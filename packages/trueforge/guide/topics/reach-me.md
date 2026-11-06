@@ -1,0 +1,31 @@
+---
+id: reach-me
+title: How Aman reaches you
+covers:
+---
+
+Aman can tell you about something without waiting for you to open a chat. You choose what may reach you, and how, in **Settings**, then **Reach me**.
+
+## What Aman watches for
+
+- Mail from people you marked always important. It counts only when your mail server confirms the sender.
+- A bill or deadline in new mail that is due within three days.
+- Two things on your own calendar at the same time.
+- Time to leave for an event with a place.
+- An approval that has waited longer than you chose.
+
+## How loudly
+
+Everything shows under the bell, with the reason you got it.
+
+- A note is quiet. Most things are notes.
+- A nudge is a notice on the devices where you turned notices on.
+- A call is a phone call. Calls are not set up yet, so nothing calls you.
+
+A model suggests how loudly to tell you, and your settings decide. Words in a message, such as "urgent", can never make it louder than a note. Aman sends at most 5 nudges a day unless you change that. Reminders you set never count toward that limit.
+
+## Check that it works
+
+1. Click **Settings**, then click **Reach me**.
+2. Click **Try it** next to a way to reach you.
+3. A test item shows under the bell. For notices, Aman also says how many devices it reached.

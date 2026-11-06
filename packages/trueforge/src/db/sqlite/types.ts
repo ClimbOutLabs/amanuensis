@@ -50,7 +50,7 @@ import type { NoticingCheckpointTable, NoticingEventTable, ReachLeaseTable } fro
 import type { PhoneCallTable } from '../phoneCallStore';
 import type { PushSubscriptionTable } from '../pushSubscriptionStore';
 import type { ReachSettingsTable } from '../reachSettingsStore';
-import type { TextCodeSendTable, TextContactTable } from '../textContactStore';
+import type { TextContactTable, TextSendCountTable } from '../textContactStore';
 
 /**
  * Trace-level state for one thread at one turn (`turn_thread.checkpoint`).
@@ -817,7 +817,7 @@ export interface Database {
   reach_settings: ReachSettingsTable;
   text_contact: TextContactTable;
   phone_call: PhoneCallTable;
-  text_code_send: TextCodeSendTable;
+  text_send_count: TextSendCountTable;
   noticing_event: NoticingEventTable;
   noticing_checkpoint: NoticingCheckpointTable;
   reach_lease: ReachLeaseTable;

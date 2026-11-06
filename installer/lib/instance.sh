@@ -186,9 +186,15 @@ instance_render() {
   fi
   # Texts through Twilio get a listener of their own beside the app. Its port is published on 127.0.0.1 only, for
   # Tailscale Funnel or a web server on this computer to carry on to Twilio. The app port is never opened for it.
-  local sms_port
+  local sms_port sms_env
   sms_port=$(sms_webhook_port "$name" quiet)
+  sms_env="$(instance_dir "$name")/.env"
+  # A port picked for the person is written down, so it stays the same whatever other instances do later.
+  if [ -n "$sms_port" ] && [ "$(sms_port_wanted "$name")" = auto ] && grep -q '^# >>> managed by the installer' "$sms_env"; then
+    env_managed_set "$sms_env" TWILIO_WEBHOOK_PORT "$sms_port"
+  fi
   reg_set "$name" sms_port "$sms_port"
+  reg_set "$name" sms_settings "$(sms_settings_digest "$name")"
   if [ -n "$sms_port" ]; then
     app_ports="${app_ports:+$app_ports$'\n'}      - '127.0.0.1:$sms_port:$sms_port'"
   fi
@@ -254,66 +260,83 @@ instance_render() {
 # picked from, so a new instance never lands on it.
 TWILIO_DEFAULT_PORT=9201
 
-# A value from a settings file read the way the app reads it: the last line for the key, without spaces around it and
-# without the quotes around it.
-env_plain() { # env key
-  local value
-  value=$(sed -n "s/^[[:space:]]*$2[[:space:]]*=//p" "$1" | tail -n 1)
-  value=$(printf '%s' "$value" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
-  case $value in
-    \"*\")
-      value=${value#\"}
-      value=${value%\"}
-      ;;
-    \'*\')
-      value=${value#\'}
-      value=${value%\'}
-      ;;
-  esac
-  printf '%s' "$value"
-}
-
-# The Twilio port the instance's settings file asks for when it turns texts on, otherwise nothing. Unset, it is the
-# default. A value that is not a port gives nothing, and the app then says so when it starts.
+# The Twilio port the instance's settings file asks for when it turns texts on, `auto` when it turns them on and sets
+# no port, otherwise nothing. A value that is not a port gives nothing, and the app then says so when it starts.
 sms_port_wanted() { # name
   local env port provider
   env="$(instance_dir "$1")/.env"
   [ -f "$env" ] || return 0
-  provider=$(env_plain "$env" REACH_SMS_PROVIDER | tr '[:upper:]' '[:lower:]')
+  provider=$(env_get "$env" REACH_SMS_PROVIDER | tr '[:upper:]' '[:lower:]')
   [ "$provider" = twilio ] || return 0
-  port=$(env_plain "$env" TWILIO_WEBHOOK_PORT)
-  port=${port:-$TWILIO_DEFAULT_PORT}
+  port=$(env_get "$env" TWILIO_WEBHOOK_PORT)
+  if [ -z "$port" ]; then
+    printf auto
+    return 0
+  fi
   case $port in
-    '' | *[!0-9]*) return 0 ;;
+    *[!0-9]*) return 0 ;;
   esac
   if [ "${#port}" -le 5 ] && [ "$port" -ge 1 ] && [ "$port" -le 65535 ]; then printf '%s' "$port"; fi
 }
 
-# The Twilio port to publish for the instance, or nothing. A port that another instance's app, sign-in or https uses,
-# that Aman uses inside the instance, or that an instance earlier by name wants for its own texts, is not published,
-# and the installer says which line to change, unless asked to be quiet.
-sms_webhook_port() { # name [quiet]
-  local name=$1 quiet=${2:-} port other taken env
-  port=$(sms_port_wanted "$name")
-  [ -n "$port" ] || return 0
+# The ports the instance's Twilio listener must not use: every instance's app, sign-in and https ports, the ones Aman
+# uses inside the instance, the Twilio port each other instance already publishes, and the one each instance earlier
+# by name asks for. A port already published stays with the instance that has it.
+sms_ports_taken() { # name
+  local name=$1 other taken
   taken="$(reg_all app_port) $(reg_all login_port) $(reg_all tls_port) $TLS_HTTP_IN $TLS_HTTPS_IN"
   for other in $(reg_names); do
-    [ "$other" = "$name" ] && break
-    taken="$taken $(sms_port_wanted "$other")"
+    [ "$other" = "$name" ] || taken="$taken $(reg_get "$other" sms_port)"
   done
+  for other in $(reg_names); do
+    [ "$other" = "$name" ] && break
+    taken="$taken $(sms_webhook_port "$other" quiet)"
+  done
+  printf '%s' "$taken"
+}
+
+# The Twilio port to publish for the instance, or nothing. With no port set, the instance keeps the one it has, else
+# gets the default or the next free port. A port the person set that is taken is not published, and the installer
+# says which line to change, unless asked to be quiet.
+sms_webhook_port() { # name [quiet]
+  local name=$1 quiet=${2:-} port taken own env
+  port=$(sms_port_wanted "$name")
+  [ -n "$port" ] || return 0
+  taken=$(sms_ports_taken "$name")
+  if [ "$port" = auto ]; then
+    own=$(reg_get "$name" sms_port)
+    if [ -n "$own" ] && ! port_reserved "$own" "$taken"; then
+      printf '%s' "$own"
+    else
+      pick_port "$TWILIO_DEFAULT_PORT" "$taken" | tr -d '\n' || true
+    fi
+    return 0
+  fi
   if port_reserved "$port" "$taken"; then
     [ -n "$quiet" ] && return 0
     env="$(instance_dir "$name")/.env"
-    warn "Texts in $name cannot use TWILIO_WEBHOOK_PORT $port, because another instance or Aman itself already uses it. Set TWILIO_WEBHOOK_PORT to another port in $env, for example $(pick_port $((port + 1)) "$taken $(reg_all sms_port)" || echo 9301), then run the installer again."
+    warn "Texts in $name cannot use TWILIO_WEBHOOK_PORT $port, because another instance or Aman itself already uses it. Set TWILIO_WEBHOOK_PORT to another port in $env, for example $(pick_port $((port + 1)) "$taken" || echo 9301), then run the installer again."
     return 0
   fi
   printf '%s' "$port"
 }
 
-# True when the Twilio port the settings file asks for is not the one the compose file publishes, so a plain run of the
-# installer redraws the compose file after texts are turned on or off, or the port is changed.
-sms_port_changed() { # name
-  [ "$(reg_get "$1" sms_port)" != "$(sms_webhook_port "$1" quiet)" ]
+# A short digest of the settings file's lines that set up texts, or nothing when it has none, so a plain run of the
+# installer restarts the app after any of them changes, such as a new auth token. The lines themselves are never kept.
+sms_settings_digest() { # name
+  local env lines
+  env="$(instance_dir "$1")/.env"
+  [ -f "$env" ] || return 0
+  lines=$(LC_ALL=C grep -E "$(env_key_line_re '(REACH_SMS_PROVIDER|TWILIO_[A-Z0-9_]+)')" "$env" || true)
+  [ -n "$lines" ] || return 0
+  printf '%s\n' "$lines" | sha256_stdin | cut -c1-16
+}
+
+# True when the texts settings in the settings file are not the ones the instance was last started with: the Twilio
+# port to publish, or any line that sets up texts.
+sms_settings_changed() { # name
+  [ "$(reg_get "$1" sms_port)" != "$(sms_webhook_port "$1" quiet)" ] ||
+    [ "$(reg_get "$1" sms_settings)" != "$(sms_settings_digest "$1")" ]
 }
 
 # What Aman calls a person who has not said: the start of their email, cut to the longest name allowed.

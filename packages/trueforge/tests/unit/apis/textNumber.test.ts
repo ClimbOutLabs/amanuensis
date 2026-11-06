@@ -5,6 +5,7 @@ import { createReachRouter } from '../../../src/apis/reach';
 import { createTextNumberRouter } from '../../../src/apis/textNumber';
 import type { RequestContext } from '../../../src/auth/identity';
 import { reachChannelsFor } from '../../../src/runtime/noticing/reachChannels';
+import { MAX_TEST_TEXTS_PER_HOUR } from '../../../src/runtime/texts/textLimits';
 import { RequestErrorResponseSchema } from '../../../src/schemas/errors';
 import { defaultReachSettings } from '../../../src/schemas/reach';
 import { GetTextStatusResponseSchema } from '../../../src/schemas/textMessages';
@@ -38,6 +39,7 @@ async function build({ provider = true }: { provider?: boolean } = {}) {
       memories: () => Promise.resolve([]),
       resolveRequestContext: () => person('alice'),
       logger: winston.createLogger({ silent: true }),
+      now: () => h.clock.now,
     }),
   );
   const call = (path: string, init?: { method: string; body?: unknown }) =>
@@ -112,7 +114,7 @@ describe('text number routes', () => {
     const none = await build({ provider: false });
     const refused = await none.call('/texts/code', { method: 'POST', body: { phone: '+15550111' } });
     expect(refused.status).toBe(409);
-    expect(await message(refused)).toContain('Twilio');
+    expect(await message(refused)).toContain('Text messages page');
   });
 
   it('counts the wait in plain words, down to one minute', async () => {
@@ -125,11 +127,13 @@ describe('text number routes', () => {
     expect(await message(limited)).toBe('Too many codes were sent. Wait 1 minute, then ask for another.');
   });
 
-  it('says what to do when the code could not be sent', async () => {
+  it('says what to do when the code could not be sent, without telling whether the number replied STOP', async () => {
     const { h, call } = await build();
+    const cannot =
+      'That number cannot get texts from this server. Check the number. If you replied STOP from it, reply START, then try again.';
     const cases = [
-      { failure: 'opted_out', words: 'This number replied STOP before. Reply START from that phone, then try again.' },
-      { failure: 'invalid_number', words: 'The phone company would not take this number. Check it, then try again.' },
+      { failure: 'opted_out', words: cannot },
+      { failure: 'invalid_number', words: cannot },
       {
         failure: 'not_accepted',
         words: 'Twilio did not accept this server’s sign-in details. Ask whoever runs Aman to check them.',
@@ -206,10 +210,28 @@ describe('the text test button', () => {
     expect(await message(failed)).toContain('Check it in Settings');
   });
 
+  it('sends at most a few test texts an hour, then says how long to wait', async () => {
+    const { h, call } = await build();
+    await h.readyToText();
+    const statuses: number[] = [];
+    for (let press = 0; press < 10; press += 1) {
+      statuses.push((await call('/reach/test', { method: 'POST', body: { channel: 'text' } })).status);
+    }
+    expect(statuses).toEqual([201, 201, 201, 429, 429, 429, 429, 429, 429, 429]);
+    expect(h.sent).toHaveLength(MAX_TEST_TEXTS_PER_HOUR);
+    h.clock.now = new Date(h.clock.now.getTime() + 20 * 60_000);
+    const later = await call('/reach/test', { method: 'POST', body: { channel: 'text' } });
+    expect(later.status).toBe(429);
+    expect(await message(later)).toBe('That was 3 test texts this hour. Wait 40 minutes, then try again.');
+    h.clock.now = new Date(h.clock.now.getTime() + 40 * 60_000);
+    expect((await call('/reach/test', { method: 'POST', body: { channel: 'text' } })).status).toBe(201);
+    expect(h.sent).toHaveLength(MAX_TEST_TEXTS_PER_HOUR + 1);
+  });
+
   it('says texts are not set up, with the one thing to do, when there is no provider', async () => {
     const { call } = await build({ provider: false });
     const response = await call('/reach/test', { method: 'POST', body: { channel: 'text' } });
     expect(response.status).toBe(409);
-    expect(await message(response)).toContain('add the Twilio details to the settings file and restart Aman');
+    expect(await message(response)).toContain('follow the Text messages page in the Aman docs');
   });
 });

@@ -10,21 +10,22 @@ interface TwilioReply {
 
 /** Twilio's REST API, reached like any outside address. Texts and calls use the same one. */
 export type TwilioFetch = (input: {
+  method: 'GET' | 'POST';
   url: string;
   headers: Record<string, string>;
-  body: Uint8Array<ArrayBuffer>;
+  body?: Uint8Array<ArrayBuffer>;
 }) => Promise<TwilioReply>;
 
 export function publicTwilioFetch(resolveAddresses: ResolveAddresses | undefined): TwilioFetch {
-  return async ({ url, headers, body }) => {
+  return async ({ method, url, headers, body }) => {
     const result = await fetchPublicUrl(url, {
       fetchImpl: undefined,
       resolveAddresses,
       timeoutMs: REQUEST_TIMEOUT_MS,
       maxRedirects: 0,
-      method: 'POST',
+      method,
       headers,
-      body,
+      ...(body === undefined ? {} : { body }),
       allowHop: undefined,
       describe: () => 'Twilio could not be reached.',
     });
@@ -47,7 +48,21 @@ export function twilioErrorCode(text: string): number | undefined {
   return undefined;
 }
 
-/** Posts a form to one of the account's REST resources, signed in with the account's own details. */
+/** The account's REST address and the headers that sign in with the account's own details. */
+export function twilioAccount(settings: Pick<TwilioSettings, 'accountSid' | 'authToken'>): {
+  url: string;
+  headers: Record<string, string>;
+} {
+  return {
+    url: `https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(settings.accountSid)}`,
+    headers: {
+      Authorization: `Basic ${Buffer.from(`${settings.accountSid}:${settings.authToken}`).toString('base64')}`,
+      Accept: 'application/json',
+    },
+  };
+}
+
+/** Posts a form to one of the account's REST resources. */
 export function postTwilioForm({
   fetchTwilio,
   settings,
@@ -60,13 +75,11 @@ export function postTwilioForm({
   resource: string;
   form: URLSearchParams;
 }): Promise<TwilioReply> {
+  const account = twilioAccount(settings);
   return fetchTwilio({
-    url: `https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(settings.accountSid)}/${resource}`,
-    headers: {
-      Authorization: `Basic ${Buffer.from(`${settings.accountSid}:${settings.authToken}`).toString('base64')}`,
-      'Content-Type': 'application/x-www-form-urlencoded',
-      Accept: 'application/json',
-    },
+    method: 'POST',
+    url: `${account.url}/${resource}`,
+    headers: { ...account.headers, 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new TextEncoder().encode(form.toString()),
   });
 }

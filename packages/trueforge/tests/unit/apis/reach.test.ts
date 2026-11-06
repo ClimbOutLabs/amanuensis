@@ -10,8 +10,8 @@ import { ReachSettingsStore } from '../../../src/db/reachSettingsStore';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { TextContactStore } from '../../../src/db/textContactStore';
 import { createDeliveryService } from '../../../src/runtime/delivery/deliveryService';
-import type { ReachChannels } from '../../../src/runtime/noticing/reachChannels';
 import { NO_PHONE_CHANNELS } from '../../../src/runtime/noticing/reachChannels';
+import type { ReachAvailability } from '../../../src/schemas/reach';
 import { defaultReachSettings, GetReachResponseSchema, type ReachSettings } from '../../../src/schemas/reach';
 import { confirmNumber } from '../../fixtures/confirmedNumber';
 
@@ -29,7 +29,7 @@ async function build({
   channels = NO_PHONE_CHANNELS,
   memories = [] as string[],
   place = noCalls,
-}: { channels?: ReachChannels; memories?: string[]; place?: PlaceCall } = {}) {
+}: { channels?: ReachAvailability; memories?: string[]; place?: PlaceCall } = {}) {
   const db = createSqliteDb(':memory:');
   await migrateSqliteToLatest(db);
   const reachStore = new ReachSettingsStore(db);
@@ -76,7 +76,7 @@ async function build({
       current = person(id);
     },
     /** The channels the server offers from now on, as when the voice parts stop. */
-    offer: (next: ReachChannels) => {
+    offer: (next: ReachAvailability) => {
       offered = next;
     },
   };
@@ -117,7 +117,7 @@ describe('reach routes', () => {
   });
 
   it('allows calls once the channel is available and the number is confirmed, and says what to do before that', async () => {
-    const channels: ReachChannels = { ...NO_PHONE_CHANNELS, calls: { available: true, note: 'On.' } };
+    const channels: ReachAvailability = { ...NO_PHONE_CHANNELS, calls: { available: true, note: 'On.' } };
     const { put, textContacts } = await build({ channels });
     const early = await put({ ...defaultReachSettings('UTC'), channels: { texts: false, calls: true } });
     expect(early.status).toBe(400);
@@ -132,7 +132,7 @@ describe('reach routes', () => {
   });
 
   it('keeps calls on, and saves other changes, while calls are briefly not available', async () => {
-    const channels: ReachChannels = { ...NO_PHONE_CHANNELS, calls: { available: true, note: 'On.' } };
+    const channels: ReachAvailability = { ...NO_PHONE_CHANNELS, calls: { available: true, note: 'On.' } };
     const { put, textContacts, offer } = await build({ channels });
     await confirmNumber({
       store: textContacts,
@@ -147,7 +147,7 @@ describe('reach routes', () => {
   });
 
   it('rings the phone on Try it for calls, without using up the time between calls', async () => {
-    const channels: ReachChannels = { ...NO_PHONE_CHANNELS, calls: { available: true, note: 'On.' } };
+    const channels: ReachAvailability = { ...NO_PHONE_CHANNELS, calls: { available: true, note: 'On.' } };
     const placed: string[] = [];
     const { call, put, textContacts, deliveryStore } = await build({
       channels,
@@ -222,7 +222,7 @@ describe('reach routes', () => {
     const text = await call('/test', { method: 'POST', body: { channel: 'text' } });
     expect(text.status).toBe(409);
     await expect(text.json()).resolves.toEqual({
-      error: { message: `${NO_PHONE_CHANNELS.texts.note} There is nothing to try yet.` },
+      error: { message: `${NO_PHONE_CHANNELS.texts.note} Try the app or push notices for now.` },
     });
   });
 });

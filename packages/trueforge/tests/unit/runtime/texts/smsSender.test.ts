@@ -1,8 +1,7 @@
 import winston from 'winston';
 
 import { createDeliveryService } from '../../../../src/runtime/delivery/deliveryService';
-import { privatePhrase, textBody } from '../../../../src/runtime/texts/textWords';
-import type { Delivery, DeliveryKind } from '../../../../src/schemas/deliveries';
+import { MAX_TEXTS_PER_PERSON_PER_DAY } from '../../../../src/runtime/texts/textLimits';
 import { defaultReachSettings } from '../../../../src/schemas/reach';
 import { ALICE, PHONE, textsHarness } from '../../../fixtures/textsHarness';
 
@@ -79,38 +78,49 @@ describe('texts as a channel of the delivery layer', () => {
     expect(h.sent[0]?.body).toBe(`Mannie: ${BILL_TEXT}`);
   });
 
-  function delivery(text: string): Delivery {
-    return {
-      id: 'd1',
-      kind: 'nudge',
-      level: 'nudge',
-      text,
-      reason: 'A test.',
-      link: null,
-      created_at: '2026-11-06T10:00:00.000Z',
-      seen_at: null,
-      attempts: [],
-    };
-  }
-
-  /** Plain characters that each take one place in a text, so two text segments hold 306 of them. */
-  const ONE_PLACE = /^[A-Za-z0-9 !"#$%&'()*+,\-./:;<=>?@_]*$/;
-
-  it('cuts a long Full message at a word, within two text segments, name included', () => {
-    const body = textBody({ name: 'Mannie', delivery: delivery(`${'word '.repeat(200)}end`), mode: 'full' });
-    expect(body.length).toBeLessThanOrEqual(306);
-    expect(body.endsWith('word...')).toBe(true);
-    expect(body).toMatch(ONE_PLACE);
+  it('sends a Full message that names a link in Private words, and says so', async () => {
+    const h = await textsHarness({ assistantName: 'Mannie' });
+    await h.readyToText({ mode: 'full' });
+    const delivery = await h.deliveries.deliver(
+      nudge('Your parcel is held. Pay the fee at https://parcel.example.invalid now.'),
+    );
+    expect(h.sent[0]?.body).toBe('Mannie: something needs you. Open the app to see it.');
+    expect(delivery.attempts.find(row => row.channel === 'sms')?.detail).toBe(
+      'Private text: the message named a link, a phone number or an address, so only the kind of thing was sent.',
+    );
   });
 
-  it('writes a Full message in plain characters, so it is not sent in the costlier long form', () => {
-    const body = textBody({
-      name: 'Mannie',
-      delivery: delivery('Café “bill” — due… {soon} [ok] ~ |x| ^ `y` \\ 🎉 naïve'),
-      mode: 'full',
+  it('sends at most a day’s texts to one person, reminders included, then says when they start again', async () => {
+    const h = await textsHarness();
+    await h.readyToText();
+    for (let index = 0; index < MAX_TEXTS_PER_PERSON_PER_DAY; index += 1) {
+      await h.deliveries.deliver(nudge(BILL_TEXT, index % 2 === 0 ? 'reminder' : 'nudge'));
+    }
+    expect(h.sent).toHaveLength(MAX_TEXTS_PER_PERSON_PER_DAY);
+    h.clock.now = new Date(h.clock.now.getTime() + 3 * 60 * 60_000);
+    const over = await h.deliveries.deliver(nudge(BILL_TEXT, 'reminder'));
+    expect(h.sent).toHaveLength(MAX_TEXTS_PER_PERSON_PER_DAY);
+    expect(over.attempts.find(row => row.channel === 'sms')).toMatchObject({
+      outcome: 'skipped',
+      detail: `You had ${String(MAX_TEXTS_PER_PERSON_PER_DAY)} texts today, the most for one day, so no text was sent. Texts start again in about 21 hours. Until then, see new items in the app.`,
     });
-    expect(body).toBe('Mannie: Cafe "bill" - due... (soon) (ok) - /x/ \'y\' / naive');
-    expect(body).toMatch(ONE_PLACE);
+    expect(over.attempts.find(row => row.channel === 'in_app')?.outcome).toBe('sent');
+    h.clock.now = new Date(h.clock.now.getTime() + 21 * 60 * 60_000);
+    await h.deliveries.deliver(nudge(BILL_TEXT));
+    expect(h.sent).toHaveLength(MAX_TEXTS_PER_PERSON_PER_DAY + 1);
+  });
+
+  it('counts a failed text toward the day, so a failing provider cannot be retried without end', async () => {
+    const h = await textsHarness();
+    await h.readyToText();
+    h.next.result = { outcome: 'failed', failure: 'unreachable' };
+    for (let index = 0; index < MAX_TEXTS_PER_PERSON_PER_DAY; index += 1) {
+      await h.deliveries.deliver(nudge(BILL_TEXT));
+    }
+    h.next.result = { outcome: 'sent' };
+    const over = await h.deliveries.deliver(nudge(BILL_TEXT));
+    expect(over.attempts.find(row => row.channel === 'sms')?.outcome).toBe('skipped');
+    expect(h.sent).toHaveLength(MAX_TEXTS_PER_PERSON_PER_DAY);
   });
 
   it('keeps a long or unusual assistant name short and plain in a text', async () => {
@@ -138,13 +148,6 @@ describe('texts as a channel of the delivery layer', () => {
     await unnamed.deliveries.deliver(nudge(BILL_TEXT));
     expect(unnamed.sent[0]?.body).toBe('Your assistant: something needs you. Open the app to see it.');
     expect(unnamed.sent[0]?.body).not.toContain('Mannie');
-  });
-
-  it('words every kind with no content', () => {
-    const kinds: DeliveryKind[] = ['reminder', 'note', 'nudge', 'approval_waiting'];
-    for (const kind of kinds) {
-      expect(privatePhrase(kind)).toMatch(/^[a-z ]+$/);
-    }
   });
 
   it('records each text as a channel attempt and in Activity, naming the number only by its last digits', async () => {

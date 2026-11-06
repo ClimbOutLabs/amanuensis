@@ -1,7 +1,8 @@
 import type { AuditLogWriter } from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
 
-import type { CreateDeliveryInput, DeliveryOwner, IDeliveryStore } from '../../db/deliveryStore';
+import type { CreateDeliveryInput, IDeliveryStore } from '../../db/deliveryStore';
+import type { PersonOwner } from '../../db/personOwner';
 import type { Delivery, DeliveryAttempt, DeliveryChannel } from '../../schemas/deliveries';
 import type { DeliveryChannelSender } from './deliveryChannel';
 
@@ -14,17 +15,19 @@ export interface DeliveryService {
    * falls back to. Each attempt is recorded on the delivery and in Activity.
    */
   fallBack(
-    input: DeliveryOwner & { delivery_id: string; channels: readonly DeliveryChannel[] },
+    input: PersonOwner & { delivery_id: string; channels: readonly DeliveryChannel[] },
   ): Promise<DeliveryAttempt[]>;
   /** Records an attempt that finished later, such as how a call ended, on its delivery and in Activity. */
   recordAttempt(
-    input: DeliveryOwner & {
+    input: PersonOwner & {
       delivery_id: string;
       attempt: DeliveryAttempt;
       /** The chat the attempt belongs to in Activity, when it is not the delivery's own link. */
       conversation_id?: string;
     },
   ): Promise<void>;
+  /** Delivers once per id: a later call with the same id sends nothing and resolves to the delivery made first. */
+  deliverOnce(input: CreateDeliveryInput & { id: string }): Promise<Delivery>;
 }
 
 export const DELIVERY_CREATED_TOOL_NAME = 'delivery.created';
@@ -56,6 +59,10 @@ function conversationOf(delivery: Delivery): string {
 function outcomeWords(attempt: DeliveryAttempt): string {
   const base = `Tried ${CHANNEL_WORDS[attempt.channel]}: ${attempt.outcome}.`;
   return attempt.detail === null ? base : `${base} ${attempt.detail}`;
+}
+
+function ownerOf(input: PersonOwner): PersonOwner {
+  return { tenant_id: input.tenant_id, created_by: input.created_by };
 }
 
 export function createDeliveryService({
@@ -111,7 +118,7 @@ export function createDeliveryService({
   }: {
     sender: DeliveryChannelSender;
     delivery: Delivery;
-    owner: DeliveryOwner;
+    owner: PersonOwner;
   }): Promise<DeliveryAttempt[]> {
     try {
       return await sender.send({ delivery, ...owner });
@@ -139,7 +146,7 @@ export function createDeliveryService({
     channels,
   }: {
     delivery: Delivery;
-    owner: DeliveryOwner;
+    owner: PersonOwner;
     channels: readonly DeliveryChannel[] | undefined;
   }): Promise<DeliveryAttempt[]> {
     const attempts: DeliveryAttempt[] = [];
@@ -167,7 +174,7 @@ export function createDeliveryService({
     attempt,
     conversation_id,
   }: {
-    owner: DeliveryOwner;
+    owner: PersonOwner;
     delivery: Delivery;
     attempt: DeliveryAttempt;
     conversation_id?: string | undefined;
@@ -184,26 +191,40 @@ export function createDeliveryService({
     }
   }
 
+  async function send({
+    owner,
+    created,
+    only_channels,
+  }: {
+    owner: PersonOwner;
+    created: Delivery;
+    only_channels: readonly DeliveryChannel[] | undefined;
+  }): Promise<Delivery> {
+    await record({
+      owner,
+      delivery: created,
+      tool_name: DELIVERY_CREATED_TOOL_NAME,
+      description: `${created.text} Why you got this: ${created.reason}`,
+    });
+    const inApp: DeliveryAttempt = {
+      channel: 'in_app',
+      outcome: 'sent',
+      detail: null,
+      target: null,
+      attempted_at: now().toISOString(),
+    };
+    await keep({ owner, delivery: created, attempt: inApp });
+    const attempts = [inApp, ...(await sendThrough({ delivery: created, owner, channels: only_channels }))];
+    return (await store.get({ ...owner, id: created.id })) ?? { ...created, attempts };
+  }
+
   return {
     async deliver({ only_channels, ...input }) {
-      const owner = { tenant_id: input.tenant_id, created_by: input.created_by };
-      const created = await store.create(input);
-      await record({
-        owner,
-        delivery: created,
-        tool_name: DELIVERY_CREATED_TOOL_NAME,
-        description: `${created.text} Why you got this: ${created.reason}`,
-      });
-      const inApp: DeliveryAttempt = {
-        channel: 'in_app',
-        outcome: 'sent',
-        detail: null,
-        target: null,
-        attempted_at: now().toISOString(),
-      };
-      await keep({ owner, delivery: created, attempt: inApp });
-      const attempts = [inApp, ...(await sendThrough({ delivery: created, owner, channels: only_channels }))];
-      return (await store.get({ ...owner, id: created.id })) ?? { ...created, attempts };
+      return await send({ owner: ownerOf(input), created: await store.create(input), only_channels });
+    },
+    async deliverOnce(input) {
+      const { delivery, created } = await store.createOnce(input);
+      return created ? await send({ owner: ownerOf(input), created: delivery, only_channels: undefined }) : delivery;
     },
     async fallBack({ delivery_id, channels, ...owner }) {
       const delivery = await store.get({ ...owner, id: delivery_id });

@@ -44,7 +44,7 @@ export const updateReachRoute = createRoute({
   description:
     'Replaces how the signed-in person wants to be reached. Texts and calls cannot be turned on until set up.',
   'x-fern-sdk-group-name': ['reach'],
-  'x-fern-sdk-method-name': 'update',
+  'x-fern-sdk-method-name': 'create_or_update',
   request: { body: { content: { 'application/json': { schema: UpdateReachRequestSchema } }, required: true } },
   responses: {
     200: { content: { 'application/json': { schema: GetReachResponseSchema } }, description: 'The saved settings.' },
@@ -75,7 +75,8 @@ export const testReachChannelRoute = createRoute({
   path: '/test',
   tags: [OpenApiTag.DELIVERIES],
   summary: 'Try a channel',
-  description: 'Sends the signed-in person a test item on one channel. A channel that is not set up answers 409.',
+  description:
+    'Sends the signed-in person a test item on one channel. A channel that is not set up answers 409. Test texts are limited to a few an hour.',
   'x-fern-sdk-group-name': ['reach'],
   'x-fern-sdk-method-name': 'test_channel',
   request: { body: { content: { 'application/json': { schema: TestReachChannelRequestSchema } }, required: true } },
@@ -86,6 +87,10 @@ export const testReachChannelRoute = createRoute({
     409: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
       description: 'That channel is not set up yet, or the number is not confirmed.',
+    },
+    429: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Too many test texts this hour. The message says how long to wait.',
     },
     502: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
@@ -99,7 +104,7 @@ export const runNoticingRoute = createRoute({
   path: '/run',
   tags: [OpenApiTag.INTERNAL],
   summary: 'Run a noticing pass',
-  description: 'Runs one pass of one watcher for everyone it can watch. Called by the controller.',
+  description: 'Runs one pass of one watcher for everyone it can watch.',
   'x-fern-sdk-group-name': ['internal', 'noticing'],
   'x-fern-sdk-method-name': 'run',
   request: { body: { content: { 'application/json': { schema: RunNoticingRequestSchema } }, required: true } },

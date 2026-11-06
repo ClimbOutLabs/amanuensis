@@ -36,6 +36,17 @@ export function runDeliveryStoreContractSuite(getStore: () => IDeliveryStore): v
     await expect(store.get({ ...ALICE, id: made.id })).resolves.toEqual(made);
   });
 
+  it('makes a delivery with a given id once, and hands back the first one after that', async () => {
+    const store = getStore();
+    const first = await store.createOnce({ ...reminder(ALICE), id: 'fixed-1' });
+    expect(first.created).toBe(true);
+    expect(first.delivery.id).toBe('fixed-1');
+    const again = await store.createOnce({ ...reminder(ALICE, 'Different words'), id: 'fixed-1' });
+    expect(again).toEqual({ delivery: first.delivery, created: false });
+    expect((await store.list({ ...ALICE, limit: 10 })).deliveries).toHaveLength(1);
+    await expect(store.createOnce({ ...reminder(BOB), id: 'fixed-1' })).rejects.toThrow('belongs to someone else');
+  });
+
   it('counts one person’s deliveries since a time by kind and level, and finds the last at a level', async () => {
     const store = getStore();
     const at = (time: string) => new Date(`2026-11-05T${time}:00.000Z`);

@@ -1,9 +1,10 @@
 import { sql, type Kysely } from 'kysely';
 
 /**
- * What the assistant notices for a person: their Reach me settings, the events the watchers have already raised
- * (one row per stable event id, so nothing is raised twice), and when each watcher last looked. `kind`, `status` and
- * the levels are plain text with no check, so a later kind needs no migration.
+ * What the assistant notices for a person: their Reach me settings, the events the watchers found (one row per stable
+ * event id, so nothing is raised twice, claimed by one pass at a time until delivered), where each watcher reads from
+ * next, and the per-person lease that keeps two passes from deciding how loudly to reach someone at once. `kind` and
+ * `status` are plain text with no check, so a later kind needs no migration.
  */
 export async function up(db: Kysely<unknown>): Promise<void> {
   // Kysely's SqliteAdapter reports supportsTransactionalDdl: false, so every schema-touching migration opens its own transaction.
@@ -27,20 +28,16 @@ export async function up(db: Kysely<unknown>): Promise<void> {
         status TEXT NOT NULL,
         event_json TEXT NOT NULL,
         due_at TEXT,
-        model_level TEXT,
-        decided_level TEXT,
-        delivered_level TEXT,
-        reason TEXT,
+        verdict_json TEXT,
         delivery_id TEXT,
         created_at TEXT NOT NULL,
-        decided_at TEXT
+        claim_id TEXT,
+        claimed_at TEXT,
+        attempts INTEGER NOT NULL DEFAULT 0
       ) STRICT
     `.execute(trx);
     await sql`
       CREATE UNIQUE INDEX noticing_event_owner_event_uq ON noticing_event (tenant_id, created_by, event_id)
-    `.execute(trx);
-    await sql`
-      CREATE INDEX noticing_event_owner_decided_idx ON noticing_event (tenant_id, created_by, decided_at)
     `.execute(trx);
     await sql`
       CREATE INDEX noticing_event_tracking_idx ON noticing_event (tenant_id, created_by, status, due_at)
@@ -54,11 +51,21 @@ export async function up(db: Kysely<unknown>): Promise<void> {
         PRIMARY KEY (tenant_id, created_by, watcher)
       ) STRICT
     `.execute(trx);
+    await sql`
+      CREATE TABLE reach_lease (
+        tenant_id TEXT NOT NULL,
+        created_by TEXT NOT NULL,
+        holder TEXT NOT NULL,
+        held_until TEXT NOT NULL,
+        PRIMARY KEY (tenant_id, created_by)
+      ) STRICT
+    `.execute(trx);
   });
 }
 
 export async function down(db: Kysely<unknown>): Promise<void> {
   await db.transaction().execute(async trx => {
+    await sql`DROP TABLE reach_lease`.execute(trx);
     await sql`DROP TABLE noticing_checkpoint`.execute(trx);
     await sql`DROP TABLE noticing_event`.execute(trx);
     await sql`DROP TABLE reach_settings`.execute(trx);

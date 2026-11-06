@@ -7106,7 +7106,7 @@ await client.reach.get();
 </dl>
 </details>
 
-<details><summary><code>client.reach.<a href="/src/api/resources/reach/client/Client.ts">update</a>({ ...params }) -> TrueForge.GetReachResponse</code></summary>
+<details><summary><code>client.reach.<a href="/src/api/resources/reach/client/Client.ts">createOrUpdate</a>({ ...params }) -> TrueForge.GetReachResponse</code></summary>
 <dl>
 <dd>
 
@@ -7133,7 +7133,7 @@ Replaces how the signed-in person wants to be reached. Texts and calls cannot be
 <dd>
 
 ```typescript
-await client.reach.update({
+await client.reach.createOrUpdate({
     settings: {
         alwaysImportant: [{
                 addedAt: "added_at",
@@ -7261,7 +7261,7 @@ await client.reach.listSuggestions();
 <dl>
 <dd>
 
-Sends the signed-in person a test item on one channel. A channel that is not set up answers 409.
+Sends the signed-in person a test item on one channel. A channel that is not set up answers 409. Test texts are limited to a few an hour.
 </dd>
 </dl>
 </dd>
@@ -8183,7 +8183,7 @@ await client.internal.metrics.getMeters({
 <dl>
 <dd>
 
-Runs one pass of one watcher for everyone it can watch. Called by the controller.
+Runs one pass of one watcher for everyone it can watch.
 </dd>
 </dl>
 </dd>

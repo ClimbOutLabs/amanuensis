@@ -14,7 +14,7 @@ import {
 import { isRecord } from '@truefoundry/trueforge-core/core/util/records';
 import type { Logger } from 'winston';
 
-import type { NoticingOwner } from '../../db/noticingStore';
+import type { PersonOwner } from '../../db/personOwner';
 import type {
   CalendarEventInfo,
   CalendarSource,
@@ -66,14 +66,16 @@ function text(value: unknown): string | undefined {
   return typeof value === 'string' && value !== '' ? value : undefined;
 }
 
-function toMailMessage(email: unknown): MailMessage | undefined {
+/** `listed_by` stands in for a Date the sender left out or garbled, since the server listed the mail before it. */
+function toMailMessage({ email, listed_by }: { email: unknown; listed_by: Date }): MailMessage | undefined {
   if (!isRecord(email)) {
     return undefined;
   }
   const id = text(email['email_id']);
   const sender = text(email['sender']);
-  const date = new Date(text(email['date']) ?? '');
-  if (id === undefined || sender === undefined || Number.isNaN(date.getTime())) {
+  const written = new Date(text(email['date']) ?? '');
+  const date = Number.isNaN(written.getTime()) ? listed_by : written;
+  if (id === undefined || sender === undefined) {
     return undefined;
   }
   const from = deliveredMailboxOf(sender);
@@ -114,23 +116,35 @@ export function sidecarMailSource({ call, account }: { call: CallSidecarTool; ac
   };
   return {
     trustedAuthenticationServers: [],
-    async listNewMessages({ since, limit }) {
-      const pageSize = Math.min(limit, PAGE_SIZE);
-      const result = await call(MAIL_LIST_TOOL_NAME, {
-        account_name: account,
-        mailbox: 'INBOX',
-        since: since.toISOString(),
-        page: 1,
-        page_size: pageSize,
-        order: 'asc',
-      });
-      const listed = emailsOfResult(result);
-      const messages = listed
-        .map(toMailMessage)
-        .filter((message): message is MailMessage => message !== undefined && message.received_at >= since)
-        .sort((a, b) => a.received_at.getTime() - b.received_at.getTime());
-      // A full page may have more behind it, so the next pass carries on from the newest message read.
-      return { messages, truncated: listed.length >= pageSize };
+    async listNewMessages({ since, before, limit }) {
+      // The sidecar picks and orders mail by the server's arrival time, which is what the window means. The Date a
+      // sender wrote can be late or early, so it is never used to pick or order.
+      const listed: unknown[] = [];
+      for (let page = 1; ; page += 1) {
+        const result = await call(MAIL_LIST_TOOL_NAME, {
+          account_name: account,
+          mailbox: 'INBOX',
+          since: since.toISOString(),
+          before: before.toISOString(),
+          page,
+          page_size: PAGE_SIZE,
+          order: 'asc',
+        });
+        const emails = emailsOfResult(result);
+        listed.push(...emails);
+        if (listed.length > limit) {
+          return { read: 'too_many' };
+        }
+        if (emails.length < PAGE_SIZE) {
+          break;
+        }
+      }
+      return {
+        read: 'all',
+        messages: listed
+          .map(email => toMailMessage({ email, listed_by: before }))
+          .filter((message): message is MailMessage => message !== undefined),
+      };
     },
     async readText(message) {
       return (await bodiesOf([message.id]))[0] ?? '';
@@ -149,8 +163,8 @@ export function sidecarMailSource({ call, account }: { call: CallSidecarTool; ac
         order: 'asc',
       });
       const ids = emailsOfResult(result)
-        .map(toMailMessage)
-        .filter((message): message is MailMessage => message !== undefined && message.received_at > ref.received_at)
+        .map(email => toMailMessage({ email, listed_by: ref.received_at }))
+        .filter((message): message is MailMessage => message !== undefined && message.id !== ref.id)
         .map(message => message.id);
       return ids.length === 0 ? [] : bodiesOf(ids);
     },
@@ -196,10 +210,9 @@ function toEventInfo(event: unknown): CalendarEventInfo | undefined {
     start,
     end,
     location: text(event['location']) ?? null,
-    own:
-      (isRecord(organizer) && organizer['is_self'] === true) ||
-      answer === 'ACCEPTED' ||
-      ((organizer === undefined || organizer === null) && attendees.length === 0),
+    // The stored invite says who organised it and who accepted, in words its sender wrote, so only an event with
+    // no one on it at all is surely the person's own.
+    own: (organizer === undefined || organizer === null) && attendees.length === 0,
   };
 }
 
@@ -235,7 +248,7 @@ export function createSidecarNoticingSources({
   calendarUrl: string | undefined;
   primary: NoticingSourceProvider;
   /** Who the shared connectors belong to, or undefined when the instance names no owner. */
-  instanceOwner: NoticingOwner | undefined;
+  instanceOwner: PersonOwner | undefined;
   logger: Logger;
 }): NoticingSourceProvider {
   async function mailFromSidecar(url: string): Promise<MailSource | undefined> {
@@ -255,7 +268,7 @@ export function createSidecarNoticingSources({
         ? listed
         : [...listed, instanceOwner];
     },
-    async sourcesFor(owner: NoticingOwner): Promise<NoticingSources> {
+    async sourcesFor(owner: PersonOwner): Promise<NoticingSources> {
       const own = await primary.sourcesFor(owner);
       if (owner.tenant_id !== instanceOwner?.tenant_id || owner.created_by !== instanceOwner.created_by) {
         return own;

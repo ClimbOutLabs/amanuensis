@@ -1,4 +1,5 @@
 import { APPROVAL_EXPIRY_MINUTES } from '@truefoundry/trueforge-core/core/permissions/approvalExpiry';
+import type { Logger } from 'winston';
 
 import type { NoticingEvent, ReachSettings } from '../../schemas/reach';
 import { checkSender } from './authenticationResults';
@@ -43,12 +44,56 @@ function localDate({ at, timezone }: { at: Date; timezone: string }): string {
 
 /**
  * What one pass over new mail found. `track` are bills due later than the window, kept until they come near. When
- * `read_until` is set, there was more mail than one pass reads, and the next pass carries on from that time.
+ * `resume_from` is set, the pass read only the mail before it, and the next pass starts there.
  */
 export interface MailFindings {
   raise: NoticingEvent[];
   track: NoticingEvent[];
-  read_until: Date | undefined;
+  resume_from: Date | undefined;
+}
+
+/** A window this short that still holds more than one pass reads is read whole, up to this many messages. */
+const SHORTEST_WINDOW_MS = 4000;
+const MOST_IN_SHORTEST_WINDOW = 500;
+
+/**
+ * The oldest mail since `since` that one pass can read, and where the next pass starts. The window is halved until
+ * the mail in it fits, so every message before `resume_from` was read and none is skipped.
+ */
+export async function readMailWindow({
+  source,
+  since,
+  now,
+  limit,
+  logger,
+}: {
+  source: MailSource;
+  since: Date;
+  now: Date;
+  limit: number;
+  logger: Pick<Logger, 'warn'>;
+}): Promise<{ messages: MailMessage[]; resume_from: Date | undefined }> {
+  let before = now;
+  for (;;) {
+    const short = before.getTime() - since.getTime() <= SHORTEST_WINDOW_MS;
+    const read = await source.listNewMessages({ since, before, limit: short ? MOST_IN_SHORTEST_WINDOW : limit });
+    if (read.read === 'all') {
+      return { messages: read.messages, resume_from: before.getTime() === now.getTime() ? undefined : before };
+    }
+    if (read.read === 'oldest') {
+      // Everything up to the newest message read was read. With none read, the next pass tries the same window.
+      return { messages: read.messages, resume_from: read.messages.at(-1)?.received_at ?? since };
+    }
+    if (short) {
+      // Hundreds of messages within a few seconds are a flood, not mail to tell anyone about.
+      logger.warn('Passed over a flood of mail that arrived within a few seconds', {
+        since: since.toISOString(),
+        before: before.toISOString(),
+      });
+      return { messages: [], resume_from: before };
+    }
+    before = new Date(since.getTime() + Math.floor((before.getTime() - since.getTime()) / 2));
+  }
 }
 
 /**
@@ -61,16 +106,17 @@ export async function watchMail({
   settings,
   since,
   now,
+  logger,
 }: {
   source: MailSource;
   settings: ReachSettings;
   since: Date;
   now: Date;
+  logger: Pick<Logger, 'warn'>;
 }): Promise<MailFindings> {
-  const { messages, truncated } = await source.listNewMessages({ since, limit: MAIL_PASS_LIMIT });
+  const { messages, resume_from } = await readMailWindow({ source, since, now, limit: MAIL_PASS_LIMIT, logger });
   const always = new Map(settings.always_important.map(sender => [sender.address, sender]));
-  const newest = messages.at(-1)?.received_at;
-  const findings: MailFindings = { raise: [], track: [], read_until: truncated ? newest : undefined };
+  const findings: MailFindings = { raise: [], track: [], resume_from };
   for (const message of messages) {
     const listed = always.get(message.from_address.toLowerCase());
     const check =

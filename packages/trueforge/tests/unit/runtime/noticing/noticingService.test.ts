@@ -6,30 +6,36 @@ import { NoticingStore } from '../../../../src/db/noticingStore';
 import { ReachSettingsStore } from '../../../../src/db/reachSettingsStore';
 import { createSqliteDb } from '../../../../src/db/sqlite/client';
 import { createDeliveryService } from '../../../../src/runtime/delivery/deliveryService';
-import type { JudgeVerdict, NoticingJudge } from '../../../../src/runtime/noticing/judge';
+import type { NoticingJudge } from '../../../../src/runtime/noticing/judge';
 import { createNoticingService } from '../../../../src/runtime/noticing/noticingService';
-import type { ReachChannels } from '../../../../src/runtime/noticing/reachChannels';
 import type {
   ApprovalSource,
   CalendarEventInfo,
   CalendarSource,
   MailMessage,
   MailSource,
+  MailWindowRead,
   NoticingSources,
   WaitingApproval,
 } from '../../../../src/runtime/noticing/sources';
 import { TokenFactoryDailyCapError } from '../../../../src/runtime/tokenFactoryBudget';
 import type { Delivery } from '../../../../src/schemas/deliveries';
-import { defaultReachSettings, type NoticingEvent, type ReachSettings } from '../../../../src/schemas/reach';
+import type { ReachAvailability } from '../../../../src/schemas/reach';
+import {
+  defaultReachSettings,
+  type NoticingEvent,
+  type NoticingVerdict,
+  type ReachSettings,
+} from '../../../../src/schemas/reach';
 
 const OWNER = { tenant_id: 'default', created_by: 'owner-1' };
 const NOW = new Date('2026-11-05T15:00:00.000Z');
-const PASS = 'mx.example.net; dkim=pass header.d=example.com';
-const PHONE_READY: ReachChannels = {
+const PASS = 'mx.example.net; dkim=pass header.d=example.com; dmarc=pass header.from=example.com';
+const PHONE_READY: ReachAvailability = {
   texts: { available: false, note: 'Texts are not set up yet.' },
   calls: { available: true, note: 'Calls are on.' },
 };
-const NO_PHONE: ReachChannels = {
+const NO_PHONE: ReachAvailability = {
   texts: { available: false, note: 'Texts are not set up yet.' },
   calls: { available: false, note: 'Phone calls are not set up yet.' },
 };
@@ -48,14 +54,21 @@ function mail(overrides: Partial<MailMessage> = {}): MailMessage {
   };
 }
 
-function event(
-  id: string,
-  title: string,
-  start: string,
-  end: string,
-  location: string | null = null,
+function event({
+  id,
+  title,
+  start,
+  end,
+  location = null,
   own = true,
-): CalendarEventInfo {
+}: {
+  id: string;
+  title: string;
+  start: string;
+  end: string;
+  location?: string | null;
+  own?: boolean;
+}): CalendarEventInfo {
   return { id, title, start: new Date(start), end: new Date(end), location, own };
 }
 
@@ -71,6 +84,7 @@ async function setup({
   exhausted = false,
   judgeDelay,
   mailPage = 100,
+  mailReadsInTime,
   saved = true,
 }: {
   settings?: Partial<ReachSettings>;
@@ -79,13 +93,15 @@ async function setup({
   later?: string[];
   events?: CalendarEventInfo[];
   waiting?: WaitingApproval[];
-  verdict?: JudgeVerdict | Error;
-  channels?: ReachChannels;
+  verdict?: NoticingVerdict | Error;
+  channels?: ReachAvailability;
   exhausted?: boolean;
   /** Holds every model answer until this resolves, so two passes can be made to overlap. */
   judgeDelay?: Promise<void>;
   /** Most messages the mail source hands over in one read; past it, it says there is more. */
   mailPage?: number;
+  /** How many messages the source reads before it runs out of time. */
+  mailReadsInTime?: number;
   /** False for a person who never saved Reach me. */
   saved?: boolean;
 } = {}) {
@@ -130,11 +146,19 @@ async function setup({
     logger: winston.createLogger({ silent: true }),
   });
   const mailSource: MailSource = {
-    listNewMessages: jest.fn(({ since }: { since: Date }) => {
+    listNewMessages: jest.fn(({ since, before, limit }: { since: Date; before: Date; limit: number }) => {
       const found = messages
-        .filter(message => message.received_at.getTime() >= since.getTime())
+        .filter(
+          message =>
+            message.received_at.getTime() >= since.getTime() && message.received_at.getTime() < before.getTime(),
+        )
         .sort((a, b) => a.received_at.getTime() - b.received_at.getTime());
-      return Promise.resolve({ messages: found.slice(0, mailPage), truncated: found.length > mailPage });
+      if (mailReadsInTime !== undefined && found.length > mailReadsInTime) {
+        return Promise.resolve<MailWindowRead>({ read: 'oldest', messages: found.slice(0, mailReadsInTime) });
+      }
+      return Promise.resolve<MailWindowRead>(
+        found.length > Math.min(limit, mailPage) ? { read: 'too_many' } : { read: 'all', messages: found },
+      );
     }),
     readText: message => Promise.resolve(texts[message.id] ?? message.snippet),
     laterInThread: jest.fn(() => Promise.resolve(later)),
@@ -233,12 +257,41 @@ describe('mail from an always-important sender', () => {
       mailPage: 2,
     });
     await service.run({ watcher: 'mail' });
-    // The next pass starts at 14:53, the newest message read, instead of after everything.
+    // The window was halved to fit, so everything before 14:55 was read and the next pass starts there.
     await expect(store.getCheckpoint({ ...OWNER, watcher: 'mail' })).resolves.toEqual(at('55'));
+    expect(await feed()).toHaveLength(2);
     clock.now = new Date('2026-11-05T15:10:00.000Z');
     await service.run({ watcher: 'mail' });
     expect(await feed()).toHaveLength(3);
-    await expect(store.getCheckpoint({ ...OWNER, watcher: 'mail' })).resolves.toEqual(clock.now);
+    await expect(store.getCheckpoint({ ...OWNER, watcher: 'mail' })).resolves.toEqual(
+      new Date('2026-11-05T15:08:00.000Z'),
+    );
+  });
+
+  it('never jumps to now when a full window held nothing worth saying', async () => {
+    const at = (minute: string) => new Date(`2026-11-05T14:${minute}:00.000Z`);
+    const { service, store } = await setup({
+      messages: [
+        mail({ id: 'm1', received_at: at('51') }),
+        mail({ id: 'm2', received_at: at('53') }),
+        mail({ id: 'm3', received_at: at('55') }),
+      ],
+      mailPage: 2,
+    });
+    await service.run({ watcher: 'mail' });
+    await expect(store.getCheckpoint({ ...OWNER, watcher: 'mail' })).resolves.toEqual(at('55'));
+  });
+
+  it('starts the next pass where a slow read stopped, or where it started when it read nothing', async () => {
+    const at = (minute: string) => new Date(`2026-11-05T14:${minute}:00.000Z`);
+    const messages = [mail({ id: 'm1', received_at: at('51') }), mail({ id: 'm2', received_at: at('53') })];
+    const slow = await setup({ settings: { always_important: [ALWAYS] }, messages, mailReadsInTime: 1 });
+    await slow.service.run({ watcher: 'mail' });
+    await expect(slow.store.getCheckpoint({ ...OWNER, watcher: 'mail' })).resolves.toEqual(at('51'));
+
+    const stuck = await setup({ settings: { always_important: [ALWAYS] }, messages, mailReadsInTime: 0 });
+    await stuck.service.run({ watcher: 'mail' });
+    await expect(stuck.store.getCheckpoint({ ...OWNER, watcher: 'mail' })).resolves.toEqual(at('50'));
   });
 
   it('never reads back further than a day, however long the server was down', async () => {
@@ -320,22 +373,24 @@ describe('bills and deadlines', () => {
 
   it('raises a tracked bill when it falls inside the window', async () => {
     const { service, store, judge, feed } = await setup({});
-    await store.record({
+    await store.recordAll({
       ...OWNER,
       status: 'tracking',
       now: NOW,
-      event: {
-        id: 'bill_due:b9',
-        kind: 'bill_due',
-        evidence: 'content',
-        summary: 'A bill is due.',
-        facts: 'Due soon',
-        matched: 'A message names a due date.',
-        link: null,
-        mail_ref: { message_id: 'b9', thread_id: 't9' },
-        occurred_at: '2026-10-30T10:00:00.000Z',
-        due_at: '2026-11-07T23:59:00.000Z',
-      },
+      events: [
+        {
+          id: 'bill_due:b9',
+          kind: 'bill_due',
+          evidence: 'content',
+          summary: 'A bill is due.',
+          facts: 'Due soon',
+          matched: 'A message names a due date.',
+          link: null,
+          mail_ref: { message_id: 'b9', thread_id: 't9' },
+          occurred_at: '2026-10-30T10:00:00.000Z',
+          due_at: '2026-11-07T23:59:00.000Z',
+        },
+      ],
     });
 
     await expect(service.run({ watcher: 'mail' })).resolves.toMatchObject({ raised: 1 });
@@ -350,22 +405,24 @@ describe('bills and deadlines', () => {
 
   it('drops a tracked bill that was paid', async () => {
     const { service, store, judge } = await setup({ later: ['Payment received'] });
-    await store.record({
+    await store.recordAll({
       ...OWNER,
       status: 'tracking',
       now: NOW,
-      event: {
-        id: 'bill_due:b9',
-        kind: 'bill_due',
-        evidence: 'content',
-        summary: 'A bill is due.',
-        facts: 'Due soon',
-        matched: 'A message names a due date.',
-        link: null,
-        mail_ref: { message_id: 'b9', thread_id: 't9' },
-        occurred_at: '2026-10-30T10:00:00.000Z',
-        due_at: '2026-11-07T23:59:00.000Z',
-      },
+      events: [
+        {
+          id: 'bill_due:b9',
+          kind: 'bill_due',
+          evidence: 'content',
+          summary: 'A bill is due.',
+          facts: 'Due soon',
+          matched: 'A message names a due date.',
+          link: null,
+          mail_ref: { message_id: 'b9', thread_id: 't9' },
+          occurred_at: '2026-10-30T10:00:00.000Z',
+          due_at: '2026-11-07T23:59:00.000Z',
+        },
+      ],
     });
     await expect(service.run({ watcher: 'mail' })).resolves.toMatchObject({ raised: 0 });
     expect(judge).not.toHaveBeenCalled();
@@ -377,8 +434,8 @@ describe('calendar', () => {
   it('raises one clash and no duplicate on the next pass', async () => {
     const { service, judge, feed } = await setup({
       events: [
-        event('a', 'Standup', '2026-11-05T16:00:00.000Z', '2026-11-05T17:00:00.000Z'),
-        event('b', 'Dentist', '2026-11-05T16:30:00.000Z', '2026-11-05T17:30:00.000Z'),
+        event({ id: 'a', title: 'Standup', start: '2026-11-05T16:00:00.000Z', end: '2026-11-05T17:00:00.000Z' }),
+        event({ id: 'b', title: 'Dentist', start: '2026-11-05T16:30:00.000Z', end: '2026-11-05T17:30:00.000Z' }),
       ],
     });
     await expect(service.run({ watcher: 'calendar' })).resolves.toEqual({ owners: 1, raised: 1 });
@@ -390,15 +447,27 @@ describe('calendar', () => {
   it('raises one travel event for an event with a place inside the lead time', async () => {
     const { service, feed } = await setup({
       events: [
-        event('far', 'Conference', '2026-11-05T20:00:00.000Z', '2026-11-05T21:00:00.000Z', '12 Main Street'),
-        event('near', 'Lunch', '2026-11-05T16:00:00.000Z', '2026-11-05T17:00:00.000Z', '12 Main Street'),
-        event(
-          'call',
-          'Video call',
-          '2026-11-05T15:30:00.000Z',
-          '2026-11-05T15:45:00.000Z',
-          'https://meet.example.com/x',
-        ),
+        event({
+          id: 'far',
+          title: 'Conference',
+          start: '2026-11-05T20:00:00.000Z',
+          end: '2026-11-05T21:00:00.000Z',
+          location: '12 Main Street',
+        }),
+        event({
+          id: 'near',
+          title: 'Lunch',
+          start: '2026-11-05T16:00:00.000Z',
+          end: '2026-11-05T17:00:00.000Z',
+          location: '12 Main Street',
+        }),
+        event({
+          id: 'call',
+          title: 'Video call',
+          start: '2026-11-05T15:30:00.000Z',
+          end: '2026-11-05T15:45:00.000Z',
+          location: 'https://meet.example.com/x',
+        }),
       ],
     });
     await expect(service.run({ watcher: 'calendar' })).resolves.toMatchObject({ raised: 1 });
@@ -411,9 +480,30 @@ describe('calendar', () => {
   it('keeps invites the person never accepted to a note, whatever they say', async () => {
     const { service, judge, feed, pushed } = await setup({
       events: [
-        event('x', 'URGENT: CEO needs you now', '2026-11-05T16:00:00.000Z', '2026-11-05T17:00:00.000Z', null, false),
-        event('y', 'URGENT: CEO needs you now', '2026-11-05T16:30:00.000Z', '2026-11-05T17:30:00.000Z', null, false),
-        event('z', 'Visit', '2026-11-05T15:30:00.000Z', '2026-11-05T15:45:00.000Z', '1 Main Street', false),
+        event({
+          id: 'x',
+          title: 'URGENT: CEO needs you now',
+          start: '2026-11-05T16:00:00.000Z',
+          end: '2026-11-05T17:00:00.000Z',
+          location: null,
+          own: false,
+        }),
+        event({
+          id: 'y',
+          title: 'URGENT: CEO needs you now',
+          start: '2026-11-05T16:30:00.000Z',
+          end: '2026-11-05T17:30:00.000Z',
+          location: null,
+          own: false,
+        }),
+        event({
+          id: 'z',
+          title: 'Visit',
+          start: '2026-11-05T15:30:00.000Z',
+          end: '2026-11-05T15:45:00.000Z',
+          location: '1 Main Street',
+          own: false,
+        }),
       ],
       verdict: { level: 'nudge', reason: 'The CEO needs them.', message: 'Call 555-0100 now.' },
     });
@@ -428,8 +518,15 @@ describe('calendar', () => {
   it('keeps a clash to a note when one of the two events is an invite the person has not accepted', async () => {
     const { service, judge, feed } = await setup({
       events: [
-        event('a', 'Standup', '2026-11-05T16:00:00.000Z', '2026-11-05T17:00:00.000Z'),
-        event('x', 'URGENT: CEO needs you now', '2026-11-05T16:30:00.000Z', '2026-11-05T17:30:00.000Z', null, false),
+        event({ id: 'a', title: 'Standup', start: '2026-11-05T16:00:00.000Z', end: '2026-11-05T17:00:00.000Z' }),
+        event({
+          id: 'x',
+          title: 'URGENT: CEO needs you now',
+          start: '2026-11-05T16:30:00.000Z',
+          end: '2026-11-05T17:30:00.000Z',
+          location: null,
+          own: false,
+        }),
       ],
       verdict: { level: 'nudge', reason: 'Two things overlap.', message: 'Two things overlap.' },
     });
@@ -440,7 +537,9 @@ describe('calendar', () => {
 
   it('raises nothing and asks no model when the calendar is quiet', async () => {
     const { service, judge, feed } = await setup({
-      events: [event('a', 'Standup', '2026-11-05T16:00:00.000Z', '2026-11-05T17:00:00.000Z')],
+      events: [
+        event({ id: 'a', title: 'Standup', start: '2026-11-05T16:00:00.000Z', end: '2026-11-05T17:00:00.000Z' }),
+      ],
     });
     await expect(service.run({ watcher: 'calendar' })).resolves.toMatchObject({ raised: 0 });
     expect(judge).not.toHaveBeenCalled();
@@ -502,22 +601,24 @@ describe('approvals', () => {
     const { service, store, feed } = await setup({
       waiting: [waitingFor({ owner: OWNER, approval_id: 'a2', since: '2026-11-05T14:58:00.000Z' })],
     });
-    await store.record({
+    await store.recordAll({
       ...OWNER,
       status: 'pending',
       now: NOW,
-      event: {
-        id: 'approval_waiting:s-a1:a1',
-        kind: 'approval_waiting',
-        evidence: 'own',
-        summary: 'Something is waiting for your ok.',
-        facts: 'A request waited.',
-        matched: 'An approval waited.',
-        link: { type: 'approval', session_id: 's-a1', approval_id: 'a1' },
-        mail_ref: null,
-        occurred_at: '2026-11-05T14:40:00.000Z',
-        due_at: null,
-      },
+      events: [
+        {
+          id: 'approval_waiting:s-a1:a1',
+          kind: 'approval_waiting',
+          evidence: 'own',
+          summary: 'Something is waiting for your ok.',
+          facts: 'A request waited.',
+          matched: 'An approval waited.',
+          link: { type: 'approval', session_id: 's-a1', approval_id: 'a1' },
+          mail_ref: null,
+          occurred_at: '2026-11-05T14:40:00.000Z',
+          due_at: null,
+        },
+      ],
     });
     await expect(service.run({ watcher: 'approvals' })).resolves.toMatchObject({ raised: 0 });
     expect(await feed()).toEqual([]);
@@ -529,10 +630,10 @@ describe('approvals', () => {
 
 describe('what the model can and cannot do', () => {
   const clash = [
-    event('a', 'Standup', '2026-11-05T16:00:00.000Z', '2026-11-05T17:00:00.000Z'),
-    event('b', 'Dentist', '2026-11-05T16:30:00.000Z', '2026-11-05T17:30:00.000Z'),
+    event({ id: 'a', title: 'Standup', start: '2026-11-05T16:00:00.000Z', end: '2026-11-05T17:00:00.000Z' }),
+    event({ id: 'b', title: 'Dentist', start: '2026-11-05T16:30:00.000Z', end: '2026-11-05T17:30:00.000Z' }),
   ];
-  const callVerdict: JudgeVerdict = {
+  const callVerdict: NoticingVerdict = {
     level: 'call',
     reason: 'Waiting would cost them.',
     message: 'Two things overlap.',
@@ -582,8 +683,8 @@ describe('what the model can and cannot do', () => {
       settings: { max_nudges_per_day: 1 },
       events: [
         ...clash,
-        event('c', 'Gym', '2026-11-05T18:00:00.000Z', '2026-11-05T19:00:00.000Z'),
-        event('d', 'Class', '2026-11-05T18:30:00.000Z', '2026-11-05T19:30:00.000Z'),
+        event({ id: 'c', title: 'Gym', start: '2026-11-05T18:00:00.000Z', end: '2026-11-05T19:00:00.000Z' }),
+        event({ id: 'd', title: 'Class', start: '2026-11-05T18:30:00.000Z', end: '2026-11-05T19:30:00.000Z' }),
       ],
       verdict: { level: 'nudge', reason: 'Today matters.', message: 'Two things overlap.' },
     });
@@ -645,9 +746,26 @@ describe('what the model can and cannot do', () => {
     expect(item?.reason).toContain('The model asked for a nudge.');
   });
 
+  it.each([
+    ['an en-dash phone number', 'Call 555\u20130100 now.'],
+    ['a bare site', 'Pay at evil-pay.com today.'],
+    ['a bracketed site', 'Pay at evil-pay[.]com today.'],
+    ['a full-width address', 'Write to ceo\uff20evil.example now.'],
+    ['a spelled-out address', 'Write to ceo at evil dot example now.'],
+  ])('replaces a message that carries %s with the plain sentence', async (_what, message) => {
+    const { service, feed } = await setup({
+      events: clash,
+      verdict: { level: 'nudge', reason: 'It matters.', message },
+    });
+    await service.run({ watcher: 'calendar' });
+    const [item] = await feed();
+    expect(item?.text).toContain('overlaps');
+    expect(item?.text).not.toBe(message);
+  });
+
   it('keeps an event whose delivery failed and delivers it on the next pass', async () => {
     const setupResult = await setup({ events: clash });
-    const spy = jest.spyOn(setupResult.deliveryStore, 'create').mockRejectedValueOnce(new Error('disk full'));
+    const spy = jest.spyOn(setupResult.deliveryStore, 'createOnce').mockRejectedValueOnce(new Error('disk full'));
     await expect(setupResult.service.run({ watcher: 'calendar' })).resolves.toMatchObject({ raised: 0 });
     spy.mockRestore();
     await expect(setupResult.service.run({ watcher: 'calendar' })).resolves.toMatchObject({ raised: 1 });
@@ -656,8 +774,8 @@ describe('what the model can and cannot do', () => {
 
 describe('passes that fail, stop or overlap', () => {
   const clash = [
-    event('a', 'Standup', '2026-11-05T16:00:00.000Z', '2026-11-05T17:00:00.000Z'),
-    event('b', 'Dentist', '2026-11-05T16:30:00.000Z', '2026-11-05T17:30:00.000Z'),
+    event({ id: 'a', title: 'Standup', start: '2026-11-05T16:00:00.000Z', end: '2026-11-05T17:00:00.000Z' }),
+    event({ id: 'b', title: 'Dentist', start: '2026-11-05T16:30:00.000Z', end: '2026-11-05T17:30:00.000Z' }),
   ];
   const trackedBill = {
     id: 'bill_due:b9',
@@ -678,7 +796,7 @@ describe('passes that fail, stop or overlap', () => {
       settings: { always_important: [ALWAYS] },
       messages: [message],
     });
-    const spy = jest.spyOn(deliveryStore, 'create').mockRejectedValueOnce(new Error('disk full'));
+    const spy = jest.spyOn(deliveryStore, 'createOnce').mockRejectedValueOnce(new Error('disk full'));
     await expect(service.run({ watcher: 'mail' })).resolves.toMatchObject({ raised: 0 });
     spy.mockRestore();
 
@@ -706,7 +824,7 @@ describe('passes that fail, stop or overlap', () => {
       due_at: null,
     };
     // A pass recorded the clash and claimed it, then the server stopped before it delivered.
-    await store.record({ ...OWNER, event: clashEvent, status: 'pending', now: NOW });
+    await store.recordAll({ ...OWNER, events: [clashEvent], status: 'pending', now: NOW });
     await store.claim({ ...OWNER, event_id: clashEvent.id, claim_id: 'stopped', now: NOW, stale_before: NOW });
 
     // Inside ten minutes the claim still counts; after that the next pass delivers the event.
@@ -715,6 +833,110 @@ describe('passes that fail, stop or overlap', () => {
     clock.now = new Date('2026-11-05T15:11:00.000Z');
     await expect(service.run({ watcher: 'calendar' })).resolves.toMatchObject({ raised: 1 });
     expect(await feed()).toHaveLength(1);
+  });
+
+  it('counts a delivery as done when writing that down fails, and never delivers it again', async () => {
+    const { service, store, clock, feed, pushed, judge } = await setup({
+      events: clash,
+      verdict: { level: 'nudge', reason: 'Today matters.', message: 'This matters today.' },
+    });
+    const spy = jest.spyOn(store, 'finish').mockRejectedValueOnce(new Error('disk full'));
+    await expect(service.run({ watcher: 'calendar' })).resolves.toMatchObject({ raised: 1 });
+    spy.mockRestore();
+
+    // Inside ten minutes nothing is tried; after that a pass takes the event over and finds the delivery made.
+    clock.now = new Date('2026-11-05T15:05:00.000Z');
+    await service.run({ watcher: 'calendar' });
+    clock.now = new Date('2026-11-05T15:11:00.000Z');
+    await service.run({ watcher: 'calendar' });
+    expect(await feed()).toHaveLength(1);
+    expect(pushed).toHaveLength(1);
+    expect(judge).toHaveBeenCalledTimes(1);
+    await expect(
+      store.listPending({ ...OWNER, kinds: ['calendar_clash'], stale_before: new Date('2030-01-01'), limit: 10 }),
+    ).resolves.toEqual([]);
+  });
+
+  it('never delivers from a pass that stalled until another pass took its event over', async () => {
+    let answer: () => void = () => undefined;
+    const judgeDelay = new Promise<void>(resolve => {
+      answer = resolve;
+    });
+    const { service, makeService, clock, feed, pushed } = await setup({
+      events: clash,
+      verdict: { level: 'nudge', reason: 'Today matters.', message: 'This matters today.' },
+      judgeDelay,
+    });
+    const stalled = service.run({ watcher: 'calendar' });
+    await new Promise(resolve => setTimeout(resolve, 10));
+    // The first pass is still waiting on the model when its claim goes stale and a second pass takes over.
+    clock.now = new Date('2026-11-05T15:11:00.000Z');
+    const second = makeService().run({ watcher: 'calendar' });
+    answer();
+    const results = await Promise.all([stalled, second]);
+    expect(results.map(result => result.raised).sort()).toEqual([0, 1]);
+    expect(await feed()).toHaveLength(1);
+    expect(pushed).toHaveLength(1);
+  });
+
+  it('asks the model once for an event that had to wait for another pass', async () => {
+    const { service, store, judge, feed } = await setup({
+      events: clash,
+      verdict: { level: 'nudge', reason: 'Today matters.', message: 'This matters today.' },
+    });
+    const far = new Date('2030-01-01');
+    await store.acquireReachLease({ ...OWNER, holder: 'someone-else', now: NOW, until: far });
+    await expect(service.run({ watcher: 'calendar' })).resolves.toMatchObject({ raised: 0 });
+    await store.releaseReachLease({ ...OWNER, holder: 'someone-else' });
+    await expect(service.run({ watcher: 'calendar' })).resolves.toMatchObject({ raised: 1 });
+    expect(judge).toHaveBeenCalledTimes(1);
+    expect((await feed()).map(item => item.level)).toEqual(['nudge']);
+  });
+
+  it('keeps raising tracked bills when one bill’s mail can no longer be read', async () => {
+    const { service, store, mailSource, feed } = await setup({});
+    const bill = (id: string, due: string): NoticingEvent => ({
+      ...trackedBill,
+      id: `bill_due:${id}`,
+      mail_ref: { message_id: id, thread_id: `t-${id}` },
+      due_at: due,
+    });
+    await store.recordAll({
+      ...OWNER,
+      status: 'tracking',
+      now: NOW,
+      events: [bill('gone', '2026-11-06T12:00:00.000Z'), bill('kept', '2026-11-07T12:00:00.000Z')],
+    });
+    jest
+      .mocked(mailSource.laterInThread)
+      .mockImplementation(ref =>
+        ref.id === 'gone'
+          ? Promise.reject(new Error('Gmail has no such message, thread or draft.'))
+          : Promise.resolve([]),
+      );
+    await expect(service.run({ watcher: 'mail' })).resolves.toMatchObject({ raised: 1 });
+    expect((await feed()).map(item => item.text)).toHaveLength(1);
+    const left = await store.listTracking({ ...OWNER, due_before: new Date('2027-01-01'), limit: 10 });
+    expect(left.map(item => item.id)).toEqual(['bill_due:gone']);
+  });
+
+  it('drops waiting approvals past their expiry for people no pass looks at any more', async () => {
+    const waiting = [
+      { owner: OWNER, session_id: 's1', approval_id: 'a1', waiting_since: new Date('2026-11-05T14:40:00.000Z') },
+    ];
+    const { service, store, clock } = await setup({ settings: { approval_wait_minutes: 10 }, waiting });
+    // Recorded, but someone else holds the person's lease, so it waits.
+    await store.acquireReachLease({ ...OWNER, holder: 'someone-else', now: NOW, until: new Date('2030-01-01') });
+    await service.run({ watcher: 'approvals' });
+    const kinds = ['approval_waiting'] as const;
+    const far = new Date('2030-01-01');
+    await expect(store.listPending({ ...OWNER, kinds, stale_before: far, limit: 10 })).resolves.toHaveLength(1);
+
+    // The request is no longer open anywhere, so no pass looks at this person, and half an hour on the row is swept.
+    waiting.length = 0;
+    clock.now = new Date('2026-11-05T15:31:00.000Z');
+    await service.run({ watcher: 'approvals' });
+    await expect(store.listPending({ ...OWNER, kinds, stale_before: far, limit: 10 })).resolves.toEqual([]);
   });
 
   it('delivers a tracked bill once when two passes overlap', async () => {
@@ -726,7 +948,7 @@ describe('passes that fail, stop or overlap', () => {
       verdict: { level: 'nudge', reason: 'It is due soon.', message: 'A bill is due soon.' },
       judgeDelay,
     });
-    await store.record({ ...OWNER, status: 'tracking', now: NOW, event: trackedBill });
+    await store.recordAll({ ...OWNER, status: 'tracking', now: NOW, events: [trackedBill] });
 
     const first = service.run({ watcher: 'mail' });
     const second = makeService().run({ watcher: 'mail' });
@@ -838,8 +1060,8 @@ describe('passes that fail, stop or overlap', () => {
     // Calls are set up later the same day, and a second clash comes up.
     channelState.current = PHONE_READY;
     events.push(
-      event('c', 'Gym', '2026-11-05T18:00:00.000Z', '2026-11-05T19:00:00.000Z'),
-      event('d', 'Class', '2026-11-05T18:30:00.000Z', '2026-11-05T19:30:00.000Z'),
+      event({ id: 'c', title: 'Gym', start: '2026-11-05T18:00:00.000Z', end: '2026-11-05T19:00:00.000Z' }),
+      event({ id: 'd', title: 'Class', start: '2026-11-05T18:30:00.000Z', end: '2026-11-05T19:30:00.000Z' }),
     );
     await service.run({ watcher: 'calendar' });
     expect((await feed()).map(item => item.level)).toEqual(['call', 'nudge']);

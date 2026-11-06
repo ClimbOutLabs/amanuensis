@@ -480,7 +480,7 @@ export function parseTwilioSettings(raw: {
     return undefined;
   }
   if (provider !== 'twilio') {
-    throw new Error('REACH_SMS_PROVIDER must be "none" or "twilio". Fix the value, or remove the line.');
+    throw new Error('Set REACH_SMS_PROVIDER to none or twilio.');
   }
   const accountSid = blankToUndefined(raw.accountSid);
   const authToken = blankToUndefined(raw.authToken);

@@ -20,6 +20,7 @@ export async function confirmNumber({
   const code = {
     hash: 'a'.repeat(64),
     salt: 'b'.repeat(32),
+    key_id: 'test-key',
     expires_at: new Date(now.getTime() + 600_000).toISOString(),
   };
   await store.startCode({ ...owner, phone, as: 'number', code, now });

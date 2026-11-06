@@ -3,14 +3,14 @@ import type { Logger } from 'winston';
 import { requestContextFromCreatedBySubject, type RequestContext } from '../../auth/identity';
 import type { IGlobalSettingsStore } from '../../db/globalSettingsStore';
 import type { IModelProviderStore } from '../../db/modelProviderStore';
-import type { NoticingOwner } from '../../db/noticingStore';
+import type { PersonOwner } from '../../db/personOwner';
 import type { IPersonalizationStore } from '../../db/personalizationStore';
 import { resolveDefaultChatModel } from '../defaultChatModel';
 import type { TokenFactoryBudget } from '../tokenFactoryBudget';
 import { createNoticingJudge, type NoticingJudge } from './judge';
 
 /** Said when no model is set up, so a watcher falls back to a plain note. */
-export class NoNoticingModelError extends Error {
+class NoNoticingModelError extends Error {
   constructor() {
     super('No model is set up for the assistant to ask. Add one in Settings, Models.');
     this.name = 'NoNoticingModelError';
@@ -33,7 +33,7 @@ export function createNoticingJudgeResolver({
   globalSettingsStore: IGlobalSettingsStore;
   tokenFactoryBudget: TokenFactoryBudget;
   logger: Logger;
-}): (owner: NoticingOwner) => Promise<NoticingJudge> {
+}): (owner: PersonOwner) => Promise<NoticingJudge> {
   return async owner => {
     const context = requestContextFromCreatedBySubject({
       tenant_id: owner.tenant_id,

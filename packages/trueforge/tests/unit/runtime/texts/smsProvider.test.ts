@@ -1,4 +1,5 @@
 import { createTwilioSmsProvider, smsFailureWords } from '../../../../src/runtime/texts/smsProvider';
+import type { TwilioFetch } from '../../../../src/runtime/twilio/rest';
 
 const settings = { accountSid: `AC${'1'.repeat(32)}`, authToken: 'secret-token-for-tests', fromNumber: '+15550100' };
 
@@ -8,16 +9,19 @@ function reply(status: number, json: unknown) {
 
 describe('Twilio text provider', () => {
   it('posts the form to the account’s Messages address with basic auth', async () => {
-    const fetchTwilio = jest.fn().mockImplementation(() => reply(201, { sid: 'SM1' }));
+    const fetchTwilio = jest.fn<ReturnType<TwilioFetch>, Parameters<TwilioFetch>>(() => reply(201, { sid: 'SM1' }));
     const provider = createTwilioSmsProvider({ settings, fetchTwilio });
     await expect(provider.send({ to: '+15550111', body: 'Hello there' })).resolves.toEqual({ outcome: 'sent' });
-    const [call] = fetchTwilio.mock.calls as [[{ url: string; headers: Record<string, string>; body: Uint8Array }]];
-    const input = call[0];
+    const input = fetchTwilio.mock.calls[0]?.[0];
+    if (input === undefined) {
+      throw new Error('Twilio was not called.');
+    }
+    expect(input.method).toBe('POST');
     expect(input.url).toBe(`https://api.twilio.com/2010-04-01/Accounts/${settings.accountSid}/Messages.json`);
     expect(input.headers['Authorization']).toBe(
       `Basic ${Buffer.from(`${settings.accountSid}:${settings.authToken}`).toString('base64')}`,
     );
-    const form = new URLSearchParams(new TextDecoder().decode(input.body));
+    const form = new URLSearchParams(new TextDecoder().decode(input.body ?? new Uint8Array()));
     expect(Object.fromEntries(form)).toEqual({ To: '+15550111', From: '+15550100', Body: 'Hello there' });
   });
 
@@ -48,13 +52,81 @@ describe('Twilio text provider', () => {
 
   it('words every failure with one next step and no credential', () => {
     for (const failure of ['opted_out', 'invalid_number', 'not_accepted', 'unreachable'] as const) {
-      const words = smsFailureWords(failure);
+      const words = smsFailureWords({ failure, during: 'delivery' });
       expect(words).not.toContain(settings.authToken);
       expect(words).not.toContain('—');
       expect(words.length).toBeGreaterThan(20);
     }
-    expect(smsFailureWords('unreachable')).toBe(
+    expect(smsFailureWords({ failure: 'unreachable', during: 'delivery' })).toBe(
       'Twilio could not be reached, so no text was sent. Open the app to see the item.',
     );
+  });
+
+  it('words a code that could not be sent the same for a number that replied STOP and one that does not exist', () => {
+    const general =
+      'That number cannot get texts from this server. Check the number. If you replied STOP from it, reply START, then try again.';
+    expect(smsFailureWords({ failure: 'opted_out', during: 'code' })).toBe(general);
+    expect(smsFailureWords({ failure: 'invalid_number', during: 'code' })).toBe(general);
+    expect(smsFailureWords({ failure: 'not_accepted', during: 'code' })).toBe(
+      'Twilio did not accept this server’s sign-in details. Ask whoever runs Aman to check them.',
+    );
+    expect(smsFailureWords({ failure: 'unreachable', during: 'code' })).toBe(
+      'Twilio could not be reached. Try again in a few minutes.',
+    );
+  });
+});
+
+describe('pointing the Twilio number at this server', () => {
+  const PN = `PN${'a'.repeat(32)}`;
+  const webhookUrl = 'https://aman.example.invalid/twilio/sms';
+
+  function twilio(numbers: unknown[]) {
+    return jest.fn<ReturnType<TwilioFetch>, Parameters<TwilioFetch>>(input =>
+      input.method === 'GET' ? reply(200, { incoming_phone_numbers: numbers }) : reply(200, { sid: PN }),
+    );
+  }
+
+  it('sets only that number’s incoming-message address, to the configured one', async () => {
+    const fetchTwilio = twilio([{ sid: PN, phone_number: '+15550100', sms_url: 'https://old.example/x' }]);
+    const provider = createTwilioSmsProvider({ settings, fetchTwilio });
+    await expect(provider.pointNumberAt({ smsUrl: webhookUrl })).resolves.toBe('updated');
+    const [lookup, update] = fetchTwilio.mock.calls.map(call => call[0]);
+    expect(lookup?.method).toBe('GET');
+    expect(lookup?.url).toBe(
+      `https://api.twilio.com/2010-04-01/Accounts/${settings.accountSid}/IncomingPhoneNumbers.json?PhoneNumber=%2B15550100`,
+    );
+    expect(update?.method).toBe('POST');
+    expect(update?.url).toBe(
+      `https://api.twilio.com/2010-04-01/Accounts/${settings.accountSid}/IncomingPhoneNumbers/${PN}.json`,
+    );
+    expect(Object.fromEntries(new URLSearchParams(new TextDecoder().decode(update?.body ?? new Uint8Array())))).toEqual(
+      { SmsUrl: webhookUrl, SmsMethod: 'POST' },
+    );
+  });
+
+  it('changes nothing when the number already points here', async () => {
+    const fetchTwilio = twilio([{ sid: PN, phone_number: '+15550100', sms_url: webhookUrl, sms_method: 'POST' }]);
+    await expect(
+      createTwilioSmsProvider({ settings, fetchTwilio }).pointNumberAt({ smsUrl: webhookUrl }),
+    ).resolves.toBe('already_set');
+    expect(fetchTwilio).toHaveBeenCalledTimes(1);
+  });
+
+  it('touches nothing when the number is not in the account, or Twilio answers with something unexpected', async () => {
+    const missing = twilio([]);
+    await expect(
+      createTwilioSmsProvider({ settings, fetchTwilio: missing }).pointNumberAt({ smsUrl: webhookUrl }),
+    ).resolves.toBe('number_not_found');
+    const odd = twilio([{ sid: '../../Messages', phone_number: '+15550100', sms_url: '' }]);
+    await expect(
+      createTwilioSmsProvider({ settings, fetchTwilio: odd }).pointNumberAt({ smsUrl: webhookUrl }),
+    ).resolves.toBe('number_not_found');
+    const refused = jest.fn<ReturnType<TwilioFetch>, Parameters<TwilioFetch>>(() => reply(401, { code: 20003 }));
+    await expect(
+      createTwilioSmsProvider({ settings, fetchTwilio: refused }).pointNumberAt({ smsUrl: webhookUrl }),
+    ).resolves.toBe('not_accepted');
+    for (const fetchTwilio of [missing, odd, refused]) {
+      expect(fetchTwilio.mock.calls.every(call => call[0].method === 'GET')).toBe(true);
+    }
   });
 });

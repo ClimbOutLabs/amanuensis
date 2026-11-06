@@ -5,6 +5,7 @@ import {
   MAX_CODES_PER_HOUR,
   MAX_CODES_PER_NUMBER_PER_DAY,
   MAX_CODES_PER_NUMBER_PER_HOUR,
+  MAX_CODES_PER_SERVER_PER_DAY,
   normalizePhoneNumber,
 } from '../../../../src/runtime/texts/textNumber';
 import { ALICE, PHONE, textsHarness } from '../../../fixtures/textsHarness';
@@ -45,14 +46,13 @@ describe('confirming a number with a one-time code', () => {
     await expect(h.numbers.status(ALICE)).resolves.toMatchObject({ confirmed: false, code_pending: true });
   });
 
-  it('keys the code with the server’s secret, so the database alone cannot check it', async () => {
+  it('keys the code with the server’s secret, and a code made with another secret is not pending', async () => {
     const h = await textsHarness({ codeKey: 'first-secret' });
     await h.numbers.sendCode({ owner: ALICE, phone: PHONE });
     const other = h.serviceWith({ codeKey: 'second-secret' });
-    await expect(other.confirm({ owner: ALICE, code: '111111' })).resolves.toMatchObject({
-      ok: false,
-      reason: 'wrong',
-    });
+    await expect(other.status(ALICE)).resolves.toMatchObject({ code_pending: false });
+    await expect(other.confirm({ owner: ALICE, code: '111111' })).resolves.toEqual({ ok: false, reason: 'no_code' });
+    await expect(h.contacts.get(ALICE)).resolves.toMatchObject({ code_attempts: 0 });
     await expect(h.numbers.confirm({ owner: ALICE, code: '111111' })).resolves.toEqual({ ok: true });
   });
 
@@ -201,6 +201,44 @@ describe('confirming a number with a one-time code', () => {
     expect(h.sent).toHaveLength(MAX_CODES_PER_NUMBER_PER_DAY);
     h.clock.now = new Date(h.clock.now.getTime() + 24 * 60 * 60_000);
     await expect(h.numbers.sendCode({ owner: person(asked + 1), phone: PHONE })).resolves.toEqual({ ok: true });
+  });
+
+  it('others filling a number’s limits do not lock out the person whose number it is', async () => {
+    const h = await textsHarness();
+    await h.readyToText();
+    await h.numbers.stopNumber(PHONE);
+    const person = (index: number) => ({ tenant_id: 'default', created_by: `person-${String(index)}` });
+    for (let index = 0; index < MAX_CODES_PER_NUMBER_PER_HOUR; index += 1) {
+      await h.numbers.sendCode({ owner: person(index), phone: PHONE });
+    }
+    await expect(h.numbers.sendCode({ owner: person(99), phone: PHONE })).resolves.toMatchObject({
+      reason: 'rate_limited',
+    });
+    await expect(h.numbers.sendCode({ owner: ALICE, phone: PHONE })).resolves.toEqual({ ok: true });
+  });
+
+  it('counts a number typed with its trunk zero as the same number', async () => {
+    const h = await textsHarness();
+    const person = (index: number) => ({ tenant_id: 'default', created_by: `person-${String(index)}` });
+    for (let index = 0; index < MAX_CODES_PER_NUMBER_PER_HOUR; index += 1) {
+      await h.numbers.sendCode({ owner: person(index), phone: '+4407700900123' });
+    }
+    await expect(h.numbers.sendCode({ owner: person(99), phone: '+447700900123' })).resolves.toMatchObject({
+      reason: 'rate_limited',
+    });
+  });
+
+  it('caps codes across the whole server in a day', async () => {
+    const h = await textsHarness();
+    for (let index = 0; index < MAX_CODES_PER_SERVER_PER_DAY; index += 1) {
+      const owner = { tenant_id: 'default', created_by: `person-${String(index)}` };
+      await expect(h.numbers.sendCode({ owner, phone: `+1555030${String(index).padStart(4, '0')}` })).resolves.toEqual({
+        ok: true,
+      });
+    }
+    await expect(
+      h.numbers.sendCode({ owner: { tenant_id: 'default', created_by: 'one-more' }, phone: '+15550399999' }),
+    ).resolves.toMatchObject({ ok: false, reason: 'rate_limited' });
   });
 
   it('a new code voids the old one', async () => {
@@ -371,6 +409,7 @@ describe('STOP', () => {
       ok: false,
       reason: 'no_code',
     });
+    expect(h.activity.map(row => row.tool_name)).toEqual(['delivery.sms_new_number_stopped']);
   });
 
   it('a number nobody has changes nothing', async () => {

@@ -1,9 +1,10 @@
 import { getDomain } from 'tldts';
 
 /**
- * Whether the receiving mail server vouched for a message's sender. A message passes when its DKIM signature or its
- * SPF check passed for a domain that lines up with the From domain. The header is read as the receiving server wrote
- * it, so only the topmost Authentication-Results header counts: any below it could have been written by the sender.
+ * Whether the receiving mail server vouched for a message's sender. A message passes when DMARC passed for the From
+ * domain and its DKIM signature or its SPF check passed for a domain that lines up with it. The header is read as the
+ * receiving server wrote it, so only the topmost Authentication-Results header counts, and only the first result of
+ * each method in it: anything below or after could have been written by the sender.
  */
 
 /** The domain of an address, lower case, or undefined when it has none. */
@@ -34,90 +35,65 @@ interface MethodResult {
   properties: Map<string, string>;
 }
 
-type Token = { kind: 'word'; text: string; quoted: boolean } | { kind: 'semicolon' } | { kind: 'equals' };
+type Token = { kind: 'word'; text: string } | { kind: 'semicolon' } | { kind: 'equals' };
 
 /**
- * Splits a header into words, `;` and `=`, as RFC 8601 reads it: comments nest and are dropped, and a quoted string
- * keeps its `;`, `=` and spaces inside one word. Undefined when a comment or a quote is never closed.
+ * Splits a header into words, `;` and `=`, with comments (which nest) dropped. Undefined when a comment is never
+ * closed or closes one that was never opened. The caller refuses quotes and backslashes first, so a comment can only
+ * end where its server ended it.
  */
 function tokenize(header: string): Token[] | undefined {
   const tokens: Token[] = [];
-  let word: { text: string; quoted: boolean } | undefined;
+  let word = '';
   const endWord = (): void => {
-    if (word !== undefined) {
-      tokens.push({ kind: 'word', ...word });
-      word = undefined;
+    if (word !== '') {
+      tokens.push({ kind: 'word', text: word });
+      word = '';
     }
   };
-  let index = 0;
-  while (index < header.length) {
-    const char = header.charAt(index);
+  let depth = 0;
+  for (const char of header) {
     if (char === '(') {
       endWord();
-      let depth = 1;
-      index += 1;
-      while (index < header.length && depth > 0) {
-        const inner = header.charAt(index);
-        index += inner === '\\' ? 2 : 1;
-        depth += inner === '(' ? 1 : inner === ')' ? -1 : 0;
-      }
-      if (depth > 0) {
-        return undefined;
-      }
-    } else if (char === '"') {
-      const current = word ?? { text: '', quoted: false };
-      current.quoted = true;
-      index += 1;
-      let closed = false;
-      while (index < header.length && !closed) {
-        const inner = header.charAt(index);
-        if (inner === '\\') {
-          current.text += header.charAt(index + 1);
-          index += 2;
-        } else {
-          closed = inner === '"';
-          current.text += closed ? '' : inner;
-          index += 1;
-        }
-      }
-      if (!closed) {
-        return undefined;
-      }
-      word = current;
+      depth += 1;
     } else if (char === ')') {
-      return undefined;
-    } else {
-      if (char === ';' || char === '=' || /\s/.test(char)) {
-        endWord();
-        if (char !== ';' && char !== '=') {
-          index += 1;
-          continue;
-        }
-        tokens.push({ kind: char === ';' ? 'semicolon' : 'equals' });
-      } else {
-        word = { text: `${word?.text ?? ''}${char}`, quoted: word?.quoted ?? false };
+      depth -= 1;
+      if (depth < 0) {
+        return undefined;
       }
-      index += 1;
+    } else if (depth > 0) {
+      continue;
+    } else if (char === ';' || char === '=') {
+      endWord();
+      tokens.push({ kind: char === ';' ? 'semicolon' : 'equals' });
+    } else if (/\s/.test(char)) {
+      endWord();
+    } else {
+      word += char;
     }
+  }
+  if (depth > 0) {
+    return undefined;
   }
   endWord();
   return tokens;
 }
 
 /** `name=value` pairs in one part of a header, or undefined when the part is not made of such pairs. */
-function pairsOf(tokens: readonly Token[]): { name: string; value: string; quoted: boolean }[] | undefined {
-  const pairs: { name: string; value: string; quoted: boolean }[] = [];
+function pairsOf(tokens: readonly Token[]): { name: string; value: string }[] | undefined {
+  const pairs: { name: string; value: string }[] = [];
   for (let at = 0; at < tokens.length; at += 3) {
     const [name, equals, value] = [tokens[at], tokens[at + 1], tokens[at + 2]];
-    if (name?.kind !== 'word' || name.quoted || equals?.kind !== 'equals' || value?.kind !== 'word') {
+    if (name?.kind !== 'word' || equals?.kind !== 'equals' || value?.kind !== 'word') {
       return undefined;
     }
-    pairs.push({ name: name.text.toLowerCase(), value: value.text, quoted: value.quoted });
+    pairs.push({ name: name.text.toLowerCase(), value: value.text });
   }
   return pairs;
 }
 
-function parseMethods(header: string): { authserv: string; results: MethodResult[] } | undefined {
+/** The server that wrote the header, and the first result it gave for each method. */
+function parseMethods(header: string): { authserv: string; results: Map<string, MethodResult> } | undefined {
   const tokens = tokenize(header);
   if (tokens === undefined) {
     return undefined;
@@ -132,22 +108,19 @@ function parseMethods(header: string): { authserv: string; results: MethodResult
   }
   const [head = [], ...rest] = parts;
   const first = head[0];
-  const authserv = first?.kind === 'word' && !first.quoted ? first.text.toLowerCase() : '';
-  const results: MethodResult[] = [];
+  const authserv = first?.kind === 'word' ? first.text.toLowerCase() : '';
+  const results = new Map<string, MethodResult>();
   for (const part of rest) {
     const [method, ...properties] = pairsOf(part) ?? [];
-    if (method === undefined || method.quoted) {
+    const name = method?.name.split('/')[0] ?? '';
+    // A later result for the same method may be text the sender got echoed into the header, so only the first counts.
+    if (method === undefined || results.has(name)) {
       continue;
     }
-    results.push({
-      method: method.name.split('/')[0] ?? '',
+    results.set(name, {
+      method: name,
       result: method.value.toLowerCase(),
-      // A quoted value can hold anything a sender wrote, so it never counts toward a check.
-      properties: new Map(
-        properties
-          .filter(item => !item.quoted)
-          .map(item => [item.name, item.value.replace(/^<|>$/g, '').toLowerCase()]),
-      ),
+      properties: new Map(properties.map(item => [item.name, item.value.replace(/^<|>$/g, '').toLowerCase()])),
     });
   }
   return { authserv, results };
@@ -194,6 +167,10 @@ export function checkSender({
   if (topmost === undefined) {
     return { verified: false, why: 'The mail server gave no sender checks for this message.' };
   }
+  // A quote or a backslash in the header is something a sender got echoed into it, so the header is not trusted.
+  if (/["\\]/.test(topmost)) {
+    return { verified: false, why: 'The sender checks on this message could not be read safely.' };
+  }
   const parsed = parseMethods(topmost);
   if (parsed === undefined) {
     return { verified: false, why: 'The sender checks on this message could not be read.' };
@@ -202,21 +179,22 @@ export function checkSender({
   if (!trusted_servers.includes(authserv)) {
     return { verified: false, why: 'The sender checks came from a server that is not the one receiving your mail.' };
   }
-  for (const entry of results) {
-    if (entry.result !== 'pass') {
-      continue;
+  const dmarc = results.get('dmarc');
+  if (dmarc?.result !== 'pass' || dmarc.properties.get('header.from') !== fromDomain) {
+    return { verified: false, why: 'The mail server did not confirm the From address with DMARC.' };
+  }
+  const dkim = results.get('dkim');
+  if (dkim?.result === 'pass') {
+    const signer = propertyDomain(dkim.properties.get('header.d') ?? dkim.properties.get('header.i'));
+    if (signer !== undefined && domainsAlign({ left: signer, right: fromDomain })) {
+      return { verified: true, how: 'dkim' };
     }
-    if (entry.method === 'dkim') {
-      const signer = propertyDomain(entry.properties.get('header.d') ?? entry.properties.get('header.i'));
-      if (signer !== undefined && domainsAlign({ left: signer, right: fromDomain })) {
-        return { verified: true, how: 'dkim' };
-      }
-    }
-    if (entry.method === 'spf') {
-      const envelope = propertyDomain(entry.properties.get('smtp.mailfrom'));
-      if (envelope !== undefined && domainsAlign({ left: envelope, right: fromDomain })) {
-        return { verified: true, how: 'spf' };
-      }
+  }
+  const spf = results.get('spf');
+  if (spf?.result === 'pass') {
+    const envelope = propertyDomain(spf.properties.get('smtp.mailfrom'));
+    if (envelope !== undefined && domainsAlign({ left: envelope, right: fromDomain })) {
+      return { verified: true, how: 'spf' };
     }
   }
   return { verified: false, why: 'The sender checks failed or do not match the From address.' };

@@ -1,13 +1,8 @@
-import type { ReachSettings } from '../../schemas/reach';
+import type { ReachSettings, ReachSuggestion } from '../../schemas/reach';
 
 const ADDRESS = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
 const MAX_SUGGESTIONS = 20;
 const MEMORY_CHARACTERS = 240;
-
-export interface ReachSuggestionItem {
-  address: string;
-  memory: string;
-}
 
 /**
  * Senders worth asking about: each address a memory names that is not already listed or turned down. A suggestion is
@@ -19,12 +14,12 @@ export function suggestAlwaysImportant({
 }: {
   memories: readonly string[];
   settings: Pick<ReachSettings, 'always_important' | 'dismissed_suggestions'>;
-}): ReachSuggestionItem[] {
+}): ReachSuggestion[] {
   const known = new Set([
     ...settings.always_important.map(sender => sender.address),
     ...settings.dismissed_suggestions.map(address => address.toLowerCase()),
   ]);
-  const found = new Map<string, ReachSuggestionItem>();
+  const found = new Map<string, ReachSuggestion>();
   for (const memory of memories) {
     for (const match of memory.matchAll(ADDRESS)) {
       const address = match[0].toLowerCase();

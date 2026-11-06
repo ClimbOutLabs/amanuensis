@@ -4,11 +4,13 @@ import type { AuditLogWriter } from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
 
 import type { IPersonalizationStore } from '../../db/personalizationStore';
+import type { PersonOwner } from '../../db/personOwner';
 import type { IReachSettingsStore } from '../../db/reachSettingsStore';
-import type { ITextContactStore, TextContactOwner } from '../../db/textContactStore';
+import type { ITextContactStore } from '../../db/textContactStore';
 import { E164_PATTERN, type TextContact, type TextMode, type TextStatus } from '../../schemas/textMessages';
 import { assistantNameFor } from './assistantName';
 import type { SmsFailure, SmsProvider } from './smsProvider';
+import { claimTextLimits, DAY_MS, HOUR_MS, ownerLimitKey, type TextLimit } from './textLimits';
 import { codeText, privateText } from './textWords';
 
 export const CODE_TTL_MS = 10 * 60_000;
@@ -19,8 +21,8 @@ export const MAX_CODES_PER_HOUR = 3;
 /** Codes sent to one number, whoever asks, so many people together cannot flood it either. */
 export const MAX_CODES_PER_NUMBER_PER_HOUR = 3;
 export const MAX_CODES_PER_NUMBER_PER_DAY = 10;
-const HOUR_MS = 60 * 60_000;
-const DAY_MS = 24 * HOUR_MS;
+/** Codes sent by the whole server in a day, so many accounts together cannot run up the bill. */
+export const MAX_CODES_PER_SERVER_PER_DAY = 50;
 
 /** The words Twilio treats as STOP in English, whatever the case. */
 const OPT_OUT_WORDS = new Set(['STOP', 'STOPALL', 'UNSUBSCRIBE', 'CANCEL', 'END', 'QUIT']);
@@ -40,39 +42,38 @@ export function canText(contact: TextContact | undefined): contact is TextContac
   return contact !== undefined && contact.confirmed_at !== null && contact.opted_out_at === null;
 }
 
-function pendingCode(contact: TextContact | undefined): { hash: string; salt: string } | undefined {
-  const hash = contact?.code_hash;
-  const salt = contact?.code_salt;
-  if (typeof hash !== 'string' || typeof salt !== 'string') {
-    return undefined;
-  }
-  return { hash, salt };
+/**
+ * The number as a limit counts it: a trunk 0 typed after the country code, as in +44 07700, is left out, so the same
+ * number typed two ways is one number. Folding a few distinct numbers together only makes a limit stricter.
+ */
+function limitNumber(phone: string): string {
+  return phone.replace(/^(\+\d{1,3}?)0/, '$1');
 }
 
-export type SendCodeResult =
+type SendCodeResult =
   | { ok: true }
   | { ok: false; reason: 'bad_number' | 'not_set_up' }
   | { ok: false; reason: 'send_failed'; failure: SmsFailure }
   | { ok: false; reason: 'rate_limited'; retry_in_minutes: number };
 
-export type ConfirmCodeResult =
+type ConfirmCodeResult =
   | { ok: true }
   | { ok: false; reason: 'no_code' | 'expired' | 'too_many' }
   | { ok: false; reason: 'wrong'; attempts_left: number };
 
-export type TextModeResult = { ok: true } | { ok: false; reason: 'no_number' };
+type TextModeResult = { ok: true } | { ok: false; reason: 'no_number' };
 
 export interface TextNumberService {
-  status(owner: TextContactOwner): Promise<TextStatus>;
+  status(owner: PersonOwner): Promise<TextStatus>;
   /**
    * Texts a one-time code to the number. Nothing else is ever sent to a number before it is confirmed. A new number
    * waits beside a confirmed one, which keeps getting texts until the new one is confirmed.
    */
-  sendCode(input: { owner: TextContactOwner; phone: string }): Promise<SendCodeResult>;
-  confirm(input: { owner: TextContactOwner; code: string }): Promise<ConfirmCodeResult>;
-  setMode(input: { owner: TextContactOwner; mode: TextMode }): Promise<TextModeResult>;
+  sendCode(input: { owner: PersonOwner; phone: string }): Promise<SendCodeResult>;
+  confirm(input: { owner: PersonOwner; code: string }): Promise<ConfirmCodeResult>;
+  setMode(input: { owner: PersonOwner; mode: TextMode }): Promise<TextModeResult>;
   /** Forgets the number and switches texts off. Codes already sent stay counted. */
-  remove(owner: TextContactOwner): Promise<void>;
+  remove(owner: PersonOwner): Promise<void>;
   /** A STOP from this number: texts go off for everyone who has it, and Activity says so. Resolves to how many people. */
   stopNumber(phone: string): Promise<number>;
 }
@@ -95,22 +96,35 @@ export function createTextNumberService({
   provider: SmsProvider | undefined;
   audit: AuditLogWriter;
   logger: Logger;
-  /** A server secret that is never stored in the database, so a copy of the database cannot be used to find a code. */
-  codeKey: string;
+  /**
+   * A server secret that is never stored in the database, so a copy of the database cannot be used to find a code.
+   * Undefined when this server has no text provider.
+   */
+  codeKey: string | undefined;
   now?: () => Date;
   /** Seam for tests. */
   newCode?: () => string;
 }): TextNumberService {
-  const hashCode = ({ code, salt, owner }: { code: string; salt: string; owner: TextContactOwner }): string =>
-    createHmac('sha256', codeKey)
+  const hashCode = ({ key, code, salt, owner }: { key: string; code: string; salt: string; owner: PersonOwner }) =>
+    createHmac('sha256', key)
       .update(`${salt}\u0000${owner.tenant_id}\u0000${owner.created_by}\u0000${code}`)
       .digest('hex');
 
-  /** A number in a limit's key, keyed so the count table never holds the number itself. */
-  const numberKey = (phone: string): string =>
-    createHmac('sha256', codeKey).update(`number\u0000${phone}`).digest('hex');
+  /** Names the key without giving it away, so a code hashed before the key changed reads as no code. */
+  const keyId =
+    codeKey === undefined ? undefined : createHmac('sha256', codeKey).update('key id').digest('hex').slice(0, 12);
 
-  async function textsOff(owner: TextContactOwner): Promise<void> {
+  /** The pending code, only while it was hashed with this server's key. */
+  function pendingCode(contact: TextContact | undefined): { hash: string; salt: string; key: string } | undefined {
+    const hash = contact?.code_hash;
+    const salt = contact?.code_salt;
+    if (codeKey === undefined || typeof hash !== 'string' || typeof salt !== 'string') {
+      return undefined;
+    }
+    return contact?.code_key_id === keyId ? { hash, salt, key: codeKey } : undefined;
+  }
+
+  async function textsOff(owner: PersonOwner): Promise<void> {
     const settings = await reachSettings.get(owner);
     if (settings?.channels.texts === true) {
       await reachSettings.put({
@@ -125,7 +139,7 @@ export function createTextNumberService({
     tool_name,
     description,
   }: {
-    owner: TextContactOwner;
+    owner: PersonOwner;
     tool_name: string;
     description: string;
   }) {
@@ -148,37 +162,38 @@ export function createTextNumberService({
   }
 
   /**
-   * Counts the send against the person, the number by the hour and the number by the day, each in one statement
-   * before the provider is called, so neither parallel requests nor a failing provider get past a limit. A limit
-   * already passed when a later one refuses stays spent.
+   * The limits one code send counts against: the person, the whole server, and the number by the hour and by the
+   * day. The number limits are kept by whoever asks, so the page cannot be used to text strangers, but the person
+   * whose number it already is, confirmed or opted out, is not held back by what others asked for. A number only
+   * waiting for its code does not count as theirs, since anyone can make any number wait.
    */
-  async function claimSend({
+  function codeLimits({
+    key,
     owner,
     phone,
-    at,
+    existing,
   }: {
-    owner: TextContactOwner;
+    key: string;
+    owner: PersonOwner;
     phone: string;
-    at: Date;
-  }): Promise<{ ok: true } | { ok: false; retry_in_minutes: number }> {
-    await store.forgetCodeSends({ before: new Date(at.getTime() - DAY_MS) });
-    const limits = [
-      {
-        key: `person:${JSON.stringify([owner.tenant_id, owner.created_by])}`,
-        window_ms: HOUR_MS,
-        max: MAX_CODES_PER_HOUR,
-      },
-      { key: `number-hour:${numberKey(phone)}`, window_ms: HOUR_MS, max: MAX_CODES_PER_NUMBER_PER_HOUR },
-      { key: `number-day:${numberKey(phone)}`, window_ms: DAY_MS, max: MAX_CODES_PER_NUMBER_PER_DAY },
+    existing: TextContact | undefined;
+  }): TextLimit[] {
+    const limits: TextLimit[] = [
+      { key: ownerLimitKey({ scope: 'person', owner }), window_ms: HOUR_MS, max: MAX_CODES_PER_HOUR },
+      { key: 'server-day', window_ms: DAY_MS, max: MAX_CODES_PER_SERVER_PER_DAY },
     ];
-    for (const limit of limits) {
-      const claim = await store.claimCodeSend({ ...limit, now: at });
-      if (!claim.ok) {
-        const waited = at.getTime() - new Date(claim.window_started_at).getTime();
-        return { ok: false, retry_in_minutes: Math.max(1, Math.ceil((limit.window_ms - waited) / 60_000)) };
-      }
+    const theirs = existing?.phone === phone && (existing.confirmed_at !== null || existing.opted_out_at !== null);
+    if (!theirs) {
+      // Keyed, so the count table never holds the number itself.
+      const number = createHmac('sha256', key)
+        .update(`number\u0000${limitNumber(phone)}`)
+        .digest('hex');
+      limits.push(
+        { key: `number-hour:${number}`, window_ms: HOUR_MS, max: MAX_CODES_PER_NUMBER_PER_HOUR },
+        { key: `number-day:${number}`, window_ms: DAY_MS, max: MAX_CODES_PER_NUMBER_PER_DAY },
+      );
     }
-    return { ok: true };
+    return limits;
   }
 
   return {
@@ -197,7 +212,7 @@ export function createTextNumberService({
         };
       }
       const pending =
-        contact.code_hash !== null &&
+        pendingCode(contact) !== undefined &&
         contact.code_expires_at !== null &&
         new Date(contact.code_expires_at).getTime() > now().getTime() &&
         contact.code_attempts < MAX_CODE_ATTEMPTS;
@@ -213,7 +228,7 @@ export function createTextNumberService({
     },
 
     async sendCode({ owner, phone }) {
-      if (provider === undefined) {
+      if (provider === undefined || codeKey === undefined || keyId === undefined) {
         return { ok: false, reason: 'not_set_up' };
       }
       const number = normalizePhoneNumber(phone);
@@ -221,18 +236,23 @@ export function createTextNumberService({
         return { ok: false, reason: 'bad_number' };
       }
       const at = now();
-      const claim = await claimSend({ owner, phone: number, at });
+      const existing = await store.get(owner);
+      const claim = await claimTextLimits({
+        store,
+        limits: codeLimits({ key: codeKey, owner, phone: number, existing }),
+        at,
+      });
       if (!claim.ok) {
         return { ok: false, reason: 'rate_limited', retry_in_minutes: claim.retry_in_minutes };
       }
       const code = newCode();
       const salt = randomBytes(16).toString('hex');
       const stored = {
-        hash: hashCode({ code, salt, owner }),
+        hash: hashCode({ key: codeKey, code, salt, owner }),
         salt,
+        key_id: keyId,
         expires_at: new Date(at.getTime() + CODE_TTL_MS).toISOString(),
       };
-      const existing = await store.get(owner);
       // A confirmed number keeps getting texts while a new one is being confirmed.
       const beside =
         canText(existing) &&
@@ -272,7 +292,7 @@ export function createTextNumberService({
         await forget();
         return { ok: false, reason: 'too_many' };
       }
-      const given = Buffer.from(hashCode({ code: code.trim(), salt: pending.salt, owner }), 'hex');
+      const given = Buffer.from(hashCode({ key: pending.key, code: code.trim(), salt: pending.salt, owner }), 'hex');
       const wanted = Buffer.from(pending.hash, 'hex');
       if (given.length !== wanted.length || !timingSafeEqual(given, wanted)) {
         if (attempt >= MAX_CODE_ATTEMPTS) {
@@ -322,7 +342,7 @@ export function createTextNumberService({
       for (const owner of pending_dropped) {
         await record({
           owner,
-          tool_name: 'delivery.sms_stop',
+          tool_name: 'delivery.sms_new_number_stopped',
           description:
             'The new number replied STOP, so it was not added. Texts still go to the number you confirmed before.',
         });

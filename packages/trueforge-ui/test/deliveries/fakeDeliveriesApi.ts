@@ -68,7 +68,7 @@ export function fakeServer(initial: DeliveryItem[]) {
       availability: {
         texts: {
           available: false,
-          note: 'Texts are not set up on this server. To set them up, add the Twilio details to the settings file and restart Aman.',
+          note: 'Texts are not set up on this server. To set them up, follow the Text messages page in the Aman docs.',
         },
         calls: { available: false, note: 'Phone calls are not set up yet.' },
       },

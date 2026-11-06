@@ -102,7 +102,7 @@ describe("ReachClient", () => {
         }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
 
-    test("update (1)", async () => {
+    test("create_or_update (1)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
         const rawRequestBody = {
@@ -156,7 +156,7 @@ describe("ReachClient", () => {
             .jsonBody(rawResponseBody)
             .build();
 
-        const response = await client.reach.update({
+        const response = await client.reach.createOrUpdate({
             settings: {
                 alwaysImportant: [
                     {
@@ -234,7 +234,7 @@ describe("ReachClient", () => {
         });
     });
 
-    test("update (2)", async () => {
+    test("create_or_update (2)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
         const rawRequestBody = {
@@ -251,7 +251,7 @@ describe("ReachClient", () => {
                 max_nudges_per_day: 50,
                 min_hours_between_calls: 72,
                 quiet_hours: { enabled: true, end: "end", start: "start" },
-                timezone: "UTC",
+                timezone: "x",
                 travel_lead_minutes: 1440,
             },
         };
@@ -267,7 +267,7 @@ describe("ReachClient", () => {
             .build();
 
         await expect(async () => {
-            return await client.reach.update({
+            return await client.reach.createOrUpdate({
                 settings: {
                     alwaysImportant: [
                         {
@@ -296,14 +296,14 @@ describe("ReachClient", () => {
                         end: "end",
                         start: "start",
                     },
-                    timezone: "UTC",
+                    timezone: "x",
                     travelLeadMinutes: 1440,
                 },
             });
         }).rejects.toThrow(TrueForgeTypes.BadRequestError);
     });
 
-    test("update (3)", async () => {
+    test("create_or_update (3)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
         const rawRequestBody = {
@@ -320,7 +320,7 @@ describe("ReachClient", () => {
                 max_nudges_per_day: 50,
                 min_hours_between_calls: 72,
                 quiet_hours: { enabled: true, end: "end", start: "start" },
-                timezone: "UTC",
+                timezone: "x",
                 travel_lead_minutes: 1440,
             },
         };
@@ -336,7 +336,7 @@ describe("ReachClient", () => {
             .build();
 
         await expect(async () => {
-            return await client.reach.update({
+            return await client.reach.createOrUpdate({
                 settings: {
                     alwaysImportant: [
                         {
@@ -365,7 +365,7 @@ describe("ReachClient", () => {
                         end: "end",
                         start: "start",
                     },
-                    timezone: "UTC",
+                    timezone: "x",
                     travelLeadMinutes: 1440,
                 },
             });
@@ -509,6 +509,28 @@ describe("ReachClient", () => {
     });
 
     test("test_channel (5)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { channel: "in_app" };
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/user/reach/test")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(429)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.reach.testChannel({
+                channel: "in_app",
+            });
+        }).rejects.toThrow(TrueForgeTypes.TooManyRequestsError);
+    });
+
+    test("test_channel (6)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
         const rawRequestBody = { channel: "in_app" };

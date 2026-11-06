@@ -82,6 +82,7 @@ import { DEFAULT_CHAT_MODEL_SETTING_KEY } from '../runtime/tokenFactoryProvider'
 import { TOOL_OUTPUT_SCREEN_ENABLED_SETTING_KEY } from '../runtime/toolOutputScreenSettings';
 import type { ImportDataResult } from '../schemas/dataImport';
 import type { ReachSettings } from '../schemas/reach';
+import type { TextContactExport } from '../schemas/textMessages';
 import { newId } from '../utils/id';
 import { detachConnectors, normalizeImportedConnectors, withoutKeptConnector } from './connectorImport';
 import { upgradeArchivedDeliveries } from './deliveryUpgrade';
@@ -139,7 +140,6 @@ import {
   type ImportSessionPartRecord,
   type ImportSettingsFile,
   type ImportSpacesFile,
-  type ImportTextContact,
   type ToolType,
   type ToolTypeResolver,
 } from './importSchemas';
@@ -510,7 +510,7 @@ interface ArchiveContents {
   audit: ImportAuditRecord[];
   deliveries: ImportDelivery[];
   reach: ReachSettings[];
-  texts: ImportTextContact[];
+  texts: TextContactExport[];
   files: ReadonlyMap<string, Buffer>;
   sourceTenantId: string;
   /** Internal details from an older version that were repaired or left out, filled in as sections are read. */

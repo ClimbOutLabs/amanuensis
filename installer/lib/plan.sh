@@ -378,7 +378,7 @@ plan_build() {
         plan_add todo "Restart instance $name on the new version"
       elif [ -n "$(instance_address_change "$name")" ]; then
         plan_existing_addresses "$name"
-      elif sms_port_changed "$name"; then
+      elif sms_settings_changed "$name"; then
         plan_add todo "Restart instance $name with the texts settings from its settings file"
       elif docker_available_for_probes && [ "$(instance_state "$name")" = running ]; then
         plan_add have "Instance $name is running"
@@ -640,7 +640,7 @@ install_execute() {
       recreate=
       case "$ADDRESS_CHANGED" in *" $name "*) recreate=recreate ;; esac
       if instance_enforce_single_owner "$name"; then recreate=recreate; fi
-      if sms_port_changed "$name"; then recreate=recreate; fi
+      if sms_settings_changed "$name"; then recreate=recreate; fi
       if [ "$(instance_state "$name")" != running ] || [ -n "$recreate" ] || { instance_sandbox_wanted "$name" && ! instance_sandbox_wired "$name"; } ||
         { instance_sandbox_wanted "$name" && ! sandbox_slots_use_current_image "$name"; }; then
         if [ "$name" = "$enabled" ]; then recreate=recreate; fi
