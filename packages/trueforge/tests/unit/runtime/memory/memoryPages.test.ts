@@ -255,6 +255,16 @@ describe('memoryPages', () => {
       expect(await readMemoryPage({ vaultDir, kind: 'person', slug: 'nobody' })).toBeUndefined();
     });
 
+    it('never reads the history or state folders as pages', async () => {
+      const vaultDir = await makeVault();
+      await writePageFile({ vaultDir, kind: 'person', slug: 'wendy', content: WENDY });
+      for (const folder of ['.memory-history/people', '.memory-state/people', '.memory-history']) {
+        await mkdir(path.join(vaultDir, folder), { recursive: true });
+        await writeFile(path.join(vaultDir, folder, 'copy.md'), WENDY);
+      }
+      expect(await listMemoryPages(vaultDir)).toEqual([{ kind: 'person', slug: 'wendy' }]);
+    });
+
     it('uses the slug as the fallback title for a page with no front matter', async () => {
       const vaultDir = await makeVault();
       await mkdir(path.join(vaultDir, 'people'), { recursive: true });

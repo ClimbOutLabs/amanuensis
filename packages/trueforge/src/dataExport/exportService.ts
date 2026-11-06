@@ -800,7 +800,7 @@ async function regularFileText(filePath: string): Promise<string | undefined> {
  * The vault's hand-written pages, every `.md` file directly in `people/` and `matters/` under its own
  * name (a file Aman cannot read by name still travels, so a move loses nothing), as regular files only.
  * A page folder that is a link is skipped, so nothing outside the vault is read. `.memory-state/`
- * is a cache and stays behind.
+ * (cache and lock) and `.memory-history/` (page history) stay behind.
  */
 async function writeMarkdownPages<TTransaction>(
   context: ExportContext<TTransaction>,

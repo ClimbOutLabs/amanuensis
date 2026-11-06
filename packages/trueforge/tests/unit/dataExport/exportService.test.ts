@@ -346,7 +346,7 @@ describe('runDataExport memory backends', () => {
         }
       }
 
-      it('takes each vault’s people and matters pages byte for byte, and never .memory-state', async () => {
+      it('takes each vault’s people and matters pages byte for byte, and never .memory-state or .memory-history', async () => {
         const mine = vaultFilesystemNamespace(TENANT_ID, personaVaultNamespace('Researcher'));
         await vault(TENANT_ID, { 'MEMORY.md': '# Shared\n' });
         await vault(mine, {});
@@ -356,6 +356,10 @@ describe('runDataExport memory backends', () => {
           'matters/lisbon-trip.md': '---\ntitle: Lisbon trip\n---\n',
           '.memory-state/aliases.json': '{}',
           '.memory-state/README': 'x',
+          '.memory-state/lock.1': '{}',
+          '.memory-history/HEAD': 'ref: refs/heads/main',
+          '.memory-history/info/exclude': '/*',
+          '.memory-history/people/wendy.md': 'a copy kept by the history',
         });
         await writePages(mine, { 'people/sam.md': 'Sam\n' });
         const { deps, close } = await makeDeps({ kind: 'markdown', markdownDir: memoryDir });
