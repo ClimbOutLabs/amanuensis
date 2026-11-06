@@ -73,7 +73,6 @@ export const AgentCodeSnippetSchema = z
   .object({
     label_name: z.string().min(1),
     language: z.string().min(1),
-    icon: z.url(),
     sample_code: AgentCodeSnippetSampleCodeSchema,
   })
   .strict()

@@ -166,6 +166,8 @@ Your memory, chats, personas and settings live on your computer. Memory is plain
 
 Be clear about one thing: **the model sees what you send it.** If you use a hosted model, the company running it sees each chat, including what Aman knows about you and anything it reads for you. To keep everything on your computer, use a local model. Web searches, maps and connectors still reach their own services. [docs/privacy.md](docs/privacy.md) lists exactly what goes where.
 
+The browser loads nothing from third parties: fonts and icons are bundled. The server contacts only the services you configure: your model provider, your mail and calendar, the connectors you add. The only other outside calls are the map services when you ask for a map, package sources such as npm and PyPI when a skill you approved installs packages, and one download of the memory search model from Hugging Face, which Aman checks against fixed fingerprints. CI fails if a new outside address appears in the code; the list is [scripts/external-hosts.allowlist.json](scripts/external-hosts.allowlist.json).
+
 Sending a message, deleting anything and installing anything always wait for your OK. That rule is enforced in code, on the tool itself, not left to the model's good behaviour.
 
 ## For developers and the curious

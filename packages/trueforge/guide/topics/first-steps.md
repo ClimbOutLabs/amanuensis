@@ -1,7 +1,7 @@
 ---
 id: first-steps
 title: First steps
-covers:
+covers: settings:models, settings:personalization, route:firstRunGuide, route:model, route:modelProvider, route:personalization
 ---
 
 1. Choose a model. Open Settings, then Models. Pick a model you have access to. Aman cannot answer until a model is chosen.
