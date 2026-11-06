@@ -39,11 +39,19 @@ function takesDigits(element) {
 /** How far up from a one-digit box to look for the others in its row. */
 const DIGIT_ROW_LEVELS = 5;
 
-/** Whether a field has a label of its own: a count such as "Adults" is labelled, a code's digit boxes are not. */
+/** A label that only says which box of a code this is, such as "Digit 1 of 6" or "OTP character 2". */
+const CODE_BOX_LABEL = /\b(digit|character|char|code|otp|pin)\b|\b\d+ of \d+\b/i;
+
+/**
+ * Whether a field has a label of its own that names what it holds: a count such as "Adults" does,
+ * while a code's digit boxes have no label or one that only numbers the box.
+ */
 function hasOwnLabel(element) {
-  const aria = element.getAttribute('aria-label') ?? '';
-  const labels = element.labels === null ? [] : [...element.labels];
-  return /[a-z]{3}/i.test(aria) || labels.some(label => /[a-z]{3}/i.test(label.textContent ?? ''));
+  const labels = [
+    element.getAttribute('aria-label') ?? '',
+    ...[...(element.labels ?? [])].map(l => l.textContent ?? ''),
+  ];
+  return labels.some(text => /[a-z]{3}/i.test(text) && !CODE_BOX_LABEL.test(text));
 }
 
 /** A one-digit box with no label of its own. */
