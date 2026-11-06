@@ -221,7 +221,8 @@ test(
       if (!(await chatList.isVisible())) {
         await pickPage.getByRole('navigation', { name: 'Sidebar' }).getByRole('button', { name: 'Chats' }).click();
       }
-      await chatList.getByRole('button', { name: 'New chat' }).click();
+      // Exact: until its title arrives, the chat just made is listed as "New Chat", which a loose match also finds.
+      await chatList.getByRole('button', { name: 'New chat', exact: true }).click();
       await pickPage.getByTitle('Choose a persona').waitFor({ timeout: RENDER_TIMEOUT_MS });
       await pickContext.close();
     } finally {
