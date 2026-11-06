@@ -260,7 +260,7 @@ export function ReachPreferences({ reach }: { reach: ReachApi }) {
 
       <Card
         title="Mail that always matters"
-        intro={`${assistant} tells you about mail from these people, as long as your mail server confirms the sender. Anything else it only mentions when it names a bill or deadline. This needs a Google account: with the shared Email connector, senders cannot be confirmed yet, so their mail is treated as ordinary mail.`}
+        intro={`${assistant} tells you about mail from these people, as long as your mail server confirms the sender. Anything else it only mentions when it names a bill or deadline. This needs a Google account. With the shared Email connector, senders cannot be confirmed yet, so their mail is treated as ordinary mail.`}
       >
         {draft.alwaysImportant.length === 0 ? (
           <p className="text-text-secondary text-sm">No one yet.</p>

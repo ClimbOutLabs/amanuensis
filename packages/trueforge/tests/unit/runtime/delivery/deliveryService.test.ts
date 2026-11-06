@@ -14,7 +14,6 @@ const INPUT = {
   kind: 'nudge' as const,
   level: 'nudge' as const,
   text: 'The model wrote this.',
-  notice_text: 'Two things overlap.',
   reason: 'Two events overlap.',
   link: null,
   created_at: AT,
@@ -24,10 +23,10 @@ async function setup() {
   const db = createSqliteDb(':memory:');
   await migrateSqliteToLatest(db);
   const store = new DeliveryStore(db);
-  const sent: { text: string; notice_text: string }[] = [];
+  const sent: string[] = [];
   const sender: DeliveryChannelSender = {
-    send: ({ delivery, notice_text }) => {
-      sent.push({ text: delivery.text, notice_text });
+    send: ({ delivery }) => {
+      sent.push(delivery.text);
       return Promise.resolve([
         { channel: 'web_push', outcome: 'sent', detail: null, target: 'phone', attempted_at: AT.toISOString() },
       ]);
@@ -49,7 +48,7 @@ describe('deliverOnce', () => {
     const first = await service.deliverOnce(INPUT);
     const second = await service.deliverOnce({ ...INPUT, text: 'Other words.' });
     expect(second).toEqual(first);
-    expect(sent).toEqual([{ text: 'The model wrote this.', notice_text: 'Two things overlap.' }]);
+    expect(sent).toEqual(['The model wrote this.']);
     expect((await store.list({ ...OWNER, limit: 10 })).deliveries).toHaveLength(1);
     expect(first.attempts.map(attempt => attempt.channel)).toEqual(['in_app', 'web_push']);
   });

@@ -208,6 +208,9 @@ describe('where a link came from', () => {
       'call \u0665\u0665\u0665\u0660\u0661\u0660\u0660',
       'call five five five oh one oh oh',
       'call five-five-five, zero-one-hundred',
+      'call 555 ext 0100',
+      'call five five five 0100',
+      'call 5Z5-OlOO',
     ]) {
       expect([text, carries(text)]).toEqual([text, true]);
     }
@@ -225,6 +228,11 @@ describe('where a link came from', () => {
       'Pay at evil-pay.\u0441\u043em',
       'Pay at 1.2.3.4/pay',
       'Pay at 1.2.3.4',
+      'Pay at 0x7f000001',
+      'Pay at evil-pay .ai',
+      'Pay at evil-pay .gg',
+      'Pay at evil-pay\u00b7com',
+      'Pay at evil-pay\u2022com',
     ]) {
       expect([text, carries(text)]).toEqual([text, true]);
     }
@@ -250,11 +258,19 @@ describe('where a link came from', () => {
       'The rent of $12,450,000.00 is due 6 November, 2026.',
       'Room 4021',
       'I will see Sol at 10 tomorrow.',
+      'Zoe has one 2026 report and two more.',
+      'Home \u00b7 About \u00b7 Help',
     ]) {
       expect([text, carries(text)]).toEqual([text, false]);
     }
-    // A long order number cannot be told from a phone number, so it counts as one and the plain sentence is used.
+    // A long order or invoice number cannot be told from a phone number, so it counts as one and the plain sentence
+    // is used. That costs only the model's wording in the feed.
     expect(carries('Order #12345678 shipped')).toBe(true);
+    expect(carries('Invoice 2026-1105')).toBe(true);
+    // Best effort: some spellings still get through. Only the feed's wording is at stake, never a notice.
+    for (const text of ['call 555 and 0100', 'call SSS-OlOO', 'Write to ceo at evil-pay']) {
+      expect([text, carries(text)]).toEqual([text, false]);
+    }
   });
 
   it('folds spellings of one page together', () => {

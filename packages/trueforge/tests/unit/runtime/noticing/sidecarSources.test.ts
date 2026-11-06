@@ -1,8 +1,10 @@
+import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import winston from 'winston';
 
 import {
   bareSubject,
   createSidecarNoticingSources,
+  MAIL_LIST_TOO_SLOW,
   sidecarCalendarSource,
   sidecarMailSource,
   type CallSidecarTool,
@@ -165,16 +167,29 @@ describe('sidecar mail source (IMAP)', () => {
     expect(calls.map(([, args]) => args['from_address'])).toEqual(['dana@example.com', 'billing@power.test']);
   });
 
-  it('asks for a shorter window when listing one takes too long', async () => {
-    jest.useFakeTimers();
-    try {
-      const source = sidecarMailSource({ call: () => new Promise(() => undefined), account: 'default' });
-      const read = source.listNewMessages({ since: new Date('2026-11-05T14:00:00.000Z'), before: NOW, limit: 50 });
-      await jest.advanceTimersByTimeAsync(20_000);
-      await expect(read).resolves.toEqual({ read: 'too_slow' });
-    } finally {
-      jest.useRealTimers();
-    }
+  it('fails the list on the first call that runs out of time, without trying a shorter window', async () => {
+    const calls: unknown[] = [];
+    const call: CallSidecarTool = (_name, args) => {
+      calls.push(args);
+      return Promise.reject(new McpError(ErrorCode.RequestTimeout, 'Request timed out'));
+    };
+    const read = sidecarMailSource({ call, account: 'default' }).listNewMessages({
+      since: new Date('2026-11-05T14:00:00.000Z'),
+      before: NOW,
+      limit: 50,
+    });
+    await expect(read).rejects.toThrow(MAIL_LIST_TOO_SLOW);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('passes on other failures as they are', async () => {
+    const call: CallSidecarTool = () => Promise.reject(new Error('connection refused'));
+    const read = sidecarMailSource({ call, account: 'default' }).listNewMessages({
+      since: new Date('2026-11-05T14:00:00.000Z'),
+      before: NOW,
+      limit: 50,
+    });
+    await expect(read).rejects.toThrow('connection refused');
   });
 
   it('reads a backlog bigger than one pass over several passes, skipping nothing', async () => {

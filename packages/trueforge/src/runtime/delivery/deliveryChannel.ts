@@ -5,11 +5,5 @@ import type { Delivery, DeliveryAttempt } from '../../schemas/deliveries';
  * touching the service. A sender never throws: a failure is returned as an attempt with the outcome `failed`.
  */
 export interface DeliveryChannelSender {
-  /** `notice_text` is what a notice outside the app may say. A sender never puts the delivery's `text` there. */
-  send(input: {
-    delivery: Delivery;
-    notice_text: string;
-    tenant_id: string;
-    created_by: string;
-  }): Promise<DeliveryAttempt[]>;
+  send(input: { delivery: Delivery; tenant_id: string; created_by: string }): Promise<DeliveryAttempt[]>;
 }

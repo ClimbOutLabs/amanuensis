@@ -1,8 +1,12 @@
 /**
  * Whether the receiving mail server vouched for a message's sender: DMARC passed for the From domain. DMARC only passes
  * when a DKIM signature or the SPF check lined up with that domain, so nothing more is asked. The header is read as the
- * receiving server wrote it, so only the topmost Authentication-Results header counts, and it must hold exactly one
- * DMARC result: a second one could be text the sender got echoed into it.
+ * receiving server wrote it, so only the topmost Authentication-Results header counts.
+ *
+ * The sender can get some of its own text into that header: its envelope address, its HELO name, and the comments
+ * that repeat them. So the header is read as RFC 8601 lays it out (quoted strings and comments kept whole), and
+ * refused when it holds anything that text could use to pass for a result: a part that does not parse, more than one
+ * DMARC result, a HELO check, an address in brackets, or a value that holds a check of its own.
  */
 
 /** The domain of an address, lower case, or undefined when it has none. */
@@ -21,15 +25,36 @@ function domainOfAddress(address: string): string | undefined {
 interface MethodResult {
   method: string;
   result: string;
-  properties: Map<string, string>;
+  properties: { name: string; value: string }[];
 }
 
-type Token = { kind: 'word'; text: string } | { kind: 'semicolon' } | { kind: 'equals' };
+type Token = { kind: 'word'; text: string } | { kind: 'semicolon' };
+
+/** Reads a quoted string that starts at `start`, with its `\` escapes. Undefined when it never closes. */
+function quotedAt({ header, start }: { header: string; start: number }): { text: string; end: number } | undefined {
+  let text = '';
+  for (let at = start + 1; at < header.length; at += 1) {
+    const char = header[at] ?? '';
+    if (char === '\\') {
+      at += 1;
+      if (at >= header.length) {
+        return undefined;
+      }
+      text += header[at] ?? '';
+    } else if (char === '"') {
+      return { text, end: at };
+    } else {
+      text += char;
+    }
+  }
+  return undefined;
+}
 
 /**
- * Splits a header into words, `;` and `=`, with comments (which nest) dropped. Undefined when a comment is never
- * closed or closes one that was never opened. The caller refuses quotes and backslashes first, so a comment can only
- * end where its server ended it.
+ * Splits a header into words and `;`. A word runs to the next space, `;` or comment, so `=` inside a value stays in
+ * it. A quoted string is part of its word, and inside a comment it is skipped whole, so a `)` the sender put in an
+ * address cannot end the comment early. Comments nest and are dropped. Undefined when a comment or a quoted string
+ * never closes, a comment closes one that was never opened, or a backslash stands outside both.
  */
 function tokenize(header: string): Token[] | undefined {
   const tokens: Token[] = [];
@@ -41,8 +66,23 @@ function tokenize(header: string): Token[] | undefined {
     }
   };
   let depth = 0;
-  for (const char of header) {
-    if (char === '(') {
+  for (let at = 0; at < header.length; at += 1) {
+    const char = header[at] ?? '';
+    if (char === '"') {
+      const quoted = quotedAt({ header, start: at });
+      if (quoted === undefined) {
+        return undefined;
+      }
+      if (depth === 0) {
+        word += quoted.text;
+      }
+      at = quoted.end;
+    } else if (char === '\\') {
+      if (depth === 0) {
+        return undefined;
+      }
+      at += 1;
+    } else if (char === '(') {
       endWord();
       depth += 1;
     } else if (char === ')') {
@@ -52,9 +92,9 @@ function tokenize(header: string): Token[] | undefined {
       }
     } else if (depth > 0) {
       continue;
-    } else if (char === ';' || char === '=') {
+    } else if (char === ';') {
       endWord();
-      tokens.push({ kind: char === ';' ? 'semicolon' : 'equals' });
+      tokens.push({ kind: 'semicolon' });
     } else if (/\s/.test(char)) {
       endWord();
     } else {
@@ -68,17 +108,13 @@ function tokenize(header: string): Token[] | undefined {
   return tokens;
 }
 
-/** `name=value` pairs in one part of a header, or undefined when the part is not made of such pairs. */
-function pairsOf(tokens: readonly Token[]): { name: string; value: string }[] | undefined {
-  const pairs: { name: string; value: string }[] = [];
-  for (let at = 0; at < tokens.length; at += 3) {
-    const [name, equals, value] = [tokens[at], tokens[at + 1], tokens[at + 2]];
-    if (name?.kind !== 'word' || equals?.kind !== 'equals' || value?.kind !== 'word') {
-      return undefined;
-    }
-    pairs.push({ name: name.text.toLowerCase(), value: value.text });
+/** A `name=value` word split at its first `=`, or undefined when it has no name or no value. */
+function pairOf(word: string): { name: string; value: string } | undefined {
+  const equals = word.indexOf('=');
+  if (equals <= 0 || equals === word.length - 1) {
+    return undefined;
   }
-  return pairs;
+  return { name: word.slice(0, equals).toLowerCase(), value: word.slice(equals + 1) };
 }
 
 /**
@@ -90,41 +126,66 @@ function parseMethods(header: string): { authserv: string; results: MethodResult
   if (tokens === undefined) {
     return undefined;
   }
-  const parts: Token[][] = [[]];
+  const parts: string[][] = [[]];
   for (const token of tokens) {
     if (token.kind === 'semicolon') {
       parts.push([]);
     } else {
-      parts[parts.length - 1]?.push(token);
+      parts[parts.length - 1]?.push(token.text);
     }
   }
   const [head = [], ...rest] = parts;
-  const first = head[0];
-  const authserv = first?.kind === 'word' ? first.text.toLowerCase() : '';
+  const authserv = (head[0] ?? '').toLowerCase();
   const results: MethodResult[] = [];
   for (const part of rest) {
     // Servers often end the header with a `;`, which leaves an empty part.
     if (part.length === 0) {
       continue;
     }
-    const pairs = pairsOf(part);
-    const [method, ...properties] = pairs ?? [];
-    if (method === undefined) {
+    const pairs = part.map(pairOf);
+    const [method, ...properties] = pairs;
+    if (method === undefined || properties.some(pair => pair === undefined)) {
       return undefined;
     }
     results.push({
       method: method.name.split('/')[0] ?? '',
       result: method.value.toLowerCase(),
-      properties: new Map(properties.map(item => [item.name, item.value.replace(/^<|>$/g, '').toLowerCase()])),
+      properties: properties.flatMap(pair =>
+        pair === undefined ? [] : [{ name: pair.name, value: pair.value.replace(/^<|>$/g, '').toLowerCase() }],
+      ),
     });
   }
   return { authserv, results };
 }
 
-export type SenderCheck = { verified: true; how: 'dmarc' } | { verified: false; why: string };
+/** Text shaped like a check of its own, such as `dmarc=pass` or `header.from=`, inside one property's value. */
+const CHECK_INSIDE_VALUE = /(?:^|[^a-z0-9])(?:dmarc|dkim|spf|arc|iprev|auth|header\.[a-z]+|smtp\.[a-z]+)=/i;
+
+/** Why a parsed header cannot be trusted, or undefined when nothing in it could be the sender's own text. */
+function echoIn(results: readonly MethodResult[]): string | undefined {
+  if (results.filter(item => item.method === 'dmarc').length > 1) {
+    return 'more than one DMARC result';
+  }
+  for (const item of results) {
+    for (const property of item.properties) {
+      // Mail with no envelope sender is checked by its HELO name, which the sender writes freely.
+      if (property.name === 'smtp.helo') {
+        return 'a HELO check';
+      }
+      // A DKIM signature is random text, so it is the one value left out.
+      if (property.name !== 'header.b' && CHECK_INSIDE_VALUE.test(property.value)) {
+        return 'a check inside a value';
+      }
+    }
+  }
+  return undefined;
+}
+
+export type SenderCheck = { verified: true } | { verified: false; why: string };
 
 /** Said when a mail source cannot pass on the receiving server's checks, so no sender is vouched for. */
 const NOT_PASSED_ON = 'This mail source does not pass on sender checks.';
+const NOT_SAFE = 'The sender checks on this message could not be read safely.';
 
 /**
  * Checks a message's sender against its Authentication-Results headers, given newest first (the topmost first).
@@ -152,9 +213,9 @@ export function checkSender({
   if (topmost === undefined) {
     return { verified: false, why: 'The mail server gave no sender checks for this message.' };
   }
-  // A quote or a backslash in the header is something a sender got echoed into it, so the header is not trusted.
-  if (/["\\]/.test(topmost)) {
-    return { verified: false, why: 'The sender checks on this message could not be read safely.' };
+  // An address in brackets can hold a `;` or a `(` outside any quotes, so a header with one is not read.
+  if (/[[\]]/.test(topmost)) {
+    return { verified: false, why: NOT_SAFE };
   }
   const parsed = parseMethods(topmost);
   if (parsed === undefined) {
@@ -164,13 +225,13 @@ export function checkSender({
   if (!trusted_servers.includes(authserv)) {
     return { verified: false, why: 'The sender checks came from a server that is not the one receiving your mail.' };
   }
-  const dmarc = results.filter(item => item.method === 'dmarc');
-  if (dmarc.length > 1) {
-    return { verified: false, why: 'The sender checks on this message could not be read safely.' };
+  if (echoIn(results) !== undefined) {
+    return { verified: false, why: NOT_SAFE };
   }
-  const [only] = dmarc;
-  if (only?.result !== 'pass' || only.properties.get('header.from') !== fromDomain) {
+  const [dmarc] = results.filter(item => item.method === 'dmarc');
+  const from = dmarc?.properties.find(property => property.name === 'header.from')?.value;
+  if (dmarc?.result !== 'pass' || from !== fromDomain) {
     return { verified: false, why: 'The mail server did not confirm the From address with DMARC.' };
   }
-  return { verified: true, how: 'dmarc' };
+  return { verified: true };
 }

@@ -44,11 +44,9 @@ export function runDeliveryStoreContractSuite(getStore: () => IDeliveryStore): v
     const again = await store.createOnce({ ...reminder(ALICE, 'Different words'), id: 'fixed-1' });
     expect(again).toEqual({ delivery: first.delivery, created: false });
     expect((await store.list({ ...ALICE, limit: 10 })).deliveries).toHaveLength(1);
-    // Someone else's delivery holds the id, so Bob's is made under a new one and Alice's is left alone.
-    const bobs = await store.createOnce({ ...reminder(BOB), id: 'fixed-1' });
-    expect(bobs.created).toBe(true);
-    expect(bobs.delivery.id).not.toBe('fixed-1');
-    await expect(store.get({ ...BOB, id: bobs.delivery.id })).resolves.toEqual(bobs.delivery);
+    // Someone else's delivery holds the id, so Bob gets nothing and Alice's is left alone.
+    await expect(store.createOnce({ ...reminder(BOB), id: 'fixed-1' })).rejects.toThrow('belongs to someone else');
+    await expect(store.get({ ...BOB, id: 'fixed-1' })).resolves.toBeUndefined();
     await expect(store.get({ ...ALICE, id: 'fixed-1' })).resolves.toEqual(first.delivery);
   });
 

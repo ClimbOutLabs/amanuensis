@@ -24,7 +24,14 @@ import type { NoticingJudge } from './judge';
 import { ceilingOf } from './levels';
 import { readReachHistory, waitFor, withReachLease, type ReachGateDeps } from './reachGate';
 import { applyReachRules, joinReasons } from './reachRules';
-import type { ApprovalSource, CalendarSource, MailSource, NoticingSourceProvider, WaitingApproval } from './sources';
+import {
+  MessageUnreadableError,
+  type ApprovalSource,
+  type CalendarSource,
+  type MailSource,
+  type NoticingSourceProvider,
+  type WaitingApproval,
+} from './sources';
 import { BILL_WINDOW_MS, billIsPaid, watchApprovals, watchCalendar, watchMail } from './watchers';
 
 /** How far back the first pass of a mail watcher looks, so a newly connected inbox is not flooded with old mail. */
@@ -211,9 +218,6 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
           kind: deliveryKindOf({ event, level: decision.delivered }),
           level: decision.delivered,
           text: shown.text,
-          // Outside the app only the fixed sentence goes, never the model's words. It is built from the mail or the
-          // events it is about, and only a confirmed sender or the person's own event can be louder than a note.
-          notice_text: event.summary,
           reason,
           link: event.link,
           created_at: at,
@@ -352,17 +356,23 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
     const since = new Date(
       Math.max(checked?.getTime() ?? at.getTime() - FIRST_LOOKBACK_MS, at.getTime() - MAX_LOOKBACK_MS),
     );
-    const findings = await watchMail({ source: mail, settings, since, now: at, logger });
-    await store.recordAll({ ...owner, events: findings.raise, status: 'pending', now: at });
-    await store.recordAll({ ...owner, events: findings.track, status: 'tracking', now: at });
-    // Everything found is written down before the checkpoint moves, so a failed delivery is retried from the store.
-    // A pass that read all mail up to now starts the next one a little earlier, for mail the server lists late.
-    await store.setCheckpoint({
-      ...owner,
-      watcher: 'mail',
-      checked_at: findings.resume_from ?? new Date(at.getTime() - CHECK_OVERLAP_MS),
-    });
-    await promoteDueBills({ owner, mail, now: at });
+    try {
+      const findings = await watchMail({ source: mail, settings, since, now: at, logger });
+      await store.recordAll({ ...owner, events: findings.raise, status: 'pending', now: at });
+      await store.recordAll({ ...owner, events: findings.track, status: 'tracking', now: at });
+      // Everything found is written down before the checkpoint moves, so a failed delivery is retried from the store.
+      // A pass that read all mail up to now starts the next one a little earlier, for mail the server lists late.
+      await store.setCheckpoint({
+        ...owner,
+        watcher: 'mail',
+        checked_at: findings.resume_from ?? new Date(at.getTime() - CHECK_OVERLAP_MS),
+      });
+    } finally {
+      // Bills seen earlier still come due when new mail could not be read this time.
+      await promoteDueBills({ owner, mail, now: at }).catch((error: unknown) => {
+        logger.warn('Could not look at tracked bills', { error: errorText(error) });
+      });
+    }
   }
 
   /** Bills seen earlier that now fall due within three days become pending, unless something since says they were paid. */
@@ -374,8 +384,12 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
     });
     for (const event of due) {
       const deadline = event.due_at === null ? undefined : new Date(event.due_at);
-      // One bill whose mail can no longer be read (deleted, say) waits for the next pass without holding up the rest.
+      // A thread that can never be read cannot say the bill was paid, so the bill is raised. Any other failure
+      // leaves the bill for the next pass without holding up the rest.
       const paid = await billIsPaid({ source: mail, event }).catch((error: unknown) => {
+        if (error instanceof MessageUnreadableError) {
+          return false;
+        }
         logger.warn('Could not check whether a tracked bill was paid', { event_id: event.id, error: errorText(error) });
         return undefined;
       });

@@ -1,3 +1,4 @@
+import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { extractErrorLogFields, RemoteMCP } from '@truefoundry/trueforge-core/core';
 import { CALDAV_SERVER_NAME } from '@truefoundry/trueforge-core/core/calendar/caldav/toolContract';
 import { deliveredMailboxOf } from '@truefoundry/trueforge-core/core/email/gmail/mailbox';
@@ -33,8 +34,26 @@ const SIDECAR_SESSION_MS = 4 * 60_000;
 const TEXT_CHARACTERS = 3000;
 /** The most the sidecar lists in one call. */
 const PAGE_SIZE = 100;
-/** A list that takes longer than this is treated as too much mail for one window, so a shorter one is asked for. */
-const LIST_PATIENCE_MS = 20_000;
+/** Longest one sidecar call may take. The client cancels a call that runs over, so none is left running. */
+const SIDECAR_CALL_MS = 30_000;
+
+/**
+ * Said when the Email connector took too long to list new mail. A shorter window would not help, since the connector
+ * searches whole days either way, so the pass stops and the next one tries the same mail again.
+ */
+export const MAIL_LIST_TOO_SLOW = `The Email connector took longer than ${String(SIDECAR_CALL_MS / 1000)} seconds to list new mail. New mail was not checked this time. If this keeps happening, check that the mail server answers quickly.`;
+
+/** Whether an error, or one it was caused by, is the MCP client giving up on a call that took too long. */
+function isCallTimeout(error: unknown): boolean {
+  const timedOut: number = ErrorCode.RequestTimeout;
+  for (let current: unknown = error; current instanceof Error; current = current.cause) {
+    if (current instanceof McpError && current.code === timedOut) {
+      return true;
+    }
+  }
+  return false;
+}
+
 const LATER_MESSAGES = 10;
 const EVENTS_PER_PASS = 100;
 
@@ -46,7 +65,7 @@ function sidecarTools({ name, url, logger }: { name: string; url: string; logger
     url,
     headers: {},
     logger,
-    requestTimeoutMs: 30_000,
+    requestTimeoutMs: SIDECAR_CALL_MS,
     connectTimeoutMs: 30_000,
     signal: AbortSignal.timeout(SIDECAR_SESSION_MS),
     refuseRedirects: true,
@@ -110,21 +129,6 @@ function toMailMessage({
   };
 }
 
-/** The call's answer, or undefined when it took longer than the list's patience. */
-async function withPatience(pending: Promise<unknown>): Promise<{ result: unknown } | undefined> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const late = new Promise<undefined>(resolve => {
-    timer = setTimeout(() => {
-      resolve(undefined);
-    }, LIST_PATIENCE_MS);
-  });
-  try {
-    return await Promise.race([pending.then(result => ({ result })), late]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 /**
  * The Email sidecar (IMAP) as a mail source. Its tools give no Authentication-Results, so an always-important sender
  * is never verified here and its mail is read as ordinary mail. Bills and deadlines still work.
@@ -151,22 +155,19 @@ export function sidecarMailSource({ call, account }: { call: CallSidecarTool; ac
       const size = Math.min(limit + 1, PAGE_SIZE);
       const listed: unknown[] = [];
       for (const address of from ?? [undefined]) {
-        const answered = await withPatience(
-          call(MAIL_LIST_TOOL_NAME, {
-            account_name: account,
-            mailbox: 'INBOX',
-            since: since.toISOString(),
-            before: before.toISOString(),
-            ...(address === undefined ? {} : { from_address: address }),
-            page: 1,
-            page_size: size,
-            order: 'asc',
-          }),
-        );
-        if (answered === undefined) {
-          return { read: 'too_slow' };
-        }
-        const emails = emailsOfResult(answered.result);
+        const result = await call(MAIL_LIST_TOOL_NAME, {
+          account_name: account,
+          mailbox: 'INBOX',
+          since: since.toISOString(),
+          before: before.toISOString(),
+          ...(address === undefined ? {} : { from_address: address }),
+          page: 1,
+          page_size: size,
+          order: 'asc',
+        }).catch((error: unknown) => {
+          throw isCallTimeout(error) ? new Error(MAIL_LIST_TOO_SLOW, { cause: error }) : error;
+        });
+        const emails = emailsOfResult(result);
         // A full list may have more behind it, so the window is too big to read in one call.
         if (emails.length >= size) {
           return { read: 'too_many' };
