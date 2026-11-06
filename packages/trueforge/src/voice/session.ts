@@ -14,7 +14,7 @@ import {
   type VoiceApprovalPlan,
 } from './approvalVoice';
 import { InputDecoder, rms } from './audio';
-import { PlaybackTimeline, SpokenTextLog, systemClock, type Clock } from './echoGuard';
+import { PlaybackTimeline, SpokenTextLog, systemClock, wordsOf, type Clock } from './echoGuard';
 import { SentenceSplitter } from './sentences';
 import { SpeechOutput } from './speechOutput';
 import type {
@@ -42,13 +42,25 @@ const BARGE_IN_START: StrictStart = { startThreshold: 0.7, minSpeechMs: 400 };
 /** Most of one reply that is read aloud; the rest stays in the chat. */
 const MAX_SPOKEN_CHARS = 1500;
 const INPUT_LEVELS_KEPT = 40;
+/** Audio waiting to be listened to beyond this many windows (about 2 s) means input outruns real time. */
+const MAX_BACKLOG_WINDOWS = 63;
+/** A conversation with no speech from the person for this long ends, so an open mic cannot run on unseen. */
+export const IDLE_END_MS = 2 * 60_000;
+/** No conversation runs longer than this, whatever is said. */
+export const MAX_CONVERSATION_MS = 30 * 60_000;
+/** A waiting card is no longer asked after this long; the card itself is still on the screen. */
+const AWAITING_MS = 5 * 60_000;
+/** Fewer words than this are said by anyone, so they are never dropped as a repeat of the assistant. */
+const MIN_ECHO_WORDS = 3;
+/** Sounds a person makes while listening: they never cut off the assistant or start a turn. */
+const FILLER_WORDS = new Set(['mm', 'hmm', 'mhm', 'uh', 'um', 'uhh', 'umm', 'ah', 'oh', 'huh', 'er', 'erm']);
 
 const REFUSAL_LINES: Record<TurnRefusal, string> = {
   changed: APPROVAL_LINES.changed,
   expired: APPROVAL_LINES.expired,
   not_allowed: APPROVAL_LINES.notAllowed,
   tool_gone: APPROVAL_LINES.notAllowed,
-  sign_in: APPROVAL_LINES.couldNot,
+  sign_in: APPROVAL_LINES.signIn,
 };
 
 /** Where the time went for one turn, from the end of the person's speech to the first sound. */
@@ -82,6 +94,7 @@ interface Awaiting {
   approval: PendingApproval;
   verb: ApprovalVerb;
   reminded: boolean;
+  expiresAtMs: number;
 }
 
 interface Heard {
@@ -113,7 +126,15 @@ export class VoiceSession {
   #samples = new Int16Array(0);
   #audioChain: Promise<void> = Promise.resolve();
   #turnChain: Promise<void> = Promise.resolve();
+  readonly #transcribing = new Set<Promise<void>>();
+  readonly #sttAborts = new Set<AbortController>();
+  #backlog = 0;
+  #working = 0;
   #turnAbort: AbortController | undefined;
+  /** Stops only the speaking of the current reply, so the person can talk over it while the turn still saves. */
+  #speechAbort: AbortController | undefined;
+  #cancelIdle: (() => void) | undefined;
+  #cancelMax: (() => void) | undefined;
   #cancelling: Promise<void> = Promise.resolve();
   #guardAtSpeechStart = false;
   #overHeldLineAtSpeechStart = false;
@@ -123,7 +144,6 @@ export class VoiceSession {
   #lineAbort: AbortController | undefined;
   #awaiting: Awaiting | undefined;
   #state: VoiceState = 'listening';
-  #busy = false;
   #ended = false;
   #cancelStateCheck: (() => void) | undefined;
 
@@ -138,6 +158,23 @@ export class VoiceSession {
 
   start(): void {
     this.#deps.transport.sendEvent({ type: 'state', state: 'listening' });
+    this.#resetIdle();
+    this.#cancelMax = this.#clock.after(MAX_CONVERSATION_MS, () => {
+      void this.#finish('That was a long conversation, so voice mode has ended. Tap voice mode to start again.');
+    });
+  }
+
+  /** Ends the conversation with a plain-words reason for the person. */
+  async #finish(notice: string): Promise<void> {
+    this.#deps.transport.sendEvent({ type: 'notice', text: notice });
+    await this.end();
+  }
+
+  #resetIdle(): void {
+    this.#cancelIdle?.();
+    this.#cancelIdle = this.#clock.after(IDLE_END_MS, () => {
+      void this.#finish('Voice mode ended because it was quiet for a while. Tap voice mode to start again.');
+    });
   }
 
   /** The line sent audio. It is processed in order; this returns at once. */
@@ -145,6 +182,7 @@ export class VoiceSession {
     if (this.#ended) {
       return;
     }
+    const arrivedAtMs = this.#clock.now();
     const incoming = this.#decoder.push(bytes);
     const joined = new Int16Array(this.#samples.length + incoming.length);
     joined.set(this.#samples);
@@ -153,7 +191,18 @@ export class VoiceSession {
     while (joined.length - offset >= VAD_WINDOW_SAMPLES) {
       const window = joined.slice(offset, offset + VAD_WINDOW_SAMPLES);
       offset += VAD_WINDOW_SAMPLES;
-      this.#audioChain = this.#audioChain.then(() => this.#onWindow(window));
+      if (this.#backlog >= MAX_BACKLOG_WINDOWS) {
+        // Audio is arriving faster than it can be listened to, which a microphone never does.
+        this.#deps.onNote?.('backlog');
+        void this.#finish('Voice mode could not keep up with your microphone. Tap voice mode to start again.');
+        return;
+      }
+      this.#backlog += 1;
+      this.#audioChain = this.#audioChain
+        .then(() => this.#onWindow({ window, arrivedAtMs }))
+        .finally(() => {
+          this.#backlog -= 1;
+        });
     }
     this.#samples = joined.slice(offset);
   }
@@ -172,6 +221,7 @@ export class VoiceSession {
       const abort = new AbortController();
       if (interruptible) {
         this.#turnAbort = abort;
+        this.#speechAbort = abort;
       } else {
         this.#lineAbort = abort;
         this.#floorHeld = true;
@@ -199,6 +249,7 @@ export class VoiceSession {
   /** Resolves once the audio pushed so far, and the turn it started, have been dealt with. */
   async settled(): Promise<void> {
     await this.#audioChain;
+    await Promise.all([...this.#transcribing]);
     await this.#turnChain;
   }
 
@@ -209,28 +260,39 @@ export class VoiceSession {
     }
     this.#ended = true;
     this.#cancelStateCheck?.();
+    this.#cancelIdle?.();
+    this.#cancelMax?.();
+    for (const abort of this.#sttAborts) {
+      abort.abort();
+    }
+    const hadTurn = this.#turnAbort !== undefined;
     this.#turnAbort?.abort();
     this.#lineAbort?.abort();
     this.#timeline.stop();
     this.#deps.transport.clearAudio();
-    await this.#deps.turns.cancel().catch(() => undefined);
-    this.#deps.vad.reset();
+    // Only a turn this conversation started is cancelled; one the person typed in the chat is left alone.
+    if (hadTurn) {
+      await this.#deps.turns.cancel().catch(() => undefined);
+    }
     this.#deps.transport.close();
+    await this.#audioChain.catch(() => undefined);
+    this.#deps.vad.reset();
+    await this.#deps.vad.dispose?.().catch(() => undefined);
   }
 
-  async #onWindow(window: Int16Array): Promise<void> {
+  async #onWindow({ window, arrivedAtMs }: { window: Int16Array; arrivedAtMs: number }): Promise<void> {
     if (this.#ended) {
       return;
     }
     try {
-      await this.#listen(window);
+      await this.#listen({ window, now: arrivedAtMs });
     } catch (error) {
       this.#deps.onNote?.(`listen_failed:${error instanceof Error ? error.name : 'unknown'}`);
     }
   }
 
-  async #listen(window: Int16Array): Promise<void> {
-    const now = this.#clock.now();
+  /** `now` is when the audio arrived, not when it was reached, so a backed-up queue cannot slip past the guard. */
+  async #listen({ window, now }: { window: Int16Array; now: number }): Promise<void> {
     this.#inputLevels.push(rms(window));
     if (this.#inputLevels.length > INPUT_LEVELS_KEPT) {
       this.#inputLevels.shift();
@@ -251,11 +313,11 @@ export class VoiceSession {
   #onDetected(event: DetectorEvent): void {
     if (event.type === 'speech_started') {
       this.#guardAtSpeechStart = this.#timeline.inGuard(event.startedAtMs);
-      const floorHeld = this.#floorHeld || this.#clock.now() < this.#floorUntilMs;
       this.#overHeldLineAtSpeechStart =
-        floorHeld && (this.#timeline.isPlaying() || event.startedAtMs < this.#timeline.endsAtMs);
-      if (this.#timeline.isPlaying() && !floorHeld) {
-        this.#bargeIn();
+        this.#holdsFloor() && (this.#timeline.isPlaying() || event.startedAtMs < this.#timeline.endsAtMs);
+      this.#resetIdle();
+      if (!this.#holdsFloor()) {
+        this.#talkedOver();
       }
       return;
     }
@@ -269,18 +331,79 @@ export class VoiceSession {
       startedInGuard: this.#guardAtSpeechStart,
       startedOverHeldLine: this.#overHeldLineAtSpeechStart,
     };
-    // A new utterance replaces a turn that is still being worked on.
-    this.#abortTurn();
-    this.#turnChain = this.#turnChain.then(() => this.#handle(heard));
+    const marks: Marks = { speechEndedAtMs: heard.speechEndedAtMs, utteranceAtMs: this.#clock.now() };
+    this.#working += 1;
+    this.#setState('thinking');
+    const stt = new AbortController();
+    this.#sttAborts.add(stt);
+    const work = this.#transcribe({ heard, signal: stt.signal })
+      .then(text => {
+        this.#sttAborts.delete(stt);
+        marks.transcribedAtMs = this.#clock.now();
+        this.#accept({ heard, text, marks });
+      })
+      .finally(() => {
+        this.#transcribing.delete(work);
+        this.#working -= 1;
+        this.#refreshState();
+      });
+    this.#transcribing.add(work);
   }
 
-  /** Stops speaking at once and lets what the person says next become the next turn. */
-  #bargeIn(): void {
-    this.#deps.onNote?.('barge_in');
+  /**
+   * Once the words are known: a cough, a filler or the assistant's own words coming back do nothing; real
+   * speech replaces the turn that was still being worked on.
+   */
+  #accept({ heard, text, marks }: { heard: Heard; text: string | undefined; marks: Marks }): void {
+    if (text === undefined || this.#ended) {
+      return;
+    }
+    const words = wordsOf(text);
+    if (words.length > 0 && words.every(word => FILLER_WORDS.has(word))) {
+      this.#deps.onNote?.('filler_ignored');
+      return;
+    }
+    if (heard.startedInGuard && this.#spoken.repeats({ heard: text, minWords: MIN_ECHO_WORDS })) {
+      this.#deps.onNote?.('echo_ignored');
+      return;
+    }
+    // A reply that began while the person was already talking must not play on after they finish.
+    if (this.#timeline.isPlaying() && !this.#holdsFloor()) {
+      this.#stopSound();
+    }
     this.#abortTurn();
+    this.#working += 1;
+    this.#turnChain = this.#turnChain
+      .then(() => this.#handle({ heard, text, marks }))
+      .finally(() => {
+        this.#working -= 1;
+        this.#refreshState();
+      });
+  }
+
+  /** The person began to speak while the assistant was talking or working: stop the sound, keep the turn. */
+  #talkedOver(): void {
+    if (!this.#timeline.isPlaying() && this.#working === 0) {
+      return;
+    }
+    this.#deps.onNote?.('barge_in');
+    if (this.#timeline.isPlaying()) {
+      // A read-back that was cut off was not heard through, so it cannot be answered.
+      this.#awaiting = undefined;
+    }
+    this.#stopSound();
+    this.#setState('listening');
+  }
+
+  /** A line that holds the floor is being handed over or still playing: it is not cut off. */
+  #holdsFloor(): boolean {
+    return this.#floorHeld || this.#clock.now() < this.#floorUntilMs;
+  }
+
+  #stopSound(): void {
+    this.#speechAbort?.abort();
     this.#timeline.stop();
     this.#deps.transport.clearAudio();
-    this.#setState('listening');
   }
 
   #abortTurn(): void {
@@ -292,38 +415,34 @@ export class VoiceSession {
     this.#cancelling = this.#deps.turns.cancel().catch(() => undefined);
   }
 
-  async #handle(heard: Heard): Promise<void> {
+  async #handle({ heard, text, marks }: { heard: Heard; text: string; marks: Marks }): Promise<void> {
     if (this.#ended) {
       return;
     }
     const abort = new AbortController();
     this.#turnAbort = abort;
-    const marks: Marks = { speechEndedAtMs: heard.speechEndedAtMs, utteranceAtMs: this.#clock.now() };
-    this.#busy = true;
-    this.#setState('thinking');
+    const speechAbort = new AbortController();
+    this.#speechAbort = speechAbort;
+    const signal = abort.signal;
+    const speechSignal = AbortSignal.any([signal, speechAbort.signal]);
     try {
-      const text = await this.#transcribe({ heard, signal: abort.signal });
-      if (text === undefined || abort.signal.aborted) {
-        return;
-      }
-      marks.transcribedAtMs = this.#clock.now();
-      if (heard.startedInGuard && this.#spoken.repeats(text)) {
-        this.#deps.onNote?.('echo_ignored');
-        return;
-      }
       const awaiting = this.#awaiting;
-      if (awaiting !== undefined) {
-        await this.#answerWaitingCard({ text, heard, awaiting, signal: abort.signal, marks });
-      } else {
-        this.#deps.transport.sendEvent({ type: 'heard', text });
-        await this.#runTurn({ text, startedOverHeldLine: heard.startedOverHeldLine, signal: abort.signal, marks });
+      if (awaiting !== undefined && awaiting.expiresAtMs <= this.#clock.now()) {
+        this.#awaiting = undefined;
       }
+      const waiting = this.#awaiting;
+      if (
+        waiting !== undefined &&
+        !(await this.#answerWaitingCard({ text, heard, awaiting: waiting, signal, speechSignal, marks }))
+      ) {
+        return;
+      }
+      this.#deps.transport.sendEvent({ type: 'heard', text });
+      await this.#runTurn({ text, startedOverHeldLine: heard.startedOverHeldLine, signal, speechSignal, marks });
     } finally {
       if (this.#turnAbort === abort) {
         this.#turnAbort = undefined;
       }
-      this.#busy = false;
-      this.#refreshState();
     }
   }
 
@@ -347,15 +466,17 @@ export class VoiceSession {
     text,
     startedOverHeldLine,
     signal,
+    speechSignal,
     marks,
   }: {
     text: string;
     startedOverHeldLine: boolean;
     signal: AbortSignal;
+    speechSignal: AbortSignal;
     marks: Marks;
   }): Promise<void> {
     await this.#cancelling;
-    const speech = this.#speechFor({ signal, marks });
+    const speech = this.#speechFor({ signal: speechSignal, marks });
     const splitter = new SentenceSplitter();
     let spokenChars = 0;
     const say = (sentence: string): void => {
@@ -378,37 +499,53 @@ export class VoiceSession {
       },
     });
     splitter.flush().forEach(say);
-    this.#afterTurn({ outcome, speech, signal });
+    const asking = this.#afterTurn({ outcome, speech, signal });
     await speech.drain();
+    this.#startAwaiting({ asking, signal: speechSignal });
   }
 
+  /** The card is waited on only once its read-back was heard through; a person who cut it off sees it on screen. */
+  #startAwaiting({ asking, signal }: { asking: Awaiting | undefined; signal: AbortSignal }): void {
+    if (asking !== undefined && !signal.aborted && !this.#ended) {
+      this.#awaiting = asking;
+    }
+  }
+
+  /** Returns true when the words are not an answer to the card and should run as a turn of their own. */
   async #answerWaitingCard({
     text,
     heard,
     awaiting,
     signal,
+    speechSignal,
     marks,
   }: {
     text: string;
     heard: Heard;
     awaiting: Awaiting;
     signal: AbortSignal;
+    speechSignal: AbortSignal;
     marks: Marks;
-  }): Promise<void> {
+  }): Promise<boolean> {
     const answer = classifyAnswer({ heard: text, verb: awaiting.verb });
-    // Heard while the assistant spoke or just after, or only repeating its words: never an answer.
-    if (heard.startedInGuard || this.#spoken.repeats(text)) {
-      this.#deps.onNote?.('approval_guard_ignored');
-      return;
-    }
-    const speech = this.#speechFor({ signal, marks });
+    const speech = this.#speechFor({ signal: speechSignal, marks });
     if (answer === 'other') {
-      if (!awaiting.reminded) {
-        awaiting.reminded = true;
-        speech.say({ text: APPROVAL_LINES.waiting(awaiting.verb), role: 'instruction' });
+      if (awaiting.reminded) {
+        // Asked once already: other speech is a new turn, and the card stays on the screen.
+        this.#awaiting = undefined;
+        return true;
       }
+      awaiting.reminded = true;
+      speech.say({ text: APPROVAL_LINES.waiting(awaiting.verb), role: 'instruction' });
       await speech.drain();
-      return;
+      return false;
+    }
+    // The exact phrase is held to the timing guard only: it is the one thing the assistant's own words contain.
+    if (heard.startedInGuard) {
+      this.#deps.onNote?.('approval_guard_ignored');
+      speech.say({ text: APPROVAL_LINES.sayAgain, role: 'instruction' });
+      await speech.drain();
+      return false;
     }
     this.#awaiting = undefined;
     this.#deps.transport.sendEvent({ type: 'heard', text });
@@ -435,31 +572,42 @@ export class VoiceSession {
         role: 'instruction',
       });
     }
-    this.#afterTurn({ outcome, speech, signal });
+    const asking = this.#afterTurn({ outcome, speech, signal });
     await speech.drain();
+    this.#startAwaiting({ asking, signal: speechSignal });
+    return false;
   }
 
-  #afterTurn({ outcome, speech, signal }: { outcome: TurnOutcome; speech: SpeechOutput; signal: AbortSignal }): void {
+  /** Says what happened and returns the card to wait on, if the turn ended asking for one. */
+  #afterTurn({
+    outcome,
+    speech,
+    signal,
+  }: {
+    outcome: TurnOutcome;
+    speech: SpeechOutput;
+    signal: AbortSignal;
+  }): Awaiting | undefined {
     if (signal.aborted) {
-      return;
+      return undefined;
     }
     if (outcome.kind === 'refused') {
       speech.say({ text: REFUSAL_LINES[outcome.reason], role: 'instruction' });
-      return;
+      return undefined;
     }
     if (outcome.kind === 'failed') {
       speech.say({ text: APPROVAL_LINES.couldNot, role: 'instruction' });
-      return;
+      return undefined;
     }
     this.#deps.transport.sendEvent({ type: 'turn_saved', turn_id: outcome.turnId });
     if (outcome.approvals.length === 0) {
-      return;
+      return undefined;
     }
     const plan = planVoiceApproval({
       pending: outcome.approvals,
       voiceApprovalsAllowed: this.#deps.transport.voiceApprovals,
     });
-    this.#readBack({ plan, approvals: outcome.approvals, speech });
+    return this.#readBack({ plan, approvals: outcome.approvals, speech });
   }
 
   #readBack({
@@ -470,18 +618,18 @@ export class VoiceSession {
     plan: VoiceApprovalPlan;
     approvals: PendingApproval[];
     speech: SpeechOutput;
-  }): void {
+  }): Awaiting | undefined {
     const only = approvals.length === 1 ? approvals[0] : undefined;
     if (plan.kind === 'typed_only' || only === undefined) {
       speech.say({ text: APPROVAL_LINES.leftForTheApp, role: 'instruction' });
-      return;
+      return undefined;
     }
     for (const segment of plan.segments) {
       for (const sentence of splitSentences(segment.text)) {
         speech.say({ text: sentence, role: segment.role });
       }
     }
-    this.#awaiting = { approval: only, verb: plan.verb, reminded: false };
+    return { approval: only, verb: plan.verb, reminded: false, expiresAtMs: this.#clock.now() + AWAITING_MS };
   }
 
   #speechFor({ signal, marks }: { signal: AbortSignal; marks: Marks }): SpeechOutput {
@@ -539,7 +687,7 @@ export class VoiceSession {
       });
       return;
     }
-    this.#setState(this.#busy ? 'thinking' : 'listening');
+    this.#setState(this.#working > 0 ? 'thinking' : 'listening');
   }
 
   #setState(state: VoiceState): void {

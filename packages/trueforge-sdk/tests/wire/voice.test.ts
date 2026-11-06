@@ -112,6 +112,28 @@ describe("VoiceClient", () => {
             .post("/api/v1/voice/connect")
             .jsonBody(rawRequestBody)
             .respondWith()
+            .statusCode(429)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.voice.connect({
+                sessionId: "x",
+            });
+        }).rejects.toThrow(TrueForgeTypes.TooManyRequestsError);
+    });
+
+    test("connect (6)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { session_id: "x" };
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/voice/connect")
+            .jsonBody(rawRequestBody)
+            .respondWith()
             .statusCode(503)
             .jsonBody(rawResponseBody)
             .build();

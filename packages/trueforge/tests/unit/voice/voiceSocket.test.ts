@@ -1,14 +1,20 @@
 import { createServer, type Server } from 'node:http';
-import type { AddressInfo } from 'node:net';
 import WebSocket from 'ws';
-import { winstonSilent } from './silentLogger';
+import { winstonSilent } from '../../fixtures/voice/silentLogger';
 
+import { pageOrigins } from '../../../src/auth/requestGuard';
+import { VoiceServerEventSchema, type VoiceServerEvent } from '../../../src/schemas/voice';
 import { VOICE_SOCKET_PROTOCOL, VOICE_STREAM_PATH } from '../../../src/voice/browserTransport';
-import { attachVoiceSocket } from '../../../src/voice/voiceSocket';
-import { VoiceTicketStore, voiceTickets, type VoiceTicket } from '../../../src/voice/voiceTickets';
+import { attachVoiceSocket, originAllowed, turnRunnerFor } from '../../../src/voice/voiceSocket';
+import {
+  VoiceTicketStore,
+  VoiceTicketsFullError,
+  voiceTickets,
+  type VoiceTicketClaims,
+} from '../../../src/voice/voiceTickets';
 import { FakeStt, FakeTts, FakeTurns, LoudnessVad, hum, pcmBytes, quiet } from '../../fixtures/voice/fakes';
 
-const TICKET: VoiceTicket = {
+const TICKET: VoiceTicketClaims = {
   tenantId: 't1',
   subjectId: 'u1',
   sessionId: 's1',
@@ -25,6 +31,25 @@ describe('VoiceTicketStore', () => {
     expect(store.redeem(id)).toBeUndefined();
   });
 
+  it('lets one person crowd out only their own tickets, and refuses rather than evict anyone else', () => {
+    const store = new VoiceTicketStore();
+    const first = store.issue(TICKET);
+    for (let n = 0; n < 5; n += 1) {
+      store.issue(TICKET);
+    }
+    expect(store.redeem(first.id)).toBeUndefined();
+    const other = store.issue({ ...TICKET, subjectId: 'u2' });
+    expect(store.redeem(other.id)).toMatchObject({ subjectId: 'u2' });
+
+    const crowded = new VoiceTicketStore();
+    for (let n = 0; n < 200; n += 1) {
+      for (let k = 0; k < 5; k += 1) {
+        crowded.issue({ ...TICKET, subjectId: `person-${String(n)}` });
+      }
+    }
+    expect(() => crowded.issue({ ...TICKET, subjectId: 'latecomer' })).toThrow(VoiceTicketsFullError);
+  });
+
   it('refuses an expired or unknown ticket', () => {
     let now = 0;
     const store = new VoiceTicketStore({ now: () => now });
@@ -39,9 +64,15 @@ describe('the voice WebSocket', () => {
   let server: Server;
   let port: number;
   let sentToApp: string[];
+  let disposed: number;
+  let setupMs: number;
+  let maxSessions: number;
 
   beforeEach(async () => {
     sentToApp = [];
+    disposed = 0;
+    setupMs = 0;
+    maxSessions = 20;
     server = createServer();
     attachVoiceSocket({
       server,
@@ -50,19 +81,36 @@ describe('the voice WebSocket', () => {
         sentToApp.push(request.url);
         return new Response('{}');
       },
-      makeParts: () =>
-        Promise.resolve({
-          vad: new LoudnessVad(),
+      maxSessions,
+      makeParts: async () => {
+        await new Promise(resolve => setTimeout(resolve, setupMs));
+        const vad = new LoudnessVad();
+        return {
+          vad: {
+            probability: window => vad.probability(window),
+            reset: () => vad.reset(),
+            dispose: () => {
+              disposed += 1;
+              return Promise.resolve();
+            },
+          },
           stt: new FakeStt('what time is it'),
           tts: new FakeTts(),
           turns: new FakeTurns({ message: [{ text: ['It is nine o clock.'] }] }),
-        }),
+        };
+      },
     });
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
-    port = (server.address() as AddressInfo).port;
+    const address = server.address();
+    if (address === null || typeof address === 'string') {
+      throw new Error('the test server has no port');
+    }
+    port = address.port;
   });
 
   afterEach(async () => {
+    // Sessions end a moment after their sockets close; let them finish before the next test counts.
+    await new Promise(resolve => setTimeout(resolve, 150));
     await new Promise<void>(resolve => {
       server.close(() => {
         resolve();
@@ -71,9 +119,11 @@ describe('the voice WebSocket', () => {
     });
   });
 
-  function open(ticket: string | undefined): WebSocket {
+  function open(ticket: string | undefined, extraHeaders: Record<string, string> = {}): WebSocket {
     const protocols = ticket === undefined ? [VOICE_SOCKET_PROTOCOL] : [VOICE_SOCKET_PROTOCOL, `ticket.${ticket}`];
-    return new WebSocket(`ws://127.0.0.1:${String(port)}${VOICE_STREAM_PATH}`, protocols);
+    return new WebSocket(`ws://127.0.0.1:${String(port)}${VOICE_STREAM_PATH}`, protocols, {
+      headers: { origin: `http://127.0.0.1:${String(port)}`, ...extraHeaders },
+    });
   }
 
   const refused = (socket: WebSocket): Promise<string> =>
@@ -94,16 +144,143 @@ describe('the voice WebSocket', () => {
     expect(await refused(open(id))).toBe('401');
   });
 
+  it('releases the listening model when the socket closes while it is still being set up', async () => {
+    setupMs = 150;
+    const { id } = voiceTickets.issue(TICKET);
+    const socket = open(id);
+    await new Promise(resolve => socket.on('open', resolve));
+    socket.close();
+    await new Promise(resolve => setTimeout(resolve, 400));
+    expect(disposed).toBe(1);
+  });
+
+  it('keeps one conversation per person when several connections open at once', async () => {
+    setupMs = 100;
+    const sockets = [voiceTickets.issue(TICKET), voiceTickets.issue(TICKET), voiceTickets.issue(TICKET)].map(ticket =>
+      open(ticket.id),
+    );
+    await new Promise(resolve => setTimeout(resolve, 800));
+    const stillOpen = sockets.filter(socket => socket.readyState === WebSocket.OPEN);
+    expect(stillOpen).toHaveLength(1);
+    stillOpen.forEach(socket => socket.close());
+  });
+
+  it('turns away a new person when the server is full', async () => {
+    const full = createServer();
+    attachVoiceSocket({
+      server: full,
+      logger: winstonSilent(),
+      selfFetch: () => new Response('{}'),
+      maxSessions: 1,
+      makeParts: () =>
+        Promise.resolve({ vad: new LoudnessVad(), stt: new FakeStt(), tts: new FakeTts(), turns: new FakeTurns() }),
+    });
+    await new Promise<void>(resolve => full.listen(0, '127.0.0.1', resolve));
+    const address = full.address();
+    if (address === null || typeof address === 'string') {
+      throw new Error('the test server has no port');
+    }
+    const url = `ws://127.0.0.1:${String(address.port)}${VOICE_STREAM_PATH}`;
+    const connect = (subject: string) =>
+      new WebSocket(
+        url,
+        [VOICE_SOCKET_PROTOCOL, `ticket.${voiceTickets.issue({ ...TICKET, subjectId: subject }).id}`],
+        {
+          headers: { origin: `http://127.0.0.1:${String(address.port)}` },
+        },
+      );
+    const first = connect('a');
+    await new Promise(resolve => first.on('open', resolve));
+    expect(await refused(connect('b'))).toBe('503');
+    first.close();
+    await new Promise<void>(resolve => {
+      full.close(() => {
+        resolve();
+      });
+      full.closeAllConnections();
+    });
+  });
+
+  it('never logs what was said, what was answered, or the ticket', async () => {
+    const logged: string[] = [];
+    const logger = winstonSilent();
+    for (const level of ['error', 'warn', 'info', 'http', 'verbose', 'debug', 'silly'] as const) {
+      jest.spyOn(logger, level).mockImplementation((...args: unknown[]) => {
+        logged.push(JSON.stringify(args));
+        return logger;
+      });
+    }
+    const logServer = createServer();
+    attachVoiceSocket({
+      server: logServer,
+      logger,
+      selfFetch: () => new Response('{}'),
+      makeParts: () =>
+        Promise.resolve({
+          vad: new LoudnessVad(),
+          stt: new FakeStt('my secret phrase is hunter two'),
+          tts: new FakeTts(),
+          turns: new FakeTurns({ message: [{ text: ['Your secret answer is purple.'] }] }),
+        }),
+    });
+    await new Promise<void>(resolve => logServer.listen(0, '127.0.0.1', resolve));
+    const address = logServer.address();
+    if (address === null || typeof address === 'string') {
+      throw new Error('the test server has no port');
+    }
+    const { id } = voiceTickets.issue(TICKET);
+    const socket = new WebSocket(
+      `ws://127.0.0.1:${String(address.port)}${VOICE_STREAM_PATH}`,
+      [VOICE_SOCKET_PROTOCOL, `ticket.${id}`],
+      { headers: { origin: `http://127.0.0.1:${String(address.port)}` } },
+    );
+    await new Promise(resolve => socket.on('open', resolve));
+    const all = Int16Array.from([...hum(900), ...quiet(1200)]);
+    for (let offset = 0; offset < all.length; offset += 512) {
+      socket.send(pcmBytes(all.subarray(offset, offset + 512)));
+      await new Promise(resolve => setTimeout(resolve, 8));
+    }
+    await new Promise(resolve => setTimeout(resolve, 500));
+    socket.close();
+    await new Promise(resolve => setTimeout(resolve, 200));
+    const everything = logged.join('\n');
+    expect(logged.length).toBeGreaterThan(0);
+    for (const secret of ['hunter two', 'purple', id]) {
+      expect(everything).not.toContain(secret);
+    }
+    logServer.closeAllConnections();
+    await new Promise<void>(resolve => {
+      logServer.close(() => {
+        resolve();
+      });
+    });
+  }, 15_000);
+
+  it('turns away a page from another site, and a connection that names no page', async () => {
+    const { id } = voiceTickets.issue(TICKET);
+    expect(await refused(open(id, { origin: 'https://evil.example' }))).toBe('403');
+    const bare = new WebSocket(`ws://127.0.0.1:${String(port)}${VOICE_STREAM_PATH}`, [
+      VOICE_SOCKET_PROTOCOL,
+      `ticket.${id}`,
+    ]);
+    expect(await refused(bare)).toBe('403');
+    // A refused page does not spend the ticket.
+    const good = open(id);
+    await new Promise(resolve => good.on('open', resolve));
+    good.close();
+  });
+
   it('carries audio in and the engine events and audio out, and ends on request', async () => {
     const { id } = voiceTickets.issue(TICKET);
     const socket = open(id);
-    const texts: Record<string, unknown>[] = [];
+    const texts: VoiceServerEvent[] = [];
     let audioFrames = 0;
     socket.on('message', (data, isBinary) => {
       if (isBinary) {
         audioFrames += 1;
       } else {
-        texts.push(JSON.parse(data.toString()) as Record<string, unknown>);
+        // Every text frame must be one of the events the schema describes.
+        texts.push(VoiceServerEventSchema.parse(JSON.parse(data.toString())));
       }
     });
     await new Promise(resolve => socket.on('open', resolve));
@@ -118,10 +295,39 @@ describe('the voice WebSocket', () => {
     }
     await new Promise(resolve => setTimeout(resolve, 400));
     expect(texts).toContainEqual({ type: 'heard', text: 'what time is it' });
-    expect(texts.some(message => message['type'] === 'turn_saved')).toBe(true);
+    expect(texts.some(message => message.type === 'turn_saved')).toBe(true);
     expect(audioFrames).toBeGreaterThan(0);
     const closed = new Promise<number>(resolve => socket.on('close', code => resolve(code)));
     socket.send(JSON.stringify({ type: 'end' }));
     expect(await closed).toBe(1000);
   }, 15_000);
+});
+
+describe('which page may open a voice line', () => {
+  it.each([
+    ['its own page', 'http://app.test:3000', 'app.test:3000', [], true],
+    ['a page behind a dev proxy that rewrites the host', 'http://localhost:3000', 'localhost:8790', [], true],
+    ['a listed page', 'https://other.test', 'app.test:3000', ['https://other.test'], true],
+    ['another site', 'https://evil.test', 'app.test:3000', [], false],
+    ['no page at all', undefined, 'app.test:3000', [], false],
+    ['an unreadable page', 'not a url', 'app.test:3000', [], false],
+  ])('%s', (_name, origin, host, listed, expected) => {
+    const pages = pageOrigins({ port: 8790, publicBaseUrl: 'http://localhost:3000', allowedOrigins: listed });
+    expect(originAllowed({ origin, host, pages })).toBe(expected);
+  });
+});
+
+describe('the turns a voice line runs', () => {
+  it('go to the chat on the ticket, as the person on the ticket', async () => {
+    const seen: { url: string; cookie: string | null }[] = [];
+    const runner = turnRunnerFor({
+      ticket: { ...TICKET, sessionId: 'chat-from-ticket' },
+      selfFetch: request => {
+        seen.push({ url: request.url, cookie: request.headers.get('cookie') });
+        return new Response('{}');
+      },
+    });
+    await runner.sendMessage({ text: 'hi', signal: new AbortController().signal, onText: () => undefined });
+    expect(seen).toEqual([{ url: 'http://localhost/api/v1/sessions/chat-from-ticket/turns', cookie: 'session=abc' }]);
+  });
 });

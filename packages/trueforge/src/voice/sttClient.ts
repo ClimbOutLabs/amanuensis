@@ -19,10 +19,18 @@ const STT_TRANSCRIBE_TIMEOUT_MS = 60_000;
 const STT_TRANSCRIBE_MAX_ATTEMPTS = 3;
 const STT_RETRY_DELAY_MS = 2_000;
 
-/** Resolves after the given delay; backs the bounded 503 retry backoff. */
-function delay(ms: number): Promise<void> {
+/** Resolves after the given delay, or at once when the caller gives up; backs the bounded 503 retry backoff. */
+function delay({ ms, signal }: { ms: number; signal: AbortSignal | undefined }): Promise<void> {
   return new Promise(resolve => {
-    setTimeout(resolve, ms);
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      { once: true },
+    );
   });
 }
 
@@ -46,7 +54,8 @@ export async function forwardToSidecar(audio: Uint8Array, signal?: AbortSignal):
     if (upstream.status !== 503 || attempt >= STT_TRANSCRIBE_MAX_ATTEMPTS) {
       return upstream;
     }
-    await delay(STT_RETRY_DELAY_MS);
+    await delay({ ms: STT_RETRY_DELAY_MS, signal });
+    signal?.throwIfAborted();
   }
 }
 

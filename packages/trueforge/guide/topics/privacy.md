@@ -14,6 +14,6 @@ Some things leave your computer, and only when needed:
 - Google. What a connected email or calendar action sends, after you approve it.
 - Twilio and the phone company, only if you set up texts or calls. Your phone number, each text, and the sound of each call. The voice and the transcript of a call are made on your computer.
 
-Voice input runs on your computer. Memory search runs on your computer too.
+Voice input and voice mode run on your computer. Voice mode ends by itself after 2 minutes of quiet, so the microphone is not left open. Memory search runs on your computer too.
 
 Backups are written to a folder on your computer.

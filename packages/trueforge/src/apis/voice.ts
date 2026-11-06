@@ -22,12 +22,13 @@ import {
   type VoiceTranscription,
 } from '../schemas/voice';
 import { VOICE_SOCKET_PROTOCOL, VOICE_STREAM_PATH } from '../voice/browserTransport';
-import { SpeechRateLimiter } from '../voice/speechRateLimit';
+import { SpeechRateLimiter, speechLimiter as sharedSpeechLimiter } from '../voice/speechRateLimit';
 import { isVoiceAvailable, probeSttHealth } from '../voice/sttAvailability';
 import { forwardToSidecar } from '../voice/sttClient';
+import { probeTtsHealth, ttsBaseUrl } from '../voice/ttsClient';
 import { VadModelUnavailableError } from '../voice/vad/sileroVad';
 import { FORWARDED_HEADERS, readyVadModel, requestAs, type SelfFetch } from '../voice/voiceSocket';
-import { voiceTickets } from '../voice/voiceTickets';
+import { VoiceTicketsFullError, voiceTickets } from '../voice/voiceTickets';
 
 export interface VoiceRouterDeps {
   logger: Logger;
@@ -36,6 +37,8 @@ export interface VoiceRouterDeps {
   selfFetch: SelfFetch;
   /** Defaults to a fresh per-process limiter; tests inject one with a small budget. */
   speechLimiter?: SpeechRateLimiter;
+  /** How often one person may ask to open a voice line. */
+  connectLimiter?: SpeechRateLimiter;
 }
 
 /**
@@ -64,10 +67,6 @@ function errorJson<S extends 400 | 404 | 413 | 429 | 502 | 503>(
   { status, message, code }: { status: S; message: string; code: string },
 ) {
   return c.json({ error: { message, code } }, status);
-}
-
-function ttsBaseUrl(): string {
-  return configuration.TTS_URL.replace(/\/+$/, '');
 }
 
 const TTS_UNAVAILABLE: { status: 503; message: string; code: string } = {
@@ -197,9 +196,17 @@ export function createVoiceRouter(deps: VoiceRouterDeps) {
     return c.json({ data: transcription }, 200);
   };
 
-  const speechLimiter = deps.speechLimiter ?? new SpeechRateLimiter();
+  const speechLimiter = deps.speechLimiter ?? sharedSpeechLimiter;
+  const connectLimiter = deps.connectLimiter ?? new SpeechRateLimiter({ maxPerWindow: 10, maxInFlight: 10 });
 
   const speakVoiceHandler: RouteHandler<typeof speakVoiceRoute> = async c => {
+    if (!configuration.TTS_ENABLED) {
+      return errorJson(c, {
+        status: 503,
+        message: 'The voice on this computer is turned off. Turn the local voice on in the server settings.',
+        code: 'tts_disabled',
+      });
+    }
     const { text, voice } = c.req.valid('json');
     if (text.length > MAX_SPEAK_TEXT_CHARS) {
       return errorJson(c, {
@@ -305,6 +312,19 @@ export function createVoiceRouter(deps: VoiceRouterDeps) {
         code: 'voice_mode_off',
       });
     }
+    const request = c.req.valid('json');
+    const { tenant_id, subject } = deps.resolveRequestContext(c);
+    // Counted per ask, not per open line: each ask costs a request to the chat and a model check.
+    const permit = connectLimiter.acquire(`${tenant_id}:${subject.id}`);
+    if (!permit.allowed) {
+      c.header('Retry-After', String(permit.retryAfterSeconds));
+      return errorJson(c, {
+        status: 429,
+        message: 'Voice mode was started too many times. Wait a few seconds, then try again.',
+        code: 'rate_limited',
+      });
+    }
+    permit.release();
     if (!isVoiceAvailable()) {
       return errorJson(c, {
         status: 503,
@@ -312,8 +332,13 @@ export function createVoiceRouter(deps: VoiceRouterDeps) {
         code: 'stt_unavailable',
       });
     }
-    const request = c.req.valid('json');
-    const { tenant_id, subject } = deps.resolveRequestContext(c);
+    if (!(await probeTtsHealth())) {
+      return errorJson(c, {
+        status: 503,
+        message: 'The voice on this computer is not ready yet. Try again in a minute.',
+        code: 'tts_unavailable',
+      });
+    }
     const headers: Record<string, string> = {};
     for (const name of FORWARDED_HEADERS) {
       const value = c.req.header(name);
@@ -354,7 +379,19 @@ export function createVoiceRouter(deps: VoiceRouterDeps) {
         code: 'vad_unavailable',
       });
     }
-    const issued = voiceTickets.issue(ticket);
+    let issued: ReturnType<typeof voiceTickets.issue>;
+    try {
+      issued = voiceTickets.issue(ticket);
+    } catch (error) {
+      if (error instanceof VoiceTicketsFullError) {
+        return errorJson(c, {
+          status: 503,
+          message: 'Voice mode is busy right now. Try again in a minute.',
+          code: 'voice_busy',
+        });
+      }
+      throw error;
+    }
     return c.json(
       {
         data: {

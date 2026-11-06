@@ -65,7 +65,7 @@ describe('Twilio media frames', () => {
     decoded.forEach((sample, n) => {
       expect(Math.abs(sample - (original[n] ?? 0))).toBeLessThanOrEqual(Math.abs(original[n] ?? 0) * 0.04 + 40);
     });
-    const at16k = new InputDecoder('mulaw_8k').push(frame.bytes);
+    const at16k = new InputDecoder('mulaw8k').push(frame.bytes);
     expect(at16k).toEqual(upsampleTo16k({ samples: decoded, previous: 0 }));
     expect(at16k.length).toBe(320);
   });
@@ -74,7 +74,7 @@ describe('Twilio media frames', () => {
 describe('the phone line', () => {
   it('says it is a phone line: mu-law both ways, and no approvals by voice', () => {
     const line = new PhoneVoiceTransport({ socket: fakeSocket().socket, streamSid: 'MZ1' });
-    expect(line.inputFormat).toBe('mulaw_8k');
+    expect(line.inputFormat).toBe('mulaw8k');
     expect(line.outputFormat).toBe('mulaw8k');
     expect(line.voiceApprovals).toBe(false);
   });

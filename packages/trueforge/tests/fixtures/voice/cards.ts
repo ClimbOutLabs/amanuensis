@@ -54,3 +54,53 @@ export const cancelScheduleCard: Tier3Card = {
     next_runs: [],
   },
 };
+
+const sendReply = sendReplyCard();
+const email = (changes: Partial<NonNullable<Tier3Card['email']>>): Tier3Card => ({
+  ...sendReply,
+  email: sendReply.email === null || sendReply.email === undefined ? null : { ...sendReply.email, ...changes },
+});
+
+const dentist: NonNullable<Tier3Card['calendar_event']> = {
+  action: 'create',
+  calendar: 'me@example.com',
+  title: 'Dentist',
+  when: 'Friday at 9',
+  time_zone: 'UTC',
+  duration: '1 hour',
+  location: '',
+  description: '',
+  attendees: [],
+  guests_emailed: false,
+  one_of_repeating: false,
+  before: null,
+};
+
+export const dentistCard: Tier3Card = { ...BASE_CARD, calendar_event: { ...dentist, description: 'Bring the form.' } };
+
+/** Cards that only the screen may settle, each for a different reason. */
+export const typedOnlyCards: [string, Tier3Card][] = [
+  ['a new recipient', { ...sendReply, mail_new_recipients: ['bob@example.com'] }],
+  ['a hidden copy', email({ bcc: [{ name: 'Bob', address: 'bob@example.com' }] })],
+  ['a long body', sendReplyCard('A long note. '.repeat(120))],
+  [
+    'a persona',
+    { ...BASE_CARD, persona: { name: 'Coach', description: 'Helps', instructions: 'Be kind.', model_name: 'm' } },
+  ],
+  [
+    'guests on an event',
+    { ...BASE_CARD, calendar_event: { ...dentist, attendees: ['bob@example.com'], guests_emailed: true } },
+  ],
+  [
+    'a new schedule',
+    {
+      ...cancelScheduleCard,
+      schedule:
+        cancelScheduleCard.schedule === null || cancelScheduleCard.schedule === undefined
+          ? null
+          : { ...cancelScheduleCard.schedule, action: 'create' },
+    },
+  ],
+  ['exact connector arguments', { ...BASE_CARD, outbound_text: 'to: bob\nbody: hello' }],
+  ['a cut-off connector argument', { ...BASE_CARD, outbound_truncated: true }],
+];

@@ -25,7 +25,13 @@ export interface SpeechProbability {
   probability(window: Int16Array): Promise<number>;
   /** Forget the running state, at the start of a new call. */
   reset(): void;
+  /** Gives back what the model holds once the call is over. */
+  dispose?(): Promise<void>;
 }
+
+/** An image carries the file; a checkout fetches it, which `pnpm dev` does itself. */
+const MISSING_MODEL_MESSAGE =
+  'Voice mode is missing its listening model. In a source checkout, run `pnpm voice:model` once; otherwise update Aman to the latest version. Then try again.';
 
 export class VadModelUnavailableError extends Error {}
 
@@ -44,27 +50,21 @@ function matchesPin({ bytes, pin }: { bytes: Uint8Array; pin: PinnedModel }): bo
   return bytes.length === pin.size && sha256Of(bytes) === pin.sha256;
 }
 
-/** The model path under `dir` once its size and hash match the pin; the server never fetches it. */
+/** The model's bytes once their size and hash match the pin; the server never fetches it. */
 export async function verifiedVadModel({
   dir,
   pin = SILERO_VAD_MODEL,
 }: {
   dir: string;
   pin?: PinnedModel;
-}): Promise<string> {
-  const target = path.join(dir, pin.fileName);
-  const bytes = await readFile(target).catch((cause: unknown) => {
-    throw new VadModelUnavailableError(
-      'Voice mode is missing its listening model. Update Aman to the latest version, then try again.',
-      { cause },
-    );
+}): Promise<Uint8Array> {
+  const bytes = await readFile(path.join(dir, pin.fileName)).catch((cause: unknown) => {
+    throw new VadModelUnavailableError(MISSING_MODEL_MESSAGE, { cause });
   });
   if (!matchesPin({ bytes, pin })) {
-    throw new VadModelUnavailableError(
-      'Voice mode found a listening model that is not the one Aman expects, so it was not used. Update Aman to the latest version, then try again.',
-    );
+    throw new VadModelUnavailableError(MISSING_MODEL_MESSAGE);
   }
-  return target;
+  return bytes;
 }
 
 /** Fetches the pinned file into `dir` for host development and tests; images carry it from their build. */
@@ -131,9 +131,10 @@ export class SileroSpeechProbability implements SpeechProbability {
     this.#state = freshState(ort);
   }
 
-  static async load({ modelPath }: { modelPath: string }): Promise<SileroSpeechProbability> {
+  /** `model` is the pinned file's bytes, already checked, so the file is not read again after the check. */
+  static async load({ model }: { model: Uint8Array }): Promise<SileroSpeechProbability> {
     const ort = await import('onnxruntime-node');
-    const session = await ort.InferenceSession.create(modelPath, {
+    const session = await ort.InferenceSession.create(model, {
       intraOpNumThreads: 1,
       interOpNumThreads: 1,
       executionProviders: ['cpu'],
@@ -160,6 +161,10 @@ export class SileroSpeechProbability implements SpeechProbability {
     this.#state = stateN;
     const value = output.data[0];
     return typeof value === 'number' ? value : 0;
+  }
+
+  async dispose(): Promise<void> {
+    await this.#session.release();
   }
 
   reset(): void {

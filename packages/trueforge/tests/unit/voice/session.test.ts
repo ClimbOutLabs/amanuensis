@@ -4,9 +4,11 @@ import {
   approval,
   calendarCard,
   cancelScheduleCard,
+  dentistCard,
   moneyCard,
   sendReplyCard,
   shellCard,
+  typedOnlyCards,
 } from '../../fixtures/voice/cards';
 import {
   FakeStt,
@@ -18,6 +20,7 @@ import {
   ManualClock,
   feed,
   hum,
+  pcmBytes,
   quiet,
   type ScriptedReply,
 } from '../../fixtures/voice/fakes';
@@ -293,10 +296,20 @@ describe('approval by voice', () => {
     expect(t.tts.sentences).toEqual([
       'I have a draft.',
       "I'll send this reply to Victor.",
+      'The subject is: Re: Thursday',
       'It says: Thursday at three works for me.',
       'See you then.',
       "Say 'yes, send it' to send, or 'no'.",
     ]);
+  });
+
+  it('reads a calendar event with its time and description, and a schedule with its task', async () => {
+    const event = await readBack({ message: withCard(dentistCard) });
+    const eventSpeech = event.tts.sentences.join(' ');
+    expect(eventSpeech).toContain('Dentist on Friday at 9 for 1 hour');
+    expect(eventSpeech).toContain('Bring the form.');
+    const schedule = await readBack({ message: withCard(cancelScheduleCard) });
+    expect(schedule.tts.sentences.join(' ')).toContain('Summarize the week');
   });
 
   it('sends on the exact phrase, says what was done, and answers the card with the same call the chat uses', async () => {
@@ -318,20 +331,29 @@ describe('approval by voice', () => {
     expect(t.tts.sentences.at(-1)).toBe('Done. I sent it.');
   });
 
-  it.each(['yeah', 'yes', 'sure, go ahead', 'yes, send it now', 'yes approve', 'send it', 'um, yes, send it'])(
-    'does not send on %p, and leaves the card waiting',
-    async answer => {
-      const t = await readBack({ message: withCard(), stt: [answer, 'yes send it'], approval: [{ text: ['Sent.'] }] });
-      await feed({ session: t.session, clock: t.clock, samples: says() });
-      await t.session.settled();
-      expect(t.turns.answers).toEqual([]);
-      // Still waiting: once the reminder has been said, the exact phrase still works.
-      await feed({ session: t.session, clock: t.clock, samples: quiet(6000) });
-      await feed({ session: t.session, clock: t.clock, samples: says() });
-      await t.session.settled();
-      expect(t.turns.answers).toEqual([{ decision: 'allow', toolCallId: 'call-1' }]);
-    },
-  );
+  it.each([
+    'yeah',
+    'yes',
+    'sure, go ahead',
+    'yes, send it now',
+    'yes approve',
+    'send it',
+    'um, yes, send it',
+    "yes, don't send it",
+    'no, yes send it',
+    'yes, send it to Bob',
+    'yes, send it?',
+  ])('does not send on %p, and leaves the card waiting', async answer => {
+    const t = await readBack({ message: withCard(), stt: [answer, 'yes send it'], approval: [{ text: ['Sent.'] }] });
+    await feed({ session: t.session, clock: t.clock, samples: says() });
+    await t.session.settled();
+    expect(t.turns.answers).toEqual([]);
+    // Still waiting: once the reminder has been said, the exact phrase still works.
+    await feed({ session: t.session, clock: t.clock, samples: quiet(6000) });
+    await feed({ session: t.session, clock: t.clock, samples: says() });
+    await t.session.settled();
+    expect(t.turns.answers).toEqual([{ decision: 'allow', toolCallId: 'call-1' }]);
+  });
 
   it('leaves the card waiting through silence', async () => {
     const t = await readBack({ message: withCard() });
@@ -393,6 +415,29 @@ describe('approval by voice', () => {
     expect(t.turns.answers).toEqual([]);
   });
 
+  it.each(typedOnlyCards)('leaves a card with %s for the screen', async (_name, card) => {
+    const t = await readBack({ message: withCard(card), stt: ['yes send it'] });
+    expect(t.tts.sentences.at(-1)).toBe("I've left it in the app for you to approve.");
+    await feed({ session: t.session, clock: t.clock, samples: says() });
+    await t.session.settled();
+    expect(t.turns.answers).toEqual([]);
+  });
+
+  it('takes the exact phrase once: saying it again does nothing', async () => {
+    const t = await readBack({
+      message: withCard(),
+      stt: ['yes send it', 'yes send it'],
+      approval: [{ text: ['Sent.'] }, { text: ['Sent again.'] }],
+    });
+    await feed({ session: t.session, clock: t.clock, samples: says() });
+    await t.session.settled();
+    await feed({ session: t.session, clock: t.clock, samples: quiet(6000) });
+    await feed({ session: t.session, clock: t.clock, samples: says() });
+    await t.session.settled();
+    expect(t.turns.answers).toEqual([{ decision: 'allow', toolCallId: 'call-1' }]);
+    expect(t.tts.sentences.join(' ')).not.toContain('Sent again');
+  });
+
   it('never answers by voice on a line that switched voice approvals off', async () => {
     const t = await readBack({ message: withCard(), voiceApprovals: false, stt: ['yes send it'] });
     expect(t.tts.sentences.at(-1)).toBe("I've left it in the app for you to approve.");
@@ -412,5 +457,203 @@ describe('approval by voice', () => {
       ],
     });
     expect(t.tts.sentences.at(-1)).toBe("I've left it in the app for you to approve.");
+  });
+});
+
+describe('answering a waiting card', () => {
+  async function waiting({ body = 'Thursday at three works for me.', stt }: { body?: string; stt: string[] }) {
+    const t = setup({
+      stt: ['send the reply', ...stt],
+      message: [{ text: ['I have a draft.'], approvals: [approval(sendReplyCard(body))] }],
+      approval: [{}, {}],
+    });
+    await feed({ session: t.session, clock: t.clock, samples: says() });
+    await t.session.settled();
+    await feed({ session: t.session, clock: t.clock, samples: quiet(9000) });
+    await t.session.settled();
+    return t;
+  }
+
+  it('takes a plain "no" even when the read-back held the word "no"', async () => {
+    const t = await waiting({ body: 'No worries, see you Friday.', stt: ['No.'] });
+    await feed({ session: t.session, clock: t.clock, samples: says() });
+    await t.session.settled();
+    expect(t.turns.answers).toEqual([{ decision: 'deny', toolCallId: 'call-1' }]);
+  });
+
+  it('runs other speech as a new turn once the reminder has been said, and leaves the card on the screen', async () => {
+    const t = await waiting({ stt: ['what time is it', 'what is the weather'] });
+    await feed({ session: t.session, clock: t.clock, samples: says() });
+    await t.session.settled();
+    expect(t.tts.sentences.at(-1)).toContain('still waiting for your answer');
+    expect(t.turns.sent).toEqual(['send the reply']);
+    await feed({ session: t.session, clock: t.clock, samples: quiet(6000) });
+    await feed({ session: t.session, clock: t.clock, samples: says() });
+    await t.session.settled();
+    expect(t.turns.sent).toEqual(['send the reply', 'what is the weather']);
+    expect(t.turns.answers).toEqual([]);
+  });
+
+  it('says to say it again when the answer came too soon after the assistant stopped', async () => {
+    const t = setup({
+      stt: ['send the reply', 'yes send it'],
+      message: [{ text: ['I have a draft.'], approvals: [approval(sendReplyCard())] }],
+    });
+    await feed({ session: t.session, clock: t.clock, samples: says() });
+    await t.session.settled();
+    for (let step = 0; step < 400 && t.transport.states().at(-1) !== 'listening'; step += 1) {
+      await feed({ session: t.session, clock: t.clock, samples: quiet(32) });
+    }
+    await feed({ session: t.session, clock: t.clock, samples: Int16Array.from([...quiet(500), ...says(900, 900)]) });
+    await t.session.settled();
+    expect(t.tts.sentences.at(-1)).toBe('Say that again.');
+    expect(t.turns.answers).toEqual([]);
+  });
+
+  it('judges the guard time by when the audio arrived, so a backed-up queue cannot let an echo through', async () => {
+    const t = setup({
+      stt: ['send the reply', 'yes send it'],
+      message: [{ text: ['I have a draft.'], approvals: [approval(sendReplyCard())] }],
+    });
+    await feed({ session: t.session, clock: t.clock, samples: says() });
+    await t.session.settled();
+    for (let step = 0; step < 400 && t.transport.states().at(-1) !== 'listening'; step += 1) {
+      await feed({ session: t.session, clock: t.clock, samples: quiet(32) });
+    }
+    await feed({ session: t.session, clock: t.clock, samples: quiet(200) });
+    // The words arrive 0.2 s after the assistant stopped, but are only listened to 3 s later.
+    const late = Int16Array.from([...hum(640), ...quiet(800)]);
+    for (let offset = 0; offset + 512 <= late.length; offset += 512) {
+      t.session.pushAudio(pcmBytes(late.subarray(offset, offset + 512)));
+    }
+    t.clock.advance(3000);
+    await t.session.settled();
+    expect(t.turns.answers).toEqual([]);
+  });
+
+  it('cannot be answered after the person talked over its read-back', async () => {
+    const t = setup({
+      stt: ['send the reply', 'yes send it'],
+      message: [{ text: ['I have a draft.'], approvals: [approval(sendReplyCard())] }, { text: ['Okay.'] }],
+    });
+    await feed({ session: t.session, clock: t.clock, samples: says() });
+    await t.session.settled();
+    await feed({
+      session: t.session,
+      clock: t.clock,
+      samples: Int16Array.from([...hum(700, 0.3, 1.7), ...quiet(900)]),
+    });
+    await t.session.settled();
+    expect(t.turns.answers).toEqual([]);
+    expect(t.turns.sent).toEqual(['send the reply', 'yes send it']);
+  });
+});
+
+describe('what counts as talking over the assistant', () => {
+  function gated() {
+    let release: () => void = () => undefined;
+    const held = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const clock = new ManualClock();
+    const transport = new FakeTransport({ clock, voiceApprovals: true });
+    const turns = new FakeTurns(
+      { message: [{ text: ['First answer.'] }, { text: ['Second answer.'] }] },
+      { gate: () => held },
+    );
+    const tts = new FakeTts();
+    return { clock, transport, turns, tts, release: () => release() };
+  }
+
+  it('lets a quick one-word answer through as a turn of its own', async () => {
+    const t = setup({
+      stt: ['plan a trip', 'London'],
+      message: [{ text: ['Paris or London?'] }, { text: ['London it is.'] }],
+    });
+    await feed({ session: t.session, clock: t.clock, samples: says() });
+    await t.session.settled();
+    await feed({
+      session: t.session,
+      clock: t.clock,
+      samples: Int16Array.from([...hum(900, 0.3, 1.7), ...quiet(900)]),
+    });
+    await t.session.settled();
+    expect(t.turns.sent).toEqual(['plan a trip', 'London']);
+  });
+
+  it('does not stop the turn for a cough, or for "mm-hmm"', async () => {
+    const g = gated();
+    const session = new VoiceSession({
+      transport: g.transport,
+      vad: new LoudnessVad(),
+      stt: new FakeStt('mm-hmm'),
+      tts: g.tts,
+      turns: g.turns,
+      clock: g.clock,
+    });
+    session.start();
+    await feed({ session, clock: g.clock, samples: says() });
+    expect(g.turns.cancels).toBe(0);
+    g.release();
+    await session.settled();
+    expect(g.turns.cancels).toBe(0);
+  });
+
+  it('never speaks the reply of a turn the person talked over, and starts the new one', async () => {
+    const g = gated();
+    const session = new VoiceSession({
+      transport: g.transport,
+      vad: new LoudnessVad(),
+      stt: new FakeStt('first question', 'second question'),
+      tts: g.tts,
+      turns: g.turns,
+      clock: g.clock,
+    });
+    session.start();
+    await feed({ session, clock: g.clock, samples: says() });
+    await feed({ session, clock: g.clock, samples: says() });
+    g.release();
+    await session.settled();
+    expect(g.tts.sentences).not.toContain('First answer.');
+    expect(g.turns.sent).toEqual(['first question', 'second question']);
+  });
+});
+
+describe('ending a conversation', () => {
+  it('cancels nothing when it never started a turn: a typed turn in the chat is left alone', async () => {
+    const t = setup({});
+    await t.session.end();
+    expect(t.turns.cancels).toBe(0);
+    expect(t.transport.closed).toBe(true);
+  });
+
+  it('ends after two minutes without the person speaking, and says why', async () => {
+    const t = setup({});
+    t.clock.advance(2 * 60_000 + 1);
+    await t.session.settled();
+    expect(t.transport.closed).toBe(true);
+    expect(t.transport.events).toContainEqual({ type: 'notice', text: expect.stringContaining('quiet for a while') });
+  });
+
+  it('does not end while the person keeps talking, until the hard limit of thirty minutes', async () => {
+    const t = setup({ stt: ['hello', 'hello'] });
+    await feed({ session: t.session, clock: t.clock, samples: Int16Array.from([...hum(900), ...quiet(900)]) });
+    t.clock.advance(100_000);
+    await feed({ session: t.session, clock: t.clock, samples: hum(500) });
+    expect(t.transport.closed).toBe(false);
+    t.clock.advance(30 * 60_000);
+    await t.session.settled();
+    expect(t.transport.closed).toBe(true);
+    expect(t.transport.events).toContainEqual({ type: 'notice', text: expect.stringContaining('long conversation') });
+  });
+
+  it('closes a line whose audio arrives faster than it can be listened to', async () => {
+    const t = setup({});
+    for (let n = 0; n < 200; n += 1) {
+      t.session.pushAudio(pcmBytes(hum(32)));
+    }
+    await t.session.settled();
+    expect(t.notes).toContain('backlog');
+    expect(t.transport.closed).toBe(true);
   });
 });

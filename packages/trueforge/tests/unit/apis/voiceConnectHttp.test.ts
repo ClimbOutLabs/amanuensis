@@ -8,12 +8,18 @@ import type { Authenticator } from '../../../src/auth/authenticator';
 import { STANDALONE_REQUEST_CONTEXT, resolveRequestContext } from '../../../src/auth/identity';
 import { createAuthMiddleware } from '../../../src/auth/middleware';
 import configuration from '../../../src/config';
+import { SpeechRateLimiter } from '../../../src/voice/speechRateLimit';
 import { voiceTickets } from '../../../src/voice/voiceTickets';
 
 let sttReady = true;
 jest.mock('../../../src/voice/sttAvailability', () => ({
   ...jest.requireActual('../../../src/voice/sttAvailability'),
   isVoiceAvailable: () => sttReady,
+}));
+let ttsReady = true;
+jest.mock('../../../src/voice/ttsClient', () => ({
+  ...jest.requireActual('../../../src/voice/ttsClient'),
+  probeTtsHealth: () => Promise.resolve(ttsReady),
 }));
 let modelError: Error | undefined;
 jest.mock('../../../src/voice/voiceSocket', () => ({
@@ -39,6 +45,7 @@ describe('POST /connect', () => {
   const logger = createLogger({ transports: [new transports.Console({ silent: true })] });
   const asked: { url: string; cookie: string | null }[] = [];
   let chatStatus = 200;
+  let connectLimiter = new SpeechRateLimiter({ maxPerWindow: 3, maxInFlight: 3 });
 
   function app(): OpenAPIHono {
     const hono = new OpenAPIHono();
@@ -48,6 +55,7 @@ describe('POST /connect', () => {
       createVoiceRouter({
         logger,
         resolveRequestContext,
+        connectLimiter,
         selfFetch: request => {
           asked.push({ url: request.url, cookie: request.headers.get('cookie') });
           return new Response('{}', { status: chatStatus });
@@ -71,6 +79,8 @@ describe('POST /connect', () => {
 
   beforeEach(() => {
     sttReady = true;
+    ttsReady = true;
+    connectLimiter = new SpeechRateLimiter({ maxPerWindow: 3, maxInFlight: 3 });
     modelError = undefined;
     chatStatus = 200;
     asked.length = 0;
@@ -122,6 +132,24 @@ describe('POST /connect', () => {
     sttReady = true;
     modelError = new Error('boom');
     expect(await (await connect({ session_id: 'chat-1' })).text()).toContain('Restart Aman');
+  });
+
+  it('says what to do when the voice service is not answering, and issues no ticket', async () => {
+    ttsReady = false;
+    const response = await connect({ session_id: 'chat-1' });
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({
+      error: { code: 'tts_unavailable', message: expect.stringContaining('Try again in a minute') },
+    });
+  });
+
+  it('limits how often one person can ask, and not other people', async () => {
+    const statuses: number[] = [];
+    for (let n = 0; n < 5; n += 1) {
+      statuses.push((await connect({ session_id: 'chat-1' })).status);
+    }
+    expect(statuses).toEqual([200, 200, 200, 429, 429]);
+    expect((await connect({ session_id: 'chat-1' }, 'bob')).status).toBe(200);
   });
 
   it('refuses a request that names no chat', async () => {

@@ -14,11 +14,6 @@ export function markDraftFromVoice(): void {
   draftFromVoice = true;
 }
 
-/** Whether the composer's draft holds a voice transcript that has not been sent. */
-export function hasDraftFromVoice(): boolean {
-  return draftFromVoice;
-}
-
 /** Forgets the voice draft, e.g. once the composer is emptied. */
 export function clearDraftFromVoice(): void {
   draftFromVoice = false;

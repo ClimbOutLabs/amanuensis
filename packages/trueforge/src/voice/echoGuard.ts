@@ -171,11 +171,14 @@ export class SpokenTextLog {
     this.#entries.push({ atMs: now, words: wordsOf(text) });
   }
 
-  /** True when the heard words are a run inside what was said, or nearly all come from it. */
-  repeats(heard: string): boolean {
+  /**
+   * True when the heard words are a run inside what was said, or nearly all come from it. A few words
+   * are said by anyone, so fewer than `minWords` never counts as a repeat.
+   */
+  repeats({ heard, minWords = 1 }: { heard: string; minWords?: number }): boolean {
     const now = this.#clock.now();
     const heardWords = wordsOf(heard);
-    if (heardWords.length === 0) {
+    if (heardWords.length === 0 || heardWords.length < minWords) {
       return false;
     }
     const spoken = this.#entries

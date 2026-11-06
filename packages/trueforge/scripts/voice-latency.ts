@@ -6,14 +6,15 @@
  *
  *   pnpm voice:latency -- --stt-ms 300 --model-ms 700 --runs 5
  */
+import { readFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 
 import configuration from '../src/config';
 import { measureTurnLatency } from '../src/voice/latencyHarness';
+import { syntheticRecording } from '../src/voice/syntheticSpeech';
 import type { SpeechToText, VoiceTurnRunner } from '../src/voice/transport';
 import { SidecarSpeechSynthesizer } from '../src/voice/ttsClient';
 import { downloadVadModel, SileroSpeechProbability } from '../src/voice/vad/sileroVad';
-import { syntheticRecording } from '../tests/fixtures/voice/syntheticSpeech';
 
 const { values } = parseArgs({
   options: {
@@ -60,12 +61,12 @@ const recording = syntheticRecording([
   { kind: 'quiet', seconds: 1.6 },
 ]);
 
-const modelPath = await downloadVadModel({ dir: configuration.VOICE_VAD_MODEL_DIR });
+const model = await readFile(await downloadVadModel({ dir: configuration.VOICE_VAD_MODEL_DIR }));
 const tts = new SidecarSpeechSynthesizer();
 
 const totals: number[] = [];
 for (let run = 1; run <= runs; run += 1) {
-  const vad = await SileroSpeechProbability.load({ modelPath });
+  const vad = await SileroSpeechProbability.load({ model });
   const latency = await measureTurnLatency({ parts: { vad, stt, tts, turns }, recording });
   totals.push(latency.total_ms);
   console.log(`run ${String(run)}:`, JSON.stringify(latency));

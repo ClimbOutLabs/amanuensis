@@ -344,7 +344,7 @@ plan_build() {
     fi
   fi
 
-  plan_image "$REL_APP_TAG" "The Aman app is built" "Build the Aman app" app-base app-deps dockerfile-frontend
+  plan_image "$REL_APP_TAG" "The Aman app is built" "Build the Aman app" app-base app-deps vad-model dockerfile-frontend
   plan_image "$REL_STT_TAG" "The speech-to-text service is built" "Build the speech-to-text service" stt-base stt-deps
   plan_image "$REL_TTS_TAG" "The voice that reads replies aloud is built" "Build the voice that reads replies aloud" tts-deps tts-voice
   plan_image "$REL_CALENDAR_TAG" "The calendar connector is built" "Build the calendar connector"

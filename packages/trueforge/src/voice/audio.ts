@@ -2,7 +2,7 @@
 export const INPUT_SAMPLE_RATE = 16_000;
 
 /** What a transport sends in: the browser sends 16 kHz samples, a phone line sends 8 kHz mu-law. */
-export type InputFormat = 'pcm16_16k' | 'mulaw_8k';
+export type InputFormat = 'pcm16_16k' | 'mulaw8k';
 /** What the voice container is asked for, matching the transport's playback: 24 kHz samples or 8 kHz mu-law. */
 export type OutputFormat = 'pcm16' | 'mulaw8k';
 
@@ -52,7 +52,7 @@ export class InputDecoder {
   }
 
   push(bytes: Uint8Array): Int16Array {
-    if (this.#format === 'mulaw_8k') {
+    if (this.#format === 'mulaw8k') {
       const samples = decodeMulaw(bytes);
       const up = upsampleTo16k({ samples, previous: this.#lastSample });
       this.#lastSample = samples[samples.length - 1] ?? this.#lastSample;

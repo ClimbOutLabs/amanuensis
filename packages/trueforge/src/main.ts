@@ -904,7 +904,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     }),
     speaking: () => new SidecarSpeechSynthesizer(),
     listening: async () => ({
-      vad: await SileroSpeechProbability.load({ modelPath: await readyVadModel() }),
+      vad: await SileroSpeechProbability.load({ model: await readyVadModel() }),
       stt: new SidecarSpeechToText(),
     }),
     logger,

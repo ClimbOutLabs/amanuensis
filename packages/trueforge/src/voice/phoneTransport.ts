@@ -82,7 +82,7 @@ export type PhoneSocket = Pick<WebSocket, 'OPEN' | 'readyState' | 'send' | 'clos
 
 export class PhoneVoiceTransport implements VoiceTransport {
   readonly outputFormat = 'mulaw8k';
-  readonly inputFormat = 'mulaw_8k';
+  readonly inputFormat = 'mulaw8k';
   /** The phone cannot tell who answered, so nothing is ever approved by voice on a call. */
   readonly voiceApprovals = false;
   readonly #socket: PhoneSocket;

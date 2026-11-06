@@ -11,7 +11,8 @@ import { WebSocketServer, type WebSocket } from 'ws';
 
 import { extractErrorLogFields } from '@truefoundry/trueforge-core/core';
 
-import configuration from '../config';
+import { pageOrigins } from '../auth/requestGuard';
+import configuration, { getAllowedOrigins, getPublicBaseUrl } from '../config';
 import {
   BrowserVoiceTransport,
   readClientFrame,
@@ -20,11 +21,12 @@ import {
   VOICE_STREAM_PATH,
 } from './browserTransport';
 import { VoiceSession, type VoiceSessionDeps } from './session';
+import { speechLimiter } from './speechRateLimit';
 import { SidecarSpeechToText } from './sttClient';
 import { SidecarSpeechSynthesizer } from './ttsClient';
 import { HttpVoiceTurnRunner } from './turnRunner';
 import { SileroSpeechProbability, verifiedVadModel } from './vad/sileroVad';
-import { voiceTickets, type VoiceTicket } from './voiceTickets';
+import { voiceTickets, type VoiceTicketClaims } from './voiceTickets';
 
 /** A connection with no audio for this long is closed; the browser sends frames all the time while the mic is on. */
 const IDLE_CLOSE_MS = 30_000;
@@ -37,7 +39,7 @@ export const FORWARDED_HEADERS = ['host', 'origin', 'cookie', 'authorization', '
 /** Runs a request against this server's own app, in this process. */
 export type SelfFetch = (request: Request) => Response | Promise<Response>;
 
-export function requestAs({ ticket, selfFetch }: { ticket: VoiceTicket; selfFetch: SelfFetch }) {
+export function requestAs({ ticket, selfFetch }: { ticket: VoiceTicketClaims; selfFetch: SelfFetch }) {
   return (path: string, init: RequestInit): Promise<Response> => {
     const headers = new Headers(init.headers);
     for (const [name, value] of Object.entries(ticket.headers)) {
@@ -62,15 +64,15 @@ function refuse(socket: Duplex, status: string): void {
   socket.destroy();
 }
 
-let modelPath: Promise<string> | undefined;
+let model: Promise<Uint8Array> | undefined;
 
-/** The verified listening model, checked once per process. A failure is not remembered, so a retry can work. */
-export function readyVadModel(): Promise<string> {
-  modelPath ??= verifiedVadModel({ dir: configuration.VOICE_VAD_MODEL_DIR }).catch((error: unknown) => {
-    modelPath = undefined;
+/** The verified listening model, read once per process. A failure is not remembered, so a retry can work. */
+export function readyVadModel(): Promise<Uint8Array> {
+  model ??= verifiedVadModel({ dir: configuration.VOICE_VAD_MODEL_DIR }).catch((error: unknown) => {
+    model = undefined;
     throw error;
   });
-  return modelPath;
+  return model;
 }
 
 /** Anything that can tell us a client asked to upgrade its connection to a WebSocket. */
@@ -85,19 +87,64 @@ export async function productionParts({
   ticket,
   selfFetch,
 }: {
-  ticket: VoiceTicket;
+  ticket: VoiceTicketClaims;
   selfFetch: SelfFetch;
 }): Promise<SessionParts> {
   return {
-    vad: await SileroSpeechProbability.load({ modelPath: await readyVadModel() }),
+    vad: await SileroSpeechProbability.load({ model: await readyVadModel() }),
     stt: new SidecarSpeechToText(),
-    tts: new SidecarSpeechSynthesizer({ voice: ticket.voice }),
-    turns: new HttpVoiceTurnRunner({
-      request: requestAs({ ticket, selfFetch }),
-      sessionId: ticket.sessionId,
-      clientTimezone: ticket.timezone,
+    tts: new SidecarSpeechSynthesizer({
+      voice: ticket.voice,
+      share: { limiter: speechLimiter, person: `${ticket.tenantId}:${ticket.subjectId}` },
     }),
+    turns: turnRunnerFor({ ticket, selfFetch }),
   };
+}
+
+/** Turns run in the chat the ticket was issued for, as the person who asked for it. */
+export function turnRunnerFor({
+  ticket,
+  selfFetch,
+}: {
+  ticket: VoiceTicketClaims;
+  selfFetch: SelfFetch;
+}): HttpVoiceTurnRunner {
+  return new HttpVoiceTurnRunner({
+    request: requestAs({ ticket, selfFetch }),
+    sessionId: ticket.sessionId,
+    clientTimezone: ticket.timezone,
+  });
+}
+
+/** Most voice conversations open at once on one server; each holds a listening model and a microphone stream. */
+export const MAX_VOICE_SESSIONS = 20;
+
+/** The page that opens a voice line must be this server's own, or one of the origins the app itself accepts. */
+export function originAllowed({
+  origin,
+  host,
+  pages,
+}: {
+  origin: string | undefined;
+  host: string | undefined;
+  pages: ReadonlySet<string>;
+}): boolean {
+  if (origin === undefined) {
+    return false;
+  }
+  try {
+    const parsed = new URL(origin);
+    return parsed.host === host || pages.has(parsed.origin);
+  } catch {
+    return false;
+  }
+}
+
+/** One open conversation. It is reserved before anything is awaited, so parallel upgrades cannot all get in. */
+interface Slot {
+  closed: boolean;
+  session: VoiceSession | undefined;
+  replace(): Promise<void>;
 }
 
 export function attachVoiceSocket({
@@ -105,12 +152,20 @@ export function attachVoiceSocket({
   selfFetch,
   logger,
   makeParts = productionParts,
+  pages = pageOrigins({
+    port: configuration.PORT,
+    publicBaseUrl: getPublicBaseUrl(),
+    allowedOrigins: getAllowedOrigins(),
+  }),
+  maxSessions = MAX_VOICE_SESSIONS,
 }: {
   server: UpgradeSource;
   selfFetch: SelfFetch;
   logger: Logger;
   /** Tests give stand-ins; the server leaves this out. */
   makeParts?: typeof productionParts;
+  pages?: ReadonlySet<string>;
+  maxSessions?: number;
 }): void {
   const sockets = new WebSocketServer({
     noServer: true,
@@ -118,11 +173,15 @@ export function attachVoiceSocket({
     handleProtocols: protocols => (protocols.has(VOICE_SOCKET_PROTOCOL) ? VOICE_SOCKET_PROTOCOL : false),
   });
   /** One voice conversation per person: a new one replaces the old. */
-  const active = new Map<string, VoiceSession>();
+  const active = new Map<string, Slot>();
 
   server.on('upgrade', (request: IncomingMessage, socket: Duplex, head: Buffer) => {
     const path = new URL(request.url ?? '/', 'http://localhost').pathname;
     if (path !== VOICE_STREAM_PATH) {
+      return;
+    }
+    if (!originAllowed({ origin: request.headers.origin, host: request.headers.host, pages })) {
+      refuse(socket, '403 Forbidden');
       return;
     }
     const id = ticketFromProtocols(request.headers['sec-websocket-protocol']);
@@ -131,18 +190,47 @@ export function attachVoiceSocket({
       refuse(socket, '401 Unauthorized');
       return;
     }
+    const key = `${ticket.tenantId}:${ticket.subjectId}`;
+    if (!active.has(key) && active.size >= maxSessions) {
+      refuse(socket, '503 Service Unavailable');
+      return;
+    }
     sockets.handleUpgrade(request, socket, head, ws => {
-      void run({ ws, ticket }).catch((error: unknown) => {
+      void run({ ws, ticket, key }).catch((error: unknown) => {
         logger.warn('voice session failed to start', extractErrorLogFields(error));
         ws.close(1011, 'could not start');
       });
     });
   });
 
-  async function run({ ws, ticket }: { ws: WebSocket; ticket: VoiceTicket }): Promise<void> {
+  async function run({ ws, ticket, key }: { ws: WebSocket; ticket: VoiceTicketClaims; key: string }): Promise<void> {
+    const previous = active.get(key);
+    const slot: Slot = {
+      closed: false,
+      session: undefined,
+      replace: async () => {
+        ws.close(1000, 'replaced');
+        await slot.session?.end();
+      },
+    };
+    active.set(key, slot);
+    // Attached before any await: a socket that closes while the model loads must still end what it started.
+    let idle: ReturnType<typeof setTimeout> | undefined;
+    ws.on('close', () => {
+      slot.closed = true;
+      clearTimeout(idle);
+      if (active.get(key) === slot) {
+        active.delete(key);
+      }
+      void slot.session?.end();
+    });
+    await previous?.replace();
     const transport = new BrowserVoiceTransport(ws);
     const parts = await makeParts({ ticket, selfFetch });
-    const key = `${ticket.tenantId}:${ticket.subjectId}`;
+    if (slot.closed) {
+      await parts.vad.dispose?.();
+      return;
+    }
     const session = new VoiceSession({
       ...parts,
       transport,
@@ -154,31 +242,24 @@ export function attachVoiceSocket({
         logger.info('voice note', { note });
       },
     });
-    await active.get(key)?.end();
-    active.set(key, session);
+    slot.session = session;
     transport.open();
     session.start();
-    let idle = setTimeout(() => {
-      ws.close(1000, 'idle');
-    }, IDLE_CLOSE_MS);
-    ws.on('message', (data, isBinary) => {
+    const restartIdle = (): void => {
       clearTimeout(idle);
       idle = setTimeout(() => {
         ws.close(1000, 'idle');
       }, IDLE_CLOSE_MS);
+    };
+    restartIdle();
+    ws.on('message', (data, isBinary) => {
+      restartIdle();
       const frame = readClientFrame({ data, isBinary });
       if (frame.kind === 'audio') {
         session.pushAudio(frame.bytes);
       } else if (frame.kind === 'end') {
         ws.close(1000, 'done');
       }
-    });
-    ws.on('close', () => {
-      clearTimeout(idle);
-      if (active.get(key) === session) {
-        active.delete(key);
-      }
-      void session.end();
     });
   }
 }

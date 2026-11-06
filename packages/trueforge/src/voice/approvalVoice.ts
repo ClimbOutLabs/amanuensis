@@ -2,9 +2,9 @@
  * Answering an approval card by voice.
  *
  * The card is read back in plain words and only an exact phrase for the card's verb approves it.
- * What the card shows is the server's own text: this file only chooses the words around it, so the
- * same approval token the card uses is what finally runs, with the usual replay and `changed` checks.
- * Cards that hold more than a person can safely check by ear stay on the screen.
+ * What the card shows is the server's own text: this file only chooses the words around it. The answer
+ * goes back as the chat's own approval input for the same thread and tool call, so the usual replay and
+ * `changed` checks apply. Cards that hold more than a person can safely check by ear stay on the screen.
  */
 import type { Tier3Card } from '@truefoundry/trueforge-core/core';
 
@@ -62,12 +62,19 @@ function needsTheScreen({ card, tier }: { card: Tier3Card; tier: 1 | 2 | 3 | und
   const tooLong = (card.email?.body.length ?? 0) > MAX_SPOKEN_BODY_CHARS || card.outbound_truncated;
   const shell = card.parsed_command !== null;
   const money = card.amount !== null;
+  // Exact connector arguments, a new schedule's task and a guest list are more than a read-back can cover.
+  const connectorText = card.outbound_text !== null;
+  const newSchedule = card.schedule?.action === 'create';
+  const guests = (card.calendar_event?.attendees ?? []).length > 0 || card.calendar_event?.guests_emailed === true;
   return (
     tier === undefined ||
     (tier === 3 && (shell || money)) ||
     newRecipients ||
     hiddenCopy ||
     tooLong ||
+    connectorText ||
+    newSchedule ||
+    guests ||
     (card.persona !== null && card.persona !== undefined)
   );
 }
@@ -96,34 +103,61 @@ export function planVoiceApproval({
     text: `Say '${CONFIRM_PHRASES[verb].spoken}' to ${VERB_WORD[verb]}, or 'no'.`,
     role: 'instruction' as const,
   };
+  const body = bodySegments(card);
+  const spokenChars = body.reduce((sum, segment) => sum + segment.text.length, 0);
+  if (spokenChars > MAX_SPOKEN_BODY_CHARS) {
+    return { kind: 'typed_only' };
+  }
+  return { kind: 'ask', verb, segments: [...body, instruction] };
+}
+
+function bodySegments(card: Tier3Card): { text: string; role: 'body' }[] {
+  const say = (text: string): { text: string; role: 'body' } => ({ text, role: 'body' });
   const email = card.email;
   if (email !== null && email !== undefined) {
     const to = recipientNames(email.to);
-    const cc = email.cc.length > 0 ? [{ text: `Copying ${recipientNames(email.cc)}.`, role: 'body' as const }] : [];
     const opening =
       email.action === 'send'
         ? `I'll send this ${email.reply_in_thread === null ? 'email' : 'reply'} to ${to}.`
         : `I'll save this email to ${to} as a draft. It will not be sent.`;
-    return {
-      kind: 'ask',
-      verb,
-      segments: [{ text: opening, role: 'body' }, ...cc, { text: `It says: ${email.body}`, role: 'body' }, instruction],
-    };
+    return [
+      say(opening),
+      ...(email.cc.length > 0 ? [say(`Copying ${recipientNames(email.cc)}.`)] : []),
+      ...(email.reply_to === null ? [] : [say(`Replies will go to ${email.reply_to}.`)]),
+      say(`The subject is: ${email.subject}`),
+      say(`It says: ${email.body}`),
+    ];
+  }
+  const event = card.calendar_event;
+  if (event !== null && event !== undefined) {
+    const place = event.location === '' ? '' : ` at ${event.location}`;
+    return [
+      say(
+        `I'll ${event.action === 'create' ? 'add' : 'change'} the event ${event.title} on ${event.when} for ${event.duration}${place}.`,
+      ),
+      ...(event.description === '' ? [] : [say(`Its description is: ${event.description}`)]),
+    ];
+  }
+  const schedule = card.schedule;
+  if (schedule !== null && schedule !== undefined) {
+    return [say(`I'll stop the schedule ${schedule.name}, which runs ${schedule.when}. Its task is: ${schedule.task}`)];
   }
   const where = card.recipient ?? card.destination;
-  const segments: { text: string; role: 'body' | 'instruction' }[] = [
-    { text: card.plain_what, role: 'body' },
-    ...(where === null ? [] : [{ text: `It goes to ${where}.`, role: 'body' as const }]),
-    ...(card.cannot_be_undone === null ? [] : [{ text: card.cannot_be_undone, role: 'body' as const }]),
-    instruction,
+  return [
+    say(card.plain_what),
+    ...(where === null ? [] : [say(`It goes to ${where}.`)]),
+    ...(card.cannot_be_undone === null ? [] : [say(card.cannot_be_undone)]),
   ];
-  return { kind: 'ask', verb, segments };
 }
 
 export type SpokenAnswer = 'confirm' | 'deny' | 'other';
 
 /** Only the exact phrase for the card's verb confirms, and only a plain "no" turns it down. */
 export function classifyAnswer({ heard, verb }: { heard: string; verb: ApprovalVerb }): SpokenAnswer {
+  // A question is not an answer, even in the right words.
+  if (heard.trim().endsWith('?')) {
+    return 'other';
+  }
   const words = wordsOf(heard).join(' ');
   if (words === CONFIRM_PHRASES[verb].heard) {
     return 'confirm';
@@ -142,4 +176,6 @@ export const APPROVAL_LINES = {
   notAllowed: 'That is not allowed any more, so I did nothing. Open the chat to look at it.',
   expired: 'That ran out of time, so I did nothing. Ask me again.',
   couldNot: 'I could not finish that. Open the chat to see where it stands.',
+  sayAgain: 'Say that again.',
+  signIn: 'Your sign-in ran out. Sign in again, then start voice mode.',
 } as const;

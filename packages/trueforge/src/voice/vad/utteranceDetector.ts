@@ -97,7 +97,11 @@ export class UtteranceDetector {
   #whileIdle({ probability, heard }: { probability: number; heard: Heard }): DetectorEvent[] {
     const start = this.#strict?.startThreshold ?? this.#options.startThreshold;
     const minSpeechMs = this.#strict?.minSpeechMs ?? this.#options.minSpeechMs;
-    const rising = this.#candidate.length > 0 ? probability >= this.#options.endThreshold : probability >= start;
+    // A strict start holds every window to the strict threshold, not only the first.
+    const rising =
+      this.#candidate.length > 0 && this.#strict === undefined
+        ? probability >= this.#options.endThreshold
+        : probability >= start;
     if (!rising) {
       this.#recent.push(...this.#candidate, heard);
       this.#candidate = [];

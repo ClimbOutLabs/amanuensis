@@ -109,7 +109,7 @@ describe('a phone call in private mode', () => {
   });
 
   it('takes a yes said over the question asked again: only the opening cannot be answered over', async () => {
-    const t = call({ heard: ['hmm', 'yes'] });
+    const t = call({ heard: ['maybe', 'yes'] });
     await speak(t);
     await t.session.settled();
     expect(t.tts.sentences.join(' ')).toContain(CALL_LINES.askAgain);
@@ -134,7 +134,7 @@ describe('a phone call in private mode', () => {
   });
 
   it('asks once more when it did not catch the answer, then leaves it in the app', async () => {
-    const t = call({ heard: ['hmm', 'what'] });
+    const t = call({ heard: ['maybe', 'what'] });
     await speak(t);
     await t.session.settled();
     t.clock.advance(5_000);

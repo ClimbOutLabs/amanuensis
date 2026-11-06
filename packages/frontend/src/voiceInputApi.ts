@@ -93,7 +93,7 @@ function parseConnection(value: unknown): VoiceConnection {
     typeof data.protocol !== 'string' ||
     typeof data.path !== 'string'
   ) {
-    throw new Error('The voice connection answer was invalid.');
+    throw new Error('The voice connection answer was invalid. Reload the page, then try again.');
   }
   const url = new URL(apiPath(data.path), window.location.href);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';

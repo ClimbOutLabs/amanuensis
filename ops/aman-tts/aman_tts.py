@@ -38,6 +38,7 @@ from typing import Protocol
 import numpy as np
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
+from starlette.background import BackgroundTask
 
 from audio_formats import FORMATS, STREAMABLE, WAV, Encoder, encode_wav
 from phonemes import Lexicon, split_chunks, split_sentences, to_phonemes
@@ -417,9 +418,9 @@ async def _stream_speech(request: Request, state: ServiceState, synthesizer: Syn
                 yield data
                 item = await pieces.get()
             if isinstance(item, Exception):
-                # The status line is already sent; ending the body early is all that is left.
+                # The status line is already sent; breaking the connection is how the caller learns the audio is cut short.
                 LOGGER.error("speak failed mid-stream", exc_info=item)
-                return
+                raise RuntimeError("speech stopped part way") from item
             LOGGER.info(
                 "speak ok: streamed bytes=%d duration_ms=%d voice=%s format=%s",
                 sent,
@@ -430,7 +431,10 @@ async def _stream_speech(request: Request, state: ServiceState, synthesizer: Syn
         finally:
             cancel.set()
 
-    return StreamingResponse(body(), media_type=job.encoder.format.content_type, headers=job.headers)
+    # Also runs when the body is never started, so a caller who left early does not keep the slot busy.
+    return StreamingResponse(
+        body(), media_type=job.encoder.format.content_type, headers=job.headers, background=BackgroundTask(cancel.set)
+    )
 
 
 async def _wait_for_slot(request: Request, slot: asyncio.Semaphore) -> bool:

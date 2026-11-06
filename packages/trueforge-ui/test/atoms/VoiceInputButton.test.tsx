@@ -1,15 +1,18 @@
-import { act, fireEvent, render, renderHook, screen } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { mockSetText, mockStartVoiceRecording, mockStartLiveVoice, mockReload, mockSession, mockInitialize } =
-  vi.hoisted(() => ({
-    mockInitialize: vi.fn(),
-    mockSetText: vi.fn(),
-    mockStartVoiceRecording: vi.fn(),
-    mockStartLiveVoice: vi.fn(),
-    mockReload: vi.fn(),
-    mockSession: { remoteId: 'chat-1' as string | null },
-  }));
+  vi.hoisted(() => {
+    const session: { remoteId: string | null } = { remoteId: 'chat-1' };
+    return {
+      mockInitialize: vi.fn(),
+      mockSetText: vi.fn(),
+      mockStartVoiceRecording: vi.fn(),
+      mockStartLiveVoice: vi.fn(),
+      mockReload: vi.fn(),
+      mockSession: session,
+    };
+  });
 
 vi.mock('@assistant-ui/react', () => ({
   useAui: () => ({
@@ -707,6 +710,62 @@ describe('VoiceInputButton voice mode', () => {
     view.rerender(composer(api));
     expect(line.stop).toHaveBeenCalledTimes(1);
     expect(getVoiceMode()).toBe('off');
+  });
+
+  it('keeps going when the composer is rebuilt in another place, as it is when an approval card appears', async () => {
+    const { api } = makeVoiceApi();
+    const view = render(composer(api));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start voice mode' }));
+    await screen.findByText('Listening');
+    view.rerender(<div data-testid="approval-view">{composer(api)}</div>);
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 20));
+    });
+    expect(line.stop).not.toHaveBeenCalled();
+    expect(getVoiceMode()).toBe('listening');
+    expect(screen.getByRole('button', { name: 'End voice mode' })).toBeInTheDocument();
+    // What the line reports now reaches the new composer.
+    act(() => events?.onTurnSaved());
+    expect(mockReload).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: 'End voice mode' }));
+    expect(line.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('ends when the composer goes away and no other one takes its place', async () => {
+    const { api } = makeVoiceApi();
+    const view = render(composer(api));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start voice mode' }));
+    await screen.findByText('Listening');
+    view.unmount();
+    await waitFor(() => expect(line.stop).toHaveBeenCalledTimes(1));
+    expect(getVoiceMode()).toBe('off');
+  });
+
+  it('a quick off and on again leaves one line, not two', async () => {
+    const opens: (() => void)[] = [];
+    const lines = [{ stop: vi.fn() }, { stop: vi.fn() }];
+    mockStartLiveVoice.mockImplementation(
+      () =>
+        new Promise(resolve => {
+          const next = lines[opens.length];
+          opens.push(() => resolve(next));
+        }),
+    );
+    const { api } = makeVoiceApi();
+    render(composer(api));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start voice mode' }));
+    await waitFor(() => expect(opens).toHaveLength(1));
+    fireEvent.click(screen.getByRole('button', { name: 'End voice mode' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start voice mode' }));
+    await waitFor(() => expect(opens).toHaveLength(2));
+    await act(async () => {
+      opens[0]?.();
+      opens[1]?.();
+      await Promise.resolve();
+    });
+    expect(lines[0]?.stop).toHaveBeenCalledTimes(1);
+    expect(lines[1]?.stop).not.toHaveBeenCalled();
+    expect(getVoiceMode()).toBe('listening');
   });
 
   it('hiding the tab ends it', async () => {

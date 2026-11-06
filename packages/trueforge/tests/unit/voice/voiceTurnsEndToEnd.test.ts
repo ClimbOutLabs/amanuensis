@@ -104,7 +104,7 @@ describe('voice turns on the real server', () => {
   );
 
   it(
-    'reads back a waiting card, and "yes, approve" runs the held action once, through the chat approval route',
+    'leaves a connector card for the screen, and "yes, approve" does not run it',
     async () => {
       const sessionId = await newChat();
       server.mcp.resetInvocations();
@@ -115,13 +115,13 @@ describe('voice turns on the real server', () => {
       await feed({ session: v.session, clock: v.clock, samples: says() });
       await v.session.settled();
       expect(server.mcp.writeInvocations()).toBe(0);
-      expect(v.tts.sentences.join(' ')).toContain("Say 'yes, approve' to go ahead, or 'no'.");
+      expect(v.tts.sentences.join(' ')).toContain("I've left it in the app for you to approve.");
       await feed({ session: v.session, clock: v.clock, samples: quiet(9000) });
       await feed({ session: v.session, clock: v.clock, samples: says() });
       await v.session.settled();
-      expect(server.mcp.writeInvocations()).toBe(1);
+      expect(server.mcp.writeInvocations()).toBe(0);
       const turns = await savedTurns(sessionId);
-      expect(turns.map(turn => turn.input?.[0]?.type)).toEqual(['user.message', 'user.tool_approval']);
+      expect(turns.map(turn => turn.input?.[0]?.type)).toEqual(['user.message']);
     },
     TURN_TIMEOUT_MS,
   );

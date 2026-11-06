@@ -28,13 +28,15 @@ type TurnInput =
       type: 'user.tool_approval';
       thread_id: string;
       tool_call_id: string;
-      approval: { status: 'allow' } | { status: 'deny' };
+      approval: { status: 'allow'; scope: 'once' } | { status: 'deny' };
     };
 
 export class HttpVoiceTurnRunner implements VoiceTurnRunner {
   readonly #request: SessionRequest;
   readonly #sessionId: string;
   readonly #timezone: string | undefined;
+  /** True from the moment the server accepted this runner's turn until it ended. */
+  #running = false;
 
   constructor({
     request,
@@ -78,7 +80,7 @@ export class HttpVoiceTurnRunner implements VoiceTurnRunner {
         type: 'user.tool_approval',
         thread_id: approval.threadId,
         tool_call_id: approval.toolCallId,
-        approval: { status: decision },
+        approval: decision === 'allow' ? { status: 'allow', scope: 'once' } : { status: 'deny' },
       },
       spoken: true,
       signal,
@@ -86,7 +88,11 @@ export class HttpVoiceTurnRunner implements VoiceTurnRunner {
     });
   }
 
+  /** Cancels this runner's own turn. Nothing else running in the chat, such as a typed message, is touched. */
   async cancel(): Promise<void> {
+    if (!this.#running) {
+      return;
+    }
     await this.#request(`/api/v1/sessions/${encodeURIComponent(this.#sessionId)}/cancel`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -122,6 +128,9 @@ export class HttpVoiceTurnRunner implements VoiceTurnRunner {
     } catch {
       return { kind: 'failed' };
     }
+    if (response.status === 401) {
+      return { kind: 'refused', reason: 'sign_in' };
+    }
     if (response.status === 409) {
       const parsed = ErrorBodySchema.safeParse(await response.json().catch(() => undefined));
       const code = parsed.success ? parsed.data.error.code : undefined;
@@ -132,9 +141,17 @@ export class HttpVoiceTurnRunner implements VoiceTurnRunner {
       return { kind: 'failed' };
     }
     try {
-      return await readTurnStream({ body: response.body, onText });
+      return await readTurnStream({
+        body: response.body,
+        onText,
+        onCreated: () => {
+          this.#running = true;
+        },
+      });
     } catch {
       return { kind: 'failed' };
+    } finally {
+      this.#running = false;
     }
   }
 }
@@ -142,9 +159,11 @@ export class HttpVoiceTurnRunner implements VoiceTurnRunner {
 async function readTurnStream({
   body,
   onText,
+  onCreated,
 }: {
   body: ReadableStream<Uint8Array>;
   onText: (delta: string) => void;
+  onCreated: () => void;
 }): Promise<TurnOutcome> {
   let turnId: string | undefined;
   const decoder = new TextDecoder();
@@ -163,6 +182,7 @@ async function readTurnStream({
     }
     if (type.data.type === EventType.TURN_CREATED) {
       turnId = TurnCreatedEventSchema.safeParse(event).data?.turn_id ?? turnId;
+      onCreated();
     } else if (type.data.type === EventType.MODEL_MESSAGE_DELTA) {
       const delta = ModelMessageDeltaEventSchema.safeParse(event).data?.content;
       if (typeof delta === 'string' && delta !== '') {

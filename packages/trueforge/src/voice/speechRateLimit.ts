@@ -30,6 +30,15 @@ export class SpeechRateLimiter {
   }
 
   acquire(key: string): SpeechPermit {
+    return this.#take({ key, countsTowardMinute: true });
+  }
+
+  /** For a voice conversation: only the cap on requests in flight applies, shared with `acquire`. */
+  acquireInFlight(key: string): SpeechPermit {
+    return this.#take({ key, countsTowardMinute: false });
+  }
+
+  #take({ key, countsTowardMinute }: { key: string; countsTowardMinute: boolean }): SpeechPermit {
     const now = this.#now();
     const state = this.#keys.get(key) ?? { starts: [], inFlight: 0 };
     state.starts = state.starts.filter(start => now - start < WINDOW_MS);
@@ -38,13 +47,15 @@ export class SpeechRateLimiter {
     this.#keys.set(key, state);
     this.#evict();
     const oldest = state.starts[0];
-    if (state.starts.length >= this.#maxPerWindow && oldest !== undefined) {
+    if (countsTowardMinute && state.starts.length >= this.#maxPerWindow && oldest !== undefined) {
       return { allowed: false, retryAfterSeconds: Math.max(1, Math.ceil((oldest + WINDOW_MS - now) / 1000)) };
     }
     if (state.inFlight >= this.#maxInFlight) {
       return { allowed: false, retryAfterSeconds: 1 };
     }
-    state.starts.push(now);
+    if (countsTowardMinute) {
+      state.starts.push(now);
+    }
     state.inFlight += 1;
     let released = false;
     return {
@@ -68,3 +79,6 @@ export class SpeechRateLimiter {
     }
   }
 }
+
+/** The one limiter this process shares between read-aloud requests and voice conversations. */
+export const speechLimiter = new SpeechRateLimiter();

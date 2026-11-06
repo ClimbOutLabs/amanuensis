@@ -1904,7 +1904,7 @@ export interface SharedServerConfiguration {
    * Folder that holds the small listening model voice mode uses to find where speech starts and
    * ends. The image carries it, and it is checked against a pinned hash before use. Host
    * development fetches it with `pnpm voice:model`.
-   * Env: `VOICE_VAD_MODEL_DIR`. Default `<MEMORY_MARKDOWN_DIR>/.voice-model`.
+   * Env: `VOICE_VAD_MODEL_DIR`. Default `<APP_DATA_DIR>/voice-model`.
    */
   VOICE_VAD_MODEL_DIR: string;
   /**
@@ -2729,9 +2729,7 @@ const shared: SharedServerConfiguration = {
   STT_URL: getEnv('STT_URL', { defaultValue: 'http://aman-stt:8001' }) ?? 'http://aman-stt:8001',
   TTS_URL: getEnv('TTS_URL', { defaultValue: 'http://aman-tts:8002' }) ?? 'http://aman-tts:8002',
   TTS_ENABLED: parseBoolean({ envKey: 'TTS_ENABLED', raw: getEnv('TTS_ENABLED'), defaultValue: true }),
-  VOICE_VAD_MODEL_DIR:
-    getEnv('VOICE_VAD_MODEL_DIR') ??
-    path.join(getEnv('MEMORY_MARKDOWN_DIR', { defaultValue: './data/memory' }) ?? './data/memory', '.voice-model'),
+  VOICE_VAD_MODEL_DIR: getEnv('VOICE_VAD_MODEL_DIR') ?? path.join(appDataDir, 'voice-model'),
   MAPS_GEOCODER_URL: parseMapsUrl({
     envKey: 'MAPS_GEOCODER_URL',
     raw: getEnv('MAPS_GEOCODER_URL'),

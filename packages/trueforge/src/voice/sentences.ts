@@ -3,11 +3,21 @@
  * before the model has finished. A sentence is complete once the character after its stop arrives.
  * Fenced code is never read aloud.
  */
-const ABBREVIATIONS = new Set(['mr', 'mrs', 'ms', 'dr', 'st', 'vs', 'etc', 'e.g', 'i.e', 'no']);
+const ABBREVIATIONS = new Set(['mr', 'mrs', 'ms', 'dr', 'st', 'vs', 'etc', 'e.g', 'i.e']);
+/** A run of words this long with no stop is cut at a space, so one huge sentence cannot be refused by the voice. */
+const MAX_SENTENCE_CHARS = 300;
 
-function endsInAbbreviation(text: string): boolean {
+/** True when the stop at the end of `text` belongs to an abbreviation, or to a list number like "1.". */
+function stopIsNotTheEnd({ text, next }: { text: string; next: string }): boolean {
   const word = /([A-Za-z.]+)\.$/.exec(text)?.[1]?.toLowerCase();
-  return word !== undefined && ABBREVIATIONS.has(word);
+  if (word !== undefined && ABBREVIATIONS.has(word)) {
+    return true;
+  }
+  // "No. 5" is a number; "No." alone is an answer.
+  if (word === 'no') {
+    return /\d/.test(next);
+  }
+  return /(?:^|\n)\s*\d+\.$/.test(text);
 }
 
 export class SentenceSplitter {
@@ -58,10 +68,14 @@ export class SentenceSplitter {
           }
           return undefined;
         }
-        if (/\s/.test(next) && !endsInAbbreviation(text.slice(0, i + 1))) {
+        if (/\s/.test(next) && !stopIsNotTheEnd({ text: text.slice(0, i + 1), next: text.slice(i + 1).trimStart() })) {
           return i + 1;
         }
       }
+    }
+    if (text.length >= MAX_SENTENCE_CHARS) {
+      const space = text.lastIndexOf(' ', MAX_SENTENCE_CHARS);
+      return space > 0 ? space + 1 : MAX_SENTENCE_CHARS;
     }
     return final && text.trim() !== '' ? text.length : undefined;
   }
