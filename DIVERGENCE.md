@@ -39,6 +39,8 @@ Resolution vocabulary:
 | docker-compose.yml                            | `server` service adds `extra_hosts: host.docker.internal:host-gateway` so a host-run custom model provider (e.g. Ollama) is reachable from the container on Linux Docker Engine, not just Docker Desktop |
 | scripts/generate-sdk.sh                       | Hardened backup/restore + version pinning around Fern                                                                                                                                                    |
 | scripts/check-no-private-data.mjs (ours only) | Private-data scan                                                                                                                                                                                        |
+| scripts/check-external-hosts.mjs (ours only)  | Outside-hosts check against scripts/external-hosts.allowlist.json                                                                                                                                        |
+| scripts/record-outbound-hosts.mjs (ours only) | Records the server's outbound hosts for the runtime outside-hosts check                                                                                                                                  |
 
 ## Memory subsystem (resolution: ours)
 

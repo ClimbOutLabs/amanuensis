@@ -33,7 +33,12 @@ export type {
 export { AgentThreadOrchestrator } from './runtime/AgentThreadOrchestrator';
 export { stageAttachment } from './runtime/attachmentStaging';
 export type { StagedAttachment } from './runtime/attachmentStaging';
-export { isHostWrappedText, isUntrustedDocumentText, personMessageIndex } from './runtime/contextUtils';
+export {
+  hostPictureMessage,
+  isHostWrappedText,
+  isUntrustedDocumentText,
+  personMessageIndex,
+} from './runtime/contextUtils';
 export type { CreateDynamicSubAgentThread } from './runtime/CreateDynamicSubAgentThread';
 export { measurePromptRequest } from './runtime/promptReport';
 export type { PromptReport, PromptReportInput, PromptReportRow } from './runtime/promptReport';
@@ -73,6 +78,7 @@ export type {
   AgentThreadExecutionContext,
   PostToolCallAgentContextProcessor,
   PreLLMEphemeralAgentContextProcessor,
+  PreLLMEphemeralCall,
   PreSendContextProcessor,
 } from './capabilities/AgentContextProcessor';
 export type { ToolResponseProcessor, ToolResponseProcessorResult } from './capabilities/ToolResponseProcessor';
@@ -484,6 +490,7 @@ export {
   BROWSER_SCREENSHOT_TOOL_NAME,
   BROWSER_SCROLL_TOOL_NAME,
   BROWSER_SELECT_TOOL_NAME,
+  BROWSER_SERVER_ID,
   BROWSER_TOOL_NAMES,
   BROWSER_TYPE_TOOL_NAME,
   isBrowserToolName,
