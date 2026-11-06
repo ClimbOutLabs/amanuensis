@@ -11,7 +11,12 @@ import { BrowserLivePage } from '../../src/BrowserLivePage';
 const params = new URLSearchParams(window.location.search);
 const mode = params.get('theme') === 'dark' ? 'dark' : 'light';
 
-createRoot(document.getElementById('root') as HTMLElement).render(
+const root = document.getElementById('root');
+if (root === null) {
+  throw new Error('the fixture page has no root element');
+}
+
+createRoot(root).render(
   <ThemeProvider theme={{ mode, brand: { mode: 'icon-title', name: 'Amanuensis' } }}>
     <BrowserLivePage />
   </ThemeProvider>,

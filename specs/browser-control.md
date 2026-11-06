@@ -16,7 +16,7 @@ The work lands in phases, each its own PR that links this spec:
 2. **Acting on a page.** Typing and clicking. Any click that submits something asks the person first, with an approval card that shows what will be sent.
 3. **Receipts.** A record of what Aman did in the browser, with a screenshot, that the person can look back at.
 
-Alongside these, a **live view** lets the person finish a step only they can do. Some pages need the person: a sign-in, a code sent to their phone, a picture check, or a cookie banner Aman cannot clear. The person opens Aman's live browser at `/browser-live` in Aman's own app, picks the tab, and sees it about twice a second. They click, scroll, type and upload a file into it, then press Done. What they did stays in their browser profile for Aman's next read, so a sign-in they finish keeps working. When a page needs such a step, the model tells the person to open the live view.
+Alongside these, a **live view** lets the person finish a step only they can do. Some pages need the person: a sign-in, a code sent to their phone, a picture check, or a cookie banner Aman cannot clear. The person opens Aman's live browser at `/browser-live` in Aman's own app, picks the tab, and sees it about twice a second. They click, scroll, type and upload a file into it, in the order they did it. Then they press Done and tell Aman in the chat that they are finished, since the turn that sent them there has ended. What they did stays in their browser profile for Aman's next read, so a sign-in they finish keeps working. When a page needs such a step, the model tells the person to open the live view.
 
 ## Key design decisions
 
@@ -65,7 +65,7 @@ Tests use synthetic data only: fixture web pages served locally and made-up site
   - real-browser fixtures for redirects, a page's own requests, popups, per-chat tabs and large pages
 - The permission tests cover the open checks, and the capability tests cover the requests the server sends and the replies it accepts, where the model's screenshots go in the request, the limit of three, and the error and closed-page messages.
 - A real-browser test checks that a screenshot gives a labelled copy and leaves the page as it was.
-- The live view's tests cover the sidecar routes with a stand-in page, the app server routes (sign-in required, the person's own profile only, size limits), and the page itself in a real browser against a stand-in server: the tabs, frames, clicks in frame pixels, typing, uploads and Done.
+- The live view's tests cover the sidecar routes with a stand-in page, the app server routes (sign-in required, the person's own profile only, size limits), and the page itself in a real browser against a stand-in server: the tabs, frames, clicks in frame pixels, typing in order, uploads and their errors, and Done. The live routes refuse a form posted from another site and an agent or API token.
 - The Compose tests check the network wall.
 
 ## Out of scope

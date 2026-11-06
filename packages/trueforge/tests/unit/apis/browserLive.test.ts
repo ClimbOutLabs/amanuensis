@@ -239,4 +239,28 @@ describe('browser live routes', () => {
     expect(response.status).toBe(401);
     expect(sent).toEqual([]);
   });
+  it('refuses an agent or API token, even alongside a browser session', async () => {
+    const { app, sent } = buildApp(() => ({ json: { status: 'ok', tabs: [] } }));
+    const response = await call(app, {
+      method: 'GET',
+      path: '/api/browser/live/tabs',
+      headers: { ...COOKIE, Authorization: 'Bearer agent-token' },
+    });
+    expect(response.status).toBe(401);
+    expect(sent).toEqual([]);
+  });
+
+  it('refuses a form posted from another site, without calling the sidecar', async () => {
+    const { app, sent } = buildApp(() => ({ json: { status: 'ok' } }));
+    const formBody = JSON.stringify({ tab: 'chat-1', kind: 'type', text: 'x' });
+    for (const path of ['/api/browser/live/input', '/api/browser/live/frame', '/api/browser/live/upload']) {
+      const response = await app.request(`http://localhost${path}`, {
+        method: 'POST',
+        headers: { ...COOKIE, 'content-type': 'text/plain', origin: 'https://evil.example' },
+        body: formBody,
+      });
+      expect(response.status).toBe(403);
+    }
+    expect(sent).toEqual([]);
+  });
 });

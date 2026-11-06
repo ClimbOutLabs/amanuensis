@@ -13,6 +13,7 @@ import {
   type BrowserProfileRef,
   type BrowserTabRef,
 } from '../runtime/browserCapability';
+import { requireJsonOrSameOrigin } from './crossSite';
 
 /** A tab id names a chat; it is the sidecar's own id shape, checked again there. */
 const TabIdSchema = z.string().min(1).max(256);
@@ -93,6 +94,11 @@ export function createBrowserLiveRouter(deps: BrowserLiveRouterDeps) {
     }
     return c.json({ data: { tabs: result.body.tabs } }, 200);
   });
+
+  // Every act below drives the person's own tab, so a form posted from another site must not reach it.
+  for (const path of ['/frame', '/input', '/upload']) {
+    app.use(path, requireJsonOrSameOrigin());
+  }
 
   app.post('/frame', async c => {
     const body: unknown = await c.req.json().catch(() => undefined);

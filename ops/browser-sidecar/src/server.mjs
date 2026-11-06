@@ -98,7 +98,71 @@ function createTab({ page }) {
     movedTo: undefined,
     // The page's last open file picker, waiting for the person to upload a file from the live view.
     fileChooser: undefined,
+    // The live view's acts, run one at a time in the order they arrived, so typed keys never swap.
+    liveActs: Promise.resolve(),
   };
+}
+
+/** Runs one live-view act after every act sent before it has finished, whether or not that one worked. */
+function inLiveOrder(tab, act) {
+  const run = tab.liveActs.then(act);
+  tab.liveActs = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
+/**
+ * One pointer or keyboard act from the live view. A click read from a frame of another size is
+ * scaled to the viewport, so it lands where the person clicked on the picture.
+ */
+async function liveAct(page, input) {
+  switch (input.kind) {
+    case 'click': {
+      const viewport = page.viewportSize();
+      const scale =
+        viewport !== null && input.imageWidth !== undefined && input.imageHeight !== undefined
+          ? { x: viewport.width / input.imageWidth, y: viewport.height / input.imageHeight }
+          : { x: 1, y: 1 };
+      await page.mouse.click(input.x * scale.x, input.y * scale.y);
+      break;
+    }
+    case 'type':
+      await page.keyboard.type(input.text);
+      break;
+    case 'key':
+      await page.keyboard.press(input.key);
+      break;
+    case 'wheel':
+      await page.mouse.wheel(0, input.dy);
+      break;
+  }
+  return { status: 'ok' };
+}
+
+/**
+ * Fills the file picker the page opened, once. When there is none, or it can no longer take the
+ * file (its field went away), the page's first file field gets it instead.
+ */
+async function putFile(tab, file) {
+  const chooser = tab.fileChooser;
+  tab.fileChooser = undefined;
+  if (chooser !== undefined && !chooser.page().isClosed()) {
+    const filled = await chooser.setFiles(file).then(
+      () => true,
+      () => false,
+    );
+    if (filled) {
+      return { status: 'ok' };
+    }
+  }
+  const field = tab.page.locator('input[type="file"]').first();
+  if ((await field.count()) === 0) {
+    return { status: 'no_file_field' };
+  }
+  await field.setInputFiles(file);
+  return { status: 'ok' };
 }
 
 /**
@@ -265,6 +329,12 @@ export class BrowserSidecar {
       // A file picker never opens on the virtual screen; the live view fills it with the person's file.
       page.on('filechooser', chooser => {
         tab.fileChooser = chooser;
+      });
+      // A picker belongs to the page that opened it; once the page has moved on, its element is gone.
+      page.on('framenavigated', frame => {
+        if (frame === page.mainFrame()) {
+          tab.fileChooser = undefined;
+        }
       });
       await guardRedirects({ tab, cdp: await profile.context.newCDPSession(page) });
       profile.tabs.set(tabId, tab);
@@ -563,28 +633,7 @@ export class BrowserSidecar {
     if (tab === undefined) {
       return NO_TAB;
     }
-    const page = tab.page;
-    switch (input.kind) {
-      case 'click': {
-        const viewport = page.viewportSize();
-        const scale =
-          viewport !== null && input.imageWidth !== undefined && input.imageHeight !== undefined
-            ? { x: viewport.width / input.imageWidth, y: viewport.height / input.imageHeight }
-            : { x: 1, y: 1 };
-        await page.mouse.click(input.x * scale.x, input.y * scale.y);
-        break;
-      }
-      case 'type':
-        await page.keyboard.type(input.text);
-        break;
-      case 'key':
-        await page.keyboard.press(input.key);
-        break;
-      case 'wheel':
-        await page.mouse.wheel(0, input.dy);
-        break;
-    }
-    return { status: 'ok' };
+    return inLiveOrder(tab, () => liveAct(tab.page, input));
   }
 
   /**
@@ -600,18 +649,7 @@ export class BrowserSidecar {
     if (file.buffer.length > MAX_UPLOAD_BYTES) {
       return { status: 'bad_input' };
     }
-    const chooser = tab.fileChooser;
-    tab.fileChooser = undefined;
-    if (chooser !== undefined && !chooser.page().isClosed()) {
-      await chooser.setFiles(file);
-      return { status: 'ok' };
-    }
-    const field = tab.page.locator('input[type="file"]').first();
-    if ((await field.count()) === 0) {
-      return { status: 'no_file_field' };
-    }
-    await field.setInputFiles(file);
-    return { status: 'ok' };
+    return inLiveOrder(tab, () => putFile(tab, file));
   }
 
   async close() {
