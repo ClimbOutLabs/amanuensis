@@ -12,12 +12,24 @@ Each backup is a new folder inside the hidden `.amanuensis` folder in your home 
 - the database with your chats, personas and settings, checked after copying;
 - your memory files and persona knowledge files;
 - the sign-in data and the instance settings, including its secrets;
-- the local certificate authority, so your devices keep trusting Aman after a restore;
+- the certificate of the local certificate authority, but never its private key, so after a restore each device trusts this computer again;
 - a `SHA256SUMS` file to check every file in the folder.
 
 If any part fails, the half-written folder is removed. The last 7 backups are kept and older ones are deleted.
 
+A backup made before an import or a restore has `-before-import` or `-before-restore` after its date. It does not count toward the 7 and stays until you delete it.
+
 Backups are not encrypted, and they contain secrets such as your model key. Treat them like a password file.
+
+## Go back to a backup
+
+To put an instance back the way a backup had it, run:
+
+```
+aman restore
+```
+
+It lists the backups, newest first, and asks which number to use. `aman restore --latest` takes the newest one without the list. It says what will be replaced and waits for you to type `yes`. Before it changes anything it saves a copy of what you have now and prints where it is, so you can go back again. If anything fails, it puts that copy back and says so. With more than one instance, give the name: `aman restore <name>`. See [Install](/install) for the details.
 
 ## Copy a backup off this computer
 

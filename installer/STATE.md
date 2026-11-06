@@ -98,6 +98,11 @@ already taken. Inside: one folder per instance that was backed up, a copy of
 `release/release.json`, a copy of the authority's `root.crt` under `tls/`
 (never its key), and `SHA256SUMS` with the hash of every file. Unlabelled
 backups are pruned to the newest seven.
+`install.sh restore` reads these folders: it accepts a backup only when every
+part its instance needs is there, `SHA256SUMS` matches, and neither
+`release.json`'s `schema` nor the instance's `manifest.json` version is newer
+than this installer's. The copy it saves first carries the label
+`before-restore`.
 
 ## The lock
 
