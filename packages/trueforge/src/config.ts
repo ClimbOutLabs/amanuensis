@@ -270,6 +270,26 @@ export function parseMailEmailAccountUrl(raw: string | undefined): string | unde
   return trimmed;
 }
 
+/** The shortest account secret the mail connector accepts; a shorter one keeps its account port closed. */
+const MAIL_EMAIL_ACCOUNT_SECRET_MIN_LENGTH = 32;
+
+/**
+ * Parses `MAIL_EMAIL_ACCOUNT_SECRET`: the value the mail connector's account agent needs before it answers.
+ * Unset or blank means none. A value that is too short fails the boot, since the connector would refuse it.
+ */
+export function parseMailEmailAccountSecret(raw: string | undefined): string | undefined {
+  if (raw === undefined || raw.trim() === '') {
+    return undefined;
+  }
+  const trimmed = raw.trim();
+  if (trimmed.length < MAIL_EMAIL_ACCOUNT_SECRET_MIN_LENGTH) {
+    throw new Error(
+      `MAIL_EMAIL_ACCOUNT_SECRET must be at least ${String(MAIL_EMAIL_ACCOUNT_SECRET_MIN_LENGTH)} characters. Set a longer random value, or remove the line to leave the Email card off.`,
+    );
+  }
+  return trimmed;
+}
+
 /**
  * A sidecar's MCP endpoint derived from its account agent's address: same scheme and host, the MCP
  * port, the /mcp path. Used when the installer has not linked the connector but an account saved
@@ -1343,6 +1363,12 @@ export interface SharedServerConfiguration {
    */
   MAIL_EMAIL_ACCOUNT_URL: string | undefined;
   /**
+   * The secret the mail connector's account agent needs before it answers. The same value is given to the
+   * connector. With an account URL but no secret the Settings Email card is left off.
+   * Env: `MAIL_EMAIL_ACCOUNT_SECRET`. Default unset.
+   */
+  MAIL_EMAIL_ACCOUNT_SECRET: string | undefined;
+  /**
    * The mail sidecar's MCP endpoint this host owns, resolved once: MAIL_EMAIL_MCP_URL, else the one derived
    * from MAIL_EMAIL_ACCOUNT_URL. An Email connector at this address is first-party. Default unset.
    */
@@ -2318,6 +2344,7 @@ const shared: SharedServerConfiguration = {
   MAIL_EMAIL_MCP_URL: mailEmailMcpUrl,
   MAIL_SIDECAR_MCP_URL: mailSidecarMcpUrl,
   MAIL_EMAIL_ACCOUNT_URL: mailEmailAccountUrl,
+  MAIL_EMAIL_ACCOUNT_SECRET: parseMailEmailAccountSecret(getEnv('MAIL_EMAIL_ACCOUNT_SECRET')),
   WEB_PUSH: parseWebPushSettings({
     publicKey: getEnv('WEB_PUSH_PUBLIC_KEY'),
     privateKey: getEnv('WEB_PUSH_PRIVATE_KEY'),

@@ -65,6 +65,13 @@ describe('mail and calendar sidecars', () => {
     expect(service.ports).toBeUndefined();
   });
 
+  it('the server and the account agent share one account secret, and neither side holds its value', () => {
+    const shared =
+      '${MAIL_EMAIL_ACCOUNT_SECRET:?set MAIL_EMAIL_ACCOUNT_SECRET to a random value of 32 or more characters, for example from openssl rand -hex 32}';
+    expect(serviceNamed('server').environment?.['MAIL_EMAIL_ACCOUNT_SECRET']).toBe(shared);
+    expect(serviceNamed('mail-email').environment?.['AMAN_MAIL_ACCOUNT_SECRET']).toBe(shared);
+  });
+
   it('the server is pointed at the account agent, never at the Docker socket', () => {
     const service = serviceNamed('server');
     expect(service.environment?.['MAIL_EMAIL_ACCOUNT_URL']).toBe('http://mail-email:9559');

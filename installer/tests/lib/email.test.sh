@@ -379,6 +379,37 @@ test_instance_commands_keep_the_connector() {
   sandbox_drop
 }
 
+test_agent_secret() {
+  t_begin "the app and the email connector share one secret through the settings file"
+  sandbox_new
+  install_with_gmail
+  local env=$AMAN_HOME/instances/main/.env compose=$AMAN_HOME/instances/main/compose.yaml first
+  first=$(sed -n 's/^MAIL_EMAIL_ACCOUNT_SECRET=//p' "$env")
+  assert_eq "${#first}" 64 "a random secret of 64 characters is made"
+  assert_not_contains "$(cat "$compose")" "$first" "the compose file never holds the secret"
+  assert_contains "$(cat "$compose")" "AMAN_MAIL_ACCOUNT_SECRET: \${MAIL_EMAIL_ACCOUNT_SECRET:?missing from .env}" "the compose file points the connector at the shared secret"
+  run_install instance email main --remove
+  assert_rc 0
+  assert_eq "$(sed -n 's/^MAIL_EMAIL_ACCOUNT_SECRET=//p' "$env")" "$first" "the same secret is still there"
+  sandbox_drop
+}
+
+test_an_older_instance_gets_a_mail_secret() {
+  t_begin "an instance whose settings file has no mail secret gets one on the next email command"
+  sandbox_new
+  install_with_gmail
+  local env=$AMAN_HOME/instances/main/.env made
+  grep -v '^MAIL_EMAIL_ACCOUNT_SECRET=' "$env" >"$env.new"
+  mv "$env.new" "$env"
+  chmod 600 "$env"
+  run_install instance email main --remove
+  assert_rc 0
+  made=$(sed -n 's/^MAIL_EMAIL_ACCOUNT_SECRET=//p' "$env")
+  assert_eq "${#made}" 64 "a secret of 64 characters is made"
+  assert_mode "$env" 600
+  sandbox_drop
+}
+
 test_instance_email_needs_the_connector_installed() {
   t_begin "instance email on a version without the email connector says to upgrade and changes nothing"
   sandbox_new
@@ -395,6 +426,8 @@ test_instance_email_needs_the_connector_installed() {
 }
 
 test_presets_write_their_servers
+test_agent_secret
+test_an_older_instance_gets_a_mail_secret
 test_instance_commands_keep_the_connector
 test_instance_email_needs_the_connector_installed
 test_sign_in_check_against_a_local_server

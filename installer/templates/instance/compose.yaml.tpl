@@ -192,7 +192,7 @@ services:
 # Email connector. It starts with the instance, and the app reaches it at http://mail-email:9557/mcp on this project's
 # private network. Nothing is published. The account lives in a volume this sidecar owns, which the installer writes
 # through the sidecar's account agent and the Settings Email card changes through the same agent on port 9559,
-# also private-network only.
+# also private-network only. The account agent answers only a caller that presents this instance's secret.
 @@IF_EMAIL@@  mail-email:
 @@IF_EMAIL@@    image: @@MAIL_EMAIL_IMAGE@@
 @@IF_EMAIL@@    pull_policy: never
@@ -209,6 +209,8 @@ services:
 @@IF_EMAIL@@      # The account agent: the account file it owns, its private-network port, and its own path in the image.
 @@IF_EMAIL@@      AMAN_MAIL_ACCOUNT_FILE: /account/.env.mail-email
 @@IF_EMAIL@@      AMAN_MAIL_ACCOUNT_PORT: '9559'
+@@IF_EMAIL@@      # Shared with the app through .env, which the installer fills in once.
+@@IF_EMAIL@@      AMAN_MAIL_ACCOUNT_SECRET: ${MAIL_EMAIL_ACCOUNT_SECRET:?missing from .env}
 @@IF_EMAIL@@      AMAN_MAIL_ACCOUNT_AGENT: /usr/local/bin/aman-mail-account-agent
 @@IF_EMAIL@@      AMAN_MAIL_EMAIL_CHECK: /usr/local/bin/aman-mail-email-check
 @@IF_EMAIL@@      MCP_EMAIL_SERVER_ENABLE_ATTACHMENT_CONTENT: 'true'

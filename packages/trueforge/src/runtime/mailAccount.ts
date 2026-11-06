@@ -230,6 +230,7 @@ export function syncMailConnectorWithAccount(deps: {
  */
 export function registerMailConnectorFromSavedAccountInBackground(deps: {
   accountUrl: string | undefined;
+  secret: string | undefined;
   mcpUrl: string | undefined;
   policyPath: string | undefined;
   fetchImpl: typeof fetch | undefined;
@@ -242,7 +243,16 @@ export function registerMailConnectorFromSavedAccountInBackground(deps: {
   if (deps.accountUrl === undefined || deps.mcpUrl === undefined) {
     return;
   }
-  const clientDeps = { accountUrl: deps.accountUrl, fetchImpl: deps.fetchImpl, logger: deps.logger };
+  if (deps.secret === undefined) {
+    deps.logger.warn('Email connector is off: MAIL_EMAIL_ACCOUNT_SECRET is not set. Set it to turn the Email card on.');
+    return;
+  }
+  const clientDeps = {
+    accountUrl: deps.accountUrl,
+    secret: deps.secret,
+    fetchImpl: deps.fetchImpl,
+    logger: deps.logger,
+  };
   void keepConnectorInStepInBackground({
     readState: () => getMailAccountState(clientDeps),
     apply: state =>

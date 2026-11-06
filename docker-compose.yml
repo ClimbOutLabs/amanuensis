@@ -134,6 +134,9 @@ services:
       MAIL_POLICY_STATUS_FILE: /data/mail-policy-status/loaded.sha256
       # The sidecar's account agent, which the Settings Email card talks to (see mail-email).
       MAIL_EMAIL_ACCOUNT_URL: http://mail-email:9559
+      # Guards the mail account port; the same value goes to mail-email. Made like the calendar secret below:
+      # `pnpm smoke` makes a random one for each run, and for plain `docker compose` set it in the shell.
+      MAIL_EMAIL_ACCOUNT_SECRET: ${MAIL_EMAIL_ACCOUNT_SECRET:?set MAIL_EMAIL_ACCOUNT_SECRET to a random value of 32 or more characters, for example from openssl rand -hex 32}
       # The calendar sidecar's account agent, which the Settings Calendar card talks to (see calendar-caldav).
       CALENDAR_ACCOUNT_URL: http://calendar-caldav:9560
       # Guards the calendar account port; the same value goes to calendar-caldav. There is no default: `pnpm smoke`
@@ -261,6 +264,8 @@ services:
       # The account agent: the account file it owns, its private-network port, and its own path in the image.
       AMAN_MAIL_ACCOUNT_FILE: /account/.env.mail-email
       AMAN_MAIL_ACCOUNT_PORT: '9559'
+      # Only a caller that presents this secret can read, replace or remove the account (same value as the server).
+      AMAN_MAIL_ACCOUNT_SECRET: ${MAIL_EMAIL_ACCOUNT_SECRET:?set MAIL_EMAIL_ACCOUNT_SECRET to a random value of 32 or more characters, for example from openssl rand -hex 32}
       AMAN_MAIL_ACCOUNT_AGENT: /usr/local/bin/aman-mail-account-agent
       AMAN_MAIL_EMAIL_CHECK: /usr/local/bin/aman-mail-email-check
       # Attachment content is read only so the server can hand it to the agent as data, never as instructions.
