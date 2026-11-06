@@ -325,6 +325,7 @@ describe('Data export route', () => {
       aliases: [],
       instructions: 'You research carefully.',
       model_name: 'test-provider/test-model',
+      voice: null,
     });
     await personaStore.createPersona({
       tenant_id: TENANT_ID,
@@ -335,6 +336,7 @@ describe('Data export route', () => {
       aliases: [],
       instructions: 'Bob only.',
       model_name: 'test-provider/test-model',
+      voice: null,
     });
     await new SqlitePersonalizationStore(db).upsertProfile({
       tenant_id: TENANT_ID,

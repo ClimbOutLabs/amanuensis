@@ -39,7 +39,12 @@ export interface PersonaContent {
   instructions: string;
   /** Fully qualified `provider/model`, resolved through the existing model contract. */
   model_name: string;
+  /** Reading voice for this persona's spoken replies; null falls back to the person's own voice choice. */
+  voice: string | null;
 }
+
+/** The names that invoke a persona; all that name matching and collision checks read. */
+export type PersonaNames = Pick<PersonaContent, 'display_name' | 'aliases'>;
 
 export interface Persona extends PersonaContent {
   tenant_id: string;
@@ -111,7 +116,7 @@ export interface PersonaContentNameConflict {
  * "the") — a persona literally named "my" would shadow the determiner skip
  * in the invocation grammar and could never be addressed without ambiguity.
  */
-export function findPersonaContentNameConflict(content: PersonaContent): PersonaContentNameConflict | undefined {
+export function findPersonaContentNameConflict(content: PersonaNames): PersonaContentNameConflict | undefined {
   const displayName = content.display_name.trim().replace(/\s+/g, ' ');
   const displayKey = personaMatchKey(displayName);
   if (isPersonaDeterminer(displayKey)) {
@@ -158,7 +163,7 @@ export class PersonaContentNameConflictError extends Error {
 }
 
 /** Every name that invokes a persona: its display name plus its aliases. */
-export function personaNameKeys(content: PersonaContent): string[] {
+export function personaNameKeys(content: PersonaNames): string[] {
   return [content.display_name, ...content.aliases].map(personaMatchKey).filter(key => key.length > 0);
 }
 
@@ -174,6 +179,7 @@ export function normalizePersonaContent(content: PersonaContent): PersonaContent
     aliases,
     instructions: content.instructions.trim(),
     model_name: content.model_name.trim(),
+    voice: content.voice,
   };
 }
 
@@ -305,7 +311,7 @@ function matchesInvocation(probe: string, key: string, options?: { leadInOnly?: 
  * assistant's name shows up in ordinary conversation ("Mannie, I have a
  * friend named Inez."), so only an explicit lead-in counts as a switch.
  */
-export function matchPersonaInvocation<T extends PersonaContent>(input: {
+export function matchPersonaInvocation<T extends PersonaNames>(input: {
   text: string;
   personas: T[];
   /**

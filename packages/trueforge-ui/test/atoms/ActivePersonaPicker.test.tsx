@@ -15,7 +15,7 @@ vi.mock('@/assistant-ui.js', () => ({
 
 import { ActivePersonaIndicator } from '@/atoms/ActivePersonaIndicator.js';
 import { PersonaProvider, type Persona, type PersonaApi, type SessionPersona } from '@/components/PersonaContext.js';
-import { personaKnowledgeApiStubs } from '../personaApiStubs.js';
+import { personaApiStubs } from '../personaApiStubs.js';
 
 const ZARA: Persona = {
   id: 'p-zara',
@@ -23,6 +23,7 @@ const ZARA: Persona = {
   aliases: ['Z'],
   instructions: 'Answer as a careful archivist.',
   model_name: 'anthropic/haiku',
+  voice: null,
 };
 
 const NOVA: Persona = {
@@ -31,6 +32,7 @@ const NOVA: Persona = {
   aliases: [],
   instructions: 'Answer as a terse engineer.',
   model_name: 'openai/gpt-4.1',
+  voice: null,
 };
 
 const ZARA_ACTIVE: SessionPersona = {
@@ -55,7 +57,7 @@ async function unavailable(): Promise<never> {
 
 function renderPicker(overrides: Partial<PersonaApi>, personas: Persona[] = [ZARA, NOVA]) {
   const api: PersonaApi = {
-    ...personaKnowledgeApiStubs,
+    ...personaApiStubs,
     listPersonas: async () => personas,
     createPersona: unavailable,
     updatePersona: unavailable,

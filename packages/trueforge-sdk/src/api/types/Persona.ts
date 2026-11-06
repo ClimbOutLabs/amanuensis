@@ -15,4 +15,6 @@ export interface Persona {
     modelName: string;
     updatedAt: Date;
     updatedBy: string;
+    /** Voice id used to read this persona’s replies aloud, e.g. `af_bella`. Null uses the person’s own voice choice. */
+    voice: string | null;
 }

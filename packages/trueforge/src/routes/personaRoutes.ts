@@ -6,6 +6,7 @@ import {
   GetPersonaContextResponseSchema,
   GetPersonaResponseSchema,
   GetSessionPersonaResponseSchema,
+  GetTurnPersonaResponseSchema,
   ListPersonaActivationsResponseSchema,
   ListPersonasResponseSchema,
   PersonaIdParamsSchema,
@@ -13,6 +14,7 @@ import {
   UpdatePersonaRequestSchema,
 } from '../schemas/persona';
 import { SessionIdParamsSchema } from '../schemas/session';
+import { TurnIdParamsSchema } from '../schemas/turn';
 import { OpenApiTag } from './openapiTags';
 
 const protectedResponses = {
@@ -205,6 +207,30 @@ export const listSessionPersonaActivationsRoute = createRoute({
     },
     403: { content: { 'application/json': { schema: RequestErrorResponseSchema } }, description: 'Not the creator.' },
     404: { content: { 'application/json': { schema: RequestErrorResponseSchema } }, description: 'No such session.' },
+    ...protectedResponses,
+  },
+});
+
+export const getTurnPersonaRoute = createRoute({
+  method: 'get',
+  path: '/{session_id}/turns/{turn_id}/persona',
+  tags: [OpenApiTag.PERSONAS],
+  summary: 'Get the persona that answered a turn',
+  description:
+    'Returns which persona answered this turn, or null when the default assistant did. Later persona switches do not change it.',
+  'x-fern-sdk-group-name': ['session-personas'],
+  'x-fern-sdk-method-name': 'get_turn',
+  request: { params: TurnIdParamsSchema },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: GetTurnPersonaResponseSchema } },
+      description: 'Persona for the turn.',
+    },
+    403: { content: { 'application/json': { schema: RequestErrorResponseSchema } }, description: 'Not the creator.' },
+    404: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'No such session or turn.',
+    },
     ...protectedResponses,
   },
 });

@@ -690,6 +690,7 @@ describe('internal schedule execution', () => {
         aliases: [],
         instructions: 'Be brief.',
         model_name: 'openai/gpt-5.2',
+        voice: null,
         created_by: 'alice',
         created_at: '2026-08-31T00:00:00.000Z',
         updated_at: '2026-08-31T00:00:00.000Z',

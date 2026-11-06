@@ -117,6 +117,18 @@ save it, because an invocation that could mean two personas has no correct answe
 If a persona's model is no longer configured, invoking it fails visibly and the assignment
 is kept, so you can point it at another model rather than losing it.
 
+### A voice for each persona
+
+A persona can have its own voice for replies read aloud. Pick it under **Voice** when you
+add or edit the persona. Picking one plays a short sample. Its replies are then read in that
+voice, both when you talk to it and when you tap the speaker button under one of its replies.
+Leave it on "Same as my voice setting" to use the voice picked in Settings, Themes, under
+"Voice replies". The main assistant always uses that voice.
+
+The choice is saved with the persona, so it follows you to every browser. The picker shows
+only when the voice on your computer is set up. When that voice is not running, your
+browser's own voice reads the reply instead.
+
 ## API
 
 ```text
@@ -128,7 +140,15 @@ GET    /api/v1/personas/{persona_id}/context
 GET    /api/v1/sessions/{session_id}/persona
 PUT    /api/v1/sessions/{session_id}/persona
 GET    /api/v1/sessions/{session_id}/persona-activations
+GET    /api/v1/sessions/{session_id}/turns/{turn_id}/persona
 ```
+
+A persona's `voice` is the voice id its replies are read in, such as `af_bella`, or `null`
+for the person's own voice choice. Create and update requests must send it.
+
+`GET /api/v1/sessions/{session_id}/turns/{turn_id}/persona` says which persona answered one
+turn (`persona_id`, or `null` for the default assistant). Switching persona later does not
+change it, so an older reply is read in the voice of the persona that wrote it.
 
 `GET /api/v1/personas/{persona_id}/context` returns the exact text a root thread receives
 when that persona answers, so nothing about the persona is hidden.

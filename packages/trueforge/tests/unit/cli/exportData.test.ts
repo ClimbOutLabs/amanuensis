@@ -354,6 +354,7 @@ describe('aman export-data against a real database', () => {
         aliases: [],
         instructions: 'Research.',
         model_name: 'test-provider/test-model',
+        voice: null,
       });
     });
     await mkdir(path.join(scratch, 'memory', 'default'), { recursive: true });
@@ -408,6 +409,7 @@ describe('aman export-data against a real database', () => {
       aliases: [],
       instructions: 'Help.',
       model_name: 'test-provider/test-model',
+      voice: null,
     });
     await database(async db => {
       await seedSession(db, 'alice', 'a1');

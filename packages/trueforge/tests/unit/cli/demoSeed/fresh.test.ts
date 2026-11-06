@@ -85,6 +85,7 @@ describe('start fresh against the real stores', () => {
       aliases: [],
       instructions: 'A persona somebody made.',
       model_name: MODEL_NAME,
+      voice: null,
     });
     const agent = await stores.agentStore.createAgent({
       host_managed: false,

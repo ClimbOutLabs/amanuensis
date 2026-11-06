@@ -126,6 +126,7 @@ async function createPersona(deps: DataExportDeps<never>, input: { id: string; n
     aliases: [],
     instructions: 'Research.',
     model_name: 'test-provider/test-model',
+    voice: null,
   });
 }
 

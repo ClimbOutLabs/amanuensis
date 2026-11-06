@@ -118,6 +118,7 @@ export async function ensureAmanGuide(input: {
         aliases: [],
         instructions: AMAN_GUIDE_INSTRUCTIONS,
         model_name: modelName,
+        voice: null,
       });
     } else if (existing.instructions !== AMAN_GUIDE_INSTRUCTIONS) {
       // Only the bundled instructions are refreshed. The name, model and aliases are the person's to change.
@@ -128,6 +129,7 @@ export async function ensureAmanGuide(input: {
         aliases: existing.aliases,
         instructions: AMAN_GUIDE_INSTRUCTIONS,
         model_name: existing.model_name,
+        voice: existing.voice,
       });
     }
   } catch (error) {

@@ -48,7 +48,7 @@ async function createPersona(
   server: ApprovalTestServer,
   persona: { display_name: string; aliases: string[]; instructions: string; model_name: string },
 ): Promise<string> {
-  const response = await server.request('/api/v1/personas', jsonInit({ persona }));
+  const response = await server.request('/api/v1/personas', jsonInit({ persona: { ...persona, voice: null } }));
   const body: unknown = await response.json();
   if (response.status !== 201) {
     throw new Error(`persona create failed (${String(response.status)}): ${JSON.stringify(body)}`);

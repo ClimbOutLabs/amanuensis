@@ -9,6 +9,7 @@ const guide: PersonaContent = {
   aliases: [],
   instructions: 'You are Iris.',
   model_name: 'tokenfactory/guide-model',
+  voice: null,
 };
 
 describe('Get to know Aman card message', () => {

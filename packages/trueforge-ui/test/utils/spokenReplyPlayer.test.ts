@@ -51,6 +51,17 @@ describe('createSpokenReplyPlayer', () => {
     expect(server.voices).toEqual(['af_heart', 'am_fenrir', 'af_heart']);
   });
 
+  it('reads every piece of one reply in the voice it was given, over the person’s own choice', async () => {
+    const server = serverVoice(text => Promise.resolve(wav(text)));
+    const player = createSpokenReplyPlayer({ serverVoice: server, playAudio: () => Promise.resolve() });
+    window.localStorage.setItem(SERVER_VOICE_STORAGE_KEY, 'am_fenrir');
+
+    await player.speak(`${'a'.repeat(1100)}. ${'b'.repeat(1100)}.`, { voice: 'af_bella' });
+    await player.speak('Back to mine.', { voice: undefined });
+
+    expect(server.voices).toEqual(['af_bella', 'af_bella', 'am_fenrir']);
+  });
+
   it('prefers the server voice when it answers', async () => {
     const server = serverVoice(text => Promise.resolve(wav(text)));
     const played: string[] = [];

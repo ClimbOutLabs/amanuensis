@@ -10,6 +10,7 @@ export const PersonaContent: core.serialization.ObjectSchema<serializers.Persona
         displayName: core.serialization.property("display_name", core.serialization.string()),
         instructions: core.serialization.string(),
         modelName: core.serialization.property("model_name", core.serialization.string()),
+        voice: core.serialization.string().nullable(),
     });
 
 export declare namespace PersonaContent {
@@ -18,5 +19,6 @@ export declare namespace PersonaContent {
         display_name: string;
         instructions: string;
         model_name: string;
+        voice?: string | null;
     }
 }
