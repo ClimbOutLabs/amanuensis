@@ -407,6 +407,24 @@ describe('a conversation on the phone', () => {
     expect(ended.at(-1)?.detail).toContain('the call ended before you said it was a good time');
   });
 
+  it('gives back the listening model once the call is over', async () => {
+    let released = 0;
+    class ReleasedVad extends LoudnessVad {
+      dispose(): Promise<void> {
+        released += 1;
+        return Promise.resolve();
+      }
+    }
+    h = await callsHarness({ listening: () => Promise.resolve({ vad: new ReleasedVad(), stt: new FakeStt() }) });
+    await h.readyToCall();
+    await h.callDelivery();
+    const media = await h.openMedia({ token: (await h.answer()).token });
+    await h.waitFor(() => h.tts.sentences.length >= 3);
+    expect(released).toBe(0);
+    media.socket.close();
+    await h.waitFor(() => released === 1);
+  });
+
   it('closes the line at the time limit even when the assistant is stuck mid-sentence', async () => {
     const stuck = new FakeTts({ delay: () => new Promise<void>(() => undefined) });
     h = await callsHarness({ tts: stuck, limits: { talkMs: 60, hangUpGraceMs: 40 } });
