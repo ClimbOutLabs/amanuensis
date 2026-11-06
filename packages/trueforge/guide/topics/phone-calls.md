@@ -9,7 +9,7 @@ Aman can phone you when something urgent needs you. Calls are off until you turn
 ## Turn calls on
 
 1. Set up texts first. Calls use the same Twilio account and ring the number you confirmed for texts.
-2. Make sure voice mode works. A call uses the same voice and listening parts.
+2. Make sure voice mode works. A call uses the same voice and listening parts. It speaks with the default voice, because the voice you pick is kept in your browser.
 3. Go to **Settings**, then **Reach me**. Switch **Phone calls** on and tick what may call you. Then save.
 4. Press **Try it** next to Phone calls. Your phone rings with a test call.
 

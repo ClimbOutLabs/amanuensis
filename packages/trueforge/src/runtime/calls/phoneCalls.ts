@@ -83,7 +83,7 @@ const ENDED_WORDS = {
   ended: 'You answered. The call ended. Anything that was said is in the chat.',
 } as const;
 
-/** What a call listens with. It speaks with the same voice a voice session in the app uses. */
+/** What a call listens with. It speaks with the voice service's default voice. */
 export type CallListening = Pick<VoiceSessionDeps, 'vad' | 'stt'>;
 type CallSpeaking = VoiceSessionDeps['tts'];
 
@@ -137,8 +137,8 @@ interface PhoneCallDeps {
   /** Read when needed: the delivery service is made after its channels. */
   deliveries: () => Pick<DeliveryService, 'fallBack' | 'recordAttempt'>;
   chats: CallChats;
-  /** The voice; a voicemail needs only this. */
-  speaking: () => CallSpeaking;
+  /** The voice for a call to this person; a voicemail needs only this. */
+  speaking: (owner: { tenant_id: string; created_by: string }) => CallSpeaking;
   /** What a conversation listens with, loaded once the person is on the line. */
   listening: () => Promise<CallListening>;
   logger: Logger;
@@ -453,7 +453,9 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
         try {
           const text = CALL_LINES.voicemail(spokenName(await namesFor(call)));
           // Said only as written, or not at all: a voicemail is heard by whoever plays it back.
-          const voice = deps.speaking().stream({ text, format: 'mulaw8k', signal: abort.signal, exact: true });
+          const voice = deps
+            .speaking({ tenant_id: call.tenant_id, created_by: call.created_by })
+            .stream({ text, format: 'mulaw8k', signal: abort.signal, exact: true });
           for await (const chunk of voice) {
             transport.sendAudio(chunk);
           }
@@ -625,7 +627,7 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
       });
       const session = new VoiceSession({
         ...listening,
-        tts: deps.speaking(),
+        tts: deps.speaking(owner),
         transport,
         turns,
         // Timings and reason codes only: what was said is never logged.

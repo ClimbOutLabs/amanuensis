@@ -1,6 +1,6 @@
 import { SpeechRateLimiter } from '../../../src/voice/speechRateLimit';
 import { WouldChangeTextError } from '../../../src/voice/transport';
-import { SidecarSpeechSynthesizer, WholeSamples } from '../../../src/voice/ttsClient';
+import { probeTtsHealth, SidecarSpeechSynthesizer, WholeSamples } from '../../../src/voice/ttsClient';
 
 function streamOf(...pieces: Uint8Array[]): Response {
   return new Response(
@@ -169,5 +169,30 @@ describe('SidecarSpeechSynthesizer with exact', () => {
     );
     await expect(read).rejects.toThrow(/did not check/);
     await expect(read).rejects.not.toBeInstanceOf(WouldChangeTextError);
+  });
+});
+
+describe('the voice service health check', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  const answering = (body: unknown) =>
+    jest.spyOn(globalThis, 'fetch').mockImplementation(() => Promise.resolve(Response.json(body)));
+
+  it('is healthy once the model is loaded', async () => {
+    answering({ status: 'ok', model_loaded: true });
+    await expect(probeTtsHealth()).resolves.toBe(true);
+  });
+
+  it('needs the service to say it checks exact speech, when exact speech is needed', async () => {
+    answering({ status: 'ok', model_loaded: true });
+    await expect(probeTtsHealth({ exact: true })).resolves.toBe(false);
+    jest.restoreAllMocks();
+    answering({ status: 'ok', model_loaded: true, exact: true });
+    await expect(probeTtsHealth({ exact: true })).resolves.toBe(true);
+    jest.restoreAllMocks();
+    answering({ status: 'ok', model_loaded: false, exact: true });
+    await expect(probeTtsHealth({ exact: true })).resolves.toBe(false);
   });
 });

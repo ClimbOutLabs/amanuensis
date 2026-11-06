@@ -17,12 +17,18 @@ export function ttsBaseUrl(): string {
 
 const TTS_HEALTH_TIMEOUT_MS = 2_000;
 
-/** True when the voice service answers and has its model loaded. */
-export async function probeTtsHealth(): Promise<boolean> {
+/**
+ * True when the voice service answers and has its model loaded. With `exact`, it must also say it checks exact speech:
+ * an older service ignores `exact` and would speak anything.
+ */
+export async function probeTtsHealth({ exact = false }: { exact?: boolean } = {}): Promise<boolean> {
   try {
     const response = await fetch(`${ttsBaseUrl()}/healthz`, { signal: AbortSignal.timeout(TTS_HEALTH_TIMEOUT_MS) });
     const body: unknown = response.ok ? await response.json() : undefined;
-    return typeof body === 'object' && body !== null && 'model_loaded' in body && body.model_loaded === true;
+    if (typeof body !== 'object' || body === null || !('model_loaded' in body) || body.model_loaded !== true) {
+      return false;
+    }
+    return !exact || ('exact' in body && body.exact === true);
   } catch {
     return false;
   }

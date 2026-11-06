@@ -123,7 +123,7 @@ import { ActiveTurnRegistry } from './runtime/activeTurns';
 import { registerCalendarConnectorForBoot } from './runtime/calendarAccount';
 import { createCallAnswerer } from './runtime/calls/callAnswerer';
 import { createCallChats } from './runtime/calls/callChats';
-import { callVoiceReady } from './runtime/calls/callVoiceReady';
+import { callVoiceReady, createCallReadiness } from './runtime/calls/callVoiceReady';
 import { createPhoneCallService } from './runtime/calls/phoneCalls';
 import { createTwilioCallProvider } from './runtime/calls/twilioCalls';
 import { createChatImageService } from './runtime/chatImages/chatImageService';
@@ -182,6 +182,7 @@ import { INBOUND_SMS_PATH, inboundSmsRoute } from './twilioWebhook/inboundSms';
 import { twilioListenerFor } from './twilioWebhook/listener';
 import { phoneCallRoutes } from './twilioWebhook/voiceCall';
 import { ensureWritableDataDir } from './utils/dataDir';
+import { speechLimiter } from './voice/speechRateLimit';
 import { isVoiceAvailable, startSttAvailabilityWatcher } from './voice/sttAvailability';
 import { SidecarSpeechToText } from './voice/sttClient';
 import { probeTtsHealth, SidecarSpeechSynthesizer } from './voice/ttsClient';
@@ -843,10 +844,26 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
       : { number_key: configuration.TWILIO.authToken, max_texts_per_day: configuration.TWILIO.maxTextsPerDay };
   // Set when the Twilio number could not be pointed at this server at boot, so Settings can say what to do.
   const twilioNumber: { problem: PointNumberFailure | undefined } = { problem: undefined };
+  // Whether a call can listen and speak is checked in one place: placing a call checks again, and Reach me, Noticing
+  // and Try it read the last answer, so none of them offers a call that would ring deaf or silent.
+  const callReadiness = createCallReadiness(() =>
+    callVoiceReady({
+      sttReady: isVoiceAvailable,
+      ttsReady: () => probeTtsHealth({ exact: true }),
+      vadModel: readyVadModel,
+    }),
+  );
+  if (configuration.TWILIO !== undefined) {
+    void callReadiness.check();
+    const callReadinessTimer = setInterval(() => {
+      void callReadiness.check();
+    }, 30_000);
+    callReadinessTimer.unref();
+  }
   const reachChannels = (input?: { viewer: ChannelViewer }) =>
     reachChannelsFor({
       twilio: configuration.TWILIO,
-      voiceReady: isVoiceAvailable(),
+      voiceReady: callReadiness.current(),
       numberProblem: twilioNumber.problem,
       viewer: input?.viewer ?? 'person',
     });
@@ -861,7 +878,8 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
       created_by_subject: {
         subject_id: owner.created_by,
         subject_type: 'user',
-        subject_display_name: owner.created_by,
+        // Only the id decides which model a call answers with; no name is needed.
+        subject_display_name: '',
       },
     });
   const phoneCalls = createPhoneCallService({
@@ -878,7 +896,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
             accountSid: configuration.TWILIO.accountSid,
             publicUrl: configuration.TWILIO.webhookPublicUrl,
           },
-    voiceReady: () => callVoiceReady({ sttReady: isVoiceAvailable, ttsReady: probeTtsHealth, vadModel: readyVadModel }),
+    voiceReady: callReadiness.check,
     deliveries: () => {
       if (callDeps.deliveries === undefined) {
         throw new Error('The delivery service is not ready yet.');
@@ -902,7 +920,12 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
           logger,
         }),
     }),
-    speaking: () => new SidecarSpeechSynthesizer(),
+    // Shares the person's place at the voice service with voice mode and read-aloud, so a call waits its turn
+    // instead of being turned away. The voice the person picked is kept in their browser, so calls use the default.
+    speaking: owner =>
+      new SidecarSpeechSynthesizer({
+        share: { limiter: speechLimiter, person: `${owner.tenant_id}:${owner.created_by}` },
+      }),
     listening: async () => ({
       vad: await SileroSpeechProbability.load({ model: await readyVadModel() }),
       stt: new SidecarSpeechToText(),

@@ -47,7 +47,7 @@ The chat keeps the call as a record, with what was said on both sides in quotes.
 ## Set it up
 
 1. Set up [Text messages](/text-messages) first. Calls use the same Twilio account, number and settings, and they ring the number you confirmed there. Your Twilio number must be able to make voice calls.
-2. Make sure the voice and speech parts of Aman are running. Calls use the same voice and speech-to-text as voice mode. See [Voice input](/voice-input). While they are not running, Reach me shows calls as not available, and nothing rings.
+2. Make sure the voice and speech parts of Aman are running. Calls use the same voice service and speech-to-text as voice mode. A call speaks with the default voice, because the voice you pick is kept in your browser. See [Voice input](/voice-input). While they are not running, Reach me shows calls as not available, and nothing rings.
 3. In Settings, Reach me, switch Phone calls on, tick what may call you, save, and press Try it next to Phone calls. Your phone rings with a test call. A test call never sends a text, and it does not count toward the time between calls. Each test call costs money, so Try it rings at most once every 2 minutes and 5 times a day.
 
 Aman tells Twilio where to reach it each time it calls, so there is no address to set in the Twilio console. Check two things there:

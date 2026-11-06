@@ -713,6 +713,25 @@ describe('a conversation on the phone', () => {
     await h.waitFor(async () => (await h.calls.getBySid(CALL_SID))?.status === 'ended');
   });
 
+  it('speaks for the person it calls, so it waits its turn with their voice mode and read-aloud', async () => {
+    const tts = new FakeTts();
+    const owners: { tenant_id: string; created_by: string }[] = [];
+    h = await callsHarness({
+      tts,
+      speaking: owner => {
+        owners.push(owner);
+        return tts;
+      },
+    });
+    await h.readyToCall();
+    await h.callDelivery();
+    const media = await h.openMedia({ token: (await h.answer()).token });
+    await h.waitFor(() => tts.sentences.length > 0);
+    expect(owners).toEqual([ALICE]);
+    media.socket.close();
+    await h.waitFor(async () => (await h.calls.getBySid(CALL_SID))?.status === 'ended');
+  });
+
   it('takes silence after the question as an answer it did not catch: asks once more, then says goodbye', async () => {
     h = await callsHarness({ limits: { silenceMs: 40 } });
     await h.readyToCall();

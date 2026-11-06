@@ -1,4 +1,4 @@
-import { callVoiceReady } from '../../../../src/runtime/calls/callVoiceReady';
+import { callVoiceReady, createCallReadiness } from '../../../../src/runtime/calls/callVoiceReady';
 
 const ready = {
   sttReady: () => true,
@@ -23,5 +23,35 @@ describe('whether a call can talk', () => {
     await expect(callVoiceReady({ ...ready, vadModel: () => Promise.reject(new Error('missing')) })).resolves.toBe(
       false,
     );
+  });
+});
+
+describe('one answer to whether calls can work', () => {
+  it('is not ready until checked, then holds the last check for everything that asks', async () => {
+    let ready = true;
+    const readiness = createCallReadiness(() => Promise.resolve(ready));
+    expect(readiness.current()).toBe(false);
+    await expect(readiness.check()).resolves.toBe(true);
+    expect(readiness.current()).toBe(true);
+    ready = false;
+    expect(readiness.current()).toBe(true);
+    await expect(readiness.check()).resolves.toBe(false);
+    expect(readiness.current()).toBe(false);
+  });
+
+  it('counts a check that fails as not ready', async () => {
+    const readiness = createCallReadiness(() => Promise.reject(new Error('down')));
+    await expect(readiness.check()).resolves.toBe(false);
+    expect(readiness.current()).toBe(false);
+  });
+
+  it('runs one check at a time, and callers that ask meanwhile share it', async () => {
+    let checks = 0;
+    const readiness = createCallReadiness(() => {
+      checks += 1;
+      return Promise.resolve(true);
+    });
+    await Promise.all([readiness.check(), readiness.check(), readiness.check()]);
+    expect(checks).toBe(1);
   });
 });

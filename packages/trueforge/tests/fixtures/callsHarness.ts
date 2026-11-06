@@ -61,7 +61,7 @@ export async function callsHarness({
   listening?: () => Promise<CallListening>;
   tts?: FakeTts;
   /** Another voice in place of the fake one, such as the real client against a fake service. */
-  speaking?: () => SpeechSynthesizer;
+  speaking?: (owner: { tenant_id: string; created_by: string }) => SpeechSynthesizer;
   /** Holds each media key's redeem until it settles, so a test can drop the line meanwhile. */
   redeemGate?: { reached: () => void; open: Promise<void> };
 } = {}) {
