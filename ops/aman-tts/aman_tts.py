@@ -10,6 +10,12 @@ HTTP contract:
                       "voices": [str], "default_voice": str}
   POST /v1/speak  -> audio/wav (24 kHz mono 16-bit PCM)
 
+When `SPEECH_SECRET` is set, every call except `/healthz` must carry it in
+the `x-speech-secret` header, the same shared-secret check the browser
+sidecar uses; a missing or wrong value is refused with 401. `/healthz`
+stays open because the Docker health check carries no secret and the reply
+says only whether the model loaded.
+
 The speak body is JSON `{"text": str, "voice": str | null}`. Text over the
 character cap is refused with 413. Text stays in memory; only character counts,
 durations and error codes are logged, never the text or the audio.
@@ -19,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 import io
 import json
 import logging
@@ -32,7 +39,7 @@ from collections.abc import Callable
 from typing import Protocol
 
 import numpy as np
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 
 from phonemes import Lexicon, split_chunks, to_phonemes
 from pins import MODEL_ASSET, MODEL_FILE, VOICE_IDS, VOICES_FILE
@@ -41,6 +48,10 @@ LOGGER = logging.getLogger("aman_tts")
 
 SAMPLE_RATE = 24000
 WAV_CONTENT_TYPE = "audio/wav"
+# The header the shared secret travels in, and the shortest secret accepted; both match the
+# browser sidecar, so one value guards every sidecar the app talks to.
+SECRET_HEADER = "x-speech-secret"
+MIN_SECRET_LENGTH = 32
 # Pause placed between model chunks, which always end at a sentence or word break.
 CHUNK_GAP_SECONDS = 0.15
 # How often a request being read checks that its caller is still there.
@@ -70,11 +81,28 @@ class Settings:
     max_waiting: int = field(default_factory=lambda: _env_int("AMAN_TTS_MAX_WAITING", 2))
     asset_dir: str = field(default_factory=lambda: os.environ.get("AMAN_TTS_ASSET_DIR", "/opt/aman-tts/assets"))
     default_voice: str = field(default_factory=lambda: os.environ.get("AMAN_TTS_DEFAULT_VOICE", VOICE_IDS[0]))
+    shared_secret: str | None = field(default_factory=lambda: os.environ.get("SPEECH_SECRET") or None)
 
     @property
     def max_body_bytes(self) -> int:
         # Four bytes per character covers any UTF-8 text plus the JSON wrapper.
         return self.max_text_chars * 4 + 1024
+
+
+def secret_matches(given: str | None, secret: str) -> bool:
+    """Checks a presented secret against the shared one in constant time, whatever their lengths."""
+    if given is None:
+        return False
+    return hmac.compare_digest(
+        hashlib.sha256(given.encode("utf-8")).digest(),
+        hashlib.sha256(secret.encode("utf-8")).digest(),
+    )
+
+
+def require_usable_secret(settings: Settings) -> None:
+    """A set but short secret would guard nothing, so the service refuses to start with one."""
+    if settings.shared_secret is not None and len(settings.shared_secret) < MIN_SECRET_LENGTH:
+        raise ValueError(f"SPEECH_SECRET must be at least {MIN_SECRET_LENGTH} characters")
 
 
 class AssetVerificationError(Exception):
@@ -212,6 +240,7 @@ def create_app(
     synthesizer_factory: "type[Synthesizer] | None" = None,
 ) -> FastAPI:
     settings = settings or Settings()
+    require_usable_secret(settings)
     state = ServiceState()
 
     @asynccontextmanager
@@ -232,6 +261,14 @@ def create_app(
 
     app = FastAPI(title="aman-tts", lifespan=lifespan)
 
+    def require_shared_secret(request: Request) -> None:
+        # A route dependency rather than middleware, so the request stream and its
+        # disconnect watching reach the handler exactly as before.
+        if settings.shared_secret is not None and not secret_matches(
+            request.headers.get(SECRET_HEADER), settings.shared_secret
+        ):
+            raise HTTPException(status_code=401, detail="Wrong or missing secret")
+
     @app.get("/healthz")
     def healthz() -> dict:
         synthesizer = state.synthesizer
@@ -243,7 +280,7 @@ def create_app(
             "default_voice": settings.default_voice,
         }
 
-    @app.post("/v1/speak")
+    @app.post("/v1/speak", dependencies=[Depends(require_shared_secret)])
     async def speak(request: Request) -> Response:
         started = time.monotonic()
         synthesizer = state.synthesizer

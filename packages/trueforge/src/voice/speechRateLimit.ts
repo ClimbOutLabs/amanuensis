@@ -1,8 +1,9 @@
 /**
- * Per-person limit on `POST /api/v1/voice/speak`. One sidecar serves every person on the
- * instance and synthesizes one reply at a time, so each person gets a bounded share:
- * a fixed number of requests per rolling minute and a cap on requests in flight.
- * State is in memory and lost on restart.
+ * Per-person limit on the voice endpoints (`POST /api/v1/voice/speak` and
+ * `POST /api/v1/voice/transcribe`), sharing one budget. One sidecar serves every person
+ * on the instance and does one piece of speech work at a time, so each person gets a
+ * bounded share: a fixed number of requests per rolling minute and a cap on requests
+ * in flight. State is in memory and lost on restart.
  */
 const WINDOW_MS = 60_000;
 const DEFAULT_MAX_PER_WINDOW = 30;

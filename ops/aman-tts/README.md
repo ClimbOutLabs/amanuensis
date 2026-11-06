@@ -36,8 +36,10 @@ Returns `{"status": "ok", "model_loaded": true, "model_error": null,
 "voices": ["af_heart", "af_bella", "af_nicole", "af_sarah", "am_michael", "am_fenrir"], "default_voice": "af_heart"}`.
 The agent backend probes it, and the Docker health check asserts `model_loaded`.
 
-No auth: like `aman-stt`, the service is reachable only inside the compose
-network (`docker-compose.dev.yml` binds `127.0.0.1:8002` for host development).
+Like `aman-stt`, calls to `/v1/speak` must carry the shared secret in the
+`x-speech-secret` header when `SPEECH_SECRET` is set, and `/healthz`
+answers without it; left unset, which is only for loopback development
+(`docker-compose.dev.yml` binds `127.0.0.1:8002`), no secret is checked.
 
 ## How text becomes sound
 

@@ -29,6 +29,7 @@ const headerAuthenticator: Authenticator = {
 interface FakeTtsCall {
   path: string;
   contentType: string | undefined;
+  speechSecret: string | undefined;
   body: unknown;
 }
 
@@ -48,7 +49,12 @@ class FakeTts {
       req.on('end', () => {
         const raw = Buffer.concat(chunks).toString('utf8');
         const body: unknown = raw === '' ? undefined : JSON.parse(raw);
-        this.calls.push({ path: req.url ?? '', contentType: req.headers['content-type'], body });
+        this.calls.push({
+          path: req.url ?? '',
+          contentType: req.headers['content-type'],
+          speechSecret: req.headers['x-speech-secret'],
+          body,
+        });
         this.reply(res);
       });
     });
@@ -256,6 +262,19 @@ describe('POST /speak', () => {
 
     expect(res.status).toBe(502);
     expect(await res.json()).toMatchObject({ error: { code: 'tts_error' } });
+  });
+
+  it('sends the shared secret to the sidecar when one is configured', async () => {
+    const originalSecret = configuration.SPEECH_SECRET;
+    configuration.SPEECH_SECRET = 'test-speech-secret-value-with-32-plus-chars';
+    try {
+      const res = await appWith().request('/speak', speakRequest({ text: 'Hi.' }));
+
+      expect(res.status).toBe(200);
+      expect(fakeTts.calls[0]?.speechSecret).toBe('test-speech-secret-value-with-32-plus-chars');
+    } finally {
+      configuration.SPEECH_SECRET = originalSecret;
+    }
   });
 
   it('limits each person separately', async () => {

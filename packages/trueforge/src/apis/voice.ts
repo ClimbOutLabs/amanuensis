@@ -73,6 +73,12 @@ function ttsBaseUrl(): string {
   return configuration.TTS_URL.replace(/\/+$/, '');
 }
 
+/** The shared-secret header the speech sidecars check; sent only when a secret is configured. */
+function speechSecretHeaders(): Record<string, string> {
+  const secret = configuration.SPEECH_SECRET;
+  return secret === undefined ? {} : { 'x-speech-secret': secret };
+}
+
 const TTS_UNAVAILABLE: { status: 503; message: string; code: string } = {
   status: 503,
   message: 'The voice on this computer is not available right now. Try again in a minute.',
@@ -144,7 +150,7 @@ async function forwardToSidecar(audio: Uint8Array): Promise<Response> {
   for (let attempt = 1; ; attempt += 1) {
     const upstream = await fetch(url, {
       method: 'POST',
-      headers: { 'content-type': 'audio/wav', 'content-length': String(audio.byteLength) },
+      headers: { 'content-type': 'audio/wav', 'content-length': String(audio.byteLength), ...speechSecretHeaders() },
       body: audio,
       signal: AbortSignal.timeout(STT_TRANSCRIBE_TIMEOUT_MS),
     });
@@ -157,6 +163,8 @@ async function forwardToSidecar(audio: Uint8Array): Promise<Response> {
 
 /** Voice router (mounted at `/api/v1/voice`). */
 export function createVoiceRouter(deps: VoiceRouterDeps) {
+  const speechLimiter = deps.speechLimiter ?? new SpeechRateLimiter();
+
   const getVoiceStatusHandler: RouteHandler<typeof getVoiceStatusRoute> = async c => {
     return c.json({ data: await probeStt(deps.logger) }, 200);
   };
@@ -181,54 +189,67 @@ export function createVoiceRouter(deps: VoiceRouterDeps) {
       return errorJson(c, { status: 400, message: 'Audio body is empty', code: 'empty_audio' });
     }
 
-    let upstream: Response;
-    try {
-      upstream = await forwardToSidecar(audio);
-    } catch (error) {
-      deps.logger.warn('voice transcribe failed: sidecar unreachable', extractErrorLogFields(error));
-      return errorJson(c, { status: 503, message: 'Speech transcription is unavailable', code: 'stt_unavailable' });
-    }
-
-    const durationMs = Math.round(performance.now() - started);
-    if (upstream.status === 400 || upstream.status === 413) {
-      deps.logger.info('voice transcribe rejected', {
-        reason: 'sidecar_rejected',
-        stt_status: upstream.status,
-        audio_bytes: audio.byteLength,
-      });
+    const { tenant_id, subject } = deps.resolveRequestContext(c);
+    const permit = speechLimiter.acquire(`${tenant_id}:${subject.id}`);
+    if (!permit.allowed) {
+      deps.logger.info('voice transcribe rejected', { reason: 'rate_limited' });
+      c.header('Retry-After', String(permit.retryAfterSeconds));
       return errorJson(c, {
-        status: upstream.status,
-        message: upstream.status === 413 ? 'Audio body is too large' : 'Audio could not be transcribed',
-        code: 'bad_audio',
+        status: 429,
+        message: 'Too many transcription requests. Wait a few seconds, then try again.',
+        code: 'rate_limited',
       });
     }
-    if (upstream.status === 503) {
-      deps.logger.info('voice transcribe failed', { reason: 'stt_not_warm' });
-      return errorJson(c, { status: 503, message: 'Speech transcription is unavailable', code: 'stt_unavailable' });
-    }
-    if (!upstream.ok) {
-      deps.logger.warn('voice transcribe failed', { reason: 'stt_error', stt_status: upstream.status });
-      return errorJson(c, { status: 502, message: 'Speech transcription failed', code: 'stt_error' });
-    }
-    let transcription: VoiceTranscription;
     try {
-      transcription = VoiceTranscriptionSchema.parse(await upstream.json());
-    } catch (error) {
-      deps.logger.warn('voice transcribe failed', {
-        reason: 'stt_bad_response',
-        ...extractErrorLogFields(error),
-      });
-      return errorJson(c, { status: 502, message: 'Speech transcription failed', code: 'stt_error' });
-    }
-    deps.logger.info('voice transcribe', {
-      duration_ms: durationMs,
-      audio_bytes: audio.byteLength,
-      stt_status: upstream.status,
-    });
-    return c.json({ data: transcription }, 200);
-  };
+      let upstream: Response;
+      try {
+        upstream = await forwardToSidecar(audio);
+      } catch (error) {
+        deps.logger.warn('voice transcribe failed: sidecar unreachable', extractErrorLogFields(error));
+        return errorJson(c, { status: 503, message: 'Speech transcription is unavailable', code: 'stt_unavailable' });
+      }
 
-  const speechLimiter = deps.speechLimiter ?? new SpeechRateLimiter();
+      const durationMs = Math.round(performance.now() - started);
+      if (upstream.status === 400 || upstream.status === 413) {
+        deps.logger.info('voice transcribe rejected', {
+          reason: 'sidecar_rejected',
+          stt_status: upstream.status,
+          audio_bytes: audio.byteLength,
+        });
+        return errorJson(c, {
+          status: upstream.status,
+          message: upstream.status === 413 ? 'Audio body is too large' : 'Audio could not be transcribed',
+          code: 'bad_audio',
+        });
+      }
+      if (upstream.status === 503) {
+        deps.logger.info('voice transcribe failed', { reason: 'stt_not_warm' });
+        return errorJson(c, { status: 503, message: 'Speech transcription is unavailable', code: 'stt_unavailable' });
+      }
+      if (!upstream.ok) {
+        deps.logger.warn('voice transcribe failed', { reason: 'stt_error', stt_status: upstream.status });
+        return errorJson(c, { status: 502, message: 'Speech transcription failed', code: 'stt_error' });
+      }
+      let transcription: VoiceTranscription;
+      try {
+        transcription = VoiceTranscriptionSchema.parse(await upstream.json());
+      } catch (error) {
+        deps.logger.warn('voice transcribe failed', {
+          reason: 'stt_bad_response',
+          ...extractErrorLogFields(error),
+        });
+        return errorJson(c, { status: 502, message: 'Speech transcription failed', code: 'stt_error' });
+      }
+      deps.logger.info('voice transcribe', {
+        duration_ms: durationMs,
+        audio_bytes: audio.byteLength,
+        stt_status: upstream.status,
+      });
+      return c.json({ data: transcription }, 200);
+    } finally {
+      permit.release();
+    }
+  };
 
   const speakVoiceHandler: RouteHandler<typeof speakVoiceRoute> = async c => {
     const { text, voice } = c.req.valid('json');
@@ -256,7 +277,7 @@ export function createVoiceRouter(deps: VoiceRouterDeps) {
       try {
         upstream = await fetch(`${ttsBaseUrl()}/v1/speak`, {
           method: 'POST',
-          headers: { 'content-type': 'application/json' },
+          headers: { 'content-type': 'application/json', ...speechSecretHeaders() },
           body: JSON.stringify(voice === undefined ? { text } : { text, voice }),
           // A caller who stops listening stops the work too, so abandoned replies do not queue up.
           signal: AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(TTS_SPEAK_TIMEOUT_MS)]),
