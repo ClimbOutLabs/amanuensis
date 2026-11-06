@@ -165,7 +165,6 @@ const app = createServerApp({
   }),
   reachChannels: () => NO_PHONE_CHANNELS,
   isInstanceOwner: () => false,
-  textLimits: undefined,
   textContactStore: new TextContactStore(db),
   textNumbers: createTextNumberService({
     store: new TextContactStore(db),
@@ -176,7 +175,6 @@ const app = createServerApp({
     logger,
     codeKey: 'openapi',
   }),
-  phoneCalls: { place: () => Promise.reject(new Error('No calls while writing the API document.')) },
   webPushPublicKey: undefined,
   sessions: new Sessions({ sessionStore }),
   chatImages: createChatImageService({

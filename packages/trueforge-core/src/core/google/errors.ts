@@ -27,6 +27,14 @@ export class GoogleReconnectRequiredError extends Error {
   }
 }
 
+/** Google reasons that only mean "too fast" or "a hiccup", which a 403 or a 5xx can carry. */
+const BUSY_REASONS = new Set(['userRateLimitExceeded', 'rateLimitExceeded', 'backendError']);
+
+/** Whether a failure says Google is busy or failing, so asking again later can work. The one place this is decided. */
+export function isBusyFailure(input: { status: number; reason: string }): boolean {
+  return input.status === 429 || input.status >= 500 || BUSY_REASONS.has(input.reason);
+}
+
 /** Google refused or failed a REST request. The message is safe to show; it never carries mail or event text. */
 export class GoogleApiError extends Error {
   readonly status: number;
@@ -37,7 +45,7 @@ export class GoogleApiError extends Error {
     super(input.message, input.cause === undefined ? undefined : { cause: input.cause });
     this.name = 'GoogleApiError';
     this.status = input.status;
-    this.busy = input.busy ?? (input.status === 429 || input.status >= 500);
+    this.busy = input.busy ?? isBusyFailure({ status: input.status, reason: '' });
   }
 }
 

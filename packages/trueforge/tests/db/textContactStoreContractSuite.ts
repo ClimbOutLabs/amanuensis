@@ -189,10 +189,11 @@ export function runTextContactStoreContractSuite(getStore: () => ITextContactSto
 
   it('claims code sends up to the limit in a window, then frees up when the window is over', async () => {
     const store = getStore();
-    const claim = (now: Date) => store.claimTextSends({ limits: [{ key: 'k', window_ms: HOUR_MS, max: 2 }], now });
+    const limit = { key: 'k', window_ms: HOUR_MS, max: 2 };
+    const claim = (now: Date) => store.claimTextSends({ limits: [limit], now });
     await expect(claim(AT)).resolves.toEqual({ ok: true });
     await expect(claim(later(10))).resolves.toEqual({ ok: true });
-    await expect(claim(later(20))).resolves.toEqual({ ok: false, refused: 0, window_started_at: AT.toISOString() });
+    await expect(claim(later(20))).resolves.toEqual({ ok: false, refused: limit, window_started_at: AT.toISOString() });
     await expect(
       store.claimTextSends({ limits: [{ key: 'other', window_ms: HOUR_MS, max: 2 }], now: later(20) }),
     ).resolves.toEqual({
@@ -202,7 +203,7 @@ export function runTextContactStoreContractSuite(getStore: () => ITextContactSto
     await expect(claim(later(61))).resolves.toEqual({ ok: true });
     await expect(claim(later(62))).resolves.toEqual({
       ok: false,
-      refused: 0,
+      refused: limit,
       window_started_at: later(60).toISOString(),
     });
   });
@@ -216,41 +217,23 @@ export function runTextContactStoreContractSuite(getStore: () => ITextContactSto
     for (let attempt = 0; attempt < 3; attempt += 1) {
       await expect(store.claimTextSends({ limits: [person, number, server], now: later(1) })).resolves.toEqual({
         ok: false,
-        refused: 2,
+        refused: server,
         window_started_at: AT.toISOString(),
       });
     }
-    await expect(store.textSendRoom({ ...person, max: 1, now: later(2) })).resolves.toEqual({ ok: true });
-    await expect(store.textSendRoom({ ...number, max: 1, now: later(2) })).resolves.toEqual({ ok: true });
+    // A limit of one still has room on each, so the refused sends counted nothing against them.
+    await expect(
+      store.claimTextSends({
+        limits: [
+          { ...person, max: 1 },
+          { ...number, max: 1 },
+        ],
+        now: later(2),
+      }),
+    ).resolves.toEqual({ ok: true });
     await expect(store.claimTextSends({ limits: [person, number, server], now: later(61) })).resolves.toEqual({
       ok: true,
     });
-  });
-
-  it('gives back a send that was counted but not made, never below none', async () => {
-    const store = getStore();
-    const limit = { key: 'k', window_ms: HOUR_MS, max: 1 };
-    await store.claimTextSends({ limits: [limit], now: AT });
-    await store.giveBackTextSends({ keys: [limit.key] });
-    await store.giveBackTextSends({ keys: [limit.key] });
-    await expect(store.claimTextSends({ limits: [limit], now: later(1) })).resolves.toEqual({ ok: true });
-    await expect(store.claimTextSends({ limits: [limit], now: later(2) })).resolves.toMatchObject({ ok: false });
-  });
-
-  it('tells whether a send would be counted, without counting it', async () => {
-    const store = getStore();
-    const limit = { key: 'k', window_ms: HOUR_MS, max: 1 };
-    await expect(store.textSendRoom({ ...limit, now: AT })).resolves.toEqual({ ok: true });
-    await expect(store.claimTextSends({ limits: [{ ...limit }], now: AT })).resolves.toEqual({ ok: true });
-    await expect(store.textSendRoom({ ...limit, now: later(10) })).resolves.toEqual({
-      ok: false,
-      window_started_at: AT.toISOString(),
-    });
-    await expect(store.textSendRoom({ ...limit, max: 2, now: later(10) })).resolves.toEqual({ ok: true });
-    await expect(store.claimTextSends({ limits: [{ ...limit, max: 2 }], now: later(10) })).resolves.toEqual({
-      ok: true,
-    });
-    await expect(store.textSendRoom({ ...limit, now: later(60) })).resolves.toEqual({ ok: true });
   });
 
   it('claims at the same moment never pass the limit together', async () => {
@@ -271,7 +254,7 @@ export function runTextContactStoreContractSuite(getStore: () => ITextContactSto
       Array.from({ length: 8 }, () => store.claimTextSends({ limits: [first, second], now: AT })),
     );
     expect(results.filter(result => result.ok)).toHaveLength(3);
-    await expect(store.textSendRoom({ ...first, max: 4, now: AT })).resolves.toEqual({ ok: true });
+    await expect(store.claimTextSends({ limits: [{ ...first, max: 4 }], now: AT })).resolves.toEqual({ ok: true });
   });
 
   it('claims outlive the number and are forgotten only once old', async () => {

@@ -25,6 +25,7 @@ import { maskedTarget } from '../texts/smsSender';
 import { canText } from '../texts/textNumber';
 import { privatePhrase } from '../texts/textWords';
 import { CALL_LINES, CallTurns, type CallChat } from './callTurns';
+import { claimTestCall } from './testCallClaim';
 import { callFailureWords, MEDIA_STREAM_PATH, type CallProvider } from './twilioCalls';
 
 /** Said where calls are offered while this server has no Twilio account. */
@@ -101,12 +102,6 @@ export interface CallChats {
 export interface PhoneCallService {
   /** The delivery channel: a delivery that may call rings the person's confirmed number. */
   readonly sender: DeliveryChannelSender;
-  /** Rings the person for a delivery already in their feed. `fallback: false` for a test, which never texts. */
-  place(input: {
-    owner: { tenant_id: string; created_by: string };
-    delivery: Delivery;
-    fallback: boolean;
-  }): Promise<DeliveryAttempt>;
   /** Twilio's voice webhook: what to do now the call was answered. Resolves to TwiML. */
   answered(input: { params: URLSearchParams; query: URLSearchParams }): Promise<string>;
   /** Twilio's status webhook: how the call stands. */
@@ -120,7 +115,7 @@ export interface PhoneCallService {
 interface PhoneCallDeps {
   store: IPhoneCallStore;
   deliveryStore: Pick<IDeliveryStore, 'get'>;
-  contacts: Pick<ITextContactStore, 'get'>;
+  contacts: Pick<ITextContactStore, 'get' | 'claimTextSends' | 'forgetTextSends'>;
   reachSettings: Pick<IReachSettingsStore, 'get'>;
   personalization: Pick<IPersonalizationStore, 'getProfile'>;
   /** Undefined when this server has no Twilio account. */
@@ -265,14 +260,15 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
     });
   }
 
+  /** Rings the person for a delivery already in their feed. A Try it test is limited, and never texts. */
   async function place({
     owner,
     delivery,
-    fallback,
+    test,
   }: {
     owner: { tenant_id: string; created_by: string };
     delivery: Delivery;
-    fallback: boolean;
+    test: boolean;
   }): Promise<DeliveryAttempt> {
     if (twilio === undefined) {
       return attempt({ outcome: 'skipped', detail: CALLS_NOT_SET_UP, target: null });
@@ -298,11 +294,18 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
     }
     const target = maskedTarget(contact.phone);
     const at = now();
+    if (test) {
+      // Claimed only once the call can ring, so a test turned away for any other reason counts nowhere.
+      const claim = await claimTestCall({ store: deps.contacts, owner, at });
+      if (!claim.ok) {
+        return attempt({ outcome: 'skipped', detail: claim.message, target: null });
+      }
+    }
     const call = await store.create({
       id: newId(),
       ...owner,
       delivery_id: delivery.id,
-      fallback,
+      fallback: !test,
       now: at,
       expires_at: new Date(at.getTime() + CALL_LIFETIME_MS),
     });
@@ -326,11 +329,11 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
     channel: 'call',
     // A phone that never rang is told through a text and a push instead, once.
     fallsBackTo: ['sms', 'web_push'],
-    async send({ delivery, tenant_id, created_by }) {
-      if (delivery.level !== 'call') {
+    async send({ delivery, tenant_id, created_by, test }) {
+      if (!test && delivery.level !== 'call') {
         return [];
       }
-      return [await place({ owner: { tenant_id, created_by }, delivery, fallback: true })];
+      return [await place({ owner: { tenant_id, created_by }, delivery, test })];
     },
   };
 
@@ -767,5 +770,5 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
     await store.prune({ ended_before: new Date(at - KEEP_ENDED_MS) });
   }
 
-  return { sender, place, answered, statusChanged, media, sweep };
+  return { sender, answered, statusChanged, media, sweep };
 }

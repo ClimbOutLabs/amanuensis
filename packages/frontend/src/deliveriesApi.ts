@@ -170,6 +170,10 @@ function parseMailProblem(value: unknown): ReachView['mailProblem'] {
   return { since, kind: kind === 'too_slow' ? 'too_slow' : 'other' };
 }
 
+function parseMailSource(value: unknown): ReachView['mailSource'] {
+  return value === 'google' || value === 'email_connector' ? value : null;
+}
+
 function parseView(body: unknown): ReachView {
   const data = isRecord(body) ? body.data : undefined;
   if (!isRecord(data)) {
@@ -190,6 +194,7 @@ function parseView(body: unknown): ReachView {
     availability: { texts: parseChannel(availability.texts), calls: parseChannel(availability.calls) },
     maxLevels,
     mailProblem: parseMailProblem(data.mail_problem),
+    mailSource: parseMailSource(data.mail_source),
   };
 }
 

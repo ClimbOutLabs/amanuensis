@@ -2,6 +2,7 @@ import {
   createTwilioSmsProvider,
   pointNumberWithRetry,
   pointNumberWords,
+  reportPointing,
   smsFailureWords,
   type PointNumberResult,
 } from '../../../../src/runtime/texts/smsProvider';
@@ -197,5 +198,34 @@ describe('pointing the number again after Twilio could not be reached', () => {
       },
     });
     expect(waits).toEqual([]);
+  });
+});
+
+describe('reporting each try at pointing the number', () => {
+  function reporter() {
+    const problems: (string | undefined)[] = [];
+    const logged: { level: string; message: string; meta: unknown }[] = [];
+    const onResult = reportPointing({
+      logger: {
+        info: (message, meta) => logged.push({ level: 'info', message, meta }),
+        warn: (message, meta) => logged.push({ level: 'warn', message, meta }),
+      },
+      setProblem: problem => problems.push(problem),
+    });
+    return { problems, logged, onResult };
+  }
+
+  it('keeps the problem while a try fails, and clears it once one works', () => {
+    const { problems, logged, onResult } = reporter();
+    onResult({ result: 'unreachable' });
+    onResult({ result: 'not_accepted' });
+    onResult({ result: 'updated', replaced_host: 'old.example.invalid' });
+    onResult({ result: 'already_set' });
+    expect(problems).toEqual(['unreachable', 'not_accepted', undefined, undefined]);
+    expect(logged.map(line => line.level)).toEqual(['warn', 'warn', 'info', 'info']);
+    expect(logged[1]?.message).toBe(
+      `The Twilio number could not be pointed at this server. ${pointNumberWords('not_accepted')}`,
+    );
+    expect(logged[2]?.meta).toEqual({ result: 'updated', replaced_host: 'old.example.invalid' });
   });
 });

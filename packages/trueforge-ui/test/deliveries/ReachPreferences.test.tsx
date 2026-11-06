@@ -59,6 +59,19 @@ describe('Settings, Reach me mail trouble', () => {
     expect(screen.queryByText(/has not been able to check your mail/)).toBeNull();
   });
 
+  it('says in plain words which mail is watched, and nothing before mail was checked', async () => {
+    const server = fakeServer([]);
+    server.state.reach = { ...server.state.reach, mailSource: 'email_connector' };
+    render(
+      <PersonalizationProvider
+        api={{ getProfile: async () => profile, updateProfile: async next => next, deleteProfile: async () => {} }}
+      >
+        <ReachPreferences reach={server.api.reach} />
+      </PersonalizationProvider>,
+    );
+    expect(await screen.findByText('Mira is watching the mail from the shared Email connector.')).toBeTruthy();
+  });
+
   it('says, with the assistant’s own name, since when mail was not checked and the one thing to do', async () => {
     renderWithProblem({ since: '2026-11-05T14:00:00.000Z', kind: 'other' });
     const notice = await screen.findByText(/Mira has not been able to check your mail since/);

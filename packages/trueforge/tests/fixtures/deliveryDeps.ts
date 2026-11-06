@@ -47,7 +47,6 @@ export function deliveryDeps(
     }),
     reachChannels: () => NO_PHONE_CHANNELS,
     isInstanceOwner: () => false,
-    textLimits: undefined,
     textContactStore,
     textNumbers: createTextNumberService({
       store: textContactStore,

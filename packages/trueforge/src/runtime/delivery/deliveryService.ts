@@ -8,8 +8,11 @@ import type { DeliveryChannelSender } from './deliveryChannel';
 
 /** The one door into the feed: makes the delivery, tries each channel, and writes every step to Activity. */
 export interface DeliveryService {
-  /** `only_channels` limits which senders are tried, such as a test of one channel. The app itself always gets it. */
-  deliver(input: CreateDeliveryInput & { only_channels?: readonly DeliveryChannel[] }): Promise<Delivery>;
+  /**
+   * `test` makes this a Try it test of one channel: only that channel's sender is tried, and it is told the delivery
+   * is a test. The app itself always gets it.
+   */
+  deliver(input: CreateDeliveryInput & { test?: DeliveryChannel }): Promise<Delivery>;
   /**
    * Sends an existing delivery again, as a nudge, through only these channels: what a call that was not answered
    * falls back to. Each attempt is recorded on the delivery and in Activity.
@@ -118,13 +121,15 @@ export function createDeliveryService({
     sender,
     delivery,
     owner,
+    test,
   }: {
     sender: DeliveryChannelSender;
     delivery: Delivery;
     owner: PersonOwner;
+    test: boolean;
   }): Promise<DeliveryAttempt[]> {
     try {
-      return await sender.send({ delivery, ...owner });
+      return await sender.send({ delivery, ...owner, test });
     } catch (error) {
       logger.warn('A delivery channel failed', {
         delivery_id: delivery.id,
@@ -147,24 +152,31 @@ export function createDeliveryService({
     delivery,
     owner,
     channels,
+    test,
   }: {
     delivery: Delivery;
     owner: PersonOwner;
     channels: readonly DeliveryChannel[] | undefined;
+    test: boolean;
   }): Promise<DeliveryAttempt[]> {
     const attempts: DeliveryAttempt[] = [];
     for (const sender of senders) {
       if (channels !== undefined && !channels.includes(sender.channel)) {
         continue;
       }
-      const made = await trySender({ sender, delivery, owner });
+      const made = await trySender({ sender, delivery, owner, test });
       for (const attempt of made) {
         await keep({ owner, delivery, attempt });
       }
       attempts.push(...made);
-      if (sender.fallsBackTo !== undefined && made.some(attempt => attempt.outcome !== 'sent')) {
+      if (!test && sender.fallsBackTo !== undefined && made.some(attempt => attempt.outcome !== 'sent')) {
         attempts.push(
-          ...(await sendThrough({ delivery: { ...delivery, level: 'nudge' }, owner, channels: sender.fallsBackTo })),
+          ...(await sendThrough({
+            delivery: { ...delivery, level: 'nudge' },
+            owner,
+            channels: sender.fallsBackTo,
+            test: false,
+          })),
         );
       }
     }
@@ -197,11 +209,11 @@ export function createDeliveryService({
   async function send({
     owner,
     created,
-    only_channels,
+    test,
   }: {
     owner: PersonOwner;
     created: Delivery;
-    only_channels: readonly DeliveryChannel[] | undefined;
+    test: DeliveryChannel | undefined;
   }): Promise<Delivery> {
     await record({
       owner,
@@ -217,19 +229,27 @@ export function createDeliveryService({
       attempted_at: now().toISOString(),
     };
     await keep({ owner, delivery: created, attempt: inApp });
-    const attempts = [inApp, ...(await sendThrough({ delivery: created, owner, channels: only_channels }))];
+    const attempts = [
+      inApp,
+      ...(await sendThrough({
+        delivery: created,
+        owner,
+        channels: test === undefined ? undefined : [test],
+        test: test !== undefined,
+      })),
+    ];
     return (await store.get({ ...owner, id: created.id })) ?? { ...created, attempts };
   }
 
   return {
-    async deliver({ only_channels, ...input }) {
-      return await send({ owner: ownerOf(input), created: await store.create(input), only_channels });
+    async deliver({ test, ...input }) {
+      return await send({ owner: ownerOf(input), created: await store.create(input), test });
     },
     async deliverOnce(input) {
       const { delivery, created } = await store.createOnce(input);
       // Sending again can repeat a notice that went out just before a crash, which is better than losing it.
       return created || delivery.attempts.length === 0
-        ? await send({ owner: ownerOf(input), created: delivery, only_channels: undefined })
+        ? await send({ owner: ownerOf(input), created: delivery, test: undefined })
         : delivery;
     },
     async fallBack({ delivery_id, channels, ...owner }) {
@@ -237,7 +257,7 @@ export function createDeliveryService({
       if (delivery === undefined) {
         return [];
       }
-      return sendThrough({ delivery: { ...delivery, level: 'nudge' }, owner, channels });
+      return sendThrough({ delivery: { ...delivery, level: 'nudge' }, owner, channels, test: false });
     },
     async recordAttempt({ delivery_id, attempt, conversation_id, ...owner }) {
       const delivery = await store.get({ ...owner, id: delivery_id });

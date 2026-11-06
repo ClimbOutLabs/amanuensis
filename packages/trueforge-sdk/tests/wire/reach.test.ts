@@ -16,6 +16,7 @@ describe("ReachClient", () => {
                     texts: { available: true, note: "note", problem: null },
                 },
                 mail_problem: { kind: "too_slow", since: "since" },
+                mail_source: "google",
                 max_levels: {
                     approval_waiting: "note",
                     bill_due: "note",
@@ -61,6 +62,7 @@ describe("ReachClient", () => {
                     kind: "too_slow",
                     since: "since",
                 },
+                mailSource: "google",
                 maxLevels: {
                     approvalWaiting: "note",
                     billDue: "note",
@@ -137,6 +139,7 @@ describe("ReachClient", () => {
                     texts: { available: true, note: "note", problem: null },
                 },
                 mail_problem: { kind: "too_slow", since: "since" },
+                mail_source: "google",
                 max_levels: {
                     approval_waiting: "note",
                     bill_due: "note",
@@ -216,6 +219,7 @@ describe("ReachClient", () => {
                     kind: "too_slow",
                     since: "since",
                 },
+                mailSource: "google",
                 maxLevels: {
                     approvalWaiting: "note",
                     billDue: "note",

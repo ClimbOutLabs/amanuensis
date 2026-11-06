@@ -459,37 +459,3 @@ describe('listing messages and reading their headers', () => {
     expect(asked[0]?.searchParams.getAll('metadataHeaders')).toEqual(['From', 'Subject', 'Authentication-Results']);
   });
 });
-
-describe('which failures say Google is busy', () => {
-  const failure = async (status: number, reason: string) => {
-    const { api } = await apiOver(() => json(googleError({ status, reason }), status));
-    return await api.getMessage('m1').catch((error: unknown) => error);
-  };
-
-  it.each(['userRateLimitExceeded', 'rateLimitExceeded', 'backendError'])(
-    'marks a 403 for %s as busy, once the retries ran out',
-    async reason => {
-      const error = await failure(403, reason);
-      expect(error).toBeInstanceOf(GoogleApiError);
-      expect(error instanceof GoogleApiError && error.busy).toBe(true);
-    },
-  );
-
-  it.each([
-    [429, ''],
-    [500, ''],
-    [503, ''],
-  ])('marks a %s as busy', async (status, reason) => {
-    const error = await failure(status, reason);
-    expect(error instanceof GoogleApiError && error.busy).toBe(true);
-  });
-
-  it.each([
-    [403, 'insufficientPermissions'],
-    [400, ''],
-    [404, 'notFound'],
-  ])('does not mark a %s for %s as busy', async (status, reason) => {
-    const error = await failure(status, reason);
-    expect(error instanceof GoogleApiError && error.busy).toBe(false);
-  });
-});

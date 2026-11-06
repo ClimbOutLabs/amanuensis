@@ -133,8 +133,8 @@ async function setupOnce() {
   const sent: string[] = [];
   const sender: DeliveryChannelSender = {
     channel: 'web_push',
-    send: ({ delivery }) => {
-      sent.push(delivery.text);
+    send: ({ delivery, test }) => {
+      sent.push(test ? `test: ${delivery.text}` : delivery.text);
       return Promise.resolve([
         { channel: 'web_push', outcome: 'sent', detail: null, target: 'phone', attempted_at: ONCE_AT.toISOString() },
       ]);
@@ -169,5 +169,23 @@ describe('deliverOnce', () => {
     expect(delivery.attempts.map(attempt => attempt.channel)).toEqual(['in_app', 'web_push']);
     await service.deliverOnce(INPUT);
     expect(sent).toHaveLength(1);
+  });
+});
+
+describe('a Try it test', () => {
+  it('tries only the tested channel and tells its sender the delivery is a test', async () => {
+    const { service, sent } = await setupOnce();
+    const input = {
+      ...OWNER,
+      kind: INPUT.kind,
+      level: INPUT.level,
+      text: INPUT.text,
+      reason: INPUT.reason,
+      link: null,
+    };
+    await service.deliver({ ...input, test: 'web_push' });
+    await service.deliver({ ...input, test: 'in_app' });
+    await service.deliver(input);
+    expect(sent).toEqual(['test: The model wrote this.', 'The model wrote this.']);
   });
 });

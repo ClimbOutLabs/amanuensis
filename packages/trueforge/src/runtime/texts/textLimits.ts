@@ -1,7 +1,7 @@
 import { createHmac } from 'node:crypto';
 
 import type { PersonOwner } from '../../db/personOwner';
-import type { ITextContactStore } from '../../db/textContactStore';
+import type { ITextContactStore, TextSendLimit } from '../../db/textContactStore';
 
 export const HOUR_MS = 60 * 60_000;
 /** The longest window of any limit, so old counts can be forgotten without ending a window that is still open. */
@@ -26,13 +26,6 @@ export const MAX_TEST_TEXTS_PER_HOUR = 3;
 const TEST_CALL_GAP_MS = 2 * 60_000;
 export const MAX_TEST_CALLS_PER_DAY = 5;
 
-/** At most `max` sends for `key` in a window that ends `window_ms` after its first send, at most a day. */
-export interface TextLimit {
-  key: string;
-  window_ms: number;
-  max: number;
-}
-
 /** What the delivery limits need from the server: the secret that keys number counts, and the server's day cap. */
 export interface DeliveryLimitSettings {
   number_key: string;
@@ -41,14 +34,14 @@ export interface DeliveryLimitSettings {
 
 /** The limits one delivery text counts against, all claimed together. */
 export interface DeliveryTextLimits {
-  person: TextLimit;
-  number: TextLimit;
-  server: TextLimit;
+  person: TextSendLimit;
+  number: TextSendLimit;
+  server: TextSendLimit;
 }
 
 interface LimitRefusal {
   ok: false;
-  limit: TextLimit;
+  limit: TextSendLimit;
   retry_in_minutes: number;
 }
 /** Refused, it names the limit that refused and how long until that limit has room. */
@@ -56,8 +49,17 @@ type LimitResult = { ok: true } | LimitRefusal;
 
 /** Each family of limits, codes, delivery texts and tests, keeps its keys under its own prefix. */
 type LimitFamily = 'code' | 'text' | 'test';
+type LimitWindow = 'hour' | 'day' | 'call-gap' | 'call-day';
 
-function personKey({ family, window, owner }: { family: LimitFamily; window: string; owner: PersonOwner }): string {
+function personKey({
+  family,
+  window,
+  owner,
+}: {
+  family: LimitFamily;
+  window: LimitWindow;
+  owner: PersonOwner;
+}): string {
   return `${family}:person-${window}:${JSON.stringify([owner.tenant_id, owner.created_by])}`;
 }
 
@@ -92,7 +94,7 @@ function numberKey({
   phone,
 }: {
   family: LimitFamily;
-  window: string;
+  window: LimitWindow;
   secret: string;
   phone: string;
 }): string {
@@ -118,8 +120,8 @@ export function codeTextLimits({
   phone: string;
   /** The person asking already confirmed this very number. */
   confirmed_by_owner: boolean;
-}): TextLimit[] {
-  const person: TextLimit[] = [
+}): TextSendLimit[] {
+  const person: TextSendLimit[] = [
     { key: personKey({ family: 'code', window: 'hour', owner }), window_ms: HOUR_MS, max: MAX_CODES_PER_HOUR },
     { key: personKey({ family: 'code', window: 'day', owner }), window_ms: DAY_MS, max: MAX_CODES_PER_PERSON_PER_DAY },
   ];
@@ -178,7 +180,13 @@ export function dayLimitWords({ limits, refused }: { limits: DeliveryTextLimits;
   return `${reached} Texts start again in ${waitWords(refused.retry_in_minutes)}.`;
 }
 
-export function testTextLimit(owner: PersonOwner): TextLimit {
+/** Why a Try it text was not sent, when the button's own hourly limit was reached. */
+export function testLimitWords(refused: LimitRefusal): string {
+  return `That was ${String(MAX_TEST_TEXTS_PER_HOUR)} test texts this hour. Wait ${waitWords(refused.retry_in_minutes)}, then try again.`;
+}
+
+/** Each test is a paid text, so the Try it button has a limit of its own on top of the day's limits for every text. */
+export function testTextLimit(owner: PersonOwner): TextSendLimit {
   return {
     key: personKey({ family: 'test', window: 'hour', owner }),
     window_ms: HOUR_MS,
@@ -187,7 +195,7 @@ export function testTextLimit(owner: PersonOwner): TextLimit {
 }
 
 /** The two limits one Try it call counts against: the wait between calls and the day's calls. */
-export function testCallLimits(owner: PersonOwner): { gap: TextLimit; day: TextLimit } {
+export function testCallLimits(owner: PersonOwner): { gap: TextSendLimit; day: TextSendLimit } {
   return {
     gap: { key: personKey({ family: 'test', window: 'call-gap', owner }), window_ms: TEST_CALL_GAP_MS, max: 1 },
     day: {
@@ -203,7 +211,7 @@ function refused({
   window_started_at,
   at,
 }: {
-  limit: TextLimit;
+  limit: TextSendLimit;
   window_started_at: string;
   at: Date;
 }): LimitRefusal {
@@ -221,7 +229,7 @@ export async function claimTextLimits({
   at,
 }: {
   store: Pick<ITextContactStore, 'claimTextSends' | 'forgetTextSends'>;
-  limits: readonly TextLimit[];
+  limits: readonly TextSendLimit[];
   at: Date;
 }): Promise<LimitResult> {
   await store.forgetTextSends({ before: new Date(at.getTime() - DAY_MS) });
@@ -229,30 +237,7 @@ export async function claimTextLimits({
   if (claim.ok) {
     return { ok: true };
   }
-  const limit = limits[claim.refused];
-  if (limit === undefined) {
-    throw new Error('A text limit refused a send, but it is not one of the limits asked for.');
-  }
-  return refused({ limit, window_started_at: claim.window_started_at, at });
-}
-
-/** Whether every limit has room for one more send, counting nothing. The claim made when sending still decides. */
-export async function textLimitsRoom({
-  store,
-  limits,
-  at,
-}: {
-  store: Pick<ITextContactStore, 'textSendRoom'>;
-  limits: readonly TextLimit[];
-  at: Date;
-}): Promise<LimitResult> {
-  for (const limit of limits) {
-    const room = await store.textSendRoom({ ...limit, now: at });
-    if (!room.ok) {
-      return refused({ limit, window_started_at: room.window_started_at, at });
-    }
-  }
-  return { ok: true };
+  return refused({ limit: claim.refused, window_started_at: claim.window_started_at, at });
 }
 
 /** How long to wait, in words: minutes under two hours, whole hours after that. */

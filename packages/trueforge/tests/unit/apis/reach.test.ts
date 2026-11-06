@@ -2,7 +2,7 @@ import { OpenAPIHono } from '@hono/zod-openapi';
 import winston from 'winston';
 
 import { createNoticingRouter } from '../../../src/apis/noticing';
-import { createReachRouter, type ReachRouterDeps } from '../../../src/apis/reach';
+import { createReachRouter } from '../../../src/apis/reach';
 import type { RequestContext } from '../../../src/auth/identity';
 import { DeliveryStore } from '../../../src/db/deliveryStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
@@ -10,9 +10,11 @@ import { NoticingStore } from '../../../src/db/noticingStore';
 import { ReachSettingsStore } from '../../../src/db/reachSettingsStore';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { TextContactStore } from '../../../src/db/textContactStore';
+import { claimTestCall } from '../../../src/runtime/calls/testCallClaim';
+import type { DeliveryChannelSender } from '../../../src/runtime/delivery/deliveryChannel';
 import { createDeliveryService } from '../../../src/runtime/delivery/deliveryService';
+import type { ChannelViewer } from '../../../src/runtime/noticing/reachChannels';
 import { NO_PHONE_CHANNELS, reachChannelsFor } from '../../../src/runtime/noticing/reachChannels';
-import type { ChannelViewer } from '../../../src/runtime/texts/smsProvider';
 import type { ReachAvailability } from '../../../src/schemas/reach';
 import { defaultReachSettings, GetReachResponseSchema, type ReachSettings } from '../../../src/schemas/reach';
 import { confirmNumber } from '../../fixtures/confirmedNumber';
@@ -23,18 +25,44 @@ function person(id: string): RequestContext {
   return { tenant_id: 'default', subject: { id, type: 'user', display_name: id }, roles: [], user_credential: null };
 }
 
-type PlaceCall = ReachRouterDeps['calls']['place'];
-
-const noCalls: PlaceCall = () => Promise.reject(new Error('No calls in this test.'));
+/** A phone that rings for every call, unless `refuse` gives the words for turning the call away. */
+function ringing(
+  onRing: (input: Parameters<DeliveryChannelSender['send']>[0]) => void,
+  refuse: (input: Parameters<DeliveryChannelSender['send']>[0]) => Promise<string | undefined> = () =>
+    Promise.resolve(undefined),
+): DeliveryChannelSender {
+  return {
+    channel: 'call',
+    async send(input) {
+      const refused = await refuse(input);
+      if (refused !== undefined) {
+        return [
+          { channel: 'call', outcome: 'skipped', detail: refused, target: null, attempted_at: NOW.toISOString() },
+        ];
+      }
+      onRing(input);
+      return [
+        {
+          channel: 'call',
+          outcome: 'sent',
+          detail: 'The phone is ringing.',
+          target: 'ending 0111',
+          attempted_at: NOW.toISOString(),
+        },
+      ];
+    },
+  };
+}
 
 async function build({
   channels = () => NO_PHONE_CHANNELS,
   memories = [],
-  place = noCalls,
+  callSender,
 }: {
   channels?: (input?: { viewer: ChannelViewer }) => ReachAvailability;
   memories?: string[];
-  place?: PlaceCall;
+  /** Stands in for the phone, given the text contact store so it can count test calls the way the real one does. */
+  callSender?: (contacts: TextContactStore) => DeliveryChannelSender;
 } = {}) {
   const db = createSqliteDb(':memory:');
   await migrateSqliteToLatest(db);
@@ -44,24 +72,21 @@ async function build({
   const textContacts = new TextContactStore(db);
   const deliveryService = createDeliveryService({
     store: deliveryStore,
-    senders: [],
+    senders: callSender === undefined ? [] : [callSender(textContacts)],
     audit: { record: () => Promise.resolve() },
     logger: winston.createLogger({ silent: true }),
   });
   let current = person('alice');
   let offered = channels;
   let at = NOW;
-  const calls = { place };
   const app = new OpenAPIHono();
   app.route(
     '/reach',
     createReachRouter({
       reachStore,
       textContacts,
-      textLimits: undefined,
       noticingStore,
       deliveryService,
-      calls,
       channels: input => offered(input),
       isInstanceOwner: owner => owner.created_by === 'alice',
       memories: () => Promise.resolve(memories),
@@ -140,6 +165,15 @@ describe('reach routes', () => {
       checked_at: minutesAgo(5),
       failure: { kind: 'too_slow' as const, since: minutesAgo(minutes) },
       stuck: undefined,
+      window_ms: undefined,
+      source: undefined,
+    });
+
+    it('says where mail is read from once it has been checked', async () => {
+      const { call, noticingStore } = await build();
+      expect(GetReachResponseSchema.parse(await (await call('')).json()).data.mail_source).toBeNull();
+      await noticingStore.setCheckpoint({ ...OWNER, watcher: 'mail', ...failingSince(5), source: 'email_connector' });
+      expect(GetReachResponseSchema.parse(await (await call('')).json()).data.mail_source).toBe('email_connector');
     });
 
     it('says nothing about mail that works, or that has failed for less than an hour', async () => {
@@ -225,16 +259,7 @@ describe('reach routes', () => {
     const placed: string[] = [];
     const { call, put, textContacts, deliveryStore } = await build({
       channels: () => channels,
-      place: ({ delivery, fallback }) => {
-        placed.push(`${delivery.kind}:${String(fallback)}`);
-        return Promise.resolve({
-          channel: 'call',
-          outcome: 'sent',
-          detail: 'The phone is ringing.',
-          target: 'ending 0111',
-          attempted_at: NOW.toISOString(),
-        });
-      },
+      callSender: () => ringing(({ delivery, test }) => placed.push(`${delivery.kind}:${String(test)}`)),
     });
     const early = await call('/test', { method: 'POST', body: { channel: 'call' } });
     expect(early.status).toBe(409);
@@ -247,7 +272,7 @@ describe('reach routes', () => {
     expect((await put({ ...defaultReachSettings('UTC'), channels: { texts: false, calls: true } })).status).toBe(200);
     const tried = await call('/test', { method: 'POST', body: { channel: 'call' } });
     expect(tried.status).toBe(201);
-    expect(placed).toEqual(['note:false']);
+    expect(placed).toEqual(['note:true']);
     await expect(
       deliveryStore.lastCreatedAt({ tenant_id: 'default', created_by: 'alice', levels: ['call'] }),
     ).resolves.toBeUndefined();
@@ -259,18 +284,19 @@ describe('reach routes', () => {
       calls: { available: true, note: 'On.', problem: null },
     };
     let placed = 0;
+    let at = NOW;
     const { call, put, textContacts, later } = await build({
       channels: () => channels,
-      place: () => {
-        placed += 1;
-        return Promise.resolve({
-          channel: 'call',
-          outcome: 'sent',
-          detail: 'The phone is ringing.',
-          target: 'ending 0111',
-          attempted_at: NOW.toISOString(),
-        });
-      },
+      callSender: contacts =>
+        ringing(
+          () => {
+            placed += 1;
+          },
+          async ({ tenant_id, created_by }) => {
+            const claim = await claimTestCall({ store: contacts, owner: { tenant_id, created_by }, at });
+            return claim.ok ? undefined : claim.message;
+          },
+        ),
     });
     await confirmNumber({
       store: textContacts,
@@ -286,9 +312,11 @@ describe('reach routes', () => {
     expect(JSON.stringify(await soon.json())).toContain('Wait 2 minutes, then try again.');
     for (let i = 0; i < 4; i += 1) {
       later(2 * 60_000);
+      at = new Date(at.getTime() + 2 * 60_000);
       expect((await tryIt()).status).toBe(201);
     }
     later(2 * 60_000);
+    at = new Date(at.getTime() + 2 * 60_000);
     const sixth = await tryIt();
     expect(sixth.status).toBe(429);
     expect(JSON.stringify(await sixth.json())).toContain('That was 5 test calls today.');

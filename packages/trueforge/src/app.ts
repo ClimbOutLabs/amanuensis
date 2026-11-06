@@ -125,7 +125,6 @@ import { createGuideSeeder, seedExistingGuides } from './personas/amanGuide/seed
 import { GOOGLE_ROUTES_BASE_PATH } from './routes/googleRoutes';
 import { OPENAPI_DOCUMENT_TAGS } from './routes/openapiTags';
 import type { ActiveTurnRegistry } from './runtime/activeTurns';
-import type { PhoneCallService } from './runtime/calls/phoneCalls';
 import type { ChatImageService } from './runtime/chatImages/chatImageService';
 import { createChatPictureService } from './runtime/chatPictures/chatPictureService';
 import type { ChatSearchIndexer } from './runtime/chatSearchIndexing';
@@ -134,11 +133,10 @@ import type { DeliveryService } from './runtime/delivery/deliveryService';
 import type { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { createVaultClient } from './runtime/memory/vaultClient';
 import type { NoticingService } from './runtime/noticing/noticingService';
+import type { ChannelViewer } from './runtime/noticing/reachChannels';
 import type { ReminderReach } from './runtime/noticing/reminderReach';
 import { resolveSandboxProvider } from './runtime/sessionResources';
 import { createSpacePictureService } from './runtime/spacePictures/spacePictureService';
-import type { ChannelViewer } from './runtime/texts/smsProvider';
-import type { DeliveryLimitSettings } from './runtime/texts/textLimits';
 import type { TextNumberService } from './runtime/texts/textNumber';
 import { TokenFactoryDailyCapError, type TokenFactoryBudget } from './runtime/tokenFactoryBudget';
 import { envManagedModelProviderNames } from './runtime/tokenFactoryProvider';
@@ -335,12 +333,8 @@ export interface ServerDeps<TTransaction> {
   reachChannels: (input?: { viewer: ChannelViewer }) => ReachAvailability;
   /** Whether this person runs Aman, so a problem with the server's setup is worded for them. */
   isInstanceOwner: (owner: PersonOwner) => boolean;
-  /** What the day's text limits need; undefined while this server has no text provider. */
-  textLimits: DeliveryLimitSettings | undefined;
   /** The person's number for texts and its confirming. */
   textNumbers: TextNumberService;
-  /** Places the test call from Reach me settings. */
-  phoneCalls: Pick<PhoneCallService, 'place'>;
   textContactStore: ITextContactStore;
   /** The public key a browser needs to turn push on; undefined while push is off. */
   webPushPublicKey: string | undefined;
@@ -930,10 +924,8 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       createReachRouter({
         reachStore: deps.reachSettingsStore,
         textContacts: deps.textContactStore,
-        textLimits: deps.textLimits,
         noticingStore: deps.noticingStore,
         deliveryService: deps.deliveryService,
-        calls: deps.phoneCalls,
         channels: deps.reachChannels,
         isInstanceOwner: deps.isInstanceOwner,
         memories: async ({ tenant_id }) => {

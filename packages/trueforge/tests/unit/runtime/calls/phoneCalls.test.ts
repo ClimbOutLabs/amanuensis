@@ -40,7 +40,8 @@ async function callWithoutSid(h: Harness) {
     text: 'Your 3pm clashes.',
     reason: 'Two things at once.',
     link: null,
-    only_channels: [],
+    // Only the app channel is tried, so no call goes out for this row.
+    test: 'in_app',
   });
   const call = await h.calls.create({
     id: 'call-unsaved',
@@ -130,7 +131,8 @@ describe('phone calls as a channel of the delivery layer', () => {
   });
 
   it('does not ring while the voice parts are not running, says so, and sends a text and a push instead', async () => {
-    h = await callsHarness({ voiceReady: false });
+    let ready = false;
+    h = await callsHarness({ voiceReady: () => ready });
     await h.readyToCall();
     const delivery = await h.callDelivery();
     expect(h.placed).toEqual([]);
@@ -223,12 +225,52 @@ describe('phone calls as a channel of the delivery layer', () => {
       text: 'This is a test call.',
       reason: 'You pressed Try it.',
       link: null,
-      only_channels: [],
+      test: 'call',
     });
-    expect((await h.service.place({ owner: ALICE, delivery, fallback: false })).outcome).toBe('sent');
+    expect(delivery.attempts.find(attempt => attempt.channel === 'call')?.outcome).toBe('sent');
     await h.status('busy');
     expect(h.texts).toEqual([]);
     expect(h.pushes).toEqual([]);
+  });
+
+  it('a second test call right after the first is turned away with words that say when to try again', async () => {
+    h = await callsHarness();
+    await h.readyToCall();
+    const tryIt = () =>
+      h.deliveries.deliver({
+        ...ALICE,
+        kind: 'note',
+        level: 'nudge',
+        text: 'This is a test call.',
+        reason: 'You pressed Try it.',
+        link: null,
+        test: 'call',
+      });
+    expect((await tryIt()).attempts.find(attempt => attempt.channel === 'call')?.outcome).toBe('sent');
+    const second = (await tryIt()).attempts.find(attempt => attempt.channel === 'call');
+    expect(second?.outcome).toBe('skipped');
+    expect(second?.detail).toMatch(/try again/i);
+    expect(h.placed).toHaveLength(1);
+  });
+
+  it('a test call that cannot ring yet does not use up a test', async () => {
+    let ready = false;
+    h = await callsHarness({ voiceReady: () => ready });
+    await h.readyToCall();
+    const tryIt = () =>
+      h.deliveries.deliver({
+        ...ALICE,
+        kind: 'note',
+        level: 'nudge',
+        text: 'This is a test call.',
+        reason: 'You pressed Try it.',
+        link: null,
+        test: 'call',
+      });
+    expect((await tryIt()).attempts.find(attempt => attempt.channel === 'call')?.outcome).toBe('skipped');
+    ready = true;
+    expect((await tryIt()).attempts.find(attempt => attempt.channel === 'call')?.outcome).toBe('sent');
+    expect(h.placed).toHaveLength(1);
   });
 });
 

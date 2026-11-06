@@ -180,7 +180,10 @@ async function setup({
     datesAreArrival: true,
   };
   const calendarSource: CalendarSource = { listEvents: jest.fn(() => Promise.resolve(events)) };
-  const sources: NoticingSources = { mail: { status: 'ready', source: mailSource }, calendar: calendarSource };
+  const sources: NoticingSources = {
+    mail: { status: 'ready', source: mailSource, kind: 'google' },
+    calendar: calendarSource,
+  };
   const approvals: ApprovalSource = { listWaiting: () => Promise.resolve(waiting) };
   const listOwners = jest.fn(() => Promise.resolve([OWNER]));
   const judge = jest.fn<ReturnType<NoticingJudge>, Parameters<NoticingJudge>>(async () => {
@@ -318,6 +321,8 @@ describe('mail from an always-important sender', () => {
       checked_at: new Date('2026-11-01T09:00:00.000Z'),
       failure: undefined,
       stuck: undefined,
+      window_ms: undefined,
+      source: undefined,
     });
     await service.run({ watcher: 'mail' });
     expect(mailSource.listNewMessages).toHaveBeenCalledWith(
@@ -945,11 +950,13 @@ describe('passes that fail, stop or overlap', () => {
     mailSource,
     gone,
     goneDue = '2026-11-06T12:00:00.000Z',
+    keptDue = '2026-11-07T12:00:00.000Z',
   }: {
     store: NoticingStore;
     mailSource: MailSource;
     gone: Error;
     goneDue?: string;
+    keptDue?: string;
   }): Promise<void> {
     const bill = ({ id, due }: { id: string; due: string }): NoticingEvent => ({
       ...trackedBill,
@@ -961,7 +968,7 @@ describe('passes that fail, stop or overlap', () => {
       ...OWNER,
       status: 'tracking',
       now: NOW,
-      events: [bill({ id: 'gone', due: goneDue }), bill({ id: 'kept', due: '2026-11-07T12:00:00.000Z' })],
+      events: [bill({ id: 'gone', due: goneDue }), bill({ id: 'kept', due: keptDue })],
     });
     jest
       .mocked(mailSource.laterInThread)
@@ -1001,6 +1008,18 @@ describe('passes that fail, stop or overlap', () => {
     expect(await feed()).toHaveLength(1);
     const left = await store.listTracking({ ...OWNER, due_before: new Date('2027-01-01'), limit: 10 });
     expect(left).toHaveLength(1);
+  });
+
+  it('raises a bill due within a day without checking it when the pass is out of time, so it is never dropped unseen', async () => {
+    const { service, clock, store, mailSource, feed } = await setup({});
+    await trackedBills({ store, mailSource, gone: new Error('unused'), keptDue: '2026-11-06T10:00:00.000Z' });
+    jest.mocked(mailSource.laterInThread).mockImplementation(() => {
+      clock.now = new Date(clock.now.getTime() + 10 * 60_000);
+      return Promise.resolve([]);
+    });
+    await service.run({ watcher: 'mail' });
+    expect(mailSource.laterInThread).toHaveBeenCalledTimes(1);
+    expect(await feed()).toHaveLength(2);
   });
 
   it('raises a tracked bill whose thread can never be read, since nothing can say it was paid', async () => {
@@ -1401,7 +1420,7 @@ describe('mail passes that keep failing', () => {
       clock.now = new Date(NOW.getTime() + pass * 10 * 60_000);
       await service.run({ watcher: 'mail' });
       const state = await checkpoint(store);
-      expect(state?.stuck).toBeUndefined();
+      expect(state?.stuck).toEqual({ message_id: 'm1', passes: 0 });
       expect(state?.checked_at).toEqual(bills[0]?.received_at);
     }
     readText.mockRestore();
@@ -1418,6 +1437,8 @@ describe('mail passes that keep failing', () => {
       checked_at: bills[0]?.received_at ?? NOW,
       failure: undefined,
       stuck: { message_id: 'm2', passes: 2 },
+      window_ms: undefined,
+      source: undefined,
     });
     sources.mail = { status: 'unreachable', error: new Error('connection refused') };
     await service.run({ watcher: 'mail' });
@@ -1435,5 +1456,133 @@ describe('mail passes that keep failing', () => {
     sources.mail = { status: 'none' };
     await service.run({ watcher: 'mail' });
     expect((await checkpoint(store))?.failure).toBeUndefined();
+  });
+});
+
+describe('mail trouble stays until a pass reads to the end of its window', () => {
+  const at = (minute: string) => new Date(`2026-11-05T14:${minute}:00.000Z`);
+  const bills = ['1', '2', '3', '4'].map(n =>
+    mail({
+      id: `m${n}`,
+      thread_id: `t${n}`,
+      from_address: 'billing@shop.test',
+      from_name: null,
+      subject: `Invoice ${n}: amount due by November 7`,
+      snippet: 'Amount due by November 7',
+      authentication_results: [],
+      received_at: at(`5${n}`),
+    }),
+  );
+  const checkpoint = async (store: NoticingStore) => await store.getCheckpoint({ ...OWNER, watcher: 'mail' });
+  const plain = () => new Error('The Email connector could not fetch the message.');
+  const busy = () => new MailSourceBusyError({ cause: new Error('timed out') });
+
+  /** Ways a pass can stop, each run for several passes ten minutes apart. */
+  const ways: [string, (built: Awaited<ReturnType<typeof setup>>) => void][] = [
+    ['a busy list', ({ mailSource }) => jest.mocked(mailSource.listNewMessages).mockRejectedValue(busy())],
+    ['a plain list failure', ({ mailSource }) => jest.mocked(mailSource.listNewMessages).mockRejectedValue(plain())],
+    [
+      'a busy read of every message',
+      ({ mailSource }) => void jest.spyOn(mailSource, 'readText').mockRejectedValue(busy()),
+    ],
+    [
+      'a plain failure of every read',
+      ({ mailSource }) => void jest.spyOn(mailSource, 'readText').mockRejectedValue(plain()),
+    ],
+    [
+      'a plain failure of one read',
+      ({ mailSource }) =>
+        void jest
+          .spyOn(mailSource, 'readText')
+          .mockImplementation(message =>
+            message.id === 'm2' ? Promise.reject(plain()) : Promise.resolve('Amount due by November 7'),
+          ),
+    ],
+    [
+      'reads that each take longer than the pass has',
+      ({ mailSource, clock }) => {
+        mailSource.datesAreArrival = false;
+        jest.spyOn(mailSource, 'readText').mockImplementation(() => {
+          clock.now = new Date(clock.now.getTime() + 100_000);
+          return Promise.resolve('Amount due by November 7');
+        });
+      },
+    ],
+  ];
+
+  it.each(ways)('either moves the checkpoint forward or shows trouble that stays, for %s', async (_name, arrange) => {
+    const built = await setup({ messages: bills });
+    arrange(built);
+    const { service, store, clock } = built;
+    let before = await checkpoint(store);
+    let since: Date | undefined;
+    for (let pass = 0; pass < 8; pass += 1) {
+      clock.now = new Date(NOW.getTime() + pass * 10 * 60_000);
+      await service.run({ watcher: 'mail' });
+      const after = await checkpoint(store);
+      const moved = before === undefined || (after?.checked_at ?? NOW) > before.checked_at;
+      // A pass that ran out of time on IMAP cannot move on, so it lists a shorter window next time.
+      const narrowed = after?.window_ms !== undefined && after.window_ms < (before?.window_ms ?? Infinity);
+      expect(moved || narrowed || after?.failure !== undefined).toBe(true);
+      if (before?.failure !== undefined && after?.failure === undefined) {
+        // Only a pass that read to the end of its window clears the trouble.
+        expect(after?.checked_at).toEqual(new Date(clock.now.getTime() - 10 * 60_000));
+      }
+      if (since !== undefined && after?.failure !== undefined) {
+        expect(after.failure.since).toEqual(since);
+      }
+      since = after?.failure?.since ?? since;
+      before = after;
+    }
+  });
+
+  it('shows a list that fails the same way for six passes, passes nothing over and keeps since', async () => {
+    const { service, store, clock, mailSource } = await setup({ messages: bills });
+    jest.mocked(mailSource.listNewMessages).mockRejectedValue(plain());
+    for (let pass = 0; pass < 6; pass += 1) {
+      clock.now = new Date(NOW.getTime() + pass * 10 * 60_000);
+      jest.mocked(mailSource.listNewMessages).mockClear();
+      await service.run({ watcher: 'mail' });
+      expect(jest.mocked(mailSource.listNewMessages).mock.calls.length).toBeLessThanOrEqual(2);
+      const state = await checkpoint(store);
+      expect(state?.failure).toEqual({ kind: 'other', since: NOW });
+      expect(state?.stuck).toBeUndefined();
+    }
+  });
+
+  it('still raises tracked bills close to due when the scan uses the whole of its time', async () => {
+    const { service, clock, store, mailSource, feed } = await setup({ messages: bills });
+    await store.recordAll({
+      ...OWNER,
+      status: 'tracking',
+      now: NOW,
+      events: [
+        {
+          id: 'bill_due:old',
+          kind: 'bill_due',
+          evidence: 'content',
+          summary: 'A bill is due.',
+          facts: 'Due soon',
+          matched: 'A message names a due date.',
+          link: null,
+          mail_ref: { message_id: 'old', thread_id: 'told' },
+          occurred_at: '2026-10-30T10:00:00.000Z',
+          due_at: '2026-11-06T06:00:00.000Z',
+        },
+      ],
+    });
+    jest.mocked(mailSource.laterInThread).mockRejectedValue(plain());
+    jest.spyOn(mailSource, 'readText').mockImplementation(() => {
+      clock.now = new Date(clock.now.getTime() + 100_000);
+      return Promise.resolve('Amount due by November 7');
+    });
+    await service.run({ watcher: 'mail' });
+    expect((await feed()).some(item => item.text.includes('A bill is due.'))).toBe(true);
+  });
+
+  it('records where mail is read from', async () => {
+    const { service, store } = await setup({ messages: bills });
+    await service.run({ watcher: 'mail' });
+    expect((await checkpoint(store))?.source).toBe('google');
   });
 });

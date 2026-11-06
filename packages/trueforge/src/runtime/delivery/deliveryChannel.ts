@@ -9,8 +9,9 @@ export interface DeliveryChannelSender {
   readonly channel: DeliveryChannel;
   /**
    * When an attempt of this sender does not go out, the delivery is sent again as a nudge through these channels,
-   * once, right after that attempt is written down.
+   * once, right after that attempt is written down. A test never falls back.
    */
   readonly fallsBackTo?: readonly DeliveryChannel[];
-  send(input: { delivery: Delivery; tenant_id: string; created_by: string }): Promise<DeliveryAttempt[]>;
+  /** `test` is true for a Try it test of this channel. */
+  send(input: { delivery: Delivery; tenant_id: string; created_by: string; test: boolean }): Promise<DeliveryAttempt[]>;
 }

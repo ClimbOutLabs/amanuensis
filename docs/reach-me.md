@@ -47,15 +47,17 @@ Each way to reach you has a **Try it** button. It sends a test item under the be
 - If a delivery fails, Aman tries again on the next check. After five tries it stops trying that item.
 - If Aman stopped in the middle of sending something, it sends it again on the next check. Rarely, a notice or a text can then reach you twice.
 - If one message cannot be read, for example because it was deleted or is too large, Aman skips it and reads the rest.
-- If Google is busy, your mail server is down, the connection drops, or a check runs out of time, Aman stops at the message it could not read. It keeps what it found before that message and starts there on the next check. This never makes Aman skip a message.
-- If a message fails for another reason, Aman skips it after 3 checks in a row in which a later message could be read. That keeps one bad message from holding up the rest of your mail. After it skips one, the next message that fails the same way is skipped after a single check.
-- If one broken message stops the mail server from sending the list of new mail, Aman narrows down the few seconds that hold it and skips them after 3 checks. Only the log says so.
-- A check stops starting new work after about a minute and a half. A slow mail server is read over several checks.
-- After a long outage, Aman does not go back further than a day, so older mail is not looked at. With the shared Email connector, each check starts again at the start of the time it looks at.
-- If the shared Email connector takes too long to list new mail (it gives up after about a minute), Aman skips that check. It tries the same mail again next time.
-- If mail could not be checked for about an hour, Reach me says so at the top, with the time it first failed and one thing to do. If your mail server answers too slowly, ask whoever runs your mail to check it. For any other problem, open Settings, Connectors, and check that your mail is still connected. The notice goes away after the next check that works. It also shows when the shared Email connector is set up but cannot be reached, or when your Google login has to be redone.
-- If Aman cannot check whether a bill was paid, it tries again on the next checks. When the bill is due within a day, Aman tells you about it anyway. If you paid it, you may still get a reminder.
+- If Google is busy, your mail server is down, the connection drops, or a check runs out of time, Aman stops at the message it could not read and keeps what it found before it. A busy server never makes Aman skip a message.
+- If a message fails for another reason, Aman tries it once more after reading another message. A message that fails again 3 checks in a row is skipped, so one bad message does not hold up the rest of your mail. If it looked like a bill, or came from someone you marked always important, Aman tells you it could not read it.
+- If a message has held up your mail for 3 hours after Reach me showed the problem, Aman skips it the same way.
+- If one broken message stops the mail server from sending the list of new mail, Aman finds the few seconds that hold it. With the shared Email connector it skips only that message. Otherwise it skips those few seconds after 3 checks. Only the log says so.
+- A check stops starting new work after about a minute. With the shared Email connector, a check that ran out of time looks at a shorter stretch of time on the next check, so it keeps moving. Otherwise it starts where it stopped.
+- After a long outage, Aman does not go back further than a day, so older mail is not looked at.
+- If the shared Email connector takes too long to list new mail (it gives up after about a minute), Aman stops that check and tries again with a shorter stretch of time next time.
+- If mail could not be checked for about an hour, Reach me says so at the top, with the time it first failed and one thing to do. If your mail server answers too slowly, ask whoever runs your mail to check it. For any other problem, open Settings, Connectors, and check that your mail is still connected. The notice goes away after a check that reads all your new mail. It also shows when the shared Email connector is set up but cannot be reached, or when your Google login has to be redone.
+- If Aman cannot check whether a bill was paid, it keeps the bill and tries again on the next checks, before it looks at new mail. When the bill is due within a day, Aman tells you about it anyway. If you paid it, you may still get a reminder.
 - If hundreds of messages arrive within a few seconds, Aman reads only the ones from people you marked always important. With the shared Email connector it skips them all, because senders cannot be confirmed there.
+- Reach me says which mail Aman is watching. Your Google mail comes first. The shared Email connector is used only if you have no Google mail connected. If your Google login has to be redone, Aman does not switch to the connector. It shows the problem instead.
 - If a page says your settings could not be read, reload the page.
 
 See [Privacy](privacy) for what is sent where.

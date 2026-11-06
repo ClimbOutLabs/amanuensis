@@ -144,7 +144,7 @@ import { createGoogleNoticingSources, googleCalendarTimezoneFor } from './runtim
 import { createNoticingJudgeResolver } from './runtime/noticing/judgeFactory';
 import { createNoticingService } from './runtime/noticing/noticingService';
 import { personTimezoneFor } from './runtime/noticing/personTimezone';
-import { reachChannelsFor } from './runtime/noticing/reachChannels';
+import { reachChannelsFor, type ChannelViewer } from './runtime/noticing/reachChannels';
 import { createReminderReach } from './runtime/noticing/reminderReach';
 import { createSidecarNoticingSources } from './runtime/noticing/sidecarSources';
 import { createOutboundSecretSource } from './runtime/outboundSecrets';
@@ -154,10 +154,8 @@ import { getSharedRunCodeService } from './runtime/sessionResources';
 import {
   createTwilioSmsProvider,
   pointNumberWithRetry,
-  pointNumberWords,
-  type ChannelViewer,
+  reportPointing,
   type PointNumberFailure,
-  type PointNumberResult,
 } from './runtime/texts/smsProvider';
 import { createSmsSender } from './runtime/texts/smsSender';
 import { createTextNumberService } from './runtime/texts/textNumber';
@@ -1102,7 +1100,6 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     deliveryStore,
     pushSubscriptionStore,
     deliveryService: deliveries,
-    phoneCalls,
     reachSettingsStore,
     noticingStore,
     noticingService,
@@ -1116,7 +1113,6 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     reachChannels,
     isInstanceOwner: (owner: PersonOwner) =>
       owner.tenant_id === noticingInstanceOwner?.tenant_id && owner.created_by === noticingInstanceOwner.created_by,
-    textLimits,
     textNumbers,
     textContactStore,
     webPushPublicKey: configuration.WEB_PUSH?.publicKey,
@@ -1473,7 +1469,8 @@ try {
   });
 
   // The Twilio listener has its own port and serves only Twilio's routes. It is off unless texts are set up, and a
-  // port it cannot open stops the server, because texts must never go out while a STOP cannot be heard.
+  // port it cannot open stops the server, because Twilio sends STOP replies to it. A number that could not be pointed
+  // here does not stop texts; Reach me says STOP replies do not reach Aman yet.
   const twilioServer = await twilioListenerFor({
     twilio: configuration.TWILIO,
     hostname: configuration.HOST,
@@ -1489,23 +1486,12 @@ try {
     // So nobody has to set it in the Twilio console. Only this number's incoming-text address changes, only to the
     // configured one, and a failure leaves texts working as before.
     const smsUrl = `${configuration.TWILIO.webhookPublicUrl}${INBOUND_SMS_PATH}`;
-    const onResult = (pointed: PointNumberResult) => {
-      twilioNumber.problem =
-        pointed.result === 'updated' || pointed.result === 'already_set' ? undefined : pointed.result;
-      if (pointed.result === 'updated') {
-        // Another app or Aman that used this number stops getting its incoming texts; the host says which one.
-        logger.info('The Twilio number now sends its incoming texts to this server', {
-          result: pointed.result,
-          replaced_host: pointed.replaced_host,
-        });
-      } else if (pointed.result === 'already_set') {
-        logger.info('The Twilio number sends its incoming texts to this server', { result: pointed.result });
-      } else {
-        logger.warn(`The Twilio number could not be pointed at this server. ${pointNumberWords(pointed.result)}`, {
-          result: pointed.result,
-        });
-      }
-    };
+    const onResult = reportPointing({
+      logger,
+      setProblem: problem => {
+        twilioNumber.problem = problem;
+      },
+    });
     // The waits are unref'd, so trying again never keeps the server from stopping.
     const wait = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms).unref());
     void pointNumberWithRetry({ provider: smsProvider, smsUrl, onResult, wait });

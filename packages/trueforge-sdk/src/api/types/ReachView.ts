@@ -5,6 +5,7 @@ import type * as TrueForge from "../index.js";
 export interface ReachView {
     availability: TrueForge.ReachAvailability;
     mailProblem: TrueForge.MailProblem | null;
+    mailSource: TrueForge.MailSourceKind | null;
     /** The highest level each kind of event can ever reach, whatever the model says. */
     maxLevels: TrueForge.ReachViewMaxLevels;
     /** False until the person saves once. While false, the settings are the quiet defaults. */

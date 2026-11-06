@@ -55,7 +55,8 @@ export async function callsHarness({
   chat?: CallChat;
   assistantName?: string;
   limits?: Partial<CallLimits>;
-  voiceReady?: boolean;
+  /** A function lets a test switch the voice parts on part way through. */
+  voiceReady?: boolean | (() => boolean);
   /** What a conversation listens with; a test can make it slow or fail. */
   listening?: () => Promise<CallListening>;
   tts?: FakeTts;
@@ -148,7 +149,7 @@ export async function callsHarness({
     reachSettings,
     personalization,
     twilio: { provider, accountSid: ACCOUNT_SID, publicUrl: PUBLIC_URL },
-    voiceReady: () => Promise.resolve(voiceReady),
+    voiceReady: () => Promise.resolve(typeof voiceReady === 'function' ? voiceReady() : voiceReady),
     deliveries: () => deliveries,
     chats,
     speaking: speaking ?? (() => tts),
