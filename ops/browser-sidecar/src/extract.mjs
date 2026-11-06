@@ -2,7 +2,6 @@
 // Node globals. Walks the visible headings, text and controls of the page in reading order, each
 // already tagged with the field kind that governs whether its value may be shown.
 
-/** Attribute and name patterns that mark a field as a password, a card number, or a one-time code. */
 /**
  * A field's name and id as plain lowercase words: `otp_code`, `otpCode` and `otp-code` all read
  * `otp code`, so the patterns below match whatever naming style a site uses.
@@ -16,8 +15,35 @@ function nameWords(element) {
     .trim();
 }
 
+/** Name words that mark a field as a password, a card number, or a one-time code. */
 const CARD_WORDS = /\b(card ?(number|no|num)|cc ?(num|number|no)|cvv|cvc|csc|security ?code)\b/;
-const CODE_WORDS = /\b(otp|totp|pin|passcode|(one ?time|verification|mfa|2 ?fa|sms|otp|pin) ?code)\b/;
+const CODE_WORDS =
+  /\b(otp|totp|passcode|(one ?time|verification|mfa|2 ?fa|sms|otp) ?code|(atm|card|security|secret) ?pin)\b/;
+/**
+ * "pin" alone names a secret only on a short number field. A "PIN code" or "pincode" is a postal code
+ * in India, and a map pin is a place, so neither is hidden.
+ */
+const BARE_PIN = /\bpin\b(?! ?code)/;
+
+/** Whether the field takes only digits, by its keyboard, its type or its pattern. */
+function takesDigits(element) {
+  const type = (element.getAttribute('type') ?? '').toLowerCase();
+  const inputMode = (element.getAttribute('inputmode') ?? '').toLowerCase();
+  const pattern = element.getAttribute('pattern') ?? '';
+  return (
+    inputMode === 'numeric' || type === 'tel' || type === 'number' || pattern.includes('0-9') || pattern.includes('\\d')
+  );
+}
+
+/** A box for one digit next to others like it: a code typed one digit per box. */
+function isCodeDigitBox(element) {
+  if (element.getAttribute('maxlength') !== '1' || !takesDigits(element)) {
+    return false;
+  }
+  const around = element.form ?? element.parentElement?.parentElement ?? element.parentElement;
+  const boxes = around === null || around === undefined ? [] : [...around.querySelectorAll('input[maxlength="1"]')];
+  return boxes.filter(takesDigits).length >= 2;
+}
 
 function fieldKind(element) {
   const type = (element.getAttribute('type') ?? '').toLowerCase();
@@ -32,12 +58,12 @@ function fieldKind(element) {
   if (autocomplete === 'one-time-code' || CODE_WORDS.test(words)) {
     return 'otp';
   }
-  // A code typed one digit per box: only the first box often says what it is.
-  const maxLength = element.getAttribute('maxlength');
-  const inputMode = (element.getAttribute('inputmode') ?? '').toLowerCase();
-  const pattern = element.getAttribute('pattern') ?? '';
-  const digitsOnly = pattern.includes('0-9') || pattern.includes('\\d');
-  if (maxLength === '1' && (inputMode === 'numeric' || type === 'tel' || type === 'number' || digitsOnly)) {
+  const maxLength = Number(element.getAttribute('maxlength') ?? '0');
+  if (BARE_PIN.test(words) && takesDigits(element) && maxLength > 0 && maxLength <= 8) {
+    return 'otp';
+  }
+  // Only the first box of a code typed one digit per box often says what it is.
+  if (isCodeDigitBox(element)) {
     return 'otp';
   }
   return null;

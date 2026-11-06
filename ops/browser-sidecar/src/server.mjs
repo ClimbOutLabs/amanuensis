@@ -32,10 +32,10 @@ function boxesInViewScript(paths) {
   return `(() => {\n${EXTRACT_MODULE}\nreturn boxesInView(${JSON.stringify(paths)});\n})()`;
 }
 
-/** The same bundled module, ending in the boxes the model's copy of a screenshot must cover. */
 /** How long the model's copy of a screenshot may take to draw. */
 const PICTURE_WORKER_MS = 5000;
 
+/** The same bundled module, ending in the boxes the model's copy of a screenshot must cover. */
 const MASK_BOXES_SCRIPT = `(() => {\n${EXTRACT_MODULE}\nreturn maskBoxes();\n})()`;
 
 /**

@@ -135,14 +135,17 @@ async function withWorld(run) {
       </script>`),
     // Code and card fields named the ways sites name them, each holding a value that must not show.
     '/code-names': html(`<h1>Verify</h1>
-      ${['otp_code', 'otpCode', 'pin_code', 'pincode', 'cvv_code', 'smsCode', 'cvc2', 'verificationCode']
+      ${['otp_code', 'otpCode', 'cvv_code', 'smsCode', 'cvc2', 'verificationCode', 'atm_pin']
         .map(
           name =>
             `<input name="${name}" value="135790" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" />`,
         )
         .join('')}
-      <input maxlength="1" pattern="[0-9]" value="7" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" />
-      <input name="zip_code" value="94110" />`),
+      <input name="pin" inputmode="numeric" maxlength="4" value="1357" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" />
+      <input maxlength="1" pattern="[0-9]" value="7" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" /><input maxlength="1" pattern="[0-9]" value="7" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" />
+      <input name="zip_code" value="94110" />
+      <input name="pin_code" value="560001" /><input name="pincode" inputmode="numeric" maxlength="6" value="560002" />
+      <input name="shippingPinCode" value="560003" /><input name="map_pin" value="Cubbon Park" />`),
     '/code-boxes': html(`<h1>Enter the code</h1>
       ${[1, 2, 3].map(() => '<input maxlength="1" inputmode="numeric" value="7" style="width:60px;height:60px;background:#00ff00;color:#00ff00;border:0" />').join('')}`),
     // A page that watches for anything added to it and says so in its title.
@@ -709,7 +712,11 @@ test('code and card fields are found whatever naming style the site uses', { ski
     const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/code-names' });
     assert.doesNotMatch(opened.text, /135790/);
     assert.doesNotMatch(opened.text, /: 7$/m);
+    assert.doesNotMatch(opened.text, /1357\b/);
     assert.match(opened.text, /94110/, 'a zip code is not a secret');
+    for (const shown of ['560001', '560002', '560003', 'Cubbon Park']) {
+      assert.match(opened.text, new RegExp(shown), 'a postal PIN code or a map pin is not a secret');
+    }
   });
 });
 
