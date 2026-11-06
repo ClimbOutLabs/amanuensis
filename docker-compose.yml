@@ -84,11 +84,8 @@ services:
       # From-source image; root Dockerfile is the npm-install prod recipe.
       dockerfile: Dockerfile.dev
     image: truefoundry-server:latest
-    # Unpinned by default, so the stack starts on any core count. On a big host,
-    # AMAN_SERVER_CPUSET and AMAN_VOICE_CPUSET give the server and the voice
-    # sidecars disjoint cores so voice work never steals latency from chat
-    # (see docs/voice-input.mdx).
-    cpuset: '${AMAN_SERVER_CPUSET:-}'
+    # No core pins here, so the stack starts on any core count. To give voice
+    # and chat their own cores, see "Dedicated cores" in docs/voice-input.mdx.
     # Ports are published by `loopback` above. Compose DNS therefore has no
     # `server` entry; other services reach this one as `loopback`.
     network_mode: 'service:loopback'
@@ -204,12 +201,9 @@ services:
     build:
       context: ops/aman-stt
     image: amanuensis-aman-stt:latest
-    # Optional dedicated cores, disjoint from the server's pin above, so a
-    # transcription never contends with chat or embedding work.
-    cpuset: '${AMAN_VOICE_CPUSET:-}'
     mem_limit: 2g
     environment:
-      # Whisper encoder threads; match the core count in AMAN_VOICE_CPUSET when it is set.
+      # Whisper encoder threads; match the core count when the sidecar has its own cores.
       AMAN_STT_CPU_THREADS: '4'
       # Model cache location; matches the stt-model-cache volume below.
       AMAN_STT_MODEL_DIR: /data/stt-cache
@@ -225,13 +219,11 @@ services:
   # posts reply text here and returns the audio to the browser. No host port
   # is published, and the voice files are baked into the image, so it sits
   # only on the internal voice network: no way out, and nothing but the app
-  # can reach it. Shares aman-stt's optional core pin: a person speaks, then
-  # listens, so the two rarely run at once.
+  # can reach it.
   aman-tts:
     build:
       context: ops/aman-tts
     image: amanuensis-aman-tts:latest
-    cpuset: '${AMAN_VOICE_CPUSET:-}'
     mem_limit: 1g
     environment:
       # onnxruntime threads; 4 matches the 4 pinned cores.

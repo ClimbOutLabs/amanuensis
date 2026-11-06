@@ -474,6 +474,9 @@ jobs:
         with:
           node-version-file: '.nvmrc'
 
+      - name: No core pins in the checked-in compose files
+        run: pnpm test:default-compose
+
       - name: Use the example settings
         run: cp packages/trueforge/.env.example packages/trueforge/.env
 

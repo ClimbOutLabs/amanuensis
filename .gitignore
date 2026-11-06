@@ -110,3 +110,6 @@ scripts/private-data-patterns.local.txt
 
 # Token eval output folders (scripts/eval-tokens).
 eval-results/
+
+# A person's own Compose settings, such as core pins (docs/voice-input.mdx).
+docker-compose.override.yml

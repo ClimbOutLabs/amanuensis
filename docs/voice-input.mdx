@@ -39,15 +39,27 @@ The server reads the sidecar address from `STT_URL` (default `http://aman-stt:80
 
 ## Host development
 
-`pnpm dev:infra` starts `aman-stt` from `docker-compose.dev.yml` next to Postgres and Redis, while the server and UI run on the host with `pnpm dev`. The service uses the same build, image, memory limit and thread count as the full stack, with two differences: it publishes `127.0.0.1:8001` (loopback only, since the sidecar has no authentication) and it never takes a `cpuset` pin, because the host-run server cannot be pinned to a disjoint core set. The first `pnpm dev:infra` builds the image and downloads the model (~464 MB) into the dev project's own `stt-model-cache` volume, separate from the full stack's.
+`pnpm dev:infra` starts `aman-stt` from `docker-compose.dev.yml` next to Postgres and Redis, while the server and UI run on the host with `pnpm dev`. The service uses the same build, image, memory limit and thread count as the full stack, with one difference: it publishes `127.0.0.1:8001` (loopback only, since the sidecar has no authentication). Do not give it its own cores here: the server runs on the host and cannot be kept off them. The first `pnpm dev:infra` builds the image and downloads the model (~464 MB) into the dev project's own `stt-model-cache` volume, separate from the full stack's.
 
 Point the server at the published port by setting `STT_URL=http://localhost:8001` in `packages/trueforge/.env` (already present in `packages/trueforge/.env.example`), then restart `pnpm dev`. Without it the server looks for `http://aman-stt:8001`, which only resolves inside the compose network, and the mic button stays hidden.
 
 ## Tuning
 
-**Dedicated cores.** By default nothing is pinned, so the stack starts on any computer. On a host with many cores you can keep voice work from slowing chat by giving the voice sidecars and the server disjoint cores. Set `AMAN_VOICE_CPUSET` (used by `aman-stt` and `aman-tts`) and `AMAN_SERVER_CPUSET` before `docker compose up`, for example `AMAN_VOICE_CPUSET=16-19` and `AMAN_SERVER_CPUSET=0-15` on a 20-core host, or `8-11` and `0-7` on a 12-core host. Give the sidecars 4 cores and the server the rest. A range the host does not have stops the stack with "Requested CPUs are not available".
+**Dedicated cores.** The default `docker-compose.yml` pins nothing, so the stack starts on any computer. On a host with many cores you can keep voice work from slowing chat by giving the voice sidecars and the server their own cores. Put the pins in a `docker-compose.override.yml` next to `docker-compose.yml`; Compose reads it automatically. For example, on a 20-core host:
 
-**Transcription threads.** `AMAN_STT_CPU_THREADS` (default `4`) sets the Whisper encoder thread count; keep it equal to the number of cores in `AMAN_VOICE_CPUSET` when you set one.
+```yaml
+services:
+  server:
+    cpuset: '0-15'
+  aman-stt:
+    cpuset: '16-19'
+  aman-tts:
+    cpuset: '16-19'
+```
+
+On a 12-core host use `0-7` for the server and `8-11` for the sidecars. Give the sidecars 4 cores and the server the rest, and keep the two sets apart. A range the host does not have stops the stack with "Requested CPUs are not available".
+
+**Transcription threads.** `AMAN_STT_CPU_THREADS` (default `4`) sets the Whisper encoder thread count; keep it equal to the number of cores the sidecar is pinned to, when you pin it.
 
 **Model size.** `AMAN_STT_MODEL` (default `small`) selects the Whisper model; `AMAN_STT_FALLBACK_MODEL` (default `base`) is used when the primary fails to load. Larger models transcribe more accurately and need more RAM; raise the service `mem_limit` accordingly.
 
