@@ -197,7 +197,8 @@ export function createVoiceRouter(deps: VoiceRouterDeps) {
   };
 
   const speechLimiter = deps.speechLimiter ?? sharedSpeechLimiter;
-  const connectLimiter = deps.connectLimiter ?? new SpeechRateLimiter({ maxPerWindow: 10, maxInFlight: 10 });
+  const connectLimiter =
+    deps.connectLimiter ?? new SpeechRateLimiter({ maxPerWindow: 10, maxInFlight: Number.POSITIVE_INFINITY });
 
   const speakVoiceHandler: RouteHandler<typeof speakVoiceRoute> = async c => {
     if (!configuration.TTS_ENABLED) {
@@ -308,7 +309,7 @@ export function createVoiceRouter(deps: VoiceRouterDeps) {
       return errorJson(c, {
         status: 503,
         message:
-          'Voice mode is turned off on this computer. Turn the local voice on in the server settings, then try again.',
+          'Voice mode is turned off on this computer. Ask whoever set up Aman to turn on the voice (the TTS_ENABLED setting), then try again.',
         code: 'voice_mode_off',
       });
     }

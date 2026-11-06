@@ -5,7 +5,7 @@
  */
 import type { RawData, WebSocket } from 'ws';
 
-import { VoiceClientMessageSchema, type VoiceServerEvent } from '../schemas/voice';
+import { VoiceClientMessageSchema, type VoiceServerEvent } from '@truefoundry/trueforge-core/schemas/voiceLine';
 import { OUTPUT_SAMPLE_RATE } from './audio';
 import type { VoiceEvent, VoiceTransport } from './transport';
 

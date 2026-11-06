@@ -51,6 +51,7 @@ const turns: VoiceTurnRunner = {
     return { kind: 'done', turnId: 'latency-run', approvals: [] };
   },
   answerApproval: () => Promise.resolve({ kind: 'failed' }),
+  stillWaiting: () => Promise.resolve(true),
   cancel: () => Promise.resolve(),
 };
 

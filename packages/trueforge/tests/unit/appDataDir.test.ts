@@ -1,7 +1,7 @@
 import envPaths from 'env-paths';
 import path from 'node:path';
-import { defaultVoiceModelDir, resolveAppDataDir } from '../../../src/appDataDir';
-import configuration from '../../../src/config';
+import { appDataDirFromEnv, resolveAppDataDir, voiceModelDirFromEnv } from '../../src/appDataDir';
+import configuration from '../../src/config';
 
 describe('app data dir', () => {
   it('uses APP_DATA_DIR as the root when it is set, made absolute', () => {
@@ -22,11 +22,21 @@ describe('app data dir', () => {
     expect(configuration.SANDBOX_GIT_BRIDGE_DIR).toBe(path.join(root, 'git-bridge'));
   });
 
-  it('keeps the voice model folder under the data root so the setup script and the server agree', () => {
-    expect(defaultVoiceModelDir('/data/app')).toBe('/data/app/voice-model');
-    const { VOICE_VAD_MODEL_DIR } = process.env;
-    expect(configuration.VOICE_VAD_MODEL_DIR).toBe(
-      VOICE_VAD_MODEL_DIR ?? defaultVoiceModelDir(path.dirname(configuration.SANDBOX_RUNS_DIR)),
+  it('reads the data folder from the environment names the server uses', () => {
+    expect(appDataDirFromEnv({ APP_DATA_DIR: '/data/app' })).toBe('/data/app');
+    expect(appDataDirFromEnv({})).toBe(resolveAppDataDir({ override: undefined, suffix: '' }));
+    expect(appDataDirFromEnv({ APP_DATA_DIR_SUFFIX: 'dev' })).toBe(
+      resolveAppDataDir({ override: undefined, suffix: 'dev' }),
+    );
+  });
+
+  it('keeps the voice model under the data folder unless a folder is named, for the server and the setup script alike', () => {
+    expect(voiceModelDirFromEnv({ APP_DATA_DIR: '/data/app' })).toBe('/data/app/voice-model');
+    expect(voiceModelDirFromEnv({ APP_DATA_DIR: '/data/app', VOICE_VAD_MODEL_DIR: '/opt/aman-voice' })).toBe(
+      '/opt/aman-voice',
+    );
+    expect(voiceModelDirFromEnv({ APP_DATA_DIR: '/data/app', VOICE_VAD_MODEL_DIR: '  ' })).toBe(
+      '/data/app/voice-model',
     );
   });
 });

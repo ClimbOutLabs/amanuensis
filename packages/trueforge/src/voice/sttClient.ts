@@ -22,6 +22,10 @@ const STT_RETRY_DELAY_MS = 2_000;
 /** Resolves after the given delay, or at once when the caller gives up; backs the bounded 503 retry backoff. */
 function delay({ ms, signal }: { ms: number; signal: AbortSignal | undefined }): Promise<void> {
   return new Promise(resolve => {
+    if (signal?.aborted === true) {
+      resolve();
+      return;
+    }
     const timer = setTimeout(resolve, ms);
     signal?.addEventListener(
       'abort',

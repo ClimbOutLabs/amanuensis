@@ -54,6 +54,16 @@ DISCONNECT_POLL_SECONDS = 0.1
 VOCAB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kokoro_vocab.json")
 
 
+NOTHING_TO_SAY_HEADER = "x-aman-reason"
+
+
+def _nothing_to_say() -> HTTPException:
+    """A 400 that callers can tell from a real fault by its header rather than by its wording."""
+    return HTTPException(
+        status_code=400, detail="text has nothing to say aloud", headers={NOTHING_TO_SAY_HEADER: "nothing_to_say"}
+    )
+
+
 def _env_int(name: str, default: int) -> int:
     raw = os.environ.get(name)
     if raw is None or raw.strip() == "":
@@ -313,7 +323,7 @@ def create_app(
             LOGGER.info("speak cancelled: caller went away")
             return Response(status_code=499)
         if audio.size == 0:
-            raise HTTPException(status_code=400, detail="text has nothing to say aloud")
+            raise _nothing_to_say()
 
         LOGGER.info(
             "speak ok: chars=%d audio_s=%.1f duration_ms=%d voice=%s format=%s",
@@ -406,7 +416,7 @@ async def _stream_speech(request: Request, state: ServiceState, synthesizer: Syn
         LOGGER.error("speak failed", exc_info=first)
         raise HTTPException(status_code=500, detail="Speech synthesis failed") from first
     if first is None:
-        raise HTTPException(status_code=400, detail="text has nothing to say aloud")
+        raise _nothing_to_say()
 
     async def body() -> AsyncIterator[bytes]:
         sent = 0

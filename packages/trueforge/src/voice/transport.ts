@@ -4,7 +4,7 @@
  * listening, turns, speaking, interrupting and approvals.
  */
 import type { Tier3Card } from '@truefoundry/trueforge-core/core';
-import type { VoiceServerEvent } from '../schemas/voice';
+import type { VoiceServerEvent } from '@truefoundry/trueforge-core/schemas/voiceLine';
 import type { InputFormat, OutputFormat } from './audio';
 
 /** An answer waiting on the person: the same card the chat shows, found on the finished turn. */
@@ -84,6 +84,8 @@ export interface VoiceTurnRunner {
     signal: AbortSignal;
     onText: (delta: string) => void;
   }): Promise<TurnOutcome>;
+  /** False once the card was answered somewhere else, such as on the screen. */
+  stillWaiting({ turnId, approval }: { turnId: string; approval: PendingApproval }): Promise<boolean>;
   /** Stops the turn that is running, if any. */
   cancel(): Promise<void>;
 }

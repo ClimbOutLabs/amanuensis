@@ -68,7 +68,13 @@ export class SentenceSplitter {
           }
           return undefined;
         }
-        if (/\s/.test(next) && !stopIsNotTheEnd({ text: text.slice(0, i + 1), next: text.slice(i + 1).trimStart() })) {
+        const upToStop = text.slice(0, i + 1);
+        const after = text.slice(i + 1).trimStart();
+        if (/\s/.test(next) && after === '' && !final && /\bno\.$/i.test(upToStop)) {
+          // "No." may be "No. 5": the next piece decides.
+          return undefined;
+        }
+        if (/\s/.test(next) && !stopIsNotTheEnd({ text: upToStop, next: after })) {
           return i + 1;
         }
       }

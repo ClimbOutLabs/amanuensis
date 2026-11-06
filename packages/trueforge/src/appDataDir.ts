@@ -2,11 +2,12 @@ import path from 'node:path';
 
 import envPaths from 'env-paths';
 
+import type { CliEnv } from './cli/env';
+
 const ENV_PATHS_APP_NAME = 'trueforge';
 
 /**
  * Where the app keeps its data. An explicit directory wins; otherwise the OS-standard data folder is used.
- * Kept free of other imports so setup scripts can find the folder before anything is built.
  */
 export function resolveAppDataDir({ override, suffix }: { override: string | undefined; suffix: string }): string {
   if (override !== undefined && override.trim() !== '') {
@@ -15,7 +16,16 @@ export function resolveAppDataDir({ override, suffix }: { override: string | und
   return envPaths(ENV_PATHS_APP_NAME, { suffix }).data;
 }
 
-/** Default folder for voice mode's listening model; `VOICE_VAD_MODEL_DIR` overrides it. */
-export function defaultVoiceModelDir(appDataDir: string): string {
-  return path.join(appDataDir, 'voice-model');
+/** The data folder an environment names (`APP_DATA_DIR`, `APP_DATA_DIR_SUFFIX`); the one place those settings are read. */
+export function appDataDirFromEnv(env: CliEnv): string {
+  return resolveAppDataDir({ override: env['APP_DATA_DIR'], suffix: env['APP_DATA_DIR_SUFFIX'] ?? '' });
+}
+
+/**
+ * Where voice mode's listening model lives: `VOICE_VAD_MODEL_DIR` when set, else a folder in the data folder.
+ * The server config and the setup script both call this, with free imports, so neither can drift from the other.
+ */
+export function voiceModelDirFromEnv(env: CliEnv): string {
+  const set = env['VOICE_VAD_MODEL_DIR'];
+  return set !== undefined && set.trim() !== '' ? set : path.join(appDataDirFromEnv(env), 'voice-model');
 }

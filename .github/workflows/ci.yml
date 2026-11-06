@@ -277,14 +277,12 @@ jobs:
         if: matrix.package == 'trueforge'
         uses: actions/cache@v6.1.0
         with:
-          path: ${{ runner.temp }}/aman-voice-model
+          path: packages/trueforge/.cache/voice-model
           key: silero-vad-${{ hashFiles('packages/trueforge/src/voice/vad/sileroVad.ts') }}
 
       - name: Fetch the listening model
         if: matrix.package == 'trueforge'
-        env:
-          VOICE_VAD_MODEL_DIR: ${{ runner.temp }}/aman-voice-model
-        run: pnpm voice:model
+        run: pnpm --filter @truefoundry/trueforge voice:model:test
 
       # The voice service's own locked packages, plus the test client FastAPI's TestClient needs.
       - name: Install voice service packages
@@ -294,8 +292,6 @@ jobs:
           python -m pip install httpx==0.28.1
 
       - name: Test
-        env:
-          VOICE_VAD_MODEL_DIR: ${{ runner.temp }}/aman-voice-model
         run: pnpm "test:${{ matrix.package }}"
 
   # The universal installer ships one executable per system. Build it on all

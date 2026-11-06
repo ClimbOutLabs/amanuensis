@@ -1,6 +1,7 @@
 /**
  * Made-up speech for the voice tests: a pulse train shaped by vowel resonances and a slow syllable
  * rhythm. It is not a recording of anyone, and the speech model still reads it as speech.
+ * Used only by the `voice:latency` script and the tests that call it.
  */
 const RATE = 16_000;
 

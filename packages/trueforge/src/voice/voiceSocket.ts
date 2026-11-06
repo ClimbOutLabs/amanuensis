@@ -119,29 +119,27 @@ export function turnRunnerFor({
 /** Most voice conversations open at once on one server; each holds a listening model and a microphone stream. */
 export const MAX_VOICE_SESSIONS = 20;
 
-/** The page that opens a voice line must be this server's own, or one of the origins the app itself accepts. */
-export function originAllowed({
-  origin,
-  host,
-  pages,
-}: {
-  origin: string | undefined;
-  host: string | undefined;
-  pages: ReadonlySet<string>;
-}): boolean {
+/**
+ * The page that opens a voice line must be one of the origins the app itself accepts. The Host header is
+ * not trusted: a page on a name that points at this computer sends its own name there (DNS rebinding).
+ */
+export function originAllowed({ origin, pages }: { origin: string | undefined; pages: ReadonlySet<string> }): boolean {
   if (origin === undefined) {
     return false;
   }
   try {
-    const parsed = new URL(origin);
-    return parsed.host === host || pages.has(parsed.origin);
+    return pages.has(new URL(origin).origin);
   } catch {
     return false;
   }
 }
 
+/** One person who belongs to several tenants cannot take more than this many of the shared places. */
+const MAX_SESSIONS_PER_SUBJECT = 3;
+
 /** One open conversation. It is reserved before anything is awaited, so parallel upgrades cannot all get in. */
 interface Slot {
+  subjectId: string;
   closed: boolean;
   session: VoiceSession | undefined;
   replace(): Promise<void>;
@@ -180,7 +178,7 @@ export function attachVoiceSocket({
     if (path !== VOICE_STREAM_PATH) {
       return;
     }
-    if (!originAllowed({ origin: request.headers.origin, host: request.headers.host, pages })) {
+    if (!originAllowed({ origin: request.headers.origin, pages })) {
       refuse(socket, '403 Forbidden');
       return;
     }
@@ -191,7 +189,8 @@ export function attachVoiceSocket({
       return;
     }
     const key = `${ticket.tenantId}:${ticket.subjectId}`;
-    if (!active.has(key) && active.size >= maxSessions) {
+    const ofThisPerson = [...active.values()].filter(slot => slot.subjectId === ticket.subjectId).length;
+    if (!active.has(key) && (active.size >= maxSessions || ofThisPerson >= MAX_SESSIONS_PER_SUBJECT)) {
       refuse(socket, '503 Service Unavailable');
       return;
     }
@@ -206,9 +205,12 @@ export function attachVoiceSocket({
   async function run({ ws, ticket, key }: { ws: WebSocket; ticket: VoiceTicketClaims; key: string }): Promise<void> {
     const previous = active.get(key);
     const slot: Slot = {
+      subjectId: ticket.subjectId,
       closed: false,
       session: undefined,
       replace: async () => {
+        // Marked at once, so a model still loading for this socket is released when it arrives.
+        slot.closed = true;
         ws.close(1000, 'replaced');
         await slot.session?.end();
       },
