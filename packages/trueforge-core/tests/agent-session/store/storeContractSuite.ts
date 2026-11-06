@@ -174,6 +174,8 @@ export function runStoreContractSuite<
       metadata: {},
       external_id: null,
       source: null,
+      is_incognito: false,
+      private_expires_at: null,
     });
   }
 
@@ -324,6 +326,8 @@ export function runStoreContractSuite<
         metadata: {},
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
       const session = mustGet(await store.getSession({ tenant_id: tenant, session_id: 'created-by-session' }));
       expect(session.created_by_subject).toEqual({
@@ -346,6 +350,7 @@ export function runStoreContractSuite<
         source_id: undefined,
         folder_id: undefined,
         no_folder: false,
+        include_private: false,
       });
       expect(listed.data.map(s => s.session_id)).toContain('created-by-session');
       expect(listed.data.find(s => s.session_id === 'created-by-session')?.created_by_subject.subject_id).toBe(
@@ -394,6 +399,8 @@ export function runStoreContractSuite<
         metadata: {},
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
       await seedSession(store);
 
@@ -414,6 +421,7 @@ export function runStoreContractSuite<
         source_id: undefined,
         folder_id: undefined,
         no_folder: false,
+        include_private: false,
       });
       expect(filtered.data.map(row => row.session_id)).toEqual(['named-1']);
     });
@@ -429,6 +437,8 @@ export function runStoreContractSuite<
         metadata: {},
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
 
       await expect(
@@ -554,6 +564,8 @@ export function runStoreContractSuite<
         metadata,
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
 
       expect(mustGet(await store.getSession({ tenant_id: tenant, session_id: sessionId })).metadata).toEqual(metadata);
@@ -570,6 +582,8 @@ export function runStoreContractSuite<
         metadata: { a: '1' },
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
 
       await store.updateSession({
@@ -623,6 +637,8 @@ export function runStoreContractSuite<
           metadata: {},
           external_id: null,
           source: null,
+          is_incognito: false,
+          private_expires_at: null,
         }),
       ).rejects.toBeInstanceOf(SessionStoreConflictError);
     });
@@ -645,6 +661,8 @@ export function runStoreContractSuite<
         metadata: {},
         external_id: 'run-1',
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
       const byId = await store.getSession({ tenant_id: tenant, session_id: sessionId });
       expect(mustGet(byId).external_id).toBe('run-1');
@@ -665,6 +683,8 @@ export function runStoreContractSuite<
         metadata: {},
         external_id: 'shared-key',
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
       // Specifically the external-id arm, not just any conflict: get-or-create
       // treats this rejection as its normal repeat-call path.
@@ -678,6 +698,8 @@ export function runStoreContractSuite<
           metadata: {},
           external_id: 'shared-key',
           source: null,
+          is_incognito: false,
+          private_expires_at: null,
         }),
       ).rejects.toBeInstanceOf(SessionExternalIdConflictError);
 
@@ -690,6 +712,8 @@ export function runStoreContractSuite<
         metadata: {},
         external_id: 'shared-key',
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
       await store.createSession({
         tenant_id: tenant,
@@ -700,6 +724,8 @@ export function runStoreContractSuite<
         metadata: {},
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
       await store.createSession({
         tenant_id: tenant,
@@ -710,6 +736,8 @@ export function runStoreContractSuite<
         metadata: {},
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
     });
 
@@ -724,11 +752,142 @@ export function runStoreContractSuite<
         metadata: {},
         external_id: 'run-1',
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
       const first = await store.getSessionByExternalId({ tenant_id: tenant, external_id: 'run-1' });
       await new Promise(r => setTimeout(r, 5));
       const second = await store.getSessionByExternalId({ tenant_id: tenant, external_id: 'run-1' });
       expect(mustGet(second).last_activity_timestamp_ms).toBe(mustGet(first).last_activity_timestamp_ms);
+    });
+  });
+
+  describe('private chats', () => {
+    const hour = 3_600_000;
+
+    async function seedChat(
+      store: Store,
+      input: { session_id: string; tenant_id?: string; private_expires_at: Date | null },
+    ) {
+      await store.createSession({
+        tenant_id: input.tenant_id ?? tenant,
+        session_id: input.session_id,
+        created_by_subject: { subject_id: createdBy, subject_type: 'user', subject_display_name: createdBy },
+        agent: { type: 'inline', spec: makeAgentSpec() },
+        custom: null,
+        metadata: {},
+        external_id: null,
+        source: null,
+        is_incognito: input.private_expires_at !== null,
+        private_expires_at: input.private_expires_at,
+      });
+    }
+
+    function listInput(include_private: boolean) {
+      return {
+        tenant_id: tenant,
+        limit: 50,
+        page_token: undefined,
+        order: 'desc' as const,
+        start_timestamp: undefined,
+        end_timestamp: undefined,
+        agent_id: undefined,
+        created_by_or_agent_ids: undefined,
+        metadata: undefined,
+        source_type: undefined,
+        source_id: undefined,
+        folder_id: undefined,
+        no_folder: false,
+        include_private,
+      };
+    }
+
+    it('stores the flag and expiry, and a normal chat has neither', async () => {
+      const store = createStore();
+      const expiresAt = new Date(Date.now() + 24 * hour);
+      await seedChat(store, { session_id: 'private-1', private_expires_at: expiresAt });
+      await seedChat(store, { session_id: 'normal-1', private_expires_at: null });
+      const privateChat = mustGet(await store.getSession({ tenant_id: tenant, session_id: 'private-1' }));
+      const normalChat = mustGet(await store.getSession({ tenant_id: tenant, session_id: 'normal-1' }));
+      expect(privateChat.is_incognito).toBe(true);
+      expect(privateChat.private_expires_at?.toISOString()).toBe(expiresAt.toISOString());
+      expect(normalChat.is_incognito).toBe(false);
+      expect(normalChat.private_expires_at).toBeNull();
+    });
+
+    it('refuses a flag without an expiry, and an expiry without the flag', async () => {
+      const store = createStore();
+      const base = {
+        tenant_id: tenant,
+        created_by_subject: { subject_id: createdBy, subject_type: 'user', subject_display_name: createdBy },
+        agent: { type: 'inline' as const, spec: makeAgentSpec() },
+        custom: null,
+        metadata: {},
+        external_id: null,
+        source: null,
+      };
+      await expect(
+        store.createSession({ ...base, session_id: 'a', is_incognito: true, private_expires_at: null }),
+      ).rejects.toBeInstanceOf(SessionStoreInvariantError);
+      await expect(
+        store.createSession({ ...base, session_id: 'b', is_incognito: false, private_expires_at: new Date() }),
+      ).rejects.toBeInstanceOf(SessionStoreInvariantError);
+    });
+
+    it('lists private chats only when asked', async () => {
+      const store = createStore();
+      await seedChat(store, { session_id: 'private-1', private_expires_at: new Date(Date.now() + hour) });
+      await seedChat(store, { session_id: 'normal-1', private_expires_at: null });
+      const without = await store.listSessions(listInput(false));
+      const withPrivate = await store.listSessions(listInput(true));
+      expect(without.data.map(session => session.session_id)).toEqual(['normal-1']);
+      expect(withPrivate.data.map(session => session.session_id).sort()).toEqual(['normal-1', 'private-1']);
+    });
+
+    it('pushes back the expiry of a private chat without counting it as activity', async () => {
+      const store = createStore();
+      await seedChat(store, { session_id: 'private-1', private_expires_at: new Date(Date.now() + hour) });
+      const before = mustGet(await store.getSession({ tenant_id: tenant, session_id: 'private-1' }));
+      const later = new Date(Date.now() + 48 * hour);
+      await store.setPrivateExpiry({ tenant_id: tenant, session_id: 'private-1', private_expires_at: later });
+      const after = mustGet(await store.getSession({ tenant_id: tenant, session_id: 'private-1' }));
+      expect(after.private_expires_at?.toISOString()).toBe(later.toISOString());
+      expect(after.last_activity_timestamp_ms).toBe(before.last_activity_timestamp_ms);
+    });
+
+    it('refuses an expiry for a normal chat and for a missing one', async () => {
+      const store = createStore();
+      await seedChat(store, { session_id: 'normal-1', private_expires_at: null });
+      await expect(
+        store.setPrivateExpiry({ tenant_id: tenant, session_id: 'normal-1', private_expires_at: new Date() }),
+      ).rejects.toBeInstanceOf(SessionStoreInvariantError);
+      await expect(
+        store.setPrivateExpiry({ tenant_id: tenant, session_id: missingSessionId, private_expires_at: new Date() }),
+      ).rejects.toBeInstanceOf(SessionStoreNotFoundError);
+      const normal = mustGet(await store.getSession({ tenant_id: tenant, session_id: 'normal-1' }));
+      expect(normal.private_expires_at).toBeNull();
+    });
+
+    it('lists only private chats past their expiry, soonest first, across tenants, up to the limit', async () => {
+      const store = createStore();
+      const now = new Date();
+      await seedChat(store, { session_id: 'expired-late', private_expires_at: new Date(now.getTime() - hour) });
+      await seedChat(store, {
+        session_id: 'expired-early',
+        tenant_id: 'other',
+        private_expires_at: new Date(now.getTime() - 2 * hour),
+      });
+      await seedChat(store, { session_id: 'expired-latest', private_expires_at: new Date(now.getTime() - 1000) });
+      await seedChat(store, { session_id: 'still-open', private_expires_at: new Date(now.getTime() + hour) });
+      await seedChat(store, { session_id: 'normal-1', private_expires_at: null });
+      const all = await store.listExpiredPrivateSessions({ now, limit: 10 });
+      expect(all).toEqual([
+        { tenant_id: 'other', session_id: 'expired-early' },
+        { tenant_id: tenant, session_id: 'expired-late' },
+        { tenant_id: tenant, session_id: 'expired-latest' },
+      ]);
+      const firstTwo = await store.listExpiredPrivateSessions({ now, limit: 2 });
+      expect(firstTwo.map(chat => chat.session_id)).toEqual(['expired-early', 'expired-late']);
     });
   });
 
@@ -745,6 +904,8 @@ export function runStoreContractSuite<
         metadata: {},
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
 
       await store.createTurn(
@@ -839,6 +1000,7 @@ export function runStoreContractSuite<
         source_id: undefined,
         folder_id: undefined,
         no_folder: false,
+        include_private: false,
       });
       expect(listed.data).toHaveLength(0);
 
@@ -940,6 +1102,8 @@ export function runStoreContractSuite<
         metadata: {},
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
       await store.createTurn(makeCreateTurnInput({ sessionId: nested, turnId: 'turn-1' }));
       const nestedKeys = { session_id: nested, turn_id: 'turn-1' };
@@ -1158,6 +1322,8 @@ export function runStoreContractSuite<
           metadata: {},
           external_id: null,
           source: null,
+          is_incognito: false,
+          private_expires_at: null,
         });
         await new Promise(r => setTimeout(r, 2));
       }
@@ -1175,6 +1341,8 @@ export function runStoreContractSuite<
         metadata: {},
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
 
       const desc = await store.listSessions({
@@ -1191,6 +1359,7 @@ export function runStoreContractSuite<
         source_id: undefined,
         folder_id: undefined,
         no_folder: false,
+        include_private: false,
       });
       expect(desc.data.map(s => s.session_id)).toEqual(['sc', 'sb', 'sa']);
 
@@ -1208,6 +1377,7 @@ export function runStoreContractSuite<
         source_id: undefined,
         folder_id: undefined,
         no_folder: false,
+        include_private: false,
       });
       expect(asc.data.map(s => s.session_id)).toEqual(['sa', 'sb', 'sc']);
     });
@@ -1230,6 +1400,7 @@ export function runStoreContractSuite<
         source_id: undefined,
         folder_id: undefined,
         no_folder: false,
+        include_private: false,
       });
       expect(first.data).toHaveLength(2);
       expect(first.pagination.next_page_token).toBeDefined();
@@ -1247,6 +1418,7 @@ export function runStoreContractSuite<
         source_id: undefined,
         folder_id: undefined,
         no_folder: false,
+        include_private: false,
       });
       expect(second.data.map(s => s.session_id)).toEqual(['sa']);
       expect(second.pagination.next_page_token).toBeUndefined();
@@ -1265,6 +1437,7 @@ export function runStoreContractSuite<
         source_id: undefined,
         folder_id: undefined,
         no_folder: false,
+        include_private: false,
       });
       const middleSession = all.data[1];
       if (!middleSession) {
@@ -1285,6 +1458,7 @@ export function runStoreContractSuite<
         source_id: undefined,
         folder_id: undefined,
         no_folder: false,
+        include_private: false,
       });
       expect(bounded.data.map(s => s.session_id)).toEqual(['sb']);
     });
@@ -1313,6 +1487,7 @@ export function runStoreContractSuite<
         source_id: undefined,
         folder_id: undefined,
         no_folder: false,
+        include_private: false,
       };
       const desc = await store.listSessions({ ...listArgs, limit: 10, page_token: undefined });
       expect(desc.data.map(s => s.session_id)).toEqual(['sa', 'sc', 'sb']);
@@ -1344,6 +1519,7 @@ export function runStoreContractSuite<
         source_id: undefined,
         folder_id: undefined,
         no_folder: false,
+        include_private: false,
       };
       const full = await store.listSessions({ ...listArgs, limit: 10, page_token: undefined });
       const page1 = await store.listSessions({ ...listArgs, limit: 2, page_token: undefined });
@@ -1371,6 +1547,8 @@ export function runStoreContractSuite<
         metadata: { env: 'prod', team: 'platform' },
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
       await store.createSession({
         tenant_id: tenant,
@@ -1381,6 +1559,8 @@ export function runStoreContractSuite<
         metadata: { env: 'prod' },
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
       await store.createSession({
         tenant_id: tenant,
@@ -1391,6 +1571,8 @@ export function runStoreContractSuite<
         metadata: { env: 'staging' },
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
       await store.createSession({
         tenant_id: tenant,
@@ -1401,6 +1583,8 @@ export function runStoreContractSuite<
         metadata: {},
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
 
       const listArgs = {
@@ -1416,6 +1600,7 @@ export function runStoreContractSuite<
         source_id: undefined,
         folder_id: undefined,
         no_folder: false,
+        include_private: false,
       };
 
       const byEnv = await store.listSessions({ ...listArgs, metadata: { env: 'prod' } });
@@ -1442,6 +1627,8 @@ export function runStoreContractSuite<
         metadata: {},
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
       await store.createSession({
         tenant_id: tenant,
@@ -1452,6 +1639,8 @@ export function runStoreContractSuite<
         metadata: {},
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
       await store.createSession({
         tenant_id: tenant,
@@ -1462,6 +1651,8 @@ export function runStoreContractSuite<
         metadata: {},
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
       await store.createSession({
         tenant_id: tenant,
@@ -1472,6 +1663,8 @@ export function runStoreContractSuite<
         metadata: {},
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
 
       const aliceOnly = await store.listSessions({
@@ -1491,6 +1684,7 @@ export function runStoreContractSuite<
         source_id: undefined,
         folder_id: undefined,
         no_folder: false,
+        include_private: false,
       });
       expect(aliceOnly.data.map(s => s.session_id)).toEqual(['alice-session']);
       expect(aliceOnly.data[0]?.created_by_subject.subject_id).toBe('alice');
@@ -1512,6 +1706,7 @@ export function runStoreContractSuite<
         source_id: undefined,
         folder_id: undefined,
         no_folder: false,
+        include_private: false,
       });
       expect(aliceOrManaged.data.map(s => s.session_id)).toEqual(['alice-session', 'managed-session']);
 
@@ -1532,6 +1727,7 @@ export function runStoreContractSuite<
         source_id: undefined,
         folder_id: undefined,
         no_folder: false,
+        include_private: false,
       });
       expect(managedAgentOnly.data.map(s => s.session_id)).toEqual(['managed-session']);
 
@@ -1552,6 +1748,7 @@ export function runStoreContractSuite<
         source_id: undefined,
         folder_id: undefined,
         no_folder: false,
+        include_private: false,
       });
       expect(unmatched.data).toEqual([]);
     });
@@ -1572,6 +1769,8 @@ export function runStoreContractSuite<
         metadata: {},
         external_id: 'run-1',
         source: scheduleSource,
+        is_incognito: false,
+        private_expires_at: null,
       });
       await store.createSession({
         tenant_id: tenant,
@@ -1582,6 +1781,8 @@ export function runStoreContractSuite<
         metadata: {},
         external_id: 'run-2',
         source: { type: 'schedule', id: 'sched-2', run_id: 'run-2' },
+        is_incognito: false,
+        private_expires_at: null,
       });
       await store.createSession({
         tenant_id: tenant,
@@ -1592,6 +1793,8 @@ export function runStoreContractSuite<
         metadata: {},
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
 
       const byId = mustGet(await store.getSession({ tenant_id: tenant, session_id: 'from-schedule' }));
@@ -1611,6 +1814,7 @@ export function runStoreContractSuite<
         source_id: undefined,
         folder_id: undefined,
         no_folder: false,
+        include_private: false,
       });
       expect(byType.data.map(s => s.session_id).sort()).toEqual(['from-other-schedule', 'from-schedule']);
 
@@ -1628,6 +1832,7 @@ export function runStoreContractSuite<
         source_id: 'sched-1',
         folder_id: undefined,
         no_folder: false,
+        include_private: false,
       });
       expect(bySourceId.data.map(s => s.session_id)).toEqual(['from-schedule']);
       expect(bySourceId.data[0]?.source).toEqual(scheduleSource);
@@ -1646,6 +1851,7 @@ export function runStoreContractSuite<
         source_id: 'missing-sched',
         folder_id: undefined,
         no_folder: false,
+        include_private: false,
       });
       expect(unmatched.data).toEqual([]);
     });
@@ -1674,6 +1880,8 @@ export function runStoreContractSuite<
           metadata: {},
           external_id: null,
           source: null,
+          is_incognito: false,
+          private_expires_at: null,
         });
         await new Promise(r => setTimeout(r, 2));
         await store.setSessionFolder({
@@ -1696,6 +1904,8 @@ export function runStoreContractSuite<
         metadata: {},
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
 
       const base = {
@@ -1709,6 +1919,7 @@ export function runStoreContractSuite<
         source_type: undefined,
         source_id: undefined,
         no_folder: false,
+        include_private: false,
       };
 
       const all = await store.listSessions({ ...base, folder_id: 'folder-1', limit: 10, page_token: undefined });
@@ -1755,6 +1966,8 @@ export function runStoreContractSuite<
           metadata: {},
           external_id: null,
           source: null,
+          is_incognito: false,
+          private_expires_at: null,
         });
         await new Promise(r => setTimeout(r, 2));
         if (folderId !== null) {
@@ -1783,6 +1996,7 @@ export function runStoreContractSuite<
         source_type: undefined,
         source_id: undefined,
         folder_id: undefined,
+        include_private: false,
       };
 
       const unscoped = await store.listSessions({ ...base, no_folder: true, limit: 10, page_token: undefined });
@@ -4065,6 +4279,8 @@ export function runStoreContractSuite<
         metadata: {},
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
       const sessionOf = (turnId: string): string => (turnId.endsWith('replica-a') ? sessionId : otherSessionId);
       for (const turnId of ['turn-a.replica-a', 'turn-b.replica-b']) {
@@ -4318,6 +4534,8 @@ export function runStoreContractSuite<
         metadata: {},
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
 
       await store.recordApprovalDismissal({
@@ -4373,6 +4591,8 @@ export function runStoreContractSuite<
         metadata: {},
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
     }
 
@@ -5305,6 +5525,8 @@ export function runStoreContractSuite<
         metadata: {},
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
       await store.createTurn(makeCreateTurnInput({ sessionId: otherSessionId, turnId: 'other-1' }));
       await store.appendToEvents({

@@ -97,7 +97,9 @@ added when it carries a label, and `-1`, `-2` and so on when the name is
 already taken. Inside: one folder per instance that was backed up, a copy of
 `release/release.json`, a copy of the authority's `root.crt` under `tls/`
 (never its key), and `SHA256SUMS` with the hash of every file. Unlabelled
-backups are pruned to the newest seven.
+backups are pruned to the newest seven. The database copy in each backup
+holds no private chats: `aman backup` deletes them from its copy before the
+copy is checked, so a private chat open at backup time is not kept.
 
 ## The lock
 

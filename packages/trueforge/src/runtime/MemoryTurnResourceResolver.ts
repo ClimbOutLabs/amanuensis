@@ -56,6 +56,8 @@ export interface MemoryTurnContext {
    * the turn's tool policy can block web_search as a substitute for recall.
    */
   internalSourceState?: InternalSourceState | undefined;
+  /** True in a private chat: memory is read as usual and nothing from the chat is saved. */
+  keepsNothing: boolean;
 }
 
 /** Root-only: sub-agent threads get no memory capability (same gating as personalization/persona). */
@@ -81,6 +83,7 @@ function memoryCapabilitiesForTurn(input: {
       timeZone: memory.clientTimezone,
       internalSourceState: memory.internalSourceState,
       webSearch: input.webSearch,
+      keepsNothing: memory.keepsNothing,
     }),
   ];
 }
