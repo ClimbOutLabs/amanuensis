@@ -40,7 +40,7 @@ function takesDigits(element) {
 const DIGIT_ROW_LEVELS = 5;
 
 /** A label that only says which box of a code this is, such as "Digit 1 of 6" or "OTP character 2". */
-const CODE_BOX_LABEL = /\b(digit|character|char|code|otp|pin)\b|\b\d+ of \d+\b/i;
+const CODE_BOX_LABEL = /\b(digit|character|char|box|code|otp|pin)\b|\b\d+\s*(of|\/)\s*\d+\b/i;
 
 /**
  * Whether a field has a label of its own that names what it holds: a count such as "Adults" does,

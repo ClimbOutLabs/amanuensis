@@ -146,7 +146,7 @@ async function withWorld(run) {
       <input name="tpin" value="8642" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" />
       <input name="txn_pin" value="1928" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" /><input id="pin" inputmode="numeric" value="3746" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" />
       <div class="otp">${[1, 2, 3].map(() => `<div class="cell"><span><input maxlength="1" inputmode="numeric" value="7" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" /></span></div>`).join('')}</div>
-      ${[1, 2].map(n => `<input maxlength="1" inputmode="numeric" aria-label="Digit ${n} of 6" value="7" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" />`).join('')}
+      ${[1, 2].map(n => `<input maxlength="1" inputmode="numeric" aria-label="${n === 1 ? 'Digit 1 of 6' : 'Box 2/6'}" value="7" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" />`).join('')}
       <input name="pin" autocomplete="postal-code" value="110001" />
       <form><label>Adults <input type="number" maxlength="1" value="2" /></label><label>Children <input type="number" maxlength="1" value="3" /></label></form>
       <div><div><div><input maxlength="1" inputmode="numeric" value="7" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" /></div></div></div>
