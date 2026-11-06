@@ -1,7 +1,7 @@
 ---
 id: telegram
 title: Using Aman from Telegram
-covers:
+covers: route:telegram
 ---
 
 You can talk to Aman from Telegram. You make a small bot of your own, connect it once in Settings, and pair it with you. After that, messages you send the bot are answered in a chat called Telegram, and replies, reminders and things that need your ok are sent back to Telegram.
