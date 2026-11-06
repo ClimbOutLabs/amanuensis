@@ -61,6 +61,7 @@ import { ASSISTANT_RESPONSE_SOURCE, isNoteTooOld, noteProvenance, withoutNoteTra
 import { MEMORY_ORIGIN_METADATA_KEY, USER_STATED_ORIGIN, type AmanMemoryOrigin } from './memoryOrigin';
 import { retainOperationId, submitRetain } from './memoryRetain';
 import { decideMemoryRoute } from './memoryRouting';
+import { recallExclusionsFor, recallFactExcluded } from './recallExclusions';
 import { rankNamedPeopleFirst } from './recallNameBoost';
 import { ScreenClient, type ScreenClassifyResult } from './screenClient';
 import { QUERY_STOPWORDS } from './stopWords';
@@ -1575,6 +1576,16 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
         message: parts[parts.length - 1] ?? '',
       });
       items = gated.items.map(item => withLocalDay({ item, timeZone: this.timeZone }));
+      // A fact the person pulled out of this chat stays out of its recall: the bank keeps it
+      // and other chats still recall it. Matched on the words the block would show for the
+      // item, so the rail's row and the recalled item meet on the same text, including when
+      // one side was shortened to fit a token budget (see recallFactExcluded).
+      const exclusions = recallExclusionsFor(this.sessionId);
+      if (exclusions.size > 0) {
+        items = items.filter(
+          item => !recallFactExcluded({ exclusions, shownText: sanitizeMemoryLine(withoutNoteTrailer(item.text)) }),
+        );
+      }
       entities = gated.entities;
       // The tool policy reads this to block web_search as a substitute for
       // recall: a web query about material recall already surfaced can never

@@ -15,6 +15,7 @@ import {
   useOptionalPersonalization,
   type PersonalizationApi,
 } from './PersonalizationContext.js';
+import { RailChatDesk, RailHomeDesk, useRailToday, type RailDeskApi } from './RailDesk.js';
 
 export type AmanRuntimeRailStatus = 'ready' | 'connecting' | 'offline' | 'degraded';
 
@@ -61,6 +62,26 @@ export type AmanRuntimeRailProps = {
    * this over, and clicking it calls it.
    */
   onOpenAudits?: () => void;
+  /**
+   * The chat the person is looking at, or undefined on Home. The desk follows it: Home shows
+   * the day, a chat shows what the assistant is using in that chat.
+   */
+  sessionId?: string | undefined;
+  /**
+   * The desk's reads (and its one small write, the per-chat recall exclusion). Without it the
+   * rail shows no desk sections at all.
+   */
+  deskApi?: RailDeskApi;
+  /**
+   * The host's way to open a chat by id, for desk rows that point at one (a reminder's chat,
+   * a held action's chat). Rows that need it render as plain rows without it.
+   */
+  onOpenChat?: (sessionId: string) => void;
+  /**
+   * The host's way to open the memory editing path, for a fact's "Forget everywhere". The rail
+   * itself never edits memory, so the control shows only when the host hands this over.
+   */
+  onOpenMemorySettings?: () => void;
 };
 
 /** Same `aui-` prefixed style as the left rail's `aui-history-collapsed` preference. */
@@ -173,6 +194,10 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
   pendingApprovalIds = [],
   auditFeed,
   onOpenAudits,
+  sessionId,
+  deskApi,
+  onOpenChat,
+  onOpenMemorySettings,
 }) => {
   const profile = useOptionalPersonalization()?.profile;
   const assistantName = assistantDisplayName(profile?.assistant_name);
@@ -186,6 +211,16 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
   const status = statusOverride ?? connectivity.status;
   const waitingOnPerson = pendingApprovalIds.length > 0;
   const statusLine = statusLineLabel({ status, activity, waitingOnPerson });
+  // The desk's Home read. A change in the waiting approvals is the rail's own sign that the
+  // day changed, so it doubles as the read's refresh signal beside the two-minute poll.
+  const today = useRailToday(sessionId === undefined ? deskApi : undefined, pendingApprovalIds.join(','));
+  // On Home the caption also says how much is being carried, once the day has been read.
+  const statusCaption =
+    statusLine === null
+      ? null
+      : sessionId === undefined && today !== null
+        ? `${statusLine} · Carrying ${String(today.carrying)}`
+        : statusLine;
   // Folded, the poster's tooltip is all that is left, so it still says a reply is running.
   const compactLabel = statusLine ?? WORKING_ON_IT_LABEL;
   const tone = statusToneOf({ status, activity, waitingOnPerson });
@@ -278,10 +313,10 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
           </section>
 
           <div className="aman-runtime-rail__status" data-tone={tone} aria-live="polite">
-            {statusLine === null ? null : (
+            {statusCaption === null ? null : (
               <>
                 <span className="aman-runtime-rail__status-dot" aria-hidden="true" />
-                <span>{statusLine}</span>
+                <span>{statusCaption}</span>
               </>
             )}
             {selfProbed && (status === 'offline' || status === 'degraded') && (
@@ -311,6 +346,14 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
               </div>
             </section>
           )}
+
+          {sessionId === undefined && deskApi !== undefined && today !== null ? (
+            <RailHomeDesk today={today} onOpenChat={onOpenChat} />
+          ) : null}
+
+          {sessionId !== undefined && deskApi !== undefined ? (
+            <RailChatDesk sessionId={sessionId} deskApi={deskApi} onOpenMemorySettings={onOpenMemorySettings} />
+          ) : null}
 
           <FoldedRow section="activity" title="Activity">
             {/* The wait line comes straight from the chat, not the receipt: a carded action is
