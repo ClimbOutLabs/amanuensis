@@ -20,7 +20,16 @@ describe('SlotSandboxProvider network declaration', () => {
     const instructions = provider.getAdditionalInstructions();
     expect(instructions).toContain('No general network from code or the shell, by design.');
     expect(instructions).toContain(
-      'When downloads are not allowed for the repo, packages cannot be downloaded; say that plainly instead of retrying, and do not try another tool to get around it.',
+      'When downloads are not allowed, packages cannot be downloaded; say that plainly instead of retrying, and do not try another tool to get around it.',
     );
+    expect(instructions).toContain('chats without a project');
+  });
+
+  it('tells the model to build Python projects in a workspace environment, and that run_code cannot see it', () => {
+    const instructions = provider.getAdditionalInstructions();
+    expect(instructions).toContain(
+      '`python3 -m venv --system-site-packages .venv`, then install with `.venv/bin/python -m pip install <package>` and run tests with `.venv/bin/python -m pytest`',
+    );
+    expect(instructions).toContain('run_code runs only the code it is given, in an empty folder');
   });
 });

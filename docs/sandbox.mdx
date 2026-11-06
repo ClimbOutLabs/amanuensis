@@ -40,7 +40,7 @@ A second backend runs `run_code` and the shell and file tools in two hardened sl
 - Each chat's workspace has a size limit (2 GB by default), enforced while a command runs. On Linux, setup (the installer, `aman doctor sandbox --fix`, or `pnpm sandbox:slots --fix`) also gives each slot a fixed-size disk of its own (16 GB by default, `--disk-gb` to change it). Each disk may fill completely, so setup needs that much free for each one, 32 GB for both by default. After asking, it creates the disk files under `/var/lib/aman-slots`, adds them to `/etc/fstab` and mounts them, so a runaway command can fill only its own slot's disk. On Docker Desktop and WSL2 there is no per-slot disk; the virtual machine's disk bounds the workspaces. `installer/install.sh instance remove <name> --purge-data` removes the instance's disk files along with its data (`pnpm sandbox:slots --down --purge` does it for a checkout-only setup).
 - A command can use at most 128 processes. Allowed environment variables for a command are a short list (locale, terminal, language runtime and git settings); others are refused with their names.
 - The installer's instance compose file sets `SANDBOX_BACKEND=slots` and `SANDBOX_SLOTS_DIR` for the app and mounts the control volumes, so there is nothing to add to any command. Each instance has its own slots (a Compose project named `<instance>-slots`). Installing with `--no-sandbox` leaves run code off. The default backend outside the installer stays `docker`.
-- The guest image has Python 3 with pypdf, pdfplumber, reportlab, python-docx, openpyxl, pandas, matplotlib and Pillow, plus pytest, ruff and mypy for testing and checking code; Node.js with TypeScript, plus vitest, jest, eslint and prettier for testing and checking code; bash and coreutils; git; gcc, g++ and make; and poppler-utils with poppler-data, and Tesseract with language data, for reading PDFs and images. More packages can be downloaded only as described under Package downloads below.
+- The guest image has Python 3 with pypdf, pdfplumber, reportlab, python-docx, openpyxl, pandas, matplotlib and Pillow, plus pytest, ruff and mypy for testing and checking code, and venv for making a project environment; Node.js with TypeScript, plus vitest, jest, eslint and prettier for testing and checking code; bash and coreutils; git; gcc, g++ and make; and poppler-utils with poppler-data, and Tesseract with language data, for reading PDFs and images. More packages can be downloaded only as described under Package downloads below.
 - Files you attach in chat reach the sandbox the same way as on Docker, and the sandbox never fetches anything: the server sends the file into the chat's workspace (under `/workspace/.aman/uploads`) and offers it to `run_code` under `/ingress`. The text of a PDF or image is read inside the sandbox and placed in the message, so any model sees it without running code. Gmail attachments use the same path: Aman fetches the file from Gmail, sends it into the chat's workspace, and reads it there. Text taken from a file is passed to the model as data, not instructions, and goes through the tool-output screen when one is configured. Office documents, saved emails, web pages and text files are read the same way, inside the sandbox; see [Document attachments](#document-attachments). Other files are read with `run_code`.
 - Languages: PDF text works in any language (poppler-data covers Chinese, Japanese and Korean PDFs). Scanned pages and images are read with Tesseract: it detects each page's script and reads the page with that script's languages only (Latin: English, Portuguese, Spanish, French, German, Italian, Dutch; Devanagari: Hindi, Marathi; Arabic; Cyrillic: Russian; Chinese, simplified and traditional; Japanese; Korean). `DOCUMENT_OCR_LANGUAGES` (default: the Latin set) is used when a page's script cannot be detected, for example a page with very little text. Setting it to a language the image lacks is ignored for that language, so OCR keeps working.
 - `pnpm test:slots-live` (from the checkout, `--instance <name>` for an instance other than `main`) proves it end to end on an installed instance: it reads generated PDFs and scanned images in each script family through that instance's sandbox, prints a line per case, and ends with a verdict. The test images are drawn in a throwaway container, so nothing is installed on the host.
@@ -188,6 +188,19 @@ The shell tool runs repository and workspace commands. It does not run inline co
 (`python3 -c`, `node -e` and the like), a script by path, or any other Python module; those go
 through `run_code`. Building and testing a Python project is the exception: `python3 -m pytest`,
 `python3 -m pip`, `python3 -m venv` and `python3 -m unittest` run in the shell.
+
+The sandbox's own Python does not accept installs, so a Python project gets its packages in an
+environment inside the project folder:
+
+```bash
+python3 -m venv --system-site-packages .venv   # keeps the preinstalled tools, such as pytest
+.venv/bin/python -m pip install mcp            # needs Package downloads allowed for the chat
+.venv/bin/python -m pytest -q
+```
+
+If pip is pointed at the sandbox's own Python instead, its refusal comes back with these steps.
+`run_code` runs only the code it is given, in an empty folder: it cannot see the project folder or
+anything installed there, so a project is checked with its tests in the shell.
 
 A reply can do as much work inside the sandbox workspace as the task needs: writing and editing
 files, running code, builds and tests. Two limits still apply to every reply:

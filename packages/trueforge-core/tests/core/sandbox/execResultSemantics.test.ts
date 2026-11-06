@@ -2,6 +2,7 @@ import {
   buildExecResultShape,
   classifyExecStatus,
   EXITED_NOTE,
+  EXTERNALLY_MANAGED_NOTE,
   NO_MATCHES_NOTE,
 } from '../../../src/core/sandbox/execResultSemantics';
 
@@ -424,6 +425,24 @@ describe('buildExecResultShape', () => {
       expect(result.exit_code).toBe(2);
       expect(result.error_summary).toBe('grep: file: No such file');
       expect(result.note).toBe(EXITED_NOTE);
+    });
+  });
+
+  describe('when pip refuses to install into the system Python', () => {
+    const refusal = 'error: externally-managed-environment\n\n× This environment is externally managed';
+
+    it('tells the model to make a project environment instead of overriding the guard', () => {
+      const result = buildExecResultShape(1, 'pip install mcp', refusal, true);
+
+      expect(result.status).toBe('exited');
+      expect(result.note).toBe(EXTERNALLY_MANAGED_NOTE);
+      expect(result.note).toContain('python3 -m venv --system-site-packages .venv');
+      expect(result.note).toContain('.venv/bin/python -m pip install');
+      expect(result.note).toContain('never use --break-system-packages');
+    });
+
+    it('keeps the plain note when a command only prints the words and succeeds', () => {
+      expect(buildExecResultShape(0, 'cat notes.txt', refusal, true).note).toBeNull();
     });
   });
 
