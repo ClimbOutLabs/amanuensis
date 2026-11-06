@@ -752,6 +752,7 @@ export type {
   NoticingKind,
   PushDevice,
   ReachApi,
+  ReachChannelState,
   ReachSender,
   ReachSettings,
   ReachView,

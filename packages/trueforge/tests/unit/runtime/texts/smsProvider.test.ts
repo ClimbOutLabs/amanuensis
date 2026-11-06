@@ -1,7 +1,9 @@
 import {
   createTwilioSmsProvider,
+  pointNumberWithRetry,
   pointNumberWords,
   smsFailureWords,
+  type PointNumberResult,
   type TwilioFetch,
 } from '../../../../src/runtime/texts/smsProvider';
 
@@ -161,5 +163,39 @@ describe('pointing the Twilio number at this server', () => {
     for (const fetchTwilio of [missing, odd, refused]) {
       expect(fetchTwilio.mock.calls.every(call => call[0].method === 'GET')).toBe(true);
     }
+  });
+});
+
+describe('pointing the number again after Twilio could not be reached', () => {
+  it('tries again with growing waits until Twilio answers, and reports each try', async () => {
+    const answers: PointNumberResult[] = [{ result: 'unreachable' }, { result: 'unreachable' }];
+    let call = 0;
+    const waits: number[] = [];
+    const results: string[] = [];
+    await pointNumberWithRetry({
+      provider: { pointNumberAt: () => Promise.resolve(answers[call++] ?? { result: 'already_set' }) },
+      smsUrl: 'https://aman.example.invalid/twilio/sms',
+      onResult: pointed => results.push(pointed.result),
+      wait: ms => {
+        waits.push(ms);
+        return Promise.resolve();
+      },
+    });
+    expect(results).toEqual(['unreachable', 'unreachable', 'already_set']);
+    expect(waits).toEqual([30_000, 60_000]);
+  });
+
+  it('does not try again when only the person who runs Aman can fix it', async () => {
+    const waits: number[] = [];
+    await pointNumberWithRetry({
+      provider: { pointNumberAt: () => Promise.resolve({ result: 'not_accepted' }) },
+      smsUrl: 'https://aman.example.invalid/twilio/sms',
+      onResult: () => undefined,
+      wait: ms => {
+        waits.push(ms);
+        return Promise.resolve();
+      },
+    });
+    expect(waits).toEqual([]);
   });
 });

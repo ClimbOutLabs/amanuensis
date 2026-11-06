@@ -228,6 +228,7 @@ export function ReachPreferences({ reach }: { reach: ReachApi }) {
             textsOn={draft.textsOn}
             savedOn={view.settings.textsOn}
             onTextsOn={next => change({ textsOn: next })}
+            problem={availability.texts.problem}
             tryButton={tryButton('text', !view.settings.textsOn)}
           />
         ) : (

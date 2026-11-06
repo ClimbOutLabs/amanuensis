@@ -46,6 +46,7 @@ export function deliveryDeps(
       logger: winston.createLogger({ silent: true }),
     }),
     reachChannels: () => NO_PHONE_CHANNELS,
+    isInstanceOwner: () => false,
     textLimits: undefined,
     textContactStore,
     textNumbers: createTextNumberService({

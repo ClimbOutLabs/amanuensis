@@ -3,6 +3,7 @@ import type { Logger } from 'winston';
 
 import type { ResolveRequestContext } from '../auth/identity';
 import type { INoticingStore } from '../db/noticingStore';
+import type { PersonOwner } from '../db/personOwner';
 import type { IReachSettingsStore } from '../db/reachSettingsStore';
 import type { ITextContactStore } from '../db/textContactStore';
 import {
@@ -15,6 +16,7 @@ import type { DeliveryService } from '../runtime/delivery/deliveryService';
 import { KIND_MAX_LEVEL } from '../runtime/noticing/levels';
 import { MAIL_PROBLEM_SHOWN_AFTER_MS } from '../runtime/noticing/noticingService';
 import { suggestAlwaysImportant } from '../runtime/noticing/suggestions';
+import type { ChannelViewer } from '../runtime/texts/smsProvider';
 import {
   claimTextLimits,
   dayLimitWords,
@@ -33,14 +35,22 @@ const TEST_WORDS = 'This is a test. If you can read this, it works.';
 
 export interface ReachRouterDeps {
   reachStore: IReachSettingsStore;
-  textContacts: Pick<ITextContactStore, 'get' | 'claimTextSend' | 'forgetTextSends' | 'textSendRoom'>;
+  textContacts: Pick<
+    ITextContactStore,
+    'get' | 'claimTextSends' | 'forgetTextSends' | 'giveBackTextSends' | 'textSendRoom'
+  >;
   /** Undefined when this server has no text provider. */
   textLimits: DeliveryLimitSettings | undefined;
   /** Where each watcher's trouble is kept, so Reach me can say mail is not being checked. */
   noticingStore: Pick<INoticingStore, 'getCheckpoint'>;
   deliveryService: Pick<DeliveryService, 'deliver'>;
-  /** Which phone channels this server can use now. Read per request, since a later part may set one up while running. */
-  channels: () => ReachAvailability;
+  /**
+   * Which phone channels this server can use now. Read per request, since a later part may set one up while running.
+   * The viewer only changes how a problem is worded.
+   */
+  channels: (input?: { viewer: ChannelViewer }) => ReachAvailability;
+  /** Whether this person runs Aman, so a problem with the server's setup is worded for them. */
+  isInstanceOwner: (owner: PersonOwner) => boolean;
   /** The texts of the memories that may name a sender. Empty when this server keeps no readable memory. */
   memories: (input: { tenant_id: string }) => Promise<string[]>;
   resolveRequestContext: ResolveRequestContext;
@@ -99,7 +109,7 @@ export function createReachRouter(deps: ReachRouterDeps) {
     return {
       settings: stored ?? defaultReachSettings('UTC'),
       saved: stored !== undefined,
-      availability: deps.channels(),
+      availability: deps.channels({ viewer: deps.isInstanceOwner(owner) ? 'owner' : 'person' }),
       max_levels: KIND_MAX_LEVEL,
       mail_problem: failing ? { since: failure.since.toISOString(), kind: failure.kind } : null,
     };
@@ -197,7 +207,9 @@ export function createReachRouter(deps: ReachRouterDeps) {
       });
       const sent = delivery.attempts.find(attempt => attempt.channel === 'sms');
       if (sent?.outcome === 'skipped') {
-        // Only a day's limit reached since the check above skips a confirmed number with texts on.
+        // Only a day's limit reached since the check above skips a confirmed number with texts on. No text went out,
+        // so the test is given back.
+        await deps.textContacts.giveBackTextSends({ keys: [testTextLimit(owner).key] });
         return c.json({ error: { message: sent.detail ?? 'No text was sent. Try again later.' } }, 429);
       }
       if (sent?.outcome !== 'sent') {

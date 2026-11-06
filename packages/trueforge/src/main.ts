@@ -88,6 +88,7 @@ import type { IModelProviderStore } from './db/modelProviderStore';
 import { NoticingStore, type INoticingStore } from './db/noticingStore';
 import type { IPersonalizationStore } from './db/personalizationStore';
 import type { IPersonaStore } from './db/personaStore';
+import type { PersonOwner } from './db/personOwner';
 import type { PostgresAgentStore } from './db/postgres/agent-store/PostgresAgentStore';
 import type { Database as PostgresDatabase } from './db/postgres/types';
 import { PushSubscriptionStore, type IPushSubscriptionStore } from './db/pushSubscriptionStore';
@@ -139,7 +140,14 @@ import { createOutboundSecretSource } from './runtime/outboundSecrets';
 import { seedOwnerNameAtBoot } from './runtime/ownerName';
 import { createSentinelServices } from './runtime/sentinelServices';
 import { getSharedRunCodeService } from './runtime/sessionResources';
-import { createTwilioSmsProvider, pointNumberWords, type PointNumberFailure } from './runtime/texts/smsProvider';
+import {
+  createTwilioSmsProvider,
+  pointNumberWithRetry,
+  pointNumberWords,
+  type ChannelViewer,
+  type PointNumberFailure,
+  type PointNumberResult,
+} from './runtime/texts/smsProvider';
 import { createSmsSender } from './runtime/texts/smsSender';
 import { createTextNumberService } from './runtime/texts/textNumber';
 import { createTokenFactoryBudget } from './runtime/tokenFactoryBudget';
@@ -817,7 +825,12 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
       : { number_key: configuration.TWILIO.authToken, max_texts_per_day: configuration.TWILIO.maxTextsPerDay };
   // Set when the Twilio number could not be pointed at this server at boot, so Settings can say what to do.
   const twilioNumber: { problem: PointNumberFailure | undefined } = { problem: undefined };
-  const reachChannels = () => reachChannelsFor({ twilio: configuration.TWILIO, numberProblem: twilioNumber.problem });
+  const reachChannels = (input?: { viewer: ChannelViewer }) =>
+    reachChannelsFor({
+      twilio: configuration.TWILIO,
+      numberProblem: twilioNumber.problem,
+      viewer: input?.viewer ?? 'person',
+    });
   const deliveryService = createDeliveryService({
     store: deliveryStore,
     senders: [
@@ -1008,6 +1021,8 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
       logger,
     }),
     reachChannels,
+    isInstanceOwner: (owner: PersonOwner) =>
+      owner.tenant_id === noticingInstanceOwner?.tenant_id && owner.created_by === noticingInstanceOwner.created_by,
     textLimits,
     textNumbers,
     textContactStore,
@@ -1373,7 +1388,9 @@ try {
     // So nobody has to set it in the Twilio console. Only this number's incoming-text address changes, only to the
     // configured one, and a failure leaves texts working as before.
     const smsUrl = `${configuration.TWILIO.webhookPublicUrl}${INBOUND_SMS_PATH}`;
-    void smsProvider.pointNumberAt({ smsUrl }).then(pointed => {
+    const onResult = (pointed: PointNumberResult) => {
+      twilioNumber.problem =
+        pointed.result === 'updated' || pointed.result === 'already_set' ? undefined : pointed.result;
       if (pointed.result === 'updated') {
         // Another app or Aman that used this number stops getting its incoming texts; the host says which one.
         logger.info('The Twilio number now sends its incoming texts to this server', {
@@ -1383,12 +1400,14 @@ try {
       } else if (pointed.result === 'already_set') {
         logger.info('The Twilio number sends its incoming texts to this server', { result: pointed.result });
       } else {
-        twilioNumber.problem = pointed.result;
         logger.warn(`The Twilio number could not be pointed at this server. ${pointNumberWords(pointed.result)}`, {
           result: pointed.result,
         });
       }
-    });
+    };
+    // The waits are unref'd, so trying again never keeps the server from stopping.
+    const wait = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms).unref());
+    void pointNumberWithRetry({ provider: smsProvider, smsUrl, onResult, wait });
   }
 
   // Graceful drain is the safe default for built and direct execution.

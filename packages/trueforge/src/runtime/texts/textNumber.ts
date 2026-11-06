@@ -10,22 +10,12 @@ import type { ITextContactStore } from '../../db/textContactStore';
 import { E164_PATTERN, type TextContact, type TextMode, type TextStatus } from '../../schemas/textMessages';
 import { assistantNameFor } from './assistantName';
 import type { SmsFailure, SmsProvider } from './smsProvider';
-import { claimTextLimits, DAY_MS, HOUR_MS, numberLimitKey, ownerLimitKey, type TextLimit } from './textLimits';
+import { claimTextLimits, codeTextLimits } from './textLimits';
 import { codeText, privateText } from './textWords';
 
 export const CODE_TTL_MS = 10 * 60_000;
 /** Tries at one code. The last one used up, the code is void and a new one must be asked for. */
 export const MAX_CODE_ATTEMPTS = 5;
-/** Codes sent in one hour for one person, whatever number they ask for, so the page cannot be used to text strangers. */
-export const MAX_CODES_PER_HOUR = 3;
-/** Codes sent in a day for one person, below the server's cap, so one account cannot use up everyone's codes. */
-export const MAX_CODES_PER_PERSON_PER_DAY = 10;
-/** Codes sent to one number, whoever asks, so many people together cannot flood it either. */
-export const MAX_CODES_PER_NUMBER_PER_HOUR = 3;
-export const MAX_CODES_PER_NUMBER_PER_DAY = 10;
-/** Codes sent by the whole server in a day, so many accounts together cannot run up the bill. */
-export const MAX_CODES_PER_SERVER_PER_DAY = 50;
-
 /** The words Twilio treats as STOP in English, whatever the case. */
 const OPT_OUT_WORDS = new Set(['STOP', 'STOPALL', 'UNSUBSCRIBE', 'CANCEL', 'END', 'QUIT']);
 
@@ -155,47 +145,6 @@ export function createTextNumberService({
     }
   }
 
-  /**
-   * The limits one code send counts against: the person by the hour and by the day, the number by the hour and by
-   * the day, and last the whole server, so a code another limit refuses spends none of the server's day. The number
-   * limits are kept by whoever asks, so the page cannot be used to text strangers, but they and the server's day do
-   * not hold back the person who confirmed that number. A number only waiting for its code, or one that replied STOP,
-   * is not theirs, since anyone can make any number wait.
-   */
-  function codeLimits({
-    key,
-    owner,
-    phone,
-    existing,
-  }: {
-    key: string;
-    owner: PersonOwner;
-    phone: string;
-    existing: TextContact | undefined;
-  }): TextLimit[] {
-    const person: TextLimit[] = [
-      { key: ownerLimitKey({ scope: 'person', owner }), window_ms: HOUR_MS, max: MAX_CODES_PER_HOUR },
-      { key: ownerLimitKey({ scope: 'person-day', owner }), window_ms: DAY_MS, max: MAX_CODES_PER_PERSON_PER_DAY },
-    ];
-    if (existing?.phone === phone && existing.confirmed_at !== null) {
-      return person;
-    }
-    return [
-      ...person,
-      {
-        key: numberLimitKey({ secret: key, scope: 'number-hour', phone }),
-        window_ms: HOUR_MS,
-        max: MAX_CODES_PER_NUMBER_PER_HOUR,
-      },
-      {
-        key: numberLimitKey({ secret: key, scope: 'number-day', phone }),
-        window_ms: DAY_MS,
-        max: MAX_CODES_PER_NUMBER_PER_DAY,
-      },
-      { key: 'server-day', window_ms: DAY_MS, max: MAX_CODES_PER_SERVER_PER_DAY },
-    ];
-  }
-
   return {
     async status(owner) {
       const [contact, name] = await Promise.all([store.get(owner), assistantNameFor({ personalization, owner })]);
@@ -218,7 +167,8 @@ export function createTextNumberService({
         contact.code_attempts < MAX_CODE_ATTEMPTS;
       return {
         phone: contact.phone,
-        confirmed: contact.confirmed_at !== null,
+        // A number that replied STOP keeps its confirmation for the limits, but must be confirmed again to get texts.
+        confirmed: canText(contact),
         mode: contact.mode,
         opted_out: contact.opted_out_at !== null,
         pending_phone: contact.pending_phone,
@@ -239,7 +189,12 @@ export function createTextNumberService({
       const existing = await store.get(owner);
       const claim = await claimTextLimits({
         store,
-        limits: codeLimits({ key: codeKey, owner, phone: number, existing }),
+        limits: codeTextLimits({
+          secret: codeKey,
+          owner,
+          phone: number,
+          confirmed_by_owner: existing?.phone === number && existing.confirmed_at !== null,
+        }),
         at,
       });
       if (!claim.ok) {
@@ -328,7 +283,7 @@ export function createTextNumberService({
     },
 
     async stopNumber(phone) {
-      const { opted_out, pending_dropped } = await store.optOut({ phone, now: now() });
+      const { opted_out, unconfirmed_dropped, pending_dropped } = await store.optOut({ phone, now: now() });
       // Reach settings are per person, so each one is switched off on its own. A number is rarely shared by many.
       for (const owner of opted_out) {
         await textsOff(owner);
@@ -339,6 +294,14 @@ export function createTextNumberService({
             'You replied STOP, so texts are off. To use them again, reply START from that phone and confirm the number again in Settings.',
         });
       }
+      for (const owner of unconfirmed_dropped) {
+        await record({
+          owner,
+          tool_name: 'delivery.sms_new_number_stopped',
+          description:
+            'The number you were confirming replied STOP, so it was removed. To use texts, enter a number again in Settings.',
+        });
+      }
       for (const owner of pending_dropped) {
         await record({
           owner,
@@ -347,7 +310,7 @@ export function createTextNumberService({
             'The new number replied STOP, so it was not added. Texts still go to the number you confirmed before.',
         });
       }
-      return opted_out.length + pending_dropped.length;
+      return opted_out.length + unconfirmed_dropped.length + pending_dropped.length;
     },
   };
 }

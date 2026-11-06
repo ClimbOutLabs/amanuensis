@@ -69,8 +69,9 @@ export function fakeServer(initial: DeliveryItem[]) {
         texts: {
           available: false,
           note: 'Texts are not set up on this server. To set them up, follow the Text messages page in the Aman docs.',
+          problem: null,
         },
-        calls: { available: false, note: 'Phone calls are not set up yet.' },
+        calls: { available: false, note: 'Phone calls are not set up yet.', problem: null },
       },
       maxLevels: {
         mail_always: 'call',

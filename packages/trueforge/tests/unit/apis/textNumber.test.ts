@@ -16,9 +16,17 @@ function person(id: string): RequestContext {
   return { tenant_id: 'default', subject: { id, type: 'user', display_name: id }, roles: [], user_credential: null };
 }
 
-async function build({ provider = true, maxTextsPerDay }: { provider?: boolean; maxTextsPerDay?: number } = {}) {
+async function build({
+  provider = true,
+  maxTextsPerDay,
+  roomAlwaysFree = false,
+}: { provider?: boolean; maxTextsPerDay?: number; roomAlwaysFree?: boolean } = {}) {
   const h = await textsHarness({ provider, ...(maxTextsPerDay === undefined ? {} : { maxTextsPerDay }) });
-  const channels = reachChannelsFor({ twilio: provider ? { accountSid: 'AC' } : undefined, numberProblem: undefined });
+  const channels = reachChannelsFor({
+    twilio: provider ? { accountSid: 'AC' } : undefined,
+    numberProblem: undefined,
+    viewer: 'person',
+  });
   const app = new OpenAPIHono();
   app.route(
     '/texts',
@@ -32,11 +40,21 @@ async function build({ provider = true, maxTextsPerDay }: { provider?: boolean; 
     '/reach',
     createReachRouter({
       reachStore: h.reachSettings,
-      textContacts: h.contacts,
+      textContacts: roomAlwaysFree
+        ? {
+            get: owner => h.contacts.get(owner),
+            claimTextSends: input => h.contacts.claimTextSends(input),
+            forgetTextSends: input => h.contacts.forgetTextSends(input),
+            giveBackTextSends: input => h.contacts.giveBackTextSends(input),
+            // As if another text took the day's last place between the check and the send.
+            textSendRoom: () => Promise.resolve({ ok: true }),
+          }
+        : h.contacts,
       textLimits: provider ? h.limits : undefined,
       noticingStore: new NoticingStore(h.db),
       deliveryService: h.deliveries,
       channels: () => channels,
+      isInstanceOwner: () => true,
       memories: () => Promise.resolve([]),
       resolveRequestContext: () => person('alice'),
       logger: winston.createLogger({ silent: true }),
@@ -245,6 +263,26 @@ describe('the text test button', () => {
     expect(await message(refused)).toBe(
       'This server sent the most texts it may send in one day, so no text was sent. Texts start again in about 24 hours.',
     );
+    expect(h.sent).toHaveLength(1);
+    await expect(h.contacts.textSendRoom({ ...testTextLimit(ALICE), max: 1, now: h.clock.now })).resolves.toEqual({
+      ok: true,
+    });
+  });
+
+  it('gives the test back when the day’s last text went to something else between the check and the send', async () => {
+    const { h, call } = await build({ maxTextsPerDay: 1, roomAlwaysFree: true });
+    await h.readyToText();
+    await h.deliveries.deliver({
+      ...ALICE,
+      kind: 'reminder',
+      level: 'nudge',
+      text: 'Water the plants',
+      reason: 'Due.',
+      link: null,
+    });
+    const refused = await call('/reach/test', { method: 'POST', body: { channel: 'text' } });
+    expect(refused.status).toBe(429);
+    expect(await message(refused)).toMatch(/^This server sent the most texts it may send in one day/);
     expect(h.sent).toHaveLength(1);
     await expect(h.contacts.textSendRoom({ ...testTextLimit(ALICE), max: 1, now: h.clock.now })).resolves.toEqual({
       ok: true,

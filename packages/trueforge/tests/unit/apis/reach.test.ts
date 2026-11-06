@@ -11,7 +11,8 @@ import { ReachSettingsStore } from '../../../src/db/reachSettingsStore';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { TextContactStore } from '../../../src/db/textContactStore';
 import { createDeliveryService } from '../../../src/runtime/delivery/deliveryService';
-import { NO_PHONE_CHANNELS } from '../../../src/runtime/noticing/reachChannels';
+import { NO_PHONE_CHANNELS, reachChannelsFor } from '../../../src/runtime/noticing/reachChannels';
+import type { ChannelViewer } from '../../../src/runtime/texts/smsProvider';
 import type { ReachAvailability } from '../../../src/schemas/reach';
 import { defaultReachSettings, GetReachResponseSchema, type ReachSettings } from '../../../src/schemas/reach';
 
@@ -22,9 +23,9 @@ function person(id: string): RequestContext {
 }
 
 async function build({
-  channels = NO_PHONE_CHANNELS,
+  channels = () => NO_PHONE_CHANNELS,
   memories = [],
-}: { channels?: ReachAvailability; memories?: string[] } = {}) {
+}: { channels?: (input?: { viewer: ChannelViewer }) => ReachAvailability; memories?: string[] } = {}) {
   const db = createSqliteDb(':memory:');
   await migrateSqliteToLatest(db);
   const reachStore = new ReachSettingsStore(db);
@@ -46,7 +47,8 @@ async function build({
       textLimits: undefined,
       noticingStore,
       deliveryService,
-      channels: () => channels,
+      channels,
+      isInstanceOwner: owner => owner.created_by === 'alice',
       memories: () => Promise.resolve(memories),
       resolveRequestContext: () => current,
       logger: winston.createLogger({ silent: true }),
@@ -73,6 +75,24 @@ async function build({
 }
 
 describe('reach routes', () => {
+  it('words a problem with texts for whoever runs Aman, and tells everyone else whom to ask', async () => {
+    const { call, as } = await build({
+      channels: input =>
+        reachChannelsFor({
+          twilio: { accountSid: 'AC' },
+          numberProblem: 'not_accepted',
+          viewer: input?.viewer ?? 'person',
+        }),
+    });
+    const owner = GetReachResponseSchema.parse(await (await call('')).json()).data;
+    expect(owner.availability.texts.problem).toContain('Copy the account id and auth token');
+    as('bob');
+    const other = GetReachResponseSchema.parse(await (await call('')).json()).data;
+    expect(other.availability.texts.problem).toBe(
+      'STOP replies do not reach Aman yet. Ask the person who runs Aman to check the Twilio settings.',
+    );
+  });
+
   it('starts quiet and unsaved, with phone channels shown as not set up', async () => {
     const { call } = await build();
     const response = await call('');
@@ -81,7 +101,11 @@ describe('reach routes', () => {
     expect(data.saved).toBe(false);
     expect(data.settings.call_kinds).toEqual([]);
     expect(data.settings.channels).toEqual({ texts: false, calls: false });
-    expect(data.availability.calls).toEqual({ available: false, note: 'Phone calls are not set up yet.' });
+    expect(data.availability.calls).toEqual({
+      available: false,
+      note: 'Phone calls are not set up yet.',
+      problem: null,
+    });
     expect(data.max_levels.bill_due).toBe('nudge');
     expect(data.max_levels.calendar_clash).toBe('call');
   });
@@ -132,8 +156,11 @@ describe('reach routes', () => {
   });
 
   it('allows calls once the channel is available', async () => {
-    const channels: ReachAvailability = { ...NO_PHONE_CHANNELS, calls: { available: true, note: 'On.' } };
-    const { put } = await build({ channels });
+    const channels: ReachAvailability = {
+      ...NO_PHONE_CHANNELS,
+      calls: { available: true, note: 'On.', problem: null },
+    };
+    const { put } = await build({ channels: () => channels });
     expect((await put({ ...defaultReachSettings('UTC'), channels: { texts: false, calls: true } })).status).toBe(200);
   });
 

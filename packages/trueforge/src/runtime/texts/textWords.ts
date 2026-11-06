@@ -73,6 +73,37 @@ function cut({ text, room }: { text: string; room: number }): string {
   return `${(space > room / 2 ? head.slice(0, space) : head).trimEnd()}...`;
 }
 
+const MONTH = '(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\\.?';
+/** Times and dates written the usual ways, the only places Full words may hold digits. */
+const TIME_AND_DATE_SHAPES = [
+  /\b\d{1,2}(?::\d{2})?\s?(?:a\.?m\.?|p\.?m\.?)(?![a-z])/gi,
+  /\b\d{1,2}:\d{2}\b/g,
+  /\b\d{4}-\d{2}-\d{2}\b/g,
+  /\b\d{1,2}\/\d{1,2}(?:\/(?:\d{4}|\d{2}))?\b/g,
+  new RegExp(`\\b\\d{1,2}(?:st|nd|rd|th)?\\s+(?:of\\s+)?${MONTH}(?:,?\\s+\\d{4})?\\b`, 'gi'),
+  new RegExp(`\\b${MONTH}\\s+\\d{1,2}(?:st|nd|rd|th)?(?:,?\\s+\\d{4})?\\b`, 'gi'),
+];
+/** Words that read out a site or a number: a spoken dot or slash, a web cue, or a number said in words. */
+const SPOKEN_DETAIL =
+  /\b(?:dot|slash|backslash|www|http|https|url|com|net|org|google|hundred|thousand|(?:zero|oh|one|two|three|four|five|six|seven|eight|nine)(?:[\s,-]+(?:zero|oh|one|two|three|four|five|six|seven|eight|nine)){2,})\b/i;
+
+/**
+ * Whether Full words could carry a number to call, a site or an address, judged by whole classes rather than by
+ * known spellings: any digit outside a time or a date, a slash or an at sign, a dot or a dash inside a word, single
+ * letters in a row, or a site or a number read out in words. Ordinary words pass; a false alarm only costs the
+ * reminder's own words, which stay in the app.
+ */
+function mayCarryContactDetail(plain: string): boolean {
+  const rest = TIME_AND_DATE_SHAPES.reduce((text, shape) => text.replace(shape, ' '), plain);
+  return (
+    /\d/.test(rest) ||
+    /[/@]/.test(rest) ||
+    /[a-z0-9][.\-_][a-z0-9]/i.test(rest) ||
+    /(?<![a-z0-9])[a-z](?:[\s.,_-]+[a-z])+(?![a-z0-9])/i.test(rest) ||
+    SPOKEN_DETAIL.test(rest)
+  );
+}
+
 /** Why a Full text went out in Private words instead, or null when it carried the item's own words. */
 export type FullWithheld = 'noticed' | 'contact_detail' | null;
 
@@ -84,9 +115,9 @@ const OWN_WORDS_KINDS: ReadonlySet<DeliveryKind> = new Set(['reminder', 'note'])
 
 /**
  * The text that goes out for a delivery, given the name already made fit for a text. Full carries the item's words
- * only for a reminder or a test; anything noticed goes out in Private words. Words that name a link, a site, a phone
- * number or an address, in any spelling, also go out in Private words, since a text is where a link or a number to
- * call does the most harm.
+ * only for a reminder or a test; anything noticed goes out in Private words. Words that could hold a link, a site, a
+ * phone number or an address also go out in Private words, since a text is where a link or a number to call does the
+ * most harm.
  */
 export function textBody({ name, delivery, mode }: { name: string; delivery: Delivery; mode: TextMode }): {
   body: string;
@@ -100,7 +131,7 @@ export function textBody({ name, delivery, mode }: { name: string; delivery: Del
     return { body: privateBody, withheld: 'noticed' };
   }
   const plain = plainText(delivery.text);
-  if (namesContactDetail([delivery.text, plain])) {
+  if (mayCarryContactDetail(plain) || namesContactDetail([delivery.text, plain])) {
     return { body: privateBody, withheld: 'contact_detail' };
   }
   const prefix = `${name}: `;

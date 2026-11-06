@@ -6,6 +6,7 @@ import {
   type NoticingKind,
   type PushDevice,
   type ReachApi,
+  type ReachChannelState,
   type ReachSender,
   type ReachSettings,
   type ReachView,
@@ -105,9 +106,15 @@ const isNumber = (value: unknown): value is number => typeof value === 'number';
 const isBoolean = (value: unknown): value is boolean => typeof value === 'boolean';
 const isArray = (value: unknown): value is unknown[] => Array.isArray(value);
 
-function parseChannel(value: unknown): { available: boolean; note: string } {
+const isStringOrNull = (value: unknown): value is string | null => value === null || typeof value === 'string';
+
+function parseChannel(value: unknown): ReachChannelState {
   const channel = required(value, isRecord);
-  return { available: required(channel.available, isBoolean), note: required(channel.note, isString) };
+  return {
+    available: required(channel.available, isBoolean),
+    note: required(channel.note, isString),
+    problem: required(channel.problem, isStringOrNull),
+  };
 }
 
 const isSenderSource = (value: unknown): value is ReachSender['source'] => value === 'settings' || value === 'memory';

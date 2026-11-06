@@ -16,7 +16,10 @@ function renderPreferences({ callsReady = false }: { callsReady?: boolean } = {}
   if (callsReady) {
     server.state.reach = {
       ...server.state.reach,
-      availability: { ...server.state.reach.availability, calls: { available: true, note: 'Calls are on.' } },
+      availability: {
+        ...server.state.reach.availability,
+        calls: { available: true, note: 'Calls are on.', problem: null },
+      },
     };
   }
   render(<ReachPreferences reach={server.api.reach} />);
@@ -221,7 +224,7 @@ describe('Settings, Reach me preferences', () => {
         ...server.state.reach,
         availability: {
           ...server.state.reach.availability,
-          texts: { available: true, note: 'Texts travel through Twilio and the phone company.' },
+          texts: { available: true, note: 'Texts travel through Twilio and the phone company.', problem: null },
         },
       };
       render(<ReachPreferences reach={server.api.reach} />);
@@ -259,13 +262,34 @@ describe('Settings, Reach me preferences', () => {
       await waitFor(() => expect(api.reach.save).toHaveBeenCalledWith(expect.objectContaining({ textsOn: true })));
     });
 
+    it('shows a problem with texts beside them while texts still work', async () => {
+      const server = fakeServer([]);
+      const words = 'STOP replies do not reach Aman yet. Ask the person who runs Aman to check the Twilio settings.';
+      server.state.reach = {
+        ...server.state.reach,
+        saved: true,
+        availability: { ...server.state.reach.availability, texts: { available: true, note: 'On.', problem: words } },
+      };
+      server.state.texts = {
+        phone: '+15550111',
+        confirmed: true,
+        mode: 'private',
+        optedOut: false,
+        codePending: false,
+        pendingPhone: null,
+        privatePreview: 'Mannie: a reminder is due. Open the app to see it.',
+      };
+      render(<ReachPreferences reach={server.api.reach} />);
+      expect(await screen.findByText(words)).toBeTruthy();
+    });
+
     it('turns texts off and forgets the number on remove', async () => {
       const server = fakeServer([]);
       server.state.reach = {
         ...server.state.reach,
         settings: { ...server.state.reach.settings, textsOn: true },
         saved: true,
-        availability: { ...server.state.reach.availability, texts: { available: true, note: 'On.' } },
+        availability: { ...server.state.reach.availability, texts: { available: true, note: 'On.', problem: null } },
       };
       server.state.texts = {
         phone: '+15550111',
@@ -291,7 +315,7 @@ describe('Settings, Reach me preferences', () => {
         ...server.state.reach,
         settings: { ...server.state.reach.settings, textsOn: true },
         saved: true,
-        availability: { ...server.state.reach.availability, texts: { available: true, note: 'On.' } },
+        availability: { ...server.state.reach.availability, texts: { available: true, note: 'On.', problem: null } },
       };
       server.state.texts = {
         phone: '+15550111',
@@ -317,7 +341,7 @@ describe('Settings, Reach me preferences', () => {
       const server = fakeServer([]);
       server.state.reach = {
         ...server.state.reach,
-        availability: { ...server.state.reach.availability, texts: { available: true, note: 'On.' } },
+        availability: { ...server.state.reach.availability, texts: { available: true, note: 'On.', problem: null } },
       };
       server.state.texts = {
         phone: '+15550111',

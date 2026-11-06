@@ -7,6 +7,15 @@ export const HOUR_MS = 60 * 60_000;
 /** The longest window of any limit, so old counts can be forgotten without ending a window that is still open. */
 export const DAY_MS = 24 * HOUR_MS;
 
+/** Codes sent in one hour for one person, whatever number they ask for, so the page cannot be used to text strangers. */
+export const MAX_CODES_PER_HOUR = 3;
+/** Codes sent in a day for one person, below the server's cap, so one account cannot use up everyone's codes. */
+export const MAX_CODES_PER_PERSON_PER_DAY = 10;
+/** Codes sent to one number, whoever asks, so many people together cannot flood it either. */
+export const MAX_CODES_PER_NUMBER_PER_HOUR = 3;
+export const MAX_CODES_PER_NUMBER_PER_DAY = 10;
+/** Codes sent by the whole server in a day, so many accounts together cannot run up the bill. */
+export const MAX_CODES_PER_SERVER_PER_DAY = 50;
 /** Texts a day to one person from deliveries of every kind, reminders and tests included, so a loop cannot run up the bill. */
 export const MAX_TEXTS_PER_PERSON_PER_DAY = 30;
 /** Texts a day to one number, however many people confirmed it. */
@@ -27,6 +36,13 @@ export interface DeliveryLimitSettings {
   max_texts_per_day: number;
 }
 
+/** The limits one delivery text counts against, all claimed together. */
+export interface DeliveryTextLimits {
+  person: TextLimit;
+  number: TextLimit;
+  server: TextLimit;
+}
+
 interface LimitRefusal {
   ok: false;
   limit: TextLimit;
@@ -35,8 +51,11 @@ interface LimitRefusal {
 /** Refused, it names the limit that refused and how long until that limit has room. */
 type LimitResult = { ok: true } | LimitRefusal;
 
-export function ownerLimitKey({ scope, owner }: { scope: string; owner: PersonOwner }): string {
-  return `${scope}:${JSON.stringify([owner.tenant_id, owner.created_by])}`;
+/** Each family of limits, codes, delivery texts and tests, keeps its keys under its own prefix. */
+type LimitFamily = 'code' | 'text' | 'test';
+
+function personKey({ family, window, owner }: { family: LimitFamily; window: string; owner: PersonOwner }): string {
+  return `${family}:person-${window}:${JSON.stringify([owner.tenant_id, owner.created_by])}`;
 }
 
 /**
@@ -47,7 +66,7 @@ export function ownerLimitKey({ scope, owner }: { scope: string; owner: PersonOw
 const TRUNK_ZERO_CODES = new Set([
   '20', '27', '31', '32', '33', '41', '43', '44', '46', '49', '51', '54', '55', '60', '61', '62', '63', '64', '66',
   '81', '82', '84', '86', '90', '91', '92', '93', '94', '98', '212', '213', '234', '254', '255', '256', '353', '358',
-  '380', '880', '966', '971', '972',
+  '380', '880', '886', '966', '971', '972',
 ]);
 
 /** The number as a limit counts it: a trunk 0 typed after a country code that uses one is left out. */
@@ -62,15 +81,65 @@ function limitNumber(phone: string): string {
   return phone;
 }
 
-/** A limit's key for one number, keyed with a server secret so the count table never holds the number itself. */
-export function numberLimitKey({ secret, scope, phone }: { secret: string; scope: string; phone: string }): string {
+/** A number's key, keyed with a server secret so the count table never holds the number itself. */
+function numberKey({
+  family,
+  window,
+  secret,
+  phone,
+}: {
+  family: LimitFamily;
+  window: string;
+  secret: string;
+  phone: string;
+}): string {
   const number = createHmac('sha256', secret)
     .update(`number\u0000${limitNumber(phone)}`)
     .digest('hex');
-  return `${scope}:${number}`;
+  return `${family}:number-${window}:${number}`;
 }
 
-/** The limits one delivery text counts against, claimed in this order: the person, the number and the whole server. */
+/**
+ * The limits one code send counts against: the person by the hour and by the day, the number by the hour and by the
+ * day, and the whole server. The number limits are kept by whoever asks, so the page cannot be used to text
+ * strangers, but they and the server's day do not hold back the person who confirmed that number.
+ */
+export function codeTextLimits({
+  secret,
+  owner,
+  phone,
+  confirmed_by_owner,
+}: {
+  secret: string;
+  owner: PersonOwner;
+  phone: string;
+  /** The person asking already confirmed this very number. */
+  confirmed_by_owner: boolean;
+}): TextLimit[] {
+  const person: TextLimit[] = [
+    { key: personKey({ family: 'code', window: 'hour', owner }), window_ms: HOUR_MS, max: MAX_CODES_PER_HOUR },
+    { key: personKey({ family: 'code', window: 'day', owner }), window_ms: DAY_MS, max: MAX_CODES_PER_PERSON_PER_DAY },
+  ];
+  if (confirmed_by_owner) {
+    return person;
+  }
+  return [
+    ...person,
+    {
+      key: numberKey({ family: 'code', window: 'hour', secret, phone }),
+      window_ms: HOUR_MS,
+      max: MAX_CODES_PER_NUMBER_PER_HOUR,
+    },
+    {
+      key: numberKey({ family: 'code', window: 'day', secret, phone }),
+      window_ms: DAY_MS,
+      max: MAX_CODES_PER_NUMBER_PER_DAY,
+    },
+    { key: 'code:server-day', window_ms: DAY_MS, max: MAX_CODES_PER_SERVER_PER_DAY },
+  ];
+}
+
+/** The limits one delivery text counts against: the person, the number and the whole server. */
 export function deliveryTextLimits({
   owner,
   phone,
@@ -79,29 +148,27 @@ export function deliveryTextLimits({
   owner: PersonOwner;
   phone: string;
   settings: DeliveryLimitSettings;
-}): { person: TextLimit; number: TextLimit; server: TextLimit } {
+}): DeliveryTextLimits {
   return {
-    person: { key: ownerLimitKey({ scope: 'texts-day', owner }), window_ms: DAY_MS, max: MAX_TEXTS_PER_PERSON_PER_DAY },
+    person: {
+      key: personKey({ family: 'text', window: 'day', owner }),
+      window_ms: DAY_MS,
+      max: MAX_TEXTS_PER_PERSON_PER_DAY,
+    },
     number: {
-      key: numberLimitKey({ secret: settings.number_key, scope: 'texts-number-day', phone }),
+      key: numberKey({ family: 'text', window: 'day', secret: settings.number_key, phone }),
       window_ms: DAY_MS,
       max: MAX_TEXTS_PER_NUMBER_PER_DAY,
     },
-    server: { key: 'texts-server-day', window_ms: DAY_MS, max: settings.max_texts_per_day },
+    server: { key: 'text:server-day', window_ms: DAY_MS, max: settings.max_texts_per_day },
   };
 }
 
 /** Why a text over a day's limit was not sent, and when texts start again. */
-export function dayLimitWords({
-  limits,
-  refused,
-}: {
-  limits: ReturnType<typeof deliveryTextLimits>;
-  refused: LimitRefusal;
-}): string {
+export function dayLimitWords({ limits, refused }: { limits: DeliveryTextLimits; refused: LimitRefusal }): string {
   const reached =
     refused.limit === limits.number
-      ? `Your number had ${String(MAX_TEXTS_PER_NUMBER_PER_DAY)} texts today, the most for one number, so no text was sent.`
+      ? `This number had ${String(MAX_TEXTS_PER_NUMBER_PER_DAY)} texts today, the most for one number, so no text was sent.`
       : refused.limit === limits.server
         ? 'This server sent the most texts it may send in one day, so no text was sent.'
         : `You had ${String(MAX_TEXTS_PER_PERSON_PER_DAY)} texts today, the most for one day, so no text was sent.`;
@@ -109,7 +176,11 @@ export function dayLimitWords({
 }
 
 export function testTextLimit(owner: PersonOwner): TextLimit {
-  return { key: ownerLimitKey({ scope: 'test-text', owner }), window_ms: HOUR_MS, max: MAX_TEST_TEXTS_PER_HOUR };
+  return {
+    key: personKey({ family: 'test', window: 'hour', owner }),
+    window_ms: HOUR_MS,
+    max: MAX_TEST_TEXTS_PER_HOUR,
+  };
 }
 
 function refused({
@@ -126,27 +197,28 @@ function refused({
 }
 
 /**
- * Counts one send against each limit in turn, each in one statement before anything is sent, so neither parallel
- * requests nor a failing provider get past a limit. A limit already passed when a later one refuses stays spent, so
- * the limit everyone shares goes last.
+ * Counts one send against every limit, or against none when any of them is full, before anything is sent, so neither
+ * parallel requests nor a failing provider get past a limit, and a send one limit refuses spends none of the others.
  */
 export async function claimTextLimits({
   store,
   limits,
   at,
 }: {
-  store: Pick<ITextContactStore, 'claimTextSend' | 'forgetTextSends'>;
+  store: Pick<ITextContactStore, 'claimTextSends' | 'forgetTextSends'>;
   limits: readonly TextLimit[];
   at: Date;
 }): Promise<LimitResult> {
   await store.forgetTextSends({ before: new Date(at.getTime() - DAY_MS) });
-  for (const limit of limits) {
-    const claim = await store.claimTextSend({ ...limit, now: at });
-    if (!claim.ok) {
-      return refused({ limit, window_started_at: claim.window_started_at, at });
-    }
+  const claim = await store.claimTextSends({ limits, now: at });
+  if (claim.ok) {
+    return { ok: true };
   }
-  return { ok: true };
+  const limit = limits[claim.refused];
+  if (limit === undefined) {
+    throw new Error('A text limit refused a send, but it is not one of the limits asked for.');
+  }
+  return refused({ limit, window_started_at: claim.window_started_at, at });
 }
 
 /** Whether every limit has room for one more send, counting nothing. The claim made when sending still decides. */
