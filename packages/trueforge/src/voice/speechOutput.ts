@@ -26,8 +26,6 @@ export class SpeechOutput {
   #tail: Promise<void> = Promise.resolve();
   /** False once a sentence was lost: it failed, was skipped as empty, or made no sound. */
   #complete = true;
-  /** Set when a sentence that had to be said exactly was lost: the rest of that text is not read. */
-  #halted = false;
 
   constructor(deps: SpeechOutputDeps) {
     this.#deps = deps;
@@ -50,7 +48,7 @@ export class SpeechOutput {
   async #speak({ text, role, exact }: { text: string; role: SentenceRole; exact: boolean }): Promise<void> {
     const { tts, format, transport, timeline, spoken, signal } = this.#deps;
     const stopped = (): boolean => signal.aborted;
-    if (stopped() || this.#halted) {
+    if (stopped()) {
       return;
     }
     let madeSound = false;
@@ -73,13 +71,16 @@ export class SpeechOutput {
     } catch (error) {
       if (!stopped()) {
         this.#complete = false;
-        this.#halted = exact;
         this.#deps.onFailure(error);
       }
       return;
     }
     if (!madeSound && !stopped()) {
       this.#complete = false;
+    }
+    if (madeSound && role === 'body' && !stopped()) {
+      // A long text is still playing a minute after its first sound, so its tail is remembered from the last.
+      spoken.add(text);
     }
   }
 }

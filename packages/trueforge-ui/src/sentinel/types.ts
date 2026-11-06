@@ -501,12 +501,13 @@ function parseCalendarEvent(value: unknown): SentinelApprovalCalendarEvent | nul
   const guests_emailed = optionalBoolean(value, 'guests_emailed') ?? optionalBoolean(value, 'guestsEmailed');
   const one_of_repeating = optionalBoolean(value, 'one_of_repeating') ?? optionalBoolean(value, 'oneOfRepeating');
   const alreadyCreated = optionalBoolean(value, 'already_created') ?? optionalBoolean(value, 'alreadyCreated');
+  const rawSpanDays = value.span_days ?? value.spanDays;
+  // The server only sends whole days of at least one; anything else is not a card this reader can trust.
   const spanDays =
-    typeof value.span_days === 'number'
-      ? value.span_days
-      : typeof value.spanDays === 'number'
-        ? value.spanDays
-        : undefined;
+    typeof rawSpanDays === 'number' && Number.isInteger(rawSpanDays) && rawSpanDays >= 1 ? rawSpanDays : undefined;
+  if (rawSpanDays !== undefined && spanDays === undefined) {
+    return null;
+  }
   if (
     action === undefined ||
     calendar === undefined ||

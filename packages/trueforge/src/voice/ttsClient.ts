@@ -126,6 +126,14 @@ export class SidecarSpeechSynthesizer implements SpeechSynthesizer {
     if (!response.ok || response.body === null) {
       throw new Error(`text to speech answered ${String(response.status)}`);
     }
+    // A service that does not know `exact` speaks anything and answers 200; only this mark says it checked.
+    if (
+      exact &&
+      (response.headers.get('x-aman-exact') !== 'checked' ||
+        !(response.headers.get('content-type') ?? '').startsWith('audio/'))
+    ) {
+      throw new Error('the voice service did not check the words, so nothing was spoken');
+    }
     const reader = response.body.getReader();
     // A chunk can end in the middle of a 16-bit sample; the odd byte waits for the next chunk.
     const whole = format === 'pcm16' ? new WholeSamples() : undefined;

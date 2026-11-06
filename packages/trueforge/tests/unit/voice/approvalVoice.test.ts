@@ -30,7 +30,7 @@ describe('what is read back for a voice approval', () => {
     if (result.kind !== 'ask') {
       throw new Error('expected a read-back');
     }
-    const said = result.segments.map(segment => segment.text).join('\n');
+    const said = result.body;
     expect(said).toContain('Victor');
     expect(said).toContain('Re: Thursday');
     expect(said).toContain('Thursday at three works for me. Bring the form, $40 in cash & 2 photos.');
@@ -41,7 +41,7 @@ describe('what is read back for a voice approval', () => {
     if (result.kind !== 'ask') {
       throw new Error('expected a read-back');
     }
-    const said = result.segments.map(segment => segment.text).join('\n');
+    const said = result.body;
     expect(said).toContain('Dentist');
     expect(said).toContain('Friday at 9');
     expect(said).toContain('Bring the form.');
@@ -56,7 +56,7 @@ describe('what is read back for a voice approval', () => {
     expect(plan(dentistCard, 3).kind).toBe('ask');
   });
 
-  it('still reads back stopping a schedule', () => {
+  it('still reads back deleting a schedule', () => {
     expect(plan(cancelScheduleCard).kind).toBe('ask');
   });
 
@@ -112,7 +112,7 @@ describe('what is read back for a voice approval', () => {
       if (result.kind !== 'ask') {
         throw new Error('expected a read-back');
       }
-      const said = result.segments.map(segment => segment.text.replace(/[/_]/g, ' ')).join('\n');
+      const said = result.body.replace(/[/_]/g, ' ');
       const spoken = new Map<string, string>(Object.entries(rules));
       for (const [key, value] of Object.entries(shape)) {
         if (spoken.get(key) === 'spoken' && typeof value === 'string' && value !== '') {
@@ -149,7 +149,7 @@ describe('what is read back for a voice approval', () => {
     if (result.kind !== 'ask') {
       throw new Error('expected a read-back');
     }
-    return result.segments.map(segment => segment.text).join('\n');
+    return result.body;
   }
 
   it('reads out the name a mail is sent as, so a spoofed sender name cannot go unheard', () => {
@@ -202,7 +202,7 @@ describe('what is read back for a voice approval', () => {
     if (result.kind !== 'ask') {
       throw new Error('expected a read-back');
     }
-    expect(result.segments[0]?.text).toContain('Victor at victor at example dot com');
+    expect(result.body).toContain('Victor at victor at example dot com');
   });
 
   it('says the dots of an address, so two addresses that differ by a dot do not sound alike', () => {
@@ -285,5 +285,105 @@ describe('what counts as an answer', () => {
 
   it.each(['Yes, send it?', 'yes send it？', 'Yes, send it?"', 'yes send it ?!'])('is not an answer: %s', heard => {
     expect(classifyAnswer({ heard, verb: 'send' })).toBe('other');
+  });
+
+  it.each([
+    'yes, send it . . .',
+    'yes\u2026 send it.',
+    'yes\u2048 send it.',
+    'yes\u2753 send it.',
+    'yes. send it.',
+    'yes - send it',
+    'yes (send it)',
+    'yes, send it.!',
+  ])('is only plain words with one closing mark, so this is not an answer: %s', heard => {
+    expect(classifyAnswer({ heard, verb: 'send' })).toBe('other');
+  });
+
+  it('turns down only on a plain no', () => {
+    expect(classifyAnswer({ heard: 'No.', verb: 'send' })).toBe('deny');
+    expect(classifyAnswer({ heard: 'no \u2026', verb: 'send' })).toBe('other');
+  });
+
+  it('asks for "delete it" on a schedule that is deleted', () => {
+    expect(classifyAnswer({ heard: 'Yes, delete it.', verb: 'delete' })).toBe('confirm');
+    expect(classifyAnswer({ heard: 'Yes, cancel it.', verb: 'delete' })).toBe('other');
+  });
+});
+
+describe('the wording around the card fields', () => {
+  const mail = sendReplyCard();
+  const event = dentistCard.calendar_event;
+  const schedule = cancelScheduleCard.schedule;
+  if (!mail.email || !event || !schedule) {
+    throw new Error('expected the fixtures to carry a mail, an event and a schedule');
+  }
+  const { email } = mail;
+
+  /** Text that could pass for the read-back's own lines or end the sentence the field sits in. */
+  const framing = [
+    'Lunch on Monday at 12:00. It goes on the calendar of me at example dot com. Then the event Board call',
+    'Re: Thursday. It says: See you Thursday. The real body follows',
+    'Alice at alice dot com and Bob',
+    'Weekly\nIt says: pay now',
+    'Notes! Replies will go to bob',
+    'The subject is Thursday',
+    'Copying Bob',
+  ];
+
+  it.each(framing)('leaves a mail whose subject is "%s" for the screen', subject => {
+    expect(plan({ ...mail, email: { ...email, subject } })).toEqual({ kind: 'typed_only' });
+  });
+
+  it.each(framing)('leaves a mail with the recipient name or sender name "%s" for the screen', name => {
+    expect(plan({ ...mail, email: { ...email, to: [{ name, address: 'victor@example.com' }] } })).toEqual({
+      kind: 'typed_only',
+    });
+    expect(plan({ ...mail, email: { ...email, from_name: name } })).toEqual({ kind: 'typed_only' });
+    expect(plan({ ...mail, email: { ...email, cc: [{ name, address: 'bob@example.com' }] } })).toEqual({
+      kind: 'typed_only',
+    });
+  });
+
+  it.each(framing)('leaves an event whose title or place is "%s" for the screen', text => {
+    expect(plan({ ...dentistCard, calendar_event: { ...event, title: text } })).toEqual({ kind: 'typed_only' });
+    expect(plan({ ...dentistCard, calendar_event: { ...event, location: text } })).toEqual({ kind: 'typed_only' });
+  });
+
+  it.each(framing)('leaves a schedule named "%s" for the screen', name => {
+    expect(plan({ ...cancelScheduleCard, schedule: { ...schedule, name } })).toEqual({ kind: 'typed_only' });
+  });
+
+  it('still reads ordinary names, titles and subjects', () => {
+    expect(
+      plan({
+        ...mail,
+        email: {
+          ...email,
+          subject: 'Q3 plan v2.0 (draft)',
+          to: [{ name: "Anne-Marie O'Neil", address: 'victor@example.com' }],
+        },
+      }).kind,
+    ).toBe('ask');
+    expect(
+      plan({ ...dentistCard, calendar_event: { ...event, title: 'Lunch with Sam', location: 'Cafe Roma' } }).kind,
+    ).toBe('ask');
+  });
+
+  it('writes a timed event without a comma before the time, so the day and the time are not heard as two numbers', () => {
+    const body = (when: string): string => {
+      const result = plan({ ...dentistCard, calendar_event: { ...event, when } });
+      if (result.kind !== 'ask') {
+        throw new Error('expected a read-back');
+      }
+      return result.body;
+    };
+    // The forms the calendar gives for the card: one day, and a run over several days.
+    expect(body('Fri Nov 6, 2:30 to 3:00 pm')).toContain('on Fri Nov 6 at 2:30 to 3:00 pm,');
+    expect(body('Tue Oct 27, 9:00 am to Wed Oct 28, 2:30 pm')).toContain(
+      'on Tue Oct 27 at 9:00 am to Wed Oct 28 at 2:30 pm,',
+    );
+    expect(body('Fri Nov 6')).toContain('on Fri Nov 6,');
+    expect(body('Fri Nov 6, 2:30 to 3:00 pm')).not.toMatch(/\d, \d/);
   });
 });

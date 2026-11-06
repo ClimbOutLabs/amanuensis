@@ -144,9 +144,12 @@ export class FakeTts implements SpeechSynthesizer {
   readonly sentences: string[] = [];
   /** Every text the voice was asked to say exactly, in order. */
   readonly asked: string[] = [];
+  /** The stop signal each text was made under, so a test can see which lines were cut off. */
+  readonly signals = new Map<string, AbortSignal>();
   constructor(
     private readonly options: {
-      delay?: () => Promise<void>;
+      /** Waits before a text is made, so a test can hold one line back. */
+      delay?: ((text: string) => Promise<void>) | undefined;
       failOn?: ((text: string) => boolean) | undefined;
       silentOn?: ((text: string) => boolean) | undefined;
       /** Texts the voice would say differently from how they are written. */
@@ -177,7 +180,8 @@ export class FakeTts implements SpeechSynthesizer {
       }
     }
     this.sentences.push(text);
-    await this.options.delay?.();
+    this.signals.set(text, signal);
+    await this.options.delay?.(text);
     if (this.options.failOn?.(text) === true) {
       throw new Error('the voice stopped');
     }

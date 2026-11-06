@@ -352,6 +352,9 @@ describe('extractSentinelFromEvent', () => {
       })[0]?.card.calendar_event;
     expect(event({ already_created: true, span_days: 3 })).toMatchObject({ already_created: true, span_days: 3 });
     expect(event({})).not.toHaveProperty('span_days');
+    for (const span_days of [0, -2, 1.5, '3']) {
+      expect(event({ span_days })).toBeNull();
+    }
   });
 
   const CALENDAR_EVENT = {
