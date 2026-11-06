@@ -130,11 +130,13 @@ export function createReachRouter(deps: ReachRouterDeps) {
       return c.json({ error: { message: `${status.note} Try the app or push notices for now.` } }, 409);
     }
     // A test is a note in the feed, so a push test never uses up one of the day's nudges.
+    const words = 'This is a test. If you can read this, it works.';
     const delivery = await deps.deliveryService.deliver({
       ...owner,
       kind: 'note',
       level: channel === 'push' ? 'nudge' : 'note',
-      text: 'This is a test. If you can read this, it works.',
+      text: words,
+      notice_text: words,
       reason: 'You pressed Try it in Reach me settings.',
       link: null,
     });

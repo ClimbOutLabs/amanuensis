@@ -64,31 +64,56 @@ function toMailMessage(message: GmailMessage): MailMessage | undefined {
   };
 }
 
+/** Senders named in one Gmail search, so a long always-important list never makes one search too long to send. */
+const SENDERS_PER_SEARCH = 25;
+
+/**
+ * The searches to run: one for the whole window, or one per group of senders. An address with a quote or a
+ * backslash cannot be written into a search safely, so it is left out.
+ */
+function senderGroups(from: readonly string[] | undefined): (readonly string[] | undefined)[] {
+  if (from === undefined) {
+    return [undefined];
+  }
+  const safe = from.filter(address => !/["\\]/.test(address));
+  const groups: string[][] = [];
+  for (let at = 0; at < safe.length; at += SENDERS_PER_SEARCH) {
+    groups.push(safe.slice(at, at + SENDERS_PER_SEARCH));
+  }
+  return groups;
+}
+
 /** Gmail as a mail source, read with the person's own Google login and read-only calls. */
 export function gmailMailSource(
   api: Pick<GmailApiPort, 'listMessages' | 'getMessageHeaders' | 'getMessage' | 'getThread'>,
 ): MailSource {
   return {
     trustedAuthenticationServers: GMAIL_AUTHENTICATION_SERVERS,
-    async listNewMessages({ since, before, limit }) {
+    async listNewMessages({ since, before, limit, from }) {
       // Gmail's search takes whole seconds, so it is asked for a little more and the window is cut exactly here.
       const after = Math.floor(since.getTime() / 1000) - 1;
       const until = Math.ceil(before.getTime() / 1000) + 1;
-      const query = `in:inbox after:${String(after)} before:${String(until)}`;
-      const ids: string[] = [];
-      let pageToken: string | undefined;
-      do {
-        const list = await api.listMessages({ query, maxResults: MESSAGE_IDS_PER_PAGE, pageToken });
-        ids.push(...list.messageIds);
-        pageToken = list.nextPageToken;
-        if (ids.length > limit) {
-          return { read: 'too_many' };
-        }
-      } while (pageToken !== undefined);
-      // Gmail lists the newest first. Reading the oldest first means a read that runs out of time has every
-      // message up to where it stopped.
+      const window = `in:inbox after:${String(after)} before:${String(until)}`;
+      const ids = new Set<string>();
+      for (const senders of senderGroups(from)) {
+        const query =
+          senders === undefined ? window : `${window} {${senders.map(address => `from:"${address}"`).join(' ')}}`;
+        let pageToken: string | undefined;
+        do {
+          const list = await api.listMessages({ query, maxResults: MESSAGE_IDS_PER_PAGE, pageToken });
+          for (const id of list.messageIds) {
+            ids.add(id);
+          }
+          pageToken = list.nextPageToken;
+          if (ids.size > limit) {
+            return { read: 'too_many' };
+          }
+        } while (pageToken !== undefined);
+      }
+      // Gmail lists the newest first. Reading the oldest first means a read of the whole window that runs out of
+      // time has every message up to where it stopped.
       const { results, notReached } = await mapSkippingMissing({
-        items: ids.reverse(),
+        items: [...ids].reverse(),
         work: id => api.getMessageHeaders(id),
         deadlineMs: LIST_DEADLINE_MS,
       });
@@ -153,10 +178,12 @@ export function googleCalendarSource({
           start: new Date(start),
           end: new Date(end),
           location: event.location ?? null,
+          // An invite from outside can name the person as its organizer, and then marks them accepted, so that
+          // counts only when they also made the event. Accepting someone else's invite is the person's own answer.
           own:
-            event.organizer?.self === true ||
-            answer === 'accepted' ||
-            (event.organizer === undefined && attendees.length === 0),
+            event.organizer?.self === true
+              ? event.creator?.self === true
+              : answer === 'accepted' || (event.organizer === undefined && attendees.length === 0),
         });
       }
       return events;

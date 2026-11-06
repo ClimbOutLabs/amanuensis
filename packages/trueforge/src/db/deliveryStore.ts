@@ -88,8 +88,9 @@ export interface IDeliveryStore {
   /** Makes one delivery, unread. Throws when the fields do not make a valid delivery of that kind. */
   create(input: CreateDeliveryInput): Promise<Delivery>;
   /**
-   * Makes the delivery with this id unless it was made already. Resolves to the delivery and whether this call made
-   * it, so whatever goes out with a delivery goes out once.
+   * Makes the delivery with this id unless the owner made it already. Resolves to the delivery and whether this call
+   * made it, so whatever goes out with a delivery goes out once. When the id is someone else's, the delivery is made
+   * under a new id.
    */
   createOnce(input: CreateDeliveryInput & { id: string }): Promise<{ delivery: Delivery; created: boolean }>;
   /** Adds one channel attempt. A delivery that is not the owner's is left alone and reads as missing. */
@@ -159,7 +160,6 @@ function toDelivery({ row, attempts }: { row: DeliveryTable; attempts: DeliveryA
   });
 }
 
-/** The feed of things meant for a person. Owner-scoped: no read or write reaches another owner's rows. */
 function rowOf(input: CreateDeliveryInput & { id: string }): DeliveryTable {
   return {
     id: input.id,
@@ -175,6 +175,7 @@ function rowOf(input: CreateDeliveryInput & { id: string }): DeliveryTable {
   };
 }
 
+/** The feed of things meant for a person. Owner-scoped: no read or write reaches another owner's rows. */
 export class DeliveryStore implements IDeliveryStore {
   readonly #db: Kysely<DeliveryDatabase>;
 
@@ -225,10 +226,10 @@ export class DeliveryStore implements IDeliveryStore {
       return { delivery, created: true };
     }
     const made = await this.get({ tenant_id: input.tenant_id, created_by: input.created_by, id: input.id });
-    if (made === undefined) {
-      throw new Error('A delivery with this id belongs to someone else.');
-    }
-    return { delivery: made, created: false };
+    // Someone else's delivery took this id, say through an import, so this one is made under a new id.
+    return made === undefined
+      ? { delivery: await this.create(input), created: true }
+      : { delivery: made, created: false };
   }
 
   async recordAttempt(input: RecordDeliveryAttemptInput): Promise<boolean> {

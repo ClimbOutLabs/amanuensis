@@ -406,3 +406,46 @@ describe('requests that create or send', () => {
     expect(calls).toBe(3);
   });
 });
+
+describe('listing messages and reading their headers', () => {
+  it('lists message ids for a search, one page at a time', async () => {
+    const asked: URL[] = [];
+    const { api } = await apiOver(url => {
+      asked.push(url);
+      return json({ messages: [{ id: 'm2' }, { id: 'm1' }], nextPageToken: 'next' });
+    });
+    await expect(api.listMessages({ query: 'in:inbox after:1', maxResults: 100, pageToken: 'p1' })).resolves.toEqual({
+      messageIds: ['m2', 'm1'],
+      nextPageToken: 'next',
+    });
+    expect(asked[0]?.pathname).toMatch(/\/messages$/);
+    expect(asked[0]?.searchParams.get('q')).toBe('in:inbox after:1');
+    expect(asked[0]?.searchParams.get('maxResults')).toBe('100');
+    expect(asked[0]?.searchParams.get('pageToken')).toBe('p1');
+  });
+
+  it('reads an empty search as no messages and no next page', async () => {
+    const { api } = await apiOver(() => json({ resultSizeEstimate: 0 }));
+    await expect(api.listMessages({ query: 'in:inbox', maxResults: 10, pageToken: undefined })).resolves.toEqual({
+      messageIds: [],
+      nextPageToken: undefined,
+    });
+  });
+
+  it('refuses a list whose rows have no id', async () => {
+    const { api } = await apiOver(() => json({ messages: [{ threadId: 't1' }] }));
+    await expect(api.listMessages({ query: 'in:inbox', maxResults: 10, pageToken: undefined })).rejects.toThrow();
+  });
+
+  it('asks for only the headers a sender check needs, with no message text', async () => {
+    const asked: URL[] = [];
+    const { api } = await apiOver(url => {
+      asked.push(url);
+      return json(message({ id: 'm1', body: 'x' }));
+    });
+    await expect(api.getMessageHeaders('m1')).resolves.toMatchObject({ id: 'm1' });
+    expect(asked[0]?.pathname).toMatch(/\/messages\/m1$/);
+    expect(asked[0]?.searchParams.get('format')).toBe('metadata');
+    expect(asked[0]?.searchParams.getAll('metadataHeaders')).toEqual(['From', 'Subject', 'Authentication-Results']);
+  });
+});

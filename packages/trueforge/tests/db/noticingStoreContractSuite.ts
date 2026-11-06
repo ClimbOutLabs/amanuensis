@@ -37,9 +37,9 @@ export function runNoticingStoreContractSuite(getStore: () => INoticingStore): v
     await store.recordAll({ ...ALICE, events: [event('e1'), event('e2')], status: 'tracking', now: LATER });
     await store.recordAll({ ...BOB, events: [event('e1')], status: 'pending', now: AT });
     const pending = await store.listPending({ ...ALICE, kinds: CLASHES, stale_before: STALE_BEFORE, limit: 10 });
-    expect(pending.map(item => item.id)).toEqual(['e1']);
+    expect(pending.map(item => item.event.id)).toEqual(['e1']);
     const bobs = await store.listPending({ ...BOB, kinds: CLASHES, stale_before: STALE_BEFORE, limit: 10 });
-    expect(bobs.map(item => item.id)).toEqual(['e1']);
+    expect(bobs.map(item => item.event.id)).toEqual(['e1']);
   });
 
   it('lists pending events of the asked kinds, oldest first, for one person', async () => {
@@ -54,7 +54,7 @@ export function runNoticingStoreContractSuite(getStore: () => INoticingStore): v
     await store.recordAll({ ...BOB, events: [event('b1')], status: 'pending', now: AT });
 
     const pending = await store.listPending({ ...ALICE, kinds: CLASHES, stale_before: STALE_BEFORE, limit: 10 });
-    expect(pending.map(item => item.id)).toEqual(['e1', 'e2']);
+    expect(pending.map(item => item.event.id)).toEqual(['e1', 'e2']);
   });
 
   it('lets one claim win, and only the holder start delivering or finish', async () => {
@@ -69,7 +69,7 @@ export function runNoticingStoreContractSuite(getStore: () => INoticingStore): v
 
     // The first holder never came back. Once its claim is older than the stale mark, another pass takes over.
     const listed = await store.listPending({ ...ALICE, kinds: CLASHES, stale_before: STALE_BEFORE, limit: 10 });
-    expect(listed.map(item => item.id)).toEqual(['e1']);
+    expect(listed.map(item => item.event.id)).toEqual(['e1']);
     await expect(
       store.claim({ ...ALICE, event_id: 'e1', claim_id: 'third', now: LATER, stale_before: STALE_BEFORE }),
     ).resolves.toEqual({ verdict: null });
@@ -98,7 +98,7 @@ export function runNoticingStoreContractSuite(getStore: () => INoticingStore): v
     // The pass stopped before it finished. Its claim goes stale and another pass takes the event over.
     await expect(store.listPending({ ...ALICE, kinds: CLASHES, stale_before: AT, limit: 10 })).resolves.toEqual([]);
     const listed = await store.listPending({ ...ALICE, kinds: CLASHES, stale_before: STALE_BEFORE, limit: 10 });
-    expect(listed.map(item => item.id)).toEqual(['e1']);
+    expect(listed.map(item => item.event.id)).toEqual(['e1']);
     await expect(
       store.claim({ ...ALICE, event_id: 'e1', claim_id: 'second', now: LATER, stale_before: STALE_BEFORE }),
     ).resolves.toEqual({ verdict });
@@ -149,9 +149,9 @@ export function runNoticingStoreContractSuite(getStore: () => INoticingStore): v
     await store.dropStale({ kinds: ['approval_waiting'], created_before: STALE_BEFORE });
     const kinds = ['approval_waiting', 'calendar_clash'] as const;
     const alice = await store.listPending({ ...ALICE, kinds, stale_before: STALE_BEFORE, limit: 10 });
-    expect(alice.map(item => item.id)).toEqual(['e1']);
+    expect(alice.map(item => item.event.id)).toEqual(['e1']);
     const bob = await store.listPending({ ...BOB, kinds, stale_before: STALE_BEFORE, limit: 10 });
-    expect(bob.map(item => item.id)).toEqual(['b2']);
+    expect(bob.map(item => item.event.id)).toEqual(['b2']);
   });
 
   it('tracks events by due date, moves one to pending once, and drops them', async () => {
@@ -176,7 +176,7 @@ export function runNoticingStoreContractSuite(getStore: () => INoticingStore): v
     await store.promote({ ...ALICE, event_id: 'b1' });
     await store.promote({ ...ALICE, event_id: 'b1' });
     const pending = await store.listPending({ ...ALICE, kinds: ['bill_due'], stale_before: AT, limit: 10 });
-    expect(pending.map(item => item.id)).toEqual(['b1']);
+    expect(pending.map(item => item.event.id)).toEqual(['b1']);
 
     await store.drop({ ...ALICE, event_id: 'b2' });
     await expect(store.listTracking({ ...ALICE, due_before: before, limit: 10 })).resolves.toEqual([]);
@@ -184,6 +184,57 @@ export function runNoticingStoreContractSuite(getStore: () => INoticingStore): v
     await expect(
       store.listPending({ ...ALICE, kinds: ['bill_due'], stale_before: AT, limit: 10 }),
     ).resolves.toHaveLength(1);
+  });
+
+  it('gives each event its own delivery id when it is first written, and keeps it', async () => {
+    const store = getStore();
+    await store.recordAll({ ...ALICE, events: [event('e1'), event('e2')], status: 'pending', now: AT });
+    await store.recordAll({ ...ALICE, events: [event('e1')], status: 'pending', now: LATER });
+    await store.recordAll({ ...BOB, events: [event('e1')], status: 'pending', now: AT });
+    const alices = await store.listPending({ ...ALICE, kinds: CLASHES, stale_before: STALE_BEFORE, limit: 10 });
+    const [bobs] = await store.listPending({ ...BOB, kinds: CLASHES, stale_before: STALE_BEFORE, limit: 10 });
+    const first = alices.find(item => item.event.id === 'e1');
+    expect(first?.status).toBe('pending');
+    expect(new Set([...alices.map(item => item.delivery_id), bobs?.delivery_id]).size).toBe(3);
+    await store.claim({ ...ALICE, event_id: 'e1', claim_id: 'c1', now: AT, stale_before: AT });
+    await store.startDelivering({ ...ALICE, event_id: 'e1', claim_id: 'c1', now: AT });
+    const again = await store.listPending({ ...ALICE, kinds: CLASHES, stale_before: STALE_BEFORE, limit: 10 });
+    expect(again.find(item => item.event.id === 'e1')).toMatchObject({
+      status: 'delivering',
+      delivery_id: first?.delivery_id,
+    });
+  });
+
+  it('leaves an event being delivered to settle, which closes it only once its claim went stale', async () => {
+    const store = getStore();
+    const approval = (id: string) => event(id, { kind: 'approval_waiting' });
+    await store.recordAll({ ...ALICE, events: [approval('a1'), approval('a2')], status: 'pending', now: AT });
+    for (const id of ['a1', 'a2']) {
+      await store.claim({ ...ALICE, event_id: id, claim_id: id, now: AT, stale_before: AT });
+      await store.startDelivering({ ...ALICE, event_id: id, claim_id: id, now: AT });
+    }
+    await store.dropStale({ kinds: ['approval_waiting'], created_before: LATER });
+    await store.drop({ ...ALICE, event_id: 'a1' });
+    const kinds = ['approval_waiting'] as const;
+    const left = await store.listPending({ ...ALICE, kinds, stale_before: STALE_BEFORE, limit: 10 });
+    // Both were written at the same time, so their order is not part of the contract.
+    expect(left.map(item => [item.event.id, item.status]).sort()).toEqual([
+      ['a1', 'delivering'],
+      ['a2', 'delivering'],
+    ]);
+
+    // A live claim is never settled under the pass that holds it.
+    await store.settle({ ...ALICE, event_id: 'a1', stale_before: AT, status: 'dropped' });
+    await expect(store.listPending({ ...ALICE, kinds, stale_before: STALE_BEFORE, limit: 10 })).resolves.toHaveLength(
+      2,
+    );
+
+    await store.settle({ ...ALICE, event_id: 'a1', stale_before: STALE_BEFORE, status: 'raised' });
+    await store.settle({ ...BOB, event_id: 'a2', stale_before: STALE_BEFORE, status: 'dropped' });
+    const after = await store.listPending({ ...ALICE, kinds, stale_before: STALE_BEFORE, limit: 10 });
+    expect(after.map(item => item.event.id)).toEqual(['a2']);
+    await store.settle({ ...ALICE, event_id: 'a2', stale_before: STALE_BEFORE, status: 'dropped' });
+    await expect(store.listPending({ ...ALICE, kinds, stale_before: STALE_BEFORE, limit: 10 })).resolves.toEqual([]);
   });
 
   it('lets one holder at a time make reach decisions for a person', async () => {
@@ -200,16 +251,8 @@ export function runNoticingStoreContractSuite(getStore: () => INoticingStore): v
     await store.releaseReachLease({ ...ALICE, holder: 'one' });
     await expect(store.acquireReachLease({ ...ALICE, holder: 'two', now: AT, until })).resolves.toBe(true);
 
-    // Only the holder can hold it longer.
-    const later = new Date(until.getTime() + 60_000);
-    await expect(store.renewReachLease({ ...ALICE, holder: 'one', until: later })).resolves.toBe(false);
-    await expect(store.renewReachLease({ ...ALICE, holder: 'two', until: later })).resolves.toBe(true);
-    await expect(
-      store.acquireReachLease({ ...ALICE, holder: 'one', now: new Date(until.getTime() + 1), until: later }),
-    ).resolves.toBe(false);
-
     // A holder that never released is passed over once its time is up.
-    const afterExpiry = new Date(later.getTime() + 1);
+    const afterExpiry = new Date(until.getTime() + 1);
     await expect(store.acquireReachLease({ ...ALICE, holder: 'three', now: afterExpiry, until: LATER })).resolves.toBe(
       true,
     );

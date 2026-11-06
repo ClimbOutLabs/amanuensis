@@ -17,6 +17,8 @@ import type { PersonOwner } from './personOwner';
  * `delivering` is being delivered, `raised` was delivered, `dropped` will never be raised and `failed` stopped after
  * too many tries. A pending or delivering row is worked on by whoever holds its `claim_id`; a claim older than the
  * caller's stale mark is free to take. `verdict_json` keeps the model's answer, so a retry never asks again.
+ * `delivery_id` is drawn at random when the event is first written, so every try makes the same delivery and no one
+ * else can know it.
  */
 export interface NoticingEventTable {
   id: string;
@@ -29,7 +31,7 @@ export interface NoticingEventTable {
   event_json: string;
   due_at: string | Date | null;
   verdict_json: string | null;
-  delivery_id: string | null;
+  delivery_id: string;
   created_at: string | Date;
   claim_id: string | null;
   claimed_at: string | Date | null;
@@ -64,6 +66,16 @@ export interface NoticingClaim {
 }
 
 /**
+ * An event waiting to be raised. `delivering` means a pass stopped part way through delivering it, so its delivery
+ * may already be made under `delivery_id`.
+ */
+export interface WaitingEvent {
+  event: NoticingEvent;
+  status: 'pending' | 'delivering';
+  delivery_id: string;
+}
+
+/**
  * An event claimed this many times without being delivered is given up on, so one broken event never blocks a pass
  * for good. A pass that stopped without handing the event back counts too.
  */
@@ -83,7 +95,7 @@ export interface INoticingStore {
   /** Pending or interrupted events of these kinds that no live claim holds, oldest first. */
   listPending(
     input: PersonOwner & { kinds: readonly NoticingKind[]; stale_before: Date; limit: number },
-  ): Promise<NoticingEvent[]>;
+  ): Promise<WaitingEvent[]>;
   /**
    * Takes an event for one pass, counting the try. Resolves to undefined when another live claim holds it, it is not
    * waiting, or it has been tried too often, in which case it is marked failed.
@@ -98,6 +110,11 @@ export interface INoticingStore {
   /** Marks an event that was being delivered as raised, with the delivery that was made. */
   finish(input: PersonOwner & { event_id: string; claim_id: string; delivery_id: string }): Promise<void>;
   /**
+   * Closes an event a pass left part way through delivering, when no live claim holds it: `raised` when its delivery
+   * was made, `dropped` when it was not and it no longer matters.
+   */
+  settle(input: PersonOwner & { event_id: string; stale_before: Date; status: 'raised' | 'dropped' }): Promise<void>;
+  /**
    * Hands a claimed event back for a later pass. A try that only waited for another pass (`failed: false`) is not
    * counted. Resolves to the status the event is left in.
    */
@@ -107,16 +124,18 @@ export interface INoticingStore {
   /** Moves a tracked event to pending, when it is still tracked. */
   promote(input: PersonOwner & { event_id: string }): Promise<void>;
   /**
-   * Drops every person's waiting events of these kinds recorded before `created_before`, for events that cannot
-   * matter any more once that old, even for someone no pass looks at again.
+   * Drops every person's pending events of these kinds recorded before `created_before`, for events that cannot
+   * matter any more once that old, even for someone no pass looks at again. One left part way through delivering is
+   * left for `settle`, since its delivery may have gone out.
    */
   dropStale(input: { kinds: readonly NoticingKind[]; created_before: Date }): Promise<void>;
-  /** Stops an event that is tracked or pending and will never be raised (it passed, or was paid). */
+  /**
+   * Stops an event that is tracked or pending and will never be raised (it passed, or was paid). One being delivered
+   * is left for `settle`.
+   */
   drop(input: PersonOwner & { event_id: string }): Promise<void>;
   /** Takes the person's reach lease when it is free or ran out. Resolves to false while someone else holds it. */
   acquireReachLease(input: PersonOwner & { holder: string; now: Date; until: Date }): Promise<boolean>;
-  /** Holds the lease longer, when this holder still has it. Resolves to false when it was lost. */
-  renewReachLease(input: PersonOwner & { holder: string; until: Date }): Promise<boolean>;
   /** Hands the lease back, when this holder still has it. */
   releaseReachLease(input: PersonOwner & { holder: string }): Promise<void>;
   getCheckpoint(input: PersonOwner & { watcher: NoticingWatcher }): Promise<Date | undefined>;
@@ -154,7 +173,7 @@ export class NoticingStore implements INoticingStore {
         event_json: JSON.stringify(event),
         due_at: event.due_at,
         verdict_json: null,
-        delivery_id: null,
+        delivery_id: newId(),
         created_at,
         claim_id: null,
         claimed_at: null,
@@ -170,14 +189,14 @@ export class NoticingStore implements INoticingStore {
 
   async listPending(
     input: PersonOwner & { kinds: readonly NoticingKind[]; stale_before: Date; limit: number },
-  ): Promise<NoticingEvent[]> {
+  ): Promise<WaitingEvent[]> {
     if (input.kinds.length === 0) {
       return [];
     }
     const stale = input.stale_before.toISOString();
     const rows = await this.#db
       .selectFrom('noticing_event')
-      .select('event_json')
+      .select(['event_json', 'status', 'delivery_id'])
       .where('tenant_id', '=', input.tenant_id)
       .where('created_by', '=', input.created_by)
       .where('status', 'in', WAITING)
@@ -187,7 +206,11 @@ export class NoticingStore implements INoticingStore {
       .orderBy('id', 'asc')
       .limit(input.limit)
       .execute();
-    return rows.map(eventOf);
+    return rows.map(row => ({
+      event: eventOf(row),
+      status: row.status === 'delivering' ? 'delivering' : 'pending',
+      delivery_id: row.delivery_id,
+    }));
   }
 
   async claim(
@@ -264,6 +287,21 @@ export class NoticingStore implements INoticingStore {
       .execute();
   }
 
+  async settle(
+    input: PersonOwner & { event_id: string; stale_before: Date; status: 'raised' | 'dropped' },
+  ): Promise<void> {
+    const stale = input.stale_before.toISOString();
+    await this.#db
+      .updateTable('noticing_event')
+      .set({ status: input.status, claim_id: null, claimed_at: null })
+      .where('tenant_id', '=', input.tenant_id)
+      .where('created_by', '=', input.created_by)
+      .where('event_id', '=', input.event_id)
+      .where('status', '=', 'delivering')
+      .where(eb => eb.or([eb('claimed_at', 'is', null), eb('claimed_at', '<', stale)]))
+      .execute();
+  }
+
   async release(
     input: PersonOwner & { event_id: string; claim_id: string; failed: boolean },
   ): Promise<'pending' | 'failed'> {
@@ -322,7 +360,7 @@ export class NoticingStore implements INoticingStore {
       .updateTable('noticing_event')
       .set({ status: 'dropped', claim_id: null, claimed_at: null })
       .where('kind', 'in', [...input.kinds])
-      .where('status', 'in', WAITING)
+      .where('status', '=', 'pending')
       .where('created_at', '<', input.created_before.toISOString())
       .execute();
   }
@@ -334,7 +372,7 @@ export class NoticingStore implements INoticingStore {
       .where('tenant_id', '=', input.tenant_id)
       .where('created_by', '=', input.created_by)
       .where('event_id', '=', input.event_id)
-      .where('status', 'in', ['tracking', ...WAITING])
+      .where('status', 'in', ['tracking', 'pending'])
       .execute();
   }
 
@@ -352,18 +390,6 @@ export class NoticingStore implements INoticingStore {
       .returning('holder')
       .execute();
     return taken.length > 0;
-  }
-
-  async renewReachLease(input: PersonOwner & { holder: string; until: Date }): Promise<boolean> {
-    const renewed = await this.#db
-      .updateTable('reach_lease')
-      .set({ held_until: input.until.toISOString() })
-      .where('tenant_id', '=', input.tenant_id)
-      .where('created_by', '=', input.created_by)
-      .where('holder', '=', input.holder)
-      .returning('holder')
-      .execute();
-    return renewed.length > 0;
   }
 
   async releaseReachLease(input: PersonOwner & { holder: string }): Promise<void> {

@@ -32,7 +32,11 @@ describe('personTimezoneFor', () => {
       Parameters<IScheduleStore<unknown>['listSchedules']>
     >(() => Promise.resolve({ data: [schedule('Pacific/Auckland')], pagination: { limit: 1 } }));
     const calendarTimezone = jest.fn((): Promise<string | undefined> => Promise.resolve('Europe/Paris'));
-    const timezoneFor = personTimezoneFor({ scheduleStore: { listSchedules }, calendarTimezone });
+    let at = new Date('2026-11-06T00:00:00.000Z');
+    const later = () => {
+      at = new Date(at.getTime() + 7 * 3_600_000);
+    };
+    const timezoneFor = personTimezoneFor({ scheduleStore: { listSchedules }, calendarTimezone, now: () => at });
 
     await expect(timezoneFor(OWNER)).resolves.toBe('Pacific/Auckland');
     expect(listSchedules.mock.calls[0]?.[0]).toMatchObject({
@@ -45,9 +49,30 @@ describe('personTimezoneFor', () => {
     await expect(timezoneFor(OWNER)).resolves.toBe('Europe/Paris');
     expect(calendarTimezone).toHaveBeenCalledWith(OWNER);
 
+    later();
     calendarTimezone.mockResolvedValue(undefined);
     await expect(timezoneFor(OWNER)).resolves.toBe('UTC');
+    later();
     calendarTimezone.mockRejectedValue(new Error('Google is not reachable'));
     await expect(timezoneFor(OWNER)).resolves.toBe('UTC');
+  });
+
+  it('asks the calendar again only after a few hours', async () => {
+    const listSchedules = jest.fn<
+      ReturnType<IScheduleStore<unknown>['listSchedules']>,
+      Parameters<IScheduleStore<unknown>['listSchedules']>
+    >(() => Promise.resolve({ data: [], pagination: { limit: 1 } }));
+    const calendarTimezone = jest.fn((): Promise<string | undefined> => Promise.resolve('Europe/Paris'));
+    let at = new Date('2026-11-06T00:00:00.000Z');
+    const timezoneFor = personTimezoneFor({ scheduleStore: { listSchedules }, calendarTimezone, now: () => at });
+
+    await expect(timezoneFor(OWNER)).resolves.toBe('Europe/Paris');
+    calendarTimezone.mockResolvedValue('Asia/Tokyo');
+    await expect(timezoneFor(OWNER)).resolves.toBe('Europe/Paris');
+    await expect(timezoneFor({ tenant_id: 'default', created_by: 'owner-2' })).resolves.toBe('Asia/Tokyo');
+    expect(calendarTimezone).toHaveBeenCalledTimes(2);
+
+    at = new Date(at.getTime() + 6 * 3_600_000 + 1);
+    await expect(timezoneFor(OWNER)).resolves.toBe('Asia/Tokyo');
   });
 });

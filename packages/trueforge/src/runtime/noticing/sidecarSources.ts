@@ -31,7 +31,10 @@ export type CallSidecarTool = (name: string, args: Record<string, unknown>) => P
 /** Longest one watcher pass may keep a sidecar session open. */
 const SIDECAR_SESSION_MS = 4 * 60_000;
 const TEXT_CHARACTERS = 3000;
+/** The most the sidecar lists in one call. */
 const PAGE_SIZE = 100;
+/** A list that takes longer than this is treated as too much mail for one window, so a shorter one is asked for. */
+const LIST_PATIENCE_MS = 20_000;
 const LATER_MESSAGES = 10;
 const EVENTS_PER_PASS = 100;
 
@@ -66,15 +69,25 @@ function text(value: unknown): string | undefined {
   return typeof value === 'string' && value !== '' ? value : undefined;
 }
 
-/** `listed_by` stands in for a Date the sender left out or garbled, since the server listed the mail before it. */
-function toMailMessage({ email, listed_by }: { email: unknown; listed_by: Date }): MailMessage | undefined {
+/**
+ * The sidecar gives the Date the sender wrote, not when the mail arrived. The server picked the mail by arrival, so
+ * it arrived inside `arrived`, and a written Date outside that span (late, early or garbled) is moved to its edge.
+ */
+function toMailMessage({
+  email,
+  arrived,
+}: {
+  email: unknown;
+  arrived: { from: Date; to: Date };
+}): MailMessage | undefined {
   if (!isRecord(email)) {
     return undefined;
   }
   const id = text(email['email_id']);
   const sender = text(email['sender']);
-  const written = new Date(text(email['date']) ?? '');
-  const date = Number.isNaN(written.getTime()) ? listed_by : written;
+  const written = new Date(text(email['date']) ?? '').getTime();
+  const latest = arrived.to.getTime() - 1;
+  const date = new Date(Number.isNaN(written) ? latest : Math.min(Math.max(written, arrived.from.getTime()), latest));
   if (id === undefined || sender === undefined) {
     return undefined;
   }
@@ -97,6 +110,21 @@ function toMailMessage({ email, listed_by }: { email: unknown; listed_by: Date }
   };
 }
 
+/** The call's answer, or undefined when it took longer than the list's patience. */
+async function withPatience(pending: Promise<unknown>): Promise<{ result: unknown } | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<undefined>(resolve => {
+    timer = setTimeout(() => {
+      resolve(undefined);
+    }, LIST_PATIENCE_MS);
+  });
+  try {
+    return await Promise.race([pending.then(result => ({ result })), late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * The Email sidecar (IMAP) as a mail source. Its tools give no Authentication-Results, so an always-important sender
  * is never verified here and its mail is read as ordinary mail. Bills and deadlines still work.
@@ -116,33 +144,42 @@ export function sidecarMailSource({ call, account }: { call: CallSidecarTool; ac
   };
   return {
     trustedAuthenticationServers: [],
-    async listNewMessages({ since, before, limit }) {
+    async listNewMessages({ since, before, limit, from }) {
       // The sidecar picks and orders mail by the server's arrival time, which is what the window means. The Date a
-      // sender wrote can be late or early, so it is never used to pick or order.
+      // sender wrote can be late or early, so it is never used to pick or order. A window is read in one call, so
+      // mail deleted while it is read can never shift a page and hide a message.
+      const size = Math.min(limit + 1, PAGE_SIZE);
       const listed: unknown[] = [];
-      for (let page = 1; ; page += 1) {
-        const result = await call(MAIL_LIST_TOOL_NAME, {
-          account_name: account,
-          mailbox: 'INBOX',
-          since: since.toISOString(),
-          before: before.toISOString(),
-          page,
-          page_size: PAGE_SIZE,
-          order: 'asc',
-        });
-        const emails = emailsOfResult(result);
+      for (const address of from ?? [undefined]) {
+        const answered = await withPatience(
+          call(MAIL_LIST_TOOL_NAME, {
+            account_name: account,
+            mailbox: 'INBOX',
+            since: since.toISOString(),
+            before: before.toISOString(),
+            ...(address === undefined ? {} : { from_address: address }),
+            page: 1,
+            page_size: size,
+            order: 'asc',
+          }),
+        );
+        if (answered === undefined) {
+          return { read: 'too_slow' };
+        }
+        const emails = emailsOfResult(answered.result);
+        // A full list may have more behind it, so the window is too big to read in one call.
+        if (emails.length >= size) {
+          return { read: 'too_many' };
+        }
         listed.push(...emails);
         if (listed.length > limit) {
           return { read: 'too_many' };
-        }
-        if (emails.length < PAGE_SIZE) {
-          break;
         }
       }
       return {
         read: 'all',
         messages: listed
-          .map(email => toMailMessage({ email, listed_by: before }))
+          .map(email => toMailMessage({ email, arrived: { from: since, to: before } }))
           .filter((message): message is MailMessage => message !== undefined),
       };
     },
@@ -163,7 +200,7 @@ export function sidecarMailSource({ call, account }: { call: CallSidecarTool; ac
         order: 'asc',
       });
       const ids = emailsOfResult(result)
-        .map(email => toMailMessage({ email, listed_by: ref.received_at }))
+        .map(email => toMailMessage({ email, arrived: { from: ref.received_at, to: new Date() } }))
         .filter((message): message is MailMessage => message !== undefined && message.id !== ref.id)
         .map(message => message.id);
       return ids.length === 0 ? [] : bodiesOf(ids);

@@ -20,6 +20,8 @@ One server-side feed of things Aman wants a person to see, called deliveries. Ea
 
 **Push carries no content.** The push payload is the delivery id and a short title such as "Reminder". It never holds the reminder text, the reason or the assistant's name. The page fetches details after the person opens it.
 
+**Words outside the app are given apart.** Each delivery is made with the words a notice outside the app may carry, which every channel is handed next to the delivery. For what the assistant noticed, that is the plain sentence its watcher wrote, never the model's wording, which only the feed shows. For a reminder or a test, it is the same text the feed shows.
+
 **Push names no one.** The contact every push carries defaults to the project's public page, not the owner's email. The owner can set their own with `WEB_PUSH_SUBJECT`.
 
 **A bounded number of devices.** A person keeps notices on for at most 10 devices. Turning on another drops the one turned on longest ago. A notice goes to at most 4 devices at a time. Settings asks the server whether this device is still saved, so a device that was dropped, or that its push service reported gone, reads as off and can be turned on again.

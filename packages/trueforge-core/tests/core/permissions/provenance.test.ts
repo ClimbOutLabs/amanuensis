@@ -183,7 +183,7 @@ describe('where a link came from', () => {
 
   it('finds a phone number, a site or an address in any spelling, for words that must carry none', () => {
     const carries = (text: string) => namesContactDetail([text]);
-    // Phone numbers, short local ones included, with any dash or mark between the digits and digits of any script.
+    // Phone numbers, short local ones included, with any marks between the digits and digits of any script.
     for (const text of [
       'call 555-0100 now',
       'ring +44 20 7946 0958',
@@ -193,18 +193,38 @@ describe('where a link came from', () => {
       'call 555/0100',
       'call 555_0100',
       'call 555\u00b70100',
+      'call 555    0100',
+      'call 555,0100',
+      'call 555:0100',
+      'call 555*0100',
+      'call 555~0100',
+      'call 555|0100',
+      'call 555\u22120100',
+      'call 555\u20430100',
+      'call 5\ufe0f\u20e35\ufe0f\u20e35\ufe0f\u20e3-0\ufe0f\u20e31\ufe0f\u20e30\ufe0f\u20e30\ufe0f\u20e3',
+      'call 555-OlOO',
+      'call 5S5-O1OO',
+      'call 555 dash 0100',
       'call \u0665\u0665\u0665\u0660\u0661\u0660\u0660',
       'call five five five oh one oh oh',
+      'call five-five-five, zero-one-hundred',
     ]) {
       expect([text, carries(text)]).toEqual([text, true]);
     }
-    // Sites, written out, bare, bracketed, spelled or in full-width dots.
+    // Sites, written out, bare, bracketed, spelled, spaced, with other dots or lookalike letters, or as an IP address.
     for (const text of [
       'Pay at https://evil-pay.example/now',
       'Pay at evil-pay.com',
       'Pay at evil-pay[.]com',
       'Pay at evil-pay dot com',
+      'Pay at evilpay d0t com',
       'Pay at evil-pay\uff0ecom',
+      'Pay at evil-pay\u3002com',
+      'Pay at evil-pay\uff61com',
+      'Pay at evil-pay .com',
+      'Pay at evil-pay.\u0441\u043em',
+      'Pay at 1.2.3.4/pay',
+      'Pay at 1.2.3.4',
     ]) {
       expect([text, carries(text)]).toEqual([text, true]);
     }
@@ -217,14 +237,24 @@ describe('where a link came from', () => {
     ]) {
       expect([text, carries(text)]).toEqual([text, true]);
     }
-    // Plain words, times, dates and amounts carry nothing.
+    // Plain words, and times, dates and amounts written the usual ways, carry nothing.
     for (const text of [
       'Your standup at 16:00 overlaps the dentist on November 7.',
       'The bill of 1,250.00 is due 2026-11-07.',
       'Meet Dana at the cafe at noon.',
+      'Nov 6 2026 14:00-15:00',
+      'due 11/06/2026 10:30',
+      '3:30-4:00 pm',
+      '2026-11-06',
+      '$1,250.00',
+      'The rent of $12,450,000.00 is due 6 November, 2026.',
+      'Room 4021',
+      'I will see Sol at 10 tomorrow.',
     ]) {
       expect([text, carries(text)]).toEqual([text, false]);
     }
+    // A long order number cannot be told from a phone number, so it counts as one and the plain sentence is used.
+    expect(carries('Order #12345678 shipped')).toBe(true);
   });
 
   it('folds spellings of one page together', () => {

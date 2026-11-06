@@ -25,14 +25,26 @@ export type MailRef = Pick<MailMessage, 'id' | 'thread_id' | 'received_at'>;
 /**
  * One read of the mail that reached the inbox in a window, by the mail server's own arrival time. `all` holds every
  * message in it, oldest first. `too_many` says the window holds more than was asked for, so a shorter one is needed.
- * `oldest` holds only the oldest part, because the source ran out of time.
+ * `oldest` holds only the oldest part, because the source ran out of time. `too_slow` says the source took too long to
+ * list the window at all, so a shorter one may help.
  */
 export type MailWindowRead =
-  { read: 'all'; messages: MailMessage[] } | { read: 'too_many' } | { read: 'oldest'; messages: MailMessage[] };
+  | { read: 'all'; messages: MailMessage[] }
+  | { read: 'too_many' }
+  | { read: 'too_slow' }
+  | { read: 'oldest'; messages: MailMessage[] };
 
 export interface MailSource {
-  /** Mail that reached the inbox at or after `since` and before `before`. Mail the person sent is left out. */
-  listNewMessages(input: { since: Date; before: Date; limit: number }): Promise<MailWindowRead>;
+  /**
+   * Mail that reached the inbox at or after `since` and before `before`, from the `from` addresses only when given.
+   * Mail the person sent is left out.
+   */
+  listNewMessages(input: {
+    since: Date;
+    before: Date;
+    limit: number;
+    from?: readonly string[];
+  }): Promise<MailWindowRead>;
   /** The start of one message's text, for a watcher that needs more than the snippet. */
   readText(message: MailMessage): Promise<string>;
   /** The text of messages that came after this one in its thread, oldest first. */
