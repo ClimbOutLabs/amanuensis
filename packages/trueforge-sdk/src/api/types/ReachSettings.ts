@@ -2,6 +2,9 @@
 
 import type * as TrueForge from "../index.js";
 
+/**
+ * How the person wants to be reached. Quiet hours and "today" are read in `timezone`.
+ */
 export interface ReachSettings {
     /** Senders whose mail the assistant tells the person about, once the mail server vouches for them. */
     alwaysImportant: TrueForge.AlwaysImportantSender[];
@@ -19,8 +22,7 @@ export interface ReachSettings {
     /** Fewest hours between two calls. */
     minHoursBetweenCalls: number;
     quietHours: TrueForge.QuietHours;
-    /** The time zone quiet hours and "today" are read in. */
-    timezone: string;
+    timezone: TrueForge.Timezone;
     /** How long before an event with a place the person wants to hear about leaving. */
     travelLeadMinutes: number;
 }

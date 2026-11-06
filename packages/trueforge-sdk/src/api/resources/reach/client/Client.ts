@@ -113,7 +113,7 @@ export class ReachClient {
      * @throws {@link errors.TrueForgeTimeoutError}
      *
      * @example
-     *     await client.reach.update({
+     *     await client.reach.createOrUpdate({
      *         settings: {
      *             alwaysImportant: [{
      *                     addedAt: "added_at",
@@ -140,14 +140,14 @@ export class ReachClient {
      *         }
      *     })
      */
-    public update(
+    public createOrUpdate(
         request: TrueForge.UpdateReachRequest,
         requestOptions?: ReachClient.RequestOptions,
     ): core.HttpResponsePromise<TrueForge.GetReachResponse> {
-        return core.HttpResponsePromise.fromPromise(this.__update(request, requestOptions));
+        return core.HttpResponsePromise.fromPromise(this.__createOrUpdate(request, requestOptions));
     }
 
-    private async __update(
+    private async __createOrUpdate(
         request: TrueForge.UpdateReachRequest,
         requestOptions?: ReachClient.RequestOptions,
     ): Promise<core.WithRawResponse<TrueForge.GetReachResponse>> {

@@ -24,7 +24,7 @@ export class NoticingClient {
     }
 
     /**
-     * Runs one pass of one watcher for everyone it can watch. Called by the controller.
+     * Runs one pass of one watcher for everyone it can watch.
      *
      * @param {TrueForge.internal.RunNoticingRequest} request
      * @param {NoticingClient.RequestOptions} requestOptions - Request-specific configuration.
