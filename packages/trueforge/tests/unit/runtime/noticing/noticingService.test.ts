@@ -30,7 +30,7 @@ import {
 
 const OWNER = { tenant_id: 'default', created_by: 'owner-1' };
 const NOW = new Date('2026-11-05T15:00:00.000Z');
-const PASS = 'mx.example.net; dkim=pass header.d=example.com';
+const PASS = 'mx.example.net; dkim=pass header.d=example.com; dmarc=pass header.from=example.com';
 const PHONE_READY: ReachChannels = {
   texts: { available: false, note: 'Texts are not set up yet.' },
   calls: { available: true, note: 'Calls are on.' },

@@ -7,7 +7,7 @@ Aman can tell you about things without waiting for you to open a chat. You choos
 
 ## What Aman watches for
 
-- **Mail from people you marked always important.** It counts only when your mail server confirms the sender. Mail that only claims to be from them is treated as ordinary mail.
+- **Mail from people you marked always important.** It counts only when your mail server confirms the sender. Mail that only claims to be from them is treated as ordinary mail. A sender whose own mail domain does not ask servers to check it can never be confirmed.
 - **Bills and deadlines** named in new mail. Aman tells you when one is due within three days. It stays quiet when a later message in the same thread says it was paid.
 - **Two things on your calendar at the same time** in the next 24 hours.
 - **Time to leave** for an event with a place, inside the lead time you choose.
