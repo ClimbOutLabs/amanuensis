@@ -270,6 +270,28 @@ describe('a call that ends while its line opens', () => {
     expect(h.tts.sentences).toEqual([]);
   });
 
+  it('when the line drops while its key is still being checked, still writes the call down and falls back', async () => {
+    let reached: () => void = () => undefined;
+    const atRedeem = new Promise<void>(resolve => {
+      reached = resolve;
+    });
+    let open: () => void = () => undefined;
+    const gate = new Promise<void>(resolve => {
+      open = resolve;
+    });
+    h = await callsHarness({ redeemGate: { reached, open: gate } });
+    await h.readyToCall();
+    await h.callDelivery();
+    const media = await h.openMedia({ token: (await h.answer()).token });
+    await atRedeem;
+    media.socket.close();
+    await media.closed;
+    open();
+    await h.waitFor(async () => (await h.calls.getBySid(CALL_SID))?.status === 'ended');
+    await h.waitFor(() => h.pushes.length === 1);
+    expect(h.tts.sentences).toEqual([]);
+  });
+
   it('when the line drops while the call is starting, writes it down and says nothing on a closed line', async () => {
     let ready: () => void = () => undefined;
     const gate = new Promise<void>(resolve => {

@@ -49,6 +49,7 @@ export async function callsHarness({
   voiceReady = true,
   listening = () => Promise.resolve({ vad: new LoudnessVad(), stt: new FakeStt() }),
   tts = new FakeTts(),
+  redeemGate,
 }: {
   chat?: CallChat;
   assistantName?: string;
@@ -57,6 +58,8 @@ export async function callsHarness({
   /** What a conversation listens with; a test can make it slow or fail. */
   listening?: () => Promise<CallListening>;
   tts?: FakeTts;
+  /** Holds each media key's redeem until it settles, so a test can drop the line meanwhile. */
+  redeemGate?: { reached: () => void; open: Promise<void> };
 } = {}) {
   const db = createSqliteDb(':memory:');
   await migrateSqliteToLatest(db);
@@ -65,6 +68,14 @@ export async function callsHarness({
   const reachSettings = new ReachSettingsStore(db);
   const deliveryStore = new DeliveryStore(db);
   const calls = new PhoneCallStore(db);
+  if (redeemGate !== undefined) {
+    const redeem = calls.redeemToken.bind(calls);
+    calls.redeemToken = async input => {
+      redeemGate.reached();
+      await redeemGate.open;
+      return redeem(input);
+    };
+  }
   const personalization = new SqlitePersonalizationStore(db);
   await personalization.upsertProfile({
     ...ALICE,
