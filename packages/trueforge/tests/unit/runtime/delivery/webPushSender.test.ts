@@ -32,6 +32,7 @@ function subscriptions(targets: PushTarget[]) {
   const store: IPushSubscriptionStore = {
     save: () => Promise.reject(new Error('not used')),
     listTargets: () => Promise.resolve(targets),
+    hasEndpoint: () => Promise.reject(new Error('not used')),
     removeByEndpoint: () => Promise.resolve(false),
     removeById: ({ id }) => {
       removed.push(id);

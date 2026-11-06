@@ -9,8 +9,8 @@ import { useSyncExternalStore } from 'react';
 let draftFromVoice = false;
 /** The trimmed text of a voice send whose message has not reached the chat yet, or null. */
 let sendingFromVoice: string | null = null;
-/** The id of the voice message whose reply is still to be read, or null. */
-let awaitingReplyTo: string | null = null;
+/** The voice message whose reply is still to be read, or null. */
+let awaitingReplyTo: { id: string; text: string } | null = null;
 
 export function markDraftFromVoice(): void {
   draftFromVoice = true;
@@ -50,17 +50,31 @@ export function disarmSpokenReply(): void {
 
 /**
  * Called for each new user message in the chat. The voice send's own message (same text) starts
- * waiting for its reply; any other new message means the voice send is over.
+ * waiting for its reply; any other new message means the voice send is over. The chat shows a sent
+ * message under a temporary id and renames it once the server accepts the turn, so a message with
+ * the waiting text keeps the reply due under its new id.
  */
 export function noteUserMessage({ id, text }: { id: string; text: string }): void {
-  if (sendingFromVoice === null) return;
-  awaitingReplyTo = text.trim() === sendingFromVoice ? id : null;
-  sendingFromVoice = null;
+  const trimmed = text.trim();
+  if (sendingFromVoice !== null) {
+    awaitingReplyTo = trimmed === sendingFromVoice ? { id, text: trimmed } : null;
+    sendingFromVoice = null;
+    return;
+  }
+  if (awaitingReplyTo === null) return;
+  awaitingReplyTo = trimmed === awaitingReplyTo.text ? { id, text: trimmed } : null;
+}
+
+/** Whether a turn sending this text is the voice send, so its reply will be read aloud. */
+export function isSpokenSend(text: string): boolean {
+  const trimmed = text.trim();
+  if (trimmed.length === 0) return false;
+  return sendingFromVoice === trimmed || awaitingReplyTo?.text === trimmed;
 }
 
 /** When a turn finishes: whether its reply answers the voice message. Consumes the pending reply. */
 export function takeSpokenReply(latestUserId: string | undefined): boolean {
-  const pending = awaitingReplyTo !== null && awaitingReplyTo === latestUserId;
+  const pending = awaitingReplyTo !== null && awaitingReplyTo.id === latestUserId;
   awaitingReplyTo = null;
   return pending;
 }
