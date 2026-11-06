@@ -5,6 +5,7 @@ import { CALENDAR_READ_TOOL_NAMES } from '../calendar/toolContract';
 import { htmlImages } from '../email/gmail/htmlText';
 import { isGmailReadToolName } from '../email/gmail/toolContract';
 import { isMailReadToolName } from '../email/mailConnector/toolContract';
+import { FORGET_FACT_TOOL_NAME, REMEMBER_FACT_TOOL_NAME, UPDATE_FACT_TOOL_NAME } from '../memory/pagesToolContract';
 import { DEFAULT_ASSISTANT_NAME } from '../personas/assistantName';
 import { REPLACE_TASK_CHECKLIST_TOOL_NAME, TASK_STATE_TOOL_NAME } from '../runtime/taskState';
 import { isPageReaderTool, isSearchResultTool } from '../search/fetchedPages';
@@ -222,9 +223,19 @@ function baseToolName(toolName: string): string {
  */
 const HOST_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set([TASK_STATE_TOOL_NAME, REPLACE_TASK_CHECKLIST_TOOL_NAME]);
 
+/**
+ * The memory page tools answer with a fixed sentence and the words the model sent, never page text. They are
+ * matched by their full name: a connector's tool carries its server's prefix, so it can never pass for one.
+ */
+const HOST_ONLY_FULL_TOOL_NAMES: ReadonlySet<string> = new Set([
+  REMEMBER_FACT_TOOL_NAME,
+  UPDATE_FACT_TOOL_NAME,
+  FORGET_FACT_TOOL_NAME,
+]);
+
 /** Whether a tool's result may hold text written outside the chat: true for every tool not known to be host-only. */
 export function toolReturnsOutsideContent(toolName: string): boolean {
-  return !HOST_ONLY_TOOL_NAMES.has(baseToolName(toolName));
+  return !HOST_ONLY_TOOL_NAMES.has(baseToolName(toolName)) && !HOST_ONLY_FULL_TOOL_NAMES.has(toolName);
 }
 
 /** The kind of content a tool's result is, so a card or a memory note can say where something was read. */

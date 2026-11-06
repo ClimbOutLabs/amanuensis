@@ -36,6 +36,7 @@ import {
 } from '../email/mailConnector/toolContract';
 import { GOOGLE_SETUP_SERVER_ID, GOOGLE_SETUP_STATUS_TOOL_NAME } from '../google/setupToolContract';
 import type { BrowserClickReview, DocumentScope, MapsHosts } from '../llm/LLMTypes';
+import { isMemoryPagesToolName, MEMORY_PAGES_SERVER_ID } from '../memory/pagesToolContract';
 import {
   isPersonaWriteToolName,
   LIST_PERSONAS_TOOL_NAME,
@@ -2897,6 +2898,22 @@ function classifyReminderTool(action: SentinelAction): TierDecision {
 }
 
 /**
+ * Memory page tools are the host's own, named by server. They write the person's own words from this chat to
+ * their own pages and leave a commit that undoes the write, so they run without asking; the tools themselves
+ * refuse in a chat that has read outside text. Any other name fails closed.
+ */
+function classifyMemoryPagesTool(action: SentinelAction): TierDecision {
+  if (!isMemoryPagesToolName(action.tool_name)) {
+    return failClosedDecision({ reason_detail: 'Unknown memory tool.' });
+  }
+  return tier1Decision({
+    reason: 'memory_page_write',
+    reason_detail: 'Keep what you said on a page.',
+    sensitive_read: false,
+  });
+}
+
+/**
  * Space tools are the host's own, named by server. Reading or writing one runs without asking: a space
  * is the person's own page on their own machine, nothing leaves it, and every write keeps a revision
  * that revert_space can restore. Any other name fails closed.
@@ -3539,6 +3556,9 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
   }
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === SPACE_SERVER_ID) {
     return classifySpaceTool(action);
+  }
+  if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === MEMORY_PAGES_SERVER_ID) {
+    return classifyMemoryPagesTool(action);
   }
   if (
     action.tool_type === 'truefoundry-system' &&

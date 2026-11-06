@@ -417,6 +417,7 @@ export { existingSandboxIdForProvider, formatSandboxId, parseSandboxId, rawSandb
 export type { SandboxRefParts } from './sandbox/sandboxRef';
 export { GitBridge } from './sandbox/slots/git/gitBridge';
 export { execFileRunner } from './sandbox/slots/git/hostCommand';
+export type { HostCommandRunner } from './sandbox/slots/git/hostCommand';
 export { probeSlotAttachments } from './sandbox/slots/slotAttachmentProbe';
 export type { SlotAttachmentProbeResult } from './sandbox/slots/slotAttachmentProbe';
 export {
@@ -454,6 +455,7 @@ export {
   callResultSource,
   callReturnsOutsideContent,
   contextHasOutsideToolResult,
+  turnReadOutsideText,
 } from './capabilities/builtins/ChatProvenance';
 export type { ToolResultSource } from './capabilities/builtins/ChatProvenance';
 export {
