@@ -36,12 +36,14 @@ import {
   isHostWrappedText,
   McpConnectionError,
   newEventId,
+  PromiseTimeoutError,
   rawSandboxId,
   redisKey,
   SandboxError,
   SandboxFileNotFoundError,
   SandboxNotAvailableError,
   VercelAILLM,
+  withTimeout,
   type BoundRepository,
   type HeldRefusalReason,
   type ToolResultSource,
@@ -3108,21 +3110,39 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           return c.json({ data: toWireTurn(createdTurn.record) }, 200);
         }
 
-        let shouldWriteToSSEStream = true;
+        // Stream: same engine; a hung SSE write is timed out so drain/dual-write continue.
+        let writesStopped = false;
         return streamSSE(c, async stream => {
           stream.onAbort(() => {
-            shouldWriteToSSEStream = false;
+            // Our own abort after a failed write already logged why; only a client leaving is news here.
+            if (!writesStopped) {
+              writesStopped = true;
+              deps.logger.info('Create-turn SSE client disconnected, continuing drain without writing', {
+                sessionId,
+                turnId: drainInput.turnId,
+              });
+            }
           });
           await drainTurnEvents({
             ...drainInput,
             onEvent: async (event, sequenceNumber) => {
-              if (!stream.closed && !stream.aborted && shouldWriteToSSEStream) {
-                try {
-                  await stream.writeSSE(turnEventSsePayload(event, sequenceNumber));
-                } catch (error) {
-                  deps.logger.error('SSE stream write error', extractErrorLogFields(error));
-                  shouldWriteToSSEStream = false;
-                }
+              if (stream.closed || stream.aborted || writesStopped) {
+                return;
+              }
+              try {
+                await withTimeout(
+                  stream.writeSSE(turnEventSsePayload(event, sequenceNumber)),
+                  configuration.TURN_SSE_STREAM_WRITE_TIMEOUT_MS,
+                );
+              } catch (error) {
+                writesStopped = true;
+                deps.logger.error(
+                  error instanceof PromiseTimeoutError ? 'SSE stream write timed out' : 'SSE stream write error',
+                  { ...extractErrorLogFields(error), sessionId, turnId: drainInput.turnId },
+                );
+                // End the response now, not when the turn finishes: a client that stops reading
+                // sees the stream close and reconnects through the subscribe route.
+                stream.abort();
               }
             },
           });
