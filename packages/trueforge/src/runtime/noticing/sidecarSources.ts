@@ -5,6 +5,7 @@ import { deliveredMailboxOf } from '@truefoundry/trueforge-core/core/email/gmail
 import {
   accountNamesOfResult,
   emailsOfResult,
+  failedIdsOfResult,
 } from '@truefoundry/trueforge-core/core/email/mailConnector/mailToolResults';
 import {
   MAIL_ACCOUNT_LIST_TOOL_NAME,
@@ -17,8 +18,8 @@ import type { Logger } from 'winston';
 
 import type { PersonOwner } from '../../db/personOwner';
 import {
+  MailSourceBusyError,
   MailTooSlowError,
-  MessageUnreadableError,
   type CalendarEventInfo,
   type CalendarSource,
   type MailMessage,
@@ -40,9 +41,10 @@ const PAGE_SIZE = 100;
 const CALENDAR_CALL_MS = 30_000;
 /**
  * Longest one mail call may take. Listing searches whole days of a mailbox, which a slow server can take a while
- * over, so mail has more time than the calendar. It still fits several times inside the session.
+ * over, so mail has more time than the calendar. The connector gives up on its own after about a minute. A list, a
+ * body read and a thread read at this limit still fit inside the session.
  */
-const MAIL_CALL_MS = 90_000;
+const MAIL_CALL_MS = 75_000;
 
 /** The sidecar answered a tool call with an error. `reply` is its own words, for the log and for telling errors apart. */
 export class SidecarToolError extends Error {
@@ -68,12 +70,9 @@ export function toolResultOf({ server, tool, result }: { server: string; tool: s
   throw new SidecarToolError({ server, tool, reply });
 }
 
-/** Whether the sidecar said the message is not there, which no later try changes. */
-function saysMissing(error: unknown): boolean {
-  return (
-    error instanceof SidecarToolError &&
-    /not found|no such|does not exist|doesn't exist|unknown email/i.test(error.reply)
-  );
+/** Whether the connector gave up on a call by its own time limit. */
+function saysTimedOut(error: unknown): boolean {
+  return error instanceof SidecarToolError && /timed out|timeout/i.test(error.reply);
 }
 
 /** Whether an error, or one it was caused by, is the MCP client giving up on a call that took too long. */
@@ -177,29 +176,37 @@ function toMailMessage({
  * is never verified here and its mail is read as ordinary mail. Bills and deadlines still work.
  */
 export function sidecarMailSource({ call, account }: { call: CallSidecarTool; account: string }): MailSource {
-  /** Reads from the sidecar. A message it says is not there is unreadable; any other error is passed on. */
-  const readingMessage = async <T>(read: () => Promise<T>): Promise<T> => {
+  /** Calls a tool. The connector's own errors pass on as they are; a dropped or abandoned call says the server is busy. */
+  const asked = async (tool: string, args: Record<string, unknown>): Promise<unknown> => {
     try {
-      return await read();
+      return await call(tool, args);
     } catch (error) {
-      throw saysMissing(error) ? new MessageUnreadableError({ cause: error }) : error;
+      throw error instanceof SidecarToolError ? error : new MailSourceBusyError({ cause: error });
     }
   };
-  const bodiesOf = async (ids: readonly string[]): Promise<string[]> => {
-    const result = await readingMessage(() =>
-      call(MAIL_CONTENT_TOOL_NAME, {
-        account_name: account,
-        email_ids: ids,
-        mailbox: 'INBOX',
-        mark_as_read: false,
-      }),
-    );
-    return emailsOfResult(result).flatMap(email =>
-      isRecord(email) ? [(text(email['body']) ?? '').slice(0, TEXT_CHARACTERS)] : [],
-    );
+  const bodiesOf = async (ids: readonly string[]): Promise<{ id: string; body: string }[]> => {
+    const result = await asked(MAIL_CONTENT_TOOL_NAME, {
+      account_name: account,
+      email_ids: ids,
+      mailbox: 'INBOX',
+      mark_as_read: false,
+    });
+    // The connector reads each message on its own and reports the ones it could not fetch, a deleted message and a
+    // dropped connection alike, as success. Which of the two it was cannot be told, so it is a failure that may clear.
+    const bodies = emailsOfResult(result).flatMap(email => {
+      const id = isRecord(email) ? text(email['email_id']) : undefined;
+      return isRecord(email) && id !== undefined
+        ? [{ id, body: (text(email['body']) ?? '').slice(0, TEXT_CHARACTERS) }]
+        : [];
+    });
+    if (failedIdsOfResult(result).length > 0 || ids.some(id => !bodies.some(item => item.id === id))) {
+      throw new Error('The Email connector could not fetch the message.');
+    }
+    return bodies;
   };
   return {
     trustedAuthenticationServers: [],
+    datesAreArrival: false,
     async listNewMessages({ since, before, limit, from }) {
       // The sidecar picks and orders mail by the server's arrival time, which is what the window means. The Date a
       // sender wrote can be late or early, so it is never used to pick or order. A window is read in one call, so
@@ -207,7 +214,7 @@ export function sidecarMailSource({ call, account }: { call: CallSidecarTool; ac
       const size = Math.min(limit + 1, PAGE_SIZE);
       const listed: unknown[] = [];
       for (const address of from ?? [undefined]) {
-        const result = await call(MAIL_LIST_TOOL_NAME, {
+        const result = await asked(MAIL_LIST_TOOL_NAME, {
           account_name: account,
           mailbox: 'INBOX',
           since: since.toISOString(),
@@ -217,7 +224,7 @@ export function sidecarMailSource({ call, account }: { call: CallSidecarTool; ac
           page_size: size,
           order: 'asc',
         }).catch((error: unknown) => {
-          throw isCallTimeout(error) ? new MailTooSlowError({ seconds: MAIL_CALL_MS / 1000, cause: error }) : error;
+          throw isCallTimeout(error) || saysTimedOut(error) ? new MailTooSlowError({ cause: error }) : error;
         });
         const emails = emailsOfResult(result);
         // A full list may have more behind it, so the window is too big to read in one call.
@@ -237,33 +244,26 @@ export function sidecarMailSource({ call, account }: { call: CallSidecarTool; ac
       };
     },
     async readText(message) {
-      const [body] = await bodiesOf([message.id]);
-      if (body === undefined) {
-        // The sidecar answered without the message, as it does for one that was deleted.
-        throw new MessageUnreadableError({ cause: new Error('The Email connector did not return the message.') });
-      }
-      return body;
+      return (await bodiesOf([message.id]))[0]?.body ?? '';
     },
     async laterInThread(ref: MailRef) {
       if (ref.thread_id === null) {
         return [];
       }
-      const result = await readingMessage(() =>
-        call(MAIL_LIST_TOOL_NAME, {
-          account_name: account,
-          mailbox: 'INBOX',
-          subject: ref.thread_id,
-          since: ref.received_at.toISOString(),
-          page: 1,
-          page_size: LATER_MESSAGES,
-          order: 'asc',
-        }),
-      );
+      const result = await asked(MAIL_LIST_TOOL_NAME, {
+        account_name: account,
+        mailbox: 'INBOX',
+        subject: ref.thread_id,
+        since: ref.received_at.toISOString(),
+        page: 1,
+        page_size: LATER_MESSAGES,
+        order: 'asc',
+      });
       const ids = emailsOfResult(result)
         .map(email => toMailMessage({ email, arrived: { from: ref.received_at, to: new Date() } }))
         .filter((message): message is MailMessage => message !== undefined && message.id !== ref.id)
         .map(message => message.id);
-      return ids.length === 0 ? [] : bodiesOf(ids);
+      return ids.length === 0 ? [] : (await bodiesOf(ids)).map(item => item.body);
     },
   };
 }
@@ -348,14 +348,21 @@ export function createSidecarNoticingSources({
   instanceOwner: PersonOwner | undefined;
   logger: Logger;
 }): NoticingSourceProvider {
-  async function mailFromSidecar(url: string): Promise<MailSource | undefined> {
+  /** The shared mail connector, told apart as not set up (no account) or set up but out of reach. */
+  async function mailFromSidecar(
+    url: string,
+  ): Promise<
+    { status: 'ready'; source: MailSource } | { status: 'not_set_up' } | { status: 'unreachable'; error: unknown }
+  > {
     try {
       const call = sidecarTools({ name: MAIL_CONNECTOR_NAME, url, logger, callMs: MAIL_CALL_MS });
       const [account] = accountNamesOfResult(await call(MAIL_ACCOUNT_LIST_TOOL_NAME, {}));
-      return account === undefined ? undefined : sidecarMailSource({ call, account });
+      return account === undefined
+        ? { status: 'not_set_up' }
+        : { status: 'ready', source: sidecarMailSource({ call, account }) };
     } catch (error) {
       logger.warn('The Email sidecar could not be reached for noticing', extractErrorLogFields(error));
-      return undefined;
+      return { status: 'unreachable', error };
     }
   }
   return {
@@ -370,8 +377,10 @@ export function createSidecarNoticingSources({
       if (owner.tenant_id !== instanceOwner?.tenant_id || owner.created_by !== instanceOwner.created_by) {
         return own;
       }
+      const shared = own.mail !== undefined || mailUrl === undefined ? undefined : await mailFromSidecar(mailUrl);
       return {
-        mail: own.mail ?? (mailUrl === undefined ? undefined : await mailFromSidecar(mailUrl)),
+        mail: own.mail ?? (shared?.status === 'ready' ? shared.source : undefined),
+        mail_unreachable: shared?.status === 'unreachable' ? { error: shared.error } : undefined,
         calendar:
           own.calendar ??
           (calendarUrl === undefined

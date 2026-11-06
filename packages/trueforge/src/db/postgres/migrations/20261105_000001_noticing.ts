@@ -5,7 +5,8 @@ import { withMigrationTransaction } from '../migrationTransaction';
 /**
  * What the assistant notices for a person: their Reach me settings, the events the watchers found (one row per stable
  * event id, so nothing is raised twice, claimed by one pass at a time until delivered), where each watcher reads from
- * next, and the per-person lease that keeps two passes from deciding how loudly to reach someone at once. `kind` and
+ * next (and how its passes are doing: since when they have failed and why, and the one message a pass keeps failing on),
+ * and the per-person lease that keeps two passes from deciding how loudly to reach someone at once. `kind` and
  * `status` are plain text with no check, so a later kind needs no migration.
  */
 export async function up(db: Kysely<unknown>): Promise<void> {
@@ -53,6 +54,10 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       .addColumn('created_by', 'text', col => col.notNull())
       .addColumn('watcher', 'text', col => col.notNull())
       .addColumn('checked_at', 'timestamptz', col => col.notNull())
+      .addColumn('failing_since', 'timestamptz')
+      .addColumn('failure_kind', 'text')
+      .addColumn('stuck_message_id', 'text')
+      .addColumn('stuck_passes', 'integer', col => col.notNull().defaultTo(0))
       .addPrimaryKeyConstraint('noticing_checkpoint_pk', ['tenant_id', 'created_by', 'watcher'])
       .execute();
     await trx.schema

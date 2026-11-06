@@ -33,8 +33,6 @@ export const CalendarEventSchema = z.object({
   organizer: z
     .object({ email: z.string().optional(), displayName: z.string().optional(), self: z.boolean().optional() })
     .optional(),
-  /** Ends in `@google.com` for an event made in Google Calendar; an imported invite keeps the id its sender gave it. */
-  iCalUID: z.string().optional(),
   /** Who made the event. Unlike the organizer, an invite from someone else cannot name the person here. */
   creator: z.object({ email: z.string().optional(), self: z.boolean().optional() }).optional(),
   attendees: z.array(AttendeeSchema).optional(),

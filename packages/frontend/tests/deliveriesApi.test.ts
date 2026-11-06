@@ -185,6 +185,10 @@ test('reads the mail trouble the server reports, and treats a kind it does not k
     Response.json({ data: { ...WIRE_REACH.data, mail_problem: { ...problem, kind: 'new_kind' } } }),
   );
   assert.deepEqual((await odd.reach.get()).mailProblem, { since: problem.since, kind: 'other' });
+  const garbled = createDeliveriesApi(async () =>
+    Response.json({ data: { ...WIRE_REACH.data, mail_problem: { ...problem, since: 'last Tuesday' } } }),
+  );
+  await assert.rejects(garbled.reach.get(), /could not be read\. Reload the page\./);
   const missing = createDeliveriesApi(async () => {
     const { mail_problem: _left, ...rest } = WIRE_REACH.data;
     return Response.json({ data: rest });

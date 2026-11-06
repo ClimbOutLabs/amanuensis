@@ -100,7 +100,7 @@ function NumberField({
 }
 
 const MAIL_PROBLEM_NEXT_STEP = {
-  too_slow: 'Your mail server answers too slowly. Check that it is running well.',
+  too_slow: 'Your mail server answers too slowly. Ask whoever runs your mail to check it.',
   other: 'Open Settings, Connectors, and check that your mail is still connected.',
 } as const;
 
@@ -110,7 +110,7 @@ function MailProblem({ problem }: { problem: NonNullable<ReachView['mailProblem'
   const since = new Date(problem.since).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
   return (
     <div role="status" className={`${CARD} flex flex-col gap-1`}>
-      <p className="text-text-primary text-sm font-semibold">{`${assistant} could not check your mail since ${since}.`}</p>
+      <p className="text-text-primary text-sm font-semibold">{`${assistant} has not been able to check your mail since ${since}.`}</p>
       <p className="text-text-secondary text-sm">{MAIL_PROBLEM_NEXT_STEP[problem.kind]}</p>
     </div>
   );

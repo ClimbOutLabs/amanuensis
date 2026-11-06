@@ -42,13 +42,22 @@ export class MessageUnreadableError extends Error {
   }
 }
 
+/**
+ * A read failed in a way that says nothing about the message: the server is busy, rate limiting, down or out of
+ * reach. Such a failure stops the pass but never counts toward passing the message over.
+ */
+export class MailSourceBusyError extends Error {
+  constructor({ cause }: { cause: unknown }) {
+    super('The mail server could not be reached or was too busy.', { cause });
+    this.name = 'MailSourceBusyError';
+  }
+}
+
 /** Said when the mail server took too long to list new mail, so the person can be told why mail was not checked. */
-export class MailTooSlowError extends Error {
-  constructor({ seconds, cause }: { seconds: number; cause: unknown }) {
-    super(
-      `The Email connector took longer than ${String(seconds)} seconds to list new mail. New mail was not checked this time. If this keeps happening, check that the mail server answers quickly.`,
-      { cause },
-    );
+export class MailTooSlowError extends MailSourceBusyError {
+  constructor({ cause }: { cause: unknown }) {
+    super({ cause });
+    this.message = 'The Email connector took too long to list new mail. New mail was not checked this time.';
     this.name = 'MailTooSlowError';
   }
 }
@@ -70,6 +79,11 @@ export interface MailSource {
   laterInThread(message: MailRef): Promise<string[]>;
   /** The receiving servers whose Authentication-Results can be believed. Empty when this source passes on none. */
   trustedAuthenticationServers: readonly string[];
+  /**
+   * Whether `received_at` is when the server got the message. Where it is a Date the sender wrote, it can be moved
+   * to the edge of the window it was listed in, so it cannot say where to resume reading.
+   */
+  datesAreArrival: boolean;
 }
 
 export interface CalendarEventInfo {
@@ -92,6 +106,8 @@ export interface CalendarSource {
 
 export interface NoticingSources {
   mail: MailSource | undefined;
+  /** Set when a mail source is set up but could not be opened now, as opposed to there being none. */
+  mail_unreachable?: { error: unknown } | undefined;
   calendar: CalendarSource | undefined;
 }
 

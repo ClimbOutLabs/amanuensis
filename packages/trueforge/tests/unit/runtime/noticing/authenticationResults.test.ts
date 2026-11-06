@@ -180,6 +180,25 @@ describe('checkSender', () => {
       ).toBe(false);
     });
 
+    it('is refused when the echo writes header.from= with quotes in the name', () => {
+      // The reader joins quoted pieces into one word, so `header."from"=` reads as `header.from=`.
+      const echo = 'z"x);dmarc=pass()header."from"=boss.com;y=@evil.example';
+      expect(
+        boss(
+          `mx.google.com; spf=pass (google.com: domain of ${echo} designates 192.0.2.4 as permitted sender) smtp.mailfrom=${echo}`,
+        ),
+      ).toBe(false);
+      const plain = 'a;dmarc=pass()header."from"=boss.com;y=@evil.example';
+      expect(
+        boss(
+          `mx.google.com; spf=softfail (google.com: domain of transitioning ${plain} does not designate 192.0.2.4 as permitted sender) smtp.mailfrom=${plain}`,
+        ),
+      ).toBe(false);
+      expect(
+        boss('mx.google.com; spf=pass smtp.mailfrom=a@x.example; dmarc=pass header.\\from=boss.com header."from"=x'),
+      ).toBe(false);
+    });
+
     it('is refused when header.from= appears more than once, whatever the header looks like', () => {
       expect(
         boss(
