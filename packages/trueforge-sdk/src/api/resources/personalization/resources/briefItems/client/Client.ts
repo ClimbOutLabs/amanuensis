@@ -140,6 +140,7 @@ export class BriefItemsClient {
      * @throws {@link TrueForge.BadRequestError}
      * @throws {@link TrueForge.UnauthorizedError}
      * @throws {@link TrueForge.NotFoundError}
+     * @throws {@link TrueForge.UnprocessableEntityError}
      * @throws {@link errors.TrueForgeError}
      * @throws {@link errors.TrueForgeTimeoutError}
      *
@@ -233,6 +234,17 @@ export class BriefItemsClient {
                     );
                 case 404:
                     throw new TrueForge.NotFoundError(
+                        serializers.RequestErrorResponse.parseOrThrow(_response.error.body, {
+                            unrecognizedObjectKeys: "passthrough",
+                            allowUnrecognizedUnionMembers: true,
+                            allowUnrecognizedEnumValues: true,
+                            skipValidation: true,
+                            breadcrumbsPrefix: ["response"],
+                        }),
+                        _response.rawResponse,
+                    );
+                case 422:
+                    throw new TrueForge.UnprocessableEntityError(
                         serializers.RequestErrorResponse.parseOrThrow(_response.error.body, {
                             unrecognizedObjectKeys: "passthrough",
                             allowUnrecognizedUnionMembers: true,

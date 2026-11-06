@@ -37,6 +37,7 @@ import { migrateSqliteToLatest } from '../../src/db/migrateSqlite';
 import { SentinelAuditStore } from '../../src/db/sentinelAuditStore';
 import { SqliteAgentStore } from '../../src/db/sqlite/agent-store/SqliteAgentStore';
 import { SqliteApprovalTokenStore } from '../../src/db/sqlite/approval-token-store/SqliteApprovalTokenStore';
+import { SqliteChatDeletionStore } from '../../src/db/sqlite/chat-deletion-store/SqliteChatDeletionStore';
 import { SqliteChatImageStore } from '../../src/db/sqlite/chat-image-store/SqliteChatImageStore';
 import { createSqliteDb } from '../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
@@ -142,6 +143,7 @@ function buildApp(input: {
   });
   const personaStore = new SqlitePersonaStore(db);
   return createServerApp({
+    chatDeletionStore: new SqliteChatDeletionStore({ db, turnArtifactStore: new SqliteTurnArtifactStore(db) }),
     chatSearchIndexer: new ChatSearchIndexer({
       sessionStore,
       globalSettingsStore,

@@ -12,6 +12,7 @@ import { McpServerWithAuthStore } from '../../../src/db/McpServerWithAuthStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { SentinelAuditStore } from '../../../src/db/sentinelAuditStore';
 import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgentStore';
+import { SqliteChatDeletionStore } from '../../../src/db/sqlite/chat-deletion-store/SqliteChatDeletionStore';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
 import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
@@ -58,6 +59,8 @@ describe('public CRUD after session deletion', () => {
     app.route(
       '/',
       createSessionsRouter({
+        chatDeletionStore: new SqliteChatDeletionStore({ db, turnArtifactStore: new SqliteTurnArtifactStore(db) }),
+        turnDrains: new TurnDrainRegistry(),
         sessions,
         sessionStore,
         sentinelAuditStore: new SentinelAuditStore(db),
@@ -77,6 +80,7 @@ describe('public CRUD after session deletion', () => {
     app.route(
       '/',
       createTurnsRouter({
+        chatDeletionStore: { listDeletedChatModelUsage: () => Promise.resolve([]) },
         mcpCatalog: McpCatalog.loadShipped(),
         globalSettingsStore: new SqliteGlobalSettingsStore(db),
         tokenFactoryBudget: uncappedTokenFactoryBudget,
@@ -121,6 +125,8 @@ describe('public CRUD after session deletion', () => {
       metadata: {},
       external_id: null,
       source: null,
+      is_incognito: false,
+      private_expires_at: null,
     });
     expect((await app.request('/s1', { method: 'DELETE' })).status).toBe(204);
 
