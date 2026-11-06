@@ -235,11 +235,12 @@ email_ask_password() { # key
 # command passes instance and always asks the rest. Flags answer any question they cover.
 email_collect() { # install|instance
   local names count
-  # The menu numbers follow the order on screen and can change, so a flag names its provider.
+  # The menu numbers follow the order on screen and can change, so a flag names its provider, and only one on the list.
   case "$OPT_EMAIL_PROVIDER" in
-    '' | *[!0-9]*) ;;
-    *) usage_die "--email-provider takes the provider's name: aol, fastmail, gmail, gmx, icloud, webde, yahoo, zoho or other." ;;
-  esac
+    '') ;;
+    *[!0-9]*) [ -n "$(email_provider_key "$OPT_EMAIL_PROVIDER")" ] ;;
+    *) false ;;
+  esac || usage_die "--email-provider takes the provider's name: aol, fastmail, gmail, gmx, icloud, webde, yahoo, zoho or other."
   EM_PROVIDER=$OPT_EMAIL_PROVIDER
   EM_ADDRESS=$OPT_EMAIL_ADDRESS
   EM_IMAP_HOST=$OPT_EMAIL_IMAP_HOST

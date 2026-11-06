@@ -106,7 +106,7 @@ test_presets_write_their_servers() {
   assert_file "$STUB_STATE/mail-account-aman-main"
   run_install instance email main --email-provider proton --email-address person@example.invalid
   assert_rc 2
-  assert_flat_contains "$ERR" "Type a number from 1 to 9" "Proton Mail Bridge is not offered"
+  assert_flat_contains "$ERR" "--email-provider takes the provider's name: aol, fastmail, gmail, gmx, icloud, webde, yahoo, zoho or other." "Proton Mail Bridge is not offered"
   sandbox_drop
 }
 

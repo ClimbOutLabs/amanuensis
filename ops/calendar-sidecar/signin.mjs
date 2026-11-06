@@ -13,17 +13,18 @@
 // names no principal is left to the tool server on its own host, as before.
 import { Buffer } from 'node:buffer';
 import { request as httpsRequest } from 'node:https';
-import { isIP } from 'node:net';
 import { URL } from 'node:url';
 
 import { hrefsOf, parseMultiStatus, propfindBody, resourceTypeHas } from '@ni-c/caldav-mcp/dist/dav-xml.js';
+import { getDomain } from 'tldts';
 
 import { addressIsWellFormed, allowedAddresses, hostOf } from './account.mjs';
 
 // How long one request may sit silent, and how long the whole walk may take, so a slow server can never
 // hold the save check or the supervisor for long.
 export const CHECK_TIMEOUT_MS = 20_000;
-export const WALK_TIMEOUT_MS = 45_000;
+// Well under the app's 45-second wait for the save and status answers, so the app hears the answer.
+export const WALK_TIMEOUT_MS = 30_000;
 
 // The properties the tool server asks for at each step, so a server answers this walk as it answers the tools.
 const HOME_PROPS = ['D:resourcetype', 'D:current-user-principal', 'C:calendar-home-set'];
@@ -34,6 +35,8 @@ const PRINCIPAL_PROPS = ['C:calendar-home-set', 'C:calendar-user-address-set'];
 const MAX_HOMES = 8;
 const MAX_BODY_BYTES = 16 * 1024 * 1024;
 const MAX_HREF_CHARS = 8 * 1024;
+
+const DOMAIN_RULES = { allowPrivateDomains: true };
 
 // TLS failures that mean the server's certificate is not one this service trusts.
 const CERTIFICATE_ERRORS = new Set([
@@ -137,20 +140,17 @@ function originOf(url) {
 }
 
 /**
- * True when `other` sits under the domain the saved host belongs to: the saved host without its first
- * label, kept only when at least two labels remain. caldav.provider.example and p42-caldav.provider.example
- * pass; a host somewhere else on the internet does not, whatever the saved server names. A saved address
- * with only two labels has no parent of its own, so its calendars must stay on that one host.
+ * True when both hosts belong to the same registered domain, judged by the public list of domain endings
+ * (with the endings hosting services hand out, such as duckdns.org). caldav.icloud.com and
+ * p42-caldav.icloud.com pass; two customers of one ending, or a host somewhere else, do not. An address
+ * written as a number has no domain, so its calendars must stay on that one host.
  */
 export function sameProvider({ saved, other }) {
   if (other === saved) {
     return true;
   }
-  const labels = saved.split('.');
-  if (labels.length < 3 || isIP(saved) !== 0) {
-    return false;
-  }
-  return other.endsWith(`.${labels.slice(1).join('.')}`);
+  const domain = getDomain(saved, DOMAIN_RULES);
+  return domain !== null && getDomain(other, DOMAIN_RULES) === domain;
 }
 
 /** A server's link as an absolute https address with no name or password in it, or null. */

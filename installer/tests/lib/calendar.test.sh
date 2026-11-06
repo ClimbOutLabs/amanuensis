@@ -439,6 +439,9 @@ test_provider_flag_takes_a_name() {
   assert_rc 2
   assert_flat_contains "$ERR" "--calendar-provider takes the provider's name: fastmail, gmx, google, icloud, webde, yahoo or other."
   assert_eq "$(cal_value CALDAV_URL)" "" "nothing saved"
+  run_install instance calendar main --yes --calendar-provider apple --calendar-email person@icloud.com
+  assert_rc 2
+  assert_flat_contains "$ERR" "--calendar-provider takes the provider's name: fastmail, gmx, google, icloud, webde, yahoo or other."
   sandbox_drop
 }
 

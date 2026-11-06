@@ -12,7 +12,7 @@ describe('the tool server command', () => {
   it('loads the address guard into the tool server', () => {
     const [, args] = gatewayCommand({ host: '127.0.0.1', port: 9558 });
     const stdio = args[args.indexOf('--stdio') + 1];
-    assert.match(stdio, /^node --import \S+\/connect-guard\.mjs \S+\/@ni-c\/caldav-mcp\/dist\/index\.js$/);
+    assert.match(stdio, /^node --import '[^']+\/connect-guard\.mjs' '[^']+\/@ni-c\/caldav-mcp\/dist\/index\.js'$/);
   });
 });
 

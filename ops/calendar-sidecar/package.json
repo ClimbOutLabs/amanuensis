@@ -16,6 +16,7 @@
     "mcp-approval": "0.8.2",
     "mcp-internal-hosts": "0.2.1",
     "mcp-tool-allowlist": "0.2.1",
-    "supergateway": "4.2.0"
+    "supergateway": "4.2.0",
+    "tldts": "7.4.19"
   }
 }

@@ -25,6 +25,9 @@ function modulePath(relative) {
   return fileURLToPath(new URL(relative, import.meta.url));
 }
 
+// One argument for a POSIX shell, whatever the path holds.
+const shellQuoted = text => `'${text.replaceAll("'", "'\\''")}'`;
+
 /** The command line of the tool server, which serves the CalDAV tools over HTTP. */
 export function gatewayCommand({ host, port }) {
   return [
@@ -32,8 +35,9 @@ export function gatewayCommand({ host, port }) {
     [
       modulePath('./node_modules/supergateway/dist/index.js'),
       '--stdio',
-      // The guard applies the address rules to every lookup the tool server makes.
-      `node --import ${modulePath('./connect-guard.mjs')} ${modulePath('./node_modules/@ni-c/caldav-mcp/dist/index.js')}`,
+      // The guard applies the address rules to every lookup the tool server makes. supergateway runs this
+      // line through a shell, so each path is quoted.
+      `node --import ${shellQuoted(modulePath('./connect-guard.mjs'))} ${shellQuoted(modulePath('./node_modules/@ni-c/caldav-mcp/dist/index.js'))}`,
       '--outputTransport',
       'streamableHttp',
       '--host',

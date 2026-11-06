@@ -72,7 +72,7 @@ describe('the sign-in walk when the calendars live on another host', () => {
 
   it('refuses a home set on a host of another provider, before any lookup or connection', async () => {
     for (const href of [
-      `https://calendars.elsewhere.example.invalid/${ACCOUNT_ID}/calendars/`,
+      `https://calendars.elsewhere.invalid/${ACCOUNT_ID}/calendars/`,
       `https://cloud.example.invalid.elsewhere.example/${ACCOUNT_ID}/calendars/`,
       `https://${PUBLIC_ADDRESS}/${ACCOUNT_ID}/calendars/`,
     ]) {
@@ -169,15 +169,19 @@ describe('the sign-in walk when the calendars live on another host', () => {
 });
 
 describe('which other hosts count as the same provider', () => {
-  it('accepts hosts under the saved host’s own domain and nothing else', () => {
+  it('accepts hosts of one registered domain and nothing else', () => {
     assert.ok(sameProvider({ saved: 'caldav.icloud.com', other: 'caldav.icloud.com' }));
     assert.ok(sameProvider({ saved: 'caldav.icloud.com', other: 'p42-caldav.icloud.com' }));
-    assert.ok(sameProvider({ saved: 'dav.mail.example.org', other: 'eu.mail.example.org' }));
+    assert.ok(sameProvider({ saved: 'dav.mail.example.org', other: 'eu.example.org' }));
     assert.ok(!sameProvider({ saved: 'caldav.icloud.com', other: 'icloud.com.attacker.example' }));
     assert.ok(!sameProvider({ saved: 'caldav.icloud.com', other: 'evilicloud.com' }));
     assert.ok(!sameProvider({ saved: 'caldav.icloud.com', other: 'calendar.example.org' }));
-    // Two labels have no parent of their own, and an address written as a number has no domain.
-    assert.ok(!sameProvider({ saved: 'example.org', other: 'dav.example.org' }));
-    assert.ok(!sameProvider({ saved: '203.0.113.10', other: '0.113.10' }));
+    // Two customers of one domain ending, public or handed out by a hosting service, are not one provider.
+    assert.ok(!sameProvider({ saved: 'example.co.uk', other: 'attacker.co.uk' }));
+    assert.ok(!sameProvider({ saved: 'caldav.example.co.uk', other: 'attacker.co.uk' }));
+    assert.ok(!sameProvider({ saved: 'mycal.duckdns.org', other: 'evil.duckdns.org' }));
+    assert.ok(!sameProvider({ saved: 'mine.herokuapp.com', other: 'theirs.herokuapp.com' }));
+    // An address written as a number has no domain.
+    assert.ok(!sameProvider({ saved: '203.0.113.10', other: '203.0.113.11' }));
   });
 });
