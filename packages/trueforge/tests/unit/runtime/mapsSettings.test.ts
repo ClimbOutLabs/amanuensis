@@ -109,13 +109,40 @@ describe('mapsServerUrlProblem', () => {
   it('accepts https and plain http on a home network', () => {
     expect(mapsServerUrlProblem({ field: 'router', value: 'https://router.project-osrm.org' })).toBeNull();
     expect(mapsServerUrlProblem({ field: 'router', value: 'http://192.168.1.10:5000' })).toBeNull();
-    expect(mapsServerUrlProblem({ field: 'router', value: 'http://osrm.home.lan' })).toBeNull();
+    expect(mapsServerUrlProblem({ field: 'router', value: 'http://osrm.local:5000' })).toBeNull();
   });
 
   it('rejects an address with another scheme, saying what to fix', () => {
     expect(mapsServerUrlProblem({ field: 'router', value: 'ftp://osrm.example.com' })).toBe(
       'The driving route address must start with http:// or https://.',
     );
+  });
+
+  it('rejects plain http away from this computer and the home network, saying what to use instead', () => {
+    expect(mapsServerUrlProblem({ field: 'router', value: 'http://osrm.example.com' })).toBe(
+      'The driving route address starts with http://, which is not encrypted. Plain http is only allowed for a server on this computer or your home network. Use the https:// address, or a home network address.',
+    );
+  });
+
+  it('rejects an address with a user name or password in it', () => {
+    expect(mapsServerUrlProblem({ field: 'router', value: 'https://user:secret@osrm.example.com' })).toBe(
+      'The driving route address has a user name or password in it. Maps addresses cannot have one. Take it out and try again.',
+    );
+  });
+
+  it('rejects an address with a query or a # part in it', () => {
+    const message =
+      'The address search address has a ? or # part in it. Maps addresses cannot have one. Take that part off and try again.';
+    expect(mapsServerUrlProblem({ field: 'geocoder', value: 'https://geo.example.com/search?key=1' })).toBe(message);
+    expect(mapsServerUrlProblem({ field: 'geocoder', value: 'https://geo.example.com/#frag' })).toBe(message);
+  });
+
+  it('rejects link-local and cloud metadata addresses over https as well as http', () => {
+    const message =
+      'The driving route address is a link-local or cloud metadata address. Those addresses belong to the network itself, so they cannot be a maps server. Check the address and try again.';
+    expect(mapsServerUrlProblem({ field: 'router', value: 'http://169.254.169.254' })).toBe(message);
+    expect(mapsServerUrlProblem({ field: 'router', value: 'https://169.254.169.254' })).toBe(message);
+    expect(mapsServerUrlProblem({ field: 'router', value: 'https://metadata.google.internal' })).toBe(message);
   });
 
   it('rejects something that is not an address at all', () => {
@@ -145,6 +172,14 @@ function okFetch(url: string): Promise<Response> {
   if (url.includes('/route/')) {
     return Promise.resolve(
       new Response(JSON.stringify({ code: 'Ok', routes: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+  }
+  if (url.includes('/plan')) {
+    return Promise.resolve(
+      new Response(JSON.stringify({ itineraries: [] }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
       }),
@@ -208,6 +243,68 @@ describe('testMapsServers', () => {
     expect(results.router.ok).toBe(false);
     expect(results.walking.ok).toBe(false);
     expect(results.geocoder.ok).toBe(true);
+  });
+
+  it('does not call a route server ok when it answers with something that is not a routing answer', async () => {
+    const results = await testMapsServers({
+      servers: TEST_SERVERS,
+      fetchUpstream: (url: string) =>
+        url.includes('/route/')
+          ? Promise.resolve(
+              new Response(JSON.stringify({ hello: 'world' }), {
+                status: 200,
+                headers: { 'content-type': 'application/json' },
+              }),
+            )
+          : okFetch(url),
+    });
+    expect(results.router.ok).toBe(false);
+    expect(results.walking.ok).toBe(false);
+    expect(results.cycling.ok).toBe(false);
+    expect(results.geocoder.ok).toBe(true);
+    expect(results.transit.ok).toBe(true);
+    expect(results.tile.ok).toBe(true);
+  });
+
+  it('does not call the address search ok when it answers with something that is not a list of places', async () => {
+    const results = await testMapsServers({
+      servers: TEST_SERVERS,
+      fetchUpstream: (url: string) =>
+        url.startsWith('https://geocoder.example.com')
+          ? Promise.resolve(
+              new Response(JSON.stringify({ results: [] }), {
+                status: 200,
+                headers: { 'content-type': 'application/json' },
+              }),
+            )
+          : okFetch(url),
+    });
+    expect(results.geocoder.ok).toBe(false);
+    expect(results.router.ok).toBe(true);
+  });
+
+  it('does not call public transport ok when it answers without a journey plan', async () => {
+    const results = await testMapsServers({
+      servers: TEST_SERVERS,
+      fetchUpstream: (url: string) =>
+        url.includes('/plan')
+          ? Promise.resolve(new Response('[]', { status: 200, headers: { 'content-type': 'application/json' } }))
+          : okFetch(url),
+    });
+    expect(results.transit.ok).toBe(false);
+    expect(results.router.ok).toBe(true);
+  });
+
+  it('does not call the map pictures ok when the answer has no picture type', async () => {
+    const results = await testMapsServers({
+      servers: TEST_SERVERS,
+      fetchUpstream: (url: string) =>
+        url.includes('/0/0/0')
+          ? Promise.resolve(new Response(new Uint8Array([1, 2, 3]), { status: 200 }))
+          : okFetch(url),
+    });
+    expect(results.tile.ok).toBe(false);
+    expect(results.router.ok).toBe(true);
   });
 
   it('sends the fixed test requests to the addresses in force', async () => {

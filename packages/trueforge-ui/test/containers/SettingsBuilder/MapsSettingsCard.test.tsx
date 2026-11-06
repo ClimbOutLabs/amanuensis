@@ -72,6 +72,7 @@ describe('MapsSettingsCard', () => {
       'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
     );
     expect(screen.getByText(/Maps use free public OpenStreetMap services/)).toBeTruthy();
+    expect(screen.getByText('Test connections saves these addresses first, then tries each server.')).toBeTruthy();
   });
 
   it('shows a field set by the environment read-only, with its label', async () => {
@@ -109,6 +110,20 @@ describe('MapsSettingsCard', () => {
     expect(
       await screen.findByText(
         'The map pictures address needs {z}, {x} and {y} in it, like https://tile.example.org/{z}/{x}/{y}.png.',
+      ),
+    ).toBeTruthy();
+    expect(calls.updates).toEqual([]);
+  });
+
+  it('shows the plain http problem under the field and saves nothing', async () => {
+    const calls: { updates: MapsSettingsUpdate[] } = { updates: [] };
+    render(<MapsSettingsCard port={portWith(stateOf(), calls)} />);
+    const driving = asInput(await screen.findByLabelText('Driving routes'));
+    fireEvent.change(driving, { target: { value: 'http://osrm.example.com' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(
+      await screen.findByText(
+        'The driving route address starts with http://, which is not encrypted. Plain http is only allowed for a server on this computer or your home network. Use the https:// address, or a home network address.',
       ),
     ).toBeTruthy();
     expect(calls.updates).toEqual([]);

@@ -115,6 +115,29 @@ describe('maps config', () => {
     expect(config.MAPS_GEOCODER_URL).toBe(url);
   });
 
+  it('accepts plain http on a private network address, the same rule Settings applies', async () => {
+    process.env['MAPS_ROUTER_URL'] = 'http://192.168.1.10:5000';
+    process.env['MAPS_GEOCODER_URL'] = 'http://10.0.0.5:8080';
+    const config = await loadConfig();
+    expect(config.MAPS_ROUTER_URL).toBe('http://192.168.1.10:5000');
+    expect(config.MAPS_GEOCODER_URL).toBe('http://10.0.0.5:8080');
+  });
+
+  it('rejects a maps URL with a user name or password in it', async () => {
+    process.env['MAPS_ROUTER_URL'] = 'https://user:secret@routes.example.internal';
+    await expect(loadConfig()).rejects.toThrow('MAPS_ROUTER_URL must not include a user name or password');
+  });
+
+  it.each([
+    'https://169.254.169.254',
+    'http://169.254.169.254',
+    'https://metadata.google.internal',
+    'https://[fe80::1]',
+  ])('refuses a link-local or cloud metadata maps address: %s', async url => {
+    process.env['MAPS_GEOCODER_URL'] = url;
+    await expect(loadConfig()).rejects.toThrow('MAPS_GEOCODER_URL must not be a link-local or cloud metadata address');
+  });
+
   it('does not treat lookalike hosts as loopback', async () => {
     process.env['MAPS_GEOCODER_URL'] = 'http://localhost.evil.example';
     await expect(loadConfig()).rejects.toThrow('must use https');

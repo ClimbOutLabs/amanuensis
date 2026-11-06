@@ -107,6 +107,20 @@ describe('maps settings router', () => {
     expect(good.status).toBe(200);
   });
 
+  it('rejects the addresses the one rule refuses at boot as well', async () => {
+    const { router } = await createRouter();
+    for (const value of [
+      'http://osrm.example.com',
+      'https://osrm.example.com/?key=1',
+      'https://user:secret@osrm.example.com',
+      'https://169.254.169.254',
+      'https://metadata.google.internal',
+    ]) {
+      const res = await router.request('/', putInit({ maps_router_url: value }));
+      expect(res.status).toBe(400);
+    }
+  });
+
   it('rejects a map pictures address without the placeholders', async () => {
     const { router } = await createRouter();
     const bad = await router.request('/', putInit({ maps_tile_url: 'https://tile.example.org/tile.png' }));
@@ -140,6 +154,14 @@ describe('maps settings router', () => {
       }
       if (url.includes('nominatim.openstreetmap.org')) {
         return Promise.reject(new Error('connect ECONNREFUSED'));
+      }
+      if (url.includes('/plan')) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ itineraries: [] }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          }),
+        );
       }
       if (url.includes('/0/0/0')) {
         return Promise.resolve(new Response('png', { status: 200, headers: { 'content-type': 'image/png' } }));

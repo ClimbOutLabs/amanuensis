@@ -274,10 +274,11 @@ async function probeRouteServer({ baseUrl, fetchUpstream }: { baseUrl: string; f
   if (!response.ok) {
     throw new Error(`route server answered HTTP ${String(response.status)}`);
   }
-  // A page that is not a routing answer at all (an error page served with a
-  // 200, say) must not read as a working route server.
+  // The answer must be a routing answer: a body whose code says a route was
+  // found, as OSRM sends. A page of another kind served with a 200 (an error
+  // page, a login page) must not read as a working route server.
   const body: unknown = await response.json().catch(() => undefined);
-  if (typeof body === 'object' && body !== null && 'code' in body && body.code !== 'Ok') {
+  if (typeof body !== 'object' || body === null || !('code' in body) || body.code !== 'Ok') {
     throw new Error('route server answered without a route');
   }
 }
@@ -287,6 +288,12 @@ async function probeGeocoder({ baseUrl, fetchUpstream }: { baseUrl: string; fetc
   const response = await fetchUpstream(url);
   if (!response.ok) {
     throw new Error(`address search server answered HTTP ${String(response.status)}`);
+  }
+  // The answer must be an address search answer: a JSON list of places, as
+  // Nominatim sends. Anything else is some other server answering.
+  const body: unknown = await response.json().catch(() => undefined);
+  if (!Array.isArray(body)) {
+    throw new Error('address search server answered with something that is not a list of places');
   }
 }
 
@@ -299,6 +306,13 @@ async function probeTransit({ baseUrl, fetchUpstream }: { baseUrl: string; fetch
   if (!response.ok) {
     throw new Error(`public transport server answered HTTP ${String(response.status)}`);
   }
+  // The answer must be a journey plan: a JSON body holding an itineraries
+  // list, as MOTIS sends.
+  const body: unknown = await response.json().catch(() => undefined);
+  const itineraries = typeof body === 'object' && body !== null && 'itineraries' in body ? body.itineraries : undefined;
+  if (!Array.isArray(itineraries)) {
+    throw new Error('public transport server answered without a journey plan');
+  }
 }
 
 async function probeTileServer({ baseUrl, fetchUpstream }: { baseUrl: string; fetchUpstream: MapsFetch }) {
@@ -307,8 +321,11 @@ async function probeTileServer({ baseUrl, fetchUpstream }: { baseUrl: string; fe
   if (!response.ok) {
     throw new Error(`map pictures server answered HTTP ${String(response.status)}`);
   }
+  // The answer must be a picture. The tile proxy only serves image bodies, so
+  // an answer with no picture type, or with another type, means the tiles
+  // would never reach a map even though something answered.
   const contentType = response.headers.get('content-type') ?? '';
-  if (contentType !== '' && !contentType.toLowerCase().startsWith('image/')) {
+  if (!contentType.toLowerCase().startsWith('image/')) {
     throw new Error('map pictures server answered with something that is not a picture');
   }
 }
@@ -326,7 +343,9 @@ const PROBES: Record<MapsServerField, (input: { baseUrl: string; fetchUpstream: 
  * Tries each maps server once, the way the Test connections button does: a
  * short fixed route for the route servers, one fixed address for the address
  * search, one plan for public transport, one tile for the map pictures. Each
- * check times out after 5 seconds and reports on its own.
+ * check also reads the shape of the answer, so a different kind of server
+ * answering on that address does not count as working. Each check times out
+ * after 5 seconds and reports on its own.
  */
 export async function testMapsServers({
   servers,

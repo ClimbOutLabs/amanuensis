@@ -1,5 +1,7 @@
 import { z } from '@hono/zod-openapi';
 
+import { mapsUrlProblem } from '../config';
+
 /**
  * Wire shapes for the maps server addresses under Settings, Connectors, Maps.
  * All field names are the snake_case setting keys. The saved-values schema is
@@ -24,8 +26,12 @@ export const MAPS_SERVER_LABELS: Record<MapsServerField, string> = {
 
 /**
  * The one message explaining why a maps server address cannot be saved, or
- * null when it can. Any http or https address is fine, including one on a home
- * network; the map pictures address must keep its {z}, {x} and {y} placeholders.
+ * null when it can. The rule itself is the one maps address rule in config.ts
+ * (mapsUrlProblem), the same check the boot parser applies to the environment
+ * variables: https anywhere; plain http only for this computer or a private
+ * network; no query or hash; no user name or password in the address;
+ * link-local and cloud metadata addresses refused. The map pictures address
+ * must also keep its {z}, {x} and {y} placeholders.
  */
 export function mapsServerUrlProblem({ field, value }: { field: MapsServerField; value: string }): string | null {
   const label = MAPS_SERVER_LABELS[field];
@@ -35,8 +41,21 @@ export function mapsServerUrlProblem({ field, value }: { field: MapsServerField;
   } catch {
     return `The ${label} address does not look like a complete web address. Check it and try again.`;
   }
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+  const problem = mapsUrlProblem(parsed);
+  if (problem === 'scheme') {
     return `The ${label} address must start with http:// or https://.`;
+  }
+  if (problem === 'userinfo') {
+    return `The ${label} address has a user name or password in it. Maps addresses cannot have one. Take it out and try again.`;
+  }
+  if (problem === 'query-or-hash') {
+    return `The ${label} address has a ? or # part in it. Maps addresses cannot have one. Take that part off and try again.`;
+  }
+  if (problem === 'link-local-or-metadata') {
+    return `The ${label} address is a link-local or cloud metadata address. Those addresses belong to the network itself, so they cannot be a maps server. Check the address and try again.`;
+  }
+  if (problem === 'plain-http') {
+    return `The ${label} address starts with http://, which is not encrypted. Plain http is only allowed for a server on this computer or your home network. Use the https:// address, or a home network address.`;
   }
   if (field === 'tile') {
     for (const placeholder of ['{z}', '{x}', '{y}']) {

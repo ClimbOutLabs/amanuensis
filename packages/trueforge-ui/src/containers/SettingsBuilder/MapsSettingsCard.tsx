@@ -235,6 +235,9 @@ export default function MapsSettingsCard({ port }: { port: MapsSetupPort }) {
             {testing ? 'Testing…' : 'Test connections'}
           </Button>
         </div>
+        <p className="mt-2 text-xs text-text-secondary">
+          Test connections saves these addresses first, then tries each server.
+        </p>
       </div>
     </section>
   );
