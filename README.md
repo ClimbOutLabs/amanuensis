@@ -100,7 +100,11 @@ Setup takes about 15 minutes. Here is what you need:
 
 ### Install
 
-Open the **Terminal** app, paste these two lines, and press Enter. If your Mac offers to install developer tools the first time, accept, then paste the lines again.
+Try it: `npx amanuensis` (Mac, Linux, Windows; needs Node.js 22.14). Full install: Docker (Mac, Linux) or Aman Setup (Windows).
+
+The quick way has no sandbox, so Aman can't run code, use skills or read PDFs there. Email, calendar, memory, the brief and connectors all work. Install with Docker for the rest.
+
+For the full install, open the **Terminal** app, paste these two lines, and press Enter. If your Mac offers to install developer tools the first time, accept, then paste the lines again.
 
 ```bash
 git clone https://github.com/ClimbOutLabs/amanuensis && cd amanuensis

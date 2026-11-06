@@ -18,7 +18,7 @@ export default defineConfig([
     // @truefoundry/trueforge compiles itself. Re-bundling inlines @truefoundry/trueforge-core,
     // which this fork modifies and does not publish, so the tarball carries the fork's code
     // rather than resolving an unrelated version from the registry.
-    entry: { main: '../trueforge/dist/main.js' },
+    entry: { main: '../trueforge/dist/main.js', aman: '../trueforge/dist/aman.js' },
     // SRT vendor helpers must resolve from node_modules at runtime (createRequire).
     external: ['@anthropic-ai/sandbox-runtime'],
     // scripts/vendor-server.mjs checks the declared dependencies against this, then removes it.
