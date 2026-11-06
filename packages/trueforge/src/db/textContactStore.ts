@@ -87,6 +87,8 @@ export interface ITextContactStore {
    * window ends `window_ms` after its first send. Refused, it resolves to when the full window started.
    */
   claimTextSend(input: { key: string; window_ms: number; max: number; now: Date }): Promise<TextSendClaim>;
+  /** Whether `claimTextSend` would count a send now, without counting it. */
+  textSendRoom(input: { key: string; window_ms: number; max: number; now: Date }): Promise<TextSendClaim>;
   /** Forgets counts whose window started before this time. */
   forgetTextSends(input: { before: Date }): Promise<void>;
 }
@@ -349,6 +351,20 @@ export class TextContactStore implements ITextContactStore {
       .where('scope_key', '=', input.key)
       .executeTakeFirst();
     return { ok: false, window_started_at: row === undefined ? at : isoTime(row.window_started_at) };
+  }
+
+  async textSendRoom(input: { key: string; window_ms: number; max: number; now: Date }): Promise<TextSendClaim> {
+    const row = await this.#db
+      .selectFrom('text_send_count')
+      .select(['window_started_at', 'sends'])
+      .where('scope_key', '=', input.key)
+      .executeTakeFirst();
+    if (row === undefined || row.sends < input.max) {
+      return { ok: true };
+    }
+    const started = isoTime(row.window_started_at);
+    const ended = new Date(started).getTime() <= input.now.getTime() - input.window_ms;
+    return ended ? { ok: true } : { ok: false, window_started_at: started };
   }
 
   async forgetTextSends(input: { before: Date }): Promise<void> {

@@ -192,6 +192,20 @@ export function runTextContactStoreContractSuite(getStore: () => ITextContactSto
     await expect(claim(later(62))).resolves.toEqual({ ok: false, window_started_at: later(60).toISOString() });
   });
 
+  it('tells whether a send would be counted, without counting it', async () => {
+    const store = getStore();
+    const limit = { key: 'k', window_ms: HOUR_MS, max: 1 };
+    await expect(store.textSendRoom({ ...limit, now: AT })).resolves.toEqual({ ok: true });
+    await expect(store.claimTextSend({ ...limit, now: AT })).resolves.toEqual({ ok: true });
+    await expect(store.textSendRoom({ ...limit, now: later(10) })).resolves.toEqual({
+      ok: false,
+      window_started_at: AT.toISOString(),
+    });
+    await expect(store.textSendRoom({ ...limit, max: 2, now: later(10) })).resolves.toEqual({ ok: true });
+    await expect(store.claimTextSend({ ...limit, max: 2, now: later(10) })).resolves.toEqual({ ok: true });
+    await expect(store.textSendRoom({ ...limit, now: later(60) })).resolves.toEqual({ ok: true });
+  });
+
   it('claims at the same moment never pass the limit together', async () => {
     const store = getStore();
     const results = await Promise.all(

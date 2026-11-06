@@ -9,7 +9,7 @@ Aman can send you a text message when something needs you and you are away from 
 ## What a text says
 
 - **Private (recommended)** is the default. A text says only your assistant's name and the kind of thing, such as "a reminder is due". It never holds names, amounts or what a message said.
-- **Full** carries the words of a reminder. A locked screen can show them, and the phone company can read them. Something your assistant noticed still gets the Private words. If a reminder holds a link, a website, a phone number or an email address, Aman sends the Private words too.
+- **Full** carries the words of a reminder. A locked screen can show them, and the phone company can read them. Something your assistant noticed still gets the Private words. If a reminder holds a link, a website, a phone number or an email address, Aman tries to spot it and sends the Private words. It cannot spot every spelling.
 
 The text with your confirmation code holds only the code.
 
@@ -32,9 +32,10 @@ Reply STOP to any text. Aman turns texts off and says so in Activity. Any other 
 
 Texts cost money, so Aman limits them:
 
-- At most 30 texts a day for each person. After that, new items wait under the bell, and the item says when texts start again.
+- At most 30 texts a day for each person, and 30 a day for one number. After that, new items wait under the bell, and the item says when texts start again.
+- The whole server sends a limited number of texts a day, 500 unless the person who runs Aman changes it.
 - At most 3 test texts an hour from Try it.
-- At most 3 codes an hour for each person.
+- At most 3 codes an hour, and 10 a day, for each person.
 
 ## If texts are not set up
 

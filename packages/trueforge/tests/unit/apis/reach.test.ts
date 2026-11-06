@@ -41,6 +41,7 @@ async function build({
     createReachRouter({
       reachStore,
       textContacts: new TextContactStore(db),
+      textLimits: undefined,
       deliveryService,
       channels: () => channels,
       memories: () => Promise.resolve(memories),

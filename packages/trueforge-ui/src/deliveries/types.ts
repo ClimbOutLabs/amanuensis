@@ -67,7 +67,7 @@ export type ReachSuggestion = { address: string; memory: string };
 
 export type ReachTestChannel = 'in_app' | 'push' | 'text' | 'call';
 
-/** How much a text says. Private names only the kind of thing; full carries the one-sentence message. */
+/** How much a text says. Private names only the kind of thing; full carries a reminder’s own words. */
 export type TextMode = 'private' | 'full';
 
 /** The person's number for texts and where confirming it stands. */

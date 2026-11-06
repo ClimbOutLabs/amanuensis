@@ -16,8 +16,36 @@ export interface SmsProvider {
   send(input: { to: string; body: string }): Promise<SmsSendResult>;
 }
 
-/** What happened when the server pointed its Twilio number's incoming texts at itself. */
-type PointNumberResult = 'updated' | 'already_set' | 'number_not_found' | 'not_accepted' | 'unreachable';
+/** Why the server could not point its Twilio number's incoming texts at itself. */
+export type PointNumberFailure = 'number_not_found' | 'not_accepted' | 'unreachable';
+
+/** What happened when the server pointed its Twilio number's incoming texts at itself, and whose address it replaced. */
+type PointNumberResult =
+  { result: 'updated'; replaced_host: string | null } | { result: 'already_set' } | { result: PointNumberFailure };
+
+/** What a failure to point the number means, ending with the one thing for whoever runs Aman to do. */
+export function pointNumberWords(failure: PointNumberFailure): string {
+  switch (failure) {
+    case 'number_not_found':
+      return 'Aman could not find its number in the Twilio account, so STOP replies do not reach it. Set TWILIO_FROM_NUMBER to one of your Twilio numbers.';
+    case 'not_accepted':
+      return 'Twilio did not accept the sign-in details, so STOP replies do not reach Aman. Copy TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN again.';
+    case 'unreachable':
+      return 'Twilio could not be reached, so STOP replies may not reach Aman. Start Aman again later.';
+  }
+}
+
+/** The host of the address a number used before, for the log; never the whole address, which can hold a token. */
+function hostOf(url: string | null | undefined): string | null {
+  if (url === null || url === undefined || url === '') {
+    return null;
+  }
+  try {
+    return new URL(url).host;
+  } catch {
+    return null;
+  }
+}
 
 const SEND_TIMEOUT_MS = 15_000;
 
@@ -123,8 +151,9 @@ export function createTwilioSmsProvider({
   const authorization = `Basic ${Buffer.from(`${settings.accountSid}:${settings.authToken}`).toString('base64')}`;
   const headers = { Authorization: authorization, Accept: 'application/json' };
   const formHeaders = { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' };
-  const refused = (status: number): PointNumberResult =>
-    status === 401 || status === 403 ? 'not_accepted' : 'unreachable';
+  const refused = (status: number): PointNumberResult => ({
+    result: status === 401 || status === 403 ? 'not_accepted' : 'unreachable',
+  });
   return {
     async pointNumberAt({ smsUrl }) {
       try {
@@ -138,10 +167,10 @@ export function createTwilioSmsProvider({
         }
         const entry = numberEntry({ text: await lookup.text(), fromNumber: settings.fromNumber });
         if (entry === undefined) {
-          return 'number_not_found';
+          return { result: 'number_not_found' };
         }
         if (entry.sms_url === smsUrl && entry.sms_method === 'POST') {
-          return 'already_set';
+          return { result: 'already_set' };
         }
         const update = await fetchTwilio({
           method: 'POST',
@@ -149,9 +178,11 @@ export function createTwilioSmsProvider({
           headers: formHeaders,
           body: new TextEncoder().encode(new URLSearchParams({ SmsUrl: smsUrl, SmsMethod: 'POST' }).toString()),
         });
-        return update.status >= 200 && update.status < 300 ? 'updated' : refused(update.status);
+        return update.status >= 200 && update.status < 300
+          ? { result: 'updated', replaced_host: entry.sms_url === smsUrl ? null : hostOf(entry.sms_url) }
+          : refused(update.status);
       } catch {
-        return 'unreachable';
+        return { result: 'unreachable' };
       }
     },
 
@@ -194,7 +225,7 @@ export function smsFailureWords({ failure, during }: { failure: SmsFailure; duri
     case 'opted_out':
     case 'invalid_number':
       if (during === 'code') {
-        return 'That number cannot get texts from this server. Check the number. If you replied STOP from it, reply START, then try again.';
+        return 'That number cannot get texts from this server. Check the number, then try again.';
       }
       return failure === 'opted_out'
         ? 'This number replied STOP to the phone company. Reply START from that phone, then confirm the number again in Settings.'

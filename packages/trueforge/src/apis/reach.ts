@@ -13,7 +13,16 @@ import {
 import type { DeliveryService } from '../runtime/delivery/deliveryService';
 import { KIND_MAX_LEVEL } from '../runtime/noticing/levels';
 import { suggestAlwaysImportant } from '../runtime/noticing/suggestions';
-import { claimTextLimits, MAX_TEST_TEXTS_PER_HOUR, testTextLimit, waitWords } from '../runtime/texts/textLimits';
+import {
+  claimTextLimits,
+  dayLimitWords,
+  deliveryTextLimits,
+  MAX_TEST_TEXTS_PER_HOUR,
+  testTextLimit,
+  textLimitsRoom,
+  waitWords,
+  type DeliveryLimitSettings,
+} from '../runtime/texts/textLimits';
 import { canText } from '../runtime/texts/textNumber';
 import type { ReachAvailability } from '../schemas/reach';
 import { defaultReachSettings, NOTICING_KINDS, type AlwaysImportantSender, type ReachSettings } from '../schemas/reach';
@@ -22,7 +31,9 @@ const TEST_WORDS = 'This is a test. If you can read this, it works.';
 
 export interface ReachRouterDeps {
   reachStore: IReachSettingsStore;
-  textContacts: Pick<ITextContactStore, 'get' | 'claimTextSend' | 'forgetTextSends'>;
+  textContacts: Pick<ITextContactStore, 'get' | 'claimTextSend' | 'forgetTextSends' | 'textSendRoom'>;
+  /** Undefined when this server has no text provider. */
+  textLimits: DeliveryLimitSettings | undefined;
   deliveryService: Pick<DeliveryService, 'deliver'>;
   /** Which phone channels this server can use now. Read per request, since a later part may set one up while running. */
   channels: () => ReachAvailability;
@@ -140,7 +151,7 @@ export function createReachRouter(deps: ReachRouterDeps) {
     const { channel } = c.req.valid('json');
     const channels = deps.channels();
     if (channel === 'text') {
-      if (!channels.texts.available) {
+      if (!channels.texts.available || deps.textLimits === undefined) {
         return c.json({ error: { message: `${channels.texts.note} Try the app or push notices for now.` } }, 409);
       }
       const settings = await deps.reachStore.get(owner);
@@ -148,8 +159,15 @@ export function createReachRouter(deps: ReachRouterDeps) {
       if (settings?.channels.texts !== true || !canText(contact)) {
         return c.json({ error: { message: 'Confirm your number and switch texts on first, then try again.' } }, 409);
       }
+      const at = now();
+      // A day's limit that is already reached would refuse the text, so the test is not counted.
+      const day = deliveryTextLimits({ owner, phone: contact.phone, settings: deps.textLimits });
+      const room = await textLimitsRoom({ store: deps.textContacts, limits: [day.person, day.number, day.server], at });
+      if (!room.ok) {
+        return c.json({ error: { message: dayLimitWords({ limits: day, refused: room }) } }, 429);
+      }
       // Each test is a paid text, so the button has a limit of its own on top of the day's limit for every text.
-      const claim = await claimTextLimits({ store: deps.textContacts, limits: [testTextLimit(owner)], at: now() });
+      const claim = await claimTextLimits({ store: deps.textContacts, limits: [testTextLimit(owner)], at });
       if (!claim.ok) {
         return c.json(
           {
@@ -171,6 +189,10 @@ export function createReachRouter(deps: ReachRouterDeps) {
         only_channels: ['sms'],
       });
       const sent = delivery.attempts.find(attempt => attempt.channel === 'sms');
+      if (sent?.outcome === 'skipped') {
+        // Only a day's limit reached since the check above skips a confirmed number with texts on.
+        return c.json({ error: { message: sent.detail ?? 'No text was sent. Try again later.' } }, 429);
+      }
       if (sent?.outcome !== 'sent') {
         return c.json(
           { error: { message: sent?.detail ?? 'The test text could not be sent. Try again in a minute.' } },

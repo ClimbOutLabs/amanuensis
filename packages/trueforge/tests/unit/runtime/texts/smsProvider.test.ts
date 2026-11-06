@@ -1,4 +1,9 @@
-import { createTwilioSmsProvider, smsFailureWords, type TwilioFetch } from '../../../../src/runtime/texts/smsProvider';
+import {
+  createTwilioSmsProvider,
+  pointNumberWords,
+  smsFailureWords,
+  type TwilioFetch,
+} from '../../../../src/runtime/texts/smsProvider';
 
 const settings = { accountSid: `AC${'1'.repeat(32)}`, authToken: 'secret-token-for-tests', fromNumber: '+15550100' };
 
@@ -62,8 +67,7 @@ describe('Twilio text provider', () => {
   });
 
   it('words a code that could not be sent the same for a number that replied STOP and one that does not exist', () => {
-    const general =
-      'That number cannot get texts from this server. Check the number. If you replied STOP from it, reply START, then try again.';
+    const general = 'That number cannot get texts from this server. Check the number, then try again.';
     expect(smsFailureWords({ failure: 'opted_out', during: 'code' })).toBe(general);
     expect(smsFailureWords({ failure: 'invalid_number', during: 'code' })).toBe(general);
     expect(smsFailureWords({ failure: 'not_accepted', during: 'code' })).toBe(
@@ -88,7 +92,10 @@ describe('pointing the Twilio number at this server', () => {
   it('sets only that number’s incoming-message address, to the configured one', async () => {
     const fetchTwilio = twilio([{ sid: PN, phone_number: '+15550100', sms_url: 'https://old.example/x' }]);
     const provider = createTwilioSmsProvider({ settings, fetchTwilio });
-    await expect(provider.pointNumberAt({ smsUrl: webhookUrl })).resolves.toBe('updated');
+    await expect(provider.pointNumberAt({ smsUrl: webhookUrl })).resolves.toEqual({
+      result: 'updated',
+      replaced_host: 'old.example',
+    });
     const [lookup, update] = fetchTwilio.mock.calls.map(call => call[0]);
     expect(lookup?.method).toBe('GET');
     expect(lookup?.url).toBe(
@@ -103,11 +110,38 @@ describe('pointing the Twilio number at this server', () => {
     );
   });
 
+  it('updates only the entry for exactly this number, when Twilio lists others first', async () => {
+    const other = `PN${'b'.repeat(32)}`;
+    const fetchTwilio = twilio([
+      { sid: other, phone_number: '+155501000', sms_url: 'https://someone-else.example/sms' },
+      { sid: PN, phone_number: '+15550100', sms_url: null },
+    ]);
+    await expect(
+      createTwilioSmsProvider({ settings, fetchTwilio }).pointNumberAt({ smsUrl: webhookUrl }),
+    ).resolves.toEqual({ result: 'updated', replaced_host: null });
+    const posts = fetchTwilio.mock.calls.map(call => call[0]).filter(input => input.method === 'POST');
+    expect(posts.map(input => input.url)).toEqual([
+      `https://api.twilio.com/2010-04-01/Accounts/${settings.accountSid}/IncomingPhoneNumbers/${PN}.json`,
+    ]);
+  });
+
+  it('gives one thing to do for each way pointing the number can fail', () => {
+    expect(pointNumberWords('number_not_found')).toBe(
+      'Aman could not find its number in the Twilio account, so STOP replies do not reach it. Set TWILIO_FROM_NUMBER to one of your Twilio numbers.',
+    );
+    expect(pointNumberWords('not_accepted')).toBe(
+      'Twilio did not accept the sign-in details, so STOP replies do not reach Aman. Copy TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN again.',
+    );
+    expect(pointNumberWords('unreachable')).toBe(
+      'Twilio could not be reached, so STOP replies may not reach Aman. Start Aman again later.',
+    );
+  });
+
   it('changes nothing when the number already points here', async () => {
     const fetchTwilio = twilio([{ sid: PN, phone_number: '+15550100', sms_url: webhookUrl, sms_method: 'POST' }]);
     await expect(
       createTwilioSmsProvider({ settings, fetchTwilio }).pointNumberAt({ smsUrl: webhookUrl }),
-    ).resolves.toBe('already_set');
+    ).resolves.toEqual({ result: 'already_set' });
     expect(fetchTwilio).toHaveBeenCalledTimes(1);
   });
 
@@ -115,15 +149,15 @@ describe('pointing the Twilio number at this server', () => {
     const missing = twilio([]);
     await expect(
       createTwilioSmsProvider({ settings, fetchTwilio: missing }).pointNumberAt({ smsUrl: webhookUrl }),
-    ).resolves.toBe('number_not_found');
+    ).resolves.toEqual({ result: 'number_not_found' });
     const odd = twilio([{ sid: '../../Messages', phone_number: '+15550100', sms_url: '' }]);
     await expect(
       createTwilioSmsProvider({ settings, fetchTwilio: odd }).pointNumberAt({ smsUrl: webhookUrl }),
-    ).resolves.toBe('number_not_found');
+    ).resolves.toEqual({ result: 'number_not_found' });
     const refused = jest.fn<ReturnType<TwilioFetch>, Parameters<TwilioFetch>>(() => reply(401, { code: 20003 }));
     await expect(
       createTwilioSmsProvider({ settings, fetchTwilio: refused }).pointNumberAt({ smsUrl: webhookUrl }),
-    ).resolves.toBe('not_accepted');
+    ).resolves.toEqual({ result: 'not_accepted' });
     for (const fetchTwilio of [missing, odd, refused]) {
       expect(fetchTwilio.mock.calls.every(call => call[0].method === 'GET')).toBe(true);
     }

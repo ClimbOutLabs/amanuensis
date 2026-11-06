@@ -706,6 +706,25 @@ describe('what the model can and cannot do', () => {
     expect(pushed).toHaveLength(1);
   });
 
+  it('makes a note only at the note level, so a texted nudge is never a note', async () => {
+    // A text in Full mode carries a note's own words, which only the Reach me test makes at the nudge level.
+    const { service, feed } = await setup({
+      settings: { max_nudges_per_day: 1 },
+      events: [
+        ...clash,
+        event({ id: 'c', title: 'Gym', start: '2026-11-05T18:00:00.000Z', end: '2026-11-05T19:00:00.000Z' }),
+        event({ id: 'd', title: 'Class', start: '2026-11-05T18:30:00.000Z', end: '2026-11-05T19:30:00.000Z' }),
+      ],
+      verdict: { level: 'nudge', reason: 'Today matters.', message: 'Two things overlap.' },
+    });
+    await service.run({ watcher: 'calendar' });
+    const items = await feed();
+    expect(items.map(item => [item.kind, item.level]).sort()).toEqual([
+      ['note', 'note'],
+      ['nudge', 'nudge'],
+    ]);
+  });
+
   it('puts every note and nudge in Activity with its reason, and never pushes a note', async () => {
     const { service, auditTexts, pushed } = await setup({ events: clash });
     await service.run({ watcher: 'calendar' });

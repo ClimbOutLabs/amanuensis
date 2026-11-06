@@ -163,6 +163,7 @@ const app = createServerApp({
     logger,
   }),
   reachChannels: () => NO_PHONE_CHANNELS,
+  textLimits: undefined,
   textContactStore: new TextContactStore(db),
   textNumbers: createTextNumberService({
     store: new TextContactStore(db),

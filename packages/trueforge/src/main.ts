@@ -139,7 +139,7 @@ import { createOutboundSecretSource } from './runtime/outboundSecrets';
 import { seedOwnerNameAtBoot } from './runtime/ownerName';
 import { createSentinelServices } from './runtime/sentinelServices';
 import { getSharedRunCodeService } from './runtime/sessionResources';
-import { createTwilioSmsProvider } from './runtime/texts/smsProvider';
+import { createTwilioSmsProvider, pointNumberWords, type PointNumberFailure } from './runtime/texts/smsProvider';
 import { createSmsSender } from './runtime/texts/smsSender';
 import { createTextNumberService } from './runtime/texts/textNumber';
 import { createTokenFactoryBudget } from './runtime/tokenFactoryBudget';
@@ -810,7 +810,14 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     // Codes are keyed by a secret that is not in the database. With no Twilio details no code is ever sent.
     codeKey: configuration.TWILIO?.authToken,
   });
-  const reachChannels = () => reachChannelsFor({ twilio: configuration.TWILIO });
+  // Number counts are keyed by the same secret as codes, so the count table never holds a number.
+  const textLimits =
+    configuration.TWILIO === undefined
+      ? undefined
+      : { number_key: configuration.TWILIO.authToken, max_texts_per_day: configuration.TWILIO.maxTextsPerDay };
+  // Set when the Twilio number could not be pointed at this server at boot, so Settings can say what to do.
+  const twilioNumber: { problem: PointNumberFailure | undefined } = { problem: undefined };
+  const reachChannels = () => reachChannelsFor({ twilio: configuration.TWILIO, numberProblem: twilioNumber.problem });
   const deliveryService = createDeliveryService({
     store: deliveryStore,
     senders: [
@@ -820,6 +827,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
         reachSettings: reachSettingsStore,
         personalization: personalizationStore,
         provider: smsProvider,
+        limits: textLimits,
         textNumbers,
       }),
     ],
@@ -999,6 +1007,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
       logger,
     }),
     reachChannels,
+    textLimits,
     textNumbers,
     textContactStore,
     webPushPublicKey: configuration.WEB_PUSH?.publicKey,
@@ -1039,6 +1048,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     chatSearchIndexer,
     packageMirrorAllowanceHolds,
     smsProvider,
+    twilioNumber,
     twilioWebhookRoutes:
       configuration.TWILIO === undefined
         ? []
@@ -1125,6 +1135,7 @@ try {
     packageMirrorAllowanceHolds,
     twilioWebhookRoutes,
     smsProvider,
+    twilioNumber,
   } = configuration.STANDALONE
     ? await createServerRuntime(
         await createStandalonePersistence({ sqlitePath: configuration.SQLITE_PATH, logger }),
@@ -1361,14 +1372,20 @@ try {
     // So nobody has to set it in the Twilio console. Only this number's incoming-text address changes, only to the
     // configured one, and a failure leaves texts working as before.
     const smsUrl = `${configuration.TWILIO.webhookPublicUrl}${INBOUND_SMS_PATH}`;
-    void smsProvider.pointNumberAt({ smsUrl }).then(result => {
-      if (result === 'updated' || result === 'already_set') {
-        logger.info('The Twilio number sends its incoming texts to this server', { result });
+    void smsProvider.pointNumberAt({ smsUrl }).then(pointed => {
+      if (pointed.result === 'updated') {
+        // Another app or Aman that used this number stops getting its incoming texts; the host says which one.
+        logger.info('The Twilio number now sends its incoming texts to this server', {
+          result: pointed.result,
+          replaced_host: pointed.replaced_host,
+        });
+      } else if (pointed.result === 'already_set') {
+        logger.info('The Twilio number sends its incoming texts to this server', { result: pointed.result });
       } else {
-        logger.warn(
-          'The Twilio number could not be pointed at this server. Check TWILIO_FROM_NUMBER and the Twilio details.',
-          { result },
-        );
+        twilioNumber.problem = pointed.result;
+        logger.warn(`The Twilio number could not be pointed at this server. ${pointNumberWords(pointed.result)}`, {
+          result: pointed.result,
+        });
       }
     });
   }

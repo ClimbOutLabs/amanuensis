@@ -134,6 +134,7 @@ import type { NoticingService } from './runtime/noticing/noticingService';
 import type { ReminderReach } from './runtime/noticing/reminderReach';
 import { resolveSandboxProvider } from './runtime/sessionResources';
 import { createSpacePictureService } from './runtime/spacePictures/spacePictureService';
+import type { DeliveryLimitSettings } from './runtime/texts/textLimits';
 import type { TextNumberService } from './runtime/texts/textNumber';
 import { TokenFactoryDailyCapError, type TokenFactoryBudget } from './runtime/tokenFactoryBudget';
 import { envManagedModelProviderNames } from './runtime/tokenFactoryProvider';
@@ -327,6 +328,8 @@ export interface ServerDeps<TTransaction> {
   reminderReach: ReminderReach;
   /** Which phone channels this server can use. */
   reachChannels: () => ReachAvailability;
+  /** What the day's text limits need; undefined while this server has no text provider. */
+  textLimits: DeliveryLimitSettings | undefined;
   /** The person's number for texts and its confirming. */
   textNumbers: TextNumberService;
   textContactStore: ITextContactStore;
@@ -918,6 +921,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       createReachRouter({
         reachStore: deps.reachSettingsStore,
         textContacts: deps.textContactStore,
+        textLimits: deps.textLimits,
         deliveryService: deps.deliveryService,
         channels: deps.reachChannels,
         memories: async ({ tenant_id }) => {

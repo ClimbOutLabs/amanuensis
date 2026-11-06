@@ -5,7 +5,7 @@ import { createReachRouter } from '../../../src/apis/reach';
 import { createTextNumberRouter } from '../../../src/apis/textNumber';
 import type { RequestContext } from '../../../src/auth/identity';
 import { reachChannelsFor } from '../../../src/runtime/noticing/reachChannels';
-import { MAX_TEST_TEXTS_PER_HOUR } from '../../../src/runtime/texts/textLimits';
+import { MAX_TEST_TEXTS_PER_HOUR, testTextLimit } from '../../../src/runtime/texts/textLimits';
 import { RequestErrorResponseSchema } from '../../../src/schemas/errors';
 import { defaultReachSettings } from '../../../src/schemas/reach';
 import { GetTextStatusResponseSchema } from '../../../src/schemas/textMessages';
@@ -15,9 +15,9 @@ function person(id: string): RequestContext {
   return { tenant_id: 'default', subject: { id, type: 'user', display_name: id }, roles: [], user_credential: null };
 }
 
-async function build({ provider = true }: { provider?: boolean } = {}) {
-  const h = await textsHarness({ provider });
-  const channels = reachChannelsFor({ twilio: provider ? { accountSid: 'AC' } : undefined });
+async function build({ provider = true, maxTextsPerDay }: { provider?: boolean; maxTextsPerDay?: number } = {}) {
+  const h = await textsHarness({ provider, ...(maxTextsPerDay === undefined ? {} : { maxTextsPerDay }) });
+  const channels = reachChannelsFor({ twilio: provider ? { accountSid: 'AC' } : undefined, numberProblem: undefined });
   const app = new OpenAPIHono();
   app.route(
     '/texts',
@@ -32,6 +32,7 @@ async function build({ provider = true }: { provider?: boolean } = {}) {
     createReachRouter({
       reachStore: h.reachSettings,
       textContacts: h.contacts,
+      textLimits: provider ? h.limits : undefined,
       deliveryService: h.deliveries,
       channels: () => channels,
       memories: () => Promise.resolve([]),
@@ -127,8 +128,7 @@ describe('text number routes', () => {
 
   it('says what to do when the code could not be sent, without telling whether the number replied STOP', async () => {
     const { h, call } = await build();
-    const cannot =
-      'That number cannot get texts from this server. Check the number. If you replied STOP from it, reply START, then try again.';
+    const cannot = 'That number cannot get texts from this server. Check the number, then try again.';
     const cases = [
       { failure: 'opted_out', words: cannot },
       { failure: 'invalid_number', words: cannot },
@@ -224,6 +224,29 @@ describe('the text test button', () => {
     h.clock.now = new Date(h.clock.now.getTime() + 40 * 60_000);
     expect((await call('/reach/test', { method: 'POST', body: { channel: 'text' } })).status).toBe(201);
     expect(h.sent).toHaveLength(MAX_TEST_TEXTS_PER_HOUR + 1);
+  });
+
+  it('says when the day’s texts are used up, and keeps the test for later', async () => {
+    const { h, call } = await build({ maxTextsPerDay: 1 });
+    await h.readyToText();
+    await h.deliveries.deliver({
+      ...ALICE,
+      kind: 'reminder',
+      level: 'nudge',
+      text: 'Water the plants',
+      reason: 'Due.',
+      link: null,
+    });
+    expect(h.sent).toHaveLength(1);
+    const refused = await call('/reach/test', { method: 'POST', body: { channel: 'text' } });
+    expect(refused.status).toBe(429);
+    expect(await message(refused)).toBe(
+      'This server sent the most texts it may send in one day, so no text was sent. Texts start again in about 24 hours.',
+    );
+    expect(h.sent).toHaveLength(1);
+    await expect(h.contacts.textSendRoom({ ...testTextLimit(ALICE), max: 1, now: h.clock.now })).resolves.toEqual({
+      ok: true,
+    });
   });
 
   it('says texts are not set up, with the one thing to do, when there is no provider', async () => {

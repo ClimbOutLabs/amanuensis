@@ -91,7 +91,7 @@ export const updateTextModeRoute = createRoute({
   path: '/',
   tags: [OpenApiTag.DELIVERIES],
   summary: 'Choose what texts say',
-  description: 'Chooses Private (only the kind of thing) or Full (the one-sentence message).',
+  description: 'Chooses Private (only the kind of thing) or Full (a reminder’s own words).',
   'x-fern-sdk-group-name': ['reach', 'texts'],
   'x-fern-sdk-method-name': 'update',
   request: { body: { content: { 'application/json': { schema: UpdateTextModeRequestSchema } }, required: true } },

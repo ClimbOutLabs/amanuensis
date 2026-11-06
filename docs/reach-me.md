@@ -45,7 +45,7 @@ Each way to reach you has a **Try it** button. It sends a test item under the be
 
 - If the model cannot be asked, or has used its limit for the day, things still arrive as quiet notes.
 - If a delivery fails, Aman tries again on the next check. After five tries it stops trying that item.
-- If Aman stopped in the middle of sending something, it sends it again on the next check. Rarely, a notice can then reach you twice.
+- If Aman stopped in the middle of sending something, it sends it again on the next check. Rarely, a notice or a text can then reach you twice.
 - If one message cannot be read, Aman skips it and reads the rest.
 - If Google is busy or the connection drops, Aman stops. It reads the same mail again on the next check.
 - If the shared Email connector takes longer than 30 seconds to list new mail, Aman skips that check. It tries the same mail again next time. If this keeps happening, check that your mail server answers quickly.
