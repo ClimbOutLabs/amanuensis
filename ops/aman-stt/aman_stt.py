@@ -9,6 +9,12 @@ HTTP contract:
   GET  /healthz       -> {"status": "ok", "model_loaded": bool, "model_error": str | None}
   POST /v1/transcribe -> {"text", "language", "duration_ms", "model"}
 
+When `SPEECH_SECRET` is set, every call except `/healthz` must carry it in
+the `x-speech-secret` header, the same shared-secret check the browser
+sidecar uses; a missing or wrong value is refused with 401. `/healthz`
+stays open because the Docker health check carries no secret and the reply
+says only whether the model loaded.
+
 Accepts `audio/wav` (16 kHz mono 16-bit PCM) or `audio/x-raw-pcm` with
 `sample_rate`/`channels`/`sample_width` query params (defaults 16000/1/2).
 Body cap is 30 MB (413 above). Audio stays in memory; only durations and
@@ -19,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 import io
 import logging
 import os
@@ -31,7 +38,7 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 import numpy as np
-from fastapi import FastAPI, HTTPException, Query, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 
 LOGGER = logging.getLogger("aman_stt")
@@ -41,6 +48,10 @@ CHANNELS = 1
 SAMPLE_WIDTH_BYTES = 2
 WAV_CONTENT_TYPE = "audio/wav"
 RAW_PCM_CONTENT_TYPE = "audio/x-raw-pcm"
+# The header the shared secret travels in, and the shortest secret accepted; both match the
+# browser sidecar, so one value guards every sidecar the app talks to.
+SECRET_HEADER = "x-speech-secret"
+MIN_SECRET_LENGTH = 32
 
 
 def _env_int(name: str, default: int) -> int:
@@ -63,6 +74,23 @@ class Settings:
     cpu_threads: int = field(default_factory=lambda: _env_int("AMAN_STT_CPU_THREADS", 4))
     max_body_bytes: int = field(default_factory=lambda: _env_int("AMAN_STT_MAX_BODY_BYTES", 30 * 1024 * 1024))
     model_dir: str | None = field(default_factory=lambda: os.environ.get("AMAN_STT_MODEL_DIR") or None)
+    shared_secret: str | None = field(default_factory=lambda: os.environ.get("SPEECH_SECRET") or None)
+
+
+def secret_matches(given: str | None, secret: str) -> bool:
+    """Checks a presented secret against the shared one in constant time, whatever their lengths."""
+    if given is None:
+        return False
+    return hmac.compare_digest(
+        hashlib.sha256(given.encode("utf-8")).digest(),
+        hashlib.sha256(secret.encode("utf-8")).digest(),
+    )
+
+
+def require_usable_secret(settings: Settings) -> None:
+    """A set but short secret would guard nothing, so the service refuses to start with one."""
+    if settings.shared_secret is not None and len(settings.shared_secret) < MIN_SECRET_LENGTH:
+        raise ValueError(f"SPEECH_SECRET must be at least {MIN_SECRET_LENGTH} characters")
 
 
 class ModelVerificationError(Exception):
@@ -404,6 +432,7 @@ def create_app(
     transcriber_factory: "type[Transcriber] | None" = None,
 ) -> FastAPI:
     settings = settings or Settings()
+    require_usable_secret(settings)
     state = ServiceState()
 
     @asynccontextmanager
@@ -424,6 +453,14 @@ def create_app(
 
     app = FastAPI(title="aman-stt", lifespan=lifespan)
 
+    def require_shared_secret(request: Request) -> None:
+        # A route dependency rather than middleware, so the request stream and its
+        # disconnect watching reach the handler exactly as before.
+        if settings.shared_secret is not None and not secret_matches(
+            request.headers.get(SECRET_HEADER), settings.shared_secret
+        ):
+            raise HTTPException(status_code=401, detail="Wrong or missing secret")
+
     @app.get("/healthz")
     def healthz() -> dict:
         return {
@@ -432,7 +469,7 @@ def create_app(
             "model_error": state.model_error,
         }
 
-    @app.post("/v1/transcribe")
+    @app.post("/v1/transcribe", dependencies=[Depends(require_shared_secret)])
     async def transcribe(
         request: Request,
         language: str | None = Query(default=None, description="Optional language hint, e.g. 'en'"),

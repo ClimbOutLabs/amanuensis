@@ -479,6 +479,61 @@ export function parseBrowserSecret(raw: string | undefined): string | undefined 
   return trimmed;
 }
 
+/** The shortest secret the speech sidecars accept; a shorter one keeps their ports closed. */
+const SPEECH_SECRET_MIN_LENGTH = 32;
+
+/**
+ * Parses `SPEECH_SECRET`: the value every request to the speech sidecars must carry. Unset or blank means
+ * none. A value that is too short fails the boot, since the sidecars would refuse it.
+ */
+export function parseSpeechSecret(raw: string | undefined): string | undefined {
+  if (raw === undefined || raw.trim() === '') {
+    return undefined;
+  }
+  const trimmed = raw.trim();
+  if (trimmed.length < SPEECH_SECRET_MIN_LENGTH) {
+    throw new Error(
+      `SPEECH_SECRET must be at least ${String(SPEECH_SECRET_MIN_LENGTH)} characters. Set a longer random value, or remove the line.`,
+    );
+  }
+  return trimmed;
+}
+
+/**
+ * Parses `STT_URL` and `TTS_URL`: a speech sidecar's address. Voice recordings and reply text are
+ * only ever sent to a speech service on this computer or its local network (a loopback or private
+ * address, or an internal service name such as the compose default), so an address anywhere else
+ * fails the boot instead of quietly sending voice to it.
+ */
+export function parseSpeechUrl({
+  envKey,
+  raw,
+  defaultValue,
+}: {
+  envKey: string;
+  raw: string | undefined;
+  defaultValue: string;
+}): string {
+  const value = raw === undefined || raw.trim() === '' ? defaultValue : raw.trim();
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch (error) {
+    throw new Error(`${envKey} must be a valid URL, for example ${defaultValue}.`, { cause: error });
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(`${envKey} must be an http(s) URL, for example ${defaultValue}.`);
+  }
+  if (!isPrivateNetworkHost(parsed.hostname)) {
+    throw new Error(
+      `${envKey} points at ${parsed.hostname}, which is not this computer or its local network. ` +
+        `Voice is only sent to a speech service on this computer or its local network. ` +
+        `Change ${envKey} to the local speech service (for example ${defaultValue}), or remove the line to use the default.`,
+    );
+  }
+  return value;
+}
+
 /**
  * The first-party origins: the operator's list, plus the Calendar connector's origin when one is configured.
  */
@@ -1795,15 +1850,23 @@ export interface SharedServerConfiguration {
   /**
    * Base URL of the `aman-stt` speech-to-text sidecar (`POST {url}/v1/transcribe`).
    * The browser never calls it directly; the voice endpoints proxy through this server.
+   * The address must be on this computer or its local network; anything else fails the boot.
    * Env: `STT_URL`. Default `http://aman-stt:8001`.
    */
   STT_URL: string;
   /**
    * Base URL of the `aman-tts` text-to-speech sidecar (`POST {url}/v1/speak`).
    * The browser never calls it directly; `POST /api/v1/voice/speak` proxies through this server.
+   * The address must be on this computer or its local network; anything else fails the boot.
    * Env: `TTS_URL`. Default `http://aman-tts:8002`.
    */
   TTS_URL: string;
+  /**
+   * The shared secret every request to the speech sidecars must carry; the same value is given to
+   * the sidecars. Unset means requests are sent without one, for host development against a
+   * sidecar started without a secret. Env: `SPEECH_SECRET`. Default unset.
+   */
+  SPEECH_SECRET: string | undefined;
   /**
    * Base URL of the Nominatim-compatible geocoder used by the embedded maps tools.
    * Env: `MAPS_GEOCODER_URL`. Default `https://nominatim.openstreetmap.org`.
@@ -2614,8 +2677,9 @@ const shared: SharedServerConfiguration = {
     defaultValue: false,
   }),
   MEMORY_SCREEN_URL: getEnv('MEMORY_SCREEN_URL', { defaultValue: '' }) ?? '',
-  STT_URL: getEnv('STT_URL', { defaultValue: 'http://aman-stt:8001' }) ?? 'http://aman-stt:8001',
-  TTS_URL: getEnv('TTS_URL', { defaultValue: 'http://aman-tts:8002' }) ?? 'http://aman-tts:8002',
+  STT_URL: parseSpeechUrl({ envKey: 'STT_URL', raw: getEnv('STT_URL'), defaultValue: 'http://aman-stt:8001' }),
+  TTS_URL: parseSpeechUrl({ envKey: 'TTS_URL', raw: getEnv('TTS_URL'), defaultValue: 'http://aman-tts:8002' }),
+  SPEECH_SECRET: parseSpeechSecret(getEnv('SPEECH_SECRET')),
   MAPS_GEOCODER_URL: parseMapsUrl({
     envKey: 'MAPS_GEOCODER_URL',
     raw: getEnv('MAPS_GEOCODER_URL'),

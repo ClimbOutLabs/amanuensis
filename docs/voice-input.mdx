@@ -37,9 +37,15 @@ This section is the voice feature's data-flow record.
 
 The server reads the sidecar address from `STT_URL` (default `http://aman-stt:8001`; compose sets it explicitly). The server does not wait for the sidecar to be healthy before starting: typed chat stays available when transcription is down.
 
+Both speech sidecars check a shared secret on every call, the same arrangement as the browser sidecar: the server sends it in the `x-speech-secret` header, and a call without it, or with a different value, is refused. The value lives in `SPEECH_SECRET`: the installer makes one for the machine and gives every instance a copy of it, and the compose file requires one (`pnpm smoke` makes a random one for each run). The health endpoint is the one exception: it answers without the secret, because the container health check carries none, and it says only whether the model loaded.
+
+The server also keeps voice local at startup: `STT_URL` and `TTS_URL` must point at this computer or its local network (loopback, a private address, or an internal service name such as the defaults). An address anywhere else stops the server from starting, with a message that names the setting and what to change.
+
 ## Host development
 
-`pnpm dev:infra` starts `aman-stt` from `docker-compose.dev.yml` next to Postgres and Redis, while the server and UI run on the host with `pnpm dev`. The service uses the same build, image, memory limit and thread count as the full stack, with two differences: it publishes `127.0.0.1:8001` (loopback only, since the sidecar has no authentication) and it has no `cpuset` pin, because the host-run server cannot be pinned to a disjoint core set and a fixed range would fail on hosts with fewer than 20 cores. The first `pnpm dev:infra` builds the image and downloads the model (~464 MB) into the dev project's own `stt-model-cache` volume, separate from the full stack's.
+`pnpm dev:infra` starts `aman-stt` from `docker-compose.dev.yml` next to Postgres and Redis, while the server and UI run on the host with `pnpm dev`. The service uses the same build, image, memory limit and thread count as the full stack, with two differences: it publishes `127.0.0.1:8001` (loopback only) and it has no `cpuset` pin, because the host-run server cannot be pinned to a disjoint core set and a fixed range would fail on hosts with fewer than 20 cores. The first `pnpm dev:infra` builds the image and downloads the model (~464 MB) into the dev project's own `stt-model-cache` volume, separate from the full stack's.
+
+The dev sidecars check the shared secret only when `SPEECH_SECRET` is set in the shell that runs `pnpm dev:infra`; the server then needs the same value in `packages/trueforge/.env`. Left unset on both sides, no secret is checked, which is fine on loopback.
 
 Point the server at the published port by setting `STT_URL=http://localhost:8001` in `packages/trueforge/.env` (already present in `packages/trueforge/.env.example`), then restart `pnpm dev`. Without it the server looks for `http://aman-stt:8001`, which only resolves inside the compose network, and the mic button stays hidden.
 
@@ -67,7 +73,7 @@ The reply to a message you spoke is read aloud by itself when it is done, unless
 
 **Nothing leaves your computer.** The browser sends the reply text to the server, which passes it to `aman-tts` and sends the audio back. The text and the audio stay on your computer, and neither is saved or written to the logs.
 
-**Limits.** One request reads at most 4,000 characters, and each person can ask for 30 readings a minute. Longer replies are read in parts.
+**Limits.** One request reads at most 4,000 characters, and each person can make 30 voice requests a minute: readings and transcriptions share that one budget. Longer replies are read in parts.
 
 **How to turn it off.** Stop the container, and replies are read by your browser's voice instead:
 

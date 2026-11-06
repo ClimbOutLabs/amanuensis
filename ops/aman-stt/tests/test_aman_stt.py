@@ -105,6 +105,54 @@ class HealthzTest(unittest.TestCase):
         self.assertIn("no model here", body["model_error"])
 
 
+class SharedSecretTest(unittest.TestCase):
+    SECRET = "test-secret-value-with-more-than-32-chars"
+
+    def settings(self) -> Settings:
+        settings = Settings()
+        settings.shared_secret = self.SECRET
+        return settings
+
+    def test_transcribe_without_the_secret_is_refused(self):
+        wav = make_sine_wav()
+        with make_client(settings=self.settings()) as client:
+            response = client.post("/v1/transcribe", content=wav, headers={"Content-Type": "audio/wav"})
+        self.assertEqual(response.status_code, 401)
+
+    def test_transcribe_with_a_wrong_secret_is_refused(self):
+        wav = make_sine_wav()
+        with make_client(settings=self.settings()) as client:
+            response = client.post(
+                "/v1/transcribe",
+                content=wav,
+                headers={"Content-Type": "audio/wav", "x-speech-secret": "a-different-secret-that-is-long-enough"},
+            )
+        self.assertEqual(response.status_code, 401)
+
+    def test_transcribe_with_the_secret_works(self):
+        wav = make_sine_wav()
+        with make_client(settings=self.settings()) as client:
+            response = client.post(
+                "/v1/transcribe",
+                content=wav,
+                headers={"Content-Type": "audio/wav", "x-speech-secret": self.SECRET},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["text"], "synthetic transcript")
+
+    def test_healthz_stays_open_without_the_secret(self):
+        with make_client(settings=self.settings()) as client:
+            response = client.get("/healthz")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["model_loaded"])
+
+    def test_a_short_secret_refuses_to_start(self):
+        settings = Settings()
+        settings.shared_secret = "too-short"
+        with self.assertRaises(ValueError):
+            create_app(settings=settings, transcriber_factory=FakeTranscriber)
+
+
 class TranscribeTest(unittest.TestCase):
     def test_happy_path_wav(self):
         wav = make_sine_wav()

@@ -38,10 +38,13 @@ wait for the warm model before routing. When the model fails to load (for
 example a weight verification failure), `model_loaded` is `false` and
 `model_error` carries the reason.
 
-No auth on v1: the service is reachable only inside the compose network (the
-full stack publishes no host port; `docker-compose.dev.yml` binds
-`127.0.0.1:8001` for host development). If the port is ever published beyond
-loopback, add a shared-secret header before doing so.
+Calls to `/v1/transcribe` must carry the shared secret in the
+`x-speech-secret` header when `SPEECH_SECRET` is set, the same check the
+browser sidecar uses; the compose stacks and the installer always set it,
+and a value under 32 characters stops the service from starting.
+`/healthz` answers without it, because the Docker health check carries no
+secret. Left unset, which is only for loopback development
+(`docker-compose.dev.yml` binds `127.0.0.1:8001`), no secret is checked.
 
 ## Lifecycle
 
