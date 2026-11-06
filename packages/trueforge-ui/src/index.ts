@@ -279,6 +279,16 @@ export {
 export type { PersonalizationApi, PersonalizationProfile } from './components/PersonalizationContext.js';
 export { PersonalizationPanel } from './components/PersonalizationPanel.js';
 export type { PersonalizationPanelProps } from './components/PersonalizationPanel.js';
+export type {
+  RailAttachment,
+  RailDeskApi,
+  RailRecallFact,
+  RailRecallFactSource,
+  RailToday,
+  RailTodayDueReminder,
+  RailTodayEvent,
+  RailTodayNeedsOkItem,
+} from './components/RailDesk.js';
 export {
   RepositoryWorkProvider,
   useOptionalRepositoryWork,
@@ -521,6 +531,7 @@ export {
 } from './server/ShellModeContext.js';
 export type {
   AgentConfig,
+  OpenSessionRequest,
   SelectLibraryAgentRequest,
   SettingsOpenRequest,
   ShellMode,

@@ -44,6 +44,7 @@ import { createPermissionsRouter } from './apis/permissions';
 import { createPersonaKnowledgeRouter } from './apis/personaKnowledge';
 import { createPersonalizationRouter } from './apis/personalization';
 import { createPersonasRouter, createSessionPersonasRouter } from './apis/personas';
+import { createRecallExclusionsRouter } from './apis/recallExclusions';
 import { createRepositoriesRouter, createSessionRepositoryRouter } from './apis/repositories';
 import { createScheduleExecutionRouter, createSchedulesRouter } from './apis/schedules';
 import { createSentinelSettingsRouter } from './apis/sentinelSettings';
@@ -55,6 +56,7 @@ import { createAvailableSkillsRouter, type ResolveSkillStore } from './apis/skil
 import { createSpaceFolderAssignmentsRouter, createSpaceFoldersRouter } from './apis/spaceFolders';
 import { createSpacePicturesRouter } from './apis/spacePictures';
 import { createSpacesRouter } from './apis/spaces';
+import { createTodayRouter } from './apis/today';
 import { createTurnsRouter } from './apis/turns';
 import { createVoiceRouter } from './apis/voice';
 import type { Authenticator } from './auth/authenticator';
@@ -917,6 +919,26 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       authMiddleware,
     ),
   );
+  // The right rail's Home view: the day read from stored state, never from a model turn.
+  app.route(
+    '/api/v1/today',
+    withAuth(
+      createTodayRouter({
+        googleConnectionStore: deps.googleConnectionStore,
+        mcpServerStore: deps.resolveMcpServerStore(),
+        scheduleStore: deps.scheduleStore,
+        sessionStore: deps.sessionStore,
+        sessions: deps.sessions,
+        calendarAccountUrl: configuration.CALENDAR_ACCOUNT_URL,
+        calendarAccountKey: configuration.CALENDAR_ACCOUNT_SECRET,
+        fetchImpl: undefined,
+        resolveRequestContext,
+        logger: deps.logger,
+        now: () => new Date(),
+      }),
+      authMiddleware,
+    ),
+  );
   app.route(
     '/api/v1/user/settings/sentinel',
     withAuth(
@@ -1140,6 +1162,16 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         resolveRequestContext,
         logger: deps.logger,
         authorizer: deps.authorizer,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
+    '/api/v1/sessions',
+    withAuth(
+      createRecallExclusionsRouter({
+        sessionStore: deps.sessionStore,
+        resolveRequestContext,
       }),
       authMiddleware,
     ),
