@@ -1255,7 +1255,7 @@ describe('watchMail on a source that cannot resume at a message', () => {
     out_of_time = () => false,
   }: {
     source: MailSource;
-    handled?: readonly string[];
+    handled?: readonly string[] | undefined;
     out_of_time?: () => boolean;
   }) =>
     watchMail({
