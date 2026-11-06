@@ -638,14 +638,25 @@ describe('a conversation on the phone', () => {
   it('takes silence after the question as an answer it did not catch: asks once more, then says goodbye', async () => {
     h = await callsHarness({ limits: { silenceMs: 40 } });
     await h.readyToCall();
-    const delivery = await h.callDelivery();
+    await h.callDelivery();
     const media = await h.openMedia({ token: (await h.answer()).token });
     expect(await media.closed).toBe(1000);
     expect(h.tts.sentences.slice(1).join(' ')).toBe(`${CALL_LINES.askAgain} ${CALL_LINES.giveUp}`);
-    await h.waitFor(async () => (await h.calls.getBySid(CALL_SID))?.outcome === 'not_now');
     expect(h.opened).toEqual([]);
+  });
+
+  it('treats an answered line where no one ever spoke as missed, as when a voicemail was not told apart, and falls back', async () => {
+    h = await callsHarness({ limits: { silenceMs: 40 } });
+    await h.readyToCall();
+    const delivery = await h.callDelivery();
+    const media = await h.openMedia({ token: (await h.answer('unknown')).token });
+    expect(await media.closed).toBe(1000);
+    await h.waitFor(() => h.texts.length === 1 && h.pushes.length === 1);
+    expect((await h.calls.getBySid(CALL_SID))?.outcome).toBe('no_answer');
     const ended = (await h.attemptsOf(delivery.id)).filter(attempt => attempt.channel === 'call');
-    expect(ended.at(-1)?.detail).toContain('the call ended before you said it was a good time');
+    expect(ended.at(-1)?.detail).toBe(
+      'The call was answered, but no one spoke, so it may have been a voicemail. It was sent as a text and a notice instead.',
+    );
   });
 
   it('waits out speech that starts just before the silence would end, instead of talking over it', async () => {

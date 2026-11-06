@@ -74,6 +74,8 @@ const ENDED_WORDS = {
   lineNotOpened: 'The call was answered, but the line could not be opened. The call was not tried again.',
   messageNotSaid: 'You answered, but the message could not be read out. It was sent as a text and a notice instead.',
   cutOff: 'The call stopped before it finished. The call was not tried again.',
+  noOneSpoke:
+    'The call was answered, but no one spoke, so it may have been a voicemail. It was sent as a text and a notice instead.',
   saidNo: 'You answered and said it was not a good time. It is waiting for you in the app.',
   noYes: 'You answered, but the call ended before you said it was a good time. It is waiting for you in the app.',
   noChat: 'You answered, but the assistant could not talk it through on the phone. It is waiting for you in the app.',
@@ -668,6 +670,11 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
           }
           const { session, turns, startedAt } = talking;
           await session.end();
+          if (turns.ending === 'unclear' && turns.replies === 0) {
+            // Silence to the question and to it asked again: likely a voicemail the answering check did not catch.
+            await endWithoutTalking({ call, outcome: 'no_answer', detail: ENDED_WORDS.noOneSpoke });
+            return;
+          }
           const session_id = await written;
           const lasted = `The call lasted ${minutesWords(now().getTime() - startedAt.getTime())}`;
           const said =
