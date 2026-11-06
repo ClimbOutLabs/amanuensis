@@ -58,10 +58,6 @@
       "AgentCodeSnippet": {
         "additionalProperties": false,
         "properties": {
-          "icon": {
-            "format": "uri",
-            "type": "string"
-          },
           "label_name": {
             "minLength": 1,
             "type": "string"
@@ -77,7 +73,6 @@
         "required": [
           "label_name",
           "language",
-          "icon",
           "sample_code"
         ],
         "type": "object"

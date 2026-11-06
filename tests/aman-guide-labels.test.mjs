@@ -3,6 +3,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { readExternalHostsAllowlist } from '../scripts/check-external-hosts.mjs';
 import { defaultSources, readInstallerCommands, readSettingsPanels } from '../scripts/check-help-coverage.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -109,25 +110,11 @@ function hostsNamed(text) {
   return [...text.matchAll(/https?:\/\/([a-z0-9-]+(?:\.[a-z0-9-]+)+)/gi)].map(match => match[1].toLowerCase());
 }
 
-/** Link categories a help page may point at: documentation and setup consoles a person opens. */
-const LINK_CATEGORIES = new Set(['docs_link', 'setup_guide']);
-
-/**
- * The hosts a help page may link to, from the external-hosts allowlist. With no allowlist yet,
- * no host is allowed, so a page that adds a link fails until its host is listed.
- */
-async function readLinkHosts() {
-  let parsed;
-  try {
-    parsed = JSON.parse(await readFile(path.join(repoRoot, 'scripts/external-hosts.allowlist.json'), 'utf8'));
-  } catch (error) {
-    if (error !== null && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
-      return new Set();
-    }
-    throw error;
-  }
+/** The hosts a help page may link to: allowed hosts whose category is link-only, such as docs and setup consoles. */
+function readLinkHosts() {
+  const { categories, allowed } = readExternalHostsAllowlist({ rootDirectory: repoRoot });
   return new Set(
-    (parsed.allowed ?? []).filter(entry => LINK_CATEGORIES.has(entry.category)).map(entry => entry.host.toLowerCase()),
+    [...allowed.values()].filter(entry => categories.get(entry.category)?.linkOnly === true).map(entry => entry.host),
   );
 }
 
@@ -198,12 +185,12 @@ test('every root script a page names exists in package.json', async () => {
 });
 
 test('every web address a page names is on the external-hosts allowlist as a link', async () => {
-  const allowed = await readLinkHosts();
+  const allowed = readLinkHosts();
   for (const { name, text } of await readTopicFiles()) {
     for (const host of hostsNamed(text)) {
       assert.ok(
         allowed.has(host),
-        `${name} links to ${host}, which is not on scripts/external-hosts.allowlist.json as a docs_link. Add it there with a reason, or drop the link.`,
+        `${name} links to ${host}, which is not on scripts/external-hosts.allowlist.json as a link-only host. Add it there with a reason, or drop the link.`,
       );
     }
   }

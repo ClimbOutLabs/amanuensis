@@ -42,7 +42,7 @@ The **Help guide** workflow fails a pull request that changes `packages/trueforg
 
 ### Links
 
-Every web address a page names must be on `scripts/external-hosts.allowlist.json` as a `docs_link` or `setup_guide`. Until that list exists, a page cannot link anywhere.
+Every web address a page names must be on `scripts/external-hosts.allowlist.json` under a link-only category, such as `docs_link` or `setup_guide`.
 
 ## The help check
 
