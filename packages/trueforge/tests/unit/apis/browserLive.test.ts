@@ -186,4 +186,57 @@ describe('browser live routes', () => {
     expect(response.status).toBe(400);
     expect(sent).toEqual([]);
   });
+
+  it("puts an uploaded file into the caller's own tab", async () => {
+    const { app, sent } = buildApp(() => ({ json: { status: 'ok' } }));
+    const response = await call(app, {
+      method: 'POST',
+      path: '/api/browser/live/upload',
+      body: { tab: 'chat-1', name: 'id.pdf', mime: 'application/pdf', data: 'JVBERi0=' },
+    });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ data: { status: 'ok' } });
+    expect(sent).toEqual([
+      {
+        url: 'http://browser-relay:8792/live/upload',
+        headers: expect.objectContaining({ 'x-browser-secret': SECRET }),
+        body: { owner: 'default:user-a', tab: 'chat-1', name: 'id.pdf', mime: 'application/pdf', data: 'JVBERi0=' },
+      },
+    ]);
+  });
+
+  it('says so when the page has nowhere to put a file', async () => {
+    const { app } = buildApp(() => ({ json: { status: 'no_file_field' } }));
+    const response = await call(app, {
+      method: 'POST',
+      path: '/api/browser/live/upload',
+      body: { tab: 'chat-1', name: 'id.pdf', mime: 'application/pdf', data: 'JVBERi0=' },
+    });
+    expect(response.status).toBe(409);
+  });
+
+  it('refuses an upload that names the profile or is too large, without calling the sidecar', async () => {
+    const { app, sent } = buildApp(() => ({ json: { status: 'ok' } }));
+    for (const body of [
+      { tab: 'chat-1', name: 'id.pdf', mime: 'application/pdf', data: 'JVBERi0=', owner: 'default:someone-else' },
+      { tab: 'chat-1', name: 'big.bin', mime: 'application/octet-stream', data: 'A'.repeat(14_000_001) },
+      { tab: 'chat-1', name: '', mime: 'text/plain', data: 'aGk=' },
+    ]) {
+      const response = await call(app, { method: 'POST', path: '/api/browser/live/upload', body });
+      expect(response.status).toBe(400);
+    }
+    expect(sent).toEqual([]);
+  });
+
+  it('refuses an upload from a caller with no browser session', async () => {
+    const { app, sent } = buildApp(() => ({ json: { status: 'ok' } }));
+    const response = await call(app, {
+      method: 'POST',
+      path: '/api/browser/live/upload',
+      body: { tab: 'chat-1', name: 'id.pdf', mime: 'application/pdf', data: 'JVBERi0=' },
+      headers: {},
+    });
+    expect(response.status).toBe(401);
+    expect(sent).toEqual([]);
+  });
 });

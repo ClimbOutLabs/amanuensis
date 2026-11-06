@@ -46,8 +46,21 @@ and names the person's profile (`owner`) and the chat's tab (`tab`).
   read.
 - `POST /screenshot { owner, tab }` — a PNG of the page, which the app shows to the person in the chat.
 
-Clicking, typing and the approval gate for actions that submit something are a later change (Phase 2
-of the browser control feature).
+- `POST /click-info`, `POST /click`, `POST /type`, `POST /select { owner, tab, ref, ... }` — act on a
+  control by its ref. The app server asks the person first for a click that would submit something.
+
+The live view, where the person drives their own tab by hand from the app's `/browser-live` page:
+
+- `POST /live/tabs { owner }` — the person's open tabs, most recent first, as chat id, title and
+  address. It never starts a browser.
+- `POST /live/frame { owner, tab }` — one JPEG frame of the tab and the viewport size.
+- `POST /live/input { owner, tab, kind, ... }` — one act: `click` (x, y and the frame size it was read
+  from), `type` (text), `key` (one named key) or `wheel` (dy). A click uses the real mouse, so the same
+  rules keep the tab on its site.
+- `POST /live/upload { owner, tab, name, mime, data }` — a file, base64, at most 10 MB, put into the
+  file picker the page opened, or else its first file field. The page itself sends it.
+
+The app server calls the live routes only for the signed-in person's own profile.
 
 ## Running it
 

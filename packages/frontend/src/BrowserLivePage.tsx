@@ -15,6 +15,7 @@ import {
   type WheelEvent as ReactWheelEvent,
 } from 'react';
 import { createAuthAwareFetch } from './authFetch';
+import './BrowserLivePage.css';
 import { apiPath } from './publicPath';
 
 interface LiveTab {
@@ -66,6 +67,19 @@ const NAMED_KEYS = new Set([
   'PageDown',
 ]);
 
+/** The person's open tabs, or null when the live routes could not be reached. */
+async function loadTabs(): Promise<LiveTab[] | null> {
+  try {
+    const data = await liveCall('/api/browser/live/tabs');
+    return isRecord(data) && Array.isArray(data.tabs) ? data.tabs.filter(isLiveTab) : [];
+  } catch {
+    return null;
+  }
+}
+
+/** How often a new frame is asked for while a tab is shown. */
+const FRAME_INTERVAL_MS = 500;
+
 export function BrowserLivePage() {
   const [tabs, setTabs] = useState<LiveTab[]>([]);
   const [selected, setSelected] = useState<string | undefined>(undefined);
@@ -74,31 +88,42 @@ export function BrowserLivePage() {
   const [done, setDone] = useState(false);
   const [typeText, setTypeText] = useState('');
   const imgRef = useRef<HTMLImageElement | null>(null);
-  const lastWheelAt = useRef(0);
+  const lastWheelAtRef = useRef(0);
 
-  const refreshTabs = useCallback(async () => {
-    try {
-      const data = await liveCall('/api/browser/live/tabs');
-      const list = isRecord(data) && Array.isArray(data.tabs) ? data.tabs.filter(isLiveTab) : [];
-      setTabs(list);
-      setSelected(current => (current !== undefined && list.some(tab => tab.tab === current) ? current : list[0]?.tab));
-      if (list.length === 0) {
-        setNote('Aman has no page open right now. Ask Aman to open the page first, then come back here.');
-      }
-    } catch {
+  const applyTabs = useCallback((list: LiveTab[] | null) => {
+    if (list === null) {
       setNote('The live view could not be reached. Try again in a moment.');
+      return;
     }
+    setTabs(list);
+    setSelected(current => (current !== undefined && list.some(tab => tab.tab === current) ? current : list[0]?.tab));
+    setNote(
+      list.length === 0 ? 'Aman has no page open right now. Ask Aman to open the page first, then come back here.' : '',
+    );
   }, []);
 
+  const refreshTabs = useCallback(() => {
+    void loadTabs().then(applyTabs);
+  }, [applyTabs]);
+
   useEffect(() => {
-    void refreshTabs();
-  }, [refreshTabs]);
+    let cancelled = false;
+    void loadTabs().then(list => {
+      if (!cancelled) {
+        applyTabs(list);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [applyTabs]);
 
   useEffect(() => {
     if (selected === undefined || done) {
       return;
     }
     let cancelled = false;
+    let timer: number | undefined;
     const tick = async () => {
       try {
         const data = await liveCall('/api/browser/live/frame', { tab: selected });
@@ -116,14 +141,15 @@ export function BrowserLivePage() {
         // A missed frame keeps the last one; the next try is half a second away.
       }
       if (!cancelled) {
-        window.setTimeout(() => {
+        timer = window.setTimeout(() => {
           void tick();
-        }, 500);
+        }, FRAME_INTERVAL_MS);
       }
     };
     void tick();
     return () => {
       cancelled = true;
+      window.clearTimeout(timer);
     };
   }, [selected, done]);
 
@@ -146,14 +172,21 @@ export function BrowserLivePage() {
     if (img === null || img.naturalWidth === 0 || img.naturalHeight === 0) {
       return;
     }
+    // The picture inside its border: a click on the border's edge maps to the frame's own edge.
     const rect = img.getBoundingClientRect();
-    if (rect.width === 0 || rect.height === 0) {
+    const left = rect.left + img.clientLeft;
+    const top = rect.top + img.clientTop;
+    // clientWidth rounds to whole pixels; the drawn size, less both borders, does not.
+    const width = rect.width - (img.offsetWidth - img.clientWidth);
+    const height = rect.height - (img.offsetHeight - img.clientHeight);
+    if (width === 0 || height === 0) {
       return;
     }
+    const clamp = (value: number, max: number) => Math.min(Math.max(value, 0), max);
     void sendInput({
       kind: 'click',
-      x: Math.round(((event.clientX - rect.left) / rect.width) * img.naturalWidth),
-      y: Math.round(((event.clientY - rect.top) / rect.height) * img.naturalHeight),
+      x: clamp(Math.round(((event.clientX - left) / width) * img.naturalWidth), img.naturalWidth),
+      y: clamp(Math.round(((event.clientY - top) / height) * img.naturalHeight), img.naturalHeight),
       image_width: img.naturalWidth,
       image_height: img.naturalHeight,
     });
@@ -161,10 +194,10 @@ export function BrowserLivePage() {
 
   const onFrameWheel = (event: ReactWheelEvent) => {
     const now = Date.now();
-    if (now - lastWheelAt.current < 150) {
+    if (now - lastWheelAtRef.current < 150) {
       return;
     }
-    lastWheelAt.current = now;
+    lastWheelAtRef.current = now;
     void sendInput({ kind: 'wheel', dy: Math.round(event.deltaY) });
   };
 
@@ -215,78 +248,82 @@ export function BrowserLivePage() {
 
   if (done) {
     return (
-      <div style={{ maxWidth: '60rem', margin: '0 auto', padding: '1rem' }}>
-        <h1>Aman&apos;s browser, live</h1>
-        <p>Done. Aman has the tab back, with everything you did still in it. You can close this page.</p>
-      </div>
+      <main className="browser-live">
+        <div className="browser-live-body">
+          <h1 className="browser-live-title">Aman&apos;s browser, live</h1>
+          <p className="browser-live-note">
+            Done. Aman has the tab back, with everything you did still in it. You can close this page.
+          </p>
+        </div>
+      </main>
     );
   }
 
   return (
-    <div style={{ maxWidth: '60rem', margin: '0 auto', padding: '1rem' }}>
-      <h1>Aman&apos;s browser, live</h1>
-      <p>
-        This is the page Aman has open. Click, scroll and type to use it yourself, for example to finish a sign-in. When
-        you are done, press Done and Aman carries on from here.
-      </p>
-      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
-        {tabs.map(tab => (
-          <button
-            key={tab.tab}
-            type="button"
-            onClick={() => {
-              setSelected(tab.tab);
-              setFrame(undefined);
-            }}
-            style={{ fontWeight: tab.tab === selected ? 'bold' : 'normal' }}
-          >
-            {tab.title === '' ? tab.url : tab.title}
+    <main className="browser-live">
+      <div className="browser-live-body">
+        <h1 className="browser-live-title">Aman&apos;s browser, live</h1>
+        <p className="browser-live-text">
+          This is the page Aman has open. Click, scroll and type to use it yourself, for example to finish a sign-in.
+          When you are done, press Done and Aman carries on from here.
+        </p>
+        <div className="browser-live-row" role="group" aria-label="Open tabs">
+          {tabs.map(tab => (
+            <button
+              key={tab.tab}
+              type="button"
+              className="browser-live-button"
+              aria-pressed={tab.tab === selected}
+              onClick={() => {
+                setSelected(tab.tab);
+                setFrame(undefined);
+              }}
+            >
+              {tab.title === '' ? tab.url : tab.title}
+            </button>
+          ))}
+          <button type="button" className="browser-live-button" onClick={refreshTabs}>
+            Refresh tabs
           </button>
-        ))}
-        <button type="button" onClick={() => void refreshTabs()}>
-          Refresh tabs
-        </button>
-      </div>
-      {note !== '' ? <p>{note}</p> : null}
-      {frame !== undefined ? (
-        <div
-          tabIndex={0}
-          onKeyDown={onKeyDown}
-          onWheel={onFrameWheel}
-          style={{ outline: '0.125rem solid transparent' }}
-        >
-          <img
-            ref={imgRef}
-            src={`data:image/jpeg;base64,${frame}`}
-            alt="The page Aman has open, as it looks now"
-            onClick={onFrameClick}
-            style={{ width: '100%', border: '0.0625rem solid #888', cursor: 'pointer', display: 'block' }}
-          />
         </div>
-      ) : null}
-      <p style={{ fontSize: '0.8125rem' }}>
-        Click the picture, then type to fill in a field. Scrolling over the picture scrolls the page.
-      </p>
-      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem' }}>
-        <input
-          value={typeText}
-          onChange={event => {
-            setTypeText(event.target.value);
-          }}
-          onKeyDown={event => {
-            if (event.key === 'Enter') {
-              onTypeSubmit();
-            }
-          }}
-          placeholder="Text or a code to type into the page"
-          style={{ flex: 1 }}
-        />
-        <button type="button" onClick={onTypeSubmit}>
-          Type it
-        </button>
-      </div>
-      <div style={{ marginBottom: '0.75rem' }}>
-        <label>
+        {note !== '' ? (
+          <p className="browser-live-note" role="status">
+            {note}
+          </p>
+        ) : null}
+        {frame !== undefined ? (
+          <div className="browser-live-frame" tabIndex={0} onKeyDown={onKeyDown} onWheel={onFrameWheel}>
+            <img
+              ref={imgRef}
+              src={`data:image/jpeg;base64,${frame}`}
+              alt="The page Aman has open, as it looks now"
+              onClick={onFrameClick}
+            />
+          </div>
+        ) : null}
+        <p className="browser-live-hint">
+          Click the picture, then type to fill in a field. Scrolling over the picture scrolls the page.
+        </p>
+        <div className="browser-live-row">
+          <input
+            className="browser-live-input"
+            aria-label="Text to type into the page"
+            value={typeText}
+            onChange={event => {
+              setTypeText(event.target.value);
+            }}
+            onKeyDown={event => {
+              if (event.key === 'Enter') {
+                onTypeSubmit();
+              }
+            }}
+            placeholder="Text or a code to type into the page"
+          />
+          <button type="button" className="browser-live-button" onClick={onTypeSubmit}>
+            Type it
+          </button>
+        </div>
+        <label className="browser-live-text">
           Upload a file into the page:{' '}
           <input
             type="file"
@@ -296,10 +333,18 @@ export function BrowserLivePage() {
             }}
           />
         </label>
+        <div className="browser-live-row">
+          <button
+            type="button"
+            className="browser-live-button browser-live-button-primary"
+            onClick={() => {
+              setDone(true);
+            }}
+          >
+            Done
+          </button>
+        </div>
       </div>
-      <button type="button" onClick={() => setDone(true)}>
-        Done
-      </button>
-    </div>
+    </main>
   );
 }

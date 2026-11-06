@@ -15,6 +15,7 @@ import { connect } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
+import { URL } from 'node:url';
 import { gzipSync } from 'node:zlib';
 
 import { createEgressProxy } from '../src/egressProxy.mjs';
@@ -791,6 +792,8 @@ test('type with a ref whose element can no longer be read is refused as a stale 
 /** A sidecar whose browser is a stand-in page, so the live view can be tested with no Chromium. */
 async function fakeSidecar() {
   const acts = [];
+  const handlers = {};
+  let fileFields = 0;
   let launches = 0;
   const page = {
     url: () => 'https://site-a.test/account',
@@ -818,7 +821,22 @@ async function fakeSidecar() {
         acts.push({ key });
       },
     },
-    on: () => undefined,
+    on: (event, handler) => {
+      handlers[event] = handler;
+    },
+    isClosed: () => false,
+    // The page's file fields: none until a test gives it one.
+    locator: selector => {
+      assert.equal(selector, 'input[type="file"]');
+      return {
+        first: () => ({
+          count: async () => fileFields,
+          setInputFiles: async file => {
+            acts.push({ fileField: file });
+          },
+        }),
+      };
+    },
     close: async () => undefined,
   };
   const cdp = {
@@ -848,7 +866,24 @@ async function fakeSidecar() {
       return { context, page };
     },
   });
-  return { sidecar, acts, gateway, launches: () => launches };
+  return {
+    sidecar,
+    acts,
+    gateway,
+    launches: () => launches,
+    /** The page opens its file picker, as when its upload button is clicked. */
+    openFileChooser: () => {
+      handlers.filechooser({
+        page: () => page,
+        setFiles: async file => {
+          acts.push({ chooser: file });
+        },
+      });
+    },
+    giveFileField: () => {
+      fileFields = 1;
+    },
+  };
 }
 
 test('the live view lists, frames and drives a tab through a stand-in page', async () => {
@@ -933,6 +968,35 @@ test('the live routes answer over HTTP, and listing them needs no tab', async ()
     assert.deepEqual(await badInput.json(), { status: 'bad_input' });
   } finally {
     server.close();
+    gateway.close();
+    await sidecar.close();
+  }
+});
+
+test('the live view puts a file into the picker the page opened, else its file field, else says there is none', async () => {
+  if (BrowserSidecar === undefined) {
+    return;
+  }
+  const { sidecar, acts, gateway, openFileChooser, giveFileField } = await fakeSidecar();
+  const file = { owner: 'owner-1', tab: 'chat-1', name: 'id.pdf', mime: 'application/pdf', data: 'JVBERi0=' };
+  const expected = { name: 'id.pdf', mimeType: 'application/pdf', buffer: Buffer.from('JVBERi0=', 'base64') };
+  try {
+    assert.deepEqual(await sidecar.liveUpload(file), { status: 'closed' });
+    await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'https://site-a.test/account' });
+
+    assert.deepEqual(await sidecar.liveUpload(file), { status: 'no_file_field' });
+
+    openFileChooser();
+    assert.deepEqual(await sidecar.liveUpload(file), { status: 'ok' });
+    assert.deepEqual(acts.at(-1), { chooser: expected });
+    // A picker is filled once: the next upload goes to the page's file field, not the spent picker.
+    giveFileField();
+    assert.deepEqual(await sidecar.liveUpload(file), { status: 'ok' });
+    assert.deepEqual(acts.at(-1), { fileField: expected });
+
+    const tooBig = Buffer.alloc(10 * 1024 * 1024 + 1).toString('base64');
+    assert.deepEqual(await sidecar.liveUpload({ ...file, data: tooBig }), { status: 'bad_input' });
+  } finally {
     gateway.close();
     await sidecar.close();
   }

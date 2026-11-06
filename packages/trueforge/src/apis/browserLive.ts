@@ -23,8 +23,8 @@ const LiveClickInputSchema = z
   .object({
     tab: TabIdSchema,
     kind: z.literal('click'),
-    x: z.number().finite(),
-    y: z.number().finite(),
+    x: z.number(),
+    y: z.number(),
     image_width: z.number().positive().optional(),
     image_height: z.number().positive().optional(),
   })
@@ -35,7 +35,7 @@ const LiveTypeInputSchema = z
 const LiveKeyInputSchema = z
   .object({ tab: TabIdSchema, kind: z.literal('key'), key: z.string().min(1).max(64) })
   .strict();
-const LiveWheelInputSchema = z.object({ tab: TabIdSchema, kind: z.literal('wheel'), dy: z.number().finite() }).strict();
+const LiveWheelInputSchema = z.object({ tab: TabIdSchema, kind: z.literal('wheel'), dy: z.number() }).strict();
 
 /** One act the person does in the live view: a click, typed text, one named key, or a scroll step. */
 const LiveInputRequestSchema = z.discriminatedUnion('kind', [

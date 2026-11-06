@@ -86,6 +86,13 @@ const ClickInfoReplySchema = z.discriminatedUnion('status', [
 
 type BrowserPageReply = z.infer<typeof PageReplySchema>;
 
+/**
+ * What the model tells the person when a step is theirs: the live view (apis/browserLive.ts, page
+ * `/browser-live`) shows them this same browser, and what they do there stays in it for the next read.
+ */
+const LIVE_VIEW_HINT =
+  "ask the person to open Aman's live browser at /browser-live and do it there themselves; what they do stays in the browser for your next read.";
+
 /** One open tab of the person's browser, as the live view lists it: the chat it belongs to, its title and address. */
 export const LiveTabSchema = z.object({ tab: z.string(), title: z.string(), url: z.string() });
 export const LiveTabsReplySchema = z.object({ status: z.literal('ok'), tabs: z.array(LiveTabSchema) });
@@ -316,8 +323,7 @@ class BrowserTool extends LocalToolMCP {
     defineTool({
       name: 'browser_open',
       annotations: BROWSER_READ_ANNOTATIONS,
-      description:
-        "Open a web page in Aman's own browser (not the user's browser) and read it back as text. Only http and https addresses; never a file, app or local-network address. Use when the user asks to find something on a site or open a specific page.",
+      description: `Open a web page in Aman's own browser (not the user's browser) and read it back as text. Only http and https addresses; never a file, app or local-network address. Use when the user asks to find something on a site or open a specific page. When a page needs a step only the person can do, such as signing in, a code sent to their phone, a picture check or a cookie banner you cannot clear: ${LIVE_VIEW_HINT}`,
       schema: OPEN_INPUT_SCHEMA,
       handler: async (input: BrowserOpenInput) => this.page('/open', { url: input.url }),
     }),
@@ -378,8 +384,7 @@ class BrowserTool extends LocalToolMCP {
     defineTool({
       name: 'browser_type',
       annotations: BROWSER_PREPARE_ANNOTATIONS,
-      description:
-        'Type text into a field on the open page, by its ref from browser_read. Refused for a password, card or one-time-code field: ask the person to type those themselves. Nothing is submitted; read the page again to see what was typed.',
+      description: `Type text into a field on the open page, by its ref from browser_read. Refused for a password, card or one-time-code field: ${LIVE_VIEW_HINT} Nothing is submitted; read the page again to see what was typed.`,
       schema: TYPE_INPUT_SCHEMA,
       handler: async (input: BrowserTypeInput) => this.page('/type', input),
     }),
