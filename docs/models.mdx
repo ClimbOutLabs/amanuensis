@@ -31,6 +31,10 @@ The provider list comes from the shipped model catalog — see [Initial Setup](/
 
 Use the `custom` provider type for vLLM, Ollama, a corporate gateway, or any other OpenAI-compatible API. Custom providers are not in the catalog — you add them yourself with a base URL, API key, and the model IDs you want exposed.
 
+For a model on your own computer, [Run Aman on a local model](/local-model) gives the exact settings for Ollama with Qwen3 8B, what speed to expect on common hardware, and what works less well on a small model. Two points apply to any local server: give it a context window of at least 32K tokens, because Aman's instructions and tool definitions take about 10K on every turn; and from inside Docker, reach a server on the host at `host.docker.internal`, not `localhost`.
+
+A custom provider gets one request at a time unless its model sets **max_concurrent_requests**, because a local server usually runs one request at a time and queues the rest.
+
 
 ## Assigning models to jobs
 

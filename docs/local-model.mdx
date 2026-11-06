@@ -1,0 +1,114 @@
+---
+title: 'Run Aman on a local model'
+sidebarTitle: 'Local model'
+description: 'Run Aman on a model on your own computer with Ollama and Qwen3 8B: what you need, the exact settings, how fast it is, and what works less well.'
+---
+
+Aman can think with a model that runs on your own computer instead of a hosted one. Your chats then never leave the machine. There is no key to buy and no charge per message.
+
+This page uses [Ollama](https://ollama.com), a free program that runs models, and one model: **Qwen3 8B** (`qwen3:8b`). Aman's model code is tested against Ollama serving Qwen3, including its thinking and its tool calls.
+
+## What you need
+
+- Aman installed, as in the [README](https://github.com/ClimbOutLabs/amanuensis#get-started).
+- A computer that can run the model quickly. See [How fast it is](#how-fast-it-is) before you start.
+- About 5 GB of free disk space for the model.
+- About 10 GB of free memory while Aman is answering, on top of what Docker uses.
+
+## Set it up
+
+**1. Install Ollama.** Download it from [ollama.com/download](https://ollama.com/download) and open it. On a Mac or Windows PC it shows a small icon while it runs. On Linux the install script sets it up as a service.
+
+**2. Give the model room to read.** Every message Aman sends carries its own instructions and the list of tools it can use. That alone is about 10,000 tokens, the small pieces of text a model reads, and Ollama's default room is smaller than that.
+
+- **Mac or Windows:** open Ollama's **Settings** and set **Context length** to **32k**.
+- **Linux:** see [Linux: two extra settings](#linux-two-extra-settings) below.
+
+If you skip this step, Ollama quietly cuts each request down to fit. Aman then loses part of its own instructions or of your chat, and answers badly.
+
+**3. Download the model.** Open the Terminal app and run:
+
+```bash
+ollama pull qwen3:8b
+```
+
+It is about 5 GB, so it takes a few minutes.
+
+**4. Add it to Aman.** Open Aman and go to **Settings**, then **Models**. Click **Add custom provider** and fill in:
+
+| Field             | What to type                           |
+| ----------------- | -------------------------------------- |
+| Name              | `ollama`                               |
+| Base URL          | `http://host.docker.internal:11434/v1` |
+| API key           | leave it empty                         |
+| Model ID          | `qwen3:8b`                             |
+| Context length    | `32768`                                |
+| Max output tokens | `8192`                                 |
+
+Leave the other fields as they are, and click **Add provider**. The **Model name** fills itself in as `qwen-3-8b`.
+
+The address is `host.docker.internal` because Aman runs inside Docker. To Aman, `localhost` means its own container, not your computer. If you run Aman from source in standalone mode, use `http://localhost:11434/v1` instead.
+
+**5. Pick it.** Choose **qwen-3-8b** in the menu under the message box, and say hello. The first reply in a new chat is the slowest; see below.
+
+### Linux: two extra settings
+
+On Linux, Ollama only answers programs on the computer itself, and Docker's containers count as other machines. Ollama also needs the bigger context length from step 2. Open Ollama's service settings:
+
+```bash
+sudo systemctl edit ollama
+```
+
+Add these three lines in the space the file leaves for them, then save:
+
+```ini
+[Service]
+Environment="OLLAMA_HOST=0.0.0.0:11434"
+Environment="OLLAMA_CONTEXT_LENGTH=32768"
+```
+
+Then restart Ollama:
+
+```bash
+sudo systemctl restart ollama
+```
+
+Ollama has no password. With this setting, other devices on your network can use it too. On a shared network, block port 11434 from other devices in your firewall.
+
+## How fast it is
+
+Two things set the speed. The **first reply in a new chat** waits while the model reads Aman's instructions and tools. After that, Ollama keeps them in memory, so later replies in the same chat start much sooner. Qwen3 also thinks for a moment before it answers, and Aman shows that as **Reasoning…**.
+
+| Computer                                                    | Does it work?                                  | What to expect                                                                                                                                                                                                                            |
+| ----------------------------------------------------------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Mac with Apple silicon (M1 or newer), 16 GB                 | Yes, but memory is tight                       | Roughly half a minute before a new chat starts answering, then replies at reading speed. Ollama uses about 10 GB and Docker most of the rest, so close other large apps. With 24 GB or more it is comfortable.                         |
+| PC with 32 GB and an NVIDIA graphics card with 12 GB or more | Yes, quickly                                  | A new chat starts answering within seconds, and replies are faster than you can read. A card with 8 GB holds only part of the model, so expect it to be several times slower.                                                            |
+| PC with 32 GB and no graphics card                          | Not recommended                                | On a 4-core test machine, the first reply in a new chat took 7 minutes, and text came at about 3 words a second. Aman stops waiting after 90 seconds, so the first reply fails unless you raise that limit. Use a hosted model instead. |
+| NVIDIA DGX Spark                                            | Yes, quickly, with room for much larger models | About as quick as a hosted model. The Spark has 128 GB of memory, so it can also run models many times this size: add them the same way with a different Model ID.                                                                        |
+
+If a reply in a new chat ends with "The model stopped answering", the computer took longer than 90 seconds to read the setup. On a computer without a graphics card that is expected; a hosted model is the better choice there.
+
+Ollama unloads the model after five minutes without use. The next message then waits for it to load again, and a new chat reads the setup again.
+
+## What works less well on a small local model
+
+Qwen3 8B is good at everyday chat, short writing and simple tool use. It is a fraction of the size of the hosted models, and it shows in a few places:
+
+- **Long jobs with many steps** are less reliable. The daily brief, research across several web pages and plans that need many tool calls go wrong more often, and take minutes rather than seconds.
+- **Pictures** do not work. Qwen3 8B reads text only, so Aman cannot look at photos, screenshots or scanned pages with it. Leave **Vision** off for this model.
+- **Long chats** fill its room sooner. When a chat gets long, Aman summarizes the older part with the same model, which takes a while and loses some detail.
+- **Everything queues.** Aman sends one request at a time to a local model. While it learns about you or summarizes in the background, your next reply waits.
+- **Voice** feels slower, because spoken replies wait for the text to start.
+
+A hosted model is still the better choice for the daily brief and long research. You can use both: keep Qwen3 8B as the main model and pick a hosted one for a single chat from the menu under the message box, or give a persona its own model in **Settings, Roles and Personas** ([Roles and Personas](/model-roles)).
+
+## What stays on your computer
+
+With a local model, your chats, what Aman knows about you and what it reads for you go only to Ollama on your own machine. Web searches, maps and connectors such as email still reach their own services. [Privacy](/privacy) lists what goes where.
+
+## If it does not answer
+
+- **"Cannot connect" or nothing happens:** check that Ollama is running. On the computer where Ollama runs, open `http://localhost:11434` in a browser; it should say "Ollama is running". On Linux, also check the `OLLAMA_HOST` line above.
+- **"model not found":** the Model ID must match what you pulled exactly, `qwen3:8b`. Run `ollama list` to see the names.
+- **Odd or forgetful answers from the first message:** the context length is still Ollama's default. Set it as in step 2 and restart Ollama.
+- **"The model stopped answering":** see [How fast it is](#how-fast-it-is).
