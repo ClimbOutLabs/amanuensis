@@ -22,7 +22,7 @@ describePg('NoticingStore on Postgres (contract)', () => {
 
   beforeEach(async () => {
     if (env !== undefined) {
-      await sql`TRUNCATE TABLE noticing_event, noticing_checkpoint`.execute(env.db);
+      await sql`TRUNCATE TABLE noticing_event, noticing_checkpoint, reach_lease`.execute(env.db);
     }
   });
 

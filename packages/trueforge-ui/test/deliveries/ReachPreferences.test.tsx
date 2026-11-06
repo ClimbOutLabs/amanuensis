@@ -10,8 +10,14 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function renderPreferences() {
+function renderPreferences({ callsReady = false }: { callsReady?: boolean } = {}) {
   const server = fakeServer([]);
+  if (callsReady) {
+    server.state.reach = {
+      ...server.state.reach,
+      availability: { ...server.state.reach.availability, calls: { available: true, note: 'Calls are on.' } },
+    };
+  }
   render(<ReachPreferences reach={server.api.reach} />);
   return server;
 }
@@ -23,7 +29,9 @@ describe('Settings, Reach me preferences', () => {
     const calls = screen.getByRole('checkbox', { name: /Phone calls/ });
     expect(texts).toHaveProperty('disabled', true);
     expect(calls).toHaveProperty('disabled', true);
-    expect(screen.getByText(/Texts are not set up\. To set them up, add your Twilio details/)).toBeTruthy();
+    expect(
+      screen.getByText(/Texts are not set up on this server\. To set them up, add the Twilio details/),
+    ).toBeTruthy();
     expect(screen.getByText('Phone calls are not set up yet.')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Try texts' })).toHaveProperty('disabled', true);
     expect(screen.getByRole('button', { name: 'Try calls' })).toHaveProperty('disabled', true);
@@ -41,6 +49,9 @@ describe('Settings, Reach me preferences', () => {
     const calls = await screen.findByRole('checkbox', { name: /Phone calls/ });
     expect(calls).toHaveProperty('disabled', false);
     expect(screen.getByText(note)).toBeTruthy();
+    expect(screen.queryByText('Call settings appear here once phone calls are set up.')).toBeNull();
+    expect(screen.getByRole('checkbox', { name: 'Call me for reminders I mark urgent' })).toBeTruthy();
+    expect(screen.getByLabelText('Fewest hours between two calls')).toBeTruthy();
     // A test call is offered only once calls are saved as on.
     expect(screen.getByRole('button', { name: 'Try calls' })).toHaveProperty('disabled', true);
     fireEvent.click(calls);
@@ -51,8 +62,20 @@ describe('Settings, Reach me preferences', () => {
     expect(await screen.findByText(/Calling your phone now\./)).toBeTruthy();
   });
 
-  it('starts with nothing ticked for calls, and offers the tick only for kinds that can call', async () => {
+  it('hides what only matters for calls until phone calls are set up, and says so', async () => {
     renderPreferences();
+    expect(await screen.findByText('Call settings appear here once phone calls are set up.')).toBeTruthy();
+    expect(screen.queryByRole('checkbox', { name: /Time to leave/ })).toBeNull();
+    expect(screen.queryByRole('checkbox', { name: 'Call me for reminders I mark urgent' })).toBeNull();
+    expect(screen.queryByRole('checkbox', { name: 'Hold calls back during quiet hours' })).toBeNull();
+    expect(screen.queryByLabelText('Fewest hours between two calls')).toBeNull();
+    // What applies to nudges and notes stays.
+    expect(screen.getByLabelText('Most nudges in one day')).toBeTruthy();
+    expect(screen.getByLabelText('Time zone')).toBeTruthy();
+  });
+
+  it('starts with nothing ticked for calls, and offers the tick only for kinds that can call', async () => {
+    renderPreferences({ callsReady: true });
     await screen.findByRole('checkbox', { name: /Texts/ });
     expect(screen.getByRole('checkbox', { name: /Mail from someone on your always-important list/ })).toHaveProperty(
       'checked',
@@ -69,7 +92,7 @@ describe('Settings, Reach me preferences', () => {
   });
 
   it('saves a ticked kind, an added sender and the urgent-reminder tick', async () => {
-    const { api } = renderPreferences();
+    const { api } = renderPreferences({ callsReady: true });
     fireEvent.click(await screen.findByRole('checkbox', { name: /Time to leave/ }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Call me for reminders I mark urgent' }));
     fireEvent.change(screen.getByLabelText('Email address'), { target: { value: 'Dana@Example.com' } });
@@ -132,7 +155,7 @@ describe('Settings, Reach me preferences', () => {
   });
 
   it('turns quiet hours and limits into saved values', async () => {
-    const { api } = renderPreferences();
+    const { api } = renderPreferences({ callsReady: true });
     fireEvent.click(await screen.findByRole('checkbox', { name: 'Hold calls back during quiet hours' }));
     fireEvent.change(screen.getByLabelText('Most nudges in one day'), { target: { value: '3' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -150,6 +173,22 @@ describe('Settings, Reach me preferences', () => {
     vi.mocked(server.api.reach.get).mockRejectedValueOnce(new Error('The server is away.'));
     render(<ReachPreferences reach={server.api.reach} />);
     expect((await screen.findByRole('alert')).textContent).toBe('The server is away.');
+  });
+
+  it('says what to do next when loading fails with no message of its own', async () => {
+    const server = fakeServer([]);
+    vi.mocked(server.api.reach.get).mockRejectedValueOnce('offline');
+    render(<ReachPreferences reach={server.api.reach} />);
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      'Your Reach me settings could not be loaded. Reload the page.',
+    );
+  });
+
+  it('says to try again later when a test fails with no message of its own', async () => {
+    const { api } = renderPreferences();
+    vi.mocked(api.reach.test).mockRejectedValueOnce('offline');
+    fireEvent.click(await screen.findByRole('button', { name: 'Try push' }));
+    expect(await screen.findByText('That test did not go through. Try again in a minute.')).toBeTruthy();
   });
 
   describe('texts, once the server has a text provider', () => {
@@ -188,7 +227,7 @@ describe('Settings, Reach me preferences', () => {
       expect(await screen.findByText('+15550111')).toBeTruthy();
       const privateMode = screen.getByRole('radio', { name: /Private \(recommended\)/ });
       expect(privateMode).toHaveProperty('checked', true);
-      expect(screen.getByText(/a reminder is due\. Open Aman to see it\./)).toBeTruthy();
+      expect(screen.getByText(/“Mannie: a reminder is due\. Open the app to see it\.”/)).toBeTruthy();
       fireEvent.click(screen.getByRole('radio', { name: /Full/ }));
       await waitFor(() => expect(api.reach.texts.setMode).toHaveBeenCalledWith('full'));
 
@@ -211,6 +250,8 @@ describe('Settings, Reach me preferences', () => {
         mode: 'private',
         optedOut: false,
         codePending: false,
+        pendingPhone: null,
+        privatePreview: 'Mannie: a reminder is due. Open the app to see it.',
       };
       render(<ReachPreferences reach={server.api.reach} />);
       expect(await screen.findByRole('checkbox', { name: /Send me texts/ })).toHaveProperty('checked', true);
@@ -219,6 +260,34 @@ describe('Settings, Reach me preferences', () => {
       await waitFor(() => expect(server.api.reach.texts.remove).toHaveBeenCalled());
       expect(await screen.findByLabelText('Your phone number')).toBeTruthy();
       expect(screen.queryByRole('checkbox', { name: /Send me texts/ })).toBeNull();
+    });
+
+    it('keeps texts going to the confirmed number while a new one waits for its code', async () => {
+      const server = fakeServer([]);
+      server.state.reach = {
+        ...server.state.reach,
+        settings: { ...server.state.reach.settings, textsOn: true },
+        saved: true,
+        availability: { ...server.state.reach.availability, texts: { available: true, note: 'On.' } },
+      };
+      server.state.texts = {
+        phone: '+15550111',
+        confirmed: true,
+        mode: 'private',
+        optedOut: false,
+        codePending: false,
+        pendingPhone: null,
+        privatePreview: 'Mannie: a reminder is due. Open the app to see it.',
+      };
+      render(<ReachPreferences reach={server.api.reach} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Change number' }));
+      fireEvent.change(screen.getByLabelText('Your phone number'), { target: { value: '+15550122' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Send code' }));
+      expect(await screen.findByText('Texts keep going to +15550111 until you confirm +15550122.')).toBeTruthy();
+      fireEvent.change(screen.getByLabelText('Code from the text'), { target: { value: '123456' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+      expect(await screen.findByText('+15550122')).toBeTruthy();
+      expect(screen.getByRole('checkbox', { name: /Send me texts/ })).toHaveProperty('checked', true);
     });
 
     it('says what a STOP did and what to do next', async () => {
@@ -233,6 +302,8 @@ describe('Settings, Reach me preferences', () => {
         mode: 'private',
         optedOut: true,
         codePending: false,
+        pendingPhone: null,
+        privatePreview: 'Mannie: a reminder is due. Open the app to see it.',
       };
       render(<ReachPreferences reach={server.api.reach} />);
       expect(

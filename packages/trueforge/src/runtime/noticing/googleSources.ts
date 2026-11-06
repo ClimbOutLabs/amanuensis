@@ -13,13 +13,13 @@ import { grantedFeatures } from '@truefoundry/trueforge-core/core/google/scopes'
 import type { Logger } from 'winston';
 
 import type { IGoogleConnectionStore } from '../../db/googleConnectionStore';
+import type { NoticingOwner } from '../../db/noticingStore';
 import type {
   CalendarEventInfo,
   CalendarSource,
   MailMessage,
   MailRef,
   MailSource,
-  NoticingOwner,
   NoticingSourceProvider,
 } from './sources';
 
@@ -27,6 +27,9 @@ import type {
 const GMAIL_AUTHENTICATION_SERVERS = ['mx.google.com'];
 const TEXT_CHARACTERS = 3000;
 const THREADS_PER_PASS = 50;
+const THREAD_IDS_PER_PAGE = 100;
+/** Most thread ids one pass lists. A pass reads back a day at most, so this is rarely reached. */
+const MAX_THREAD_IDS = 500;
 const EVENTS_PER_PASS = 100;
 
 function headerValues({ message, name }: { message: GmailMessage; name: string }): string[] {
@@ -65,28 +68,37 @@ function toMailMessage(message: GmailMessage, thread_id: string): MailMessage | 
 }
 
 /** Gmail as a mail source, read with the person's own Google login and read-only calls. */
-function gmailMailSource(api: GmailApiPort): MailSource {
+export function gmailMailSource(api: Pick<GmailApiPort, 'listThreads' | 'getThread' | 'getMessage'>): MailSource {
   return {
     trustedAuthenticationServers: GMAIL_AUTHENTICATION_SERVERS,
     async listNewMessages({ since, limit }) {
-      const list = await api.listThreads({
-        query: `in:inbox after:${String(Math.floor(since.getTime() / 1000))}`,
-        maxResults: Math.min(limit, THREADS_PER_PASS),
-        pageToken: undefined,
-      });
+      const query = `in:inbox after:${String(Math.floor(since.getTime() / 1000))}`;
+      const threadIds: string[] = [];
+      let pageToken: string | undefined;
+      do {
+        const list = await api.listThreads({ query, maxResults: THREAD_IDS_PER_PAGE, pageToken });
+        threadIds.push(...list.threadIds);
+        pageToken = list.nextPageToken;
+      } while (pageToken !== undefined && threadIds.length < MAX_THREAD_IDS);
+      // Gmail lists the newest threads first. The oldest are read first, so a pass that cannot read everything
+      // leaves only newer mail for the next one.
+      const oldest = threadIds.slice(-THREADS_PER_PASS);
       const { results } = await mapSkippingMissing({
-        items: list.threadIds,
+        items: oldest,
         work: threadId => api.getThread({ threadId, format: 'metadata' }),
         deadlineMs: LIST_DEADLINE_MS,
       });
-      return results
+      const messages = results
         .flatMap(thread => (thread.messages ?? []).filter(isIncoming).map(message => toMailMessage(message, thread.id)))
         .filter(
           (message): message is MailMessage =>
             message !== undefined && message.received_at.getTime() >= since.getTime(),
         )
-        .sort((a, b) => a.received_at.getTime() - b.received_at.getTime())
-        .slice(0, limit);
+        .sort((a, b) => a.received_at.getTime() - b.received_at.getTime());
+      return {
+        messages: messages.slice(0, limit),
+        truncated: pageToken !== undefined || threadIds.length > oldest.length || messages.length > limit,
+      };
     },
     async readText(message) {
       return readBody({ message: await api.getMessage(message.id), maxChars: TEXT_CHARACTERS }).body;
@@ -104,7 +116,13 @@ function gmailMailSource(api: GmailApiPort): MailSource {
 }
 
 /** Google Calendar as a calendar source: the primary calendar's timed events that are still on. */
-function googleCalendarSource({ api, timeZone }: { api: CalendarApiPort; timeZone: string }): CalendarSource {
+export function googleCalendarSource({
+  api,
+  timeZone,
+}: {
+  api: Pick<CalendarApiPort, 'listEvents'>;
+  timeZone: string;
+}): CalendarSource {
   return {
     async listEvents({ from, to }) {
       const page = await api.listEvents({
@@ -119,9 +137,9 @@ function googleCalendarSource({ api, timeZone }: { api: CalendarApiPort; timeZon
       for (const event of page.events) {
         const start = event.start?.dateTime;
         const end = event.end?.dateTime;
-        const declined = (event.attendees ?? []).some(
-          guest => guest.self === true && guest.responseStatus === 'declined',
-        );
+        const attendees = event.attendees ?? [];
+        const answer = attendees.find(guest => guest.self === true)?.responseStatus;
+        const declined = answer === 'declined';
         if (event.status === 'cancelled' || declined || start === undefined || end === undefined) {
           continue;
         }
@@ -131,6 +149,10 @@ function googleCalendarSource({ api, timeZone }: { api: CalendarApiPort; timeZon
           start: new Date(start),
           end: new Date(end),
           location: event.location ?? null,
+          own:
+            event.organizer?.self === true ||
+            answer === 'accepted' ||
+            (event.organizer === undefined && attendees.length === 0),
         });
       }
       return events;

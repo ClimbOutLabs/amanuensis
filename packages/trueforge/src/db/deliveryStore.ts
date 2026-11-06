@@ -100,6 +100,12 @@ export interface IDeliveryStore {
   /** Marks every unread delivery of the owner seen, loaded on a page or not. Resolves to how many changed. */
   markAllSeen(input: DeliveryOwner & { now?: Date }): Promise<number>;
   countUnread(input: DeliveryOwner): Promise<number>;
+  /** How many of the owner's deliveries of these kinds went out at one of these levels at or after `since`. */
+  countSince(
+    input: DeliveryOwner & { since: Date; kinds: readonly Delivery['kind'][]; levels: readonly DeliveryLevel[] },
+  ): Promise<number>;
+  /** When the owner's newest delivery at one of these levels was made, or undefined when there is none. */
+  lastCreatedAt(input: DeliveryOwner & { levels: readonly DeliveryLevel[] }): Promise<Date | undefined>;
   /** The owner's newest deliveries for a data export. */
   listForExport(input: DeliveryOwner): Promise<Delivery[]>;
   /** Adds exported deliveries under the owner; pass the import transaction. One already there keeps its row. Resolves to how many were added. */
@@ -312,6 +318,40 @@ export class DeliveryStore implements IDeliveryStore {
       .where('seen_at', 'is', null)
       .executeTakeFirst();
     return Number(row?.unread ?? 0);
+  }
+
+  async countSince(
+    input: DeliveryOwner & { since: Date; kinds: readonly Delivery['kind'][]; levels: readonly DeliveryLevel[] },
+  ): Promise<number> {
+    if (input.kinds.length === 0 || input.levels.length === 0) {
+      return 0;
+    }
+    const row = await this.#db
+      .selectFrom('delivery')
+      .select(eb => eb.fn.countAll<string | number>().as('total'))
+      .where('tenant_id', '=', input.tenant_id)
+      .where('created_by', '=', input.created_by)
+      .where('kind', 'in', [...input.kinds])
+      .where('level', 'in', [...input.levels])
+      .where('created_at', '>=', input.since.toISOString())
+      .executeTakeFirst();
+    return Number(row?.total ?? 0);
+  }
+
+  async lastCreatedAt(input: DeliveryOwner & { levels: readonly DeliveryLevel[] }): Promise<Date | undefined> {
+    if (input.levels.length === 0) {
+      return undefined;
+    }
+    const row = await this.#db
+      .selectFrom('delivery')
+      .select('created_at')
+      .where('tenant_id', '=', input.tenant_id)
+      .where('created_by', '=', input.created_by)
+      .where('level', 'in', [...input.levels])
+      .orderBy('created_at', 'desc')
+      .limit(1)
+      .executeTakeFirst();
+    return row === undefined ? undefined : new Date(row.created_at);
   }
 
   async listForExport(input: DeliveryOwner): Promise<Delivery[]> {

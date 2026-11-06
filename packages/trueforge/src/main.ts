@@ -11,6 +11,7 @@
  */
 import { extractErrorLogFields } from '@truefoundry/trueforge-core/core';
 import type { Context } from 'hono';
+import { randomBytes } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import {
@@ -142,6 +143,7 @@ import { sessionApprovalSource } from './runtime/noticing/approvalSource';
 import { createGoogleNoticingSources } from './runtime/noticing/googleSources';
 import { createNoticingJudgeResolver } from './runtime/noticing/judgeFactory';
 import { createNoticingService } from './runtime/noticing/noticingService';
+import { scheduleTimezoneFor } from './runtime/noticing/personTimezone';
 import { reachChannelsFor } from './runtime/noticing/reachChannels';
 import { createReminderReach } from './runtime/noticing/reminderReach';
 import { createSidecarNoticingSources } from './runtime/noticing/sidecarSources';
@@ -172,7 +174,7 @@ import { TrueFoundrySandboxProviderStore } from './truefoundry/TrueFoundrySandbo
 import { TrueFoundryServiceFoundryServerClient } from './truefoundry/TrueFoundryServiceFoundryServerClient';
 import { TrueFoundrySkillStore } from './truefoundry/TrueFoundrySkillStore';
 import { inboundSmsRoute } from './twilioWebhook/inboundSms';
-import { startTwilioWebhookListener } from './twilioWebhook/listener';
+import { twilioListenerFor } from './twilioWebhook/listener';
 import { phoneCallRoutes } from './twilioWebhook/voiceCall';
 import { ensureWritableDataDir } from './utils/dataDir';
 import { startSttAvailabilityWatcher } from './voice/sttAvailability';
@@ -826,6 +828,8 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     provider: smsProvider,
     audit: sentinelAuditStore,
     logger,
+    // Codes are keyed by a secret that is not in the database. With no Twilio details no code is ever sent.
+    codeKey: configuration.TWILIO?.authToken ?? randomBytes(32).toString('hex'),
   });
   const reachChannels = () => reachChannelsFor({ twilio: configuration.TWILIO });
   // Made below; the call channel reaches them only once a call is under way.
@@ -938,10 +942,11 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
       instanceOwner: noticingInstanceOwner,
       logger,
     }),
-    approvals: sessionApprovalSource({ sessionStore }),
+    approvals: sessionApprovalSource({ sessionStore, tenant_id: TENANT_ID }),
     reachSettings: reachSettingsStore,
     store: noticingStore,
     deliveries,
+    history: deliveryStore,
     judgeFor: createNoticingJudgeResolver({
       resolveModelProviderStore: context => persistence.resolveModelProviderStore(context),
       personalizationStore,
@@ -952,6 +957,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     budget: tokenFactoryBudget,
     channels: reachChannels,
     logger,
+    timezoneFor: scheduleTimezoneFor({ scheduleStore }),
   });
   const sentinelServices = createSentinelServices({
     demoMode: configuration.DEMO_MODE,
@@ -1089,7 +1095,9 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     reminderReach: createReminderReach({
       reachSettings: reachSettingsStore,
       store: noticingStore,
+      history: deliveryStore,
       channels: reachChannels,
+      logger,
     }),
     reachChannels,
     textNumbers,
@@ -1436,17 +1444,18 @@ try {
     },
   );
 
-  // The Twilio listener has its own port and serves only Twilio's routes. It is off unless texts are set up.
-  const twilioServer =
-    configuration.TWILIO === undefined
-      ? undefined
-      : startTwilioWebhookListener({
-          settings: configuration.TWILIO,
-          hostname: configuration.HOST,
-          routes: twilioWebhookRoutes,
-          sockets: twilioSocketRoutes,
-          logger,
-        });
+  // The Twilio listener has its own port and serves only Twilio's routes. It is off unless texts are set up, and a
+  // port it cannot open stops the server, because texts must never go out while a STOP cannot be heard.
+  const twilioServer = await twilioListenerFor({
+    twilio: configuration.TWILIO,
+    hostname: configuration.HOST,
+    routes: twilioWebhookRoutes,
+    sockets: twilioSocketRoutes,
+    logger,
+  }).catch((error: unknown) => {
+    console.error(error instanceof Error ? error.message : error);
+    process.exit(1);
+  });
 
   // Voice mode's WebSocket: the upgrade is handled here because the app's own router cannot take one.
   attachVoiceSocket({ server, selfFetch: request => app.fetch(request), logger });

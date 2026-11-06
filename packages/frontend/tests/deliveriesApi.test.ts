@@ -94,6 +94,19 @@ test('saves a push device with its keys and removes it by address', async () => 
   assert.deepEqual(calls[2]?.body, { endpoint: 'https://push.example.test/a' });
 });
 
+test('asks the server whether this device still gets notices, with the address in the body', async () => {
+  const { fetcher, calls } = recordingFetch(seen =>
+    Response.json({ data: { saved: JSON.stringify(seen.body).includes('/kept') } }),
+  );
+  const api = createDeliveriesApi(fetcher);
+  assert.equal(await api.pushDeviceSaved('https://push.example.test/kept'), true);
+  assert.equal(await api.pushDeviceSaved('https://push.example.test/dropped'), false);
+  assert.equal(calls[0]?.method, 'POST');
+  assert.equal(new URL(calls[0]?.url ?? '').pathname, '/api/v1/user/push/subscriptions/lookup');
+  assert.equal(new URL(calls[0]?.url ?? '').search, '');
+  assert.deepEqual(calls[0]?.body, { endpoint: 'https://push.example.test/kept' });
+});
+
 test('reports an address another account holds, and marks everything seen in one call', async () => {
   const taken = createDeliveriesApi(async () =>
     Response.json({ error: { message: 'Another account.' } }, { status: 409 }),
@@ -162,6 +175,16 @@ test('reads Reach me settings into the app shape, dropping what it does not know
   assert.equal(view.availability.calls.note, 'Phone calls are not set up yet.');
 });
 
+test('says the settings could not be read when the server leaves a field out, instead of filling in defaults', async () => {
+  const { max_nudges_per_day: _dropped, ...partial } = WIRE_REACH.data.settings;
+  const broken = createDeliveriesApi(async () => Response.json({ data: { ...WIRE_REACH.data, settings: partial } }));
+  await assert.rejects(broken.reach.get(), /could not be read\. Reload the page\./);
+  const noQuiet = createDeliveriesApi(async () =>
+    Response.json({ data: { ...WIRE_REACH.data, settings: { ...WIRE_REACH.data.settings, quiet_hours: {} } } }),
+  );
+  await assert.rejects(noQuiet.reach.get(), /could not be read\. Reload the page\./);
+});
+
 test('saves Reach me settings in the wire shape and shows the server message when it refuses', async () => {
   const { fetcher, calls } = recordingFetch(() => Response.json(WIRE_REACH));
   const api = createDeliveriesApi(fetcher);
@@ -169,10 +192,12 @@ test('saves Reach me settings in the wire shape and shows the server message whe
   await api.reach.save(view.settings);
 
   assert.equal(calls[1]?.method, 'PUT');
-  const sent = calls[1]?.body as { settings: { channels: unknown; call_kinds: unknown; always_important: unknown } };
-  assert.deepEqual(sent.settings.channels, { texts: false, calls: false });
-  assert.deepEqual(sent.settings.call_kinds, ['travel']);
-  assert.deepEqual(sent.settings.always_important, [
+  const body: unknown = calls[1]?.body;
+  const sent = typeof body === 'object' && body !== null && 'settings' in body ? body.settings : undefined;
+  assert.ok(typeof sent === 'object' && sent !== null);
+  assert.deepEqual('channels' in sent ? sent.channels : undefined, { texts: false, calls: false });
+  assert.deepEqual('call_kinds' in sent ? sent.call_kinds : undefined, ['travel']);
+  assert.deepEqual('always_important' in sent ? sent.always_important : undefined, [
     { address: 'dana@example.com', name: 'Dana', source: 'memory', added_at: '2026-11-01T00:00:00.000Z' },
   ]);
 
@@ -192,15 +217,25 @@ test('tries a channel and reads how many devices a push notice reached', async (
 });
 
 test('walks the text number flow over the texts routes and reads the status in plain fields', async () => {
-  const wire = { phone: '+15550111', confirmed: false, mode: 'private', opted_out: false, code_pending: true };
+  const wire = {
+    phone: '+15550111',
+    confirmed: true,
+    mode: 'private',
+    opted_out: false,
+    code_pending: true,
+    pending_phone: '+15550122',
+    private_preview: 'Mannie: a reminder is due. Open the app to see it.',
+  };
   const { fetcher, calls } = recordingFetch(() => Response.json({ data: wire }));
   const texts = createDeliveriesApi(fetcher).reach.texts;
   assert.deepEqual(await texts.status(), {
     phone: '+15550111',
-    confirmed: false,
+    confirmed: true,
     mode: 'private',
     optedOut: false,
     codePending: true,
+    pendingPhone: '+15550122',
+    privatePreview: 'Mannie: a reminder is due. Open the app to see it.',
   });
   await texts.sendCode('+15550111');
   await texts.confirm('123456');

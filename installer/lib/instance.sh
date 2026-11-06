@@ -187,7 +187,8 @@ instance_render() {
   # Texts through Twilio get a listener of their own beside the app. Its port is published on 127.0.0.1 only, for
   # Tailscale Funnel or a web server on this computer to carry on to Twilio. The app port is never opened for it.
   local sms_port
-  sms_port=$(sms_webhook_port "$name")
+  sms_port=$(sms_webhook_port "$name" quiet)
+  reg_set "$name" sms_port "$sms_port"
   if [ -n "$sms_port" ]; then
     app_ports="${app_ports:+$app_ports$'\n'}      - '127.0.0.1:$sms_port:$sms_port'"
   fi
@@ -249,20 +250,70 @@ instance_render() {
     write_if_changed "$dir/dex.yaml" 644 || true
 }
 
-# The port of the Twilio listener when the instance's settings file turns texts on, otherwise nothing. The default is
-# the app's own default, 8793. A value that is not a port is ignored, and the app then says so when it starts.
-sms_webhook_port() { # name
+# The app's own default port for the Twilio listener. It sits outside the ranges app, sign-in and https ports are
+# picked from, so a new instance never lands on it.
+TWILIO_DEFAULT_PORT=9201
+
+# A value from a settings file read the way the app reads it: the last line for the key, without spaces around it and
+# without the quotes around it.
+env_plain() { # env key
+  local value
+  value=$(sed -n "s/^[[:space:]]*$2[[:space:]]*=//p" "$1" | tail -n 1)
+  value=$(printf '%s' "$value" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+  case $value in
+    \"*\")
+      value=${value#\"}
+      value=${value%\"}
+      ;;
+    \'*\')
+      value=${value#\'}
+      value=${value%\'}
+      ;;
+  esac
+  printf '%s' "$value"
+}
+
+# The Twilio port the instance's settings file asks for when it turns texts on, otherwise nothing. Unset, it is the
+# default. A value that is not a port gives nothing, and the app then says so when it starts.
+sms_port_wanted() { # name
   local env port provider
   env="$(instance_dir "$1")/.env"
   [ -f "$env" ] || return 0
-  provider=$(env_get "$env" REACH_SMS_PROVIDER)
+  provider=$(env_plain "$env" REACH_SMS_PROVIDER | tr '[:upper:]' '[:lower:]')
   [ "$provider" = twilio ] || return 0
-  port=$(env_get "$env" TWILIO_WEBHOOK_PORT)
-  port=${port:-8793}
+  port=$(env_plain "$env" TWILIO_WEBHOOK_PORT)
+  port=${port:-$TWILIO_DEFAULT_PORT}
   case $port in
     '' | *[!0-9]*) return 0 ;;
   esac
-  if [ "$port" -ge 1 ] && [ "$port" -le 65535 ]; then printf '%s' "$port"; fi
+  if [ "${#port}" -le 5 ] && [ "$port" -ge 1 ] && [ "$port" -le 65535 ]; then printf '%s' "$port"; fi
+}
+
+# The Twilio port to publish for the instance, or nothing. A port that another instance's app, sign-in or https uses,
+# that Aman uses inside the instance, or that an instance earlier by name wants for its own texts, is not published,
+# and the installer says which line to change, unless asked to be quiet.
+sms_webhook_port() { # name [quiet]
+  local name=$1 quiet=${2:-} port other taken env
+  port=$(sms_port_wanted "$name")
+  [ -n "$port" ] || return 0
+  taken="$(reg_all app_port) $(reg_all login_port) $(reg_all tls_port) $TLS_HTTP_IN $TLS_HTTPS_IN"
+  for other in $(reg_names); do
+    [ "$other" = "$name" ] && break
+    taken="$taken $(sms_port_wanted "$other")"
+  done
+  if port_reserved "$port" "$taken"; then
+    [ -n "$quiet" ] && return 0
+    env="$(instance_dir "$name")/.env"
+    warn "Texts in $name cannot use TWILIO_WEBHOOK_PORT $port, because another instance or Aman itself already uses it. Set TWILIO_WEBHOOK_PORT to another port in $env, for example $(pick_port $((port + 1)) "$taken $(reg_all sms_port)" || echo 9301), then run the installer again."
+    return 0
+  fi
+  printf '%s' "$port"
+}
+
+# True when the Twilio port the settings file asks for is not the one the compose file publishes, so a plain run of the
+# installer redraws the compose file after texts are turned on or off, or the port is changed.
+sms_port_changed() { # name
+  [ "$(reg_get "$1" sms_port)" != "$(sms_webhook_port "$1" quiet)" ]
 }
 
 # What Aman calls a person who has not said: the start of their email, cut to the longest name allowed.
@@ -608,7 +659,7 @@ instance_derive() {
   local reserved_app reserved_login all_reserved
   reserved_app=$(reg_all app_port)
   reserved_login=$(reg_all login_port)
-  all_reserved="$reserved_app $reserved_login $(reg_all tls_port)"
+  all_reserved="$reserved_app $reserved_login $(reg_all tls_port) $(reg_all sms_port)"
   if [ -n "${OPT_PORT:-}" ]; then
     check_port_usable "$OPT_PORT" "$all_reserved" "--port"
     I_PORT=$OPT_PORT

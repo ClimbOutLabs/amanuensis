@@ -23,8 +23,10 @@ export type DeliveryPage = { items: DeliveryItem[]; nextPageToken: string | unde
 /** What a browser hands over when it turns notices on. */
 export type PushDevice = { endpoint: string; p256dh: string; auth: string; label: string };
 
-/** The kinds of event the assistant watches for. A kind added on the server later shows with its own words. */
-export type NoticingKind = 'mail_always' | 'calendar_clash' | 'travel' | 'bill_due' | 'approval_waiting';
+/** The kinds of event the assistant watches for, in the order Reach me lists them. */
+export const NOTICING_KINDS = ['mail_always', 'calendar_clash', 'travel', 'bill_due', 'approval_waiting'] as const;
+
+export type NoticingKind = (typeof NOTICING_KINDS)[number];
 
 export type ReachSender = {
   address: string;
@@ -54,7 +56,7 @@ export type ReachChannelState = { available: boolean; note: string };
 
 export type ReachView = {
   settings: ReachSettings;
-  /** False until the person saves once. The settings are then the quiet defaults. */
+  /** False until the person saves once. While false, the settings are the quiet defaults. */
   saved: boolean;
   availability: { texts: ReachChannelState; calls: ReachChannelState };
   /** The highest level each kind of event can ever reach, so only kinds that can call offer the tick. */
@@ -78,6 +80,10 @@ export type TextStatus = {
   /** The person replied STOP. They confirm the number again to use texts. */
   optedOut: boolean;
   codePending: boolean;
+  /** A new number waiting for its code. Texts keep going to the confirmed number until then. */
+  pendingPhone: string | null;
+  /** What a Private text says, word for word, as the server writes it. */
+  privatePreview: string;
 };
 
 /** The number for texts, served by the host. Each call rejects with a message fit to show. */
@@ -119,5 +125,7 @@ export type DeliveriesApi = {
   /** Resolves to `taken` when this address already gets another account's notices; a fresh subscription is needed. */
   savePushDevice(device: PushDevice): Promise<'saved' | 'taken'>;
   removePushDevice(endpoint: string): Promise<void>;
+  /** Whether the server still sends notices to this address. A device drops off when newer ones replace it or it goes away. */
+  pushDeviceSaved(endpoint: string): Promise<boolean>;
   reach: ReachApi;
 };

@@ -3,6 +3,7 @@ import {
   emptyChatProvenance,
   hasReadContent,
   isTrustedLink,
+  namesPhoneNumber,
   namesUrl,
   recordEmailText,
   recordPersonText,
@@ -178,6 +179,14 @@ describe('where a link came from', () => {
     expect(namesUrl(['weather in Oslo'])).toBe(false);
     expect(namesUrl(['https://example.org/a'])).toBe(true);
     expect(namesUrl(['read example.org/a please'])).toBe(true);
+  });
+
+  it('finds anything written like a phone number, short local ones included', () => {
+    expect(namesPhoneNumber(['call 555-0100 now'])).toBe(true);
+    expect(namesPhoneNumber(['ring +44 20 7946 0958'])).toBe(true);
+    expect(namesPhoneNumber(['(415) 555-0132'])).toBe(true);
+    expect(namesPhoneNumber(['Your standup at 16:00 overlaps the dentist on November 7.'])).toBe(false);
+    expect(namesPhoneNumber(['The bill of 1,250.00 is due 2026-11-07.'])).toBe(false);
   });
 
   it('folds spellings of one page together', () => {

@@ -575,6 +575,26 @@ describe('VoiceInputButton voice mode', () => {
     return { ...made, view };
   }
 
+  it('tells the mic and the voice mode switch apart when pointed at', async () => {
+    const { api } = makeVoiceApi();
+    render(composer(api));
+    fireEvent.mouseEnter(await screen.findByRole('button', { name: 'Record voice message' }));
+    expect(screen.getByRole('tooltip').textContent).toMatch(/^Voice message: tap to record/);
+    fireEvent.mouseLeave(screen.getByRole('button', { name: 'Record voice message' }));
+    fireEvent.focus(screen.getByRole('button', { name: 'Start voice mode' }));
+    expect(screen.getByRole('tooltip').textContent).toMatch(/^Voice mode: just talk/);
+    expect(screen.queryByTitle(/./)).toBeNull();
+  });
+
+  it('shows no mic hint while recording, since a hold and a tap end differently', async () => {
+    const { api } = makeVoiceApi();
+    render(composer(api));
+    fireEvent.click(await screen.findByRole('button', { name: 'Record voice message' }), { detail: 0 });
+    const stop = await screen.findByRole('button', { name: 'Stop and transcribe' });
+    fireEvent.mouseEnter(stop);
+    expect(screen.queryByRole('tooltip')).toBeNull();
+  });
+
   it('asks the server for a line to this chat and starts listening', async () => {
     const { connectMock } = await startVoiceMode();
     expect(connectMock).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'chat-1' }));

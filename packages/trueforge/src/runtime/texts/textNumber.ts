@@ -8,14 +8,19 @@ import type { IReachSettingsStore } from '../../db/reachSettingsStore';
 import type { ITextContactStore, TextContactOwner } from '../../db/textContactStore';
 import { E164_PATTERN, type TextContact, type TextMode, type TextStatus } from '../../schemas/textMessages';
 import { assistantNameFor } from './assistantName';
-import type { SmsProvider } from './smsProvider';
+import type { SmsFailure, SmsProvider } from './smsProvider';
+import { codeText, privateText } from './textWords';
 
 export const CODE_TTL_MS = 10 * 60_000;
 /** Tries at one code. The last one used up, the code is void and a new one must be asked for. */
 export const MAX_CODE_ATTEMPTS = 5;
 /** Codes sent in one hour for one person, whatever number they ask for, so the page cannot be used to text strangers. */
 export const MAX_CODES_PER_HOUR = 3;
+/** Codes sent to one number, whoever asks, so many people together cannot flood it either. */
+export const MAX_CODES_PER_NUMBER_PER_HOUR = 3;
+export const MAX_CODES_PER_NUMBER_PER_DAY = 10;
 const HOUR_MS = 60 * 60_000;
+const DAY_MS = 24 * HOUR_MS;
 
 /** The words Twilio treats as STOP in English, whatever the case. */
 const OPT_OUT_WORDS = new Set(['STOP', 'STOPALL', 'UNSUBSCRIBE', 'CANCEL', 'END', 'QUIT']);
@@ -46,7 +51,8 @@ function pendingCode(contact: TextContact | undefined): { hash: string; salt: st
 
 export type SendCodeResult =
   | { ok: true }
-  | { ok: false; reason: 'bad_number' | 'not_set_up' | 'send_failed' }
+  | { ok: false; reason: 'bad_number' | 'not_set_up' }
+  | { ok: false; reason: 'send_failed'; failure: SmsFailure }
   | { ok: false; reason: 'rate_limited'; retry_in_minutes: number };
 
 export type ConfirmCodeResult =
@@ -58,33 +64,17 @@ export type TextModeResult = { ok: true } | { ok: false; reason: 'no_number' };
 
 export interface TextNumberService {
   status(owner: TextContactOwner): Promise<TextStatus>;
-  /** Texts a one-time code to the number. Nothing else is ever sent to a number before it is confirmed. */
+  /**
+   * Texts a one-time code to the number. Nothing else is ever sent to a number before it is confirmed. A new number
+   * waits beside a confirmed one, which keeps getting texts until the new one is confirmed.
+   */
   sendCode(input: { owner: TextContactOwner; phone: string }): Promise<SendCodeResult>;
   confirm(input: { owner: TextContactOwner; code: string }): Promise<ConfirmCodeResult>;
   setMode(input: { owner: TextContactOwner; mode: TextMode }): Promise<TextModeResult>;
-  /** Forgets the number and switches texts off. */
+  /** Forgets the number and switches texts off. Codes already sent stay counted. */
   remove(owner: TextContactOwner): Promise<void>;
   /** A STOP from this number: texts go off for everyone who has it, and Activity says so. Resolves to how many people. */
   stopNumber(phone: string): Promise<number>;
-}
-
-function hashCode({ code, salt, owner }: { code: string; salt: string; owner: TextContactOwner }): string {
-  return createHmac('sha256', salt).update(`${owner.tenant_id}\u0000${owner.created_by}\u0000${code}`).digest('hex');
-}
-
-function blankContact({ phone, mode }: { phone: string; mode: TextMode }): TextContact {
-  return {
-    phone,
-    mode,
-    confirmed_at: null,
-    opted_out_at: null,
-    code_hash: null,
-    code_salt: null,
-    code_expires_at: null,
-    code_attempts: 0,
-    send_window_started_at: null,
-    sends_in_window: 0,
-  };
 }
 
 export function createTextNumberService({
@@ -94,6 +84,7 @@ export function createTextNumberService({
   provider,
   audit,
   logger,
+  codeKey,
   now = () => new Date(),
   newCode = () => String(randomInt(0, 1_000_000)).padStart(6, '0'),
 }: {
@@ -104,10 +95,21 @@ export function createTextNumberService({
   provider: SmsProvider | undefined;
   audit: AuditLogWriter;
   logger: Logger;
+  /** A server secret that is never stored in the database, so a copy of the database cannot be used to find a code. */
+  codeKey: string;
   now?: () => Date;
   /** Seam for tests. */
   newCode?: () => string;
 }): TextNumberService {
+  const hashCode = ({ code, salt, owner }: { code: string; salt: string; owner: TextContactOwner }): string =>
+    createHmac('sha256', codeKey)
+      .update(`${salt}\u0000${owner.tenant_id}\u0000${owner.created_by}\u0000${code}`)
+      .digest('hex');
+
+  /** A number in a limit's key, keyed so the count table never holds the number itself. */
+  const numberKey = (phone: string): string =>
+    createHmac('sha256', codeKey).update(`number\u0000${phone}`).digest('hex');
+
   async function textsOff(owner: TextContactOwner): Promise<void> {
     const settings = await reachSettings.get(owner);
     if (settings?.channels.texts === true) {
@@ -145,11 +147,54 @@ export function createTextNumberService({
     }
   }
 
+  /**
+   * Counts the send against the person, the number by the hour and the number by the day, each in one statement
+   * before the provider is called, so neither parallel requests nor a failing provider get past a limit. A limit
+   * already passed when a later one refuses stays spent.
+   */
+  async function claimSend({
+    owner,
+    phone,
+    at,
+  }: {
+    owner: TextContactOwner;
+    phone: string;
+    at: Date;
+  }): Promise<{ ok: true } | { ok: false; retry_in_minutes: number }> {
+    await store.forgetCodeSends({ before: new Date(at.getTime() - DAY_MS) });
+    const limits = [
+      {
+        key: `person:${JSON.stringify([owner.tenant_id, owner.created_by])}`,
+        window_ms: HOUR_MS,
+        max: MAX_CODES_PER_HOUR,
+      },
+      { key: `number-hour:${numberKey(phone)}`, window_ms: HOUR_MS, max: MAX_CODES_PER_NUMBER_PER_HOUR },
+      { key: `number-day:${numberKey(phone)}`, window_ms: DAY_MS, max: MAX_CODES_PER_NUMBER_PER_DAY },
+    ];
+    for (const limit of limits) {
+      const claim = await store.claimCodeSend({ ...limit, now: at });
+      if (!claim.ok) {
+        const waited = at.getTime() - new Date(claim.window_started_at).getTime();
+        return { ok: false, retry_in_minutes: Math.max(1, Math.ceil((limit.window_ms - waited) / 60_000)) };
+      }
+    }
+    return { ok: true };
+  }
+
   return {
     async status(owner) {
-      const contact = await store.get(owner);
+      const [contact, name] = await Promise.all([store.get(owner), assistantNameFor({ personalization, owner })]);
+      const private_preview = privateText({ name, kind: 'reminder' });
       if (contact === undefined) {
-        return { phone: null, confirmed: false, mode: 'private', opted_out: false, code_pending: false };
+        return {
+          phone: null,
+          confirmed: false,
+          mode: 'private',
+          opted_out: false,
+          pending_phone: null,
+          code_pending: false,
+          private_preview,
+        };
       }
       const pending =
         contact.code_hash !== null &&
@@ -161,7 +206,9 @@ export function createTextNumberService({
         confirmed: contact.confirmed_at !== null,
         mode: contact.mode,
         opted_out: contact.opted_out_at !== null,
+        pending_phone: contact.pending_phone,
         code_pending: pending,
+        private_preview,
       };
     },
 
@@ -174,53 +221,33 @@ export function createTextNumberService({
         return { ok: false, reason: 'bad_number' };
       }
       const at = now();
-      const existing = await store.get(owner);
-      const windowStart = existing?.send_window_started_at ?? null;
-      const inWindow = windowStart !== null && at.getTime() - new Date(windowStart).getTime() < HOUR_MS;
-      if (inWindow && (existing?.sends_in_window ?? 0) >= MAX_CODES_PER_HOUR) {
-        const waited = at.getTime() - new Date(windowStart).getTime();
-        return {
-          ok: false,
-          reason: 'rate_limited',
-          retry_in_minutes: Math.max(1, Math.ceil((HOUR_MS - waited) / 60_000)),
-        };
+      const claim = await claimSend({ owner, phone: number, at });
+      if (!claim.ok) {
+        return { ok: false, reason: 'rate_limited', retry_in_minutes: claim.retry_in_minutes };
       }
       const code = newCode();
       const salt = randomBytes(16).toString('hex');
-      const sameNumber = existing?.phone === number;
-      const base: TextContact = {
-        ...(existing ?? blankContact({ phone: number, mode: 'private' })),
-        phone: number,
-        // A different number starts unconfirmed. The same one keeps what it earned, so a fresh code never switches it off.
-        confirmed_at: sameNumber ? existing.confirmed_at : null,
-        opted_out_at: sameNumber ? existing.opted_out_at : null,
+      const stored = {
+        hash: hashCode({ code, salt, owner }),
+        salt,
+        expires_at: new Date(at.getTime() + CODE_TTL_MS).toISOString(),
       };
-      const pending: TextContact = {
-        ...base,
-        code_hash: hashCode({ code, salt, owner }),
-        code_salt: salt,
-        code_expires_at: new Date(at.getTime() + CODE_TTL_MS).toISOString(),
-        code_attempts: 0,
-        send_window_started_at: inWindow ? windowStart : at.toISOString(),
-        sends_in_window: inWindow ? (existing?.sends_in_window ?? 0) + 1 : 1,
-      };
-      if (!sameNumber) {
-        await textsOff(owner);
+      const existing = await store.get(owner);
+      // A confirmed number keeps getting texts while a new one is being confirmed.
+      const beside =
+        canText(existing) &&
+        existing.phone !== number &&
+        (await store.startCode({ ...owner, phone: number, as: 'new_number', code: stored, now: at }));
+      if (!beside) {
+        if (existing !== undefined && existing.phone !== number) {
+          await textsOff(owner);
+        }
+        await store.startCode({ ...owner, phone: number, as: 'number', code: stored, now: at });
       }
-      // The send is counted before it is tried, so a failing provider cannot be used to get past the limit.
-      await store.put({ ...owner, contact: pending, now: at });
-      const name = await assistantNameFor({ personalization, owner });
-      const result = await provider.send({
-        to: number,
-        body: `${name}: your confirmation code is ${code}. It works for 10 minutes. If you did not ask for it, ignore this text.`,
-      });
+      const result = await provider.send({ to: number, body: codeText(code) });
       if (result.outcome === 'failed') {
-        await store.put({
-          ...owner,
-          contact: { ...pending, code_hash: null, code_salt: null, code_expires_at: null },
-          now: at,
-        });
-        return { ok: false, reason: 'send_failed' };
+        await store.clearCode({ ...owner, code_hash: stored.hash, now: at });
+        return { ok: false, reason: 'send_failed', failure: result.failure };
       }
       return { ok: true };
     },
@@ -232,13 +259,7 @@ export function createTextNumberService({
         return { ok: false, reason: 'no_code' };
       }
       const at = now();
-      const forget = async (): Promise<void> => {
-        await store.put({
-          ...owner,
-          contact: { ...contact, code_hash: null, code_salt: null, code_expires_at: null, code_attempts: 0 },
-          now: at,
-        });
-      };
+      const forget = () => store.clearCode({ ...owner, code_hash: pending.hash, now: at });
       if (contact.code_expires_at === null || new Date(contact.code_expires_at).getTime() <= at.getTime()) {
         await forget();
         return { ok: false, reason: 'expired' };
@@ -260,29 +281,18 @@ export function createTextNumberService({
         }
         return { ok: false, reason: 'wrong', attempts_left: MAX_CODE_ATTEMPTS - attempt };
       }
-      await store.put({
-        ...owner,
-        contact: {
-          ...contact,
-          confirmed_at: at.toISOString(),
-          opted_out_at: null,
-          code_hash: null,
-          code_salt: null,
-          code_expires_at: null,
-          code_attempts: 0,
-        },
-        now: at,
-      });
+      // Only while the code read above is still the pending one, so a STOP or a newer code in between is never undone.
+      if (!(await store.confirmCode({ ...owner, code_hash: pending.hash, now: at }))) {
+        return { ok: false, reason: 'no_code' };
+      }
       await record({ owner, tool_name: 'delivery.sms_confirmed', description: 'You confirmed your number for texts.' });
       return { ok: true };
     },
 
     async setMode({ owner, mode }) {
-      const contact = await store.get(owner);
-      if (contact === undefined) {
+      if (!(await store.setMode({ ...owner, mode, now: now() }))) {
         return { ok: false, reason: 'no_number' };
       }
-      await store.put({ ...owner, contact: { ...contact, mode }, now: now() });
       return { ok: true };
     },
 
@@ -298,22 +308,9 @@ export function createTextNumberService({
     },
 
     async stopNumber(phone) {
-      const at = now();
-      const owners = await store.listByPhone(phone);
-      for (const { contact, ...owner } of owners) {
-        await store.put({
-          ...owner,
-          contact: {
-            ...contact,
-            confirmed_at: null,
-            opted_out_at: at.toISOString(),
-            code_hash: null,
-            code_salt: null,
-            code_expires_at: null,
-            code_attempts: 0,
-          },
-          now: at,
-        });
+      const { opted_out, pending_dropped } = await store.optOut({ phone, now: now() });
+      // Reach settings are per person, so each one is switched off on its own. A number is rarely shared by many.
+      for (const owner of opted_out) {
         await textsOff(owner);
         await record({
           owner,
@@ -322,7 +319,15 @@ export function createTextNumberService({
             'You replied STOP, so texts are off. To use them again, reply START from that phone and confirm the number again in Settings.',
         });
       }
-      return owners.length;
+      for (const owner of pending_dropped) {
+        await record({
+          owner,
+          tool_name: 'delivery.sms_stop',
+          description:
+            'The new number replied STOP, so it was not added. Texts still go to the number you confirmed before.',
+        });
+      }
+      return opted_out.length + pending_dropped.length;
     },
   };
 }

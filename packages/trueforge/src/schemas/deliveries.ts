@@ -181,6 +181,22 @@ export const DeletePushSubscriptionRequestSchema = z
 
 export const DeletePushSubscriptionResponseSchema = z.object({}).openapi('DeletePushSubscriptionResponse');
 
+export const LookupPushSubscriptionRequestSchema = z
+  .object({ endpoint: z.url().max(2048).describe('The push service address this browser has for notices.') })
+  .openapi('LookupPushSubscriptionRequest');
+
+export const PushSubscriptionLookupSchema = z
+  .object({
+    saved: z
+      .boolean()
+      .describe('Whether this device still gets notices. False once it was turned off, replaced or went away.'),
+  })
+  .openapi('PushSubscriptionLookup');
+
+export const LookupPushSubscriptionResponseSchema = z
+  .object({ data: PushSubscriptionLookupSchema })
+  .openapi('LookupPushSubscriptionResponse');
+
 export const PushConfigSchema = z
   .object({
     public_key: z.string().nullable().describe('The key a browser needs to turn notices on, or null when push is off.'),

@@ -31,12 +31,18 @@ describe('parseTwilioSettings', () => {
     expect(parseTwilioSettings({ ...base, webhookPort: '9100' })?.webhookPort).toBe(9100);
   });
 
+  it('listens by default on the port the installer keeps free for it', () => {
+    expect(DEFAULT_TWILIO_WEBHOOK_PORT).toBe(9201);
+  });
+
   it('refuses an unknown provider and each missing or malformed value, saying what to do', () => {
     expect(() => parseTwilioSettings({ ...base, provider: 'acme' })).toThrow(/REACH_SMS_PROVIDER/);
     expect(() => parseTwilioSettings({ ...base, accountSid: 'nope' })).toThrow(/TWILIO_ACCOUNT_SID/);
     expect(() => parseTwilioSettings({ ...base, authToken: undefined })).toThrow(/TWILIO_AUTH_TOKEN/);
     expect(() => parseTwilioSettings({ ...base, fromNumber: '0123' })).toThrow(/TWILIO_FROM_NUMBER/);
-    expect(() => parseTwilioSettings({ ...base, webhookPublicUrl: undefined })).toThrow(/TWILIO_WEBHOOK_PUBLIC_URL/);
+    expect(() => parseTwilioSettings({ ...base, webhookPublicUrl: undefined })).toThrow(
+      'TWILIO_WEBHOOK_PUBLIC_URL must be the https address Twilio reaches, such as https://aman.example.com. Set it to that address.',
+    );
     expect(() => parseTwilioSettings({ ...base, webhookPublicUrl: 'http://aman.example.invalid' })).toThrow(
       /TWILIO_WEBHOOK_PUBLIC_URL/,
     );

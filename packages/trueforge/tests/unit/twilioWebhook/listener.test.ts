@@ -1,15 +1,22 @@
-import type { ServerType } from '@hono/node-server';
+import { createServer } from 'node:net';
+import { Writable } from 'node:stream';
+
 import winston from 'winston';
 
-import { EMPTY_TWIML, startTwilioWebhookListener, type TwilioWebhookRoute } from '../../../src/twilioWebhook/listener';
+import {
+  EMPTY_TWIML,
+  startTwilioWebhookListener,
+  twilioListenerFor,
+  type TwilioWebhookRoute,
+} from '../../../src/twilioWebhook/listener';
 import { twilioSignature } from '../../../src/twilioWebhook/signature';
 import { closeServer, listeningPort } from '../../fixtures/listenPort';
 
 const settings = { authToken: 'token-for-tests', webhookPublicUrl: 'https://aman.example.invalid', webhookPort: 0 };
 const logger = winston.createLogger({ silent: true });
 
-async function listen(routes: readonly TwilioWebhookRoute[]) {
-  const server: ServerType = startTwilioWebhookListener({ settings, hostname: '127.0.0.1', routes, logger });
+async function listen(routes: readonly TwilioWebhookRoute[], log = logger) {
+  const server = await startTwilioWebhookListener({ settings, hostname: '127.0.0.1', routes, logger: log });
   const port = await listeningPort(server);
   return {
     base: `http://127.0.0.1:${String(port)}`,
@@ -133,5 +140,82 @@ describe('the Twilio listener', () => {
     });
     expect(large.status).toBe(413);
     expect(handle).not.toHaveBeenCalled();
+  });
+
+  it('answers a route that fails with an empty reply, and logs only the address and the kind of error', async () => {
+    const errors: unknown[] = [];
+    const recording = winston.createLogger({
+      transports: [
+        new winston.transports.Stream({
+          stream: new Writable({
+            write(chunk: Buffer, _encoding, done) {
+              errors.push(JSON.parse(chunk.toString()));
+              done();
+            },
+          }),
+        }),
+      ],
+    });
+    const failing = await listen(
+      [{ method: 'POST', path: '/twilio/fails', handle: () => Promise.reject(new TypeError('+15550111 said hi')) }],
+      recording,
+    );
+    try {
+      const { headers, body } = signed({ path: '/twilio/fails', fields: { From: '+15550111', Body: 'hi' } });
+      const response = await fetch(`${failing.base}/twilio/fails`, { method: 'POST', headers, body });
+      expect(response.status).toBe(500);
+      await expect(response.text()).resolves.toBe(EMPTY_TWIML);
+      expect(errors).toContainEqual({
+        level: 'error',
+        message: 'A Twilio request failed',
+        path: '/twilio/fails',
+        error_class: 'TypeError',
+      });
+      expect(JSON.stringify(errors)).not.toContain('5550111');
+    } finally {
+      await failing.close();
+    }
+  });
+});
+
+describe('starting the Twilio listener', () => {
+  it('fails when its port is taken, so the server does not run without hearing STOP', async () => {
+    const holder = createServer();
+    await new Promise<void>(resolve => holder.listen(0, '127.0.0.1', resolve));
+    const address = holder.address();
+    if (address === null || typeof address === 'string') {
+      throw new Error('The holder has no port.');
+    }
+    try {
+      await expect(
+        startTwilioWebhookListener({
+          settings: { ...settings, webhookPort: address.port },
+          hostname: '127.0.0.1',
+          routes: [],
+          logger,
+        }),
+      ).rejects.toThrow(`The Twilio listener could not use port ${String(address.port)}`);
+    } finally {
+      await new Promise<void>(resolve => holder.close(() => resolve()));
+    }
+  });
+
+  it('starts nothing when texts are not set up', async () => {
+    await expect(twilioListenerFor({ twilio: undefined, hostname: '127.0.0.1', routes: [], logger })).resolves.toBe(
+      undefined,
+    );
+  });
+
+  it('starts the listener when texts are set up', async () => {
+    const server = await twilioListenerFor({
+      twilio: { ...settings, accountSid: `AC${'1'.repeat(32)}`, fromNumber: '+15550100' },
+      hostname: '127.0.0.1',
+      routes: [],
+      logger,
+    });
+    expect(server?.listening).toBe(true);
+    if (server !== undefined) {
+      await closeServer(server);
+    }
   });
 });

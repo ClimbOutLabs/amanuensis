@@ -22,6 +22,7 @@ import { startTwilioWebhookListener } from '../../src/twilioWebhook/listener';
 import { twilioSignature } from '../../src/twilioWebhook/signature';
 import { phoneCallRoutes } from '../../src/twilioWebhook/voiceCall';
 import { socketBytes } from '../../src/voice/transport';
+import { confirmNumber } from './confirmedNumber';
 import { closeServer, listeningPort } from './listenPort';
 import { FakeStt, FakeTts, LoudnessVad } from './voice/fakes';
 
@@ -36,7 +37,10 @@ export const AUTH_TOKEN = 'token-for-tests';
  * Stores over one test database, a fake Twilio for texts and calls, a push channel that only records, and the call
  * service on a real Twilio listener. The clock only moves when a test moves it.
  */
-export async function callsHarness({ chat }: { chat?: CallChat } = {}) {
+export async function callsHarness({
+  chat,
+  assistantName = 'Mannie',
+}: { chat?: CallChat; assistantName?: string } = {}) {
   const db = createSqliteDb(':memory:');
   await migrateSqliteToLatest(db);
   const logger = winston.createLogger({ silent: true });
@@ -48,7 +52,7 @@ export async function callsHarness({ chat }: { chat?: CallChat } = {}) {
   await personalization.upsertProfile({
     ...ALICE,
     updated_by: 'alice',
-    assistant_name: 'Mannie',
+    assistant_name: assistantName,
     assistant_identity: null,
     voice_guidance: null,
     user_name: 'Dana Reyes',
@@ -98,6 +102,7 @@ export async function callsHarness({ chat }: { chat?: CallChat } = {}) {
   const tts = new FakeTts();
   const numbers = createTextNumberService({
     store: contacts,
+    codeKey: 'test-code-key',
     reachSettings,
     personalization,
     provider: smsProvider,
@@ -148,21 +153,13 @@ export async function callsHarness({ chat }: { chat?: CallChat } = {}) {
   });
 
   /** A person whose number is confirmed, with texts and calls switched on, the way the Settings page leaves them. */
-  async function readyToCall({ texts: textsOn = true }: { texts?: boolean } = {}) {
-    await contacts.put({
-      ...ALICE,
-      contact: {
-        phone: PHONE,
-        mode: 'private',
-        confirmed_at: '2026-11-06T09:00:00.000Z',
-        opted_out_at: null,
-        code_hash: null,
-        code_salt: null,
-        code_expires_at: null,
-        code_attempts: 0,
-        send_window_started_at: null,
-        sends_in_window: 0,
-      },
+  async function readyToCall({ texts: textsOn = true, pending }: { texts?: boolean; pending?: string } = {}) {
+    await confirmNumber({
+      store: contacts,
+      owner: ALICE,
+      phone: PHONE,
+      now: new Date('2026-11-06T09:00:00.000Z'),
+      ...(pending === undefined ? {} : { pending }),
     });
     const settings = defaultReachSettings('UTC');
     await reachSettings.put({ ...ALICE, settings: { ...settings, channels: { texts: textsOn, calls: true } } });
@@ -180,7 +177,7 @@ export async function callsHarness({ chat }: { chat?: CallChat } = {}) {
   }
 
   const { routes, sockets } = phoneCallRoutes({ calls: service });
-  const server: ServerType = startTwilioWebhookListener({
+  const server: ServerType = await startTwilioWebhookListener({
     settings: { authToken: AUTH_TOKEN, webhookPublicUrl: PUBLIC_URL, webhookPort: 0 },
     hostname: '127.0.0.1',
     routes,

@@ -6,7 +6,7 @@ import { createTlsFetch, normalizeTlsUrl } from '../http/tls';
 import type { NoticingWatcher } from '../schemas/reach';
 import type { ControlLoop } from './Controller';
 
-/** Mail is looked at every 10 minutes, the calendar every 30, and waiting approvals alongside the mail. */
+/** Mail is looked at every 10 minutes, the calendar every 30, and waiting approvals every 5. */
 export const MAIL_WATCH_INTERVAL_MS = 10 * 60_000;
 export const CALENDAR_WATCH_INTERVAL_MS = 30 * 60_000;
 const APPROVAL_WATCH_INTERVAL_MS = 5 * 60_000;

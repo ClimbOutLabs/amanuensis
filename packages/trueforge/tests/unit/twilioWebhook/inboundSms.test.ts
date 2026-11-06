@@ -17,7 +17,7 @@ async function serve() {
   const h = await textsHarness();
   await h.readyToText();
   const logger = winston.createLogger({ silent: true });
-  const server = startTwilioWebhookListener({
+  const server = await startTwilioWebhookListener({
     settings,
     hostname: '127.0.0.1',
     routes: [inboundSmsRoute({ settings, textNumbers: h.numbers, logger })],
@@ -69,6 +69,20 @@ describe('inbound texts', () => {
       expect(s.h.activity.map(row => row.tool_name)).toContain('delivery.sms_stop');
     },
   );
+
+  it('acts on one message once, however often the same signed request arrives', async () => {
+    const stop = jest.spyOn(s.h.numbers, 'stopNumber');
+    const fields = { From: PHONE, Body: 'STOP', AccountSid: settings.accountSid, MessageSid: `SM${'a'.repeat(32)}` };
+    expect((await s.post({ fields })).status).toBe(200);
+    await s.h.readyToText();
+    const again = await s.post({ fields });
+    expect(again.status).toBe(200);
+    await expect(again.text()).resolves.toBe('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect((await s.h.reachSettings.get(ALICE))?.channels.texts).toBe(true);
+    await s.post({ fields: { ...fields, MessageSid: `SM${'b'.repeat(32)}` } });
+    expect(stop).toHaveBeenCalledTimes(2);
+  });
 
   it('ignores every other reply: no change, and no answer written back', async () => {
     for (const body of ['yes', 'START', 'what is this', 'please stop', 'HELP']) {

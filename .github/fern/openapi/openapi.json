@@ -5917,6 +5917,31 @@
         ],
         "type": "object"
       },
+      "LookupPushSubscriptionRequest": {
+        "properties": {
+          "endpoint": {
+            "description": "The push service address this browser has for notices.",
+            "format": "uri",
+            "maxLength": 2048,
+            "type": "string"
+          }
+        },
+        "required": [
+          "endpoint"
+        ],
+        "type": "object"
+      },
+      "LookupPushSubscriptionResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PushSubscriptionLookup"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "MCPAuthRequiredEvent": {
         "allOf": [
           {
@@ -7803,14 +7828,15 @@
         "type": "object"
       },
       "ModelUsageRole": {
-        "description": "Job the model did: chat answers, sub-agent work, compaction, turn summarization, profile learning, or the knowledge relevance check.",
+        "description": "Job the model did: chat answers, sub-agent work, compaction, turn summarization, profile learning, the knowledge relevance check, or deciding how loudly to tell the person about something noticed.",
         "enum": [
           "chat",
           "delegation",
           "compaction",
           "summarization",
           "profile_learning",
-          "relevance_judge"
+          "relevance_judge",
+          "noticing"
         ],
         "type": "string"
       },
@@ -8875,6 +8901,18 @@
         ],
         "type": "object"
       },
+      "PushSubscriptionLookup": {
+        "properties": {
+          "saved": {
+            "description": "Whether this device still gets notices. False once it was turned off, replaced or went away.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "saved"
+        ],
+        "type": "object"
+      },
       "QuietHours": {
         "properties": {
           "enabled": {
@@ -9123,7 +9161,7 @@
             "type": "object"
           },
           "saved": {
-            "description": "False until the person saves once. Then the settings are the quiet defaults.",
+            "description": "False until the person saves once. While false, the settings are the quiet defaults.",
             "type": "boolean"
           },
           "settings": {
@@ -11776,12 +11814,23 @@
             "description": "Whether the person replied STOP. They confirm the number again to use texts.",
             "type": "boolean"
           },
+          "pending_phone": {
+            "description": "A new number waiting for its code. Texts keep going to the confirmed number until then.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "phone": {
             "description": "The number the person entered, or null before one is entered.",
             "type": [
               "string",
               "null"
             ]
+          },
+          "private_preview": {
+            "description": "What a Private text says, word for word, for a reminder.",
+            "type": "string"
           }
         },
         "required": [
@@ -11789,7 +11838,9 @@
           "confirmed",
           "mode",
           "opted_out",
-          "code_pending"
+          "pending_phone",
+          "code_pending",
+          "private_preview"
         ],
         "type": "object"
       },
@@ -26507,6 +26558,62 @@
           "push"
         ],
         "x-fern-sdk-method-name": "create_subscription"
+      }
+    },
+    "/api/v1/user/push/subscriptions/lookup": {
+      "post": {
+        "description": "Says whether this device is still saved for the signed-in person. A device drops off when 10 newer ones are saved or its push service says it is gone.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LookupPushSubscriptionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LookupPushSubscriptionResponse"
+                }
+              }
+            },
+            "description": "Whether the device is saved."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "Check whether a device gets notices",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "deliveries",
+          "push"
+        ],
+        "x-fern-sdk-method-name": "lookup_subscription"
       }
     },
     "/api/v1/user/reach": {

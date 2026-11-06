@@ -1,6 +1,13 @@
 import { vi } from 'vitest';
 
-import type { DeliveriesApi, DeliveryItem, ReachSettings, ReachView, TextStatus } from '@/deliveries/types.js';
+import type {
+  DeliveriesApi,
+  DeliveryItem,
+  ReachSettings,
+  ReachSuggestion,
+  ReachView,
+  TextStatus,
+} from '@/deliveries/types.js';
 
 export function item(overrides: Partial<DeliveryItem> & { id: string }): DeliveryItem {
   return {
@@ -32,18 +39,36 @@ export const QUIET_SETTINGS: ReachSettings = {
   approvalWaitMinutes: 15,
 };
 
+const NO_NUMBER: TextStatus = {
+  phone: null,
+  confirmed: false,
+  mode: 'private',
+  optedOut: false,
+  codePending: false,
+  pendingPhone: null,
+  privatePreview: 'Mannie: a reminder is due. Open the app to see it.',
+};
+
 /** A server that holds the feed once, the way the real one does, so two "devices" can share it. */
 export function fakeServer(initial: DeliveryItem[]) {
-  const state = {
+  const state: {
+    items: DeliveryItem[];
+    pushKey: string | null;
+    pushEndpoints: Set<string>;
+    reach: ReachView;
+    suggestions: ReachSuggestion[];
+    texts: TextStatus;
+  } = {
     items: initial,
-    pushKey: SERVER_KEY as string | null,
+    pushKey: SERVER_KEY,
+    pushEndpoints: new Set<string>(),
     reach: {
       settings: QUIET_SETTINGS,
       saved: false,
       availability: {
         texts: {
           available: false,
-          note: 'Texts are not set up. To set them up, add your Twilio details to the settings file and restart Aman.',
+          note: 'Texts are not set up on this server. To set them up, add the Twilio details to the settings file and restart Aman.',
         },
         calls: { available: false, note: 'Phone calls are not set up yet.' },
       },
@@ -54,9 +79,9 @@ export function fakeServer(initial: DeliveryItem[]) {
         bill_due: 'nudge',
         approval_waiting: 'nudge',
       },
-    } as ReachView,
-    suggestions: [] as { address: string; memory: string }[],
-    texts: { phone: null, confirmed: false, mode: 'private', optedOut: false, codePending: false } as TextStatus,
+    },
+    suggestions: [],
+    texts: NO_NUMBER,
   };
   const unread = () => state.items.filter(row => row.seenAt === null).length;
   const api: DeliveriesApi = {
@@ -77,8 +102,15 @@ export function fakeServer(initial: DeliveryItem[]) {
     }),
     get: vi.fn((id: string) => Promise.resolve(state.items.find(row => row.id === id) ?? null)),
     pushPublicKey: vi.fn(() => Promise.resolve(state.pushKey)),
-    savePushDevice: vi.fn((): Promise<'saved' | 'taken'> => Promise.resolve('saved')),
-    removePushDevice: vi.fn(() => Promise.resolve()),
+    savePushDevice: vi.fn((device: { endpoint: string }): Promise<'saved' | 'taken'> => {
+      state.pushEndpoints.add(device.endpoint);
+      return Promise.resolve('saved');
+    }),
+    removePushDevice: vi.fn((endpoint: string) => {
+      state.pushEndpoints.delete(endpoint);
+      return Promise.resolve();
+    }),
+    pushDeviceSaved: vi.fn((endpoint: string) => Promise.resolve(state.pushEndpoints.has(endpoint))),
     reach: {
       get: vi.fn(() => Promise.resolve(state.reach)),
       save: vi.fn((settings: ReachSettings) => {
@@ -90,12 +122,22 @@ export function fakeServer(initial: DeliveryItem[]) {
       texts: {
         status: vi.fn(() => Promise.resolve(state.texts)),
         sendCode: vi.fn((phone: string) => {
-          state.texts = { ...state.texts, phone, confirmed: false, codePending: true };
+          // Like the server: a new number waits beside a confirmed one until its code is confirmed.
+          state.texts =
+            state.texts.confirmed && state.texts.phone !== phone
+              ? { ...state.texts, pendingPhone: phone, codePending: true }
+              : { ...state.texts, phone, confirmed: false, codePending: true, pendingPhone: null };
           return Promise.resolve(state.texts);
         }),
         confirm: vi.fn((code: string) => {
           if (code !== '123456') return Promise.reject(new Error('That code is not right. You have 4 tries left.'));
-          state.texts = { ...state.texts, confirmed: true, codePending: false };
+          state.texts = {
+            ...state.texts,
+            phone: state.texts.pendingPhone ?? state.texts.phone,
+            confirmed: true,
+            codePending: false,
+            pendingPhone: null,
+          };
           return Promise.resolve(state.texts);
         }),
         setMode: vi.fn((mode: TextStatus['mode']) => {
@@ -103,7 +145,7 @@ export function fakeServer(initial: DeliveryItem[]) {
           return Promise.resolve(state.texts);
         }),
         remove: vi.fn(() => {
-          state.texts = { phone: null, confirmed: false, mode: 'private', optedOut: false, codePending: false };
+          state.texts = NO_NUMBER;
           return Promise.resolve();
         }),
       },

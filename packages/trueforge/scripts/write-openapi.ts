@@ -158,7 +158,9 @@ const app = createServerApp({
   reminderReach: createReminderReach({
     reachSettings: new ReachSettingsStore(db),
     store: new NoticingStore(db),
+    history: deliveryStore,
     channels: () => NO_PHONE_CHANNELS,
+    logger,
   }),
   reachChannels: () => NO_PHONE_CHANNELS,
   textContactStore: new TextContactStore(db),
@@ -169,6 +171,7 @@ const app = createServerApp({
     provider: undefined,
     audit: { record: () => Promise.resolve() },
     logger,
+    codeKey: 'openapi',
   }),
   phoneCalls: { place: () => Promise.reject(new Error('No calls while writing the API document.')) },
   webPushPublicKey: undefined,

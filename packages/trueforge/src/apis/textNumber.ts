@@ -8,10 +8,25 @@ import {
   sendTextCodeRoute,
   updateTextModeRoute,
 } from '../routes/textRoutes';
-import type { TextNumberService } from '../runtime/texts/textNumber';
-import { MAX_CODE_ATTEMPTS } from '../runtime/texts/textNumber';
+import type { SmsFailure } from '../runtime/texts/smsProvider';
+import { MAX_CODE_ATTEMPTS, type TextNumberService } from '../runtime/texts/textNumber';
+import { TEXTS_NOT_SET_UP } from '../runtime/texts/textWords';
 
-export interface TextNumberRouterDeps {
+/** Why a code could not be sent, ending with the one thing to do. */
+function codeFailureWords(failure: SmsFailure): string {
+  switch (failure) {
+    case 'opted_out':
+      return 'This number replied STOP before. Reply START from that phone, then try again.';
+    case 'invalid_number':
+      return 'The phone company would not take this number. Check it, then try again.';
+    case 'not_accepted':
+      return 'Twilio did not accept this server’s sign-in details. Ask whoever runs Aman to check them.';
+    case 'unreachable':
+      return 'Twilio could not be reached. Try again in a few minutes.';
+  }
+}
+
+interface TextNumberRouterDeps {
   textNumbers: TextNumberService;
   /** Whether this server has a text provider. Read per request. */
   available: () => boolean;
@@ -31,15 +46,7 @@ export function createTextNumberRouter(deps: TextNumberRouterDeps) {
   const sendCodeHandler: RouteHandler<typeof sendTextCodeRoute> = async c => {
     const owner = ownerOf(c);
     if (!deps.available()) {
-      return c.json(
-        {
-          error: {
-            message:
-              'Texts are not set up on this server. Add your Twilio details to the settings file and restart Aman.',
-          },
-        },
-        409,
-      );
+      return c.json({ error: { message: TEXTS_NOT_SET_UP } }, 409);
     }
     const { phone } = c.req.valid('json');
     const result = await deps.textNumbers.sendCode({ owner, phone });
@@ -52,22 +59,14 @@ export function createTextNumberRouter(deps: TextNumberRouterDeps) {
           { error: { message: 'That is not a phone number. Type it with the country code, such as +15550100.' } },
           400,
         );
-      case 'rate_limited':
-        return c.json(
-          {
-            error: {
-              message: `Too many codes were sent. Wait ${String(result.retry_in_minutes)} minutes, then ask for another.`,
-            },
-          },
-          429,
-        );
+      case 'rate_limited': {
+        const minutes = result.retry_in_minutes === 1 ? '1 minute' : `${String(result.retry_in_minutes)} minutes`;
+        return c.json({ error: { message: `Too many codes were sent. Wait ${minutes}, then ask for another.` } }, 429);
+      }
       case 'not_set_up':
-        return c.json({ error: { message: 'Texts are not set up on this server.' } }, 409);
+        return c.json({ error: { message: TEXTS_NOT_SET_UP } }, 409);
       case 'send_failed':
-        return c.json(
-          { error: { message: 'The code could not be sent. Check the number, then try again in a minute.' } },
-          502,
-        );
+        return c.json({ error: { message: codeFailureWords(result.failure) } }, 502);
     }
   };
 

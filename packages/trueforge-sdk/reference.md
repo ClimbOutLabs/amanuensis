@@ -7914,6 +7914,71 @@ await client.deliveries.push.deleteSubscription({
 </dl>
 </details>
 
+<details><summary><code>client.deliveries.push.<a href="/src/api/resources/deliveries/resources/push/client/Client.ts">lookupSubscription</a>({ ...params }) -> TrueForge.LookupPushSubscriptionResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Says whether this device is still saved for the signed-in person. A device drops off when 10 newer ones are saved or its push service says it is gone.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.deliveries.push.lookupSubscription({
+    endpoint: "endpoint"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.deliveries.LookupPushSubscriptionRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `PushClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 ## Internal Metrics
 <details><summary><code>client.internal.metrics.<a href="/src/api/resources/internal/resources/metrics/client/Client.ts">listCharts</a>() -> TrueForge.GetSessionMetricsChartResponse</code></summary>
 <dl>

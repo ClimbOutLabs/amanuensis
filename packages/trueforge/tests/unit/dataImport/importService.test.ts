@@ -3028,7 +3028,7 @@ describe('runDataImport keeps permission history and persona choices', () => {
       const entries = new Map(readZipEntries(archive).map(entry => [entry.name, entry.data]));
       const rows = listAt(parseJson(entries.get('texts.json'), 'texts.json'), 'texts.json');
       expect(rows).toEqual([{ phone: '+15550111', mode: 'full' }]);
-      expect(entries.get('texts.json')?.toString('utf8')).not.toMatch(/code|confirmed|a{20}/);
+      expect(entries.get('texts.json')?.toString('utf8')).not.toMatch(/code|confirmed|pending|0122|a{20}/);
 
       await runDataImport(importDeps(target), importRequest(archive));
       await expect(target.stores.textContactStore.get({ tenant_id: TENANT, created_by: 'bob' })).resolves.toEqual({
@@ -3036,12 +3036,11 @@ describe('runDataImport keeps permission history and persona choices', () => {
         mode: 'full',
         confirmed_at: null,
         opted_out_at: null,
+        pending_phone: null,
         code_hash: null,
         code_salt: null,
         code_expires_at: null,
         code_attempts: 0,
-        send_window_started_at: null,
-        sends_in_window: 0,
       });
       const reach = await target.stores.reachSettingsStore.get({ tenant_id: TENANT, created_by: 'bob' });
       expect(reach?.channels.texts).toBe(false);

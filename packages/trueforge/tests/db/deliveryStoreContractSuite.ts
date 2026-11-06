@@ -36,6 +36,31 @@ export function runDeliveryStoreContractSuite(getStore: () => IDeliveryStore): v
     await expect(store.get({ ...ALICE, id: made.id })).resolves.toEqual(made);
   });
 
+  it('counts one person’s deliveries since a time by kind and level, and finds the last at a level', async () => {
+    const store = getStore();
+    const at = (time: string) => new Date(`2026-11-05T${time}:00.000Z`);
+    await store.create({ ...reminder(ALICE, 'old', new Date('2026-11-04T23:00:00.000Z')), kind: 'nudge' });
+    await store.create({ ...reminder(ALICE, 'one', at('09:00')), kind: 'nudge' });
+    await store.create({ ...reminder(ALICE, 'two', at('09:30')), kind: 'nudge', level: 'call' });
+    await store.create({ ...reminder(ALICE, 'quiet', at('10:00')), kind: 'note', level: 'note' });
+    await store.create(reminder(ALICE, 'reminder', at('10:30')));
+    await store.create({
+      ...reminder(ALICE, 'waiting', at('11:00')),
+      kind: 'approval_waiting',
+      link: { type: 'approval', session_id: 's1', approval_id: 'a1' },
+    });
+    await store.create({ ...reminder(BOB, 'bob', at('09:00')), kind: 'nudge' });
+
+    const since = at('00:00');
+    await expect(
+      store.countSince({ ...ALICE, since, kinds: ['nudge', 'approval_waiting'], levels: ['nudge'] }),
+    ).resolves.toBe(2);
+    await expect(store.countSince({ ...ALICE, since, kinds: ['reminder'], levels: ['nudge'] })).resolves.toBe(1);
+    await expect(store.countSince({ ...BOB, since, kinds: ['nudge'], levels: ['nudge'] })).resolves.toBe(1);
+    await expect(store.lastCreatedAt({ ...ALICE, levels: ['call'] })).resolves.toEqual(at('09:30'));
+    await expect(store.lastCreatedAt({ ...BOB, levels: ['call'] })).resolves.toBeUndefined();
+  });
+
   it('refuses an approval_waiting delivery that does not link to an approval', async () => {
     const store = getStore();
     await expect(

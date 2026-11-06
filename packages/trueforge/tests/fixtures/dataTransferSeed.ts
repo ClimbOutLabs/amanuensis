@@ -522,21 +522,19 @@ export async function seedRichInstance<TTransaction>(input: SeedRichInstanceInpu
     },
   });
 
-  await stores.textContactStore.put({
-    tenant_id: tenantId,
-    created_by: userId,
-    contact: {
-      phone: '+15550111',
-      mode: 'full',
-      confirmed_at: '2026-11-05T09:00:00.000Z',
-      opted_out_at: null,
-      code_hash: 'a'.repeat(64),
-      code_salt: 'b'.repeat(32),
-      code_expires_at: '2026-11-05T09:10:00.000Z',
-      code_attempts: 2,
-      send_window_started_at: '2026-11-05T08:55:00.000Z',
-      sends_in_window: 1,
-    },
+  // A confirmed number with a code to a new number still pending: none of the code or the new number is exported.
+  const seededCode = { hash: 'a'.repeat(64), salt: 'b'.repeat(32), expires_at: '2026-11-05T09:10:00.000Z' };
+  const owner = { tenant_id: tenantId, created_by: userId };
+  const at = new Date('2026-11-05T09:00:00.000Z');
+  await stores.textContactStore.startCode({ ...owner, phone: '+15550111', as: 'number', code: seededCode, now: at });
+  await stores.textContactStore.confirmCode({ ...owner, code_hash: seededCode.hash, now: at });
+  await stores.textContactStore.setMode({ ...owner, mode: 'full', now: at });
+  await stores.textContactStore.startCode({
+    ...owner,
+    phone: '+15550122',
+    as: 'new_number',
+    code: seededCode,
+    now: at,
   });
 
   const knowledgeDbPath = personaKnowledgeLocation({

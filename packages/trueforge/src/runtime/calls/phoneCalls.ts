@@ -13,11 +13,13 @@ import type { PhoneCall, PhoneCallOutcome } from '../../schemas/phoneCalls';
 import { newId } from '../../utils/id';
 import { PhoneVoiceTransport, readPhoneFrame } from '../../voice/phoneTransport';
 import { VoiceSession, type VoiceSessionDeps } from '../../voice/session';
+import { UNNAMED_ASSISTANT } from '../chatAssistant';
 import type { DeliveryChannelSender } from '../delivery/deliveryChannel';
 import type { DeliveryService } from '../delivery/deliveryService';
-import { assistantNameFor, FALLBACK_ASSISTANT_NAME } from '../texts/assistantName';
-import { maskedTarget, privatePhrase } from '../texts/smsSender';
+import { assistantNameFor } from '../texts/assistantName';
+import { maskedTarget } from '../texts/smsSender';
 import { canText } from '../texts/textNumber';
+import { privatePhrase } from '../texts/textWords';
 import { CALL_LINES, CallTurns, type CallChat } from './callTurns';
 import { callFailureWords, MEDIA_STREAM_PATH, type CallProvider } from './twilioCalls';
 
@@ -29,8 +31,6 @@ const MEDIA_TOKEN_TTL_MS = 30_000;
 const START_WAIT_MS = 10_000;
 /** The longest a call talks before the assistant says goodbye. */
 const MAX_TALK_MS = 10 * 60_000;
-/** The most of the assistant's name read aloud, so a long name cannot fill the call. */
-const SPOKEN_NAME_MAX = 40;
 
 /** Twilio's final statuses for a call that never reached a person. */
 const MISSED_STATUSES = new Set(['busy', 'no-answer', 'failed', 'canceled']);
@@ -99,12 +99,6 @@ function xmlAttribute(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-/** The name the call speaks: the person's own choice, kept short. */
-function spokenName(name: string): string {
-  const flat = name.replace(/\s+/g, ' ').trim();
-  return flat.length <= SPOKEN_NAME_MAX ? flat : flat.slice(0, SPOKEN_NAME_MAX).trimEnd();
-}
-
 /** What the call says the delivery is about once the person said yes. */
 function spokenMessage(delivery: Delivery): string {
   return delivery.kind === 'reminder' ? `Here is your reminder: ${delivery.text}` : delivery.text;
@@ -134,7 +128,8 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
   }): DeliveryAttempt => ({ channel: 'call', outcome, detail, target, attempted_at: now().toISOString() });
 
   async function nameFor(owner: { tenant_id: string; created_by: string }): Promise<string> {
-    return spokenName(await assistantNameFor({ personalization: deps.personalization, owner }));
+    // The same rule as a text: plain letters only, kept short, and never a name that holds a phone number.
+    return assistantNameFor({ personalization: deps.personalization, owner });
   }
 
   function deliveryOf(call: PhoneCall): Promise<Delivery | undefined> {
@@ -316,7 +311,7 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
     const owner = { tenant_id: call.tenant_id, created_by: call.created_by };
     const delivery = await deliveryOf(call);
     const name = await nameFor(owner);
-    const greetingName = name === FALLBACK_ASSISTANT_NAME ? name.toLowerCase() : name;
+    const greetingName = name === UNNAMED_ASSISTANT ? name.toLowerCase() : name;
     const parts = await deps.parts();
     const startedAt = now();
     const hangUp = (): void => {

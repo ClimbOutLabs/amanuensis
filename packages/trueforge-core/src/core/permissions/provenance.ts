@@ -202,6 +202,23 @@ function phoneDetails(text: string): string[] {
   return found;
 }
 
+/** Fewest digits a short local phone number has, such as `555-0100`. */
+const MIN_LOCAL_PHONE_DIGITS = 7;
+/** A date or time written as `2026-11-07` or `2026-11-07T10:00Z`, which is not a phone number. */
+const ISO_DATE = /\b\d{4}-\d{2}-\d{2}(?:T[\d:.]+(?:Z|[+-]\d{2}:?\d{2})?)?/g;
+
+/**
+ * Whether any value carries something written like a phone number, short local ones included. Looser than the
+ * match for the person's own numbers, for text that should carry no number at all.
+ */
+export function namesPhoneNumber(values: readonly string[]): boolean {
+  return values.some(value =>
+    [...foldSpelling(value).replace(ISO_DATE, ' ').matchAll(PHONE_CANDIDATE)].some(
+      match => match[0].replace(/\D/g, '').length >= MIN_LOCAL_PHONE_DIGITS,
+    ),
+  );
+}
+
 const MAX_DECODE_ROUNDS = 3;
 /** Characters that show nothing, which a writer can hide inside a value to break an exact match. */
 const INVISIBLE = /\p{Default_Ignorable_Code_Point}/gu;

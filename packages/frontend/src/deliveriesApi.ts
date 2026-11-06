@@ -1,14 +1,15 @@
-import type {
-  DeliveriesApi,
-  DeliveryItem,
-  DeliveryLink,
-  NoticingKind,
-  PushDevice,
-  ReachApi,
-  ReachSettings,
-  ReachView,
-  TextsApi,
-  TextStatus,
+import {
+  NOTICING_KINDS,
+  type DeliveriesApi,
+  type DeliveryItem,
+  type DeliveryLink,
+  type NoticingKind,
+  type PushDevice,
+  type ReachApi,
+  type ReachSettings,
+  type ReachView,
+  type TextsApi,
+  type TextStatus,
 } from '@truefoundry/trueforge-ui';
 
 import { apiPath, UI_BASE_PATH } from './publicPath';
@@ -84,77 +85,76 @@ function json(body: unknown, method: 'POST' | 'DELETE' = 'POST'): RequestInit {
   return { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
 }
 
-const KINDS: readonly NoticingKind[] = ['mail_always', 'calendar_clash', 'travel', 'bill_due', 'approval_waiting'];
+const UNREADABLE = 'Your Reach me settings could not be read. Reload the page.';
 
 function kindOf(value: unknown): NoticingKind | null {
-  return KINDS.find(kind => kind === value) ?? null;
+  return NOTICING_KINDS.find(kind => kind === value) ?? null;
 }
 
-function stringOr(value: unknown, fallback: string): string {
-  return typeof value === 'string' ? value : fallback;
+/** A field the server always sends. One that is missing or of the wrong type means the reply cannot be trusted. */
+function required<T>(value: unknown, check: (candidate: unknown) => candidate is T): T {
+  if (!check(value)) {
+    throw new Error(UNREADABLE);
+  }
+  return value;
 }
 
-function numberOr(value: unknown, fallback: number): number {
-  return typeof value === 'number' ? value : fallback;
-}
-
-function boolOr(value: unknown, fallback: boolean): boolean {
-  return typeof value === 'boolean' ? value : fallback;
-}
+const isString = (value: unknown): value is string => typeof value === 'string';
+const isNumber = (value: unknown): value is number => typeof value === 'number';
+const isBoolean = (value: unknown): value is boolean => typeof value === 'boolean';
+const isArray = (value: unknown): value is unknown[] => Array.isArray(value);
 
 function parseChannel(value: unknown): { available: boolean; note: string } {
-  return isRecord(value)
-    ? { available: value.available === true, note: stringOr(value.note, '') }
-    : { available: false, note: '' };
+  const channel = required(value, isRecord);
+  return { available: required(channel.available, isBoolean), note: required(channel.note, isString) };
 }
 
-function parseSettings(value: unknown): ReachSettings {
-  const raw = isRecord(value) ? value : {};
-  const channels = isRecord(raw.channels) ? raw.channels : {};
-  const quiet = isRecord(raw.quiet_hours) ? raw.quiet_hours : {};
-  const senders = Array.isArray(raw.always_important) ? raw.always_important : [];
-  const callKinds = Array.isArray(raw.call_kinds) ? raw.call_kinds : [];
-  const dismissed = Array.isArray(raw.dismissed_suggestions) ? raw.dismissed_suggestions : [];
+function parseSender(value: unknown): ReachSettings['alwaysImportant'][number] {
+  const sender = required(value, isRecord);
   return {
-    textsOn: channels.texts === true,
-    callsOn: channels.calls === true,
-    alwaysImportant: senders.flatMap(sender =>
-      isRecord(sender) && typeof sender.address === 'string' && typeof sender.added_at === 'string'
-        ? [
-            {
-              address: sender.address,
-              name: typeof sender.name === 'string' ? sender.name : null,
-              source: sender.source === 'memory' ? ('memory' as const) : ('settings' as const),
-              addedAt: sender.added_at,
-            },
-          ]
-        : [],
-    ),
-    dismissedSuggestions: dismissed.filter(item => typeof item === 'string'),
-    callKinds: callKinds.map(kindOf).filter(kind => kind !== null),
-    callForUrgentReminders: raw.call_for_urgent_reminders === true,
+    address: required(sender.address, isString),
+    name: typeof sender.name === 'string' ? sender.name : null,
+    source: sender.source === 'memory' ? 'memory' : 'settings',
+    addedAt: required(sender.added_at, isString),
+  };
+}
+
+/** The server always sends every field. Kinds this version does not know are dropped, never guessed. */
+function parseSettings(value: unknown): ReachSettings {
+  const raw = required(value, isRecord);
+  const channels = required(raw.channels, isRecord);
+  const quiet = required(raw.quiet_hours, isRecord);
+  return {
+    textsOn: required(channels.texts, isBoolean),
+    callsOn: required(channels.calls, isBoolean),
+    alwaysImportant: required(raw.always_important, isArray).map(parseSender),
+    dismissedSuggestions: required(raw.dismissed_suggestions, isArray).filter(isString),
+    callKinds: required(raw.call_kinds, isArray)
+      .map(kindOf)
+      .filter(kind => kind !== null),
+    callForUrgentReminders: required(raw.call_for_urgent_reminders, isBoolean),
     quietHours: {
-      enabled: boolOr(quiet.enabled, true),
-      start: stringOr(quiet.start, '21:00'),
-      end: stringOr(quiet.end, '08:00'),
+      enabled: required(quiet.enabled, isBoolean),
+      start: required(quiet.start, isString),
+      end: required(quiet.end, isString),
     },
-    timezone: stringOr(raw.timezone, 'UTC'),
-    maxNudgesPerDay: numberOr(raw.max_nudges_per_day, 5),
-    minHoursBetweenCalls: numberOr(raw.min_hours_between_calls, 6),
-    travelLeadMinutes: numberOr(raw.travel_lead_minutes, 90),
-    approvalWaitMinutes: numberOr(raw.approval_wait_minutes, 15),
+    timezone: required(raw.timezone, isString),
+    maxNudgesPerDay: required(raw.max_nudges_per_day, isNumber),
+    minHoursBetweenCalls: required(raw.min_hours_between_calls, isNumber),
+    travelLeadMinutes: required(raw.travel_lead_minutes, isNumber),
+    approvalWaitMinutes: required(raw.approval_wait_minutes, isNumber),
   };
 }
 
 function parseView(body: unknown): ReachView {
   const data = isRecord(body) ? body.data : undefined;
-  if (!isRecord(data) || !isRecord(data.settings)) {
-    throw new Error('Your Reach me settings could not be read. Reload the page.');
+  if (!isRecord(data)) {
+    throw new Error(UNREADABLE);
   }
-  const availability = isRecord(data.availability) ? data.availability : {};
-  const levels = isRecord(data.max_levels) ? data.max_levels : {};
+  const availability = required(data.availability, isRecord);
+  const levels = required(data.max_levels, isRecord);
   const maxLevels: ReachView['maxLevels'] = {};
-  for (const kind of KINDS) {
+  for (const kind of NOTICING_KINDS) {
     const level = levels[kind];
     if (level === 'note' || level === 'nudge' || level === 'call') {
       maxLevels[kind] = level;
@@ -162,7 +162,7 @@ function parseView(body: unknown): ReachView {
   }
   return {
     settings: parseSettings(data.settings),
-    saved: data.saved === true,
+    saved: required(data.saved, isBoolean),
     availability: { texts: parseChannel(availability.texts), calls: parseChannel(availability.calls) },
     maxLevels,
   };
@@ -200,6 +200,8 @@ function parseTextStatus(body: unknown): TextStatus {
     mode: data.mode === 'full' ? 'full' : 'private',
     optedOut: data.opted_out === true,
     codePending: data.code_pending === true,
+    pendingPhone: typeof data.pending_phone === 'string' ? data.pending_phone : null,
+    privatePreview: typeof data.private_preview === 'string' ? data.private_preview : '',
   };
 }
 
@@ -315,6 +317,12 @@ export function createDeliveriesApi(fetcher: typeof fetch): DeliveriesApi {
       }
       await readBody(response);
       return 'saved';
+    },
+    async pushDeviceSaved(endpoint) {
+      // The address goes in the body, so it stays out of request logs.
+      const body = await readBody(await fetcher(apiPath(`${PUSH_URL}/subscriptions/lookup`), json({ endpoint })));
+      const data = isRecord(body) ? body.data : undefined;
+      return isRecord(data) && data.saved === true;
     },
     async removePushDevice(endpoint) {
       // The address goes in the body, so it stays out of request logs.

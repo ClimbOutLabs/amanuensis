@@ -39,7 +39,9 @@ export function deliveryDeps(
     reminderReach: createReminderReach({
       reachSettings: reachSettingsStore,
       store: new NoticingStore(db),
+      history: deliveryStore,
       channels: () => NO_PHONE_CHANNELS,
+      logger: winston.createLogger({ silent: true }),
     }),
     reachChannels: () => NO_PHONE_CHANNELS,
     textContactStore,
@@ -50,6 +52,7 @@ export function deliveryDeps(
       provider: undefined,
       audit,
       logger: winston.createLogger({ silent: true }),
+      codeKey: 'test-code-key',
     }),
     phoneCalls: { place: () => Promise.reject(new Error('No calls in this test.')) },
     webPushPublicKey: undefined,

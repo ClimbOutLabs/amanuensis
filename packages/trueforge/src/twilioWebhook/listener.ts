@@ -14,7 +14,7 @@ import { verifyTwilioSignature } from './signature';
 const MAX_BODY_BYTES = 64 * 1024;
 
 /** What a route answers. Twilio reads TwiML, which is XML. */
-export interface TwilioWebhookReply {
+interface TwilioWebhookReply {
   status: 200 | 400 | 403;
   body: string;
 }
@@ -48,7 +48,7 @@ export const EMPTY_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response></Re
  * It shares no code path with the main app, so sign-in and the rest of Aman are never reachable here. The public URL
  * a signature is checked against is built from the configured address, never from a header the caller sent.
  */
-export function createTwilioWebhookApp({
+function createTwilioWebhookApp({
   settings,
   routes,
   logger,
@@ -61,6 +61,11 @@ export function createTwilioWebhookApp({
   const known = new Map(routes.map(route => [`${route.method} ${route.path}`, route]));
 
   app.use(bodyLimit({ maxSize: MAX_BODY_BYTES, onError: c => c.body(null, 413) }));
+  app.onError((error, c) => {
+    // Only the address and the kind of error: the message can carry a phone number or the text itself.
+    logger.error('A Twilio request failed', { path: new URL(c.req.url).pathname, error_class: error.name });
+    return c.body(EMPTY_TWIML, 500, { 'Content-Type': 'text/xml; charset=utf-8' });
+  });
   app.all('*', async c => {
     const url = new URL(c.req.url);
     const route = known.get(`${c.req.method} ${url.pathname}`);
@@ -142,7 +147,10 @@ function attachSocketRoutes({
   });
 }
 
-/** Starts the Twilio listener on its own port. It is only started when texts are set up. */
+/**
+ * Starts the Twilio listener on its own port. It resolves once the port is open and fails when the port cannot be
+ * used, so the server never sends texts while unable to hear a STOP.
+ */
 export function startTwilioWebhookListener({
   settings,
   hostname,
@@ -156,16 +164,45 @@ export function startTwilioWebhookListener({
   /** WebSocket addresses, such as a call's media stream. */
   sockets?: readonly TwilioSocketRoute[];
   logger: Logger;
-}): ServerType {
+}): Promise<ServerType> {
   const app = createTwilioWebhookApp({ settings, routes, logger });
-  const server = serve({ fetch: app.fetch, port: settings.webhookPort, hostname }, info => {
-    logger.info(`Twilio listener on ${hostname}:${String(info.port)} (Twilio routes only)`);
-  });
-  attachSocketRoutes({ server, settings, sockets, logger });
-  server.on('error', (error: unknown) => {
-    logger.error('The Twilio listener could not start', {
-      error: error instanceof Error ? error.message : String(error),
+  return new Promise((resolve, reject) => {
+    const server = serve({ fetch: app.fetch, port: settings.webhookPort, hostname }, info => {
+      logger.info(`Twilio listener on ${hostname}:${String(info.port)} (Twilio routes only)`);
+      resolve(server);
+    });
+    attachSocketRoutes({ server, settings, sockets, logger });
+    server.on('error', (error: unknown) => {
+      // Before the port is open this fails the start. After, it is only logged, by its kind.
+      if (server.listening) {
+        logger.error('The Twilio listener failed', { error_class: error instanceof Error ? error.name : typeof error });
+        return;
+      }
+      reject(
+        new Error(
+          `The Twilio listener could not use port ${String(settings.webhookPort)}. Set TWILIO_WEBHOOK_PORT to a free port, then restart Aman.`,
+          { cause: error },
+        ),
+      );
     });
   });
-  return server;
+}
+
+/** The Twilio listener when texts are set up on this server, otherwise nothing is started. */
+export async function twilioListenerFor({
+  twilio,
+  hostname,
+  routes,
+  sockets = [],
+  logger,
+}: {
+  twilio: TwilioSettings | undefined;
+  hostname: string;
+  routes: readonly TwilioWebhookRoute[];
+  sockets?: readonly TwilioSocketRoute[];
+  logger: Logger;
+}): Promise<ServerType | undefined> {
+  return twilio === undefined
+    ? undefined
+    : startTwilioWebhookListener({ settings: twilio, hostname, routes, sockets, logger });
 }

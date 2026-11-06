@@ -69,8 +69,10 @@ export const TABLES_TO_MOVE = [
   'reach_settings',
   'text_contact',
   'phone_call',
+  'text_code_send',
   'noticing_event',
   'noticing_checkpoint',
+  'reach_lease',
   'push_subscription',
 ] as const;
 

@@ -6,7 +6,7 @@ export interface ReachView {
     availability: TrueForge.ReachAvailability;
     /** The highest level each kind of event can ever reach, whatever the model says. */
     maxLevels: TrueForge.ReachViewMaxLevels;
-    /** False until the person saves once. Then the settings are the quiet defaults. */
+    /** False until the person saves once. While false, the settings are the quiet defaults. */
     saved: boolean;
     settings: TrueForge.ReachSettings;
 }

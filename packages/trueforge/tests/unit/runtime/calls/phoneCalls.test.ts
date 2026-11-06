@@ -79,7 +79,7 @@ describe('phone calls as a channel of the delivery layer', () => {
     await h.twilioPost({ path: '/twilio/call-status', fields: { ...status, CallStatus: 'completed' } });
     expect(h.placed).toEqual([PHONE]);
     expect(h.texts).toHaveLength(1);
-    expect(h.texts[0]?.body).toBe('Mannie: something needs you. Open Aman to see it.');
+    expect(h.texts[0]?.body).toBe('Mannie: something needs you. Open the app to see it.');
     expect(h.pushes).toEqual([delivery.id]);
     const attempts = await attemptsOf(h, delivery.id);
     expect(attempts.filter(attempt => attempt.channel === 'call').map(attempt => attempt.outcome)).toEqual([

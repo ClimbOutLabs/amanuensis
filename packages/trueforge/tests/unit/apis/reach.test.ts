@@ -2,7 +2,7 @@ import { OpenAPIHono } from '@hono/zod-openapi';
 import winston from 'winston';
 
 import { createNoticingRouter } from '../../../src/apis/noticing';
-import { createReachRouter } from '../../../src/apis/reach';
+import { createReachRouter, type ReachRouterDeps } from '../../../src/apis/reach';
 import type { RequestContext } from '../../../src/auth/identity';
 import { DeliveryStore } from '../../../src/db/deliveryStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
@@ -13,6 +13,7 @@ import { createDeliveryService } from '../../../src/runtime/delivery/deliverySer
 import type { ReachChannels } from '../../../src/runtime/noticing/reachChannels';
 import { NO_PHONE_CHANNELS } from '../../../src/runtime/noticing/reachChannels';
 import { defaultReachSettings, GetReachResponseSchema, type ReachSettings } from '../../../src/schemas/reach';
+import { confirmNumber } from '../../fixtures/confirmedNumber';
 
 const NOW = new Date('2026-11-05T15:00:00.000Z');
 
@@ -20,7 +21,15 @@ function person(id: string): RequestContext {
   return { tenant_id: 'default', subject: { id, type: 'user', display_name: id }, roles: [], user_credential: null };
 }
 
-async function build({ channels = NO_PHONE_CHANNELS, memories = [] as string[] } = {}) {
+type PlaceCall = ReachRouterDeps['calls']['place'];
+
+const noCalls: PlaceCall = () => Promise.reject(new Error('No calls in this test.'));
+
+async function build({
+  channels = NO_PHONE_CHANNELS,
+  memories = [] as string[],
+  place = noCalls,
+}: { channels?: ReachChannels; memories?: string[]; place?: PlaceCall } = {}) {
   const db = createSqliteDb(':memory:');
   await migrateSqliteToLatest(db);
   const reachStore = new ReachSettingsStore(db);
@@ -33,7 +42,7 @@ async function build({ channels = NO_PHONE_CHANNELS, memories = [] as string[] }
     logger: winston.createLogger({ silent: true }),
   });
   let current = person('alice');
-  const calls = { place: () => Promise.reject(new Error('No calls in this test.')) };
+  const calls = { place };
   const app = new OpenAPIHono();
   app.route(
     '/reach',
@@ -108,23 +117,46 @@ describe('reach routes', () => {
     const early = await put({ ...defaultReachSettings('UTC'), channels: { texts: false, calls: true } });
     expect(early.status).toBe(400);
     expect(JSON.stringify(await early.json())).toContain('Confirm your number first, then switch calls on.');
-    await textContacts.put({
-      tenant_id: 'default',
-      created_by: 'alice',
-      contact: {
-        phone: '+15550111',
-        mode: 'private',
-        confirmed_at: NOW.toISOString(),
-        opted_out_at: null,
-        code_hash: null,
-        code_salt: null,
-        code_expires_at: null,
-        code_attempts: 0,
-        send_window_started_at: null,
-        sends_in_window: 0,
-      },
+    await confirmNumber({
+      store: textContacts,
+      owner: { tenant_id: 'default', created_by: 'alice' },
+      phone: '+15550111',
+      now: NOW,
     });
     expect((await put({ ...defaultReachSettings('UTC'), channels: { texts: false, calls: true } })).status).toBe(200);
+  });
+
+  it('rings the phone on Try it for calls, without using up the time between calls', async () => {
+    const channels: ReachChannels = { ...NO_PHONE_CHANNELS, calls: { available: true, note: 'On.' } };
+    const placed: string[] = [];
+    const { call, put, textContacts, deliveryStore } = await build({
+      channels,
+      place: ({ delivery, fallback }) => {
+        placed.push(`${delivery.kind}:${String(fallback)}`);
+        return Promise.resolve({
+          channel: 'call',
+          outcome: 'sent',
+          detail: 'The phone is ringing.',
+          target: 'ending 0111',
+          attempted_at: NOW.toISOString(),
+        });
+      },
+    });
+    const early = await call('/test', { method: 'POST', body: { channel: 'call' } });
+    expect(early.status).toBe(409);
+    await confirmNumber({
+      store: textContacts,
+      owner: { tenant_id: 'default', created_by: 'alice' },
+      phone: '+15550111',
+      now: NOW,
+    });
+    expect((await put({ ...defaultReachSettings('UTC'), channels: { texts: false, calls: true } })).status).toBe(200);
+    const tried = await call('/test', { method: 'POST', body: { channel: 'call' } });
+    expect(tried.status).toBe(201);
+    expect(placed).toEqual(['note:false']);
+    await expect(
+      deliveryStore.lastCreatedAt({ tenant_id: 'default', created_by: 'alice', levels: ['call'] }),
+    ).resolves.toBeUndefined();
   });
 
   it('refuses a call tick for a kind that can never call', async () => {
@@ -157,16 +189,16 @@ describe('reach routes', () => {
     });
   });
 
-  it('tries in-app as a note and push as a nudge, and says plainly that texts and calls are not set up', async () => {
+  it('tries in-app quietly and push loudly, both as notes in the feed, and says plainly that texts and calls are not set up', async () => {
     const { call, deliveryStore } = await build();
     const inApp = await call('/test', { method: 'POST', body: { channel: 'in_app' } });
     expect(inApp.status).toBe(201);
     const push = await call('/test', { method: 'POST', body: { channel: 'push' } });
     expect(push.status).toBe(201);
-    const levels = (await deliveryStore.list({ tenant_id: 'default', created_by: 'alice', limit: 10 })).deliveries
-      .map(item => item.level)
-      .sort();
-    expect(levels).toEqual(['note', 'nudge']);
+    const tried = (await deliveryStore.list({ tenant_id: 'default', created_by: 'alice', limit: 10 })).deliveries;
+    expect(tried.map(item => item.level).sort()).toEqual(['note', 'nudge']);
+    // A test never counts toward the day's nudges, which count only nudges the assistant noticed.
+    expect(tried.map(item => item.kind)).toEqual(['note', 'note']);
     const text = await call('/test', { method: 'POST', body: { channel: 'text' } });
     expect(text.status).toBe(409);
     await expect(text.json()).resolves.toEqual({

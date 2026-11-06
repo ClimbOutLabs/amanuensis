@@ -164,7 +164,8 @@ export function createReachRouter(deps: ReachRouterDeps) {
       }
       const delivery = await deps.deliveryService.deliver({
         ...owner,
-        kind: 'nudge',
+        // A note in the feed, so a test never uses up one of the day's nudges.
+        kind: 'note',
         level: 'nudge',
         text: 'This is a test. If you can read this, it works.',
         reason: 'You pressed Try it in Reach me settings.',
@@ -189,11 +190,12 @@ export function createReachRouter(deps: ReachRouterDeps) {
       if (settings?.channels.calls !== true || !canText(contact)) {
         return c.json({ error: { message: 'Confirm your number and switch calls on first, then try again.' } }, 409);
       }
-      // Only the app gets the test item; the call itself is placed below, and a test call never falls back to a text.
+      // A note in the feed that only the app shows, so a test never counts toward the time between calls. The call
+      // itself is placed below, and a test call never falls back to a text.
       const delivery = await deps.deliveryService.deliver({
         ...owner,
-        kind: 'nudge',
-        level: 'call',
+        kind: 'note',
+        level: 'nudge',
         text: 'This is a test call. If you can hear this, calls work.',
         reason: 'You pressed Try it in Reach me settings.',
         link: null,
@@ -209,13 +211,16 @@ export function createReachRouter(deps: ReachRouterDeps) {
       }
       return c.json({ data: { delivery_id: delivery.id, devices_reached: 0 } }, 201);
     }
+    // A test is a note in the feed, so a push test never uses up one of the day's nudges, and it reaches only the
+    // person's devices, so it never sends a paid text.
     const delivery = await deps.deliveryService.deliver({
       ...owner,
-      kind: channel === 'push' ? 'nudge' : 'note',
+      kind: 'note',
       level: channel === 'push' ? 'nudge' : 'note',
       text: 'This is a test. If you can read this, it works.',
       reason: 'You pressed Try it in Reach me settings.',
       link: null,
+      only_channels: channel === 'push' ? ['web_push'] : [],
     });
     const devices_reached = delivery.attempts.filter(
       attempt => attempt.channel === 'web_push' && attempt.outcome === 'sent',

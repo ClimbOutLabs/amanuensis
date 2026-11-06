@@ -60,6 +60,8 @@ describe('text number routes', () => {
       confirmed: false,
       mode: 'private',
       opted_out: false,
+      pending_phone: null,
+      private_preview: 'Mannie: a reminder is due. Open the app to see it.',
       code_pending: false,
     });
   });
@@ -113,6 +115,36 @@ describe('text number routes', () => {
     expect(await message(refused)).toContain('Twilio');
   });
 
+  it('counts the wait in plain words, down to one minute', async () => {
+    const { h, call } = await build();
+    for (let n = 0; n < 3; n += 1) {
+      await call('/texts/code', { method: 'POST', body: { phone: `+1555011${String(n)}` } });
+    }
+    h.clock.now = new Date(h.clock.now.getTime() + 59 * 60_000 + 30_000);
+    const limited = await call('/texts/code', { method: 'POST', body: { phone: '+15550119' } });
+    expect(await message(limited)).toBe('Too many codes were sent. Wait 1 minute, then ask for another.');
+  });
+
+  it('says what to do when the code could not be sent', async () => {
+    const { h, call } = await build();
+    const cases = [
+      { failure: 'opted_out', words: 'This number replied STOP before. Reply START from that phone, then try again.' },
+      { failure: 'invalid_number', words: 'The phone company would not take this number. Check it, then try again.' },
+      {
+        failure: 'not_accepted',
+        words: 'Twilio did not accept this server’s sign-in details. Ask whoever runs Aman to check them.',
+      },
+      { failure: 'unreachable', words: 'Twilio could not be reached. Try again in a few minutes.' },
+    ] as const;
+    for (const [index, { failure, words }] of cases.entries()) {
+      h.next.result = { outcome: 'failed', failure };
+      const response = await call('/texts/code', { method: 'POST', body: { phone: `+1555012${String(index)}` } });
+      expect(response.status).toBe(502);
+      expect(await message(response)).toBe(words);
+      h.clock.now = new Date(h.clock.now.getTime() + 61 * 60_000);
+    }
+  });
+
   it('voids a code after too many wrong tries and says so', async () => {
     const { call } = await build();
     await call('/texts/code', { method: 'POST', body: { phone: '+15550111' } });
@@ -142,6 +174,16 @@ describe('text number routes', () => {
   });
 });
 
+describe('the other test buttons', () => {
+  it('a push or in-app test never sends a text, even with texts on', async () => {
+    const { h, call } = await build();
+    await h.readyToText();
+    expect((await call('/reach/test', { method: 'POST', body: { channel: 'push' } })).status).toBe(201);
+    expect((await call('/reach/test', { method: 'POST', body: { channel: 'in_app' } })).status).toBe(201);
+    expect(h.sent).toEqual([]);
+  });
+});
+
 describe('the text test button', () => {
   it('texts the confirmed number, and only by the text channel', async () => {
     const { h, call } = await build();
@@ -149,7 +191,7 @@ describe('the text test button', () => {
     const response = await call('/reach/test', { method: 'POST', body: { channel: 'text' } });
     expect(response.status).toBe(201);
     expect(h.sent).toHaveLength(1);
-    expect(h.sent[0]?.body).toContain('Open Aman to see it.');
+    expect(h.sent[0]?.body).toContain('Open the app to see it.');
   });
 
   it('asks the person to confirm and switch on first, and says so when sending fails', async () => {
@@ -168,6 +210,6 @@ describe('the text test button', () => {
     const { call } = await build({ provider: false });
     const response = await call('/reach/test', { method: 'POST', body: { channel: 'text' } });
     expect(response.status).toBe(409);
-    expect(await message(response)).toContain('add your Twilio details');
+    expect(await message(response)).toContain('add the Twilio details to the settings file and restart Aman');
   });
 });

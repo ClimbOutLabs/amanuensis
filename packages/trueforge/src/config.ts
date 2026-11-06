@@ -43,6 +43,7 @@ import { parseModelPrices, type ModelPrices } from './runtime/modelPricing';
 import { DEFAULT_TOKEN_FACTORY_MODEL } from './runtime/tokenFactoryDefaults';
 import { MAX_CODE_MODE_SOCKET_PARENT_BYTES } from './sandbox/local/core/CodeModeUdsTransport';
 import { isGoModuleHostName } from './sandbox/mirrors/goMirrorPath';
+import { E164_PATTERN } from './schemas/textMessages';
 
 const DEFAULT_PORT = 8790;
 /** Loopback default; container images set HOST=0.0.0.0 so probes and Service traffic reach the process. */
@@ -455,7 +456,8 @@ export interface TwilioSettings {
   webhookPublicUrl: string;
 }
 
-export const DEFAULT_TWILIO_WEBHOOK_PORT = 8793;
+/** Outside the ranges the installer picks app, sign-in and https ports from, so no instance lands on it. */
+export const DEFAULT_TWILIO_WEBHOOK_PORT = 9201;
 
 function isPlainHttpsAddress(url: URL | undefined): url is URL {
   return (
@@ -494,7 +496,7 @@ export function parseTwilioSettings(raw: {
   if (authToken === undefined) {
     throw new Error('TWILIO_AUTH_TOKEN is not set. Copy the auth token from the Twilio console.');
   }
-  if (fromNumber === undefined || !/^\+[1-9]\d{7,14}$/.test(fromNumber)) {
+  if (fromNumber === undefined || !E164_PATTERN.test(fromNumber)) {
     throw new Error('TWILIO_FROM_NUMBER must be your Twilio number with the country code, such as +15550100.');
   }
   const portText = blankToUndefined(raw.webhookPort);
@@ -513,7 +515,7 @@ export function parseTwilioSettings(raw: {
   }
   if (!isPlainHttpsAddress(parsed)) {
     throw new Error(
-      'TWILIO_WEBHOOK_PUBLIC_URL must be the https address Twilio reaches, such as https://aman.example.com. Set it, or turn texts off.',
+      'TWILIO_WEBHOOK_PUBLIC_URL must be the https address Twilio reaches, such as https://aman.example.com. Set it to that address.',
     );
   }
   return {
@@ -1461,7 +1463,7 @@ export interface SharedServerConfiguration {
   /**
    * Text messages through Twilio. Undefined (the default) means texts are off. Env: `REACH_SMS_PROVIDER` (`none` or
    * `twilio`), `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER`, and for the separate Twilio listener
-   * `TWILIO_WEBHOOK_PORT` (default 8793) and `TWILIO_WEBHOOK_PUBLIC_URL`.
+   * `TWILIO_WEBHOOK_PORT` (default 9201) and `TWILIO_WEBHOOK_PUBLIC_URL`.
    */
   TWILIO: TwilioSettings | undefined;
   /**

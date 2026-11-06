@@ -1,7 +1,7 @@
 import winston from 'winston';
 
 import { createDeliveryService } from '../../../../src/runtime/delivery/deliveryService';
-import { privatePhrase, textBody } from '../../../../src/runtime/texts/smsSender';
+import { privatePhrase, textBody } from '../../../../src/runtime/texts/textWords';
 import type { Delivery, DeliveryKind } from '../../../../src/schemas/deliveries';
 import { defaultReachSettings } from '../../../../src/schemas/reach';
 import { ALICE, PHONE, textsHarness } from '../../../fixtures/textsHarness';
@@ -64,8 +64,8 @@ describe('texts as a channel of the delivery layer', () => {
     await h.deliveries.deliver(nudge(MAIL_TEXT, 'reminder'));
     expect(h.sent.map(text => text.to)).toEqual([PHONE, PHONE]);
     expect(h.sent.map(text => text.body)).toEqual([
-      'Mannie: something needs you. Open Aman to see it.',
-      'Mannie: a reminder is due. Open Aman to see it.',
+      'Mannie: something needs you. Open the app to see it.',
+      'Mannie: a reminder is due. Open the app to see it.',
     ]);
     for (const { body } of h.sent) {
       expect(body).not.toMatch(/Dana|Reyes|Northwind|\$|482|Friday|URGENT|wire|4417|electric/);
@@ -79,21 +79,53 @@ describe('texts as a channel of the delivery layer', () => {
     expect(h.sent[0]?.body).toBe(`Mannie: ${BILL_TEXT}`);
   });
 
-  it('cuts a long Full message at a word', () => {
-    const delivery: Delivery = {
+  function delivery(text: string): Delivery {
+    return {
       id: 'd1',
       kind: 'nudge',
       level: 'nudge',
-      text: `${'word '.repeat(200)}end`,
+      text,
       reason: 'A test.',
       link: null,
       created_at: '2026-11-06T10:00:00.000Z',
       seen_at: null,
       attempts: [],
     };
-    const body = textBody({ name: 'Mannie', delivery, mode: 'full' });
-    expect(body.length).toBeLessThanOrEqual(310);
-    expect(body.endsWith('…')).toBe(true);
+  }
+
+  /** Plain characters that each take one place in a text, so two text segments hold 306 of them. */
+  const ONE_PLACE = /^[A-Za-z0-9 !"#$%&'()*+,\-./:;<=>?@_]*$/;
+
+  it('cuts a long Full message at a word, within two text segments, name included', () => {
+    const body = textBody({ name: 'Mannie', delivery: delivery(`${'word '.repeat(200)}end`), mode: 'full' });
+    expect(body.length).toBeLessThanOrEqual(306);
+    expect(body.endsWith('word...')).toBe(true);
+    expect(body).toMatch(ONE_PLACE);
+  });
+
+  it('writes a Full message in plain characters, so it is not sent in the costlier long form', () => {
+    const body = textBody({
+      name: 'Mannie',
+      delivery: delivery('Café “bill” — due… {soon} [ok] ~ |x| ^ `y` \\ 🎉 naïve'),
+      mode: 'full',
+    });
+    expect(body).toBe('Mannie: Cafe "bill" - due... (soon) (ok) - /x/ \'y\' / naive');
+    expect(body).toMatch(ONE_PLACE);
+  });
+
+  it('keeps a long or unusual assistant name short and plain in a text', async () => {
+    const h = await textsHarness({ assistantName: `Call 555 0199 now: your bank ${'x'.repeat(400)}` });
+    await h.readyToText();
+    await h.deliveries.deliver(nudge(BILL_TEXT));
+    expect(h.sent[0]?.body).toBe('Your assistant: something needs you. Open the app to see it.');
+    const long = await textsHarness({ assistantName: `Juniper the ${'very '.repeat(80)}helpful` });
+    await long.readyToText();
+    await long.deliveries.deliver(nudge(BILL_TEXT));
+    expect(long.sent[0]?.body).toBe('Juniper the very ver: something needs you. Open the app to see it.');
+    const plain = await textsHarness({ assistantName: '🎉🎉' });
+    await plain.readyToText();
+    await plain.deliveries.deliver(nudge(BILL_TEXT));
+    expect(plain.sent[0]?.body).toBe('Your assistant: something needs you. Open the app to see it.');
   });
 
   it('takes the assistant name from the person’s settings, never a fixed one', async () => {
@@ -104,7 +136,7 @@ describe('texts as a channel of the delivery layer', () => {
     const unnamed = await textsHarness({ assistantName: null });
     await unnamed.readyToText();
     await unnamed.deliveries.deliver(nudge(BILL_TEXT));
-    expect(unnamed.sent[0]?.body).toBe('Your assistant: something needs you. Open Aman to see it.');
+    expect(unnamed.sent[0]?.body).toBe('Your assistant: something needs you. Open the app to see it.');
     expect(unnamed.sent[0]?.body).not.toContain('Mannie');
   });
 

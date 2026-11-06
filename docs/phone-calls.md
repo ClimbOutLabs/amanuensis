@@ -44,7 +44,7 @@ There is nothing to set in the Twilio console for calls. Aman tells Twilio where
 
 ## Let Twilio reach Aman
 
-Calls use the same separate Twilio door as texts, on the same port (8793 unless you changed it). Twilio reaches it at three addresses under your `TWILIO_WEBHOOK_PUBLIC_URL`:
+Calls use the same separate Twilio door as texts, on the same port (9201 unless you changed it). Twilio reaches it at three addresses under your `TWILIO_WEBHOOK_PUBLIC_URL`:
 
 - `/twilio/voice`, when you pick up;
 - `/twilio/call-status`, when the call ends;
@@ -52,7 +52,7 @@ Calls use the same separate Twilio door as texts, on the same port (8793 unless 
 
 Every request must carry Twilio's signature. The sound connection must also carry a one-time key that Aman gave Twilio for that same call, and it works only once, within 30 seconds. Aman refuses anything else. The door never shows the Aman app or the sign-in page. Never publish the main Aman port.
 
-- **Tailscale Funnel, on that port only.** `tailscale funnel 8793` carries the WebSocket too. Nothing else is needed.
+- **Tailscale Funnel, on that port only.** `tailscale funnel 9201` carries the WebSocket too. Nothing else is needed.
 - **Your own domain with https.** Your web server must pass WebSockets on. Caddy does this on its own. With nginx, add the `Upgrade` and `Connection` headers for the `/twilio/` path.
 
 ## Privacy
