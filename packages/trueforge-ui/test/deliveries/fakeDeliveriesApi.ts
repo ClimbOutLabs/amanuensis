@@ -34,9 +34,16 @@ export const QUIET_SETTINGS: ReachSettings = {
 
 /** A server that holds the feed once, the way the real one does, so two "devices" can share it. */
 export function fakeServer(initial: DeliveryItem[]) {
-  const state: { items: DeliveryItem[]; pushKey: string | null; reach: ReachView; suggestions: ReachSuggestion[] } = {
+  const state: {
+    items: DeliveryItem[];
+    pushKey: string | null;
+    pushEndpoints: Set<string>;
+    reach: ReachView;
+    suggestions: ReachSuggestion[];
+  } = {
     items: initial,
     pushKey: SERVER_KEY,
+    pushEndpoints: new Set<string>(),
     reach: {
       settings: QUIET_SETTINGS,
       saved: false,
@@ -73,8 +80,15 @@ export function fakeServer(initial: DeliveryItem[]) {
     }),
     get: vi.fn((id: string) => Promise.resolve(state.items.find(row => row.id === id) ?? null)),
     pushPublicKey: vi.fn(() => Promise.resolve(state.pushKey)),
-    savePushDevice: vi.fn((): Promise<'saved' | 'taken'> => Promise.resolve('saved')),
-    removePushDevice: vi.fn(() => Promise.resolve()),
+    savePushDevice: vi.fn((device: { endpoint: string }): Promise<'saved' | 'taken'> => {
+      state.pushEndpoints.add(device.endpoint);
+      return Promise.resolve('saved');
+    }),
+    removePushDevice: vi.fn((endpoint: string) => {
+      state.pushEndpoints.delete(endpoint);
+      return Promise.resolve();
+    }),
+    pushDeviceSaved: vi.fn((endpoint: string) => Promise.resolve(state.pushEndpoints.has(endpoint))),
     reach: {
       get: vi.fn(() => Promise.resolve(state.reach)),
       save: vi.fn((settings: ReachSettings) => {

@@ -12,6 +12,7 @@ import {
   GetDeliveryResponseSchema,
   GetPushSubscriptionResponseSchema,
   ListDeliveriesResponseSchema,
+  LookupPushSubscriptionResponseSchema,
 } from '../../../src/schemas/deliveries';
 
 function person(id: string): RequestContext {
@@ -167,6 +168,24 @@ describe('push routes', () => {
 
     const removed = await json('/push/subscriptions', { method: 'DELETE', body: { endpoint: subscription.endpoint } });
     expect(removed.status).toBe(200);
+  });
+
+  it('says whether a device still gets notices, only to its owner', async () => {
+    const { json, as } = await build();
+    const lookup = async () =>
+      LookupPushSubscriptionResponseSchema.parse(
+        await (
+          await json('/push/subscriptions/lookup', { method: 'POST', body: { endpoint: subscription.endpoint } })
+        ).json(),
+      ).data.saved;
+    expect(await lookup()).toBe(false);
+    expect((await json('/push/subscriptions', { method: 'POST', body: subscription })).status).toBe(201);
+    expect(await lookup()).toBe(true);
+    as('bob');
+    expect(await lookup()).toBe(false);
+    as('alice');
+    await json('/push/subscriptions', { method: 'DELETE', body: { endpoint: subscription.endpoint } });
+    expect(await lookup()).toBe(false);
   });
 
   it('refuses device keys that are not real push keys', async () => {
