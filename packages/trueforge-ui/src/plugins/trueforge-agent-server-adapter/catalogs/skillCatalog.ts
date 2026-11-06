@@ -206,5 +206,45 @@ export function createSkillCatalog(
         options: clientOptions,
       });
     },
+    allowSkillNetworkHost: async ({ id, host }): Promise<SkillNetworkApprovalState> => {
+      const body = await requestSkillRoute({
+        name: id,
+        route: 'network-approval/allowed-host',
+        method: 'PUT',
+        body: { host },
+        failureLabel: 'Allowing the site',
+        options: clientOptions,
+      });
+      return parseSkillNetworkApproval(body);
+    },
+    denySkillNetworkHost: async ({ id, host }): Promise<SkillNetworkApprovalState> => {
+      const body = await requestSkillRoute({
+        name: id,
+        route: 'network-approval/denied-host',
+        method: 'PUT',
+        body: { host },
+        failureLabel: 'Turning down the site',
+        options: clientOptions,
+      });
+      return parseSkillNetworkApproval(body);
+    },
+    clearSkillNetworkAllowedHost: async ({ id, host }): Promise<void> => {
+      await requestSkillRoute({
+        name: id,
+        route: `network-approval/allowed-host?host=${encodeURIComponent(host)}`,
+        method: 'DELETE',
+        failureLabel: 'Removing the allowed site',
+        options: clientOptions,
+      });
+    },
+    clearSkillNetworkDeniedHost: async ({ id, host }): Promise<void> => {
+      await requestSkillRoute({
+        name: id,
+        route: `network-approval/denied-host?host=${encodeURIComponent(host)}`,
+        method: 'DELETE',
+        failureLabel: 'Clearing the turned-down site',
+        options: clientOptions,
+      });
+    },
   };
 }

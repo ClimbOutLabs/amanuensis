@@ -785,6 +785,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     outboundSecrets,
     mailPolicyPath: configuration.MAIL_POLICY_FILE,
     mailPolicyStatusPath: configuration.MAIL_POLICY_STATUS_FILE,
+    skillStore,
   });
   const sessions = new Sessions({ sessionStore, sentinelServices });
   const chatImages = createChatImageService({

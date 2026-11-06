@@ -238,7 +238,14 @@ describe('skillCatalog network approval', () => {
   }
 
   const stateBody = {
-    data: { declared_hosts: ['github.com', 'api.github.com'], approved_hosts: null, send_capable: false },
+    data: {
+      declared_hosts: ['github.com', 'api.github.com'],
+      approved_hosts: null,
+      allowed_hosts: [],
+      denied_hosts: [],
+      session_hosts: [],
+      send_capable: false,
+    },
   };
 
   it('reads the approval state from the settings route and projects it', async () => {
@@ -259,6 +266,9 @@ describe('skillCatalog network approval', () => {
     assert.deepEqual(state, {
       declaredHosts: ['github.com', 'api.github.com'],
       approvedHosts: null,
+      allowedHosts: [],
+      deniedHosts: [],
+      sessionHosts: [],
       sendCapable: false,
     });
   });
@@ -276,6 +286,9 @@ describe('skillCatalog network approval', () => {
           data: {
             declared_hosts: ['github.com', 'api.github.com'],
             approved_hosts: ['github.com', 'api.github.com'],
+            allowed_hosts: [],
+            denied_hosts: [],
+            session_hosts: [],
             send_capable: false,
           },
         }),
@@ -295,6 +308,49 @@ describe('skillCatalog network approval', () => {
       },
       {
         url: 'http://harness.test/api/v1/settings/skills/ten-x/network-approval',
+        method: 'DELETE',
+        body: undefined,
+      },
+    ]);
+  });
+
+  it('allows or turns down one site with a PUT, and clears each with a DELETE naming the site', async () => {
+    const calls: { url: string; method: string | undefined; body: string | undefined }[] = [];
+    const catalog = catalogWithFetch(async (input, init) => {
+      calls.push({
+        url: String(input),
+        method: init?.method,
+        body: typeof init?.body === 'string' ? init.body : undefined,
+      });
+      return new Response(JSON.stringify(stateBody), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+
+    await catalog.allowSkillNetworkHost({ id: 'ten-x', host: 'uploads.github.com' });
+    await catalog.denySkillNetworkHost({ id: 'ten-x', host: 'trackers.example.com' });
+    await catalog.clearSkillNetworkAllowedHost({ id: 'ten-x', host: 'uploads.github.com' });
+    await catalog.clearSkillNetworkDeniedHost({ id: 'ten-x', host: 'trackers.example.com' });
+
+    assert.deepEqual(calls, [
+      {
+        url: 'http://harness.test/api/v1/settings/skills/ten-x/network-approval/allowed-host',
+        method: 'PUT',
+        body: JSON.stringify({ host: 'uploads.github.com' }),
+      },
+      {
+        url: 'http://harness.test/api/v1/settings/skills/ten-x/network-approval/denied-host',
+        method: 'PUT',
+        body: JSON.stringify({ host: 'trackers.example.com' }),
+      },
+      {
+        url: 'http://harness.test/api/v1/settings/skills/ten-x/network-approval/allowed-host?host=uploads.github.com',
+        method: 'DELETE',
+        body: undefined,
+      },
+      {
+        url: 'http://harness.test/api/v1/settings/skills/ten-x/network-approval/denied-host?host=trackers.example.com',
         method: 'DELETE',
         body: undefined,
       },

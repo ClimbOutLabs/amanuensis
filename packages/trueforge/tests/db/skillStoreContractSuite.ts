@@ -254,6 +254,62 @@ export function runSkillStoreContractSuite(getStore: () => ISkillStore): void {
     ).resolves.toBeUndefined();
   });
 
+  it('a new skill has no per-site network decisions', async () => {
+    const store = getStore();
+    const created = await store.createSkill({
+      tenant_id: TENANT,
+      name: 'algorithmic-art',
+      manifest: manifest({ network_hosts: ['github.com', 'api.github.com'] }),
+    });
+    expect(created.network_allowed_hosts).toEqual([]);
+    expect(created.network_denied_hosts).toEqual([]);
+  });
+
+  it('setSkillNetworkHostDecision stores one decision per site, and none clears it', async () => {
+    const store = getStore();
+    await store.upsertSkill({
+      tenant_id: TENANT,
+      name: 'algorithmic-art',
+      manifest: manifest({ network_hosts: ['github.com', 'api.github.com'] }),
+    });
+    const allowed = await store.setSkillNetworkHostDecision({
+      tenant_id: TENANT,
+      name: 'algorithmic-art',
+      host: 'uploads.github.com',
+      decision: 'allowed',
+    });
+    expect(allowed?.network_allowed_hosts).toEqual(['uploads.github.com']);
+    expect(allowed?.network_denied_hosts).toEqual([]);
+
+    // A site holds one decision at a time: turning it down replaces the allowance.
+    const denied = await store.setSkillNetworkHostDecision({
+      tenant_id: TENANT,
+      name: 'algorithmic-art',
+      host: 'uploads.github.com',
+      decision: 'denied',
+    });
+    expect(denied?.network_allowed_hosts).toEqual([]);
+    expect(denied?.network_denied_hosts).toEqual(['uploads.github.com']);
+    const [listed] = await store.listSkills({ tenant_id: TENANT, names: ['algorithmic-art'] });
+    expect(listed?.network_denied_hosts).toEqual(['uploads.github.com']);
+
+    const cleared = await store.setSkillNetworkHostDecision({
+      tenant_id: TENANT,
+      name: 'algorithmic-art',
+      host: 'uploads.github.com',
+      decision: 'none',
+    });
+    expect(cleared?.network_allowed_hosts).toEqual([]);
+    expect(cleared?.network_denied_hosts).toEqual([]);
+  });
+
+  it('setSkillNetworkHostDecision on a missing skill returns undefined', async () => {
+    const store = getStore();
+    await expect(
+      store.setSkillNetworkHostDecision({ tenant_id: TENANT, name: 'nope', host: 'github.com', decision: 'denied' }),
+    ).resolves.toBeUndefined();
+  });
+
   it('replacing the manifest keeps the stored approval beside it', async () => {
     const store = getStore();
     await store.upsertSkill({

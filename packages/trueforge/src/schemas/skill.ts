@@ -136,6 +136,37 @@ export function effectiveSkillNetworkHosts(input: {
   return declared.every(host => approved.has(host)) ? declared : null;
 }
 
+/**
+ * Every site a skill may reach, from all the ways the person allowed it: the declared list when
+ * its approval is in force, each site allowed on its own (from a card or Settings), and the
+ * session's allow-once sites. A denied site is never included, even when another rule names it:
+ * a denial is the person's latest word on that site until they clear it in Settings.
+ */
+export function grantedSkillNetworkHosts(input: {
+  declared: readonly string[] | undefined;
+  approved: readonly string[] | null;
+  allowed: readonly string[];
+  denied: readonly string[];
+  session: readonly string[];
+}): readonly string[] {
+  const denied = new Set(input.denied);
+  const hosts = new Set<string>();
+  const effective = effectiveSkillNetworkHosts({ declared: input.declared, approved: input.approved });
+  for (const host of effective ?? []) {
+    hosts.add(host);
+  }
+  for (const host of input.allowed) {
+    hosts.add(host);
+  }
+  for (const host of input.session) {
+    hosts.add(host);
+  }
+  for (const host of denied) {
+    hosts.delete(host);
+  }
+  return [...hosts];
+}
+
 /** Configured skill document persisted as `skill.manifest`. */
 const GitSkillSchema = z
   .object({
@@ -253,14 +284,19 @@ export const ListSkillVersionsResponseSchema = z
   .openapi('ListSkillVersionsResponse');
 
 /**
- * Network approval state of one skill, as Settings shows it. `approved_hosts` is the list in
- * force right now: null when the person has not approved, or when the skill's declared list grew
- * past what they approved and they need to approve the new full list.
+ * Network approval state of one skill, as Settings shows it. `approved_hosts` is the declared
+ * list in force right now: null when the person has not approved, or when the skill's declared
+ * list grew past what they approved and they need to approve the new full list. `allowed_hosts`
+ * are sites allowed one by one, `denied_hosts` are sites the person turned down, and
+ * `session_hosts` are sites allowed once in a chat that is still open.
  */
 export const SkillNetworkApprovalSchema = z
   .object({
     declared_hosts: SkillNetworkHostsSchema,
     approved_hosts: z.array(SkillNetworkHostSchema).nullable(),
+    allowed_hosts: z.array(SkillNetworkHostSchema),
+    denied_hosts: z.array(SkillNetworkHostSchema),
+    session_hosts: z.array(SkillNetworkHostSchema),
     send_capable: z.boolean().describe('True when a declared site can send mail or change a calendar.'),
   })
   .strict()
@@ -284,6 +320,27 @@ export const UpdateSkillNetworkApprovalResponseSchema = z
 
 export const DeleteSkillNetworkApprovalResponseSchema = z.object({}).openapi('DeleteSkillNetworkApprovalResponse');
 
+/** One site the person is allowing or turning down for a skill, apart from the declared list. */
+export const UpdateSkillNetworkHostRequestSchema = z
+  .object({
+    host: SkillNetworkHostSchema,
+  })
+  .strict()
+  .openapi('UpdateSkillNetworkHostRequest');
+
+export const UpdateSkillNetworkHostResponseSchema = z
+  .object({ data: SkillNetworkApprovalSchema })
+  .openapi('UpdateSkillNetworkHostResponse');
+
+/** Query for removing one site from a skill's allowed or denied list. */
+export const DeleteSkillNetworkHostRequestQuerySchema = z
+  .object({
+    host: SkillNetworkHostSchema,
+  })
+  .openapi('DeleteSkillNetworkHostRequestQuery');
+
+export const DeleteSkillNetworkHostResponseSchema = z.object({}).openapi('DeleteSkillNetworkHostResponse');
+
 export type ConfiguredSkill = z.infer<typeof ConfiguredSkillSchema>;
 export type CreateSkillRequest = z.infer<typeof CreateSkillRequestSchema>;
 export type UpdateSkillRequest = z.infer<typeof UpdateSkillRequestSchema>;
@@ -291,3 +348,4 @@ export type AvailableSkill = z.infer<typeof AvailableSkillSchema>;
 export type SkillVersion = z.infer<typeof SkillVersionSchema>;
 export type SkillNetworkApproval = z.infer<typeof SkillNetworkApprovalSchema>;
 export type UpdateSkillNetworkApprovalRequest = z.infer<typeof UpdateSkillNetworkApprovalRequestSchema>;
+export type UpdateSkillNetworkHostRequest = z.infer<typeof UpdateSkillNetworkHostRequestSchema>;

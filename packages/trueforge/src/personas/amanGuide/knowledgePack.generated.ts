@@ -820,12 +820,18 @@ export const AMAN_GUIDE_TOPICS: readonly AmanGuideTopic[] = [
   },
   {
     id: 'docs-skills-5',
+    title: 'Setup Skills: Network access for skills',
+    covers: [],
+    body: "A skill can name the sites it needs in its manifest (`network_hosts`). The sandbox has no network of its own, so a skill can reach only the sites you allow for it, and only while it is switched on for the chat.\n\nThe first time a skill with named sites runs in a chat, a card asks whether it may reach the whole list. The chat keeps working without the sites until you answer. If a skill tries a site it did not name, the connection is refused at once and a card asks about that one site. A card always names the skill, the site, and why it is asking.\n\nEach card takes one of three answers:\n\n- **Allow once** lets the skill reach the sites in this chat only. The command that was refused runs again with them.\n- **Always allow for this skill** remembers the sites for that skill in every chat. It does not change the list the skill names.\n- **Deny** remembers the sites as turned down for that skill, and no card asks about them again until you clear them.\n\nA scheduled run never waits for an answer: the run finishes, and the card waits for you with the run's other held actions.\n\n**Settings → Skills** shows, for each skill, the sites it names, the ones in force, the ones allowed one by one, the ones allowed once in a chat that is still open, and the ones turned down. You can clear an allowed or turned-down site there, or take back the whole approval; a change takes effect on the next command.\n\nPublic source: https://github.com/ClimbOutLabs/amanuensis/blob/main/docs/skills.mdx",
+  },
+  {
+    id: 'docs-skills-6',
     title: 'Setup Skills: Skills + MCP tools',
     covers: [],
     body: '- **Skills** define _how_ to handle a task (procedure, decision logic, formatting).\n- **MCP tools** provide the _actions and data_ to execute it.\n\nExample: a CRM follow-up skill sets tone and escalation rules; MCP tools look up the record, update the ticket, and notify Slack.\n\nPublic source: https://github.com/ClimbOutLabs/amanuensis/blob/main/docs/skills.mdx',
   },
   {
-    id: 'docs-skills-6',
+    id: 'docs-skills-7',
     title: 'Setup Skills: Authoring tips',
     covers: [],
     body: '- Keep the `description` sharp — it is the only thing the model sees before loading the skill.\n- Write `SKILL.md` like instructions to a competent teammate.\n- Put heavy reference material in supporting files the skill links to.\n- Prefer several focused skills over one sprawling pack.\n\nPublic source: https://github.com/ClimbOutLabs/amanuensis/blob/main/docs/skills.mdx',

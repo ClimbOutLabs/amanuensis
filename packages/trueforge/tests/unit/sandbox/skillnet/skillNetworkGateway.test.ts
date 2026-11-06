@@ -186,6 +186,24 @@ describe('SkillNetworkGateway', () => {
     expect(harness.logLines()).toContain('Skill network connection refused');
   });
 
+  it('records a refused site on its chat, so the runtime can raise a card for it', async () => {
+    const token = harness.registry.issue({ ...GRANT_INPUT, hosts: HOSTS });
+    const reply = await connectVia(harness.socketPath, { authority: 'evil.example.com:443', token });
+    expect(reply.status).toBe(403);
+    expect(harness.registry.drainRefusals({ session_id: 's' })).toEqual(['evil.example.com']);
+    // Draining hands the site out once; a second read has nothing.
+    expect(harness.registry.drainRefusals({ session_id: 's' })).toEqual([]);
+    // Another chat's refusals are its own.
+    expect(harness.registry.drainRefusals({ session_id: 'other' })).toEqual([]);
+  });
+
+  it('records nothing for a call with no token, since it names no chat', async () => {
+    harness.registry.issue({ ...GRANT_INPUT, hosts: HOSTS });
+    const reply = await connectVia(harness.socketPath, { authority: 'evil.example.com:443' });
+    expect(reply.status).toBe(403);
+    expect(harness.registry.drainRefusals({ session_id: 's' })).toEqual([]);
+  });
+
   it('refuses a call with no token and one with an unknown token', async () => {
     harness.registry.issue({ ...GRANT_INPUT, hosts: HOSTS });
     const noToken = await connectVia(harness.socketPath, { authority: 'github.com:443' });
