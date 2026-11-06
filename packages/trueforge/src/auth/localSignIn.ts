@@ -93,7 +93,7 @@ export async function verifyLocalSignIn(params: {
 }): Promise<LocalUserRecord | undefined> {
   const user = await params.store.getUser();
   const email = normalizeLocalEmail(params.email);
-  if (user === undefined || user.email !== email) {
+  if (user?.email !== email) {
     await verifyPasswordValue(params.password, await standInHash());
     return undefined;
   }
@@ -115,7 +115,7 @@ export async function changeLocalUserPassword(params: {
   new_password: string;
 }): Promise<ChangeLocalPasswordResult> {
   const user = await params.store.getUser();
-  if (user === undefined || user.id !== params.user_id) {
+  if (user?.id !== params.user_id) {
     return { ok: false, message: LOCAL_WRONG_CREDENTIALS_MESSAGE };
   }
   const currentMatches = await verifyPasswordValue(params.current_password, user.password_hash);

@@ -166,15 +166,13 @@ export function createAuthRouter(params: {
       return undefined;
     }
     const user = await local.localUserStore.getUser();
-    return user !== undefined && user.id === claims.user_id && user.session_version === claims.session_version
-      ? user
-      : undefined;
+    return user?.id === claims.user_id && user.session_version === claims.session_version ? user : undefined;
   };
 
   if (local !== undefined && localLimiter !== undefined) {
     // The form itself, served ahead of the login route like the retry page: the create form while
     // no user exists, the sign-in form after, and a signed-in person is sent straight through.
-    router.use('/login', async (c, next) => {
+    const localLoginPage: MiddlewareHandler = async (c, next) => {
       if (c.req.method !== 'GET') {
         return next();
       }
@@ -196,7 +194,8 @@ export function createAuthRouter(params: {
         200,
         LOCAL_LOGIN_PAGE_HEADERS,
       );
-    });
+    };
+    router.use('/login', localLoginPage);
 
     // First run: create the one sign-in. The store refuses a second, so this path closes itself.
     router.post('/create-account', async c => {
@@ -368,7 +367,7 @@ export function createAuthRouter(params: {
       const requestContext = resolveRequestContext(c);
       const body = c.req.valid('json');
       const user = await local.localUserStore.getUser();
-      if (user === undefined || user.id !== requestContext.subject.id) {
+      if (user?.id !== requestContext.subject.id) {
         throw new HTTPException(401, { message: 'Authentication required' });
       }
       // A password check like any other: the limiter sits in front of it too.

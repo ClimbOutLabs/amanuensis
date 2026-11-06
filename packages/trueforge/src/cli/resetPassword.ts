@@ -17,7 +17,7 @@ export interface ResetPasswordDeps {
   /** True when the server answers on its own address; a reset under a running server is refused. */
   serverRunning(): Promise<boolean>;
   /** Opens the instance's local user store; only called once the command line has been accepted. */
-  openStore(): Promise<{ store: ILocalUserStore; close(): Promise<void> }>;
+  openStore(): Promise<{ store: ILocalUserStore; close: () => Promise<void> }>;
   /** The new password typed twice: hidden on a terminal, two lines when piped in. */
   readPasswordPair(): Promise<{ password: string; confirm: string }>;
 }

@@ -54,7 +54,7 @@ export async function openLocalUserStore(): Promise<{ store: ILocalUserStore; cl
 async function readHiddenLine(prompt: string): Promise<string> {
   const stdin = process.stdin;
   process.stdout.write(prompt);
-  const wasRaw = stdin.isRaw === true;
+  const wasRaw = stdin.isRaw;
   stdin.setRawMode(true);
   stdin.resume();
   const decoder = new StringDecoder('utf8');

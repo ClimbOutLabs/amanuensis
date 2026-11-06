@@ -36,7 +36,7 @@ export class LocalAuthenticator implements Authenticator {
       throw new HTTPException(401, { message: 'Authentication required' });
     }
     const user = await this.#localUserStore.getUser();
-    if (user === undefined || user.id !== claims.user_id || user.session_version !== claims.session_version) {
+    if (user?.id !== claims.user_id || user.session_version !== claims.session_version) {
       throw new HTTPException(401, { message: 'Authentication required' });
     }
     return {
