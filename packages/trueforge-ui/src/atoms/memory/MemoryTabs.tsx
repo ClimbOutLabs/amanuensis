@@ -10,7 +10,8 @@ import { tablistTargetIndex } from '@/atoms/lib/tablistKeys.js';
  * the Settings Memory section and Settings Personalization, so the surfaces navigate the
  * same way. Arrow keys move
  * between tabs (focus follows the selection), Home and End jump to the ends, and only the
- * selected tab is in the tab order.
+ * selected tab is in the tab order. When the tabs are wider than the space they get, the
+ * strip scrolls sideways rather than squeezing the labels.
  */
 export function MemoryTabs<TabId extends string>(props: {
   ariaLabel: string;
@@ -35,7 +36,7 @@ export function MemoryTabs<TabId extends string>(props: {
     <div
       role="tablist"
       aria-label={props.ariaLabel}
-      className="flex gap-1 border-b border-border"
+      className="flex gap-1 overflow-x-auto border-b border-border"
       onKeyDown={onKeyDown}
     >
       {props.tabs.map((item, index) => (
@@ -50,7 +51,7 @@ export function MemoryTabs<TabId extends string>(props: {
           tabIndex={props.activeTab === item.id ? 0 : -1}
           onClick={() => props.onTabChange(item.id)}
           className={cn(
-            'px-3 py-2 text-sm font-medium',
+            'shrink-0 px-3 py-2 text-sm font-medium whitespace-nowrap',
             'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring',
             props.activeTab === item.id
               ? 'border-b-2 border-primary-button-bg text-text-primary'

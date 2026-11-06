@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { DraftCatalogProvider } from '@/atoms/draft/DraftCatalogProvider.js';
 import { MemoryVaultPage } from '@/atoms/memory/MemoryVaultPage.js';
+import { PersonalizationProvider } from '@/components/PersonalizationContext.js';
 import TruefoundrySettingsBuilder from '@/containers/SettingsBuilder/index.js';
 import type { MemoryVaultCatalog } from '@/plugins/trueforge-agent-server-adapter/catalogs/memoryVaultCatalog.js';
 import { ServerProvider } from '@/server/ServerContext.js';
@@ -106,14 +107,39 @@ function OpenSettingsButton() {
   );
 }
 
-function TestShell({ server, children }: { server: AgentUIServer; children?: ReactNode }) {
+function TestShell({
+  server,
+  children,
+  withPersonalization = true,
+}: {
+  server: AgentUIServer;
+  children?: ReactNode;
+  withPersonalization?: boolean;
+}) {
+  const content = (
+    <>
+      <OpenSettingsButton />
+      <TruefoundrySettingsBuilder />
+      {children}
+    </>
+  );
   return (
     <ServerProvider server={server}>
       <DraftCatalogProvider>
         <ShellModeProvider>
-          <OpenSettingsButton />
-          <TruefoundrySettingsBuilder />
-          {children}
+          {withPersonalization ? (
+            <PersonalizationProvider
+              api={{
+                getProfile: async () => null,
+                updateProfile: async profile => profile,
+                deleteProfile: async () => {},
+              }}
+            >
+              {content}
+            </PersonalizationProvider>
+          ) : (
+            content
+          )}
         </ShellModeProvider>
       </DraftCatalogProvider>
     </ServerProvider>
@@ -144,7 +170,7 @@ describe('Settings Memory section', () => {
     expect(screen.queryByRole('button', { name: 'Memory vault' })).not.toBeInTheDocument();
   });
 
-  it('shows the three sub-tabs in order: Memories, Sharing, Settings', async () => {
+  it('shows the five sub-tabs in order: Memories, Sharing, Learned profile, Import and export, Settings', async () => {
     render(<TestShell server={createServer({ memorySetUp: true })} />);
     await openMemorySection();
 
@@ -153,7 +179,7 @@ describe('Settings Memory section', () => {
       within(memoryTabs)
         .getAllByRole('tab')
         .map(tab => tab.textContent),
-    ).toEqual(['Memories', 'Sharing', 'Settings']);
+    ).toEqual(['Memories', 'Sharing', 'Learned profile', 'Import and export', 'Settings']);
   });
 
   it('opens on Memories when memory is set up', async () => {
@@ -183,12 +209,53 @@ describe('Settings Memory section', () => {
     expect(await screen.findByText(/nothing to share\./)).toBeInTheDocument();
   });
 
+  it('shows the Learned profile block on its own sub-tab', async () => {
+    render(<TestShell server={createServer({ memorySetUp: true })} />);
+    await openMemorySection();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Learned profile' }));
+    expect(screen.getByRole('tab', { name: 'Learned profile' })).toHaveAttribute('aria-selected', 'true');
+    expect(await screen.findByRole('heading', { name: 'Learned profile' })).toBeInTheDocument();
+    expect(screen.getByText(/updates this from your conversations/)).toBeInTheDocument();
+    expect(screen.getByRole('switch', { name: 'Learn from conversations' })).toBeInTheDocument();
+  });
+
+  it('hides the Learned profile tab when the host has no personalization provider', async () => {
+    render(<TestShell server={createServer({ memorySetUp: true })} withPersonalization={false} />);
+    await openMemorySection();
+
+    const memoryTabs = screen.getByRole('tablist', { name: 'Memory sections' });
+    expect(
+      within(memoryTabs)
+        .getAllByRole('tab')
+        .map(tab => tab.textContent),
+    ).toEqual(['Memories', 'Sharing', 'Import and export', 'Settings']);
+    expect(await screen.findByText('The user drinks tea in the morning.')).toBeInTheDocument();
+  });
+
+  it('shows export and import on their own sub-tab, not below the list', async () => {
+    render(<TestShell server={createServer({ memorySetUp: true })} />);
+    await openMemorySection();
+
+    expect(await screen.findByText('The user drinks tea in the morning.')).toBeInTheDocument();
+    expect(screen.queryByText('Export, import, and topics')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Import and export' }));
+    expect(screen.getByRole('tab', { name: 'Import and export' })).toHaveAttribute('aria-selected', 'true');
+    fireEvent.click(screen.getByText('Export, import, and topics'));
+    expect(screen.getByRole('button', { name: 'Export' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Import' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Import memory JSON file')).toBeInTheDocument();
+  });
+
   it('moves between sub-tabs with the arrow keys, Home, and End', async () => {
     render(<TestShell server={createServer({ memorySetUp: true })} />);
     await openMemorySection();
 
     const memoriesTab = screen.getByRole('tab', { name: 'Memories' });
     const sharingTab = screen.getByRole('tab', { name: 'Sharing' });
+    const learnedTab = screen.getByRole('tab', { name: 'Learned profile' });
+    const importTab = screen.getByRole('tab', { name: 'Import and export' });
     const settingsTab = screen.getByRole('tab', { name: 'Settings' });
 
     memoriesTab.focus();
@@ -199,14 +266,22 @@ describe('Settings Memory section', () => {
     expect(sharingTab).toHaveFocus();
 
     fireEvent.keyDown(sharingTab, { key: 'ArrowRight' });
+    expect(learnedTab).toHaveAttribute('aria-selected', 'true');
+    expect(learnedTab).toHaveFocus();
+
+    fireEvent.keyDown(learnedTab, { key: 'ArrowRight' });
+    expect(importTab).toHaveAttribute('aria-selected', 'true');
+    expect(importTab).toHaveFocus();
+
+    fireEvent.keyDown(importTab, { key: 'ArrowRight' });
     expect(settingsTab).toHaveAttribute('aria-selected', 'true');
     expect(settingsTab).toHaveFocus();
 
     fireEvent.keyDown(settingsTab, { key: 'ArrowLeft' });
-    expect(sharingTab).toHaveAttribute('aria-selected', 'true');
-    expect(sharingTab).toHaveFocus();
+    expect(importTab).toHaveAttribute('aria-selected', 'true');
+    expect(importTab).toHaveFocus();
 
-    fireEvent.keyDown(sharingTab, { key: 'End' });
+    fireEvent.keyDown(importTab, { key: 'End' });
     expect(settingsTab).toHaveAttribute('aria-selected', 'true');
     expect(settingsTab).toHaveFocus();
 
