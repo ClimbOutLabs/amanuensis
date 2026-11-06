@@ -26,6 +26,51 @@ const MAX_UPLOAD_BODY_BYTES = Math.ceil((MAX_UPLOAD_BYTES * 4) / 3) + 64 * 1024;
 const EXTRACT_MODULE = readFileSync(new URL('./extract.mjs', import.meta.url), 'utf8').replace(/^export /gm, '');
 
 const EXTRACT_SCRIPT = `(() => {\n${EXTRACT_MODULE}\nreturn extractSnapshotNodes();\n})()`;
+const VIEW_SCRIPT = `(() => {\n${EXTRACT_MODULE}\nreturn viewPosition();\n})()`;
+
+/** How long a scroll may take to come to rest before the page is read anyway. */
+const SCROLL_SETTLE_MS = 1000;
+
+/**
+ * Waits in the page until a scroll has come to rest: the position holds for a few frames, after it
+ * moved or after a short wait for a page that does not move (its end). The position counts the
+ * window and every scroll box under the middle of the view, since the wheel scrolls whichever is there.
+ */
+const SCROLL_SETTLE_SCRIPT = `(async () => {
+  const position = () => {
+    let sum = window.scrollY;
+    for (let box = document.elementFromPoint(innerWidth / 2, innerHeight / 2); box !== null; box = box.parentElement) {
+      sum += box.scrollTop;
+    }
+    return sum;
+  };
+  const start = position();
+  const began = performance.now();
+  let last = start;
+  let still = 0;
+  while (performance.now() - began < ${String(SCROLL_SETTLE_MS)}) {
+    await new Promise(resolve => requestAnimationFrame(resolve));
+    const now = position();
+    still = now === last ? still + 1 : 0;
+    last = now;
+    if (still >= 3 && (now !== start || performance.now() - began > 200)) {
+      return;
+    }
+  }
+})()`;
+
+/** A scroll's settle wait, bounded here too, so a page that stalls its own frames cannot hold the read. */
+async function scrollSettled(page) {
+  let timer;
+  const cap = new Promise(resolve => {
+    timer = setTimeout(resolve, SCROLL_SETTLE_MS + 500);
+  });
+  try {
+    await Promise.race([page.evaluate(SCROLL_SETTLE_SCRIPT).catch(() => undefined), cap]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /** The same bundled module, ending in a read-only look at where the elements at `paths` sit in view. */
 function boxesInViewScript(paths) {
@@ -514,7 +559,8 @@ export class BrowserSidecar {
       try {
         const nodes = await tab.page.evaluate(EXTRACT_SCRIPT);
         const refs = tab.refs.refsFor(nodes);
-        const text = renderSnapshot({ title: await tab.page.title(), url: tab.page.url(), nodes, refs });
+        const view = await tab.page.evaluate(VIEW_SCRIPT);
+        const text = renderSnapshot({ title: await tab.page.title(), url: tab.page.url(), nodes, refs, view });
         return { status: 'ok', text };
       } catch (error) {
         if (attempt >= READ_ATTEMPTS || !String(error).includes('Execution context was destroyed')) {
@@ -530,7 +576,14 @@ export class BrowserSidecar {
     if (tab === undefined) {
       return NO_TAB;
     }
+    // The wheel scrolls whatever is under the pointer, so it is turned over the middle of the view,
+    // and the pointer goes back to the corner so nothing in the middle stays hovered for the read.
+    const viewport = tab.page.viewportSize() ?? { width: 1280, height: 800 };
+    await tab.page.mouse.move(viewport.width / 2, viewport.height / 2);
     await tab.page.mouse.wheel(0, direction === 'up' ? -800 : 800);
+    await tab.page.mouse.move(0, 0);
+    // The wheel only starts the scroll; reading before it ends would show where the page was.
+    await scrollSettled(tab.page);
     return this.#read(tab);
   }
 
@@ -573,7 +626,6 @@ export class BrowserSidecar {
   async #pictureLayout(tab) {
     const nodes = await tab.page.evaluate(EXTRACT_SCRIPT);
     const refs = tab.refs.refsFor(nodes);
-    const text = renderSnapshot({ title: await tab.page.title(), url: tab.page.url(), nodes, refs });
     const cdp = await tab.page.context().newCDPSession(tab.page);
     try {
       const executionContextId = await isolatedWorld(cdp);
@@ -583,6 +635,9 @@ export class BrowserSidecar {
         expression: boxesInViewScript([...refs.keys()]),
       });
       const covered = await inIsolatedWorld({ cdp, executionContextId, expression: MASK_BOXES_SCRIPT });
+      // Where the view is, read with the layout so the page text says where the picture was taken.
+      const view = await inIsolatedWorld({ cdp, executionContextId, expression: VIEW_SCRIPT });
+      const text = renderSnapshot({ title: await tab.page.title(), url: tab.page.url(), nodes, refs, view });
       const closed = await closedShadowFieldBoxes(cdp);
       const boxOf = new Map(layout.boxes.map(({ path, ...box }) => [path, box]));
       return {
