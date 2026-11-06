@@ -38,9 +38,12 @@ export const CALLS_NEED_VOICE = 'Calls need the voice parts of Aman. Start them,
 const CALL_LIFETIME_MS = 5 * 60_000;
 /** A media token must be used within this long of Twilio being told about it. */
 const MEDIA_TOKEN_TTL_MS = 30_000;
-/** Twilio sends `start` straight after the socket opens; a socket that names no call by then is closed. */
-const START_WAIT_MS = 10_000;
-/** More lines than this waiting to name their call are not real calls, so the rest are turned away. */
+/** Twilio sends `start` within milliseconds of the socket opening; a socket that names no call by then is closed. */
+const START_WAIT_MS = 3_000;
+/**
+ * More lines than this waiting to name their call are not real calls. The one that has waited longest is closed, so
+ * idle lines opened with a copied signature can never keep a real call out.
+ */
 const MAX_WAITING_LINES = 8;
 /** Ended calls are kept this long, then forgotten. */
 const KEEP_ENDED_MS = 30 * 24 * 60 * 60_000;
@@ -180,7 +183,8 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
     twilio === undefined ? undefined : `${twilio.publicUrl.replace(/^https:/, 'wss:')}${MEDIA_STREAM_PATH}`;
   /** Calls with an open line in this process; their own close writes them down. */
   const live = new Set<string>();
-  let waitingLines = 0;
+  /** Lines open but not yet named, oldest first. */
+  const waitingLines = new Set<WebSocket>();
 
   const attempt = ({
     outcome,
@@ -695,17 +699,16 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
     let line: { call: PhoneCall; run: CallLine; transport: PhoneVoiceTransport } | undefined;
     let started = false;
     let closed = false;
-    if (waitingLines >= MAX_WAITING_LINES) {
-      socket.close(1013, 'busy');
-      return;
-    }
-    waitingLines += 1;
-    let waiting = true;
-    const stopWaiting = (): void => {
-      if (waiting) {
-        waiting = false;
-        waitingLines -= 1;
+    if (waitingLines.size >= MAX_WAITING_LINES) {
+      const [oldest] = waitingLines;
+      if (oldest !== undefined) {
+        waitingLines.delete(oldest);
+        oldest.close(1013, 'busy');
       }
+    }
+    waitingLines.add(socket);
+    const stopWaiting = (): void => {
+      waitingLines.delete(socket);
     };
     const waitForStart = setTimeout(() => {
       socket.close(1008, 'no call');

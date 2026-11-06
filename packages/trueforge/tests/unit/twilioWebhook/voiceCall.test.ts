@@ -169,22 +169,30 @@ describe('the Twilio listener for calls', () => {
     expect(h.tts.sentences).toEqual([]);
   });
 
-  it('turns away more lines that have not said which call they are for than any real calls would need', async () => {
+  it('closes the line that has waited longest to name its call, so idle lines can never keep a real call out', async () => {
     h = await callsHarness();
     await h.readyToCall();
     await h.callDelivery();
-    const waiting = await Promise.all(Array.from({ length: 8 }, () => h.openMedia({ token: undefined, start: false })));
-    const extra = await h.openMedia({ token: undefined, start: false });
-    expect(await extra.closed).toBe(1013);
-    waiting[0]?.socket.close();
-    await waiting[0]?.closed;
+    const waiting = [];
+    for (let n = 0; n < 8; n += 1) {
+      waiting.push(await h.openMedia({ token: undefined, start: false }));
+    }
     const { token } = await h.answer();
     const line = await h.openMedia({ token });
+    expect(await waiting[0]?.closed).toBe(1013);
     await h.waitFor(() => h.tts.sentences.length > 0);
-    for (const socket of [...waiting, line]) {
+    for (const socket of [...waiting.slice(1), line]) {
       socket.socket.close();
       await socket.closed;
     }
+  });
+
+  it('closes a line that has not named its call within a few seconds', async () => {
+    h = await callsHarness();
+    const started = Date.now();
+    const idle = await h.openMedia({ token: undefined, start: false });
+    expect(await idle.closed).toBe(1008);
+    expect(Date.now() - started).toBeLessThan(5_000);
   });
 
   it('lets a media token open the line once', async () => {
