@@ -3019,7 +3019,10 @@ export class AgentThread {
     });
 
     for (const processor of this.preEphemeralLLMContextProcessors) {
-      messages = processor.processPreLLMEphemeral(messages) ?? messages;
+      messages =
+        processor.processPreLLMEphemeral(messages, {
+          modelSupportsVision: this.definition.modelSupportsVision === true,
+        }) ?? messages;
     }
 
     // Host-owned task state: re-injected fresh on EVERY model call, after

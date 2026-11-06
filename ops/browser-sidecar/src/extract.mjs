@@ -2,18 +2,96 @@
 // Node globals. Walks the visible headings, text and controls of the page in reading order, each
 // already tagged with the field kind that governs whether its value may be shown.
 
-/** Attribute and name patterns that mark a field as a password, a card number, or a one-time code. */
+/**
+ * A field's name and id as plain lowercase words: `otp_code`, `otpCode` and `otp-code` all read
+ * `otp code`, so the patterns below match whatever naming style a site uses.
+ */
+function nameWords(element) {
+  return `${element.getAttribute('name') ?? ''} ${element.id ?? ''}`
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/([a-zA-Z])([0-9])/g, '$1 $2')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+/** Name words that mark a field as a password, a card number, or a one-time code. */
+const CARD_WORDS = /\b(card ?(number|no|num)|cc ?(num|number|no)|cvv|cvc|csc|security ?code)\b/;
+const CODE_WORDS =
+  /\b(otp|totp|passcode|mpin|tpin|(one ?time|verification|mfa|2 ?fa|sms|otp) ?code|(atm|card|security|secret|upi|txn|transaction) ?pin)\b/;
+/**
+ * "pin" names a secret unless it is a place or a postal code: a "PIN code" or "pincode" is a postal
+ * code in India, and a map pin is a place, so neither is hidden.
+ */
+const BARE_PIN = /\bpin\b(?! ?code)/;
+const PLACE_WORDS = /\b(map|location|place|drop|postal|post|zip|address|shipping|billing)\b/;
+
+/** Whether the field takes only digits, by its keyboard, its type or its pattern. */
+function takesDigits(element) {
+  const type = (element.getAttribute('type') ?? '').toLowerCase();
+  const inputMode = (element.getAttribute('inputmode') ?? '').toLowerCase();
+  const pattern = element.getAttribute('pattern') ?? '';
+  return (
+    inputMode === 'numeric' || type === 'tel' || type === 'number' || pattern.includes('0-9') || pattern.includes('\\d')
+  );
+}
+
+/** How far up from a one-digit box to look for the others in its row. */
+const DIGIT_ROW_LEVELS = 5;
+
+/** A label that only says which box of a code this is, such as "Digit 1 of 6" or "OTP character 2". */
+const CODE_BOX_LABEL = /\b(digit|character|char|box|code|otp|pin)\b|\b\d+\s*(of|\/)\s*\d+\b/i;
+
+/**
+ * Whether a field has a label of its own that names what it holds: a count such as "Adults" does,
+ * while a code's digit boxes have no label or one that only numbers the box.
+ */
+function hasOwnLabel(element) {
+  const labels = [
+    element.getAttribute('aria-label') ?? '',
+    ...[...(element.labels ?? [])].map(l => l.textContent ?? ''),
+  ];
+  return labels.some(text => /[a-z]{3}/i.test(text) && !CODE_BOX_LABEL.test(text));
+}
+
+/** A one-digit box with no label of its own. */
+function isDigitBox(element) {
+  return element.getAttribute('maxlength') === '1' && takesDigits(element) && !hasOwnLabel(element);
+}
+
+/** A box for one digit next to others like it, however deeply each is wrapped: a code typed one digit per box. */
+function isCodeDigitBox(element) {
+  if (!isDigitBox(element)) {
+    return false;
+  }
+  let around = element.parentElement;
+  for (let level = 0; around !== null && level < DIGIT_ROW_LEVELS; level += 1, around = around.parentElement) {
+    if ([...around.querySelectorAll('input[maxlength="1"]')].filter(isDigitBox).length >= 2) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function fieldKind(element) {
   const type = (element.getAttribute('type') ?? '').toLowerCase();
   const autocomplete = (element.getAttribute('autocomplete') ?? '').toLowerCase();
-  const name = `${element.getAttribute('name') ?? ''} ${element.id ?? ''}`.toLowerCase();
+  const words = nameWords(element);
   if (type === 'password') {
     return 'password';
   }
-  if (autocomplete.startsWith('cc-') || /\b(card.?number|cvv|cvc|security.?code)\b/.test(name)) {
+  if (autocomplete.startsWith('cc-') || CARD_WORDS.test(words)) {
     return 'card';
   }
-  if (autocomplete === 'one-time-code' || /\b(otp|one.?time.?code|verification.?code)\b/.test(name)) {
+  if (autocomplete === 'one-time-code' || CODE_WORDS.test(words)) {
+    return 'otp';
+  }
+  const postal = autocomplete === 'postal-code' || autocomplete.startsWith('address');
+  if (BARE_PIN.test(words) && !PLACE_WORDS.test(words) && !postal) {
+    return 'otp';
+  }
+  // Only the first box of a code typed one digit per box often says what it is.
+  if (isCodeDigitBox(element)) {
     return 'otp';
   }
   return null;
@@ -247,4 +325,73 @@ export function extractSnapshotNodes() {
     });
   }
   return nodes;
+}
+
+/**
+ * Where each element of `paths` sits in the viewport, read without changing anything on the page.
+ * Elements that are gone, empty or out of view are left out. The viewport size comes with them, so
+ * the sidecar can turn page pixels into picture pixels.
+ */
+export function boxesInView(paths) {
+  const width = window.innerWidth;
+  const height = window.innerHeight;
+  const boxes = [];
+  for (const path of paths) {
+    const element = elementAtPath(path);
+    if (element === null) {
+      continue;
+    }
+    const rect = element.getBoundingClientRect();
+    if (
+      rect.width === 0 ||
+      rect.height === 0 ||
+      rect.bottom < 0 ||
+      rect.top > height ||
+      rect.right < 0 ||
+      rect.left > width
+    ) {
+      continue;
+    }
+    boxes.push({ path, left: rect.left, top: rect.top, width: rect.width, height: rect.height });
+  }
+  return { width, height, boxes };
+}
+
+/** Elements that show another document, whose fields this page cannot read. */
+const EMBED_TAGS = new Set(['IFRAME', 'FRAME', 'EMBED', 'OBJECT']);
+const FIELD_TAGS = new Set(['INPUT', 'TEXTAREA', 'SELECT']);
+
+/**
+ * What the model's copy of a screenshot must cover, read without changing the page: every password,
+ * card or one-time-code field in view, including those inside open shadow roots, and every frame or
+ * embed in view whole, since a frame's own fields (a hosted card form) cannot be read from here.
+ */
+export function maskBoxes() {
+  const width = window.innerWidth;
+  const height = window.innerHeight;
+  const boxes = [];
+  const visit = root => {
+    for (const element of root.querySelectorAll('*')) {
+      const covered =
+        EMBED_TAGS.has(element.tagName) || (FIELD_TAGS.has(element.tagName) && fieldKind(element) !== null);
+      if (covered) {
+        const rect = element.getBoundingClientRect();
+        const inView =
+          rect.width > 0 &&
+          rect.height > 0 &&
+          rect.bottom >= 0 &&
+          rect.top <= height &&
+          rect.right >= 0 &&
+          rect.left <= width;
+        if (inView) {
+          boxes.push({ left: rect.left, top: rect.top, width: rect.width, height: rect.height });
+        }
+      }
+      if (element.shadowRoot !== null) {
+        visit(element.shadowRoot);
+      }
+    }
+  };
+  visit(document);
+  return { width, height, boxes };
 }
