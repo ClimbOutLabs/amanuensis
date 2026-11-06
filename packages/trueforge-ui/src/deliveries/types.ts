@@ -125,5 +125,7 @@ export type DeliveriesApi = {
   /** Resolves to `taken` when this address already gets another account's notices; a fresh subscription is needed. */
   savePushDevice(device: PushDevice): Promise<'saved' | 'taken'>;
   removePushDevice(endpoint: string): Promise<void>;
+  /** Whether the server still sends notices to this address. A device drops off when newer ones replace it or it goes away. */
+  pushDeviceSaved(endpoint: string): Promise<boolean>;
   reach: ReachApi;
 };
