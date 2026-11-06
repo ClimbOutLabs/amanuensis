@@ -149,7 +149,7 @@ values for a turn are what the `aman.memory.recall` event reflects.
 ## Memory pages
 
 These notes apply to the Markdown memory backend. A vault is one folder under `MEMORY_MARKDOWN_DIR`.
-The pages and their format are described in [the design](DESIGN.md#pages). Pages are edited by hand.
+The pages and their format are described in [the design](DESIGN.md#pages). You can edit pages by hand, and in a chat Aman can add, change or forget a single fact when you ask.
 
 ### A page is not loaded
 
@@ -165,13 +165,45 @@ along. If it says some pages have a name that is not all lowercase, rename each 
 name in the memory folder, for example `people/Wendy.md` to `people/wendy.md`; Aman reads it on the next
 turn. If it says other files were not copied, they were not `.md` pages; copy them by hand if you need
 them. If it says pages were left out because memory is kept in a different way, pages only work with the
-Markdown memory backend. `.memory-state/` is not exported and
-is rebuilt on the new server.
+Markdown memory backend. `.memory-state/` and `.memory-history/` are not exported. The cache is
+rebuilt on the new server. The history starts again there, with your edits and Aman's later changes.
 
 ### Files in `.memory-state/`
 
 - `aliases.json` is a cache of page names. Deleting it is safe. It is rebuilt on the next turn that
   needs it.
+- `lock.<n>` and `lock.<n>.beat` are the lock that keeps two writers from changing pages at once. Leave
+  them alone while Aman is running. If every process is stopped and you still see them, delete them all.
+
+### The lock is busy
+
+A chat that asks Aman to remember something while another change is running waits up to 10 seconds, then
+Aman says it could not save and asks you to try again. If a process crashed while it held the lock, the
+next writer takes over after 30 seconds of silence. You do not need to do anything.
+
+### The page history
+
+Every change Aman makes to `people/` or `matters/` is one commit in `<vault>/.memory-history`. It is
+separate from any git repository your memory folder is already part of, and it never changes that one.
+The next time Aman writes, it first commits anything you changed by hand as "Your edits". If git is not
+installed on the server, pages are still saved but there is no history, and the log says so once. Install
+git to turn it back on.
+
+To look at the history, use the same two folders every time. Replace `VAULT` with the vault's folder:
+
+    git --git-dir=VAULT/.memory-history --work-tree=VAULT log --stat
+    git --git-dir=VAULT/.memory-history --work-tree=VAULT show HEAD
+
+To undo Aman's last change to one page, stop Aman first so that no write is running, then put the page
+back from the commit before it:
+
+    git --git-dir=VAULT/.memory-history --work-tree=VAULT checkout HEAD~1 -- people/wendy.md
+    git --git-dir=VAULT/.memory-history --work-tree=VAULT commit -m "Undo by hand" people/wendy.md
+
+Change `HEAD~1` to any commit from the log to go further back. If you skip the second command, Aman
+commits the restored page as "Your edits" the next time it writes. A forgotten fact is not lost: it sits
+under "Earlier" with an end date, so you can also move the line back by hand. If a history call keeps
+failing, check that the disk has room. Deleting `.memory-history` only removes the history, never the pages.
 
 ## Evaluation-only Prompt Guard sidecar
 

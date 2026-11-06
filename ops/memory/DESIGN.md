@@ -5,8 +5,10 @@
 Host-enforced long-term memory. Exactly one MCP connector carries
 `memory_provider: true` in its manifest; the host recalls from it before
 every model call and retains every completed turn to it. The model is never
-responsible for remembering to use it, and no memory-write tool is exposed
-to the model. Hindsight is the recommended provider: a self-hosted,
+responsible for remembering to use it. The one exception is the three page
+tools described under [Writing pages](#writing-pages), which keep short facts
+the person asked for on a page and are not a way to write to the provider.
+Hindsight is the recommended provider: a self-hosted,
 long-term memory bank, run as its own service, with one bank per user.
 
 Deliberate principles: recall is user-visible byte for byte; one dispatch
@@ -150,7 +152,8 @@ the nightly pass can learn how the person writes to each contact.
 - **Not an instruction.** The model composed the text of a sent message, and it can echo text from mail it
   read, so a `sent_mail` note is evidence of how the person writes, not something the person said as a
   rule. No pass may promote a `sent_mail` note into a drafting instruction on a page, and so into a fact
-  with source `sent_mail`, unless the person confirms it. Nothing does today: pages are written by hand.
+  with source `sent_mail`, unless the person confirms it. Nothing does today: the page tools only write
+  what the person said in the current chat, as `you_said`.
 - **Old files.** Notes already on disk keep their exact bytes. Only a new source word, `sent_mail`, can
   appear in the hidden note marker.
 
@@ -160,14 +163,18 @@ Pages are short Markdown files about one person or one matter. They sit beside t
 vault and hold what stays true, so it does not have to be dug out of old entries. They work with the
 Markdown memory backend only. Hindsight does not use them.
 
-Pages are written by hand. Aman only reads them. No memory-write tool is exposed to the model, and pages
-do not change that.
+Pages can be written by hand, and in a chat Aman can add, change and forget single facts with three
+tools (see [Writing pages](#writing-pages)). Every change Aman makes is a commit in a history that sits
+beside the pages, so a page can always be put back. This reverses the earlier rule that no memory-write
+tool is exposed to the model. It is safe because of the taint rule: the tools refuse once the turn has
+read anything from outside the chat, so only the person's own words in the current message can reach a page.
 
 ### Files in a vault
 
     people/<slug>.md      one page per person
     matters/<slug>.md     one page per matter (a trip, a purchase, a project)
-    .memory-state/        notes Aman keeps for itself
+    .memory-state/        notes Aman keeps for itself, and the lock
+    .memory-history/      a git history of the two page folders
 
 The slug comes from the title: lowercase, accents dropped from Latin and Greek letters (and Cyrillic `ё` read as `е`), other characters that
 are not letters or digits turned into dashes, cut at 64 characters (and at 200 bytes, so the file name
@@ -196,7 +203,10 @@ An older export has no pages and imports as before. An instance that already hol
 holding memories, so the import refuses it like any instance with data. A memory backend that is not
 Markdown files cannot hold pages, and the summary says how many were left out.
 
-`.memory-state/` is never exported. It holds one file:
+`.memory-state/` and `.memory-history/` are never exported, and neither is ever read as a page. The
+history can be rebuilt only by starting again, so keep a backup of the memory folder if you want it
+(the pages themselves travel with an export). `.memory-state/` holds the cache below and the lock files
+(`lock.<n>` and `lock.<n>.beat`, see [Writing pages](#writing-pages)):
 
 - `aliases.json`: a cache of every page's title and other names. It is rebuilt whenever a page
   changes, so it is safe to delete. A page is read again only when its size or modification time
@@ -344,3 +354,80 @@ are gathered, for every loaded contact, under one fixed heading after the pages 
   left out with it. The heading and end line count once against `MEMORY_PAGES_MAX_TOKENS`.
 - The rest of the block is data, not instructions.
 - Facts from mail, the calendar, read content and inference are labelled as not confirmed.
+
+### Writing pages
+
+Three tools let Aman keep short facts on pages: `remember_fact({about, text})`, `update_fact({about,
+old_text, new_text})` and `forget_fact({about, text})`. Each also takes an optional `kind` (`person` or
+`matter`), and `remember_fact` an optional `about_writing`. They are offered only when memory is on for the
+chat, the memory backend is Markdown files, and the thread is the main one. A chat with memory switched
+off, an unattended run, a sub-agent and any other memory backend get none, and the memory instruction
+then keeps saying that no memory-write tool is available.
+
+**Which page.** `about` is looked up only in the vault this chat writes to (the persona's own vault, else the
+shared one), by title or other name, with case, accents and punctuation ignored. A persona's chat
+never sees, changes or creates a page in another vault. Two pages with the same name (a person and a
+matter) are refused with a plain question for the model to put to the person.
+
+**Person or matter.** When no page matches, a page is created only if the tool call says `kind`. Without
+it the call is refused and the model asks the person. Aman never guesses the kind from the name. An
+existing page keeps its own kind.
+
+**Which section.** A new fact goes in `Now` as `src=you_said` with `since` set to today in the person's
+time zone. It goes under "How you write to them" only when `about_writing` is true, which the instruction
+defines as how the person likes to write to this contact: tone, length, greeting, sign-off, language. A
+matter has no such section, so that call is refused. A fact that is already on the page (ignoring case,
+accents and spacing) is not added twice.
+
+**Update and forget.** The old line is found by its text among the page's current facts. A fact already under
+`Earlier` is not a target. A missing or repeated line is refused and nothing changes. `update_fact` moves the
+old line to `Earlier` with `until` set to today and adds the new text as a new `you_said` line in the old
+line's section (a line that was unconfirmed goes to `Now`). `forget_fact` moves the line to `Earlier` with
+`until` set to today. Nothing is ever deleted, so the old text and its id stay on the page.
+
+**The text.** A fact or a name is one line of at most 500 and 120 characters. A line break, `<!--` or `-->` is
+refused. Control and invisible characters are removed. A fact that holds the drafting heading or the
+drafting end line is refused, using the same match as the loader, instead of being rewritten. A tool answer
+never repeats text from a page, only a fixed sentence.
+
+**The taint rule.** Before every model step the host checks whether the turn, from the person's latest message
+on, has read text from outside the chat: any tool result other than a host-only one, an attached file or
+image, or a summary of earlier chat. Memory tool results and task-state results are host-only and do not
+count; a connector tool that merely has the same name, or the same name reached through `call_tool`, does
+count. Once a turn has read outside text it stays that way. A tool call is judged on what the model had seen
+when it wrote the call, so a call written in the same step as a mail read is judged on the step before it.
+When the turn has read outside text, every tool refuses, writes nothing and tells the model to ask the
+person to say it again in a new message. That is what keeps mail, web pages and documents from steering
+what is written to a page. Two limits remain. Notes and pages recalled into the memory block do not
+count as outside text, because they are labelled and not confirmed already, and the person's own message
+can of course ask for something unwise. The tools need no approval card: what they write is the
+person's own words, it stays on their machine, and each write is a commit that can be undone.
+
+**Every change is one commit.** Under the vault lock the host does these steps. It makes the history ready.
+It takes in the person's hand edits (below). It makes the change. It commits the change with a message such
+as `You: remembered Likes tulips. (Wendy)`, `You: changed ... to ... (Wendy)` or `You: forgot ... (Wendy)`.
+Each call also adds an entry to the activity log. The daily log is never written by these tools.
+If the history fails before the change, nothing is written and the model is told to try again. If it fails
+after, the page is already saved and the failure is logged. If git is not installed, pages are still
+written, without history, and the log says so once.
+
+**Hand edits.** Before any change Aman makes, every page that differs from the last commit is committed
+as "Your edits". In those pages a fact whose text changed keeps its id and dates and gets `src=you_edited`
+(its text is not touched). A bullet with no marker gets a new id, `src=you_edited` and `since` set to
+today. A line whose marker cannot be read is left alone, so it stays unreadable and not confirmed.
+
+**The history.** It is a git folder, `<vault>/.memory-history`, with the vault as its work tree. Only
+`people/*.md` and `matters/*.md` are tracked, by an exclude file inside that folder. A vault that is
+already a git repository is never touched: its `.git`, `.gitignore` and settings stay as they are, and
+it will show `.memory-history/` as an untracked folder. A `.gitignore` in the vault does not apply to
+the history. Git is run with no shell, its own commit name, no hooks, no signing and no files read from
+the machine's git settings.
+
+**The lock.** One lock per vault covers `people/`, `matters/`, `.memory-state/` and the history, and is shared
+between processes, so a nightly pass and a chat cannot write at once. It is made of numbered files,
+`lock.<n>`, in `.memory-state/`. A new owner must create file `n+1`, which is also how a dead owner is
+replaced. The owner refreshes `lock.<n>.beat`. A waiter decides that the owner is dead only by watching
+the lock stay unchanged for 30 seconds on its own clock, never by comparing file times, so a clock that
+is wrong cannot steal a live lock. After a crash, the next writer therefore waits up to 30 seconds. A
+writer gives up after 10 seconds and the model is told to try again. The daily-log append path does not
+take this lock.
