@@ -103,7 +103,9 @@ async function walk({ session, start }) {
   }
   const self = asked.responses[0];
   const principalHref = hrefsOf(self?.props['current-user-principal'])[0];
-  if (principalHref === undefined || resourceTypeHas(self?.props.resourcetype, 'calendar')) {
+  // The tool server takes an answer as one calendar only when the saved address itself gave it.
+  const oneCalendar = asked.from_root && resourceTypeHas(self?.props.resourcetype, 'calendar');
+  if (principalHref === undefined || oneCalendar) {
     // One calendar, or no principal named: the tool server stays on this address either way.
     return { result: 'ok', server_url: start };
   }
@@ -145,7 +147,7 @@ async function walk({ session, start }) {
 async function askAbout({ session, root }) {
   const asked = await propfind({ session, url: root, depth: 0, props: HOME_PROPS });
   if (asked.result !== 'redirect') {
-    return asked;
+    return asked.result === 'ok' ? { ...asked, from_root: true } : asked;
   }
   const wellKnown = new URL('/.well-known/caldav', root);
   const viaWellKnown = await propfind({ session, url: wellKnown.toString(), depth: 0, props: HOME_PROPS });

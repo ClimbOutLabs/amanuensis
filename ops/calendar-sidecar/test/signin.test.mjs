@@ -72,6 +72,26 @@ describe('the sign-in walk when the calendars live on another host', () => {
     );
   });
 
+  it('walks on from a calendar the well-known route lands on, as the tool server does', async () => {
+    const shaped = fake.answers[BASE_HOST];
+    fake.answers[BASE_HOST] = (path, res) => {
+      if (path === '/' || path === '/.well-known/caldav') {
+        res.writeHead(302, { Location: path === '/' ? '/login/' : '/dav/' });
+        res.end();
+        return 'handled';
+      }
+      if (path === '/dav/') {
+        return multistatus({
+          href: path,
+          props: `<resourcetype><collection/><C:calendar/></resourcetype>${principalProp(`/${ACCOUNT_ID}/principal/`)}`,
+        });
+      }
+      return shaped(path, res);
+    };
+    const found = await discoverCalendarServer(fake.account(), fake.deps);
+    assert.deepEqual(found, { result: 'ok', server_url: `${fake.url(HOME_HOST)}/${ACCOUNT_ID}/calendars/` });
+  });
+
   it('never follows a well-known redirect to another server', async () => {
     fake.answers[BASE_HOST] = (path, res) => {
       res.writeHead(302, { Location: path === '/' ? '/login/' : `${fake.url(HOME_HOST)}/dav/` });
