@@ -11,7 +11,8 @@
 import { InMemoryApprovalTokenStore, type ApprovalTokenStore } from './approvalTokens';
 import type { AuditLogWriter } from './audit';
 import { seedShellAllowlist, type ShellAllowlistConfig } from './shellAllowlist';
-import type { Tier2ActionKind } from './tier';
+import type { SkillNetworkAnswer } from './skillNetworkCards';
+import type { Tier2ActionKind, Tier3SkillNetwork } from './tier';
 import { InMemoryToolGrantStore, type ToolGrantStore } from './toolGrants';
 import { InMemoryTrackedExecutableStore, type TrackedExecutableStore } from './trackedExecutables';
 import { createWebSearchTurnState, type WebSearchTurnState } from './webSearch';
@@ -52,6 +53,21 @@ export interface SentinelServices {
    * send never runs on a list the sidecar has not loaded. Fails closed by default.
    */
   mail_list_loaded: (input: { tenant_id: string; created_by: string }) => Promise<MailListLoadedResult>;
+  /**
+   * Records the owner's answer to a skill network card: allow once for this chat, always allow
+   * for the skill, or deny. The default records nothing, so a host without skill wiring never
+   * grants a site by answering. An implementation that binds the answer to the skill's code
+   * version may refuse it, recording nothing, by rejecting with an error named
+   * SkillCodePinRefusedError whose message is written for the person: the send carrying the
+   * answer is refused with that message and the card stays undecided.
+   */
+  skill_network_record_answer: (input: {
+    tenant_id: string;
+    created_by: string;
+    session_id: string;
+    skill_network: Tier3SkillNetwork;
+    answer: SkillNetworkAnswer;
+  }) => Promise<void>;
 }
 
 /** `loaded`: the sidecar runs the new list. `not_loaded`: it did not in time. `refused`: an address is not allowed. */
@@ -95,6 +111,7 @@ export function defaultSentinelServices(input: { pinned_path: string }): Sentine
     mail_listed_addresses: () => Promise.resolve([]),
     mail_add_recipients: () => Promise.resolve('not_loaded'),
     mail_list_loaded: () => Promise.resolve('not_loaded'),
+    skill_network_record_answer: () => Promise.resolve(),
   };
 }
 

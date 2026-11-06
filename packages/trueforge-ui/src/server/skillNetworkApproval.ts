@@ -13,6 +13,9 @@ const SkillNetworkApprovalResponseSchema = z.object({
   data: z.object({
     declared_hosts: z.array(z.string()),
     approved_hosts: z.array(z.string()).nullable(),
+    allowed_hosts: z.array(z.string()),
+    denied_hosts: z.array(z.string()),
+    session_hosts: z.array(z.string()),
     send_capable: z.boolean(),
   }),
 });
@@ -22,6 +25,12 @@ export interface SkillNetworkApprovalState {
   declaredHosts: string[];
   /** The approved list in force, or null when there is none the sandbox may use. */
   approvedHosts: string[] | null;
+  /** Sites allowed one by one for this skill, from a network card or from Settings. */
+  allowedHosts: string[];
+  /** Sites turned down for this skill; they raise no card until cleared here. */
+  deniedHosts: string[];
+  /** Sites allowed once in a chat that is still open; they end with that chat. */
+  sessionHosts: string[];
   /** True when a declared site can send mail or change a calendar. */
   sendCapable: boolean;
 }
@@ -33,6 +42,14 @@ export interface SkillNetworkApproval {
   approveSkillNetwork(req: { id: string; hosts: string[] }): Promise<SkillNetworkApprovalState>;
   /** Takes the approval back. The skill keeps no network access from the next run on. */
   revokeSkillNetwork(req: { id: string }): Promise<void>;
+  /** Allows one site for the skill on its own, apart from the declared list. */
+  allowSkillNetworkHost(req: { id: string; host: string }): Promise<SkillNetworkApprovalState>;
+  /** Turns one site down for the skill, so it is not granted and raises no card. */
+  denySkillNetworkHost(req: { id: string; host: string }): Promise<SkillNetworkApprovalState>;
+  /** Clears one site's allowance. The skill cannot reach it from the next run on. */
+  clearSkillNetworkAllowedHost(req: { id: string; host: string }): Promise<void>;
+  /** Clears one site being turned down, so a card can ask about it again. */
+  clearSkillNetworkDeniedHost(req: { id: string; host: string }): Promise<void>;
 }
 
 /**
@@ -43,7 +60,11 @@ export function hasSkillNetworkApproval(catalog: object): catalog is SkillNetwor
   return (
     typeof Reflect.get(catalog, 'getSkillNetworkApproval') === 'function' &&
     typeof Reflect.get(catalog, 'approveSkillNetwork') === 'function' &&
-    typeof Reflect.get(catalog, 'revokeSkillNetwork') === 'function'
+    typeof Reflect.get(catalog, 'revokeSkillNetwork') === 'function' &&
+    typeof Reflect.get(catalog, 'allowSkillNetworkHost') === 'function' &&
+    typeof Reflect.get(catalog, 'denySkillNetworkHost') === 'function' &&
+    typeof Reflect.get(catalog, 'clearSkillNetworkAllowedHost') === 'function' &&
+    typeof Reflect.get(catalog, 'clearSkillNetworkDeniedHost') === 'function'
   );
 }
 
@@ -59,6 +80,9 @@ export function parseSkillNetworkApproval(body: unknown): SkillNetworkApprovalSt
   return {
     declaredHosts: parsed.data.data.declared_hosts,
     approvedHosts: parsed.data.data.approved_hosts,
+    allowedHosts: parsed.data.data.allowed_hosts,
+    deniedHosts: parsed.data.data.denied_hosts,
+    sessionHosts: parsed.data.data.session_hosts,
     sendCapable: parsed.data.data.send_capable,
   };
 }

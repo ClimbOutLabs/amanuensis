@@ -381,7 +381,14 @@ describe("SkillsClient", () => {
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
 
         const rawResponseBody = {
-            data: { approved_hosts: ["approved_hosts"], declared_hosts: ["declared_hosts"], send_capable: true },
+            data: {
+                allowed_hosts: ["allowed_hosts"],
+                approved_hosts: ["approved_hosts"],
+                declared_hosts: ["declared_hosts"],
+                denied_hosts: ["denied_hosts"],
+                send_capable: true,
+                session_hosts: ["session_hosts"],
+            },
         };
 
         server
@@ -395,9 +402,12 @@ describe("SkillsClient", () => {
         const response = await client.settings.skills.getNetworkApproval("name");
         expect(response).toEqual({
             data: {
+                allowedHosts: ["allowed_hosts"],
                 approvedHosts: ["approved_hosts"],
                 declaredHosts: ["declared_hosts"],
+                deniedHosts: ["denied_hosts"],
                 sendCapable: true,
+                sessionHosts: ["session_hosts"],
             },
         });
     });
@@ -426,7 +436,14 @@ describe("SkillsClient", () => {
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
         const rawRequestBody = { hosts: ["hosts"] };
         const rawResponseBody = {
-            data: { approved_hosts: ["approved_hosts"], declared_hosts: ["declared_hosts"], send_capable: true },
+            data: {
+                allowed_hosts: ["allowed_hosts"],
+                approved_hosts: ["approved_hosts"],
+                declared_hosts: ["declared_hosts"],
+                denied_hosts: ["denied_hosts"],
+                send_capable: true,
+                session_hosts: ["session_hosts"],
+            },
         };
 
         server
@@ -443,9 +460,12 @@ describe("SkillsClient", () => {
         });
         expect(response).toEqual({
             data: {
+                allowedHosts: ["allowed_hosts"],
                 approvedHosts: ["approved_hosts"],
                 declaredHosts: ["declared_hosts"],
+                deniedHosts: ["denied_hosts"],
                 sendCapable: true,
+                sessionHosts: ["session_hosts"],
             },
         });
     });
@@ -591,6 +611,340 @@ describe("SkillsClient", () => {
 
         await expect(async () => {
             return await client.settings.skills.deleteNetworkApproval("xy");
+        }).rejects.toThrow(TrueForgeTypes.FailedDependencyError);
+    });
+
+    test("create_or_update_network_allowed_host (1)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { host: "host" };
+        const rawResponseBody = {
+            data: {
+                allowed_hosts: ["allowed_hosts"],
+                approved_hosts: ["approved_hosts"],
+                declared_hosts: ["declared_hosts"],
+                denied_hosts: ["denied_hosts"],
+                send_capable: true,
+                session_hosts: ["session_hosts"],
+            },
+        };
+
+        server
+            .mockEndpoint()
+            .put("/api/v1/settings/skills/name/network-approval/allowed-host")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        const response = await client.settings.skills.createOrUpdateNetworkAllowedHost("name", {
+            host: "host",
+        });
+        expect(response).toEqual({
+            data: {
+                allowedHosts: ["allowed_hosts"],
+                approvedHosts: ["approved_hosts"],
+                declaredHosts: ["declared_hosts"],
+                deniedHosts: ["denied_hosts"],
+                sendCapable: true,
+                sessionHosts: ["session_hosts"],
+            },
+        });
+    });
+
+    test("create_or_update_network_allowed_host (2)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { host: "host" };
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .put("/api/v1/settings/skills/xy/network-approval/allowed-host")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(400)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.settings.skills.createOrUpdateNetworkAllowedHost("xy", {
+                host: "host",
+            });
+        }).rejects.toThrow(TrueForgeTypes.BadRequestError);
+    });
+
+    test("create_or_update_network_allowed_host (3)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { host: "host" };
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .put("/api/v1/settings/skills/xy/network-approval/allowed-host")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(404)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.settings.skills.createOrUpdateNetworkAllowedHost("xy", {
+                host: "host",
+            });
+        }).rejects.toThrow(TrueForgeTypes.NotFoundError);
+    });
+
+    test("create_or_update_network_allowed_host (4)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { host: "host" };
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .put("/api/v1/settings/skills/xy/network-approval/allowed-host")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(424)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.settings.skills.createOrUpdateNetworkAllowedHost("xy", {
+                host: "host",
+            });
+        }).rejects.toThrow(TrueForgeTypes.FailedDependencyError);
+    });
+
+    test("delete_network_allowed_host (1)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = {};
+
+        server
+            .mockEndpoint()
+            .delete("/api/v1/settings/skills/name/network-approval/allowed-host")
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        const response = await client.settings.skills.deleteNetworkAllowedHost("name", {
+            host: "host",
+        });
+        expect(response).toEqual({});
+    });
+
+    test("delete_network_allowed_host (2)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .delete("/api/v1/settings/skills/xy/network-approval/allowed-host")
+            .respondWith()
+            .statusCode(404)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.settings.skills.deleteNetworkAllowedHost("xy", {
+                host: "host",
+            });
+        }).rejects.toThrow(TrueForgeTypes.NotFoundError);
+    });
+
+    test("delete_network_allowed_host (3)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .delete("/api/v1/settings/skills/xy/network-approval/allowed-host")
+            .respondWith()
+            .statusCode(424)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.settings.skills.deleteNetworkAllowedHost("xy", {
+                host: "host",
+            });
+        }).rejects.toThrow(TrueForgeTypes.FailedDependencyError);
+    });
+
+    test("create_or_update_network_denied_host (1)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { host: "host" };
+        const rawResponseBody = {
+            data: {
+                allowed_hosts: ["allowed_hosts"],
+                approved_hosts: ["approved_hosts"],
+                declared_hosts: ["declared_hosts"],
+                denied_hosts: ["denied_hosts"],
+                send_capable: true,
+                session_hosts: ["session_hosts"],
+            },
+        };
+
+        server
+            .mockEndpoint()
+            .put("/api/v1/settings/skills/name/network-approval/denied-host")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        const response = await client.settings.skills.createOrUpdateNetworkDeniedHost("name", {
+            host: "host",
+        });
+        expect(response).toEqual({
+            data: {
+                allowedHosts: ["allowed_hosts"],
+                approvedHosts: ["approved_hosts"],
+                declaredHosts: ["declared_hosts"],
+                deniedHosts: ["denied_hosts"],
+                sendCapable: true,
+                sessionHosts: ["session_hosts"],
+            },
+        });
+    });
+
+    test("create_or_update_network_denied_host (2)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { host: "host" };
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .put("/api/v1/settings/skills/xy/network-approval/denied-host")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(400)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.settings.skills.createOrUpdateNetworkDeniedHost("xy", {
+                host: "host",
+            });
+        }).rejects.toThrow(TrueForgeTypes.BadRequestError);
+    });
+
+    test("create_or_update_network_denied_host (3)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { host: "host" };
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .put("/api/v1/settings/skills/xy/network-approval/denied-host")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(404)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.settings.skills.createOrUpdateNetworkDeniedHost("xy", {
+                host: "host",
+            });
+        }).rejects.toThrow(TrueForgeTypes.NotFoundError);
+    });
+
+    test("create_or_update_network_denied_host (4)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { host: "host" };
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .put("/api/v1/settings/skills/xy/network-approval/denied-host")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(424)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.settings.skills.createOrUpdateNetworkDeniedHost("xy", {
+                host: "host",
+            });
+        }).rejects.toThrow(TrueForgeTypes.FailedDependencyError);
+    });
+
+    test("delete_network_denied_host (1)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = {};
+
+        server
+            .mockEndpoint()
+            .delete("/api/v1/settings/skills/name/network-approval/denied-host")
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        const response = await client.settings.skills.deleteNetworkDeniedHost("name", {
+            host: "host",
+        });
+        expect(response).toEqual({});
+    });
+
+    test("delete_network_denied_host (2)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .delete("/api/v1/settings/skills/xy/network-approval/denied-host")
+            .respondWith()
+            .statusCode(404)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.settings.skills.deleteNetworkDeniedHost("xy", {
+                host: "host",
+            });
+        }).rejects.toThrow(TrueForgeTypes.NotFoundError);
+    });
+
+    test("delete_network_denied_host (3)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .delete("/api/v1/settings/skills/xy/network-approval/denied-host")
+            .respondWith()
+            .statusCode(424)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.settings.skills.deleteNetworkDeniedHost("xy", {
+                host: "host",
+            });
         }).rejects.toThrow(TrueForgeTypes.FailedDependencyError);
     });
 });

@@ -57,6 +57,7 @@ describe('skills routers', () => {
       resolveSkillStore: () => skillStore,
       withTransaction: callback => db.transaction().execute(callback),
       resolveRequestContext: () => STANDALONE_REQUEST_CONTEXT,
+      resolveSkillCodeSha: async () => 'a'.repeat(40),
     });
     catalogRouter = createCatalogRouter({
       modelCatalog: ModelCatalog.load(),
@@ -148,6 +149,8 @@ describe('skills routers', () => {
       deleteSkill: jest.fn(),
       resolveTurnSkills: jest.fn(),
       setSkillNetworkApproval: jest.fn(),
+      setSkillNetworkHostDecision: jest.fn(),
+      setSkillNetworkCodePin: jest.fn(),
     };
     const router = createAvailableSkillsRouter({
       resolveSkillStore: () => skillStore,
@@ -198,6 +201,8 @@ describe('skills routers', () => {
       deleteSkill: jest.fn(),
       resolveTurnSkills: jest.fn(),
       setSkillNetworkApproval: jest.fn(),
+      setSkillNetworkHostDecision: jest.fn(),
+      setSkillNetworkCodePin: jest.fn(),
     };
     const router = createSkillsRouter({
       resolveSkillStore: () => managedStore,
@@ -239,6 +244,8 @@ describe('skills routers', () => {
       deleteSkill: jest.fn(),
       resolveTurnSkills: jest.fn(),
       setSkillNetworkApproval: jest.fn(),
+      setSkillNetworkHostDecision: jest.fn(),
+      setSkillNetworkCodePin: jest.fn(),
     };
     const router = createSkillsRouter({
       resolveSkillStore: () => managedStore,
@@ -315,7 +322,14 @@ describe('skills routers', () => {
       const response = await settingsRouter.request('/ten-x/network-approval');
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual({
-        data: { declared_hosts: ['github.com', 'api.github.com'], approved_hosts: null, send_capable: false },
+        data: {
+          declared_hosts: ['github.com', 'api.github.com'],
+          approved_hosts: null,
+          allowed_hosts: [],
+          denied_hosts: [],
+          session_hosts: [],
+          send_capable: false,
+        },
       });
     });
 
@@ -329,6 +343,9 @@ describe('skills routers', () => {
         data: {
           declared_hosts: ['github.com', 'api.github.com'],
           approved_hosts: ['github.com', 'api.github.com'],
+          allowed_hosts: [],
+          denied_hosts: [],
+          session_hosts: [],
           send_capable: false,
         },
       });
@@ -337,9 +354,40 @@ describe('skills routers', () => {
         data: {
           declared_hosts: ['github.com', 'api.github.com'],
           approved_hosts: ['github.com', 'api.github.com'],
+          allowed_hosts: [],
+          denied_hosts: [],
+          session_hosts: [],
           send_capable: false,
         },
       });
+    });
+
+    it('PUT refuses the approval when the code version cannot be read, with the refusal in plain words', async () => {
+      const db = createSqliteDb(':memory:');
+      await migrateSqliteToLatest(db);
+      const failingRouter = createSkillsRouter({
+        resolveSkillStore: () => new SqliteSkillStore(db),
+        withTransaction: callback => db.transaction().execute(callback),
+        resolveRequestContext: () => STANDALONE_REQUEST_CONTEXT,
+        resolveSkillCodeSha: async () => {
+          throw new Error('repository unreachable');
+        },
+      });
+      const created = await failingRouter.request('/', putInit(wrapManifest(tenX)));
+      expect(created.status).toBe(200);
+      const response = await failingRouter.request(
+        '/ten-x/network-approval',
+        putInit({ hosts: ['github.com', 'api.github.com'] }),
+      );
+      expect(response.status).toBe(422);
+      expect(await response.json()).toEqual({
+        error: {
+          message: "Aman could not read this skill's code version. Check the skill's address and try again.",
+        },
+      });
+      const state = await failingRouter.request('/ten-x/network-approval');
+      const body = (await state.json()) as { data: { approved_hosts: string[] | null } };
+      expect(body.data.approved_hosts).toBeNull();
     });
 
     it('PUT refuses a list that is not the declared list, with the next step in plain words', async () => {
@@ -354,7 +402,14 @@ describe('skills routers', () => {
       expect(removed.status).toBe(200);
       const state = await settingsRouter.request('/ten-x/network-approval');
       expect(await state.json()).toEqual({
-        data: { declared_hosts: ['github.com', 'api.github.com'], approved_hosts: null, send_capable: false },
+        data: {
+          declared_hosts: ['github.com', 'api.github.com'],
+          approved_hosts: null,
+          allowed_hosts: [],
+          denied_hosts: [],
+          session_hosts: [],
+          send_capable: false,
+        },
       });
     });
 
@@ -362,7 +417,14 @@ describe('skills routers', () => {
       const response = await settingsRouter.request('/algorithmic-art/network-approval');
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual({
-        data: { declared_hosts: [], approved_hosts: null, send_capable: false },
+        data: {
+          declared_hosts: [],
+          approved_hosts: null,
+          allowed_hosts: [],
+          denied_hosts: [],
+          session_hosts: [],
+          send_capable: false,
+        },
       });
     });
 
@@ -379,7 +441,14 @@ describe('skills routers', () => {
       expect(created.status).toBe(200);
       const response = await settingsRouter.request('/mail-reader/network-approval');
       expect(await response.json()).toEqual({
-        data: { declared_hosts: ['gmail.googleapis.com'], approved_hosts: null, send_capable: true },
+        data: {
+          declared_hosts: ['gmail.googleapis.com'],
+          approved_hosts: null,
+          allowed_hosts: [],
+          denied_hosts: [],
+          session_hosts: [],
+          send_capable: true,
+        },
       });
     });
 
@@ -390,6 +459,198 @@ describe('skills routers', () => {
       expect(put.status).toBe(404);
       const del = await settingsRouter.request('/nope/network-approval', { method: 'DELETE' });
       expect(del.status).toBe(404);
+    });
+
+    it('PUT allowed-host allows one site on its own, without approving the declared list', async () => {
+      const response = await settingsRouter.request(
+        '/ten-x/network-approval/allowed-host',
+        putInit({ host: 'uploads.github.com' }),
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        data: {
+          declared_hosts: ['github.com', 'api.github.com'],
+          approved_hosts: null,
+          allowed_hosts: ['uploads.github.com'],
+          denied_hosts: [],
+          session_hosts: [],
+          send_capable: false,
+        },
+      });
+    });
+
+    it('DELETE allowed-host clears that one site again', async () => {
+      const removed = await settingsRouter.request('/ten-x/network-approval/allowed-host?host=uploads.github.com', {
+        method: 'DELETE',
+      });
+      expect(removed.status).toBe(200);
+      expect(await removed.json()).toEqual({});
+      const state = await settingsRouter.request('/ten-x/network-approval');
+      expect(await state.json()).toEqual({
+        data: {
+          declared_hosts: ['github.com', 'api.github.com'],
+          approved_hosts: null,
+          allowed_hosts: [],
+          denied_hosts: [],
+          session_hosts: [],
+          send_capable: false,
+        },
+      });
+    });
+
+    it('PUT denied-host turns one site down, and a site holds one decision at a time', async () => {
+      const allowed = await settingsRouter.request(
+        '/ten-x/network-approval/allowed-host',
+        putInit({ host: 'uploads.github.com' }),
+      );
+      expect(allowed.status).toBe(200);
+      const denied = await settingsRouter.request(
+        '/ten-x/network-approval/denied-host',
+        putInit({ host: 'uploads.github.com' }),
+      );
+      expect(denied.status).toBe(200);
+      expect(await denied.json()).toEqual({
+        data: {
+          declared_hosts: ['github.com', 'api.github.com'],
+          approved_hosts: null,
+          allowed_hosts: [],
+          denied_hosts: ['uploads.github.com'],
+          session_hosts: [],
+          send_capable: false,
+        },
+      });
+    });
+
+    it('DELETE denied-host clears the turned-down site so a card can ask again', async () => {
+      const removed = await settingsRouter.request('/ten-x/network-approval/denied-host?host=uploads.github.com', {
+        method: 'DELETE',
+      });
+      expect(removed.status).toBe(200);
+      const state = await settingsRouter.request('/ten-x/network-approval');
+      expect(await state.json()).toEqual({
+        data: {
+          declared_hosts: ['github.com', 'api.github.com'],
+          approved_hosts: null,
+          allowed_hosts: [],
+          denied_hosts: [],
+          session_hosts: [],
+          send_capable: false,
+        },
+      });
+    });
+
+    it('clearing an allowed site never clears a turned-down one, and the other way round', async () => {
+      await settingsRouter.request('/ten-x/network-approval/allowed-host', putInit({ host: 'a.example.com' }));
+      await settingsRouter.request('/ten-x/network-approval/denied-host', putInit({ host: 'b.example.com' }));
+      await settingsRouter.request('/ten-x/network-approval/allowed-host?host=a.example.com', { method: 'DELETE' });
+      const state = await settingsRouter.request('/ten-x/network-approval');
+      expect(await state.json()).toEqual({
+        data: {
+          declared_hosts: ['github.com', 'api.github.com'],
+          approved_hosts: null,
+          allowed_hosts: [],
+          denied_hosts: ['b.example.com'],
+          session_hosts: [],
+          send_capable: false,
+        },
+      });
+      await settingsRouter.request('/ten-x/network-approval/denied-host?host=b.example.com', { method: 'DELETE' });
+    });
+
+    it('the per-site routes 404 for an unknown skill name', async () => {
+      const allow = await settingsRouter.request(
+        '/nope/network-approval/allowed-host',
+        putInit({ host: 'a.example.com' }),
+      );
+      expect(allow.status).toBe(404);
+      const deny = await settingsRouter.request(
+        '/nope/network-approval/denied-host',
+        putInit({ host: 'a.example.com' }),
+      );
+      expect(deny.status).toBe(404);
+      const clearAllowed = await settingsRouter.request('/nope/network-approval/allowed-host?host=a.example.com', {
+        method: 'DELETE',
+      });
+      expect(clearAllowed.status).toBe(404);
+      const clearDenied = await settingsRouter.request('/nope/network-approval/denied-host?host=a.example.com', {
+        method: 'DELETE',
+      });
+      expect(clearDenied.status).toBe(404);
+    });
+
+    it('PUT allowed-host binds the allowance to the code pin, and removing the approval leaves both standing', async () => {
+      const db = createSqliteDb(':memory:');
+      await migrateSqliteToLatest(db);
+      const store = new SqliteSkillStore(db);
+      const router = createSkillsRouter({
+        resolveSkillStore: () => store,
+        withTransaction: callback => db.transaction().execute(callback),
+        resolveRequestContext: () => STANDALONE_REQUEST_CONTEXT,
+        resolveSkillCodeSha: async () => 'a'.repeat(40),
+      });
+      const pinBound = { ...tenX, name: 'pin-bound' };
+      const created = await router.request('/', putInit(wrapManifest(pinBound)));
+      expect(created.status).toBe(200);
+
+      const allowed = await router.request(
+        '/pin-bound/network-approval/allowed-host',
+        putInit({ host: 'uploads.example.com' }),
+      );
+      expect(allowed.status).toBe(200);
+      const [afterAllow] = await store.listSkills({ tenant_id: 'default', names: ['pin-bound'] });
+      expect(afterAllow?.network_approval).toBeNull();
+      expect(afterAllow?.network_allowed_hosts).toEqual(['uploads.example.com']);
+      expect(afterAllow?.network_approval_code_sha).toBe('a'.repeat(40));
+
+      const approved = await router.request(
+        '/pin-bound/network-approval',
+        putInit({ hosts: ['github.com', 'api.github.com'] }),
+      );
+      expect(approved.status).toBe(200);
+      const removed = await router.request('/pin-bound/network-approval', { method: 'DELETE' });
+      expect(removed.status).toBe(200);
+      const [afterRemove] = await store.listSkills({ tenant_id: 'default', names: ['pin-bound'] });
+      expect(afterRemove?.network_approval).toBeNull();
+      expect(afterRemove?.network_allowed_hosts).toEqual(['uploads.example.com']);
+      expect(afterRemove?.network_approval_code_sha).toBe('a'.repeat(40));
+
+      const cleared = await router.request('/pin-bound/network-approval/allowed-host?host=uploads.example.com', {
+        method: 'DELETE',
+      });
+      expect(cleared.status).toBe(200);
+      const [afterClear] = await store.listSkills({ tenant_id: 'default', names: ['pin-bound'] });
+      expect(afterClear?.network_allowed_hosts).toEqual([]);
+      expect(afterClear?.network_approval_code_sha).toBeNull();
+    });
+
+    it('PUT allowed-host refuses when the code version cannot be read, storing nothing', async () => {
+      const db = createSqliteDb(':memory:');
+      await migrateSqliteToLatest(db);
+      const store = new SqliteSkillStore(db);
+      const failingRouter = createSkillsRouter({
+        resolveSkillStore: () => store,
+        withTransaction: callback => db.transaction().execute(callback),
+        resolveRequestContext: () => STANDALONE_REQUEST_CONTEXT,
+        resolveSkillCodeSha: async () => {
+          throw new Error('repository unreachable');
+        },
+      });
+      const pinRefused = { ...tenX, name: 'pin-refused' };
+      const created = await failingRouter.request('/', putInit(wrapManifest(pinRefused)));
+      expect(created.status).toBe(200);
+      const response = await failingRouter.request(
+        '/pin-refused/network-approval/allowed-host',
+        putInit({ host: 'uploads.example.com' }),
+      );
+      expect(response.status).toBe(422);
+      expect(await response.json()).toEqual({
+        error: {
+          message: "Aman could not read this skill's code version. Check the skill's address and try again.",
+        },
+      });
+      const [record] = await store.listSkills({ tenant_id: 'default', names: ['pin-refused'] });
+      expect(record?.network_allowed_hosts).toEqual([]);
+      expect(record?.network_approval_code_sha).toBeNull();
     });
   });
 });

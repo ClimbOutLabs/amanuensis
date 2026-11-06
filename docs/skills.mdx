@@ -41,6 +41,22 @@ At runtime:
 2. When the model decides a skill is relevant, the repo is materialized under `/opt/tfy/skills/{name}`.
 3. The agent follows `SKILL.md` and uses supporting files as needed.
 
+## Network access for skills
+
+A skill can name the sites it needs in its manifest (`network_hosts`). The sandbox has no network of its own, so a skill can reach only the sites you allow for it, and only while it is switched on for the chat.
+
+The first time a skill with named sites runs in a chat, a card asks whether it may reach the sites it still needs: the ones you have not already allowed, and not the ones you turned down. The chat keeps working without the sites until you answer. If a skill tries a site it did not name, the connection is refused at once and a card asks about that one site. A card always names the skill, the site, and why it is asking.
+
+Each card takes one of three answers:
+
+- **Allow once** lets the skill reach the sites in this chat only. The command that was refused runs again with them.
+- **Always allow for this skill** remembers the sites for that skill in every chat. It does not change the list the skill names.
+- **Deny** remembers the sites as turned down for that skill, and no card asks about them again until you clear them.
+
+A scheduled run never waits for an answer: the run finishes, and the card waits for you with the run's other held actions.
+
+**Settings → Skills** shows, for each skill, the sites it names, the ones in force, the ones allowed one by one, the ones allowed once in a chat that is still open, and the ones turned down. You can clear an allowed or turned-down site there, or take back the whole approval; a change takes effect on the next command.
+
 ## Skills + MCP tools
 
 - **Skills** define _how_ to handle a task (procedure, decision logic, formatting).

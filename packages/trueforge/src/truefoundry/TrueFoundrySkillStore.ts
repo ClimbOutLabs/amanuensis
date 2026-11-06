@@ -8,6 +8,8 @@ import type {
   ISkillStore,
   ListSkillsInput,
   SetSkillNetworkApprovalInput,
+  SetSkillNetworkCodePinInput,
+  SetSkillNetworkHostDecisionInput,
   SkillRecord,
   UpsertSkillInput,
 } from '../db/skillStore';
@@ -42,6 +44,9 @@ function toRegistryRecord(tenant_id: string, skill: SfyRegistrySkill): SkillReco
     name: skill.name,
     manifest,
     network_approval: null,
+    network_approval_code_sha: null,
+    network_allowed_hosts: [],
+    network_denied_hosts: [],
     created_at: now,
     updated_at: now,
   };
@@ -154,6 +159,24 @@ export class TrueFoundrySkillStore<TTransaction = never>
 
   setSkillNetworkApproval(
     input: SetSkillNetworkApprovalInput,
+    transaction?: TTransaction,
+  ): Promise<SkillRecord | undefined> {
+    void input;
+    void transaction;
+    return trueFoundryManaged();
+  }
+
+  setSkillNetworkHostDecision(
+    input: SetSkillNetworkHostDecisionInput,
+    transaction?: TTransaction,
+  ): Promise<SkillRecord | undefined> {
+    void input;
+    void transaction;
+    return trueFoundryManaged();
+  }
+
+  setSkillNetworkCodePin(
+    input: SetSkillNetworkCodePinInput,
     transaction?: TTransaction,
   ): Promise<SkillRecord | undefined> {
     void input;

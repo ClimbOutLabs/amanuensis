@@ -5,21 +5,32 @@ import { SkillNameConflictError, type ISkillStore, type SkillRecord } from '../d
 import type { WithTransaction } from '../db/transaction';
 import {
   createSkillRoute,
+  deleteSkillNetworkAllowedHostRoute,
   deleteSkillNetworkApprovalRoute,
+  deleteSkillNetworkDeniedHostRoute,
   deleteSkillRoute,
   getSkillNetworkApprovalRoute,
   listAvailableSkillsRoute,
   listConfiguredSkillsRoute,
   listSkillVersionsRoute,
   putSkillRoute,
+  updateSkillNetworkAllowedHostRoute,
   updateSkillNetworkApprovalRoute,
+  updateSkillNetworkDeniedHostRoute,
 } from '../routes/skillRoutes';
+import {
+  SkillCodePinRefusedError,
+  resolveSkillCodePin,
+  type SkillCodeResolver,
+} from '../sandbox/skillnet/skillNetworkGrant';
+import { skillNetworkTokens } from '../sandbox/skillnet/skillNetworkTokens';
 import type {
   AvailableSkill,
   ConfiguredSkill,
   CreateSkillRequest,
   SkillNetworkApproval,
   UpdateSkillNetworkApprovalRequest,
+  UpdateSkillNetworkHostRequest,
   UpdateSkillRequest,
 } from '../schemas/skill';
 import {
@@ -35,6 +46,8 @@ export interface SkillsRouterDeps<TTransaction> {
   resolveSkillStore: ResolveSkillStore<TTransaction>;
   withTransaction: WithTransaction<TTransaction>;
   resolveRequestContext: ResolveRequestContext;
+  /** Reads the commit a git skill's ref names now, for pinning an approval to the code. */
+  resolveSkillCodeSha?: SkillCodeResolver | undefined;
 }
 
 function toConfiguredSkill(record: SkillRecord): ConfiguredSkill {
@@ -45,12 +58,28 @@ function toConfiguredSkill(record: SkillRecord): ConfiguredSkill {
 }
 
 /** The approval state Settings shows: what the skill declares, what is in force, whether sending is in play. */
-function toSkillNetworkApproval(record: SkillRecord): SkillNetworkApproval {
+function toSkillNetworkApproval(
+  record: SkillRecord,
+  viewer?: { tenant_id: string; created_by: string },
+): SkillNetworkApproval {
   const declared = parseGitSkill(record.manifest)?.network_hosts ?? [];
   const effective = effectiveSkillNetworkHosts({ declared, approved: record.network_approval });
+  const denied = new Set(record.network_denied_hosts);
   return {
     declared_hosts: [...declared],
     approved_hosts: effective === null ? null : [...effective],
+    allowed_hosts: record.network_allowed_hosts.filter(host => !denied.has(host)),
+    denied_hosts: [...record.network_denied_hosts],
+    session_hosts:
+      viewer === undefined
+        ? []
+        : [
+            ...skillNetworkTokens.sessionHostsForSkill({
+              tenant_id: viewer.tenant_id,
+              created_by: viewer.created_by,
+              skill_name: record.name,
+            }),
+          ],
     send_capable: skillNetworkHostsCanSend(declared),
   };
 }
@@ -139,11 +168,20 @@ export function createSkillsRouter<TTransaction>(deps: SkillsRouterDeps<TTransac
 
   const getNetworkApprovalHandler: RouteHandler<typeof getSkillNetworkApprovalRoute> = async c => {
     const { name } = c.req.valid('param');
+    const requestContext = deps.resolveRequestContext(c);
     const record = await findSkillRecord(deps, c, name);
     if (record === undefined) {
       return c.json({ error: { message: `No skill with this name: ${name}` } }, 404);
     }
-    return c.json({ data: toSkillNetworkApproval(record) }, 200);
+    return c.json(
+      {
+        data: toSkillNetworkApproval(record, {
+          tenant_id: requestContext.tenant_id,
+          created_by: requestContext.subject.id,
+        }),
+      },
+      200,
+    );
   };
 
   const updateNetworkApprovalHandler: RouteHandler<typeof updateSkillNetworkApprovalRoute> = async c => {
@@ -168,24 +206,162 @@ export function createSkillsRouter<TTransaction>(deps: SkillsRouterDeps<TTransac
         422,
       );
     }
+    // The approval is pinned to the skill's code as it stands now; code nobody could
+    // identify is never approved, so an unreadable code version refuses the approval.
+    let code_sha: string | null;
+    try {
+      code_sha = await resolveSkillCodePin({ manifest: record.manifest, resolve: deps.resolveSkillCodeSha });
+    } catch (error) {
+      if (error instanceof SkillCodePinRefusedError) {
+        return c.json({ error: { message: error.message } }, 422);
+      }
+      throw error;
+    }
     const updated = await deps.resolveSkillStore(c).setSkillNetworkApproval({
       tenant_id: requestContext.tenant_id,
       name,
       hosts: [...declared],
+      code_sha,
     });
     if (updated === undefined) {
       return c.json({ error: { message: `No skill with this name: ${name}` } }, 404);
     }
-    return c.json({ data: toSkillNetworkApproval(updated) }, 200);
+    return c.json(
+      {
+        data: toSkillNetworkApproval(updated, {
+          tenant_id: requestContext.tenant_id,
+          created_by: requestContext.subject.id,
+        }),
+      },
+      200,
+    );
+  };
+
+  const setHostDecision = async (
+    c: Context,
+    name: string,
+    host: string,
+    decision: 'allowed' | 'denied' | 'none',
+  ): Promise<SkillRecord | undefined> => {
+    const requestContext = deps.resolveRequestContext(c);
+    return deps.resolveSkillStore(c).setSkillNetworkHostDecision({
+      tenant_id: requestContext.tenant_id,
+      name,
+      host,
+      decision,
+    });
+  };
+
+  const updateAllowedHostHandler: RouteHandler<typeof updateSkillNetworkAllowedHostRoute> = async c => {
+    const { name } = c.req.valid('param');
+    const body: UpdateSkillNetworkHostRequest = c.req.valid('json');
+    const requestContext = deps.resolveRequestContext(c);
+    const record = await findSkillRecord(deps, c, name);
+    if (record === undefined) {
+      return c.json({ error: { message: `No skill with this name: ${name}` } }, 404);
+    }
+    // Allowing a site on a skill with no approval and no pin yet binds the allowance to
+    // the skill's code as it stands: the pin is read before anything is stored, and a code
+    // version that cannot be read refuses the allowance, like approving.
+    let code_sha: string | null = null;
+    if (record.network_approval === null && record.network_approval_code_sha === null) {
+      try {
+        code_sha = await resolveSkillCodePin({ manifest: record.manifest, resolve: deps.resolveSkillCodeSha });
+        if (code_sha === null) {
+          // A manifest that names no code version cannot be pinned; refuse like an
+          // unreadable one rather than store an unbound allowance.
+          throw new SkillCodePinRefusedError();
+        }
+      } catch (error) {
+        if (error instanceof SkillCodePinRefusedError) {
+          return c.json({ error: { message: error.message } }, 422);
+        }
+        throw error;
+      }
+    }
+    const decided = await setHostDecision(c, name, body.host, 'allowed');
+    if (decided === undefined) {
+      return c.json({ error: { message: `No skill with this name: ${name}` } }, 404);
+    }
+    const updated =
+      code_sha === null
+        ? decided
+        : await deps.resolveSkillStore(c).setSkillNetworkCodePin({
+            tenant_id: requestContext.tenant_id,
+            name,
+            code_sha,
+          });
+    if (updated === undefined) {
+      return c.json({ error: { message: `No skill with this name: ${name}` } }, 404);
+    }
+    return c.json(
+      {
+        data: toSkillNetworkApproval(updated, {
+          tenant_id: requestContext.tenant_id,
+          created_by: requestContext.subject.id,
+        }),
+      },
+      200,
+    );
+  };
+
+  const deleteAllowedHostHandler: RouteHandler<typeof deleteSkillNetworkAllowedHostRoute> = async c => {
+    const { name } = c.req.valid('param');
+    const { host } = c.req.valid('query');
+    const record = await findSkillRecord(deps, c, name);
+    if (record === undefined) {
+      return c.json({ error: { message: `No skill with this name: ${name}` } }, 404);
+    }
+    // The store holds one decision per site, so clearing the site removes it from both the
+    // allowed and the turned-down lists.
+    if (record.network_allowed_hosts.includes(host)) {
+      await setHostDecision(c, name, host, 'none');
+    }
+    return c.json({}, 200);
+  };
+
+  const updateDeniedHostHandler: RouteHandler<typeof updateSkillNetworkDeniedHostRoute> = async c => {
+    const { name } = c.req.valid('param');
+    const body: UpdateSkillNetworkHostRequest = c.req.valid('json');
+    const requestContext = deps.resolveRequestContext(c);
+    const updated = await setHostDecision(c, name, body.host, 'denied');
+    if (updated === undefined) {
+      return c.json({ error: { message: `No skill with this name: ${name}` } }, 404);
+    }
+    return c.json(
+      {
+        data: toSkillNetworkApproval(updated, {
+          tenant_id: requestContext.tenant_id,
+          created_by: requestContext.subject.id,
+        }),
+      },
+      200,
+    );
+  };
+
+  const deleteDeniedHostHandler: RouteHandler<typeof deleteSkillNetworkDeniedHostRoute> = async c => {
+    const { name } = c.req.valid('param');
+    const { host } = c.req.valid('query');
+    const record = await findSkillRecord(deps, c, name);
+    if (record === undefined) {
+      return c.json({ error: { message: `No skill with this name: ${name}` } }, 404);
+    }
+    if (record.network_denied_hosts.includes(host)) {
+      await setHostDecision(c, name, host, 'none');
+    }
+    return c.json({}, 200);
   };
 
   const deleteNetworkApprovalHandler: RouteHandler<typeof deleteSkillNetworkApprovalRoute> = async c => {
     const { name } = c.req.valid('param');
     const requestContext = deps.resolveRequestContext(c);
+    // Removing the approval leaves any per-site allowances standing, still bound to the
+    // pin; the store clears the pin only when no grants remain.
     const updated = await deps.resolveSkillStore(c).setSkillNetworkApproval({
       tenant_id: requestContext.tenant_id,
       name,
       hosts: null,
+      code_sha: null,
     });
     if (updated === undefined) {
       return c.json({ error: { message: `No skill with this name: ${name}` } }, 404);
@@ -201,6 +377,10 @@ export function createSkillsRouter<TTransaction>(deps: SkillsRouterDeps<TTransac
   router.openapi(getSkillNetworkApprovalRoute, getNetworkApprovalHandler);
   router.openapi(updateSkillNetworkApprovalRoute, updateNetworkApprovalHandler);
   router.openapi(deleteSkillNetworkApprovalRoute, deleteNetworkApprovalHandler);
+  router.openapi(updateSkillNetworkAllowedHostRoute, updateAllowedHostHandler);
+  router.openapi(deleteSkillNetworkAllowedHostRoute, deleteAllowedHostHandler);
+  router.openapi(updateSkillNetworkDeniedHostRoute, updateDeniedHostHandler);
+  router.openapi(deleteSkillNetworkDeniedHostRoute, deleteDeniedHostHandler);
   return router;
 }
 
