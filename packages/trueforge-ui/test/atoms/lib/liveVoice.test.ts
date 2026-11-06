@@ -1,13 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import {
-  floatToPcm16,
-  pcm16ToFloat,
-  readServerMessage,
-  startLiveVoice,
-  type LiveVoiceEvents,
-} from '@/atoms/lib/liveVoice.js';
+import { pcm16ToFloat, readServerEvent, startLiveVoice, type LiveVoiceEvents } from '@/atoms/lib/liveVoice.js';
+import { floatToPcm16 } from '@/atoms/lib/voiceRecorder.js';
 
 describe('voice line audio', () => {
   it('turns float samples into 16-bit little-endian bytes and back', () => {
@@ -28,20 +23,21 @@ describe('voice line audio', () => {
   });
 });
 
-describe('readServerMessage', () => {
+describe('readServerEvent', () => {
   it('reads the messages the server sends', () => {
-    expect(readServerMessage('{"type":"ready","sample_rate":24000}')).toEqual({ kind: 'ready' });
-    expect(readServerMessage('{"type":"clear"}')).toEqual({ kind: 'clear' });
-    expect(readServerMessage('{"type":"turn_saved","turn_id":"t1"}')).toEqual({ kind: 'turn_saved' });
-    expect(readServerMessage('{"type":"state","state":"thinking"}')).toEqual({ kind: 'state', state: 'thinking' });
-    expect(readServerMessage('{"type":"notice","text":"Hi"}')).toEqual({ kind: 'notice', text: 'Hi' });
+    expect(readServerEvent('{"type":"ready","sample_rate":24000}')).toEqual({ type: 'ready', sample_rate: 24000 });
+    expect(readServerEvent('{"type":"clear"}')).toEqual({ type: 'clear' });
+    expect(readServerEvent('{"type":"turn_saved","turn_id":"t1"}')).toEqual({ type: 'turn_saved' });
+    expect(readServerEvent('{"type":"state","state":"thinking"}')).toEqual({ type: 'state', state: 'thinking' });
+    expect(readServerEvent('{"type":"notice","text":"Hi"}')).toEqual({ type: 'notice', text: 'Hi' });
   });
 
   it('drops what it does not know', () => {
-    expect(readServerMessage('not json')).toBeNull();
-    expect(readServerMessage('{"type":"state","state":"dancing"}')).toBeNull();
-    expect(readServerMessage('{"type":"other"}')).toBeNull();
-    expect(readServerMessage('[]')).toBeNull();
+    expect(readServerEvent('not json')).toBeNull();
+    expect(readServerEvent('{"type":"state","state":"dancing"}')).toBeNull();
+    expect(readServerEvent('{"type":"ready","sample_rate":0}')).toBeNull();
+    expect(readServerEvent('{"type":"other"}')).toBeNull();
+    expect(readServerEvent('[]')).toBeNull();
   });
 });
 
@@ -137,7 +133,6 @@ describe('startLiveVoice', () => {
     vi.stubGlobal('WebSocket', FakeSocket);
     vi.stubGlobal('AudioContext', FakeAudioContext);
     Object.defineProperty(navigator, 'mediaDevices', { value: { getUserMedia }, configurable: true });
-    window.AudioContext = FakeAudioContext as unknown as typeof AudioContext;
     events = { onState: vi.fn(), onTurnSaved: vi.fn(), onNotice: vi.fn(), onEnded: vi.fn() };
   });
 
@@ -170,7 +165,8 @@ describe('startLiveVoice', () => {
     capture?.processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => new Float32Array([0.5, -0.5]) } });
     const frame = FakeSocket.last?.sent[0];
     expect(frame).toBeInstanceOf(ArrayBuffer);
-    expect(new DataView(frame as ArrayBuffer).getInt16(0, true)).toBe(16384);
+    if (!(frame instanceof ArrayBuffer)) throw new Error('the frame is not binary');
+    expect(new DataView(frame).getInt16(0, true)).toBe(16384);
   });
 
   it('plays what the server sends back to back, and a clear drops it all at once', async () => {
@@ -182,6 +178,22 @@ describe('startLiveVoice', () => {
     expect(playback?.sources.map(source => source.startedAt)).toEqual([0, 0.5]);
     FakeSocket.last?.onmessage?.({ data: '{"type":"clear"}' });
     expect(playback?.sources.every(source => source.stopped)).toBe(true);
+  });
+
+  it('plays at the rate the server says in its ready message', async () => {
+    await start();
+    const playback = FakeAudioContext.all.find(context => context.sampleRate === 24_000);
+    const rates: number[] = [];
+    const create = playback?.createBuffer.bind(playback);
+    if (playback !== undefined && create !== undefined) {
+      playback.createBuffer = (channels, length, rate) => {
+        rates.push(rate);
+        return create(channels, length, rate);
+      };
+    }
+    FakeSocket.last?.onmessage?.({ data: '{"type":"ready","sample_rate":8000}' });
+    FakeSocket.last?.onmessage?.({ data: new Int16Array(800).buffer });
+    expect(rates).toEqual([8000]);
   });
 
   it('reports states, saved turns and notices', async () => {
@@ -216,7 +228,7 @@ describe('startLiveVoice', () => {
     const pending = startLiveVoice({ connection: { url: 'wss://aman.test/stream', protocols: [] }, events });
     await vi.waitFor(() => expect(FakeSocket.last).toBeDefined());
     FakeSocket.last?.onerror?.();
-    await expect(pending).rejects.toThrow(/could not be opened/);
+    await expect(pending).rejects.toThrow(/could not be opened. Check your connection/);
     expect(stopTrack).toHaveBeenCalled();
     expect(FakeAudioContext.all.every(context => context.closed)).toBe(true);
   });

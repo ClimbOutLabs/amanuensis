@@ -280,3 +280,8 @@ test('connect passes the server message on when the line is refused', async () =
   );
   await assert.rejects(api.connect({ sessionId: 'chat-1' }), /turned off on this computer/);
 });
+
+test('connect says what to do when the answer is not a voice line', async () => {
+  const api = createVoiceInputApi(transcribeFetcher(jsonResponse({ data: {} }, 200), {}));
+  await assert.rejects(api.connect({ sessionId: 'chat-1' }), /Reload the page, then try again\./);
+});

@@ -6,9 +6,9 @@
  * and when to stop talking; this file only moves audio and reports what the server says.
  */
 import type { VoiceConnection } from '../../components/VoiceInputContext.js';
-import { audioContextCtor, resampleLinear, VOICE_SAMPLE_RATE } from './voiceRecorder.js';
+import { audioContextCtor, floatToPcm16, resampleLinear, VOICE_SAMPLE_RATE } from './voiceRecorder.js';
 
-/** Rate of the audio the server sends. */
+/** Rate of the audio the server sends until its `ready` message says otherwise. */
 export const LIVE_PLAYBACK_RATE = 24_000;
 /** Samples per captured frame: 64 ms, so the server hears the end of a sentence promptly. */
 const CAPTURE_FRAME_SAMPLES = 1024;
@@ -30,16 +30,6 @@ export type LiveVoice = {
   stop: () => void;
 };
 
-/** Mono float samples as the 16-bit little-endian bytes the server reads. */
-export function floatToPcm16(samples: Float32Array): ArrayBuffer {
-  const out = new DataView(new ArrayBuffer(samples.length * 2));
-  for (let i = 0; i < samples.length; i++) {
-    const clamped = Math.max(-1, Math.min(1, samples[i] ?? 0));
-    out.setInt16(i * 2, Math.round(clamped * 32767), true);
-  }
-  return out.buffer;
-}
-
 /** 16-bit little-endian bytes as float samples. A stray odd byte is dropped. */
 export function pcm16ToFloat(bytes: ArrayBuffer): Float32Array {
   const view = new DataView(bytes);
@@ -48,19 +38,20 @@ export function pcm16ToFloat(bytes: ArrayBuffer): Float32Array {
   return out;
 }
 
-export type ServerMessage =
-  | { kind: 'ready' }
-  | { kind: 'clear' }
-  | { kind: 'state'; state: LiveVoiceState }
-  | { kind: 'turn_saved' }
-  | { kind: 'notice'; text: string };
+/** A text message from the server, as the server sends it (the server owns the shapes). */
+export type ServerEvent =
+  | { type: 'ready'; sample_rate: number }
+  | { type: 'clear' }
+  | { type: 'state'; state: LiveVoiceState }
+  | { type: 'turn_saved' }
+  | { type: 'notice'; text: string };
 
 function isLiveState(value: unknown): value is LiveVoiceState {
   return value === 'listening' || value === 'thinking' || value === 'speaking';
 }
 
 /** Reads one JSON message from the server; anything it does not recognise is dropped. */
-export function readServerMessage(text: string): ServerMessage | null {
+export function readServerEvent(text: string): ServerEvent | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
@@ -68,14 +59,17 @@ export function readServerMessage(text: string): ServerMessage | null {
     return null;
   }
   if (typeof parsed !== 'object' || parsed === null || !('type' in parsed)) return null;
-  if (parsed.type === 'ready' || parsed.type === 'clear' || parsed.type === 'turn_saved') {
-    return { kind: parsed.type };
+  if (parsed.type === 'clear' || parsed.type === 'turn_saved') {
+    return { type: parsed.type };
+  }
+  if (parsed.type === 'ready' && 'sample_rate' in parsed && typeof parsed.sample_rate === 'number') {
+    return parsed.sample_rate > 0 ? { type: 'ready', sample_rate: parsed.sample_rate } : null;
   }
   if (parsed.type === 'state' && 'state' in parsed && isLiveState(parsed.state)) {
-    return { kind: 'state', state: parsed.state };
+    return { type: 'state', state: parsed.state };
   }
   if (parsed.type === 'notice' && 'text' in parsed && typeof parsed.text === 'string') {
-    return { kind: 'notice', text: parsed.text };
+    return { type: 'notice', text: parsed.text };
   }
   return null;
 }
@@ -85,14 +79,19 @@ class Player {
   readonly #context: AudioContext;
   readonly #playing = new Set<AudioBufferSourceNode>();
   #nextStart = 0;
+  #rate = LIVE_PLAYBACK_RATE;
 
   constructor(context: AudioContext) {
     this.#context = context;
   }
 
+  setRate(rate: number): void {
+    this.#rate = rate;
+  }
+
   enqueue(samples: Float32Array): void {
     if (samples.length === 0) return;
-    const buffer = this.#context.createBuffer(1, samples.length, LIVE_PLAYBACK_RATE);
+    const buffer = this.#context.createBuffer(1, samples.length, this.#rate);
     buffer.copyToChannel(new Float32Array(samples), 0);
     const source = this.#context.createBufferSource();
     source.buffer = buffer;
@@ -123,11 +122,13 @@ class Player {
   }
 }
 
+const CHECK_CONNECTION = 'Check your connection, then tap voice mode again.';
+
 function opened(socket: WebSocket): Promise<void> {
   return new Promise((resolve, reject) => {
     socket.onopen = () => resolve();
-    socket.onerror = () => reject(new Error('The voice line could not be opened.'));
-    socket.onclose = () => reject(new Error('The voice line closed before it opened.'));
+    socket.onerror = () => reject(new Error(`The voice line could not be opened. ${CHECK_CONNECTION}`));
+    socket.onclose = () => reject(new Error(`The voice line closed before it opened. ${CHECK_CONNECTION}`));
   });
 }
 
@@ -145,7 +146,7 @@ export async function startLiveVoice({
 }): Promise<LiveVoice> {
   const Ctor = audioContextCtor();
   if (Ctor === undefined || typeof navigator.mediaDevices?.getUserMedia !== 'function') {
-    throw new Error('Voice capture is not supported in this browser');
+    throw new Error('Voice capture is not supported in this browser. Use a current Chrome, Edge, Firefox or Safari.');
   }
   // Both audio contexts are made right away, while the tap that started voice mode still counts.
   const playbackContext = new Ctor({ sampleRate: LIVE_PLAYBACK_RATE });
@@ -195,9 +196,9 @@ export async function startLiveVoice({
       return;
     }
     if (typeof message.data !== 'string') return;
-    const event = readServerMessage(message.data);
+    const event = readServerEvent(message.data);
     if (event === null) return;
-    switch (event.kind) {
+    switch (event.type) {
       case 'clear':
         player.clear();
         break;
@@ -211,6 +212,7 @@ export async function startLiveVoice({
         events.onNotice(event.text);
         break;
       case 'ready':
+        player.setRate(event.sample_rate);
         break;
     }
   };

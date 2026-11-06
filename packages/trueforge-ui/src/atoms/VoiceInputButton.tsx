@@ -8,11 +8,24 @@ import { useSpokenReply } from '../components/SpokenReplyContext.js';
 import { useOptionalVoiceInput, type VoiceAvailability, type VoiceInputApi } from '../components/VoiceInputContext.js';
 import { Icon } from '../icons/Icon.js';
 import { hotkeyById, matchesHotkey, usePushToTalkHotkey } from '../utils/pushToTalkHotkey.js';
-import { getVoiceMode, setVoiceMode, useVoiceMode } from '../utils/voiceMode.js';
+import {
+  beginLiveStart,
+  endLiveLine,
+  finishLiveStart,
+  getLiveLineSession,
+  getVoiceMode,
+  hasLiveLine,
+  liveLineEnded,
+  liveLineEvents,
+  mountVoiceButton,
+  setLiveLine,
+  setVoiceMode,
+  useVoiceMode,
+} from '../utils/voiceMode.js';
 import { markDraftFromVoice } from '../utils/voiceTurn.js';
 import { auiButtonClass } from './lib/buttonClasses.js';
 import { cn } from './lib/cn.js';
-import { startLiveVoice, type LiveVoice } from './lib/liveVoice.js';
+import { startLiveVoice } from './lib/liveVoice.js';
 import { isVoiceCaptureSupported, startVoiceRecording, type VoiceRecorder } from './lib/voiceRecorder.js';
 import { Tooltip } from './primitives/Tooltip.js';
 
@@ -68,7 +81,6 @@ function VoiceInputButtonInner({
   const reload = useTrueFoundryReload();
   const sessionId = useAuiState(s => s.threadListItem.remoteId);
   const voiceMode = useVoiceMode();
-  const liveRef = useRef<LiveVoice | null>(null);
   const reloadRef = useRef(reload);
   reloadRef.current = reload;
   const composerText = useAuiState(s => s.composer.text);
@@ -101,9 +113,6 @@ function VoiceInputButtonInner({
     () => () => {
       mountedRef.current = false;
       startTokenRef.current++;
-      liveRef.current?.stop();
-      liveRef.current = null;
-      setVoiceMode('off');
       abortRef.current?.abort();
       abortRef.current = null;
       recorderRef.current?.cancel();
@@ -126,10 +135,7 @@ function VoiceInputButtonInner({
 
   /** Ends voice mode: the line, the mic and any playback. One tap anywhere ends it. */
   const endVoiceMode = useCallback(() => {
-    liveRef.current?.stop();
-    liveRef.current = null;
-    liveSessionRef.current = null;
-    setVoiceMode('off');
+    endLiveLine();
   }, []);
 
   // Fail-closed on tab backgrounding: the voice session ends and tracks stop.
@@ -158,10 +164,24 @@ function VoiceInputButtonInner({
   }, [cancelVoice]);
 
   // Voice mode belongs to the chat it started in: another chat ends it.
-  const liveSessionRef = useRef<string | null>(null);
   useEffect(() => {
-    if (liveRef.current !== null && liveSessionRef.current !== (sessionId ?? null)) endVoiceMode();
+    if (hasLiveLine() && getLiveLineSession() !== (sessionId ?? null)) endVoiceMode();
   }, [sessionId, endVoiceMode]);
+
+  // The line outlives this button when the composer is rebuilt; whichever button is on screen takes its reports.
+  useEffect(
+    () =>
+      mountVoiceButton({
+        onTurnSaved: () => reloadRef.current(),
+        onNotice: setNotice,
+        onEnded: reason => {
+          if (mountedRef.current) {
+            setNotice(reason === 'mic_lost' ? VOICE_MODE_MIC_LOST_MESSAGE : VOICE_MODE_ENDED_MESSAGE);
+          }
+        },
+      }),
+    [],
+  );
 
   const stopAndTranscribe = useCallback(
     async ({ autoStopped, send }: { autoStopped: boolean; send: boolean }): Promise<void> => {
@@ -271,8 +291,7 @@ function VoiceInputButtonInner({
     // Reading a reply aloud by hand and listening at once would have the mic hear the reply.
     spokenReply.stop();
     setVoiceMode('connecting');
-    const controller = new AbortController();
-    abortRef.current = controller;
+    const controller = beginLiveStart();
     void (async () => {
       try {
         // A new chat has no session yet; it is created the same way the first typed send creates one.
@@ -282,13 +301,10 @@ function VoiceInputButtonInner({
           connection,
           events: {
             onState: setVoiceMode,
-            onTurnSaved: () => reloadRef.current(),
-            onNotice: setNotice,
+            ...liveLineEvents,
             onEnded: reason => {
-              liveRef.current = null;
-              liveSessionRef.current = null;
-              setVoiceMode('off');
-              setNotice(reason === 'mic_lost' ? VOICE_MODE_MIC_LOST_MESSAGE : VOICE_MODE_ENDED_MESSAGE);
+              // A line that was replaced or ended on purpose has nothing more to report.
+              if (!controller.signal.aborted) liveLineEnded(reason);
             },
           },
         });
@@ -297,8 +313,7 @@ function VoiceInputButtonInner({
           live.stop();
           return;
         }
-        liveRef.current = live;
-        liveSessionRef.current = chatId;
+        setLiveLine({ stop: live.stop, sessionId: chatId });
         setVoiceMode('listening');
       } catch (failure) {
         if (controller.signal.aborted || !mountedRef.current) return;
@@ -306,7 +321,7 @@ function VoiceInputButtonInner({
         if (isPermissionDenial(failure)) setPhase('denied');
         else setError(failure instanceof Error && failure.message !== '' ? failure.message : VOICE_MODE_FAILED_MESSAGE);
       } finally {
-        if (abortRef.current === controller) abortRef.current = null;
+        finishLiveStart(controller);
       }
     })();
   };
