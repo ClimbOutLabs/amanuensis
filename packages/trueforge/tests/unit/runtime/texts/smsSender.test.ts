@@ -1,7 +1,7 @@
 import winston from 'winston';
 
 import { createDeliveryService } from '../../../../src/runtime/delivery/deliveryService';
-import { MAX_TEXTS_PER_PERSON_PER_DAY } from '../../../../src/runtime/texts/textLimits';
+import { MAX_TEXTS_PER_NUMBER_PER_DAY, MAX_TEXTS_PER_PERSON_PER_DAY } from '../../../../src/runtime/texts/textLimits';
 import { defaultReachSettings } from '../../../../src/schemas/reach';
 import { ALICE, PHONE, textsHarness } from '../../../fixtures/textsHarness';
 
@@ -118,6 +118,41 @@ describe('texts as a channel of the delivery layer', () => {
     h.clock.now = new Date(h.clock.now.getTime() + 21 * 60 * 60_000);
     await h.deliveries.deliver(nudge(BILL_TEXT));
     expect(h.sent).toHaveLength(MAX_TEXTS_PER_PERSON_PER_DAY + 1);
+  });
+
+  it('sends at most a day’s texts to one number, however many people confirmed it', async () => {
+    const h = await textsHarness();
+    const bob = { tenant_id: 'default', created_by: 'bob' };
+    await h.readyToText();
+    await h.readyToText({ owner: bob });
+    for (let index = 0; index < 20; index += 1) {
+      await h.deliveries.deliver(nudge(BILL_TEXT));
+      await h.deliveries.deliver({ ...nudge(BILL_TEXT), ...bob });
+    }
+    expect(h.sent).toHaveLength(MAX_TEXTS_PER_NUMBER_PER_DAY);
+    const over = await h.deliveries.deliver({ ...nudge(BILL_TEXT), ...bob });
+    expect(over.attempts.find(row => row.channel === 'sms')).toMatchObject({
+      outcome: 'skipped',
+      detail: `Your number had ${String(MAX_TEXTS_PER_NUMBER_PER_DAY)} texts today, the most for one number, so no text was sent. Texts start again in about 24 hours. Until then, see new items in the app.`,
+    });
+  });
+
+  it('sends at most the server’s day of texts across everyone, as the owner set it', async () => {
+    const h = await textsHarness({ maxTextsPerDay: 5 });
+    const bob = { tenant_id: 'default', created_by: 'bob' };
+    await h.readyToText();
+    await h.readyToText({ owner: bob, phone: '+15550122' });
+    for (let index = 0; index < 3; index += 1) {
+      await h.deliveries.deliver(nudge(BILL_TEXT));
+      await h.deliveries.deliver({ ...nudge(BILL_TEXT), ...bob });
+    }
+    expect(h.sent).toHaveLength(5);
+    const over = await h.deliveries.deliver(nudge(BILL_TEXT));
+    expect(over.attempts.find(row => row.channel === 'sms')).toMatchObject({
+      outcome: 'skipped',
+      detail:
+        'This server sent the most texts it may send in one day, so no text was sent. Texts start again in about 24 hours. Until then, see new items in the app.',
+    });
   });
 
   it('counts a failed text toward the day, so a failing provider cannot be retried without end', async () => {

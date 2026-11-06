@@ -5,6 +5,7 @@ import {
   MAX_CODES_PER_HOUR,
   MAX_CODES_PER_NUMBER_PER_DAY,
   MAX_CODES_PER_NUMBER_PER_HOUR,
+  MAX_CODES_PER_PERSON_PER_DAY,
   MAX_CODES_PER_SERVER_PER_DAY,
   normalizePhoneNumber,
 } from '../../../../src/runtime/texts/textNumber';
@@ -203,10 +204,9 @@ describe('confirming a number with a one-time code', () => {
     await expect(h.numbers.sendCode({ owner: person(asked + 1), phone: PHONE })).resolves.toEqual({ ok: true });
   });
 
-  it('others filling a number’s limits do not lock out the person whose number it is', async () => {
+  it('others filling a number’s limits do not lock out the person who confirmed it', async () => {
     const h = await textsHarness();
     await h.readyToText();
-    await h.numbers.stopNumber(PHONE);
     const person = (index: number) => ({ tenant_id: 'default', created_by: `person-${String(index)}` });
     for (let index = 0; index < MAX_CODES_PER_NUMBER_PER_HOUR; index += 1) {
       await h.numbers.sendCode({ owner: person(index), phone: PHONE });
@@ -217,15 +217,107 @@ describe('confirming a number with a one-time code', () => {
     await expect(h.numbers.sendCode({ owner: ALICE, phone: PHONE })).resolves.toEqual({ ok: true });
   });
 
-  it('counts a number typed with its trunk zero as the same number', async () => {
+  it('a number that replied STOP is not theirs for someone who never confirmed it', async () => {
     const h = await textsHarness();
-    const person = (index: number) => ({ tenant_id: 'default', created_by: `person-${String(index)}` });
-    for (let index = 0; index < MAX_CODES_PER_NUMBER_PER_HOUR; index += 1) {
-      await h.numbers.sendCode({ owner: person(index), phone: '+4407700900123' });
+    const mallory = { tenant_id: 'default', created_by: 'mallory' };
+    await expect(h.numbers.sendCode({ owner: mallory, phone: PHONE })).resolves.toEqual({ ok: true });
+    await h.numbers.stopNumber(PHONE);
+    for (let index = 1; index < MAX_CODES_PER_NUMBER_PER_HOUR; index += 1) {
+      await h.numbers.sendCode({
+        owner: { tenant_id: 'default', created_by: `person-${String(index)}` },
+        phone: PHONE,
+      });
     }
-    await expect(h.numbers.sendCode({ owner: person(99), phone: '+447700900123' })).resolves.toMatchObject({
+    await expect(h.numbers.sendCode({ owner: mallory, phone: PHONE })).resolves.toMatchObject({
+      ok: false,
       reason: 'rate_limited',
     });
+    expect(h.sent).toHaveLength(MAX_CODES_PER_NUMBER_PER_HOUR);
+  });
+
+  it('limits codes for one person in a day, below the server’s cap', async () => {
+    const h = await textsHarness();
+    let sent = 0;
+    for (let round = 0; sent < MAX_CODES_PER_PERSON_PER_DAY; round += 1) {
+      const result = await h.numbers.sendCode({ owner: ALICE, phone: `+1555040${String(round).padStart(4, '0')}` });
+      if (result.ok) {
+        sent += 1;
+      } else {
+        h.clock.now = new Date(h.clock.now.getTime() + 61 * 60_000);
+      }
+    }
+    h.clock.now = new Date(h.clock.now.getTime() + 61 * 60_000);
+    await expect(h.numbers.sendCode({ owner: ALICE, phone: '+15550499999' })).resolves.toMatchObject({
+      ok: false,
+      reason: 'rate_limited',
+    });
+    expect(MAX_CODES_PER_PERSON_PER_DAY).toBeLessThan(MAX_CODES_PER_SERVER_PER_DAY);
+  });
+
+  it('a code another limit refuses spends none of the server’s day', async () => {
+    const h = await textsHarness();
+    const person = (index: number) => ({ tenant_id: 'default', created_by: `person-${String(index)}` });
+    for (let index = 0; index < MAX_CODES_PER_NUMBER_PER_HOUR + 20; index += 1) {
+      await h.numbers.sendCode({ owner: person(index), phone: PHONE });
+    }
+    expect(h.sent).toHaveLength(MAX_CODES_PER_NUMBER_PER_HOUR);
+    for (let index = MAX_CODES_PER_NUMBER_PER_HOUR; index < MAX_CODES_PER_SERVER_PER_DAY; index += 1) {
+      await expect(
+        h.numbers.sendCode({ owner: person(100 + index), phone: `+1555050${String(index).padStart(4, '0')}` }),
+      ).resolves.toEqual({ ok: true });
+    }
+  });
+
+  it('the person who confirmed a number can get a new code to it when the server’s day is used up', async () => {
+    const h = await textsHarness();
+    await h.readyToText();
+    for (let index = 0; index < MAX_CODES_PER_SERVER_PER_DAY; index += 1) {
+      const owner = { tenant_id: 'default', created_by: `person-${String(index)}` };
+      await h.numbers.sendCode({ owner, phone: `+1555060${String(index).padStart(4, '0')}` });
+    }
+    await expect(
+      h.numbers.sendCode({ owner: { tenant_id: 'default', created_by: 'one-more' }, phone: '+15550699999' }),
+    ).resolves.toMatchObject({ ok: false, reason: 'rate_limited' });
+    await expect(h.numbers.sendCode({ owner: ALICE, phone: PHONE })).resolves.toEqual({ ok: true });
+  });
+
+  it('counts a number typed with its trunk zero as the same number', async () => {
+    const pairs: [string, string][] = [
+      ['+4407700900123', '+447700900123'],
+      ['+9005321234567', '+905321234567'],
+      ['+35308512345678', '+3538512345678'],
+    ];
+    for (const [typed, plain] of pairs) {
+      const h = await textsHarness();
+      const person = (index: number) => ({ tenant_id: 'default', created_by: `person-${String(index)}` });
+      for (let index = 0; index < MAX_CODES_PER_NUMBER_PER_HOUR; index += 1) {
+        await h.numbers.sendCode({ owner: person(index), phone: typed });
+      }
+      await expect([typed, await h.numbers.sendCode({ owner: person(99), phone: plain })]).toEqual([
+        typed,
+        expect.objectContaining({ reason: 'rate_limited' }),
+      ]);
+    }
+  });
+
+  it('keeps numbers apart whose country code holds a 0', async () => {
+    const pairs: [string, string][] = [
+      ['+302101234567', '+32101234567'],
+      ['+905321234567', '+95321234567'],
+      ['+5025551234', '+525551234'],
+      ['+12025550100', '+1225550100'],
+    ];
+    for (const [number, other] of pairs) {
+      const h = await textsHarness();
+      const person = (index: number) => ({ tenant_id: 'default', created_by: `person-${String(index)}` });
+      for (let index = 0; index < MAX_CODES_PER_NUMBER_PER_HOUR; index += 1) {
+        await h.numbers.sendCode({ owner: person(index), phone: number });
+      }
+      await expect([number, await h.numbers.sendCode({ owner: person(99), phone: other })]).toEqual([
+        number,
+        { ok: true },
+      ]);
+    }
   });
 
   it('caps codes across the whole server in a day', async () => {

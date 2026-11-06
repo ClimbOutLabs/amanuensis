@@ -208,7 +208,7 @@ describe('starting the Twilio listener', () => {
 
   it('starts the listener when texts are set up', async () => {
     const server = await twilioListenerFor({
-      twilio: { ...settings, accountSid: `AC${'1'.repeat(32)}`, fromNumber: '+15550100' },
+      twilio: { ...settings, accountSid: `AC${'1'.repeat(32)}`, fromNumber: '+15550100', maxTextsPerDay: 500 },
       hostname: '127.0.0.1',
       routes: [],
       logger,

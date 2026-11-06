@@ -1,6 +1,6 @@
 /** The part of calling a Google product's REST API that does not depend on the product: the user's own login, retries, size caps. */
 import { z } from 'zod';
-import { GoogleApiError } from './errors';
+import { GoogleApiError, GoogleUnusableReplyError } from './errors';
 import type { GoogleAccessTokens } from './GoogleAccessTokens';
 import { fetchGoogle } from './oauth';
 
@@ -221,7 +221,7 @@ export class GoogleRestClient {
           throw new GoogleApiError({ status: 503, message: input.unknownOutcome ?? busy, cause: error });
         }
         if (!read.ok) {
-          throw new GoogleApiError({ status: 502, message: input.unknownOutcome ?? product.tooLargeMessage });
+          throw new GoogleUnusableReplyError({ message: input.unknownOutcome ?? product.tooLargeMessage });
         }
         return read.value;
       }
@@ -245,8 +245,7 @@ export class GoogleRestClient {
   async parsed<T>(schema: z.ZodType<T>, request: GoogleRestRequest): Promise<T> {
     const body = safeParse({ schema, value: await this.#send(request) });
     if (!body.success) {
-      throw new GoogleApiError({
-        status: 502,
+      throw new GoogleUnusableReplyError({
         message: request.unknownOutcome ?? `${this.#product.name} returned a response Aman could not read.`,
         cause: body.error,
       });

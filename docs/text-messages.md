@@ -10,7 +10,7 @@ Texts go through Twilio, a service you sign up for. You pay Twilio for each text
 ## What a text says
 
 - **Private (the default).** The text says only the kind of thing, such as "Mannie: a reminder is due. Open the app to see it." It holds no names, amounts or message content. Your assistant's name is the one you chose in Personalization. A text uses at most 20 letters of it.
-- **Full.** A reminder's text holds the reminder, cut to fit two texts. It can show on a locked screen, and Twilio and the phone company can read it. Something your assistant noticed still gets the Private words, because its wording comes from the model and stays in the app. A reminder that holds a link, a website, a phone number or an email address is sent in Private words too, because a link or a number to call in a text is a common trick.
+- **Full.** A reminder's text holds the reminder, cut to fit two texts. It can show on a locked screen, and Twilio and the phone company can read it. Something your assistant noticed still gets the Private words, because its wording comes from the model and stays in the app. Aman also looks for a link, a website, a phone number or an email address in a reminder, and sends that reminder in Private words, because a link or a number to call in a text is a common trick. It catches the usual spellings, but it cannot catch every one. Keep Private if that matters to you.
 
 The text with your confirmation code holds only the code. It does not name your assistant.
 
@@ -30,11 +30,17 @@ TWILIO_FROM_NUMBER=+15550100
 TWILIO_WEBHOOK_PUBLIC_URL=https://your-address.example
 # Optional. The port Twilio's messages arrive on. The installer picks one for you.
 # TWILIO_WEBHOOK_PORT=9201
+# Optional. The most texts the whole server sends in a day.
+# REACH_SMS_MAX_TEXTS_PER_DAY=500
 ```
 
-Then start Aman again with the new settings. If you installed Aman with the installer, run `./installer/install.sh` again from your `amanuensis` folder. If you run Aman from a copy of the code, stop it and start it again. Do the same after you change any of these lines later, such as a new auth token.
+Then start Aman again with the new settings. If you installed Aman with the installer, run `./installer/install.sh` again from your `amanuensis` folder. If you run Aman from a copy of the code, stop it and start it again. Do the same after you change any of these lines later, such as a new auth token. The installer notices a change to these lines by itself. After you change any other line in that file, also run `./installer/install.sh instance refresh <name>`.
 
-When Aman starts, it tells Twilio to send the texts that come in to your number to `TWILIO_WEBHOOK_PUBLIC_URL`. You do not set this in the Twilio console. Aman changes only that setting, and only for the number in `TWILIO_FROM_NUMBER`. If it cannot, it says so in its log, and texts still go out.
+When Aman starts, it tells Twilio to send the texts that come in to your number to `TWILIO_WEBHOOK_PUBLIC_URL` followed by `/twilio/sms`. You do not set this in the Twilio console. Aman changes only that setting, and only for the number in `TWILIO_FROM_NUMBER`.
+
+Use a number only for this Aman. Aman takes over its incoming texts. If another app or another Aman used the number, it stops getting them, and the log names the address that was replaced. A number in a Messaging Service needs the service set to use the number's own address.
+
+If Aman cannot point the number at itself, its log and Reach me say why and what to do. Texts still go out, but STOP replies do not reach Aman until it is set. To set it by hand, open the number in the Twilio console. Under "A message comes in", choose Webhook, enter your `TWILIO_WEBHOOK_PUBLIC_URL` followed by `/twilio/sms`, choose POST, and save.
 
 4. In the Twilio console, open Messaging, then Settings, then Geo permissions. Allow only the countries you text. Aman sends codes only to numbers a person types in, but this keeps any mistake from costing you texts to far-away numbers.
 5. In Aman, open Settings, then Reach me. Enter your number with the country code, type the code that arrives, choose Private or Full, switch texts on, save, and press Try it.
@@ -44,9 +50,11 @@ Keep the auth token secret. Aman never writes it to its logs. If you change the 
 Texts cost money, so Aman limits them:
 
 - Each person gets at most 30 texts a day, reminders and tests included. After that, new items wait in the app, and the item says when texts start again.
-- Try it sends at most 3 test texts an hour.
-- Aman sends at most 3 codes an hour for each person, and at most 50 codes a day in all.
-- Aman sends at most 3 codes an hour, and 10 a day, to any one number, whoever asks. The person whose number it already is can still get a code. Removing a number does not reset these limits.
+- One number gets at most 30 texts a day, however many people confirmed it.
+- The whole server sends at most 500 texts a day. To change this, set `REACH_SMS_MAX_TEXTS_PER_DAY` in the settings file, then start Aman again.
+- Try it sends at most 3 test texts an hour. When a day's limit is reached, Try it says so and does not count the test.
+- Aman sends at most 3 codes an hour, and 10 a day, for each person. It sends at most 50 codes a day in all.
+- Aman sends at most 3 codes an hour, and 10 a day, to any one number, whoever asks. The person who confirmed the number can still get a code to it. Removing a number does not reset these limits.
 
 To change your number, type the new one and confirm its code. Texts keep going to your old number until you do.
 

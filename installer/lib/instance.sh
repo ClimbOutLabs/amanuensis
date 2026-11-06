@@ -186,17 +186,20 @@ instance_render() {
   fi
   # Texts through Twilio get a listener of their own beside the app. Its port is published on 127.0.0.1 only, for
   # Tailscale Funnel or a web server on this computer to carry on to Twilio. The app port is never opened for it.
-  local sms_port sms_env
+  local sms_port sms_env sms_listen
   sms_port=$(sms_webhook_port "$name" quiet)
   sms_env="$(instance_dir "$name")/.env"
   # A port picked for the person is written down, so it stays the same whatever other instances do later.
   if [ -n "$sms_port" ] && [ "$(sms_port_wanted "$name")" = auto ] && grep -q '^# >>> managed by the installer' "$sms_env"; then
     env_managed_set "$sms_env" TWILIO_WEBHOOK_PORT "$sms_port"
   fi
+  # Published onto the port the app listens on, which differs from the pick only when the pick could not be written.
+  sms_listen=$(env_get "$sms_env" TWILIO_WEBHOOK_PORT)
+  sms_listen=${sms_listen:-$TWILIO_DEFAULT_PORT}
   reg_set "$name" sms_port "$sms_port"
   reg_set "$name" sms_settings "$(sms_settings_digest "$name")"
   if [ -n "$sms_port" ]; then
-    app_ports="${app_ports:+$app_ports$'\n'}      - '127.0.0.1:$sms_port:$sms_port'"
+    app_ports="${app_ports:+$app_ports$'\n'}      - '127.0.0.1:$sms_port:$sms_listen'"
   fi
   # Only the app reaches the sign-in service when it passes the sign-in pages through; a browser that goes to the
   # published sign-in port directly needs the service on every address of the namespace.
@@ -327,7 +330,7 @@ sms_settings_digest() { # name
   local env lines
   env="$(instance_dir "$1")/.env"
   [ -f "$env" ] || return 0
-  lines=$(LC_ALL=C grep -E "$(env_key_line_re '(REACH_SMS_PROVIDER|TWILIO_[A-Z0-9_]+)')" "$env" || true)
+  lines=$(LC_ALL=C grep -E "$(env_key_line_re '(REACH_SMS_[A-Z0-9_]+|TWILIO_[A-Z0-9_]+)')" "$env" || true)
   [ -n "$lines" ] || return 0
   printf '%s\n' "$lines" | sha256_stdin | cut -c1-16
 }

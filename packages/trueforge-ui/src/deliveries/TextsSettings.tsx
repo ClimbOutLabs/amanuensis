@@ -234,7 +234,8 @@ export function TextsSettings({
               <span className="text-text-primary">
                 Full
                 <span className="text-text-secondary block">
-                  The one-sentence message. It can show on a locked screen and is seen by Twilio and the phone company.
+                  A reminder’s own words, cut to fit two texts. Anything your assistant noticed still says only its
+                  kind. It can show on a locked screen and is seen by Twilio and the phone company.
                 </span>
               </span>
             </label>

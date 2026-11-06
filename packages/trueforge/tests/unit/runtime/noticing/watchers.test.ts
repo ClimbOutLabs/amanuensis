@@ -1,5 +1,7 @@
 import type { MailMessage, MailSource, MailWindowRead } from '../../../../src/runtime/noticing/sources';
-import { readMailWindow } from '../../../../src/runtime/noticing/watchers';
+import { MessageUnreadableError } from '../../../../src/runtime/noticing/sources';
+import { MAX_STUCK_MS, MAX_STUCK_PASSES, readMailWindow, watchMail } from '../../../../src/runtime/noticing/watchers';
+import { defaultReachSettings } from '../../../../src/schemas/reach';
 
 const SINCE = new Date('2026-11-05T14:00:00.000Z');
 const NOW = new Date('2026-11-05T15:00:00.000Z');
@@ -133,5 +135,103 @@ describe('readMailWindow', () => {
     });
     expect(read.messages).toEqual([]);
     expect(asked.some(item => item.from !== undefined)).toBe(false);
+  });
+});
+
+describe('watchMail when a message cannot be read', () => {
+  const bill = (id: string, minute: number): MailMessage => ({
+    ...message({ id, at: new Date(SINCE.getTime() + minute * 60_000) }),
+    subject: `Invoice ${id}: amount due by November 7`,
+  });
+  const settings = defaultReachSettings('UTC');
+
+  /** A source whose `readText` fails for the ids in `failing`, and says what it read. */
+  function failingSource({ inbox, failing }: { inbox: MailMessage[]; failing: Record<string, () => Error> }) {
+    const read: string[] = [];
+    const source: MailSource = {
+      listNewMessages: () => Promise.resolve({ read: 'all', messages: inbox }),
+      readText: item => {
+        read.push(item.id);
+        const fail = failing[item.id];
+        return fail === undefined ? Promise.resolve('Amount due by November 7') : Promise.reject(fail());
+      },
+      laterInThread: () => Promise.resolve([]),
+      trustedAuthenticationServers: [],
+    };
+    return { source, read };
+  }
+  const watch = (input: { source: MailSource; stuck?: { message_id: string; passes: number; since: Date } }) =>
+    watchMail({ source: input.source, settings, since: SINCE, now: NOW, logger: logger(), stuck: input.stuck });
+
+  it('keeps what messages before the failing one found, and starts the next pass at the failing one', async () => {
+    const inbox = [bill('a', 1), bill('b', 2), bill('c', 3)];
+    const rateLimited = new Error('Too many requests.');
+    const { source } = failingSource({ inbox, failing: { b: () => rateLimited } });
+    const found = await watch({ source });
+    expect(found.raise.concat(found.track).map(event => event.id)).toEqual(['bill_due:a']);
+    expect(found.resume_from).toEqual(inbox[1]?.received_at);
+    expect(found.stopped_by).toEqual({ error: rateLimited });
+    expect(found.stuck).toEqual({ message_id: 'b', passes: 1, since: NOW });
+  });
+
+  it('counts one more pass against the same message, and keeps when it first failed', async () => {
+    const inbox = [bill('a', 1), bill('b', 2)];
+    const { source } = failingSource({ inbox, failing: { b: () => new Error('busy') } });
+    const earlier = new Date(NOW.getTime() - 20 * 60_000);
+    const found = await watch({ source, stuck: { message_id: 'b', passes: 1, since: earlier } });
+    expect(found.stuck).toEqual({ message_id: 'b', passes: 2, since: earlier });
+    expect(found.stopped_by).toBeDefined();
+  });
+
+  it('starts counting again when a different message fails', async () => {
+    const inbox = [bill('a', 1)];
+    const { source } = failingSource({ inbox, failing: { a: () => new Error('busy') } });
+    const found = await watch({ source, stuck: { message_id: 'z', passes: 2, since: new Date(0) } });
+    expect(found.stuck).toEqual({ message_id: 'a', passes: 1, since: NOW });
+  });
+
+  it(`passes a message over after ${String(MAX_STUCK_PASSES)} failed passes, with a warning, and reads the rest`, async () => {
+    const inbox = [bill('a', 1), bill('b', 2), bill('c', 3)];
+    const { source, read } = failingSource({ inbox, failing: { b: () => new Error('busy') } });
+    const warnings = logger();
+    const found = await watchMail({
+      source,
+      settings,
+      since: SINCE,
+      now: NOW,
+      logger: warnings,
+      stuck: { message_id: 'b', passes: MAX_STUCK_PASSES - 1, since: new Date(NOW.getTime() - 60_000) },
+    });
+    expect(read).toEqual(['a', 'b', 'c']);
+    expect(found.raise.concat(found.track).map(event => event.id)).toEqual(['bill_due:a', 'bill_due:c']);
+    expect(found.stopped_by).toBeUndefined();
+    expect(found.stuck).toBeUndefined();
+    expect(warnings.warn).toHaveBeenCalledWith(
+      'Passed over a mail the mail server kept failing on',
+      expect.objectContaining({ message_id: 'b' }),
+    );
+  });
+
+  it('passes a message over once it has failed for about an hour, however few passes that took', async () => {
+    const inbox = [bill('a', 1)];
+    const { source } = failingSource({ inbox, failing: { a: () => new Error('busy') } });
+    const found = await watch({
+      source,
+      stuck: { message_id: 'a', passes: 1, since: new Date(NOW.getTime() - MAX_STUCK_MS) },
+    });
+    expect(found.stopped_by).toBeUndefined();
+    expect(found.stuck).toBeUndefined();
+  });
+
+  it('passes over a message that can never be read at once, and clears the count', async () => {
+    const inbox = [bill('a', 1), bill('b', 2)];
+    const { source } = failingSource({
+      inbox,
+      failing: { a: () => new MessageUnreadableError({ cause: new Error('gone') }) },
+    });
+    const found = await watch({ source, stuck: { message_id: 'a', passes: 2, since: SINCE } });
+    expect(found.raise.concat(found.track).map(event => event.id)).toEqual(['bill_due:b']);
+    expect(found.stuck).toBeUndefined();
+    expect(found.stopped_by).toBeUndefined();
   });
 });

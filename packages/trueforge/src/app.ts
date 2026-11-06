@@ -95,6 +95,7 @@ import type { IGoogleConnectionStore } from './db/googleConnectionStore';
 import type { IMcpServerWithAuthStore } from './db/mcpServerStore';
 import type { IMcpToolGrantStore } from './db/mcpToolGrantStore';
 import type { IModelProviderStore } from './db/modelProviderStore';
+import type { INoticingStore } from './db/noticingStore';
 import type { IPersonalizationStore } from './db/personalizationStore';
 import type { IPersonaStore } from './db/personaStore';
 import type { IPushSubscriptionStore } from './db/pushSubscriptionStore';
@@ -135,6 +136,7 @@ import type { NoticingService } from './runtime/noticing/noticingService';
 import type { ReminderReach } from './runtime/noticing/reminderReach';
 import { resolveSandboxProvider } from './runtime/sessionResources';
 import { createSpacePictureService } from './runtime/spacePictures/spacePictureService';
+import type { DeliveryLimitSettings } from './runtime/texts/textLimits';
 import type { TextNumberService } from './runtime/texts/textNumber';
 import { TokenFactoryDailyCapError, type TokenFactoryBudget } from './runtime/tokenFactoryBudget';
 import { envManagedModelProviderNames } from './runtime/tokenFactoryProvider';
@@ -322,12 +324,15 @@ export interface ServerDeps<TTransaction> {
   /** The one door into the feed; due reminders go through it. */
   deliveryService: DeliveryService;
   reachSettingsStore: IReachSettingsStore;
+  noticingStore: Pick<INoticingStore, 'getCheckpoint'>;
   /** Runs the watcher passes the controller asks for. */
   noticingService: NoticingService;
   /** Settles how loud a due reminder is. */
   reminderReach: ReminderReach;
   /** Which phone channels this server can use. */
   reachChannels: () => ReachAvailability;
+  /** What the day's text limits need; undefined while this server has no text provider. */
+  textLimits: DeliveryLimitSettings | undefined;
   /** The person's number for texts and its confirming. */
   textNumbers: TextNumberService;
   /** Places the test call from Reach me settings. */
@@ -921,6 +926,8 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       createReachRouter({
         reachStore: deps.reachSettingsStore,
         textContacts: deps.textContactStore,
+        textLimits: deps.textLimits,
+        noticingStore: deps.noticingStore,
         deliveryService: deps.deliveryService,
         calls: deps.phoneCalls,
         channels: deps.reachChannels,

@@ -30,7 +30,8 @@ export async function textsHarness({
   assistantName = 'Mannie',
   provider = true,
   codeKey = 'test-code-key',
-}: { assistantName?: string | null; provider?: boolean; codeKey?: string } = {}) {
+  maxTextsPerDay = 500,
+}: { assistantName?: string | null; provider?: boolean; codeKey?: string; maxTextsPerDay?: number } = {}) {
   const db = createSqliteDb(':memory:');
   await migrateSqliteToLatest(db);
   const logger = winston.createLogger({ silent: true });
@@ -86,6 +87,7 @@ export async function textsHarness({
       newCode: () => codes.shift() ?? '999999',
     });
   const numbers = serviceWith({ codeKey });
+  const limits = { number_key: codeKey, max_texts_per_day: maxTextsPerDay };
   const deliveries = createDeliveryService({
     store: deliveryStore,
     senders: [
@@ -94,6 +96,7 @@ export async function textsHarness({
         reachSettings,
         personalization,
         provider: smsProvider,
+        limits,
         textNumbers: numbers,
         now: () => clock.now,
       }),
@@ -124,6 +127,7 @@ export async function textsHarness({
     reachSettings,
     deliveryStore,
     numbers,
+    limits,
     serviceWith,
     deliveries,
     sent,

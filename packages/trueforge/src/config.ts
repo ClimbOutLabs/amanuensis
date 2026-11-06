@@ -451,7 +451,11 @@ export interface TwilioSettings {
   webhookPort: number;
   /** The public address Twilio reaches that listener at, without a trailing slash. Request signatures are checked against it. */
   webhookPublicUrl: string;
+  /** Texts the whole server sends in a day, codes apart, so many accounts together cannot run up the bill. */
+  maxTextsPerDay: number;
 }
+
+export const DEFAULT_MAX_TEXTS_PER_DAY = 500;
 
 /** Outside the ranges the installer picks app, sign-in and https ports from, so no instance lands on it. */
 export const DEFAULT_TWILIO_WEBHOOK_PORT = 9201;
@@ -473,6 +477,7 @@ export function parseTwilioSettings(raw: {
   fromNumber: string | undefined;
   webhookPort: string | undefined;
   webhookPublicUrl: string | undefined;
+  maxTextsPerDay: string | undefined;
   mainPort: number;
 }): TwilioSettings | undefined {
   const provider = blankToUndefined(raw.provider)?.toLowerCase() ?? 'none';
@@ -515,12 +520,20 @@ export function parseTwilioSettings(raw: {
       'TWILIO_WEBHOOK_PUBLIC_URL must be the https address Twilio reaches, such as https://aman.example.com. Set it to that address.',
     );
   }
+  const capText = blankToUndefined(raw.maxTextsPerDay);
+  const maxTextsPerDay = capText === undefined ? DEFAULT_MAX_TEXTS_PER_DAY : Number(capText);
+  if (!Number.isInteger(maxTextsPerDay) || maxTextsPerDay < 1) {
+    throw new Error(
+      'REACH_SMS_MAX_TEXTS_PER_DAY must be a whole number of 1 or more. Set it to the most texts this server may send in a day.',
+    );
+  }
   return {
     accountSid,
     authToken,
     fromNumber,
     webhookPort,
     webhookPublicUrl: parsed.href.replace(/\/+$/, ''),
+    maxTextsPerDay,
   };
 }
 
@@ -1460,7 +1473,8 @@ export interface SharedServerConfiguration {
   /**
    * Text messages through Twilio. Undefined (the default) means texts are off. Env: `REACH_SMS_PROVIDER` (`none` or
    * `twilio`), `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER`, and for the separate Twilio listener
-   * `TWILIO_WEBHOOK_PORT` (default 9201) and `TWILIO_WEBHOOK_PUBLIC_URL`.
+   * `TWILIO_WEBHOOK_PORT` (default 9201) and `TWILIO_WEBHOOK_PUBLIC_URL`. `REACH_SMS_MAX_TEXTS_PER_DAY` (default 500)
+   * caps the texts the whole server sends in a day.
    */
   TWILIO: TwilioSettings | undefined;
   /**
@@ -2420,6 +2434,7 @@ const shared: SharedServerConfiguration = {
     fromNumber: getEnv('TWILIO_FROM_NUMBER'),
     webhookPort: getEnv('TWILIO_WEBHOOK_PORT'),
     webhookPublicUrl: getEnv('TWILIO_WEBHOOK_PUBLIC_URL'),
+    maxTextsPerDay: getEnv('REACH_SMS_MAX_TEXTS_PER_DAY'),
     mainPort: port,
   }),
   MAIL_POLICY_FILE: parseOptionalPath(getEnv('MAIL_POLICY_FILE')),

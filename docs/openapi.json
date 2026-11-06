@@ -6543,6 +6543,34 @@
         ],
         "type": "object"
       },
+      "MailProblem": {
+        "description": "Set when mail has not been checked for about an hour. Null when mail checks work.",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/MailProblemKind"
+          },
+          "since": {
+            "description": "When mail checks first failed, with none succeeding since, ISO 8601 UTC.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "since",
+          "kind"
+        ],
+        "type": [
+          "object",
+          "null"
+        ]
+      },
+      "MailProblemKind": {
+        "description": "Why mail could not be checked: the mail server answered too slowly, or something else went wrong.",
+        "enum": [
+          "too_slow",
+          "other"
+        ],
+        "type": "string"
+      },
       "MarkBriefItemDoneRequest": {
         "properties": {
           "item_key": {
@@ -9254,6 +9282,9 @@
           "availability": {
             "$ref": "#/components/schemas/ReachAvailability"
           },
+          "mail_problem": {
+            "$ref": "#/components/schemas/MailProblem"
+          },
           "max_levels": {
             "description": "The highest level each kind of event can ever reach, whatever the model says.",
             "properties": {
@@ -9287,7 +9318,8 @@
           "settings",
           "saved",
           "availability",
-          "max_levels"
+          "max_levels",
+          "mail_problem"
         ],
         "type": "object"
       },
@@ -11905,7 +11937,7 @@
         "type": "object"
       },
       "TextMode": {
-        "description": "Private texts say only the kind of thing. Full texts carry the one-sentence message.",
+        "description": "Private texts say only the kind of thing. Full texts carry a reminder’s own words.",
         "enum": [
           "private",
           "full"
@@ -26916,7 +26948,7 @@
                 }
               }
             },
-            "description": "Too many test texts or test calls. The message says how long to wait."
+            "description": "Too many test texts or test calls for now, or a day’s limit on texts is reached. The message says how long to wait."
           },
           "502": {
             "content": {
@@ -27009,7 +27041,7 @@
         "x-fern-sdk-method-name": "get"
       },
       "put": {
-        "description": "Chooses Private (only the kind of thing) or Full (the one-sentence message).",
+        "description": "Chooses Private (only the kind of thing) or Full (a reminder’s own words).",
         "requestBody": {
           "content": {
             "application/json": {

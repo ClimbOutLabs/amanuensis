@@ -90,7 +90,8 @@ export const testReachChannelRoute = createRoute({
     },
     429: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
-      description: 'Too many test texts or test calls. The message says how long to wait.',
+      description:
+        'Too many test texts or test calls for now, or a day’s limit on texts is reached. The message says how long to wait.',
     },
     502: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },

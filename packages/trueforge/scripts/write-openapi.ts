@@ -154,6 +154,7 @@ const app = createServerApp({
     logger,
   }),
   reachSettingsStore: new ReachSettingsStore(db),
+  noticingStore: new NoticingStore(db),
   noticingService: { run: () => Promise.resolve({ owners: 0, raised: 0 }) },
   reminderReach: createReminderReach({
     reachSettings: new ReachSettingsStore(db),
@@ -163,6 +164,7 @@ const app = createServerApp({
     logger,
   }),
   reachChannels: () => NO_PHONE_CHANNELS,
+  textLimits: undefined,
   textContactStore: new TextContactStore(db),
   textNumbers: createTextNumberService({
     store: new TextContactStore(db),

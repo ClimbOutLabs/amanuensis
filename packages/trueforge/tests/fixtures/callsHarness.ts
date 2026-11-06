@@ -163,6 +163,7 @@ export async function callsHarness({
         reachSettings,
         personalization,
         provider: smsProvider,
+        limits: { number_key: 'test-code-key', max_texts_per_day: 50 },
         textNumbers: numbers,
         now: () => clock.now,
       }),

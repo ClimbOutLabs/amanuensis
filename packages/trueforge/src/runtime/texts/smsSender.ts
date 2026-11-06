@@ -6,7 +6,7 @@ import type { TextMode } from '../../schemas/textMessages';
 import type { DeliveryChannelSender } from '../delivery/deliveryChannel';
 import { assistantNameFor } from './assistantName';
 import { smsFailureWords, type SmsProvider } from './smsProvider';
-import { claimTextLimits, deliveryTextLimit, MAX_TEXTS_PER_PERSON_PER_DAY, waitWords } from './textLimits';
+import { claimTextLimits, dayLimitWords, deliveryTextLimits, type DeliveryLimitSettings } from './textLimits';
 import { canText, type TextNumberService } from './textNumber';
 import { textBody, TEXTS_NOT_SET_UP, type FullWithheld } from './textWords';
 
@@ -43,13 +43,14 @@ function sentWords({ mode, withheld }: { mode: TextMode; withheld: FullWithheld 
 /**
  * Texts a nudge to the person's confirmed number, only while they have texts switched on. A new install has none of
  * that, so it texts no one. A note stays in the app. Nothing is sent to a number that was not confirmed. Every text,
- * reminders and tests included, counts toward a day's limit for the person before it is sent.
+ * reminders and tests included, counts toward a day's limit for the person, the number and the server before it is sent.
  */
 export function createSmsSender({
   contacts,
   reachSettings,
   personalization,
   provider,
+  limits,
   textNumbers,
   now = () => new Date(),
 }: {
@@ -58,6 +59,8 @@ export function createSmsSender({
   personalization: Pick<IPersonalizationStore, 'getProfile'>;
   /** Undefined when this server has no text provider. */
   provider: SmsProvider | undefined;
+  /** Undefined, like the provider, when this server has no text provider. */
+  limits: DeliveryLimitSettings | undefined;
   textNumbers: Pick<TextNumberService, 'stopNumber'>;
   now?: () => Date;
 }): DeliveryChannelSender {
@@ -84,7 +87,7 @@ export function createSmsSender({
         ];
       }
       const target = maskedTarget(contact.phone);
-      if (provider === undefined) {
+      if (provider === undefined || limits === undefined) {
         return [
           attempt({
             outcome: 'skipped',
@@ -95,12 +98,13 @@ export function createSmsSender({
         ];
       }
       const at = now();
-      const claim = await claimTextLimits({ store: contacts, limits: [deliveryTextLimit(owner)], at });
+      const day = deliveryTextLimits({ owner, phone: contact.phone, settings: limits });
+      const claim = await claimTextLimits({ store: contacts, limits: [day.person, day.number, day.server], at });
       if (!claim.ok) {
         return [
           attempt({
             outcome: 'skipped',
-            detail: `You had ${String(MAX_TEXTS_PER_PERSON_PER_DAY)} texts today, the most for one day, so no text was sent. Texts start again in ${waitWords(claim.retry_in_minutes)}. Until then, see new items in the app.`,
+            detail: `${dayLimitWords({ limits: day, refused: claim })} Until then, see new items in the app.`,
             target,
             at,
           }),

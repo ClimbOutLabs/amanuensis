@@ -10,7 +10,7 @@ import type { ITextContactStore } from '../../db/textContactStore';
 import { E164_PATTERN, type TextContact, type TextMode, type TextStatus } from '../../schemas/textMessages';
 import { assistantNameFor } from './assistantName';
 import type { SmsFailure, SmsProvider } from './smsProvider';
-import { claimTextLimits, DAY_MS, HOUR_MS, ownerLimitKey, type TextLimit } from './textLimits';
+import { claimTextLimits, DAY_MS, HOUR_MS, numberLimitKey, ownerLimitKey, type TextLimit } from './textLimits';
 import { codeText, privateText } from './textWords';
 
 export const CODE_TTL_MS = 10 * 60_000;
@@ -18,6 +18,8 @@ export const CODE_TTL_MS = 10 * 60_000;
 export const MAX_CODE_ATTEMPTS = 5;
 /** Codes sent in one hour for one person, whatever number they ask for, so the page cannot be used to text strangers. */
 export const MAX_CODES_PER_HOUR = 3;
+/** Codes sent in a day for one person, below the server's cap, so one account cannot use up everyone's codes. */
+export const MAX_CODES_PER_PERSON_PER_DAY = 10;
 /** Codes sent to one number, whoever asks, so many people together cannot flood it either. */
 export const MAX_CODES_PER_NUMBER_PER_HOUR = 3;
 export const MAX_CODES_PER_NUMBER_PER_DAY = 10;
@@ -40,14 +42,6 @@ export function normalizePhoneNumber(raw: string): string | undefined {
 /** Whether texts may go to this number: the person proved it, and it has not replied STOP. */
 export function canText(contact: TextContact | undefined): contact is TextContact {
   return contact !== undefined && contact.confirmed_at !== null && contact.opted_out_at === null;
-}
-
-/**
- * The number as a limit counts it: a trunk 0 typed after the country code, as in +44 07700, is left out, so the same
- * number typed two ways is one number. Folding a few distinct numbers together only makes a limit stricter.
- */
-function limitNumber(phone: string): string {
-  return phone.replace(/^(\+\d{1,3}?)0/, '$1');
 }
 
 type SendCodeResult =
@@ -162,10 +156,11 @@ export function createTextNumberService({
   }
 
   /**
-   * The limits one code send counts against: the person, the whole server, and the number by the hour and by the
-   * day. The number limits are kept by whoever asks, so the page cannot be used to text strangers, but the person
-   * whose number it already is, confirmed or opted out, is not held back by what others asked for. A number only
-   * waiting for its code does not count as theirs, since anyone can make any number wait.
+   * The limits one code send counts against: the person by the hour and by the day, the number by the hour and by
+   * the day, and last the whole server, so a code another limit refuses spends none of the server's day. The number
+   * limits are kept by whoever asks, so the page cannot be used to text strangers, but they and the server's day do
+   * not hold back the person who confirmed that number. A number only waiting for its code, or one that replied STOP,
+   * is not theirs, since anyone can make any number wait.
    */
   function codeLimits({
     key,
@@ -178,22 +173,27 @@ export function createTextNumberService({
     phone: string;
     existing: TextContact | undefined;
   }): TextLimit[] {
-    const limits: TextLimit[] = [
+    const person: TextLimit[] = [
       { key: ownerLimitKey({ scope: 'person', owner }), window_ms: HOUR_MS, max: MAX_CODES_PER_HOUR },
+      { key: ownerLimitKey({ scope: 'person-day', owner }), window_ms: DAY_MS, max: MAX_CODES_PER_PERSON_PER_DAY },
+    ];
+    if (existing?.phone === phone && existing.confirmed_at !== null) {
+      return person;
+    }
+    return [
+      ...person,
+      {
+        key: numberLimitKey({ secret: key, scope: 'number-hour', phone }),
+        window_ms: HOUR_MS,
+        max: MAX_CODES_PER_NUMBER_PER_HOUR,
+      },
+      {
+        key: numberLimitKey({ secret: key, scope: 'number-day', phone }),
+        window_ms: DAY_MS,
+        max: MAX_CODES_PER_NUMBER_PER_DAY,
+      },
       { key: 'server-day', window_ms: DAY_MS, max: MAX_CODES_PER_SERVER_PER_DAY },
     ];
-    const theirs = existing?.phone === phone && (existing.confirmed_at !== null || existing.opted_out_at !== null);
-    if (!theirs) {
-      // Keyed, so the count table never holds the number itself.
-      const number = createHmac('sha256', key)
-        .update(`number\u0000${limitNumber(phone)}`)
-        .digest('hex');
-      limits.push(
-        { key: `number-hour:${number}`, window_ms: HOUR_MS, max: MAX_CODES_PER_NUMBER_PER_HOUR },
-        { key: `number-day:${number}`, window_ms: DAY_MS, max: MAX_CODES_PER_NUMBER_PER_DAY },
-      );
-    }
-    return limits;
   }
 
   return {

@@ -172,6 +172,42 @@ test_a_rerun_applies_a_new_auth_token() {
   sandbox_drop
 }
 
+test_a_rerun_applies_a_new_day_cap() {
+  t_begin "running the installer again after the server's day cap on texts changes restarts the app with it"
+  sandbox_new
+  install_machine
+  local env=$AMAN_HOME/instances/main/.env
+  printf '%s\n' 'REACH_SMS_PROVIDER=twilio' 'REACH_SMS_MAX_TEXTS_PER_DAY=500' >>"$env"
+  run_install --yes
+  assert_rc 0
+  : >"$STUB_LOG"
+  sed -i.bak 's/^REACH_SMS_MAX_TEXTS_PER_DAY=.*/REACH_SMS_MAX_TEXTS_PER_DAY=40/' "$env"
+  rm -f "$env.bak"
+  run_install --yes
+  assert_rc 0
+  assert_eq "$(log_count 'force-recreate')" 1 "one restart, for the new cap"
+  sandbox_drop
+}
+
+test_a_picked_port_reaches_the_app_without_a_managed_block() {
+  t_begin "a port picked for a settings file with no managed block is published onto the port the app listens on"
+  sandbox_new
+  install_machine
+  add_instance second
+  assert_rc 0
+  room_for_instances
+  printf '%s\n' 'REACH_SMS_PROVIDER=twilio' >>"$AMAN_HOME/instances/main/.env"
+  local env=$AMAN_HOME/instances/second/.env
+  sed -i.bak '/^# >>> managed by the installer/,/^# <<< end of managed block/d' "$env"
+  rm -f "$env.bak"
+  printf '%s\n' 'REACH_SMS_PROVIDER=twilio' >>"$env"
+  run_install --yes
+  assert_rc 0
+  assert_contains "$(compose_of main)" "'127.0.0.1:9201:9201'"
+  assert_contains "$(compose_of second)" "'127.0.0.1:9202:9201'" "the picked port leads to the app's own port"
+  sandbox_drop
+}
+
 test_lines_compose_reads_are_read_the_same() {
   t_begin "an export line and a trailing comment on the texts lines are read the way Compose reads them"
   sandbox_new
@@ -207,6 +243,8 @@ test_a_port_another_instance_uses_is_refused
 test_two_instances_with_texts_never_share_a_port
 test_the_instance_that_has_the_port_keeps_it
 test_a_rerun_applies_a_new_auth_token
+test_a_rerun_applies_a_new_day_cap
+test_a_picked_port_reaches_the_app_without_a_managed_block
 test_lines_compose_reads_are_read_the_same
 test_a_new_instance_never_takes_the_twilio_port
 tests_finish

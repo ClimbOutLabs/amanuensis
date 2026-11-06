@@ -282,6 +282,8 @@ export * from "./ListUserAuditLogResponse.js";
 export * from "./ListVerifyCommandProposalsResponse.js";
 export * from "./ListVerifyCommandsResponse.js";
 export * from "./LookupPushSubscriptionResponse.js";
+export * from "./MailProblem.js";
+export * from "./MailProblemKind.js";
 export * from "./MarkBriefItemDoneResponse.js";
 export * from "./McpAuthRequiredEvent.js";
 export * from "./McpAuthStatus.js";

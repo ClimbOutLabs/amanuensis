@@ -211,6 +211,11 @@ describe('where a link came from', () => {
       'call 555 ext 0100',
       'call five five five 0100',
       'call 5Z5-OlOO',
+      'Call 1-800-FLOWERS',
+      'Call 1 800 FLOWERS',
+      'Call 800-FLOWERS today',
+      'Call (888) GO-FEDEX',
+      'Call 555-PIZZA',
     ]) {
       expect([text, carries(text)]).toEqual([text, true]);
     }
@@ -233,6 +238,9 @@ describe('where a link came from', () => {
       'Pay at evil-pay .gg',
       'Pay at evil-pay\u00b7com',
       'Pay at evil-pay\u2022com',
+      'Pay at e v i l . c o m',
+      'go to bit ly slash abc',
+      'go to evil-pay com slash pay',
     ]) {
       expect([text, carries(text)]).toEqual([text, true]);
     }
@@ -260,6 +268,10 @@ describe('where a link came from', () => {
       'I will see Sol at 10 tomorrow.',
       'Zoe has one 2026 report and two more.',
       'Home \u00b7 About \u00b7 Help',
+      'Buy milk, eggs and a b c blocks.',
+      'Room 404 HELP desk is free.',
+      'Cut the wood with a slash saw.',
+      'Pay the 900 EUR fee.',
     ]) {
       expect([text, carries(text)]).toEqual([text, false]);
     }
@@ -268,7 +280,12 @@ describe('where a link came from', () => {
     expect(carries('Order #12345678 shipped')).toBe(true);
     expect(carries('Invoice 2026-1105')).toBe(true);
     // Best effort: some spellings still get through. Only the feed's wording is at stake, never a notice.
-    for (const text of ['call 555 and 0100', 'call SSS-OlOO', 'Write to ceo at evil-pay']) {
+    for (const text of [
+      'call 555 and 0100',
+      'call SSS-OlOO',
+      'Write to ceo at evil-pay',
+      'Pay at e v i l d o t c o m',
+    ]) {
       expect([text, carries(text)]).toEqual([text, false]);
     }
   });

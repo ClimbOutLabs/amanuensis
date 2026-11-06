@@ -13,7 +13,7 @@ Aman can tell you about things without waiting for you to open a chat. You choos
 - **Time to leave** for an event with a place, inside the lead time you choose.
 - **An approval waiting for you** longer than the time you choose.
 
-Calendar events count only when they are your own. On a Google calendar, that means you made and organised them, you accepted them, or no one else is on them. An invite from someone else that names you as its organizer does not count. On the shared Calendar connector, it means no one else is on them, because anyone who sends an invite can write that you accepted it. Anything else can only ever become a quiet note.
+Calendar events count only when they are your own. On a Google calendar, that means you made and organised them, you accepted them, or no one else is on them. An invite from someone else that names you as its organizer does not count. A meeting someone else made for you in Google Calendar counts only when no one else is on it. With guests on it, it can only become a quiet note. On the shared Calendar connector, it means no one else is on them, because anyone who sends an invite can write that you accepted it. Anything else can only ever become a quiet note.
 
 Mail is checked every 10 minutes, the calendar every 30 minutes, and approvals every 5 minutes.
 
@@ -45,10 +45,12 @@ Each way to reach you has a **Try it** button. It sends a test item under the be
 
 - If the model cannot be asked, or has used its limit for the day, things still arrive as quiet notes.
 - If a delivery fails, Aman tries again on the next check. After five tries it stops trying that item.
-- If Aman stopped in the middle of sending something, it sends it again on the next check. Rarely, a notice can then reach you twice.
-- If one message cannot be read, Aman skips it and reads the rest.
-- If Google is busy or the connection drops, Aman stops. It reads the same mail again on the next check.
-- If the shared Email connector takes longer than 30 seconds to list new mail, Aman skips that check. It tries the same mail again next time. If this keeps happening, check that your mail server answers quickly.
+- If Aman stopped in the middle of sending something, it sends it again on the next check. Rarely, a notice or a text can then reach you twice.
+- If one message cannot be read, for example because it was deleted or is too large, Aman skips it and reads the rest.
+- If Google is busy, your mail server fails, or the connection drops, Aman stops at the message it could not read. It keeps what it found before that message and starts there on the next check. If the same message fails 3 checks in a row, or for about an hour, Aman skips it so the rest of your mail is not held up.
+- If the shared Email connector takes longer than 90 seconds to answer, Aman skips that check. It tries the same mail again next time.
+- If mail could not be checked for about an hour, Reach me says so at the top, with the time it first failed and one thing to do. If your mail server answers too slowly, check that it is running well. For any other problem, open Settings, Connectors, and check that your mail is still connected. The notice goes away after the next check that works.
+- A bill whose conversation was deleted for good cannot be checked for a payment, so Aman tells you about it. If you paid it and then emptied the trash, you may still get a reminder.
 - If hundreds of messages arrive within a few seconds, Aman reads only the ones from people you marked always important. With the shared Email connector it skips them all, because senders cannot be confirmed there.
 - If a page says your settings could not be read, reload the page.
 

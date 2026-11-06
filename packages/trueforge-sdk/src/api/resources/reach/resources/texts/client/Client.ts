@@ -102,7 +102,7 @@ export class TextsClient {
     }
 
     /**
-     * Chooses Private (only the kind of thing) or Full (the one-sentence message).
+     * Chooses Private (only the kind of thing) or Full (a reminder’s own words).
      *
      * @param {TrueForge.reach.UpdateTextModeRequest} request
      * @param {TextsClient.RequestOptions} requestOptions - Request-specific configuration.

@@ -57,12 +57,14 @@ and records it as `sms_port` in the instance's registry file. With no port set,
 the instance keeps the port it has, else gets 9201 (outside the ranges app,
 sign-in and https ports are picked from) or the next free port, and the
 installer writes it as `TWILIO_WEBHOOK_PORT` in the managed block so the app
-listens on it and it stays the same. A port another instance already publishes
+listens on it and it stays the same. In a `.env` with no managed block the pick
+cannot be written, so it is published onto the port the app listens on there
+(`TWILIO_WEBHOOK_PORT`, else 9201). A port another instance already publishes
 stays with that instance. A port the owner set that another instance's app,
 sign-in, https or Twilio port uses, or that Aman uses inside the instance, is
 not published: the installer names the line to change. The registry also keeps
-`sms_settings`, a short digest of the `.env` lines that set up texts (never the
-lines themselves). A plain re-run of the installer redraws and restarts the
+`sms_settings`, a short digest of the `.env` lines that set up texts, the
+`REACH_SMS_*` and `TWILIO_*` lines (never the lines themselves). A plain re-run of the installer redraws and restarts the
 instance when the port or that digest differs from the recorded one, so turning
 texts on or off, or changing the port, the auth token or any other texts line,
 needs no upgrade. New instances never pick a recorded `sms_port`. The listener

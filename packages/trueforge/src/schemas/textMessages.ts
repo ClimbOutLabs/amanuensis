@@ -1,9 +1,9 @@
 import { z } from '@hono/zod-openapi';
 
-/** How much a text says. Private names only the kind of thing; full carries the one-sentence message. */
+/** How much a text says. Private names only the kind of thing; full carries a reminder’s own words. */
 export const TextModeSchema = z
   .enum(['private', 'full'])
-  .describe('Private texts say only the kind of thing. Full texts carry the one-sentence message.')
+  .describe('Private texts say only the kind of thing. Full texts carry a reminder’s own words.')
   .openapi('TextMode');
 
 export type TextMode = z.infer<typeof TextModeSchema>;
