@@ -97,7 +97,7 @@ describe('Settings, Reach me preferences', () => {
       "Calls and texts travel through Twilio and the phone company. The assistant's voice and the transcript are made on your computer.";
     server.state.reach = {
       ...server.state.reach,
-      availability: { ...server.state.reach.availability, calls: { available: true, note } },
+      availability: { ...server.state.reach.availability, calls: { available: true, note, problem: null } },
     };
     render(<ReachPreferences reach={server.api.reach} />);
     const calls = await screen.findByRole('checkbox', { name: /Phone calls/ });
