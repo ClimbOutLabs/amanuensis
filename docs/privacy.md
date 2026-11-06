@@ -15,6 +15,10 @@ If you use a hosted model, the company running it sees each chat: your messages,
 - **To the map service:** the places and routes Aman looks up, after you approve the card.
 - **To your browser's push service (Google, Apple or Mozilla), only for devices where you turned notices on:** a sealed notice holding an item number and a generic title such as "Reminder", never the reminder text. The service also sees this computer's internet address and the project's public page as the sender's contact.
 - **To a connector's service:** whatever a connector call sends, such as an email you approved. Calls that send or change something show a card first; see [Safety story](/safety).
+- **To package sources (npm, PyPI, Go and Rust), when a skill you approved installs packages:** the names and versions of those packages.
+- **To Hugging Face, once:** a request for the memory search model's files the first time Aman starts. Nothing about you is in it, and Aman checks each file against a fixed fingerprint before using it.
+
+The browser loads nothing from third parties: fonts and icons are bundled with Aman. Apart from the services above, the server contacts nothing. Every outside address in Aman's code is on a reviewed list, [scripts/external-hosts.allowlist.json](https://github.com/ClimbOutLabs/amanuensis/blob/main/scripts/external-hosts.allowlist.json), and CI fails if a new one appears.
 
 ## What stays on your machine
 

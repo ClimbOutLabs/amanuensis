@@ -410,6 +410,7 @@ jobs:
         run: pnpm test:store:postgres
 
   # No dependency install: must run fast and stay green even when pnpm install fails.
+  # Also runs the outside-hosts check, which needs nothing installed either.
   private-data-scan:
     name: Private data scan
     runs-on: ubuntu-latest
@@ -426,6 +427,13 @@ jobs:
 
       - name: Scan tracked files for private data
         run: node scripts/check-no-private-data.mjs
+
+      # Shipped code may name only the outside hosts reviewed in scripts/external-hosts.allowlist.json.
+      - name: Check shipped code for outside hosts
+        run: npm run test:external-hosts
+
+      - name: Test the outside-hosts check
+        run: npm run test:external-hosts-scanner
 
   generated-contract-drift:
     name: Generated contract drift
