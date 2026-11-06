@@ -5,7 +5,7 @@ Aman Setup is one program that installs everything. You do not need a terminal, 
 ## Before you start
 
 - Windows 11, or Windows 10 version 22H2.
-- About 20 GB of free disk space.
+- About 10 GB of free disk space.
 - 8 GB of memory at the least, and 16 GB is better. Aman runs inside Docker, and Docker needs 6 GB of memory to itself.
 - Virtualization turned on in the computer's firmware. It is on for almost every PC sold in the last few years. If Docker Desktop says it is off, [Microsoft's page](https://learn.microsoft.com/en-us/windows/wsl/troubleshooting#error-0x80370102-the-virtual-machine-could-not-be-started-because-a-required-feature-is-not-installed) shows how to turn it on.
 - A model key from Together AI or another provider, if you have one. You can also add it later in Settings.
