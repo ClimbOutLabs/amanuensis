@@ -337,11 +337,12 @@ export async function drainSkillNetworkCards(input: {
 
 /**
  * Records the person's answer to a network card. Allow once adds the sites to this chat only,
- * under the code version the skill is at now; always allow stores them on the skill (a
- * first-use or code-changed answer approves the declared list itself, pinned to the code as
- * it stands, like approving it in Settings); deny stores the sites as turned down for the
- * skill, which also ends their first-use card. Every answer clears the raised mark, so a
- * later change can raise a card again. Approving is refused, storing nothing, when the
+ * under the code version the skill is at now; always allow stores them on the skill, pinned to
+ * the code as it stands (a first-use or code-changed answer stores the sites the card asked
+ * for, together with the declared sites already approved or allowed one by one, and never a
+ * turned-down site, like approving the list in Settings); deny stores the sites as turned down
+ * for the skill, which also ends their first-use card. Every answer clears the raised mark, so
+ * a later change can raise a card again. Approving is refused, storing nothing, when the
  * skill's code version cannot be read.
  */
 export async function recordSkillNetworkAnswer(input: {
@@ -364,9 +365,24 @@ export async function recordSkillNetworkAnswer(input: {
     if (record !== undefined) {
       const code_sha = await resolveSkillCodePin({ manifest: record.manifest, resolve: input.resolveCodeSha });
       const declared = parseGitSkill(record.manifest)?.network_hosts ?? [];
-      // The card asked for the declared sites still missing; approving the list means the full
-      // declared list as it stands now, so a list that changed since the card still lands whole.
-      const hosts = declared.length > 0 ? declared : input.hosts;
+      // The stored approval names only sites a card or an earlier decision named: the sites this
+      // card asked for, plus the declared sites already approved or allowed one by one. A
+      // turned-down site is never written in, so clearing its denial later cannot grant it
+      // without a card; a site the declaration gained after the card was raised is not named
+      // either, so it waits for its own card.
+      const denied = new Set(record.network_denied_hosts);
+      const named = new Set<string>([...(record.network_approval ?? []), ...record.network_allowed_hosts]);
+      const hosts = new Set<string>();
+      for (const host of input.hosts) {
+        if (!denied.has(host)) {
+          hosts.add(host);
+        }
+      }
+      for (const host of declared) {
+        if (named.has(host) && !denied.has(host)) {
+          hosts.add(host);
+        }
+      }
       await input.store.setSkillNetworkApproval({
         tenant_id: input.tenant_id,
         name: input.skill_name,
