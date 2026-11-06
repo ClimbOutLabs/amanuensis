@@ -142,6 +142,10 @@ async function withWorld(run) {
         )
         .join('')}
       <input name="pin" inputmode="numeric" maxlength="4" value="1357" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" />
+      <input name="pin" type="text" value="2468" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" /><input name="mpin" value="9753" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" />
+      <input name="tpin" value="8642" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" />
+      <div><div><div><input maxlength="1" inputmode="numeric" value="7" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" /></div></div></div>
+      <div><div><div><input maxlength="1" inputmode="numeric" value="7" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" /></div></div></div>
       <input maxlength="1" pattern="[0-9]" value="7" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" /><input maxlength="1" pattern="[0-9]" value="7" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" />
       <input name="zip_code" value="94110" />
       <input name="pin_code" value="560001" /><input name="pincode" inputmode="numeric" maxlength="6" value="560002" />
@@ -712,7 +716,9 @@ test('code and card fields are found whatever naming style the site uses', { ski
     const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/code-names' });
     assert.doesNotMatch(opened.text, /135790/);
     assert.doesNotMatch(opened.text, /: 7$/m);
-    assert.doesNotMatch(opened.text, /1357\b/);
+    for (const secret of ['1357', '2468', '9753', '8642']) {
+      assert.doesNotMatch(opened.text, new RegExp(secret), 'a PIN is a secret');
+    }
     assert.match(opened.text, /94110/, 'a zip code is not a secret');
     for (const shown of ['560001', '560002', '560003', 'Cubbon Park']) {
       assert.match(opened.text, new RegExp(shown), 'a postal PIN code or a map pin is not a secret');

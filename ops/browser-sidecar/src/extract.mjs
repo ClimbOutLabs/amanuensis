@@ -18,12 +18,13 @@ function nameWords(element) {
 /** Name words that mark a field as a password, a card number, or a one-time code. */
 const CARD_WORDS = /\b(card ?(number|no|num)|cc ?(num|number|no)|cvv|cvc|csc|security ?code)\b/;
 const CODE_WORDS =
-  /\b(otp|totp|passcode|(one ?time|verification|mfa|2 ?fa|sms|otp) ?code|(atm|card|security|secret) ?pin)\b/;
+  /\b(otp|totp|passcode|mpin|tpin|(one ?time|verification|mfa|2 ?fa|sms|otp) ?code|(atm|card|security|secret|upi) ?pin)\b/;
 /**
- * "pin" alone names a secret only on a short number field. A "PIN code" or "pincode" is a postal code
- * in India, and a map pin is a place, so neither is hidden.
+ * "pin" names a secret unless it is a place or a postal code: a "PIN code" or "pincode" is a postal
+ * code in India, and a map pin is a place, so neither is hidden.
  */
 const BARE_PIN = /\bpin\b(?! ?code)/;
+const PLACE_WORDS = /\b(map|location|place|drop|postal|post|zip|address|shipping|billing)\b/;
 
 /** Whether the field takes only digits, by its keyboard, its type or its pattern. */
 function takesDigits(element) {
@@ -35,14 +36,21 @@ function takesDigits(element) {
   );
 }
 
+/** How far up from a one-digit box to look for the others in its row. */
+const DIGIT_ROW_LEVELS = 5;
+
 /** A box for one digit next to others like it: a code typed one digit per box. */
 function isCodeDigitBox(element) {
   if (element.getAttribute('maxlength') !== '1' || !takesDigits(element)) {
     return false;
   }
-  const around = element.form ?? element.parentElement?.parentElement ?? element.parentElement;
-  const boxes = around === null || around === undefined ? [] : [...around.querySelectorAll('input[maxlength="1"]')];
-  return boxes.filter(takesDigits).length >= 2;
+  let around = element.parentElement;
+  for (let level = 0; around !== null && level < DIGIT_ROW_LEVELS; level += 1, around = around.parentElement) {
+    if ([...around.querySelectorAll('input[maxlength="1"]')].filter(takesDigits).length >= 2) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function fieldKind(element) {
@@ -58,8 +66,7 @@ function fieldKind(element) {
   if (autocomplete === 'one-time-code' || CODE_WORDS.test(words)) {
     return 'otp';
   }
-  const maxLength = Number(element.getAttribute('maxlength') ?? '0');
-  if (BARE_PIN.test(words) && takesDigits(element) && maxLength > 0 && maxLength <= 8) {
+  if (BARE_PIN.test(words) && !PLACE_WORDS.test(words) && autocomplete !== 'postal-code') {
     return 'otp';
   }
   // Only the first box of a code typed one digit per box often says what it is.
