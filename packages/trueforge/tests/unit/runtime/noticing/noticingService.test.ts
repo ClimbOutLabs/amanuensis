@@ -8,7 +8,7 @@ import { createSqliteDb } from '../../../../src/db/sqlite/client';
 import { createDeliveryService } from '../../../../src/runtime/delivery/deliveryService';
 import type { NoticingJudge } from '../../../../src/runtime/noticing/judge';
 import { createNoticingService } from '../../../../src/runtime/noticing/noticingService';
-import type { ReachChannels } from '../../../../src/runtime/noticing/reachChannels';
+import type { ReachAvailability } from '../../../../src/runtime/noticing/reachChannels';
 import type {
   ApprovalSource,
   CalendarEventInfo,
@@ -31,11 +31,11 @@ import {
 const OWNER = { tenant_id: 'default', created_by: 'owner-1' };
 const NOW = new Date('2026-11-05T15:00:00.000Z');
 const PASS = 'mx.example.net; dkim=pass header.d=example.com; dmarc=pass header.from=example.com';
-const PHONE_READY: ReachChannels = {
+const PHONE_READY: ReachAvailability = {
   texts: { available: false, note: 'Texts are not set up yet.' },
   calls: { available: true, note: 'Calls are on.' },
 };
-const NO_PHONE: ReachChannels = {
+const NO_PHONE: ReachAvailability = {
   texts: { available: false, note: 'Texts are not set up yet.' },
   calls: { available: false, note: 'Phone calls are not set up yet.' },
 };
@@ -54,14 +54,21 @@ function mail(overrides: Partial<MailMessage> = {}): MailMessage {
   };
 }
 
-function event(
-  id: string,
-  title: string,
-  start: string,
-  end: string,
-  location: string | null = null,
+function event({
+  id,
+  title,
+  start,
+  end,
+  location = null,
   own = true,
-): CalendarEventInfo {
+}: {
+  id: string;
+  title: string;
+  start: string;
+  end: string;
+  location?: string | null;
+  own?: boolean;
+}): CalendarEventInfo {
   return { id, title, start: new Date(start), end: new Date(end), location, own };
 }
 
@@ -87,7 +94,7 @@ async function setup({
   events?: CalendarEventInfo[];
   waiting?: WaitingApproval[];
   verdict?: NoticingVerdict | Error;
-  channels?: ReachChannels;
+  channels?: ReachAvailability;
   exhausted?: boolean;
   /** Holds every model answer until this resolves, so two passes can be made to overlap. */
   judgeDelay?: Promise<void>;
@@ -426,8 +433,8 @@ describe('calendar', () => {
   it('raises one clash and no duplicate on the next pass', async () => {
     const { service, judge, feed } = await setup({
       events: [
-        event('a', 'Standup', '2026-11-05T16:00:00.000Z', '2026-11-05T17:00:00.000Z'),
-        event('b', 'Dentist', '2026-11-05T16:30:00.000Z', '2026-11-05T17:30:00.000Z'),
+        event({ id: 'a', title: 'Standup', start: '2026-11-05T16:00:00.000Z', end: '2026-11-05T17:00:00.000Z' }),
+        event({ id: 'b', title: 'Dentist', start: '2026-11-05T16:30:00.000Z', end: '2026-11-05T17:30:00.000Z' }),
       ],
     });
     await expect(service.run({ watcher: 'calendar' })).resolves.toEqual({ owners: 1, raised: 1 });
@@ -439,15 +446,27 @@ describe('calendar', () => {
   it('raises one travel event for an event with a place inside the lead time', async () => {
     const { service, feed } = await setup({
       events: [
-        event('far', 'Conference', '2026-11-05T20:00:00.000Z', '2026-11-05T21:00:00.000Z', '12 Main Street'),
-        event('near', 'Lunch', '2026-11-05T16:00:00.000Z', '2026-11-05T17:00:00.000Z', '12 Main Street'),
-        event(
-          'call',
-          'Video call',
-          '2026-11-05T15:30:00.000Z',
-          '2026-11-05T15:45:00.000Z',
-          'https://meet.example.com/x',
-        ),
+        event({
+          id: 'far',
+          title: 'Conference',
+          start: '2026-11-05T20:00:00.000Z',
+          end: '2026-11-05T21:00:00.000Z',
+          location: '12 Main Street',
+        }),
+        event({
+          id: 'near',
+          title: 'Lunch',
+          start: '2026-11-05T16:00:00.000Z',
+          end: '2026-11-05T17:00:00.000Z',
+          location: '12 Main Street',
+        }),
+        event({
+          id: 'call',
+          title: 'Video call',
+          start: '2026-11-05T15:30:00.000Z',
+          end: '2026-11-05T15:45:00.000Z',
+          location: 'https://meet.example.com/x',
+        }),
       ],
     });
     await expect(service.run({ watcher: 'calendar' })).resolves.toMatchObject({ raised: 1 });
@@ -460,9 +479,30 @@ describe('calendar', () => {
   it('keeps invites the person never accepted to a note, whatever they say', async () => {
     const { service, judge, feed, pushed } = await setup({
       events: [
-        event('x', 'URGENT: CEO needs you now', '2026-11-05T16:00:00.000Z', '2026-11-05T17:00:00.000Z', null, false),
-        event('y', 'URGENT: CEO needs you now', '2026-11-05T16:30:00.000Z', '2026-11-05T17:30:00.000Z', null, false),
-        event('z', 'Visit', '2026-11-05T15:30:00.000Z', '2026-11-05T15:45:00.000Z', '1 Main Street', false),
+        event({
+          id: 'x',
+          title: 'URGENT: CEO needs you now',
+          start: '2026-11-05T16:00:00.000Z',
+          end: '2026-11-05T17:00:00.000Z',
+          location: null,
+          own: false,
+        }),
+        event({
+          id: 'y',
+          title: 'URGENT: CEO needs you now',
+          start: '2026-11-05T16:30:00.000Z',
+          end: '2026-11-05T17:30:00.000Z',
+          location: null,
+          own: false,
+        }),
+        event({
+          id: 'z',
+          title: 'Visit',
+          start: '2026-11-05T15:30:00.000Z',
+          end: '2026-11-05T15:45:00.000Z',
+          location: '1 Main Street',
+          own: false,
+        }),
       ],
       verdict: { level: 'nudge', reason: 'The CEO needs them.', message: 'Call 555-0100 now.' },
     });
@@ -477,8 +517,15 @@ describe('calendar', () => {
   it('keeps a clash to a note when one of the two events is an invite the person has not accepted', async () => {
     const { service, judge, feed } = await setup({
       events: [
-        event('a', 'Standup', '2026-11-05T16:00:00.000Z', '2026-11-05T17:00:00.000Z'),
-        event('x', 'URGENT: CEO needs you now', '2026-11-05T16:30:00.000Z', '2026-11-05T17:30:00.000Z', null, false),
+        event({ id: 'a', title: 'Standup', start: '2026-11-05T16:00:00.000Z', end: '2026-11-05T17:00:00.000Z' }),
+        event({
+          id: 'x',
+          title: 'URGENT: CEO needs you now',
+          start: '2026-11-05T16:30:00.000Z',
+          end: '2026-11-05T17:30:00.000Z',
+          location: null,
+          own: false,
+        }),
       ],
       verdict: { level: 'nudge', reason: 'Two things overlap.', message: 'Two things overlap.' },
     });
@@ -489,7 +536,9 @@ describe('calendar', () => {
 
   it('raises nothing and asks no model when the calendar is quiet', async () => {
     const { service, judge, feed } = await setup({
-      events: [event('a', 'Standup', '2026-11-05T16:00:00.000Z', '2026-11-05T17:00:00.000Z')],
+      events: [
+        event({ id: 'a', title: 'Standup', start: '2026-11-05T16:00:00.000Z', end: '2026-11-05T17:00:00.000Z' }),
+      ],
     });
     await expect(service.run({ watcher: 'calendar' })).resolves.toMatchObject({ raised: 0 });
     expect(judge).not.toHaveBeenCalled();
@@ -580,8 +629,8 @@ describe('approvals', () => {
 
 describe('what the model can and cannot do', () => {
   const clash = [
-    event('a', 'Standup', '2026-11-05T16:00:00.000Z', '2026-11-05T17:00:00.000Z'),
-    event('b', 'Dentist', '2026-11-05T16:30:00.000Z', '2026-11-05T17:30:00.000Z'),
+    event({ id: 'a', title: 'Standup', start: '2026-11-05T16:00:00.000Z', end: '2026-11-05T17:00:00.000Z' }),
+    event({ id: 'b', title: 'Dentist', start: '2026-11-05T16:30:00.000Z', end: '2026-11-05T17:30:00.000Z' }),
   ];
   const callVerdict: NoticingVerdict = {
     level: 'call',
@@ -633,8 +682,8 @@ describe('what the model can and cannot do', () => {
       settings: { max_nudges_per_day: 1 },
       events: [
         ...clash,
-        event('c', 'Gym', '2026-11-05T18:00:00.000Z', '2026-11-05T19:00:00.000Z'),
-        event('d', 'Class', '2026-11-05T18:30:00.000Z', '2026-11-05T19:30:00.000Z'),
+        event({ id: 'c', title: 'Gym', start: '2026-11-05T18:00:00.000Z', end: '2026-11-05T19:00:00.000Z' }),
+        event({ id: 'd', title: 'Class', start: '2026-11-05T18:30:00.000Z', end: '2026-11-05T19:30:00.000Z' }),
       ],
       verdict: { level: 'nudge', reason: 'Today matters.', message: 'Two things overlap.' },
     });
@@ -724,8 +773,8 @@ describe('what the model can and cannot do', () => {
 
 describe('passes that fail, stop or overlap', () => {
   const clash = [
-    event('a', 'Standup', '2026-11-05T16:00:00.000Z', '2026-11-05T17:00:00.000Z'),
-    event('b', 'Dentist', '2026-11-05T16:30:00.000Z', '2026-11-05T17:30:00.000Z'),
+    event({ id: 'a', title: 'Standup', start: '2026-11-05T16:00:00.000Z', end: '2026-11-05T17:00:00.000Z' }),
+    event({ id: 'b', title: 'Dentist', start: '2026-11-05T16:30:00.000Z', end: '2026-11-05T17:30:00.000Z' }),
   ];
   const trackedBill = {
     id: 'bill_due:b9',
@@ -1010,8 +1059,8 @@ describe('passes that fail, stop or overlap', () => {
     // Calls are set up later the same day, and a second clash comes up.
     channelState.current = PHONE_READY;
     events.push(
-      event('c', 'Gym', '2026-11-05T18:00:00.000Z', '2026-11-05T19:00:00.000Z'),
-      event('d', 'Class', '2026-11-05T18:30:00.000Z', '2026-11-05T19:30:00.000Z'),
+      event({ id: 'c', title: 'Gym', start: '2026-11-05T18:00:00.000Z', end: '2026-11-05T19:00:00.000Z' }),
+      event({ id: 'd', title: 'Class', start: '2026-11-05T18:30:00.000Z', end: '2026-11-05T19:30:00.000Z' }),
     );
     await service.run({ watcher: 'calendar' });
     expect((await feed()).map(item => item.level)).toEqual(['call', 'nudge']);

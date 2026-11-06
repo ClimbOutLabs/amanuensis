@@ -51,7 +51,7 @@ function turn({
   };
 }
 
-function waitingOn(approvalId: string, at: string): TurnRecord<TurnCustom>['state'] {
+function waitingOn({ approvalId, at }: { approvalId: string; at: string }): TurnRecord<TurnCustom>['state'] {
   return {
     status: 'done',
     output: null,
@@ -83,11 +83,11 @@ describe('sessionApprovalSource', () => {
       [session({ id: 'e', owner: 'erin', updated: '2026-11-05T14:10:00.000Z' })],
     ];
     const turns: Record<string, TurnRecord<TurnCustom>['state']> = {
-      a: waitingOn('approval-a', '2026-11-05T14:50:00.000Z'),
+      a: waitingOn({ approvalId: 'approval-a', at: '2026-11-05T14:50:00.000Z' }),
       b: { status: 'running' },
-      c: waitingOn('approval-c', '2026-11-05T14:40:00.000Z'),
-      d: waitingOn('approval-d', '2026-11-05T14:20:00.000Z'),
-      e: waitingOn('approval-e', '2026-11-05T14:10:00.000Z'),
+      c: waitingOn({ approvalId: 'approval-c', at: '2026-11-05T14:40:00.000Z' }),
+      d: waitingOn({ approvalId: 'approval-d', at: '2026-11-05T14:20:00.000Z' }),
+      e: waitingOn({ approvalId: 'approval-e', at: '2026-11-05T14:10:00.000Z' }),
     };
     const listSessions = jest.fn<
       ReturnType<ISessionStore<SessionCustom, TurnCustom>['listSessions']>,

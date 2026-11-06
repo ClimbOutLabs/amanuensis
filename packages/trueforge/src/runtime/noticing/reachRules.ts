@@ -46,7 +46,7 @@ export function applyReachRules({
   const steps: string[] = [];
   let level = asked;
   const lower = (to: DeliveryLevel, why: string): void => {
-    const next = lowerOf(level, to);
+    const next = lowerOf({ left: level, right: to });
     if (next !== level) {
       level = next;
       steps.push(why);

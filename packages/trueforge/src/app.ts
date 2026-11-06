@@ -128,13 +128,13 @@ import type { DeliveryService } from './runtime/delivery/deliveryService';
 import type { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { createVaultClient } from './runtime/memory/vaultClient';
 import type { NoticingService } from './runtime/noticing/noticingService';
-import type { ReachChannels } from './runtime/noticing/reachChannels';
 import type { ReminderReach } from './runtime/noticing/reminderReach';
 import { resolveSandboxProvider } from './runtime/sessionResources';
 import { createSpacePictureService } from './runtime/spacePictures/spacePictureService';
 import { TokenFactoryDailyCapError, type TokenFactoryBudget } from './runtime/tokenFactoryBudget';
 import { envManagedModelProviderNames } from './runtime/tokenFactoryProvider';
 import type { TurnDrainRegistry } from './runtime/turnDrains';
+import type { ReachAvailability } from './schemas/reach';
 import { InvalidCronError } from './schemas/schedule';
 import { TENANT_ID } from './tenancy';
 import { zodErrorResponse, zodValidationHook } from './zodErrorResponse';
@@ -322,7 +322,7 @@ export interface ServerDeps<TTransaction> {
   /** Settles how loud a due reminder is. */
   reminderReach: ReminderReach;
   /** Which phone channels this server can use. Texts and calls are set up by later parts. */
-  reachChannels: () => ReachChannels;
+  reachChannels: () => ReachAvailability;
   /** The public key a browser needs to turn push on; undefined while push is off. */
   webPushPublicKey: string | undefined;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;

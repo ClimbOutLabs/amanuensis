@@ -18,8 +18,8 @@ export type NoticingKind = z.infer<typeof NoticingKindSchema>;
 export const NOTICING_KINDS: readonly NoticingKind[] = NoticingKindSchema.options;
 
 /** A request for the person's ok closes itself after 30 minutes, so the wait to speak up stays well inside that. */
-export const APPROVAL_WAIT_MIN_MINUTES = 5;
-export const APPROVAL_WAIT_MAX_MINUTES = 20;
+const APPROVAL_WAIT_MIN_MINUTES = 5;
+const APPROVAL_WAIT_MAX_MINUTES = 20;
 
 const ClockTimeSchema = z
   .string()
@@ -82,7 +82,7 @@ export const ReachSettingsSchema = z
       .describe('The kinds of event the person allows a phone call for. Empty means none.'),
     call_for_urgent_reminders: z.boolean().describe('Whether a reminder marked urgent may call.'),
     quiet_hours: QuietHoursSchema,
-    timezone: TimezoneSchema.describe('The time zone quiet hours and "today" are read in.'),
+    timezone: TimezoneSchema,
     max_nudges_per_day: z
       .number()
       .int()
@@ -103,6 +103,7 @@ export const ReachSettingsSchema = z
       .max(APPROVAL_WAIT_MAX_MINUTES)
       .describe('How long an approval may wait before the assistant says so. A request expires after 30 minutes.'),
   })
+  .describe('How the person wants to be reached. Quiet hours and "today" are read in `timezone`.')
   .openapi('ReachSettings');
 
 export type ReachSettings = z.infer<typeof ReachSettingsSchema>;
@@ -160,6 +161,8 @@ export const ReachSuggestionSchema = z
   })
   .openapi('ReachSuggestion');
 
+export type ReachSuggestion = z.infer<typeof ReachSuggestionSchema>;
+
 export const ListReachSuggestionsResponseSchema = z
   .object({
     data: z.array(ReachSuggestionSchema).describe('Senders memory suggests. Nothing is added until accepted.'),
@@ -186,21 +189,21 @@ export const TestReachChannelResponseSchema = z
   })
   .openapi('TestReachChannelResponse');
 
-/** The body of the internal pass the controller asks the server to run. */
 export const NoticingWatcherSchema = z.enum(['mail', 'calendar', 'approvals']).openapi('NoticingWatcher');
 
+/** The body of the internal pass the controller asks the server to run. */
 export const RunNoticingRequestSchema = z.object({ watcher: NoticingWatcherSchema }).openapi('RunNoticingRequest');
 
-export const RunNoticingResponseSchema = z
+export const RunNoticingResultSchema = z
   .object({
-    data: z
-      .object({
-        owners: z.number().int().min(0).describe('People checked.'),
-        raised: z.number().int().min(0).describe('New events turned into notes or nudges.'),
-      })
-      .openapi('RunNoticingResult'),
+    owners: z.number().int().min(0).describe('People checked.'),
+    raised: z.number().int().min(0).describe('New events turned into notes or nudges.'),
   })
-  .openapi('RunNoticingResponse');
+  .openapi('RunNoticingResult');
+
+export type RunNoticingResult = z.infer<typeof RunNoticingResultSchema>;
+
+export const RunNoticingResponseSchema = z.object({ data: RunNoticingResultSchema }).openapi('RunNoticingResponse');
 
 export type NoticingWatcher = z.infer<typeof NoticingWatcherSchema>;
 

@@ -17,7 +17,7 @@ import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteScheduleStore } from '../../../src/db/sqlite/schedule-store/SqliteScheduleStore';
 import { SqliteSessionStore } from '../../../src/db/sqlite/session-store/SqliteSessionStore';
 import { createDeliveryService } from '../../../src/runtime/delivery/deliveryService';
-import { NO_PHONE_CHANNELS, type ReachChannels } from '../../../src/runtime/noticing/reachChannels';
+import { NO_PHONE_CHANNELS, type ReachAvailability } from '../../../src/runtime/noticing/reachChannels';
 import { createReminderReach } from '../../../src/runtime/noticing/reminderReach';
 import { REMINDER_FEED_TEXT_MAX, deliverReminder } from '../../../src/runtime/reminderDelivery';
 import type { Delivery } from '../../../src/schemas/deliveries';
@@ -27,7 +27,7 @@ import { ScheduleManifestSchema } from '../../../src/schemas/schedule';
 const TENANT = 'default';
 const OWNER: CreatedBySubject = { subject_id: 'owner-1', subject_type: 'user', subject_display_name: 'Owner' };
 
-async function setup(channels: ReachChannels = NO_PHONE_CHANNELS) {
+async function setup(channels: ReachAvailability = NO_PHONE_CHANNELS) {
   const db = createSqliteDb(':memory:');
   await migrateSqliteToLatest(db);
   const agentStore = new SqliteAgentStore(db);
@@ -121,7 +121,7 @@ async function setup(channels: ReachChannels = NO_PHONE_CHANNELS) {
 
 describe('deliverReminder and Reach me', () => {
   const owner = { tenant_id: TENANT, created_by: OWNER.subject_id };
-  const READY: ReachChannels = { ...NO_PHONE_CHANNELS, calls: { available: true, note: 'Calls are on.' } };
+  const READY: ReachAvailability = { ...NO_PHONE_CHANNELS, calls: { available: true, note: 'Calls are on.' } };
   const calling = {
     ...defaultReachSettings('America/New_York'),
     channels: { texts: false, calls: true },

@@ -9,7 +9,7 @@ import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { ReachSettingsStore } from '../../../src/db/reachSettingsStore';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { createDeliveryService } from '../../../src/runtime/delivery/deliveryService';
-import type { ReachChannels } from '../../../src/runtime/noticing/reachChannels';
+import type { ReachAvailability } from '../../../src/runtime/noticing/reachChannels';
 import { NO_PHONE_CHANNELS } from '../../../src/runtime/noticing/reachChannels';
 import { defaultReachSettings, GetReachResponseSchema, type ReachSettings } from '../../../src/schemas/reach';
 
@@ -19,7 +19,10 @@ function person(id: string): RequestContext {
   return { tenant_id: 'default', subject: { id, type: 'user', display_name: id }, roles: [], user_credential: null };
 }
 
-async function build({ channels = NO_PHONE_CHANNELS, memories = [] as string[] } = {}) {
+async function build({
+  channels = NO_PHONE_CHANNELS,
+  memories = [],
+}: { channels?: ReachAvailability; memories?: string[] } = {}) {
   const db = createSqliteDb(':memory:');
   await migrateSqliteToLatest(db);
   const reachStore = new ReachSettingsStore(db);
@@ -96,7 +99,7 @@ describe('reach routes', () => {
   });
 
   it('allows calls once the channel is available', async () => {
-    const channels: ReachChannels = { ...NO_PHONE_CHANNELS, calls: { available: true, note: 'On.' } };
+    const channels: ReachAvailability = { ...NO_PHONE_CHANNELS, calls: { available: true, note: 'On.' } };
     const { put } = await build({ channels });
     expect((await put({ ...defaultReachSettings('UTC'), channels: { texts: false, calls: true } })).status).toBe(200);
   });
@@ -144,7 +147,7 @@ describe('reach routes', () => {
     const text = await call('/test', { method: 'POST', body: { channel: 'text' } });
     expect(text.status).toBe(409);
     await expect(text.json()).resolves.toEqual({
-      error: { message: 'Texts are not set up yet. There is nothing to try yet.' },
+      error: { message: 'Texts are not set up yet. Try the app or push notices for now.' },
     });
   });
 });

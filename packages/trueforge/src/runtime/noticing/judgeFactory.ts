@@ -10,7 +10,7 @@ import type { TokenFactoryBudget } from '../tokenFactoryBudget';
 import { createNoticingJudge, type NoticingJudge } from './judge';
 
 /** Said when no model is set up, so a watcher falls back to a plain note. */
-export class NoNoticingModelError extends Error {
+class NoNoticingModelError extends Error {
   constructor() {
     super('No model is set up for the assistant to ask. Add one in Settings, Models.');
     this.name = 'NoNoticingModelError';

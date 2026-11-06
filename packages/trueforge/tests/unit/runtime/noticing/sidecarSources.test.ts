@@ -174,7 +174,10 @@ const EMAIL_MESSAGE = {
 
 describe('sidecar calendar source (CalDAV)', () => {
   const time = (value: string, all_day = false) => ({ value, tzid: 'Europe/Berlin', all_day });
-  const event = (id: string, start: string, end: string, extra: Record<string, unknown> = {}) => ({
+  const event = (
+    { id, start, end }: { id: string; start: string; end: string },
+    extra: Record<string, unknown> = {},
+  ) => ({
     id,
     summary: id,
     start: time(start),
@@ -187,14 +190,23 @@ describe('sidecar calendar source (CalDAV)', () => {
       Promise.resolve({
         structuredContent: {
           events: [
-            event('a', '2026-11-05T17:00:00+01:00', '2026-11-05T18:00:00+01:00'),
-            event('b', '2026-11-05T17:30:00+01:00', '2026-11-05T18:30:00+01:00', { location: '12 Main Street' }),
-            event('c', '2026-11-05T17:00:00+01:00', '2026-11-05T18:00:00+01:00', { status: 'CANCELLED' }),
-            event('d', '2026-11-05T17:00:00+01:00', '2026-11-05T18:00:00+01:00', {
-              attendees: [{ is_self: true, status: 'DECLINED' }],
-            }),
+            event({ id: 'a', start: '2026-11-05T17:00:00+01:00', end: '2026-11-05T18:00:00+01:00' }),
+            event(
+              { id: 'b', start: '2026-11-05T17:30:00+01:00', end: '2026-11-05T18:30:00+01:00' },
+              { location: '12 Main Street' },
+            ),
+            event(
+              { id: 'c', start: '2026-11-05T17:00:00+01:00', end: '2026-11-05T18:00:00+01:00' },
+              { status: 'CANCELLED' },
+            ),
+            event(
+              { id: 'd', start: '2026-11-05T17:00:00+01:00', end: '2026-11-05T18:00:00+01:00' },
+              {
+                attendees: [{ is_self: true, status: 'DECLINED' }],
+              },
+            ),
             { id: 'e', summary: 'All day', start: time('2026-11-05', true), end: time('2026-11-06', true) },
-            event('f', '2026-11-05T17:00:00', '2026-11-05T18:00:00'),
+            event({ id: 'f', start: '2026-11-05T17:00:00', end: '2026-11-05T18:00:00' }),
           ],
         },
       });
@@ -210,25 +222,37 @@ describe('sidecar calendar source (CalDAV)', () => {
       Promise.resolve({
         structuredContent: {
           events: [
-            event('alone', '2026-11-05T17:00:00+01:00', '2026-11-05T18:00:00+01:00'),
-            event('forged-organizer', '2026-11-05T17:00:00+01:00', '2026-11-05T18:00:00+01:00', {
-              organizer: { email: 'me@example.com', is_self: true },
-              attendees: [{ email: 'guest@example.com', is_self: false, status: 'NEEDS-ACTION' }],
-            }),
-            event('forged-acceptance', '2026-11-05T17:00:00+01:00', '2026-11-05T18:00:00+01:00', {
-              organizer: { email: 'stranger@example.com', is_self: false },
-              attendees: [
-                { email: 'me@example.com', is_self: true, status: 'ACCEPTED' },
-                { email: 'me@example.com', is_self: true, status: 'NEEDS-ACTION' },
-              ],
-            }),
-            event('organizer-only', '2026-11-05T17:00:00+01:00', '2026-11-05T18:00:00+01:00', {
-              organizer: { email: 'me@example.com', is_self: true },
-            }),
-            event('invite', '2026-11-05T17:00:00+01:00', '2026-11-05T18:00:00+01:00', {
-              organizer: { email: 'stranger@example.com', is_self: false },
-              attendees: [{ email: 'me@example.com', is_self: true, status: 'NEEDS-ACTION' }],
-            }),
+            event({ id: 'alone', start: '2026-11-05T17:00:00+01:00', end: '2026-11-05T18:00:00+01:00' }),
+            event(
+              { id: 'forged-organizer', start: '2026-11-05T17:00:00+01:00', end: '2026-11-05T18:00:00+01:00' },
+              {
+                organizer: { email: 'me@example.com', is_self: true },
+                attendees: [{ email: 'guest@example.com', is_self: false, status: 'NEEDS-ACTION' }],
+              },
+            ),
+            event(
+              { id: 'forged-acceptance', start: '2026-11-05T17:00:00+01:00', end: '2026-11-05T18:00:00+01:00' },
+              {
+                organizer: { email: 'stranger@example.com', is_self: false },
+                attendees: [
+                  { email: 'me@example.com', is_self: true, status: 'ACCEPTED' },
+                  { email: 'me@example.com', is_self: true, status: 'NEEDS-ACTION' },
+                ],
+              },
+            ),
+            event(
+              { id: 'organizer-only', start: '2026-11-05T17:00:00+01:00', end: '2026-11-05T18:00:00+01:00' },
+              {
+                organizer: { email: 'me@example.com', is_self: true },
+              },
+            ),
+            event(
+              { id: 'invite', start: '2026-11-05T17:00:00+01:00', end: '2026-11-05T18:00:00+01:00' },
+              {
+                organizer: { email: 'stranger@example.com', is_self: false },
+                attendees: [{ email: 'me@example.com', is_self: true, status: 'NEEDS-ACTION' }],
+              },
+            ),
           ],
         },
       });

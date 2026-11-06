@@ -3,7 +3,7 @@ import type { Logger } from 'winston';
 
 import configuration from '../config';
 import { createTlsFetch, normalizeTlsUrl } from '../http/tls';
-import type { NoticingWatcher } from '../schemas/reach';
+import type { NoticingWatcher, RunNoticingResult } from '../schemas/reach';
 import type { ControlLoop } from './Controller';
 
 /** Mail is looked at every 10 minutes, the calendar every 30, and waiting approvals every 5. */
@@ -14,7 +14,7 @@ const APPROVAL_WATCH_INTERVAL_MS = 5 * 60_000;
 /** A pass reads mail and may ask a model once per new event, so it is given longer than a plain request. */
 const NOTICING_REQUEST_TIMEOUT_S = 5 * 60;
 
-export type NoticingRunner = (watcher: NoticingWatcher) => Promise<{ owners: number; raised: number }>;
+export type NoticingRunner = (watcher: NoticingWatcher) => Promise<RunNoticingResult>;
 
 /**
  * HTTP handoff to `POST /api/internal/noticing/run`. Like the schedule loop, the controller holds no mail, calendar or

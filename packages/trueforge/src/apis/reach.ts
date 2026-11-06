@@ -11,15 +11,15 @@ import {
 } from '../routes/reachRoutes';
 import type { DeliveryService } from '../runtime/delivery/deliveryService';
 import { KIND_MAX_LEVEL } from '../runtime/noticing/levels';
-import type { ReachChannels } from '../runtime/noticing/reachChannels';
 import { suggestAlwaysImportant } from '../runtime/noticing/suggestions';
+import type { ReachAvailability } from '../schemas/reach';
 import { defaultReachSettings, NOTICING_KINDS, type AlwaysImportantSender, type ReachSettings } from '../schemas/reach';
 
 export interface ReachRouterDeps {
   reachStore: IReachSettingsStore;
   deliveryService: Pick<DeliveryService, 'deliver'>;
   /** Which phone channels this server can use now. Read per request, since a later part may set one up while running. */
-  channels: () => ReachChannels;
+  channels: () => ReachAvailability;
   /** The texts of the memories that may name a sender. Empty when this server keeps no readable memory. */
   memories: (input: { tenant_id: string }) => Promise<string[]>;
   resolveRequestContext: ResolveRequestContext;
@@ -127,7 +127,7 @@ export function createReachRouter(deps: ReachRouterDeps) {
     // Texts and calls have no test of their own yet; the part that sets one up adds it here.
     if (channel === 'text' || channel === 'call') {
       const status = channel === 'text' ? channels.texts : channels.calls;
-      return c.json({ error: { message: `${status.note} There is nothing to try yet.` } }, 409);
+      return c.json({ error: { message: `${status.note} Try the app or push notices for now.` } }, 409);
     }
     // A test is a note in the feed, so a push test never uses up one of the day's nudges.
     const delivery = await deps.deliveryService.deliver({

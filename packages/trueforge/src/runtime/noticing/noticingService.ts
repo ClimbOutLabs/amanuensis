@@ -9,6 +9,7 @@ import type { INoticingStore, NoticingClaim } from '../../db/noticingStore';
 import type { PersonOwner } from '../../db/personOwner';
 import type { IReachSettingsStore } from '../../db/reachSettingsStore';
 import type { Delivery, DeliveryLevel } from '../../schemas/deliveries';
+import type { ReachAvailability } from '../../schemas/reach';
 import {
   defaultReachSettings,
   type NoticingEvent,
@@ -16,13 +17,13 @@ import {
   type NoticingVerdict,
   type NoticingWatcher,
   type ReachSettings,
+  type RunNoticingResult,
 } from '../../schemas/reach';
 import { newId } from '../../utils/id';
 import type { DeliveryService } from '../delivery/deliveryService';
 import { TokenFactoryDailyCapError, type TokenFactoryBudget } from '../tokenFactoryBudget';
 import type { NoticingJudge } from './judge';
 import { ceilingOf } from './levels';
-import type { ReachChannels } from './reachChannels';
 import { readReachHistory, waitFor, withReachLease, type ReachGateDeps } from './reachGate';
 import { applyReachRules, joinReasons } from './reachRules';
 import type { ApprovalSource, CalendarSource, MailSource, NoticingSourceProvider, WaitingApproval } from './sources';
@@ -48,7 +49,7 @@ const WATCHER_KINDS: Record<NoticingWatcher, readonly NoticingKind[]> = {
 
 export interface NoticingService {
   /** Runs one pass of one watcher for everyone it can watch. */
-  run(input: { watcher: NoticingWatcher }): Promise<{ owners: number; raised: number }>;
+  run(input: { watcher: NoticingWatcher }): Promise<RunNoticingResult>;
 }
 
 export interface NoticingDeps {
@@ -62,7 +63,7 @@ export interface NoticingDeps {
   /** The model call for "does this matter", made once per event. It throws when no model can answer. */
   judgeFor: (owner: PersonOwner) => Promise<NoticingJudge>;
   budget: Pick<TokenFactoryBudget, 'isExhausted'>;
-  channels: () => ReachChannels;
+  channels: () => ReachAvailability;
   logger: Logger;
   /** The time zone to read the day in for someone who never saved Reach me. */
   timezoneFor: (owner: PersonOwner) => Promise<string>;

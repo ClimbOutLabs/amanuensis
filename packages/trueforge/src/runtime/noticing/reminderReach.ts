@@ -1,8 +1,8 @@
 import type { PersonOwner } from '../../db/personOwner';
 import type { IReachSettingsStore } from '../../db/reachSettingsStore';
 import type { Delivery } from '../../schemas/deliveries';
+import type { ReachAvailability } from '../../schemas/reach';
 import { defaultReachSettings } from '../../schemas/reach';
-import type { ReachChannels } from './reachChannels';
 import { readReachHistory, waitFor, withReachLease, type ReachGateDeps } from './reachGate';
 import { applyReachRules, type ReachDecision } from './reachRules';
 
@@ -33,7 +33,7 @@ export function createReminderReach({
   ...gate
 }: {
   reachSettings: Pick<IReachSettingsStore, 'get'>;
-  channels: () => ReachChannels;
+  channels: () => ReachAvailability;
   now?: () => Date;
   sleep?: (ms: number) => Promise<void>;
 } & Pick<ReachGateDeps, 'store' | 'history' | 'logger'>): ReminderReach {

@@ -99,9 +99,7 @@ export const ScheduleManifestObjectSchema = z
     urgent: z
       .boolean()
       .default(false)
-      .describe(
-        'For a reminder: the person marked it urgent, so it may call if they allowed that. Rows saved before this read as false.',
-      ),
+      .describe('For a reminder: the person marked it urgent, so it may call if they allowed that.'),
   })
   .strict();
 

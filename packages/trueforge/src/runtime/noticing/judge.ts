@@ -50,8 +50,13 @@ export function buildJudgeMessages({
   ].join('\n');
   return [
     { role: 'system', content: system },
-    { role: 'user', content: `<event kind="${event.kind}">\n${event.facts}\n</event>` },
+    // The facts are mail and calendar text, so they cannot be allowed to close the fence they sit in.
+    { role: 'user', content: `<event kind="${event.kind}">\n${escapeAngles(event.facts)}\n</event>` },
   ];
+}
+
+function escapeAngles(text: string): string {
+  return text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 /** Reads the model's JSON, allowing a fenced block. Undefined when it is not a usable verdict. */
