@@ -102,17 +102,10 @@ const AMAN_AVATAR_MOTION_SOURCES: AmanAvatarMotionSources = {
 const AMAN_PANDA_SRC = apiPath('/aman-avatar.png');
 
 const AMAN_THEME: ThemeConfig = {
-  webFonts: false,
   brand: {
     mode: 'icon-title',
     name: 'Amanuensis',
   },
-};
-
-/** Host look: the kit's warm paper and gold. No host colour overrides. */
-const appTheme: ThemeConfig = {
-  // The shell CSP keeps stylesheets and fonts on the app origin.
-  webFonts: false,
 };
 
 function Loader() {
@@ -492,7 +485,7 @@ export function App() {
   const authErrorReason = shouldShowAuthErrorScreen({ authError, session });
   if (authErrorReason != null) {
     return (
-      <ThemeProvider theme={appTheme}>
+      <ThemeProvider>
         <AuthErrorScreen reason={authErrorReason} />
       </ThemeProvider>
     );
@@ -500,7 +493,7 @@ export function App() {
 
   if (session.status === 'checking') {
     return (
-      <ThemeProvider theme={appTheme}>
+      <ThemeProvider>
         <Loader />
       </ThemeProvider>
     );
@@ -508,7 +501,7 @@ export function App() {
 
   if (session.status === 'unauthenticated') {
     return (
-      <ThemeProvider theme={appTheme}>
+      <ThemeProvider>
         <GetStartedScreen />
       </ThemeProvider>
     );
@@ -518,7 +511,7 @@ export function App() {
   // It is answered here, before the app's router, which would send an address it does not know home.
   if (isBrowserLivePath(window.location.pathname)) {
     return (
-      <ThemeProvider theme={appTheme}>
+      <ThemeProvider>
         <BrowserLivePage />
       </ThemeProvider>
     );
@@ -526,7 +519,7 @@ export function App() {
 
   if (boot.status === 'error') {
     return (
-      <ThemeProvider theme={appTheme}>
+      <ThemeProvider>
         <div className="boot-screen" data-error="true">
           Failed to load application configuration: {boot.message}
         </div>
@@ -536,7 +529,7 @@ export function App() {
 
   if (boot.status === 'loading') {
     return (
-      <ThemeProvider theme={appTheme}>
+      <ThemeProvider>
         <Loader />
       </ThemeProvider>
     );
