@@ -12,21 +12,29 @@ function isAgentsCollectionUrl(url: string): boolean {
 }
 
 describe('harnessBuilderServer', () => {
-  it('modelProviderLogosByName maps well-known catalog logos by type', () => {
-    const logos = modelProviderLogosByName([
-      {
-        type: 'openai',
-        logo: 'https://assets.example/openai.svg',
-        models: [{ modelId: 'gpt', name: 'gpt', properties: {} }],
-      },
-      {
-        type: 'anthropic',
-        models: [{ modelId: 'claude', name: 'claude', properties: {} }],
-      },
-      { type: 'custom', supportedReasoningEfforts: ['low'] },
-    ]);
-    assert.equal(logos.get('openai'), 'https://assets.example/openai.svg');
-    assert.equal(logos.has('anthropic'), false);
+  it('modelProviderLogosByName serves catalog logos same-origin and falls back to bundled ones', () => {
+    const logos = modelProviderLogosByName({
+      catalog: [
+        {
+          type: 'openai',
+          logo: 'https://assets.example/openai.svg',
+          models: [{ modelId: 'gpt', name: 'gpt', properties: {} }],
+        },
+        {
+          type: 'anthropic',
+          models: [{ modelId: 'claude', name: 'claude', properties: {} }],
+        },
+        {
+          type: 'tokenfactory',
+          models: [{ modelId: 'llama', name: 'llama', properties: {} }],
+        },
+        { type: 'custom', supportedReasoningEfforts: ['low'] },
+      ],
+      baseUrl: '/',
+    });
+    assert.equal(logos.get('openai'), '/catalog-logos/https/assets.example/openai.svg');
+    assert.equal(logos.get('anthropic'), 'catalog-logo:model/anthropic');
+    assert.equal(logos.has('tokenfactory'), false);
     assert.equal(logos.has('custom'), false);
   });
 

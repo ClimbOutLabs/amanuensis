@@ -27,7 +27,7 @@ const SECRET = 'alice-private-marker-7f3a91';
 
 const TURN_TIMEOUT_MS = 60_000;
 
-/** Routes anyone may call without signing in: liveness, the sign-in pages, provider callbacks and API docs. */
+/** Routes anyone may call without signing in: liveness, the sign-in pages, provider callbacks and the API docs page and files. */
 const PUBLIC_ROUTES = new Set([
   'GET /healthz',
   'GET /api/v1/auth/login',
@@ -35,6 +35,7 @@ const PUBLIC_ROUTES = new Set([
   'POST /api/v1/auth/logout',
   'GET /api/v1/mcp-servers/oauth/callback',
   'GET /api/v1/docs',
+  'GET /api/v1/docs/assets/swagger-ui-dist/:file',
   'GET /api/v1/openapi.json',
 ]);
 
