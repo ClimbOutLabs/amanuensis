@@ -201,7 +201,7 @@ type TurnMemory =
   | { kind: 'nothing' };
 
 /** A finding or reply note ready to store: its source, its day, and its text with the label in front. */
-interface LabeledNote {
+export interface LabeledNote {
   source: MemoryNoteSource;
   date: string;
   text: string;
@@ -396,19 +396,44 @@ function noteRetainItems({
   params: SubmitRetainParams;
   notes: readonly LabeledNote[];
 }): RetainItem[] {
-  return notes.map((note, index) => ({
+  return notes.map((note, index) =>
+    noteRetainItem({
+      sessionId: params.sessionId,
+      turnId: params.turnId,
+      completedAt: params.completedAt,
+      note,
+      documentId: `aman-${params.sessionId}-${params.turnId}-note-${String(index)}`,
+    }),
+  );
+}
+
+/** One note ready for the provider, carrying the untrusted origin like every note. */
+export function noteRetainItem({
+  sessionId,
+  turnId,
+  completedAt,
+  note,
+  documentId,
+}: {
+  sessionId: string;
+  turnId: string;
+  completedAt: string;
+  note: LabeledNote;
+  documentId: string;
+}): RetainItem {
+  return {
     content: noteRetainContent({ text: note.text, source: note.source, date: note.date }),
-    timestamp: params.completedAt,
-    document_id: `aman-${params.sessionId}-${params.turnId}-note-${String(index)}`,
+    timestamp: completedAt,
+    document_id: documentId,
     metadata: {
-      [SESSION_ID_METADATA_KEY]: params.sessionId,
-      turn_id: params.turnId,
+      [SESSION_ID_METADATA_KEY]: sessionId,
+      turn_id: turnId,
       source: 'aman-chat',
       [MEMORY_ORIGIN_METADATA_KEY]: TOOL_INGESTED_ORIGIN,
       [NOTE_SOURCE_METADATA_KEY]: note.source,
       [NOTE_DATE_METADATA_KEY]: note.date,
     },
-  }));
+  };
 }
 
 /** Newest daily files compared before a retain: the same window recall reads, so the check stays cheap. */

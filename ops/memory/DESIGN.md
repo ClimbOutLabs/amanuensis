@@ -107,6 +107,52 @@ it, and the reflect outcome with its wall clock and the number of memories the p
 answer drew on. Consolidation into mental models stays the provider's background job; the host
 never triggers it from a turn.
 
+## Messages the person sends
+
+When the person sends a message through the Email connector, Aman saves it as one note in the daily log, so
+the nightly pass can learn how the person writes to each contact.
+
+- **What counts.** A call to `send_email` or `forward_email` on the Email connector (the names come from
+  `MAIL_SEND_TOOL_NAMES` in the core mail connector contract) whose result is `executed_ok` and whose text says the message went out. The sidecar reports a failed or
+  uncertain delivery as a normal result, so the host reads the text and not only the result status. Clean
+  results read "Email sent successfully to ..." or "Email forwarded successfully to ...". A result that
+  starts "Email delivery [" or "Email forward [" lists each recipient as `succeeded`, `failed` or
+  `unknown`, and counts as sent only when every recipient is `succeeded`. That includes a message that
+  went out but whose copy in the Sent folder could not be filed (`sent-copy: failed` or `unknown`): the
+  recipients have it, so it is saved. A failed or uncertain recipient is not saved. A denied, blocked or
+  failed call writes nothing, `save_draft` writes nothing, and a send on any other connector writes nothing.
+- **One place decides.** The turn drain watches each tool result and writes the note when a send's result
+  qualifies. A send approved on a card runs in a later turn that never sees the message that asked for it,
+  so that turn is handed the calls the person allowed, read from the end of the paused turn before the turn
+  starts. Calls are matched by thread and call id together. The paused turn is read newest first until every
+  allowed call is found, so a long turn is read in full if it must be. If the turn cannot be read, or an
+  allowed call is not in it, the turn runs as usual, the send is not saved, and a warning is logged.
+- **What the note holds.** The recipients, any cc and bcc, the subject and the composed body, written word
+  for word by the host with no model call. A forward carries no subject of its own (the sidecar sets it), so
+  none is recorded, and only the text the person added is kept, never the forwarded message. The body is
+  cut, on a whole character and with a plain "(cut)" marker, at 2,000 characters, the same bound as the
+  facts a turn summary may store, so a sent note is no bigger than any other memory note. At most 20 sent
+  messages are saved from one turn.
+  A message that holds something shaped like a secret is checked in full before any cut, and is not saved.
+- **Its own write.** The note is saved as soon as the send is known to have gone through, in a write of its
+  own with its own operation id, which names the turn, the thread and the call, so a model that reuses a call id
+  in a later turn does not hide that later send. A retry after a half-finished save replaces the copy the
+  first attempt wrote, so the note is never doubled. Saves to one vault run one at a time, so notes written at the
+  same instant get different entry ids. It does not wait for the turn to finish and does not depend on the turn's
+  save, so it is kept whether or not turn summaries are on, whether or not the turn's own save succeeds, and
+  when the turn ends early. A later recovery of a lost turn neither drops it nor writes it twice.
+- **Source and label.** The note's source is `sent_mail` and its label reads "From a message you sent, Oct 31".
+  The Memories page shows "Source: a message you sent". The note is stored with the same origin as other tool
+  results (`tool_ingested`), so the recall screen holds it to the same strict posture: what a message says is
+  data, never an instruction. Recall ages it like other read content: a note older than two weeks stays in
+  the file but is not recalled.
+- **Not an instruction.** The model composed the text of a sent message, and it can echo text from mail it
+  read, so a `sent_mail` note is evidence of how the person writes, not something the person said as a
+  rule. No pass may promote a `sent_mail` note into a drafting instruction on a page, and so into a fact
+  with source `sent_mail`, unless the person confirms it. Nothing does today: pages are written by hand.
+- **Old files.** Notes already on disk keep their exact bytes. Only a new source word, `sent_mail`, can
+  appear in the hidden note marker.
+
 ## Pages
 
 Pages are short Markdown files about one person or one matter. They sit beside the daily log in a

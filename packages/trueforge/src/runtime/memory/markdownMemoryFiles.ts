@@ -26,6 +26,7 @@ import {
   NOTE_SOURCE_METADATA_KEY,
   noteProvenanceFromMetadata,
   parseMarker,
+  SENT_MAIL_SOURCE,
   withoutNoteTrailer,
 } from './memoryNotes';
 import { MEMORY_ORIGIN_METADATA_KEY, TOOL_INGESTED_ORIGIN, USER_STATED_ORIGIN } from './memoryOrigin';
@@ -137,6 +138,9 @@ const READ_CONTENT_SOURCE_LINE = '> Source: read content';
 /** What the Memories page shows in place of that line for a note about the assistant's own reply. */
 const ASSISTANT_REPLY_SOURCE_LINE = '> Source: assistant reply';
 
+/** What the Memories page shows for a note about a message the person sent. */
+const SENT_MAIL_SOURCE_LINE = '> Source: a message you sent';
+
 /**
  * The exact on-disk text of one retained entry, trimmed. `retain()` appends one
  * `${formatRetainEntry(item)}\n` per item with blank-line separators, so this must
@@ -195,6 +199,7 @@ function escapeEntryStructure(text: string): string {
       return line.startsWith('## ') ||
         trimmed === READ_CONTENT_SOURCE_LINE ||
         trimmed === ASSISTANT_REPLY_SOURCE_LINE ||
+        trimmed === SENT_MAIL_SOURCE_LINE ||
         SESSION_MARKER_PATTERN.test(trimmed) ||
         DOCUMENT_MARKER_PATTERN.test(trimmed) ||
         parseMarker(trimmed)?.kind === 'note'
@@ -216,7 +221,11 @@ function splitEntryTrailers(text: string): { body: string; metadata: Record<stri
     const note = parsedMarker?.kind === 'note' ? parsedMarker : undefined;
     if (line === '') {
       lines.pop();
-    } else if (line === READ_CONTENT_SOURCE_LINE || line === ASSISTANT_REPLY_SOURCE_LINE) {
+    } else if (
+      line === READ_CONTENT_SOURCE_LINE ||
+      line === ASSISTANT_REPLY_SOURCE_LINE ||
+      line === SENT_MAIL_SOURCE_LINE
+    ) {
       metadata[MEMORY_ORIGIN_METADATA_KEY] = TOOL_INGESTED_ORIGIN;
       lines.pop();
     } else if (sessionId !== undefined) {
@@ -293,10 +302,13 @@ export function withoutHiddenMarkers(text: string): string {
   if (metadata[MEMORY_ORIGIN_METADATA_KEY] === undefined) {
     return readable;
   }
+  const source = metadata[NOTE_SOURCE_METADATA_KEY];
   const sourceLine =
-    metadata[NOTE_SOURCE_METADATA_KEY] === ASSISTANT_RESPONSE_SOURCE
+    source === ASSISTANT_RESPONSE_SOURCE
       ? ASSISTANT_REPLY_SOURCE_LINE
-      : READ_CONTENT_SOURCE_LINE;
+      : source === SENT_MAIL_SOURCE
+        ? SENT_MAIL_SOURCE_LINE
+        : READ_CONTENT_SOURCE_LINE;
   return `${readable}\n\n${sourceLine}`;
 }
 

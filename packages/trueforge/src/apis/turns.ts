@@ -47,6 +47,7 @@ import {
   type ToolResultSource,
 } from '@truefoundry/trueforge-core/core';
 import { readTurnedOffConnectorKeys } from '@truefoundry/trueforge-core/core/connectors/chatConnectorChoice';
+import type { RawToolCall } from '@truefoundry/trueforge-core/core/llm/LLMTypes';
 import { upgradeStoredTurnState } from '@truefoundry/trueforge-core/core/permissions/storedCards';
 import type { Context } from 'hono';
 import { HTTPException } from 'hono/http-exception';
@@ -104,6 +105,7 @@ import {
   type SummarizeTurnContext,
 } from '../runtime/memory/memoryRetain';
 import { applyMemorySettings } from '../runtime/memory/memorySettings';
+import { saveSentMail, sentMailFromCall, sentMailWentThrough } from '../runtime/memory/sentMail';
 import { readMemoryRecallSetting } from '../runtime/memoryRecallSettings';
 import { applyMemoryScreenOverride, readMemoryScreenSetting } from '../runtime/memoryScreenSettings';
 import { resolveTurnSummarizeContext } from '../runtime/memorySummarizeSettings';
@@ -164,6 +166,7 @@ import { resolveSkillNetworkGrant } from '../sandbox/skillnet/skillNetworkGrant'
 import { skillNetworkTokens } from '../sandbox/skillnet/skillNetworkTokens';
 import type { MemoryProviderSettings } from '../schemas/mcpServer';
 import { canReadAgentBoundResource } from './agentAccess';
+import { approvedToolCalls, toolCallKey } from './approvedToolCalls';
 import { readServerSandboxAvailable } from './capabilities';
 
 export function toWireTurn<TCustom extends object>(record: TurnRecordWithoutSnapshot<TCustom>): Turn {
@@ -1180,6 +1183,11 @@ export interface DrainTurnEventsInput {
         outcomeLog?: TurnOutcomeLog | undefined;
       }
     | undefined;
+  /**
+   * Calls the person allowed on a card, from the turn that paused. An approved call runs in this turn, whose
+   * stream never carries the message that asked for it, so the drain would not otherwise know what ran.
+   */
+  approvedCalls?: ReadonlyMap<string, RawToolCall> | undefined;
   /** Present on every turn: the model usage the turn recorded, persisted when it completes. */
   modelUsage?: ModelUsageDrainMember | undefined;
   /** Present only when profile learning is enabled; the drain awaits the pass. */
@@ -1243,8 +1251,18 @@ async function runTurnEventDrain(params: {
   markArtifactsCaptured: () => void;
 }): Promise<void> {
   const { input, markArtifactsCaptured } = params;
-  const { trackedStream, turnEventStream, sessionId, turnId, executionDeadline, startBound, logger, onEvent, memory } =
-    input;
+  const {
+    trackedStream,
+    turnEventStream,
+    sessionId,
+    turnId,
+    executionDeadline,
+    startBound,
+    logger,
+    onEvent,
+    memory,
+    approvedCalls,
+  } = input;
   // Provenance for the memory the retain below writes. Tool output may hold text from outside the
   // chat (a web page, mail, a connector, a shell command), and the retained assistant reply is
   // produced after seeing it, so a turn with any tool result is stamped `tool_ingested` and held to
@@ -1255,6 +1273,9 @@ async function runTurnEventDrain(params: {
   const callReturnsOutside = new Map<string, boolean>();
   const callSources = new Map<string, ToolResultSource>();
   const toolResults: TurnToolResult[] = [];
+  // A send is read from its call and saved as soon as its result says it went through, whichever turn ran it.
+  const callsByKey = new Map<string, RawToolCall>(approvedCalls);
+  const sentMailWrites: Promise<void>[] = [];
   let followUp: Promise<void> | undefined;
   try {
     for await (const event of trackedStream) {
@@ -1265,6 +1286,26 @@ async function runTurnEventDrain(params: {
         for (const call of event.tool_calls ?? []) {
           callReturnsOutside.set(call.id, callReturnsOutsideContent(call));
           callSources.set(call.id, callResultSource(call));
+          callsByKey.set(toolCallKey({ threadId: event.thread_id, callId: call.id }), call);
+        }
+      }
+      if (memory !== undefined && event.type === EventType.TOOL_RESPONSE_V2 && event.disposition === 'executed_ok') {
+        const call = callsByKey.get(toolCallKey({ threadId: event.thread_id, callId: event.tool_call_id }));
+        const mail = call === undefined || !sentMailWentThrough(event.content) ? undefined : sentMailFromCall(call);
+        if (mail !== undefined && sentMailWrites.length < TURN_TOOL_RESULTS_KEPT) {
+          sentMailWrites.push(
+            saveSentMail({
+              client: memory.client,
+              sessionId,
+              turnId,
+              threadId: event.thread_id,
+              callId: event.tool_call_id,
+              mail,
+              sentAt: event.created_at,
+              timeZone: memory.timeZone,
+              logger,
+            }),
+          );
         }
       }
       if (
@@ -1322,6 +1363,8 @@ async function runTurnEventDrain(params: {
     if (followUp === undefined) {
       markArtifactsCaptured();
     }
+    // Each write never throws; the drain waits so a shutdown does not drop a note.
+    await Promise.allSettled(sentMailWrites);
     executionDeadline.dispose();
     startBound?.dispose();
   }
@@ -2621,6 +2664,12 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
     // never overwrites an existing title.
     const title = session.record.last_turn_id ? undefined : deriveSessionTitle(body.input);
 
+    // Read before the turn exists and only when memory will save the send; a read failure falls back to none.
+    const approvedCalls =
+      memoryClient === undefined
+        ? undefined
+        : await approvedToolCalls({ pausedTurn: previousTurn, input: body.input, logger: deps.logger });
+
     // Turning down held actions ends the turn with no model call. Approving one runs the call,
     // and the model continues with its result.
     const stopAfterToolResponse = await session.answersOnlyDeniedHeldActions({
@@ -2941,6 +2990,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
                   },
                 },
           profileLearning,
+          approvedCalls,
           artifacts: {
             turnArtifactStore: deps.turnArtifactStore,
             sandboxProviderStore,

@@ -1039,7 +1039,12 @@ describe('HindsightMemoryProcessor recall screening', () => {
     return jest.fn().mockResolvedValue({ ok: true, results, entities: [] });
   }
 
-  function screenedCapability(input: { recall: jest.Mock; classify: jest.Mock; config?: MemoryConfig }) {
+  function screenedCapability(input: {
+    recall: jest.Mock;
+    classify: jest.Mock;
+    config?: MemoryConfig;
+    now?: () => number;
+  }) {
     const screenClient = makeScreenClient(input.classify);
     return hindsightMemoryCapability({
       client: makeClient({ recall: input.recall }),
@@ -1048,6 +1053,8 @@ describe('HindsightMemoryProcessor recall screening', () => {
       sessionId: 's1',
       previousTurnId: null,
       screenClient,
+      // A clock the test controls, so no host speed can change how much budget the screen sees.
+      now: input.now ?? (() => 1_000_000),
     });
   }
 
@@ -1309,13 +1316,37 @@ describe('HindsightMemoryProcessor recall screening', () => {
     // Three items under the default pool of 8 all run before any resolves: the screen fans out
     // rather than serializing per item.
     expect(maxActive).toBe(3);
-    // The instant mock recall leaves the whole recall budget as headroom, so each call is bounded by
-    // the (smaller) per-call screen timeout recomputed at its start: at most the budget, never zero
-    // here, and well inside MEMORY_RECALL_TIMEOUT_MS.
+    // The clock stands still, so no time has passed since the budget was set: every call is given the
+    // whole screen budget, which is smaller than what the recall budget leaves.
     for (const call of classify.mock.calls) {
-      expect(call[0].timeoutMs).toBeLessThanOrEqual(50);
-      expect(call[0].timeoutMs).toBeGreaterThan(0);
+      expect(call[0].timeoutMs).toBe(50);
     }
+  });
+
+  it('gives each call only the screen budget that is left, and none once it is spent', async () => {
+    let clock = 1_000_000;
+    const classify = jest.fn(async (_params: { text: string; timeoutMs: number }) => {
+      clock += 30;
+      await Promise.resolve();
+      return benign;
+    });
+    const recall = recallReturning([
+      { id: '1', text: 'a', metadata: { origin: 'tool_ingested' } },
+      { id: '2', text: 'b', metadata: { origin: 'tool_ingested' } },
+      { id: '3', text: 'c', metadata: { origin: 'tool_ingested' } },
+    ]);
+    const capability = screenedCapability({
+      recall,
+      classify,
+      config: withScreenEnabled({ maxConcurrency: 1 }),
+      now: () => clock,
+    });
+
+    await runRecall(capability);
+
+    // One call at a time, each taking 30 ms of a 50 ms budget: the second gets 20 ms, the third none, so
+    // it is never sent to the classifier.
+    expect(classify.mock.calls.map(call => call[0].timeoutMs)).toEqual([50, 20]);
   });
 
   it('bounds classifier fan-out to screen.maxConcurrency across items and entities', async () => {
@@ -1616,6 +1647,7 @@ describe('HindsightMemoryProcessor curated and reflect layers', () => {
       logger: makeLogger(),
       sessionId: 's1',
       previousTurnId: null,
+      now: () => 1_000_000,
       ...(input.screenClient ? { screenClient: input.screenClient } : {}),
     });
     const processor = capability.preLLMProcessors?.[0];
@@ -1870,6 +1902,7 @@ describe('HindsightMemoryProcessor pages layer', () => {
       logger: input.logger ?? makeLogger(),
       sessionId: 's1',
       previousTurnId: null,
+      now: () => 1_000_000,
       ...(input.screenClient ? { screenClient: input.screenClient } : {}),
     });
     const processor = capability.preLLMProcessors?.[0];

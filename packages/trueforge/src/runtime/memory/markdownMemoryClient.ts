@@ -108,6 +108,12 @@ export interface MarkdownMemoryClientConfig {
 /** How many daily log files recall scans, newest first, before the token budget cuts it off. */
 const RECALL_MAX_DAILY_FILES = 14;
 
+/**
+ * Pending retains to each daily folder in this process. An entry's id is its position in the day's file,
+ * counted before the append, so two retains running together would give different entries the same id.
+ */
+const retainQueues = new Map<string, Promise<void>>();
+
 /** Pending writes to each operations file in this process, so concurrent recordings run one at a time. */
 const operationsFileQueues = new Map<string, Promise<void>>();
 
@@ -335,6 +341,23 @@ export class MarkdownMemoryClient implements MemoryClient {
   }
 
   async retain(params: { items: RetainItem[]; operationId: string; timeoutMs: number }): Promise<RetainOutcome> {
+    const key = this.dailyDir();
+    const run = (retainQueues.get(key) ?? Promise.resolve()).then(() => this.retainOne(params));
+    retainQueues.set(
+      key,
+      run.then(
+        () => undefined,
+        () => undefined,
+      ),
+    );
+    return run;
+  }
+
+  private async retainOne(params: {
+    items: RetainItem[];
+    operationId: string;
+    timeoutMs: number;
+  }): Promise<RetainOutcome> {
     try {
       if (params.items.length === 0) {
         return { ok: true };

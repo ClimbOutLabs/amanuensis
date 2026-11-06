@@ -24,6 +24,29 @@ export function isMailSendToolName(tool_name: string): boolean {
   return MAIL_SEND_TOOL_NAMES.some(name => name === tool_name);
 }
 
+/**
+ * Whether a send or forward result says the message went out. The sidecar answers a clean send with
+ * "Email sent successfully to ..." and a clean forward with "Email forwarded successfully to ...". Anything
+ * short of clean is still a normal result: "Email delivery [...]" or "Email forward [...]", a list of
+ * `; `-separated parts such as `succeeded: a@x`, `failed: b@x (detail)`, `unknown: c@x`, `sent-copy: failed`.
+ * The message went out when every recipient part is `succeeded`, even if its copy in the Sent folder could
+ * not be filed. A failed or uncertain recipient, or any other text, is not sent.
+ */
+export function mailSendOutcome(text: string): 'sent' | 'not_sent' {
+  if (/^Email (?:sent|forwarded) successfully to /.test(text)) {
+    return 'sent';
+  }
+  const tagged = /^Email (?:delivery|forward) \[(.*)\]$/s.exec(text);
+  if (tagged === null) {
+    return 'not_sent';
+  }
+  const parts = (tagged[1] ?? '').split('; ');
+  const recipientParts = parts.filter(part => /^(?:succeeded|failed|unknown): /.test(part));
+  return recipientParts.length > 0 && recipientParts.every(part => part.startsWith('succeeded: '))
+    ? 'sent'
+    : 'not_sent';
+}
+
 /** Saves a message as a draft. It sends nothing, but its recipients are checked against the Email list like a send's. */
 export const MAIL_DRAFT_TOOL_NAME = 'save_draft';
 

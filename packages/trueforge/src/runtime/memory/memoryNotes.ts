@@ -11,8 +11,11 @@ export const NOTE_DATE_METADATA_KEY = 'note_date';
 /** Stored source of a note that records what the assistant told the person. */
 export const ASSISTANT_RESPONSE_SOURCE = 'assistant_response';
 
-/** Where a saved note came from: a kind of tool result, or the assistant's own reply. */
-export type MemoryNoteSource = ToolResultSource | typeof ASSISTANT_RESPONSE_SOURCE;
+/** Stored source of a note that records a message the person sent through the assistant. */
+export const SENT_MAIL_SOURCE = 'sent_mail';
+
+/** Where a saved note came from: a kind of tool result, the assistant's own reply, or a message the person sent. */
+export type MemoryNoteSource = ToolResultSource | typeof ASSISTANT_RESPONSE_SOURCE | typeof SENT_MAIL_SOURCE;
 
 const NOTE_SOURCES = [
   'email',
@@ -20,6 +23,7 @@ const NOTE_SOURCES = [
   'web',
   'attachment',
   'other',
+  'sent_mail',
   'assistant_response',
 ] as const satisfies readonly MemoryNoteSource[];
 
@@ -105,12 +109,13 @@ function monthAndDay(date: string): string | undefined {
     : `${month} ${String(Number(match[3]))}`;
 }
 
-const FINDING_SOURCE_PHRASES: Record<ToolResultSource, string> = {
+const FINDING_SOURCE_PHRASES: Record<ToolResultSource | typeof SENT_MAIL_SOURCE, string> = {
   email: 'an email',
   calendar: 'the calendar',
   web: 'the web',
   attachment: 'an attachment',
   other: 'another tool',
+  sent_mail: 'a message you sent',
 };
 
 /**
@@ -127,8 +132,12 @@ export function noteLabel({
   assistantName: string | undefined;
 }): string {
   const day = monthAndDay(date) ?? date;
-  return source === ASSISTANT_RESPONSE_SOURCE
-    ? `From ${assistantName ?? 'the assistant'}'s reply, ${day}`
+  if (source === ASSISTANT_RESPONSE_SOURCE) {
+    return `From ${assistantName ?? 'the assistant'}'s reply, ${day}`;
+  }
+  // A sent message was written by the person, not found, so its label has no "found".
+  return source === SENT_MAIL_SOURCE
+    ? `From ${FINDING_SOURCE_PHRASES[source]}, ${day}`
     : `From ${FINDING_SOURCE_PHRASES[source]}, found ${day}`;
 }
 
