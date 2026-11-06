@@ -835,6 +835,10 @@ export const INSTALL_PHONE_QUESTION =
 
 export const INSTALL_YES_OR_NO_LINE = 'Please answer yes or no.';
 
+// Said at the end of a window a double-click or the Start menu opened,
+// so the person can read it before it closes.
+export const PRESS_ENTER_TO_CLOSE_LINE = 'Press Enter to close this window.';
+
 export const INSTALL_DONE_LINE = 'Aman is installed, and the getting started page is open in your browser.';
 
 // What aman install --dry-run prints: the steps it would take, in
@@ -1002,5 +1006,6 @@ export function allMessageLines(): string[] {
   lines.push(INSTALL_YES_OR_NO_LINE);
   lines.push(INSTALL_DONE_LINE);
   lines.push(...INSTALL_DRY_RUN_LINES);
+  lines.push(PRESS_ENTER_TO_CLOSE_LINE);
   return lines;
 }

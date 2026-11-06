@@ -78,6 +78,11 @@ What it can do today:
 - `aman backups`, on Windows, lists the backups kept on the PC,
   newest first. The Start menu's Backups entry opens the folder.
 
+On Windows, a window that a double-click or a Start menu entry opened
+stays open at the end until the person presses Enter, so the result and
+any problem can be read; a successful `aman open` closes at once, and a
+terminal or the daily backup task never waits.
+
 Every sentence a person can read lives in `src/messages.ts`. A test checks
 each one for plain words and compares them all to the golden file in
 `tests/golden/messages.txt`. Every command line a flow would run on a

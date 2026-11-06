@@ -269,6 +269,10 @@ export interface WindowsJobs {
   // True when the port can be bound on loopback and on any-address: the
   // bind is the real test, as the shell's port check does it.
   portIsFree: (port: number) => Promise<boolean>;
+  // True when the given process is Windows Explorer: this program was
+  // started by a double-click or a Start menu entry, in a window of its
+  // own that closes the moment it ends, and not from a terminal.
+  startedFromExplorer: (parentPid: number) => Promise<boolean>;
 }
 
 // A PowerShell string literal: single-quoted, with its quotes doubled.
@@ -541,6 +545,13 @@ export function systemWindowsJobs(options: {
       if (shown.started && shown.exitCode === 0) {
         throw new WindowsJobError('the firewall rule could not be turned off');
       }
+    },
+
+    async startedFromExplorer(parentPid: number) {
+      const name = await runPowerShell(
+        `(Get-Process -Id ${String(Math.trunc(parentPid))} -ErrorAction SilentlyContinue).ProcessName`,
+      ).catch(() => '');
+      return name.trim().toLowerCase() === 'explorer';
     },
 
     async replaceSetupCmdCopyWithForwarder() {

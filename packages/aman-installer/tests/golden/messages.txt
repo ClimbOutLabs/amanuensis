@@ -178,3 +178,4 @@ It asks four questions: your email, a password, your model key, and whether to o
 It downloads the newest Aman and sets it up with daily backups and an https address on this computer.
 It puts the aman command and the Start menu entries in place, and opens Aman in your browser.
 It opens a short getting started page in your browser at the end.
+Press Enter to close this window.
