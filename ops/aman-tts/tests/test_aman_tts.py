@@ -147,12 +147,40 @@ class SpokenWordsTest(unittest.TestCase):
             "Great \U0001f44d",
             "Use **bold** text.",
             "Don't\u200b do it.",
+            "Pay 007.",  # leading zeros are lost
+            "Account 0042",
+            "Account 0012345",
+            "Pay 10 000.",  # a space inside a number
+            "Pay 5\u2009000",
+            "Pay 5\u00a0000",
+            "Pay 1000 500 dollars.",  # two numbers side by side
+            "Wire 100 20 3.",
+            "Wire $5\u2070\u2070\u2070",  # superscripts fold to digits
+            "Wire 10\u2076",
+            "Pay \uff15\uff10\uff10",  # full-width digits
+            "Pay \U0001d7d1\U0001d7ce\U0001d7ce",  # maths bold digits
+            "At 9:60",
+            "At 25:99",
+            "At 24:00",
         ):
             with self.subTest(text=text):
                 self.assertFalse(reads_as_written(text))
 
+    def test_says_the_cents_of_a_sum_with_their_unit(self) -> None:
+        self.assertEqual(
+            spoken_words("Pay $1,000.10 now."),
+            ["pay", "one", "thousand", "dollars", "and", "ten", "cents", "now"],
+        )
+        self.assertEqual(spoken_words("Pay $1.01."), ["pay", "one", "dollar", "and", "one", "cent"])
+        self.assertEqual(spoken_words("Pay $40."), ["pay", "forty", "dollars"])
+
+    def test_says_plain_numbers_that_look_like_edge_cases(self) -> None:
+        for text in ("Use 0.5 now.", "Wait 0 days.", "At 0:05 and 23:59.", "Pay $0.50 now."):
+            with self.subTest(text=text):
+                self.assertTrue(reads_as_written(text))
+
     def test_the_words_it_would_say(self) -> None:
-        self.assertEqual(spoken_words("Pay $40.50 at 9:30."), ["pay", "forty", "dollars", "fifty", "at", "nine", "thirty"])
+        self.assertEqual(spoken_words("Pay $40.50 at 9:30."), ["pay", "forty", "dollars", "and", "fifty", "cents", "at", "nine", "thirty"])
         self.assertEqual(spoken_words("It costs 1,200."), ["it", "costs", "one", "thousand", "two", "hundred"])
 
 
@@ -872,7 +900,7 @@ class PhonemesTest(unittest.TestCase):
         self.assertEqual(to_phonemes("GPU", LEXICON), "ʤˈi pˈi jˈu.")
 
     def test_money(self):
-        self.assertEqual(to_phonemes("$12.50", LEXICON), "twˈɛlv dˈɑləɹz fˈɪfti.")
+        self.assertEqual(to_phonemes("$12.50", LEXICON), "twˈɛlv dˈɑləɹz ˈænd fˈɪfti ˈkɛnts.")
 
     def test_unknown_words_are_sounded_out(self):
         self.assertEqual(to_phonemes("Zorp", LEXICON), "ˈzɔɹp.")

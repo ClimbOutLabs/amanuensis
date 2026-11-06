@@ -139,6 +139,8 @@ export class VoiceSession {
   #turnAbort: AbortController | undefined;
   /** Stops only the speaking of the current reply, so the person can talk over it while the turn still saves. */
   #speechAbort: AbortController | undefined;
+  /** Aborted when the conversation ends, so a line spoken outside any turn stops with it. */
+  readonly #lifetime = new AbortController();
   /** Sound that may still arrive early: it refills as time passes, but never past the slack. */
   #creditMs = REALTIME_SLACK_MS;
   #lastArrivalAtMs = 0;
@@ -239,6 +241,7 @@ export class VoiceSession {
       return;
     }
     this.#ended = true;
+    this.#lifetime.abort();
     this.#cancelStateCheck?.();
     this.#cancelIdle?.();
     this.#cancelMax?.();
@@ -311,9 +314,17 @@ export class VoiceSession {
       startedInGuard: this.#guardAtSpeechStart,
     };
     if (this.#sttAborts.size >= MAX_PARALLEL_TRANSCRIPTIONS) {
-      // Said out loud, never dropped silently: it may have been the answer to a waiting card.
+      // Never dropped silently: it may have been the answer to a waiting card, and the person may not be
+      // looking at the screen. Shown always, and spoken unless something is already being said.
       this.#deps.onNote?.('stt_busy');
       this.#deps.transport.sendEvent({ type: 'notice', text: MISSED_THAT_NOTICE });
+      if (!this.#timeline.isPlaying()) {
+        const marks: Marks = { speechEndedAtMs: event.speechEndedAtMs, utteranceAtMs: this.#clock.now() };
+        this.#speechFor({ signal: this.#lifetime.signal, marks }).say({
+          text: MISSED_THAT_NOTICE,
+          role: 'instruction',
+        });
+      }
       return;
     }
     const marks: Marks = { speechEndedAtMs: heard.speechEndedAtMs, utteranceAtMs: this.#clock.now() };
@@ -667,16 +678,18 @@ export class VoiceSession {
       speech.say({ text: APPROVAL_LINES.leftForTheApp, role: 'instruction' });
       return undefined;
     }
-    const sentences = plan.segments.flatMap(segment =>
-      splitSentences(segment.text).map(text => ({ text, role: segment.role })),
-    );
-    // Nothing of the card is spoken unless the voice would say all of it as written; the voice service decides.
-    if (!(await this.#voiceSaysAsWritten({ texts: sentences.filter(({ role }) => role === 'body'), signal }))) {
+    const cut = plan.segments.map(segment => ({ ...segment, pieces: splitSentences(segment.text) }));
+    // The voice is asked about each whole text, never about its pieces: cutting is for playback only. The
+    // pieces must also add up to the text, so a card is never heard as less than it says.
+    const complete = cut.every(({ text, pieces }) => withoutSpace(pieces.join('')) === withoutSpace(text));
+    const bodies = cut.filter(({ role }) => role === 'body');
+    if (!complete || !(await this.#voiceSaysAsWritten({ texts: bodies, signal }))) {
       if (!signal.aborted) {
         speech.say({ text: APPROVAL_LINES.leftForTheApp, role: 'instruction' });
       }
       return undefined;
     }
+    const sentences = cut.flatMap(({ pieces, role }) => pieces.map(text => ({ text, role })));
     for (const sentence of sentences) {
       speech.say(sentence);
     }
@@ -770,6 +783,10 @@ export class VoiceSession {
     }
     this.#deps.transport.sendEvent({ type: 'state', state });
   }
+}
+
+function withoutSpace(text: string): string {
+  return text.replace(/\s/g, '');
 }
 
 /** The sentences of a card's text, so the first is spoken before the rest is made. */

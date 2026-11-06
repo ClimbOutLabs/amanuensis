@@ -146,7 +146,9 @@ node scripts/postprocess-generated-sdk.mjs
 # lockfile first or that install fails when the generator added/removed deps.
 pnpm install --no-frozen-lockfile
 # Fern's container can leave the output unformatted with imports unsorted. Run the SDK's own Biome so a local run
-# matches the checked-in files; it changes nothing when the output is already formatted.
+# matches the checked-in files; it changes nothing when the output is already formatted. The SDK's `check:fix` is used
+# as is: it includes Biome's unsafe import-type and unused-parameter fixes, and without them the generator's output
+# differs from the checked-in tree in about 1,100 files.
 (cd packages/trueforge-sdk && pnpm run check:fix)
 (cd packages/trueforge-sdk && bash .fern/verify.sh)
 # Fern uses these while assembling and verifying a local package, but none is

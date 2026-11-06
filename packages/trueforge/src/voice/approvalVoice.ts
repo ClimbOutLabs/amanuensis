@@ -51,14 +51,17 @@ type FieldRule = 'spoken' | 'context' | 'empty' | 'shape';
  * Every field of a card and what voice may do with it. A card is read aloud only when each field it
  * carries is listed here as read, harmless, empty or checked by its shape: a field added later is not
  * on the list, so a card carrying it stays on the screen until someone decides how it is read.
+ * What a person hears is the shape, word for word. The card's own wording is `context`: it repeats the
+ * shape, so anything it adds must be in the shape too. `destination` and `recipient` are further held to
+ * the shape in `cardWordingMatchesShape`.
  */
 export const CARD_FIELD_RULES: Record<keyof Tier3Card, FieldRule> = {
-  plain_what: 'spoken',
+  plain_what: 'context',
   plain_why: 'context',
-  cannot_be_undone: 'spoken',
+  cannot_be_undone: 'context',
   why_asked_again: 'context',
-  destination: 'spoken',
-  recipient: 'spoken',
+  destination: 'context',
+  recipient: 'context',
   amount: 'empty',
   parsed_command: 'empty',
   outbound_text: 'empty',
@@ -81,7 +84,9 @@ function mailboxNames(mailboxes: { name: string; address: string }[]): string {
   const names = mailboxes.map(mailbox => {
     const name = mailbox.name.trim();
     // The address is read too, so a friendly name cannot stand in for a different address.
-    return name === '' || name === mailbox.address ? mailbox.address : `${name} at ${mailbox.address}`;
+    return name === '' || name === mailbox.address
+      ? spokenAddress(mailbox.address)
+      : `${name} at ${spokenAddress(mailbox.address)}`;
   });
   if (names.length <= 1) {
     return names[0] ?? 'the recipient';
@@ -101,6 +106,7 @@ function verbFor(card: Tier3Card): ApprovalVerb {
 
 type NestedRule = 'spoken' | 'checked' | 'empty';
 type Email = NonNullable<Tier3Card['email']>;
+type Mailbox = Email['to'][number];
 type CalendarEvent = NonNullable<Tier3Card['calendar_event']>;
 type Schedule = NonNullable<Tier3Card['schedule']>;
 
@@ -119,6 +125,8 @@ export const EMAIL_FIELD_RULES: Record<keyof Email, NestedRule> = {
   replaces: 'empty',
   reply_in_thread: 'checked',
   reply_to: 'spoken',
+  from_name: 'spoken',
+  name_left_off: 'spoken',
 };
 export const EVENT_FIELD_RULES: Record<keyof CalendarEvent, NestedRule> = {
   action: 'checked',
@@ -133,6 +141,8 @@ export const EVENT_FIELD_RULES: Record<keyof CalendarEvent, NestedRule> = {
   guests_emailed: 'empty',
   one_of_repeating: 'empty',
   before: 'empty',
+  already_created: 'spoken',
+  span_days: 'spoken',
 };
 export const SCHEDULE_FIELD_RULES: Record<keyof Schedule, NestedRule> = {
   action: 'checked',
@@ -144,6 +154,9 @@ export const SCHEDULE_FIELD_RULES: Record<keyof Schedule, NestedRule> = {
   next_runs: 'empty',
 };
 
+/** The fields of one recipient: the name it is shown with and the address mail goes to. */
+export const MAILBOX_FIELD_RULES: Record<keyof Mailbox, NestedRule> = { name: 'spoken', address: 'spoken' };
+
 /** True when every field the value carries is listed, and each one listed as `empty` carries nothing. */
 function fieldsAreListed({ shape, rules }: { shape: object; rules: Record<string, string> }): boolean {
   const listed = new Map(Object.entries(rules));
@@ -153,8 +166,24 @@ function fieldsAreListed({ shape, rules }: { shape: object; rules: Record<string
   });
 }
 
+/**
+ * With a shape set, the card's `destination` and `recipient` must say nothing the shape does not: empty, or
+ * an address the mail goes to. Anything else could point somewhere the read-back never named.
+ */
+function cardWordingMatchesShape(card: Tier3Card): boolean {
+  const addresses = (card.email?.to ?? []).map(mailbox => mailbox.address);
+  return isEmpty(card.destination) && (isEmpty(card.recipient) || addresses.includes(card.recipient ?? ''));
+}
+
 /** A zone name like Europe/Berlin, as words. */
 const zoneWords = (zone: string): string => zone.replace(/[/_]/g, ' ');
+
+/** `Etc/GMT+5` is five hours behind UTC, the way round people do not say it, so it is left for the screen. */
+const isOffsetZone = (zone: string): boolean => /^Etc\/GMT[+-]/.test(zone);
+
+/** An address said so that every dot is heard: "victor at example dot com". */
+const spokenAddress = (address: string): string =>
+  address.replace(/@/g, ' at ').replace(/\./g, ' dot ').replace(/ +/g, ' ').trim();
 
 interface BodySegment {
   text: string;
@@ -176,6 +205,9 @@ function readableBody(card: Tier3Card): BodySegment[] | undefined {
   if (email !== null && email !== undefined) {
     if (
       !fieldsAreListed({ shape: email, rules: EMAIL_FIELD_RULES }) ||
+      ![...email.to, ...email.cc].every(mailbox => fieldsAreListed({ shape: mailbox, rules: MAILBOX_FIELD_RULES })) ||
+      email.from_name === undefined ||
+      email.name_left_off === undefined ||
       (email.action !== 'send' && email.action !== 'save') ||
       email.to.length === 0 ||
       email.body.length > MAX_SPOKEN_BODY_CHARS
@@ -190,13 +222,21 @@ function readableBody(card: Tier3Card): BodySegment[] | undefined {
     return [
       say(opening),
       ...(email.cc.length > 0 ? [say(`Copying ${mailboxNames(email.cc)}.`)] : []),
-      ...(email.reply_to === null ? [] : [say(`Replies will go to ${email.reply_to}.`)]),
+      ...(email.reply_to === null ? [] : [say(`Replies will go to ${spokenAddress(email.reply_to)}.`)]),
+      ...(email.from_name === null ? [] : [say(`It will be sent as ${email.from_name}.`)]),
+      ...(email.name_left_off ? [say('The name was left off an address because it looked like an address.')] : []),
       say(`The subject is: ${email.subject}`),
       say(`It says: ${email.body}`),
     ];
   }
   if (event !== null && event !== undefined) {
-    if (!fieldsAreListed({ shape: event, rules: EVENT_FIELD_RULES }) || event.action !== 'create') {
+    if (
+      isOffsetZone(event.time_zone) ||
+      !fieldsAreListed({ shape: event, rules: EVENT_FIELD_RULES }) ||
+      event.already_created === undefined ||
+      event.span_days === undefined ||
+      event.action !== 'create'
+    ) {
       return undefined;
     }
     const place = event.location === '' ? '' : ` at ${event.location}`;
@@ -205,11 +245,17 @@ function readableBody(card: Tier3Card): BodySegment[] | undefined {
         `I'll add the event ${event.title} on ${event.when}, ${zoneWords(event.time_zone)} time, for ${event.duration}${place}.`,
       ),
       say(`It goes on the calendar of ${event.calendar}.`),
+      ...(event.already_created ? [say('You already have this event.')] : []),
+      ...(event.span_days > 1 ? [say(`This event runs over ${String(event.span_days)} days.`)] : []),
       ...(event.description === '' ? [] : [say(`Its description is: ${event.description}`)]),
     ];
   }
   if (schedule !== null && schedule !== undefined) {
-    if (!fieldsAreListed({ shape: schedule, rules: SCHEDULE_FIELD_RULES }) || schedule.action !== 'delete') {
+    if (
+      isOffsetZone(schedule.time_zone) ||
+      !fieldsAreListed({ shape: schedule, rules: SCHEDULE_FIELD_RULES }) ||
+      schedule.action !== 'delete'
+    ) {
       return undefined;
     }
     return [
@@ -227,7 +273,7 @@ function canBeSettledByVoice({ card, tier }: { card: Tier3Card; tier: 1 | 2 | 3 
   if (tier !== 3) {
     return false;
   }
-  return fieldsAreListed({ shape: card, rules: CARD_FIELD_RULES });
+  return fieldsAreListed({ shape: card, rules: CARD_FIELD_RULES }) && cardWordingMatchesShape(card);
 }
 
 /**
@@ -269,8 +315,10 @@ export type SpokenAnswer = 'confirm' | 'deny' | 'other';
 
 /** Only the exact phrase for the card's verb confirms, and only a plain "no" turns it down. */
 export function classifyAnswer({ heard, verb }: { heard: string; verb: ApprovalVerb }): SpokenAnswer {
-  // A question is not an answer, even in the right words.
-  if (/[?\uff1f\u061f\u203d\u2047]\W*$/u.test(heard.normalize('NFKC'))) {
+  // A question is not an answer, even in the right words. Scripts write their question mark in many ways, so
+  // only a plain stop or "!" (and closing quotes) may end a confirmation, and a leading "¿" is a question.
+  const ending = /[^\p{L}\p{N}\s]+(?=\s*$)/u.exec(heard.normalize('NFKC'))?.[0] ?? '';
+  if (/[^.!"'\u2019\u201d)\]]/u.test(ending) || heard.includes('\u00bf')) {
     return 'other';
   }
   const words = wordsOf(heard).join(' ');

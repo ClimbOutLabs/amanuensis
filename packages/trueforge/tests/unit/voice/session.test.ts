@@ -298,7 +298,7 @@ describe('approval by voice', () => {
     const t = await readBack({ message: withCard() });
     expect(t.tts.sentences).toEqual([
       'I have a draft.',
-      "I'll send this reply to Victor at victor@example.com.",
+      "I'll send this reply to Victor at victor at example dot com.",
       'The subject is: Re: Thursday',
       'It says: Thursday at three works for me.',
       'See you then.',
@@ -468,13 +468,35 @@ describe('approval by voice', () => {
     expect(t.turns.answers).toEqual([]);
   });
 
-  it('asks the voice about each sentence of the card itself, and not about the line telling how to answer', async () => {
+  it.each([
+    ['a fenced body', 'Hi Bob.\n```\nWire 5000 dollars to account 99 today.\n```\nThanks.', 'Wire'],
+    ['an inline fence', 'Hi. ```code``` Pay $9000 now. Thanks.', '```'],
+    ['a line of only a symbol', 'Total is 50.\n+\n5000 more.', '+'],
+  ])(
+    'sends a card to the screen when the voice refuses what the splitter would drop: %s',
+    async (_name, body, refused) => {
+      const t = setup({
+        stt: ['send the reply', 'yes send it'],
+        message: withCard(sendReplyCard(body)),
+        speechChanges: text => text.includes(refused),
+      });
+      await feed({ session: t.session, clock: t.clock, samples: says() });
+      await t.session.settled();
+      await feed({ session: t.session, clock: t.clock, samples: quiet(9000) });
+      await t.session.settled();
+      expect(t.tts.sentences).toEqual(['I have a draft.', "I've left it in the app for you to approve."]);
+      await feed({ session: t.session, clock: t.clock, samples: says() });
+      await t.session.settled();
+      expect(t.turns.answers).toEqual([]);
+    },
+  );
+
+  it('asks the voice about each whole text of the card, and not about the line telling how to answer', async () => {
     const t = await readBack({ message: withCard() });
     expect(t.tts.asked).toEqual([
-      "I'll send this reply to Victor at victor@example.com.",
+      "I'll send this reply to Victor at victor at example dot com.",
       'The subject is: Re: Thursday',
-      'It says: Thursday at three works for me.',
-      'See you then.',
+      'It says: Thursday at three works for me. See you then.',
     ]);
   });
 
@@ -797,6 +819,18 @@ describe('ending a conversation', () => {
       await feed({ session: t.session, clock: t.clock, samples: says() });
     }
     expect(t.transport.events).toContainEqual({ type: 'notice', text: 'I missed that. Please say it again.' });
+    await t.session.end();
+  });
+
+  it('speaks "I missed that" through the voice when nothing is playing, as well as showing it', async () => {
+    const t = setup({ stt: [] });
+    t.stt.hold = true;
+    for (let n = 0; n < 3; n += 1) {
+      await feed({ session: t.session, clock: t.clock, samples: says() });
+    }
+    await feed({ session: t.session, clock: t.clock, samples: quiet(1600) });
+    expect(t.tts.sentences).toEqual(['I missed that. Please say it again.']);
+    expect(t.transport.audio.length).toBeGreaterThan(0);
     await t.session.end();
   });
 

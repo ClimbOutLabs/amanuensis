@@ -212,7 +212,7 @@ describe('startLiveVoice', () => {
     await start();
     FakeSocket.last?.onmessage?.({ data: '{"type":"tts_failed"}' });
     expect(events.onNotice).toHaveBeenCalledWith(
-      'I could not say that out loud. The reply is in the chat. If this keeps happening, turn voice mode off and on again.',
+      'I could not say that out loud. Check that the voice is running. The reply is in the chat.',
     );
   });
 
