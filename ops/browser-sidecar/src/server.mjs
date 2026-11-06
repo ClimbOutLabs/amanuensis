@@ -27,7 +27,6 @@ const EXTRACT_MODULE = readFileSync(new URL('./extract.mjs', import.meta.url), '
 const EXTRACT_SCRIPT = `(() => {\n${EXTRACT_MODULE}\nreturn extractSnapshotNodes();\n})()`;
 const VIEW_SCRIPT = `(() => {\n${EXTRACT_MODULE}\nreturn viewPosition();\n})()`;
 
-/** The same bundled module, ending in a read of one element's field, submit and form context. */
 /** How long a scroll may take to come to rest before the page is read anyway. */
 const SCROLL_SETTLE_MS = 1000;
 
@@ -72,6 +71,7 @@ async function scrollSettled(page) {
   }
 }
 
+/** The same bundled module, ending in a read of one element's field, submit and form context. */
 function elementInfoScript(domPath) {
   return `(() => {\n${EXTRACT_MODULE}\nreturn elementInfo(${JSON.stringify(domPath)});\n})()`;
 }
@@ -475,10 +475,12 @@ export class BrowserSidecar {
     if (tab === undefined) {
       return NO_TAB;
     }
-    // The wheel scrolls whatever is under the pointer, so it is turned over the middle of the view.
+    // The wheel scrolls whatever is under the pointer, so it is turned over the middle of the view,
+    // and the pointer goes back to the corner so nothing in the middle stays hovered for the read.
     const viewport = tab.page.viewportSize() ?? { width: 1280, height: 800 };
     await tab.page.mouse.move(viewport.width / 2, viewport.height / 2);
     await tab.page.mouse.wheel(0, direction === 'up' ? -800 : 800);
+    await tab.page.mouse.move(0, 0);
     // The wheel only starts the scroll; reading before it ends would show where the page was.
     await scrollSettled(tab.page);
     return this.#read(tab);
