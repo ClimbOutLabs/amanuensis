@@ -68,15 +68,15 @@ function memoryCapabilitiesForTurn(input: {
   webSearch: WebSearchTurnState;
   logger: PersonaTurnResourceResolver['logger'];
   isSubAgent: boolean;
-  /** The memory page tools for this turn, when they are offered. */
-  pageTools: AgentCapability | undefined;
+  /** The memory page tools for this turn and the watch they share with the memory block, when they are offered. */
+  pageTools: { capability: AgentCapability; watch: TurnReadWatch } | undefined;
 }): AgentCapability[] {
   const { memory } = input;
   if (memory.client === undefined || input.isSubAgent) {
     return [];
   }
   return [
-    ...(input.pageTools === undefined ? [] : [input.pageTools]),
+    ...(input.pageTools === undefined ? [] : [input.pageTools.capability]),
     hindsightMemoryCapability({
       client: memory.client,
       config: memory.config,
@@ -89,7 +89,7 @@ function memoryCapabilitiesForTurn(input: {
       internalSourceState: memory.internalSourceState,
       webSearch: input.webSearch,
       keepsNothing: memory.keepsNothing,
-      pageTools: input.pageTools !== undefined,
+      pageToolsWatch: input.pageTools?.watch,
     }),
   ];
 }
@@ -257,12 +257,13 @@ export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
     input: Parameters<PersonaTurnResourceResolver['resolveAgentDefinition']>[0];
     recallEnabled: boolean;
     isSubAgent: boolean;
-  }): AgentCapability | undefined {
+  }): { capability: AgentCapability; watch: TurnReadWatch } | undefined {
     const vaultDir = isSubAgent || !recallEnabled ? undefined : this.#memory.client?.pagesWriteDir?.();
     if (vaultDir === undefined) {
       return undefined;
     }
-    return memoryPagesCapability({
+    const watch = new TurnReadWatch();
+    const capability = memoryPagesCapability({
       vaultDir,
       runner: execFileRunner,
       timeZone: this.#memory.clientTimezone,
@@ -277,8 +278,9 @@ export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
         workspace_cwd: input.workspace_cwd ?? null,
         web_search: this.webSearchTurn,
       }),
-      watch: new TurnReadWatch(),
+      watch,
     });
+    return { capability, watch };
   }
 
   override async resolveAgentDefinition(

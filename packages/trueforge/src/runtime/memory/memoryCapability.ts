@@ -73,6 +73,7 @@ import { decideMemoryRoute } from './memoryRouting';
 import { rankNamedPeopleFirst } from './recallNameBoost';
 import { ScreenClient, type ScreenClassifyResult } from './screenClient';
 import { QUERY_STOPWORDS } from './stopWords';
+import { TurnReadWatch } from './turnReadWatch';
 
 const MEMORY_STATE_KEY = 'aman.memory';
 const MAX_QUERY_CHARS = 2000;
@@ -565,18 +566,21 @@ function noteLabelFor(source: MemoryNoteSource): string {
   return source === SENT_MAIL_SOURCE ? SENT_MAIL_LABEL : FINDING_LABEL;
 }
 
-function formatItemLine(item: RecallItem): string {
-  const date = item.occurred_start ? sanitizeMemoryLine(item.occurred_start.slice(0, 10)) : 'undated';
+/** The fixed phrase an item's line carries when it is not the person's own words, or undefined when it is theirs. */
+function itemSourceLabel(item: RecallItem): string | undefined {
   const origin = item.metadata?.[MEMORY_ORIGIN_METADATA_KEY];
   const note = noteProvenance({ metadata: item.metadata, text: item.text });
   // Only a fixed phrase is emitted for the origin, never the provider's own value.
-  const source =
-    note !== undefined
-      ? `, ${noteLabelFor(note.source)}`
-      : origin === undefined || origin === USER_STATED_ORIGIN
-        ? ''
-        : `, ${READ_CONTENT_LABEL}`;
-  return `[${date}${source}] ${sanitizeMemoryLine(withoutNoteTrailer(item.text))}`;
+  if (note !== undefined) {
+    return noteLabelFor(note.source);
+  }
+  return origin === undefined || origin === USER_STATED_ORIGIN ? undefined : READ_CONTENT_LABEL;
+}
+
+function formatItemLine(item: RecallItem): string {
+  const date = item.occurred_start ? sanitizeMemoryLine(item.occurred_start.slice(0, 10)) : 'undated';
+  const label = itemSourceLabel(item);
+  return `[${date}${label === undefined ? '' : `, ${label}`}] ${sanitizeMemoryLine(withoutNoteTrailer(item.text))}`;
 }
 
 /**
@@ -1143,6 +1147,7 @@ const REFLECTION_SCREEN_RECORD_ID = 'reflection:#0';
 interface PageEntry {
   text: string;
   drafting: string[];
+  holdsOutsideText: boolean;
 }
 
 function pageEntryText(entry: PageEntry): string {
@@ -1360,6 +1365,8 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
    * recall: a web query about recalled material is blocked at dispatch.
    */
   private readonly internalSourceState: InternalSourceState | undefined;
+  /** Told what the block holds when the page tools are offered, so they can refuse after outside text was recalled. */
+  private readonly blockWatch: TurnReadWatch | undefined;
   /** The turn's search state: the injected block is the person's own data, so a search carrying it asks. */
   private readonly webSearch: WebSearchTurnState | undefined;
   /** True only when summaries are off, so a turn is saved as its full exchange and a vanished one may be rebuilt from the chat. */
@@ -1389,6 +1396,7 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
     screenClient?: ScreenClient | undefined;
     recallEnabled?: boolean | undefined;
     internalSourceState?: InternalSourceState | undefined;
+    blockWatch?: TurnReadWatch | undefined;
     webSearch?: WebSearchTurnState | undefined;
     keepsFullExchange?: boolean | undefined;
     timeZone?: string | undefined;
@@ -1403,6 +1411,7 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
     this.screenClient = input.screenClient;
     this.recallEnabled = input.recallEnabled ?? true;
     this.internalSourceState = input.internalSourceState;
+    this.blockWatch = input.blockWatch;
     this.webSearch = input.webSearch;
     this.keepsFullExchange = input.keepsFullExchange ?? false;
     this.timeZone = input.timeZone;
@@ -1750,6 +1759,14 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
     // Injected even when every line was withheld or dropped: the stats line then honestly notes
     // the withholding instead of the block silently vanishing.
     this.cachedBlock = formatted.block;
+    this.blockWatch?.noteBlock({
+      holdsOutsideText:
+        screening.injectedItems.some(item => itemSourceLabel(item) !== undefined) ||
+        screening.injectedEntities.length > 0 ||
+        screening.injectedCurated.length > 0 ||
+        screening.injectedReflection !== undefined ||
+        screening.injectedPages.some(page => page.holdsOutsideText),
+    });
     if (this.webSearch !== undefined) {
       // What the assistant remembers of the person is theirs: a link or address in it is theirs to use.
       recordPersonText({ provenance: this.webSearch.provenance, text: formatted.block });
@@ -1817,6 +1834,7 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
         entries: loaded.pages.map(page => ({
           text: sanitizeMemoryText(page.text),
           drafting: page.drafting.map(sanitizeMemoryLine),
+          holdsOutsideText: page.holdsOutsideText,
         })),
         stats: { ...loaded.stats, withheld: 0 },
       };
@@ -2350,10 +2368,14 @@ export function hindsightMemoryCapability(input: {
   now?: (() => number) | undefined;
   /** True in a private chat: recall runs, nothing is saved, and the model is told so. */
   keepsNothing?: boolean | undefined;
-  /** True when the memory page tools are offered this turn, so the instruction no longer says no memory-write tool exists. */
-  pageTools?: boolean | undefined;
+  /** Present when the memory page tools are offered this turn: the instruction then names them, and the block's contents are reported to it. */
+  pageToolsWatch?: TurnReadWatch | undefined;
 }): AgentCapability {
-  const processor = new HindsightMemoryProcessor({ ...input, screenClient: resolveScreenClient(input) });
+  const processor = new HindsightMemoryProcessor({
+    ...input,
+    blockWatch: input.pageToolsWatch,
+    screenClient: resolveScreenClient(input),
+  });
   return {
     preLLMProcessors: [processor],
     preLLMEphemeralProcessors: [processor],
@@ -2361,7 +2383,7 @@ export function hindsightMemoryCapability(input: {
       builder => {
         builder.addSection(
           'memory',
-          memoryInstruction({ keepsNothing: processor.keepsNothing, pageTools: input.pageTools === true }),
+          memoryInstruction({ keepsNothing: processor.keepsNothing, pageTools: input.pageToolsWatch !== undefined }),
         );
       },
     ],

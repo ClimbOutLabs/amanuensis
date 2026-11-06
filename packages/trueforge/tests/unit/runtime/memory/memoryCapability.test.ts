@@ -40,6 +40,7 @@ import {
 } from '../../../../src/runtime/memory/memoryPageLoader';
 import { parseMemoryPage } from '../../../../src/runtime/memory/memoryPages';
 import type { ScreenClassifyResult, ScreenClient } from '../../../../src/runtime/memory/screenClient';
+import { TurnReadWatch } from '../../../../src/runtime/memory/turnReadWatch';
 import { LEARNED_PROFILE_CLEARED_CONTENT } from '../../../../src/runtime/profileLearning';
 import { pageOf } from './pageFixtures';
 
@@ -385,7 +386,7 @@ describe('hindsightMemoryCapability instruction', () => {
       sessionId: 's1',
       previousTurnId: null,
       keepsNothing,
-      pageTools,
+      pageToolsWatch: pageTools ? new TurnReadWatch() : undefined,
     });
     const builder = InstructionBuilder.createSystemPrompt('identity');
     for (const add of capability.instructionBuilders ?? []) {

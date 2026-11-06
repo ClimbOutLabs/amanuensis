@@ -189,6 +189,14 @@ The next time Aman writes, it first commits anything you changed by hand as "You
 installed on the server, pages are still saved but there is no history, and the log says so once. Install
 git to turn it back on.
 
+If your memory folder is also a git repository of your own, `git status` there lists `.memory-history/` as a new
+folder. Aman never changes your repository or your `.gitignore`. If you want git to stop listing it, add this one
+line to your own `.gitignore`:
+
+    .memory-history/
+
+A `.gitignore` of yours never hides pages from Aman's history.
+
 To look at the history, use the same two folders every time. Replace `VAULT` with the vault's folder:
 
     git --git-dir=VAULT/.memory-history --work-tree=VAULT log --stat

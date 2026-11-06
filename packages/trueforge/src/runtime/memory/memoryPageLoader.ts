@@ -31,6 +31,8 @@ export interface LoadedPage {
   text: string;
   /** This contact's lines for the one drafting block (see `draftingLines`); empty when it has none. */
   drafting: string[];
+  /** True when a line is not the person's own words, so the page may hold text read elsewhere. */
+  holdsOutsideText: boolean;
   /** Tokens for the page and its drafting lines, plus the drafting heading and end line when this is the first page with drafting lines. */
   estimatedTokens: number;
 }
@@ -193,6 +195,22 @@ const INSTRUCTION_SOURCES: ReadonlySet<FactSource> = new Set<FactSource>(['you_s
  */
 function isInstructionLine(line: PageLine): boolean {
   return line.kind === 'other' || (line.kind === 'fact' && INSTRUCTION_SOURCES.has(line.fact.marker.src));
+}
+
+/** The sources that are the person's own words typed or written by them; `sent_mail` is a message they sent, which may echo mail. */
+const OWN_WORDS_SOURCES: ReadonlySet<FactSource> = new Set<FactSource>(['you_said', 'you_edited']);
+
+/**
+ * Whether any line of the page is not the person's own words: a fact from mail, the calendar, read content,
+ * inference or a sent message, or a line whose marker cannot be read. Hand-written lines with no marker are theirs.
+ * The one owner of "what counts as outside text" on a page.
+ */
+export function pageHoldsOutsideText(page: MemoryPage): boolean {
+  return page.sections.some(section =>
+    section.lines.some(line =>
+      line.kind === 'unreadable' ? true : line.kind === 'fact' && !OWN_WORDS_SOURCES.has(line.fact.marker.src),
+    ),
+  );
 }
 
 /** The instruction a line carries: a bullet's text or a hand-written prose line; headings and blanks carry none. */
@@ -421,6 +439,7 @@ export async function loadPagesForMessage(input: {
       page,
       text,
       drafting,
+      holdsOutsideText: pageHoldsOutsideText(page),
       estimatedTokens,
     });
   }

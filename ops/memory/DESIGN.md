@@ -390,18 +390,32 @@ refused. Control and invisible characters are removed. A fact that holds the dra
 drafting end line is refused, using the same match as the loader, instead of being rewritten. A tool answer
 never repeats text from a page, only a fixed sentence.
 
-**The taint rule.** Before every model step the host checks whether the turn, from the person's latest message
-on, has read text from outside the chat: any tool result other than a host-only one, an attached file or
-image, or a summary of earlier chat. Memory tool results and task-state results are host-only and do not
-count; a connector tool that merely has the same name, or the same name reached through `call_tool`, does
-count. Once a turn has read outside text it stays that way. A tool call is judged on what the model had seen
-when it wrote the call, so a call written in the same step as a mail read is judged on the step before it.
-When the turn has read outside text, every tool refuses, writes nothing and tells the model to ask the
-person to say it again in a new message. That is what keeps mail, web pages and documents from steering
-what is written to a page. Two limits remain. Notes and pages recalled into the memory block do not
-count as outside text, because they are labelled and not confirmed already, and the person's own message
-can of course ask for something unwise. The tools need no approval card: what they write is the
-person's own words, it stays on their machine, and each write is a commit that can be undone.
+**The taint rule.** The tools refuse when the turn holds anything that is not the person's own words. Two
+things count, and they are checked in the host, not left to the model.
+
+- _Read in this turn._ Before every model step the host checks whether the turn, from the person's latest
+  message on, has read text from outside the chat: any tool result other than a host-only one, an attached
+  file or image, or a summary of earlier chat. Memory tool results and task-state results are host-only and
+  do not count; a connector tool that merely has the same name, or the same name reached through
+  `call_tool`, does count. A tool call is judged on what the model had seen when it wrote the call, so a call
+  written in the same step as a mail read is judged on the step before it.
+- _Recalled into the memory block._ When the memory block built for the turn holds a recalled note whose origin
+  is not the person's own words (mail, web, documents, read content, messages they sent, the assistant's
+  earlier replies), a provider summary (entities, profile lines, reflection), or a page line whose source is
+  mail, calendar, read content, inferred or a sent message, or whose marker cannot be read, the turn counts
+  as tainted. Only notes stated by the person and page lines with source `you_said`, `you_edited` or no marker
+  count as their own. The block builder sets this when it builds the block, from what it actually put
+  there (the same label that marks a line "from something read for the person"), so there is one owner of what
+  counts as outside text for notes (`itemSourceLabel`) and one for pages (`pageHoldsOutsideText`). A note that
+  was withheld by the recall screen or left out of the block does not count.
+
+Once a turn is tainted it stays that way. Every tool then refuses, writes nothing, and tells the model what to
+say: that it did not save the line, and either to say it again in a new message (read in this turn) or that the
+person can open the page and add the line by hand (recalled into the block). That is what keeps mail, web
+pages and documents, now or recalled from months ago, from steering what is written to a page. The one limit
+that remains is the person's own message: it can of course ask for something unwise. The tools need no
+approval card: what they write is the person's own words, it stays on their machine, and each write is a
+commit that can be undone.
 
 **Every change is one commit.** Under the vault lock the host does these steps. It makes the history ready.
 It takes in the person's hand edits (below). It makes the change. It commits the change with a message such
@@ -419,8 +433,9 @@ today. A line whose marker cannot be read is left alone, so it stays unreadable 
 **The history.** It is a git folder, `<vault>/.memory-history`, with the vault as its work tree. Only
 `people/*.md` and `matters/*.md` are tracked, by an exclude file inside that folder. A vault that is
 already a git repository is never touched: its `.git`, `.gitignore` and settings stay as they are, and
-it will show `.memory-history/` as an untracked folder. A `.gitignore` in the vault does not apply to
-the history. Git is run with no shell, its own commit name, no hooks, no signing and no files read from
+it will show `.memory-history/` as an untracked folder (the RUNBOOK says how the person can hide it). A
+`.gitignore` in the vault does not hide pages from the history: pages are staged by name with
+`git add --force`, restricted to `.md` files directly in `people/` and `matters/`. Git is run with no shell, its own commit name, no hooks, no signing and no files read from
 the machine's git settings.
 
 **The lock.** One lock per vault covers `people/`, `matters/`, `.memory-state/` and the history, and is shared
