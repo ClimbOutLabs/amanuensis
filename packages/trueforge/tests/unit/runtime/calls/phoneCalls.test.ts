@@ -4,11 +4,16 @@ import { CALL_LINES } from '../../../../src/runtime/calls/callTurns';
 import { CALLS_NEED_VOICE } from '../../../../src/runtime/calls/phoneCalls';
 import { readReachHistory } from '../../../../src/runtime/noticing/reachGate';
 import { ACCOUNT_SID, ALICE, CALL_SID, PHONE, callsHarness } from '../../../fixtures/callsHarness';
-import { FakeStt, FakeTts, LoudnessVad } from '../../../fixtures/voice/fakes';
+import { FakeStt, FakeTts, LoudnessVad, hum, mulawBytes } from '../../../fixtures/voice/fakes';
 
 type Harness = Awaited<ReturnType<typeof callsHarness>>;
 
 const OTHER_SID = `CA${'c'.repeat(32)}`;
+
+const pause = (ms: number): Promise<void> =>
+  new Promise(resolve => {
+    setTimeout(resolve, ms);
+  });
 
 /** A call row whose Twilio id was never saved, as when saving it failed or Twilio answered slowly. */
 async function callWithoutSid(h: Harness) {
@@ -270,6 +275,21 @@ describe('a call that ends while its line opens', () => {
     expect(h.tts.sentences).toEqual([]);
   });
 
+  it('when the voice cannot speak the opening, hangs up and sends a text and a push instead', async () => {
+    h = await callsHarness({ tts: new FakeTts({ failOn: () => true }) });
+    await h.readyToCall();
+    const delivery = await h.callDelivery();
+    const media = await h.openMedia({ token: (await h.answer()).token });
+    expect(await media.closed).toBe(1000);
+    await h.waitFor(() => h.texts.length === 1 && h.pushes.length === 1);
+    expect((await h.calls.getBySid(CALL_SID))?.outcome).toBe('failed');
+    expect(h.pushes).toEqual([delivery.id]);
+    const calls = (await h.attemptsOf(delivery.id)).filter(attempt => attempt.channel === 'call');
+    expect(calls.at(-1)?.detail).toBe(
+      'The call was answered, but the line could not be opened. The call was not tried again.',
+    );
+  });
+
   it('when the line drops while its key is still being checked, still writes the call down and falls back', async () => {
     let reached: () => void = () => undefined;
     const atRedeem = new Promise<void>(resolve => {
@@ -429,6 +449,37 @@ describe('a conversation on the phone', () => {
     expect(ended.at(-1)?.detail).toContain('the call ended before you said it was a good time');
   });
 
+  it('waits out speech that starts just before the silence would end, instead of talking over it', async () => {
+    const stt = new FakeStt();
+    stt.hold = true;
+    h = await callsHarness({
+      limits: { silenceMs: 2400 },
+      listening: () => Promise.resolve({ vad: new LoudnessVad(), stt }),
+    });
+    await h.readyToCall();
+    await h.callDelivery();
+    const media = await h.openMedia({ token: (await h.answer()).token });
+    await h.waitFor(() => h.tts.sentences.length >= 3 && media.frames.some(frame => frame.event === 'mark'));
+    // The fake line plays instantly, so wait out the opening's own length before speaking over nothing.
+    await pause(1900);
+    // 8 kHz phone frames of 20 ms: a moment of someone starting to talk.
+    const voice = hum(300).filter((_, index) => index % 2 === 0);
+    for (let offset = 0; offset < voice.length; offset += 160) {
+      media.socket.send(
+        JSON.stringify({
+          event: 'media',
+          streamSid: 'MZ1',
+          media: { payload: Buffer.from(mulawBytes(voice.subarray(offset, offset + 160))).toString('base64') },
+        }),
+      );
+      await pause(20);
+    }
+    await pause(500);
+    expect(h.tts.sentences).toHaveLength(3);
+    media.socket.close();
+    await h.waitFor(async () => (await h.calls.getBySid(CALL_SID))?.status === 'ended');
+  });
+
   it('gives back the listening model once the call is over', async () => {
     let released = 0;
     class ReleasedVad extends LoudnessVad {
@@ -445,6 +496,37 @@ describe('a conversation on the phone', () => {
     expect(released).toBe(0);
     media.socket.close();
     await h.waitFor(() => released === 1);
+  });
+
+  it('gives back the listening model when the line drops while it is still loading', async () => {
+    let released = 0;
+    class ReleasedVad extends LoudnessVad {
+      dispose(): Promise<void> {
+        released += 1;
+        return Promise.resolve();
+      }
+    }
+    let loaded: () => void = () => undefined;
+    const loading = new Promise<void>(resolve => {
+      loaded = resolve;
+    });
+    let asked = false;
+    h = await callsHarness({
+      listening: async () => {
+        asked = true;
+        await loading;
+        return { vad: new ReleasedVad(), stt: new FakeStt() };
+      },
+    });
+    await h.readyToCall();
+    await h.callDelivery();
+    const media = await h.openMedia({ token: (await h.answer()).token });
+    await h.waitFor(() => asked);
+    media.socket.close();
+    await h.waitFor(async () => (await h.calls.getBySid(CALL_SID))?.status === 'ended');
+    loaded();
+    await h.waitFor(() => released === 1);
+    expect(h.tts.sentences).toEqual([]);
   });
 
   it('closes the line at the time limit even when the assistant is stuck mid-sentence', async () => {

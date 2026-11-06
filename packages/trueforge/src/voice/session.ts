@@ -94,6 +94,8 @@ export interface VoiceSessionDeps {
   onLatency?: (latency: TurnLatency) => void;
   /** Called with a short reason code and no words, for the logs. */
   onNote?: (note: string) => void;
+  /** Called when the person starts to speak, before any words are known. */
+  onSpeechStarted?: () => void;
 }
 
 interface Awaiting {
@@ -347,6 +349,7 @@ export class VoiceSession {
       if (this.#state === 'listening') {
         this.#resetIdle();
       }
+      this.#deps.onSpeechStarted?.();
       if (!this.#holdsFloor()) {
         this.#talkedOver(event.startedAtMs);
       }

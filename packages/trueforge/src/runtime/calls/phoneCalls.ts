@@ -39,6 +39,8 @@ const CALL_LIFETIME_MS = 5 * 60_000;
 const MEDIA_TOKEN_TTL_MS = 30_000;
 /** Twilio sends `start` straight after the socket opens; a socket that names no call by then is closed. */
 const START_WAIT_MS = 10_000;
+/** More lines than this waiting to name their call are not real calls, so the rest are turned away. */
+const MAX_WAITING_LINES = 8;
 /** Ended calls are kept this long, then forgotten. */
 const KEEP_ENDED_MS = 30 * 24 * 60 * 60_000;
 
@@ -182,6 +184,7 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
     twilio === undefined ? undefined : `${twilio.publicUrl.replace(/^https:/, 'wss:')}${MEDIA_STREAM_PATH}`;
   /** Calls with an open line in this process; their own close writes them down. */
   const live = new Set<string>();
+  let waitingLines = 0;
 
   const attempt = ({
     outcome,
@@ -414,9 +417,10 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
   function voicemailLine({ call, transport }: { call: PhoneCall; transport: PhoneVoiceTransport }): CallLine {
     let left = false;
     let ending: Promise<void> | undefined;
+    // Stops the voice once the line is gone, so nothing is spoken into a closed call.
+    const abort = new AbortController();
     return {
       async start() {
-        const abort = new AbortController();
         try {
           const text = CALL_LINES.voicemail(spokenName(await namesFor(call)));
           for await (const chunk of deps.speaking().stream({ text, format: 'mulaw8k', signal: abort.signal })) {
@@ -431,6 +435,7 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
         }
       },
       end() {
+        abort.abort();
         ending ??= endWithoutTalking({
           call,
           outcome: 'voicemail',
@@ -457,6 +462,10 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
     const timers: NodeJS.Timeout[] = [];
     let talking: { session: VoiceSession; turns: CallTurns; startedAt: Date } | undefined;
     let ended = false;
+    /** The voice failed on the opening, so the person never heard why they were called. */
+    let unheard = false;
+    /** The wait for an answer, while one is running. */
+    let silence: NodeJS.Timeout | undefined;
     let ending: Promise<void> | undefined;
 
     const later = (ms: number, run: () => void): void => {
@@ -464,8 +473,22 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
     };
 
     async function begin(): Promise<void> {
-      const [delivery, names, listening] = await Promise.all([deliveryOf(call), namesFor(owner), deps.listening()]);
+      const loading = deps.listening();
+      const release = (): Promise<void> =>
+        loading.then(
+          parts => parts.vad.dispose?.().catch(() => undefined),
+          () => undefined,
+        );
+      let read: [Delivery | undefined, CallNames, CallListening];
+      try {
+        read = await Promise.all([deliveryOf(call), namesFor(owner), loading]);
+      } catch (error) {
+        await release();
+        throw error;
+      }
+      const [delivery, names, listening] = read;
       if (ended) {
+        await release();
         return;
       }
       const name = spokenName(names);
@@ -478,8 +501,13 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
       };
       /** Waits for the person to answer the question; silence counts as an answer that was not caught. */
       const listenForAnswer = (): void => {
+        if (ended) {
+          return;
+        }
         const heard = turns.replies;
-        later(limits.silenceMs, () => {
+        clearTimeout(silence);
+        silence = setTimeout(() => {
+          silence = undefined;
           if (turns.replies !== heard) {
             return;
           }
@@ -491,13 +519,16 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
             .say(next.line)
             .then(() => transport.whenPlayed())
             .then(() => {
+              if (ended) {
+                return;
+              }
               if (next.end) {
                 transport.close();
               } else {
                 listenForAnswer();
               }
             });
-        });
+        }, limits.silenceMs);
       };
       const turns = new CallTurns({
         message: delivery === undefined ? 'It is in the app for you to see.' : spokenMessage(delivery),
@@ -537,6 +568,12 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
         onNote: note => {
           logger.info('phone call note', { note });
         },
+        // Someone who starts to answer just before the wait runs out is not talked over.
+        onSpeechStarted: () => {
+          if (silence !== undefined) {
+            listenForAnswer();
+          }
+        },
       });
       talking = { session, turns, startedAt: now() };
       session.start();
@@ -549,7 +586,18 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
       void session
         .say(opening, { interruptible: false })
         .then(() => transport.whenPlayed())
-        .then(listenForAnswer);
+        .then(() => {
+          if (ended) {
+            return;
+          }
+          if (transport.voiceFailed) {
+            // The person heard nothing of why they were called, so a text and a push tell them instead.
+            unheard = true;
+            transport.close();
+            return;
+          }
+          listenForAnswer();
+        });
       later(limits.talkMs, () => {
         void session.say(CALL_LINES.timeUp).then(hangUp);
       });
@@ -572,7 +620,9 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
         ending ??= (async () => {
           ended = true;
           timers.forEach(clearTimeout);
-          if (talking === undefined) {
+          clearTimeout(silence);
+          if (talking === undefined || unheard) {
+            await talking?.session.end();
             // The person never heard the assistant, so they hear through a text and a push instead.
             await endWithoutTalking({ call, outcome: 'failed', detail: ENDED_WORDS.lineNotOpened });
             return;
@@ -606,6 +656,18 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
     let line: { call: PhoneCall; run: CallLine; transport: PhoneVoiceTransport } | undefined;
     let started = false;
     let closed = false;
+    if (waitingLines >= MAX_WAITING_LINES) {
+      socket.close(1013, 'busy');
+      return;
+    }
+    waitingLines += 1;
+    let waiting = true;
+    const stopWaiting = (): void => {
+      if (waiting) {
+        waiting = false;
+        waitingLines -= 1;
+      }
+    };
     const waitForStart = setTimeout(() => {
       socket.close(1008, 'no call');
     }, START_WAIT_MS);
@@ -622,6 +684,7 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
     // Attached before anything is awaited, so a line that drops at any point is still written down.
     socket.on('close', () => {
       closed = true;
+      stopWaiting();
       clearTimeout(waitForStart);
       if (line !== undefined) {
         writeDown(line);
@@ -645,6 +708,7 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
         return;
       }
       started = true;
+      stopWaiting();
       clearTimeout(waitForStart);
       const token = frame.parameters['token'];
       void (async () => {

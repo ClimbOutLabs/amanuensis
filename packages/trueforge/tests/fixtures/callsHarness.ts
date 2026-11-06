@@ -232,15 +232,17 @@ export async function callsHarness({
     });
   }
 
-  /** Opens the media stream the way Twilio does, echoing every mark back as played, and sends `start`. */
+  /** Opens the media stream the way Twilio does, echoing every mark back as played, and sends `start` unless told not to. */
   async function openMedia({
     token,
     callSid = CALL_SID,
     sign = true,
+    start = true,
   }: {
     token: string | undefined;
     callSid?: string;
     sign?: boolean;
+    start?: boolean;
   }) {
     const wssUrl = `${PUBLIC_URL.replace(/^https:/, 'wss:')}${MEDIA_STREAM_PATH}`;
     const socket = new WebSocket(`ws://127.0.0.1:${String(port)}${MEDIA_STREAM_PATH}`, {
@@ -286,7 +288,7 @@ export async function callsHarness({
       }
     });
     const refusedWith = await failed;
-    if (refusedWith === undefined && socket.readyState === socket.OPEN) {
+    if (start && refusedWith === undefined && socket.readyState === socket.OPEN) {
       socket.send(JSON.stringify({ event: 'connected', protocol: 'Call', version: '1.0.0' }));
       socket.send(
         JSON.stringify({

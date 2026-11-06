@@ -169,6 +169,24 @@ describe('the Twilio listener for calls', () => {
     expect(h.tts.sentences).toEqual([]);
   });
 
+  it('turns away more lines that have not said which call they are for than any real calls would need', async () => {
+    h = await callsHarness();
+    await h.readyToCall();
+    await h.callDelivery();
+    const waiting = await Promise.all(Array.from({ length: 8 }, () => h.openMedia({ token: undefined, start: false })));
+    const extra = await h.openMedia({ token: undefined, start: false });
+    expect(await extra.closed).toBe(1013);
+    waiting[0]?.socket.close();
+    await waiting[0]?.closed;
+    const { token } = await h.answer();
+    const line = await h.openMedia({ token });
+    await h.waitFor(() => h.tts.sentences.length > 0);
+    for (const socket of [...waiting, line]) {
+      socket.socket.close();
+      await socket.closed;
+    }
+  });
+
   it('lets a media token open the line once', async () => {
     h = await callsHarness();
     await h.readyToCall();
