@@ -51,6 +51,11 @@
       "reason": "GitHub MCP server preset in the MCP catalog; contacted only if the person adds it."
     },
     {
+      "host": "api.telegram.org",
+      "category": "connector",
+      "reason": "Telegram Bot API, for the bot the person connects in Settings."
+    },
+    {
       "host": "api.transitous.org",
       "category": "connector",
       "reason": "Default public transit routes for the maps card (Transitous); can be changed in settings."
