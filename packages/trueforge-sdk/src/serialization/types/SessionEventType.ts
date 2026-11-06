@@ -25,6 +25,7 @@ export const SessionEventType: core.serialization.Schema<serializers.SessionEven
         "aman.memory.recall",
         "aman.profile.learned",
         "aman.skill.used",
+        "aman.email.send_receipt",
         "aman.sandbox.provisioning",
         "aman.model.waiting",
     ]);
@@ -50,6 +51,7 @@ export declare namespace SessionEventType {
         | "aman.memory.recall"
         | "aman.profile.learned"
         | "aman.skill.used"
+        | "aman.email.send_receipt"
         | "aman.sandbox.provisioning"
         | "aman.model.waiting";
 }

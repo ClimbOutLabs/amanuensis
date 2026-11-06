@@ -33,12 +33,13 @@ import { ModelUsagePersistedEventSchema, type ModelUsagePersistedEvent } from '.
 import { ModelWaitingPersistedEventSchema, type ModelWaitingPersistedEvent } from './modelWaitingEvents';
 import { ProfileLearnedPersistedEventSchema, type ProfileLearnedPersistedEvent } from './profileLearningEvents';
 import { ProvisioningPersistedEventSchema, type ProvisioningPersistedEvent } from './provisionEvents';
+import { SendReceiptPersistedEventSchema, type SendReceiptPersistedEvent } from './sendReceiptEvents';
 import { SkillUsedPersistedEventSchema, type SkillUsedPersistedEvent } from './skillEvents';
 
 /**
  * `SessionEventSchema` (agent-session, core) enumerates only built-in durable events and
  * deliberately excludes passthrough events. `aman.memory.recall`, `aman.profile.learned`,
- * `aman.skill.used`, `aman.sandbox.provisioning`, `aman.model.usage`, and `aman.model.waiting` are passthrough events registered by
+ * `aman.skill.used`, `aman.email.send_receipt`, `aman.sandbox.provisioning`, `aman.model.usage`, and `aman.model.waiting` are passthrough events registered by
  * trueforge (see runtime/memory/memoryEvents.ts, schemas/memoryEvents.ts,
  * runtime/profileLearning.ts, schemas/profileLearningEvents.ts,
  * schemas/skillEvents.ts, schemas/provisionEvents.ts, schemas/modelUsageEvents.ts, schemas/modelWaitingEvents.ts), so the actual persisted event stream
@@ -51,6 +52,7 @@ export const SessionEventWithPassthroughSchema = z
     MemoryRecallPersistedEventSchema,
     ProfileLearnedPersistedEventSchema,
     SkillUsedPersistedEventSchema,
+    SendReceiptPersistedEventSchema,
     ProvisioningPersistedEventSchema,
     ModelUsagePersistedEventSchema,
     ModelWaitingPersistedEventSchema,
@@ -69,6 +71,7 @@ export const SessionEventTypeSchema = z
     MemoryRecallPersistedEventSchema.shape.type.value,
     ProfileLearnedPersistedEventSchema.shape.type.value,
     SkillUsedPersistedEventSchema.shape.type.value,
+    SendReceiptPersistedEventSchema.shape.type.value,
     ProvisioningPersistedEventSchema.shape.type.value,
     ModelWaitingPersistedEventSchema.shape.type.value,
   ])
@@ -107,6 +110,7 @@ export const TurnStreamingEventSchema = z
     MemoryRecallPersistedEventSchema,
     ProfileLearnedPersistedEventSchema,
     SkillUsedPersistedEventSchema,
+    SendReceiptPersistedEventSchema,
     ProvisioningPersistedEventSchema,
     ModelUsagePersistedEventSchema,
     ModelWaitingPersistedEventSchema,
@@ -190,6 +194,7 @@ export type PersistedPassthroughEvent =
   | MemoryRecallPersistedEvent
   | ProfileLearnedPersistedEvent
   | SkillUsedPersistedEvent
+  | SendReceiptPersistedEvent
   | ProvisioningPersistedEvent
   | ModelUsagePersistedEvent
   | ModelWaitingPersistedEvent;

@@ -15,6 +15,7 @@ import { ModelWaitingPersistedEvent } from "./ModelWaitingPersistedEvent.js";
 import { ProfileLearnedPersistedEvent } from "./ProfileLearnedPersistedEvent.js";
 import { ProvisioningPersistedEvent } from "./ProvisioningPersistedEvent.js";
 import { SandboxCreatedEvent } from "./SandboxCreatedEvent.js";
+import { SendReceiptPersistedEvent } from "./SendReceiptPersistedEvent.js";
 import { SessionEventFive } from "./SessionEventFive.js";
 import { SessionEventFour } from "./SessionEventFour.js";
 import { SkillUsedPersistedEvent } from "./SkillUsedPersistedEvent.js";
@@ -49,6 +50,7 @@ export const SessionEvent: core.serialization.Schema<serializers.SessionEvent.Ra
         MemoryRecallPersistedEvent,
         ProfileLearnedPersistedEvent,
         SkillUsedPersistedEvent,
+        SendReceiptPersistedEvent,
         ProvisioningPersistedEvent,
         ModelUsagePersistedEvent,
         ModelWaitingPersistedEvent,
@@ -76,6 +78,7 @@ export declare namespace SessionEvent {
         | MemoryRecallPersistedEvent.Raw
         | ProfileLearnedPersistedEvent.Raw
         | SkillUsedPersistedEvent.Raw
+        | SendReceiptPersistedEvent.Raw
         | ProvisioningPersistedEvent.Raw
         | ModelUsagePersistedEvent.Raw
         | ModelWaitingPersistedEvent.Raw;

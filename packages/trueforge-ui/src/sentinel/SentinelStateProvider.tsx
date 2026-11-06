@@ -6,8 +6,8 @@ import { createContext, useContext, useEffect, useMemo, useState, type FC, type 
 import { useAuiState } from '../assistant-ui.js';
 
 import { useOptionalSentinelApi } from './SentinelApiContext.js';
-import { subscribeToSentinelEvents } from './sentinelEvents.js';
-import type { ApprovalAnswer, SentinelApprovalInfo } from './types.js';
+import { subscribeToSendReceipts, subscribeToSentinelEvents } from './sentinelEvents.js';
+import type { ApprovalAnswer, SentinelApprovalInfo, SentinelSendReceipt } from './types.js';
 
 export type SentinelState = {
   /**
@@ -29,6 +29,8 @@ export type SentinelState = {
   changeRequestFor: (toolCallId: string) => string | undefined;
   /** Remembers the words of a "Change it" answer given in this tab. */
   recordChangeRequest: (toolCallId: string, words: string) => void;
+  /** How the send behind this tool call ended, once the server has said. */
+  receiptFor: (toolCallId: string) => SentinelSendReceipt | undefined;
 };
 
 const SentinelStateContext = createContext<SentinelState | null>(null);
@@ -45,6 +47,7 @@ export const SentinelStateProvider: FC<{ children: ReactNode }> = ({ children })
   const [approvals, setApprovals] = useState<Map<string, SentinelApprovalInfo>>(new Map());
   const [answers, setAnswers] = useState<Map<string, ApprovalAnswer>>(new Map());
   const [changeRequests, setChangeRequests] = useState<Map<string, string>>(new Map());
+  const [receipts, setReceipts] = useState<Map<string, SentinelSendReceipt>>(new Map());
   // Keyed by session, so switching chats never reads the last chat's finished read as this one's.
   const [readSessionId, setReadSessionId] = useState<string | null>(null);
   const savedCardsRead = api == null || sessionId == null || readSessionId === sessionId;
@@ -54,9 +57,16 @@ export const SentinelStateProvider: FC<{ children: ReactNode }> = ({ children })
   }, []);
 
   useEffect(() => {
+    return subscribeToSendReceipts(receipt =>
+      setReceipts(previous => new Map(previous).set(receipt.toolCallId, receipt)),
+    );
+  }, []);
+
+  useEffect(() => {
     setApprovals(new Map());
     setAnswers(new Map());
     setChangeRequests(new Map());
+    setReceipts(new Map());
     setReadSessionId(null);
     if (api == null || sessionId == null) return;
     let cancelled = false;
@@ -73,6 +83,7 @@ export const SentinelStateProvider: FC<{ children: ReactNode }> = ({ children })
         });
         setAnswers(previous => new Map([...Object.entries(context.answers ?? {}), ...previous]));
         setChangeRequests(previous => new Map([...Object.entries(context.changeRequests ?? {}), ...previous]));
+        setReceipts(previous => new Map([...Object.entries(context.receipts ?? {}), ...previous]));
         setReadSessionId(sessionId);
       })
       .catch((error: unknown) => {
@@ -103,8 +114,9 @@ export const SentinelStateProvider: FC<{ children: ReactNode }> = ({ children })
       changeRequestFor: toolCallId => changeRequests.get(toolInvocationRawId(toolCallId)),
       recordChangeRequest: (toolCallId, words) =>
         setChangeRequests(previous => new Map(previous).set(toolInvocationRawId(toolCallId), words)),
+      receiptFor: toolCallId => receipts.get(toolInvocationRawId(toolCallId)),
     }),
-    [savedCardsRead, approvals, answers, changeRequests],
+    [savedCardsRead, approvals, answers, changeRequests, receipts],
   );
 
   return <SentinelStateContext.Provider value={state}>{children}</SentinelStateContext.Provider>;

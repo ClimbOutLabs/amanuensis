@@ -14,6 +14,8 @@ export interface Tier3Email {
     body: string;
     /** Copied recipients. */
     cc: TrueForge.Tier3Mailbox[];
+    /** Short code for a send, repeated on its receipt; null for a draft. */
+    checkCode?: string | null;
     /** The saved draft a change replaces, or null. */
     replaces: TrueForge.Tier3EmailReplaces | null;
     /** The message a reply answers in its thread, or null when the message is not a reply. */
