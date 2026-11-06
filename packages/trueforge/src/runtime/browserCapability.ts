@@ -23,6 +23,7 @@ import type {
 } from '@truefoundry/trueforge-core/core';
 import {
   BROWSER_CLICK_TOOL_NAME,
+  BROWSER_SERVER_ID,
   defineTool,
   hostPictureMessage,
   LocalToolMCP,
@@ -35,8 +36,6 @@ import { randomUUID } from 'node:crypto';
 import type { Logger } from 'winston';
 import { z } from 'zod';
 import configuration, { getPublicUiBasePath } from '../config';
-
-export const BROWSER_SERVER_ID = 'browser';
 
 /** Browser tools read a page and move around it; nothing here submits anything. */
 const BROWSER_READ_ANNOTATIONS = { readOnlyHint: true, openWorldHint: true } as const;

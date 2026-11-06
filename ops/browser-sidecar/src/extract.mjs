@@ -109,6 +109,75 @@ function isVisible(element) {
   return rect.width > 0 && rect.height > 0;
 }
 
+/**
+ * Where what can be seen of an element starts: the top of the window, or the top of a scroll box
+ * around it when that is lower, since many web apps scroll an inner box and not the page.
+ */
+function viewTopOf(element, scrollBoxTops) {
+  let top = 0;
+  for (let box = element.parentElement; box !== null && box !== document.documentElement; box = box.parentElement) {
+    let boxTop = scrollBoxTops.get(box);
+    if (boxTop === undefined) {
+      const overflow = window.getComputedStyle(box).overflowY;
+      const scrolls = (overflow === 'auto' || overflow === 'scroll') && box.scrollHeight > box.clientHeight;
+      boxTop = scrolls ? box.getBoundingClientRect().top : null;
+      scrollBoxTops.set(box, boxTop);
+    }
+    if (boxTop !== null) {
+      top = Math.max(top, boxTop);
+    }
+  }
+  return top;
+}
+
+/** Whether the element lies wholly above the view, so a long page can be read from where it is scrolled to. */
+function isAboveView(element, scrollBoxTops) {
+  return element.getBoundingClientRect().bottom <= viewTopOf(element, scrollBoxTops);
+}
+
+/** The most text an alert may hold and still stay in a read wherever the view is. */
+const ALERT_MAX_CHARS = 500;
+
+/**
+ * The page's main heading and its short alerts and status lines stay in a read wherever the view
+ * is, so an error shown at the top is seen. A long live region, such as a chat log, scrolls like the rest.
+ */
+function isAlwaysShown(element) {
+  if (element.tagName === 'H1') {
+    return true;
+  }
+  const alert = element.closest('[role="alert"], [role="status"], [aria-live]:not([aria-live="off"])');
+  return alert !== null && (alert.textContent ?? '').length <= ALERT_MAX_CHARS;
+}
+
+/**
+ * Where the view is, in whole pixels down what scrolls: the scroll box under the middle of the view
+ * when there is one (many web apps scroll an inner box), or else the page.
+ */
+export function viewPosition() {
+  const middle = document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2);
+  for (
+    let box = middle;
+    box !== null && box !== document.body && box !== document.documentElement;
+    box = box.parentElement
+  ) {
+    const overflow = window.getComputedStyle(box).overflowY;
+    if ((overflow === 'auto' || overflow === 'scroll') && box.scrollHeight > box.clientHeight) {
+      return {
+        top: Math.round(box.scrollTop),
+        bottom: Math.round(box.scrollTop + box.clientHeight),
+        height: Math.round(box.scrollHeight),
+      };
+    }
+  }
+  const page = document.scrollingElement ?? document.documentElement;
+  return {
+    top: Math.round(window.scrollY),
+    bottom: Math.round(window.scrollY + window.innerHeight),
+    height: Math.round(Math.max(page.scrollHeight, window.innerHeight)),
+  };
+}
+
 function accessibleName(element) {
   const ariaLabel = element.getAttribute('aria-label');
   if (ariaLabel !== null && ariaLabel.trim() !== '') {
@@ -303,6 +372,7 @@ export function elementInfo(path) {
 export function extractSnapshotNodes() {
   const nodes = [];
   const selector = [...HEADING_TAGS, ...TEXT_TAGS, ...INTERACTIVE_TAGS].join(',');
+  const scrollBoxTops = new Map();
   for (const element of document.querySelectorAll(selector)) {
     if (!isVisible(element)) {
       continue;
@@ -310,7 +380,14 @@ export function extractSnapshotNodes() {
     if (TEXT_TAGS.has(element.tagName)) {
       const text = blockText(element);
       if (text !== '') {
-        nodes.push({ id: domPath(element), role: 'text', name: text, field_kind: null, actionable: false });
+        nodes.push({
+          id: domPath(element),
+          role: 'text',
+          name: text,
+          field_kind: null,
+          actionable: false,
+          above_view: isAboveView(element, scrollBoxTops) && !isAlwaysShown(element),
+        });
       }
       continue;
     }
@@ -322,6 +399,7 @@ export function extractSnapshotNodes() {
       value: element.tagName === 'INPUT' || element.tagName === 'TEXTAREA' ? element.value : undefined,
       field_kind: fieldKind(element),
       actionable,
+      above_view: isAboveView(element, scrollBoxTops) && !isAlwaysShown(element),
     });
   }
   return nodes;

@@ -108,6 +108,34 @@ async function withWorld(run) {
   const siteA = await fixture({
     '/': ACCOUNT_PAGE,
     '/checkout': (_req, res) => res.writeHead(200, { 'content-type': 'text/html' }).end(CHECKOUT_FIXTURE_HTML),
+    // A chat log: a long polite live region that must scroll like the rest of the page.
+    '/chat-log': html(
+      `<h1>Chat</h1><div role="log" aria-live="polite">${Array.from(
+        { length: 3000 },
+        (_v, i) => `<p>Chat message ${String(i)} in a long conversation.</p>`,
+      ).join('')}</div>`,
+    ),
+    // A web app that scrolls an inner box, not the page, under a header that stays put.
+    '/long-box': html(
+      `<h1 style="height:80px;margin:0">Inbox</h1><div style="height:600px;overflow:auto">${Array.from(
+        { length: 3000 },
+        (_v, i) => `<p>Message ${String(i)} in a long and unchanging list.</p>`,
+      ).join('')}</div>`,
+    ),
+    // A page whose text fits one read but is many screens tall, with an alert at its top.
+    '/tall': html(
+      `<h1>Article</h1><p role="alert">Saved.</p>${Array.from(
+        { length: 40 },
+        (_v, i) => `<p style="height:200px">Section ${String(i)}.</p>`,
+      ).join('')}`,
+    ),
+    // A static page much longer than one read.
+    '/long': html(
+      `<h1>Long read</h1><p role="alert">Your changes were not saved.</p>${Array.from(
+        { length: 3000 },
+        (_v, i) => `<p>Paragraph ${String(i)} of a long and unchanging page.</p>`,
+      ).join('')}`,
+    ),
     // A card number the person typed, on a field painted a green no other part of the page uses.
     '/card': html(`<h1>Pay</h1>
       <label for="cc">Card number</label>
@@ -645,6 +673,78 @@ function refFor(text, label) {
   const line = text.split('\n').find(candidate => candidate.includes(label));
   return /^\[(e\d+)\]/.exec(line ?? '')?.[1];
 }
+
+test('each scroll down a long page reads the next part of it', { skip: !browsersAvailable }, async () => {
+  await withWorld(async ({ sidecar }) => {
+    const where = { owner: 'owner-1', tab: 'chat-1' };
+    const opened = await sidecar.open({ ...where, url: 'http://site-a.test/long' });
+    const first = await sidecar.scroll({ ...where, direction: 'down' });
+    const second = await sidecar.scroll({ ...where, direction: 'down' });
+    assert.match(opened.text, /Paragraph 0 of/);
+    assert.doesNotMatch(opened.text, /left out; scroll up/);
+    assert.match(first.text, /left out; scroll up/);
+    assert.notEqual(first.text, opened.text);
+    assert.notEqual(second.text, first.text);
+    assert.doesNotMatch(second.text, /Paragraph 0 of/);
+    const back = await sidecar.scroll({ ...where, direction: 'up' });
+    assert.equal(back.text, first.text);
+  });
+});
+
+test('each scroll down an inner scroll box reads the next part of it', { skip: !browsersAvailable }, async () => {
+  await withWorld(async ({ sidecar }) => {
+    const where = { owner: 'owner-1', tab: 'chat-1' };
+    const opened = await sidecar.open({ ...where, url: 'http://site-a.test/long-box' });
+    const first = await sidecar.scroll({ ...where, direction: 'down' });
+    const second = await sidecar.scroll({ ...where, direction: 'down' });
+    assert.match(opened.text, /Message 0 in/);
+    assert.match(first.text, /left out; scroll up/);
+    assert.match(first.text, /Inbox/, 'the header in view still shows');
+    assert.notEqual(first.text, opened.text);
+    assert.notEqual(second.text, first.text);
+  });
+});
+
+test('a scroll down a tall page that fits one read says where the view is', { skip: !browsersAvailable }, async () => {
+  await withWorld(async ({ sidecar }) => {
+    const where = { owner: 'owner-1', tab: 'chat-1' };
+    const opened = await sidecar.open({ ...where, url: 'http://site-a.test/tall' });
+    const first = await sidecar.scroll({ ...where, direction: 'down' });
+    const second = await sidecar.scroll({ ...where, direction: 'down' });
+    assert.match(opened.text, /^In view: 0 to 800 of \d+ pixels down$/m);
+    assert.match(first.text, /^In view: 800 to 1600 of /m);
+    assert.notEqual(second.text, first.text);
+    assert.match(second.text, /Section 0\./, 'a page that fits one read is read whole');
+    for (let i = 0; i < 12; i += 1) {
+      await sidecar.scroll({ ...where, direction: 'down' });
+    }
+    const end = await sidecar.scroll({ ...where, direction: 'down' });
+    assert.match(end.text, /the end of the page$/m);
+  });
+});
+
+test('a chat log scrolls like the rest of the page', { skip: !browsersAvailable }, async () => {
+  await withWorld(async ({ sidecar }) => {
+    const where = { owner: 'owner-1', tab: 'chat-1' };
+    await sidecar.open({ ...where, url: 'http://site-a.test/chat-log' });
+    await sidecar.scroll({ ...where, direction: 'down' });
+    const scrolled = await sidecar.scroll({ ...where, direction: 'down' });
+    assert.match(scrolled.text, /left out; scroll up/);
+    assert.doesNotMatch(scrolled.text, /Chat message 0 in/);
+  });
+});
+
+test('a read that starts at the view keeps the main heading and any alert', { skip: !browsersAvailable }, async () => {
+  await withWorld(async ({ sidecar }) => {
+    const where = { owner: 'owner-1', tab: 'chat-1' };
+    await sidecar.open({ ...where, url: 'http://site-a.test/long' });
+    const scrolled = await sidecar.scroll({ ...where, direction: 'down' });
+    assert.match(scrolled.text, /left out; scroll up/);
+    assert.doesNotMatch(scrolled.text, /Paragraph 0 of/);
+    assert.match(scrolled.text, /Long read/);
+    assert.match(scrolled.text, /Your changes were not saved\./);
+  });
+});
 
 /** How many pixels of a PNG are exactly this colour. */
 function pixelsOf(pngBase64, color) {

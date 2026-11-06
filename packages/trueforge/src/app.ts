@@ -1,5 +1,4 @@
 /** The API: resource routers, the OpenAPI document and Swagger UI, all under /api/v1. */
-import { swaggerUI } from '@hono/swagger-ui';
 import { OpenAPIHono, z } from '@hono/zod-openapi';
 import type { ISessionStore, Sessions, TurnStreamingEvent } from '@truefoundry/trueforge-core/agent-session';
 import {
@@ -113,6 +112,7 @@ import type { ITextContactStore } from './db/textContactStore';
 import type { WithTransaction } from './db/transaction';
 import type { ITurnArtifactStore } from './db/turnArtifactStore';
 import type { SchedulerProbe } from './help/healthCheck';
+import { mountApiDocs } from './http/apiDocs';
 import { mountCatalogLogos } from './http/catalogLogos';
 import { createClientCertificateMiddleware } from './http/tls';
 import type { IOAuthTokenStore } from './mcp/auth/types';
@@ -646,6 +646,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         tokenStore: deps.tokenStore,
         globalSettingsStore: deps.globalSettingsStore,
         googleConnectionStore: deps.googleConnectionStore,
+        personalizationStore: deps.personalizationStore,
         hostReportPath: configuration.HOST_REPORT_PATH,
         schedulerStatus: deps.schedulerStatus,
         logger: deps.logger,
@@ -1340,7 +1341,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
   const uiBasePath = getPublicUiBasePath();
   const openApiSpecPath = `${uiBasePath}api/v1/openapi.json`;
   const openApiServerUrl = uiBasePath === '/' ? undefined : uiBasePath.replace(/\/$/, '');
-  app.get('/api/v1/docs', swaggerUI({ url: openApiSpecPath }));
+  mountApiDocs(app, { uiBasePath, openApiSpecPath });
   app.get('/api/v1/openapi.json', c =>
     c.json(
       buildOpenApiDocument(app, {
