@@ -10,11 +10,10 @@ import { defaultVoiceModelDir, resolveAppDataDir } from '../src/appDataDir';
 import { downloadVadModel } from '../src/voice/vad/sileroVad';
 
 const optional = process.argv.includes('--optional');
+const { VOICE_VAD_MODEL_DIR, APP_DATA_DIR, APP_DATA_DIR_SUFFIX } = process.env;
 const dir =
-  process.env.VOICE_VAD_MODEL_DIR ??
-  defaultVoiceModelDir(
-    resolveAppDataDir({ override: process.env.APP_DATA_DIR, suffix: process.env.APP_DATA_DIR_SUFFIX ?? '' }),
-  );
+  VOICE_VAD_MODEL_DIR ??
+  defaultVoiceModelDir(resolveAppDataDir({ override: APP_DATA_DIR, suffix: APP_DATA_DIR_SUFFIX ?? '' }));
 try {
   const target = await downloadVadModel({ dir });
   console.log(`Voice mode's listening model is ready at ${target}`);
