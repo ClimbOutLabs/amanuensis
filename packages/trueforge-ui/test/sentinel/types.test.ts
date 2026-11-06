@@ -314,7 +314,7 @@ describe('extractSentinelFromEvent', () => {
     });
   });
 
-  it('keeps the name a mail is sent as and the warnings the voice reads, and leaves them off an older card', () => {
+  it('keeps the name a mail is sent as and its name-left-off note, and leaves them off an older card', () => {
     const card = (extra: Record<string, unknown>) =>
       extractSentinelFromEvent({
         type: 'tool.approval_required',
@@ -338,7 +338,7 @@ describe('extractSentinelFromEvent', () => {
     expect(card({})).not.toHaveProperty('name_left_off');
   });
 
-  it('keeps the duplicate and multi-day warnings of an event the voice reads', () => {
+  it('keeps the duplicate and multi-day warnings of an event', () => {
     const event = (extra: Record<string, unknown>) =>
       extractSentinelFromEvent({
         type: 'tool.approval_required',

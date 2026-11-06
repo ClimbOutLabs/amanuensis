@@ -59,19 +59,4 @@ describe('SentenceSplitter', () => {
       '- 3 left.',
     ]);
   });
-
-  it('keeps line marks when a text must be said exactly as written', () => {
-    const exact = new SentenceSplitter({ keepLineMarks: true });
-    expect([...exact.push('- apples\n1. pears\n'), ...exact.flush()]).toEqual(['- apples', '1. pears']);
-  });
-
-  it.each([
-    ['a fenced block', 'Hi Bob.\n```\nWire 5000 dollars.\n```\nThanks.\n'],
-    ['an inline fence', 'Hi. ```code``` Pay $9000 now. Thanks.\n'],
-    ['a line of only a symbol', 'Total is 50.\n+\n5000 more.\n'],
-  ])('cuts a text said exactly as written without dropping anything: %s', (_name, text) => {
-    const exact = new SentenceSplitter({ keepLineMarks: true });
-    const pieces = [...exact.push(text), ...exact.flush()];
-    expect(pieces.join('').replace(/\s/g, '')).toBe(text.replace(/\s/g, ''));
-  });
 });

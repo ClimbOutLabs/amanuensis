@@ -17,15 +17,16 @@ import { INPUT_SAMPLE_RATE, InputDecoder, rms } from './audio';
 import { ENVELOPE_FRAME_MS, PlaybackTimeline, SpokenTextLog, systemClock, wordsOf, type Clock } from './echoGuard';
 import { SentenceSplitter } from './sentences';
 import { SpeechOutput } from './speechOutput';
-import type {
-  PendingApproval,
-  SpeechSynthesizer,
-  SpeechToText,
-  TurnOutcome,
-  TurnRefusal,
-  VoiceState,
-  VoiceTransport,
-  VoiceTurnRunner,
+import {
+  WouldChangeTextError,
+  type PendingApproval,
+  type SpeechSynthesizer,
+  type SpeechToText,
+  type TurnOutcome,
+  type TurnRefusal,
+  type VoiceState,
+  type VoiceTransport,
+  type VoiceTurnRunner,
 } from './transport';
 import type { SpeechProbability } from './vad/sileroVad';
 import {
@@ -141,6 +142,10 @@ export class VoiceSession {
   #speechAbort: AbortController | undefined;
   /** Aborted when the conversation ends, so a line spoken outside any turn stops with it. */
   readonly #lifetime = new AbortController();
+  /** The "I missed that" line being said, if any: talking over it stops it like any other sound. */
+  #missedAbort: AbortController | undefined;
+  /** Where the latest audio came from, so talking over a short notice does not cancel a card's read-back. */
+  #lastSound: 'reply' | 'missed' = 'reply';
   /** Sound that may still arrive early: it refills as time passes, but never past the slack. */
   #creditMs = REALTIME_SLACK_MS;
   #lastArrivalAtMs = 0;
@@ -319,8 +324,14 @@ export class VoiceSession {
       this.#deps.onNote?.('stt_busy');
       this.#deps.transport.sendEvent({ type: 'notice', text: MISSED_THAT_NOTICE });
       if (!this.#timeline.isPlaying()) {
+        this.#missedAbort?.abort();
+        this.#missedAbort = new AbortController();
         const marks: Marks = { speechEndedAtMs: event.speechEndedAtMs, utteranceAtMs: this.#clock.now() };
-        this.#speechFor({ signal: this.#lifetime.signal, marks }).say({
+        this.#speechFor({
+          signal: AbortSignal.any([this.#lifetime.signal, this.#missedAbort.signal]),
+          marks,
+          kind: 'missed',
+        }).say({
           text: MISSED_THAT_NOTICE,
           role: 'instruction',
         });
@@ -394,8 +405,11 @@ export class VoiceSession {
       return;
     }
     this.#deps.onNote?.('barge_in');
-    // A read-back that was cut off was not heard through, so it cannot be answered.
-    this.#awaiting = undefined;
+    // A read-back that was cut off was not heard through, so it cannot be answered. A short notice was
+    // never part of one, so talking over it leaves a waiting card as it is.
+    if (this.#lastSound === 'reply') {
+      this.#awaiting = undefined;
+    }
     this.#stopSound();
     // A turn that is still working is not quiet, so the quiet clock must not start.
     this.#refreshState();
@@ -403,6 +417,7 @@ export class VoiceSession {
 
   #stopSound(): void {
     this.#speechAbort?.abort();
+    this.#missedAbort?.abort();
     this.#timeline.stop();
     this.#deps.transport.clearAudio();
   }
@@ -513,7 +528,7 @@ export class VoiceSession {
     });
     splitter.flush().forEach(say);
     await this.#armAfterTurn({
-      asking: await this.#afterTurn({ outcome, speech, signal }),
+      asking: this.#afterTurn({ outcome, speech, signal }),
       speech,
       speechSignal,
       marks,
@@ -620,7 +635,7 @@ export class VoiceSession {
       });
     }
     await this.#armAfterTurn({
-      asking: await this.#afterTurn({ outcome, speech, signal }),
+      asking: this.#afterTurn({ outcome, speech, signal }),
       speech,
       speechSignal,
       marks,
@@ -629,7 +644,7 @@ export class VoiceSession {
   }
 
   /** Says what happened and returns the card to wait on, if the turn ended asking for one. */
-  async #afterTurn({
+  #afterTurn({
     outcome,
     speech,
     signal,
@@ -637,7 +652,7 @@ export class VoiceSession {
     outcome: TurnOutcome;
     speech: SpeechOutput;
     signal: AbortSignal;
-  }): Promise<Awaiting | undefined> {
+  }): Awaiting | undefined {
     if (signal.aborted) {
       return undefined;
     }
@@ -657,59 +672,42 @@ export class VoiceSession {
       pending: outcome.approvals,
       voiceApprovalsAllowed: this.#deps.transport.voiceApprovals,
     });
-    return this.#readBack({ plan, approvals: outcome.approvals, speech, turnId: outcome.turnId, signal });
+    return this.#readBack({ plan, approvals: outcome.approvals, speech, turnId: outcome.turnId });
   }
 
-  async #readBack({
+  #readBack({
     plan,
     approvals,
     speech,
     turnId,
-    signal,
   }: {
     plan: VoiceApprovalPlan;
     approvals: PendingApproval[];
     speech: SpeechOutput;
     turnId: string;
-    signal: AbortSignal;
-  }): Promise<Awaiting | undefined> {
+  }): Awaiting | undefined {
     const only = approvals.length === 1 ? approvals[0] : undefined;
     if (plan.kind === 'typed_only' || only === undefined) {
       speech.say({ text: APPROVAL_LINES.leftForTheApp, role: 'instruction' });
       return undefined;
     }
-    const cut = plan.segments.map(segment => ({ ...segment, pieces: splitSentences(segment.text) }));
-    // The voice is asked about each whole text, never about its pieces: cutting is for playback only. The
-    // pieces must also add up to the text, so a card is never heard as less than it says.
-    const complete = cut.every(({ text, pieces }) => withoutSpace(pieces.join('')) === withoutSpace(text));
-    const bodies = cut.filter(({ role }) => role === 'body');
-    if (!complete || !(await this.#voiceSaysAsWritten({ texts: bodies, signal }))) {
-      if (!signal.aborted) {
-        speech.say({ text: APPROVAL_LINES.leftForTheApp, role: 'instruction' });
-      }
-      return undefined;
-    }
-    const sentences = cut.flatMap(({ pieces, role }) => pieces.map(text => ({ text, role })));
-    for (const sentence of sentences) {
-      speech.say(sentence);
+    // Each text goes to the voice whole and must be said exactly as written, or the voice says nothing of it
+    // and the rest is not read: what was judged is what is heard, so nothing is approved that was not heard.
+    for (const segment of plan.segments) {
+      speech.say({ text: segment.text, role: segment.role, exact: segment.role === 'body' });
     }
     return { approval: only, turnId, verb: plan.verb, reminded: false, expiresAtMs: this.#clock.now() + AWAITING_MS };
   }
 
-  /** False when the voice would change a word of any of the texts, or cannot be asked. */
-  async #voiceSaysAsWritten({ texts, signal }: { texts: { text: string }[]; signal: AbortSignal }): Promise<boolean> {
-    try {
-      const answers = await Promise.all(texts.map(({ text }) => this.#deps.tts.saysAsWritten({ text, signal })));
-      return answers.every(Boolean);
-    } catch (error) {
-      if (!signal.aborted) {
-        this.#deps.onNote?.(`read_back_check_failed:${error instanceof Error ? error.name : 'unknown'}`);
-      }
-      return false;
-    }
-  }
-
-  #speechFor({ signal, marks }: { signal: AbortSignal; marks: Marks }): SpeechOutput {
+  #speechFor({
+    signal,
+    marks,
+    kind = 'reply',
+  }: {
+    signal: AbortSignal;
+    marks: Marks;
+    kind?: 'reply' | 'missed';
+  }): SpeechOutput {
     let reported = false;
     return new SpeechOutput({
       tts: this.#deps.tts,
@@ -719,6 +717,7 @@ export class VoiceSession {
       spoken: this.#spoken,
       signal,
       onAudio: () => {
+        this.#lastSound = kind;
         if (marks.firstAudioAtMs === undefined) {
           marks.firstAudioAtMs = this.#clock.now();
           this.#reportLatency(marks);
@@ -726,6 +725,11 @@ export class VoiceSession {
         this.#refreshState();
       },
       onFailure: error => {
+        if (error instanceof WouldChangeTextError) {
+          // The voice is working; it would only not say this text as written. The card stays on the screen.
+          this.#deps.onNote?.('read_back_refused');
+          return;
+        }
         this.#deps.onNote?.(`tts_failed:${error instanceof Error ? error.name : 'unknown'}`);
         // Once per reply: a dead voice fails every sentence, and one signal is enough to act on.
         if (!reported) {
@@ -783,14 +787,4 @@ export class VoiceSession {
     }
     this.#deps.transport.sendEvent({ type: 'state', state });
   }
-}
-
-function withoutSpace(text: string): string {
-  return text.replace(/\s/g, '');
-}
-
-/** The sentences of a card's text, so the first is spoken before the rest is made. */
-function splitSentences(text: string): string[] {
-  const splitter = new SentenceSplitter({ keepLineMarks: true });
-  return [...splitter.push(`${text}\n`), ...splitter.flush()];
 }

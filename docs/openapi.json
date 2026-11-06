@@ -11659,6 +11659,7 @@
           },
           "span_days": {
             "description": "How many days the event runs over; 1 for an ordinary event.",
+            "minimum": 1,
             "type": "integer"
           },
           "time_zone": {

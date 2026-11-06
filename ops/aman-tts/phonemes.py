@@ -206,8 +206,19 @@ _PLAIN_NUMBER = re.compile(
     rf"|(?P<number>{_WHOLE}(?:\.\d+)?)"
     r")" + _NOT_MORE_DIGITS
 )
-# Two numbers with only a space between are read as one run of words ("1000 500", "5 000").
-_ADJACENT_NUMBERS = re.compile(r"\d[ \t\n]+\$?\d")
+# Two numbers with nothing between them but blanks or signs that make no sound or only a pause
+# ("1000 500", "1000 (500)", "1000; 500", "1000 & 500") run together when heard. A comma or colon straight
+# between digits ("1,000", "9:30") is a number's own and is left to the number rules.
+_ADJACENT_NUMBERS = re.compile(r"\d(?![,:]\d)[ \t\n\"'()\u2014;!?,:&]+\$?\d")
+# A number word beside a digit ("twenty 5") is heard as one number, like two digits side by side.
+_NUMBER_WORDS = (
+    r"(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen"
+    r"|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million"
+    r"|billion|trillion)"
+)
+_NUMBER_WORD_BESIDE_DIGIT = re.compile(
+    rf"(?i)\b{_NUMBER_WORDS}\b[ \t\n]*\$?\d|\d[ \t\n]*\b{_NUMBER_WORDS}\b"
+)
 _WRITTEN_WORD = re.compile(r"[^\W_]+(?:'[^\W_]+)*")
 # Characters the voice says as written: letters and digits, spaces, usual punctuation and a few symbols.
 _PLAIN_CHARS = re.compile(r"[A-Za-z0-9 \n\t.,!?;:'\"()%&+@=$\u2014\u2026-]*")
@@ -240,6 +251,7 @@ def reads_as_written(text: str) -> bool:
         or _LONE_HYPHEN.search(written)
         or _URL.search(written)
         or _ADJACENT_NUMBERS.search(written)
+        or _NUMBER_WORD_BESIDE_DIGIT.search(written)
     ):
         return False
     written = _PLAIN_NUMBER.sub(_spell_plain_number, written)

@@ -116,7 +116,9 @@ describe('what is read back for a voice approval', () => {
       const spoken = new Map<string, string>(Object.entries(rules));
       for (const [key, value] of Object.entries(shape)) {
         if (spoken.get(key) === 'spoken' && typeof value === 'string' && value !== '') {
-          expect([key, said.includes(value.replace(/[/_]/g, ' '))]).toEqual([key, true]);
+          // An address is said with its dots, so the same transformation is applied to what is looked for.
+          const heard = key === 'calendar' ? value.replace(/@/g, ' at ').replace(/\./g, ' dot ') : value;
+          expect([key, said.includes(heard.replace(/[/_]/g, ' '))]).toEqual([key, true]);
         }
       }
     }
@@ -223,6 +225,20 @@ describe('what is read back for a voice approval', () => {
     expect(plan({ ...base, email: { ...base.email, to } })).toEqual({ kind: 'typed_only' });
   });
 
+  it('says the dots and hyphens of the calendar address, so it cannot sound like another', () => {
+    const event = dentistCard.calendar_event;
+    if (!event) {
+      throw new Error('expected an event');
+    }
+    expect(said({ ...dentistCard, calendar_event: { ...event, calendar: 'me@my-bank.example.com' } })).toContain(
+      'me at my dash bank dot example dot com',
+    );
+  });
+
+  it('says a stopped schedule is deleted for good', () => {
+    expect(said(cancelScheduleCard)).toContain('delete the schedule Monday summary for good');
+  });
+
   it('leaves a schedule or event in an offset zone that reads the wrong way round for the screen', () => {
     const event = dentistCard.calendar_event;
     if (!event) {
@@ -255,6 +271,13 @@ describe('what counts as an answer', () => {
   ])('is not an answer, even in a script that writes its question mark another way: %s', heard => {
     expect(classifyAnswer({ heard, verb: 'send' })).toBe('other');
   });
+
+  it.each(['Yes? send it.', 'yes, send it\u2026', 'yes send it...', 'yes \u037e send it'])(
+    'is not an answer when a question mark sits inside it or it trails off: %s',
+    heard => {
+      expect(classifyAnswer({ heard, verb: 'send' })).toBe('other');
+    },
+  );
 
   it.each(['Yes, send it.', 'Yes, send it!', 'yes send it', 'Yes, send it.\u201d'])('still is one: %s', heard => {
     expect(classifyAnswer({ heard, verb: 'send' })).toBe('confirm');

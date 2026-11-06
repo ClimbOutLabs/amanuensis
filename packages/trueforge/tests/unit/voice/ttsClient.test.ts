@@ -1,4 +1,5 @@
 import { SpeechRateLimiter } from '../../../src/voice/speechRateLimit';
+import { WouldChangeTextError } from '../../../src/voice/transport';
 import { SidecarSpeechSynthesizer, WholeSamples } from '../../../src/voice/ttsClient';
 
 function streamOf(...pieces: Uint8Array[]): Response {
@@ -88,42 +89,58 @@ describe('WholeSamples', () => {
   });
 });
 
-describe('SidecarSpeechSynthesizer.saysAsWritten', () => {
+describe('SidecarSpeechSynthesizer with exact', () => {
   afterEach(() => {
     jest.restoreAllMocks();
   });
 
-  it('is true when the service would say the text as written', async () => {
-    const fetchSpy = jest.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ spoken: 'hello' }));
-    await expect(new SidecarSpeechSynthesizer().saysAsWritten({ text: 'Hello.', signal: never })).resolves.toBe(true);
-    expect(String(fetchSpy.mock.calls[0]?.[0])).toMatch(/\/v1\/normalize$/);
+  it('sends the whole text once, marked exact, and streams what comes back', async () => {
+    const fetchSpy = jest.spyOn(globalThis, 'fetch').mockResolvedValue(streamOf(Uint8Array.of(1, 2)));
+    const pieces = await collect(
+      new SidecarSpeechSynthesizer().stream({
+        text: 'Total is 100. + 500 fee.',
+        format: 'pcm16',
+        signal: never,
+        exact: true,
+      }),
+    );
+    expect(pieces.length).toBe(1);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(String(fetchSpy.mock.calls[0]?.[0])).toMatch(/\/v1\/speak$/);
+    expect(JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body))).toMatchObject({
+      text: 'Total is 100. + 500 fee.',
+      exact: true,
+    });
   });
 
-  it('is false when the service says it would change the words', async () => {
+  it('does not ask for exact unless told to', async () => {
+    const fetchSpy = jest.spyOn(globalThis, 'fetch').mockResolvedValue(streamOf(Uint8Array.of(1, 2)));
+    await collect(new SidecarSpeechSynthesizer().stream({ text: 'Hi.', format: 'pcm16', signal: never }));
+    expect(JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body))).not.toHaveProperty('exact');
+  });
+
+  it('says so, before any sound, when the voice would change the words', async () => {
     jest
       .spyOn(globalThis, 'fetch')
       .mockResolvedValue(
         Response.json({ detail: 'no' }, { status: 400, headers: { 'x-aman-reason': 'would_change_text' } }),
       );
-    await expect(new SidecarSpeechSynthesizer().saysAsWritten({ text: 'Pay $1,5.', signal: never })).resolves.toBe(
-      false,
-    );
+    await expect(
+      collect(
+        new SidecarSpeechSynthesizer().stream({ text: 'Pay $1,5.', format: 'pcm16', signal: never, exact: true }),
+      ),
+    ).rejects.toBeInstanceOf(WouldChangeTextError);
   });
 
   it.each([
     ['a refusal for another reason', () => Response.json({ detail: 'bad' }, { status: 400 })],
     ['a server error', () => Response.json({ detail: 'down' }, { status: 503 })],
-    ['a 200 that is not the voice service', () => new Response('<html>welcome</html>', { status: 200 })],
-    ['a 200 with no spoken words', () => Response.json({ ok: true })],
-  ])('throws on %s, so the caller cannot take it for a yes', async (_name, answer) => {
+  ])('reports %s as a failure, not as a refusal of the words', async (_name, answer) => {
     jest.spyOn(globalThis, 'fetch').mockResolvedValue(answer());
-    await expect(new SidecarSpeechSynthesizer().saysAsWritten({ text: 'Hi.', signal: never })).rejects.toThrow(
-      /text to speech answered/,
+    const read = collect(
+      new SidecarSpeechSynthesizer().stream({ text: 'Hi.', format: 'pcm16', signal: never, exact: true }),
     );
-  });
-
-  it('throws when the service cannot be reached', async () => {
-    jest.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('offline'));
-    await expect(new SidecarSpeechSynthesizer().saysAsWritten({ text: 'Hi.', signal: never })).rejects.toThrow();
+    await expect(read).rejects.toThrow(/text to speech answered/);
+    await expect(read).rejects.not.toBeInstanceOf(WouldChangeTextError);
   });
 });

@@ -21,7 +21,6 @@ function parts(clock: Clock): { stt: SpeechToText; turns: VoiceTurnRunner; tts: 
     cancel: () => Promise.resolve(),
   };
   const tts: SpeechSynthesizer = {
-    saysAsWritten: () => Promise.resolve(true),
     stream: async function* () {
       await delay({ clock, ms: 60 });
       yield new Uint8Array(960);

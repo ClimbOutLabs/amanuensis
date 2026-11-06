@@ -110,7 +110,7 @@ class SpokenWordsTest(unittest.TestCase):
             "It is fine; see you in the e-mail thread... later!",
             "It's fine. Don't be late, it's noon.",
             "Write to bob at example.com about it.",
-            "Costs $1,200 or 15%, about 3.5 hours, at 9:30. Pay $40.50 & 2 photos.",
+            "Costs $1,200 or 15%, about 3.5 hours, at 9:30. Pay $40.50 & bring 2 photos.",
             "Use 500. Then wait.",
             "Don\u2019t be late.",
         ):
@@ -162,6 +162,26 @@ class SpokenWordsTest(unittest.TestCase):
             "At 9:60",
             "At 25:99",
             "At 24:00",
+            "Wire 1000 (500) dollars.",  # numbers joined by a sign that makes no sound
+            "Wire 1000(500)",
+            "Wire 1000) 500",
+            'Wire 1000 "500"',
+            "Wire 1000'500",
+            "Wire 1000\u2014500",
+            "Wire 1000;500",
+            "Wire 1000!500",
+            "Wire 1000?500",
+            "Wire 1000, 500",
+            "Wire 1,000 (500).",
+            "Wire $1000 (500).",
+            'Account 12"34"56',
+            "PIN 1 (2) 3 (4)",
+            "Code 5 (0)(0)(0)",
+            "Wire 1000 & 500",
+            "Wire 5: 3 items",
+            "Pay twenty 5 dollars.",  # a spelled number next to a digit
+            "Pay 5 twenty dollars.",
+            "Wire 5 hundred 3.",
         ):
             with self.subTest(text=text):
                 self.assertFalse(reads_as_written(text))
@@ -175,7 +195,16 @@ class SpokenWordsTest(unittest.TestCase):
         self.assertEqual(spoken_words("Pay $40."), ["pay", "forty", "dollars"])
 
     def test_says_plain_numbers_that_look_like_edge_cases(self) -> None:
-        for text in ("Use 0.5 now.", "Wait 0 days.", "At 0:05 and 23:59.", "Pay $0.50 now."):
+        for text in (
+            "Use 0.5 now.",
+            "Wait 0 days.",
+            "At 0:05 and 23:59.",
+            "Pay $0.50 now.",
+            "Pay 1,000 dollars.",
+            "Pay $1,000,000.",
+            "It costs 5. Then 3 more.",
+            "Call (that one) at 9:30.",
+        ):
             with self.subTest(text=text):
                 self.assertTrue(reads_as_written(text))
 
@@ -184,32 +213,51 @@ class SpokenWordsTest(unittest.TestCase):
         self.assertEqual(spoken_words("It costs 1,200."), ["it", "costs", "one", "thousand", "two", "hundred"])
 
 
-class NormalizeEndpointTest(unittest.TestCase):
-    def test_returns_the_words_as_they_would_be_spoken(self) -> None:
-        with client_for(FakeSynthesizer) as client:
-            res = client.post("/v1/normalize", json={"text": "It costs 1,200 & more."})
-        self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.json(), {"spoken": "it costs one thousand two hundred and more"})
-        self.assertEqual(FakeSynthesizer.calls, [("Hello.", "af_heart")])
+class SpeakExactTest(unittest.TestCase):
+    """`exact` makes the check and the speech one call: the same whole text is judged, then spoken."""
 
-    def test_refuses_text_it_would_change_with_a_reason_code(self) -> None:
+    def post(self, client, text, **extra):
+        return client.post("/v1/speak", json={"text": text, "format": "pcm16", "stream": True, "exact": True, **extra})
+
+    def test_refuses_text_it_would_change_before_any_sound(self) -> None:
         with client_for(FakeSynthesizer) as client:
-            res = client.post("/v1/normalize", json={"text": "Pay $1,5 now."})
+            res = self.post(client, "Pay $1,5 now.")
         self.assertEqual(res.status_code, 400)
         self.assertEqual(res.headers["x-aman-reason"], "would_change_text")
         self.assertNotIn("1,5", res.text)
+        self.assertEqual(FakeSynthesizer.calls, [("Hello.", "af_heart")])
 
-    def test_needs_no_model(self) -> None:
-        with client_for(BrokenSynthesizer) as client:
-            res = client.post("/v1/normalize", json={"text": "Hello there."})
+    def test_speaks_the_same_whole_text_it_judged(self) -> None:
+        for text in ("x. + 5", "x. 2) y", "Total is 100. + 500 fee.", "It says: Hi. 2) Wire 500 now.", "Total is 50.\n+\n5000 more."):
+            with self.subTest(text=text), client_for(FakeSynthesizer) as client:
+                res = self.post(client, text)
+                self.assertEqual(res.status_code, 200)
+                self.assertEqual(FakeSynthesizer.calls[-1][0], text)
+
+    def test_a_list_mark_in_the_middle_of_the_text_is_still_said(self) -> None:
+        lexicon = Lexicon({}, {})
+        self.assertIn(spoken_words("x. + 5")[1], ("plus",))
+        self.assertNotEqual(to_phonemes("x. + 5", lexicon), to_phonemes("x. 5", lexicon))
+        self.assertNotEqual(to_phonemes("x. 2) y", lexicon), to_phonemes("x. y", lexicon))
+
+    def test_a_piece_cut_from_a_longer_text_is_refused_when_its_mark_would_be_dropped(self) -> None:
+        with client_for(FakeSynthesizer) as client:
+            for piece in ("+ 500 fee.", "2) Wire 500 now."):
+                with self.subTest(piece=piece):
+                    self.assertEqual(self.post(client, piece).status_code, 400)
+
+    def test_without_exact_the_text_is_spoken_as_before(self) -> None:
+        with client_for(FakeSynthesizer) as client:
+            res = client.post("/v1/speak", json={"text": "Pay $1,5 now.", "format": "pcm16", "stream": True})
         self.assertEqual(res.status_code, 200)
 
-    def test_rejects_a_bad_body(self) -> None:
+    def test_exact_must_be_true_or_false(self) -> None:
         with client_for(FakeSynthesizer) as client:
-            self.assertEqual(client.post("/v1/normalize", json={"text": 5}).status_code, 400)
-            self.assertEqual(client.post("/v1/normalize", content=b"x", headers={"content-type": "text/plain"}).status_code, 400)
-            big = client.post("/v1/normalize", json={"text": "a" * 6000})
-            self.assertEqual(big.status_code, 413)
+            self.assertEqual(self.post(client, "Hi.", exact="yes").status_code, 400)
+
+    def test_needs_the_model_only_to_speak(self) -> None:
+        with client_for(BrokenSynthesizer) as client:
+            self.assertEqual(self.post(client, "Pay $1,5 now.").status_code, 400)
 
 
 class HealthTest(unittest.TestCase):
