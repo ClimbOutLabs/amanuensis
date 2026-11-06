@@ -1,0 +1,40 @@
+name: PR hygiene
+
+# The description is part of what this checks, so it runs again when the description is edited.
+# It is its own workflow so an edit does not restart the full CI run.
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  pr-hygiene:
+    name: PR hygiene
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: '.nvmrc'
+
+      # The description reaches the script through the environment, never through the command line.
+      - name: Check the description, commit messages and added lines
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/check-pr-hygiene.mjs --base "$BASE_SHA" --head "$HEAD_SHA"
