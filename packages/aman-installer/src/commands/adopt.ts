@@ -80,6 +80,7 @@ export async function runAdopt(deps: AdoptDeps): Promise<number> {
     await jobs.ensureOpenAmanShortcut();
     await jobs.ensureCheckAmanShortcut();
     await jobs.ensureUpdateAmanShortcut();
+    await jobs.ensureRemoveAmanShortcut();
     await jobs.replaceSetupCmdCopyWithForwarder();
     await jobs.ensureDailyBackupTask();
     await jobs.ensureBackupsShortcut();

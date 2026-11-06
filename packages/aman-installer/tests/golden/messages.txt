@@ -13,6 +13,7 @@ Run aman upgrade to update Aman on Windows to the newest version.
 Run aman backup to make a backup of Aman now, in the Backups folder on this computer.
 Run aman backups to list the backups kept on this computer.
 Run aman verify and name a downloaded file to check it against its signed release record.
+Run aman uninstall to remove Aman from this Windows computer.
 Docker is not installed on this computer. Install Docker Desktop from its website, then run this check again.
 Docker Desktop is not running. Open Docker Desktop from the Start menu, then run this check again.
 Docker is installed without its Compose tool, which Aman needs. Update Docker Desktop to the newest version, then run this check again.
@@ -179,3 +180,24 @@ It downloads the newest Aman and sets it up with daily backups and an https addr
 It puts the aman command and the Start menu entries in place, and opens Aman in your browser.
 It opens a short getting started page in your browser at the end.
 Press Enter to close this window.
+aman uninstall removes an Aman set up with the Aman Setup download, and this is not a Windows computer. Run installer/install.sh instance remove with the name of each instance and --purge-data instead.
+Docker is not answering, so Aman cannot be removed from it. Open Docker Desktop from the Start menu, wait until it says it is running, then run aman uninstall again.
+Docker could not download the small helper it needs to remove Aman. Check your internet connection, then run aman uninstall again.
+The record of what is installed could not be read, so nothing was removed. Run aman doctor to find what is wrong, then run aman uninstall again.
+Another install is running right now, so nothing was removed. Wait for it to finish, or wait 2 minutes if you stopped an install a moment ago, then run aman uninstall again.
+The last backup could not be made, so nothing was removed. Run Check Aman from the Start menu to see what is wrong, then run aman uninstall again.
+The instance main could not be removed, so the removal stopped there. Read the lines above for the cause, then run aman uninstall again; it carries on from where it stopped.
+Some of what Aman kept in Docker could not be deleted. Restart Docker Desktop, then run aman uninstall again; it carries on from where it stopped.
+Aman is removed from Docker, but some of its entries on this PC could not be taken away. Run aman uninstall again, and answer Yes if Windows asks; it carries on from where it stopped.
+This removes Aman from this computer.
+It deletes your instances and everything they keep: chats, memory, files and settings.
+It deletes the Aman images in Docker Desktop, the aman command and the Start menu entries.
+It takes away the daily backup task, the home network rule and the certificate Aman added.
+Docker Desktop stays installed, because other programs may use it.
+Remove Aman and delete all of its data?
+Delete your backups folder C:\Users\Friend\AppData\Local\Amanuensis\backups too? A last backup is made in it first unless you say yes.
+Nothing was removed.
+Removing the instance main.
+Aman is removed from this computer.
+Your backups are kept in C:\Users\Friend\AppData\Local\Amanuensis\backups. Delete that folder when you no longer need them.
+Docker Desktop is still installed. If nothing else uses it, remove it in Windows Settings, under Apps.
