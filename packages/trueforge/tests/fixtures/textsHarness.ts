@@ -2,10 +2,11 @@ import winston from 'winston';
 
 import { DeliveryStore } from '../../src/db/deliveryStore';
 import { migrateSqliteToLatest } from '../../src/db/migrateSqlite';
+import type { PersonOwner } from '../../src/db/personOwner';
 import { ReachSettingsStore } from '../../src/db/reachSettingsStore';
 import { createSqliteDb } from '../../src/db/sqlite/client';
 import { SqlitePersonalizationStore } from '../../src/db/sqlite/personalization-store/SqlitePersonalizationStore';
-import { TextContactStore, type TextContactOwner } from '../../src/db/textContactStore';
+import { TextContactStore } from '../../src/db/textContactStore';
 import { createDeliveryService } from '../../src/runtime/delivery/deliveryService';
 import type { SmsProvider, SmsSendResult } from '../../src/runtime/texts/smsProvider';
 import { createSmsSender } from '../../src/runtime/texts/smsSender';
@@ -107,7 +108,7 @@ export async function textsHarness({
     mode = 'private',
     owner = ALICE,
     phone = PHONE,
-  }: { mode?: TextMode; owner?: TextContactOwner; phone?: string } = {}) {
+  }: { mode?: TextMode; owner?: PersonOwner; phone?: string } = {}) {
     const code = { hash: 'seeded', salt: 'seeded', key_id: 'seeded', expires_at: '2026-11-06T09:10:00.000Z' };
     const at = new Date('2026-11-06T09:00:00.000Z');
     await contacts.startCode({ ...owner, phone, as: 'number', code, now: at });

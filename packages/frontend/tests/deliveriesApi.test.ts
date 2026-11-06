@@ -185,6 +185,23 @@ test('says the settings could not be read when the server leaves a field out, in
   await assert.rejects(noQuiet.reach.get(), /could not be read\. Reload the page\./);
 });
 
+test('reads a sender only as the server wrote it, never guessing where it came from or its name', async () => {
+  const withSender = (sender: Record<string, unknown>) =>
+    createDeliveriesApi(async () =>
+      Response.json({
+        data: { ...WIRE_REACH.data, settings: { ...WIRE_REACH.data.settings, always_important: [sender] } },
+      }),
+    );
+  const base = { address: 'dana@example.com', source: 'settings', added_at: '2026-11-01T00:00:00.000Z' };
+  const unnamed = await withSender(base).reach.get();
+  assert.equal(unnamed.settings.alwaysImportant[0]?.name, null);
+  await assert.rejects(
+    withSender({ ...base, source: 'somewhere' }).reach.get(),
+    /could not be read\. Reload the page\./,
+  );
+  await assert.rejects(withSender({ ...base, name: 42 }).reach.get(), /could not be read\. Reload the page\./);
+});
+
 test('saves Reach me settings in the wire shape and shows the server message when it refuses', async () => {
   const { fetcher, calls } = recordingFetch(() => Response.json(WIRE_REACH));
   const api = createDeliveriesApi(fetcher);

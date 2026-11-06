@@ -1,13 +1,22 @@
-import type { Kysely } from 'kysely';
+import type { ExpressionBuilder, Kysely } from 'kysely';
 
-import type { DeliveryLevel } from '../schemas/deliveries';
-import { NoticingEventSchema, type NoticingEvent, type NoticingKind, type NoticingWatcher } from '../schemas/reach';
+import {
+  NoticingEventSchema,
+  NoticingVerdictSchema,
+  type NoticingEvent,
+  type NoticingKind,
+  type NoticingVerdict,
+  type NoticingWatcher,
+} from '../schemas/reach';
 import { newId } from '../utils/id';
+
+import type { PersonOwner } from './personOwner';
 
 /**
  * Rows of `noticing_event`: one per stable event id. `tracking` waits for a due date, `pending` waits to be raised,
- * `raised` was delivered, `dropped` will never be raised and `failed` stopped after too many failed tries. A pending
- * row is worked on by whoever holds its `claim_id`; a claim older than the caller's stale mark is free to take.
+ * `delivering` is being delivered, `raised` was delivered, `dropped` will never be raised and `failed` stopped after
+ * too many tries. A pending or delivering row is worked on by whoever holds its `claim_id`; a claim older than the
+ * caller's stale mark is free to take. `verdict_json` keeps the model's answer, so a retry never asks again.
  */
 export interface NoticingEventTable {
   id: string;
@@ -19,13 +28,9 @@ export interface NoticingEventTable {
   /** JSON of a NoticingEvent. */
   event_json: string;
   due_at: string | Date | null;
-  model_level: string | null;
-  decided_level: string | null;
-  delivered_level: string | null;
-  reason: string | null;
+  verdict_json: string | null;
   delivery_id: string | null;
   created_at: string | Date;
-  decided_at: string | Date | null;
   claim_id: string | null;
   claimed_at: string | Date | null;
   attempts: number;
@@ -53,61 +58,69 @@ export interface NoticingDatabase {
   reach_lease: ReachLeaseTable;
 }
 
-/** The person whose events, settings and reach decisions these are. */
-export interface NoticingOwner {
-  tenant_id: string;
-  created_by: string;
+/** What a pass holds once it claimed an event: the model's answer when an earlier try already had one. */
+export interface NoticingClaim {
+  verdict: NoticingVerdict | null;
 }
 
-/** What was decided for an event, with the reason in plain words. */
-export interface NoticingDecision {
-  model_level: DeliveryLevel | null;
-  decided_level: DeliveryLevel;
-  delivered_level: DeliveryLevel;
-  reason: string;
-  delivery_id: string;
-}
-
-/** An event that failed this many times is given up on, so one broken event never blocks a pass for good. */
+/**
+ * An event claimed this many times without being delivered is given up on, so one broken event never blocks a pass
+ * for good. A pass that stopped without handing the event back counts too.
+ */
 const MAX_ATTEMPTS = 5;
+
+/** Events a pass may claim: waiting to be raised, or left halfway through delivery by a pass that stopped. */
+const WAITING = ['pending', 'delivering'];
 
 export interface INoticingStore {
   /**
-   * Writes an event the first time its stable id is seen, either `pending` to be raised or `tracking` to wait for
-   * its due date. Resolves to `new` for the first sighting and `seen` for every later one.
+   * Writes each event the first time its stable id is seen, either `pending` to be raised or `tracking` to wait for
+   * its due date. An event already written is left as it is.
    */
-  record(
-    input: NoticingOwner & { event: NoticingEvent; status: 'pending' | 'tracking'; now: Date },
-  ): Promise<'new' | 'seen'>;
-  /** Pending events of these kinds that no live claim holds, oldest first. */
+  recordAll(
+    input: PersonOwner & { events: readonly NoticingEvent[]; status: 'pending' | 'tracking'; now: Date },
+  ): Promise<void>;
+  /** Pending or interrupted events of these kinds that no live claim holds, oldest first. */
   listPending(
-    input: NoticingOwner & { kinds: readonly NoticingKind[]; stale_before: Date; limit: number },
+    input: PersonOwner & { kinds: readonly NoticingKind[]; stale_before: Date; limit: number },
   ): Promise<NoticingEvent[]>;
-  /** Takes a pending event for one pass. Resolves to false when another live claim holds it or it is not pending. */
-  claim(input: NoticingOwner & { event_id: string; claim_id: string; now: Date; stale_before: Date }): Promise<boolean>;
-  /** Marks a claimed event raised. Resolves to false when the claim was lost to another pass first. */
-  decide(
-    input: NoticingOwner & { event_id: string; claim_id: string; decision: NoticingDecision; now: Date },
-  ): Promise<boolean>;
   /**
-   * Hands a claimed event back for a later pass. A `failed` try counts toward giving up; resolves to the status the
-   * event is left in.
+   * Takes an event for one pass, counting the try. Resolves to undefined when another live claim holds it, it is not
+   * waiting, or it has been tried too often, in which case it is marked failed.
    */
-  release(
-    input: NoticingOwner & { event_id: string; claim_id: string; failed: boolean },
-  ): Promise<'pending' | 'failed'>;
+  claim(
+    input: PersonOwner & { event_id: string; claim_id: string; now: Date; stale_before: Date },
+  ): Promise<NoticingClaim | undefined>;
+  /** Keeps the model's answer with the claimed event, so a later try uses it instead of asking again. */
+  saveVerdict(input: PersonOwner & { event_id: string; claim_id: string; verdict: NoticingVerdict }): Promise<void>;
+  /** Marks a claimed event as being delivered. Resolves to false when another pass took the claim first. */
+  startDelivering(input: PersonOwner & { event_id: string; claim_id: string; now: Date }): Promise<boolean>;
+  /** Marks an event that was being delivered as raised, with the delivery that was made. */
+  finish(input: PersonOwner & { event_id: string; claim_id: string; delivery_id: string }): Promise<void>;
+  /**
+   * Hands a claimed event back for a later pass. A try that only waited for another pass (`failed: false`) is not
+   * counted. Resolves to the status the event is left in.
+   */
+  release(input: PersonOwner & { event_id: string; claim_id: string; failed: boolean }): Promise<'pending' | 'failed'>;
   /** Tracked events due at or before `due_before`, soonest first. */
-  listTracking(input: NoticingOwner & { due_before: Date; limit: number }): Promise<NoticingEvent[]>;
-  /** Moves a tracked event to pending. Resolves to false when it is no longer tracked. */
-  promote(input: NoticingOwner & { event_id: string }): Promise<boolean>;
+  listTracking(input: PersonOwner & { due_before: Date; limit: number }): Promise<NoticingEvent[]>;
+  /** Moves a tracked event to pending, when it is still tracked. */
+  promote(input: PersonOwner & { event_id: string }): Promise<void>;
+  /**
+   * Drops every person's waiting events of these kinds recorded before `created_before`, for events that cannot
+   * matter any more once that old, even for someone no pass looks at again.
+   */
+  dropStale(input: { kinds: readonly NoticingKind[]; created_before: Date }): Promise<void>;
   /** Stops an event that is tracked or pending and will never be raised (it passed, or was paid). */
-  drop(input: NoticingOwner & { event_id: string }): Promise<void>;
+  drop(input: PersonOwner & { event_id: string }): Promise<void>;
   /** Takes the person's reach lease when it is free or ran out. Resolves to false while someone else holds it. */
-  acquireReachLease(input: NoticingOwner & { holder: string; now: Date; until: Date }): Promise<boolean>;
+  acquireReachLease(input: PersonOwner & { holder: string; now: Date; until: Date }): Promise<boolean>;
+  /** Holds the lease longer, when this holder still has it. Resolves to false when it was lost. */
+  renewReachLease(input: PersonOwner & { holder: string; until: Date }): Promise<boolean>;
   /** Hands the lease back, when this holder still has it. */
-  releaseReachLease(input: NoticingOwner & { holder: string }): Promise<void>;
-  getCheckpoint(input: NoticingOwner & { watcher: NoticingWatcher }): Promise<Date | undefined>;
-  setCheckpoint(input: NoticingOwner & { watcher: NoticingWatcher; checked_at: Date }): Promise<void>;
+  releaseReachLease(input: PersonOwner & { holder: string }): Promise<void>;
+  getCheckpoint(input: PersonOwner & { watcher: NoticingWatcher }): Promise<Date | undefined>;
+  setCheckpoint(input: PersonOwner & { watcher: NoticingWatcher; checked_at: Date }): Promise<void>;
 }
 
 function eventOf(row: Pick<NoticingEventTable, 'event_json'>): NoticingEvent {
@@ -122,13 +135,16 @@ export class NoticingStore implements INoticingStore {
     this.#db = db;
   }
 
-  async record(
-    input: NoticingOwner & { event: NoticingEvent; status: 'pending' | 'tracking'; now: Date },
-  ): Promise<'new' | 'seen'> {
-    const event = NoticingEventSchema.parse(input.event);
-    const inserted = await this.#db
-      .insertInto('noticing_event')
-      .values({
+  async recordAll(
+    input: PersonOwner & { events: readonly NoticingEvent[]; status: 'pending' | 'tracking'; now: Date },
+  ): Promise<void> {
+    if (input.events.length === 0) {
+      return;
+    }
+    const created_at = input.now.toISOString();
+    const rows = input.events.map(item => {
+      const event = NoticingEventSchema.parse(item);
+      return {
         id: newId(),
         tenant_id: input.tenant_id,
         created_by: input.created_by,
@@ -137,25 +153,23 @@ export class NoticingStore implements INoticingStore {
         status: input.status,
         event_json: JSON.stringify(event),
         due_at: event.due_at,
-        model_level: null,
-        decided_level: null,
-        delivered_level: null,
-        reason: null,
+        verdict_json: null,
         delivery_id: null,
-        created_at: input.now.toISOString(),
-        decided_at: null,
+        created_at,
         claim_id: null,
         claimed_at: null,
         attempts: 0,
-      })
+      };
+    });
+    await this.#db
+      .insertInto('noticing_event')
+      .values(rows)
       .onConflict(conflict => conflict.columns(['tenant_id', 'created_by', 'event_id']).doNothing())
-      .returning('id')
       .execute();
-    return inserted.length > 0 ? 'new' : 'seen';
   }
 
   async listPending(
-    input: NoticingOwner & { kinds: readonly NoticingKind[]; stale_before: Date; limit: number },
+    input: PersonOwner & { kinds: readonly NoticingKind[]; stale_before: Date; limit: number },
   ): Promise<NoticingEvent[]> {
     if (input.kinds.length === 0) {
       return [];
@@ -166,7 +180,7 @@ export class NoticingStore implements INoticingStore {
       .select('event_json')
       .where('tenant_id', '=', input.tenant_id)
       .where('created_by', '=', input.created_by)
-      .where('status', '=', 'pending')
+      .where('status', 'in', WAITING)
       .where('kind', 'in', [...input.kinds])
       .where(eb => eb.or([eb('claimed_at', 'is', null), eb('claimed_at', '<', stale)]))
       .orderBy('created_at', 'asc')
@@ -177,77 +191,104 @@ export class NoticingStore implements INoticingStore {
   }
 
   async claim(
-    input: NoticingOwner & { event_id: string; claim_id: string; now: Date; stale_before: Date },
-  ): Promise<boolean> {
+    input: PersonOwner & { event_id: string; claim_id: string; now: Date; stale_before: Date },
+  ): Promise<NoticingClaim | undefined> {
     const stale = input.stale_before.toISOString();
-    const updated = await this.#db
+    const free = (eb: ExpressionBuilder<NoticingDatabase, 'noticing_event'>) =>
+      eb.or([eb('claimed_at', 'is', null), eb('claimed_at', '<', stale)]);
+    const taken = await this.#db
       .updateTable('noticing_event')
-      .set({ claim_id: input.claim_id, claimed_at: input.now.toISOString() })
+      .set(eb => ({ claim_id: input.claim_id, claimed_at: input.now.toISOString(), attempts: eb('attempts', '+', 1) }))
       .where('tenant_id', '=', input.tenant_id)
       .where('created_by', '=', input.created_by)
       .where('event_id', '=', input.event_id)
-      .where('status', '=', 'pending')
-      .where(eb => eb.or([eb('claimed_at', 'is', null), eb('claimed_at', '<', stale)]))
+      .where('status', 'in', WAITING)
+      .where('attempts', '<', MAX_ATTEMPTS)
+      .where(free)
+      .returning('verdict_json')
+      .executeTakeFirst();
+    if (taken !== undefined) {
+      return {
+        verdict: taken.verdict_json === null ? null : NoticingVerdictSchema.parse(JSON.parse(taken.verdict_json)),
+      };
+    }
+    await this.#db
+      .updateTable('noticing_event')
+      .set({ status: 'failed', claim_id: null, claimed_at: null })
+      .where('tenant_id', '=', input.tenant_id)
+      .where('created_by', '=', input.created_by)
+      .where('event_id', '=', input.event_id)
+      .where('status', 'in', WAITING)
+      .where('attempts', '>=', MAX_ATTEMPTS)
+      .where(free)
+      .execute();
+    return undefined;
+  }
+
+  async saveVerdict(
+    input: PersonOwner & { event_id: string; claim_id: string; verdict: NoticingVerdict },
+  ): Promise<void> {
+    await this.#db
+      .updateTable('noticing_event')
+      .set({ verdict_json: JSON.stringify(NoticingVerdictSchema.parse(input.verdict)) })
+      .where('tenant_id', '=', input.tenant_id)
+      .where('created_by', '=', input.created_by)
+      .where('event_id', '=', input.event_id)
+      .where('claim_id', '=', input.claim_id)
+      .execute();
+  }
+
+  async startDelivering(input: PersonOwner & { event_id: string; claim_id: string; now: Date }): Promise<boolean> {
+    const updated = await this.#db
+      .updateTable('noticing_event')
+      .set({ status: 'delivering', claimed_at: input.now.toISOString() })
+      .where('tenant_id', '=', input.tenant_id)
+      .where('created_by', '=', input.created_by)
+      .where('event_id', '=', input.event_id)
+      .where('status', 'in', WAITING)
+      .where('claim_id', '=', input.claim_id)
       .returning('id')
       .execute();
     return updated.length > 0;
   }
 
-  async decide(
-    input: NoticingOwner & { event_id: string; claim_id: string; decision: NoticingDecision; now: Date },
-  ): Promise<boolean> {
-    const updated = await this.#db
+  async finish(input: PersonOwner & { event_id: string; claim_id: string; delivery_id: string }): Promise<void> {
+    await this.#db
       .updateTable('noticing_event')
-      .set({
-        status: 'raised',
-        model_level: input.decision.model_level,
-        decided_level: input.decision.decided_level,
-        delivered_level: input.decision.delivered_level,
-        reason: input.decision.reason,
-        delivery_id: input.decision.delivery_id,
-        decided_at: input.now.toISOString(),
-        claim_id: null,
-        claimed_at: null,
-      })
+      .set({ status: 'raised', delivery_id: input.delivery_id, claim_id: null, claimed_at: null })
       .where('tenant_id', '=', input.tenant_id)
       .where('created_by', '=', input.created_by)
       .where('event_id', '=', input.event_id)
-      .where('status', '=', 'pending')
+      .where('status', '=', 'delivering')
       .where('claim_id', '=', input.claim_id)
-      .returning('id')
       .execute();
-    return updated.length > 0;
   }
 
   async release(
-    input: NoticingOwner & { event_id: string; claim_id: string; failed: boolean },
+    input: PersonOwner & { event_id: string; claim_id: string; failed: boolean },
   ): Promise<'pending' | 'failed'> {
-    const held = await this.#db
-      .selectFrom('noticing_event')
-      .select('attempts')
-      .where('tenant_id', '=', input.tenant_id)
-      .where('created_by', '=', input.created_by)
-      .where('event_id', '=', input.event_id)
-      .where('status', '=', 'pending')
-      .where('claim_id', '=', input.claim_id)
-      .executeTakeFirst();
-    if (held === undefined) {
-      return 'pending';
-    }
-    const attempts = held.attempts + (input.failed ? 1 : 0);
-    const status = attempts >= MAX_ATTEMPTS ? 'failed' : 'pending';
-    await this.#db
+    const left = await this.#db
       .updateTable('noticing_event')
-      .set({ status, attempts, claim_id: null, claimed_at: null })
+      .set(eb => ({
+        // The try was counted when it was claimed; one that only waited for another pass is taken back.
+        attempts: input.failed ? eb.ref('attempts') : eb('attempts', '-', 1),
+        status: input.failed
+          ? eb.case().when('attempts', '>=', MAX_ATTEMPTS).then('failed').else('pending').end()
+          : 'pending',
+        claim_id: null,
+        claimed_at: null,
+      }))
       .where('tenant_id', '=', input.tenant_id)
       .where('created_by', '=', input.created_by)
       .where('event_id', '=', input.event_id)
+      .where('status', 'in', WAITING)
       .where('claim_id', '=', input.claim_id)
-      .execute();
-    return status;
+      .returning('status')
+      .executeTakeFirst();
+    return left?.status === 'failed' ? 'failed' : 'pending';
   }
 
-  async listTracking(input: NoticingOwner & { due_before: Date; limit: number }): Promise<NoticingEvent[]> {
+  async listTracking(input: PersonOwner & { due_before: Date; limit: number }): Promise<NoticingEvent[]> {
     const rows = await this.#db
       .selectFrom('noticing_event')
       .select('event_json')
@@ -262,31 +303,42 @@ export class NoticingStore implements INoticingStore {
     return rows.map(eventOf);
   }
 
-  async promote(input: NoticingOwner & { event_id: string }): Promise<boolean> {
-    const updated = await this.#db
+  async promote(input: PersonOwner & { event_id: string }): Promise<void> {
+    await this.#db
       .updateTable('noticing_event')
       .set({ status: 'pending' })
       .where('tenant_id', '=', input.tenant_id)
       .where('created_by', '=', input.created_by)
       .where('event_id', '=', input.event_id)
       .where('status', '=', 'tracking')
-      .returning('id')
       .execute();
-    return updated.length > 0;
   }
 
-  async drop(input: NoticingOwner & { event_id: string }): Promise<void> {
+  async dropStale(input: { kinds: readonly NoticingKind[]; created_before: Date }): Promise<void> {
+    if (input.kinds.length === 0) {
+      return;
+    }
+    await this.#db
+      .updateTable('noticing_event')
+      .set({ status: 'dropped', claim_id: null, claimed_at: null })
+      .where('kind', 'in', [...input.kinds])
+      .where('status', 'in', WAITING)
+      .where('created_at', '<', input.created_before.toISOString())
+      .execute();
+  }
+
+  async drop(input: PersonOwner & { event_id: string }): Promise<void> {
     await this.#db
       .updateTable('noticing_event')
       .set({ status: 'dropped', claim_id: null, claimed_at: null })
       .where('tenant_id', '=', input.tenant_id)
       .where('created_by', '=', input.created_by)
       .where('event_id', '=', input.event_id)
-      .where('status', 'in', ['tracking', 'pending'])
+      .where('status', 'in', ['tracking', ...WAITING])
       .execute();
   }
 
-  async acquireReachLease(input: NoticingOwner & { holder: string; now: Date; until: Date }): Promise<boolean> {
+  async acquireReachLease(input: PersonOwner & { holder: string; now: Date; until: Date }): Promise<boolean> {
     const held_until = input.until.toISOString();
     const taken = await this.#db
       .insertInto('reach_lease')
@@ -302,7 +354,19 @@ export class NoticingStore implements INoticingStore {
     return taken.length > 0;
   }
 
-  async releaseReachLease(input: NoticingOwner & { holder: string }): Promise<void> {
+  async renewReachLease(input: PersonOwner & { holder: string; until: Date }): Promise<boolean> {
+    const renewed = await this.#db
+      .updateTable('reach_lease')
+      .set({ held_until: input.until.toISOString() })
+      .where('tenant_id', '=', input.tenant_id)
+      .where('created_by', '=', input.created_by)
+      .where('holder', '=', input.holder)
+      .returning('holder')
+      .execute();
+    return renewed.length > 0;
+  }
+
+  async releaseReachLease(input: PersonOwner & { holder: string }): Promise<void> {
     await this.#db
       .deleteFrom('reach_lease')
       .where('tenant_id', '=', input.tenant_id)
@@ -311,7 +375,7 @@ export class NoticingStore implements INoticingStore {
       .execute();
   }
 
-  async getCheckpoint(input: NoticingOwner & { watcher: NoticingWatcher }): Promise<Date | undefined> {
+  async getCheckpoint(input: PersonOwner & { watcher: NoticingWatcher }): Promise<Date | undefined> {
     const row = await this.#db
       .selectFrom('noticing_checkpoint')
       .select('checked_at')
@@ -322,7 +386,7 @@ export class NoticingStore implements INoticingStore {
     return row === undefined ? undefined : new Date(row.checked_at);
   }
 
-  async setCheckpoint(input: NoticingOwner & { watcher: NoticingWatcher; checked_at: Date }): Promise<void> {
+  async setCheckpoint(input: PersonOwner & { watcher: NoticingWatcher; checked_at: Date }): Promise<void> {
     const checked_at = input.checked_at.toISOString();
     await this.#db
       .insertInto('noticing_checkpoint')

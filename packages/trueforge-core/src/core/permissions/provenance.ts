@@ -176,8 +176,11 @@ function recordText(side: ProvenanceValues, text: string): string[] {
   return found;
 }
 
-/** A phone number as written, with its spaces and marks: `+1 (415) 555-0132`. A few marks may sit between digits. */
-const PHONE_CANDIDATE = /\+?\d(?:[\s().-]{0,3}\d){6,}/g;
+/**
+ * A phone number as written, with its spaces and marks: `+1 (415) 555-0132`. A few marks may sit between digits: any
+ * dash, a slash, an underscore or a middle dot. Digits of other scripts are folded to these before it is matched.
+ */
+const PHONE_CANDIDATE = /\+?\d(?:[\s().\p{Pd}/_\u00b7]{0,3}\d){6,}/gu;
 /** Fewest digits a phone number has, when written with a leading plus sign. */
 const MIN_INTERNATIONAL_PHONE_DIGITS = 8;
 /** Fewest digits a phone number has when written without one. Shorter runs are postal codes and dates. */
@@ -207,16 +210,32 @@ const MIN_LOCAL_PHONE_DIGITS = 7;
 /** A date or time written as `2026-11-07` or `2026-11-07T10:00Z`, which is not a phone number. */
 const ISO_DATE = /\b\d{4}-\d{2}-\d{2}(?:T[\d:.]+(?:Z|[+-]\d{2}:?\d{2})?)?/g;
 
+/** A site with its dot written out or bracketed, such as `evil[.]com` or `evil dot com`. */
+const SPELLED_DOT =
+  /[\p{L}\p{N}]\s*(?:\[\s*(?:\.|dot)\s*\]|\(\s*(?:\.|dot)\s*\)|\{\s*(?:\.|dot)\s*\}|\s+dot\s+)\s*[\p{L}\p{N}]/iu;
+/** An address with its at sign bracketed, such as `ceo [at] evil`. */
+const SPELLED_AT = /[\p{L}\p{N}]\s*(?:\[\s*at\s*\]|\(\s*at\s*\)|\{\s*at\s*\})\s*[\p{L}\p{N}]/iu;
+/** A number read out digit by digit, such as `five five five oh one oh oh`. */
+const SPELLED_DIGITS = /\b(?:(?:zero|oh|one|two|three|four|five|six|seven|eight|nine)\b[\s,-]*){7,}/i;
+
 /**
- * Whether any value carries something written like a phone number, short local ones included. Looser than the
- * match for the person's own numbers, for text that should carry no number at all.
+ * Whether any value carries a phone number, a site or an address in any spelling: short local numbers, digits of
+ * any script, bare sites, spelled-out dots and at signs. Far looser than the checks that tell whose detail something
+ * is, for text that should carry no contact detail at all.
  */
-export function namesPhoneNumber(values: readonly string[]): boolean {
-  return values.some(value =>
-    [...foldSpelling(value).replace(ISO_DATE, ' ').matchAll(PHONE_CANDIDATE)].some(
-      match => match[0].replace(/\D/g, '').length >= MIN_LOCAL_PHONE_DIGITS,
-    ),
-  );
+export function namesContactDetail(values: readonly string[]): boolean {
+  return values.some(value => {
+    const folded = foldSpelling(value).replace(ISO_DATE, ' ');
+    return (
+      folded.includes('@') ||
+      urlsInText(folded).length > 0 ||
+      [...folded.matchAll(BARE_HOST)].length > 0 ||
+      SPELLED_DOT.test(folded) ||
+      SPELLED_AT.test(folded) ||
+      SPELLED_DIGITS.test(folded) ||
+      [...folded.matchAll(PHONE_CANDIDATE)].some(match => match[0].replace(/\D/g, '').length >= MIN_LOCAL_PHONE_DIGITS)
+    );
+  });
 }
 
 const MAX_DECODE_ROUNDS = 3;
@@ -253,7 +272,20 @@ function foldSpelling(text: string): string {
     }
     folded = next;
   }
-  return folded.replace(/\s*@\s*/g, '@');
+  return asciiDigits(folded).replace(/\s*@\s*/g, '@');
+}
+
+/** Digits of any script, written as the digits 0 to 9 they stand for, so a number reads the same however it is written. */
+function asciiDigits(text: string): string {
+  return text.replace(/\p{Nd}/gu, digit => {
+    const code = digit.codePointAt(0) ?? 0;
+    // Each script's digits are ten code points in a row, from zero to nine.
+    let zero = code;
+    while (zero > 0 && /\p{Nd}/u.test(String.fromCodePoint(zero - 1))) {
+      zero -= 1;
+    }
+    return String((code - zero) % 10);
+  });
 }
 
 /** A mailbox however it is addressed: lower case, with a `+tag` dropped from the part before the at sign. */

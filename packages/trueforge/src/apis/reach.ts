@@ -12,10 +12,10 @@ import {
 } from '../routes/reachRoutes';
 import type { DeliveryService } from '../runtime/delivery/deliveryService';
 import { KIND_MAX_LEVEL } from '../runtime/noticing/levels';
-import type { ReachChannels } from '../runtime/noticing/reachChannels';
 import { suggestAlwaysImportant } from '../runtime/noticing/suggestions';
 import { claimTextLimits, MAX_TEST_TEXTS_PER_HOUR, testTextLimit, waitWords } from '../runtime/texts/textLimits';
 import { canText } from '../runtime/texts/textNumber';
+import type { ReachAvailability } from '../schemas/reach';
 import { defaultReachSettings, NOTICING_KINDS, type AlwaysImportantSender, type ReachSettings } from '../schemas/reach';
 
 export interface ReachRouterDeps {
@@ -23,7 +23,7 @@ export interface ReachRouterDeps {
   textContacts: Pick<ITextContactStore, 'get' | 'claimTextSend' | 'forgetTextSends'>;
   deliveryService: Pick<DeliveryService, 'deliver'>;
   /** Which phone channels this server can use now. Read per request, since a later part may set one up while running. */
-  channels: () => ReachChannels;
+  channels: () => ReachAvailability;
   /** The texts of the memories that may name a sender. Empty when this server keeps no readable memory. */
   memories: (input: { tenant_id: string }) => Promise<string[]>;
   resolveRequestContext: ResolveRequestContext;
@@ -139,7 +139,7 @@ export function createReachRouter(deps: ReachRouterDeps) {
     const channels = deps.channels();
     if (channel === 'text') {
       if (!channels.texts.available) {
-        return c.json({ error: { message: `${channels.texts.note} There is nothing to try yet.` } }, 409);
+        return c.json({ error: { message: `${channels.texts.note} Try the app or push notices for now.` } }, 409);
       }
       const settings = await deps.reachStore.get(owner);
       const contact = await deps.textContacts.get(owner);
@@ -178,7 +178,7 @@ export function createReachRouter(deps: ReachRouterDeps) {
       return c.json({ data: { delivery_id: delivery.id, devices_reached: 0 } }, 201);
     }
     if (channel === 'call') {
-      return c.json({ error: { message: `${channels.calls.note} There is nothing to try yet.` } }, 409);
+      return c.json({ error: { message: `${channels.calls.note} Try the app or push notices for now.` } }, 409);
     }
     // A test is a note in the feed, so a push test never uses up one of the day's nudges, and it reaches only the
     // person's devices, so it never sends a paid text.

@@ -42,10 +42,14 @@ describe('the words of a text', () => {
     expect(body).toMatch(ONE_PLACE);
   });
 
-  it('sends a Full message that names a link or a phone number in Private words', () => {
+  it('sends a Full message that names a link, a site, a phone number or an address in Private words', () => {
     for (const text of [
       'Your parcel is held. Pay the fee at https://parcel-fees.example.invalid/pay today.',
       'Your parcel is held. Pay the fee at parcel-fees.example.invalid/pay today.',
+      'Your parcel is held. Pay the fee at parcel-fees.example.com today.',
+      'Your parcel is held. Pay at parcel-fees dot com today.',
+      'Your bank needs you. Write to help@bank-help.example.com now.',
+      'Your bank needs you. Call five five five oh one oh oh one nine nine.',
       'Your bank needs you. Call +1 555 010 0199 right away.',
       'Your bank needs you. Call (555) 010-0199 right away.',
     ]) {

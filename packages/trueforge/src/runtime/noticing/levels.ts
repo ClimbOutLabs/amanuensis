@@ -4,7 +4,7 @@ import type { NoticingEvidence, NoticingKind } from '../../schemas/reach';
 const RANK: Record<DeliveryLevel, number> = { note: 0, nudge: 1, call: 2 };
 
 /** The quieter of two levels. */
-export function lowerOf(left: DeliveryLevel, right: DeliveryLevel): DeliveryLevel {
+export function lowerOf({ left, right }: { left: DeliveryLevel; right: DeliveryLevel }): DeliveryLevel {
   return RANK[left] <= RANK[right] ? left : right;
 }
 
@@ -27,7 +27,7 @@ export function evidenceCeiling(evidence: NoticingEvidence): DeliveryLevel {
 
 /** The most an event can reach given its kind and its evidence, before the person's own rules. */
 export function ceilingOf({ kind, evidence }: { kind: NoticingKind; evidence: NoticingEvidence }): DeliveryLevel {
-  return lowerOf(KIND_MAX_LEVEL[kind], evidenceCeiling(evidence));
+  return lowerOf({ left: KIND_MAX_LEVEL[kind], right: evidenceCeiling(evidence) });
 }
 
 /** Each kind in plain words, for the sentences a person reads about it. */

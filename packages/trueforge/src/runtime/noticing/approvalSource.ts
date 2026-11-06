@@ -53,6 +53,8 @@ export function sessionApprovalSource({
           if (session.last_turn_id === null) {
             continue;
           }
+          // One read per chat, but only for chats touched within the last half hour, so the count follows how many
+          // chats were in use just now, and MAX_PAGES caps it however busy the install is.
           const turn = await sessionStore.getTurn({ session_id: session.session_id, turn_id: session.last_turn_id });
           if (turn?.state.status !== 'done') {
             continue;

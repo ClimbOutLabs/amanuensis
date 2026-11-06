@@ -1,4 +1,4 @@
-import { namesPhoneNumber, namesUrl } from '@truefoundry/trueforge-core/core/permissions/provenance';
+import { namesContactDetail } from '@truefoundry/trueforge-core/core/permissions/provenance';
 
 import type { Delivery, DeliveryKind } from '../../schemas/deliveries';
 import type { TextMode } from '../../schemas/textMessages';
@@ -75,15 +75,16 @@ function cut({ text, room }: { text: string; room: number }): string {
 
 /**
  * The text that goes out for a delivery, given the name already made fit for a text, and the words it was sent in.
- * A Full message that names a link or a phone number goes out in Private words, because the message can come from
- * mail someone else wrote, and a text is where a link or a number to call does the most harm.
+ * A Full message that names a link, a site, a phone number or an address, in any spelling, goes out in Private words,
+ * because the message can come from mail someone else wrote, and a text is where a link or a number to call does the
+ * most harm.
  */
 export function textBody({ name, delivery, mode }: { name: string; delivery: Delivery; mode: TextMode }): {
   body: string;
   sent_as: TextMode;
 } {
   const plain = plainText(delivery.text);
-  if (mode === 'private' || namesUrl([delivery.text, plain]) || namesPhoneNumber([delivery.text, plain])) {
+  if (mode === 'private' || namesContactDetail([delivery.text, plain])) {
     return { body: privateText({ name, kind: delivery.kind }), sent_as: 'private' };
   }
   const prefix = `${name}: `;

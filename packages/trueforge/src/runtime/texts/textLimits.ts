@@ -1,4 +1,5 @@
-import type { ITextContactStore, TextContactOwner } from '../../db/textContactStore';
+import type { PersonOwner } from '../../db/personOwner';
+import type { ITextContactStore } from '../../db/textContactStore';
 
 export const HOUR_MS = 60 * 60_000;
 /** The longest window of any limit, so old counts can be forgotten without ending a window that is still open. */
@@ -16,15 +17,15 @@ export interface TextLimit {
   max: number;
 }
 
-export function ownerLimitKey({ scope, owner }: { scope: string; owner: TextContactOwner }): string {
+export function ownerLimitKey({ scope, owner }: { scope: string; owner: PersonOwner }): string {
   return `${scope}:${JSON.stringify([owner.tenant_id, owner.created_by])}`;
 }
 
-export function deliveryTextLimit(owner: TextContactOwner): TextLimit {
+export function deliveryTextLimit(owner: PersonOwner): TextLimit {
   return { key: ownerLimitKey({ scope: 'texts-day', owner }), window_ms: DAY_MS, max: MAX_TEXTS_PER_PERSON_PER_DAY };
 }
 
-export function testTextLimit(owner: TextContactOwner): TextLimit {
+export function testTextLimit(owner: PersonOwner): TextLimit {
   return { key: ownerLimitKey({ scope: 'test-text', owner }), window_ms: HOUR_MS, max: MAX_TEST_TEXTS_PER_HOUR };
 }
 

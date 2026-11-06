@@ -2,7 +2,8 @@
  * Backend-agnostic behavioural contract for ITextContactStore.
  * Runs under jest against a fresh store per test (see backend test files).
  */
-import type { ITextContactStore, TextContactOwner } from '../../src/db/textContactStore';
+import type { PersonOwner } from '../../src/db/personOwner';
+import type { ITextContactStore } from '../../src/db/textContactStore';
 import type { TextContact } from '../../src/schemas/textMessages';
 
 const ALICE = { tenant_id: 't1', created_by: 'alice' };
@@ -36,7 +37,7 @@ function later(minutes: number): Date {
 }
 
 export function runTextContactStoreContractSuite(getStore: () => ITextContactStore): void {
-  async function confirmed(store: ITextContactStore, owner: TextContactOwner, phone = '+15550100') {
+  async function confirmed(store: ITextContactStore, owner: PersonOwner, phone = '+15550100') {
     await store.startCode({ ...owner, phone, as: 'number', code: code('seed'), now: AT });
     await expect(store.confirmCode({ ...owner, code_hash: 'seed', now: AT })).resolves.toBe(true);
   }

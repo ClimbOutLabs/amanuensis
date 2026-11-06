@@ -2,6 +2,7 @@ import type { AuditLogWriter } from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
 
 import type { CreateDeliveryInput, IDeliveryStore } from '../../db/deliveryStore';
+import type { PersonOwner } from '../../db/personOwner';
 import type { Delivery, DeliveryAttempt, DeliveryChannel } from '../../schemas/deliveries';
 import type { DeliveryChannelSender } from './deliveryChannel';
 
@@ -9,6 +10,8 @@ import type { DeliveryChannelSender } from './deliveryChannel';
 export interface DeliveryService {
   /** `only_channels` limits which senders are tried, such as a test of one channel. The app itself always gets it. */
   deliver(input: CreateDeliveryInput & { only_channels?: readonly DeliveryChannel[] }): Promise<Delivery>;
+  /** Delivers once per id: a later call with the same id sends nothing and resolves to the delivery made first. */
+  deliverOnce(input: CreateDeliveryInput & { id: string }): Promise<Delivery>;
 }
 
 export const DELIVERY_CREATED_TOOL_NAME = 'delivery.created';
@@ -31,6 +34,10 @@ function conversationOf(delivery: Delivery): string {
 function outcomeWords(attempt: DeliveryAttempt): string {
   const base = `Tried ${CHANNEL_WORDS[attempt.channel]}: ${attempt.outcome}.`;
   return attempt.detail === null ? base : `${base} ${attempt.detail}`;
+}
+
+function ownerOf(input: PersonOwner): PersonOwner {
+  return { tenant_id: input.tenant_id, created_by: input.created_by };
 }
 
 export function createDeliveryService({
@@ -76,59 +83,73 @@ export function createDeliveryService({
     }
   }
 
+  async function send({
+    owner,
+    created,
+    only_channels,
+  }: {
+    owner: PersonOwner;
+    created: Delivery;
+    only_channels: readonly DeliveryChannel[] | undefined;
+  }): Promise<Delivery> {
+    await record({
+      owner,
+      delivery: created,
+      tool_name: DELIVERY_CREATED_TOOL_NAME,
+      description: `${created.text} Why you got this: ${created.reason}`,
+    });
+    const inApp: DeliveryAttempt = {
+      channel: 'in_app',
+      outcome: 'sent',
+      detail: null,
+      target: null,
+      attempted_at: now().toISOString(),
+    };
+    const attempts: DeliveryAttempt[] = [inApp];
+    for (const sender of senders) {
+      if (only_channels !== undefined && !only_channels.includes(sender.channel)) {
+        continue;
+      }
+      try {
+        attempts.push(...(await sender.send({ delivery: created, ...owner })));
+      } catch (error) {
+        logger.warn('A delivery channel failed', {
+          delivery_id: created.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        attempts.push({
+          channel: sender.channel,
+          outcome: 'failed',
+          detail:
+            sender.channel === 'sms'
+              ? 'The text could not be sent. The item is still in your feed.'
+              : 'The notice could not be sent. It is still in your feed.',
+          target: null,
+          attempted_at: now().toISOString(),
+        });
+      }
+    }
+    for (const attempt of attempts) {
+      await store.recordAttempt({ ...owner, delivery_id: created.id, attempt });
+      if (attempt.channel !== 'in_app') {
+        await record({
+          owner,
+          delivery: created,
+          tool_name: channelToolName(attempt),
+          description: outcomeWords(attempt),
+        });
+      }
+    }
+    return (await store.get({ ...owner, id: created.id })) ?? { ...created, attempts };
+  }
+
   return {
     async deliver({ only_channels, ...input }) {
-      const owner = { tenant_id: input.tenant_id, created_by: input.created_by };
-      const created = await store.create(input);
-      await record({
-        owner,
-        delivery: created,
-        tool_name: DELIVERY_CREATED_TOOL_NAME,
-        description: `${created.text} Why you got this: ${created.reason}`,
-      });
-      const inApp: DeliveryAttempt = {
-        channel: 'in_app',
-        outcome: 'sent',
-        detail: null,
-        target: null,
-        attempted_at: now().toISOString(),
-      };
-      const attempts: DeliveryAttempt[] = [inApp];
-      for (const sender of senders) {
-        if (only_channels !== undefined && !only_channels.includes(sender.channel)) {
-          continue;
-        }
-        try {
-          attempts.push(...(await sender.send({ delivery: created, ...owner })));
-        } catch (error) {
-          logger.warn('A delivery channel failed', {
-            delivery_id: created.id,
-            error: error instanceof Error ? error.message : String(error),
-          });
-          attempts.push({
-            channel: sender.channel,
-            outcome: 'failed',
-            detail:
-              sender.channel === 'sms'
-                ? 'The text could not be sent. The item is still in your feed.'
-                : 'The notice could not be sent. It is still in your feed.',
-            target: null,
-            attempted_at: now().toISOString(),
-          });
-        }
-      }
-      for (const attempt of attempts) {
-        await store.recordAttempt({ ...owner, delivery_id: created.id, attempt });
-        if (attempt.channel !== 'in_app') {
-          await record({
-            owner,
-            delivery: created,
-            tool_name: channelToolName(attempt),
-            description: outcomeWords(attempt),
-          });
-        }
-      }
-      return (await store.get({ ...owner, id: created.id })) ?? { ...created, attempts };
+      return await send({ owner: ownerOf(input), created: await store.create(input), only_channels });
+    },
+    async deliverOnce(input) {
+      const { delivery, created } = await store.createOnce(input);
+      return created ? await send({ owner: ownerOf(input), created: delivery, only_channels: undefined }) : delivery;
     },
   };
 }

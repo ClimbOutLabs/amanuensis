@@ -1,5 +1,5 @@
 import type { IScheduleStore, ScheduleRecord } from '../../../../src/db/scheduleStore';
-import { scheduleTimezoneFor } from '../../../../src/runtime/noticing/personTimezone';
+import { personTimezoneFor } from '../../../../src/runtime/noticing/personTimezone';
 import { ScheduleManifestSchema } from '../../../../src/schemas/schedule';
 
 const OWNER = { tenant_id: 'default', created_by: 'owner-1' };
@@ -25,19 +25,29 @@ function schedule(timezone: string): ScheduleRecord {
   };
 }
 
-describe('scheduleTimezoneFor', () => {
-  it('uses the time zone of the person’s own schedules, and UTC when they have none', async () => {
+describe('personTimezoneFor', () => {
+  it('uses the person’s schedules first, then their own calendar’s time zone, and UTC only when neither says', async () => {
     const listSchedules = jest.fn<
       ReturnType<IScheduleStore<unknown>['listSchedules']>,
       Parameters<IScheduleStore<unknown>['listSchedules']>
     >(() => Promise.resolve({ data: [schedule('Pacific/Auckland')], pagination: { limit: 1 } }));
-    await expect(scheduleTimezoneFor({ scheduleStore: { listSchedules } })(OWNER)).resolves.toBe('Pacific/Auckland');
+    const calendarTimezone = jest.fn((): Promise<string | undefined> => Promise.resolve('Europe/Paris'));
+    const timezoneFor = personTimezoneFor({ scheduleStore: { listSchedules }, calendarTimezone });
+
+    await expect(timezoneFor(OWNER)).resolves.toBe('Pacific/Auckland');
     expect(listSchedules.mock.calls[0]?.[0]).toMatchObject({
       tenant_id: 'default',
       created_by_or_agent_ids: { created_by_subject_id: 'owner-1', agent_ids: [] },
     });
+    expect(calendarTimezone).not.toHaveBeenCalled();
 
-    listSchedules.mockResolvedValueOnce({ data: [], pagination: { limit: 1 } });
-    await expect(scheduleTimezoneFor({ scheduleStore: { listSchedules } })(OWNER)).resolves.toBe('UTC');
+    listSchedules.mockResolvedValue({ data: [], pagination: { limit: 1 } });
+    await expect(timezoneFor(OWNER)).resolves.toBe('Europe/Paris');
+    expect(calendarTimezone).toHaveBeenCalledWith(OWNER);
+
+    calendarTimezone.mockResolvedValue(undefined);
+    await expect(timezoneFor(OWNER)).resolves.toBe('UTC');
+    calendarTimezone.mockRejectedValue(new Error('Google is not reachable'));
+    await expect(timezoneFor(OWNER)).resolves.toBe('UTC');
   });
 });

@@ -33,7 +33,7 @@ function sentWords({ mode, sent_as }: { mode: TextMode; sent_as: TextMode }): st
     return 'Full text.';
   }
   return mode === 'full'
-    ? 'Private text: the message named a link or a phone number, so only the kind of thing was sent.'
+    ? 'Private text: the message named a link, a phone number or an address, so only the kind of thing was sent.'
     : 'Private text: only the kind of thing was sent.';
 }
 

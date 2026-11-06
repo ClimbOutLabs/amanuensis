@@ -44,7 +44,7 @@ export const updateReachRoute = createRoute({
   description:
     'Replaces how the signed-in person wants to be reached. Texts and calls cannot be turned on until set up.',
   'x-fern-sdk-group-name': ['reach'],
-  'x-fern-sdk-method-name': 'update',
+  'x-fern-sdk-method-name': 'create_or_update',
   request: { body: { content: { 'application/json': { schema: UpdateReachRequestSchema } }, required: true } },
   responses: {
     200: { content: { 'application/json': { schema: GetReachResponseSchema } }, description: 'The saved settings.' },
@@ -104,7 +104,7 @@ export const runNoticingRoute = createRoute({
   path: '/run',
   tags: [OpenApiTag.INTERNAL],
   summary: 'Run a noticing pass',
-  description: 'Runs one pass of one watcher for everyone it can watch. Called by the controller.',
+  description: 'Runs one pass of one watcher for everyone it can watch.',
   'x-fern-sdk-group-name': ['internal', 'noticing'],
   'x-fern-sdk-method-name': 'run',
   request: { body: { content: { 'application/json': { schema: RunNoticingRequestSchema } }, required: true } },

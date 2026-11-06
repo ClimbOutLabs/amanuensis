@@ -4,8 +4,9 @@ import type { AuditLogWriter } from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
 
 import type { IPersonalizationStore } from '../../db/personalizationStore';
+import type { PersonOwner } from '../../db/personOwner';
 import type { IReachSettingsStore } from '../../db/reachSettingsStore';
-import type { ITextContactStore, TextContactOwner } from '../../db/textContactStore';
+import type { ITextContactStore } from '../../db/textContactStore';
 import { E164_PATTERN, type TextContact, type TextMode, type TextStatus } from '../../schemas/textMessages';
 import { assistantNameFor } from './assistantName';
 import type { SmsFailure, SmsProvider } from './smsProvider';
@@ -63,16 +64,16 @@ type ConfirmCodeResult =
 type TextModeResult = { ok: true } | { ok: false; reason: 'no_number' };
 
 export interface TextNumberService {
-  status(owner: TextContactOwner): Promise<TextStatus>;
+  status(owner: PersonOwner): Promise<TextStatus>;
   /**
    * Texts a one-time code to the number. Nothing else is ever sent to a number before it is confirmed. A new number
    * waits beside a confirmed one, which keeps getting texts until the new one is confirmed.
    */
-  sendCode(input: { owner: TextContactOwner; phone: string }): Promise<SendCodeResult>;
-  confirm(input: { owner: TextContactOwner; code: string }): Promise<ConfirmCodeResult>;
-  setMode(input: { owner: TextContactOwner; mode: TextMode }): Promise<TextModeResult>;
+  sendCode(input: { owner: PersonOwner; phone: string }): Promise<SendCodeResult>;
+  confirm(input: { owner: PersonOwner; code: string }): Promise<ConfirmCodeResult>;
+  setMode(input: { owner: PersonOwner; mode: TextMode }): Promise<TextModeResult>;
   /** Forgets the number and switches texts off. Codes already sent stay counted. */
-  remove(owner: TextContactOwner): Promise<void>;
+  remove(owner: PersonOwner): Promise<void>;
   /** A STOP from this number: texts go off for everyone who has it, and Activity says so. Resolves to how many people. */
   stopNumber(phone: string): Promise<number>;
 }
@@ -104,7 +105,7 @@ export function createTextNumberService({
   /** Seam for tests. */
   newCode?: () => string;
 }): TextNumberService {
-  const hashCode = ({ key, code, salt, owner }: { key: string; code: string; salt: string; owner: TextContactOwner }) =>
+  const hashCode = ({ key, code, salt, owner }: { key: string; code: string; salt: string; owner: PersonOwner }) =>
     createHmac('sha256', key)
       .update(`${salt}\u0000${owner.tenant_id}\u0000${owner.created_by}\u0000${code}`)
       .digest('hex');
@@ -123,7 +124,7 @@ export function createTextNumberService({
     return contact?.code_key_id === keyId ? { hash, salt, key: codeKey } : undefined;
   }
 
-  async function textsOff(owner: TextContactOwner): Promise<void> {
+  async function textsOff(owner: PersonOwner): Promise<void> {
     const settings = await reachSettings.get(owner);
     if (settings?.channels.texts === true) {
       await reachSettings.put({
@@ -138,7 +139,7 @@ export function createTextNumberService({
     tool_name,
     description,
   }: {
-    owner: TextContactOwner;
+    owner: PersonOwner;
     tool_name: string;
     description: string;
   }) {
@@ -173,7 +174,7 @@ export function createTextNumberService({
     existing,
   }: {
     key: string;
-    owner: TextContactOwner;
+    owner: PersonOwner;
     phone: string;
     existing: TextContact | undefined;
   }): TextLimit[] {

@@ -1,4 +1,4 @@
-import { namesPhoneNumber } from '@truefoundry/trueforge-core/core/permissions/provenance';
+import { namesContactDetail } from '@truefoundry/trueforge-core/core/permissions/provenance';
 
 import type { IPersonalizationStore } from '../../db/personalizationStore';
 import { UNNAMED_ASSISTANT } from '../chatAssistant';
@@ -13,8 +13,8 @@ const TEXT_NAME_MAX = 20;
  */
 export function textName(name: string | null | undefined): string {
   const plain = plainText(name ?? '');
-  // A name that holds a phone number, even one spelled out in words, is not used at all.
-  if (namesPhoneNumber([plain])) {
+  // A name that holds a phone number, a site or an address, in any spelling, is not used at all.
+  if (namesContactDetail([name ?? '', plain])) {
     return UNNAMED_ASSISTANT;
   }
   const letters = plain

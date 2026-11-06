@@ -8977,6 +8977,7 @@
         "type": "object"
       },
       "ReachSettings": {
+        "description": "How the person wants to be reached. Quiet hours and \"today\" are read in `timezone`.",
         "properties": {
           "always_important": {
             "description": "Senders whose mail the assistant tells the person about, once the mail server vouches for them.",
@@ -9032,14 +9033,7 @@
             "$ref": "#/components/schemas/QuietHours"
           },
           "timezone": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Timezone"
-              },
-              {
-                "description": "The time zone quiet hours and \"today\" are read in."
-              }
-            ]
+            "$ref": "#/components/schemas/Timezone"
           },
           "travel_lead_minutes": {
             "description": "How long before an event with a place the person wants to hear about leaving.",
@@ -10101,7 +10095,7 @@
           },
           "urgent": {
             "default": false,
-            "description": "For a reminder: the person marked it urgent, so it may call if they allowed that. Rows saved before this read as false.",
+            "description": "For a reminder: the person marked it urgent, so it may call if they allowed that.",
             "type": "boolean"
           }
         },
@@ -15736,7 +15730,7 @@
     },
     "/api/internal/noticing/run": {
       "post": {
-        "description": "Runs one pass of one watcher for everyone it can watch. Called by the controller.",
+        "description": "Runs one pass of one watcher for everyone it can watch.",
         "requestBody": {
           "content": {
             "application/json": {
@@ -26637,7 +26631,7 @@
         "x-fern-sdk-group-name": [
           "reach"
         ],
-        "x-fern-sdk-method-name": "update"
+        "x-fern-sdk-method-name": "create_or_update"
       }
     },
     "/api/v1/user/reach/suggestions": {

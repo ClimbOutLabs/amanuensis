@@ -128,10 +128,10 @@ import { registerMailConnectorFromSavedAccountInBackground } from './runtime/mai
 import { prepareMailPolicyAtBoot, registerMailConnectorAtBoot } from './runtime/mailConnector';
 import { warmEmbeddingsAtBoot } from './runtime/memory/embeddingRetrieval';
 import { sessionApprovalSource } from './runtime/noticing/approvalSource';
-import { createGoogleNoticingSources } from './runtime/noticing/googleSources';
+import { createGoogleNoticingSources, googleCalendarTimezoneFor } from './runtime/noticing/googleSources';
 import { createNoticingJudgeResolver } from './runtime/noticing/judgeFactory';
 import { createNoticingService } from './runtime/noticing/noticingService';
-import { scheduleTimezoneFor } from './runtime/noticing/personTimezone';
+import { personTimezoneFor } from './runtime/noticing/personTimezone';
 import { reachChannelsFor } from './runtime/noticing/reachChannels';
 import { createReminderReach } from './runtime/noticing/reminderReach';
 import { createSidecarNoticingSources } from './runtime/noticing/sidecarSources';
@@ -856,7 +856,10 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     budget: tokenFactoryBudget,
     channels: reachChannels,
     logger,
-    timezoneFor: scheduleTimezoneFor({ scheduleStore }),
+    timezoneFor: personTimezoneFor({
+      scheduleStore,
+      calendarTimezone: googleCalendarTimezoneFor({ connections: googleConnectionStore, fetchImpl: undefined }),
+    }),
   });
   const sentinelServices = createSentinelServices({
     demoMode: configuration.DEMO_MODE,

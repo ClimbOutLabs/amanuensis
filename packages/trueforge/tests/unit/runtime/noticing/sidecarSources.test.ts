@@ -8,7 +8,7 @@ import {
   type CallSidecarTool,
 } from '../../../../src/runtime/noticing/sidecarSources';
 import type { NoticingSourceProvider } from '../../../../src/runtime/noticing/sources';
-import { watchCalendar, watchMail } from '../../../../src/runtime/noticing/watchers';
+import { readMailWindow, watchCalendar, watchMail } from '../../../../src/runtime/noticing/watchers';
 import { defaultReachSettings } from '../../../../src/schemas/reach';
 
 const NOW = new Date('2026-11-05T15:00:00.000Z');
@@ -43,15 +43,14 @@ const EMAIL = {
 
 describe('sidecar mail source (IMAP)', () => {
   it('reads new inbox mail without marking it read, and never vouches for a sender', async () => {
-    const { call, calls } = mailTool([EMAIL, { ...EMAIL, email_id: '6', date: '2026-11-01T00:00:00+00:00' }], {
-      '7': 'Amount due by November 7',
-    });
+    const { call, calls } = mailTool([EMAIL], { '7': 'Amount due by November 7' });
     const source = sidecarMailSource({ call, account: 'default' });
-    const { messages, truncated } = await source.listNewMessages({
+    const read = await source.listNewMessages({
       since: new Date('2026-11-05T14:00:00.000Z'),
+      before: NOW,
       limit: 50,
     });
-    expect(truncated).toBe(false);
+    const messages = read.read === 'all' ? read.messages : [];
     expect(messages).toHaveLength(1);
     expect(messages[0]).toMatchObject({
       id: '7',
@@ -64,15 +63,67 @@ describe('sidecar mail source (IMAP)', () => {
     expect(source.trustedAuthenticationServers).toEqual([]);
   });
 
-  it('reads the oldest mail first and says when a full page may have more behind it', async () => {
-    const { call, calls } = mailTool([EMAIL, { ...EMAIL, email_id: '8', date: '2026-11-05T14:56:00+00:00' }], {});
-    const { messages, truncated } = await sidecarMailSource({ call, account: 'default' }).listNewMessages({
-      since: new Date('2026-11-05T14:00:00.000Z'),
-      limit: 2,
+  /** The sidecar picks mail by the server's arrival time, which a sender cannot set, and lists it oldest first. */
+  function inbox(mail: { email: typeof EMAIL; arrived: string }[]): CallSidecarTool {
+    return (_name, args) => {
+      const since = new Date(String(args['since'])).getTime();
+      const before = new Date(String(args['before'])).getTime();
+      const page = Number(args['page']);
+      const size = Number(args['page_size']);
+      const emails = mail
+        .filter(item => new Date(item.arrived).getTime() >= since && new Date(item.arrived).getTime() < before)
+        .sort((a, b) => new Date(a.arrived).getTime() - new Date(b.arrived).getTime())
+        .map(item => item.email)
+        .slice((page - 1) * size, page * size);
+      return Promise.resolve({ structuredContent: { emails } });
+    };
+  }
+
+  it('keeps mail the server got late, whatever Date its sender wrote, in the order the server got it', async () => {
+    const delayed = { ...EMAIL, email_id: '8', date: '2026-11-05T10:00:00+00:00' };
+    const garbled = { ...EMAIL, email_id: '9', date: 'yesterday-ish' };
+    const call = inbox([
+      { email: EMAIL, arrived: '2026-11-05T14:55:00Z' },
+      { email: delayed, arrived: '2026-11-05T14:56:00Z' },
+      { email: garbled, arrived: '2026-11-05T14:57:00Z' },
+    ]);
+    const read = await sidecarMailSource({ call, account: 'default' }).listNewMessages({
+      since: new Date('2026-11-05T14:13:00.000Z'),
+      before: NOW,
+      limit: 50,
     });
-    expect(messages.map(message => message.id)).toEqual(['7', '8']);
-    expect(truncated).toBe(true);
-    expect(calls.at(-1)?.[1]).toMatchObject({ order: 'asc', page_size: 2 });
+    expect(read.read === 'all' ? read.messages.map(message => message.id) : read.read).toEqual(['7', '8', '9']);
+  });
+
+  it('pages through the window and says when it holds more than one read takes', async () => {
+    const mail = Array.from({ length: 150 }, (_, n) => ({
+      email: { ...EMAIL, email_id: String(n) },
+      arrived: new Date(Date.UTC(2026, 10, 5, 12, 0, n)).toISOString(),
+    }));
+    const source = sidecarMailSource({ call: inbox(mail), account: 'default' });
+    const all = await source.listNewMessages({ since: new Date('2026-11-05T12:00:00Z'), before: NOW, limit: 200 });
+    expect(all.read === 'all' ? all.messages.length : all.read).toBe(150);
+    await expect(
+      source.listNewMessages({ since: new Date('2026-11-05T12:00:00Z'), before: NOW, limit: 120 }),
+    ).resolves.toEqual({ read: 'too_many' });
+  });
+
+  it('reads a backlog bigger than one pass over several passes, skipping nothing', async () => {
+    const mail = Array.from({ length: 250 }, (_, n) => ({
+      email: { ...EMAIL, email_id: String(n) },
+      arrived: new Date(Date.UTC(2026, 10, 5, 12, 0, 0, n * 997)).toISOString(),
+    }));
+    const source = sidecarMailSource({ call: inbox(mail), account: 'default' });
+    const seen = new Set<string>();
+    let since = new Date('2026-11-05T12:00:00Z');
+    for (let pass = 0; pass < 20; pass += 1) {
+      const read = await readMailWindow({ source, since, now: NOW, limit: 100, logger: { warn: jest.fn() } });
+      read.messages.forEach(message => seen.add(message.id));
+      if (read.resume_from === undefined) break;
+      expect(read.resume_from.getTime()).toBeGreaterThan(since.getTime());
+      since = read.resume_from;
+    }
+    expect(seen.size).toBe(250);
   });
 
   it('treats an always-important sender as ordinary mail, so only a bill note can come of it', async () => {
@@ -88,6 +139,7 @@ describe('sidecar mail source (IMAP)', () => {
       settings,
       since: new Date('2026-11-05T14:00:00.000Z'),
       now: NOW,
+      logger: { warn: jest.fn() },
     });
     expect(found.raise.map(event => [event.kind, event.evidence])).toEqual([['bill_due', 'content']]);
   });
@@ -122,7 +174,10 @@ const EMAIL_MESSAGE = {
 
 describe('sidecar calendar source (CalDAV)', () => {
   const time = (value: string, all_day = false) => ({ value, tzid: 'Europe/Berlin', all_day });
-  const event = (id: string, start: string, end: string, extra: Record<string, unknown> = {}) => ({
+  const event = (
+    { id, start, end }: { id: string; start: string; end: string },
+    extra: Record<string, unknown> = {},
+  ) => ({
     id,
     summary: id,
     start: time(start),
@@ -135,14 +190,23 @@ describe('sidecar calendar source (CalDAV)', () => {
       Promise.resolve({
         structuredContent: {
           events: [
-            event('a', '2026-11-05T17:00:00+01:00', '2026-11-05T18:00:00+01:00'),
-            event('b', '2026-11-05T17:30:00+01:00', '2026-11-05T18:30:00+01:00', { location: '12 Main Street' }),
-            event('c', '2026-11-05T17:00:00+01:00', '2026-11-05T18:00:00+01:00', { status: 'CANCELLED' }),
-            event('d', '2026-11-05T17:00:00+01:00', '2026-11-05T18:00:00+01:00', {
-              attendees: [{ is_self: true, status: 'DECLINED' }],
-            }),
+            event({ id: 'a', start: '2026-11-05T17:00:00+01:00', end: '2026-11-05T18:00:00+01:00' }),
+            event(
+              { id: 'b', start: '2026-11-05T17:30:00+01:00', end: '2026-11-05T18:30:00+01:00' },
+              { location: '12 Main Street' },
+            ),
+            event(
+              { id: 'c', start: '2026-11-05T17:00:00+01:00', end: '2026-11-05T18:00:00+01:00' },
+              { status: 'CANCELLED' },
+            ),
+            event(
+              { id: 'd', start: '2026-11-05T17:00:00+01:00', end: '2026-11-05T18:00:00+01:00' },
+              {
+                attendees: [{ is_self: true, status: 'DECLINED' }],
+              },
+            ),
             { id: 'e', summary: 'All day', start: time('2026-11-05', true), end: time('2026-11-06', true) },
-            event('f', '2026-11-05T17:00:00', '2026-11-05T18:00:00'),
+            event({ id: 'f', start: '2026-11-05T17:00:00', end: '2026-11-05T18:00:00' }),
           ],
         },
       });
@@ -153,24 +217,42 @@ describe('sidecar calendar source (CalDAV)', () => {
     expect(found.map(item => item.kind)).toContain('calendar_clash');
   });
 
-  it('counts an event as the person’s own only when they organised or accepted it, or no one else is on it', async () => {
+  it('counts an event as the person’s own only when no one else is on it, since the invite writes who organised and who accepted', async () => {
     const call: CallSidecarTool = () =>
       Promise.resolve({
         structuredContent: {
           events: [
-            event('alone', '2026-11-05T17:00:00+01:00', '2026-11-05T18:00:00+01:00'),
-            event('organised', '2026-11-05T17:00:00+01:00', '2026-11-05T18:00:00+01:00', {
-              organizer: { email: 'me@example.com', is_self: true },
-              attendees: [{ email: 'guest@example.com', is_self: false, status: 'NEEDS-ACTION' }],
-            }),
-            event('accepted', '2026-11-05T17:00:00+01:00', '2026-11-05T18:00:00+01:00', {
-              organizer: { email: 'boss@example.com', is_self: false },
-              attendees: [{ email: 'me@example.com', is_self: true, status: 'ACCEPTED' }],
-            }),
-            event('invite', '2026-11-05T17:00:00+01:00', '2026-11-05T18:00:00+01:00', {
-              organizer: { email: 'stranger@example.com', is_self: false },
-              attendees: [{ email: 'me@example.com', is_self: true, status: 'NEEDS-ACTION' }],
-            }),
+            event({ id: 'alone', start: '2026-11-05T17:00:00+01:00', end: '2026-11-05T18:00:00+01:00' }),
+            event(
+              { id: 'forged-organizer', start: '2026-11-05T17:00:00+01:00', end: '2026-11-05T18:00:00+01:00' },
+              {
+                organizer: { email: 'me@example.com', is_self: true },
+                attendees: [{ email: 'guest@example.com', is_self: false, status: 'NEEDS-ACTION' }],
+              },
+            ),
+            event(
+              { id: 'forged-acceptance', start: '2026-11-05T17:00:00+01:00', end: '2026-11-05T18:00:00+01:00' },
+              {
+                organizer: { email: 'stranger@example.com', is_self: false },
+                attendees: [
+                  { email: 'me@example.com', is_self: true, status: 'ACCEPTED' },
+                  { email: 'me@example.com', is_self: true, status: 'NEEDS-ACTION' },
+                ],
+              },
+            ),
+            event(
+              { id: 'organizer-only', start: '2026-11-05T17:00:00+01:00', end: '2026-11-05T18:00:00+01:00' },
+              {
+                organizer: { email: 'me@example.com', is_self: true },
+              },
+            ),
+            event(
+              { id: 'invite', start: '2026-11-05T17:00:00+01:00', end: '2026-11-05T18:00:00+01:00' },
+              {
+                organizer: { email: 'stranger@example.com', is_self: false },
+                attendees: [{ email: 'me@example.com', is_self: true, status: 'NEEDS-ACTION' }],
+              },
+            ),
           ],
         },
       });
@@ -180,8 +262,9 @@ describe('sidecar calendar source (CalDAV)', () => {
     });
     expect(events.map(item => [item.id, item.own])).toEqual([
       ['alone', true],
-      ['organised', true],
-      ['accepted', true],
+      ['forged-organizer', false],
+      ['forged-acceptance', false],
+      ['organizer-only', false],
       ['invite', false],
     ]);
   });

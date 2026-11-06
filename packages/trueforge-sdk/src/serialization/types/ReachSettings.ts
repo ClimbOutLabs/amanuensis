@@ -7,6 +7,7 @@ import { AlwaysImportantSender } from "./AlwaysImportantSender.js";
 import { NoticingKind } from "./NoticingKind.js";
 import { QuietHours } from "./QuietHours.js";
 import { ReachChannels } from "./ReachChannels.js";
+import { Timezone } from "./Timezone.js";
 
 export const ReachSettings: core.serialization.ObjectSchema<serializers.ReachSettings.Raw, TrueForge.ReachSettings> =
     core.serialization.object({
@@ -25,7 +26,7 @@ export const ReachSettings: core.serialization.ObjectSchema<serializers.ReachSet
         maxNudgesPerDay: core.serialization.property("max_nudges_per_day", core.serialization.number()),
         minHoursBetweenCalls: core.serialization.property("min_hours_between_calls", core.serialization.number()),
         quietHours: core.serialization.property("quiet_hours", QuietHours),
-        timezone: core.serialization.string(),
+        timezone: Timezone,
         travelLeadMinutes: core.serialization.property("travel_lead_minutes", core.serialization.number()),
     });
 
@@ -40,7 +41,7 @@ export declare namespace ReachSettings {
         max_nudges_per_day: number;
         min_hours_between_calls: number;
         quiet_hours: QuietHours.Raw;
-        timezone: string;
+        timezone: Timezone.Raw;
         travel_lead_minutes: number;
     }
 }

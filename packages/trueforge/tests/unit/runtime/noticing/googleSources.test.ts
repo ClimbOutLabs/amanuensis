@@ -1,9 +1,10 @@
 import type { CalendarApiPort } from '@truefoundry/trueforge-core/core/calendar/CalendarApi';
 import type { CalendarEvent } from '@truefoundry/trueforge-core/core/calendar/calendarWire';
-import type { GmailApiPort } from '@truefoundry/trueforge-core/core/email/gmail/gmailApi';
-import type { GmailMessage, GmailThread } from '@truefoundry/trueforge-core/core/email/gmail/gmailWire';
+import { LIST_DEADLINE_MS, type GmailApiPort } from '@truefoundry/trueforge-core/core/email/gmail/gmailApi';
+import type { GmailMessage } from '@truefoundry/trueforge-core/core/email/gmail/gmailWire';
 
 import { gmailMailSource, googleCalendarSource } from '../../../../src/runtime/noticing/googleSources';
+import { readMailWindow } from '../../../../src/runtime/noticing/watchers';
 
 const NOW = new Date('2026-11-05T15:00:00.000Z');
 
@@ -53,10 +54,10 @@ describe('Google Calendar source', () => {
 
 describe('Gmail source', () => {
   const minute = (value: number) => new Date(Date.UTC(2026, 10, 5, 14, value));
-  function message(id: string, at: Date): GmailMessage {
+  function message({ id, thread, at }: { id: string; thread: string; at: Date }): GmailMessage {
     return {
       id,
-      threadId: `t-${id}`,
+      threadId: thread,
       labelIds: ['INBOX'],
       internalDate: String(at.getTime()),
       snippet: '',
@@ -70,42 +71,97 @@ describe('Gmail source', () => {
     };
   }
 
-  /** Threads newest first, as Gmail lists them, split into pages of `perPage`. */
-  function gmail({ threads, perPage }: { threads: GmailThread[]; perPage: number }) {
-    const listThreads = jest.fn(({ pageToken }: { pageToken: string | undefined }) => {
+  /** An inbox that answers Gmail's `after:` and `before:` search in whole seconds and lists the newest first. */
+  function gmail({ messages, perPage }: { messages: GmailMessage[]; perPage: number }) {
+    const listMessages = jest.fn(({ query, pageToken }: { query: string; pageToken: string | undefined }) => {
+      const after = Number(/after:(\d+)/.exec(query)?.[1]) * 1000;
+      const before = Number(/before:(\d+)/.exec(query)?.[1]) * 1000;
+      const matching = messages
+        .filter(item => Number(item.internalDate) > after && Number(item.internalDate) < before)
+        .sort((a, b) => Number(b.internalDate) - Number(a.internalDate));
       const start = pageToken === undefined ? 0 : Number(pageToken);
-      const page = threads.slice(start, start + perPage);
       return Promise.resolve({
-        threadIds: page.map(thread => thread.id),
-        nextPageToken: start + perPage < threads.length ? String(start + perPage) : undefined,
-        resultSizeEstimate: threads.length,
+        messageIds: matching.slice(start, start + perPage).map(item => item.id),
+        nextPageToken: start + perPage < matching.length ? String(start + perPage) : undefined,
       });
     });
-    const api: Pick<GmailApiPort, 'listThreads' | 'getThread' | 'getMessage'> = {
-      listThreads,
-      getThread: ({ threadId }) => {
-        const found = threads.find(thread => thread.id === threadId);
-        return found === undefined ? Promise.reject(new Error('missing')) : Promise.resolve(found);
-      },
-      getMessage: () => Promise.reject(new Error('not used')),
+    const byId = (id: string) => {
+      const found = messages.find(item => item.id === id);
+      return found === undefined ? Promise.reject(new Error('missing')) : Promise.resolve(found);
     };
-    return { api, listThreads };
+    const api: Pick<GmailApiPort, 'listMessages' | 'getMessageHeaders' | 'getMessage' | 'getThread'> = {
+      listMessages,
+      getMessageHeaders: byId,
+      getMessage: byId,
+      getThread: () => Promise.reject(new Error('not used')),
+    };
+    return { api, listMessages };
   }
 
-  it('pages through the inbox and hands back the oldest mail first', async () => {
-    const threads = [3, 2, 1].map(n => ({ id: `t-${String(n)}`, messages: [message(String(n), minute(50 + n))] }));
-    const { api, listThreads } = gmail({ threads, perPage: 1 });
-    const { messages, truncated } = await gmailMailSource(api).listNewMessages({ since: minute(0), limit: 10 });
-    expect(listThreads).toHaveBeenCalledTimes(3);
-    expect(messages.map(item => item.id)).toEqual(['1', '2', '3']);
-    expect(truncated).toBe(false);
+  it('pages through the inbox by message and hands back the oldest mail first', async () => {
+    const messages = [3, 2, 1].map(n => message({ id: String(n), thread: `t-${String(n)}`, at: minute(50 + n) }));
+    const { api, listMessages } = gmail({ messages, perPage: 1 });
+    const read = await gmailMailSource(api).listNewMessages({ since: minute(0), before: NOW, limit: 10 });
+    expect(listMessages).toHaveBeenCalledTimes(3);
+    expect(read.read === 'all' ? read.messages.map(item => item.id) : read.read).toEqual(['1', '2', '3']);
   });
 
-  it('says there is more when one read cannot hold it all, keeping the oldest', async () => {
-    const threads = [3, 2, 1].map(n => ({ id: `t-${String(n)}`, messages: [message(String(n), minute(50 + n))] }));
-    const { api } = gmail({ threads, perPage: 100 });
-    const { messages, truncated } = await gmailMailSource(api).listNewMessages({ since: minute(0), limit: 2 });
-    expect(messages.map(item => item.id)).toEqual(['1', '2']);
-    expect(truncated).toBe(true);
+  it('says a window holds too much rather than reading part of it', async () => {
+    const messages = [3, 2, 1].map(n => message({ id: String(n), thread: `t-${String(n)}`, at: minute(50 + n) }));
+    const { api } = gmail({ messages, perPage: 100 });
+    await expect(gmailMailSource(api).listNewMessages({ since: minute(0), before: NOW, limit: 2 })).resolves.toEqual({
+      read: 'too_many',
+    });
+  });
+
+  it('keeps the window exact to the millisecond though Gmail searches in seconds', async () => {
+    const messages = [
+      message({ id: 'before', thread: 'a', at: new Date(minute(10).getTime() - 1) }),
+      message({ id: 'first', thread: 'b', at: minute(10) }),
+      message({ id: 'last', thread: 'c', at: new Date(minute(20).getTime() - 1) }),
+      message({ id: 'after', thread: 'd', at: minute(20) }),
+    ];
+    const { api } = gmail({ messages, perPage: 100 });
+    const read = await gmailMailSource(api).listNewMessages({ since: minute(10), before: minute(20), limit: 10 });
+    expect(read.read === 'all' ? read.messages.map(item => item.id) : read.read).toEqual(['first', 'last']);
+  });
+
+  it('reads a thread whose reply came after the cut, without passing over its first message', async () => {
+    // Thread x has a bill at minute 1 and a reply at minute 10; thread y has one message at minute 5.
+    const messages = [
+      message({ id: 'x1', thread: 'x', at: minute(1) }),
+      message({ id: 'y1', thread: 'y', at: minute(5) }),
+      message({ id: 'x2', thread: 'x', at: minute(10) }),
+    ];
+    const { api } = gmail({ messages, perPage: 100 });
+    const source = gmailMailSource(api);
+    const seen: string[] = [];
+    let since = minute(0);
+    for (let pass = 0; pass < 5; pass += 1) {
+      const read = await readMailWindow({ source, since, now: minute(30), limit: 1, logger: { warn: jest.fn() } });
+      seen.push(...read.messages.map(item => item.id));
+      if (read.resume_from === undefined) break;
+      since = read.resume_from;
+    }
+    expect(seen).toEqual(['x1', 'y1', 'x2']);
+  });
+
+  it('hands back the oldest part when Gmail is too slow to read it all', async () => {
+    jest.useFakeTimers();
+    try {
+      const messages = Array.from({ length: 8 }, (_, n) => message({ id: String(n), thread: 't', at: minute(n) }));
+      const { api } = gmail({ messages, perPage: 100 });
+      const slow: typeof api = {
+        ...api,
+        getMessageHeaders: id => (Number(id) >= 4 ? new Promise(() => undefined) : api.getMessageHeaders(id)),
+      };
+      const reading = gmailMailSource(slow).listNewMessages({ since: minute(0), before: NOW, limit: 50 });
+      await jest.advanceTimersByTimeAsync(LIST_DEADLINE_MS + 1000);
+      const read = await reading;
+      expect(read.read).toBe('oldest');
+      expect(read.read === 'oldest' ? read.messages.map(item => item.id) : []).toEqual(['0', '1', '2', '3']);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

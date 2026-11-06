@@ -1,6 +1,7 @@
 import { sql, type Kysely } from 'kysely';
 
 import { TextContactSchema, type TextContact, type TextContactExport, type TextMode } from '../schemas/textMessages';
+import type { PersonOwner } from './personOwner';
 
 /** One row of `text_contact`. Times are text on SQLite and timestamptz on Postgres. */
 export interface TextContactTable {
@@ -31,11 +32,6 @@ export interface TextContactDatabase {
   text_send_count: TextSendCountTable;
 }
 
-export interface TextContactOwner {
-  tenant_id: string;
-  created_by: string;
-}
-
 /** A one-time code as stored: its keyed hash, the salt it was hashed with, which key hashed it, and when it runs out. */
 interface StoredCode {
   hash: string;
@@ -51,39 +47,39 @@ type TextSendClaim = { ok: true } | { ok: false; window_started_at: string };
  * after a read is conditional on what was read, so two requests at once cannot undo each other.
  */
 export interface ITextContactStore {
-  get(owner: TextContactOwner): Promise<TextContact | undefined>;
+  get(owner: PersonOwner): Promise<TextContact | undefined>;
   /**
    * Starts a code. As `number`, the phone becomes the person's number: the same number keeps its confirmation, another
    * one starts unconfirmed. As `new_number`, it waits beside a confirmed number, which keeps getting texts; this
    * resolves to false when the person has no confirmed number to keep.
    */
   startCode(
-    input: TextContactOwner & { phone: string; as: 'number' | 'new_number'; code: StoredCode; now: Date },
+    input: PersonOwner & { phone: string; as: 'number' | 'new_number'; code: StoredCode; now: Date },
   ): Promise<boolean>;
   /** Confirms the code with this hash, and swaps in a waiting new number. False when that code is no longer pending. */
-  confirmCode(input: TextContactOwner & { code_hash: string; now: Date }): Promise<boolean>;
+  confirmCode(input: PersonOwner & { code_hash: string; now: Date }): Promise<boolean>;
   /** Forgets the code with this hash and any new number waiting for it. False when that code is no longer pending. */
-  clearCode(input: TextContactOwner & { code_hash: string; now: Date }): Promise<boolean>;
+  clearCode(input: PersonOwner & { code_hash: string; now: Date }): Promise<boolean>;
   /**
    * Counts one try at the pending code and resolves to the new count, or undefined when no code is pending. The count
    * moves in the database, so two tries at once cannot both be the last one allowed.
    */
-  countCodeAttempt(owner: TextContactOwner): Promise<number | undefined>;
+  countCodeAttempt(owner: PersonOwner): Promise<number | undefined>;
   /** False when the person has no number. */
-  setMode(input: TextContactOwner & { mode: TextMode; now: Date }): Promise<boolean>;
+  setMode(input: PersonOwner & { mode: TextMode; now: Date }): Promise<boolean>;
   /**
    * A STOP from this number, across tenants: where it is the person's number it is opted out and unconfirmed, and
    * where it waits as a new number it is dropped.
    */
   optOut(input: { phone: string; now: Date }): Promise<{
-    opted_out: TextContactOwner[];
-    pending_dropped: TextContactOwner[];
+    opted_out: PersonOwner[];
+    pending_dropped: PersonOwner[];
   }>;
   /** Removes the person's number. Codes already sent stay counted. Resolves to whether there was one. */
-  remove(owner: TextContactOwner): Promise<boolean>;
+  remove(owner: PersonOwner): Promise<boolean>;
   /** Adds an exported number as unconfirmed when the person has none; one already there is kept. Resolves to whether it was added. */
   importContact(
-    input: TextContactOwner & { contact: TextContactExport; now?: Date },
+    input: PersonOwner & { contact: TextContactExport; now?: Date },
     transaction?: Kysely<TextContactDatabase>,
   ): Promise<boolean>;
   /**
@@ -125,7 +121,7 @@ function freshRow({
   mode,
   now,
 }: {
-  owner: TextContactOwner;
+  owner: PersonOwner;
   phone: string;
   mode: TextMode;
   now: Date;
@@ -156,7 +152,7 @@ const NO_CODE = {
   code_attempts: 0,
 } as const;
 
-function ownerOf(row: TextContactOwner): TextContactOwner {
+function ownerOf(row: PersonOwner): PersonOwner {
   return { tenant_id: row.tenant_id, created_by: row.created_by };
 }
 
@@ -167,7 +163,7 @@ export class TextContactStore implements ITextContactStore {
     this.#db = db;
   }
 
-  async get(owner: TextContactOwner): Promise<TextContact | undefined> {
+  async get(owner: PersonOwner): Promise<TextContact | undefined> {
     const row = await this.#db
       .selectFrom('text_contact')
       .selectAll()
@@ -178,7 +174,7 @@ export class TextContactStore implements ITextContactStore {
   }
 
   async startCode(
-    input: TextContactOwner & { phone: string; as: 'number' | 'new_number'; code: StoredCode; now: Date },
+    input: PersonOwner & { phone: string; as: 'number' | 'new_number'; code: StoredCode; now: Date },
   ): Promise<boolean> {
     const owner = ownerOf(input);
     const phone = TextContactSchema.shape.phone.parse(input.phone);
@@ -221,7 +217,7 @@ export class TextContactStore implements ITextContactStore {
     return true;
   }
 
-  async confirmCode(input: TextContactOwner & { code_hash: string; now: Date }): Promise<boolean> {
+  async confirmCode(input: PersonOwner & { code_hash: string; now: Date }): Promise<boolean> {
     const at = input.now.toISOString();
     const updated = await this.#db
       .updateTable('text_contact')
@@ -241,7 +237,7 @@ export class TextContactStore implements ITextContactStore {
     return updated !== undefined;
   }
 
-  async clearCode(input: TextContactOwner & { code_hash: string; now: Date }): Promise<boolean> {
+  async clearCode(input: PersonOwner & { code_hash: string; now: Date }): Promise<boolean> {
     const updated = await this.#db
       .updateTable('text_contact')
       .set({ ...NO_CODE, pending_phone: null, updated_at: input.now.toISOString() })
@@ -253,7 +249,7 @@ export class TextContactStore implements ITextContactStore {
     return updated !== undefined;
   }
 
-  async countCodeAttempt(owner: TextContactOwner): Promise<number | undefined> {
+  async countCodeAttempt(owner: PersonOwner): Promise<number | undefined> {
     const row = await this.#db
       .updateTable('text_contact')
       .set(eb => ({ code_attempts: eb('code_attempts', '+', 1) }))
@@ -265,7 +261,7 @@ export class TextContactStore implements ITextContactStore {
     return row?.code_attempts;
   }
 
-  async setMode(input: TextContactOwner & { mode: TextMode; now: Date }): Promise<boolean> {
+  async setMode(input: PersonOwner & { mode: TextMode; now: Date }): Promise<boolean> {
     const updated = await this.#db
       .updateTable('text_contact')
       .set({ mode: input.mode, updated_at: input.now.toISOString() })
@@ -277,8 +273,8 @@ export class TextContactStore implements ITextContactStore {
   }
 
   async optOut(input: { phone: string; now: Date }): Promise<{
-    opted_out: TextContactOwner[];
-    pending_dropped: TextContactOwner[];
+    opted_out: PersonOwner[];
+    pending_dropped: PersonOwner[];
   }> {
     const at = input.now.toISOString();
     const optedOut = await this.#db
@@ -296,7 +292,7 @@ export class TextContactStore implements ITextContactStore {
     return { opted_out: optedOut.map(ownerOf), pending_dropped: dropped.map(ownerOf) };
   }
 
-  async remove(owner: TextContactOwner): Promise<boolean> {
+  async remove(owner: PersonOwner): Promise<boolean> {
     const removed = await this.#db
       .deleteFrom('text_contact')
       .where('tenant_id', '=', owner.tenant_id)
@@ -307,7 +303,7 @@ export class TextContactStore implements ITextContactStore {
   }
 
   async importContact(
-    input: TextContactOwner & { contact: TextContactExport; now?: Date },
+    input: PersonOwner & { contact: TextContactExport; now?: Date },
     transaction?: Kysely<TextContactDatabase>,
   ): Promise<boolean> {
     const db = transaction ?? this.#db;

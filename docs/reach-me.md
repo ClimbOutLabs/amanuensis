@@ -7,13 +7,13 @@ Aman can tell you about things without waiting for you to open a chat. You choos
 
 ## What Aman watches for
 
-- **Mail from people you marked always important.** It counts only when your mail server confirms the sender. Mail that only claims to be from them is treated as ordinary mail.
+- **Mail from people you marked always important.** It counts only when your mail server confirms the sender. Mail that only claims to be from them is treated as ordinary mail. A sender whose own mail domain does not ask servers to check it can never be confirmed.
 - **Bills and deadlines** named in new mail. Aman tells you when one is due within three days. It stays quiet when a later message in the same thread says it was paid.
 - **Two things on your calendar at the same time** in the next 24 hours.
 - **Time to leave** for an event with a place, inside the lead time you choose.
 - **An approval waiting for you** longer than the time you choose.
 
-Calendar events count only when they are your own. That means you organised them, you accepted them, or no one else is on them. An invite you have not accepted can only ever become a quiet note.
+Calendar events count only when they are your own. On a Google calendar, that means you organised them, you accepted them, or no one else is on them. On the shared Calendar connector, it means no one else is on them, because anyone who sends an invite can write that you accepted it. Anything else can only ever become a quiet note.
 
 Mail is checked every 10 minutes, the calendar every 30 minutes, and approvals every 5 minutes.
 
@@ -25,7 +25,7 @@ Everything lands under the bell with the reason you got it.
 - **Nudge:** a notice on the devices where you turned notices on, and a text if you set up texts and switched them on. See [Text messages](/text-messages).
 - **Call:** a phone call. Calls are not set up yet. Until they are, nothing calls you.
 
-A model reads a short description of each new thing and suggests how loudly to tell you. It can only suggest. Your settings decide. A bill or a waiting approval can nudge you but never call. Words in a message, such as "urgent", can never make it louder than a note.
+A model reads a short description of each new thing and suggests how loudly to tell you. It can only suggest. Your settings decide. A waiting approval can nudge you but never call. A bill can nudge you only when it came from someone you marked always important and your mail server confirmed the sender, and it never calls. Words in a message, such as "urgent", can never make it louder than a note.
 
 ## Your settings
 
@@ -42,7 +42,7 @@ Each way to reach you has a **Try it** button. It sends a test item under the be
 ## When something goes wrong
 
 - If the model cannot be asked, or has used its limit for the day, things still arrive as quiet notes.
-- If a delivery fails, Aman tries again on the next check.
+- If a delivery fails, Aman tries again on the next check. After five tries it stops trying that item.
 - If a page says your settings could not be read, reload the page.
 
 See [Privacy](privacy) for what is sent where.

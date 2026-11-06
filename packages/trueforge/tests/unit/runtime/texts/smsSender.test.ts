@@ -86,7 +86,7 @@ describe('texts as a channel of the delivery layer', () => {
     );
     expect(h.sent[0]?.body).toBe('Mannie: something needs you. Open the app to see it.');
     expect(delivery.attempts.find(row => row.channel === 'sms')?.detail).toBe(
-      'Private text: the message named a link or a phone number, so only the kind of thing was sent.',
+      'Private text: the message named a link, a phone number or an address, so only the kind of thing was sent.',
     );
   });
 
