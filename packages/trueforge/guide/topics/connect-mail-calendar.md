@@ -6,7 +6,7 @@ covers:
 
 You connect email and calendar in one place, in Settings. You do not need the terminal.
 
-Google email and Google Calendar use a Google app that you make once in your own Google account. This takes about ten minutes. A calendar from another provider, such as Fastmail, connects with an app password instead. See "Connect a calendar with an app password" below.
+Google email uses a Google app that you make once in your own Google account. This takes about ten minutes. Google Calendar can use that app, or the simpler Calendar card with an app password. A calendar from another provider, such as Fastmail, also connects with an app password. See "Connect a calendar with an app password" below.
 
 If Aman is in offline mode, turn it off first. Click **More**, click **Settings**, click **Permissions**, and turn off **Offline mode**.
 
@@ -38,7 +38,7 @@ The panel then says it is connected and shows your Google address.
 
 ## Connect a calendar with an app password
 
-Use this for a calendar that is not Google Calendar. Fastmail, Yahoo, GMX and web.de are on the list. Any other calendar that gives you an https calendar address works too.
+Use this for Google Calendar or a calendar from another provider. Google, Fastmail, Yahoo, GMX and web.de are on the list. Any other calendar that gives you an https calendar address works too.
 
 An app password is a separate password for apps like this one. It is not your usual password. You make it at your calendar provider.
 
