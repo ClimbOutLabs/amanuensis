@@ -9095,11 +9095,19 @@
           "note": {
             "description": "A plain-words line about the channel, shown beside its switch.",
             "type": "string"
+          },
+          "problem": {
+            "description": "Set when the channel works but has a problem to fix, in plain words with what to do. Null otherwise.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
           "available",
-          "note"
+          "note",
+          "problem"
         ],
         "type": "object"
       },

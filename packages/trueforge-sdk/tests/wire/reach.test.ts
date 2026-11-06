@@ -11,7 +11,10 @@ describe("ReachClient", () => {
 
         const rawResponseBody = {
             data: {
-                availability: { calls: { available: true, note: "note" }, texts: { available: true, note: "note" } },
+                availability: {
+                    calls: { available: true, note: "note", problem: null },
+                    texts: { available: true, note: "note", problem: null },
+                },
                 mail_problem: { kind: "too_slow", since: "since" },
                 max_levels: {
                     approval_waiting: "note",
@@ -46,10 +49,12 @@ describe("ReachClient", () => {
                     calls: {
                         available: true,
                         note: "note",
+                        problem: null,
                     },
                     texts: {
                         available: true,
                         note: "note",
+                        problem: null,
                     },
                 },
                 mailProblem: {
@@ -127,7 +132,10 @@ describe("ReachClient", () => {
         };
         const rawResponseBody = {
             data: {
-                availability: { calls: { available: true, note: "note" }, texts: { available: true, note: "note" } },
+                availability: {
+                    calls: { available: true, note: "note", problem: null },
+                    texts: { available: true, note: "note", problem: null },
+                },
                 mail_problem: { kind: "too_slow", since: "since" },
                 max_levels: {
                     approval_waiting: "note",
@@ -196,10 +204,12 @@ describe("ReachClient", () => {
                     calls: {
                         available: true,
                         note: "note",
+                        problem: null,
                     },
                     texts: {
                         available: true,
                         note: "note",
+                        problem: null,
                     },
                 },
                 mailProblem: {
