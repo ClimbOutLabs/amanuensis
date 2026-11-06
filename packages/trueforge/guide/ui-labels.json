@@ -106,5 +106,12 @@
   "Cancel": "packages/trueforge-ui/src/containers/SettingsBuilder/AccountSetupPanel.tsx",
   "Reach me": "packages/trueforge-ui/src/containers/SettingsBuilder/index.tsx",
   "Try it": "packages/trueforge-ui/src/deliveries/ReachPreferences.tsx",
-  "Call me for reminders I mark urgent": "packages/trueforge-ui/src/deliveries/ReachPreferences.tsx"
+  "Call me for reminders I mark urgent": "packages/trueforge-ui/src/deliveries/ReachPreferences.tsx",
+  "Send code": "packages/trueforge-ui/src/deliveries/TextsSettings.tsx",
+  "Confirm": "packages/trueforge-ui/src/deliveries/TextsSettings.tsx",
+  "Change number": "packages/trueforge-ui/src/deliveries/TextsSettings.tsx",
+  "Remove number": "packages/trueforge-ui/src/deliveries/TextsSettings.tsx",
+  "Private (recommended)": "packages/trueforge-ui/src/deliveries/TextsSettings.tsx",
+  "Full": "packages/trueforge-ui/src/deliveries/TextsSettings.tsx",
+  "Send me texts": "packages/trueforge-ui/src/deliveries/TextsSettings.tsx"
 }
