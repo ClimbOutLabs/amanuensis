@@ -65,7 +65,7 @@ async function setup(senders: DeliveryChannelSender[]) {
 }
 
 describe('the delivery service', () => {
-  it('names the channel that failed, and says the item is still in the feed', async () => {
+  it('names the channel that failed, and says where to see the item instead', async () => {
     const t = await setup([
       sender({ channel: 'web_push', outcome: 'sent', throws: true }),
       sender({ channel: 'sms', outcome: 'sent', throws: true }),
@@ -73,8 +73,8 @@ describe('the delivery service', () => {
     const delivery = await t.deliver('nudge');
     expect(delivery.attempts.map(attempt => attempt.detail)).toEqual([
       null,
-      'The push notice could not be sent. It is still in your feed.',
-      'The text could not be sent. It is still in your feed.',
+      'The push notice could not be sent. Open the app to see it in your feed.',
+      'The text could not be sent. Open the app to see it in your feed.',
     ]);
   });
 

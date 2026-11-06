@@ -22,11 +22,11 @@ export interface PhoneCallTable {
   ended_at: string | Date | null;
 }
 
-export interface PhoneCallDatabase {
+interface PhoneCallDatabase {
   phone_call: PhoneCallTable;
 }
 
-export interface NewPhoneCall {
+interface NewPhoneCall {
   id: string;
   tenant_id: string;
   created_by: string;

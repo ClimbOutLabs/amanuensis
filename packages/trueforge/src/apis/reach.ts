@@ -12,6 +12,7 @@ import {
 } from '../routes/reachRoutes';
 import type { PhoneCallService } from '../runtime/calls/phoneCalls';
 import { claimTestCall } from '../runtime/calls/testCallLimits';
+import { callFailureWords } from '../runtime/calls/twilioCalls';
 import type { DeliveryService } from '../runtime/delivery/deliveryService';
 import { KIND_MAX_LEVEL } from '../runtime/noticing/levels';
 import { suggestAlwaysImportant } from '../runtime/noticing/suggestions';
@@ -226,10 +227,7 @@ export function createReachRouter(deps: ReachRouterDeps) {
       const rang = await deps.calls.place({ owner, delivery, fallback: false });
       await deps.deliveryService.recordAttempt({ ...owner, delivery_id: delivery.id, attempt: rang });
       if (rang.outcome !== 'sent') {
-        return c.json(
-          { error: { message: rang.detail ?? 'The call could not be started. Try again in a minute.' } },
-          502,
-        );
+        return c.json({ error: { message: rang.detail ?? callFailureWords('unreachable') } }, 502);
       }
       return c.json({ data: { delivery_id: delivery.id, devices_reached: 0 } }, 201);
     }

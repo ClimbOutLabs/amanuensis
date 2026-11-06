@@ -2,7 +2,7 @@ import { wordsOf } from '../../voice/echoGuard';
 import type { TurnOutcome, VoiceTurnRunner } from '../../voice/transport';
 
 /** What the person answered to "Is this a good time?". */
-export type GoodTimeAnswer = 'yes' | 'no' | 'unclear';
+type GoodTimeAnswer = 'yes' | 'no' | 'unclear';
 
 const NO_WORDS = new Set(['no', 'nope', 'not', 'busy', 'later', 'bad', 'cant', 'cannot', 'driving', 'stop']);
 /** Words that are only ever a yes. "Go", "fine", "ok" and "alright" are left out: each also starts other replies. */
@@ -60,7 +60,7 @@ function withStop(text: string): string {
 }
 
 /** Why a call ended before a conversation: the person said no, no yes was heard, or no chat could open. */
-export type CallEnding = 'said_no' | 'unclear' | 'no_chat';
+type CallEnding = 'said_no' | 'unclear' | 'no_chat';
 
 /** The conversation a call has once the person said yes, and the chat it is written into when there is one. */
 export interface CallChat {

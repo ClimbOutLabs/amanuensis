@@ -3,10 +3,10 @@ import { z } from 'zod';
 import type { TwilioSettings } from '../../config';
 import { CallSidSchema } from '../../schemas/phoneCalls';
 import type { ResolveAddresses } from '../publicFetch';
-import { postTwilioForm, publicTwilioFetch, twilioErrorCode, type TwilioFetch } from '../twilio/rest';
+import { postTwilioForm, publicTwilioFetch, twilioErrorCode, twilioRefusal, type TwilioFetch } from '../twilio/rest';
 
 /** Why a call could not be started. The words for the person are written by whoever shows it. */
-export type CallFailure = 'invalid_number' | 'not_accepted' | 'unreachable';
+type CallFailure = 'invalid_number' | 'not_accepted' | 'unreachable';
 
 export type PlaceCallResult = { outcome: 'started'; call_sid: string } | { outcome: 'failed'; failure: CallFailure };
 
@@ -86,10 +86,7 @@ export function createTwilioCallProvider({
         if (code !== undefined && INVALID_NUMBER_CODES.has(code)) {
           return { outcome: 'failed', failure: 'invalid_number' };
         }
-        return {
-          outcome: 'failed',
-          failure: reply.status === 401 || reply.status === 403 ? 'not_accepted' : 'unreachable',
-        };
+        return { outcome: 'failed', failure: twilioRefusal(reply.status) };
       } catch {
         return { outcome: 'failed', failure: 'unreachable' };
       }

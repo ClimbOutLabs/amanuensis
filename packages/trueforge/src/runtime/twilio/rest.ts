@@ -48,6 +48,11 @@ export function twilioErrorCode(text: string): number | undefined {
   return undefined;
 }
 
+/** Why Twilio refused a request: its sign-in details, or anything else. */
+export function twilioRefusal(status: number): 'not_accepted' | 'unreachable' {
+  return status === 401 || status === 403 ? 'not_accepted' : 'unreachable';
+}
+
 /** The account's REST address and the headers that sign in with the account's own details. */
 export function twilioAccount(settings: Pick<TwilioSettings, 'accountSid' | 'authToken'>): {
   url: string;

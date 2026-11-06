@@ -4,16 +4,16 @@ import { z } from '@hono/zod-openapi';
  * Where a call Aman placed stands. `dialing` until Twilio names the call, `ringing` until it is answered, `connecting`
  * while a one-time media token waits to be used, `connected` while the line is open, and `ended` after.
  */
-export const PhoneCallStatusSchema = z.enum(['dialing', 'ringing', 'connecting', 'connected', 'ended']);
+const PhoneCallStatusSchema = z.enum(['dialing', 'ringing', 'connecting', 'connected', 'ended']);
 
 /** How a call ended, in the words Activity uses. */
-export const PhoneCallOutcomeSchema = z.enum(['answered', 'not_now', 'voicemail', 'no_answer', 'failed']);
+const PhoneCallOutcomeSchema = z.enum(['answered', 'not_now', 'voicemail', 'no_answer', 'failed']);
 
 /** What the open line is for: a conversation with the person, or a voicemail when a machine answered. */
-export const PhoneCallModeSchema = z.enum(['talk', 'voicemail']);
+const PhoneCallModeSchema = z.enum(['talk', 'voicemail']);
 
 /** Whether a call that is not answered falls back to one text and one push: `pending` until it has, `off` for a test. */
-export const PhoneCallFallbackSchema = z.enum(['pending', 'done', 'off']);
+const PhoneCallFallbackSchema = z.enum(['pending', 'done', 'off']);
 
 /** One call Aman placed. Stored on SQLite and Postgres; never sent over the wire as is. */
 export const PhoneCallSchema = z.object({
@@ -68,6 +68,3 @@ export const CallStatusParamsSchema = z.object({
     'canceled',
   ]),
 });
-
-export type VoiceWebhookParams = z.infer<typeof VoiceWebhookParamsSchema>;
-export type CallStatusParams = z.infer<typeof CallStatusParamsSchema>;

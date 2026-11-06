@@ -36,7 +36,7 @@ const TwilioFrameSchema = z.discriminatedUnion('event', [
 ]);
 
 /** What a frame from Twilio means here; anything else is ignored. */
-export type PhoneFrame =
+type PhoneFrame =
   | { kind: 'start'; streamSid: string; callSid: string; parameters: Record<string, string> }
   | { kind: 'audio'; bytes: Uint8Array }
   | { kind: 'mark'; name: string }
@@ -78,7 +78,7 @@ export function readPhoneFrame(data: RawData): PhoneFrame {
 }
 
 /** The parts of the socket the line uses. */
-export type PhoneSocket = Pick<WebSocket, 'OPEN' | 'readyState' | 'send' | 'close'>;
+type PhoneSocket = Pick<WebSocket, 'OPEN' | 'readyState' | 'send' | 'close'>;
 
 export class PhoneVoiceTransport implements VoiceTransport {
   readonly outputFormat = 'mulaw8k';

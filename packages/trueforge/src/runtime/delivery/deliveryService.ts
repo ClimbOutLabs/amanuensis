@@ -46,12 +46,12 @@ const CHANNEL_WORDS: Record<DeliveryChannel, string> = {
   call: 'a phone call',
 };
 
-/** What failed, when a sender broke before it could say so itself. */
+/** What failed, when a sender broke before it could say so itself, and where to see the item instead. */
 const FAILED_WORDS: Record<DeliveryChannel, string> = {
-  in_app: 'The notice could not be added.',
-  web_push: 'The push notice could not be sent.',
-  sms: 'The text could not be sent.',
-  call: 'The call could not be made.',
+  in_app: 'The notice could not be added to your feed. Restart Aman if this keeps happening.',
+  web_push: 'The push notice could not be sent. Open the app to see it in your feed.',
+  sms: 'The text could not be sent. Open the app to see it in your feed.',
+  call: 'The call could not be made. Open the app to see it in your feed.',
 };
 
 function conversationOf(delivery: Delivery): string {
@@ -134,7 +134,7 @@ export function createDeliveryService({
         {
           channel: sender.channel,
           outcome: 'failed',
-          detail: `${FAILED_WORDS[sender.channel]} It is still in your feed.`,
+          detail: FAILED_WORDS[sender.channel],
           target: null,
           attempted_at: now().toISOString(),
         },

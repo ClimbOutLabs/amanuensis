@@ -59,7 +59,7 @@ const DEFAULT_LIMITS: CallLimits = { talkMs: 10 * 60_000, hangUpGraceMs: 15_000,
 /** Twilio's final statuses for a call that never reached a person. */
 const MISSED_STATUSES = new Set(['busy', 'no-answer', 'failed', 'canceled']);
 
-export const HANG_UP_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>';
+const HANG_UP_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>';
 
 /** What Activity says about how a call ended. Each sentence is one idea. */
 const ENDED_WORDS = {
@@ -77,7 +77,7 @@ const ENDED_WORDS = {
 
 /** What a call listens with. It speaks with the same voice a voice session in the app uses. */
 export type CallListening = Pick<VoiceSessionDeps, 'vad' | 'stt'>;
-export type CallSpeaking = VoiceSessionDeps['tts'];
+type CallSpeaking = VoiceSessionDeps['tts'];
 
 /** The names a call says: the assistant's, and the person's, each from their settings and undefined when unset. */
 export interface CallNames {
@@ -115,7 +115,7 @@ export interface PhoneCallService {
   sweep(): Promise<void>;
 }
 
-export interface PhoneCallDeps {
+interface PhoneCallDeps {
   store: IPhoneCallStore;
   deliveryStore: Pick<IDeliveryStore, 'get'>;
   contacts: Pick<ITextContactStore, 'get'>;

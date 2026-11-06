@@ -2,7 +2,14 @@ import { z } from 'zod';
 
 import type { TwilioSettings } from '../../config';
 import type { ResolveAddresses } from '../publicFetch';
-import { postTwilioForm, publicTwilioFetch, twilioAccount, twilioErrorCode, type TwilioFetch } from '../twilio/rest';
+import {
+  postTwilioForm,
+  publicTwilioFetch,
+  twilioAccount,
+  twilioErrorCode,
+  twilioRefusal,
+  type TwilioFetch,
+} from '../twilio/rest';
 
 /** Why a text was not sent. The words for the person are written by whoever shows it. */
 export type SmsFailure = 'opted_out' | 'invalid_number' | 'not_accepted' | 'unreachable';
@@ -75,8 +82,6 @@ export function createTwilioSmsProvider({
   pointNumberAt(input: { smsUrl: string }): Promise<PointNumberResult>;
 } {
   const { url: account, headers } = twilioAccount(settings);
-  const refused = (status: number): PointNumberResult =>
-    status === 401 || status === 403 ? 'not_accepted' : 'unreachable';
   return {
     async pointNumberAt({ smsUrl }) {
       try {
@@ -86,7 +91,7 @@ export function createTwilioSmsProvider({
           headers,
         });
         if (lookup.status !== 200) {
-          return refused(lookup.status);
+          return twilioRefusal(lookup.status);
         }
         const entry = numberEntry({ text: await lookup.text(), fromNumber: settings.fromNumber });
         if (entry === undefined) {
@@ -101,7 +106,7 @@ export function createTwilioSmsProvider({
           resource: `IncomingPhoneNumbers/${entry.sid}.json`,
           form: new URLSearchParams({ SmsUrl: smsUrl, SmsMethod: 'POST' }),
         });
-        return update.status >= 200 && update.status < 300 ? 'updated' : refused(update.status);
+        return update.status >= 200 && update.status < 300 ? 'updated' : twilioRefusal(update.status);
       } catch {
         return 'unreachable';
       }
@@ -123,7 +128,7 @@ export function createTwilioSmsProvider({
         }
         return {
           outcome: 'failed',
-          failure: reply.status === 401 || reply.status === 403 ? 'not_accepted' : 'unreachable',
+          failure: twilioRefusal(reply.status),
         };
       } catch {
         return { outcome: 'failed', failure: 'unreachable' };
