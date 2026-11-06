@@ -46,7 +46,7 @@ One model call per new event asks only for a level, a reason and a one-sentence 
 
 - Each kind has a highest level. Bills and waiting approvals can nudge but never call.
 - A call needs the kind to be ticked for calls, calls to be switched on, no quiet hours, and at least 6 hours since the last call.
-- Text that only claimed something (for example "urgent" in a bill) can raise a note and nothing more. A message or reason that carries a link, an address or a phone number only the read content named is replaced by a plain sentence the watcher wrote. When a kind can only be a note, no model is called.
+- Text that only claimed something (for example "urgent" in a bill) can raise a note and nothing more. A message or reason that carries any phone number, site or address, in any spelling (other dashes and digits of other scripts, bare or bracketed sites, "dot com", a full-width or spelled-out at sign, a number read out in words) is replaced by a plain sentence the watcher wrote. When a kind can only be a note, no model is called.
 - At most 5 nudges a day (the person can change this). Past it, events become notes.
 - When the daily token cap is reached, or no model can answer, events become plain notes and no model is called.
 

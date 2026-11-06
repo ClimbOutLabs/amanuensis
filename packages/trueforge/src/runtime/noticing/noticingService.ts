@@ -1,15 +1,7 @@
 import { createHash } from 'node:crypto';
 
 import { APPROVAL_EXPIRY_MINUTES } from '@truefoundry/trueforge-core/core/permissions/approvalExpiry';
-import {
-  emptyChatProvenance,
-  namesPhoneNumber,
-  namesUrl,
-  recordPersonText,
-  recordUntrustedText,
-  steeredDestinations,
-  type ReadSource,
-} from '@truefoundry/trueforge-core/core/permissions/provenance';
+import { namesContactDetail } from '@truefoundry/trueforge-core/core/permissions/provenance';
 import type { Logger } from 'winston';
 
 import type { IDeliveryStore } from '../../db/deliveryStore';
@@ -78,55 +70,19 @@ export interface NoticingDeps {
   sleep?: (ms: number) => Promise<void>;
 }
 
-const READ_SOURCE: Record<NoticingKind, ReadSource> = {
-  mail_always: 'email',
-  bill_due: 'email',
-  calendar_clash: 'event',
-  travel: 'event',
-  approval_waiting: 'other',
-};
-
 const ONLY_WORDS = 'Only the words in a message said this mattered, so it stays a note.';
 
-/**
- * Whether the model's words may reach the person as they are. Read content steers nothing, so words that carry a link,
- * a phone number, or an address only read content named are never shown. The always-important addresses are the
- * person's own words.
- */
-function usableWords({
-  event,
-  words,
-  settings,
-}: {
-  event: NoticingEvent;
-  words: string;
-  settings: ReachSettings;
-}): boolean {
-  const provenance = emptyChatProvenance();
-  for (const sender of settings.always_important) {
-    recordPersonText({ provenance, text: sender.address });
-  }
-  recordUntrustedText({ provenance, text: event.facts, source: READ_SOURCE[event.kind] });
-  const steered = steeredDestinations({ provenance, addresses: [], values: [words], reply_sender: null });
-  return !namesUrl([words]) && !namesPhoneNumber([words]) && steered.length === 0;
-}
-
 /** The model's message and reason as they may be shown, each replaced by plain words when it cannot be. */
-function shownWords({
-  event,
-  verdict,
-  settings,
-}: {
-  event: NoticingEvent;
-  verdict: NoticingVerdict;
-  settings: ReachSettings;
-}): { text: string; reason: string; replaced: boolean } {
-  const messageOk = usableWords({ event, words: verdict.message, settings });
+function shownWords({ event, verdict }: { event: NoticingEvent; verdict: NoticingVerdict }): {
+  text: string;
+  reason: string;
+  replaced: boolean;
+} {
+  // A steered model could put a number, a site or an address on the person's lock screen, so its words carry none.
+  const messageOk = !namesContactDetail([verdict.message]);
   return {
     text: messageOk ? verdict.message : event.summary,
-    reason: usableWords({ event, words: verdict.reason, settings })
-      ? verdict.reason
-      : `The model asked for a ${verdict.level}.`,
+    reason: namesContactDetail([verdict.reason]) ? `The model asked for a ${verdict.level}.` : verdict.reason,
     replaced: !messageOk,
   };
 }
@@ -229,9 +185,7 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
       await store.saveVerdict({ ...owner, event_id: event.id, claim_id, verdict });
     }
     const shown =
-      verdict === undefined
-        ? { text: event.summary, reason: why, replaced: false }
-        : shownWords({ event, verdict, settings });
+      verdict === undefined ? { text: event.summary, reason: why, replaced: false } : shownWords({ event, verdict });
     const outcome = await withReachLease({
       deps: gate,
       owner,

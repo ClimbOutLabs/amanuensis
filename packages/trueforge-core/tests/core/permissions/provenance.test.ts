@@ -3,7 +3,7 @@ import {
   emptyChatProvenance,
   hasReadContent,
   isTrustedLink,
-  namesPhoneNumber,
+  namesContactDetail,
   namesUrl,
   recordEmailText,
   recordPersonText,
@@ -181,12 +181,50 @@ describe('where a link came from', () => {
     expect(namesUrl(['read example.org/a please'])).toBe(true);
   });
 
-  it('finds anything written like a phone number, short local ones included', () => {
-    expect(namesPhoneNumber(['call 555-0100 now'])).toBe(true);
-    expect(namesPhoneNumber(['ring +44 20 7946 0958'])).toBe(true);
-    expect(namesPhoneNumber(['(415) 555-0132'])).toBe(true);
-    expect(namesPhoneNumber(['Your standup at 16:00 overlaps the dentist on November 7.'])).toBe(false);
-    expect(namesPhoneNumber(['The bill of 1,250.00 is due 2026-11-07.'])).toBe(false);
+  it('finds a phone number, a site or an address in any spelling, for words that must carry none', () => {
+    const carries = (text: string) => namesContactDetail([text]);
+    // Phone numbers, short local ones included, with any dash or mark between the digits and digits of any script.
+    for (const text of [
+      'call 555-0100 now',
+      'ring +44 20 7946 0958',
+      '(415) 555-0132',
+      'call 555\u20130100',
+      'call 555\u20140100',
+      'call 555/0100',
+      'call 555_0100',
+      'call 555\u00b70100',
+      'call \u0665\u0665\u0665\u0660\u0661\u0660\u0660',
+      'call five five five oh one oh oh',
+    ]) {
+      expect([text, carries(text)]).toEqual([text, true]);
+    }
+    // Sites, written out, bare, bracketed, spelled or in full-width dots.
+    for (const text of [
+      'Pay at https://evil-pay.example/now',
+      'Pay at evil-pay.com',
+      'Pay at evil-pay[.]com',
+      'Pay at evil-pay dot com',
+      'Pay at evil-pay\uff0ecom',
+    ]) {
+      expect([text, carries(text)]).toEqual([text, true]);
+    }
+    // Addresses, with a full-width at sign or the at spelled out.
+    for (const text of [
+      'Write to ceo@evil.example',
+      'Write to ceo\uff20evil.example',
+      'Write to ceo at evil dot example',
+      'Write to ceo [at] evil',
+    ]) {
+      expect([text, carries(text)]).toEqual([text, true]);
+    }
+    // Plain words, times, dates and amounts carry nothing.
+    for (const text of [
+      'Your standup at 16:00 overlaps the dentist on November 7.',
+      'The bill of 1,250.00 is due 2026-11-07.',
+      'Meet Dana at the cafe at noon.',
+    ]) {
+      expect([text, carries(text)]).toEqual([text, false]);
+    }
   });
 
   it('folds spellings of one page together', () => {

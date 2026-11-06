@@ -696,6 +696,23 @@ describe('what the model can and cannot do', () => {
     expect(item?.reason).toContain('The model asked for a nudge.');
   });
 
+  it.each([
+    ['an en-dash phone number', 'Call 555\u20130100 now.'],
+    ['a bare site', 'Pay at evil-pay.com today.'],
+    ['a bracketed site', 'Pay at evil-pay[.]com today.'],
+    ['a full-width address', 'Write to ceo\uff20evil.example now.'],
+    ['a spelled-out address', 'Write to ceo at evil dot example now.'],
+  ])('replaces a message that carries %s with the plain sentence', async (_what, message) => {
+    const { service, feed } = await setup({
+      events: clash,
+      verdict: { level: 'nudge', reason: 'It matters.', message },
+    });
+    await service.run({ watcher: 'calendar' });
+    const [item] = await feed();
+    expect(item?.text).toContain('overlaps');
+    expect(item?.text).not.toBe(message);
+  });
+
   it('keeps an event whose delivery failed and delivers it on the next pass', async () => {
     const setupResult = await setup({ events: clash });
     const spy = jest.spyOn(setupResult.deliveryStore, 'createOnce').mockRejectedValueOnce(new Error('disk full'));
