@@ -5,7 +5,7 @@ import {
   type ResolvedAgentDefinition,
 } from '@truefoundry/trueforge-core/agent-session';
 import type { AgentCapability } from '@truefoundry/trueforge-core/core';
-import { TOOL_TAG_READ_ONLY } from '@truefoundry/trueforge-core/core';
+import { createSentinelHostContext, execFileRunner, TOOL_TAG_READ_ONLY } from '@truefoundry/trueforge-core/core';
 import { CALDAV_SERVER_NAME, CALDAV_TOOL_NAMES } from '@truefoundry/trueforge-core/core/calendar/caldav/toolContract';
 import {
   connectorOffKey,
@@ -23,7 +23,9 @@ import type { PersonaContext } from '../personas/persona';
 import type { InternalSourceState } from './internalSourceGuard';
 import { hindsightMemoryCapability, type MemoryConfig } from './memory/memoryCapability';
 import type { MemoryClient } from './memory/memoryClient';
+import { memoryPagesCapability } from './memory/memoryPagesTools';
 import type { SummarizeTurnContext } from './memory/memoryRetain';
+import { TurnReadWatch } from './memory/turnReadWatch';
 import { PersonaTurnResourceResolver, type PersonaSwitchNotice } from './PersonaTurnResourceResolver';
 import { isStaleSearchProviderMount } from './sessionResources';
 import { toolOutputScreenCapability, type ToolOutputScreenConfig } from './toolOutputScreen';
@@ -66,12 +68,15 @@ function memoryCapabilitiesForTurn(input: {
   webSearch: WebSearchTurnState;
   logger: PersonaTurnResourceResolver['logger'];
   isSubAgent: boolean;
+  /** The memory page tools for this turn, when they are offered. */
+  pageTools: AgentCapability | undefined;
 }): AgentCapability[] {
   const { memory } = input;
   if (memory.client === undefined || input.isSubAgent) {
     return [];
   }
   return [
+    ...(input.pageTools === undefined ? [] : [input.pageTools]),
     hindsightMemoryCapability({
       client: memory.client,
       config: memory.config,
@@ -84,6 +89,7 @@ function memoryCapabilitiesForTurn(input: {
       internalSourceState: memory.internalSourceState,
       webSearch: input.webSearch,
       keepsNothing: memory.keepsNothing,
+      pageTools: input.pageTools !== undefined,
     }),
   ];
 }
@@ -239,6 +245,42 @@ export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
     return next;
   }
 
+  /**
+   * The memory page tools, offered only where pages can be written: the Markdown backend, a chat with memory on,
+   * and a root thread. A chat with memory switched off and an unattended run (recall off) get none.
+   */
+  #pageTools({
+    input,
+    recallEnabled,
+    isSubAgent,
+  }: {
+    input: Parameters<PersonaTurnResourceResolver['resolveAgentDefinition']>[0];
+    recallEnabled: boolean;
+    isSubAgent: boolean;
+  }): AgentCapability | undefined {
+    const vaultDir = isSubAgent || !recallEnabled ? undefined : this.#memory.client?.pagesWriteDir?.();
+    if (vaultDir === undefined) {
+      return undefined;
+    }
+    return memoryPagesCapability({
+      vaultDir,
+      runner: execFileRunner,
+      timeZone: this.#memory.clientTimezone,
+      now: () => new Date(),
+      logger: this.logger,
+      tracing: input.tracing,
+      sentinel: createSentinelHostContext({
+        services: input.sentinel_services,
+        tenant_id: input.tenant_id,
+        created_by: input.created_by,
+        conversation_id: input.session_id,
+        workspace_cwd: input.workspace_cwd ?? null,
+        web_search: this.webSearchTurn,
+      }),
+      watch: new TurnReadWatch(),
+    });
+  }
+
   override async resolveAgentDefinition(
     input: Parameters<PersonaTurnResourceResolver['resolveAgentDefinition']>[0],
   ): Promise<ResolvedAgentDefinition> {
@@ -293,6 +335,7 @@ export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
       webSearch: this.webSearchTurn,
       logger: this.logger,
       isSubAgent,
+      pageTools: this.#pageTools({ input, recallEnabled, isSubAgent }),
     });
     const outputScreen = toolOutputScreenCapability({ config: this.#toolOutputScreen });
     const extraCapabilities = [

@@ -564,6 +564,10 @@ export class MarkdownMemoryClient implements MemoryClient {
     return readable.map(namespace => namespaceDirFor(this.baseDir, namespace));
   }
 
+  pagesWriteDir(): string {
+    return this.namespaceDir();
+  }
+
   async loadPages(params: { message: string; maxPages: number; maxTokens: number }): Promise<PageLoadResult> {
     let vaultDirs: string[];
     try {

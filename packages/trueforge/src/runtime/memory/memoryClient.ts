@@ -110,6 +110,12 @@ export interface MemoryClient {
    * pages live beside the daily logs. Never throws.
    */
   loadPages?(params: { message: string; maxPages: number; maxTokens: number }): Promise<PageLoadResult>;
+
+  /**
+   * Optional: the folder of the one vault this client's chat writes pages to (its persona's vault, else the
+   * shared vault). Only the markdown client implements it, so only it offers the memory page tools.
+   */
+  pagesWriteDir?(): string;
 }
 
 /** What `loadPages` hands back: the pages the model sees and the counts the memory event records. */

@@ -255,6 +255,30 @@ export function matchAliases({ index, text }: { index: AliasIndexFile; text: str
   return matches.sort((a, b) => a.position - b.position);
 }
 
+/**
+ * The pages that go by exactly this name: their title or one of their other names, compared the way names are
+ * everywhere (case, accents and punctuation ignored). Unlike `matchAliases` the whole name must match, not a word
+ * inside a longer text. Optionally only one kind.
+ */
+export function pagesNamed({
+  index,
+  name,
+  kind,
+}: {
+  index: AliasIndexFile;
+  name: string;
+  kind: PageKind | undefined;
+}): PageListing[] {
+  const wanted = normalizeAliasText(name);
+  if (wanted === '') {
+    return [];
+  }
+  return index.pages
+    .filter(page => kind === undefined || page.kind === kind)
+    .filter(page => [page.title, ...page.aliases].some(candidate => normalizeAliasText(candidate) === wanted))
+    .map(page => ({ kind: page.kind, slug: page.slug }));
+}
+
 /** An index entry for one page, from its parsed content and the hash of its bytes. */
 function aliasIndexPage(input: {
   kind: PageKind;
