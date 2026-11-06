@@ -12,7 +12,7 @@ const AT = new Date('2026-11-06T10:00:00.000Z');
 const HOUR_MS = 60 * 60_000;
 
 function code(hash = 'h') {
-  return { hash, salt: `${hash}-salt`, expires_at: '2026-11-06T10:10:00.000Z' };
+  return { hash, salt: `${hash}-salt`, key_id: 'k1', expires_at: '2026-11-06T10:10:00.000Z' };
 }
 
 function contact(overrides: Partial<TextContact> = {}): TextContact {
@@ -24,6 +24,7 @@ function contact(overrides: Partial<TextContact> = {}): TextContact {
     pending_phone: null,
     code_hash: null,
     code_salt: null,
+    code_key_id: null,
     code_expires_at: null,
     code_attempts: 0,
     ...overrides,
@@ -50,7 +51,7 @@ export function runTextContactStoreContractSuite(getStore: () => ITextContactSto
     const store = getStore();
     await store.startCode({ ...ALICE, phone: '+15550100', as: 'number', code: code(), now: AT });
     await expect(store.get(ALICE)).resolves.toEqual(
-      contact({ code_hash: 'h', code_salt: 'h-salt', code_expires_at: '2026-11-06T10:10:00.000Z' }),
+      contact({ code_hash: 'h', code_salt: 'h-salt', code_key_id: 'k1', code_expires_at: '2026-11-06T10:10:00.000Z' }),
     );
   });
 
@@ -178,11 +179,11 @@ export function runTextContactStoreContractSuite(getStore: () => ITextContactSto
 
   it('claims code sends up to the limit in a window, then frees up when the window is over', async () => {
     const store = getStore();
-    const claim = (now: Date) => store.claimCodeSend({ key: 'k', window_ms: HOUR_MS, max: 2, now });
+    const claim = (now: Date) => store.claimTextSend({ key: 'k', window_ms: HOUR_MS, max: 2, now });
     await expect(claim(AT)).resolves.toEqual({ ok: true });
     await expect(claim(later(10))).resolves.toEqual({ ok: true });
     await expect(claim(later(20))).resolves.toEqual({ ok: false, window_started_at: AT.toISOString() });
-    await expect(store.claimCodeSend({ key: 'other', window_ms: HOUR_MS, max: 2, now: later(20) })).resolves.toEqual({
+    await expect(store.claimTextSend({ key: 'other', window_ms: HOUR_MS, max: 2, now: later(20) })).resolves.toEqual({
       ok: true,
     });
     await expect(claim(later(60))).resolves.toEqual({ ok: true });
@@ -193,7 +194,7 @@ export function runTextContactStoreContractSuite(getStore: () => ITextContactSto
   it('claims at the same moment never pass the limit together', async () => {
     const store = getStore();
     const results = await Promise.all(
-      Array.from({ length: 8 }, () => store.claimCodeSend({ key: 'k', window_ms: HOUR_MS, max: 3, now: AT })),
+      Array.from({ length: 8 }, () => store.claimTextSend({ key: 'k', window_ms: HOUR_MS, max: 3, now: AT })),
     );
     expect(results.filter(result => result.ok)).toHaveLength(3);
   });
@@ -201,17 +202,17 @@ export function runTextContactStoreContractSuite(getStore: () => ITextContactSto
   it('claims outlive the number and are forgotten only once old', async () => {
     const store = getStore();
     await store.startCode({ ...ALICE, phone: '+15550100', as: 'number', code: code(), now: AT });
-    await store.claimCodeSend({ key: 'k', window_ms: HOUR_MS, max: 1, now: AT });
+    await store.claimTextSend({ key: 'k', window_ms: HOUR_MS, max: 1, now: AT });
     await store.remove(ALICE);
-    await expect(store.claimCodeSend({ key: 'k', window_ms: HOUR_MS, max: 1, now: later(1) })).resolves.toMatchObject({
+    await expect(store.claimTextSend({ key: 'k', window_ms: HOUR_MS, max: 1, now: later(1) })).resolves.toMatchObject({
       ok: false,
     });
-    await store.forgetCodeSends({ before: AT });
-    await expect(store.claimCodeSend({ key: 'k', window_ms: HOUR_MS, max: 1, now: later(2) })).resolves.toMatchObject({
+    await store.forgetTextSends({ before: AT });
+    await expect(store.claimTextSend({ key: 'k', window_ms: HOUR_MS, max: 1, now: later(2) })).resolves.toMatchObject({
       ok: false,
     });
-    await store.forgetCodeSends({ before: later(1) });
-    await expect(store.claimCodeSend({ key: 'k', window_ms: HOUR_MS, max: 1, now: later(3) })).resolves.toEqual({
+    await store.forgetTextSends({ before: later(1) });
+    await expect(store.claimTextSend({ key: 'k', window_ms: HOUR_MS, max: 1, now: later(3) })).resolves.toEqual({
       ok: true,
     });
   });

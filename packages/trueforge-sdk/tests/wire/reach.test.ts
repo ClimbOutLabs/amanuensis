@@ -519,6 +519,28 @@ describe("ReachClient", () => {
             .post("/api/v1/user/reach/test")
             .jsonBody(rawRequestBody)
             .respondWith()
+            .statusCode(429)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.reach.testChannel({
+                channel: "in_app",
+            });
+        }).rejects.toThrow(TrueForgeTypes.TooManyRequestsError);
+    });
+
+    test("test_channel (6)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { channel: "in_app" };
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/user/reach/test")
+            .jsonBody(rawRequestBody)
+            .respondWith()
             .statusCode(502)
             .jsonBody(rawResponseBody)
             .build();

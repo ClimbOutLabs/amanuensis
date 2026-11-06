@@ -84,6 +84,45 @@ describe('inbound texts', () => {
     expect(stop).toHaveBeenCalledTimes(2);
   });
 
+  it('acts once on two copies of one message that arrive at the same time', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const real = s.h.numbers.stopNumber.bind(s.h.numbers);
+    const stop = jest.spyOn(s.h.numbers, 'stopNumber').mockImplementation(async phone => {
+      await gate;
+      return real(phone);
+    });
+    const fields = { From: PHONE, Body: 'STOP', AccountSid: settings.accountSid, MessageSid: `SM${'c'.repeat(32)}` };
+    const first = s.post({ fields });
+    const second = s.post({ fields });
+    const settled = await Promise.race([
+      first,
+      second,
+      new Promise(resolve => setTimeout(() => resolve('waiting'), 2000)),
+    ]);
+    release();
+    const responses = await Promise.all([first, second]);
+    expect(settled).not.toBe('waiting');
+    expect(responses.map(response => response.status)).toEqual([200, 200]);
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(s.h.activity.filter(row => row.tool_name === 'delivery.sms_stop')).toHaveLength(1);
+  });
+
+  it('a message that failed to be handled can be sent again', async () => {
+    const real = s.h.numbers.stopNumber.bind(s.h.numbers);
+    const stop = jest
+      .spyOn(s.h.numbers, 'stopNumber')
+      .mockImplementationOnce(() => Promise.reject(new Error('database away')))
+      .mockImplementation(real);
+    const fields = { From: PHONE, Body: 'STOP', AccountSid: settings.accountSid, MessageSid: `SM${'d'.repeat(32)}` };
+    expect((await s.post({ fields })).status).toBe(500);
+    expect((await s.post({ fields })).status).toBe(200);
+    expect(stop).toHaveBeenCalledTimes(2);
+    expect((await s.h.reachSettings.get(ALICE))?.channels.texts).toBe(false);
+  });
+
   it('ignores every other reply: no change, and no answer written back', async () => {
     for (const body of ['yes', 'START', 'what is this', 'please stop', 'HELP']) {
       const response = await s.post({ fields: { From: PHONE, Body: body } });

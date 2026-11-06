@@ -3039,6 +3039,7 @@ describe('runDataImport keeps permission history and persona choices', () => {
         pending_phone: null,
         code_hash: null,
         code_salt: null,
+        code_key_id: null,
         code_expires_at: null,
         code_attempts: 0,
       });

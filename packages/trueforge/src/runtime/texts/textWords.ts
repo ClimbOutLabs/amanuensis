@@ -1,9 +1,11 @@
+import { namesPhoneNumber, namesUrl } from '@truefoundry/trueforge-core/core/permissions/provenance';
+
 import type { Delivery, DeliveryKind } from '../../schemas/deliveries';
 import type { TextMode } from '../../schemas/textMessages';
 
 /** Said wherever texts are asked for on a server that has no Twilio details. */
 export const TEXTS_NOT_SET_UP =
-  'Texts are not set up on this server. To set them up, add the Twilio details to the settings file and restart Aman.';
+  'Texts are not set up on this server. To set them up, follow the Text messages page in the Aman docs.';
 
 /** Two text segments of plain characters. A longer message is cut at a word and ends with three dots. */
 const TEXT_MAX = 306;
@@ -45,7 +47,7 @@ export function plainText(text: string): string {
  * What a Private text says: only the kind of thing. It never carries a name, an amount or any content, because a
  * text can show on a locked screen and travels through the phone company.
  */
-export function privatePhrase(kind: DeliveryKind): string {
+function privatePhrase(kind: DeliveryKind): string {
   switch (kind) {
     case 'reminder':
       return 'a reminder is due';
@@ -71,13 +73,21 @@ function cut({ text, room }: { text: string; room: number }): string {
   return `${(space > room / 2 ? head.slice(0, space) : head).trimEnd()}...`;
 }
 
-/** The text that goes out for a delivery, given the name already made fit for a text. */
-export function textBody({ name, delivery, mode }: { name: string; delivery: Delivery; mode: TextMode }): string {
-  if (mode === 'private') {
-    return privateText({ name, kind: delivery.kind });
+/**
+ * The text that goes out for a delivery, given the name already made fit for a text, and the words it was sent in.
+ * A Full message that names a link or a phone number goes out in Private words, because the message can come from
+ * mail someone else wrote, and a text is where a link or a number to call does the most harm.
+ */
+export function textBody({ name, delivery, mode }: { name: string; delivery: Delivery; mode: TextMode }): {
+  body: string;
+  sent_as: TextMode;
+} {
+  const plain = plainText(delivery.text);
+  if (mode === 'private' || namesUrl([delivery.text, plain]) || namesPhoneNumber([delivery.text, plain])) {
+    return { body: privateText({ name, kind: delivery.kind }), sent_as: 'private' };
   }
   const prefix = `${name}: `;
-  return `${prefix}${cut({ text: plainText(delivery.text), room: TEXT_MAX - prefix.length })}`;
+  return { body: `${prefix}${cut({ text: plain, room: TEXT_MAX - prefix.length })}`, sent_as: 'full' };
 }
 
 /** The code text. It carries no name the person chose, because it goes to a number nobody has proved yet. */

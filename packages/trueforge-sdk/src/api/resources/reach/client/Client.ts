@@ -324,7 +324,7 @@ export class ReachClient {
     }
 
     /**
-     * Sends the signed-in person a test item on one channel. A channel that is not set up answers 409.
+     * Sends the signed-in person a test item on one channel. A channel that is not set up answers 409. Test texts are limited to a few an hour.
      *
      * @param {TrueForge.TestReachChannelRequest} request
      * @param {ReachClient.RequestOptions} requestOptions - Request-specific configuration.
@@ -332,6 +332,7 @@ export class ReachClient {
      * @throws {@link TrueForge.BadRequestError}
      * @throws {@link TrueForge.UnauthorizedError}
      * @throws {@link TrueForge.ConflictError}
+     * @throws {@link TrueForge.TooManyRequestsError}
      * @throws {@link TrueForge.BadGatewayError}
      * @throws {@link errors.TrueForgeError}
      * @throws {@link errors.TrueForgeTimeoutError}
@@ -423,6 +424,17 @@ export class ReachClient {
                     );
                 case 409:
                     throw new TrueForge.ConflictError(
+                        serializers.RequestErrorResponse.parseOrThrow(_response.error.body, {
+                            unrecognizedObjectKeys: "passthrough",
+                            allowUnrecognizedUnionMembers: true,
+                            allowUnrecognizedEnumValues: true,
+                            skipValidation: true,
+                            breadcrumbsPrefix: ["response"],
+                        }),
+                        _response.rawResponse,
+                    );
+                case 429:
+                    throw new TrueForge.TooManyRequestsError(
                         serializers.RequestErrorResponse.parseOrThrow(_response.error.body, {
                             unrecognizedObjectKeys: "passthrough",
                             allowUnrecognizedUnionMembers: true,

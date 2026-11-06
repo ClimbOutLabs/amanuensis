@@ -108,7 +108,10 @@ export function createDeliveryService({
           attempts.push({
             channel: sender.channel,
             outcome: 'failed',
-            detail: 'The notice could not be sent. It is still in your feed.',
+            detail:
+              sender.channel === 'sms'
+                ? 'The text could not be sent. The item is still in your feed.'
+                : 'The notice could not be sent. It is still in your feed.',
             target: null,
             attempted_at: now().toISOString(),
           });

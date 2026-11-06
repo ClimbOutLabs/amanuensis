@@ -48,15 +48,23 @@ export function inboundSmsRoute({
       if (messageSid !== null && seenRecently(messageSid)) {
         return { status: 200, body: EMPTY_TWIML };
       }
-      const from = normalizePhoneNumber(params.get('From') ?? '');
-      if (from !== undefined && isOptOutWord(params.get('Body') ?? '')) {
-        const people = await textNumbers.stopNumber(from);
-        // Only a count is logged: the number and the message are the person's.
-        logger.info('A STOP turned texts off', { people });
-      }
-      // Remembered only once handled, so a request that failed can still be sent again.
+      // Marked before the work starts, so a second copy arriving meanwhile is not acted on too. A request that fails is
+      // forgotten again, so Twilio can still send it again.
       if (messageSid !== null) {
         seen.set(messageSid, Date.now() + SEEN_FOR_MS);
+      }
+      const from = normalizePhoneNumber(params.get('From') ?? '');
+      if (from !== undefined && isOptOutWord(params.get('Body') ?? '')) {
+        try {
+          const people = await textNumbers.stopNumber(from);
+          // Only a count is logged: the number and the message are the person's.
+          logger.info('A STOP turned texts off', { people });
+        } catch (error) {
+          if (messageSid !== null) {
+            seen.delete(messageSid);
+          }
+          throw error;
+        }
       }
       return { status: 200, body: EMPTY_TWIML };
     },

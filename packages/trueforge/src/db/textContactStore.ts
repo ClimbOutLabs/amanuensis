@@ -13,13 +13,14 @@ export interface TextContactTable {
   pending_phone: string | null;
   code_hash: string | null;
   code_salt: string | null;
+  code_key_id: string | null;
   code_expires_at: string | Date | null;
   code_attempts: number;
   updated_at: string | Date;
 }
 
 /** Codes sent in one window for one key, such as a person or a number. Kept apart from `text_contact`. */
-export interface TextCodeSendTable {
+export interface TextSendCountTable {
   scope_key: string;
   window_started_at: string | Date;
   sends: number;
@@ -27,7 +28,7 @@ export interface TextCodeSendTable {
 
 export interface TextContactDatabase {
   text_contact: TextContactTable;
-  text_code_send: TextCodeSendTable;
+  text_send_count: TextSendCountTable;
 }
 
 export interface TextContactOwner {
@@ -35,14 +36,15 @@ export interface TextContactOwner {
   created_by: string;
 }
 
-/** A one-time code as stored: its keyed hash, the salt it was hashed with, and when it runs out. */
-export interface StoredCode {
+/** A one-time code as stored: its keyed hash, the salt it was hashed with, which key hashed it, and when it runs out. */
+interface StoredCode {
   hash: string;
   salt: string;
+  key_id: string;
   expires_at: string;
 }
 
-export type CodeSendClaim = { ok: true } | { ok: false; window_started_at: string };
+type TextSendClaim = { ok: true } | { ok: false; window_started_at: string };
 
 /**
  * A person's number for texts. Owner-scoped: no read or write by owner reaches another person's row. Every change
@@ -85,12 +87,12 @@ export interface ITextContactStore {
     transaction?: Kysely<TextContactDatabase>,
   ): Promise<boolean>;
   /**
-   * Counts one code send against `key` in one statement, so sends at the same moment cannot pass `max` together. A
+   * Counts one text send against `key` in one statement, so sends at the same moment cannot pass `max` together. A
    * window ends `window_ms` after its first send. Refused, it resolves to when the full window started.
    */
-  claimCodeSend(input: { key: string; window_ms: number; max: number; now: Date }): Promise<CodeSendClaim>;
+  claimTextSend(input: { key: string; window_ms: number; max: number; now: Date }): Promise<TextSendClaim>;
   /** Forgets counts whose window started before this time. */
-  forgetCodeSends(input: { before: Date }): Promise<void>;
+  forgetTextSends(input: { before: Date }): Promise<void>;
 }
 
 function isoTime(value: string | Date): string {
@@ -110,6 +112,7 @@ function toContact(row: TextContactTable): TextContact {
     pending_phone: row.pending_phone,
     code_hash: row.code_hash,
     code_salt: row.code_salt,
+    code_key_id: row.code_key_id,
     code_expires_at: iso(row.code_expires_at),
     code_attempts: row.code_attempts,
   });
@@ -136,6 +139,7 @@ function freshRow({
     pending_phone: null,
     code_hash: null,
     code_salt: null,
+    code_key_id: null,
     code_expires_at: null,
     code_attempts: 0,
     updated_at: now.toISOString(),
@@ -144,7 +148,13 @@ function freshRow({
   return row;
 }
 
-const NO_CODE = { code_hash: null, code_salt: null, code_expires_at: null, code_attempts: 0 } as const;
+const NO_CODE = {
+  code_hash: null,
+  code_salt: null,
+  code_key_id: null,
+  code_expires_at: null,
+  code_attempts: 0,
+} as const;
 
 function ownerOf(row: TextContactOwner): TextContactOwner {
   return { tenant_id: row.tenant_id, created_by: row.created_by };
@@ -175,6 +185,7 @@ export class TextContactStore implements ITextContactStore {
     const codeColumns = {
       code_hash: input.code.hash,
       code_salt: input.code.salt,
+      code_key_id: input.code.key_id,
       code_expires_at: input.code.expires_at,
       code_attempts: 0,
       updated_at: input.now.toISOString(),
@@ -315,21 +326,21 @@ export class TextContactStore implements ITextContactStore {
     return inserted.length > 0;
   }
 
-  async claimCodeSend(input: { key: string; window_ms: number; max: number; now: Date }): Promise<CodeSendClaim> {
+  async claimTextSend(input: { key: string; window_ms: number; max: number; now: Date }): Promise<TextSendClaim> {
     const at = input.now.toISOString();
     const over = new Date(input.now.getTime() - input.window_ms).toISOString();
-    const ended = sql<boolean>`text_code_send.window_started_at <= ${over}`;
+    const ended = sql<boolean>`text_send_count.window_started_at <= ${over}`;
     const claimed = await this.#db
-      .insertInto('text_code_send')
+      .insertInto('text_send_count')
       .values({ scope_key: input.key, window_started_at: at, sends: 1 })
       .onConflict(conflict =>
         conflict
           .column('scope_key')
           .doUpdateSet({
-            window_started_at: sql`CASE WHEN ${ended} THEN ${at} ELSE text_code_send.window_started_at END`,
-            sends: sql`CASE WHEN ${ended} THEN 1 ELSE text_code_send.sends + 1 END`,
+            window_started_at: sql`CASE WHEN ${ended} THEN ${at} ELSE text_send_count.window_started_at END`,
+            sends: sql`CASE WHEN ${ended} THEN 1 ELSE text_send_count.sends + 1 END`,
           })
-          .where(sql<boolean>`${ended} OR text_code_send.sends < ${input.max}`),
+          .where(sql<boolean>`${ended} OR text_send_count.sends < ${input.max}`),
       )
       .returning('sends')
       .executeTakeFirst();
@@ -337,14 +348,14 @@ export class TextContactStore implements ITextContactStore {
       return { ok: true };
     }
     const row = await this.#db
-      .selectFrom('text_code_send')
+      .selectFrom('text_send_count')
       .select('window_started_at')
       .where('scope_key', '=', input.key)
       .executeTakeFirst();
     return { ok: false, window_started_at: row === undefined ? at : isoTime(row.window_started_at) };
   }
 
-  async forgetCodeSends(input: { before: Date }): Promise<void> {
-    await this.#db.deleteFrom('text_code_send').where('window_started_at', '<', input.before.toISOString()).execute();
+  async forgetTextSends(input: { before: Date }): Promise<void> {
+    await this.#db.deleteFrom('text_send_count').where('window_started_at', '<', input.before.toISOString()).execute();
   }
 }

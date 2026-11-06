@@ -47,21 +47,27 @@ Paths below are relative to the home.
 Texts through Twilio are set up by the owner in the `.env`, below the managed block:
 `REACH_SMS_PROVIDER=twilio`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`,
 `TWILIO_FROM_NUMBER` and `TWILIO_WEBHOOK_PUBLIC_URL`, with `TWILIO_WEBHOOK_PORT`
-(default 9201, outside the ranges app, sign-in and https ports are picked from)
-if the default is taken. The installer never writes these, and reads them the way
-the app does (quotes and case on the provider line do not matter). When
+if they want a port of their own. The installer reads these lines the way
+Compose does (`export`, quotes, a trailing comment and case on the provider line
+do not matter), through the one `.env` reader in `lib/shared.sh`. When
 `REACH_SMS_PROVIDER=twilio` is in the `.env`, `instance_render` also publishes
-that one port in the instance's compose file, on `127.0.0.1` only, for
+one port in the instance's compose file, on `127.0.0.1` only, for
 Tailscale Funnel or a web server on the same computer to carry on to Twilio,
-and records it as `sms_port` in the instance's registry file. A plain re-run of
-the installer redraws and restarts the instance when that port differs from the
-recorded one, so turning texts on or off, or changing the port, needs no upgrade.
-A port that another instance's app, sign-in or https uses, that Aman uses inside
-the instance, or that an instance earlier by name wants for texts, is not
-published: the installer names the line to change. New instances never pick a
-recorded `sms_port`. The listener behind it serves only Twilio's routes. The app
-port is never opened for it, and a `.env` without the provider line opens
-nothing. See `docs/text-messages.md`.
+and records it as `sms_port` in the instance's registry file. With no port set,
+the instance keeps the port it has, else gets 9201 (outside the ranges app,
+sign-in and https ports are picked from) or the next free port, and the
+installer writes it as `TWILIO_WEBHOOK_PORT` in the managed block so the app
+listens on it and it stays the same. A port another instance already publishes
+stays with that instance. A port the owner set that another instance's app,
+sign-in, https or Twilio port uses, or that Aman uses inside the instance, is
+not published: the installer names the line to change. The registry also keeps
+`sms_settings`, a short digest of the `.env` lines that set up texts (never the
+lines themselves). A plain re-run of the installer redraws and restarts the
+instance when the port or that digest differs from the recorded one, so turning
+texts on or off, or changing the port, the auth token or any other texts line,
+needs no upgrade. New instances never pick a recorded `sms_port`. The listener
+behind it serves only Twilio's routes. The app port is never opened for it, and
+a `.env` without the provider line opens nothing. See `docs/text-messages.md`.
 
 The `release.json` in a checkout's `installer/` folder is a different file:
 it is the pins manifest the installer ships (image digests, among them the
@@ -80,8 +86,9 @@ The keys an install writes at creation are:
 `tf_cap`, `demo`, `created`.
 
 Later steps add keys with the same rule (for example `healthy` is set to `1`
-once an instance answers, and `sms_port` holds the Twilio port the compose
-file publishes, empty when none). Instance names use lowercase letters, digits and
+once an instance answers, `sms_port` holds the Twilio port the compose
+file publishes, empty when none, and `sms_settings` the digest of its texts
+lines, empty when none). Instance names use lowercase letters, digits and
 hyphens.
 
 ## The release record

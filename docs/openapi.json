@@ -26677,7 +26677,7 @@
     },
     "/api/v1/user/reach/test": {
       "post": {
-        "description": "Sends the signed-in person a test item on one channel. A channel that is not set up answers 409.",
+        "description": "Sends the signed-in person a test item on one channel. A channel that is not set up answers 409. Test texts are limited to a few an hour.",
         "requestBody": {
           "content": {
             "application/json": {
@@ -26728,6 +26728,16 @@
               }
             },
             "description": "That channel is not set up yet."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Too many test texts this hour. The message says how long to wait."
           },
           "502": {
             "content": {

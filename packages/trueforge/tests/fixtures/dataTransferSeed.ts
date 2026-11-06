@@ -523,7 +523,12 @@ export async function seedRichInstance<TTransaction>(input: SeedRichInstanceInpu
   });
 
   // A confirmed number with a code to a new number still pending: none of the code or the new number is exported.
-  const seededCode = { hash: 'a'.repeat(64), salt: 'b'.repeat(32), expires_at: '2026-11-05T09:10:00.000Z' };
+  const seededCode = {
+    hash: 'a'.repeat(64),
+    salt: 'b'.repeat(32),
+    key_id: 'c'.repeat(8),
+    expires_at: '2026-11-05T09:10:00.000Z',
+  };
   const owner = { tenant_id: tenantId, created_by: userId };
   const at = new Date('2026-11-05T09:00:00.000Z');
   await stores.textContactStore.startCode({ ...owner, phone: '+15550111', as: 'number', code: seededCode, now: at });

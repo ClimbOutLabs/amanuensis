@@ -30,7 +30,7 @@ describe('Settings, Reach me preferences', () => {
     expect(texts).toHaveProperty('disabled', true);
     expect(calls).toHaveProperty('disabled', true);
     expect(
-      screen.getByText(/Texts are not set up on this server\. To set them up, add the Twilio details/),
+      screen.getByText(/Texts are not set up on this server\. To set them up, follow the Text messages page/),
     ).toBeTruthy();
     expect(screen.getByText('Phone calls are not set up yet.')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Try texts' })).toHaveProperty('disabled', true);

@@ -26,6 +26,8 @@ export const TextContactSchema = z.object({
   pending_phone: z.string().regex(E164_PATTERN).nullable(),
   code_hash: z.string().nullable(),
   code_salt: z.string().nullable(),
+  /** Which server key hashed the code, so a code from before the key changed reads as no code. */
+  code_key_id: z.string().nullable(),
   code_expires_at: z.string().nullable(),
   code_attempts: z.number().int().min(0),
 });

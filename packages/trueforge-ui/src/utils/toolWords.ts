@@ -112,6 +112,14 @@ const TOOL_WORDS: ReadonlyMap<string, ToolWords> = new Map([
     'delivery.sms_stop',
   ]),
   ...words(
+    {
+      doing: 'Dropping a new number',
+      done: 'Dropped a new number after a STOP',
+      thing: 'A STOP from a new number',
+    },
+    ['delivery.sms_new_number_stopped'],
+  ),
+  ...words(
     { doing: 'Confirming your number', done: 'Confirmed your number for texts', thing: 'Your number for texts' },
     ['delivery.sms_confirmed'],
   ),

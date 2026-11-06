@@ -601,4 +601,3 @@ export type ImportDelivery = z.infer<typeof DeliverySchema>;
 export const ImportReachFileSchema = z.array(ReachSettingsSchema);
 /** The person's number for texts and their choice of words, as a list of none or one. It always comes in unconfirmed. */
 export const ImportTextsFileSchema = z.array(TextContactExportSchema);
-export type ImportTextContact = z.infer<typeof TextContactExportSchema>;

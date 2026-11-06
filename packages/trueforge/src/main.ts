@@ -11,7 +11,6 @@
  */
 import { extractErrorLogFields } from '@truefoundry/trueforge-core/core';
 import type { Context } from 'hono';
-import { randomBytes } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import {
@@ -162,7 +161,7 @@ import { TrueFoundryModelProviderStore } from './truefoundry/TrueFoundryModelPro
 import { TrueFoundrySandboxProviderStore } from './truefoundry/TrueFoundrySandboxProviderStore';
 import { TrueFoundryServiceFoundryServerClient } from './truefoundry/TrueFoundryServiceFoundryServerClient';
 import { TrueFoundrySkillStore } from './truefoundry/TrueFoundrySkillStore';
-import { inboundSmsRoute } from './twilioWebhook/inboundSms';
+import { INBOUND_SMS_PATH, inboundSmsRoute } from './twilioWebhook/inboundSms';
 import { twilioListenerFor } from './twilioWebhook/listener';
 import { ensureWritableDataDir } from './utils/dataDir';
 import { startSttAvailabilityWatcher } from './voice/sttAvailability';
@@ -809,7 +808,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     audit: sentinelAuditStore,
     logger,
     // Codes are keyed by a secret that is not in the database. With no Twilio details no code is ever sent.
-    codeKey: configuration.TWILIO?.authToken ?? randomBytes(32).toString('hex'),
+    codeKey: configuration.TWILIO?.authToken,
   });
   const reachChannels = () => reachChannelsFor({ twilio: configuration.TWILIO });
   const deliveryService = createDeliveryService({
@@ -1036,6 +1035,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     sentinelAuditStore,
     chatSearchIndexer,
     packageMirrorAllowanceHolds,
+    smsProvider,
     twilioWebhookRoutes:
       configuration.TWILIO === undefined
         ? []
@@ -1121,6 +1121,7 @@ try {
     chatSearchIndexer,
     packageMirrorAllowanceHolds,
     twilioWebhookRoutes,
+    smsProvider,
   } = configuration.STANDALONE
     ? await createServerRuntime(
         await createStandalonePersistence({ sqlitePath: configuration.SQLITE_PATH, logger }),
@@ -1337,6 +1338,10 @@ try {
       controller?.start();
     },
   );
+  server.on('error', (error: unknown) => {
+    console.error('Failed to start server:', error instanceof Error ? error.message : error);
+    process.exit(1);
+  });
 
   // The Twilio listener has its own port and serves only Twilio's routes. It is off unless texts are set up, and a
   // port it cannot open stops the server, because texts must never go out while a STOP cannot be heard.
@@ -1349,11 +1354,21 @@ try {
     console.error(error instanceof Error ? error.message : error);
     process.exit(1);
   });
-
-  server.on('error', (error: unknown) => {
-    console.error('Failed to start server:', error instanceof Error ? error.message : error);
-    process.exit(1);
-  });
+  if (smsProvider !== undefined && configuration.TWILIO !== undefined) {
+    // So nobody has to set it in the Twilio console. Only this number's incoming-text address changes, only to the
+    // configured one, and a failure leaves texts working as before.
+    const smsUrl = `${configuration.TWILIO.webhookPublicUrl}${INBOUND_SMS_PATH}`;
+    void smsProvider.pointNumberAt({ smsUrl }).then(result => {
+      if (result === 'updated' || result === 'already_set') {
+        logger.info('The Twilio number sends its incoming texts to this server', { result });
+      } else {
+        logger.warn(
+          'The Twilio number could not be pointed at this server. Check TWILIO_FROM_NUMBER and the Twilio details.',
+          { result },
+        );
+      }
+    });
+  }
 
   // Graceful drain is the safe default for built and direct execution.
   // Development watch mode opts out so tsx can restart without waiting for a drain.

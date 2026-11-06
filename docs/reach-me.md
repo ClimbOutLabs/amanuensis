@@ -37,7 +37,7 @@ Settings that only matter for calls appear once phone calls are set up. Those ar
 
 ## Try it
 
-Each way to reach you has a **Try it** button. It sends a test item under the bell. For notices, it also says how many devices the notice reached. A test never counts toward your daily nudges.
+Each way to reach you has a **Try it** button. It sends a test item under the bell. For notices, it also says how many devices the notice reached. A test never counts toward your daily nudges. Each test text costs money, so Try it sends at most 3 test texts an hour, and they count toward the 30 texts a day each person can get.
 
 ## When something goes wrong
 

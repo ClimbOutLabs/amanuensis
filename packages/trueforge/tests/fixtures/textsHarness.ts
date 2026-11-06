@@ -108,7 +108,7 @@ export async function textsHarness({
     owner = ALICE,
     phone = PHONE,
   }: { mode?: TextMode; owner?: TextContactOwner; phone?: string } = {}) {
-    const code = { hash: 'seeded', salt: 'seeded', expires_at: '2026-11-06T09:10:00.000Z' };
+    const code = { hash: 'seeded', salt: 'seeded', key_id: 'seeded', expires_at: '2026-11-06T09:10:00.000Z' };
     const at = new Date('2026-11-06T09:00:00.000Z');
     await contacts.startCode({ ...owner, phone, as: 'number', code, now: at });
     await contacts.confirmCode({ ...owner, code_hash: code.hash, now: at });
