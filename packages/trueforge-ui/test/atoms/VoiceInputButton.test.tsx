@@ -1,4 +1,4 @@
-import { act, fireEvent, render, renderHook, screen } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { mockSetText, mockStartVoiceRecording } = vi.hoisted(() => ({
@@ -211,10 +211,10 @@ describe('VoiceInputButton', () => {
     expect(mockSetText).not.toHaveBeenCalled();
   });
 
-  it('backgrounding the tab releases the mic and ends the session', async () => {
+  it('keeps recording when the tab is hidden, and the words still reach the box', async () => {
     const recorder = makeRecorder();
     mockStartVoiceRecording.mockResolvedValueOnce(recorder);
-    const { api } = makeApi();
+    const { api, transcribeMock } = makeApi();
     render(
       <VoiceInputProvider api={api}>
         <VoiceInputButton disabled={false} />
@@ -224,17 +224,18 @@ describe('VoiceInputButton', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Record voice message' }));
     await screen.findByRole('button', { name: 'Stop and transcribe' });
 
-    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
     try {
       act(() => {
         document.dispatchEvent(new Event('visibilitychange'));
       });
+      expect(recorder.cancel).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole('button', { name: 'Stop and transcribe' }));
+      await waitFor(() => expect(transcribeMock).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(mockSetText).toHaveBeenCalled());
     } finally {
-      Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+      visibility.mockRestore();
     }
-
-    expect(recorder.cancel).toHaveBeenCalled();
-    expect(await screen.findByRole('button', { name: 'Record voice message' })).toBeEnabled();
   });
 
   it('shows an inline dismissible error when transcription fails', async () => {
@@ -670,25 +671,28 @@ describe('VoiceInputButton hands-free', () => {
     expect(screen.queryByText('Listening. Pause to send.')).toBeNull();
   });
 
-  it('hiding the tab while the mic is still opening drops that recording', async () => {
-    const mic = micOpening();
-    const { api } = makeApi();
-    render(composer(api));
-    fireEvent.click(await screen.findByRole('button', { name: 'Start hands-free conversation' }));
-
+  it('keeps the conversation going while the tab is hidden', async () => {
+    const { transcribeMock } = await startHandsFree();
+    const recorder = await mockStartVoiceRecording.mock.results[0]?.value;
     const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
-    act(() => {
-      document.dispatchEvent(new Event('visibilitychange'));
-    });
-    await act(async () => {
-      mic.open();
-      await Promise.resolve();
-    });
-    visibility.mockRestore();
-    act(() => silence?.('pause'));
+    try {
+      act(() => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      expect(recorder.cancel).not.toHaveBeenCalled();
 
-    expect(mic.recorder.cancel).toHaveBeenCalledTimes(1);
-    expect(HTMLFormElement.prototype.requestSubmit).not.toHaveBeenCalled();
+      act(() => silence?.('pause'));
+      await screen.findByText('Waiting for the answer…');
+      expect(transcribeMock).toHaveBeenCalledTimes(1);
+      expect(HTMLFormElement.prototype.requestSubmit).toHaveBeenCalledTimes(1);
+
+      // The answer is read while the person is still on another tab, then it listens again.
+      act(() => voiceReplyDone());
+      await screen.findByText('Listening. Pause to send.');
+      expect(mockStartVoiceRecording).toHaveBeenCalledTimes(2);
+    } finally {
+      visibility.mockRestore();
+    }
   });
 
   it('ends after 30 minutes and says how to start again', async () => {

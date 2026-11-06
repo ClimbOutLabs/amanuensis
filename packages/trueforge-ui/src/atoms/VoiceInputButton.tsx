@@ -129,19 +129,6 @@ function VoiceInputButtonInner({
     setPhase(current => (current === 'recording' || current === 'transcribing' ? 'idle' : current));
   }, []);
 
-  // Fail-closed on tab backgrounding: the voice session ends and tracks stop.
-  useEffect(() => {
-    const onVisibilityChange = () => {
-      if (document.visibilityState !== 'hidden') {
-        return;
-      }
-      cancelVoice();
-      setHandsFree('off');
-    };
-    document.addEventListener('visibilitychange', onVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
-  }, [cancelVoice]);
-
   // Fail-closed on SPA route changes: the voice session ends and tracks stop,
   // even if the composer stays mounted across navigation. A hands-free conversation is left to the
   // chat itself: a new chat changes its address when it gets its id, and a real chat switch ends
@@ -197,7 +184,7 @@ function VoiceInputButtonInner({
           setNotice(RECORD_LIMIT_MESSAGE);
         }
       } catch {
-        // Abort (cancel, unmount, route change, backgrounding) discards silently.
+        // Abort (cancel, unmount, route change) discards silently.
         if (controller.signal.aborted || !mountedRef.current) {
           return;
         }
@@ -298,7 +285,8 @@ function VoiceInputButtonInner({
   };
 
   // Hands-free listens again once the answer is over, and picks up where it was after the composer
-  // remounts. A hidden tab never listens.
+  // remounts. It keeps going while the person looks at another tab or app: they turned it on, the
+  // browser keeps showing the mic is in use, and the quiet and 30-minute limits still end it.
   useEffect(() => {
     // Mounted mid-listen (the composer remounted): that recording is gone, so listen afresh.
     if (getHandsFree() === 'listening') setHandsFree('listen-due');
@@ -306,10 +294,6 @@ function VoiceInputButtonInner({
 
   useEffect(() => {
     if (available !== true || handsFree !== 'listen-due' || isRunning) return;
-    if (document.visibilityState === 'hidden') {
-      setHandsFree('off');
-      return;
-    }
     listenRef.current();
   }, [handsFree, available, isRunning]);
 
