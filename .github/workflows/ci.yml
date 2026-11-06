@@ -315,6 +315,13 @@ jobs:
           python -m pip install --require-hashes --requirement ops/aman-tts/requirements.txt
           python -m pip install httpx==0.28.1
 
+      # Browser tests use an installed Chrome on x64. Google Chrome has no Linux arm64 build, so arm64
+      # installs the Chromium build of the package's pinned playwright-core, where the tests look next.
+      - name: Install Chromium for browser tests
+        if: matrix.arch == 'arm64' && (matrix.package == 'frontend' || matrix.package == 'trueforge')
+        working-directory: packages/${{ matrix.package }}
+        run: pnpm exec playwright-core install --with-deps chromium
+
       - name: Test
         run: pnpm "test:${{ matrix.package }}"
 
