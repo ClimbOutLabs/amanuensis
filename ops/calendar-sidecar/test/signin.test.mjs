@@ -54,6 +54,35 @@ describe('the sign-in walk when the calendars live on another host', () => {
     assert.ok(fake.connected.every(entry => entry.addresses.length === 1 && entry.addresses[0] === PUBLIC_ADDRESS));
   });
 
+  it('takes the well-known route when the saved address redirects, and follows one redirect on the same server', async () => {
+    const shaped = fake.answers[BASE_HOST];
+    fake.answers[BASE_HOST] = (path, res) => {
+      if (path === '/' || path === '/.well-known/caldav') {
+        res.writeHead(302, { Location: path === '/' ? '/login/' : '/dav/' });
+        res.end();
+        return 'handled';
+      }
+      return shaped(path === '/dav/' ? '/' : path, res);
+    };
+    const found = await discoverCalendarServer(fake.account(), fake.deps);
+    assert.deepEqual(found, { result: 'ok', server_url: `${fake.url(HOME_HOST)}/${ACCOUNT_ID}/calendars/` });
+    assert.deepEqual(
+      fake.seen.filter(request => request.host === BASE_HOST).map(request => request.path),
+      ['/', '/.well-known/caldav', '/dav/', `/${ACCOUNT_ID}/principal/`],
+    );
+  });
+
+  it('never follows a well-known redirect to another server', async () => {
+    fake.answers[BASE_HOST] = (path, res) => {
+      res.writeHead(302, { Location: path === '/' ? '/login/' : `${fake.url(HOME_HOST)}/dav/` });
+      res.end();
+      return 'handled';
+    };
+    assert.deepEqual(await discoverCalendarServer(fake.account(), fake.deps), { result: 'redirect' });
+    assert.deepEqual(fake.looked, [BASE_HOST]);
+    assert.ok(fake.seen.every(request => request.host === BASE_HOST));
+  });
+
   it('keeps the saved address when the principal and the home set are on its own host', async () => {
     fake.answers[BASE_HOST] = onBase(`/${ACCOUNT_ID}/calendars/`);
     const found = await discoverCalendarServer(fake.account(), fake.deps);

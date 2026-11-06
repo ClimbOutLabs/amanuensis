@@ -8,9 +8,11 @@
 // the same provider as the saved address, pass the same rules, and the walk is run again from it, since
 // the tool server only ever talks to the one host it is started on.
 //
-// The tool server also falls back to /.well-known/caldav and the site root when an address names no
-// principal, and treats some refusals as soft. This walk does not copy those fallbacks: an address that
-// names no principal is left to the tool server on its own host, as before.
+// When the saved address redirects, the tool server takes the /.well-known/caldav route and follows one
+// redirect from it on the same server (GMX and web.de need this), so the walk does the same. The tool
+// server also tries the site root when an address names no principal, and treats a 404 or 405 as "not
+// here". The walk does not copy those: an address that names no principal is left to the tool server on its
+// own host, as before.
 import { Buffer } from 'node:buffer';
 import { request as httpsRequest } from 'node:https';
 import { URL } from 'node:url';
@@ -66,8 +68,9 @@ export function firstRequestUrl(url) {
  * could not be reached, or answered something the tool server cannot use), certificate (a security
  * certificate was not accepted), redirect (the saved address sends the login to another address), blocked
  * (an address this service may not use).
- * No redirect is followed: the tool server refuses every redirect, so an address that redirects would pass
- * here and then fail on every calendar call.
+ * The only redirects followed are the ones the tool server follows: from the saved address to the
+ * /.well-known/caldav route, and one more from there on the same server. Nothing that leaves the server is
+ * followed, so the login is never sent anywhere else.
  */
 export async function checkSignIn(account, deps = {}) {
   return (await discoverCalendarServer(account, deps)).result;
@@ -94,7 +97,7 @@ async function walk({ session, start }) {
     return { result: 'server' };
   }
   const root = firstRequestUrl(start).toString();
-  const asked = await propfind({ session, url: root, depth: 0, props: HOME_PROPS });
+  const asked = await askAbout({ session, root });
   if (asked.result !== 'ok') {
     return asked;
   }
@@ -133,6 +136,43 @@ async function walk({ session, start }) {
     return { result: 'server' };
   }
   return { result: 'elsewhere', next: `${home.origin}${home.pathname}` };
+}
+
+/**
+ * The first answer about the account, found the way the tool server finds it: the saved address, or, when
+ * that redirects, the server's /.well-known/caldav route and at most one redirect from it on the same server.
+ */
+async function askAbout({ session, root }) {
+  const asked = await propfind({ session, url: root, depth: 0, props: HOME_PROPS });
+  if (asked.result !== 'redirect') {
+    return asked;
+  }
+  const wellKnown = new URL('/.well-known/caldav', root);
+  const viaWellKnown = await propfind({ session, url: wellKnown.toString(), depth: 0, props: HOME_PROPS });
+  if (viaWellKnown.result !== 'redirect') {
+    return viaWellKnown;
+  }
+  const next = sameServerLocation({ location: viaWellKnown.location, from: wellKnown });
+  if (next === null) {
+    return { result: 'redirect' };
+  }
+  // The address the well-known route names is asked once; a further redirect is not followed.
+  return propfind({ session, url: next.toString(), depth: 0, props: HOME_PROPS });
+}
+
+/** The same-server https address a redirect points to, or null when it leaves the server or is unreadable. */
+function sameServerLocation({ location, from }) {
+  if (typeof location !== 'string' || location.length > MAX_HREF_CHARS) {
+    return null;
+  }
+  try {
+    const next = new URL(location, from);
+    return next.protocol === 'https:' && next.origin === from.origin && next.username === '' && next.password === ''
+      ? next
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 function originOf(url) {
@@ -201,7 +241,7 @@ async function propfind({ session, url, depth, props }) {
   if (status === 401 || status === 403) {
     return { result: 'login' };
   }
-  return { result: REDIRECT_STATUSES.has(status) ? 'redirect' : 'server' };
+  return REDIRECT_STATUSES.has(status) ? { result: 'redirect', location: answer.location } : { result: 'server' };
 }
 
 function send({ session, target, depth, body, addresses }) {
@@ -252,7 +292,7 @@ function send({ session, target, depth, body, addresses }) {
       const status = response.statusCode ?? 0;
       if (status < 200 || status >= 300) {
         response.resume();
-        finish({ result: 'ok', status, text: '' });
+        finish({ result: 'ok', status, text: '', location: response.headers?.location ?? null });
         return;
       }
       const chunks = [];
