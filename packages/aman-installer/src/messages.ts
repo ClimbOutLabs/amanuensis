@@ -704,7 +704,7 @@ export const INSTALL_RESTART_NEEDED: Problem = {
 // is told to open it instead of being promised the automatic reopen.
 export const INSTALL_RESUME_FAILED: Problem = {
   happened: 'Docker Desktop needs a restart, but Aman Setup could not be set to open again by itself.',
-  fix: 'Restart your computer, then open Aman Setup from the Start menu.',
+  fix: 'Restart your computer, then open the Aman Setup download again from where you saved it, usually your Downloads folder.',
 };
 
 export const INSTALL_DOCKER_NOT_ANSWERING: Problem = {

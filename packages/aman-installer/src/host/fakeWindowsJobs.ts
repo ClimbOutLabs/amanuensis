@@ -3,6 +3,7 @@ import { win32 } from 'node:path';
 import {
   BACKUPS_SHORTCUT_NAME,
   CHECK_AMAN_SHORTCUT_NAME,
+  OPEN_AMAN_SHORTCUT_NAME,
   PHONE_SHORTCUT_NAME,
   RUN_ONCE_VALUE_NAME,
   SETUP_CMD_FORWARDER,
@@ -20,6 +21,7 @@ export type FakeWindowsJobStep =
   | 'path'
   | 'list'
   | 'point'
+  | 'open-entry'
   | 'check'
   | 'update'
   | 'backupsShortcut'
@@ -171,6 +173,19 @@ export class FakeWindowsJobs implements WindowsJobs {
     this.shortcuts = this.shortcuts.map(shortcut =>
       shortcut.path === shortcutPath ? { ...shortcut, target: this.programsExePath, args: 'open' } : shortcut,
     );
+    return Promise.resolve();
+  }
+
+  ensureOpenAmanShortcut(): Promise<void> {
+    this.step('open-entry');
+    const path = win32.join(this.startMenuProgramsDir, `${OPEN_AMAN_SHORTCUT_NAME}.lnk`);
+    const entry: ShortcutFacts = { path, target: this.programsExePath, args: 'open' };
+    const existing = this.shortcuts.findIndex(shortcut => shortcut.path === path);
+    if (existing === -1) {
+      this.shortcuts.push(entry);
+    } else {
+      this.shortcuts[existing] = entry;
+    }
     return Promise.resolve();
   }
 
