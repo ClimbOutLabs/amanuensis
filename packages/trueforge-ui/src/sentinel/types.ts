@@ -117,7 +117,8 @@ export type SentinelApprovalSchedule = {
 /**
  * The words an approval card is made of, produced by the server by one owner per action kind.
  * The UI renders the three parts and never builds sentences of its own. Absent on cards saved
- * before copy existed; those render from plain_what as they did then.
+ * before copy existed; those build their headline from their own fields, or show the generic
+ * headline when they have none, never their stored plain_what.
  */
 export type SentinelApprovalCopy = {
   /** What will happen, in one sentence, in words the person recognises. */

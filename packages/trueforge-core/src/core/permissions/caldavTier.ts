@@ -76,6 +76,25 @@ export async function classifyCaldavTool({
       sensitive_read: true,
     });
   }
+  // A change or cancellation reaches the event's guests, so a guest list that cannot be read is
+  // refused the same way: Aman cannot say who the change reaches, and a card may not guess.
+  if ((tool === 'delete_event' || tool === 'update_event') && review?.attendees == null) {
+    return autoDenyDecision({
+      reason: 'cannot_describe',
+      reason_detail: 'The guest list could not be read, so the change was refused instead of carded.',
+      owner_message: unknownGuestsMessage(tool),
+      sensitive_read: true,
+    });
+  }
+  // A reply goes to the organizer, so an organizer that cannot be read refuses the same way.
+  if (tool === 'respond_to_event' && review?.organizer == null) {
+    return autoDenyDecision({
+      reason: 'cannot_describe',
+      reason_detail: 'The organizer could not be read, so the reply was refused instead of carded.',
+      owner_message: unknownGuestsMessage(tool),
+      sensitive_read: true,
+    });
+  }
   const reach = reachFor({ tool, assistant });
   const card = cardFor({ tool, params, review, reason: reach.reason_text });
   // A call that writes a field the card cannot show gets the generic card, which shows the raw call.
@@ -110,6 +129,21 @@ function undescribableEventMessage(tool: CaldavToolName): string {
     return "I can't see which event this is or who's on it, so I won't change it. Open it in your calendar and tell me the title.";
   }
   return "I can't see which event this is, so I won't answer it. Open it in your calendar and tell me the title.";
+}
+
+/**
+ * What the person is told when the event is named but the people the action reaches cannot be
+ * read: the guests of a change or cancellation, or the organizer a reply goes to. The refusal is
+ * the whole answer, with the one thing to do next.
+ */
+function unknownGuestsMessage(tool: CaldavToolName): string {
+  if (tool === 'delete_event') {
+    return "I can't see who's on this event, so I won't delete it. Open it in your calendar and tell me who's on it.";
+  }
+  if (tool === 'update_event') {
+    return "I can't see who's on this event, so I won't change it. Open it in your calendar and tell me who's on it.";
+  }
+  return "I can't see who this reply goes to, so I won't answer it. Open it in your calendar and tell me who sent the invitation.";
 }
 
 /**
@@ -237,24 +271,24 @@ function cardPartsFor({
     };
   }
   if (tool === 'delete_event') {
-    // A cancellation is sent to every guest, or might be when the guest list cannot be read.
-    const guests = review?.attendees ?? null;
-    const mayEmailGuests = guests === null || guests.length > 0;
+    // A cancellation is sent to every guest. The classifier refuses a delete whose guest list
+    // cannot be read before a card is built, so the list here is the whole list or an empty one.
+    const guests = review?.attendees ?? [];
     return {
       headline: `Delete ${existing.text}?`,
       emailed: emailedGuestsText({ review, lead: 'Deleting this' }),
-      undo: mayEmailGuests
-        ? "This removes the event from the calendar. It can't be restored from here. A cancellation sent to the guests can't be unsent."
-        : "This removes the event from the calendar. It can't be restored from here.",
+      undo:
+        guests.length > 0
+          ? "This removes the event from the calendar. It can't be restored from here. A cancellation sent to the guests can't be unsent."
+          : "This removes the event from the calendar. It can't be restored from here.",
     };
   }
-  // respond_to_event: only the organizer is sent the reply, so only the organizer is named.
+  // respond_to_event: only the organizer is sent the reply, so only the organizer is named. The
+  // classifier refuses a reply whose organizer cannot be read, so a card always has the name.
   const verb = answerVerb(stringParam(params, 'response'));
   const organizer = review?.organizer ?? null;
   const organizerText =
-    organizer === null
-      ? 'The organizer will be told. Their name could not be read.'
-      : `The organizer, ${shown(organizer)}, will be told.`;
+    organizer === null ? 'The organizer will be told.' : `The organizer, ${shown(organizer)}, will be told.`;
   return {
     headline: `${verb} ${existing.text}?`,
     emailed: organizerText,
@@ -265,13 +299,14 @@ function cardPartsFor({
 /** Longest guest list the card names in full. A longer one gives the generic card. */
 const MAX_NAMED_GUESTS = 20;
 
-/** The sentence that names the guests a change would email. Null when the event has no guests. */
+/**
+ * The sentence that names the guests a change would email. Null when the event has no guests.
+ * A change whose guest list cannot be read is refused before a card is built, so the list a card
+ * sees is always the whole list.
+ */
 function emailedGuestsText({ review, lead }: { review: CaldavEventReview | null; lead: string }): string | null {
   const guests = review?.attendees ?? null;
-  if (guests === null) {
-    return 'The guest list could not be read, so anyone invited may be emailed.';
-  }
-  if (guests.length === 0) {
+  if (guests === null || guests.length === 0) {
     return null;
   }
   return `${lead} will email: ${guests.map(shown).join(', ')}.`;

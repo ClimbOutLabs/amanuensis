@@ -28,6 +28,7 @@ vi.mock('@truefoundry/assistant-ui-runtime', async importOriginal => {
 function card(plain_what: string): SentinelApprovalCard {
   return {
     plain_what,
+    copy: { headline: plain_what, consequence: null, reason: null },
     plain_why: null,
     cannot_be_undone: null,
     why_asked_again: null,
@@ -490,6 +491,11 @@ describe('ToolCallContainer sandbox approval', () => {
         args: { command },
         card: {
           plain_what: 'Run this command?',
+          copy: {
+            headline: 'Run this command?',
+            consequence: 'Commands can change or delete files.',
+            reason: null,
+          },
           plain_why: null,
           cannot_be_undone: 'Commands can change or delete files.',
           why_asked_again: null,

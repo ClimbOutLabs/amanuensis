@@ -105,7 +105,7 @@ describe('emailCardCopy', () => {
     expect(copy.headline).toBe('Send this reply to Grace Hopper?');
   });
 
-  it('still asks when the recipient list could not be read, naming no one', () => {
+  it('names no one when a message that was read has no recipients', () => {
     const copy = emailCardCopy({ ...base, to: [] });
     expect(copy.headline).toBe('Send this email?');
   });
@@ -178,6 +178,23 @@ describe('sandboxCardCopy and simpleCardCopy', () => {
       consequence: null,
       reason: null,
     });
+  });
+});
+
+describe('a mail send Aman cannot describe', () => {
+  it('refuses a send whose message could not be read, so its recipients are unknown', async () => {
+    // No mail_draft on the action: the host could not load the message to show, so who it goes
+    // to is unknown. Unknown recipients refuse, like an event Aman cannot describe; no card.
+    const action: SentinelAction = {
+      tool_name: 'send_draft',
+      canonical_params: { draft_id: 'd1' },
+      tool_type: 'truefoundry-system',
+      mcp_server_name: 'gmail',
+      mcp_hints: { read_only_hint: false, destructive_hint: false, open_world_hint: true },
+    };
+    const decision = await classifyTier(action, makeCtx());
+    expect(decision.card).toBeNull();
+    expect(decision.auto_deny).toBe('destination_unverifiable');
   });
 });
 

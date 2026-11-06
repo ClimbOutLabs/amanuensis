@@ -186,7 +186,7 @@ describe('CalDAV changes and standing grants', () => {
   });
 });
 
-describe('unknown guests always ask', () => {
+describe('unknown guests refuse', () => {
   it('refuses a CalDAV delete whose event cannot be read at all, even with an Always grant', async () => {
     const delete_action = caldavAction('delete_event', { id: 'ev1', scope: 'this' });
     const withGrant = await ctxWithGrants([[CALDAV, 'delete_event']]);
@@ -195,7 +195,7 @@ describe('unknown guests always ask', () => {
     expect(decision.card).toBeNull();
   });
 
-  it('shows a card for a CalDAV update whose guest list is unknown, even with an Always grant', async () => {
+  it('refuses a CalDAV update whose guest list is unknown, even with an Always grant', async () => {
     const decision = await classifyTier(
       {
         ...caldavAction('update_event', UPDATE_ARGS),
@@ -204,7 +204,8 @@ describe('unknown guests always ask', () => {
       },
       await ctxWithGrants([[CALDAV, 'update_event']]),
     );
-    expect(decision).toMatchObject({ tier: 3, reason: 'caldav_calendar_guests' });
+    expect(decision).toMatchObject({ tier: 3, reason: 'auto_denied', auto_deny: 'cannot_describe' });
+    expect(decision.card).toBeNull();
   });
 });
 
@@ -266,7 +267,10 @@ describe('invitation replies and connector calendar tools', () => {
   );
 });
 
-/** A get_event answer as the CalDAV server sends it: a guest-free event leaves the attendees key out. */
+/**
+ * A get_event answer as the CalDAV server sends it: an event with no guests lists an empty
+ * attendees array, and an answer that leaves the key out leaves the guest list unknown.
+ */
 function fetchedCaldavEvent(event: Record<string, unknown>): CaldavEventReview {
   return caldavEventReviewFrom({
     id: 'ev1',
@@ -277,8 +281,8 @@ function fetchedCaldavEvent(event: Record<string, unknown>): CaldavEventReview {
 describe('a fetched CalDAV event decides whether guests are reached', () => {
   const ORGANIZER = { name: 'Ada' };
 
-  it('shows a card for an update and a delete of an event with no guest lines, even with an Always grant', async () => {
-    const review = fetchedCaldavEvent({ organizer: ORGANIZER });
+  it('shows a card for an update and a delete of an event with no guests, even with an Always grant', async () => {
+    const review = fetchedCaldavEvent({ organizer: ORGANIZER, attendees: [] });
     const withGrant = await ctxWithGrants([
       [CALDAV, 'update_event'],
       [CALDAV, 'delete_event'],
@@ -290,7 +294,10 @@ describe('a fetched CalDAV event decides whether guests are reached', () => {
   });
 
   it('still asks for a guest-free event without a grant', async () => {
-    const update = { ...caldavAction('update_event', UPDATE_ARGS), caldav_event: fetchedCaldavEvent({}) };
+    const update = {
+      ...caldavAction('update_event', UPDATE_ARGS),
+      caldav_event: fetchedCaldavEvent({ attendees: [] }),
+    };
     expect(await classifyTier(update, await ctxWithGrants([]))).toMatchObject({
       tier: 3,
       reason: 'caldav_calendar_guests',

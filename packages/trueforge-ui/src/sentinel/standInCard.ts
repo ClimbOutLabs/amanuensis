@@ -65,8 +65,12 @@ export function standInApprovalCard({
   const server = typeof mcp?.mcpServer === 'string' && mcp.mcpServer !== '' ? mcp.mcpServer : null;
   const shownArgs = mcp === undefined ? parsedArgs(argsText) : mcp.input;
   const name = toolWords(innerName ?? toolName);
+  const headline = server === null ? `Allow the assistant to use "${name}"?` : `Allow "${name}" on ${server}?`;
   return {
-    plain_what: server === null ? `Allow the assistant to use "${name}"?` : `Allow "${name}" on ${server}?`,
+    plain_what: headline,
+    // The sentence is this card's copy, like a server card's: a headline surface never falls
+    // back to a stored plain_what, and this card's words are its own, built from names only.
+    copy: { headline, consequence: null, reason: null },
     plain_why: null,
     cannot_be_undone: null,
     why_asked_again: null,

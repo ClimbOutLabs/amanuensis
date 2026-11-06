@@ -28,11 +28,21 @@ function recipientsText(recipients: readonly SentinelApprovalMailbox[]): string 
 
 /**
  * The headline a card leads with: the server's copy when the card carries it. Cards saved before
- * copy existed fall back to the question built from their fields, as they rendered then.
+ * copy existed fall back to the question built from their fields, or to the generic headline when
+ * the card has no fields to build one from.
  */
 export function cardHeadline(card: SentinelApprovalCard): string {
   return card.copy?.headline ?? approvalQuestion(card);
 }
+
+/**
+ * The headline for a card with neither copy nor the fields a question is built from. A card saved
+ * before copy existed can carry a raw server sentence as its plain_what, identifiers and all (an
+ * old calendar card named the event by its id), so that sentence never appears on a headline
+ * surface: not the card's title, not the strip, not the stub, not the spoken line. The card's own
+ * detail rows still show what the card holds, so the person can judge it there.
+ */
+export const GENERIC_CARD_HEADLINE = 'Needs your OK';
 
 /**
  * The consequence line a card shows: the copy's consequence on a card with copy, the older
@@ -47,7 +57,12 @@ export function cardReason(card: SentinelApprovalCard): string | null {
   return card.copy?.reason ?? null;
 }
 
-/** The question a ticket asks, one sentence the person can answer with a verb. */
+/**
+ * The question a ticket asks, one sentence the person can answer with a verb, built from the
+ * card's own fields. A card with none of those fields gets the generic headline instead of its
+ * stored plain_what: a sentence saved before copy existed is not checked wording and may carry
+ * an identifier, so it is never the question a surface shows.
+ */
 export function approvalQuestion(card: SentinelApprovalCard): string {
   const { email, calendar_event: event, schedule, persona } = card;
   if (email != null) return emailQuestion(email);
@@ -62,7 +77,7 @@ export function approvalQuestion(card: SentinelApprovalCard): string {
       : `Delete the schedule "${schedule.name}"?`;
   }
   if (persona != null) return `Add the persona "${persona.name}"?`;
-  return card.plain_what;
+  return GENERIC_CARD_HEADLINE;
 }
 
 /** The verb on the primary button: Allow for every card, except a new-recipient card, which says it adds its addresses. */

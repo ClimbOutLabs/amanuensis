@@ -271,7 +271,7 @@ describe('CalDAV changes', () => {
     expect(decision.card?.copy?.consequence).toBe('Changing this will email: Sam Lee, dana@example.com.');
   });
 
-  it('says anyone invited may be emailed when the guest list could not be read', async () => {
+  it('refuses a change when the guest list could not be read, even though the event is named', async () => {
     const decision = await classifyTier(
       caldavAction(
         'update_event',
@@ -280,9 +280,38 @@ describe('CalDAV changes', () => {
       ),
       makeCtx(),
     );
-    expect(decision.card?.plain_what).toContain('The guest list could not be read, so anyone invited may be emailed.');
-    expect(decision.card?.copy?.consequence).toBe(
-      'The guest list could not be read, so anyone invited may be emailed.',
+    expect(decision.card).toBeNull();
+    expect(decision.auto_deny).toBe('cannot_describe');
+    expect(decision.owner_message).toBe(
+      "I can't see who's on this event, so I won't change it. Open it in your calendar and tell me who's on it.",
+    );
+  });
+
+  it('refuses a delete when the guest list could not be read, even though the event is named', async () => {
+    const decision = await classifyTier(
+      caldavAction('delete_event', EVENT_ID, { caldav_event: { ...DENTIST, attendees: null } }),
+      makeCtx(),
+    );
+    expect(decision.card).toBeNull();
+    expect(decision.auto_deny).toBe('cannot_describe');
+    expect(decision.owner_message).toBe(
+      "I can't see who's on this event, so I won't delete it. Open it in your calendar and tell me who's on it.",
+    );
+  });
+
+  it('refuses a reply when the organizer could not be read', async () => {
+    const decision = await classifyTier(
+      caldavAction(
+        'respond_to_event',
+        { ...EVENT_ID, response: 'ACCEPTED', confirm_token: 'abc' },
+        { caldav_event: { ...DENTIST, organizer: null } },
+      ),
+      makeCtx(),
+    );
+    expect(decision.card).toBeNull();
+    expect(decision.auto_deny).toBe('cannot_describe');
+    expect(decision.owner_message).toBe(
+      "I can't see who this reply goes to, so I won't answer it. Open it in your calendar and tell me who sent the invitation.",
     );
   });
 
