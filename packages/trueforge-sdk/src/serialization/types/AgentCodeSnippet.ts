@@ -9,7 +9,6 @@ export const AgentCodeSnippet: core.serialization.ObjectSchema<
     serializers.AgentCodeSnippet.Raw,
     TrueForge.AgentCodeSnippet
 > = core.serialization.object({
-    icon: core.serialization.string(),
     labelName: core.serialization.property("label_name", core.serialization.string()),
     language: core.serialization.string(),
     sampleCode: core.serialization.property("sample_code", AgentCodeSnippetSampleCode),
@@ -17,7 +16,6 @@ export const AgentCodeSnippet: core.serialization.ObjectSchema<
 
 export declare namespace AgentCodeSnippet {
     export interface Raw {
-        icon: string;
         label_name: string;
         language: string;
         sample_code: AgentCodeSnippetSampleCode.Raw;
