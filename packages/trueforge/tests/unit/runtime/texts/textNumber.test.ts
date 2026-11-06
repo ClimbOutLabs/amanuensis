@@ -282,11 +282,12 @@ describe('confirming a number with a one-time code', () => {
   });
 
   it('counts a number typed with its trunk zero as the same number', async () => {
-    for (const [typed, plain] of [
+    const pairs: [string, string][] = [
       ['+4407700900123', '+447700900123'],
       ['+9005321234567', '+905321234567'],
       ['+35308512345678', '+3538512345678'],
-    ]) {
+    ];
+    for (const [typed, plain] of pairs) {
       const h = await textsHarness();
       const person = (index: number) => ({ tenant_id: 'default', created_by: `person-${String(index)}` });
       for (let index = 0; index < MAX_CODES_PER_NUMBER_PER_HOUR; index += 1) {
@@ -300,12 +301,13 @@ describe('confirming a number with a one-time code', () => {
   });
 
   it('keeps numbers apart whose country code holds a 0', async () => {
-    for (const [number, other] of [
+    const pairs: [string, string][] = [
       ['+302101234567', '+32101234567'],
       ['+905321234567', '+95321234567'],
       ['+5025551234', '+525551234'],
       ['+12025550100', '+1225550100'],
-    ]) {
+    ];
+    for (const [number, other] of pairs) {
       const h = await textsHarness();
       const person = (index: number) => ({ tenant_id: 'default', created_by: `person-${String(index)}` });
       for (let index = 0; index < MAX_CODES_PER_NUMBER_PER_HOUR; index += 1) {
