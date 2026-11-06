@@ -59,6 +59,7 @@ import {
   createTelegramExecutionRouter,
   createTelegramSettingsRouter,
   createTelegramWebhookRouter,
+  createTelegramWebhookSecretMiddleware,
   TELEGRAM_SETTINGS_BASE_PATH,
   TELEGRAM_WEBHOOK_BASE_PATH,
   type TelegramTurnExecutionDeps,
@@ -766,7 +767,14 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     withAuth(createTelegramExecutionRouter(telegramTurnDeps), scheduleExecutionAuthMiddleware),
   );
   // No session or service key: Telegram posts here, and the secret it was given at setup decides.
-  app.route(TELEGRAM_WEBHOOK_BASE_PATH, createTelegramWebhookRouter(telegramTurnDeps));
+  // The secret gate runs ahead of the route, so a call without it is refused before its body is read.
+  app.route(
+    TELEGRAM_WEBHOOK_BASE_PATH,
+    withAuth(
+      createTelegramWebhookRouter(telegramTurnDeps),
+      createTelegramWebhookSecretMiddleware({ telegramStore: deps.telegramStore }),
+    ),
+  );
   app.route(
     '/api/v1/schedules',
     withAuth(

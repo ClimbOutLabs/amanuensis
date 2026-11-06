@@ -7,7 +7,8 @@
  */
 import { OpenAPIHono, type RouteHandler } from '@hono/zod-openapi';
 import { AgentSpecSchema, type SessionHandle, type TurnInputItem } from '@truefoundry/trueforge-core/agent-session';
-import type { Context } from 'hono';
+import type { Context, MiddlewareHandler } from 'hono';
+import { HTTPException } from 'hono/http-exception';
 import type { Logger } from 'winston';
 
 import {
@@ -286,6 +287,25 @@ export function createTelegramExecutionRouter<TTransaction>(deps: TelegramTurnEx
 }
 
 /** The webhook Telegram posts updates to (mounted at /api/telegram). The secret it was given decides. */
+/**
+ * The webhook's gate, applied before the route sees the call: the body is not even read until
+ * the secret Telegram was given at setup checks out, so a call without it is refused as
+ * unauthorized whatever it carries. The route handler checks again for itself.
+ */
+export function createTelegramWebhookSecretMiddleware(deps: { telegramStore: ITelegramStore }): MiddlewareHandler {
+  return async (c, next) => {
+    const secret = c.req.header('x-telegram-bot-api-secret-token');
+    const connection =
+      secret === undefined
+        ? undefined
+        : await deps.telegramStore.getConnectionByWebhookSecret({ webhook_secret: secret });
+    if (connection === undefined) {
+      throw new HTTPException(401, { message: 'This call did not carry the webhook secret.' });
+    }
+    return next();
+  };
+}
+
 export function createTelegramWebhookRouter<TTransaction>(deps: TelegramTurnExecutionDeps<TTransaction>) {
   const handler: RouteHandler<typeof telegramWebhookRoute> = async c => {
     const secret = c.req.header('x-telegram-bot-api-secret-token');
