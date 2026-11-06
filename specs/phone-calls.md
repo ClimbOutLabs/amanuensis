@@ -33,7 +33,7 @@ When the rules allow a call, Aman asks Twilio to ring the person's confirmed num
 
 ## When it calls
 
-The rules are Noticing's, unchanged: the kind is ticked for calls (or the reminder is urgent and "Call me for reminders I mark urgent" is ticked), calls are switched on, it is not during quiet hours, and the time between calls has passed. The call sender also needs Twilio set up, the voice parts running (the same check as voice mode), calls switched on and a confirmed number that has not replied STOP. Otherwise nothing rings, and the text and push are tried at once. A new install has calls off and rings no one.
+The rules are Noticing's, unchanged: the kind is ticked for calls (or the reminder is urgent and "Call me for reminders I mark urgent" is ticked), calls are switched on, it is not during quiet hours, and the time between calls has passed. The call sender also needs Twilio set up, the voice parts running (speech-to-text healthy, the voice that speaks healthy, and the listening model present; a phone that rang without them would be deaf or silent), calls switched on and a confirmed number that has not replied STOP. Otherwise nothing rings, and the text and push are tried at once. A new install has calls off and rings no one.
 
 ## The call routes
 

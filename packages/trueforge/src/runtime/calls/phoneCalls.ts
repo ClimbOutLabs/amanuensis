@@ -129,7 +129,7 @@ export interface PhoneCallDeps {
       }
     | undefined;
   /** Whether the parts that listen and speak are running now. */
-  voiceReady: () => boolean;
+  voiceReady: () => Promise<boolean>;
   /** Read when needed: the delivery service is made after its channels. */
   deliveries: () => Pick<DeliveryService, 'fallBack' | 'recordAttempt'>;
   chats: CallChats;
@@ -272,7 +272,7 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
     if (twilio === undefined) {
       return attempt({ outcome: 'skipped', detail: CALLS_NOT_SET_UP, target: null });
     }
-    if (!deps.voiceReady()) {
+    if (!(await deps.voiceReady())) {
       return attempt({ outcome: 'skipped', detail: CALLS_NEED_VOICE, target: null });
     }
     const settings = await deps.reachSettings.get(owner);

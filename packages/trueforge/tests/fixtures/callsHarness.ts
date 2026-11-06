@@ -134,7 +134,7 @@ export async function callsHarness({
     reachSettings,
     personalization,
     twilio: { provider, accountSid: ACCOUNT_SID, publicUrl: PUBLIC_URL },
-    voiceReady: () => voiceReady,
+    voiceReady: () => Promise.resolve(voiceReady),
     deliveries: () => deliveries,
     chats,
     speaking: () => tts,

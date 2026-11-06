@@ -122,6 +122,7 @@ import { ActiveTurnRegistry } from './runtime/activeTurns';
 import { registerCalendarConnectorForBoot } from './runtime/calendarAccount';
 import { createCallAnswerer } from './runtime/calls/callAnswerer';
 import { createCallChats } from './runtime/calls/callChats';
+import { callVoiceReady } from './runtime/calls/callVoiceReady';
 import { createPhoneCallService } from './runtime/calls/phoneCalls';
 import { createTwilioCallProvider } from './runtime/calls/twilioCalls';
 import { createChatImageService } from './runtime/chatImages/chatImageService';
@@ -177,7 +178,7 @@ import { phoneCallRoutes } from './twilioWebhook/voiceCall';
 import { ensureWritableDataDir } from './utils/dataDir';
 import { isVoiceAvailable, startSttAvailabilityWatcher } from './voice/sttAvailability';
 import { SidecarSpeechToText } from './voice/sttClient';
-import { SidecarSpeechSynthesizer } from './voice/ttsClient';
+import { probeTtsHealth, SidecarSpeechSynthesizer } from './voice/ttsClient';
 import { SileroSpeechProbability } from './voice/vad/sileroVad';
 import { attachVoiceSocket, readyVadModel } from './voice/voiceSocket';
 
@@ -858,7 +859,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
             accountSid: configuration.TWILIO.accountSid,
             publicUrl: configuration.TWILIO.webhookPublicUrl,
           },
-    voiceReady: isVoiceAvailable,
+    voiceReady: () => callVoiceReady({ sttReady: isVoiceAvailable, ttsReady: probeTtsHealth, vadModel: readyVadModel }),
     deliveries: () => {
       if (callDeps.deliveries === undefined) {
         throw new Error('The delivery service is not ready yet.');
