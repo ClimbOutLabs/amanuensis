@@ -30,6 +30,7 @@ vi.mock('@/sentinel/SentinelStateProvider.js', () => ({
         schedule: null,
         persona: null,
         plain_what: 'Send this reply?',
+        copy: { headline: 'Send this reply?', consequence: null, reason: null },
       },
     }),
   }),

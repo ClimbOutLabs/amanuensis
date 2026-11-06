@@ -214,9 +214,7 @@ describe('sends and guest changes ask every time, with only Allow and Not now', 
   it('asks before creating a calendar event with a guest, and never offers the chat-wide answer', async () => {
     const decision = await classifyTier(calendarCreate(['dana@example.org']), makeCtx());
     expect(decision).toMatchObject({ tier: 3, reason: 'calendar_write_guests' });
-    expect(decision.card?.plain_what).toContain(
-      'This change sends an invitation to other people, so Aman always asks.',
-    );
+    expect(decision.card?.copy?.reason).toBe('This change sends an invitation to other people, so Aman always asks.');
     expect(
       allowsChatApproval({
         type: 'truefoundry-system',
@@ -229,11 +227,11 @@ describe('sends and guest changes ask every time, with only Allow and Not now', 
     ).toBe(false);
   });
 
-  it("names the assistant on a guest change's card", async () => {
+  it("names the assistant in a guest change's reason", async () => {
     const ctx = makeCtx();
     ctx.web_search.assistantName = 'Mannie';
     const decision = await classifyTier(calendarCreate(['dana@example.org']), ctx);
-    expect(decision.card?.plain_what).toContain('so Mannie always asks.');
+    expect(decision.card?.copy?.reason).toContain('so Mannie always asks.');
   });
 
   it('still lets the chat-wide answer cover saving a draft, which sends nothing', async () => {
