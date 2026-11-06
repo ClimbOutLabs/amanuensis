@@ -214,7 +214,7 @@ test_cgroup_and_low_disk() {
   STUB_DF_KB=$((15 * 1024 * 1024))
   run_install --dry-run --email owner@example.invalid
   assert_rc 1
-  assert_flat_contains "$OUT$ERR" "Less than 32 GB free for the sandbox disks under /var/lib/aman-slots"
+  assert_flat_contains "$OUT$ERR" "Less than 32 GB free for the sandbox disks under $SB/aman-slots"
   run_install --dry-run --no-sandbox --email owner@example.invalid
   assert_rc 0
   assert_not_contains "$OUT" "slot"
@@ -225,7 +225,7 @@ test_cgroup_and_low_disk() {
   STUB_DF_KB=$((35 * 1024 * 1024))
   run_install --dry-run --email owner@example.invalid
   assert_rc 1
-  assert_flat_contains "$OUT$ERR" "Less than 42 GB free for the sandbox disks under /var/lib/aman-slots"
+  assert_flat_contains "$OUT$ERR" "Less than 42 GB free for the sandbox disks under $SB/aman-slots"
   sandbox_drop
 }
 
@@ -286,7 +286,8 @@ test_install_without_sandbox() {
   INSTALL_EXTRA=(--no-sandbox)
   install_machine
   assert_eq "$RC" 0
-  assert_log_lacks "node "
+  # The host's Node.js logs lines that start with "node "; the app image's own node (the push keys step) is not it.
+  if grep -q '^node ' "$STUB_LOG"; then t_fail "host Node.js ran: $(grep '^node ' "$STUB_LOG" | head -n 1)"; else t_pass; fi
   assert_log_lacks "--entrypoint cat"
   assert_log_lacks "https://nodejs.org" "no runtime is downloaded for an install without the sandbox"
   assert_no_path "$AMAN_HOME/runtime"
@@ -583,7 +584,6 @@ test_remove_asks_for_the_password_before_any_change() {
   sandbox_new
   install_machine
   mkdir -p "$SB/aman-slots/main"
-  RUN_ENV_EXTRA=(AMAN_SLOT_DISK_ROOT="$SB/aman-slots")
   : >"$STUB_LOG"
   STUB_SUDO_REFUSE=1
   run_install instance remove main --purge-data --confirm-name main
@@ -609,7 +609,6 @@ test_remove_that_stops_at_the_slot_disks_can_run_again() {
   sandbox_new
   install_machine
   mkdir -p "$SB/aman-slots/main"
-  RUN_ENV_EXTRA=(AMAN_SLOT_DISK_ROOT="$SB/aman-slots")
   STUB_SLOT_DISK_FAIL=1
   run_install instance remove main --purge-data --confirm-name main
   unset STUB_SLOT_DISK_FAIL
@@ -635,7 +634,6 @@ test_remove_deletes_slots_left_by_a_removed_instance() {
   grep -Ev '^(aman_main_|main_slot_)' "$SB_STATE/volumes" >"$SB_STATE/volumes.new" || true
   mv "$SB_STATE/volumes.new" "$SB_STATE/volumes"
   mkdir -p "$SB/aman-slots/main"
-  RUN_ENV_EXTRA=(AMAN_SLOT_DISK_ROOT="$SB/aman-slots")
   run_install instance remove main
   assert_rc 0
   assert_flat_contains "$OUT" "Instance main is already removed, but its sandboxes are still on this computer."

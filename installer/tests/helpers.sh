@@ -6,6 +6,16 @@ TESTS_DIR=$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 INSTALLER_DIR=$(cd -P -- "$TESTS_DIR/.." && pwd)
 SENTINEL_PASSWORD="sentinel-pw-7f3a91c2"
 
+# The account the id stub reports. The sandbox's files belong to whoever runs the tests, and the installer refuses a
+# checkout owned by another user, so the stub reports that same account. Root-owned files pass that check anyway, so under
+# root the stub reports an ordinary account instead and no root-only path runs.
+STUB_UID=$(id -u)
+STUB_GID=$(id -g)
+if [ "$STUB_UID" = 0 ]; then
+  STUB_UID=1000 STUB_GID=1000
+fi
+export STUB_UID STUB_GID
+
 # The host's Node.js, which the docker stub uses to run the certificate and code scripts for real.
 STUB_REAL_NODE=$(command -v node 2>/dev/null || true)
 
@@ -199,7 +209,7 @@ repo_commit_change() {
 build_run_env() {
   RUN_ENV=(PATH="$SB_BIN" HOME="$SB/user" AMAN_HOME="$AMAN_HOME" AMAN_REPO_ROOT="$REPO" GIT_CONFIG_NOSYSTEM=1
     AMAN_OS_RELEASE="${AMAN_OS_RELEASE:-$SB/os-release}" AMAN_DMI_DIR="${AMAN_DMI_DIR:-$SB/no-dmi}"
-    STUB_LOG="$STUB_LOG" STUB_STATE="$STUB_STATE" STUB_BIN="$STUB_BIN" STUB_USER="$STUB_USER"
+    STUB_LOG="$STUB_LOG" STUB_STATE="$STUB_STATE" STUB_BIN="$STUB_BIN" STUB_USER="$STUB_USER" STUB_UID="$STUB_UID" STUB_GID="$STUB_GID"
     STUB_DOCKER_SRC="$STUB_DOCKER_SRC" STUB_REAL_DF="$STUB_REAL_DF"
     STUB_DOCKER_DENIED="${STUB_DOCKER_DENIED:-}" STUB_DOCKER_DOWN="${STUB_DOCKER_DOWN:-}"
     STUB_ROOTLESS="${STUB_ROOTLESS:-}" STUB_PODMAN="${STUB_PODMAN:-}" STUB_BUILD_FAIL="${STUB_BUILD_FAIL:-}"
@@ -216,7 +226,7 @@ build_run_env() {
     STUB_DOCTOR_EXIT="${STUB_DOCTOR_EXIT:-}" STUB_DOCTOR_JSON="${STUB_DOCTOR_JSON:-}" STUB_DOCKER_ROOT="${STUB_DOCKER_ROOT:-}" STUB_DOCKER_ROOT_KB="${STUB_DOCKER_ROOT_KB:-}"
     STUB_CALENDAR_REFUSES="${STUB_CALENDAR_REFUSES:-}" STUB_CALENDAR_CHECK="${STUB_CALENDAR_CHECK:-}"
     STUB_UI_SH="$INSTALLER_DIR/lib/ui.sh" STUB_REAL_NODE="$STUB_REAL_NODE" STUB_PKI_FAIL="${STUB_PKI_FAIL:-}" STUB_PUSH_KEYS_FAIL="${STUB_PUSH_KEYS_FAIL:-}"
-    AMAN_CADDY_ETC="$SB/etc-caddy" AMAN_SYS_NET="$SB/sysnet" AMAN_EDGE_WAIT_TRIES=1 ${RUN_ENV_EXTRA[@]+"${RUN_ENV_EXTRA[@]}"}
+    AMAN_CADDY_ETC="$SB/etc-caddy" AMAN_SYS_NET="$SB/sysnet" AMAN_SLOT_DISK_ROOT="$SB/aman-slots" AMAN_EDGE_WAIT_TRIES=1 ${RUN_ENV_EXTRA[@]+"${RUN_ENV_EXTRA[@]}"}
     ${AMAN_PASSWORD+AMAN_PASSWORD="$AMAN_PASSWORD"})
 }
 

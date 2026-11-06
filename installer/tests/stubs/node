@@ -76,6 +76,11 @@ case "$mode" in
     if [ "$state" != needs_retire ] || [ "$fix" = 1 ]; then echo ready >"$S/slots_state"; fi
     # The slots now run the image as it is.
     { cat "$S/image_id" 2>/dev/null || echo first; } >"$S/slots_run_image_id"
+    # The real setup leaves one disk file per slot, which the installer's free-space check counts as already made.
+    if [ -n "${AMAN_SLOT_DISK_ROOT:-}" ]; then
+      mkdir -p "$AMAN_SLOT_DISK_ROOT/$instance"
+      for n in 1 2; do : >"$AMAN_SLOT_DISK_ROOT/$instance/ws-$n.img"; done
+    fi
     exit 0
     ;;
 esac
