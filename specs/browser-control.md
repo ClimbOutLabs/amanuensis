@@ -34,8 +34,12 @@ Alongside these, a **live view** lets the person finish a step only they can do.
   - Aman asks first, after reading other people's content, when the person did not give the address
   - in scheduled runs, these cases are skipped instead of asked
 - **Browser pages are the person's.** A page read in the signed-in browser is treated like the person's mail: their details in it count as private.
-- **Screenshots go to the person, and to a model that reads images.** The person gets the plain picture in the chat. The model gets a copy with a red box and its ref on each control in view, so it can act on what it sees by ref instead of guessing a position. The labels are drawn into the page just for that copy and taken off right after, and they hold only refs. The model sees at most the three latest screenshots, each right after the result it came with; they are never stored in the chat. The picture is marked as page content, never the person's words. A model that cannot read images gets a note instead.
-- **The model can recover by itself.** When a chat's page has closed (Aman restarted, or the tab made room for another chat), the model is told to open the same address again and carry on, without asking the person. When a step fails, the model gets the first line of the browser's own reason, so it can tell a page that never loaded from a control that was not there.
+- **Screenshots go to the person, and to a model that reads images.** The person gets the plain picture in the chat. The model gets a copy with a red box and its ref on each control in view, so it can act on what it sees by ref instead of guessing a position.
+  - The copy is drawn by the sidecar onto the picture, never into the page, so a page cannot see, hide or fake the labels, and both pictures share the same pixels.
+  - Every password, card and one-time-code field is covered in the model's copy, as the page text hides their values. The page is looked at before and after the shot; if such a field appeared or moved in between, or the copy cannot be made, the model gets no picture and is told so.
+  - The page text from the same moment is stored with the result, so what the picture showed is recorded like any page the chat read.
+  - The model sees at most the three latest screenshots, each right after the result it came with, and they are never stored in the chat. The picture goes in as the host's message, marked as page content, so it never takes the place of the person's own message. A model that cannot read images is shown none.
+- **The model can recover by itself.** When a chat's page has closed (Aman restarted, or the tab made room for another chat), the model is told to open the address it last opened again and carry on. It asks the person first only when opening that address does something by itself. A page that closes a second time in one turn is reported instead, so busy chats cannot keep closing each other's tabs. When a step fails, the model gets a fixed, plain reason (the page took too long, could not be loaded, changed, or its own code stopped the step), never the browser's error text, which a page can write.
 - **The live view is the person's own hands, and only theirs.** Its routes on the app server take only the signed-in person's browser session, never an agent or API token, and always use that person's own profile; a request cannot name another profile. The server calls the browser through the same gateway with the shared secret, so the secret never reaches the page. The tab still cannot leave its site: a click goes through the real mouse, and the same rules refuse any move to another site. Nothing the person does in the live view goes through an approval card, because the person is the one doing it. A file upload is at most 10 MB and lands only in the file picker the page opened, or else its first file field; the page itself sends it.
 - **On in every installed Aman.** Installing or upgrading with the installer builds the browser, makes the secret the server and the gateway share, and starts both with the instance. Nobody edits a settings file or exports a secret. Running the code directly (development) keeps it off unless the server turns it on and Compose runs the `browser` profile.
 
@@ -48,7 +52,7 @@ In scope: the browser container and gateway, the browser tools, their permission
 - **What data is involved:** the pages the browser opens and the person's logins, which live in their browser profile on a local Docker volume.
 - **Where it flows:**
   - Page text goes to the model, like a fetched page.
-  - Screenshots stay in the chat for the person. A model that reads images also sees the latest few, like it reads the page text.
+  - Screenshots stay in the chat for the person. A model that reads images also sees the latest few, with password, card and one-time-code fields covered, so they go to the model provider like the page text.
   - Live view frames, clicks, typing and uploaded files go only between the person's own app page, Aman's server and the browser. The model does not see them. A file goes to a site only when the page sends it.
   - Logins and cookies are stored only in the person's browser profile, on a volume only the browser's container mounts.
   - The addresses Aman opens go to those sites, under the checks above.
@@ -64,7 +68,7 @@ Tests use synthetic data only: fixture web pages served locally and made-up site
   - page text
   - real-browser fixtures for redirects, a page's own requests, popups, per-chat tabs and large pages
 - The permission tests cover the open checks, and the capability tests cover the requests the server sends and the replies it accepts, where the model's screenshots go in the request, the limit of three, and the error and closed-page messages.
-- A real-browser test checks that a screenshot gives a labelled copy and leaves the page as it was.
+- Real-browser tests check that a screenshot gives a labelled copy, covers a card number the person's own picture still shows, and changes nothing a page can see. Unit tests cover drawing the copy and the fixed failure reasons.
 - The live view's tests cover the sidecar routes with a stand-in page, the app server routes (sign-in required, the person's own profile only, size limits), and the page itself in a real browser against a stand-in server: the tabs, frames, clicks in frame pixels, typing in order, uploads and their errors, and Done. The live routes refuse a form posted from another site and an agent or API token.
 - The Compose tests check the network wall.
 

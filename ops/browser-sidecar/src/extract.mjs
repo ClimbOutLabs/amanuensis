@@ -250,18 +250,15 @@ export function extractSnapshotNodes() {
 }
 
 /**
- * Draws the model's labels over the page, in a layer of its own that clicks pass through: a red box
- * and its ref on each control in view. `marks` are `{ path, ref }` pairs from the snapshot just read.
- * Returns how many controls were marked.
+ * Where each element of `paths` sits in the viewport, read without changing anything on the page.
+ * Elements that are gone, empty or out of view are left out. The viewport size comes with them, so
+ * the sidecar can turn page pixels into picture pixels.
  */
-export function drawRefMarks(marks, layerId) {
-  const layer = document.createElement('div');
-  layer.id = layerId;
-  layer.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:2147483647;font:bold 11px/14px sans-serif';
+export function boxesInView(paths) {
   const width = window.innerWidth;
   const height = window.innerHeight;
-  let marked = 0;
-  for (const { path, ref } of marks) {
+  const boxes = [];
+  for (const path of paths) {
     const element = elementAtPath(path);
     if (element === null) {
       continue;
@@ -277,19 +274,7 @@ export function drawRefMarks(marks, layerId) {
     ) {
       continue;
     }
-    const box = document.createElement('div');
-    box.style.cssText = `position:absolute;left:${String(rect.left)}px;top:${String(rect.top)}px;width:${String(rect.width)}px;height:${String(rect.height)}px;outline:2px solid #e00`;
-    const label = document.createElement('div');
-    label.textContent = ref;
-    label.style.cssText = `position:absolute;left:${String(Math.max(0, rect.left))}px;top:${String(Math.max(0, rect.top - 14))}px;background:#e00;color:#fff;padding:0 2px`;
-    layer.append(box, label);
-    marked += 1;
+    boxes.push({ path, left: rect.left, top: rect.top, width: rect.width, height: rect.height });
   }
-  document.documentElement.append(layer);
-  return marked;
-}
-
-/** Takes the labels layer `drawRefMarks` added back off the page. */
-export function removeRefMarks(layerId) {
-  document.getElementById(layerId)?.remove();
+  return { width, height, boxes };
 }

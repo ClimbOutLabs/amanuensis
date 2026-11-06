@@ -44,9 +44,13 @@ and names the person's profile (`owner`) and the chat's tab (`tab`).
   payment or one-time-code field never shows its value.
 - `POST /scroll { owner, tab, direction }`, `POST /back { owner, tab }` — move around, then return a
   read.
-- `POST /screenshot { owner, tab }` — a PNG of the page, which the app shows to the person in the chat,
-  and `marked_png_base64`, the same view with a red box and its ref on each control in view, for the
-  model. The labels are drawn into the page only for that shot and taken off right after.
+- `POST /screenshot { owner, tab }` — a PNG of the page, which the app shows to the person in the chat.
+  With it come `model_png_base64`, the same picture with every password, card or one-time-code field
+  covered and a red box and its ref on each control in view, and `text`, the page text from the same
+  moment. The copy is drawn here, never in the page, and is left out when it cannot be made safely.
+
+A step that fails answers 500 with a fixed `reason` (`timeout`, `navigation_failed`, `page_changed`,
+`page_script_error` or `unknown`), never the error's own text; the full error goes to the sidecar's log.
 
 - `POST /click-info`, `POST /click`, `POST /type`, `POST /select { owner, tab, ref, ... }` — act on a
   control by its ref. The app server asks the person first for a click that would submit something.

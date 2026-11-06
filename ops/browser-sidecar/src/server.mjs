@@ -2,7 +2,7 @@
 // chat, reached only through the browser gateway, which checks the app server's shared secret before
 // it relays a call. Nothing here is published to the host or to any other service.
 import { Buffer } from 'node:buffer';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -10,7 +10,8 @@ import path from 'node:path';
 import { URL } from 'node:url';
 import { chromium } from 'playwright-core';
 
-import { elementAtPath, removeRefMarks } from './extract.mjs';
+import { elementAtPath } from './extract.mjs';
+import { markPicture } from './pictureMarks.mjs';
 import { RefAssigner, renderSnapshot, sensitivityOf } from './snapshot.mjs';
 
 const MAX_BODY_BYTES = 256 * 1024;
@@ -26,9 +27,9 @@ const EXTRACT_MODULE = readFileSync(new URL('./extract.mjs', import.meta.url), '
 
 const EXTRACT_SCRIPT = `(() => {\n${EXTRACT_MODULE}\nreturn extractSnapshotNodes();\n})()`;
 
-/** The same bundled module, drawing the model's ref labels over the page in a layer named `layerId`. */
-function drawRefMarksScript(marks, layerId) {
-  return `(() => {\n${EXTRACT_MODULE}\nreturn drawRefMarks(${JSON.stringify(marks)}, ${JSON.stringify(layerId)});\n})()`;
+/** The same bundled module, ending in a read-only look at where the elements at `paths` sit in view. */
+function boxesInViewScript(paths) {
+  return `(() => {\n${EXTRACT_MODULE}\nreturn boxesInView(${JSON.stringify(paths)});\n})()`;
 }
 
 /** The same bundled module, ending in a read of one element's field, submit and form context. */
@@ -101,6 +102,23 @@ function createTab({ page }) {
     // The live view's acts, run one at a time in the order they arrived, so typed keys never swap.
     liveActs: Promise.resolve(),
   };
+}
+
+/**
+ * A picture of a tab's page. A headed window that has not drawn its first frame yet cannot be
+ * captured, which is common right after a page opens, so that one error is tried again shortly.
+ */
+async function capturePage(page, options) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await page.screenshot(options);
+    } catch (error) {
+      if (attempt >= 3 || !String(error).includes('Unable to capture screenshot')) {
+        throw error;
+      }
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+  }
 }
 
 /** Runs one live-view act after every act sent before it has finished, whether or not that one worked. */
@@ -459,35 +477,57 @@ export class BrowserSidecar {
     if (!checked.ok) {
       return checked.result;
     }
-    const buffer = await tab.page.screenshot({ type: 'png' });
-    const marked = await this.#markedShot(tab);
+    const seen = await this.#pictureLayout(tab).catch(() => undefined);
+    const buffer = await capturePage(tab.page, { type: 'png' });
+    const model = seen === undefined ? undefined : await this.#modelCopy({ tab, seen, buffer });
     return {
       status: 'ok',
       png_base64: buffer.toString('base64'),
-      ...(marked === undefined ? {} : { marked_png_base64: marked }),
+      ...(model === undefined ? {} : { model_png_base64: model.png.toString('base64'), text: model.text }),
     };
   }
 
   /**
-   * The picture the model sees: the same view with a red box and its ref on each control in view, so
-   * the model can act on what it sees by ref instead of guessing positions. The person's picture is
-   * taken before, without the labels. The labels are a layer the page could see while it is drawn,
-   * so it holds only refs, and it comes off right after the shot. Undefined when the page cannot be
-   * labelled: the model then sees the plain picture.
+   * The page as the model's copy of a screenshot needs it, read without changing the page: its text
+   * snapshot, each control's ref and box, and the box of every password, card or one-time-code field.
    */
-  async #markedShot(tab) {
-    const layerId = `aman-marks-${randomUUID()}`;
+  async #pictureLayout(tab) {
+    const nodes = await tab.page.evaluate(EXTRACT_SCRIPT);
+    const refs = tab.refs.refsFor(nodes);
+    const sensitive = nodes.filter(node => sensitivityOf(node) !== null).map(node => node.id);
+    const layout = await tab.page.evaluate(boxesInViewScript([...new Set([...refs.keys(), ...sensitive])]));
+    const text = renderSnapshot({ title: await tab.page.title(), url: tab.page.url(), nodes, refs });
+    const boxOf = new Map(layout.boxes.map(({ path, ...box }) => [path, box]));
+    return {
+      text,
+      width: layout.width,
+      controls: [...refs].flatMap(([path, ref]) => {
+        const box = boxOf.get(path);
+        return box === undefined ? [] : [{ ref, box }];
+      }),
+      masks: sensitive.flatMap(path => {
+        const box = boxOf.get(path);
+        return box === undefined ? [] : [box];
+      }),
+    };
+  }
+
+  /**
+   * The picture the model sees, with the text snapshot from the same moment: the person's picture
+   * with every password, card or one-time-code field covered and each control boxed with its ref,
+   * drawn here and never in the page. The page is looked at again after the shot; if a hidden
+   * field appeared or moved in between, or anything fails, the model gets no picture at all.
+   */
+  async #modelCopy({ tab, seen, buffer }) {
     try {
-      const nodes = await tab.page.evaluate(EXTRACT_SCRIPT);
-      const refs = tab.refs.refsFor(nodes);
-      const marks = [...refs].map(([path, ref]) => ({ path, ref }));
-      await tab.page.evaluate(drawRefMarksScript(marks, layerId));
-      const buffer = await tab.page.screenshot({ type: 'png' });
-      return buffer.toString('base64');
+      const after = await this.#pictureLayout(tab);
+      if (JSON.stringify(after.masks) !== JSON.stringify(seen.masks) || after.width !== seen.width) {
+        return undefined;
+      }
+      const png = markPicture({ png: buffer, scale: pngWidth(buffer) / seen.width, ...seen });
+      return { png, text: seen.text };
     } catch {
       return undefined;
-    } finally {
-      await tab.page.evaluate(removeRefMarks, layerId).catch(() => undefined);
     }
   }
 
@@ -614,7 +654,7 @@ export class BrowserSidecar {
     if (tab === undefined) {
       return NO_TAB;
     }
-    const buffer = await tab.page.screenshot({ type: 'jpeg', quality: 60 });
+    const buffer = await capturePage(tab.page, { type: 'jpeg', quality: 60 });
     const viewport = tab.page.viewportSize();
     return {
       status: 'ok',
@@ -822,6 +862,32 @@ export function createHttpServer({ sidecar, allowedPeers }) {
   });
 }
 
+/** The width a PNG says it is, from its header. */
+function pngWidth(png) {
+  return png.readUInt32BE(16);
+}
+
+/**
+ * A fixed reason for a step that failed, never the error's own text: that text can come from the
+ * page (a script error it threw), so it must not reach the model as the browser's words.
+ */
+export function failureReason(error) {
+  const message = error instanceof Error ? error.message : '';
+  if (error instanceof Error && error.name === 'TimeoutError') {
+    return 'timeout';
+  }
+  if (/net::ERR_|NS_ERROR_|Navigation failed/.test(message)) {
+    return 'navigation_failed';
+  }
+  if (/not attached|detached|Target page, context or browser has been closed|Target closed/i.test(message)) {
+    return 'page_changed';
+  }
+  if (/^(page|frame|locator)\.evaluate:/.test(message) || /Execution context was destroyed/.test(message)) {
+    return 'page_script_error';
+  }
+  return 'unknown';
+}
+
 async function handleRequest({ req, res, sidecar }) {
   const route = ROUTES[`${req.method} ${req.url}`];
   if (route === undefined) {
@@ -839,8 +905,12 @@ async function handleRequest({ req, res, sidecar }) {
     const result = await route(sidecar, { owner: body.owner, tab: body.tab }, body);
     res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(result));
   } catch (error) {
+    // The full message stays in the sidecar's own log; the caller gets only the fixed reason.
+    process.stderr.write(
+      `browser sidecar: ${req.url} failed: ${error instanceof Error ? error.message : String(error)}\n`,
+    );
     res
       .writeHead(500, { 'content-type': 'application/json' })
-      .end(JSON.stringify({ status: 'error', message: error instanceof Error ? error.message : 'unknown error' }));
+      .end(JSON.stringify({ status: 'error', reason: failureReason(error) }));
   }
 }
