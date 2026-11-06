@@ -34,6 +34,7 @@ jobs:
       packages: ${{ steps.packages.outputs.list }}
       chart: ${{ steps.filter.outputs.chart }}
       store: ${{ steps.filter.outputs.store }}
+      arm64-images: ${{ steps.packages.outputs.arm64_images }}
 
     steps:
       - name: Check out repository code
@@ -126,6 +127,27 @@ jobs:
               - 'pnpm-workspace.yaml'
               - 'tsconfig.base.json'
               - '.github/workflows/ci.yml'
+            # Images the installer builds or pulls, checked on arm64 below. The app image (and the sandbox
+            # slot image its runtime check builds) is checked on every change, since it is built from the whole tree.
+            aman-stt-image:
+              - 'ops/aman-stt/**'
+              - 'installer/lib/release.sh'
+              - '.github/workflows/ci.yml'
+            aman-tts-image:
+              - 'ops/aman-tts/**'
+              - 'installer/lib/release.sh'
+              - '.github/workflows/ci.yml'
+            calendar-image:
+              - 'ops/calendar-sidecar/**'
+              - 'installer/lib/release.sh'
+              - '.github/workflows/ci.yml'
+            browser-image:
+              - 'ops/browser-sidecar/**'
+              - 'installer/lib/release.sh'
+              - '.github/workflows/ci.yml'
+            pinned-images:
+              - 'installer/release.json'
+              - '.github/workflows/ci.yml'
             chart:
               - 'charts/trueforge/**'
               - 'Dockerfile'
@@ -145,6 +167,11 @@ jobs:
           SANDBOX_SLOT_AGENT: ${{ steps.filter.outputs['sandbox-slot-agent'] }}
           AMAN_TTS: ${{ steps.filter.outputs['aman-tts'] }}
           BROWSER_SIDECAR: ${{ steps.filter.outputs['browser-sidecar'] }}
+          AMAN_STT_IMAGE: ${{ steps.filter.outputs['aman-stt-image'] }}
+          AMAN_TTS_IMAGE: ${{ steps.filter.outputs['aman-tts-image'] }}
+          CALENDAR_IMAGE: ${{ steps.filter.outputs['calendar-image'] }}
+          BROWSER_IMAGE: ${{ steps.filter.outputs['browser-image'] }}
+          PINNED_IMAGES: ${{ steps.filter.outputs['pinned-images'] }}
         run: |
           node <<'EOF' >> "$GITHUB_OUTPUT"
           const changedPackages = [];
@@ -158,6 +185,13 @@ jobs:
           if (process.env.AMAN_TTS === 'true') changedPackages.push('aman-tts');
           if (process.env.BROWSER_SIDECAR === 'true') changedPackages.push('browser-sidecar');
           console.log(`list=${JSON.stringify(changedPackages)}`);
+          const arm64Images = ['app'];
+          if (process.env.AMAN_STT_IMAGE === 'true') arm64Images.push('aman-stt');
+          if (process.env.AMAN_TTS_IMAGE === 'true') arm64Images.push('aman-tts');
+          if (process.env.CALENDAR_IMAGE === 'true') arm64Images.push('calendar');
+          if (process.env.BROWSER_IMAGE === 'true') arm64Images.push('browser');
+          if (process.env.PINNED_IMAGES === 'true') arm64Images.push('pinned');
+          console.log(`arm64_images=${JSON.stringify(arm64Images)}`);
           EOF
 
   # Always-on: format + lint cover the whole tree (incl. roots outside packages/*);
@@ -227,16 +261,19 @@ jobs:
         run: pnpm build
 
   # Path-gated tests only — format/lint are covered by the global job above.
+  # Each package also runs on arm64 (Apple silicon, Linux arm servers): native modules, Python wheels,
+  # Go builds and the browser image all differ by architecture.
   package-checks:
-    name: Package (${{ matrix.package }})
+    name: Package (${{ matrix.package }}${{ matrix.arch == 'arm64' && ', arm64' || '' }})
     needs: detect-changes
     if: needs.detect-changes.outputs.packages != '[]'
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         package: ${{ fromJSON(needs.detect-changes.outputs.packages) }}
+        arch: [x64, arm64]
 
     steps:
       - name: Check out repository code
@@ -293,7 +330,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # macos-latest is Apple silicon; ubuntu-24.04-arm is Linux on arm64.
+        os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, macos-latest]
 
     steps:
       - name: Check out repository code
@@ -451,6 +489,86 @@ jobs:
       - name: Regenerate and check committed contracts
         run: pnpm sdk:check
 
+  # The format, lint and contract checks above read source only, so they run once. Install, typecheck and
+  # build run again on arm64, where native dependencies install from different prebuilt binaries.
+  arm64-build:
+    name: Typecheck and Build (arm64)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Build
+        run: pnpm build
+
+  # Aman runs in Docker, and on Apple silicon and arm servers the installer builds every image for arm64.
+  # Each image is built natively on an arm64 runner the way installer/lib/release.sh builds it. The app
+  # image is also started the way an instance starts it, which builds the sandbox slot image too.
+  arm64-images:
+    name: Image (${{ matrix.image }}, arm64)
+    needs: detect-changes
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ${{ fromJSON(needs.detect-changes.outputs.arm64-images) }}
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+
+      - name: Build and start the app image
+        if: matrix.image == 'app'
+        run: bash installer/tests/image-runtime.sh
+
+      - name: Build the speech-to-text image
+        if: matrix.image == 'aman-stt'
+        run: docker build -t aman-stt:arm64-check ops/aman-stt
+
+      - name: Build the voice image
+        if: matrix.image == 'aman-tts'
+        run: docker build -t aman-tts:arm64-check ops/aman-tts
+
+      - name: Build the calendar image
+        if: matrix.image == 'calendar'
+        run: docker build -t aman-calendar:arm64-check ops/calendar-sidecar
+
+      - name: Build the browser and gateway images
+        if: matrix.image == 'browser'
+        run: |
+          docker build -t aman-browser:arm64-check ops/browser-sidecar
+          docker build -f ops/browser-sidecar/Dockerfile.gateway -t aman-browser-gateway:arm64-check ops/browser-sidecar
+
+      # The installer pulls these by digest; each must have an arm64 image behind it.
+      - name: Pull the pinned images for arm64
+        if: matrix.image == 'pinned'
+        run: |
+          for key in dex_image mail_email_image setup_image caddy_image; do
+            image=$(node -p "require('./installer/release.json').$key")
+            echo "Pulling $key: $image"
+            docker pull --platform linux/arm64 "$image"
+            arch=$(docker image inspect -f '{{.Architecture}}' "$image")
+            [ "$arch" = arm64 ] || { echo "$key resolved to $arch, not arm64" >&2; exit 1; }
+          done
+
   # https://github.com/marketplace/actions/alls-green#why
   check:
     if: always()
@@ -464,6 +582,8 @@ jobs:
       - store-tests
       - private-data-scan
       - generated-contract-drift
+      - arm64-build
+      - arm64-images
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -478,9 +598,11 @@ jobs:
           STORE_TESTS: ${{ needs.store-tests.result }}
           PRIVATE_DATA_SCAN: ${{ needs.private-data-scan.result }}
           GENERATED_CONTRACT_DRIFT: ${{ needs.generated-contract-drift.result }}
+          ARM64_BUILD: ${{ needs.arm64-build.result }}
+          ARM64_IMAGES: ${{ needs.arm64-images.result }}
         run: |
           ok() { [ "$1" = success ] || [ "$1" = skipped ]; }
-          echo "detect-changes=$DETECT_CHANGES migration-order=$MIGRATION_ORDER typecheck-and-build=$TYPECHECK_AND_BUILD package-checks=$PACKAGE_CHECKS chart-checks=$CHART_CHECKS store-tests=$STORE_TESTS private-data-scan=$PRIVATE_DATA_SCAN generated-contract-drift=$GENERATED_CONTRACT_DRIFT"
+          echo "detect-changes=$DETECT_CHANGES migration-order=$MIGRATION_ORDER typecheck-and-build=$TYPECHECK_AND_BUILD package-checks=$PACKAGE_CHECKS chart-checks=$CHART_CHECKS store-tests=$STORE_TESTS private-data-scan=$PRIVATE_DATA_SCAN generated-contract-drift=$GENERATED_CONTRACT_DRIFT arm64-build=$ARM64_BUILD arm64-images=$ARM64_IMAGES"
           [ "$DETECT_CHANGES" = success ] || exit 1
           [ "$MIGRATION_ORDER" = success ] || exit 1
           [ "$TYPECHECK_AND_BUILD" = success ] || exit 1
@@ -490,3 +612,5 @@ jobs:
           ok "$STORE_TESTS" || exit 1
           [ "$PRIVATE_DATA_SCAN" = success ] || exit 1
           [ "$GENERATED_CONTRACT_DRIFT" = success ] || exit 1
+          [ "$ARM64_BUILD" = success ] || exit 1
+          [ "$ARM64_IMAGES" = success ] || exit 1

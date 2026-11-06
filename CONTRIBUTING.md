@@ -231,6 +231,7 @@ Prettier and ESLint run as pre-commit hooks via husky + lint-staged.
 1. Fork (or branch) and create a topic branch: `git checkout -b my-fix`.
 2. Make your change, with tests where it makes sense. Do not commit generated OpenAPI/SDK output (forks: source only; `main` regenerates after merge).
 3. Make sure `pnpm build`, `pnpm test`, `pnpm typecheck`, `pnpm lint:ci`, and `pnpm format:check` pass - CI runs exactly these.
+   CI also installs, typechecks and builds on arm64, runs each changed package's tests on both x64 and arm64, and builds the Docker images the installer builds natively for arm64 (the app image is also started and must become healthy). An arm64-only failure usually means a native dependency, Python wheel, downloaded binary or base image without an arm64 build.
 4. Keep PRs focused and reasonably small; describe **what** changed and **why** in the description.
 5. Open the PR. The maintainer will review it; squash-merge is the norm.
 6. **Please avoid rebasing or force-pushing once a maintainer has started reviewing.** It can make iterative reviewing harder. To update your branch, merge `main` instead. We squash-merge at the end, so messy in-PR history is fine.
