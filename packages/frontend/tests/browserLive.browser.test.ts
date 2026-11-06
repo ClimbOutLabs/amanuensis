@@ -22,7 +22,12 @@ const THEMES = ['light', 'dark'] as const;
 interface LiveCall {
   path: string;
   body: unknown;
+  /** Acts still waiting for their answer when this one was sent. */
+  inputsInFlight: number;
 }
+
+/** Said by the stand-in, as the app server says it, for a file the page has nowhere to put. */
+const NO_PLACE_FOR_FILE = 'This page has no place to upload a file. Click its upload button first.';
 
 /** A plain JPEG of the frame's size, made by the test browser itself. */
 async function makeFrame(browser: Browser): Promise<string> {
@@ -37,11 +42,29 @@ async function makeFrame(browser: Browser): Promise<string> {
 /** Answers the page's live calls the way the app server does, and records each one. */
 async function answerLiveRoutes(page: Page, options: { frame: string; tabs: unknown[] }): Promise<LiveCall[]> {
   const calls: LiveCall[] = [];
+  let inputsInFlight = 0;
   await page.route('**/api/browser/live/**', async (route: Route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
     const body: unknown = request.method() === 'POST' ? request.postDataJSON() : undefined;
-    calls.push({ path, body });
+    const call: LiveCall = { path, body, inputsInFlight };
+    calls.push(call);
+    if (path === '/api/browser/live/input') {
+      // The first key typed is slow to answer, as on a busy page; the next must still wait for it.
+      inputsInFlight += 1;
+      if (bodyOf(call)['text'] === 'a') {
+        await new Promise(resolve => setTimeout(resolve, 300));
+      }
+      inputsInFlight -= 1;
+    }
+    if (path === '/api/browser/live/upload' && bodyOf(call)['name'] === 'nowhere.txt') {
+      await route.fulfill({
+        status: 409,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: { message: NO_PLACE_FOR_FILE } }),
+      });
+      return;
+    }
     const data =
       path === '/api/browser/live/tabs'
         ? { tabs: options.tabs }
@@ -160,6 +183,11 @@ async function checkLivePage(page: Page, calls: LiveCall[], label: string) {
     kind: 'key',
     key: 'Enter',
   });
+  // Enter was only sent once the slow "a" had landed, so the page gets them in the order pressed.
+  assert.ok(
+    calls.filter(call => call.path === '/api/browser/live/input').every(call => call.inputsInFlight === 0),
+    `${label}: each act waits for the one before it`,
+  );
 
   // A code typed in the box goes in as one piece of text.
   await page.getByRole('textbox', { name: 'Text to type into the page' }).fill('123456');
@@ -181,6 +209,14 @@ async function checkLivePage(page: Page, calls: LiveCall[], label: string) {
   });
   await page.getByText('id.txt is in the page', { exact: false }).waitFor({ timeout: RENDER_TIMEOUT_MS });
 
+  // A file the page cannot take shows the app's own reason and what to do.
+  await page.getByLabel('Upload a file into the page').setInputFiles({
+    name: 'nowhere.txt',
+    mimeType: 'text/plain',
+    buffer: Buffer.from('hello'),
+  });
+  await page.getByText(NO_PLACE_FOR_FILE).waitFor({ timeout: RENDER_TIMEOUT_MS });
+
   // Picking the other tab moves the frames to it.
   await tabs.getByRole('button', { name: 'https://example.test/upload' }).click();
   await waitForCall(calls, call => call.path === '/api/browser/live/frame' && hasTab(call, 'chat-2'));
@@ -190,9 +226,9 @@ async function checkLivePage(page: Page, calls: LiveCall[], label: string) {
     `${label}: the page does not scroll sideways`,
   );
 
-  // Done hands the tab back and stops asking for frames.
+  // Done stops asking for frames and sends the person back to the chat to tell Aman.
   await page.getByRole('button', { name: 'Done' }).click();
-  await page.getByText('Aman has the tab back', { exact: false }).waitFor({ timeout: RENDER_TIMEOUT_MS });
+  await page.getByText('Go back to the chat and tell Aman', { exact: false }).waitFor({ timeout: RENDER_TIMEOUT_MS });
   const framesAtDone = calls.filter(call => call.path === '/api/browser/live/frame').length;
   await page.waitForTimeout(1_200);
   assert.equal(
@@ -207,7 +243,7 @@ function frameSize() {
 }
 
 function bodyOf(call: LiveCall): Record<string, unknown> {
-  return typeof call.body === 'object' && call.body !== null ? (call.body as Record<string, unknown>) : {};
+  return typeof call.body === 'object' && call.body !== null ? Object.fromEntries(Object.entries(call.body)) : {};
 }
 
 function isInput(call: LiveCall, kind: string): boolean {

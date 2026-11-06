@@ -36,18 +36,43 @@ function isLiveTab(value: unknown): value is LiveTab {
   );
 }
 
-/** One call to the live routes; answers with the route's `data`, and throws when the call itself failed. */
+/** The route's own plain message for a failed call, when it sent one. */
+function errorMessageOf(json: unknown): string | undefined {
+  return isRecord(json) && isRecord(json.error) && typeof json.error.message === 'string' && json.error.message !== ''
+    ? json.error.message
+    : undefined;
+}
+
+/**
+ * One call to the live routes; answers with the route's `data`. A failed call throws with the
+ * route's own message, so the person reads why (a closed tab, a file too big) and what to do.
+ */
 async function liveCall(path: string, body?: Record<string, unknown>): Promise<unknown> {
   const response = await liveFetch(apiPath(path), {
     method: body === undefined ? 'GET' : 'POST',
     headers: { 'content-type': 'application/json' },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
+  const json: unknown = await response.json().catch(() => undefined);
   if (!response.ok) {
-    throw new Error(`live call failed: ${String(response.status)}`);
+    throw new Error(errorMessageOf(json) ?? 'The live view could not be reached. Try again in a moment.');
   }
-  const json: unknown = await response.json();
   return isRecord(json) && 'data' in json ? json.data : json;
+}
+
+/** Whether this browser tab is in view; frames are only worth asking for while it is. */
+function useTabVisible(): boolean {
+  const [visible, setVisible] = useState(() => document.visibilityState === 'visible');
+  useEffect(() => {
+    const onChange = () => {
+      setVisible(document.visibilityState === 'visible');
+    };
+    document.addEventListener('visibilitychange', onChange);
+    return () => {
+      document.removeEventListener('visibilitychange', onChange);
+    };
+  }, []);
+  return visible;
 }
 
 /** Keys that are sent as one named press rather than typed text. */
@@ -85,10 +110,17 @@ export function BrowserLivePage() {
   const [selected, setSelected] = useState<string | undefined>(undefined);
   const [frame, setFrame] = useState<string | undefined>(undefined);
   const [note, setNote] = useState('Loading your tabs...');
+  // Whether the shown tab answered closed; kept apart from `note` so a new frame never wipes an upload's answer.
+  const [closed, setClosed] = useState(false);
   const [done, setDone] = useState(false);
   const [typeText, setTypeText] = useState('');
+  // Bumped to look at a tab again after it answered closed; picking a tab or refreshing does it.
+  const [frameRun, setFrameRun] = useState(0);
+  const visible = useTabVisible();
   const imgRef = useRef<HTMLImageElement | null>(null);
   const lastWheelAtRef = useRef(0);
+  // Every act waits for the one before it, so keys typed fast reach the page in the order typed.
+  const inputQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   const applyTabs = useCallback((list: LiveTab[] | null) => {
     if (list === null) {
@@ -103,6 +135,7 @@ export function BrowserLivePage() {
   }, []);
 
   const refreshTabs = useCallback(() => {
+    setFrameRun(run => run + 1);
     void loadTabs().then(applyTabs);
   }, [applyTabs]);
 
@@ -119,7 +152,7 @@ export function BrowserLivePage() {
   }, [applyTabs]);
 
   useEffect(() => {
-    if (selected === undefined || done) {
+    if (selected === undefined || done || !visible) {
       return;
     }
     let cancelled = false;
@@ -132,10 +165,12 @@ export function BrowserLivePage() {
         }
         if (isRecord(data) && data.status === 'ok' && typeof data.jpeg_base64 === 'string') {
           setFrame(data.jpeg_base64);
-          setNote('');
+          setClosed(false);
         } else if (isRecord(data) && data.status === 'closed') {
+          // A closed tab stays closed until the person picks a tab or refreshes, so stop asking.
           setFrame(undefined);
-          setNote('That page is closed now. Pick another tab, or ask Aman to open the page again.');
+          setClosed(true);
+          return;
         }
       } catch {
         // A missed frame keeps the last one; the next try is half a second away.
@@ -151,18 +186,20 @@ export function BrowserLivePage() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [selected, done]);
+  }, [selected, done, visible, frameRun]);
 
   const sendInput = useCallback(
-    async (input: Record<string, unknown>) => {
+    (input: Record<string, unknown>) => {
       if (selected === undefined) {
         return;
       }
-      try {
-        await liveCall('/api/browser/live/input', { tab: selected, ...input });
-      } catch {
-        // The next frame shows what the page looks like now, whether the act landed or not.
-      }
+      inputQueueRef.current = inputQueueRef.current.then(async () => {
+        try {
+          await liveCall('/api/browser/live/input', { tab: selected, ...input });
+        } catch {
+          // The next frame shows what the page looks like now, whether the act landed or not.
+        }
+      });
     },
     [selected],
   );
@@ -183,7 +220,7 @@ export function BrowserLivePage() {
       return;
     }
     const clamp = (value: number, max: number) => Math.min(Math.max(value, 0), max);
-    void sendInput({
+    sendInput({
       kind: 'click',
       x: clamp(Math.round(((event.clientX - left) / width) * img.naturalWidth), img.naturalWidth),
       y: clamp(Math.round(((event.clientY - top) / height) * img.naturalHeight), img.naturalHeight),
@@ -198,19 +235,21 @@ export function BrowserLivePage() {
       return;
     }
     lastWheelAtRef.current = now;
-    void sendInput({ kind: 'wheel', dy: Math.round(event.deltaY) });
+    sendInput({ kind: 'wheel', dy: Math.round(event.deltaY) });
   };
 
   const onKeyDown = (event: ReactKeyboardEvent) => {
-    if (event.metaKey || event.ctrlKey || event.altKey) {
+    // AltGr reports Ctrl and Alt together on Windows, and is how @, € and { are typed on many layouts.
+    const altGraph = event.getModifierState('AltGraph');
+    if (event.metaKey || ((event.ctrlKey || event.altKey) && !altGraph)) {
       return;
     }
     if (event.key.length === 1) {
       event.preventDefault();
-      void sendInput({ kind: 'type', text: event.key });
+      sendInput({ kind: 'type', text: event.key });
     } else if (NAMED_KEYS.has(event.key)) {
       event.preventDefault();
-      void sendInput({ kind: 'key', key: event.key });
+      sendInput({ kind: 'key', key: event.key });
     }
   };
 
@@ -231,8 +270,12 @@ export function BrowserLivePage() {
         .then(() => {
           setNote(`${file.name} is in the page. Press the page's own upload or send button to finish.`);
         })
-        .catch(() => {
-          setNote("The file could not be put in the page. Click the page's upload button first, then try again.");
+        .catch((error: unknown) => {
+          setNote(
+            error instanceof Error
+              ? error.message
+              : "The file could not be put in the page. Click the page's upload button first, then try again.",
+          );
         });
     };
     reader.readAsDataURL(file);
@@ -242,7 +285,7 @@ export function BrowserLivePage() {
     if (typeText === '') {
       return;
     }
-    void sendInput({ kind: 'type', text: typeText });
+    sendInput({ kind: 'type', text: typeText });
     setTypeText('');
   };
 
@@ -252,7 +295,7 @@ export function BrowserLivePage() {
         <div className="browser-live-body">
           <h1 className="browser-live-title">Aman&apos;s browser, live</h1>
           <p className="browser-live-note">
-            Done. Aman has the tab back, with everything you did still in it. You can close this page.
+            Done. Go back to the chat and tell Aman you are finished. Everything you did stays in the page.
           </p>
         </div>
       </main>
@@ -265,7 +308,7 @@ export function BrowserLivePage() {
         <h1 className="browser-live-title">Aman&apos;s browser, live</h1>
         <p className="browser-live-text">
           This is the page Aman has open. Click, scroll and type to use it yourself, for example to finish a sign-in.
-          When you are done, press Done and Aman carries on from here.
+          When you are done, press Done, then go back to the chat and tell Aman.
         </p>
         <div className="browser-live-row" role="group" aria-label="Open tabs">
           {tabs.map(tab => (
@@ -277,6 +320,7 @@ export function BrowserLivePage() {
               onClick={() => {
                 setSelected(tab.tab);
                 setFrame(undefined);
+                setFrameRun(run => run + 1);
               }}
             >
               {tab.title === '' ? tab.url : tab.title}
@@ -286,6 +330,11 @@ export function BrowserLivePage() {
             Refresh tabs
           </button>
         </div>
+        {closed ? (
+          <p className="browser-live-note" role="status">
+            That page is closed now. Pick another tab, or ask Aman to open the page again.
+          </p>
+        ) : null}
         {note !== '' ? (
           <p className="browser-live-note" role="status">
             {note}

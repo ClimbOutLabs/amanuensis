@@ -11,6 +11,6 @@ Some steps only you can do: signing in, typing a code sent to your phone, a pict
 1. Go to `/browser-live` on the address you use for Aman. For example, if Aman is at `https://aman.local`, open `https://aman.local/browser-live`. Aman gives you this link when a page needs you.
 2. Pick the tab. Each button is one of Aman's open pages.
 3. Use the picture of the page like the page itself. Click it, scroll over it, and type. To type a code or longer text, put it in the box under the picture and press **Type it**. To upload a file, pick it under **Upload a file into the page**, then press the page's own upload or send button.
-4. Press **Done**. Aman carries on from where you left the page, and a sign-in you finished stays signed in.
+4. Press **Done**, then go back to the chat and tell Aman you are finished. Aman carries on from where you left the page, and a sign-in you finished stays signed in.
 
-Only you see your own tabs, and only while you are signed in to Aman. If Aman asks you to sign in first, you come back to the live browser afterwards. The live browser keeps the same rules as Aman's own clicks: the page cannot leave the site it was opened on. If the page says Aman has no page open, ask Aman to open the page first.
+Only you see your own tabs, and only while you are signed in to Aman. If Aman asks you to sign in first, you come back to the live browser afterwards. The live browser keeps the same rules as Aman's own clicks: the page cannot leave the site it was opened on. If the page says Aman has no page open, ask Aman to open the page first. The live browser only asks for new pictures while you are looking at it.

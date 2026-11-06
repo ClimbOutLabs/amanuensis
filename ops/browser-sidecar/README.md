@@ -56,9 +56,10 @@ The live view, where the person drives their own tab by hand from the app's `/br
 - `POST /live/frame { owner, tab }` — one JPEG frame of the tab and the viewport size.
 - `POST /live/input { owner, tab, kind, ... }` — one act: `click` (x, y and the frame size it was read
   from), `type` (text), `key` (one named key) or `wheel` (dy). A click uses the real mouse, so the same
-  rules keep the tab on its site.
+  rules keep the tab on its site. Acts on one tab run one at a time, in the order they arrived.
 - `POST /live/upload { owner, tab, name, mime, data }` — a file, base64, at most 10 MB, put into the
-  file picker the page opened, or else its first file field. The page itself sends it.
+  file picker the page opened (dropped once the page moves on), or else its first file field. The
+  page itself sends it.
 
 The app server calls the live routes only for the signed-in person's own profile.
 

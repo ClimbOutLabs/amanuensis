@@ -795,7 +795,9 @@ async function fakeSidecar() {
   const handlers = {};
   let fileFields = 0;
   let launches = 0;
+  const mainFrame = { name: 'main' };
   const page = {
+    mainFrame: () => mainFrame,
     url: () => 'https://site-a.test/account',
     title: async () => 'Account',
     goto: async () => undefined,
@@ -814,7 +816,11 @@ async function fakeSidecar() {
       },
     },
     keyboard: {
+      // Text that starts with "slow" takes a while, as a busy page can.
       type: async text => {
+        if (text.startsWith('slow')) {
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
         acts.push({ type: text });
       },
       press: async key => {
@@ -871,14 +877,21 @@ async function fakeSidecar() {
     acts,
     gateway,
     launches: () => launches,
-    /** The page opens its file picker, as when its upload button is clicked. */
-    openFileChooser: () => {
+    /** The page opens its file picker, as when its upload button is clicked; a stale one cannot take a file. */
+    openFileChooser: ({ stale = false } = {}) => {
       handlers.filechooser({
         page: () => page,
         setFiles: async file => {
+          if (stale) {
+            throw new Error('Element is not attached to the DOM');
+          }
           acts.push({ chooser: file });
         },
       });
+    },
+    /** The tab's page moves to another address on its site. */
+    navigate: () => {
+      handlers.framenavigated(mainFrame);
     },
     giveFileField: () => {
       fileFields = 1;
@@ -977,7 +990,7 @@ test('the live view puts a file into the picker the page opened, else its file f
   if (BrowserSidecar === undefined) {
     return;
   }
-  const { sidecar, acts, gateway, openFileChooser, giveFileField } = await fakeSidecar();
+  const { sidecar, acts, gateway, openFileChooser, giveFileField, navigate } = await fakeSidecar();
   const file = { owner: 'owner-1', tab: 'chat-1', name: 'id.pdf', mime: 'application/pdf', data: 'JVBERi0=' };
   const expected = { name: 'id.pdf', mimeType: 'application/pdf', buffer: Buffer.from('JVBERi0=', 'base64') };
   try {
@@ -994,8 +1007,42 @@ test('the live view puts a file into the picker the page opened, else its file f
     assert.deepEqual(await sidecar.liveUpload(file), { status: 'ok' });
     assert.deepEqual(acts.at(-1), { fileField: expected });
 
+    // A picker the page opened before it moved on is dropped; the file goes to the new page's field.
+    openFileChooser();
+    navigate();
+    assert.deepEqual(await sidecar.liveUpload(file), { status: 'ok' });
+    assert.deepEqual(acts.at(-1), { fileField: expected });
+    // A picker that can no longer take the file falls back to the field too.
+    openFileChooser({ stale: true });
+    assert.deepEqual(await sidecar.liveUpload(file), { status: 'ok' });
+    assert.deepEqual(acts.at(-1), { fileField: expected });
+
     const tooBig = Buffer.alloc(10 * 1024 * 1024 + 1).toString('base64');
     assert.deepEqual(await sidecar.liveUpload({ ...file, data: tooBig }), { status: 'bad_input' });
+  } finally {
+    gateway.close();
+    await sidecar.close();
+  }
+});
+
+test('the live view runs acts sent at once in the order they were sent', async () => {
+  if (BrowserSidecar === undefined) {
+    return;
+  }
+  const { sidecar, acts, gateway } = await fakeSidecar();
+  try {
+    await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'https://site-a.test/account' });
+    acts.length = 0;
+    const send = input => sidecar.liveInput({ owner: 'owner-1', tab: 'chat-1', input });
+    // The first key is slow to land; the ones after it still wait their turn.
+    const answers = await Promise.all([
+      send({ kind: 'click', x: 10, y: 10 }),
+      send({ kind: 'type', text: 'slow-h' }),
+      send({ kind: 'type', text: 'i' }),
+      send({ kind: 'key', key: 'Enter' }),
+    ]);
+    assert.deepEqual(answers, Array(4).fill({ status: 'ok' }));
+    assert.deepEqual(acts, [{ click: [10, 10] }, { type: 'slow-h' }, { type: 'i' }, { key: 'Enter' }]);
   } finally {
     gateway.close();
     await sidecar.close();
