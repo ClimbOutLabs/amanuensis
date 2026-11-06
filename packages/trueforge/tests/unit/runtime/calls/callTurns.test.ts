@@ -99,7 +99,7 @@ describe('a phone call in private mode', () => {
     await speak(t);
     await t.session.settled();
     expect(t.tts.sentences.join(' ')).toContain('Please say yes or no.');
-    expect(t.tts.sentences.join(' ')).toContain('I will leave it in Aman for you.');
+    expect(t.tts.sentences.join(' ')).toContain('I will leave it in the app for you.');
     expect(t.hungUp()).toBe(1);
   });
 

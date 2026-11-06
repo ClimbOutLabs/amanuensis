@@ -100,7 +100,7 @@ describe('phone calls as a channel of the delivery layer', () => {
     const media = await h.openMedia({ token });
     expect(await media.closed).toBe(1000);
     await waitFor(async () => (await h.calls.getBySid(CALL_SID))?.outcome === 'voicemail');
-    expect(h.tts.sentences).toEqual(['Mannie here, something needs you, please open Aman.']);
+    expect(h.tts.sentences).toEqual(['Mannie here, something needs you, please open the app.']);
     expect(media.frames.some(frame => frame.event === 'media')).toBe(true);
     await h.twilioPost({
       path: '/twilio/call-status',
@@ -179,6 +179,20 @@ describe('the Twilio listener for calls', () => {
       });
     });
     expect(status).toBe(404);
+  });
+
+  it('gives a request no way in by claiming to come from inside Aman', async () => {
+    h = await callsHarness();
+    const headers = { 'x-aman-in-process-caller': 'a'.repeat(43), 'sec-fetch-site': 'same-origin' };
+    for (const path of ['/api/v1/sessions/chat-1/turns', '/api/v1/user/reach', '/']) {
+      expect([path, (await fetch(`${h.base}${path}`, { method: 'POST', headers })).status]).toEqual([path, 404]);
+    }
+    const unsigned = await fetch(`${h.base}/twilio/voice`, {
+      method: 'POST',
+      headers: { ...headers, 'content-type': 'application/x-www-form-urlencoded' },
+      body: 'CallSid=x',
+    });
+    expect(unsigned.status).toBe(403);
   });
 
   it('hangs up on a call Aman did not start, and on one from another account', async () => {

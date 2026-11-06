@@ -1,7 +1,7 @@
-import { Sessions, type CreatedBySubject } from '@truefoundry/trueforge-core/agent-session';
+import { Sessions, type CreatedBySubject, type SessionAgent } from '@truefoundry/trueforge-core/agent-session';
 
 import type { RequestContext } from '../../../../src/auth/identity';
-import { IN_PROCESS_CALLER_HEADER, inProcessCaller } from '../../../../src/auth/inProcessCaller';
+import { inProcessCaller } from '../../../../src/auth/inProcessCaller';
 import { migrateSqliteToLatest } from '../../../../src/db/migrateSqlite';
 import { ReachSettingsStore } from '../../../../src/db/reachSettingsStore';
 import { createSqliteDb } from '../../../../src/db/sqlite/client';
@@ -12,6 +12,8 @@ import type { Delivery } from '../../../../src/schemas/deliveries';
 const TENANT = 'default';
 const DANA: CreatedBySubject = { subject_id: 'dana', subject_type: 'user', subject_display_name: 'Dana' };
 const AGENT = { type: 'reference' as const, id: 'agent-1', name: 'assistant-0123456789abcdef' };
+/** What a new chat in the app starts on. */
+const NEW_CHAT_AGENT: SessionAgent = { type: 'reference', id: 'agent-new', name: 'assistant-fedcba9876543210' };
 
 function delivery(link: Delivery['link']): Delivery {
   return {
@@ -27,7 +29,8 @@ function delivery(link: Delivery['link']): Delivery {
   };
 }
 
-async function setup() {
+/** `null` stands for a server with no model, whose new chats have no assistant. */
+async function setup({ newChatAgent = NEW_CHAT_AGENT }: { newChatAgent?: SessionAgent | null } = {}) {
   const db = createSqliteDb(':memory:');
   await migrateSqliteToLatest(db);
   const sessionStore = new SqliteSessionStore(db);
@@ -37,12 +40,10 @@ async function setup() {
     sessionStore,
     sessions: () => sessions,
     reachSettings: new ReachSettingsStore(db),
-    selfFetch: () => request => {
-      requests.push({
-        path: new URL(request.url).pathname,
-        caller: inProcessCaller(request.headers.get(IN_PROCESS_CALLER_HEADER) ?? undefined),
-        site: request.headers.get('sec-fetch-site'),
-      });
+    newChatAgent: () => Promise.resolve(newChatAgent ?? undefined),
+    selfFetch: () => (request, env) => {
+      const path = new URL(request.url).pathname;
+      requests.push({ path, caller: inProcessCaller({ env, path }), site: request.headers.get('sec-fetch-site') });
       return new Response('{}', { status: 200 });
     },
     contextFor: ({ tenant_id, subject }) => ({
@@ -115,7 +116,25 @@ describe('the chat a phone call talks in', () => {
     expect(t.requests[1]?.caller).toBeUndefined();
   });
 
-  it('is not made for a person who has never chatted, or from someone else’s chat', async () => {
+  it('starts a person who has never chatted on the assistant a new chat in the app starts on', async () => {
+    const t = await setup();
+    const chat = await t.chats.open({
+      owner: { tenant_id: TENANT, created_by: 'dana' },
+      delivery: delivery(null),
+      call_id: 'call-3',
+      opening: 'Hi.',
+    });
+    if (chat === undefined) {
+      throw new Error('expected a chat');
+    }
+    const record = await t.sessionStore.getSession({ tenant_id: TENANT, session_id: chat.session_id });
+    expect(record?.agent).toEqual(NEW_CHAT_AGENT);
+    expect(record?.created_by_subject.subject_id).toBe('dana');
+    await chat.turns.cancel();
+    expect(t.requests[0]?.caller?.subject.id).toBe('dana');
+  });
+
+  it('never takes the assistant or the name from someone else’s chat', async () => {
     const t = await setup();
     const { session: theirs } = await t.sessions.getOrCreateByExternalId({
       tenant_id: TENANT,
@@ -126,7 +145,23 @@ describe('the chat a phone call talks in', () => {
     const chat = await t.chats.open({
       owner: { tenant_id: TENANT, created_by: 'dana' },
       delivery: delivery({ type: 'chat', session_id: theirs.session_id }),
-      call_id: 'call-3',
+      call_id: 'call-4',
+      opening: 'Hi.',
+    });
+    if (chat === undefined) {
+      throw new Error('expected a chat');
+    }
+    const record = await t.sessionStore.getSession({ tenant_id: TENANT, session_id: chat.session_id });
+    expect(record?.agent).toEqual(NEW_CHAT_AGENT);
+    expect(record?.created_by_subject.subject_id).toBe('dana');
+  });
+
+  it('has no chat to open only when the server has no model at all', async () => {
+    const t = await setup({ newChatAgent: null });
+    const chat = await t.chats.open({
+      owner: { tenant_id: TENANT, created_by: 'dana' },
+      delivery: delivery(null),
+      call_id: 'call-5',
       opening: 'Hi.',
     });
     expect(chat).toBeUndefined();

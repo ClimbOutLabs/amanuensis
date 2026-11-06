@@ -26,12 +26,12 @@ export const CALL_LINES = {
     `Hi, it's ${name}. ${capitalized(kind)}. Is this a good time?`,
   /** Once the person said yes. The chat holds this line, with the greeting, as the start of the conversation. */
   message: (message: string): string => `${withStop(message)} Want me to do something about it?`,
-  notNow: 'Okay. It is waiting in Aman for you. Goodbye.',
+  notNow: 'Okay. It is waiting in the app for you. Goodbye.',
   askAgain: 'Sorry, I did not catch that. Is this a good time? Please say yes or no.',
-  giveUp: 'I will leave it in Aman for you. Goodbye.',
-  noChat: 'I cannot talk it through on the phone right now. Please open Aman to see it. Goodbye.',
-  timeUp: 'I need to go now. Everything we said is in the chat in Aman. Goodbye.',
-  voicemail: (name: string): string => `${name} here, something needs you, please open Aman.`,
+  giveUp: 'I will leave it in the app for you. Goodbye.',
+  noChat: 'I cannot talk it through on the phone right now. Please open the app to see it. Goodbye.',
+  timeUp: 'I need to go now. Everything we said is in the chat in the app. Goodbye.',
+  voicemail: (name: string): string => `${name} here, something needs you, please open the app.`,
 } as const;
 
 function capitalized(text: string): string {

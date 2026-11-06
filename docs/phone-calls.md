@@ -22,13 +22,13 @@ Otherwise the same thing reaches you as a nudge, and the bell says why.
 
 - The call uses your assistant's own voice, made on your computer. Its name is the one you chose in Personalization.
 - It starts with only the kind of thing: "Hi, it's Mannie. Something needs you. Is this a good time?" It says more only after you answer yes. Say no and it says goodbye. The phone cannot tell who picked up, so nothing private is said first.
-- After your yes it tells you what it is about and asks "Want me to do something about it?". From then on it is a normal voice conversation with the same assistant, tools and rules as in the app. You can ask questions and interrupt it.
-- **Nothing is approved on a call.** Anything that would send, save or change something is left waiting in Aman for you to approve. The assistant says so. Looking things up and answering questions are fine.
+- After your yes it tells you what it is about and asks "Want me to do something about it?". From then on it is a normal voice conversation with the same assistant, tools and rules as in the app. This works even if you have never chatted before: the call then uses the assistant a new chat starts with. You can ask questions and interrupt it.
+- **Nothing is approved on a call.** Anything that would send, save or change something is left waiting in the app for you to approve. The assistant says so. Looking things up and answering questions are fine.
 - A call lasts at most 10 minutes.
 
 ## If you do not answer
 
-If no one answers, or a voicemail picks up, the assistant leaves one short voicemail that says only "Mannie here, something needs you, please open Aman." Then it sends one text (if texts are on) and one notice to your devices. It never calls again about the same thing.
+If no one answers, or a voicemail picks up, the assistant leaves one short voicemail that says only "Mannie here, something needs you, please open the app." Then it sends one text (if texts are on) and one notice to your devices. It never calls again about the same thing.
 
 ## What you see afterwards
 

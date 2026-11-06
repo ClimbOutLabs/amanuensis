@@ -327,7 +327,7 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
       })();
     };
     const turns = new CallTurns({
-      message: delivery === undefined ? 'It is in Aman for you to see.' : spokenMessage(delivery),
+      message: delivery === undefined ? 'It is in the app for you to see.' : spokenMessage(delivery),
       openChat: async () => {
         if (delivery === undefined) {
           return undefined;

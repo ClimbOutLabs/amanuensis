@@ -63,6 +63,7 @@ import type { Kysely, Transaction } from 'kysely';
 import type { RedisClientType } from 'redis';
 import type { Logger } from 'winston';
 
+import { readServerSandboxAvailable } from './apis/capabilities';
 import { createServerApp } from './app';
 import { TrueForgeAuthorizer, type Authorizer } from './auth/authorizer';
 import { createAuthenticator } from './auth/createAuthenticator';
@@ -128,6 +129,7 @@ import { CHAT_IMAGE_RETENTION_DAYS } from './runtime/chatImages/limits';
 import { createImageReencoder } from './runtime/chatImages/reencodeInSandbox';
 import { ChatSearchIndexer } from './runtime/chatSearchIndexing';
 import { recoverAbandonedCommandExecutions } from './runtime/commandExecutionRecovery';
+import { newChatAgentSpec, resolveDefaultChatModelEntry } from './runtime/defaultChatModel';
 import { designateTavilyAtBoot, seedDefaultSearchProviderAtBoot } from './runtime/defaultSearchProvider';
 import { createDeliveryService, type DeliveryService } from './runtime/delivery/deliveryService';
 import { createWebPushSender } from './runtime/delivery/webPushSender';
@@ -830,7 +832,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   const callDeps: {
     deliveries?: DeliveryService;
     sessions?: Sessions<SessionCustom, TurnCustom>;
-    app?: { fetch: (request: Request) => Response | Promise<Response> };
+    app?: { fetch: (request: Request, env: object) => Response | Promise<Response> };
   } = {};
   const phoneCalls = createPhoneCallService({
     store: phoneCallStore,
@@ -861,11 +863,35 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
         return callDeps.sessions;
       },
       reachSettings: reachSettingsStore,
-      selfFetch: () => request => {
+      newChatAgent: async owner => {
+        const context = requestContextFromCreatedBySubject({
+          tenant_id: owner.tenant_id,
+          created_by_subject: {
+            subject_id: owner.created_by,
+            subject_type: 'user',
+            subject_display_name: owner.created_by,
+          },
+        });
+        const spec = newChatAgentSpec({
+          model: await resolveDefaultChatModelEntry({
+            tenantId: owner.tenant_id,
+            modelProviderStore: persistence.resolveModelProviderStore(context),
+            globalSettingsStore,
+            logger,
+          }),
+          sandbox: await readServerSandboxAvailable({
+            store: persistence.resolveSandboxProviderStore(context),
+            tenant_id: owner.tenant_id,
+            logger,
+          }),
+        });
+        return spec === undefined ? undefined : { type: 'inline', spec };
+      },
+      selfFetch: () => (request, env) => {
         if (callDeps.app === undefined) {
           throw new Error('The app is not ready yet.');
         }
-        return callDeps.app.fetch(request);
+        return callDeps.app.fetch(request, env);
       },
       contextFor: ({ tenant_id, subject }) =>
         getTrueForgeAuthMode(configuration) === TrueForgeAuthMode.Standalone

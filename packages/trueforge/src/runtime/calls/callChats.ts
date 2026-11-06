@@ -1,11 +1,15 @@
-import type { CreatedBySubject, ISessionStore, Sessions } from '@truefoundry/trueforge-core/agent-session';
+import type {
+  CreatedBySubject,
+  ISessionStore,
+  SessionAgent,
+  Sessions,
+} from '@truefoundry/trueforge-core/agent-session';
 
 import type { RequestContext } from '../../auth/identity';
-import { grantInProcessCaller, IN_PROCESS_CALLER_HEADER } from '../../auth/inProcessCaller';
+import { grantInProcessCaller, type InProcessFetch } from '../../auth/inProcessCaller';
 import type { IReachSettingsStore } from '../../db/reachSettingsStore';
 import type { SessionCustom, TurnCustom } from '../../db/sessionCustom';
 import { HttpVoiceTurnRunner } from '../../voice/turnRunner';
-import type { SelfFetch } from '../../voice/voiceSocket';
 import { appendAssistantLine } from '../assistantLine';
 import type { CallChats } from './phoneCalls';
 
@@ -14,13 +18,14 @@ export const PHONE_CALL_CHAT_TITLE = 'Phone call';
 
 /**
  * Each call talks in a chat of its own, written as the person and run through the app's own turn route, so the same
- * assistant, tools and approvals apply as to a typed message. The chat takes the assistant of the chat the delivery
- * points to, or else the person's latest chat. A person who has never chatted has no assistant to talk to.
+ * assistant, tools and approvals apply as to a typed message. The chat takes the assistant of the person's chat the
+ * delivery points to, or else of their latest chat, or else the one a new chat in the app starts on.
  */
 export function createCallChats({
   sessionStore,
   sessions,
   reachSettings,
+  newChatAgent,
   selfFetch,
   contextFor,
   port,
@@ -30,8 +35,10 @@ export function createCallChats({
   /** Read when needed: sessions are made after the delivery channels. */
   sessions: () => Pick<Sessions<SessionCustom, TurnCustom>, 'getOrCreateByExternalId'>;
   reachSettings: Pick<IReachSettingsStore, 'get'>;
+  /** The assistant a new chat in the app starts on; undefined when the server has no model. */
+  newChatAgent: (owner: { tenant_id: string; created_by: string }) => Promise<SessionAgent | undefined>;
   /** Runs a request against this server's own app, in this process. */
-  selfFetch: () => SelfFetch;
+  selfFetch: () => InProcessFetch;
   /** Who the person is to the app's routes, as their own sign-in would say. */
   contextFor: (input: { tenant_id: string; subject: CreatedBySubject }) => RequestContext;
   port: number;
@@ -44,34 +51,39 @@ export function createCallChats({
         linkedId === undefined
           ? undefined
           : await sessionStore.getSession({ tenant_id: owner.tenant_id, session_id: linkedId });
-      const base =
-        linked?.created_by_subject.subject_id === owner.created_by
-          ? linked
-          : (
-              await sessionStore.listSessions({
-                tenant_id: owner.tenant_id,
-                limit: 1,
-                page_token: undefined,
-                order: 'desc',
-                start_timestamp: undefined,
-                end_timestamp: undefined,
-                agent_id: undefined,
-                folder_id: undefined,
-                no_folder: false,
-                created_by_or_agent_ids: { created_by_subject_id: owner.created_by, agent_ids: [] },
-                metadata: undefined,
-                source_type: undefined,
-                source_id: undefined,
-              })
-            ).data[0];
-      if (base === undefined) {
+      const latest = async () =>
+        (
+          await sessionStore.listSessions({
+            tenant_id: owner.tenant_id,
+            limit: 1,
+            page_token: undefined,
+            order: 'desc',
+            start_timestamp: undefined,
+            end_timestamp: undefined,
+            agent_id: undefined,
+            folder_id: undefined,
+            no_folder: false,
+            created_by_or_agent_ids: { created_by_subject_id: owner.created_by, agent_ids: [] },
+            metadata: undefined,
+            source_type: undefined,
+            source_id: undefined,
+          })
+        ).data.find(chat => chat.created_by_subject.subject_id === owner.created_by);
+      const base = linked?.created_by_subject.subject_id === owner.created_by ? linked : await latest();
+      const agent = base?.agent ?? (await newChatAgent(owner));
+      if (agent === undefined) {
         return undefined;
       }
+      const subject: CreatedBySubject = base?.created_by_subject ?? {
+        subject_id: owner.created_by,
+        subject_type: 'user',
+        subject_display_name: owner.created_by,
+      };
       const { session } = await sessions().getOrCreateByExternalId({
         tenant_id: owner.tenant_id,
         external_id: `phone-call:${call_id}`,
-        created_by_subject: base.created_by_subject,
-        agent: base.agent,
+        created_by_subject: subject,
+        agent,
       });
       await appendAssistantLine({
         sessionStore,
@@ -81,13 +93,17 @@ export function createCallChats({
         title: PHONE_CALL_CHAT_TITLE,
         now: now(),
       });
-      const grant = grantInProcessCaller(contextFor({ tenant_id: owner.tenant_id, subject: base.created_by_subject }));
+      const grant = grantInProcessCaller({
+        context: contextFor({ tenant_id: owner.tenant_id, subject }),
+        pathPrefix: `/api/v1/sessions/${encodeURIComponent(session.session_id)}/`,
+      });
       const fetchApp = selfFetch();
       const request = (path: string, init: RequestInit): Promise<Response> => {
         const headers = new Headers(init.headers);
-        headers.set(IN_PROCESS_CALLER_HEADER, grant.key);
         headers.set('sec-fetch-site', 'same-origin');
-        return Promise.resolve(fetchApp(new Request(`http://localhost:${String(port)}${path}`, { ...init, headers })));
+        return Promise.resolve(
+          fetchApp(new Request(`http://localhost:${String(port)}${path}`, { ...init, headers }), grant.env),
+        );
       };
       const settings = await reachSettings.get(owner);
       return {
