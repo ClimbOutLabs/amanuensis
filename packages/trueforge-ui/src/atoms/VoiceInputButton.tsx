@@ -14,6 +14,7 @@ import { auiButtonClass } from './lib/buttonClasses.js';
 import { cn } from './lib/cn.js';
 import { startLiveVoice, type LiveVoice } from './lib/liveVoice.js';
 import { isVoiceCaptureSupported, startVoiceRecording, type VoiceRecorder } from './lib/voiceRecorder.js';
+import { Tooltip } from './primitives/Tooltip.js';
 
 const TRANSCRIBE_ERROR_MESSAGE = 'Transcription failed, try again or type instead.';
 const MIC_UNAVAILABLE_MESSAGE = 'Microphone unavailable. Check your microphone and try again.';
@@ -22,6 +23,9 @@ const VOICE_MODE_FAILED_MESSAGE = 'Voice mode could not start. Check your microp
 const VOICE_MODE_ENDED_MESSAGE = 'Voice mode ended because the connection closed. Tap it to start again.';
 const VOICE_MODE_MIC_LOST_MESSAGE =
   'Voice mode ended because the microphone stopped. Check it, then tap to start again.';
+
+/** The hints are a sentence long, so they wrap instead of running off a narrow screen. */
+const VOICE_HINT_CLASS = 'w-max max-w-64 whitespace-normal text-center';
 
 const VOICE_MODE_LABELS = {
   connecting: 'Getting ready…',
@@ -412,7 +416,15 @@ function VoiceInputButtonInner({
       : phase === 'recording'
         ? 'Stop and transcribe'
         : 'Record voice message';
-  const micHint = phase === 'idle' ? 'Tap to record, or hold to talk and let go to send.' : micTitle;
+  // The mic and the voice mode switch sit side by side, so each hint says what it is before how to use it.
+  const micHint =
+    phase === 'denied'
+      ? micTitle
+      : 'Voice message: tap to record and check the words, or hold to talk and let go to send.';
+  const voiceModeHint =
+    voiceMode === 'off'
+      ? 'Voice mode: just talk, pause, and hear the answer. Talk over it to interrupt.'
+      : 'End voice mode.';
 
   return (
     <span ref={rootRef} className="relative inline-flex min-w-0 items-center gap-1">
@@ -433,64 +445,67 @@ function VoiceInputButtonInner({
               </button>
             </span>
           ) : (
-            <button
-              type="button"
-              onPointerDown={event => {
-                if (event.button !== 0) return;
-                // Keeps the release reported here when the finger or pointer drifts off the button.
-                event.currentTarget.setPointerCapture?.(event.pointerId);
-                beginPress();
-              }}
-              onPointerUp={endPress}
-              onPointerCancel={endPress}
-              onContextMenu={event => event.preventDefault()}
-              onClick={event => {
-                // Pointer presses are handled above; only keyboard activation (no click count) gets here as a tap.
-                if (event.detail !== 0) return;
-                beginPress();
-                endPress();
-              }}
-              disabled={acquiring || (disabled && phase !== 'recording')}
-              title={micHint}
-              aria-label={micTitle}
-              aria-pressed={phase === 'recording'}
-              className={cn(
-                auiButtonClass({ variant: 'ghost', size: 'icon' }),
-                'touch-none select-none',
-                phase === 'recording' && 'bg-failure-bg/15',
-                phase === 'denied' && 'text-failure-text',
-              )}
-            >
-              {phase === 'recording' ? (
-                <span aria-hidden="true" className="block h-2.5 w-2.5 animate-pulse rounded-full bg-recording" />
-              ) : phase === 'denied' ? (
-                <span className="relative inline-flex" aria-hidden="true">
+            // No hint while recording: a tap stops it, but letting go of a hold sends, and one hint cannot say both.
+            <Tooltip content={phase === 'recording' ? null : micHint} className={VOICE_HINT_CLASS}>
+              <button
+                type="button"
+                onPointerDown={event => {
+                  if (event.button !== 0) return;
+                  // Keeps the release reported here when the finger or pointer drifts off the button.
+                  event.currentTarget.setPointerCapture?.(event.pointerId);
+                  beginPress();
+                }}
+                onPointerUp={endPress}
+                onPointerCancel={endPress}
+                onContextMenu={event => event.preventDefault()}
+                onClick={event => {
+                  // Pointer presses are handled above; only keyboard activation (no click count) gets here as a tap.
+                  if (event.detail !== 0) return;
+                  beginPress();
+                  endPress();
+                }}
+                disabled={acquiring || (disabled && phase !== 'recording')}
+                aria-label={micTitle}
+                aria-pressed={phase === 'recording'}
+                className={cn(
+                  auiButtonClass({ variant: 'ghost', size: 'icon' }),
+                  'touch-none select-none',
+                  phase === 'recording' && 'bg-failure-bg/15',
+                  phase === 'denied' && 'text-failure-text',
+                )}
+              >
+                {phase === 'recording' ? (
+                  <span aria-hidden="true" className="block h-2.5 w-2.5 animate-pulse rounded-full bg-recording" />
+                ) : phase === 'denied' ? (
+                  <span className="relative inline-flex" aria-hidden="true">
+                    <Icon name="mic" />
+                    <span className="absolute top-1/2 left-1/2 h-px w-5 -translate-x-1/2 -translate-y-1/2 rotate-45 bg-current" />
+                  </span>
+                ) : (
                   <Icon name="mic" />
-                  <span className="absolute top-1/2 left-1/2 h-px w-5 -translate-x-1/2 -translate-y-1/2 rotate-45 bg-current" />
-                </span>
-              ) : (
-                <Icon name="mic" />
-              )}
-            </button>
+                )}
+              </button>
+            </Tooltip>
           )}
         </>
       )}
       {phase !== 'denied' && (
-        <button
-          type="button"
-          onClick={toggleVoiceMode}
-          disabled={voiceMode === 'off' && (acquiring || disabled || phase !== 'idle')}
-          title={voiceMode === 'off' ? 'Talk it through: speak, pause, and hear the answer' : 'End voice mode'}
-          aria-label={voiceMode === 'off' ? 'Start voice mode' : 'End voice mode'}
-          aria-pressed={voiceMode !== 'off'}
-          className={cn(
-            auiButtonClass({ variant: 'ghost', size: 'icon' }),
-            voiceMode !== 'off' && 'bg-card-bg',
-            voiceMode === 'listening' && 'animate-pulse',
-          )}
-        >
-          <Icon name="audio-lines" />
-        </button>
+        <Tooltip content={voiceModeHint} className={VOICE_HINT_CLASS}>
+          <button
+            type="button"
+            onClick={toggleVoiceMode}
+            disabled={voiceMode === 'off' && (acquiring || disabled || phase !== 'idle')}
+            aria-label={voiceMode === 'off' ? 'Start voice mode' : 'End voice mode'}
+            aria-pressed={voiceMode !== 'off'}
+            className={cn(
+              auiButtonClass({ variant: 'ghost', size: 'icon' }),
+              voiceMode !== 'off' && 'bg-card-bg',
+              voiceMode === 'listening' && 'animate-pulse',
+            )}
+          >
+            <Icon name="audio-lines" />
+          </button>
+        </Tooltip>
       )}
       {voiceMode !== 'off' && (
         <span role="status" className="text-text-secondary text-xs whitespace-nowrap">

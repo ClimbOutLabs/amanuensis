@@ -299,8 +299,13 @@ def create_app(
                 request, state, synthesizer, SpeechJob(text, voice_id, Encoder(fmt), headers, started)
             )
         try:
-            async with state.in_flight:
-                audio = await _speak_until_disconnect(request, synthesizer, text, voice_id)
+            if await _wait_for_slot(request, state.in_flight):
+                try:
+                    audio = await _speak_until_disconnect(request, synthesizer, text, voice_id)
+                finally:
+                    state.in_flight.release()
+            else:
+                audio = None
         finally:
             state.queued -= 1
         if audio is None:
@@ -376,10 +381,14 @@ async def _stream_speech(request: Request, state: ServiceState, synthesizer: Syn
             await asyncio.sleep(DISCONNECT_POLL_SECONDS)
 
     try:
-        await state.in_flight.acquire()
+        acquired = await _wait_for_slot(request, state.in_flight)
     except BaseException:
         state.queued -= 1
         raise
+    if not acquired:
+        state.queued -= 1
+        LOGGER.info("speak cancelled: caller went away")
+        return Response(status_code=499)
     worker = loop.run_in_executor(None, produce)
     worker.add_done_callback(lambda _: finish())
     watcher = asyncio.create_task(watch_for_hang_up())
@@ -422,6 +431,35 @@ async def _stream_speech(request: Request, state: ServiceState, synthesizer: Syn
             cancel.set()
 
     return StreamingResponse(body(), media_type=job.encoder.format.content_type, headers=job.headers)
+
+
+async def _wait_for_slot(request: Request, slot: asyncio.Semaphore) -> bool:
+    """Waits for the synthesis slot, giving up once the caller hangs up so a gone caller does not hold a place in line."""
+    acquire = asyncio.ensure_future(slot.acquire())
+    acquired = False
+    try:
+        while not acquired:
+            done, _ = await asyncio.wait({acquire}, timeout=DISCONNECT_POLL_SECONDS)
+            if done:
+                acquired = True
+            elif await request.is_disconnected():
+                break
+    finally:
+        if not acquired:
+            # Not awaited, so a cancel of this request still reaches its caller.
+            acquire.cancel()
+            acquire.add_done_callback(_pass_on_slot(slot))
+    return acquired
+
+
+def _pass_on_slot(slot: asyncio.Semaphore) -> Callable[[asyncio.Future], None]:
+    """Gives the slot back when it was handed over just as the wait ended."""
+
+    def done(acquire: asyncio.Future) -> None:
+        if not acquire.cancelled() and acquire.exception() is None:
+            slot.release()
+
+    return done
 
 
 async def _speak_until_disconnect(
