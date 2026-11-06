@@ -220,11 +220,11 @@ export class InMemoryTelegramStore implements ITelegramStore {
   }
 }
 
-export type SentTelegramMessage = {
+export interface SentTelegramMessage {
   chat_id: string;
   text: string;
   inline_buttons: readonly (readonly TelegramInlineButton[])[] | undefined;
-};
+}
 
 /** A Telegram client that records sends and answers callbacks; getMe and downloads are set by the test. */
 export class FakeTelegramClient implements TelegramClient {
