@@ -1,9 +1,8 @@
 /** POST /connect: who may open a voice connection, and what a ticket carries. */
 import { OpenAPIHono, z } from '@hono/zod-openapi';
 import { HTTPException } from 'hono/http-exception';
-import { createLogger, transports } from 'winston';
-
 import { Socket } from 'node:net';
+import { createLogger, transports } from 'winston';
 
 import { createVoiceRouter } from '../../../src/apis/voice';
 import type { Authenticator } from '../../../src/auth/authenticator';

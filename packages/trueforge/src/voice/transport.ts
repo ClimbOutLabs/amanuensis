@@ -47,19 +47,29 @@ export interface SpeechToText {
 /** What the engine reads to speak (text to speech): audio in the transport's own format, as it is made. */
 export interface SpeechSynthesizer {
   /**
-   * True when the voice would say this text exactly as written; false when it would change a word, so the
-   * text cannot be checked by ear. Throws when the voice cannot be asked, which is never a yes.
+   * With `exact`, the whole text is first checked and spoken only if the voice would say exactly what is
+   * written; otherwise this throws `WouldChangeTextError` before any sound. A caller that needs a text heard
+   * as written sends it whole, never in pieces, because the check judges the text it is given.
    */
-  saysAsWritten({ text, signal }: { text: string; signal: AbortSignal }): Promise<boolean>;
   stream({
     text,
     format,
     signal,
+    exact,
   }: {
     text: string;
     format: OutputFormat;
     signal: AbortSignal;
+    exact?: boolean;
   }): AsyncIterable<Uint8Array>;
+}
+
+/** The voice would say something other than what is written, so the text cannot be checked by ear. */
+export class WouldChangeTextError extends Error {
+  constructor() {
+    super('the voice would not say this text as it is written');
+    this.name = 'WouldChangeTextError';
+  }
 }
 
 export type TurnRefusal = 'expired' | 'changed' | 'not_allowed' | 'tool_gone' | 'sign_in';

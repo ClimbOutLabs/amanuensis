@@ -68,6 +68,8 @@ const ENDED_WORDS = {
     'A voicemail picked up, so a short message was left. It said only that something needs you. The call was not tried again.',
   voicemailNotLeft: 'A voicemail picked up, but no message could be left. The call was not tried again.',
   lineNotOpened: 'The call was answered, but the line could not be opened. The call was not tried again.',
+  messageNotSaid:
+    'You answered, but the message could not be read out as written. It was sent as a text and a notice instead.',
   cutOff: 'The call stopped before it finished. The call was not tried again.',
   saidNo: 'You answered and said it was not a good time. It is waiting for you in the app.',
   noYes: 'You answered, but the call ended before you said it was a good time. It is waiting for you in the app.',
@@ -423,7 +425,9 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
       async start() {
         try {
           const text = CALL_LINES.voicemail(spokenName(await namesFor(call)));
-          for await (const chunk of deps.speaking().stream({ text, format: 'mulaw8k', signal: abort.signal })) {
+          // Said only as written, or not at all: a voicemail is heard by whoever plays it back.
+          const voice = deps.speaking().stream({ text, format: 'mulaw8k', signal: abort.signal, exact: true });
+          for await (const chunk of voice) {
             transport.sendAudio(chunk);
           }
           await transport.whenPlayed();
@@ -462,8 +466,8 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
     const timers: NodeJS.Timeout[] = [];
     let talking: { session: VoiceSession; turns: CallTurns; startedAt: Date } | undefined;
     let ended = false;
-    /** The voice failed on the opening, so the person never heard why they were called. */
-    let unheard = false;
+    /** Why the call was not heard through, when the voice could not say the opening or the message as written. */
+    let unheard: string | undefined;
     /** The wait for an answer, while one is running. */
     let silence: NodeJS.Timeout | undefined;
     let ending: Promise<void> | undefined;
@@ -530,6 +534,16 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
             });
         }, limits.silenceMs);
       };
+      /** The person heard nothing of why they were called, so a text and a push tell them instead. */
+      const notHeard = (words: string): void => {
+        if (ended) {
+          return;
+        }
+        unheard = words;
+        void transport.whenPlayed().then(() => {
+          transport.close();
+        });
+      };
       const turns = new CallTurns({
         message: delivery === undefined ? 'It is in the app for you to see.' : spokenMessage(delivery),
         openChat: async () => {
@@ -549,6 +563,13 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
           return chat;
         },
         hangUp,
+        sayMessage: line => {
+          void session.say(line, { exact: true }).then(said => {
+            if (!said) {
+              notHeard(ENDED_WORDS.messageNotSaid);
+            }
+          });
+        },
         askedAgain: () => {
           void session
             .settled()
@@ -582,22 +603,15 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
         person: names.person,
         kind: delivery === undefined ? 'something needs you' : privatePhrase(delivery.kind),
       });
-      // The opening plays to the end: a reply that starts over it is not an answer to the question.
-      void session
-        .say(opening, { interruptible: false })
-        .then(() => transport.whenPlayed())
-        .then(() => {
-          if (ended) {
-            return;
-          }
-          if (transport.voiceFailed) {
-            // The person heard nothing of why they were called, so a text and a push tell them instead.
-            unheard = true;
-            transport.close();
-            return;
-          }
-          listenForAnswer();
-        });
+      // The opening plays to the end, and only as written. A reply that starts over it is not an answer.
+      void session.say(opening, { interruptible: false, exact: true }).then(async said => {
+        if (!said) {
+          notHeard(ENDED_WORDS.lineNotOpened);
+          return;
+        }
+        await transport.whenPlayed();
+        listenForAnswer();
+      });
       later(limits.talkMs, () => {
         void session.say(CALL_LINES.timeUp).then(hangUp);
       });
@@ -621,10 +635,10 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
           ended = true;
           timers.forEach(clearTimeout);
           clearTimeout(silence);
-          if (talking === undefined || unheard) {
+          if (talking === undefined || unheard !== undefined) {
             await talking?.session.end();
             // The person never heard the assistant, so they hear through a text and a push instead.
-            await endWithoutTalking({ call, outcome: 'failed', detail: ENDED_WORDS.lineNotOpened });
+            await endWithoutTalking({ call, outcome: 'failed', detail: unheard ?? ENDED_WORDS.lineNotOpened });
             return;
           }
           const { session, turns, startedAt } = talking;

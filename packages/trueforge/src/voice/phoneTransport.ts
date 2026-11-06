@@ -6,7 +6,7 @@
 import type { RawData, WebSocket } from 'ws';
 import { z } from 'zod';
 
-import { socketBytes, type VoiceEvent, type VoiceTransport } from './transport';
+import { socketBytes, type VoiceTransport } from './transport';
 
 /** Longest wait for Twilio to say it has played everything sent, so a call never hangs open on a lost mark. */
 const PLAYED_TIMEOUT_MS = 30_000;
@@ -89,7 +89,6 @@ export class PhoneVoiceTransport implements VoiceTransport {
   readonly #streamSid: string;
   readonly #marks = new Map<string, () => void>();
   #markCount = 0;
-  #voiceFailed = false;
 
   constructor({ socket, streamSid }: { socket: PhoneSocket; streamSid: string }) {
     this.#socket = socket;
@@ -108,16 +107,8 @@ export class PhoneVoiceTransport implements VoiceTransport {
     this.#send({ event: 'clear', streamSid: this.#streamSid });
   }
 
-  /** True once the voice failed to speak something sent to this line. */
-  get voiceFailed(): boolean {
-    return this.#voiceFailed;
-  }
-
-  sendEvent(event: VoiceEvent): void {
-    // The phone has no screen, so the engine's events have nowhere to go; only a voice failure is kept, for the call.
-    if (event.type === 'tts_failed') {
-      this.#voiceFailed = true;
-    }
+  sendEvent(): void {
+    // The phone has no screen, so the engine's events have nowhere to go.
   }
 
   close(): void {

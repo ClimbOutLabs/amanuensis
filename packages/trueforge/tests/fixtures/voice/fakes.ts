@@ -13,6 +13,7 @@ import type {
   VoiceTransport,
   VoiceTurnRunner,
 } from '../../../src/voice/transport';
+import { WouldChangeTextError } from '../../../src/voice/transport';
 import type { SpeechProbability } from '../../../src/voice/vad/sileroVad';
 import { VAD_WINDOW_SAMPLES } from '../../../src/voice/vad/utteranceDetector';
 
@@ -109,13 +110,22 @@ export class FakeStt implements SpeechToText {
   calls = 0;
   /** While true, a call waits (until its signal aborts) instead of answering. */
   hold = false;
+  readonly #held: ((text: string) => void)[] = [];
   constructor(...answers: string[]) {
     this.#answers = answers;
   }
+  /** Answers every call that is waiting with this text. */
+  release(text: string): void {
+    for (const resolve of this.#held.splice(0)) {
+      resolve(text);
+    }
+  }
+
   transcribe({ signal }: { signal: AbortSignal }): Promise<string> {
     this.calls += 1;
     if (this.hold) {
-      return new Promise((_resolve, reject) => {
+      return new Promise((resolve, reject) => {
+        this.#held.push(resolve);
         signal.addEventListener(
           'abort',
           () => {
@@ -132,7 +142,7 @@ export class FakeStt implements SpeechToText {
 /** Each sentence is half a second of a pulsing tone, handed over in four pieces. */
 export class FakeTts implements SpeechSynthesizer {
   readonly sentences: string[] = [];
-  /** Every text the voice was asked about, in order. */
+  /** Every text the voice was asked to say exactly, in order. */
   readonly asked: string[] = [];
   constructor(
     private readonly options: {
@@ -141,28 +151,31 @@ export class FakeTts implements SpeechSynthesizer {
       silentOn?: ((text: string) => boolean) | undefined;
       /** Texts the voice would say differently from how they are written. */
       changes?: ((text: string) => boolean) | undefined;
-      /** The voice cannot be asked at all. */
+      /** The voice cannot be reached to check a text it is asked to say exactly. */
       cannotCheck?: boolean | undefined;
     } = {},
   ) {}
-
-  saysAsWritten({ text }: { text: string; signal: AbortSignal }): Promise<boolean> {
-    this.asked.push(text);
-    if (this.options.cannotCheck === true) {
-      return Promise.reject(new Error('the voice is not answering'));
-    }
-    return Promise.resolve(this.options.changes?.(text) !== true);
-  }
 
   async *stream({
     text,
     format,
     signal,
+    exact = false,
   }: {
     text: string;
     format: OutputFormat;
     signal: AbortSignal;
+    exact?: boolean;
   }): AsyncIterable<Uint8Array> {
+    if (exact) {
+      this.asked.push(text);
+      if (this.options.cannotCheck === true) {
+        throw new Error('the voice is not answering');
+      }
+      if (this.options.changes?.(text) === true) {
+        throw new WouldChangeTextError();
+      }
+    }
     this.sentences.push(text);
     await this.options.delay?.();
     if (this.options.failOn?.(text) === true) {

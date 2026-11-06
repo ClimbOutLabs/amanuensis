@@ -4,12 +4,10 @@
  */
 import type { ReadableStreamReadResult } from 'node:stream/web';
 
-import { z } from 'zod';
-
 import configuration from '../config';
 import type { OutputFormat } from './audio';
 import type { SpeechRateLimiter } from './speechRateLimit';
-import type { SpeechSynthesizer } from './transport';
+import { WouldChangeTextError, type SpeechSynthesizer } from './transport';
 
 const TTS_STREAM_TIMEOUT_MS = 60_000;
 
@@ -40,11 +38,6 @@ function refusedFor({
 }): boolean {
   return response.status === 400 && response.headers.get('x-aman-reason') === reason;
 }
-
-const TTS_NORMALIZE_TIMEOUT_MS = 5_000;
-
-/** What the service answers when it would say the text as written; anything else is not the voice service. */
-const NormalizeAnswerSchema = z.object({ spoken: z.string() });
 
 /** Hands on only whole 16-bit samples, holding a trailing odd byte until the next piece arrives. */
 export class WholeSamples {
@@ -79,28 +72,12 @@ export class SidecarSpeechSynthesizer implements SpeechSynthesizer {
     this.#share = options.share;
   }
 
-  async saysAsWritten({ text, signal }: { text: string; signal: AbortSignal }): Promise<boolean> {
-    const response = await fetch(`${ttsBaseUrl()}/v1/normalize`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ text }),
-      signal: AbortSignal.any([signal, AbortSignal.timeout(TTS_NORMALIZE_TIMEOUT_MS)]),
-    });
-    if (refusedFor({ response, reason: 'would_change_text' })) {
-      return false;
-    }
-    if (!response.ok) {
-      throw new Error(`text to speech answered ${String(response.status)}`);
-    }
-    // A 200 from something else at this address must not pass for a yes.
-    const answer = NormalizeAnswerSchema.safeParse(await response.json().catch(() => undefined));
-    if (!answer.success) {
-      throw new Error('text to speech answered 200 with something other than its words', { cause: answer.error });
-    }
-    return true;
-  }
-
-  async *stream(args: { text: string; format: OutputFormat; signal: AbortSignal }): AsyncIterable<Uint8Array> {
+  async *stream(args: {
+    text: string;
+    format: OutputFormat;
+    signal: AbortSignal;
+    exact?: boolean;
+  }): AsyncIterable<Uint8Array> {
     const release =
       this.#share === undefined
         ? undefined
@@ -120,10 +97,12 @@ export class SidecarSpeechSynthesizer implements SpeechSynthesizer {
     text,
     format,
     signal,
+    exact = false,
   }: {
     text: string;
     format: OutputFormat;
     signal: AbortSignal;
+    exact?: boolean;
   }): AsyncIterable<Uint8Array> {
     const response = await fetch(`${ttsBaseUrl()}/v1/speak`, {
       method: 'POST',
@@ -132,6 +111,7 @@ export class SidecarSpeechSynthesizer implements SpeechSynthesizer {
         text,
         format,
         stream: true,
+        ...(exact ? { exact: true } : {}),
         ...(this.#voice === undefined ? {} : { voice: this.#voice }),
       }),
       signal: AbortSignal.any([signal, AbortSignal.timeout(TTS_STREAM_TIMEOUT_MS)]),
@@ -139,6 +119,9 @@ export class SidecarSpeechSynthesizer implements SpeechSynthesizer {
     // A sentence with nothing to say aloud (a lone symbol) is skipped; any other refusal is a real failure.
     if (refusedFor({ response, reason: 'nothing_to_say' })) {
       return;
+    }
+    if (exact && refusedFor({ response, reason: 'would_change_text' })) {
+      throw new WouldChangeTextError();
     }
     if (!response.ok || response.body === null) {
       throw new Error(`text to speech answered ${String(response.status)}`);

@@ -33,7 +33,7 @@ Base URL (container-internal): `http://aman-tts:8002`
   500 MB, under the 1 GB the container gets.
 - 200 response: `audio/wav` by default (24 kHz mono 16-bit PCM), with `x-voice`,
   `x-model` and `x-sample-rate` headers.
-- Errors: `400` bad JSON, empty text, unknown voice or format, `stream` without a streamable format, or nothing to read aloud;
+- Errors: `400` bad JSON, empty text, unknown voice or format, `stream` without a streamable format, `exact` that is not true or false, nothing to read aloud, or (with `exact`) text the voice would not say as written;
   `413` text too long; `429` busy (with `Retry-After`); `503` model not loaded.
 
 One synthesis runs at a time, a stream included; a single run already uses every configured thread.
@@ -42,18 +42,23 @@ whose caller hangs up stops between pieces of text and is never finished. A
 request whose caller hangs up while it waits leaves the line at once, so it
 does not count toward the two.
 
-### `POST /v1/normalize`
+#### `exact`
 
-Says what `/v1/speak` would say for a text, without making any audio, and needs no model.
-It is how a caller that must read text back exactly finds out whether it can.
+Send `"exact": true` with `/v1/speak` when a text must be heard exactly as written, as a card read
+back before a yes. The whole text is checked first, with the same code that then speaks it, so the
+text that was checked is the text that is heard. The check needs no model.
 
-- Request: `{"text": "..."}`, with the same size limits as `/v1/speak`.
-- 200: `{"spoken": "..."}`, the words as they would be spoken, with numbers spelled out.
-- 400 with header `x-aman-reason: would_change_text`: the voice would say something other than
-  what is written. That covers numbers it would read another way (`1,5`, `10.0.0.1`, `11.06.2026`,
-  more than two cents), links, code, list marks, a minus sign or range, line breaks other than a
-  plain one, and letters outside plain English. Only the common forms are kept: plain digits, groups
-  of three with commas, up to two cents after a dollar sign, a decimal, and a time like `9:30`.
+- 400 with header `x-aman-reason: would_change_text`, before any sound: the voice would say something
+  other than what is written. That covers numbers it would read another way (`1,5`, `10.0.0.1`,
+  `11.06.2026`, `007`, `5 000`, more than two cents), two numbers with only blanks or silent signs
+  between them (`1000 (500)`, `1000; 500`, `1000 & 500`), times that are not real (`9:60`), digits
+  written as superscripts or other forms, links, code, list marks, a minus sign or range, line breaks
+  other than a plain one, and letters outside plain English. Only the common forms are kept: plain
+  digits with no leading zero, groups of three with commas, up to two cents after a dollar sign, a
+  decimal, and a time like `9:30`.
+- Cents are said with their unit: `$1,000.10` is "one thousand dollars and ten cents".
+- Send the whole text in one request. A piece cut from a longer text can start with a list mark or a
+  number-and-bracket that the voice drops from the start of a text, so it is judged on its own.
 
 ### `GET /healthz`
 

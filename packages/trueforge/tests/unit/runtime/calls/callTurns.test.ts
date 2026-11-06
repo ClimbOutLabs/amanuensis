@@ -35,6 +35,9 @@ function call({ heard, chatReplies = [] }: { heard: string[]; chatReplies?: Scri
     hangUp: () => {
       hungUp += 1;
     },
+    sayMessage: line => {
+      void session.say(line, { exact: true });
+    },
   });
   const session = new VoiceSession({
     transport,
@@ -80,6 +83,16 @@ describe('a phone call in private mode', () => {
     expect(t.opened()).toBe(1);
     expect(t.tts.sentences.join(' ')).toContain(CALL_LINES.message(MESSAGE));
     expect(t.chatTurns.sent).toEqual([]);
+  });
+
+  it('reads the message out in one piece and only as written', async () => {
+    const t = call({ heard: ['yes'] });
+    await t.session.say(OPENING, { interruptible: false });
+    t.clock.advance(5_000);
+    await speak(t);
+    await t.session.settled();
+    expect(t.tts.asked).toContain(CALL_LINES.message(MESSAGE));
+    expect(t.tts.sentences).toContain(CALL_LINES.message(MESSAGE));
   });
 
   it('says who the call is for before it asks anything', () => {

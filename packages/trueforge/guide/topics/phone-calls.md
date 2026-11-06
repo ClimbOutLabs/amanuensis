@@ -33,6 +33,8 @@ A call lasts at most 10 minutes. What was said is written in a chat called "Phon
 
 If a voicemail picks up, Aman leaves one short message that says only that something needs you. If no one answers, it leaves no message. Either way it then sends one text and one notice to your devices. It never calls again about the same thing.
 
+Aman says the message only exactly as written. If its voice would say a word differently, it hangs up and sends the text and the notice instead.
+
 ## If calls do not work
 
 - If Reach me says calls are not available, start the voice parts of Aman, then try again in a minute.

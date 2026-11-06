@@ -356,7 +356,7 @@ describe('the turns a voice line runs', () => {
   });
 });
 
-describe('the voice WebSocket when mutual TLS is on', () => {
+describe("the voice WebSocket reaching the server's own routes behind the certificate check", () => {
   let server: Server;
   let port: number;
   let inner: number[];

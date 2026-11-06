@@ -45,7 +45,7 @@ export interface PendingCard {
   tier: 1 | 2 | 3 | undefined;
 }
 
-type FieldRule = 'spoken' | 'context' | 'empty' | 'shape';
+type FieldRule = 'context' | 'empty' | 'shape';
 
 /**
  * Every field of a card and what voice may do with it. A card is read aloud only when each field it
@@ -181,9 +181,9 @@ const zoneWords = (zone: string): string => zone.replace(/[/_]/g, ' ');
 /** `Etc/GMT+5` is five hours behind UTC, the way round people do not say it, so it is left for the screen. */
 const isOffsetZone = (zone: string): boolean => /^Etc\/GMT[+-]/.test(zone);
 
-/** An address said so that every dot is heard: "victor at example dot com". */
+/** An address said so that every dot and hyphen is heard: "victor at my dash bank dot com". */
 const spokenAddress = (address: string): string =>
-  address.replace(/@/g, ' at ').replace(/\./g, ' dot ').replace(/ +/g, ' ').trim();
+  address.replace(/@/g, ' at ').replace(/\./g, ' dot ').replace(/-/g, ' dash ').replace(/ +/g, ' ').trim();
 
 interface BodySegment {
   text: string;
@@ -244,7 +244,7 @@ function readableBody(card: Tier3Card): BodySegment[] | undefined {
       say(
         `I'll add the event ${event.title} on ${event.when}, ${zoneWords(event.time_zone)} time, for ${event.duration}${place}.`,
       ),
-      say(`It goes on the calendar of ${event.calendar}.`),
+      say(`It goes on the calendar of ${spokenAddress(event.calendar)}.`),
       ...(event.already_created ? [say('You already have this event.')] : []),
       ...(event.span_days > 1 ? [say(`This event runs over ${String(event.span_days)} days.`)] : []),
       ...(event.description === '' ? [] : [say(`Its description is: ${event.description}`)]),
@@ -260,7 +260,7 @@ function readableBody(card: Tier3Card): BodySegment[] | undefined {
     }
     return [
       say(
-        `I'll stop the schedule ${schedule.name}, which runs ${schedule.when}, ${zoneWords(schedule.time_zone)} time, as ${schedule.runs_as}. Its task is: ${schedule.task}`,
+        `I'll delete the schedule ${schedule.name} for good. It runs ${schedule.when}, ${zoneWords(schedule.time_zone)} time, as ${schedule.runs_as}. Its task is: ${schedule.task}`,
       ),
     ];
   }
@@ -311,14 +311,19 @@ export function planVoiceApproval({
   return { kind: 'ask', verb, segments: [...body, instruction] };
 }
 
+/** A question mark in any script, and the Spanish opening mark. */
+const QUESTION_MARKS = /[?\u00bf\uff1f\u061f\u203d\u2047\u037e\u055e\u1367\u2e2e\ua60f\ufe16\ufe56]/u;
+
 export type SpokenAnswer = 'confirm' | 'deny' | 'other';
 
 /** Only the exact phrase for the card's verb confirms, and only a plain "no" turns it down. */
 export function classifyAnswer({ heard, verb }: { heard: string; verb: ApprovalVerb }): SpokenAnswer {
   // A question is not an answer, even in the right words. Scripts write their question mark in many ways, so
-  // only a plain stop or "!" (and closing quotes) may end a confirmation, and a leading "¿" is a question.
+  // none may appear anywhere, only a plain stop or "!" (and closing quotes) may end a confirmation, and a
+  // trailing ellipsis is a trailing-off, not a yes.
   const ending = /[^\p{L}\p{N}\s]+(?=\s*$)/u.exec(heard.normalize('NFKC'))?.[0] ?? '';
-  if (/[^.!"'\u2019\u201d)\]]/u.test(ending) || heard.includes('\u00bf')) {
+  const trailsOff = /(?:\u2026|\.{2,})\s*$/u.test(heard);
+  if (/[^.!"'\u2019\u201d)\]]/u.test(ending) || trailsOff || QUESTION_MARKS.test(heard)) {
     return 'other';
   }
   const words = wordsOf(heard).join(' ');

@@ -34,6 +34,8 @@ If a voicemail picks up, the assistant leaves one short voicemail that says only
 
 If the call cannot be made at all, for example because the voice parts of Aman are not running, the text and the notice are sent at once.
 
+The assistant says the opening, the message and the voicemail only exactly as written. If its voice would say a word differently, for example a number or a name, it says none of that part. Then it hangs up, and the text and the notice are sent instead. The voicemail is simply not left.
+
 ## What you see afterwards
 
 Each call is recorded in Activity: when it was and how it ended. What was said on the call is written in a chat called "Phone call", starting from the moment you said yes. You can carry on in that chat in the app.

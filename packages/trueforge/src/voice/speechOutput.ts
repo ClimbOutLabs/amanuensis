@@ -26,13 +26,16 @@ export class SpeechOutput {
   #tail: Promise<void> = Promise.resolve();
   /** False once a sentence was lost: it failed, was skipped as empty, or made no sound. */
   #complete = true;
+  /** Set when a sentence that had to be said exactly was lost: the rest of that text is not read. */
+  #halted = false;
 
   constructor(deps: SpeechOutputDeps) {
     this.#deps = deps;
   }
 
-  say({ text, role }: { text: string; role: SentenceRole }): void {
-    this.#tail = this.#tail.then(() => this.#speak({ text, role }));
+  /** With `exact`, the voice must say the text just as written or say nothing of it (see the synthesizer). */
+  say({ text, role, exact = false }: { text: string; role: SentenceRole; exact?: boolean }): void {
+    this.#tail = this.#tail.then(() => this.#speak({ text, role, exact }));
   }
 
   /**
@@ -44,16 +47,16 @@ export class SpeechOutput {
     return this.#complete;
   }
 
-  async #speak({ text, role }: { text: string; role: SentenceRole }): Promise<void> {
+  async #speak({ text, role, exact }: { text: string; role: SentenceRole; exact: boolean }): Promise<void> {
     const { tts, format, transport, timeline, spoken, signal } = this.#deps;
     const stopped = (): boolean => signal.aborted;
-    if (stopped()) {
+    if (stopped() || this.#halted) {
       return;
     }
     let madeSound = false;
     try {
       let counted = false;
-      for await (const chunk of tts.stream({ text, format, signal })) {
+      for await (const chunk of tts.stream({ text, format, signal, exact })) {
         if (stopped()) {
           return;
         }
@@ -70,6 +73,7 @@ export class SpeechOutput {
     } catch (error) {
       if (!stopped()) {
         this.#complete = false;
+        this.#halted = exact;
         this.#deps.onFailure(error);
       }
       return;

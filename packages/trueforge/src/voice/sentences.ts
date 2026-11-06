@@ -1,7 +1,7 @@
 /**
  * Cuts a reply into sentences while it is still streaming in, so the first one can be spoken
  * before the model has finished. A sentence is complete once the character after its stop arrives.
- * Fenced code is never read aloud, except in `keepLineMarks` mode, which only cuts.
+ * Fenced code is never read aloud.
  */
 const ABBREVIATIONS = new Set(['mr', 'mrs', 'ms', 'dr', 'st', 'vs', 'etc', 'e.g', 'i.e']);
 /** A run of words this long with no stop is cut at a space, so one huge sentence cannot be refused by the voice. */
@@ -25,16 +25,6 @@ export class SentenceSplitter {
   #inFence = false;
   /** True while the next piece begins a line, the only place a list or heading mark is one. */
   #atLineStart = true;
-  readonly #dropLineMarks: boolean;
-
-  /**
-   * By default a reply's list and heading marks and code fences are taken out. A text that must be said exactly
-   * as written passes `keepLineMarks`: the splitter then only cuts, and drops nothing but blank space.
-   */
-  constructor({ keepLineMarks = false }: { keepLineMarks?: boolean } = {}) {
-    this.#dropLineMarks = !keepLineMarks;
-  }
-
   /** Adds streamed text and returns the sentences it completed. */
   push(text: string): string[] {
     this.#pending += text;
@@ -98,12 +88,9 @@ export class SentenceSplitter {
     return final && text.trim() !== '' ? text.length : undefined;
   }
 
-  /** The words of one piece, with code fences and list or heading marks taken out unless the text is kept whole. */
+  /** The words of one piece, with code fences and list or heading marks taken out. */
   #spoken({ piece, atLineStart }: { piece: string; atLineStart: boolean }): string {
     const trimmed = piece.trim();
-    if (!this.#dropLineMarks) {
-      return trimmed;
-    }
     if (trimmed.startsWith('```')) {
       this.#inFence = !this.#inFence;
       return '';

@@ -4,7 +4,7 @@ import { CALL_LINES } from '../../../../src/runtime/calls/callTurns';
 import { CALLS_NEED_VOICE } from '../../../../src/runtime/calls/phoneCalls';
 import { readReachHistory } from '../../../../src/runtime/noticing/reachGate';
 import { ACCOUNT_SID, ALICE, CALL_SID, PHONE, callsHarness } from '../../../fixtures/callsHarness';
-import { FakeStt, FakeTts, LoudnessVad, hum, mulawBytes } from '../../../fixtures/voice/fakes';
+import { FakeStt, FakeTts, FakeTurns, LoudnessVad, hum, mulawBytes, quiet } from '../../../fixtures/voice/fakes';
 
 type Harness = Awaited<ReturnType<typeof callsHarness>>;
 
@@ -14,6 +14,21 @@ const pause = (ms: number): Promise<void> =>
   new Promise(resolve => {
     setTimeout(resolve, ms);
   });
+
+/** Sends sound down the line the way Twilio does: 8 kHz frames of 20 ms, in real time. */
+async function sendSound(media: { socket: { send: (data: string) => void } }, samples: Int16Array): Promise<void> {
+  const phone = samples.filter((_, index) => index % 2 === 0);
+  for (let offset = 0; offset < phone.length; offset += 160) {
+    media.socket.send(
+      JSON.stringify({
+        event: 'media',
+        streamSid: 'MZ1',
+        media: { payload: Buffer.from(mulawBytes(phone.subarray(offset, offset + 160))).toString('base64') },
+      }),
+    );
+    await pause(20);
+  }
+}
 
 /** A call row whose Twilio id was never saved, as when saving it failed or Twilio answered slowly. */
 async function callWithoutSid(h: Harness) {
@@ -183,6 +198,20 @@ describe('phone calls as a channel of the delivery layer', () => {
     );
   });
 
+  it('leaves no voicemail when the voice would change a word of it, and still sends one text and one push', async () => {
+    h = await callsHarness({ tts: new FakeTts({ changes: () => true }) });
+    await h.readyToCall();
+    const delivery = await h.callDelivery();
+    const media = await h.openMedia({ token: (await h.answer('machine_end_beep')).token });
+    await media.closed;
+    await h.waitFor(() => h.texts.length === 1 && h.pushes.length === 1);
+    expect(h.tts.sentences).toEqual([]);
+    const calls = (await h.attemptsOf(delivery.id)).filter(attempt => attempt.channel === 'call');
+    expect(calls.at(-1)?.detail).toBe(
+      'A voicemail picked up, but no message could be left. The call was not tried again.',
+    );
+  });
+
   it('a test call never falls back to a text', async () => {
     h = await callsHarness();
     await h.readyToCall();
@@ -287,6 +316,42 @@ describe('a call that ends while its line opens', () => {
     const calls = (await h.attemptsOf(delivery.id)).filter(attempt => attempt.channel === 'call');
     expect(calls.at(-1)?.detail).toBe(
       'The call was answered, but the line could not be opened. The call was not tried again.',
+    );
+  });
+
+  it('when the voice would change a word of the opening, says none of it and sends a text and a push instead', async () => {
+    h = await callsHarness({ tts: new FakeTts({ changes: text => text.startsWith('Hi, this is') }) });
+    await h.readyToCall();
+    const delivery = await h.callDelivery();
+    const media = await h.openMedia({ token: (await h.answer()).token });
+    expect(await media.closed).toBe(1000);
+    await h.waitFor(() => h.texts.length === 1 && h.pushes.length === 1);
+    expect(h.tts.sentences).toEqual([]);
+    expect((await h.calls.getBySid(CALL_SID))?.outcome).toBe('failed');
+    expect(h.pushes).toEqual([delivery.id]);
+  });
+
+  it('when the voice would change a word of the message after a yes, says none of it and sends a text and a push', async () => {
+    h = await callsHarness({
+      tts: new FakeTts({ changes: text => text.includes('school pickup') }),
+      chat: { session_id: 'chat-1', turns: new FakeTurns({ message: [] }) },
+      listening: () => Promise.resolve({ vad: new LoudnessVad(), stt: new FakeStt('yes') }),
+    });
+    await h.readyToCall();
+    const delivery = await h.callDelivery();
+    const media = await h.openMedia({ token: (await h.answer()).token });
+    await h.waitFor(() => h.tts.sentences.length >= 1 && media.frames.some(frame => frame.event === 'mark'));
+    // The fake line plays instantly, so wait out the opening's own length before answering.
+    await pause(1700);
+    await sendSound(media, Int16Array.from([...hum(600), ...quiet(900)]));
+    expect(await media.closed).toBe(1000);
+    await h.waitFor(() => h.texts.length === 1 && h.pushes.length === 1);
+    expect(h.tts.asked.some(text => text.includes('school pickup'))).toBe(true);
+    expect(h.tts.sentences.join(' ')).not.toContain('school pickup');
+    expect((await h.calls.getBySid(CALL_SID))?.outcome).toBe('failed');
+    const calls = (await h.attemptsOf(delivery.id)).filter(attempt => attempt.channel === 'call');
+    expect(calls.at(-1)?.detail).toBe(
+      'You answered, but the message could not be read out as written. It was sent as a text and a notice instead.',
     );
   });
 
@@ -404,7 +469,7 @@ describe('a conversation on the phone', () => {
     await h.readyToCall();
     const delivery = await h.callDelivery();
     const media = await h.openMedia({ token: (await h.answer()).token });
-    await h.waitFor(() => h.tts.sentences.length >= 3);
+    await h.waitFor(() => h.tts.sentences.length >= 1);
     expect(h.tts.sentences.join(' ')).toBe(
       'Hi, this is Mannie, calling for Dana. Something needs you. Is this a good time?',
     );
@@ -431,7 +496,7 @@ describe('a conversation on the phone', () => {
     await h.callDelivery();
     const media = await h.openMedia({ token: (await h.answer()).token });
     await h.waitFor(() => h.tts.sentences.length > 0);
-    expect(h.tts.sentences[0]).toBe(spoken);
+    expect(h.tts.sentences[0]).toContain(spoken);
     media.socket.close();
     await h.waitFor(async () => (await h.calls.getBySid(CALL_SID))?.status === 'ended');
   });
@@ -442,7 +507,7 @@ describe('a conversation on the phone', () => {
     const delivery = await h.callDelivery();
     const media = await h.openMedia({ token: (await h.answer()).token });
     expect(await media.closed).toBe(1000);
-    expect(h.tts.sentences.slice(3).join(' ')).toBe(`${CALL_LINES.askAgain} ${CALL_LINES.giveUp}`);
+    expect(h.tts.sentences.slice(1).join(' ')).toBe(`${CALL_LINES.askAgain} ${CALL_LINES.giveUp}`);
     await h.waitFor(async () => (await h.calls.getBySid(CALL_SID))?.outcome === 'not_now');
     expect(h.opened).toEqual([]);
     const ended = (await h.attemptsOf(delivery.id)).filter(attempt => attempt.channel === 'call');
@@ -459,23 +524,13 @@ describe('a conversation on the phone', () => {
     await h.readyToCall();
     await h.callDelivery();
     const media = await h.openMedia({ token: (await h.answer()).token });
-    await h.waitFor(() => h.tts.sentences.length >= 3 && media.frames.some(frame => frame.event === 'mark'));
+    await h.waitFor(() => h.tts.sentences.length >= 1 && media.frames.some(frame => frame.event === 'mark'));
     // The fake line plays instantly, so wait out the opening's own length before speaking over nothing.
     await pause(1900);
-    // 8 kHz phone frames of 20 ms: a moment of someone starting to talk.
-    const voice = hum(300).filter((_, index) => index % 2 === 0);
-    for (let offset = 0; offset < voice.length; offset += 160) {
-      media.socket.send(
-        JSON.stringify({
-          event: 'media',
-          streamSid: 'MZ1',
-          media: { payload: Buffer.from(mulawBytes(voice.subarray(offset, offset + 160))).toString('base64') },
-        }),
-      );
-      await pause(20);
-    }
+    // A moment of someone starting to talk.
+    await sendSound(media, hum(300));
     await pause(500);
-    expect(h.tts.sentences).toHaveLength(3);
+    expect(h.tts.sentences).toHaveLength(1);
     media.socket.close();
     await h.waitFor(async () => (await h.calls.getBySid(CALL_SID))?.status === 'ended');
   });
@@ -492,7 +547,7 @@ describe('a conversation on the phone', () => {
     await h.readyToCall();
     await h.callDelivery();
     const media = await h.openMedia({ token: (await h.answer()).token });
-    await h.waitFor(() => h.tts.sentences.length >= 3);
+    await h.waitFor(() => h.tts.sentences.length >= 1);
     expect(released).toBe(0);
     media.socket.close();
     await h.waitFor(() => released === 1);

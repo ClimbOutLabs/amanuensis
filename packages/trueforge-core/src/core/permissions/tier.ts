@@ -166,7 +166,12 @@ export const Tier3CalendarEventSchema = z
       .boolean()
       .optional()
       .describe('True when the same event was already created in this chat a few minutes ago.'),
-    span_days: z.number().int().optional().describe('How many days the event runs over; 1 for an ordinary event.'),
+    span_days: z
+      .number()
+      .int()
+      .min(1)
+      .optional()
+      .describe('How many days the event runs over; 1 for an ordinary event.'),
   })
   .describe('The calendar event a write adds or changes, shown in full.')
   .openapi('Tier3CalendarEvent');

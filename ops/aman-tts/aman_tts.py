@@ -9,18 +9,17 @@ HTTP contract:
   GET  /healthz   -> {"status": "ok", "model_loaded": bool, "model_error": str | None,
                       "voices": [str], "default_voice": str}
   POST /v1/speak  -> audio/wav (24 kHz mono 16-bit PCM) by default
-  POST /v1/normalize -> {"spoken": str}: the words /v1/speak would say for `{"text": str}`, without
-                      making any audio. It refuses with 400 and `x-aman-reason: would_change_text`
-                      when the voice would say anything other than what is written (numbers read
-                      another way, links, list marks, letters outside plain English), so a caller
-                      that must read text back exactly can tell. It needs no model.
 
 The speak body is JSON `{"text": str, "voice": str | null, "format": str | null,
-"stream": bool | null}`. `format` is `wav` (default), `pcm16` (24 kHz raw 16-bit
+"stream": bool | null, "exact": bool | null}`. `format` is `wav` (default), `pcm16` (24 kHz raw 16-bit
 little-endian) or `mulaw8k` (8 kHz G.711 mu-law, for phone lines). With `stream`
 true (`pcm16` or `mulaw8k` only) the audio is sent sentence by sentence, so the
 first bytes arrive after the first sentence is made. Text over the
-character cap is refused with 413. Text stays in memory; only character counts,
+character cap is refused with 413. With `exact` true the whole text is first checked, with
+the same code that speaks it: if the voice would say anything other than what is written
+(numbers read another way, links, list marks, letters outside plain English) the request
+is refused with 400 and `x-aman-reason: would_change_text` before any sound; otherwise
+that same text is spoken. Text stays in memory; only character counts,
 durations and error codes are logged, never the text or the audio.
 """
 
@@ -46,7 +45,7 @@ from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
 
 from audio_formats import FORMATS, STREAMABLE, WAV, Encoder, encode_wav
-from phonemes import Lexicon, reads_as_written, spoken_words, split_chunks, split_sentences, to_phonemes
+from phonemes import Lexicon, reads_as_written, split_chunks, split_sentences, to_phonemes
 from pins import MODEL_ASSET, MODEL_FILE, VOICE_IDS, VOICES_FILE
 
 LOGGER = logging.getLogger("aman_tts")
@@ -221,6 +220,7 @@ class SpeakRequest:
     voice: str | None
     format: str
     stream: bool
+    exact: bool
 
 
 def _parse_speak_body(body: bytes) -> SpeakRequest:
@@ -234,6 +234,7 @@ def _parse_speak_body(body: bytes) -> SpeakRequest:
     voice = payload.get("voice")
     fmt = payload.get("format")
     stream = payload.get("stream")
+    exact = payload.get("exact")
     if not isinstance(text, str):
         raise HTTPException(status_code=400, detail="text must be a string")
     if voice is not None and not isinstance(voice, str):
@@ -242,9 +243,11 @@ def _parse_speak_body(body: bytes) -> SpeakRequest:
         raise HTTPException(status_code=400, detail=f"format must be one of {', '.join(FORMATS)}")
     if stream is not None and not isinstance(stream, bool):
         raise HTTPException(status_code=400, detail="stream must be true or false")
+    if exact is not None and not isinstance(exact, bool):
+        raise HTTPException(status_code=400, detail="exact must be true or false")
     if stream and fmt not in STREAMABLE:
         raise HTTPException(status_code=400, detail=f"stream needs format {' or '.join(STREAMABLE)}")
-    return SpeakRequest(text=text, voice=voice, format=fmt or WAV.name, stream=bool(stream))
+    return SpeakRequest(text=text, voice=voice, format=fmt or WAV.name, stream=bool(stream), exact=bool(exact))
 
 
 def create_app(
@@ -286,10 +289,6 @@ def create_app(
     @app.post("/v1/speak")
     async def speak(request: Request) -> Response:
         started = time.monotonic()
-        synthesizer = state.synthesizer
-        if synthesizer is None:
-            LOGGER.warning("speak rejected: model not warm")
-            raise HTTPException(status_code=503, detail="Model is not warm yet")
         content_type = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
         if content_type != "application/json":
             raise HTTPException(status_code=400, detail="Content-Type must be application/json")
@@ -300,6 +299,18 @@ def create_app(
             raise HTTPException(status_code=413, detail=f"Text exceeds {settings.max_text_chars} characters")
         if text.strip() == "":
             raise HTTPException(status_code=400, detail="text is empty")
+        # The same whole text is judged here and then spoken below, so what was checked is what is heard.
+        if speak_request.exact and not reads_as_written(text):
+            LOGGER.info("speak refused: would change text, chars=%d", len(text))
+            raise HTTPException(
+                status_code=400,
+                detail="the voice would not say this text as it is written",
+                headers={REASON_HEADER: "would_change_text"},
+            )
+        synthesizer = state.synthesizer
+        if synthesizer is None:
+            LOGGER.warning("speak rejected: model not warm")
+            raise HTTPException(status_code=503, detail="Model is not warm yet")
         voice_id = speak_request.voice or settings.default_voice
         if voice_id not in synthesizer.voices:
             raise HTTPException(status_code=400, detail=f"Unknown voice; choose one of {', '.join(synthesizer.voices)}")
@@ -343,24 +354,6 @@ def create_app(
         else:
             content = Encoder(fmt).feed(audio)
         return Response(content=content, media_type=fmt.content_type, headers=headers)
-
-    @app.post("/v1/normalize")
-    async def normalize_text(request: Request) -> dict[str, str]:
-        content_type = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
-        if content_type != "application/json":
-            raise HTTPException(status_code=400, detail="Content-Type must be application/json")
-        body = await _read_bounded_body(request, settings.max_body_bytes)
-        text = _parse_speak_body(body).text
-        if len(text) > settings.max_text_chars:
-            raise HTTPException(status_code=413, detail=f"Text exceeds {settings.max_text_chars} characters")
-        if not reads_as_written(text):
-            LOGGER.info("normalize refused: chars=%d", len(text))
-            raise HTTPException(
-                status_code=400,
-                detail="the voice would not say this text as it is written",
-                headers={REASON_HEADER: "would_change_text"},
-            )
-        return {"spoken": " ".join(spoken_words(text))}
 
     return app
 

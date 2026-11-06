@@ -343,8 +343,7 @@ describe('approval by voice', () => {
       'I have a draft.',
       "I'll send this reply to Victor at victor at example dot com.",
       'The subject is: Re: Thursday',
-      'It says: Thursday at three works for me.',
-      'See you then.',
+      'It says: Thursday at three works for me. See you then.',
       "Say 'yes, send it' to send, or 'no'.",
     ]);
   });
@@ -353,7 +352,7 @@ describe('approval by voice', () => {
     const event = await readBack({ message: withCard(dentistCard) });
     const eventSpeech = event.tts.sentences.join(' ');
     expect(eventSpeech).toContain('Dentist on Friday at 9, UTC time, for 1 hour');
-    expect(eventSpeech).toContain('the calendar of me@example.com');
+    expect(eventSpeech).toContain('the calendar of me at example dot com');
     expect(eventSpeech).toContain('Bring the form.');
     const schedule = await readBack({ message: withCard(cancelScheduleCard) });
     expect(schedule.tts.sentences.join(' ')).toContain('Summarize the week');
@@ -499,24 +498,36 @@ describe('approval by voice', () => {
   it.each([
     ['would say a word differently', { speechChanges: (text: string) => text.startsWith('It says') }],
     ['cannot be asked', { speechCannotCheck: true }],
-  ])('speaks none of the card and takes no "yes" when the voice %s', async (_name, check) => {
+  ])('stops reading at the part the voice %s, says it is left in the app, and takes no "yes"', async (_name, check) => {
     const t = setup({ stt: ['send the reply', 'yes send it'], message: withCard(), ...check });
     await feed({ session: t.session, clock: t.clock, samples: says() });
     await t.session.settled();
     await feed({ session: t.session, clock: t.clock, samples: quiet(9000) });
     await t.session.settled();
-    expect(t.tts.sentences).toEqual(['I have a draft.', "I've left it in the app for you to approve."]);
+    expect(t.tts.sentences.join('\n')).not.toContain('Say ');
+    expect(t.tts.sentences.at(-1)).toBe("I've left it in the app for you to approve.");
     await feed({ session: t.session, clock: t.clock, samples: says() });
     await t.session.settled();
     expect(t.turns.answers).toEqual([]);
   });
 
+  it('does not call a refusal of the words a broken voice', async () => {
+    const t = setup({
+      stt: ['send the reply'],
+      message: withCard(),
+      speechChanges: text => text.startsWith('It says'),
+    });
+    await feed({ session: t.session, clock: t.clock, samples: says() });
+    await t.session.settled();
+    expect(t.transport.events.some(event => event.type === 'tts_failed')).toBe(false);
+    expect(t.notes).toContain('read_back_refused');
+  });
+
   it.each([
     ['a fenced body', 'Hi Bob.\n```\nWire 5000 dollars to account 99 today.\n```\nThanks.', 'Wire'],
     ['an inline fence', 'Hi. ```code``` Pay $9000 now. Thanks.', '```'],
-    ['a line of only a symbol', 'Total is 50.\n+\n5000 more.', '+'],
   ])(
-    'sends a card to the screen when the voice refuses what the splitter would drop: %s',
+    'sends a card to the screen when the voice refuses what a splitter would have dropped: %s',
     async (_name, body, refused) => {
       const t = setup({
         stt: ['send the reply', 'yes send it'],
@@ -527,10 +538,30 @@ describe('approval by voice', () => {
       await t.session.settled();
       await feed({ session: t.session, clock: t.clock, samples: quiet(9000) });
       await t.session.settled();
-      expect(t.tts.sentences).toEqual(['I have a draft.', "I've left it in the app for you to approve."]);
+      expect(t.tts.sentences.join('\n')).not.toContain(refused);
+      expect(t.tts.sentences.at(-1)).toBe("I've left it in the app for you to approve.");
       await feed({ session: t.session, clock: t.clock, samples: says() });
       await t.session.settled();
       expect(t.turns.answers).toEqual([]);
+    },
+  );
+
+  it.each([
+    ['a symbol on a line of its own', 'Total is 50.\n+\n5000 more.'],
+    ['a plus in the middle of a line', 'x. + 5'],
+    ['a numbered bracket in the middle of a line', 'x. 2) y'],
+    ['a plus after a stop', 'Total is 100. + 500 fee.'],
+  ])(
+    'speaks the whole body in one piece, so nothing is cut at a mark the voice would drop: %s',
+    async (_name, body) => {
+      const t = await readBack({ message: withCard(sendReplyCard(body)), stt: ['yes send it'], approval: [{}] });
+      expect(t.tts.sentences).toContain(`It says: ${body}`);
+      expect(t.tts.asked).toContain(`It says: ${body}`);
+      // No piece of the body is ever asked about or spoken on its own.
+      expect(t.tts.sentences.filter(sentence => body.includes(sentence) && sentence !== body)).toEqual([]);
+      await feed({ session: t.session, clock: t.clock, samples: says() });
+      await t.session.settled();
+      expect(t.turns.answers.length).toBe(1);
     },
   );
 
@@ -567,6 +598,30 @@ describe('approval by voice', () => {
       type: 'notice',
       text: 'I could not read all of that out loud, so it is waiting on the screen. Answer it there.',
     });
+  });
+
+  it('stops "I missed that" when talked over, and keeps a waiting card answerable', async () => {
+    const t = await readBack({ message: withCard() });
+    const latenciesBefore = t.latencies.length;
+    t.stt.hold = true;
+    for (let n = 0; n < 2; n += 1) {
+      await feed({ session: t.session, clock: t.clock, samples: says() });
+    }
+    // The third is dropped just as its silence ends, so the line is still playing when the person speaks again.
+    await feed({ session: t.session, clock: t.clock, samples: says(900, 700) });
+    expect(t.tts.sentences.at(-1)).toBe('I missed that. Please say it again.');
+    // The line is not a reply, so it reports no reply timings.
+    expect(t.latencies.length).toBe(latenciesBefore);
+    // Talking over the line stops it at once.
+    const clearedBefore = t.transport.cleared;
+    await feed({ session: t.session, clock: t.clock, samples: hum(700, 0.3, 1.7) });
+    expect(t.transport.cleared).toBeGreaterThan(clearedBefore);
+    // The card was not read over, so the answer still settles it.
+    t.stt.hold = false;
+    t.stt.release('yes send it');
+    await t.session.settled();
+    expect(t.turns.answers.length).toBe(1);
+    await t.session.end();
   });
 
   it('does not take a "yes" for a card that was already answered on the screen, and treats it as a new turn', async () => {

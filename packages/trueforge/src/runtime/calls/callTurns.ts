@@ -79,6 +79,7 @@ export class CallTurns implements VoiceTurnRunner {
   readonly #openChat: () => Promise<CallChat | undefined>;
   readonly #hangUp: () => void;
   readonly #askedAgain: () => void;
+  readonly #sayMessage: (line: string) => void;
   #phase: 'asking' | 'open' | 'closing' = 'asking';
   #unclear = 0;
   #replies = 0;
@@ -90,6 +91,7 @@ export class CallTurns implements VoiceTurnRunner {
     openChat,
     hangUp,
     askedAgain = () => undefined,
+    sayMessage,
   }: {
     /** What the call is about, said only after a yes. */
     message: string;
@@ -98,11 +100,14 @@ export class CallTurns implements VoiceTurnRunner {
     hangUp: () => void;
     /** The question was asked again, so a wait for its answer can start again. */
     askedAgain?: () => void;
+    /** Says what the call is about, word for word, or not at all. */
+    sayMessage: (line: string) => void;
   }) {
     this.#message = message;
     this.#openChat = openChat;
     this.#hangUp = hangUp;
     this.#askedAgain = askedAgain;
+    this.#sayMessage = sayMessage;
   }
 
   /** Whether the person said it was a good time. */
@@ -168,7 +173,8 @@ export class CallTurns implements VoiceTurnRunner {
       }
       this.#chat = chat;
       this.#phase = 'open';
-      onText(CALL_LINES.message(this.#message));
+      // Spoken apart from the turn's own words, so it is checked whole and never said differently.
+      this.#sayMessage(CALL_LINES.message(this.#message));
       return { kind: 'done', turnId: '', approvals: [] };
     }
     if (answer === 'no') {

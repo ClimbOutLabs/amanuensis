@@ -29,7 +29,8 @@ When the rules allow a call, Aman asks Twilio to ring the person's confirmed num
 - Twilio's answering machine detection tells a person from a machine. A machine gets one short voicemail: `This is <assistant name>. Something needs you. Please open the app.` A fax, busy line, no answer, or failed call gets no voicemail.
 - Then, once only, the delivery is tried as a text (when texts are on) and as a push notice. A call is never placed again for the same delivery.
 - When the call cannot be placed at all, the text and push are tried at once, right after the call attempt is written down.
-- The same text and push go out when the line could not be opened after the person picked up, when the parts that listen could not load, when the voice could not speak the opening, and when a call never finished (for example the server stopped mid-call, or Twilio never called back). A sweep every minute ends such calls once they are past their time.
+- The opening, the message after a yes and a voicemail are each sent to the voice whole and said only as written. If the voice would change a word, none of it is said: a voicemail is not left, and an opening or a message falls back to the text and push.
+- The same text and push go out when the line could not be opened after the person picked up, when the parts that listen could not load, when the voice could not speak the opening or the message after a yes, and when a call never finished (for example the server stopped mid-call, or Twilio never called back). A sweep every minute ends such calls once they are past their time.
 
 ## When it calls
 
