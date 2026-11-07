@@ -36,6 +36,14 @@ The panel then says it is connected and shows your Google address.
 3. Click **Connect Calendar**. On Google's screen, leave the calendar box ticked and continue.
 4. To let Aman add events, click the button that starts with "Allow" and ends with "to add events". It shows Aman's name in the middle. You still approve each event first. Aman cannot delete events.
 
+## Connect Google Drive
+
+1. Click **More**, click **Settings**, click **Connectors**, find **Google**, and click **Manage**.
+2. Open the Drive API, Docs API and Sheets API links in the Drive section. On each Google page, click Enable. All three are needed: the Drive API lists files, the Docs API reads and writes Docs, and the Sheets API reads and adds to Sheets.
+3. Click **Connect Google Drive**. On Google's screen, leave the Drive box ticked and continue.
+
+Aman only sees files it created, or files you opened with Aman. It can read a Doc or a Sheet. Creating a Doc or adding rows to a Sheet asks you first, and the card shows the whole text or every row. Aman cannot delete a file, and it cannot change who a file is shared with.
+
 ## Connect a calendar with an app password
 
 Use this for Google Calendar or a calendar from another provider. Google, Fastmail, Yahoo, GMX and web.de are on the list. Any other calendar that gives you an https calendar address works too.
@@ -61,4 +69,4 @@ The app stores the app password only on your computer, in the calendar connector
 - Click **Allow drafts and sending** if you skipped drafts at the start.
 - Click **Test connection** to check that it still works.
 - If Google signs you out, click **Reconnect**. A Google project in Testing mode signs you out every 7 days. To stop this, open Audience in Google Cloud and click Publish app. Then reconnect once.
-- Click **Disconnect**, then **Disconnect Google**, to turn off both email and calendar.
+- Click **Disconnect**, then **Disconnect Google**, to turn off email, calendar and Google Drive.
