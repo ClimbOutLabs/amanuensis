@@ -295,7 +295,10 @@ export function createGoogleNoticingSources({
       const record = await connections.get(owner);
       if (record?.status === 'needs_reconnect' && grantedFeatures(record.granted_scopes).includes('gmail_read')) {
         // Mail is set up but cannot be read until the person signs in again, which is trouble to show, not no mail.
-        return { mail: { status: 'unreachable', error: new GoogleReconnectRequiredError() }, calendar: undefined };
+        return {
+          mail: { status: 'unreachable', error: new GoogleReconnectRequiredError(), kind: 'google' },
+          calendar: undefined,
+        };
       }
       if (record?.status !== 'connected') {
         return { mail: { status: 'none' }, calendar: undefined };

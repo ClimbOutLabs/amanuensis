@@ -58,11 +58,20 @@ export class MailSourceBusyError extends Error {
   }
 }
 
+/** The Email connector could not log in to the mail account, so the person has to check the account's password. */
+export class MailLoginFailedError extends MailSourceBusyError {
+  constructor({ cause }: { cause: unknown }) {
+    super({ cause });
+    this.message = 'The Email connector could not log in to the mail account.';
+    this.name = 'MailLoginFailedError';
+  }
+}
+
 /** Said when mail took too long to read, so the person can be told why it was not checked. */
 export class MailTooSlowError extends MailSourceBusyError {
   constructor({ cause }: { cause: unknown }) {
     super({ cause });
-    this.message = 'Mail took too long to read. New mail was not fully checked this time.';
+    this.message = 'Mail took too long to read. It is read again on the next check.';
     this.name = 'MailTooSlowError';
   }
 }
@@ -77,6 +86,10 @@ export interface MailSource {
     before: Date;
     limit: number;
     from?: readonly string[];
+    /** Whether the pass has used the time or calls it has. A long search checks it before every call it makes. */
+    out_of_time: () => boolean;
+    /** Set for a list that tells a failing account from a failing message, so no search for one message is made. */
+    whole?: true;
   }): Promise<MailWindowRead>;
   /** The start of one message's text, for a watcher that needs more than the snippet. Throws MessageUnreadableError for a message it can never read. */
   readText(message: MailMessage): Promise<string>;
@@ -113,7 +126,7 @@ export interface CalendarSource {
 export type MailAccess =
   | { status: 'ready'; source: MailSource; kind: MailSourceKind }
   | { status: 'none' }
-  | { status: 'unreachable'; error: unknown };
+  | { status: 'unreachable'; error: unknown; kind: MailSourceKind };
 
 export interface NoticingSources {
   mail: MailAccess;

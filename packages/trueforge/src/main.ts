@@ -988,6 +988,9 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     budget: tokenFactoryBudget,
     channels: reachChannels,
     logger,
+    assistantNameFor: async owner =>
+      (await personalizationStore.getProfile({ tenant_id: owner.tenant_id, created_by: owner.created_by }))
+        ?.assistant_name ?? 'Your assistant',
     timezoneFor: personTimezoneFor({
       scheduleStore,
       calendarTimezone: googleCalendarTimezoneFor({ connections: googleConnectionStore, fetchImpl: undefined }),

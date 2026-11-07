@@ -183,7 +183,12 @@ describe('Gmail source', () => {
   it('pages through the inbox by message and hands back the oldest mail first', async () => {
     const messages = [3, 2, 1].map(n => message({ id: String(n), thread: `t-${String(n)}`, at: minute(50 + n) }));
     const { api, listMessages } = gmail({ messages, perPage: 1 });
-    const read = await gmailMailSource(api).listNewMessages({ since: minute(0), before: NOW, limit: 10 });
+    const read = await gmailMailSource(api).listNewMessages({
+      since: minute(0),
+      before: NOW,
+      limit: 10,
+      out_of_time: () => false,
+    });
     expect(listMessages).toHaveBeenCalledTimes(3);
     expect(read.read === 'all' ? read.messages.map(item => item.id) : read.read).toEqual(['1', '2', '3']);
   });
@@ -197,6 +202,7 @@ describe('Gmail source', () => {
       before: NOW,
       limit: 10,
       from: [...senders, 'odd"name@example.com'],
+      out_of_time: () => false,
     });
     expect(read.read === 'all' ? read.messages.map(item => item.id) : read.read).toEqual(['1']);
     const queries = listMessages.mock.calls.map(([input]) => input.query);
@@ -209,7 +215,9 @@ describe('Gmail source', () => {
   it('says a window holds too much rather than reading part of it', async () => {
     const messages = [3, 2, 1].map(n => message({ id: String(n), thread: `t-${String(n)}`, at: minute(50 + n) }));
     const { api } = gmail({ messages, perPage: 100 });
-    await expect(gmailMailSource(api).listNewMessages({ since: minute(0), before: NOW, limit: 2 })).resolves.toEqual({
+    await expect(
+      gmailMailSource(api).listNewMessages({ since: minute(0), before: NOW, limit: 2, out_of_time: () => false }),
+    ).resolves.toEqual({
       read: 'too_many',
     });
   });
@@ -222,7 +230,12 @@ describe('Gmail source', () => {
       message({ id: 'after', thread: 'd', at: minute(20) }),
     ];
     const { api } = gmail({ messages, perPage: 100 });
-    const read = await gmailMailSource(api).listNewMessages({ since: minute(10), before: minute(20), limit: 10 });
+    const read = await gmailMailSource(api).listNewMessages({
+      since: minute(10),
+      before: minute(20),
+      limit: 10,
+      out_of_time: () => false,
+    });
     expect(read.read === 'all' ? read.messages.map(item => item.id) : read.read).toEqual(['first', 'last']);
   });
 
@@ -387,7 +400,12 @@ describe('Gmail source', () => {
         ...api,
         getMessageHeaders: id => (Number(id) >= 4 ? new Promise(() => undefined) : api.getMessageHeaders(id)),
       };
-      const reading = gmailMailSource(slow).listNewMessages({ since: minute(0), before: NOW, limit: 50 });
+      const reading = gmailMailSource(slow).listNewMessages({
+        since: minute(0),
+        before: NOW,
+        limit: 50,
+        out_of_time: () => false,
+      });
       await jest.advanceTimersByTimeAsync(LIST_DEADLINE_MS + 1000);
       const read = await reading;
       expect(read.read).toBe('oldest');

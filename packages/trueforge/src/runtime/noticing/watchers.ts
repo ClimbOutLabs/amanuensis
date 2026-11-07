@@ -7,7 +7,6 @@ import { checkSender } from './authenticationResults';
 import { findDeadline, looksLikeBill, saysPaid } from './deadlines';
 import {
   MailSourceBusyError,
-  MailTooSlowError,
   MessageUnreadableError,
   type CalendarEventInfo,
   type CalendarSource,
@@ -56,8 +55,8 @@ function localDate({ at, timezone }: { at: Date; timezone: string }): string {
 /** A message the mail server keeps failing on, or a stretch of mail it cannot list, is passed over after this many passes. */
 export const MAX_STUCK_PASSES = 3;
 /**
- * A message that has held up a pass this long, after the problem was shown to the person, is passed over whatever the
- * failure was, so a message that never reads cannot stop mail for good.
+ * A message that has held up passes this long, while other messages read fine, is passed over whatever the failure
+ * was, so a message that never reads cannot stop mail for good.
  */
 const STUCK_BACKSTOP_AFTER_MS = 3 * 3_600_000;
 
@@ -84,7 +83,17 @@ export interface MailFindings {
   stuck: StuckMessage | undefined;
   stopped_by: { error: unknown } | undefined;
   window_ms: number | undefined;
+  /** The pass ran out of time or calls before it read to the end of its window. */
+  timed_out: boolean;
+  /**
+   * Messages of the window the next pass starts at again that this pass read or passed over, for a source that cannot
+   * resume at a message. The next pass does not read them again.
+   */
+  handled: string[] | undefined;
 }
+
+/** Most handled messages remembered. Any left out are read again, which stable ids absorb. */
+const MOST_HANDLED_REMEMBERED = 300;
 
 /** A window this short that still holds more than one pass reads is read whole, up to this many messages. */
 export const SHORTEST_WINDOW_MS = 4000;
@@ -99,6 +108,12 @@ function ceilGrid(ms: number): number {
   return Math.ceil(ms / GRID_MS) * GRID_MS;
 }
 
+/** A stretch of mail that arrived between two times and was left unread, so the person can be told. */
+export interface LeftBehind {
+  from: Date;
+  to: Date;
+}
+
 export interface MailWindow {
   messages: MailMessage[];
   resume_from: Date | undefined;
@@ -110,6 +125,8 @@ export interface MailWindow {
   unlistable?: { from: Date; to: Date; error: unknown };
   /** No list worked, so the trouble is the account or the server and not a stretch of mail. */
   list_failed?: { error: unknown };
+  /** Mail in this window that was passed over without being read: a flood, or messages the server cannot list. */
+  left_behind: LeftBehind[];
 }
 
 interface WindowInput {
@@ -126,14 +143,19 @@ interface WindowInput {
   known_cell?: Date | undefined;
 }
 
+/** Where the next pass starts after a window that ended at `before`: nowhere in particular once it reached now. */
+function resumeAfter({ before, now }: { before: Date; now: Date }): Date | undefined {
+  return before.getTime() >= now.getTime() ? undefined : before;
+}
+
 /**
  * The oldest mail since `since` that one pass can read, and where the next pass starts. The window is halved until
  * the mail in it fits, so every message before `resume_from` was read and none is skipped. A flood too big to read
  * even in the shortest window is passed over, except mail from `keep_from`, so a flood cannot hide that mail.
  *
  * A list that fails for a reason other than a busy server is looked into only when some list worked: a short list at
- * the start tells a failing account from a failing stretch of mail. Then the window is searched for the few seconds
- * that fail alone, the mail before them is read, and the pass goes on after them.
+ * the start, and one at the end, tell a failing account from a failing stretch of mail. Then the window is searched
+ * for the few seconds that fail alone, the mail before them is read, and the pass goes on after them.
  */
 export async function readMailWindow(input: WindowInput): Promise<MailWindow> {
   const { source, since, now, limit, keep_from, logger, out_of_time, max_width, known_cell } = input;
@@ -141,12 +163,17 @@ export async function readMailWindow(input: WindowInput): Promise<MailWindow> {
   let worked = false;
   for (;;) {
     if (out_of_time()) {
-      return { messages: [], resume_from: since, before, timed_out: true };
+      return { messages: [], resume_from: since, before, timed_out: true, left_behind: [] };
     }
     const short = before.getTime() - since.getTime() <= SHORTEST_WINDOW_MS;
     let read: MailWindowRead;
     try {
-      read = await source.listNewMessages({ since, before, limit: short ? MOST_IN_SHORTEST_WINDOW : limit });
+      read = await source.listNewMessages({
+        since,
+        before,
+        limit: short ? MOST_IN_SHORTEST_WINDOW : limit,
+        out_of_time,
+      });
     } catch (error) {
       if (error instanceof MailSourceBusyError) {
         throw error;
@@ -156,31 +183,53 @@ export async function readMailWindow(input: WindowInput): Promise<MailWindow> {
     }
     worked = true;
     if (read.read === 'all') {
-      noteSkipped({ read, logger });
       return {
         messages: read.messages,
-        resume_from: before.getTime() === now.getTime() ? undefined : before,
+        resume_from: resumeAfter({ before, now }),
         before,
+        left_behind: skippedIn({ read, from: since, to: before, logger }),
       };
     }
     if (read.read === 'oldest') {
       // Everything up to the newest message read was read. With none read, the next pass tries the same window.
-      return { messages: read.messages, resume_from: read.messages.at(-1)?.received_at ?? since, before };
+      return {
+        messages: read.messages,
+        resume_from: read.messages.at(-1)?.received_at ?? since,
+        before,
+        left_behind: [],
+      };
     }
     if (short) {
-      return { ...(await readFlood({ source, since, before, keep_from, logger })), before };
+      const flood = await readFlood({ source, since, before, keep_from, logger, out_of_time });
+      return { messages: flood.messages, resume_from: resumeAfter({ before, now }), before, left_behind: [flood.left] };
     }
     before = halfway({ since, before });
   }
 }
 
-function noteSkipped({ read, logger }: { read: { skipped?: number | undefined }; logger: Pick<Logger, 'warn'> }): void {
-  if ((read.skipped ?? 0) > 0) {
-    logger.warn('Left out mail the mail server could not list one by one', { skipped: read.skipped });
+/** What a list left out because the server could not list those messages, if it left any out. */
+function skippedIn({
+  read,
+  from,
+  to,
+  logger,
+}: {
+  read: { skipped?: number | undefined };
+  from: Date;
+  to: Date;
+  logger: Pick<Logger, 'warn'>;
+}): LeftBehind[] {
+  if ((read.skipped ?? 0) === 0) {
+    return [];
   }
+  logger.warn('Left out mail the mail server could not list one by one', { skipped: read.skipped });
+  return [{ from, to }];
 }
 
-/** Searches a window that failed to list for the few seconds that fail alone. */
+/**
+ * Searches a window that failed to list for the few seconds that fail alone. The mail before them is read, a flood in
+ * the way is passed over, and the pass goes on with the mail after them.
+ */
 async function locateFailure({
   input,
   before,
@@ -192,29 +241,64 @@ async function locateFailure({
   error: unknown;
   worked: boolean;
 }): Promise<MailWindow> {
-  const { source, since, now, limit, logger, out_of_time } = input;
-  const list = async ({ from, to }: { from: number; to: number }): Promise<MailWindowRead> =>
-    await source.listNewMessages({ since: new Date(from), before: new Date(to), limit });
-  const stopped: MailWindow = { messages: [], resume_from: since, before, list_failed: { error } };
+  const { source, since, now, limit, keep_from, logger, out_of_time } = input;
+  const messages: MailMessage[] = [];
+  const left_behind: LeftBehind[] = [];
+  const list = async ({ from, to, whole }: { from: number; to: number; whole: boolean }): Promise<MailWindowRead> =>
+    await source.listNewMessages({
+      since: new Date(from),
+      before: new Date(to),
+      limit: to - from <= SHORTEST_WINDOW_MS ? MOST_IN_SHORTEST_WINDOW : limit,
+      out_of_time,
+      ...(whole ? { whole: true as const } : {}),
+    });
+  /** Takes what a list of `[from, to)` found: its messages, or for a flood only the mail that matters. */
+  const take = async ({ read, from, to }: { read: MailWindowRead; from: number; to: number }): Promise<void> => {
+    if (read.read === 'all') {
+      messages.push(...read.messages);
+      left_behind.push(...skippedIn({ read, from: new Date(from), to: new Date(to), logger }));
+    } else if (read.read === 'too_many') {
+      const flood = await readFlood({
+        source,
+        since: new Date(from),
+        before: new Date(to),
+        keep_from,
+        logger,
+        out_of_time,
+      });
+      messages.push(...flood.messages);
+      left_behind.push(flood.left);
+    }
+  };
+  const stopped: MailWindow = { messages: [], resume_from: since, before, list_failed: { error }, left_behind: [] };
   let hi = ceilGrid(before.getTime());
   let lo = since.getTime();
-  let good: { messages: MailMessage[]; before: number } | undefined;
-  let hiFails = true;
-  let lastError = error;
   if (!worked) {
+    if (out_of_time()) {
+      return { messages: [], resume_from: since, before, timed_out: true, left_behind: [] };
+    }
+    // A list at the start, and if that fails one at the end: when neither works the account or server is failing, and
+    // nothing is passed over.
     const end = Math.min(floorGrid(lo) + GRID_MS, hi);
     try {
-      const control = await list({ from: lo, to: end });
-      if (control.read === 'all') {
-        noteSkipped({ read: control, logger });
-        good = { messages: control.messages, before: end };
-        lo = end;
-      }
+      const control = await list({ from: lo, to: end, whole: true });
+      await take({ read: control, from: lo, to: end });
+      lo = control.read === 'oldest' ? lo : end;
     } catch (controlError) {
       if (controlError instanceof MailSourceBusyError) {
         throw controlError;
       }
-      return stopped;
+      if (hi - GRID_MS <= lo) {
+        return stopped;
+      }
+      try {
+        await list({ from: hi - GRID_MS, to: hi, whole: true });
+      } catch (endError) {
+        if (endError instanceof MailSourceBusyError) {
+          throw endError;
+        }
+        return stopped;
+      }
     }
   }
   while (hi - lo > GRID_MS && !out_of_time()) {
@@ -223,103 +307,112 @@ async function locateFailure({
       break;
     }
     try {
-      const read = await list({ from: since.getTime(), to: mid });
-      if (read.read === 'all') {
-        noteSkipped({ read, logger });
-        good = { messages: read.messages, before: mid };
-        lo = mid;
-      } else {
-        hi = mid;
-        hiFails = false;
+      const read = await list({ from: lo, to: mid, whole: true });
+      if (read.read === 'oldest') {
+        break;
       }
+      await take({ read, from: lo, to: mid });
+      lo = mid;
     } catch (searchError) {
       if (searchError instanceof MailSourceBusyError) {
         throw searchError;
       }
       hi = mid;
-      hiFails = true;
-      lastError = searchError;
     }
   }
-  const prefix = good?.messages ?? [];
-  const prefixEnd = new Date(good?.before ?? since.getTime());
-  if (!hiFails || out_of_time()) {
+  const reached = new Date(lo);
+  if (out_of_time()) {
     return {
-      messages: prefix,
-      resume_from: prefixEnd,
+      messages,
+      resume_from: reached,
       before,
-      ...(good === undefined ? { timed_out: true as const } : {}),
+      left_behind,
+      ...(messages.length === 0 ? { timed_out: true as const } : {}),
     };
   }
-  const cell = { from: new Date(lo), to: new Date(hi) };
+  const cell = { from: reached, to: new Date(hi) };
   let cellRead: MailWindowRead;
   try {
-    cellRead = await list({ from: lo, to: hi });
+    cellRead = await list({ from: lo, to: hi, whole: false });
   } catch (cellError) {
     if (cellError instanceof MailSourceBusyError) {
       throw cellError;
     }
-    return {
-      messages: prefix,
-      resume_from: cell.from,
-      before,
-      unlistable: { ...cell, error: cellError instanceof Error ? cellError : lastError },
-    };
+    return { messages, resume_from: cell.from, before, left_behind, unlistable: { ...cell, error: cellError } };
   }
-  if (cellRead.read !== 'all') {
-    return { messages: prefix, resume_from: cell.from, before };
+  if (cellRead.read === 'oldest') {
+    return { messages, resume_from: cell.from, before, left_behind };
   }
-  noteSkipped({ read: cellRead, logger });
-  const found = [...prefix, ...cellRead.messages];
+  await take({ read: cellRead, from: lo, to: hi });
   if (hi >= before.getTime()) {
-    return { messages: found, resume_from: before.getTime() === now.getTime() ? undefined : before, before };
+    return { messages, resume_from: resumeAfter({ before, now }), before, left_behind };
   }
   // The few seconds that failed are read or left out, so the pass goes on with the mail after them.
-  const rest = await readMailWindow({ ...input, since: cell.to, max_width: undefined, known_cell: undefined });
-  if (rest.list_failed !== undefined || rest.timed_out === true) {
-    return { messages: found, resume_from: cell.to, before };
+  let rest: MailWindow;
+  try {
+    rest = await readMailWindow({ ...input, since: cell.to, max_width: undefined, known_cell: undefined });
+  } catch (restError) {
+    if (restError instanceof MailSourceBusyError) {
+      // What was found around the cell is kept, and the next pass meets the busy server itself.
+      return { messages, resume_from: cell.to, before, left_behind };
+    }
+    throw restError;
   }
-  return { ...rest, messages: [...found, ...rest.messages] };
+  if (rest.list_failed !== undefined) {
+    return { messages, resume_from: cell.to, before, left_behind };
+  }
+  return { ...rest, messages: [...messages, ...rest.messages], left_behind: [...left_behind, ...rest.left_behind] };
 }
 
 function halfway({ since, before }: { since: Date; before: Date }): Date {
   return new Date(since.getTime() + Math.floor((before.getTime() - since.getTime()) / 2));
 }
 
-/** Hundreds of messages within a few seconds are a flood, not mail to tell anyone about. Only `keep_from` is read. */
+/**
+ * A few hundred messages within a few seconds are a flood, not mail to tell anyone about. Only `keep_from` is read,
+ * and the rest of the window is reported as left behind.
+ */
 async function readFlood({
   source,
   since,
   before,
   keep_from,
   logger,
+  out_of_time,
 }: {
   source: MailSource;
   since: Date;
   before: Date;
   keep_from: readonly string[];
   logger: Pick<Logger, 'warn'>;
-}): Promise<{ messages: MailMessage[]; resume_from: Date }> {
+  out_of_time: () => boolean;
+}): Promise<{ messages: MailMessage[]; left: LeftBehind }> {
   const window = { since: since.toISOString(), before: before.toISOString() };
+  const left = { from: since, to: before };
   // Where no sender can be confirmed, mail from those senders is ordinary mail, so reading it is not worth a call.
   const kept =
-    keep_from.length === 0 || source.trustedAuthenticationServers.length === 0
+    keep_from.length === 0 || source.trustedAuthenticationServers.length === 0 || out_of_time()
       ? undefined
-      : await source.listNewMessages({ since, before, limit: MOST_IN_SHORTEST_WINDOW, from: keep_from });
+      : await source.listNewMessages({ since, before, limit: MOST_IN_SHORTEST_WINDOW, from: keep_from, out_of_time });
   if (kept === undefined || kept.read === 'too_many') {
     logger.warn('Passed over a flood of mail that arrived within a few seconds', window);
-    return { messages: [], resume_from: before };
+    return { messages: [], left };
   }
   // A flood is read once, so a read that ran out of time is not tried again: the rest of the flood is passed over too.
   logger.warn('Read only mail from always-important senders in a flood of mail that arrived within a few seconds', {
     ...window,
     whole: kept.read === 'all',
   });
-  return { messages: kept.messages, resume_from: before };
+  return { messages: kept.messages, left };
 }
 
 /** Stops a message's read when the pass has used its time, before another call is made. */
-class OutOfTime extends Error {}
+class OutOfTime extends Error {
+  constructor() {
+    super('The pass ran out of time.');
+    this.name = 'OutOfTime';
+  }
+}
 
 /** A message that failed, or that the pass stopped at, and what it failed with. */
 interface Failed {
@@ -336,8 +429,10 @@ interface Failed {
  * waits for the next message whose read worked, and then the failing message is tried once more. A failure that
  * survives the retry counts as a failed pass for the message if it is unclear, and does not count if it says the
  * server is busy. A message that fails `MAX_STUCK_PASSES` counted passes is passed over. A message that has held up
- * mail for `STUCK_BACKSTOP_AFTER_MS` after the problem was shown is passed over too, with a note if it looked like a bill
- * or came from an always-important sender. Two failures with no working read between stop the pass.
+ * mail for `STUCK_BACKSTOP_AFTER_MS` is passed over too, but only after a retry that followed a working read, so a
+ * server that fails on everything never makes the pass skip a message. Both come with a fixed note when the message
+ * looked like a bill or came from an always-important sender. Two failures with no working read between stop the pass
+ * at the first of them.
  *
  * The next pass starts at the earliest message not read, so no failure holds up mail for good and none loses what
  * the messages before it found. A pass that runs out of time stops there without counting anything, and an IMAP pass,
@@ -351,22 +446,25 @@ export async function watchMail({
   logger,
   stuck,
   out_of_time,
-  stalled_since,
   max_width,
+  assistant,
+  handled,
 }: {
   source: MailSource;
   settings: ReachSettings;
   since: Date;
   now: Date;
   logger: Pick<Logger, 'warn'>;
+  /** Messages of this window an earlier pass already handled, when the source cannot resume at a message. */
+  handled: readonly string[] | undefined;
   /** The message or stretch of mail the last pass stopped at, when it did. */
   stuck: StuckMessage | undefined;
-  /** Whether the pass has used the time it has, so it stops cleanly before its connection ends. */
+  /** Whether the pass has used the time or calls it has, so it stops cleanly before its connection ends. */
   out_of_time: () => boolean;
-  /** When mail checks first failed with none working since, if they have. */
-  stalled_since: Date | undefined;
   /** The widest window to list, while catching up after a pass that ran out of time. */
   max_width: number | undefined;
+  /** What the person calls their assistant, for the notes about mail it could not read. */
+  assistant: string;
 }): Promise<MailFindings> {
   const always = new Map(settings.always_important.map(sender => [sender.address, sender]));
   const window = await readMailWindow({
@@ -384,7 +482,6 @@ export async function watchMail({
     const half = Math.floor((width.getTime() - since.getTime()) / 2);
     return half >= GRID_MS ? half : undefined;
   };
-  const slow = new MailTooSlowError({ cause: new Error('The pass ran out of time.') });
   if (window.list_failed !== undefined) {
     return {
       raise: [],
@@ -393,22 +490,32 @@ export async function watchMail({
       stuck,
       stopped_by: { error: window.list_failed.error },
       window_ms: max_width,
+      timed_out: false,
+      handled: source.datesAreArrival ? undefined : handled?.slice(),
     };
   }
+  const findings = {
+    raise: window.left_behind.map(gap => gapNote({ gap, settings, assistant })),
+    track: new Array<NoticingEvent>(),
+  };
   if (window.timed_out === true) {
-    // Nothing was read, so the next pass lists a shorter window, or the trouble is shown when it cannot be shorter.
-    const width = narrower(window.before);
+    // Nothing was read, so the next pass lists a shorter window, and the pass shows it fell behind.
     return {
-      raise: [],
-      track: [],
-      resume_from: since,
+      ...findings,
+      resume_from: window.resume_from ?? since,
       stuck,
-      stopped_by: width === undefined ? { error: slow } : undefined,
-      window_ms: width ?? max_width,
+      stopped_by: undefined,
+      window_ms: narrower(window.before) ?? max_width,
+      timed_out: true,
+      handled: source.datesAreArrival ? undefined : handled?.slice(),
     };
   }
   const { messages } = window;
-  const findings = { raise: new Array<NoticingEvent>(), track: new Array<NoticingEvent>() };
+  const stuckFor = ({ message_id, passes }: { message_id: string; passes: number }): StuckMessage => ({
+    message_id,
+    passes,
+    since: stuck?.message_id === message_id ? stuck.since : now,
+  });
   const state: {
     /** A count from an earlier pass, carried on only while its message is still in the window. */
     carried: StuckMessage | undefined;
@@ -428,7 +535,6 @@ export async function watchMail({
     stoppedBy: undefined,
     timedOut: false,
   };
-  const stalledFor = stalled_since === undefined ? 0 : now.getTime() - stalled_since.getTime();
 
   const attempt = async (
     message: MailMessage,
@@ -440,30 +546,39 @@ export async function watchMail({
     }
   };
 
-  /** Settles a failure that survived its retry: passes the message over, or holds it as where the next pass starts. */
+  /**
+   * Settles a failure that survived its retry: passes the message over, or holds it as where the next pass starts. It
+   * runs only after a read of another message worked, so a failure that comes from the server alone never gets here.
+   */
   const settle = ({ message, error }: Failed): void => {
     const busy = error instanceof MailSourceBusyError;
-    const before = state.carried?.message_id === message.id ? state.carried.passes : undefined;
-    const passes = busy ? (before ?? 0) : (before ?? 0) + 1;
-    const backstop = state.carried?.message_id === message.id && stalledFor >= STUCK_BACKSTOP_AFTER_MS;
+    const carried = state.carried?.message_id === message.id ? state.carried : undefined;
+    const passes = busy ? (carried?.passes ?? 0) : (carried?.passes ?? 0) + 1;
+    const backstop = carried !== undefined && now.getTime() - carried.since.getTime() >= STUCK_BACKSTOP_AFTER_MS;
     if ((!busy && passes >= MAX_STUCK_PASSES) || backstop) {
       logger.warn('Passed over a mail the mail server kept failing on', {
         message_id: message.id,
         passes,
         error: loggedError(error),
       });
-      const note = unreadNote({ message, always });
+      const note = unreadNote({ message, always, settings, assistant });
       if (note !== undefined) {
         findings.raise.push(note);
       }
-      state.carried = state.carried?.message_id === message.id ? undefined : state.carried;
+      state.carried = carried === undefined ? state.carried : undefined;
       state.open = state.open === message ? undefined : state.open;
       return;
     }
-    state.held = { failed: { message_id: message.id, passes }, error };
+    state.held = { failed: stuckFor({ message_id: message.id, passes }), error };
   };
 
+  const alreadyHandled = new Set(source.datesAreArrival ? [] : (handled ?? []));
+  const done = new Set<string>();
   for (const message of messages) {
+    if (alreadyHandled.has(message.id)) {
+      done.add(message.id);
+      continue;
+    }
     if (out_of_time()) {
       state.open ??= message;
       state.timedOut = true;
@@ -478,6 +593,7 @@ export async function watchMail({
     if ('found' in result) {
       findings.raise.push(...result.found.raise);
       findings.track.push(...result.found.track);
+      done.add(message.id);
       state.carried = state.carried?.message_id === message.id ? undefined : state.carried;
       if (result.found.served && state.unconfirmed !== undefined) {
         // A read worked after the failure, so the failing message is tried once more. Only a failure that
@@ -492,9 +608,11 @@ export async function watchMail({
         if ('found' in again) {
           findings.raise.push(...again.found.raise);
           findings.track.push(...again.found.track);
+          done.add(failed.message.id);
           state.carried = state.carried?.message_id === failed.message.id ? undefined : state.carried;
           state.open = state.open === failed.message ? undefined : state.open;
         } else if (again.error instanceof MessageUnreadableError) {
+          done.add(failed.message.id);
           logger.warn('Passed over a mail that could not be read', {
             message_id: failed.message.id,
             error: loggedError(again.error),
@@ -503,11 +621,15 @@ export async function watchMail({
           state.open = state.open === failed.message ? undefined : state.open;
         } else {
           settle({ message: failed.message, error: again.error });
+          if (state.held?.failed.message_id !== failed.message.id) {
+            done.add(failed.message.id);
+          }
         }
       }
       continue;
     }
     if (result.error instanceof MessageUnreadableError) {
+      done.add(message.id);
       logger.warn('Passed over a mail that could not be read', {
         message_id: message.id,
         error: loggedError(result.error),
@@ -524,13 +646,8 @@ export async function watchMail({
     state.unconfirmed = { message, error: result.error };
   }
   if (state.unconfirmed !== undefined && !state.timedOut) {
-    // No read worked after it, so it cannot be tried again; only a long stall passes it over.
-    const waiting = state.unconfirmed;
-    if (state.carried?.message_id === waiting.message.id && stalledFor >= STUCK_BACKSTOP_AFTER_MS) {
-      settle(waiting);
-    } else {
-      state.stoppedBy ??= { error: waiting.error };
-    }
+    // No read worked after it, so it cannot be tried again, and nothing says the message is to blame.
+    state.stoppedBy ??= { error: state.unconfirmed.error };
   }
   const { held, unconfirmed } = state;
   // A pass that stops at a message remembers which one, so a message that keeps stopping passes is known.
@@ -538,8 +655,17 @@ export async function watchMail({
   const stopIdentity: StuckMessage | undefined =
     stoppedAt === undefined || state.stoppedBy === undefined
       ? undefined
-      : { message_id: stoppedAt.id, passes: state.carried?.message_id === stoppedAt.id ? state.carried.passes : 0 };
-  const slice = window.unlistable === undefined ? undefined : countSlice({ slice: window.unlistable, stuck, logger });
+      : stuckFor({
+          message_id: stoppedAt.id,
+          passes: state.carried?.message_id === stoppedAt.id ? state.carried.passes : 0,
+        });
+  const slice =
+    window.unlistable === undefined
+      ? undefined
+      : countSlice({ slice: window.unlistable, stuck, now, logger, settings, assistant });
+  if (slice?.note !== undefined) {
+    findings.raise.push(slice.note);
+  }
   const open = state.open;
   const resume_from =
     open !== undefined
@@ -549,28 +675,30 @@ export async function watchMail({
       : (slice?.resume_from ?? window.resume_from);
   let stopped = state.stoppedBy ?? (held === undefined ? undefined : { error: held.error });
   stopped ??= slice?.error === undefined ? undefined : { error: slice.error };
-  // A pass that got through its window without running out of time lets the next one list a wider window again.
-  let window_ms = max_width === undefined ? undefined : max_width * 2;
-  if (state.timedOut) {
-    window_ms = max_width;
-    // The pass ran out of time. Mail at an arrival date moves forward to the message it reached; IMAP lists a shorter
-    // window next time. With neither possible, nothing moved, so the trouble is shown.
-    const reached = source.datesAreArrival ? (open?.received_at ?? since).getTime() > since.getTime() : undefined;
-    const width = narrower(window.before);
-    if (reached === true) {
-      window_ms = max_width;
-    } else if (reached === undefined && width !== undefined) {
-      window_ms = width;
-    } else {
-      stopped ??= { error: slow };
-    }
+  const timed_out = state.timedOut;
+  const read_all =
+    open === undefined && stopped === undefined && !timed_out && slice === undefined && held === undefined;
+  // A pass that read its whole window lets the next one list a wider window again. One that ran out of time without
+  // moving lists a shorter one.
+  let window_ms = max_width;
+  if (resume_from === undefined) {
+    window_ms = undefined;
+  } else if (timed_out && resume_from.getTime() <= since.getTime()) {
+    window_ms = narrower(window.before) ?? max_width;
+  } else if (read_all && max_width !== undefined) {
+    window_ms = max_width * 2;
   }
   return {
     ...findings,
     resume_from,
     stuck: held?.failed ?? stopIdentity ?? slice?.stuck ?? state.carried,
     stopped_by: stopped,
-    window_ms: resume_from === undefined ? undefined : window_ms,
+    window_ms,
+    timed_out,
+    handled:
+      source.datesAreArrival || resume_from?.getTime() !== since.getTime() || done.size === 0
+        ? undefined
+        : [...done].slice(-MOST_HANDLED_REMEMBERED),
   };
 }
 
@@ -578,16 +706,26 @@ export async function watchMail({
 function countSlice({
   slice,
   stuck,
+  now,
   logger,
+  settings,
+  assistant,
 }: {
   slice: { from: Date; to: Date; error: unknown };
   stuck: StuckMessage | undefined;
+  now: Date;
   logger: Pick<Logger, 'warn'>;
-}): { resume_from: Date; stuck: StuckMessage | undefined; error: unknown } {
+  settings: ReachSettings;
+  assistant: string;
+}): { resume_from: Date; stuck: StuckMessage | undefined; error: unknown; note?: NoticingEvent } {
   const key = listSliceKey(slice.from);
   const passes = stuck?.message_id === key ? stuck.passes + 1 : 1;
   if (passes < MAX_STUCK_PASSES) {
-    return { resume_from: slice.from, stuck: { message_id: key, passes }, error: slice.error };
+    return {
+      resume_from: slice.from,
+      stuck: { message_id: key, passes, since: stuck?.message_id === key ? stuck.since : now },
+      error: slice.error,
+    };
   }
   logger.warn('Passed over mail that the mail server could not list', {
     since: slice.from.toISOString(),
@@ -595,30 +733,82 @@ function countSlice({
     passes,
     error: loggedError(slice.error),
   });
-  return { resume_from: slice.to, stuck: undefined, error: undefined };
+  return {
+    resume_from: slice.to,
+    stuck: undefined,
+    error: undefined,
+    note: gapNote({ gap: slice, settings, assistant }),
+  };
 }
 
-/** A fixed note for a message that could never be read but may matter: it looked like a bill or came from a listed sender. */
+/** A time in the person's own words and zone, with the day, for a note that names mail they must go and find. */
+function localWhen({ at, timezone }: { at: Date; timezone: string }): string {
+  try {
+    return at.toLocaleString('en-US', {
+      timeZone: timezone,
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
+  } catch {
+    return at.toISOString();
+  }
+}
+
+/** A fixed note that some mail could not be read, naming when it arrived so the person can look for it. */
+export function gapNote({
+  gap,
+  settings,
+  assistant,
+}: {
+  gap: LeftBehind;
+  settings: ReachSettings;
+  assistant: string;
+}): NoticingEvent {
+  const from = localWhen({ at: gap.from, timezone: settings.timezone });
+  const to = localWhen({ at: gap.to, timezone: settings.timezone });
+  return {
+    id: `mail_gap:${gap.from.toISOString()}:${gap.to.toISOString()}`,
+    kind: 'mail_always',
+    evidence: 'content',
+    summary: `${assistant} could not read some mail that arrived between ${from} and ${to}. Open your mail to check it.`,
+    facts: `${assistant} could not read some mail that arrived between ${from} and ${to}.`,
+    matched: 'Some mail could not be read, so it may hold something that matters.',
+    link: null,
+    mail_ref: null,
+    occurred_at: gap.to.toISOString(),
+    due_at: null,
+  };
+}
+
+/** A fixed note for a message that could not be read but may matter: it looked like a bill or came from a listed sender. */
 function unreadNote({
   message,
   always,
+  settings,
+  assistant,
 }: {
   message: MailMessage;
   always: ReadonlyMap<string, AlwaysImportantSender>;
+  settings: ReachSettings;
+  assistant: string;
 }): NoticingEvent | undefined {
   const listed = always.has(message.from_address.toLowerCase());
   if (!listed && !looksLikeBill(`${message.subject}\n${message.snippet}`)) {
     return undefined;
   }
   const kind = listed ? 'mail_always' : 'bill_due';
+  const when = localWhen({ at: message.received_at, timezone: settings.timezone });
+  const from = clip(message.from_address, 80);
   return {
     id: `${kind}:${message.id}`,
     kind,
     evidence: 'content',
-    summary: 'A message that may matter could not be read. Open your mail to check it.',
-    facts: 'Aman could not read one message, and it looked like it may matter.',
-    matched:
-      'Aman could not read this message after many tries, and it looked like a bill or came from a listed sender.',
+    summary: `A message from ${from} that arrived ${when} could not be read, and it may matter. Open your mail to check it.`,
+    facts: `${assistant} could not read one message from ${from} that arrived ${when}, and it looked like it may matter.`,
+    matched: `${assistant} could not read this message. It looked like a bill or came from someone you marked always important.`,
     link: null,
     mail_ref: { message_id: message.id, thread_id: message.thread_id },
     occurred_at: message.received_at.toISOString(),
@@ -695,6 +885,11 @@ async function findInMessage({
   if (bill === undefined) {
     return found;
   }
+  if (bill.due_at !== null && new Date(bill.due_at).getTime() - now.getTime() > BILL_WINDOW_MS) {
+    // A bill due later is kept without a thread check, which is made when it comes near.
+    found.track.push(bill);
+    return found;
+  }
   // A thread that cannot be checked says nothing about the message itself, so the bill is kept to be checked again
   // with the tracked bills, and is raised once it is close to due.
   // With no time left the thread is not checked, and the bill is kept to be checked with the tracked bills.
@@ -714,10 +909,7 @@ async function findInMessage({
   if (paid === true) {
     return found;
   }
-  if (
-    paid === undefined ||
-    (bill.due_at !== null && new Date(bill.due_at).getTime() - now.getTime() > BILL_WINDOW_MS)
-  ) {
+  if (paid === undefined) {
     found.track.push(bill);
   } else if (found.raise.length === 0) {
     // Mail already raised for its sender is not raised a second time as a bill.

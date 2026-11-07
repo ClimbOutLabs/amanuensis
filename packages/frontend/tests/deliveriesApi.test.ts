@@ -176,6 +176,11 @@ test('reads Reach me settings into the app shape, dropping what it does not know
   assert.equal(view.availability.calls.note, 'Phone calls are not set up yet.');
   assert.equal(view.mailProblem, null);
   assert.equal(view.mailSource, null);
+  assert.equal(view.calendarProblem, null);
+  const calendar = createDeliveriesApi(async () =>
+    Response.json({ data: { ...WIRE_REACH.data, calendar_problem: { since: '2026-11-05T14:00:00.000Z' } } }),
+  );
+  assert.deepEqual((await calendar.reach.get()).calendarProblem, { since: '2026-11-05T14:00:00.000Z' });
   const watched = createDeliveriesApi(async () =>
     Response.json({ data: { ...WIRE_REACH.data, mail_source: 'google' } }),
   );
@@ -200,6 +205,12 @@ test('reads the mail trouble the server reports, and treats a kind it does not k
   const problem = { since: '2026-11-05T14:00:00.000Z', kind: 'too_slow' };
   const slow = createDeliveriesApi(async () => Response.json({ data: { ...WIRE_REACH.data, mail_problem: problem } }));
   assert.deepEqual((await slow.reach.get()).mailProblem, problem);
+  for (const kind of ['google_sign_in', 'email_password']) {
+    const own = createDeliveriesApi(async () =>
+      Response.json({ data: { ...WIRE_REACH.data, mail_problem: { ...problem, kind } } }),
+    );
+    assert.deepEqual((await own.reach.get()).mailProblem, { since: problem.since, kind });
+  }
   const odd = createDeliveriesApi(async () =>
     Response.json({ data: { ...WIRE_REACH.data, mail_problem: { ...problem, kind: 'new_kind' } } }),
   );
