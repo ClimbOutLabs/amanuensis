@@ -761,7 +761,7 @@ describe('validateAgentSpec', () => {
   });
 });
 
-describe('getModelDetails — the address check at use time', () => {
+describe('getModelDetails: the address check at use time', () => {
   async function setupWithBaseUrl(baseUrl: string) {
     const db = createSqliteDb(':memory:');
     await migrateSqliteToLatest(db);
