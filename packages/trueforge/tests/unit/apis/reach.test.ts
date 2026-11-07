@@ -113,7 +113,7 @@ describe('reach routes', () => {
     const OWNER = { tenant_id: 'default', created_by: 'alice' };
     const minutesAgo = (minutes: number) => new Date(NOW.getTime() - minutes * 60_000);
     const failingSince = (minutes: number) => ({
-      checked_at: minutesAgo(5),
+      checked_at: minutesAgo(minutes),
       failure: { kind: 'too_slow' as const, since: minutesAgo(minutes) },
       stuck: undefined,
       window_ms: undefined,
@@ -132,6 +132,48 @@ describe('reach routes', () => {
       expect(GetReachResponseSchema.parse(await (await call('')).json()).data.mail_problem).toBeNull();
       await noticingStore.setCheckpoint({ ...OWNER, watcher: 'mail', ...failingSince(59) });
       expect(GetReachResponseSchema.parse(await (await call('')).json()).data.mail_problem).toBeNull();
+    });
+
+    it('shows trouble when the mail read so far is an hour behind, even when no pass recorded a failure', async () => {
+      const { call, noticingStore } = await build();
+      await noticingStore.setCheckpoint({
+        ...OWNER,
+        watcher: 'mail',
+        checked_at: minutesAgo(90),
+        failure: undefined,
+        stuck: undefined,
+        window_ms: undefined,
+        source: 'google',
+      });
+      const mine = GetReachResponseSchema.parse(await (await call('')).json()).data;
+      expect(mine.mail_problem).toEqual({ since: minutesAgo(90).toISOString(), kind: 'too_slow' });
+    });
+
+    it('shows no trouble when an old failure is on record but mail has been read up to a few minutes ago', async () => {
+      const { call, noticingStore } = await build();
+      await noticingStore.setCheckpoint({
+        ...OWNER,
+        watcher: 'mail',
+        ...failingSince(300),
+        checked_at: minutesAgo(10),
+      });
+      expect(GetReachResponseSchema.parse(await (await call('')).json()).data.mail_problem).toBeNull();
+    });
+
+    it('says when the calendar has not been checked for about an hour', async () => {
+      const { call, noticingStore } = await build();
+      const calendar = { ...failingSince(60), failure: { kind: 'other' as const, since: minutesAgo(60) } };
+      await noticingStore.setCheckpoint({ ...OWNER, watcher: 'calendar', ...calendar });
+      expect(GetReachResponseSchema.parse(await (await call('')).json()).data.calendar_problem).toEqual({
+        since: minutesAgo(60).toISOString(),
+      });
+      await noticingStore.setCheckpoint({
+        ...OWNER,
+        watcher: 'calendar',
+        ...calendar,
+        failure: { kind: 'other', since: minutesAgo(10) },
+      });
+      expect(GetReachResponseSchema.parse(await (await call('')).json()).data.calendar_problem).toBeNull();
     });
 
     it('says when mail was last checked well and why not since, after about an hour', async () => {
