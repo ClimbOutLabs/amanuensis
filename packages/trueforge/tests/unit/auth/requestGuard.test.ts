@@ -190,6 +190,13 @@ describe('request guard: Origin', () => {
     },
   );
 
+  it('lets the controller run a noticing pass with its key, and checks the Origin like any other write', async () => {
+    const app = appFor(PUBLIC);
+    const path = '/api/internal/noticing/run';
+    expect(await status({ app, path, method: 'POST', headers: { ...host, authorization: 'Bearer abc' } })).toBe(200);
+    expect(await status({ app, path, method: 'POST', headers: { ...host, origin: 'https://evil.example' } })).toBe(403);
+  });
+
   it('does not exempt look-alike paths', async () => {
     const app = appFor(PUBLIC);
     expect(

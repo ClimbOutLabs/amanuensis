@@ -241,4 +241,24 @@ export function runGoogleConnectionStoreContractSuite(getStore: () => IGoogleCon
       expect(await store.hasPending(OWNER)).toBe(false);
     });
   });
+
+  describe('listConnectedOwners', () => {
+    it('lists the people whose login is saved and works, and no one else', async () => {
+      const store = getStore();
+      expect(await store.listConnectedOwners()).toEqual([]);
+
+      await store.save(connection());
+      await store.save(connection({ tenant_id: 'tenant-b', created_by: 'user-b' }));
+      await store.save(connection({ tenant_id: 'tenant-c', created_by: 'user-c', status: 'needs_reconnect' }));
+
+      const owners = await store.listConnectedOwners();
+      expect(owners).toHaveLength(2);
+      expect(owners).toEqual(
+        expect.arrayContaining([
+          { tenant_id: 'tenant-a', created_by: 'user-a' },
+          { tenant_id: 'tenant-b', created_by: 'user-b' },
+        ]),
+      );
+    });
+  });
 }

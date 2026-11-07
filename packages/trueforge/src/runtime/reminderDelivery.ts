@@ -15,6 +15,8 @@ import type { IAgentStore } from '../db/agentStore';
 import type { ScheduleDispatchItem } from '../db/scheduleStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { DeliveryService } from './delivery/deliveryService';
+import { joinReasons } from './noticing/reachRules';
+import type { ReminderReach } from './noticing/reminderReach';
 import { formatRunTime } from './scheduleCapability';
 
 function remindersExternalId(subjectId: string): string {
@@ -54,6 +56,8 @@ export async function deliverReminder(params: {
   now: Date;
   /** The feed the reminder is also delivered through; it writes the reason to Activity. */
   deliveries: Pick<DeliveryService, 'deliver'>;
+  /** Settles how loud the reminder is, by the person's own rules for the channels. */
+  reach: ReminderReach;
 }): Promise<{ session_id: string; turn_id: string }> {
   const { item, sessions, sessionStore, agentStore, now } = params;
   const { schedule, run } = item;
@@ -167,14 +171,25 @@ export async function deliverReminder(params: {
     metadata: { ...record.metadata, [REMINDERS_METADATA_KEY]: 'true' },
   });
 
-  await params.deliveries.deliver({
-    tenant_id: schedule.tenant_id,
-    created_by: owner.subject_id,
-    kind: 'reminder',
-    level: 'nudge',
-    text: feedText(what),
-    reason: `You asked to be reminded on ${formatRunTime({ at: new Date(run.scheduled_for), timezone: schedule.manifest.timezone })}.`,
-    link: { type: 'chat', session_id: sessionId },
+  const person = { tenant_id: schedule.tenant_id, created_by: owner.subject_id };
+  await params.reach.deliver({
+    owner: person,
+    urgent: schedule.manifest.urgent,
+    timezone: schedule.manifest.timezone,
+    at: params.now,
+    send: decision =>
+      params.deliveries.deliver({
+        ...person,
+        kind: 'reminder',
+        level: decision.delivered,
+        text: feedText(what),
+        reason: joinReasons([
+          `You asked to be reminded on ${formatRunTime({ at: new Date(run.scheduled_for), timezone: schedule.manifest.timezone })}.`,
+          ...decision.steps,
+        ]),
+        link: { type: 'chat', session_id: sessionId },
+        created_at: params.now,
+      }),
   });
   return { session_id: sessionId, turn_id: turnId };
 }

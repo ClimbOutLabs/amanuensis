@@ -16,9 +16,9 @@ import { EventIdSchema } from '@truefoundry/trueforge-core/core/events/schema';
 export const MODEL_USAGE_EVENT_TYPE = 'aman.model.usage';
 
 export const ModelUsageRoleSchema = z
-  .enum(['chat', 'delegation', 'compaction', 'summarization', 'profile_learning', 'relevance_judge'])
+  .enum(['chat', 'delegation', 'compaction', 'summarization', 'profile_learning', 'relevance_judge', 'noticing'])
   .describe(
-    'Job the model did: chat answers, sub-agent work, compaction, turn summarization, profile learning, or the knowledge relevance check.',
+    'Job the model did: chat answers, sub-agent work, compaction, turn summarization, profile learning, the knowledge relevance check, or deciding how loudly to tell the person about something noticed.',
   )
   .openapi('ModelUsageRole');
 

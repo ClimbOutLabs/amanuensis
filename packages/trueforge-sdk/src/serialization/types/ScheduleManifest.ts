@@ -19,6 +19,7 @@ export const ScheduleManifest: core.serialization.ObjectSchema<
     status: ScheduleStatus.optional(),
     task: core.serialization.string(),
     timezone: Timezone.optional(),
+    urgent: core.serialization.boolean().optional(),
 });
 
 export declare namespace ScheduleManifest {
@@ -29,5 +30,6 @@ export declare namespace ScheduleManifest {
         status?: ScheduleStatus.Raw | null;
         task: string;
         timezone?: Timezone.Raw | null;
+        urgent?: boolean | null;
     }
 }

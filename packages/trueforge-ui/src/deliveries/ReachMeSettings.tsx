@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { useAssistantDisplayName } from '../components/PersonalizationContext.js';
 import { useOptionalDeliveries } from './DeliveriesContext.js';
+import { ReachPreferences } from './ReachPreferences.js';
 import { disablePush, enablePush, pushStatus, pushSupport, type PushBlocker } from './pushDevice.js';
 
 const BLOCKER_WORDS: Record<PushBlocker, string> = {
@@ -79,7 +80,7 @@ export function ReachMeSettings() {
         <h2 className="text-text-primary text-lg font-semibold">Reach me</h2>
         <p className="text-text-secondary mt-1 text-sm">
           Choose how {assistant} reaches you. Everything it sends also waits under the bell in the top bar, with the
-          reason you got it. Texts and phone calls are off.
+          reason you got it. Texts and phone calls stay off until they are set up.
         </p>
       </div>
       <div className="border-border rounded-xl border p-4">
@@ -127,6 +128,7 @@ export function ReachMeSettings() {
           </p>
         )}
       </div>
+      <ReachPreferences reach={api.reach} />
     </section>
   );
 }

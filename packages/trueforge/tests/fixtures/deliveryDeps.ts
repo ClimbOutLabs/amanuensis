@@ -3,15 +3,24 @@ import type { Kysely } from 'kysely';
 import winston from 'winston';
 
 import { DeliveryStore, type DeliveryDatabase } from '../../src/db/deliveryStore';
+import { NoticingStore, type NoticingDatabase } from '../../src/db/noticingStore';
 import { PushSubscriptionStore, type PushSubscriptionDatabase } from '../../src/db/pushSubscriptionStore';
+import { ReachSettingsStore, type ReachSettingsDatabase } from '../../src/db/reachSettingsStore';
 import { createDeliveryService } from '../../src/runtime/delivery/deliveryService';
+import { NO_PHONE_CHANNELS } from '../../src/runtime/noticing/reachChannels';
+import { createReminderReach } from '../../src/runtime/noticing/reminderReach';
 
-/** The feed's stores and service over a test database, with no push channel and an activity log that drops writes. */
+/**
+ * The feed's stores and service over a test database, with no push channel and an activity log that drops writes,
+ * plus Reach me stores, a noticing service that finds no one, and reminders that follow the quiet defaults.
+ */
 export function deliveryDeps(
-  db: Kysely<DeliveryDatabase & PushSubscriptionDatabase>,
+  db: Kysely<DeliveryDatabase & PushSubscriptionDatabase & ReachSettingsDatabase & NoticingDatabase>,
   audit: AuditLogWriter = { record: () => Promise.resolve() },
 ) {
   const deliveryStore = new DeliveryStore(db);
+  const reachSettingsStore = new ReachSettingsStore(db);
+  const noticingStore = new NoticingStore(db);
   return {
     deliveryStore,
     pushSubscriptionStore: new PushSubscriptionStore(db),
@@ -21,6 +30,17 @@ export function deliveryDeps(
       audit,
       logger: winston.createLogger({ silent: true }),
     }),
+    reachSettingsStore,
+    noticingStore,
+    noticingService: { run: () => Promise.resolve({ owners: 0, raised: 0 }) },
+    reminderReach: createReminderReach({
+      reachSettings: reachSettingsStore,
+      store: noticingStore,
+      history: deliveryStore,
+      channels: () => NO_PHONE_CHANNELS,
+      logger: winston.createLogger({ silent: true }),
+    }),
+    reachChannels: () => NO_PHONE_CHANNELS,
     webPushPublicKey: undefined,
   };
 }

@@ -133,6 +133,7 @@ const expectedRuntimeExports: Array<keyof typeof sdk> = [
   'MessageTimestamp',
   'ModelUsageProvider',
   'MonacoEditorCore',
+  'NOTICING_KINDS',
   'OfflineIndicator',
   'OpenUiFenceBlock',
   'PRESETS',

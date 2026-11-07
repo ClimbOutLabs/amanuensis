@@ -39,6 +39,11 @@ export const ThreadListSchema = z.object({
   resultSizeEstimate: z.number().optional(),
 });
 
+export const MessageListSchema = z.object({
+  messages: z.array(z.object({ id: z.string() })).optional(),
+  nextPageToken: z.string().optional(),
+});
+
 export const DraftSchema = z.object({ id: z.string(), message: GmailMessageSchema.optional() });
 export type GmailDraft = z.infer<typeof DraftSchema>;
 

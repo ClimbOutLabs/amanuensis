@@ -322,6 +322,7 @@ describe('who a schedule runs as', () => {
         status: 'active',
         run_at: null,
         kind: 'task',
+        urgent: false,
       },
       created_by_subject: alice,
       runFrom: new Date(),
@@ -544,7 +545,15 @@ describe('internal schedule execution', () => {
       agent_name: agent.name,
       persona_id: null,
       name: 'daily-report',
-      manifest: { task: 'Say hi', cron: '0 13 * * *', timezone, status: 'active', run_at: null, kind: 'task' },
+      manifest: {
+        task: 'Say hi',
+        cron: '0 13 * * *',
+        timezone,
+        status: 'active',
+        run_at: null,
+        kind: 'task',
+        urgent: false,
+      },
       created_by_subject: alice,
       runFrom: new Date(),
     });
@@ -1058,6 +1067,7 @@ describe('audit rows for schedule firings', () => {
       sessionStore,
       audit,
       deliveryService: deliveryDeps(built.db, audit).deliveryService,
+      reminderReach: deliveryDeps(built.db, audit).reminderReach,
     });
 
     const response = await execution.request('/runs/execute', {

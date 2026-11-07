@@ -27,13 +27,35 @@ export class GoogleReconnectRequiredError extends Error {
   }
 }
 
+/** Google reasons that only mean "too fast" or "a hiccup", which a 403 or a 5xx can carry. */
+const BUSY_REASONS = new Set(['userRateLimitExceeded', 'rateLimitExceeded', 'backendError']);
+
+/** Whether a failure says Google is busy or failing, so asking again later can work. The one place this is decided. */
+export function isBusyFailure(input: { status: number; reason: string }): boolean {
+  return input.status === 429 || input.status >= 500 || BUSY_REASONS.has(input.reason);
+}
+
 /** Google refused or failed a REST request. The message is safe to show; it never carries mail or event text. */
 export class GoogleApiError extends Error {
   readonly status: number;
+  /** Whether Google was only too busy or too slow, so asking again later can work. A 403 for going too fast is busy. */
+  readonly busy: boolean;
 
-  constructor(input: { status: number; message: string; cause?: unknown }) {
+  constructor(input: { status: number; message: string; cause?: unknown; busy?: boolean }) {
     super(input.message, input.cause === undefined ? undefined : { cause: input.cause });
     this.name = 'GoogleApiError';
     this.status = input.status;
+    this.busy = input.busy ?? isBusyFailure({ status: input.status, reason: '' });
+  }
+}
+
+/**
+ * Google answered, but with a reply Aman cannot take in: it is over the size Aman reads, or it does not parse. Asking
+ * again gets the same reply, unlike a busy or failing Google. The status stays 502.
+ */
+export class GoogleUnusableReplyError extends GoogleApiError {
+  constructor(input: { message: string; cause?: unknown }) {
+    super({ status: 502, busy: false, ...input });
+    this.name = 'GoogleUnusableReplyError';
   }
 }

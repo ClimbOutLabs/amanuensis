@@ -35,6 +35,7 @@
   "Connectors": "packages/trueforge-ui/src/containers/SettingsBuilder/index.tsx",
   "Offline mode": "packages/trueforge-ui/src/sentinel/SentinelSettings.tsx",
   "Google": "packages/trueforge-ui/src/containers/SettingsBuilder/ConnectorSettings.tsx",
+  "Email": "packages/trueforge-ui/src/containers/SettingsBuilder/ConnectorSettings.tsx",
   "Connect": "packages/trueforge-ui/src/containers/SettingsBuilder/ConnectorSettings.tsx",
   "Client ID": "packages/trueforge-ui/src/containers/SettingsBuilder/GoogleSetupPanel.tsx",
   "Client secret": "packages/trueforge-ui/src/containers/SettingsBuilder/GoogleSetupPanel.tsx",
@@ -103,5 +104,8 @@
   "App password": "packages/trueforge-ui/src/containers/SettingsBuilder/CalendarSetupPanel.tsx",
   "How to make an app password": "packages/trueforge-ui/src/containers/SettingsBuilder/CalendarSetupPanel.tsx",
   "Remove": "packages/trueforge-ui/src/containers/SettingsBuilder/AccountSetupPanel.tsx",
-  "Cancel": "packages/trueforge-ui/src/containers/SettingsBuilder/AccountSetupPanel.tsx"
+  "Cancel": "packages/trueforge-ui/src/containers/SettingsBuilder/AccountSetupPanel.tsx",
+  "Reach me": "packages/trueforge-ui/src/containers/SettingsBuilder/index.tsx",
+  "Try it": "packages/trueforge-ui/src/deliveries/ReachPreferences.tsx",
+  "Call me for reminders I mark urgent": "packages/trueforge-ui/src/deliveries/ReachPreferences.tsx"
 }

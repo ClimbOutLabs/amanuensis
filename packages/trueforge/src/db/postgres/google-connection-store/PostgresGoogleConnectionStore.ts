@@ -99,6 +99,17 @@ export class PostgresGoogleConnectionStore implements IGoogleConnectionStore {
       .execute();
   }
 
+  async listConnectedOwners(): Promise<GoogleOwner[]> {
+    const rows = await this.#db
+      .selectFrom('google_connection')
+      .select(['tenant_id', 'created_by'])
+      .where('status', '=', 'connected')
+      .orderBy('tenant_id')
+      .orderBy('created_by')
+      .execute();
+    return rows;
+  }
+
   async savePending(pending: PendingGoogleAuthorization): Promise<void> {
     const row = { ...pending, scopes: pending.scopes.join(' '), created_at: new Date(pending.created_at) };
     await this.purgeExpiredPending();

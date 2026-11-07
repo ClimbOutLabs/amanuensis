@@ -87,6 +87,7 @@ export const SetReminderToolSchema = z
     at: RunAtSchema.describe('Due time, ISO 8601 with offset. A repeat keeps its time of day.'),
     repeat: z.enum(['daily', 'weekdays', 'weekly']).optional(),
     days: z.array(WeekdaySchema).optional(),
+    urgent: z.boolean().optional().describe('True only when the user says this reminder is urgent.'),
   })
   .strict();
 
@@ -729,6 +730,7 @@ export class ScheduleToolSet extends LocalToolMCP {
       timezone,
       status: 'active',
       kind: 'reminder',
+      urgent: input.urgent ?? false,
     });
     try {
       validateManifest(manifest, now);
