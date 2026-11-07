@@ -36,6 +36,7 @@ import {
 } from '../email/mailConnector/toolContract';
 import { GOOGLE_SETUP_SERVER_ID, GOOGLE_SETUP_STATUS_TOOL_NAME } from '../google/setupToolContract';
 import type { BrowserClickReview, DocumentScope, MapsHosts } from '../llm/LLMTypes';
+import { NOTES_FOLDER_SERVER_ID } from '../notes/toolContract';
 import {
   isPersonaWriteToolName,
   LIST_PERSONAS_TOOL_NAME,
@@ -66,6 +67,7 @@ import {
 } from './approvalTokens';
 import { recordClassificationAudit } from './audit';
 import { browserOpenCard, classifyBrowserActionTool, classifyBrowserViewTool } from './browserTier';
+import { classifyNotesFolderTool } from './notesTier';
 import {
   BROWSER_OPEN_GUARD_REASON,
   BROWSER_OPEN_PRIVATE_DETAIL_REASON,
@@ -3539,6 +3541,9 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
   }
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === SPACE_SERVER_ID) {
     return classifySpaceTool(action);
+  }
+  if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === NOTES_FOLDER_SERVER_ID) {
+    return classifyNotesFolderTool(action);
   }
   if (
     action.tool_type === 'truefoundry-system' &&

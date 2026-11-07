@@ -38,6 +38,7 @@ import { createMapsRouter } from './apis/maps';
 import { createMcpOAuthRouter } from './apis/mcpOAuth';
 import { createMcpServersRouter } from './apis/mcpServers';
 import { createMemoryVaultRouter } from './apis/memoryVault';
+import { createNotesFolderRouter, NOTES_FOLDER_SETTINGS_BASE_PATH } from './apis/notesFolder';
 import { createModelsRouter } from './apis/models';
 import { createPermissionsRouter } from './apis/permissions';
 import { createPersonaKnowledgeRouter } from './apis/personaKnowledge';
@@ -969,6 +970,21 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
           fetchImpl: undefined,
           logger: deps.logger,
           mcpServerStore: deps.resolveMcpServerStore(),
+        }),
+        adminAuthMiddleware,
+      ),
+      createUiSessionAuthMiddleware(deps.authenticator),
+    ),
+  );
+  // Same guard as the accounts: the notes folder belongs to the whole instance. It holds no
+  // secret; the path and the inbox file name are all that is saved.
+  app.route(
+    NOTES_FOLDER_SETTINGS_BASE_PATH,
+    withAuth(
+      withAdminAuth(
+        createNotesFolderRouter({
+          logger: deps.logger,
+          settingsStore: deps.globalSettingsStore,
         }),
         adminAuthMiddleware,
       ),
