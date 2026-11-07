@@ -113,6 +113,8 @@ describe('Home Assistant refusals', () => {
     ['HassTurnOn', { entity_id: 'lock.front_door' }],
     ['HassTurnOff', { entity_id: 'alarm_control_panel.home' }],
     ['HassSetPosition', { entity_id: 'cover.garage_door', device_class: 'garage' }],
+    ['HassSetPosition', { name: 'Garage door', domain: ['cover'] }],
+    ['HassTurnOn', { entity_id: 'cover.garage_door' }],
     ['HassTurnOn', { name: 'Front door lock' }],
   ])('refuses %s with the fixed line', async (tool_name, params) => {
     const decision = await classifyTier(haAction(tool_name, params), makeCtx());
@@ -184,5 +186,16 @@ describe('Home Assistant standing grants', () => {
     await recordGrant(ctx, 'ha:domain:lock');
     const decision = await classifyTier(haAction('HassTurnOn', { entity_id: 'lock.front_door' }), ctx);
     expect(decision.auto_deny).toBe('home_assistant_refused');
+  });
+
+  it('never lets a stored cover grant run a garage door that arrives with no device class', async () => {
+    const ctx = makeCtx();
+    await recordGrant(ctx, 'ha:domain:cover');
+    const byName = await classifyTier(haAction('HassSetPosition', { name: 'Garage door', domain: ['cover'] }), ctx);
+    expect(byName.auto_deny).toBe('home_assistant_refused');
+    expect(byName.card).toBeNull();
+    const byEntity = await classifyTier(haAction('HassTurnOn', { entity_id: 'cover.garage_door' }), ctx);
+    expect(byEntity.auto_deny).toBe('home_assistant_refused');
+    expect(byEntity.card).toBeNull();
   });
 });

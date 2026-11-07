@@ -52,6 +52,9 @@ export const HOME_ASSISTANT_REFUSED_COVER_DEVICE_CLASSES = ['garage', 'gate', 'd
 /** Words in a target's name that mark it as one of the refused kinds when nothing else names its domain. */
 const REFUSED_NAME_PATTERN = /\b(lock|locks|alarm|garage)\b/i;
 
+/** Words that mark a cover as leading outside the home, in its name or its entity id. */
+const REFUSED_COVER_PATTERN = /\b(garage|gate|door)\b/i;
+
 /** What a call acts on, read from the arguments Home Assistant's tools take. */
 export interface HomeAssistantTarget {
   /** The entity the call names (`light.living_room_lamp`), or null when it names none. */
@@ -120,15 +123,33 @@ export function isHomeAssistantRefusedTarget(target: HomeAssistantTarget): boole
   if (target.domain !== null && (HOME_ASSISTANT_REFUSED_DOMAINS as readonly string[]).includes(target.domain)) {
     return true;
   }
+  if (target.domain === 'cover' && coverLeadsOutside(target)) {
+    return true;
+  }
+  // With no entity id and no domain to judge by, a name that says lock, alarm or garage is enough.
+  if (target.domain === null && target.name !== null && REFUSED_NAME_PATTERN.test(target.name)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Whether a cover leads outside the home. The device class says so when the call carries one;
+ * when it does not, the cover's own name or entity id says so instead, so a garage door is
+ * refused whatever shape the call arrives in.
+ */
+function coverLeadsOutside(target: HomeAssistantTarget): boolean {
   if (
-    target.domain === 'cover' &&
     target.device_class !== null &&
     (HOME_ASSISTANT_REFUSED_COVER_DEVICE_CLASSES as readonly string[]).includes(target.device_class)
   ) {
     return true;
   }
-  // With no entity id and no domain to judge by, a name that says lock, alarm or garage is enough.
-  if (target.domain === null && target.name !== null && REFUSED_NAME_PATTERN.test(target.name)) {
+  if (target.name !== null && REFUSED_COVER_PATTERN.test(target.name)) {
+    return true;
+  }
+  // Entity ids join their words with underscores (`cover.garage_door`); read them as words.
+  if (target.entity_id !== null && REFUSED_COVER_PATTERN.test(target.entity_id.replace(/_/g, ' '))) {
     return true;
   }
   return false;

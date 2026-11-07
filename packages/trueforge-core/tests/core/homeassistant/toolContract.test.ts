@@ -103,6 +103,44 @@ describe('Home Assistant refused targets', () => {
     ).toBe(false);
   });
 
+  it('refuses a garage cover that arrives with a name and a domain but no device class', () => {
+    expect(
+      isHomeAssistantRefusedTarget(
+        homeAssistantTarget({
+          tool_name: 'HassSetPosition',
+          params: { name: 'Garage door', domain: ['cover'] },
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it('refuses a garage cover that arrives by entity id alone, with no device class', () => {
+    expect(
+      isHomeAssistantRefusedTarget(
+        homeAssistantTarget({ tool_name: 'HassTurnOn', params: { entity_id: 'cover.garage_door' } }),
+      ),
+    ).toBe(true);
+  });
+
+  it('still asks for a cover inside the home that arrives with no device class', () => {
+    expect(
+      isHomeAssistantRefusedTarget(
+        homeAssistantTarget({
+          tool_name: 'HassSetPosition',
+          params: { entity_id: 'cover.living_room_blinds' },
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      isHomeAssistantRefusedTarget(
+        homeAssistantTarget({
+          tool_name: 'HassSetPosition',
+          params: { name: 'Living room blinds', domain: ['cover'] },
+        }),
+      ),
+    ).toBe(false);
+  });
+
   it('refuses a name that says lock, alarm or garage when nothing names a domain', () => {
     expect(
       isHomeAssistantRefusedTarget(
