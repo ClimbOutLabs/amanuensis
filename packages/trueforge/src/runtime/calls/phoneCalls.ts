@@ -25,6 +25,7 @@ import { maskedTarget } from '../texts/smsSender';
 import { canText } from '../texts/textNumber';
 import { privatePhrase } from '../texts/textWords';
 import { CALL_LINES, CallTurns, type CallChat } from './callTurns';
+import { messageLine } from './callWords';
 import { claimTestCall } from './testCallClaim';
 import { callFailureWords, MEDIA_STREAM_PATH, type CallProvider } from './twilioCalls';
 
@@ -153,11 +154,6 @@ function tokenHash(token: string): string {
 
 function xmlAttribute(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-/** What the call says the delivery is about once the person said yes. */
-function spokenMessage(delivery: Delivery): string {
-  return delivery.kind === 'reminder' ? `Here is your reminder: ${delivery.text}` : delivery.text;
 }
 
 function minutesWords(ms: number): string {
@@ -591,7 +587,7 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
         });
       };
       const turns = new CallTurns({
-        message: delivery === undefined ? 'It is in the app for you to see.' : spokenMessage(delivery),
+        message: delivery === undefined ? 'It is in the app for you to see.' : messageLine(delivery),
         openChat: async () => {
           if (delivery === undefined) {
             return undefined;
@@ -601,7 +597,7 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
             names,
             delivery,
             call_id: call.id,
-            opening: `Hi, this is ${name}. ${CALL_LINES.message(spokenMessage(delivery))}`,
+            opening: `Hi, this is ${name}. ${messageLine(delivery)}`,
           });
           opened = chat;
           return chat;

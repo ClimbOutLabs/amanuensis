@@ -452,6 +452,29 @@ describe('a call that ends while its line opens', () => {
     expect(h.activity.at(-1)?.conversation_id).toBe('chat-1');
   });
 
+  it('after a yes, does not read out a reminder that holds a number, and says why in a fixed line', async () => {
+    h = await callsHarness({
+      chat: { turns: new FakeTurns({ message: [] }), begin: () => Promise.resolve('chat-1') },
+      listening: () => Promise.resolve({ vad: new LoudnessVad(), stt: new FakeStt('yes') }),
+    });
+    await h.readyToCall();
+    await h.deliveries.deliver({
+      ...ALICE,
+      kind: 'reminder',
+      level: 'call',
+      text: 'Call five five five, twelve twelve',
+      reason: 'You asked to be called.',
+      link: null,
+    });
+    const media = await h.openMedia({ token: (await h.answer()).token });
+    await sayYes(media);
+    await h.waitFor(() => h.tts.sentences.join(' ').includes('so I will not read it out'));
+    expect(h.tts.sentences.join(' ')).not.toContain('five five five');
+    expect(h.opened.map(open => open.opening).join(' ')).not.toContain('five five five');
+    media.socket.close();
+    await h.waitFor(async () => (await h.calls.getBySid(CALL_SID))?.status === 'ended');
+  });
+
   it('when the voice cannot speak the message after a yes, writes no chat and sends a text and a push', async () => {
     const begun: string[] = [];
     h = await callsHarness({

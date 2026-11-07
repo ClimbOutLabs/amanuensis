@@ -81,7 +81,7 @@ describe('a phone call in private mode', () => {
     await speak(t);
     await t.session.settled();
     expect(t.opened()).toBe(1);
-    expect(t.tts.sentences.join(' ')).toContain(CALL_LINES.message(MESSAGE));
+    expect(t.tts.sentences.join(' ')).toContain(MESSAGE);
     expect(t.chatTurns.sent).toEqual([]);
   });
 
@@ -91,8 +91,8 @@ describe('a phone call in private mode', () => {
     t.clock.advance(5_000);
     await speak(t);
     await t.session.settled();
-    expect(t.tts.asked).not.toContain(CALL_LINES.message(MESSAGE));
-    expect(t.tts.sentences.join(' ')).toContain(CALL_LINES.message(MESSAGE));
+    expect(t.tts.asked).not.toContain(MESSAGE);
+    expect(t.tts.sentences.join(' ')).toContain(MESSAGE);
   });
 
   it('says who the call is for before it asks anything', () => {

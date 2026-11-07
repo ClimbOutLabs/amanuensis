@@ -811,26 +811,6 @@ describe('what the model can and cannot do', () => {
     expect(item?.text).not.toBe(message);
   });
 
-  it('on a call, says only the kind of thing when the plain sentence itself carries a number, a site or an address', async () => {
-    const { service, feed } = await setup({
-      settings: { call_kinds: ['calendar_clash'], channels: { texts: false, calls: true } },
-      events: [
-        event({
-          id: 'a',
-          title: 'Ring 555-0100 back',
-          start: '2026-11-05T16:00:00.000Z',
-          end: '2026-11-05T17:00:00.000Z',
-        }),
-        event({ id: 'b', title: 'Dentist', start: '2026-11-05T16:30:00.000Z', end: '2026-11-05T17:30:00.000Z' }),
-      ],
-      verdict: { level: 'call', reason: 'Waiting would cost them.', message: 'See https://evil.example/pay now.' },
-      channels: PHONE_READY,
-    });
-    await service.run({ watcher: 'calendar' });
-    const [item] = await feed();
-    expect(item).toMatchObject({ level: 'call', text: 'Two events on your calendar overlap.' });
-  });
-
   it('keeps an event whose delivery failed and delivers it on the next pass', async () => {
     const setupResult = await setup({ events: clash });
     const spy = jest.spyOn(setupResult.deliveryStore, 'createOnce').mockRejectedValueOnce(new Error('disk full'));

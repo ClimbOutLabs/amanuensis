@@ -97,7 +97,7 @@ export class CallTurns implements VoiceTurnRunner {
     askedAgain = () => undefined,
     sayMessage,
   }: {
-    /** What the call is about, said only after a yes. */
+    /** The line that says what the call is about, said only after a yes. */
     message: string;
     openChat: () => Promise<CallChat | undefined>;
     /** Ends the call once what is being said has played. */
@@ -177,7 +177,7 @@ export class CallTurns implements VoiceTurnRunner {
       }
       this.#chat = chat;
       this.#phase = 'open';
-      this.#sayMessage(CALL_LINES.message(this.#message));
+      this.#sayMessage(this.#message);
       return { kind: 'done', turnId: '', approvals: [] };
     }
     if (answer === 'no') {

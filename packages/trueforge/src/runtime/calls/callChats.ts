@@ -5,6 +5,7 @@ import type { SessionCustom, TurnCustom } from '../../db/sessionCustom';
 import type { Delivery } from '../../schemas/deliveries';
 import type { TurnOutcome, VoiceTurnRunner } from '../../voice/transport';
 import { appendAssistantLine } from '../assistantLine';
+import { callWords } from './callWords';
 import type { CallChats, CallNames } from './phoneCalls';
 
 /** The title a call's chat gets. */
@@ -15,6 +16,9 @@ const COULD_NOT_ANSWER = 'Sorry, I could not answer that. You can see it in the 
 
 /** One model answer on a call: the conversation so far in, the reply's text out. No tools are ever offered. */
 export type CallAsk = (input: { messages: LLMCreateParams['messages']; signal: AbortSignal }) => Promise<string>;
+
+/** Said in place of words a call may not carry, so the model can tell the person where to find them. */
+const LEFT_OUT = 'Left out, because it has a number or a link or is too long. It is in the app.';
 
 /** Keeps what a delivery says as plain information inside the block that holds it. */
 function asData(text: string): string {
@@ -57,8 +61,8 @@ function callInstructions({ names, delivery }: { names: CallNames; delivery: Del
     'Answer in one to three short sentences, as speech: plain words, no lists, no links and no formatting.',
     '<about>',
     `Kind: ${delivery.kind}`,
-    `What: ${asData(delivery.text)}`,
-    `Why you called: ${asData(delivery.reason)}`,
+    `What: ${asData(callWords(delivery.text) ?? LEFT_OUT)}`,
+    `Why you called: ${asData(callWords(delivery.reason) ?? LEFT_OUT)}`,
     '</about>',
   ].join('\n');
 }
