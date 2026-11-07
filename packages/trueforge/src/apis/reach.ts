@@ -12,16 +12,16 @@ import {
   testReachChannelRoute,
   updateReachRoute,
 } from '../routes/reachRoutes';
+import { TEST_WORDS } from '../runtime/delivery/deliveryChannel';
 import type { DeliveryService } from '../runtime/delivery/deliveryService';
 import { KIND_MAX_LEVEL } from '../runtime/noticing/levels';
 import { MAIL_PROBLEM_SHOWN_AFTER_MS, mailProblemOf } from '../runtime/noticing/noticingService';
 import type { ChannelViewer } from '../runtime/noticing/reachChannels';
 import { suggestAlwaysImportant } from '../runtime/noticing/suggestions';
+import { smsFailureWords } from '../runtime/texts/smsProvider';
 import { canText } from '../runtime/texts/textNumber';
 import type { ReachAvailability } from '../schemas/reach';
 import { defaultReachSettings, NOTICING_KINDS, type AlwaysImportantSender, type ReachSettings } from '../schemas/reach';
-
-const TEST_WORDS = 'This is a test. If you can read this, it works.';
 
 export interface ReachRouterDeps {
   reachStore: IReachSettingsStore;
@@ -179,16 +179,18 @@ export function createReachRouter(deps: ReachRouterDeps) {
         test: 'sms',
       });
       const sent = delivery.attempts.find(attempt => attempt.channel === 'sms');
-      if (sent === undefined) {
-        // Texts were switched off after the check above.
-        return c.json({ error: { message: notOn } }, 409);
-      }
-      if (sent.outcome === 'skipped') {
-        // A confirmed number with texts on is skipped only by a limit; otherwise the number stopped being confirmed.
-        const stillOn = canText(await deps.textContacts.get(owner));
-        return stillOn
-          ? c.json({ error: { message: sent.detail ?? 'No text was sent. Try again later.' } }, 429)
-          : c.json({ error: { message: notOn } }, 409);
+      if (sent === undefined || sent.outcome === 'skipped') {
+        // A confirmed number with texts on is skipped only by a limit. Otherwise, between the check above and the
+        // send, texts were switched off or the number replied STOP, which also switches them off.
+        const contact = await deps.textContacts.get(owner);
+        if (sent?.outcome === 'skipped' && canText(contact)) {
+          return c.json({ error: { message: sent.detail ?? 'No text was sent. Try again later.' } }, 429);
+        }
+        const stopped = typeof contact?.opted_out_at === 'string';
+        return c.json(
+          { error: { message: stopped ? smsFailureWords({ failure: 'opted_out', during: 'delivery' }) : notOn } },
+          409,
+        );
       }
       if (sent.outcome !== 'sent') {
         return c.json(

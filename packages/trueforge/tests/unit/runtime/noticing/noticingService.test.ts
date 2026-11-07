@@ -724,7 +724,7 @@ describe('what the model can and cannot do', () => {
   });
 
   it('makes a note only at the note level, so a texted nudge is never a note', async () => {
-    // A text in Full mode carries a note's own words, which only the Reach me test makes at the nudge level.
+    // A note at the nudge level is what the Reach me test makes, and a texted nudge must stay a nudge.
     const { service, feed } = await setup({
       settings: { max_nudges_per_day: 1 },
       events: [

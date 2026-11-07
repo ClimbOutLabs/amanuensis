@@ -39,7 +39,7 @@ describe('Settings, Reach me, texts', () => {
     );
     const full = await screen.findByText(/^A reminder’s own words/);
     expect(full.textContent).toBe(
-      'A reminder’s own words, cut to fit two texts. Anything your assistant noticed still says only its kind. It can show on a locked screen and is seen by Twilio and the phone company.',
+      'A reminder’s own words, cut to fit two texts. Anything your assistant noticed still says only its kind. A reminder with a link, a long number or signs is sent as Private. It can show on a locked screen and is seen by Twilio and the phone company.',
     );
     expect(screen.queryByText(/one-sentence message/)).toBeNull();
     expect(screen.queryByRole('alert')).toBeNull();

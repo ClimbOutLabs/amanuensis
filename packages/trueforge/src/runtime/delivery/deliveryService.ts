@@ -10,7 +10,7 @@ import type { DeliveryChannelSender } from './deliveryChannel';
 export interface DeliveryService {
   /**
    * `test` makes this a Try it test of one channel: only that channel's sender is tried, and it is told the delivery
-   * is a test. The app itself always gets it.
+   * is a test. The app itself always gets it. A text sender lets only the fixed test words through in Full.
    */
   deliver(input: CreateDeliveryInput & { test?: DeliveryChannel }): Promise<Delivery>;
   /**

@@ -221,7 +221,7 @@ describe('reporting each try at pointing the number', () => {
     onResult({ result: 'not_accepted' });
     onResult({ result: 'updated', replaced_host: 'old.example.invalid' });
     onResult({ result: 'already_set' });
-    expect(problems).toEqual(['unreachable', 'not_accepted', undefined, undefined]);
+    expect(problems).toStrictEqual(['unreachable', 'not_accepted', undefined, undefined]);
     expect(logged.map(line => line.level)).toEqual(['warn', 'warn', 'info', 'info']);
     expect(logged[1]?.message).toBe(
       `The Twilio number could not be pointed at this server. ${pointNumberWords('not_accepted')}`,

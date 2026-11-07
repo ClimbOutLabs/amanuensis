@@ -3,7 +3,7 @@ import type { IReachSettingsStore } from '../../db/reachSettingsStore';
 import type { ITextContactStore } from '../../db/textContactStore';
 import type { DeliveryAttempt } from '../../schemas/deliveries';
 import type { TextMode } from '../../schemas/textMessages';
-import type { DeliveryChannelSender } from '../delivery/deliveryChannel';
+import { TEST_WORDS, type DeliveryChannelSender } from '../delivery/deliveryChannel';
 import { assistantNameFor } from './assistantName';
 import { smsFailureWords, type SmsProvider } from './smsProvider';
 import {
@@ -40,7 +40,7 @@ function sentWords({ mode, withheld }: { mode: TextMode; withheld: FullWithheld 
     case 'noticed':
       return 'Private text: what your assistant noticed is shown only in the app, so only the kind of thing was sent.';
     case 'not_plain_words':
-      return 'Private text: a Full text carries only words, times and dates. This message had other numbers or signs, so only the kind of thing was sent. To see it, open the app.';
+      return 'Private text: a Full text carries only plain words, with at most 6 digits in all. This message had more digits, a sign inside a word, or something that could spell a link or a number, so only the kind of thing was sent. To get its words by text, leave out links and long numbers. The whole message is in the app.';
     case null:
       return mode === 'full' ? 'Full text.' : 'Private text: only the kind of thing was sent.';
   }
@@ -114,7 +114,7 @@ export function createSmsSender({
       });
       if (!claim.ok) {
         const detail =
-          claim.limit === tried
+          claim.limit.key === tried.key
             ? testLimitWords(claim)
             : test
               ? dayLimitWords({ limits: day, refused: claim })
@@ -122,7 +122,13 @@ export function createSmsSender({
         return [attempt({ outcome: 'skipped', detail, target, at })];
       }
       const name = await assistantNameFor({ personalization, owner });
-      const { body, withheld } = textBody({ name, delivery, mode: contact.mode, test });
+      // Only the fixed test words are let through in Full, whatever kind a test delivery has.
+      const { body, withheld } = textBody({
+        name,
+        delivery,
+        mode: contact.mode,
+        test: test && delivery.text === TEST_WORDS,
+      });
       const result = await provider.send({ to: contact.phone, body });
       if (result.outcome === 'sent') {
         return [attempt({ outcome: 'sent', detail: sentWords({ mode: contact.mode, withheld }), target, at: now() })];

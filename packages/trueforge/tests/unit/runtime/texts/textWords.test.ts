@@ -47,54 +47,72 @@ describe('the words of a text', () => {
     expect(body).toMatch(ONE_PLACE);
   });
 
-  it('sends Full words only when they hold no number, link or spelled-out address of any kind', () => {
+  it('sends Full words only when they hold no phone number, link or spelled-out address of any kind', () => {
     for (const text of [
-      // Digits that are not a time or a date, in any form.
+      // Digits in a shape that is not an amount, a count, a code, a time or a date.
       'Call 1-800-FLOWERS',
       'call 1-800-flowers',
-      'Pay 800 EUROS',
-      'Room 4021',
       'Pay into GB82WEST12345698765432',
       'Order 2 x 100-PACK filters',
-      // A slash, an at sign, or a dot or dash inside a word.
+      'Call +1955-12-23',
+      'Call +12:34',
+      'Call +1 555 010',
+      // A slash, an at sign, or a dot, comma, colon or hash inside a word.
       'go to bit ly/abc',
       'Write to ceo@evil',
       'Pay at evil.com',
       'Pay at e-v-i-l.c-o-m',
-      'Ask about the e.g. list',
-      // Single letters in a row.
+      'Visit evil,io',
+      'Visit evil:io',
+      'Visit evil#io',
+      'Visit w.w.w evil',
+      // An at sign in brackets, spaced or not.
+      'Write to ceo [at] evil',
+      'Write to bob ( at ) gmail',
+      // Single letters in a row, whatever punctuation follows them.
       'Pay at e v i l . c o m',
       'Pay at e v i l d o t c o m',
       'Visit w w w evil com',
       'I O U . M E',
-      // A site or a number read out in words.
-      'go to bit ly slash abc',
-      'go to bitly slash abc',
+      'e! v! i! l! c! o! m!',
+      // A site read out in words.
       'Pay at evil dot com',
+      'Visit www evil',
+      'Open https evil',
+      // A number read out in a row, in words or digits, whatever joins them.
       'call eight hundred flowers',
       'call five five five oh one oh oh',
-      // Numbers in the shape of a time or a date, but out of range, side by side, or too many of them.
-      'Ring 5551-23-45 then 67:00',
-      'Call 20:25 55:51 23:45',
-      'Dial 12:34 56:78',
-      'call Jan 18 0035 or Dec 55 1234',
-      'Call Marketing 18 2026',
-      'Call the Mayor 18, 2026',
-      'Call 5 5 5',
-      'Call at 8am, 9am or 10am',
-      'Back at 13pm',
-      'Due on the 32nd',
-      // A number read out with tens and teens, or with other joins.
       'call five fifty five, twelve thirty four',
       'call eighteen oh oh',
       'call five; five; five',
       'call five. five. five',
       'call five and five and five',
-      // Signs inside a word, or an at sign in brackets.
-      'Visit evil,io',
-      'Visit evil:io',
-      'Visit evil#io',
-      'Write to ceo [at] evil',
+      'call five! five! five! one! two!',
+      'call five? five? five?',
+      'call "five" "five" "five"',
+      'call five: five: five',
+      'call nought five five',
+      'call niner niner niner',
+      'Call 5 5 5',
+      // More than 6 digits in all, however they are spread.
+      'Ring 2015-12-31 then 45',
+      'Call 12/31/2015 then 45',
+      'Call 2015-12-31 or 1955-12-31',
+      'Renew the passport by 2026-11-20',
+      'call 55 five six 12 seven eight',
+      'call 12/31/2015 five six 45 seven eight',
+      'ring five five, then one two, next three four, next five six, next seven eight',
+      'Room 4021 at 9:30',
+      'Ring 5551-23-45 then 67:00',
+      // Times and dates out of range.
+      'Call 20:25 55:51 23:45',
+      'Dial 12:34 56:78',
+      'call Jan 18 0035 or Dec 55 1234',
+      'Back at 13pm',
+      'Party on Feb 31',
+      'Party on the 31st of April',
+      // A currency sign that a text cannot carry.
+      'Pay ₹500 today',
     ]) {
       expect([
         text,
@@ -103,14 +121,14 @@ describe('the words of a text', () => {
     }
   });
 
-  it('keeps ordinary words, and times and dates written the usual ways, in Full', () => {
+  it('keeps ordinary words, amounts, codes, times and dates written the usual ways, in Full', () => {
     for (const text of [
       'Water the plants',
       'Call Mum about the trip',
       'Team lunch at 12:30',
       'Pick up the kids at 3:30 pm',
       'Dentist at 9am tomorrow',
-      'Renew the passport by 2026-11-20',
+      'Dentist at 2:30 p.m.',
       'Bins go out on 11/06',
       'Call Dana about the move on 7 November',
       'Send the card before Nov 6, 2026',
@@ -128,12 +146,47 @@ describe('the words of a text', () => {
       'Bread & milk - and eggs!',
       'Meet at 12:30, then call Dana at 6 pm.',
       'Book the dentist for Jan 18, 2027',
+      // Amounts and counts, with their signs.
+      'Pay rent $1,450 by the 1st',
+      'Lunch money $20',
+      '50% off at the shoe shop',
+      'Walk 5,000 steps',
+      'Room 204 at 3pm',
+      'Book the 60th birthday cake',
+      // Short codes of letters and digits.
+      'Call Mom re: Q3',
+      '5k run Sat 7am',
+      'Flight AA100 at 6:05',
+      'Take the B12 pills',
+      // Ranges, and a date next to a time.
+      'Yoga 3-4pm',
+      'Yoga 7:30-9:30',
+      'Pickup 3pm-4pm',
+      'Trip 3-5 June',
+      'Dentist Mar 3 3pm',
+      'Flight Jan 18 6:40am',
+      'Party 12/25 9am',
+      // Abbreviations, and words that look like a site word or a month.
+      'Bring snacks, e.g. fruit',
+      'Plan the U.S. trip',
+      'Lunch w/ Sam',
+      'Wear the polka dot dress',
+      'Rom com night with Sam',
+      'Call Aunt Dot',
+      'Send the slides to Marketing 40 minutes early',
     ]) {
       expect([text, textBody({ test: false, name: 'Mannie', delivery: delivery(text), mode: 'full' })]).toEqual([
         text,
         { body: `Mannie: ${text}`, withheld: null },
       ]);
     }
+  });
+
+  it('writes the euro, pound and yen signs as letters, so an amount keeps its meaning in Full', () => {
+    expect(textBody({ test: false, name: 'Mannie', delivery: delivery('Pay €15 for lunch'), mode: 'full' })).toEqual({
+      body: 'Mannie: Pay EUR 15 for lunch',
+      withheld: null,
+    });
   });
 
   it('sends a Full message that names a link, a site, a phone number or an address in Private words', () => {

@@ -20,7 +20,9 @@ async function build({
   provider = true,
   maxTextsPerDay,
   textsOffAfterCheck = false,
-}: { provider?: boolean; maxTextsPerDay?: number; textsOffAfterCheck?: boolean } = {}) {
+  stopAfterCheck = false,
+}: { provider?: boolean; maxTextsPerDay?: number; textsOffAfterCheck?: boolean; stopAfterCheck?: boolean } = {}) {
+  let checked = false;
   const h = await textsHarness({ provider, ...(maxTextsPerDay === undefined ? {} : { maxTextsPerDay }) });
   const channels = reachChannelsFor({
     twilio: provider ? { accountSid: 'AC' } : undefined,
@@ -57,7 +59,19 @@ async function build({
             },
           }
         : h.reachSettings,
-      textContacts: h.contacts,
+      textContacts: stopAfterCheck
+        ? {
+            // As if the number replied STOP just after the route checked it, the first time only.
+            get: async owner => {
+              const contact = await h.contacts.get(owner);
+              if (!checked) {
+                checked = true;
+                await h.numbers.stopNumber(PHONE);
+              }
+              return contact;
+            },
+          }
+        : h.contacts,
       noticingStore: new NoticingStore(h.db),
       deliveryService: h.deliveries,
       channels: () => channels,
@@ -288,6 +302,17 @@ describe('the text test button', () => {
     const response = await call('/reach/test', { method: 'POST', body: { channel: 'text' } });
     expect(response.status).toBe(409);
     expect(await message(response)).toBe('Confirm your number and switch texts on first, then try again.');
+    expect(h.sent).toEqual([]);
+  });
+
+  it('asks the person to reply START when the number replied STOP between the check and the send', async () => {
+    const { h, call } = await build({ stopAfterCheck: true });
+    await h.readyToText();
+    const response = await call('/reach/test', { method: 'POST', body: { channel: 'text' } });
+    expect(response.status).toBe(409);
+    expect(await message(response)).toBe(
+      'This number replied STOP to the phone company. Reply START from that phone, then confirm the number again in Settings.',
+    );
     expect(h.sent).toEqual([]);
   });
 
