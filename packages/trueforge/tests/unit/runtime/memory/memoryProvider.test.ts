@@ -209,6 +209,37 @@ describe('resolveMemoryProvider', () => {
     expect(connection).toBeUndefined();
     expect(warn).toHaveBeenCalledTimes(1);
   });
+
+  it('returns undefined and logs a warning when the memory provider address fails the address check', async () => {
+    // A provider at a refused address degrades to no memory for the turn, like the invalid URL
+    // above: the refusal must not fail the turn that asked for memory.
+    const { mcpServerStore: isolatedMcpServerStore, tokenStore: isolatedTokenStore } = await freshStores();
+    await isolatedMcpServerStore.upsertServer({
+      tenant_id: TENANT_ID,
+      name: 'loopback-hindsight',
+      manifest: {
+        type: 'remote',
+        name: 'loopback-hindsight',
+        url: 'http://127.0.0.1:8888/mcp/aman/',
+        description: 'Memory provider at a refused address.',
+        memory_provider: true,
+      },
+      first_party: false,
+    });
+    const warn = jest.spyOn(logger, 'warn');
+
+    const connection = await resolveMemoryProvider({
+      mcpServerStore: isolatedMcpServerStore,
+      tokenStore: isolatedTokenStore,
+      tenantId: TENANT_ID,
+      clientName: 'test-client',
+      userRef: STANDALONE_REQUEST_CONTEXT.subject.id,
+      logger,
+    });
+
+    expect(connection).toBeUndefined();
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('findMemoryProviderSettings', () => {

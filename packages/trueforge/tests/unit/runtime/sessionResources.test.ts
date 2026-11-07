@@ -11,6 +11,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { TENANT_ID } from '../../../src/apis/sessions';
+import configuration from '../../../src/config';
 import { validateGitAgentSkills } from '../../../src/db/gitSkillMounts';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import type { ISkillStore } from '../../../src/db/skillStore';
@@ -757,6 +758,85 @@ describe('validateAgentSpec', () => {
       status: 422,
       message: 'Skill "echo": preload is not supported for git skills',
     });
+  });
+});
+
+describe('getModelDetails — the address check at use time', () => {
+  async function setupWithBaseUrl(baseUrl: string) {
+    const db = createSqliteDb(':memory:');
+    await migrateSqliteToLatest(db);
+    const modelProviderStore = new SqliteModelProviderStore(db);
+    await modelProviderStore.upsertProvider({
+      tenant_id: 'default',
+      name: 'local-provider',
+      manifest: {
+        type: 'custom',
+        name: 'local-provider',
+        base_url: baseUrl,
+        auth: { api_key: 'sk-test' },
+        models: [
+          {
+            model_id: 'local-model',
+            name: 'local-model',
+            properties: { context_length: 128000, max_output_tokens: 4096 },
+          },
+        ],
+      },
+    });
+    return modelProviderStore;
+  }
+
+  it('refuses a stored provider at a loopback address, naming the setting that allows it', async () => {
+    const store = await setupWithBaseUrl('http://127.0.0.1:11434/v1');
+
+    await expect(
+      getModelDetails({ tenant_id: 'default', name: 'local-provider/local-model', store }),
+    ).rejects.toMatchObject({
+      status: 422,
+      message: expect.stringContaining('LOCAL_MODEL_ENDPOINTS'),
+    } satisfies Partial<HTTPException>);
+  });
+
+  it('refuses a stored provider at the cloud metadata address', async () => {
+    const store = await setupWithBaseUrl('http://169.254.169.254/v1');
+
+    await expect(
+      getModelDetails({ tenant_id: 'default', name: 'local-provider/local-model', store }),
+    ).rejects.toMatchObject({ status: 422 } satisfies Partial<HTTPException>);
+  });
+
+  it('resolves the same loopback provider once the operator names its exact endpoint', async () => {
+    const store = await setupWithBaseUrl('http://127.0.0.1:11434/v1');
+    const originalEndpoints = configuration.LOCAL_MODEL_ENDPOINTS;
+    configuration.LOCAL_MODEL_ENDPOINTS = ['127.0.0.1:11434'];
+    try {
+      await expect(
+        getModelDetails({ tenant_id: 'default', name: 'local-provider/local-model', store }),
+      ).resolves.toMatchObject({ providerConfig: { baseUrl: 'http://127.0.0.1:11434/v1' } });
+    } finally {
+      configuration.LOCAL_MODEL_ENDPOINTS = originalEndpoints;
+    }
+  });
+
+  it('does not let a named endpoint cover a different port on the same host', async () => {
+    const store = await setupWithBaseUrl('http://127.0.0.1:9999/v1');
+    const originalEndpoints = configuration.LOCAL_MODEL_ENDPOINTS;
+    configuration.LOCAL_MODEL_ENDPOINTS = ['127.0.0.1:11434'];
+    try {
+      await expect(
+        getModelDetails({ tenant_id: 'default', name: 'local-provider/local-model', store }),
+      ).rejects.toMatchObject({ status: 422 } satisfies Partial<HTTPException>);
+    } finally {
+      configuration.LOCAL_MODEL_ENDPOINTS = originalEndpoints;
+    }
+  });
+
+  it('resolves a stored provider at a public address', async () => {
+    const store = await setupWithBaseUrl('https://8.8.8.8/v1');
+
+    await expect(
+      getModelDetails({ tenant_id: 'default', name: 'local-provider/local-model', store }),
+    ).resolves.toMatchObject({ providerConfig: { baseUrl: 'https://8.8.8.8/v1' } });
   });
 });
 

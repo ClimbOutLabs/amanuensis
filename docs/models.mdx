@@ -31,6 +31,8 @@ The provider list comes from the shipped model catalog — see [Initial Setup](/
 
 Use the `custom` provider type for vLLM, Ollama, a corporate gateway, or any other OpenAI-compatible API. Custom providers are not in the catalog — you add them yourself with a base URL, API key, and the model IDs you want exposed.
 
+A provider's base address is checked when you save it and again each time the model is used. An address on the internet or on your home network works as it stands. An address that points at the computer Aman runs on, or at that computer's own internal network, is refused — with one exception, for a model you run yourself on that computer. Whoever runs the server names the model's exact address, host and port, in the server's `LOCAL_MODEL_ENDPOINTS` setting (see `packages/trueforge/.env.example`); for a local Ollama that is `LOCAL_MODEL_ENDPOINTS=localhost:11434`. A base URL that names a listed endpoint, and only that endpoint, is then allowed. The match is exact: a different port on the same computer is a different endpoint and stays refused until it is named too.
+
 
 ## Assigning models to jobs
 

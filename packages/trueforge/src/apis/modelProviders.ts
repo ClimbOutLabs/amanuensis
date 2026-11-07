@@ -1,6 +1,7 @@
 import { OpenAPIHono, type RouteHandler } from '@hono/zod-openapi';
 import type { Context } from 'hono';
 import type { ResolveRequestContext } from '../auth/identity';
+import configuration from '../config';
 import {
   ModelProviderNameConflictError,
   type IModelProviderStore,
@@ -13,6 +14,7 @@ import {
   listModelProvidersRoute,
   putModelProviderRoute,
 } from '../routes/modelProviderRoutes';
+import { isNamedLocalModelEndpoint, remoteUrlProblem } from '../runtime/remoteAddress';
 import {
   modelProviderName,
   type ConfiguredModelProvider,
@@ -41,6 +43,33 @@ function envManagedConflict(name: string) {
       code: ENV_MANAGED_PROVIDER_CODE,
     },
   };
+}
+
+/**
+ * The reason a model base address may not be saved, or undefined when it may. The one exception
+ * is an exact endpoint the operator named in `LOCAL_MODEL_ENDPOINTS`: a model running on this
+ * computer is allowed once its host and port are named there. Every other address is resolved
+ * and judged by the address check (see runtime/remoteAddress) before it is written. A host that
+ * does not resolve is not refused: it connects nowhere, and the address is judged again when
+ * the model is used.
+ */
+async function modelAddressRefusal({ baseUrl }: { baseUrl: string | undefined }): Promise<string | undefined> {
+  if (baseUrl === undefined) {
+    return undefined;
+  }
+  if (isNamedLocalModelEndpoint({ url: baseUrl, endpoints: configuration.LOCAL_MODEL_ENDPOINTS })) {
+    return undefined;
+  }
+  const problem = await remoteUrlProblem({ url: baseUrl });
+  switch (problem) {
+    case null:
+    case 'unresolved':
+      return undefined;
+    case 'blocked':
+      return "That address is on this computer or its own network, so the server cannot use it for a model. To use a model on this computer, name its exact address (host and port) in the server's LOCAL_MODEL_ENDPOINTS setting.";
+    case 'invalid':
+      return 'That address is not one the server can connect to. Enter the full address, starting with http:// or https://, without a name and password in it.';
+  }
 }
 
 function redactModelProvider(manifest: ModelProviderManifest): ModelProviderManifest {
@@ -107,6 +136,10 @@ export function createModelProvidersRouter<TTransaction>(deps: ModelProvidersRou
     if (deps.envManagedNames.has(name)) {
       return c.json(envManagedConflict(name), 409);
     }
+    const refusal = await modelAddressRefusal({ baseUrl: provider.base_url });
+    if (refusal !== undefined) {
+      return c.json({ error: { message: refusal } }, 400);
+    }
     try {
       // Create has no prior row; redacted keep resolves to MissingStoredSecretError → 400.
       const manifest = resolveModelProviderManifestForWrite({ incoming: provider, existing: undefined });
@@ -135,6 +168,12 @@ export function createModelProvidersRouter<TTransaction>(deps: ModelProvidersRou
     const name = modelProviderName(provider);
     if (deps.envManagedNames.has(name)) {
       return c.json(envManagedConflict(name), 409);
+    }
+    // Before the transaction: the check resolves the address, and remote I/O stays out of the
+    // write transaction.
+    const refusal = await modelAddressRefusal({ baseUrl: provider.base_url });
+    if (refusal !== undefined) {
+      return c.json({ error: { message: refusal } }, 400);
     }
     try {
       // Lock → resolve secret from that snapshot → upsert, all in one txn so concurrent keep
