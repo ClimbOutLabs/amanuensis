@@ -282,6 +282,25 @@ export function runNoticingStoreContractSuite(getStore: () => INoticingStore): v
     await expect(store.getCheckpoint({ ...BOB, watcher: 'mail' })).resolves.toBeUndefined();
   });
 
+  it('lists everyone with a checkpoint for a watcher', async () => {
+    const store = getStore();
+    const clear = { failure: undefined, stuck: undefined, window_ms: undefined, source: undefined };
+    await store.setCheckpoint({
+      ...ALICE,
+      watcher: 'mail',
+      checked_at: new Date('2026-11-05T10:00:00.000Z'),
+      ...clear,
+    });
+    await store.setCheckpoint({
+      ...BOB,
+      watcher: 'calendar',
+      checked_at: new Date('2026-11-05T10:00:00.000Z'),
+      ...clear,
+    });
+    await expect(store.listCheckpointOwners({ watcher: 'mail' })).resolves.toEqual([ALICE]);
+    await expect(store.listCheckpointOwners({ watcher: 'calendar' })).resolves.toEqual([BOB]);
+  });
+
   it('keeps a watcher’s trouble with its checkpoint until a pass that works clears it', async () => {
     const store = getStore();
     const trouble = {

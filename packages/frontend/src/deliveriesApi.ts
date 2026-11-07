@@ -168,11 +168,12 @@ function parseCalendarProblem(value: unknown): ReachView['calendarProblem'] {
   if (value === null || value === undefined) {
     return null;
   }
-  const since = required(required(value, isRecord).since, isString);
+  const raw = required(value, isRecord);
+  const since = required(raw.since, isString);
   if (Number.isNaN(new Date(since).getTime())) {
     throw new Error(UNREADABLE);
   }
-  return { since };
+  return { since, kind: raw.kind === 'google_sign_in' ? 'google_sign_in' : 'other' };
 }
 
 function parseMailSource(value: unknown): ReachView['mailSource'] {

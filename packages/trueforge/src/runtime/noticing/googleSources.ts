@@ -178,6 +178,7 @@ export function gmailMailSource(
   return {
     trustedAuthenticationServers: GMAIL_AUTHENTICATION_SERVERS,
     datesAreArrival: true,
+    fetchesEachListed: true,
     async listNewMessages(input) {
       try {
         return await listNew({ api, ...input });
@@ -293,15 +294,20 @@ export function createGoogleNoticingSources({
     },
     async sourcesFor(owner: PersonOwner) {
       const record = await connections.get(owner);
-      if (record?.status === 'needs_reconnect' && grantedFeatures(record.granted_scopes).includes('gmail_read')) {
-        // Mail is set up but cannot be read until the person signs in again, which is trouble to show, not no mail.
+      if (record?.status === 'needs_reconnect') {
+        // What was set up cannot be read until the person signs in again, which is trouble to show, not no mail.
+        const features = grantedFeatures(record.granted_scopes);
         return {
-          mail: { status: 'unreachable', error: new GoogleReconnectRequiredError(), kind: 'google' },
-          calendar: undefined,
+          mail: features.includes('gmail_read')
+            ? { status: 'unreachable', error: new GoogleReconnectRequiredError(), kind: 'google' }
+            : { status: 'none' },
+          calendar: features.includes('calendar_read')
+            ? { status: 'unreachable', error: new GoogleReconnectRequiredError(), kind: 'google_sign_in' }
+            : { status: 'none' },
         };
       }
       if (record?.status !== 'connected') {
-        return { mail: { status: 'none' }, calendar: undefined };
+        return { mail: { status: 'none' }, calendar: { status: 'none' } };
       }
       const features = grantedFeatures(record.granted_scopes);
       const tokens = new GoogleAccessTokens({ now: undefined, connections, owner, fetchImpl });
@@ -322,7 +328,10 @@ export function createGoogleNoticingSources({
               kind: 'google',
             }
           : { status: 'none' },
-        calendar: calendarApi === undefined ? undefined : googleCalendarSource({ api: calendarApi, timeZone }),
+        calendar:
+          calendarApi === undefined
+            ? { status: 'none' }
+            : { status: 'ready', source: googleCalendarSource({ api: calendarApi, timeZone }) },
       };
     },
   };

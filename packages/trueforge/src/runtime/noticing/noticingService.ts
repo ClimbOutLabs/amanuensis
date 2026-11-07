@@ -8,7 +8,7 @@ import type { INoticingStore, NoticingClaim, WaitingEvent, WatcherCheckpoint } f
 import type { PersonOwner } from '../../db/personOwner';
 import type { IReachSettingsStore } from '../../db/reachSettingsStore';
 import type { Delivery, DeliveryLevel } from '../../schemas/deliveries';
-import type { MailSourceKind, ReachAvailability } from '../../schemas/reach';
+import type { CalendarProblemKind, MailProblemKind, MailSourceKind, ReachAvailability } from '../../schemas/reach';
 import {
   defaultReachSettings,
   type NoticingEvent,
@@ -19,6 +19,7 @@ import {
   type RunNoticingResult,
 } from '../../schemas/reach';
 import { newId } from '../../utils/id';
+import { UNNAMED_ASSISTANT } from '../chatAssistant';
 import type { DeliveryService } from '../delivery/deliveryService';
 import { TokenFactoryDailyCapError, type TokenFactoryBudget } from '../tokenFactoryBudget';
 import type { NoticingJudge } from './judge';
@@ -27,6 +28,7 @@ import { readReachHistory, waitFor, withReachLease, type ReachGateDeps } from '.
 import { applyReachRules, joinReasons } from './reachRules';
 import {
   MailLoginFailedError,
+  MailSourceBusyError,
   MailTooSlowError,
   MessageUnreadableError,
   type ApprovalSource,
@@ -42,6 +44,7 @@ import {
   watchApprovals,
   watchCalendar,
   watchMail,
+  type LeftBehind,
   type MailFindings,
 } from './watchers';
 
@@ -57,14 +60,15 @@ const MAX_LOOKBACK_MS = 24 * 3_600_000;
 const TRACKING_LIMIT = 50;
 const PENDING_LIMIT = 50;
 /** Reach me says mail is not being checked once the mail read so far is this far behind the clock. */
-export const MAIL_PROBLEM_SHOWN_AFTER_MS = 3_600_000;
+const MAIL_PROBLEM_SHOWN_AFTER_MS = 3_600_000;
 /**
  * How long one mail pass may start new work, and how many calls to the mail server it may make, shared by the look at
  * tracked bills and the scan of new mail. Each checks before every call, and a call may then take up to its own
  * limit, so a slow pass can still be cut off by a connector session. That ends it as a busy failure, which never
- * counts against a message. Tracked bills may use only the first part, so a slow scan never starves them.
+ * counts against a message. Tracked bills may use only the first part, so a slow scan never starves them. A minute
+ * leaves room in the connector's four-minute session for opening it and for one last slow call.
  */
-const MAIL_PASS_MS = 80_000;
+const MAIL_PASS_MS = 60_000;
 const MAIL_PASS_CALLS = 80;
 const TRACKED_BILLS_MS = 20_000;
 const TRACKED_BILLS_CALLS = 20;
@@ -106,6 +110,8 @@ export interface NoticingDeps {
   sleep?: (ms: number) => Promise<void>;
 }
 
+/** Why a note about unread mail is never a nudge: it says nothing about what the mail holds. */
+const GAP_NOTE_WHY = 'Some mail could not be read, so this stays a note.';
 const ONLY_WORDS = 'Only the words in a message said this mattered, so it stays a note.';
 
 /** The model's message and reason as they may be shown, each replaced by plain words when it cannot be. */
@@ -165,11 +171,26 @@ export function mailProblemOf({
 }: {
   checkpoint: WatcherCheckpoint | undefined;
   now: Date;
-}): { since: Date; kind: NonNullable<WatcherCheckpoint['failure']>['kind'] } | undefined {
+}): { since: Date; kind: MailProblemKind } | undefined {
   if (checkpoint === undefined || now.getTime() - checkpoint.checked_at.getTime() < MAIL_PROBLEM_SHOWN_AFTER_MS) {
     return undefined;
   }
   return { since: checkpoint.failure?.since ?? checkpoint.checked_at, kind: checkpoint.failure?.kind ?? 'too_slow' };
+}
+
+/** The calendar trouble to show, once the calendar has gone unchecked for as long as mail must be behind. */
+export function calendarProblemOf({
+  checkpoint,
+  now,
+}: {
+  checkpoint: WatcherCheckpoint | undefined;
+  now: Date;
+}): { since: Date; kind: CalendarProblemKind } | undefined {
+  const failure = checkpoint?.failure;
+  if (failure === undefined || now.getTime() - failure.since.getTime() < MAIL_PROBLEM_SHOWN_AFTER_MS) {
+    return undefined;
+  }
+  return { since: failure.since, kind: failure.kind === 'google_sign_in' ? 'google_sign_in' : 'other' };
 }
 
 /** Whether an error, or one it was caused by, matches. */
@@ -199,7 +220,7 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
     event: NoticingEvent;
   }): Promise<{ verdict: NoticingVerdict | undefined; why: string }> {
     if (ceilingOf(event) === 'note') {
-      return { verdict: undefined, why: ONLY_WORDS };
+      return { verdict: undefined, why: event.id.startsWith('mail_gap:') ? GAP_NOTE_WHY : ONLY_WORDS };
     }
     if (await deps.budget.isExhausted()) {
       return { verdict: undefined, why: 'The model has used its limit for today, so this is a plain note.' };
@@ -409,9 +430,13 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
       promotionSpent: () => spent() || now().getTime() - started > TRACKED_BILLS_MS || calls >= TRACKED_BILLS_CALLS,
       counted: source => ({
         ...source,
-        listNewMessages: input => {
+        listNewMessages: async input => {
           calls += 1;
-          return source.listNewMessages(input);
+          const read = await source.listNewMessages(input);
+          if (source.fetchesEachListed === true && read.read !== 'too_many') {
+            calls += read.messages.length;
+          }
+          return read;
         },
         readText: message => {
           calls += 1;
@@ -426,7 +451,10 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
     };
   }
 
-  /** The mail checkpoint, unless it was written for another source: its place, counts and ids mean nothing to this one. */
+  /**
+   * The mail checkpoint. When it was written for another source, how far mail was read and the trouble since carry
+   * over, so a switch never hides mail left unread; its counts, window and handled ids mean nothing to this source.
+   */
   async function checkpointFor({
     owner,
     kind,
@@ -435,7 +463,46 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
     kind: MailSourceKind;
   }): Promise<WatcherCheckpoint | undefined> {
     const stored = await store.getCheckpoint({ ...owner, watcher: 'mail' });
-    return stored?.source === undefined || stored.source === kind ? stored : undefined;
+    return stored?.source === undefined || stored.source === kind
+      ? stored
+      : { ...stored, stuck: undefined, handled: undefined, window_ms: undefined, source: kind };
+  }
+
+  /** The name to put in a note; a lookup that fails never stops mail from being read. */
+  async function assistantOf(owner: PersonOwner): Promise<string> {
+    try {
+      return await deps.assistantNameFor(owner);
+    } catch (error) {
+      logger.warn('Could not look up the assistant name; using the default', { error: errorText(error) });
+      return UNNAMED_ASSISTANT;
+    }
+  }
+
+  /**
+   * One note for a whole stretch of trouble, however many passes leave mail unread in it: it is named by when the
+   * trouble began, so later passes make the same note and a delivered one is not repeated.
+   */
+  function stretchNotes({
+    gaps,
+    began,
+    ongoing,
+    settings,
+    assistant,
+  }: {
+    gaps: readonly LeftBehind[];
+    /** When the trouble began, if it has. */
+    began: Date | undefined;
+    ongoing: boolean;
+    settings: ReachSettings;
+    assistant: string;
+  }): NoticingEvent[] {
+    if (gaps.length === 0) {
+      return [];
+    }
+    const from = new Date(Math.min(...gaps.map(gap => gap.from.getTime())));
+    const to = new Date(Math.max(...gaps.map(gap => gap.to.getTime())));
+    const stretch = began ?? new Date(Math.floor(from.getTime() / 3_600_000) * 3_600_000);
+    return [gapNote({ gap: { from, to }, stretch, ongoing, settings, assistant })];
   }
 
   async function runMail({
@@ -465,7 +532,7 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
     const since = new Date(
       Math.max(checkpoint?.checked_at.getTime() ?? at.getTime() - FIRST_LOOKBACK_MS, oldest.getTime()),
     );
-    const assistant = await deps.assistantNameFor(owner);
+    const assistant = await assistantOf(owner);
     let findings: MailFindings;
     try {
       findings = await watchMail({
@@ -487,11 +554,22 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
     }
     const moved = findings.resume_from === undefined || findings.resume_from.getTime() > since.getTime();
     // Mail from before the day limit is no longer read. It is told about once, when a pass reads past it.
-    const dropped =
+    const dropped: LeftBehind[] =
       checkpoint !== undefined && moved && checkpoint.checked_at.getTime() < since.getTime()
-        ? [gapNote({ gap: { from: checkpoint.checked_at, to: since }, settings, assistant })]
+        ? [{ from: checkpoint.checked_at, to: since }]
         : [];
-    await store.recordAll({ ...owner, events: [...findings.raise, ...dropped], status: 'pending', now: at });
+    const failure =
+      findings.resume_from === undefined && findings.stopped_by === undefined
+        ? undefined
+        : mailFailure({ checkpoint, error: findings.stopped_by?.error, timed_out: findings.timed_out, at });
+    const notes = stretchNotes({
+      gaps: [...findings.gaps, ...dropped],
+      began: (failure ?? checkpoint?.failure)?.since,
+      ongoing: failure !== undefined,
+      settings,
+      assistant,
+    });
+    await store.recordAll({ ...owner, events: [...findings.raise, ...notes], status: 'pending', now: at });
     await store.recordAll({ ...owner, events: findings.track, status: 'tracking', now: at });
     // Everything found is written down before the checkpoint moves, so a failed delivery is retried from the store.
     // A pass that read all mail up to now starts the next one a little earlier, for mail the server lists late. Only
@@ -506,10 +584,7 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
           : moved
             ? findings.resume_from
             : (checkpoint?.checked_at ?? since),
-      failure:
-        findings.resume_from === undefined && findings.stopped_by === undefined
-          ? undefined
-          : mailFailure({ checkpoint, error: findings.stopped_by?.error, timed_out: findings.timed_out, at }),
+      failure,
       stuck: findings.stuck,
       handled: findings.handled,
       window_ms: findings.window_ms === undefined ? undefined : Math.min(findings.window_ms, MAX_LOOKBACK_MS),
@@ -532,7 +607,7 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
     timed_out: boolean;
     at: Date;
   }): NonNullable<WatcherCheckpoint['failure']> {
-    const kind = (): NonNullable<WatcherCheckpoint['failure']>['kind'] => {
+    const kind = (): MailProblemKind => {
       if (timed_out || error instanceof MailTooSlowError) {
         return 'too_slow';
       }
@@ -541,6 +616,9 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
       }
       if (causedBy({ error, matches: cause => cause instanceof MailLoginFailedError })) {
         return 'email_password';
+      }
+      if (causedBy({ error, matches: cause => cause instanceof MailSourceBusyError })) {
+        return 'too_slow';
       }
       return error === undefined ? (checkpoint?.failure?.kind ?? 'too_slow') : 'other';
     };
@@ -575,22 +653,44 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
     });
   }
 
-  /** Someone with no mail connected cannot have trouble checking it, so an old failure is not shown any more. */
-  async function clearMailTrouble(owner: PersonOwner): Promise<void> {
+  /**
+   * Someone with no mail connected cannot have trouble checking it, so an old failure is not shown any more. Mail left
+   * unread before then is told about once, since nothing will read it later.
+   */
+  async function clearMailTrouble({ owner, settings }: { owner: PersonOwner; settings: ReachSettings }): Promise<void> {
     const checkpoint = await store.getCheckpoint({ ...owner, watcher: 'mail' });
-    if (checkpoint !== undefined) {
-      await store.setCheckpoint({
-        ...owner,
-        watcher: 'mail',
-        ...checkpoint,
-        checked_at: now(),
-        failure: undefined,
-        stuck: undefined,
-        handled: undefined,
-        window_ms: undefined,
-        source: undefined,
-      });
+    if (checkpoint === undefined) {
+      return;
     }
+    const at = now();
+    // Mail from a source that has gone away is unread since the last pass, so it is told about once. The place then
+    // belongs to no source, so the next pass with none finds nothing more to tell.
+    if (
+      checkpoint.source !== undefined ||
+      checkpoint.failure !== undefined ||
+      at.getTime() - checkpoint.checked_at.getTime() >= MAIL_PROBLEM_SHOWN_AFTER_MS
+    ) {
+      const from = new Date(Math.max(checkpoint.checked_at.getTime(), at.getTime() - MAX_LOOKBACK_MS));
+      const notes = stretchNotes({
+        gaps: [{ from, to: at }],
+        began: checkpoint.failure?.since,
+        ongoing: false,
+        settings,
+        assistant: await assistantOf(owner),
+      });
+      await store.recordAll({ ...owner, events: notes, status: 'pending', now: at });
+    }
+    await store.setCheckpoint({
+      ...owner,
+      watcher: 'mail',
+      ...checkpoint,
+      checked_at: at,
+      failure: undefined,
+      stuck: undefined,
+      handled: undefined,
+      window_ms: undefined,
+      source: undefined,
+    });
   }
 
   /**
@@ -653,18 +753,10 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
     try {
       events = await watchCalendar({ source: calendar, settings, now: at });
     } catch (error) {
-      // The calendar is read from now on, so a failed pass loses nothing; the person is told once it lasts.
-      const checkpoint = await store.getCheckpoint({ ...owner, watcher: 'calendar' });
-      await store.setCheckpoint({
-        ...owner,
-        watcher: 'calendar',
-        checked_at: checkpoint?.checked_at ?? at,
-        failure: { kind: 'other', since: checkpoint?.failure?.since ?? at },
-        stuck: undefined,
-        window_ms: undefined,
-        source: undefined,
-      });
-      throw error;
+      // The calendar is read from now on, so a failed pass loses nothing; the person is told once it lasts. What the
+      // calendar answered is kept out of the logs.
+      await recordCalendarFailure({ owner, kind: 'other', at });
+      throw new Error('The calendar could not be read.', { cause: error });
     }
     await store.recordAll({ ...owner, events, status: 'pending', now: at });
     await store.setCheckpoint({
@@ -672,6 +764,27 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
       watcher: 'calendar',
       checked_at: at,
       failure: undefined,
+      stuck: undefined,
+      window_ms: undefined,
+      source: undefined,
+    });
+  }
+
+  async function recordCalendarFailure({
+    owner,
+    kind,
+    at,
+  }: {
+    owner: PersonOwner;
+    kind: CalendarProblemKind;
+    at: Date;
+  }): Promise<void> {
+    const checkpoint = await store.getCheckpoint({ ...owner, watcher: 'calendar' });
+    await store.setCheckpoint({
+      ...owner,
+      watcher: 'calendar',
+      checked_at: checkpoint?.checked_at ?? at,
+      failure: { kind, since: checkpoint?.failure?.since ?? at },
       stuck: undefined,
       window_ms: undefined,
       source: undefined,
@@ -736,7 +849,13 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
       const owners = [...approvals.values()].flatMap(items => (items[0] === undefined ? [] : [items[0].owner]));
       return { owners, approvals };
     }
-    const listed = [...(await deps.sources.listOwners()), ...(await deps.reachSettings.listOwners())];
+    // A person who lost their source or never saved settings is still looked at while they have a checkpoint, so mail
+    // left unread is told about and trouble is kept.
+    const listed = [
+      ...(await deps.sources.listOwners()),
+      ...(await deps.reachSettings.listOwners()),
+      ...(await store.listCheckpointOwners({ watcher })),
+    ];
     const seen = new Set<string>();
     const owners = listed.filter(owner => {
       const key = ownerKey(owner);
@@ -770,7 +889,7 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
       if (mail.status === 'ready') {
         await runMail({ owner, mail: mail.source, kind: mail.kind, settings });
       } else if (mail.status === 'none') {
-        await clearMailTrouble(owner);
+        await clearMailTrouble({ owner, settings });
       } else {
         // A mail source that is set up but out of reach is trouble the person can see, not no mail at all. Bills
         // already tracked still come due, so those close to it are raised without reading their threads.
@@ -778,21 +897,26 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
         await promoteDueBills({ owner, mail: undefined, now: at, out_of_time: () => true }).catch((error: unknown) => {
           logger.warn('Could not look at tracked bills', { error: errorText(error) });
         });
+        // The place mail was read to stays where it is, whatever source it was read from, so the lag keeps showing.
+        const stored = await store.getCheckpoint({ ...owner, watcher: 'mail' });
         await recordMailFailure({
           owner,
-          checkpoint: await checkpointFor({ owner, kind: mail.kind }),
+          checkpoint: stored,
           error: mail.error,
           at,
           fallback: new Date(at.getTime() - FIRST_LOOKBACK_MS),
-          source: mail.kind,
+          source: stored?.source ?? mail.kind,
         });
       }
     }
     if (watcher === 'calendar') {
-      if (sources.calendar === undefined) {
+      const { calendar } = sources;
+      if (calendar.status === 'ready') {
+        await runCalendar({ owner, calendar: calendar.source, settings });
+      } else if (calendar.status === 'none') {
         await clearCalendarTrouble(owner);
       } else {
-        await runCalendar({ owner, calendar: sources.calendar, settings });
+        await recordCalendarFailure({ owner, kind: calendar.kind, at: now() });
       }
     }
   }

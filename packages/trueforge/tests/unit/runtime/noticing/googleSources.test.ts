@@ -23,6 +23,7 @@ import {
 } from '../../../../src/runtime/noticing/googleSources';
 import { MailSourceBusyError, MessageUnreadableError } from '../../../../src/runtime/noticing/sources';
 import { readMailWindow } from '../../../../src/runtime/noticing/watchers';
+import { readMessages } from './mailWindowSupport';
 
 const NOW = new Date('2026-11-05T15:00:00.000Z');
 
@@ -260,7 +261,7 @@ describe('Gmail source', () => {
         logger: { warn: jest.fn() },
         out_of_time: () => false,
       });
-      seen.push(...read.messages.map(item => item.id));
+      seen.push(...readMessages(read).map(item => item.id));
       if (read.resume_from === undefined) break;
       since = read.resume_from;
     }
@@ -464,7 +465,10 @@ describe('googleCalendarTimezoneFor', () => {
 describe('createGoogleNoticingSources', () => {
   const OWNER = { tenant_id: 'default', created_by: 'owner-1' };
 
-  async function sourcesWith(status: 'connected' | 'needs_reconnect') {
+  async function sourcesWith(
+    status: 'connected' | 'needs_reconnect',
+    scopes: string[] = ['https://www.googleapis.com/auth/gmail.readonly'],
+  ) {
     const db = createSqliteDb(':memory:');
     await migrateSqliteToLatest(db);
     const store = new SqliteGoogleConnectionStore(db);
@@ -474,7 +478,7 @@ describe('createGoogleNoticingSources', () => {
       client_secret: 'synthetic-secret',
       client_type: 'desktop',
       refresh_token: 'synthetic-refresh',
-      granted_scopes: ['https://www.googleapis.com/auth/gmail.readonly'],
+      granted_scopes: scopes,
       account_email: 'me@example.com',
       status,
       created_at: '2026-11-01T00:00:00.000Z',
@@ -496,11 +500,18 @@ describe('createGoogleNoticingSources', () => {
     expect(mail.status).toBe('unreachable');
   });
 
+  it('says the calendar is out of reach, with a kind, when the login has to be redone', async () => {
+    const provider = await sourcesWith('needs_reconnect', ['https://www.googleapis.com/auth/calendar.events.readonly']);
+    const { mail, calendar } = await provider.sourcesFor(OWNER);
+    expect(calendar).toMatchObject({ status: 'unreachable', kind: 'google_sign_in' });
+    expect(mail.status).toBe('none');
+  });
+
   it('says there is no mail for someone with no Google login', async () => {
     const provider = await sourcesWith('connected');
     await expect(provider.sourcesFor({ tenant_id: 'default', created_by: 'someone-else' })).resolves.toEqual({
       mail: { status: 'none' },
-      calendar: undefined,
+      calendar: { status: 'none' },
     });
   });
 });

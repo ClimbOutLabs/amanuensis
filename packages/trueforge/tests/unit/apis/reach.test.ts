@@ -140,6 +140,17 @@ describe('reach routes', () => {
       await noticingStore.setCheckpoint({ ...OWNER, watcher: 'calendar', ...calendar });
       expect(GetReachResponseSchema.parse(await (await call('')).json()).data.calendar_problem).toEqual({
         since: minutesAgo(60).toISOString(),
+        kind: 'other',
+      });
+      await noticingStore.setCheckpoint({
+        ...OWNER,
+        watcher: 'calendar',
+        ...calendar,
+        failure: { kind: 'google_sign_in', since: minutesAgo(90) },
+      });
+      expect(GetReachResponseSchema.parse(await (await call('')).json()).data.calendar_problem).toEqual({
+        since: minutesAgo(90).toISOString(),
+        kind: 'google_sign_in',
       });
       await noticingStore.setCheckpoint({
         ...OWNER,
