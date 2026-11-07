@@ -103,5 +103,10 @@
   "App password": "packages/trueforge-ui/src/containers/SettingsBuilder/CalendarSetupPanel.tsx",
   "How to make an app password": "packages/trueforge-ui/src/containers/SettingsBuilder/CalendarSetupPanel.tsx",
   "Remove": "packages/trueforge-ui/src/containers/SettingsBuilder/AccountSetupPanel.tsx",
-  "Cancel": "packages/trueforge-ui/src/containers/SettingsBuilder/AccountSetupPanel.tsx"
+  "Cancel": "packages/trueforge-ui/src/containers/SettingsBuilder/AccountSetupPanel.tsx",
+  "Notes folder": "packages/trueforge-ui/src/containers/SettingsBuilder/NotesFolderSetupPanel.tsx",
+  "Folder": "packages/trueforge-ui/src/containers/SettingsBuilder/NotesFolderSetupPanel.tsx",
+  "Inbox file": "packages/trueforge-ui/src/containers/SettingsBuilder/NotesFolderSetupPanel.tsx",
+  "Change folder": "packages/trueforge-ui/src/containers/SettingsBuilder/NotesFolderSetupPanel.tsx",
+  "Remove folder": "packages/trueforge-ui/src/containers/SettingsBuilder/NotesFolderSetupPanel.tsx"
 }

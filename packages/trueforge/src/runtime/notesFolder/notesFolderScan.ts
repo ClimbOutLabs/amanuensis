@@ -115,7 +115,7 @@ export function chunkNote(note: NoteFile): NoteChunk[] {
   sections.push(current);
   for (const line of body.split('\n')) {
     const heading = HEADING_LINE.exec(line.trim());
-    if (heading !== null && heading[1] !== undefined) {
+    if (heading?.[1] !== undefined) {
       current = { heading: heading[1].trim(), lines: [] };
       sections.push(current);
     } else {
@@ -126,7 +126,7 @@ export function chunkNote(note: NoteFile): NoteChunk[] {
   for (const section of sections) {
     for (const text of packSection(section.lines.join('\n'))) {
       chunks.push({
-        id: `${note.relativePath}#${chunks.length}`,
+        id: `${note.relativePath}#${String(chunks.length)}`,
         relativePath: note.relativePath,
         heading: section.heading,
         text,

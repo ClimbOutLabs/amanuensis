@@ -118,7 +118,7 @@ export class NotesFolderService {
     }
     const folder = resolveFolderPath(settings.folder_path);
     const info = await stat(folder).catch(() => null);
-    if (info === null || !info.isDirectory()) {
+    if (!info?.isDirectory()) {
       return { settings, state: 'not_working' };
     }
     return { settings, state: 'connected' };
@@ -181,7 +181,9 @@ export class NotesFolderService {
       return;
     }
     const folder = resolveFolderPath(settings.folder_path);
-    if (this.cache === undefined || this.cache.folder !== folder || this.now() - this.cache.refreshedAt > STALE_AFTER_MS) {
+    const cache = this.cache;
+    const age = cache === undefined ? Number.POSITIVE_INFINITY : this.now() - cache.refreshedAt;
+    if (cache?.folder !== folder || age > STALE_AFTER_MS) {
       await this.refresh();
     }
   }
@@ -201,7 +203,7 @@ export class NotesFolderService {
       return;
     }
     const info = await stat(folder).catch(() => null);
-    if (info === null || !info.isDirectory()) {
+    if (!info?.isDirectory()) {
       // A sync folder can vanish for a moment; the last good index keeps serving.
       return;
     }
@@ -224,7 +226,7 @@ export class NotesFolderService {
     if (changed.length === 0) {
       return;
     }
-    let ready = false;
+    let ready: boolean;
     try {
       ready = await embedder.ensureReady();
     } catch {
@@ -294,7 +296,7 @@ export class NotesFolderService {
     if (embedder === undefined || store === undefined) {
       return empty;
     }
-    let ready = false;
+    let ready: boolean;
     try {
       ready = await embedder.ensureReady();
     } catch {
@@ -425,8 +427,14 @@ export class NotesFolderService {
       );
     }
     const folder = resolveFolderPath(settings.folder_path);
+    // The same backstop as the index: however the settings were written, Aman's own memory
+    // folder is never read or added to as if it were the person's notes.
+    const overlap = folderOverlapProblem({ folderPath: folder, memoryDir: this.deps.memoryDir });
+    if (overlap !== null) {
+      throw new NotesFolderProblem(overlap);
+    }
     const info = await stat(folder).catch(() => null);
-    if (info === null || !info.isDirectory()) {
+    if (!info?.isDirectory()) {
       throw new NotesFolderProblem(
         'Aman cannot find your notes folder. Check the folder in Settings, under Connectors, Notes folder.',
       );
@@ -449,6 +457,11 @@ export class NotesFolderService {
 
   /** Keeps the watcher pointed at the folder the settings name now; called after every rebuild. */
   private syncWatch(): void {
+    // Watching is background work: it belongs to the started lifecycle, so a poke before
+    // start (or after stop) refreshes the index but opens no watcher.
+    if (!this.started) {
+      return;
+    }
     const target = this.cache?.folder;
     if (target === this.watchedFolder) {
       return;
@@ -554,7 +567,7 @@ function separatorFor(tail: string): string {
 /** The dated heading of an entry: `2026-11-07 09:41` in the server's local time. */
 function entryStamp(date: Date): string {
   const pad = (value: number) => String(value).padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  return `${String(date.getFullYear())}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 function isAlreadyExists(error: unknown): boolean {

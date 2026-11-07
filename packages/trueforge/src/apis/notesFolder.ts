@@ -48,7 +48,7 @@ async function statusBody(settingsStore: Pick<IGlobalSettingsStore, 'getSetting'
   }
   const folder = resolveFolderPath(settings.folder_path);
   const info = await stat(folder).catch(() => null);
-  if (info === null || !info.isDirectory()) {
+  if (!info?.isDirectory()) {
     return { state: 'not_working', folder_path: settings.folder_path, inbox_file: settings.inbox_file, note_count: null };
   }
   return {
