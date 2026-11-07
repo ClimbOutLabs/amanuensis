@@ -62,3 +62,17 @@ The app stores the app password only on your computer, in the calendar connector
 - Click **Test connection** to check that it still works.
 - If Google signs you out, click **Reconnect**. A Google project in Testing mode signs you out every 7 days. To stop this, open Audience in Google Cloud and click Publish app. Then reconnect once.
 - Click **Disconnect**, then **Disconnect Google**, to turn off both email and calendar.
+
+## Connect Home Assistant
+
+You can connect your Home Assistant, so Aman can see and control the devices you choose to share.
+
+1. In Home Assistant, click your profile picture, click **Security**, and make a long-lived access token.
+2. In Home Assistant, click **Settings**, click **Devices and services**, and add the **Model Context Protocol Server** integration.
+3. In Aman, click **More** in the left bar, click **Settings**, then click **Connectors**.
+4. Find **home-assistant** and click **Connect**.
+5. Type your Home Assistant address and paste the token, then click **Connect**.
+6. Aman says how many tools and exposed entities it found, or the one thing to fix.
+7. In Home Assistant, expose each entity Aman may see, under **Settings**, **Voice assistants**, **Expose**. Only exposed entities are visible to Aman.
+
+Reading the state of your home runs on its own. A change, such as turning off a lamp, asks you first, unless you allow that kind of device for good on the card. You can see what you allowed, and take it back, on the Home Assistant connector's page in Settings. Aman never controls locks, alarms or garage doors.
