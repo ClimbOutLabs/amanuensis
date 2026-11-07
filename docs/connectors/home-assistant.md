@@ -35,12 +35,12 @@ The token is stored with the connector and is never shown again. If you lose it,
 
 Aman works only with the entities you exposed. It cannot see or touch anything else in your home, and it cannot change Home Assistant itself: no automations, no settings, no new entities.
 
-| What Aman wants to do | What happens |
-| --- | --- |
-| Read the state of your home (live context, one device's state, the list of exposed entities) | Runs without asking |
-| Turn something on or off, set the temperature, brightness or position, run a script, start a scene, control media | Asks first, with a card naming the device |
-| The same change, for a device or a kind of device you allowed for good | Runs without asking |
-| Unlock or lock a door, arm or disarm an alarm, open a garage door or a cover that leads outside | Refused. Aman never does these, and no setting allows them |
+| What Aman wants to do                                                                                             | What happens                                               |
+| ----------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| Read the state of your home (live context, one device's state, the list of exposed entities)                      | Runs without asking                                        |
+| Turn something on or off, set the temperature, brightness or position, run a script, start a scene, control media | Asks first, with a card naming the device                  |
+| The same change, for a device or a kind of device you allowed for good                                            | Runs without asking                                        |
+| Unlock or lock a door, arm or disarm an alarm, open a garage door or a cover that leads outside                   | Refused. Aman never does these, and no setting allows them |
 
 A refused call says: "Aman does not control locks, alarms or garage doors. Do that in Home Assistant."
 

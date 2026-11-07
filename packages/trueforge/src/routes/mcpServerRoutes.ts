@@ -5,6 +5,7 @@
  */
 import { createRoute } from '@hono/zod-openapi';
 import { RequestErrorResponseSchema } from '../schemas/errors';
+import { HomeAssistantCheckResponseSchema } from '../schemas/homeAssistant';
 import {
   CreateMcpServerRequestSchema,
   DeleteMcpServerResponseSchema,
@@ -21,7 +22,6 @@ import {
   McpToolGrantParamsSchema,
   UpdateMcpServerRequestSchema,
 } from '../schemas/mcpServer';
-import { HomeAssistantCheckResponseSchema } from '../schemas/homeAssistant';
 import { MemoryProviderCheckResponseSchema } from '../schemas/memoryProvider';
 import { OpenApiTag } from './openapiTags';
 

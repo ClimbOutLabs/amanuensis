@@ -26,9 +26,9 @@ import type { IMcpToolGrantStore } from '../db/mcpToolGrantStore';
 import type { WithTransaction } from '../db/transaction';
 import { createMcpOAuthClient } from '../mcp/auth/mcpDcr';
 import { mcpOAuthRedirectUris } from '../mcp/auth/mcpOAuthHelpers';
-import { checkHomeAssistant, homeAssistantUrlProblem, type HomeAssistantProbeClient } from '../mcp/homeAssistant';
 import type { IOAuthTokenStore, OAuthClientRecord } from '../mcp/auth/types';
 import { firstPartyAfterSave } from '../mcp/firstParty';
+import { checkHomeAssistant, homeAssistantUrlProblem, type HomeAssistantProbeClient } from '../mcp/homeAssistant';
 import {
   authorizeMcpServerRoute,
   createMcpServerRoute,
@@ -956,9 +956,7 @@ export function createMcpServersRouter<TTransaction>(deps: McpServersRouterDeps<
         if (isAuthRequired(response)) {
           return { authRequired: true };
         }
-        const texts = response.result.content.flatMap(part =>
-          part.type === 'text' ? [part.text] : [],
-        );
+        const texts = response.result.content.flatMap(part => (part.type === 'text' ? [part.text] : []));
         return { texts };
       },
     };

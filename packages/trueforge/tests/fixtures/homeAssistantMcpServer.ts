@@ -85,7 +85,10 @@ export async function startHomeAssistantStub(
     return undefined;
   };
 
-  const noMatch = { content: [{ type: 'text' as const, text: 'No matching entities are exposed to the assistant.' }], isError: true };
+  const noMatch = {
+    content: [{ type: 'text' as const, text: 'No matching entities are exposed to the assistant.' }],
+    isError: true,
+  };
 
   const buildServer = (): McpServer => {
     const server = new McpServer({ name: 'home-assistant-stub', version: '1.0.0' });
@@ -100,9 +103,7 @@ export async function startHomeAssistantStub(
       async () => {
         count('GetLiveContext');
         const lines = [...entities.values()].map(entity =>
-          entity.entity_id === HA_THERMOSTAT
-            ? `- ${HA_HEATING_LINE}`
-            : `- ${entity.name}: ${entity.state}`,
+          entity.entity_id === HA_THERMOSTAT ? `- ${HA_HEATING_LINE}` : `- ${entity.name}: ${entity.state}`,
         );
         return { content: [{ type: 'text' as const, text: lines.join('\n') }] };
       },
@@ -141,9 +142,7 @@ export async function startHomeAssistantStub(
     change('HassLightSet', entity => `Set ${entity.name}.`);
     change('HassClimateSetTemperature', (entity, args) => {
       const temperature = typeof args['temperature'] === 'number' ? args['temperature'] : null;
-      return temperature === null
-        ? `Set ${entity.name}.`
-        : `Set ${entity.name} to ${String(temperature)} degrees.`;
+      return temperature === null ? `Set ${entity.name}.` : `Set ${entity.name} to ${String(temperature)} degrees.`;
     });
     change('HassSetPosition', entity => `Set the position of ${entity.name}.`);
     return server;

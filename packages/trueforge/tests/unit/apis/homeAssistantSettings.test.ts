@@ -75,68 +75,87 @@ describe('Home Assistant preset', () => {
     expect(JSON.stringify(await wrongPath.json())).toMatch(/mcp_server\/sse/);
   });
 
-  it('saves the connector with the token redacted, and the check reports the counts', async () => {
-    const created = await server.request('/api/v1/settings/mcp-servers', jsonInit('POST', manifest(stub.url, CANARY_TOKEN)));
-    expect(created.status).toBe(201);
-    const createdText = JSON.stringify(await created.json());
-    expect(createdText).not.toContain(CANARY_TOKEN);
+  it(
+    'saves the connector with the token redacted, and the check reports the counts',
+    async () => {
+      const created = await server.request(
+        '/api/v1/settings/mcp-servers',
+        jsonInit('POST', manifest(stub.url, CANARY_TOKEN)),
+      );
+      expect(created.status).toBe(201);
+      const createdText = JSON.stringify(await created.json());
+      expect(createdText).not.toContain(CANARY_TOKEN);
 
-    const read = await server.request('/api/v1/settings/mcp-servers/home-assistant');
-    expect(read.status).toBe(200);
-    expect(JSON.stringify(await read.json())).not.toContain(CANARY_TOKEN);
+      const read = await server.request('/api/v1/settings/mcp-servers/home-assistant');
+      expect(read.status).toBe(200);
+      expect(JSON.stringify(await read.json())).not.toContain(CANARY_TOKEN);
 
-    const check = await server.request('/api/v1/mcp-servers/home-assistant/home-assistant-check', { method: 'POST' });
-    expect(check.status).toBe(200);
-    const checkBody = CheckResultSchema.parse(await check.json());
-    expect(checkBody.data).toEqual({ status: 'ok', tool_count: 6, entity_count: 5 });
-    // The token travelled the only way it may: as the Authorization header on the dial.
-    expect(stub.lastAuthorizationHeader()).toBe(`Bearer ${CANARY_TOKEN}`);
-  }, TEST_TIMEOUT_MS);
+      const check = await server.request('/api/v1/mcp-servers/home-assistant/home-assistant-check', { method: 'POST' });
+      expect(check.status).toBe(200);
+      const checkBody = CheckResultSchema.parse(await check.json());
+      expect(checkBody.data).toEqual({ status: 'ok', tool_count: 6, entity_count: 5 });
+      // The token travelled the only way it may: as the Authorization header on the dial.
+      expect(stub.lastAuthorizationHeader()).toBe(`Bearer ${CANARY_TOKEN}`);
+    },
+    TEST_TIMEOUT_MS,
+  );
 
-  it('says the token was refused when Home Assistant does not know it', async () => {
-    const updated = await server.request(
-      '/api/v1/settings/mcp-servers',
-      jsonInit('PUT', manifest(stub.url, 'not-the-saved-token')),
-    );
-    expect(updated.status).toBe(200);
-    const check = await server.request('/api/v1/mcp-servers/home-assistant/home-assistant-check', { method: 'POST' });
-    const checkBody = CheckResultSchema.parse(await check.json());
-    expect(checkBody.data.status).toBe('failed');
-    if (checkBody.data.status === 'failed') {
-      expect(checkBody.data.code).toBe('token_refused');
-      expect(checkBody.data.reason).toMatch(/refused the token/);
-    }
-  }, TEST_TIMEOUT_MS);
+  it(
+    'says the token was refused when Home Assistant does not know it',
+    async () => {
+      const updated = await server.request(
+        '/api/v1/settings/mcp-servers',
+        jsonInit('PUT', manifest(stub.url, 'not-the-saved-token')),
+      );
+      expect(updated.status).toBe(200);
+      const check = await server.request('/api/v1/mcp-servers/home-assistant/home-assistant-check', { method: 'POST' });
+      const checkBody = CheckResultSchema.parse(await check.json());
+      expect(checkBody.data.status).toBe('failed');
+      if (checkBody.data.status === 'failed') {
+        expect(checkBody.data.code).toBe('token_refused');
+        expect(checkBody.data.reason).toMatch(/refused the token/);
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
 
-  it('says the integration is missing when the endpoint answers 404', async () => {
-    const updated = await server.request(
-      '/api/v1/settings/mcp-servers',
-      jsonInit('PUT', manifest(missingStub.url, CANARY_TOKEN)),
-    );
-    expect(updated.status).toBe(200);
-    const check = await server.request('/api/v1/mcp-servers/home-assistant/home-assistant-check', { method: 'POST' });
-    const checkBody = CheckResultSchema.parse(await check.json());
-    expect(checkBody.data.status).toBe('failed');
-    if (checkBody.data.status === 'failed') {
-      expect(checkBody.data.code).toBe('integration_missing');
-      expect(checkBody.data.reason).toMatch(/integration is not installed/);
-    }
-  }, TEST_TIMEOUT_MS);
+  it(
+    'says the integration is missing when the endpoint answers 404',
+    async () => {
+      const updated = await server.request(
+        '/api/v1/settings/mcp-servers',
+        jsonInit('PUT', manifest(missingStub.url, CANARY_TOKEN)),
+      );
+      expect(updated.status).toBe(200);
+      const check = await server.request('/api/v1/mcp-servers/home-assistant/home-assistant-check', { method: 'POST' });
+      const checkBody = CheckResultSchema.parse(await check.json());
+      expect(checkBody.data.status).toBe('failed');
+      if (checkBody.data.status === 'failed') {
+        expect(checkBody.data.code).toBe('integration_missing');
+        expect(checkBody.data.reason).toMatch(/integration is not installed/);
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
 
-  it('says nothing answered when the address refuses the connection', async () => {
-    const updated = await server.request(
-      '/api/v1/settings/mcp-servers',
-      jsonInit('PUT', manifest('http://127.0.0.1:1/mcp_server/sse', CANARY_TOKEN)),
-    );
-    expect(updated.status).toBe(200);
-    const check = await server.request('/api/v1/mcp-servers/home-assistant/home-assistant-check', { method: 'POST' });
-    const checkBody = CheckResultSchema.parse(await check.json());
-    expect(checkBody.data.status).toBe('failed');
-    if (checkBody.data.status === 'failed') {
-      expect(checkBody.data.code).toBe('unreachable');
-      expect(checkBody.data.reason).toMatch(/Nothing answered at that address/);
-    }
-  }, TEST_TIMEOUT_MS);
+  it(
+    'says nothing answered when the address refuses the connection',
+    async () => {
+      const updated = await server.request(
+        '/api/v1/settings/mcp-servers',
+        jsonInit('PUT', manifest('http://127.0.0.1:1/mcp_server/sse', CANARY_TOKEN)),
+      );
+      expect(updated.status).toBe(200);
+      const check = await server.request('/api/v1/mcp-servers/home-assistant/home-assistant-check', { method: 'POST' });
+      const checkBody = CheckResultSchema.parse(await check.json());
+      expect(checkBody.data.status).toBe('failed');
+      if (checkBody.data.status === 'failed') {
+        expect(checkBody.data.code).toBe('unreachable');
+        expect(checkBody.data.reason).toMatch(/Nothing answered at that address/);
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
 
   it('answers 404 for a check on a connector that does not exist', async () => {
     const check = await server.request('/api/v1/mcp-servers/no_such_home/home-assistant-check', { method: 'POST' });

@@ -73,7 +73,9 @@ describe('Home Assistant targets', () => {
 describe('Home Assistant refused targets', () => {
   it('refuses locks and alarm panels by domain', () => {
     expect(
-      isHomeAssistantRefusedTarget(homeAssistantTarget({ tool_name: 'HassTurnOn', params: { entity_id: 'lock.front_door' } })),
+      isHomeAssistantRefusedTarget(
+        homeAssistantTarget({ tool_name: 'HassTurnOn', params: { entity_id: 'lock.front_door' } }),
+      ),
     ).toBe(true);
     expect(
       isHomeAssistantRefusedTarget(
@@ -103,7 +105,9 @@ describe('Home Assistant refused targets', () => {
 
   it('refuses a name that says lock, alarm or garage when nothing names a domain', () => {
     expect(
-      isHomeAssistantRefusedTarget(homeAssistantTarget({ tool_name: 'HassTurnOn', params: { name: 'Front door lock' } })),
+      isHomeAssistantRefusedTarget(
+        homeAssistantTarget({ tool_name: 'HassTurnOn', params: { name: 'Front door lock' } }),
+      ),
     ).toBe(true);
     expect(
       isHomeAssistantRefusedTarget(homeAssistantTarget({ tool_name: 'HassTurnOn', params: { name: 'Garage door' } })),

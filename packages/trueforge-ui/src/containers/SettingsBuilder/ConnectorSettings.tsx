@@ -156,8 +156,9 @@ const ConnectorSettings = () => {
   const [addMcpServerFormOpen, setAddMcpServerFormOpen] = useState(false);
   const [editingConnector, setEditingConnector] = useState<ConnectorBase | null>(null);
   const [connectorAwaitingKey, setConnectorAwaitingKey] = useState<ConnectorCatalogEntry | null>(null);
-  const [connectorAwaitingHomeAssistant, setConnectorAwaitingHomeAssistant] =
-    useState<ConnectorCatalogEntry | null>(null);
+  const [connectorAwaitingHomeAssistant, setConnectorAwaitingHomeAssistant] = useState<ConnectorCatalogEntry | null>(
+    null,
+  );
   const [homeAssistantAddress, setHomeAssistantAddress] = useState('');
   const [homeAssistantToken, setHomeAssistantToken] = useState('');
   const [selectedConnector, setSelectedConnector] = useState<ConnectorBase | null>(null);
@@ -519,10 +520,7 @@ const ConnectorSettings = () => {
   const isPlainDraft = mode.status === 'active' && mode.isMutable && mode.agentId == null && pendingSessionId == null;
 
   const handleConnectionTest = (connector: Pick<ConnectorBase, 'id' | 'name'>) => {
-    if (
-      (connectionTester === undefined && homeAssistantChecker === undefined) ||
-      checkInFlightIds.has(connector.id)
-    ) {
+    if ((connectionTester === undefined && homeAssistantChecker === undefined) || checkInFlightIds.has(connector.id)) {
       return;
     }
     // Captured now, checked when the response lands: if invalidateConnectionCheck bumped this

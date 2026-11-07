@@ -1,6 +1,6 @@
+import { HOME_ASSISTANT_REFUSAL } from '../../../src/core/homeassistant/toolContract';
 import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
 import { defaultSentinelServices } from '../../../src/core/permissions/context';
-import { HOME_ASSISTANT_REFUSAL } from '../../../src/core/homeassistant/toolContract';
 import { recordEmailText } from '../../../src/core/permissions/provenance';
 import { TOOL_GRANT_REASON } from '../../../src/core/permissions/toolGrants';
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
@@ -64,10 +64,7 @@ describe('Home Assistant reads', () => {
 
 describe('Home Assistant changes', () => {
   it('cards a lamp change and names the entity in plain words', async () => {
-    const decision = await classifyTier(
-      haAction('HassTurnOff', { entity_id: 'light.living_room_lamp' }),
-      makeCtx(),
-    );
+    const decision = await classifyTier(haAction('HassTurnOff', { entity_id: 'light.living_room_lamp' }), makeCtx());
     expect(decision.tier).toBe(3);
     expect(decision.reason).toBe('home_assistant_change');
     expect(decision.card?.plain_what).toBe('Turn off Living room lamp');
@@ -76,10 +73,7 @@ describe('Home Assistant changes', () => {
   });
 
   it('cards the same change under a set prefix', async () => {
-    const decision = await classifyTier(
-      haAction('intent__HassTurnOn', { name: 'Living room lamp' }),
-      makeCtx(),
-    );
+    const decision = await classifyTier(haAction('intent__HassTurnOn', { name: 'Living room lamp' }), makeCtx());
     expect(decision.tier).toBe(3);
     expect(decision.card?.plain_what).toBe('Turn on Living room lamp');
   });

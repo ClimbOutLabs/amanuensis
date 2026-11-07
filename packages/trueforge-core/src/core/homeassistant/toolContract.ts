@@ -167,7 +167,10 @@ export function homeAssistantGrantScopeKeys(target: HomeAssistantTarget): string
 
 /** An entity id as a person says it: `light.living_room_lamp` becomes `Living room lamp`. */
 export function homeAssistantEntityLabel(entity_id: string): string {
-  const object = entity_id.slice(entity_id.indexOf('.') + 1).replace(/_/g, ' ').trim();
+  const object = entity_id
+    .slice(entity_id.indexOf('.') + 1)
+    .replace(/_/g, ' ')
+    .trim();
   return object === '' ? entity_id : object.charAt(0).toUpperCase() + object.slice(1);
 }
 

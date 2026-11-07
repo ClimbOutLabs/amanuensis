@@ -2704,8 +2704,7 @@ function homeAssistantSteered(input: { action: SentinelAction; ctx: ClassifyCont
     }
   }
   return (
-    steeredDestinations({ provenance: ctx.web_search.provenance, addresses: [], values, reply_sender: null }).length >
-    0
+    steeredDestinations({ provenance: ctx.web_search.provenance, addresses: [], values, reply_sender: null }).length > 0
   );
 }
 

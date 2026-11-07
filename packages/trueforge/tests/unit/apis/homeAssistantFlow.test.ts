@@ -4,8 +4,8 @@
  * lights lets the second lamp change run, clearing the grant makes the next change ask again,
  * and the heating line reaches the conversation only when the connector is mounted.
  */
-import { z } from 'zod';
 import type { Turn, TurnInputItem } from '@truefoundry/trueforge-core/agent-session';
+import { z } from 'zod';
 import { ListSessionEventsResponseSchema } from '../../../src/schemas/events';
 import { GetTurnResponseSchema } from '../../../src/schemas/turn';
 import { MODEL_FQN, startApprovalTestServer, type ApprovalTestServer } from '../../fixtures/approvalTestServer';
@@ -186,104 +186,124 @@ describe('Home Assistant demo world', () => {
     await server.close();
   });
 
-  it('runs a read without asking, and the heating line reaches the conversation', async () => {
-    const turn = await runTurn({
-      server,
-      sessionId,
-      input: userMessage(`${RUN_DIRECTIVE_PREFIX}GetLiveContext please`),
-    });
-    expect(pendingApproval(turn)).toBeUndefined();
-    expect(stub.liveContextInvocations()).toBe(1);
-    const responses = await toolResponses(server, sessionId);
-    expect(responses.some(content => content.includes('Hallway thermostat: heating, set to 22 degrees'))).toBe(true);
-  }, TURN_TIMEOUT_MS);
+  it(
+    'runs a read without asking, and the heating line reaches the conversation',
+    async () => {
+      const turn = await runTurn({
+        server,
+        sessionId,
+        input: userMessage(`${RUN_DIRECTIVE_PREFIX}GetLiveContext please`),
+      });
+      expect(pendingApproval(turn)).toBeUndefined();
+      expect(stub.liveContextInvocations()).toBe(1);
+      const responses = await toolResponses(server, sessionId);
+      expect(responses.some(content => content.includes('Hallway thermostat: heating, set to 22 degrees'))).toBe(true);
+    },
+    TURN_TIMEOUT_MS,
+  );
 
-  it('cards a lamp change naming the lamp, then runs it on Allow always and covers the next one', async () => {
-    const turn = await runTurn({
-      server,
-      sessionId,
-      input: userMessage(`${RUN_DIRECTIVE_PREFIX}HassTurnOff text:${HA_LAMP} please`),
-    });
-    const pending = pendingApproval(turn);
-    expect(pending).toBeDefined();
-    expect(pending?.plain_what).toBe('Turn off Living room lamp');
-    expect(stub.invocations('HassTurnOff')).toBe(0);
-    if (pending === undefined) {
-      return;
-    }
-    const resumed = await runTurn({
-      server,
-      sessionId,
-      input: approvalInput({ ...pending, approval: { status: 'allow', scope: 'always' } }),
-    });
-    expect(pendingApproval(resumed)).toBeUndefined();
-    expect(stub.invocations('HassTurnOff')).toBe(1);
-    expect(stub.entityState(HA_LAMP)).toBe('off');
+  it(
+    'cards a lamp change naming the lamp, then runs it on Allow always and covers the next one',
+    async () => {
+      const turn = await runTurn({
+        server,
+        sessionId,
+        input: userMessage(`${RUN_DIRECTIVE_PREFIX}HassTurnOff text:${HA_LAMP} please`),
+      });
+      const pending = pendingApproval(turn);
+      expect(pending).toBeDefined();
+      expect(pending?.plain_what).toBe('Turn off Living room lamp');
+      expect(stub.invocations('HassTurnOff')).toBe(0);
+      if (pending === undefined) {
+        return;
+      }
+      const resumed = await runTurn({
+        server,
+        sessionId,
+        input: approvalInput({ ...pending, approval: { status: 'allow', scope: 'always' } }),
+      });
+      expect(pendingApproval(resumed)).toBeUndefined();
+      expect(stub.invocations('HassTurnOff')).toBe(1);
+      expect(stub.entityState(HA_LAMP)).toBe('off');
 
-    // The standing grant is stored under the lights scope, where Settings lists it.
-    const grants = await server.request('/api/v1/mcp-servers/home-assistant/tool-grants');
-    expect(grants.status).toBe(200);
-    const grantBody = (await grants.json()) as { data: { tool_name: string }[] };
-    expect(grantBody.data.map(grant => grant.tool_name)).toContain('ha:domain:light');
+      // The standing grant is stored under the lights scope, where Settings lists it.
+      const grants = await server.request('/api/v1/mcp-servers/home-assistant/tool-grants');
+      expect(grants.status).toBe(200);
+      const grantBody = (await grants.json()) as { data: { tool_name: string }[] };
+      expect(grantBody.data.map(grant => grant.tool_name)).toContain('ha:domain:light');
 
-    const second = await runTurn({
-      server,
-      sessionId,
-      input: userMessage(`${RUN_DIRECTIVE_PREFIX}HassTurnOn text:${HA_LAMP} please`),
-    });
-    expect(pendingApproval(second)).toBeUndefined();
-    expect(stub.invocations('HassTurnOn')).toBe(1);
-    expect(stub.entityState(HA_LAMP)).toBe('on');
-  }, TURN_TIMEOUT_MS);
+      const second = await runTurn({
+        server,
+        sessionId,
+        input: userMessage(`${RUN_DIRECTIVE_PREFIX}HassTurnOn text:${HA_LAMP} please`),
+      });
+      expect(pendingApproval(second)).toBeUndefined();
+      expect(stub.invocations('HassTurnOn')).toBe(1);
+      expect(stub.entityState(HA_LAMP)).toBe('on');
+    },
+    TURN_TIMEOUT_MS,
+  );
 
-  it('refuses the front door lock outright, with no card and no run', async () => {
-    const turn = await runTurn({
-      server,
-      sessionId,
-      input: userMessage(`${RUN_DIRECTIVE_PREFIX}HassTurnOn text:${HA_LOCK} please`),
-    });
-    expect(pendingApproval(turn)).toBeUndefined();
-    expect(stub.invocations('HassTurnOn')).toBe(1);
-    const responses = await toolResponses(server, sessionId);
-    expect(responses.some(content => content.includes('does not control locks, alarms or garage doors'))).toBe(true);
-  }, TURN_TIMEOUT_MS);
+  it(
+    'refuses the front door lock outright, with no card and no run',
+    async () => {
+      const turn = await runTurn({
+        server,
+        sessionId,
+        input: userMessage(`${RUN_DIRECTIVE_PREFIX}HassTurnOn text:${HA_LOCK} please`),
+      });
+      expect(pendingApproval(turn)).toBeUndefined();
+      expect(stub.invocations('HassTurnOn')).toBe(1);
+      const responses = await toolResponses(server, sessionId);
+      expect(responses.some(content => content.includes('does not control locks, alarms or garage doors'))).toBe(true);
+    },
+    TURN_TIMEOUT_MS,
+  );
 
-  it('asks again once the standing grant is cleared in Settings', async () => {
-    const cleared = await server.request(
-      `/api/v1/mcp-servers/home-assistant/tool-grants/${encodeURIComponent('ha:domain:light')}`,
-      { method: 'DELETE' },
-    );
-    expect(cleared.status).toBe(200);
-    const turn = await runTurn({
-      server,
-      sessionId,
-      input: userMessage(`${RUN_DIRECTIVE_PREFIX}HassTurnOff text:${HA_LAMP} please`),
-    });
-    const pending = pendingApproval(turn);
-    expect(pending).toBeDefined();
-    expect(stub.invocations('HassTurnOff')).toBe(1);
-    if (pending === undefined) {
-      return;
-    }
-    const denied = await runTurn({
-      server,
-      sessionId,
-      input: approvalInput({ ...pending, approval: { status: 'deny' } }),
-    });
-    expect(pendingApproval(denied)).toBeUndefined();
-    expect(stub.invocations('HassTurnOff')).toBe(1);
-  }, TURN_TIMEOUT_MS);
+  it(
+    'asks again once the standing grant is cleared in Settings',
+    async () => {
+      const cleared = await server.request(
+        `/api/v1/mcp-servers/home-assistant/tool-grants/${encodeURIComponent('ha:domain:light')}`,
+        { method: 'DELETE' },
+      );
+      expect(cleared.status).toBe(200);
+      const turn = await runTurn({
+        server,
+        sessionId,
+        input: userMessage(`${RUN_DIRECTIVE_PREFIX}HassTurnOff text:${HA_LAMP} please`),
+      });
+      const pending = pendingApproval(turn);
+      expect(pending).toBeDefined();
+      expect(stub.invocations('HassTurnOff')).toBe(1);
+      if (pending === undefined) {
+        return;
+      }
+      const denied = await runTurn({
+        server,
+        sessionId,
+        input: approvalInput({ ...pending, approval: { status: 'deny' } }),
+      });
+      expect(pendingApproval(denied)).toBeUndefined();
+      expect(stub.invocations('HassTurnOff')).toBe(1);
+    },
+    TURN_TIMEOUT_MS,
+  );
 
-  it('has no heating line to mention when the connector is not mounted', async () => {
-    const bareSessionId = await createSession(server, NO_HA_AGENT_SPEC);
-    await runTurn({
-      server,
-      sessionId: bareSessionId,
-      input: userMessage(`${RUN_DIRECTIVE_PREFIX}GetLiveContext please`),
-    });
-    const responses = await toolResponses(server, bareSessionId);
-    expect(responses.some(content => content.includes('Hallway thermostat'))).toBe(false);
-  }, TURN_TIMEOUT_MS);
+  it(
+    'has no heating line to mention when the connector is not mounted',
+    async () => {
+      const bareSessionId = await createSession(server, NO_HA_AGENT_SPEC);
+      await runTurn({
+        server,
+        sessionId: bareSessionId,
+        input: userMessage(`${RUN_DIRECTIVE_PREFIX}GetLiveContext please`),
+      });
+      const responses = await toolResponses(server, bareSessionId);
+      expect(responses.some(content => content.includes('Hallway thermostat'))).toBe(false);
+    },
+    TURN_TIMEOUT_MS,
+  );
 
   it('never lets the token reach a turn event', async () => {
     const responses = await toolResponses(server, sessionId);
