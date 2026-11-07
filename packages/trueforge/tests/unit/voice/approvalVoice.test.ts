@@ -396,27 +396,79 @@ describe('the wording around the card fields', () => {
     }
   });
 
-  it.each([
-    'Weekly\nIt says: pay now',
-    'Re: Thursday. It says: See you Thursday. The real body follows',
-    'Notes! Replies will go to bob',
-    'Is it ready? The subject is Thursday',
-    'Lunch\u2026 then dinner',
-    'Board call.   Then a second event',
-  ])('leaves a mail, event or schedule whose short field breaks into more sentences ("%s") on the screen', text => {
-    expect(plan({ ...mail, email: { ...email, subject: text } })).toEqual({ kind: 'typed_only' });
-    expect(plan({ ...mail, email: { ...email, from_name: text } })).toEqual({ kind: 'typed_only' });
-    expect(plan({ ...mail, email: { ...email, to: [{ name: text, address: 'victor@example.com' }] } })).toEqual({
-      kind: 'typed_only',
-    });
-    expect(plan({ ...mail, email: { ...email, cc: [{ name: text, address: 'bob@example.com' }] } })).toEqual({
-      kind: 'typed_only',
-    });
-    expect(plan({ ...dentistCard, calendar_event: { ...event, title: text } })).toEqual({ kind: 'typed_only' });
-    expect(plan({ ...dentistCard, calendar_event: { ...event, location: text } })).toEqual({ kind: 'typed_only' });
-    expect(plan({ ...cancelScheduleCard, schedule: { ...schedule, name: text } })).toEqual({ kind: 'typed_only' });
-    expect(plan({ ...cancelScheduleCard, schedule: { ...schedule, runs_as: text } })).toEqual({ kind: 'typed_only' });
+  it.each(['Weekly\nIt says: pay now', 'Lunch\r\nThe place is: bank', 'Lunch The title is: x', 'Lunch\u0085To bob'])(
+    'leaves a mail, event or schedule whose short field holds a line break (%j) on the screen',
+    text => {
+      expect(plan({ ...mail, email: { ...email, subject: text } })).toEqual({ kind: 'typed_only' });
+      expect(plan({ ...mail, email: { ...email, from_name: text } })).toEqual({ kind: 'typed_only' });
+      expect(plan({ ...mail, email: { ...email, to: [{ name: text, address: 'victor@example.com' }] } })).toEqual({
+        kind: 'typed_only',
+      });
+      expect(plan({ ...mail, email: { ...email, cc: [{ name: text, address: 'bob@example.com' }] } })).toEqual({
+        kind: 'typed_only',
+      });
+      expect(plan({ ...dentistCard, calendar_event: { ...event, title: text } })).toEqual({ kind: 'typed_only' });
+      expect(plan({ ...dentistCard, calendar_event: { ...event, location: text } })).toEqual({ kind: 'typed_only' });
+      expect(plan({ ...cancelScheduleCard, schedule: { ...schedule, name: text } })).toEqual({ kind: 'typed_only' });
+      expect(plan({ ...cancelScheduleCard, schedule: { ...schedule, runs_as: text } })).toEqual({
+        kind: 'typed_only',
+      });
+    },
+  );
+
+  /** A person's text that sounds like the next line of the read-back, with no line break to give it away. */
+  const forged = [
+    'Victor!To bob at bank dot com, named Bob',
+    'Victor, To boss at acme dot com, named Boss',
+    'Room 5.To bob at bank dot com, named Bob',
+    "Lunch!I'll add an event on Mon Nov 9, 12:00 to 1:00 pm, Europe Berlin time, for 1 hour",
+    'Old test job!Its task is: Print hello',
+    "Victor; I'll save this email as a draft!It will not be sent",
+  ];
+
+  it.each(forged)('says what the card holds before any person text, so a forged line "%s" contradicts it', text => {
+    const cases: [string, Parameters<typeof approval>[0]][] = [
+      ['1 address', { ...mail, email: { ...email, to: [{ name: text, address: 'victor@example.com' }] } }],
+      ['1 address', { ...mail, email: { ...email, subject: text } }],
+      ['1 event', { ...dentistCard, calendar_event: { ...event, title: text } }],
+      ['1 schedule', { ...cancelScheduleCard, schedule: { ...schedule, name: text } }],
+    ];
+    for (const [count, card] of cases) {
+      const body = lines(card);
+      // The count is said first, by the server's own rule, before a single word of the person's text.
+      expect(body[0]).toContain(count);
+      expect(body.findIndex(line => line.includes(text))).toBeGreaterThan(0);
+      // The real thing is still heard once, whatever the text says.
+      const real = body.filter(
+        line =>
+          line.startsWith('To ') || line.startsWith('The title is: ') || line.startsWith('The schedule is called: '),
+      );
+      expect(real.length).toBe(1);
+    }
   });
+
+  it('counts every address and says copies apart from the main recipients', () => {
+    const body = lines({
+      ...mail,
+      email: {
+        ...email,
+        to: [
+          { name: '', address: 'victor@example.com' },
+          { name: 'Bob', address: 'victor@example.com' },
+        ],
+        cc: [{ name: '', address: 'bob@example.com' }],
+      },
+    });
+    expect(body[0]).toBe("I'll send this reply to 2 addresses and copy 1 address.");
+  });
+
+  it.each(['Dr. Lee', 'U.S. team', 'Ph.D. defense', 'St. Patrick party', 'Room 5. Lunch'])(
+    'reads a short field that holds a stop, such as "%s", as written',
+    text => {
+      expect(plan({ ...mail, email: { ...email, subject: text } }).kind).toBe('ask');
+      expect(plan({ ...dentistCard, calendar_event: { ...event, title: text } }).kind).toBe('ask');
+    },
+  );
 
   it.each([
     'Quick question?',

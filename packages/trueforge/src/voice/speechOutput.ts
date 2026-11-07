@@ -4,9 +4,12 @@
  */
 import type { OutputFormat } from './audio';
 import type { PlaybackTimeline, SpokenTextLog } from './echoGuard';
-import type { SpeechSynthesizer, VoiceTransport } from './transport';
+import { WouldChangeTextError, type SpeechSynthesizer, type VoiceTransport } from './transport';
 
 export type SentenceRole = 'body' | 'instruction';
+
+/** How a queue of sentences ended: all made, one refused as not said exactly as written, or one lost. */
+export type SpeechResult = 'complete' | 'refused' | 'failed';
 
 export interface SpeechOutputDeps {
   tts: SpeechSynthesizer;
@@ -24,8 +27,8 @@ export interface SpeechOutputDeps {
 export class SpeechOutput {
   readonly #deps: SpeechOutputDeps;
   #tail: Promise<void> = Promise.resolve();
-  /** False once a sentence was lost: it failed, was skipped as empty, or made no sound. */
-  #complete = true;
+  /** Worse outcomes win: a lost sentence (failed, empty or silent) over a refused one. */
+  #result: SpeechResult = 'complete';
 
   constructor(deps: SpeechOutputDeps) {
     this.#deps = deps;
@@ -38,11 +41,11 @@ export class SpeechOutput {
 
   /**
    * Resolves when every queued sentence has been made and handed over (not when it has been heard). The
-   * value is true only if each of them produced sound, so a caller can tell a card was read in full.
+   * value is `complete` only if each of them produced sound, so a caller can tell a card was read in full.
    */
-  async drain(): Promise<boolean> {
+  async drain(): Promise<SpeechResult> {
     await this.#tail;
-    return this.#complete;
+    return this.#result;
   }
 
   async #speak({ text, role, exact }: { text: string; role: SentenceRole; exact: boolean }): Promise<void> {
@@ -70,13 +73,14 @@ export class SpeechOutput {
       }
     } catch (error) {
       if (!stopped()) {
-        this.#complete = false;
+        this.#result =
+          error instanceof WouldChangeTextError ? (this.#result === 'complete' ? 'refused' : this.#result) : 'failed';
         this.#deps.onFailure(error);
       }
       return;
     }
     if (!madeSound && !stopped()) {
-      this.#complete = false;
+      this.#result = 'failed';
     }
     if (madeSound && role === 'body' && !stopped()) {
       // A long text is still playing a minute after its first sound, so its tail is remembered from when it ends.

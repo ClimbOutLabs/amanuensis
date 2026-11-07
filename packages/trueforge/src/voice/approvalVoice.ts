@@ -6,7 +6,8 @@
  * goes back as the chat's own approval input for the same thread and tool call, so the usual replay and
  * `changed` checks apply. Cards that hold more than a person can safely check by ear stay on the screen.
  * Whether the voice would say a read-back exactly as written is the voice service's call, made in the same
- * request that speaks it; this file holds no copy of those rules.
+ * request that speaks it; this file holds no copy of those rules. It only spells out the digits of a time zone
+ * name, which the voice service then checks like any other word.
  */
 import type { Tier3Card } from '@truefoundry/trueforge-core/core';
 
@@ -176,14 +177,17 @@ function cardWordingMatchesShape(card: Tier3Card): boolean {
 }
 
 /**
- * Text a person supplied (a title, subject, name) sits last on a line of its own, after a fixed label, so
- * no fixed wording follows it and it cannot pass for the next line. It is kept off the voice only when it
- * would end the line early: a line break, or a full stop followed by more words.
+ * Text a person supplied (a title, subject, name) sits last on a line of its own, after a fixed label, and
+ * the counts of what the card holds are said first, so a name that sounds like another line contradicts what
+ * was already heard. Only a line break is kept off the voice, because it would end the line early.
  */
-const LINE_BREAK_OR_MORE_SENTENCES = /[\r\n\u2028\u2029\u0085]|[.!?\u2026]+\s+\S/u;
+const LINE_BREAK = /[\r\n\u2028\u2029\u0085]/u;
 
-/** True when the field stays one phrase on its line. A closing "?" or "!" ("Quick question?") is fine. */
-const staysOnItsLine = (field: string): boolean => !LINE_BREAK_OR_MORE_SENTENCES.test(field);
+/** True when the field stays on its own line. Stops and marks inside it are read as written ("Dr. Lee"). */
+const staysOnItsLine = (field: string): boolean => !LINE_BREAK.test(field);
+
+const plural = ({ count, noun, many }: { count: number; noun: string; many: string }): string =>
+  `${String(count)} ${count === 1 ? noun : many}`;
 
 const DIGIT_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
 
@@ -228,10 +232,15 @@ function readableBody(card: Tier3Card): string[] | undefined {
     ) {
       return undefined;
     }
+    const addresses = plural({ count: email.to.length, noun: 'address', many: 'addresses' });
+    const copies =
+      email.cc.length === 0
+        ? ''
+        : ` and copy ${plural({ count: email.cc.length, noun: 'address', many: 'addresses' })}`;
     return [
       email.action === 'send'
-        ? `I'll send this ${email.reply_in_thread === null ? 'email' : 'reply'}.`
-        : "I'll save this email as a draft. It will not be sent.",
+        ? `I'll send this ${email.reply_in_thread === null ? 'email' : 'reply'} to ${addresses}${copies}.`
+        : `I'll save this email as a draft to ${addresses}${copies}. It will not be sent.`,
       ...(email.reply_to === null ? [] : [`Replies will go to ${spokenAddress(email.reply_to)}.`]),
       ...(email.name_left_off ? ['The name was left off an address because it looked like an address.'] : []),
       ...email.to.map(mailbox => mailboxLine({ lead: 'To', mailbox })),
@@ -253,7 +262,7 @@ function readableBody(card: Tier3Card): string[] | undefined {
       return undefined;
     }
     return [
-      `I'll add an event on ${event.when}, ${zoneWords(event.time_zone)} time, for ${event.duration}.`,
+      `I'll add 1 event on ${event.when}, ${zoneWords(event.time_zone)} time, for ${event.duration}.`,
       `It goes on the calendar of ${spokenAddress(event.calendar)}.`,
       ...(event.already_created ? ['You already have this event.'] : []),
       ...(event.span_days > 1 ? [`This event runs over ${String(event.span_days)} days.`] : []),
@@ -272,7 +281,7 @@ function readableBody(card: Tier3Card): string[] | undefined {
       return undefined;
     }
     return [
-      `I'll delete a schedule for good. It runs ${schedule.when}, ${zoneWords(schedule.time_zone)} time.`,
+      `I'll delete 1 schedule for good. It runs ${schedule.when}, ${zoneWords(schedule.time_zone)} time.`,
       `It runs as: ${schedule.runs_as}`,
       `The schedule is called: ${schedule.name}`,
       `Its task is: ${schedule.task}`,

@@ -50,19 +50,20 @@ text that was checked is the text that is heard. The check needs no model.
 
 - 400 with header `x-aman-reason: would_change_text`, before any sound: the voice would say something
   other than what is written. That covers numbers it would read another way (`1,5`, `10.0.0.1`,
-  `11.06.2026`, `007`, `5 000`, more than two cents), two numbers with only blanks or silent signs
-  between them (`1000 (500)`, `1000; 500`, `1000...500`, `1000 & 500`), a number word next to a digit
-  the same way (`twenty (5)`, `5 (hundred)`, `5 dozen`, `5 k`), number words either side of a bracket or
-  quote (`one thousand (five hundred)`), `1000 and 500` (heard as one number), web-address-like text
-  (`my.bank.com`, `t.co`, `my-bank dot com`; a single letter either side of a dot, as in `e.g.` and
-  `p.m.`, is kept), times that are not real (`9:60`), digits
+  `11.06.2026`, `007`, `5 000`, `3th`, more than two cents), times that are not real (`9:60`), digits
   written as superscripts or other forms, links, code, list marks, a minus sign or range, line breaks
-  other than a plain one, and letters outside plain English. Only the common forms are kept: plain
-  digits with no leading zero, groups of three with commas, up to two cents after a dollar sign, a
-  decimal, and a time like `9:30`. Two numbers are fine when one sentence stop and a space separate
-  them (`Use 5. 3 more follow.`). A comma after a number is a pause of its own, and it is plain only
-  where a date or time has one: a day and a year, a day and a time, or a year and a time
-  (`Fri Nov 6, 2:30`, `March 5, 2026`, `Nov 6, 2026, 2:30 pm`). `Pay 19, 99 dollars` is refused.
+  other than a plain one, letters outside plain English, and web-address-like text (`my.bank.com`,
+  `t.co`, `163.com`; a single letter either side of a dot, as in `e.g.` and `p.m.`, is allowed).
+  Numbers written side by side are judged by one rule. A _spelling_ is digits (`1,000`, `2:30`), digits and
+  a scale word (`5 million`, `2 dozen`), or a run of number words (`twenty-five`). Two spellings joined by a
+  gap of only blanks, silent signs and pause marks (`1000 (500)`, `1000; 500`, `1000...500`, `1000 & 500`,
+  `twenty (5)`, `one, two`), or by `and` when the left ends in a scale and the right is smaller
+  (`1000 and $500`, `1,000,000 and 500,000`), are refused. Not refused: one sentence stop and a space
+  (`Use 5. 3 more follow.`), ranges (`Between 100 and 150`, `Rooms 101 and 102`), and a date or time
+  written with a comma after a month or weekday (`Fri Nov 6, 2:30`, `March 5, 2026`,
+  `Nov 6, 2026, 2:30 pm`). `Pay 19, 99 dollars` and `Send 12, 2000 dollars` are refused. Plain
+  forms are kept: digits with no leading zero, groups of three with commas, up to two cents after a dollar
+  sign, a decimal, a time like `9:30` and an ordinal with its right ending (`14th`).
 - A `200` for an exact speak carries `x-aman-exact: checked`. A caller that asked for `exact` must treat
   an answer without it as unchecked: an older service ignores `exact` and speaks anything.
 - Cents are said with their unit: `$1,000.10` is "one thousand dollars and ten cents".

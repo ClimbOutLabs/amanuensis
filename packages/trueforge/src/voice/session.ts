@@ -52,7 +52,7 @@ const REALTIME_SLACK_MS = 5_000;
 const MAX_PARALLEL_TRANSCRIPTIONS = 2;
 /** Said when a third utterance arrives while two are still being turned into words. */
 const MISSED_THAT_NOTICE = 'I missed that. Please say it again.';
-const VOICE_OUT_OF_DATE_NOTICE = 'The voice service is out of date. Rebuild it, then try again.';
+const VOICE_OUT_OF_DATE_NOTICE = 'The voice service is out of date. Run aman upgrade, then try again.';
 const CARD_ON_SCREEN_NOTICE = 'I stopped reading that card. It is waiting on the screen. Answer it there.';
 /** A conversation with no speech from the person for this long ends, so an open mic cannot run on unseen. */
 export const IDLE_END_MS = 2 * 60_000;
@@ -160,8 +160,6 @@ export class VoiceSession {
    * off; a short notice queued after it is not part of one, so talking over only that leaves a card waiting.
    */
   #replyEndsAtMs = 0;
-  /** Read-backs the voice refused to say exactly, so the line that follows can say why. */
-  readonly #refused = new WeakSet<SpeechOutput>();
   /** Sound that may still arrive early: it refills as time passes, but never past the slack. */
   #creditMs = REALTIME_SLACK_MS;
   #lastArrivalAtMs = 0;
@@ -564,14 +562,14 @@ export class VoiceSession {
     speechSignal: AbortSignal;
     marks: Marks;
   }): Promise<void> {
-    let readInFull = await speech.drain();
-    if (asking !== undefined && readInFull && !speechSignal.aborted) {
+    let result = await speech.drain();
+    if (asking !== undefined && result === 'complete' && !speechSignal.aborted) {
       // How to answer is said only once the card itself was read, so a refused card never asks for an answer.
       speech.say({ text: asking.instruction, role: 'instruction' });
-      readInFull = await speech.drain();
+      result = await speech.drain();
     }
-    if (asking !== undefined && !readInFull && !speechSignal.aborted) {
-      await this.#leaveCardForTheScreen({ signal: speechSignal, marks, refused: this.#refused.has(speech) });
+    if (asking !== undefined && result !== 'complete' && !speechSignal.aborted) {
+      await this.#leaveCardForTheScreen({ signal: speechSignal, marks, refused: result === 'refused' });
       return;
     }
     this.#startAwaiting({ asking, signal: speechSignal });
@@ -595,7 +593,7 @@ export class VoiceSession {
     if (refused) {
       this.#deps.transport.sendEvent({ type: 'notice', text: APPROVAL_LINES.cannotReadExactly });
     }
-    if (!(await speech.drain())) {
+    if ((await speech.drain()) !== 'complete') {
       this.#deps.transport.sendEvent({
         type: 'notice',
         text: 'I could not read all of that out loud, so it is waiting on the screen. Answer it there.',
@@ -765,7 +763,7 @@ export class VoiceSession {
     kind?: 'reply' | 'missed';
   }): SpeechOutput {
     let reported = false;
-    const output: SpeechOutput = new SpeechOutput({
+    return new SpeechOutput({
       tts: this.#deps.tts,
       format: this.#deps.transport.outputFormat,
       transport: this.#deps.transport,
@@ -778,9 +776,7 @@ export class VoiceSession {
         }
         if (marks.firstAudioAtMs === undefined) {
           marks.firstAudioAtMs = this.#clock.now();
-          if (kind === 'reply') {
-            this.#reportLatency(marks);
-          }
+          this.#reportLatency(marks);
         }
         this.#refreshState();
       },
@@ -788,7 +784,6 @@ export class VoiceSession {
         if (error instanceof WouldChangeTextError) {
           // The voice is working; it would only not say this text as written. The card stays on the screen.
           this.#deps.onNote?.('read_back_refused');
-          this.#refused.add(output);
           return;
         }
         if (error instanceof UncheckedSpeechError) {
@@ -805,7 +800,6 @@ export class VoiceSession {
         }
       },
     });
-    return output;
   }
 
   #reportLatency(marks: Marks): void {

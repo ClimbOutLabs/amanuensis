@@ -128,7 +128,6 @@ class SpokenWordsTest(unittest.TestCase):
             "Server 10.0.0.1",
             "Due 11.06.2026",
             "10:30:15",
-            "Take the 3rd",
             "1. apples",
             "- apples",
             "Pay $ now.",
@@ -213,18 +212,32 @@ class SpokenWordsTest(unittest.TestCase):
             "Pay twenty-five (hundred) dollars.",
             'Pay one thousand "five hundred" dollars.',
             "Pay 5 (thousands) dollars.",  # forms of number words
-            "Pay 5 dozen now.",
-            "Pay 5 grand now.",
-            "Pay 5 k now.",
-            "Pay 5 bn now.",
-            "Pay 5 lakh now.",
-            "Pay 5 crore now.",
-            "Pay 5 hundreds now.",
-            "Pay fifth (5) now.",
-            "Pay 5 oh 5 now.",
-            "Wire 1000 and 500 dollars.",  # heard as one number: one thousand and five hundred
+            "Wire 1000 and 500 dollars.",
+            "Wire 1000 and $500 today.",  # "and" inside a number, in every disguise
+            "Wire 1000 (and 500) now.",
+            'Wire 1000 "and" 500 now.',
+            "Wire 1000\tand 500 now.",
+            "Wire 1000 and, 500 now.",
+            "Wire 1000 and; 500 now.",
+            "Wire 1000\nand 500 now.",
+            "Wire 1000 and five hundred now.",
+            "Wire one thousand and 500 now.",
+            "Wire 1000 and 500.00 now.",
+            "Wire 1,000,000 and 500,000 now.",
+            "Wire 5 million and 500,000 now.",
+            "Wire 1200 and 50 now.",
+            "Wire 1000 'five hundred' dollars.",  # an opening single quote hides nothing
+            "Wire 5 'thousand' dollars.",
+            "Wire 'twenty' 'five' dollars.",
+            "Pay one, two and three.",
+            "Send 12, 2000 dollars.",  # a comma is plain only after a month or weekday and its day
+            "Wire 5, 2000 now.",
+            "Pay 20, 20:00 now.",
+            "Mail me at 1.co today.",  # a digit before the dot of a web address
+            "Mail me at 163.com today.",
+            "The 3th of May.",  # a wrong ordinal suffix
+            "The 11st of May.",  # heard as one number: one thousand and five hundred
             "Wire 100 and 5 dollars.",
-            "Mail me at my-bank dot com today.",  # sounds like mybank dot com
             "Mail me at t.co today.",
             "Mail sam@example.com today.",
         ):
@@ -271,7 +284,23 @@ class SpokenWordsTest(unittest.TestCase):
             "I'm 5 minutes away.",
             "Use 5. 3 more follow.",  # one sentence stop and a space
             "Twenty five and one hundred.",
-            "Pay one, two and three.",
+            "Between 100 and 150 guests.",  # ranges and counts, not one number
+            "Rooms 101 and 102 are free.",
+            "Tickets are 300 and 450 dollars.",
+            "Pay 5 million now.",
+            "Pay 2 dozen now.",
+            "Pay 5 grand now.",
+            "Pay 5 lakh now.",
+            "Room 4 (second floor) is free.",
+            "Oh, 3 more things.",
+            "Wire 1000 and 1000 now.",
+            "Pay 5 k now.",
+            "Pay fifth (5) now.",
+            "The 14th of May, the 1st, 2nd, 3rd, 11th, 12th, 13th, 21st and 22nd.",
+            "5th Ave is on the 40th floor.",
+            "Mail me at my-bank dot com today.",
+            "Fri Nov 6, 2026 is fine.",
+            "On Monday 12, 2:30 pm.",
         ):
             with self.subTest(text=text):
                 self.assertTrue(reads_as_written(text))

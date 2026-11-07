@@ -306,7 +306,7 @@ describe('approval by voice', () => {
     expect(t.tts.sentences).toEqual([
       'I have a draft.',
       [
-        "I'll send this reply.",
+        "I'll send this reply to 1 address.",
         'To victor at example dot com, named Victor',
         'The subject is: Re: Thursday',
         'It says: Thursday at three works for me. See you then.',
@@ -502,7 +502,7 @@ describe('approval by voice', () => {
     expect(t.notes).toContain('tts_unchecked');
     expect(t.transport.events).toContainEqual({
       type: 'notice',
-      text: 'The voice service is out of date. Rebuild it, then try again.',
+      text: 'The voice service is out of date. Run aman upgrade, then try again.',
     });
     expect(t.transport.events.some(event => event.type === 'tts_failed')).toBe(false);
     expect(t.tts.sentences.join(' ')).not.toContain('Say ');
@@ -567,7 +567,7 @@ describe('approval by voice', () => {
     const t = await readBack({ message: withCard() });
     expect(t.tts.asked).toEqual([
       [
-        "I'll send this reply.",
+        "I'll send this reply to 1 address.",
         'To victor at example dot com, named Victor',
         'The subject is: Re: Thursday',
         'It says: Thursday at three works for me. See you then.',
@@ -688,7 +688,7 @@ describe('approval by voice', () => {
   });
 
   it('keeps a read-back that was cut off unanswerable when "I missed that" is queued after its last line', async () => {
-    const { t, releaseInstruction, releaseMissed } = await withLinesHeld();
+    const { t, releaseInstruction, releaseMissed } = await withLinesHeld(['yes send it']);
     await overflowTheTranscriber(t);
     // The line telling how to answer reaches the line first, then the missed line is queued behind it.
     releaseInstruction();
@@ -698,10 +698,16 @@ describe('approval by voice', () => {
     expect(t.tts.sentences.at(-1)).toBe('I missed that. Please say it again.');
     // The person talks over the instruction line, which was not heard through.
     await feed({ session: t.session, clock: t.clock, samples: hum(700, 0.3, 1.7) });
+    // What was held comes back as filler, so it cannot be the reason the card is not answered.
     t.stt.hold = false;
-    t.stt.release('yes send it');
+    t.stt.release('hmm');
+    await t.session.settled();
+    // Well after the card would have been waiting, the exact phrase is said.
+    await feed({ session: t.session, clock: t.clock, samples: quiet(6000) });
+    await feed({ session: t.session, clock: t.clock, samples: says() });
     await t.session.settled();
     expect(t.turns.answers).toEqual([]);
+    expect(t.turns.sent).toEqual(['send the reply', 'yes send it']);
     await t.session.end();
   });
 
