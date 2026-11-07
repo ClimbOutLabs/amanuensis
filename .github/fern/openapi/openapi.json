@@ -1312,18 +1312,30 @@
       "CalendarProblem": {
         "description": "Set when the calendar has not been checked for about an hour. Null when calendar checks work.",
         "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/CalendarProblemKind"
+          },
           "since": {
             "description": "When calendar checks first failed, with none succeeding since, ISO 8601 UTC.",
             "type": "string"
           }
         },
         "required": [
-          "since"
+          "since",
+          "kind"
         ],
         "type": [
           "object",
           "null"
         ]
+      },
+      "CalendarProblemKind": {
+        "description": "Why the calendar could not be checked: Google needs signing in again, or something else went wrong.",
+        "enum": [
+          "google_sign_in",
+          "other"
+        ],
+        "type": "string"
       },
       "CalendarProvider": {
         "properties": {

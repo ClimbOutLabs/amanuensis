@@ -35,6 +35,7 @@
   "Connectors": "packages/trueforge-ui/src/containers/SettingsBuilder/index.tsx",
   "Offline mode": "packages/trueforge-ui/src/sentinel/SentinelSettings.tsx",
   "Google": "packages/trueforge-ui/src/containers/SettingsBuilder/ConnectorSettings.tsx",
+  "Email": "packages/trueforge-ui/src/containers/SettingsBuilder/ConnectorSettings.tsx",
   "Connect": "packages/trueforge-ui/src/containers/SettingsBuilder/ConnectorSettings.tsx",
   "Client ID": "packages/trueforge-ui/src/containers/SettingsBuilder/GoogleSetupPanel.tsx",
   "Client secret": "packages/trueforge-ui/src/containers/SettingsBuilder/GoogleSetupPanel.tsx",

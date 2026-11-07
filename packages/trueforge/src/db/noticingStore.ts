@@ -60,8 +60,9 @@ function parseIds(stored: string | null): string[] | undefined {
 /**
  * When a watcher last looked for one person, and how it is doing. `failing_since` and `failure_kind` are set while
  * passes keep failing and cleared by a pass that works. `stuck_*` name the one message a pass keeps failing on and how
- * many passes failed on it, so a message that never reads can be passed over. `window_ms` caps how wide a window the
- * next pass lists, after a pass ran out of time. `source` is where mail was read from.
+ * many passes failed on it and since when, so a message that never reads can be passed over. `handled_ids` are the
+ * messages of the window the next pass starts at again that were already read or passed over. `window_ms` caps how wide
+ * a window the next pass lists, after a pass ran out of time. `source` is where mail was read from.
  */
 export interface NoticingCheckpointTable {
   tenant_id: string;
@@ -133,8 +134,8 @@ export interface WatcherCheckpoint {
   failure: { kind: MailProblemKind; since: Date } | undefined;
   stuck: StuckMessage | undefined;
   /**
-   * Messages of the window the next pass starts at again that were already read or passed over, as JSON ids. Only a
-   * source that cannot resume at a message (IMAP) keeps them, so a pass skips what it handled.
+   * Messages of the window the next pass starts at again that were already read or passed over. Only a source that
+   * cannot resume at a message (IMAP) keeps them, so a pass skips what it handled.
    */
   handled?: readonly string[] | undefined;
   /** The widest window the next pass lists, in milliseconds, while a pass that ran out of time is being caught up on. */
@@ -197,6 +198,8 @@ export interface INoticingStore {
   /** Hands the lease back, when this holder still has it. */
   releaseReachLease(input: PersonOwner & { holder: string }): Promise<void>;
   getCheckpoint(input: PersonOwner & { watcher: NoticingWatcher }): Promise<WatcherCheckpoint | undefined>;
+  /** Everyone with a checkpoint for a watcher, so someone who lost their source is still looked at once. */
+  listCheckpointOwners(input: { watcher: NoticingWatcher }): Promise<PersonOwner[]>;
   /** Replaces the whole checkpoint, so a pass that works clears an earlier failure by leaving it out. */
   setCheckpoint(input: PersonOwner & { watcher: NoticingWatcher } & WatcherCheckpoint): Promise<void>;
 }
@@ -491,6 +494,14 @@ export class NoticingStore implements INoticingStore {
       window_ms: row.window_ms ?? undefined,
       source: source.success ? source.data : undefined,
     };
+  }
+
+  async listCheckpointOwners(input: { watcher: NoticingWatcher }): Promise<PersonOwner[]> {
+    return await this.#db
+      .selectFrom('noticing_checkpoint')
+      .select(['tenant_id', 'created_by'])
+      .where('watcher', '=', input.watcher)
+      .execute();
   }
 
   async setCheckpoint(input: PersonOwner & { watcher: NoticingWatcher } & WatcherCheckpoint): Promise<void> {

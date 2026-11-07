@@ -178,9 +178,14 @@ test('reads Reach me settings into the app shape, dropping what it does not know
   assert.equal(view.mailSource, null);
   assert.equal(view.calendarProblem, null);
   const calendar = createDeliveriesApi(async () =>
-    Response.json({ data: { ...WIRE_REACH.data, calendar_problem: { since: '2026-11-05T14:00:00.000Z' } } }),
+    Response.json({
+      data: { ...WIRE_REACH.data, calendar_problem: { since: '2026-11-05T14:00:00.000Z', kind: 'google_sign_in' } },
+    }),
   );
-  assert.deepEqual((await calendar.reach.get()).calendarProblem, { since: '2026-11-05T14:00:00.000Z' });
+  assert.deepEqual((await calendar.reach.get()).calendarProblem, {
+    since: '2026-11-05T14:00:00.000Z',
+    kind: 'google_sign_in',
+  });
   const watched = createDeliveriesApi(async () =>
     Response.json({ data: { ...WIRE_REACH.data, mail_source: 'google' } }),
   );

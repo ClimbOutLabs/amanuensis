@@ -13,6 +13,18 @@ const CHAT_ASSISTANT_NAME_PREFIX = 'assistant-';
 /** The name used for an assistant the person has not named. */
 export const UNNAMED_ASSISTANT = 'Your assistant';
 
+/** The name a person gave their assistant, or the plain default when they gave none. */
+export async function assistantNameFor({
+  personalizationStore,
+  owner,
+}: {
+  personalizationStore: Pick<IPersonalizationStore, 'getProfile'>;
+  owner: { tenant_id: string; created_by: string };
+}): Promise<string> {
+  const profile = await personalizationStore.getProfile({ tenant_id: owner.tenant_id, created_by: owner.created_by });
+  return profile?.assistant_name ?? UNNAMED_ASSISTANT;
+}
+
 /** Who a schedule made in one chat runs as, settled by the host so the model never names it. */
 export interface ChatAssistant {
   /** The persona or assistant name, for the "runs as" line. */

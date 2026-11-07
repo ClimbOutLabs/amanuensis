@@ -166,9 +166,17 @@ export const MailProblemSchema = z
   })
   .openapi('MailProblem');
 
+export const CalendarProblemKindSchema = z
+  .enum(['google_sign_in', 'other'])
+  .describe('Why the calendar could not be checked: Google needs signing in again, or something else went wrong.')
+  .openapi('CalendarProblemKind');
+
+export type CalendarProblemKind = z.infer<typeof CalendarProblemKindSchema>;
+
 export const CalendarProblemSchema = z
   .object({
     since: z.string().describe('When calendar checks first failed, with none succeeding since, ISO 8601 UTC.'),
+    kind: CalendarProblemKindSchema,
   })
   .openapi('CalendarProblem');
 

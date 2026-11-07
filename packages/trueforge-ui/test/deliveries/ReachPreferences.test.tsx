@@ -83,16 +83,14 @@ describe('Settings, Reach me mail trouble', () => {
     renderWithProblem({ since: '2026-11-05T14:00:00.000Z', kind: 'too_slow' });
     await screen.findByText(/has not been able to check your mail since/);
     expect(
-      screen.getByText(
-        'Your mail is taking too long to read. Ask whoever runs your mail to check it, or wait for it to catch up.',
-      ),
+      screen.getByText('Wait for Mira to catch up. If this lasts a day, ask whoever runs your mail.'),
     ).toBeTruthy();
     expect(screen.queryByText(/still connected/)).toBeNull();
   });
 
   it.each([
     ['google_sign_in', 'Open Settings, Connectors, Google and choose Reconnect to sign in to Google again.'],
-    ['email_password', 'Open Settings, Connectors, and check the Email connector’s account name and password.'],
+    ['email_password', 'Open Settings, Connectors, Email. Make a new app password and save it again.'],
   ] as const)('gives its own step for %s', async (kind, step) => {
     renderWithProblem({ since: '2026-11-05T14:00:00.000Z', kind });
     await screen.findByText(/has not been able to check your mail since/);
@@ -101,7 +99,10 @@ describe('Settings, Reach me mail trouble', () => {
 
   it('says since when the calendar was not checked', async () => {
     const server = fakeServer([]);
-    server.state.reach = { ...server.state.reach, calendarProblem: { since: '2026-11-05T14:00:00.000Z' } };
+    server.state.reach = {
+      ...server.state.reach,
+      calendarProblem: { since: '2026-11-05T14:00:00.000Z', kind: 'google_sign_in' },
+    };
     render(
       <PersonalizationProvider
         api={{ getProfile: async () => profile, updateProfile: async next => next, deleteProfile: async () => {} }}
@@ -111,6 +112,9 @@ describe('Settings, Reach me mail trouble', () => {
     );
     const notice = await screen.findByText(/Mira has not been able to check your calendar since/);
     expect(notice.textContent).toMatch(/^Mira has not been able to check your calendar since .+\.$/);
+    expect(
+      screen.getByText('Open Settings, Connectors, Google and choose Reconnect to sign in to Google again.'),
+    ).toBeTruthy();
   });
 });
 

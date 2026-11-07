@@ -3,8 +3,14 @@ import { GoogleApiError } from '@truefoundry/trueforge-core/core/google/errors';
 import type { StuckMessage } from '../../../../src/db/noticingStore';
 import type { MailMessage, MailSource, MailWindowRead } from '../../../../src/runtime/noticing/sources';
 import { MailSourceBusyError, MessageUnreadableError } from '../../../../src/runtime/noticing/sources';
-import { MAX_STUCK_PASSES, readMailWindow, watchMail } from '../../../../src/runtime/noticing/watchers';
+import {
+  MAX_STUCK_PASSES,
+  readMailWindow,
+  SHORTEST_WINDOW_MS,
+  watchMail,
+} from '../../../../src/runtime/noticing/watchers';
 import { defaultReachSettings } from '../../../../src/schemas/reach';
+import { readMessages } from './mailWindowSupport';
 
 const SINCE = new Date('2026-11-05T14:00:00.000Z');
 const NOW = new Date('2026-11-05T15:00:00.000Z');
@@ -91,7 +97,7 @@ describe('readMailWindow', () => {
       logger: logger(),
       out_of_time: () => false,
     });
-    expect(read.messages.map(item => item.id)).toEqual(['0', '1']);
+    expect(readMessages(read).map(item => item.id)).toEqual(['0', '1']);
     expect(read.resume_from).toEqual(new Date('2026-11-05T14:30:00.000Z'));
     expect(asked.map(item => item.before)).toEqual([NOW, new Date('2026-11-05T14:30:00.000Z')]);
   });
@@ -138,7 +144,7 @@ describe('readMailWindow', () => {
       logger: warnings,
       out_of_time: () => false,
     });
-    expect(read.messages).toEqual([]);
+    expect(readMessages(read)).toEqual([]);
     expect(read.resume_from?.getTime()).toBeLessThanOrEqual(SINCE.getTime() + 4000);
     expect(read.resume_from?.getTime()).toBeGreaterThan(at.getTime());
     expect(warnings.warn).toHaveBeenCalledWith(
@@ -161,7 +167,7 @@ describe('readMailWindow', () => {
       logger: logger(),
       out_of_time: () => false,
     });
-    expect(read.messages).toEqual([boss]);
+    expect(readMessages(read)).toEqual([boss]);
     expect(asked.at(-1)?.from).toEqual(['boss@example.com']);
   });
 
@@ -179,8 +185,47 @@ describe('readMailWindow', () => {
       logger: logger(),
       out_of_time: () => false,
     });
-    expect(read.messages).toEqual([]);
+    expect(readMessages(read)).toEqual([]);
     expect(asked.some(item => item.from !== undefined)).toBe(false);
+  });
+});
+
+describe('readMailWindow when the rest of the window runs out of time', () => {
+  it('keeps the mail listed before a failing stretch, and starts the next pass after it', async () => {
+    const bad = new Date('2026-11-05T14:30:00.000Z');
+    const early = message({ id: 'early', at: new Date('2026-11-05T14:05:00.000Z') });
+    const inbox = [early, message({ id: 'late', at: new Date('2026-11-05T14:50:00.000Z') })];
+    let cellRead = false;
+    const source: MailSource = {
+      listNewMessages: ({ since, before, whole }) => {
+        const covers = since.getTime() <= bad.getTime() && before.getTime() > bad.getTime();
+        if (covers && before.getTime() - since.getTime() > SHORTEST_WINDOW_MS) {
+          return Promise.reject(new Error('cannot list'));
+        }
+        if (whole !== true && before.getTime() - since.getTime() <= SHORTEST_WINDOW_MS) {
+          // The few seconds are read last, and the rest of the window then has no time left.
+          cellRead = true;
+        }
+        const found = inbox.filter(item => item.received_at >= since && item.received_at < before);
+        return Promise.resolve({ read: 'all', messages: found });
+      },
+      readText: () => Promise.resolve(''),
+      laterInThread: () => Promise.resolve([]),
+      trustedAuthenticationServers: [],
+      datesAreArrival: true,
+    };
+    const read = await readMailWindow({
+      source,
+      since: SINCE,
+      now: NOW,
+      limit: 10,
+      keep_from: [],
+      logger: logger(),
+      out_of_time: () => cellRead,
+    });
+    expect(read.status).toBe('read');
+    expect(read.status === 'read' ? readMessages(read).map(item => item.id) : []).toContain('early');
+    expect((read.resume_from ?? NOW).getTime()).toBeLessThanOrEqual(new Date('2026-11-05T14:50:00.000Z').getTime());
   });
 });
 
@@ -457,7 +502,8 @@ describe('watchMail when a message cannot be read', () => {
       failing: { a: () => new MessageUnreadableError({ cause: new Error('gone') }) },
     });
     const found = await watch({ source, stuck: { message_id: 'a', passes: 2, since: SINCE } });
-    expect(ids(found)).toEqual(['bill_due:b']);
+    // The message that can never be read is told about, since it looked like a bill.
+    expect(ids(found)).toEqual(['bill_due:a', 'bill_due:b']);
     expect(found.stuck).toBeUndefined();
     expect(found.stopped_by).toBeUndefined();
   });
@@ -509,6 +555,7 @@ describe('watchMail when a list fails', () => {
     const { source } = sourceWith(() => new Error('The Email connector returned an incomplete metadata page.'));
     const warnings = logger();
     const seen: string[] = [];
+    const gaps: { from: Date; to: Date }[] = [];
     let since = SINCE;
     let stuck: StuckMessage | undefined;
     let passes = 0;
@@ -526,6 +573,7 @@ describe('watchMail when a list fails', () => {
         max_width: undefined,
       });
       seen.push(...found.raise.map(event => event.id));
+      gaps.push(...found.gaps);
       stuck = found.stuck;
       if (found.resume_from === undefined) {
         break;
@@ -534,7 +582,8 @@ describe('watchMail when a list fails', () => {
     }
     expect(passes).toBeLessThan(80);
     // The stretch passed over is told about once, in a fixed note.
-    expect(seen).toEqual(['bill_due:a', 'mail_gap:2026-11-05T14:20:00.000Z:2026-11-05T14:20:04.000Z', 'bill_due:c']);
+    expect(seen).toEqual(['bill_due:a', 'bill_due:c']);
+    expect(gaps).toEqual([{ from: new Date('2026-11-05T14:20:00.000Z'), to: new Date('2026-11-05T14:20:04.000Z') }]);
     expect(warnings.warn).toHaveBeenCalledWith(
       'Passed over mail that the mail server could not list',
       expect.objectContaining({ passes: MAX_STUCK_PASSES, since: '2026-11-05T14:20:00.000Z' }),
@@ -788,7 +837,7 @@ describe('watchMail when a list fails', () => {
     const raised: string[] = [];
     for (let pass = 0; pass < 3; pass += 1) {
       last = await watchMail({ ...base, source, since, stuck, logger: warnings });
-      raised.push(...last.raise.map(event => event.id));
+      raised.push(...last.raise.map(event => event.id), ...last.gaps.map(() => 'mail_gap:'));
       since = last.resume_from ?? since;
       stuck = last.stuck;
     }
@@ -1123,7 +1172,8 @@ describe('watchMail with a flood and a bad header', () => {
     expect(found.timed_out).toBe(false);
     expect(found.stopped_by).toBeUndefined();
     expect(found.resume_from).toBeUndefined();
-    expect(found.raise.map(event => event.id)).toEqual([expect.stringMatching(/^mail_gap:/), 'bill_due:bill']);
+    expect(found.gaps).toHaveLength(1);
+    expect(found.raise.map(event => event.id)).toEqual(['bill_due:bill']);
   });
 
   it('passes a flood over and goes on to the mail after it, in a few calls', async () => {
@@ -1135,7 +1185,8 @@ describe('watchMail with a flood and a bad header', () => {
     const found = await watch(source, new Date(second(0).getTime() + 3_600_000));
     expect(found.timed_out).toBe(false);
     expect(found.resume_from).toBeUndefined();
-    expect(found.raise.map(event => event.id)).toEqual([expect.stringMatching(/^mail_gap:/), 'bill_due:bill']);
+    expect(found.gaps).toHaveLength(1);
+    expect(found.raise.map(event => event.id)).toEqual(['bill_due:bill']);
     expect(lists.length).toBeLessThan(30);
   });
 });
@@ -1220,6 +1271,36 @@ describe('watchMail window and thread checks', () => {
     expect((await watchMail({ ...input, out_of_time: () => false })).window_ms).toBe(20 * 60_000);
     // A pass that ran out of time before it read anything lists half as much next time.
     expect((await watchMail({ ...input, out_of_time: () => true })).window_ms).toBe(5 * 60_000);
+  });
+});
+
+describe('watchMail window after a pass that did not read all of it', () => {
+  it('does not double the window after a pass that stopped at a message, only after one that read it all', async () => {
+    const bill = {
+      ...message({ id: 'a', at: new Date('2026-11-05T14:02:00.000Z') }),
+      subject: 'Invoice: amount due by November 7',
+    };
+    const source: MailSource = {
+      listNewMessages: () => Promise.resolve({ read: 'all', messages: [bill] }),
+      readText: () => Promise.reject(new Error('The connector could not fetch the message.')),
+      laterInThread: () => Promise.resolve([]),
+      trustedAuthenticationServers: [],
+      datesAreArrival: false,
+    };
+    const found = await watchMail({
+      source,
+      settings: defaultReachSettings('UTC'),
+      since: SINCE,
+      now: NOW,
+      logger: logger(),
+      stuck: undefined,
+      out_of_time: () => false,
+      assistant: 'Mira',
+      handled: undefined,
+      max_width: 10 * 60_000,
+    });
+    expect(found.stopped_by).toBeDefined();
+    expect(found.window_ms).toBe(10 * 60_000);
   });
 });
 

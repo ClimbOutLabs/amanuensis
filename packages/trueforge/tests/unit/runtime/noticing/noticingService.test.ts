@@ -8,7 +8,11 @@ import { ReachSettingsStore } from '../../../../src/db/reachSettingsStore';
 import { createSqliteDb } from '../../../../src/db/sqlite/client';
 import { createDeliveryService } from '../../../../src/runtime/delivery/deliveryService';
 import type { NoticingJudge } from '../../../../src/runtime/noticing/judge';
-import { createNoticingService, mailProblemOf } from '../../../../src/runtime/noticing/noticingService';
+import {
+  calendarProblemOf,
+  createNoticingService,
+  mailProblemOf,
+} from '../../../../src/runtime/noticing/noticingService';
 import {
   MailLoginFailedError,
   MailSourceBusyError,
@@ -183,7 +187,7 @@ async function setup({
   const calendarSource: CalendarSource = { listEvents: jest.fn(() => Promise.resolve(events)) };
   const sources: NoticingSources = {
     mail: { status: 'ready', source: mailSource, kind: 'google' },
-    calendar: calendarSource,
+    calendar: { status: 'ready', source: calendarSource },
   };
   const approvals: ApprovalSource = { listWaiting: () => Promise.resolve(waiting) };
   const listOwners = jest.fn(() => Promise.resolve([OWNER]));
@@ -1217,8 +1221,9 @@ describe('mail that cannot be read, and mail that is two things', () => {
       ],
       unreadable: { broken: true },
     });
-    await expect(service.run({ watcher: 'mail' })).resolves.toEqual({ owners: 1, raised: 1 });
-    expect(await feed()).toHaveLength(1);
+    // The one it cannot read is from a sender marked always important, so it is told about, and so is the other.
+    await expect(service.run({ watcher: 'mail' })).resolves.toEqual({ owners: 1, raised: 2 });
+    expect(await feed()).toHaveLength(2);
     expect((await store.getCheckpoint({ ...OWNER, watcher: 'mail' }))?.checked_at).toEqual(
       new Date('2026-11-05T14:50:00.000Z'),
     );
@@ -1664,9 +1669,7 @@ describe('mail trouble follows how far behind the checkpoint is', () => {
           event =>
             event.id === `bill_due:${message.id}` ||
             (event.id.startsWith('mail_gap:') &&
-              (([from, to]) =>
-                new Date(from ?? '').getTime() <= message.received_at.getTime() &&
-                message.received_at.getTime() <= new Date(to ?? '').getTime())(event.id.slice(9).split(/(?<=Z):/))),
+              new Date(event.occurred_at).getTime() <= message.received_at.getTime()),
         );
       for (let pass = 0; pass <= (hours * HOUR) / STEP; pass += 1) {
         clock.now = new Date(NOW.getTime() + pass * STEP);
@@ -1694,6 +1697,212 @@ describe('mail trouble follows how far behind the checkpoint is', () => {
     },
     120_000,
   );
+
+  /** A small seeded generator, so a failing run can be played again from its seed. */
+  const seeded = (seed: number): (() => number) => {
+    let state = seed;
+    return () => {
+      state = (state + 0x6d2b79f5) | 0;
+      let t = Math.imul(state ^ (state >>> 15), 1 | state);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  };
+
+  describe('with faults drawn from a seed', () => {
+    const PASS = 30 * 60_000;
+    const RUN_HOURS = 42;
+    const FAULTY_HOURS = 30;
+    const MODES = [
+      'clean',
+      'list_busy',
+      'list_plain',
+      'list_flaky',
+      'slow_lists',
+      'read_plain',
+      'read_flaky',
+      'read_busy',
+      'read_unreadable',
+      'slow_reads',
+      'no_source',
+      'google_sign_in',
+    ] as const;
+    const seeds = Array.from({ length: 24 }, (_, index) => index + 1);
+
+    it.each(seeds)(
+      'tells about every message, shows the lag and stays within its calls, for seed %i',
+      async seed => {
+        const random = seeded(seed);
+        const messages = Array.from({ length: 45 }, (_, index) =>
+          mail({
+            id: `r${String(index)}`,
+            thread_id: `tr${String(index)}`,
+            from_address: 'billing@shop.test',
+            from_name: null,
+            subject: `Invoice ${String(index)}: amount due by November 7`,
+            snippet: 'Amount due by November 7',
+            authentication_results: [],
+            received_at: new Date(NOW.getTime() + 10 * 60_000 + Math.floor(random() * 28 * HOUR)),
+          }),
+        );
+        const built = await setup({ messages });
+        const { service, store, clock, mailSource } = built;
+        const recorded: NoticingEvent[] = [];
+        const real = store.recordAll.bind(store);
+        jest.spyOn(store, 'recordAll').mockImplementation(async input => {
+          recorded.push(...input.events);
+          return await real(input);
+        });
+        const list = jest.mocked(mailSource.listNewMessages).getMockImplementation();
+        const read = mailSource.readText.bind(mailSource);
+        let mode: (typeof MODES)[number] = 'clean';
+        let reads = 0;
+        let calls = 0;
+        jest.mocked(mailSource.listNewMessages).mockImplementation(input => {
+          calls += 1;
+          if (mode === 'list_busy') return Promise.reject(busy());
+          if (mode === 'list_plain') return Promise.reject(plain());
+          if (mode === 'list_flaky' && calls % 3 !== 0) return Promise.reject(plain());
+          if (mode === 'slow_lists') clock.now = new Date(clock.now.getTime() + 12_000);
+          return list === undefined ? Promise.reject(plain()) : list(input);
+        });
+        mailSource.readText = message => {
+          calls += 1;
+          reads += 1;
+          if (mode === 'slow_reads') clock.now = new Date(clock.now.getTime() + 20_000);
+          if (mode === 'read_plain' || (mode === 'read_flaky' && reads % 2 === 0)) return Promise.reject(plain());
+          if (mode === 'read_busy') return Promise.reject(busy());
+          if (mode === 'read_unreadable' && Number(message.id.slice(1)) % 4 === 0) {
+            return Promise.reject(new MessageUnreadableError({ cause: new Error('gone') }));
+          }
+          return read(message);
+        };
+        const told = (message: MailMessage): boolean =>
+          recorded.some(
+            event =>
+              event.id === `bill_due:${message.id}` ||
+              (event.id.startsWith('mail_gap:') &&
+                new Date(event.occurred_at).getTime() <= message.received_at.getTime()),
+          );
+        let phaseEnds = 0;
+        for (let pass = 0; pass <= (RUN_HOURS * HOUR) / PASS; pass += 1) {
+          clock.now = new Date(NOW.getTime() + pass * PASS);
+          const hours = (clock.now.getTime() - NOW.getTime()) / HOUR;
+          if (pass === 0) {
+            // The first pass starts the checkpoint; mail that came before it is not read, by design.
+            phaseEnds = 2;
+          } else if (pass >= phaseEnds) {
+            phaseEnds = pass + 2 + Math.floor(random() * 8);
+            mode = hours >= FAULTY_HOURS ? 'clean' : (MODES[Math.floor(random() * MODES.length)] ?? 'clean');
+            // A source switch now and then, each way, whatever the fault is.
+            if (random() < 0.4) {
+              const imap = random() < 0.5;
+              mailSource.datesAreArrival = !imap;
+              if (imap) {
+                delete mailSource.fetchesEachListed;
+              } else {
+                mailSource.fetchesEachListed = true;
+              }
+              built.sources.mail = { status: 'ready', source: mailSource, kind: imap ? 'email_connector' : 'google' };
+            }
+          }
+          const ready = built.sources.mail;
+          if (mode === 'no_source') built.sources.mail = { status: 'none' };
+          if (mode === 'google_sign_in') {
+            built.sources.mail = { status: 'unreachable', error: new GoogleReconnectRequiredError(), kind: 'google' };
+          }
+          calls = 0;
+          await service.run({ watcher: 'mail' });
+          built.sources.mail = ready;
+          expect(calls).toBeLessThanOrEqual(150);
+          const state = await checkpoint(store);
+          const problem = mailProblemOf({ checkpoint: state, now: clock.now });
+          // Mail read to the checkpoint is told about, whatever went wrong, and anything older than an hour shows.
+          for (const message of messages) {
+            if (state !== undefined && message.received_at.getTime() < state.checked_at.getTime()) {
+              expect(told(message)).toBe(true);
+            }
+            if (message.received_at.getTime() <= clock.now.getTime() - HOUR - PASS && !told(message)) {
+              expect(problem).toBeDefined();
+            }
+          }
+        }
+        for (const message of messages) {
+          expect(told(message)).toBe(true);
+        }
+        expect((await checkpoint(store))?.failure).toBeUndefined();
+        expect(
+          new Set(recorded.filter(event => event.id.startsWith('mail_gap:')).map(event => event.id)).size,
+        ).toBeLessThanOrEqual(8);
+      },
+      120_000,
+    );
+  });
+
+  it('shows mail as behind from the checkpoint alone, and not at all once it was read a short while ago', () => {
+    const stored = (checked_ago: number, failure?: { kind: 'other'; since: Date }) => ({
+      checked_at: new Date(NOW.getTime() - checked_ago),
+      failure,
+      stuck: undefined,
+      window_ms: undefined,
+      source: 'google' as const,
+    });
+    expect(mailProblemOf({ checkpoint: stored(2 * HOUR), now: NOW })).toEqual({
+      since: new Date(NOW.getTime() - 2 * HOUR),
+      kind: 'too_slow',
+    });
+    expect(
+      mailProblemOf({
+        checkpoint: stored(10 * 60_000, { kind: 'other', since: new Date(NOW.getTime() - 5 * HOUR) }),
+        now: NOW,
+      }),
+    ).toBeUndefined();
+  });
+
+  it('marks a pass that ran out of time as slow in the same pass', async () => {
+    const { service, store, mailSource, clock } = await setup({ messages: bills });
+    mailSource.datesAreArrival = false;
+    // An earlier pass recorded another reason, which running out of time replaces.
+    await store.setCheckpoint({
+      ...OWNER,
+      watcher: 'mail',
+      checked_at: new Date(NOW.getTime() - 20 * 60_000),
+      failure: { kind: 'other', since: new Date(NOW.getTime() - 30 * 60_000) },
+      stuck: undefined,
+      window_ms: undefined,
+      source: 'google',
+    });
+    jest.spyOn(mailSource, 'readText').mockImplementation(() => {
+      clock.now = new Date(clock.now.getTime() + 100_000);
+      return Promise.resolve('Amount due by November 7');
+    });
+    await service.run({ watcher: 'mail' });
+    expect((await checkpoint(store))?.failure).toMatchObject({ kind: 'too_slow' });
+  });
+
+  it('counts the look at tracked bills against its own small budget', async () => {
+    const { service, store, mailSource } = await setup({});
+    await store.recordAll({
+      ...OWNER,
+      status: 'tracking',
+      now: NOW,
+      events: Array.from({ length: 30 }, (_, index) => ({
+        id: `bill_due:t${String(index)}`,
+        kind: 'bill_due' as const,
+        evidence: 'content' as const,
+        summary: 'A bill is due.',
+        facts: 'Due soon',
+        matched: 'A message names a due date.',
+        link: null,
+        mail_ref: { message_id: `t${String(index)}`, thread_id: `tt${String(index)}` },
+        occurred_at: '2026-10-30T10:00:00.000Z',
+        due_at: '2026-11-07T15:00:00.000Z',
+      })),
+    });
+    await service.run({ watcher: 'mail' });
+    // A thread check costs two calls and the look at bills gets 20.
+    expect(jest.mocked(mailSource.laterInThread).mock.calls.length).toBeLessThanOrEqual(11);
+  });
 
   it('shows a list that fails the same way for six passes, passes nothing over and keeps since', async () => {
     const { service, store, clock, mailSource } = await setup({ messages: bills });
@@ -1831,7 +2040,7 @@ describe('mail trouble follows how far behind the checkpoint is', () => {
     await store.setCheckpoint({
       ...OWNER,
       watcher: 'mail',
-      checked_at: new Date(NOW.getTime() - 12 * 3_600_000),
+      checked_at: new Date(NOW.getTime() - 23 * 3_600_000),
       failure: { kind: 'too_slow', since: NOW },
       stuck: undefined,
       window_ms: 20 * 3_600_000,
@@ -1842,6 +2051,10 @@ describe('mail trouble follows how far behind the checkpoint is', () => {
       await service.run({ watcher: 'mail' });
       const state = await checkpoint(store);
       expect(state?.window_ms ?? 0).toBeLessThanOrEqual(24 * 3_600_000);
+      if (pass === 0) {
+        // The window did not reach now, so the doubled 40 hours is cut to a day.
+        expect(state?.window_ms).toBe(24 * 3_600_000);
+      }
     }
   });
 
@@ -1856,24 +2069,106 @@ describe('mail trouble follows how far behind the checkpoint is', () => {
     it.each([
       ['google', 'email_connector'],
       ['email_connector', 'google'],
-    ] as const)('starts afresh when mail moves from %s to %s', async (before, now) => {
+    ] as const)('keeps how far behind mail was when it moves from %s to %s', async (before, now) => {
       const { service, store, mailSource, sources } = await setup({});
       sources.mail = { status: 'ready', source: mailSource, kind: now };
       await store.setCheckpoint({ ...OWNER, watcher: 'mail', ...carried, source: before });
       await service.run({ watcher: 'mail' });
       const state = await checkpoint(store);
-      expect(state).toMatchObject({ source: now, failure: undefined, stuck: undefined, window_ms: undefined });
+      expect(state).toMatchObject({ source: now, stuck: undefined, window_ms: undefined });
+      // The new source reads from where the old one got to, not from ten minutes ago.
       expect(jest.mocked(mailSource.listNewMessages)).toHaveBeenCalledWith(
-        expect.objectContaining({ since: new Date(NOW.getTime() - 10 * 60_000) }),
+        expect.objectContaining({ since: carried.checked_at }),
       );
     });
 
-    it('writes the source that failed, and starts afresh, when the other source cannot be reached', async () => {
-      const { service, store, sources } = await setup({});
+    it('keeps the stored place and the start of the trouble when the other source cannot be reached', async () => {
+      const { service, store, sources, clock } = await setup({});
       await store.setCheckpoint({ ...OWNER, watcher: 'mail', ...carried, source: 'email_connector' });
       sources.mail = { status: 'unreachable', error: new Error('Google needs to be connected again.'), kind: 'google' };
       await service.run({ watcher: 'mail' });
-      expect(await checkpoint(store)).toMatchObject({ source: 'google', stuck: undefined, window_ms: undefined });
+      expect(await checkpoint(store)).toMatchObject({
+        source: 'email_connector',
+        checked_at: carried.checked_at,
+        failure: { since: carried.failure.since },
+        stuck: carried.stuck,
+        window_ms: carried.window_ms,
+      });
+      expect(mailProblemOf({ checkpoint: await checkpoint(store), now: clock.now })?.since).toEqual(
+        carried.failure.since,
+      );
+    });
+
+    it('keeps showing the trouble when Google needs a sign-in while an email connector is behind', async () => {
+      const { service, store, sources, clock } = await setup({});
+      await store.setCheckpoint({ ...OWNER, watcher: 'mail', ...carried, source: 'email_connector' });
+      sources.mail = { status: 'unreachable', error: new GoogleReconnectRequiredError(), kind: 'google' };
+      for (let pass = 0; pass < 3; pass += 1) {
+        clock.now = new Date(NOW.getTime() + pass * 10 * 60_000);
+        await service.run({ watcher: 'mail' });
+        expect(mailProblemOf({ checkpoint: await checkpoint(store), now: clock.now })).toMatchObject({
+          kind: 'google_sign_in',
+          since: carried.failure.since,
+        });
+      }
+    });
+
+    it('tells about the mail left unread, once, when a pass finds no mail source while behind', async () => {
+      const { service, store, sources, feed } = await setup({});
+      await store.setCheckpoint({ ...OWNER, watcher: 'mail', ...carried, source: 'email_connector' });
+      sources.mail = { status: 'none' };
+      await service.run({ watcher: 'mail' });
+      await service.run({ watcher: 'mail' });
+      const notes = (await feed()).filter(item => item.text.includes('could not read some mail'));
+      expect(notes).toHaveLength(1);
+    });
+
+    it('does not tell about anything when a pass finds no mail source and none was in use', async () => {
+      const { service, store, sources, feed } = await setup({});
+      await store.setCheckpoint({
+        ...OWNER,
+        watcher: 'mail',
+        checked_at: new Date(NOW.getTime() - 10 * 60_000),
+        failure: undefined,
+        stuck: undefined,
+        window_ms: undefined,
+        source: undefined,
+      });
+      sources.mail = { status: 'none' };
+      await service.run({ watcher: 'mail' });
+      expect(await feed()).toEqual([]);
+    });
+  });
+
+  describe('someone who is not listed by their source or their settings', () => {
+    const behind = {
+      checked_at: new Date(NOW.getTime() - 3 * 3_600_000),
+      failure: { kind: 'other' as const, since: new Date(NOW.getTime() - 2 * 3_600_000) },
+      stuck: undefined,
+      window_ms: undefined,
+      source: 'google' as const,
+    };
+
+    it('still records that Google needs a sign-in, for a person who never saved Reach me settings', async () => {
+      const { service, store, sources, listOwners, clock } = await setup({ saved: false });
+      listOwners.mockResolvedValue([]);
+      await store.setCheckpoint({ ...OWNER, watcher: 'mail', ...behind });
+      sources.mail = { status: 'unreachable', error: new GoogleReconnectRequiredError(), kind: 'google' };
+      await expect(service.run({ watcher: 'mail' })).resolves.toMatchObject({ owners: 1 });
+      expect(mailProblemOf({ checkpoint: await checkpoint(store), now: clock.now })).toMatchObject({
+        kind: 'google_sign_in',
+        since: behind.failure.since,
+      });
+    });
+
+    it('tells about unread mail once after a full disconnect', async () => {
+      const { service, store, sources, listOwners, feed } = await setup({ saved: false });
+      listOwners.mockResolvedValue([]);
+      await store.setCheckpoint({ ...OWNER, watcher: 'mail', ...behind });
+      sources.mail = { status: 'none' };
+      await service.run({ watcher: 'mail' });
+      await service.run({ watcher: 'mail' });
+      expect((await feed()).filter(item => item.text.includes('could not read some mail'))).toHaveLength(1);
     });
   });
 
@@ -1919,11 +2214,22 @@ describe('mail trouble follows how far behind the checkpoint is', () => {
       expect((await store.getCheckpoint({ ...OWNER, watcher: 'calendar' }))?.failure).toBeUndefined();
     });
 
+    it('records calendar trouble, with its kind, when the calendar is out of reach', async () => {
+      const { service, store, sources, clock } = await setup({});
+      sources.calendar = { status: 'unreachable', error: new GoogleReconnectRequiredError(), kind: 'google_sign_in' };
+      await service.run({ watcher: 'calendar' });
+      clock.now = new Date(NOW.getTime() + 2 * 3_600_000);
+      await service.run({ watcher: 'calendar' });
+      expect(
+        calendarProblemOf({ checkpoint: await store.getCheckpoint({ ...OWNER, watcher: 'calendar' }), now: clock.now }),
+      ).toEqual({ since: NOW, kind: 'google_sign_in' });
+    });
+
     it('forgets calendar trouble once no calendar is connected', async () => {
       const { service, store, calendarSource, sources } = await setup({});
       jest.mocked(calendarSource.listEvents).mockRejectedValue(new Error('CalDAV is down'));
       await service.run({ watcher: 'calendar' });
-      sources.calendar = undefined;
+      sources.calendar = { status: 'none' };
       await service.run({ watcher: 'calendar' });
       expect((await store.getCheckpoint({ ...OWNER, watcher: 'calendar' }))?.failure).toBeUndefined();
     });

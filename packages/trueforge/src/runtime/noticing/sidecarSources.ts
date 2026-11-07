@@ -514,12 +514,14 @@ export function createSidecarNoticingSources({
       return {
         mail: own.mail.status !== 'none' || mailUrl === undefined ? own.mail : await mailFromSidecar(mailUrl),
         calendar:
-          own.calendar ??
-          (calendarUrl === undefined
-            ? undefined
-            : sidecarCalendarSource({
-                call: sidecarTools({ name: CALDAV_SERVER_NAME, url: calendarUrl, logger, callMs: CALENDAR_CALL_MS }),
-              })),
+          own.calendar.status !== 'none' || calendarUrl === undefined
+            ? own.calendar
+            : {
+                status: 'ready',
+                source: sidecarCalendarSource({
+                  call: sidecarTools({ name: CALDAV_SERVER_NAME, url: calendarUrl, logger, callMs: CALENDAR_CALL_MS }),
+                }),
+              },
       };
     },
   };

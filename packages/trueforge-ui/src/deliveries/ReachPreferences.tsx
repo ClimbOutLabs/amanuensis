@@ -67,12 +67,20 @@ function NumberField({
   );
 }
 
-const MAIL_PROBLEM_NEXT_STEP = {
-  too_slow: 'Your mail is taking too long to read. Ask whoever runs your mail to check it, or wait for it to catch up.',
-  google_sign_in: 'Open Settings, Connectors, Google and choose Reconnect to sign in to Google again.',
-  email_password: 'Open Settings, Connectors, and check the Email connector’s account name and password.',
-  other: 'Open Settings, Connectors, and check that your mail is still connected.',
-} as const;
+const SIGN_IN_STEP = 'Open Settings, Connectors, Google and choose Reconnect to sign in to Google again.';
+
+function mailNextStep({ kind, assistant }: { kind: NonNullable<ReachView['mailProblem']>['kind']; assistant: string }) {
+  switch (kind) {
+    case 'too_slow':
+      return `Wait for ${assistant} to catch up. If this lasts a day, ask whoever runs your mail.`;
+    case 'google_sign_in':
+      return SIGN_IN_STEP;
+    case 'email_password':
+      return 'Open Settings, Connectors, Email. Make a new app password and save it again.';
+    case 'other':
+      return 'Open Settings, Connectors, and check that your mail is still connected.';
+  }
+}
 
 /** Shown only once mail has gone unchecked for about an hour, so a short hiccup never worries anyone. */
 function MailProblem({ problem }: { problem: NonNullable<ReachView['mailProblem']> }) {
@@ -81,7 +89,7 @@ function MailProblem({ problem }: { problem: NonNullable<ReachView['mailProblem'
   return (
     <div role="status" className={`${CARD} flex flex-col gap-1`}>
       <p className="text-text-primary text-sm font-semibold">{`${assistant} has not been able to check your mail since ${since}.`}</p>
-      <p className="text-text-secondary text-sm">{MAIL_PROBLEM_NEXT_STEP[problem.kind]}</p>
+      <p className="text-text-secondary text-sm">{mailNextStep({ kind: problem.kind, assistant })}</p>
     </div>
   );
 }
@@ -94,7 +102,9 @@ function CalendarProblem({ problem }: { problem: NonNullable<ReachView['calendar
     <div role="status" className={`${CARD} flex flex-col gap-1`}>
       <p className="text-text-primary text-sm font-semibold">{`${assistant} has not been able to check your calendar since ${since}.`}</p>
       <p className="text-text-secondary text-sm">
-        Open Settings, Connectors, and check that your calendar is still connected.
+        {problem.kind === 'google_sign_in'
+          ? SIGN_IN_STEP
+          : 'Open Settings, Connectors, and check that your calendar is still connected.'}
       </p>
     </div>
   );

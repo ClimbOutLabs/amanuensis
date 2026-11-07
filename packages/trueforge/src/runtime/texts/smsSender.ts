@@ -4,7 +4,7 @@ import type { ITextContactStore } from '../../db/textContactStore';
 import type { DeliveryAttempt } from '../../schemas/deliveries';
 import type { TextMode } from '../../schemas/textMessages';
 import { TEST_WORDS, type DeliveryChannelSender } from '../delivery/deliveryChannel';
-import { assistantNameFor } from './assistantName';
+import { textAssistantName } from './assistantName';
 import { smsFailureWords, type SmsProvider } from './smsProvider';
 import {
   claimTextLimits,
@@ -121,7 +121,7 @@ export function createSmsSender({
               : `${dayLimitWords({ limits: day, refused: claim })} Until then, see new items in the app.`;
         return [attempt({ outcome: 'skipped', detail, target, at })];
       }
-      const name = await assistantNameFor({ personalization, owner });
+      const name = await textAssistantName({ personalization, owner });
       // Only the fixed test words are let through in Full, whatever kind a test delivery has.
       const { body, withheld } = textBody({
         name,
