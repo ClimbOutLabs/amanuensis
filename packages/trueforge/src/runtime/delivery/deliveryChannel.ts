@@ -1,5 +1,8 @@
 import type { Delivery, DeliveryAttempt, DeliveryChannel } from '../../schemas/deliveries';
 
+/** The words of every Try it test, the only words a test may send in Full. */
+export const TEST_WORDS = 'This is a test. If you can read this, it works.';
+
 /**
  * One way a delivery can reach a person beyond the feed. A later part adds a sender for a new channel without
  * touching the service. A sender never throws: a failure is returned as an attempt with the outcome `failed`.

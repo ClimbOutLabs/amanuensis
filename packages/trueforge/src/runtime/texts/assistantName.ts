@@ -1,30 +1,41 @@
 import type { IPersonalizationStore } from '../../db/personalizationStore';
 import { UNNAMED_ASSISTANT } from '../chatAssistant';
-import { mayCarryContactDetail, plainText } from './textWords';
+import { isPlainWords, plainText } from './textWords';
 
 /** The most of a name a text or a call carries, so a name cannot hold a message of its own. */
-const NAME_MAX = 20;
+const TEXT_NAME_MAX = 20;
+
+/** Cuts at the last whole word, so a cut never makes a new word, such as comet cut to com. */
+function cutAtWord(text: string): string {
+  if (text.length <= TEXT_NAME_MAX) {
+    return text;
+  }
+  const head = text.slice(0, TEXT_NAME_MAX);
+  const space = head.lastIndexOf(' ');
+  return (text[TEXT_NAME_MAX] === ' ' || space < 0 ? head : head.slice(0, space)).trim();
+}
+
+/** Dashes and apostrophes that are not inside a word, which a voice would not say as written. */
+const LONE_MARKS = /(?<![A-Za-z])['-]+|['-]+(?![A-Za-z])/g;
 
 /**
- * A name from the person's settings, made fit to say or send: only letters, spaces, and apostrophes and dashes between
- * letters, at most 20 of them, so it cannot carry a link or a number to call. Undefined when nothing of it is left.
+ * A name from the person's settings, made fit to say or send: only letters, spaces, apostrophes and dashes inside
+ * words, at most 20 of them, so it cannot carry a link or a number to call. The name is checked as given and again as
+ * it will be used, since leaving out signs and cutting it can make new words. Undefined when it cannot be used.
  */
 export function plainName(name: string | null | undefined): string | undefined {
   const plain = plainText(name ?? '');
-  // A name that is not plain words, such as one that holds a number, a site or an address, is not used at all.
-  if (mayCarryContactDetail(plain)) {
-    return undefined;
-  }
-  const letters = plain
-    .replace(/[^A-Za-z '-]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, NAME_MAX)
-    // After the cut, which can leave a dash at the end: a voice will not say a lone dash or apostrophe as written.
-    .replace(/(?<![A-Za-z])['-]|['-](?![A-Za-z])/g, ' ')
-    .replace(/\s+/g, ' ')
+  const letters = cutAtWord(
+    plain
+      .replace(/[^A-Za-z '-]/g, ' ')
+      .replace(LONE_MARKS, ' ')
+      .replace(/\s+/g, ' ')
+      .trim(),
+  )
+    // A cut inside a long word can leave a dash at its end.
+    .replace(LONE_MARKS, ' ')
     .trim();
-  return letters === '' ? undefined : letters;
+  return letters !== '' && isPlainWords(plain) && isPlainWords(letters) ? letters : undefined;
 }
 
 /** The name the person gave their assistant, made fit for the first words of a text. */

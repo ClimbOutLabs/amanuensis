@@ -244,7 +244,8 @@ export function TextsSettings({
                 Full
                 <span className="text-text-secondary block">
                   A reminder’s own words, cut to fit two texts. Anything your assistant noticed still says only its
-                  kind. It can show on a locked screen and is seen by Twilio and the phone company.
+                  kind. A reminder with a link, a long number or signs is sent as Private. It can show on a locked
+                  screen and is seen by Twilio and the phone company.
                 </span>
               </span>
             </label>

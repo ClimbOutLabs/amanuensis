@@ -723,7 +723,7 @@ describe('a conversation on the phone', () => {
 
   it.each([
     ['Call 555 0100 now', 'Hi, this is your assistant, calling for Dana.'],
-    ['Mannie the very helpful assistant', 'Hi, this is Mannie the very help, calling for Dana.'],
+    ['Mannie the very helpful assistant', 'Hi, this is Mannie the very, calling for Dana.'],
   ])('says the assistant name "%s" by the same rule as a text', async (name, spoken) => {
     h = await callsHarness({ assistantName: name });
     await h.readyToCall();

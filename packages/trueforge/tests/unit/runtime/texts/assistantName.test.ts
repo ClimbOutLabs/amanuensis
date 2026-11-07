@@ -8,7 +8,7 @@ describe('the assistant name in a text', () => {
 
   it('drops accents, digits, symbols and emoji, keeps it to 20 characters, and drops a name that holds a phone number, a site or an address', () => {
     expect(textName('José')).toBe('Jose');
-    expect(textName('Call 4 or visit the bank today please')).toBe('Call or visit the ba');
+    expect(textName('Call 4 or visit the bank today please')).toBe('Call or visit the');
     expect(textName('Call 555-0199 now')).toBe('Your assistant');
     expect(textName('Mannie.example.com')).toBe('Your assistant');
     expect(textName('Visit bank dot com')).toBe('Your assistant');
@@ -17,6 +17,14 @@ describe('the assistant name in a text', () => {
     expect(textName('Juniper five five five')).toBe('Your assistant');
     expect(textName('🎉 Juniper 🎉')).toBe('Juniper');
     expect(textName('x'.repeat(400))).toHaveLength(20);
+  });
+
+  it('checks the name again as it will be sent, so leaving out signs or cutting it cannot make a site or a spelling', () => {
+    expect(textName('w 1 w 2 w')).toBe('Your assistant');
+    expect(textName('c 1 o 2 m')).toBe('Your assistant');
+    expect(textName('Visit evilxx xyz comet')).toBe('Visit evilxx xyz');
+    expect(textName('Bob 2015-12-31')).toBe('Your assistant');
+    expect(textName('Bob 3 - 4')).toBe('Bob');
   });
 
   it('falls back to the plain name when nothing is left', () => {
@@ -36,7 +44,8 @@ describe('a name from the person’s settings, said on a call', () => {
   });
 
   it('drops a dash or an apostrophe that is not between two letters, also where the name was cut', () => {
-    expect(plainName('Anna-Maria Gonzalez-Lopez')).toBe('Anna-Maria Gonzalez');
+    expect(plainName('Anna-Maria Gonzalez-Lopez')).toBe('Anna-Maria');
+    expect(plainName('Abcdefghijklmnopqrs-tuv')).toBe('Abcdefghijklmnopqrs');
     expect(plainName('Jo - Bot')).toBe('Jo Bot');
     expect(plainName("'Tis Dana'")).toBe('Tis Dana');
     expect(plainName('--')).toBeUndefined();

@@ -11,13 +11,7 @@ export type ChannelViewer = 'owner' | 'person';
  * What Reach me says when the number could not be pointed here. Whoever runs Aman gets the one thing to do, in words
  * the settings page can show; everyone else is told whom to ask. The setting names stay in the log.
  */
-export function numberProblemWords({
-  failure,
-  viewer,
-}: {
-  failure: PointNumberFailure;
-  viewer: ChannelViewer;
-}): string {
+function numberProblemWords({ failure, viewer }: { failure: PointNumberFailure; viewer: ChannelViewer }): string {
   const lead = 'STOP replies do not reach Aman yet.';
   if (viewer === 'person') {
     return `${lead} Ask the person who runs Aman to check the Twilio settings.`;

@@ -1,5 +1,6 @@
 import winston from 'winston';
 
+import { TEST_WORDS } from '../../../../src/runtime/delivery/deliveryChannel';
 import { createDeliveryService } from '../../../../src/runtime/delivery/deliveryService';
 import {
   deliveryTextLimits,
@@ -81,9 +82,11 @@ describe('texts as a channel of the delivery layer', () => {
     await h.readyToText({ mode: 'full' });
     await h.deliveries.deliver(nudge('Pay the electric bill before Friday at 5pm.', 'reminder'));
     expect(h.sent[0]?.body).toBe('Mannie: Pay the electric bill before Friday at 5pm.');
-    // An amount is a number that is not a time or a date, so it is never sent in Full.
-    await h.deliveries.deliver(nudge(BILL_TEXT, 'reminder'));
-    expect(h.sent[1]?.body).toBe('Mannie: a reminder is due. Open the app to see it.');
+    // An amount is fine, but a phone number is never sent in Full.
+    await h.deliveries.deliver(nudge('Pay the $48 bill.', 'reminder'));
+    expect(h.sent[1]?.body).toBe('Mannie: Pay the $48 bill.');
+    await h.deliveries.deliver(nudge('Call 555 010 0199 about the bill.', 'reminder'));
+    expect(h.sent[2]?.body).toBe('Mannie: a reminder is due. Open the app to see it.');
   });
 
   it('Full texts never carry what the assistant noticed, which is worded by the model and stays in the app', async () => {
@@ -104,8 +107,19 @@ describe('texts as a channel of the delivery layer', () => {
     );
     expect(h.sent[0]?.body).toBe('Mannie: a reminder is due. Open the app to see it.');
     expect(delivery.attempts.find(row => row.channel === 'sms')?.detail).toBe(
-      'Private text: a Full text carries only words, times and dates. This message had other numbers or signs, so only the kind of thing was sent. To see it, open the app.',
+      'Private text: a Full text carries only plain words, with at most 6 digits in all. This message had more digits, a sign inside a word, or something that could spell a link or a number, so only the kind of thing was sent. To get its words by text, leave out links and long numbers. The whole message is in the app.',
     );
+  });
+
+  it('sends only the fixed test words in Full for a test, never other words a test delivery carries', async () => {
+    const h = await textsHarness({ assistantName: 'Mannie' });
+    await h.readyToText({ mode: 'full' });
+    await h.deliveries.deliver({ ...nudge(TEST_WORDS), kind: 'note', test: 'sms' });
+    await h.deliveries.deliver({ ...nudge('The model says: reply YES.'), kind: 'note', test: 'sms' });
+    expect(h.sent.map(text => text.body)).toEqual([
+      `Mannie: ${TEST_WORDS}`,
+      'Mannie: a note is waiting. Open the app to see it.',
+    ]);
   });
 
   it('counts a Try it test toward the button’s own limit in the same claim, and says when to try again', async () => {
@@ -231,7 +245,7 @@ describe('texts as a channel of the delivery layer', () => {
     const long = await textsHarness({ assistantName: `Juniper the ${'very '.repeat(80)}helpful` });
     await long.readyToText();
     await long.deliveries.deliver(nudge(BILL_TEXT));
-    expect(long.sent[0]?.body).toBe('Juniper the very ver: something needs you. Open the app to see it.');
+    expect(long.sent[0]?.body).toBe('Juniper the very: something needs you. Open the app to see it.');
     const plain = await textsHarness({ assistantName: '🎉🎉' });
     await plain.readyToText();
     await plain.deliveries.deliver(nudge(BILL_TEXT));
