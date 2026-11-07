@@ -41,6 +41,11 @@ env_key_values() { # env file, key
     }' "$1"
 }
 
+# The value Compose reads for KEY: that of its last line.
+env_get() { # env file, key
+  env_key_values "$1" "$2" | tail -n 1
+}
+
 # What to call the sign-in users of an instance beyond its owner, comma separated: their emails, else the names behind
 # leftover records and password hashes. Empty when only the owner can sign in. Every OIDC_ALLOWED_EMAILS line counts
 # because Compose reads the last one, wherever it sits. Hashes are never printed.

@@ -81,6 +81,7 @@ async function setup(channels: ReachAvailability = NO_PHONE_CHANNELS) {
     store: deliveryStore,
     senders: [
       {
+        channel: 'web_push',
         send: ({ delivery }) => {
           pushed.push(delivery);
           return Promise.resolve([
@@ -122,7 +123,10 @@ async function setup(channels: ReachAvailability = NO_PHONE_CHANNELS) {
 
 describe('deliverReminder and Reach me', () => {
   const owner = { tenant_id: TENANT, created_by: OWNER.subject_id };
-  const READY: ReachAvailability = { ...NO_PHONE_CHANNELS, calls: { available: true, note: 'Calls are on.' } };
+  const READY: ReachAvailability = {
+    ...NO_PHONE_CHANNELS,
+    calls: { available: true, note: 'Calls are on.', problem: null },
+  };
   const calling = {
     ...defaultReachSettings('America/New_York'),
     channels: { texts: false, calls: true },

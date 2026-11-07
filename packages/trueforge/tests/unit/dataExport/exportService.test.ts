@@ -23,6 +23,7 @@ import { SqliteSentinelSettingsStore } from '../../../src/db/sqlite/sentinel-set
 import { SqliteSessionStore } from '../../../src/db/sqlite/session-store/SqliteSessionStore';
 import { SqliteSpaceStore } from '../../../src/db/sqlite/space-store/SqliteSpaceStore';
 import { SqliteTurnArtifactStore } from '../../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
+import { TextContactStore } from '../../../src/db/textContactStore';
 import { personaVaultNamespace, vaultFilesystemNamespace } from '../../../src/runtime/memory/markdownMemoryFiles';
 import type { MemoryClient, MemoryVaultEntry } from '../../../src/runtime/memory/memoryClient';
 import { legacySessionsOf } from '../../fixtures/legacySessions';
@@ -67,6 +68,7 @@ async function makeDeps(
     auditStore: new SentinelAuditStore(db),
     deliveryStore: new DeliveryStore(db),
     reachSettingsStore: new ReachSettingsStore(db),
+    textContactStore: new TextContactStore(db),
     turnArtifactStore: new SqliteTurnArtifactStore(db),
     mcpServerStore: new SqliteMcpServerStore(db),
     listAgents: () => Promise.resolve([]),

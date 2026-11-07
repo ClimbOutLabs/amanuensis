@@ -67,6 +67,8 @@ export const TABLES_TO_MOVE = [
   'delivery',
   'delivery_attempt',
   'reach_settings',
+  'text_contact',
+  'text_send_count',
   'noticing_event',
   'noticing_checkpoint',
   'reach_lease',

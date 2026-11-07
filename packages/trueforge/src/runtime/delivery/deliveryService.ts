@@ -3,12 +3,16 @@ import type { Logger } from 'winston';
 
 import type { CreateDeliveryInput, IDeliveryStore } from '../../db/deliveryStore';
 import type { PersonOwner } from '../../db/personOwner';
-import type { Delivery, DeliveryAttempt } from '../../schemas/deliveries';
+import type { Delivery, DeliveryAttempt, DeliveryChannel } from '../../schemas/deliveries';
 import type { DeliveryChannelSender } from './deliveryChannel';
 
 /** The one door into the feed: makes the delivery, tries each channel, and writes every step to Activity. */
 export interface DeliveryService {
-  deliver(input: CreateDeliveryInput): Promise<Delivery>;
+  /**
+   * `test` makes this a Try it test of one channel: only that channel's sender is tried, and it is told the delivery
+   * is a test. The app itself always gets it. A text sender lets only the fixed test words through in Full.
+   */
+  deliver(input: CreateDeliveryInput & { test?: DeliveryChannel }): Promise<Delivery>;
   /**
    * Delivers once per id: a later call with the same id resolves to the delivery made first. It sends again only when
    * that delivery has no attempt written down, because the call that made it stopped before its sends were recorded.
@@ -22,13 +26,19 @@ function channelToolName(attempt: DeliveryAttempt): string {
   return `delivery.${attempt.channel}`;
 }
 
+const CHANNEL_WORDS: Record<DeliveryChannel, string> = {
+  in_app: 'the app',
+  web_push: 'a push notice',
+  sms: 'a text message',
+};
+
 function conversationOf(delivery: Delivery): string {
   const link = delivery.link;
   return link !== null && 'session_id' in link ? link.session_id : '';
 }
 
 function outcomeWords(attempt: DeliveryAttempt): string {
-  const base = `Tried ${attempt.channel === 'web_push' ? 'a push notice' : 'the app'}: ${attempt.outcome}.`;
+  const base = `Tried ${CHANNEL_WORDS[attempt.channel]}: ${attempt.outcome}.`;
   return attempt.detail === null ? base : `${base} ${attempt.detail}`;
 }
 
@@ -79,7 +89,15 @@ export function createDeliveryService({
     }
   }
 
-  async function send({ owner, created }: { owner: PersonOwner; created: Delivery }): Promise<Delivery> {
+  async function send({
+    owner,
+    created,
+    test,
+  }: {
+    owner: PersonOwner;
+    created: Delivery;
+    test: DeliveryChannel | undefined;
+  }): Promise<Delivery> {
     await record({
       owner,
       delivery: created,
@@ -95,17 +113,23 @@ export function createDeliveryService({
     };
     const attempts: DeliveryAttempt[] = [inApp];
     for (const sender of senders) {
+      if (test !== undefined && test !== sender.channel) {
+        continue;
+      }
       try {
-        attempts.push(...(await sender.send({ delivery: created, ...owner })));
+        attempts.push(...(await sender.send({ delivery: created, ...owner, test: test !== undefined })));
       } catch (error) {
         logger.warn('A delivery channel failed', {
           delivery_id: created.id,
           error: error instanceof Error ? error.message : String(error),
         });
         attempts.push({
-          channel: 'web_push',
+          channel: sender.channel,
           outcome: 'failed',
-          detail: 'The notice could not be sent. It is still in your feed.',
+          detail:
+            sender.channel === 'sms'
+              ? 'The text could not be sent. The item is still in your feed.'
+              : 'The notice could not be sent. It is still in your feed.',
           target: null,
           attempted_at: now().toISOString(),
         });
@@ -126,14 +150,14 @@ export function createDeliveryService({
   }
 
   return {
-    async deliver(input) {
-      return await send({ owner: ownerOf(input), created: await store.create(input) });
+    async deliver({ test, ...input }) {
+      return await send({ owner: ownerOf(input), created: await store.create(input), test });
     },
     async deliverOnce(input) {
       const { delivery, created } = await store.createOnce(input);
       // Sending again can repeat a notice that went out just before a crash, which is better than losing it.
       return created || delivery.attempts.length === 0
-        ? await send({ owner: ownerOf(input), created: delivery })
+        ? await send({ owner: ownerOf(input), created: delivery, test: undefined })
         : delivery;
     },
   };

@@ -5,4 +5,6 @@ export interface ReachChannelAvailability {
     available: boolean;
     /** A plain-words line about the channel, shown beside its switch. */
     note: string;
+    /** Set when the channel works but has a problem to fix, in plain words with what to do. Null otherwise. */
+    problem: string | null;
 }

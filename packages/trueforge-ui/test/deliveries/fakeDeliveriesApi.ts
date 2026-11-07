@@ -1,6 +1,13 @@
 import { vi } from 'vitest';
 
-import type { DeliveriesApi, DeliveryItem, ReachSettings, ReachSuggestion, ReachView } from '@/deliveries/types.js';
+import type {
+  DeliveriesApi,
+  DeliveryItem,
+  ReachSettings,
+  ReachSuggestion,
+  ReachView,
+  TextStatus,
+} from '@/deliveries/types.js';
 
 export function item(overrides: Partial<DeliveryItem> & { id: string }): DeliveryItem {
   return {
@@ -32,6 +39,16 @@ export const QUIET_SETTINGS: ReachSettings = {
   approvalWaitMinutes: 15,
 };
 
+const NO_NUMBER: TextStatus = {
+  phone: null,
+  confirmed: false,
+  mode: 'private',
+  optedOut: false,
+  codePending: false,
+  pendingPhone: null,
+  privatePreview: 'Mannie: a reminder is due. Open the app to see it.',
+};
+
 /** A server that holds the feed once, the way the real one does, so two "devices" can share it. */
 export function fakeServer(initial: DeliveryItem[]) {
   const state: {
@@ -40,6 +57,7 @@ export function fakeServer(initial: DeliveryItem[]) {
     pushEndpoints: Set<string>;
     reach: ReachView;
     suggestions: ReachSuggestion[];
+    texts: TextStatus;
   } = {
     items: initial,
     pushKey: SERVER_KEY,
@@ -48,8 +66,12 @@ export function fakeServer(initial: DeliveryItem[]) {
       settings: QUIET_SETTINGS,
       saved: false,
       availability: {
-        texts: { available: false, note: 'Texts are not set up yet.' },
-        calls: { available: false, note: 'Phone calls are not set up yet.' },
+        texts: {
+          available: false,
+          note: 'Texts are not set up on this server. To set them up, follow the Text messages page in the Aman docs.',
+          problem: null,
+        },
+        calls: { available: false, note: 'Phone calls are not set up yet.', problem: null },
       },
       maxLevels: {
         mail_always: 'call',
@@ -63,6 +85,7 @@ export function fakeServer(initial: DeliveryItem[]) {
       mailSource: null,
     },
     suggestions: [],
+    texts: NO_NUMBER,
   };
   const unread = () => state.items.filter(row => row.seenAt === null).length;
   const api: DeliveriesApi = {
@@ -100,6 +123,36 @@ export function fakeServer(initial: DeliveryItem[]) {
       }),
       suggestions: vi.fn(() => Promise.resolve(state.suggestions)),
       test: vi.fn(() => Promise.resolve({ devicesReached: 1 })),
+      texts: {
+        status: vi.fn(() => Promise.resolve(state.texts)),
+        sendCode: vi.fn((phone: string) => {
+          // Like the server: a new number waits beside a confirmed one until its code is confirmed.
+          state.texts =
+            state.texts.confirmed && state.texts.phone !== phone
+              ? { ...state.texts, pendingPhone: phone, codePending: true }
+              : { ...state.texts, phone, confirmed: false, codePending: true, pendingPhone: null };
+          return Promise.resolve(state.texts);
+        }),
+        confirm: vi.fn((code: string) => {
+          if (code !== '123456') return Promise.reject(new Error('That code is not right. You have 4 tries left.'));
+          state.texts = {
+            ...state.texts,
+            phone: state.texts.pendingPhone ?? state.texts.phone,
+            confirmed: true,
+            codePending: false,
+            pendingPhone: null,
+          };
+          return Promise.resolve(state.texts);
+        }),
+        setMode: vi.fn((mode: TextStatus['mode']) => {
+          state.texts = { ...state.texts, mode };
+          return Promise.resolve(state.texts);
+        }),
+        remove: vi.fn(() => {
+          state.texts = NO_NUMBER;
+          return Promise.resolve();
+        }),
+      },
     },
   };
   return { api, state };

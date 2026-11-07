@@ -10,6 +10,7 @@ import type { Persona } from '../personas/persona';
 export const CHAT_ASSISTANT_DESCRIPTION = 'Runs the schedules you make in a chat.';
 
 const CHAT_ASSISTANT_NAME_PREFIX = 'assistant-';
+/** The name used for an assistant the person has not named. */
 export const UNNAMED_ASSISTANT = 'Your assistant';
 
 /** The name a person gave their assistant, or the plain default when they gave none. */
