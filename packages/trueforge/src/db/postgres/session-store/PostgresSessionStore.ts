@@ -57,6 +57,7 @@ import type {
   RecoverRunningCommandExecutionsInput,
   RemoveThreadsInput,
   RenewCommandExecutionLeaseInput,
+  ReplaceSessionTitleIfCurrentInput,
   ReplaceTaskChecklistInput,
   RevokeImplementationPlanGrantInput,
   RevokeImplementationPlanGrantResult,
@@ -126,6 +127,7 @@ import {
   getSessionByExternalId as getSessionByExternalIdQuery,
   getSession as getSessionQuery,
   listSessions as listSessionsQuery,
+  replaceSessionTitleIfCurrent as replaceSessionTitleIfCurrentQuery,
   stampImportedSession as stampImportedSessionQuery,
   updateSession as updateSessionQuery,
 } from './queries/sessions';
@@ -247,6 +249,10 @@ export class PostgresSessionStore implements ISessionStore<SessionCustom, TurnCu
 
   updateSession(input: UpdateSessionInput<SessionCustom>): Promise<void> {
     return updateSessionQuery(this.db, input);
+  }
+
+  replaceSessionTitleIfCurrent(input: ReplaceSessionTitleIfCurrentInput): Promise<boolean> {
+    return replaceSessionTitleIfCurrentQuery(this.db, input);
   }
 
   createSessionFolder(input: CreateSessionFolderInput): Promise<SessionFolderRecord> {
