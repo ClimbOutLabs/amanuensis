@@ -4,7 +4,7 @@ import type { Logger } from 'winston';
 import type { IModelProviderStore } from '../../db/modelProviderStore';
 import type { DeliveryLevel } from '../../schemas/deliveries';
 import { NoticingVerdictSchema, type NoticingEvent, type NoticingVerdict } from '../../schemas/reach';
-import type { TurnModelUsage } from '../modelUsage';
+import { NO_TURN_USAGE } from '../modelUsage';
 import { askModelOnce } from '../oneShotModelCall';
 import type { TokenFactoryBudget } from '../tokenFactoryBudget';
 import { ceilingOf } from './levels';
@@ -74,13 +74,6 @@ export function parseJudgeVerdict(raw: string): NoticingVerdict | undefined {
   const parsed = NoticingVerdictSchema.safeParse(decoded);
   return parsed.success ? parsed.data : undefined;
 }
-
-/** A watcher has no turn to attribute a call to, so its usage is dropped; the daily token cap still counts every call. */
-const NO_TURN_USAGE: TurnModelUsage = {
-  record() {
-    // Counted by the budget when the call is made.
-  },
-};
 
 export function createNoticingJudge({
   tenantId,

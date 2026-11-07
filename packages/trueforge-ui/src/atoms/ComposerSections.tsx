@@ -41,7 +41,7 @@ export function ComposerLeftSection({ disabled, isRunning, onAttach }: ComposerL
   return <DraftComposerActionsMenu actions={actions} disabled={disabled || isRunning} />;
 }
 
-/** The mic. While a turn runs it shows only a hands-free conversation that is on, so Stop stays the main control. */
+/** The mic. While a turn runs it shows only voice mode when it is on, so Stop stays the main control. */
 export function ComposerRightSection({ disabled, isRunning }: ComposerRightSectionProps): ReactNode {
   return <VoiceInputButton disabled={disabled} isRunning={isRunning} />;
 }

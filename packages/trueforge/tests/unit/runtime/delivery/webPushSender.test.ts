@@ -166,6 +166,15 @@ describe('web push sender', () => {
     expect(fetchPush).not.toHaveBeenCalled();
   });
 
+  it('leaves a call to the phone: a push goes out only if the call is missed', async () => {
+    const { store } = subscriptions([TARGET_A]);
+    const fetchPush = jest.fn(() => Promise.resolve({ status: 201 }));
+    const sender = createWebPushSender({ subscriptions: store, settings: SETTINGS, fetchPush });
+
+    await expect(sender.send({ delivery: delivery({ level: 'call' }), ...OWNER, test: false })).resolves.toEqual([]);
+    expect(fetchPush).not.toHaveBeenCalled();
+  });
+
   it('skips every device and says why when push is not set up', async () => {
     const { store } = subscriptions([TARGET_A]);
     const fetchPush = jest.fn(() => Promise.resolve({ status: 201 }));

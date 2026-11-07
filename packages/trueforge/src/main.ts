@@ -66,7 +66,12 @@ import type { Logger } from 'winston';
 import { createServerApp } from './app';
 import { TrueForgeAuthorizer, type Authorizer } from './auth/authorizer';
 import { createAuthenticator } from './auth/createAuthenticator';
-import { resolveRequestContext, STANDALONE_REQUEST_CONTEXT, type RequestContext } from './auth/identity';
+import {
+  requestContextFromCreatedBySubject,
+  resolveRequestContext,
+  STANDALONE_REQUEST_CONTEXT,
+  type RequestContext,
+} from './auth/identity';
 import { startOidcDiscovery } from './auth/oidc';
 import { McpCatalog } from './catalog/McpCatalog';
 import { ModelCatalog } from './catalog/ModelCatalog';
@@ -89,6 +94,7 @@ import { NoticingStore, type INoticingStore } from './db/noticingStore';
 import type { IPersonalizationStore } from './db/personalizationStore';
 import type { IPersonaStore } from './db/personaStore';
 import type { PersonOwner } from './db/personOwner';
+import { PhoneCallStore, type IPhoneCallStore } from './db/phoneCallStore';
 import type { PostgresAgentStore } from './db/postgres/agent-store/PostgresAgentStore';
 import type { Database as PostgresDatabase } from './db/postgres/types';
 import { PushSubscriptionStore, type IPushSubscriptionStore } from './db/pushSubscriptionStore';
@@ -115,13 +121,18 @@ import { PACKAGE_VERSION } from './packageVersion';
 import { closePersonaKnowledgeIndexers } from './personaKnowledge/knowledgeIndexer';
 import { ActiveTurnRegistry } from './runtime/activeTurns';
 import { registerCalendarConnectorForBoot } from './runtime/calendarAccount';
+import { createCallAnswerer } from './runtime/calls/callAnswerer';
+import { createCallChats } from './runtime/calls/callChats';
+import { callVoiceReady, createCallReadiness } from './runtime/calls/callVoiceReady';
+import { createPhoneCallService } from './runtime/calls/phoneCalls';
+import { createTwilioCallProvider } from './runtime/calls/twilioCalls';
 import { createChatImageService } from './runtime/chatImages/chatImageService';
 import { CHAT_IMAGE_RETENTION_DAYS } from './runtime/chatImages/limits';
 import { createImageReencoder } from './runtime/chatImages/reencodeInSandbox';
 import { ChatSearchIndexer } from './runtime/chatSearchIndexing';
 import { recoverAbandonedCommandExecutions } from './runtime/commandExecutionRecovery';
 import { designateTavilyAtBoot, seedDefaultSearchProviderAtBoot } from './runtime/defaultSearchProvider';
-import { createDeliveryService } from './runtime/delivery/deliveryService';
+import { createDeliveryService, type DeliveryService } from './runtime/delivery/deliveryService';
 import { createWebPushSender } from './runtime/delivery/webPushSender';
 import { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { instanceOwnerSubjectId } from './runtime/instanceOwner';
@@ -169,8 +180,14 @@ import { TrueFoundryServiceFoundryServerClient } from './truefoundry/TrueFoundry
 import { TrueFoundrySkillStore } from './truefoundry/TrueFoundrySkillStore';
 import { INBOUND_SMS_PATH, inboundSmsRoute } from './twilioWebhook/inboundSms';
 import { twilioListenerFor } from './twilioWebhook/listener';
+import { phoneCallRoutes } from './twilioWebhook/voiceCall';
 import { ensureWritableDataDir } from './utils/dataDir';
-import { startSttAvailabilityWatcher } from './voice/sttAvailability';
+import { speechLimiter } from './voice/speechRateLimit';
+import { isVoiceAvailable, startSttAvailabilityWatcher } from './voice/sttAvailability';
+import { SidecarSpeechToText } from './voice/sttClient';
+import { probeTtsHealth, SidecarSpeechSynthesizer } from './voice/ttsClient';
+import { SileroSpeechProbability } from './voice/vad/sileroVad';
+import { attachVoiceSocket, readyVadModel } from './voice/voiceSocket';
 
 /** Persistence + optional Redis wired for the selected topology. */
 interface ServerPersistence<TTransaction> {
@@ -217,6 +234,7 @@ interface ServerPersistence<TTransaction> {
   deliveryStore: IDeliveryStore;
   reachSettingsStore: IReachSettingsStore;
   textContactStore: ITextContactStore;
+  phoneCallStore: IPhoneCallStore;
   noticingStore: INoticingStore;
   pushSubscriptionStore: IPushSubscriptionStore;
   approvalTokenStore: ApprovalTokenStore;
@@ -456,6 +474,7 @@ async function createStandalonePersistence(options: {
     deliveryStore: new DeliveryStore(db),
     reachSettingsStore: new ReachSettingsStore(db),
     textContactStore: new TextContactStore(db),
+    phoneCallStore: new PhoneCallStore(db),
     noticingStore: new NoticingStore(db),
     pushSubscriptionStore: new PushSubscriptionStore(db),
     approvalTokenStore: new SqliteApprovalTokenStore(db),
@@ -631,6 +650,7 @@ async function createDistributedPersistence(options: {
     deliveryStore: new DeliveryStore(db),
     reachSettingsStore: new ReachSettingsStore(db),
     textContactStore: new TextContactStore(db),
+    phoneCallStore: new PhoneCallStore(db),
     noticingStore: new NoticingStore(db),
     pushSubscriptionStore: new PushSubscriptionStore(db),
     approvalTokenStore: new PostgresApprovalTokenStore(db),
@@ -677,6 +697,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     deliveryStore,
     reachSettingsStore,
     textContactStore,
+    phoneCallStore,
     noticingStore,
     pushSubscriptionStore,
     approvalTokenStore,
@@ -823,13 +844,103 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
       : { number_key: configuration.TWILIO.authToken, max_texts_per_day: configuration.TWILIO.maxTextsPerDay };
   // Set when the Twilio number could not be pointed at this server at boot, so Settings can say what to do.
   const twilioNumber: { problem: PointNumberFailure | undefined } = { problem: undefined };
+  // Whether a call can listen and speak is checked in one place: placing a call checks again, and Reach me, Noticing
+  // and Try it read the last answer, so none of them offers a call that would ring deaf or silent.
+  const callReadiness = createCallReadiness(() =>
+    callVoiceReady({
+      sttReady: isVoiceAvailable,
+      ttsReady: () => probeTtsHealth({ exact: true }),
+      vadModel: readyVadModel,
+    }),
+  );
+  if (configuration.TWILIO !== undefined) {
+    void callReadiness.check();
+    const callReadinessTimer = setInterval(() => {
+      void callReadiness.check();
+    }, 30_000);
+    callReadinessTimer.unref();
+  }
   const reachChannels = (input?: { viewer: ChannelViewer }) =>
     reachChannelsFor({
       twilio: configuration.TWILIO,
+      voiceReady: callReadiness.current(),
       numberProblem: twilioNumber.problem,
       viewer: input?.viewer ?? 'person',
     });
-  const deliveryService = createDeliveryService({
+  // Made below; the call channel reaches them only once a call is under way.
+  const callDeps: {
+    deliveries?: DeliveryService;
+    sessions?: Sessions<SessionCustom, TurnCustom>;
+  } = {};
+  const ownerContext = (owner: { tenant_id: string; created_by: string }) =>
+    requestContextFromCreatedBySubject({
+      tenant_id: owner.tenant_id,
+      created_by_subject: {
+        subject_id: owner.created_by,
+        subject_type: 'user',
+        // Only the id decides which model a call answers with; no name is needed.
+        subject_display_name: '',
+      },
+    });
+  const phoneCalls = createPhoneCallService({
+    store: phoneCallStore,
+    deliveryStore,
+    contacts: textContactStore,
+    reachSettings: reachSettingsStore,
+    personalization: personalizationStore,
+    twilio:
+      configuration.TWILIO === undefined
+        ? undefined
+        : {
+            provider: createTwilioCallProvider({ settings: configuration.TWILIO }),
+            accountSid: configuration.TWILIO.accountSid,
+            publicUrl: configuration.TWILIO.webhookPublicUrl,
+          },
+    voiceReady: callReadiness.check,
+    deliveries: () => {
+      if (callDeps.deliveries === undefined) {
+        throw new Error('The delivery service is not ready yet.');
+      }
+      return callDeps.deliveries;
+    },
+    chats: createCallChats({
+      sessionStore,
+      sessions: () => {
+        if (callDeps.sessions === undefined) {
+          throw new Error('Chats are not ready yet.');
+        }
+        return callDeps.sessions;
+      },
+      answerer: owner =>
+        createCallAnswerer({
+          tenantId: owner.tenant_id,
+          modelProviderStore: persistence.resolveModelProviderStore(ownerContext(owner)),
+          globalSettingsStore,
+          tokenFactoryBudget,
+          logger,
+        }),
+    }),
+    // Shares the person's place at the voice service with voice mode and read-aloud, so a call waits its turn
+    // instead of being turned away. The voice the person picked is kept in their browser, so calls use the default.
+    speaking: owner =>
+      new SidecarSpeechSynthesizer({
+        share: { limiter: speechLimiter, person: `${owner.tenant_id}:${owner.created_by}` },
+      }),
+    listening: async () => ({
+      vad: await SileroSpeechProbability.load({ model: await readyVadModel() }),
+      stt: new SidecarSpeechToText(),
+    }),
+    logger,
+  });
+
+  // A call cut off when the server stopped is still written down, and its text and push still go out.
+  const phoneCallSweepTimer = setInterval(() => {
+    phoneCalls.sweep().catch((error: unknown) => {
+      logger.warn('Phone call sweep failed', extractErrorLogFields(error));
+    });
+  }, 60_000);
+  phoneCallSweepTimer.unref();
+  const deliveries = createDeliveryService({
     store: deliveryStore,
     senders: [
       createWebPushSender({ subscriptions: pushSubscriptionStore, settings: configuration.WEB_PUSH }),
@@ -841,10 +952,12 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
         limits: textLimits,
         textNumbers,
       }),
+      phoneCalls.sender,
     ],
     audit: sentinelAuditStore,
     logger,
   });
+  callDeps.deliveries = deliveries;
   const noticingOwnerId = instanceOwnerSubjectId({
     signInOff: getTrueForgeAuthMode(configuration) === TrueForgeAuthMode.Standalone,
     defaultSubjectId: STANDALONE_REQUEST_CONTEXT.subject.id,
@@ -863,7 +976,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     approvals: sessionApprovalSource({ sessionStore, tenant_id: TENANT_ID }),
     reachSettings: reachSettingsStore,
     store: noticingStore,
-    deliveries: deliveryService,
+    deliveries,
     history: deliveryStore,
     judgeFor: createNoticingJudgeResolver({
       resolveModelProviderStore: context => persistence.resolveModelProviderStore(context),
@@ -895,6 +1008,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     mailPolicyStatusPath: configuration.MAIL_POLICY_STATUS_FILE,
   });
   const sessions = new Sessions({ sessionStore, sentinelServices });
+  callDeps.sessions = sessions;
   const chatImages = createChatImageService({
     store: chatImageStore,
     sessionStore,
@@ -975,6 +1089,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     personaStore,
     logger,
   });
+  const callRoutes = phoneCallRoutes({ calls: phoneCalls });
   const app = createServerApp({
     chatSearchIndexer,
     modelCatalog,
@@ -1010,7 +1125,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     briefItemStore,
     deliveryStore,
     pushSubscriptionStore,
-    deliveryService,
+    deliveryService: deliveries,
     reachSettingsStore,
     noticingStore,
     noticingService,
@@ -1068,7 +1183,8 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     twilioWebhookRoutes:
       configuration.TWILIO === undefined
         ? []
-        : [inboundSmsRoute({ settings: configuration.TWILIO, textNumbers, logger })],
+        : [inboundSmsRoute({ settings: configuration.TWILIO, textNumbers, logger }), ...callRoutes.routes],
+    twilioSocketRoutes: configuration.TWILIO === undefined ? [] : callRoutes.sockets,
   };
 }
 
@@ -1150,6 +1266,7 @@ try {
     chatSearchIndexer,
     packageMirrorAllowanceHolds,
     twilioWebhookRoutes,
+    twilioSocketRoutes,
     smsProvider,
     twilioNumber,
   } = configuration.STANDALONE
@@ -1368,6 +1485,10 @@ try {
       controller?.start();
     },
   );
+
+  // Voice mode's WebSocket: the upgrade is handled here because the app's own router cannot take one.
+  attachVoiceSocket({ server, app, logger, requireClientCertificate: tlsServe !== undefined });
+
   server.on('error', (error: unknown) => {
     console.error('Failed to start server:', error instanceof Error ? error.message : error);
     process.exit(1);
@@ -1380,6 +1501,7 @@ try {
     twilio: configuration.TWILIO,
     hostname: configuration.HOST,
     routes: twilioWebhookRoutes,
+    sockets: twilioSocketRoutes,
     logger,
   }).catch((error: unknown) => {
     console.error(error instanceof Error ? error.message : error);

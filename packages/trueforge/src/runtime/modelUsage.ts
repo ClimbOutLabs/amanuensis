@@ -47,6 +47,13 @@ export interface TurnModelUsage {
   record(call: ModelCall): void;
 }
 
+/** For a model call that belongs to no turn: its usage is not kept, though the daily token cap still counts it. */
+export const NO_TURN_USAGE: TurnModelUsage = {
+  record() {
+    // Counted by the budget when the call is made.
+  },
+};
+
 /**
  * The provider's own usage, or null. A completed call always has at least one input token, so an
  * all-zero usage means the provider reported nothing and the client filled in zeros; it is never

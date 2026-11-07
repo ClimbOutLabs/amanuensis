@@ -4259,7 +4259,7 @@ await client.sessions.createBugReport("session_id");
 <dl>
 <dd>
 
-Cancel the running last turn for a session. Only the session creator may cancel.
+Cancel the running last turn for a session, or only the turn named by `turn_id`. Only the session creator may cancel.
 </dd>
 </dl>
 </dd>
@@ -7261,7 +7261,7 @@ await client.reach.listSuggestions();
 <dl>
 <dd>
 
-Sends the signed-in person a test item on one channel. A channel that is not set up answers 409. Test texts are limited to a few an hour.
+Sends the signed-in person a test item on one channel. A channel that is not set up answers 409. Test texts and test calls are limited, and a test past the limit answers 429.
 </dd>
 </dl>
 </dd>
@@ -7315,6 +7315,71 @@ await client.reach.testChannel({
 </details>
 
 ## Voice
+<details><summary><code>client.voice.<a href="/src/api/resources/voice/client/Client.ts">connect</a>({ ...params }) -> TrueForge.VoiceTicketResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Checks that the chat belongs to the caller and voice mode is ready, then returns a single-use ticket for the voice WebSocket. The WebSocket itself is not described here.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.voice.connect({
+    sessionId: "session_id"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.ConnectVoiceRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `VoiceClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 <details><summary><code>client.voice.<a href="/src/api/resources/voice/client/Client.ts">speak</a>({ ...params }) -> core.BinaryResponse</code></summary>
 <dl>
 <dd>

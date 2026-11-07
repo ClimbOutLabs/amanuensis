@@ -1,7 +1,11 @@
+import type { IncomingMessage } from 'node:http';
+import type { Duplex } from 'node:stream';
+
 import { serve, type ServerType } from '@hono/node-server';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import type { Logger } from 'winston';
+import { WebSocketServer, type WebSocket } from 'ws';
 
 import type { TwilioSettings } from '../config';
 import { verifyTwilioSignature } from './signature';
@@ -22,8 +26,21 @@ interface TwilioWebhookReply {
 export interface TwilioWebhookRoute {
   path: string;
   method: 'POST';
-  handle(input: { params: URLSearchParams }): Promise<TwilioWebhookReply>;
+  /** `query` is the signed address's own query, which Aman set when it asked Twilio to call back. */
+  handle(input: { params: URLSearchParams; query: URLSearchParams }): Promise<TwilioWebhookReply>;
 }
+
+/**
+ * One WebSocket address on the listener, such as a call's media stream. It opens only after the handshake's signature
+ * has been checked; what the socket then carries is the route's to check.
+ */
+export interface TwilioSocketRoute {
+  path: string;
+  open(socket: WebSocket): void;
+}
+
+/** The most one media frame may hold. Twilio sends 20 ms of audio at a time, far smaller. */
+const MAX_SOCKET_FRAME_BYTES = 64 * 1024;
 
 export const EMPTY_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response></Response>';
 
@@ -73,10 +90,62 @@ function createTwilioWebhookApp({
       logger.warn('A Twilio request was refused because its signature did not match', { path: route.path });
       return c.body(null, 403);
     }
-    const reply = await route.handle({ params });
+    const reply = await route.handle({ params, query: url.searchParams });
     return c.body(reply.body, reply.status, { 'Content-Type': 'text/xml; charset=utf-8' });
   });
   return app;
+}
+
+function refuseUpgrade(socket: Duplex, status: string): void {
+  socket.write(`HTTP/1.1 ${status}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
+  socket.destroy();
+}
+
+/**
+ * Takes WebSocket upgrades for the socket routes only. Twilio signs the handshake of a media stream like a webhook,
+ * over the stream's own address and no fields; the address may be written as wss or https, and either form is checked
+ * against the configured public address. Any other upgrade is refused.
+ */
+function attachSocketRoutes({
+  server,
+  settings,
+  sockets,
+  logger,
+}: {
+  server: ServerType;
+  settings: Pick<TwilioSettings, 'authToken' | 'webhookPublicUrl'>;
+  sockets: readonly TwilioSocketRoute[];
+  logger: Logger;
+}): void {
+  const known = new Map(sockets.map(route => [route.path, route]));
+  const upgrades = new WebSocketServer({ noServer: true, maxPayload: MAX_SOCKET_FRAME_BYTES });
+  server.on('upgrade', (request: IncomingMessage, socket: Duplex, head: Buffer) => {
+    const url = new URL(request.url ?? '/', 'http://localhost');
+    const route = known.get(url.pathname);
+    if (route === undefined) {
+      refuseUpgrade(socket, '404 Not Found');
+      return;
+    }
+    const header = request.headers['x-twilio-signature'];
+    const signature = Array.isArray(header) ? header[0] : header;
+    const httpsUrl = `${settings.webhookPublicUrl}${url.pathname}${url.search}`;
+    const signed = [httpsUrl, httpsUrl.replace(/^https:/, 'wss:')].some(candidate =>
+      verifyTwilioSignature({
+        authToken: settings.authToken,
+        url: candidate,
+        params: new URLSearchParams(),
+        signature,
+      }),
+    );
+    if (!signed) {
+      logger.warn('A Twilio socket was refused because its signature did not match', { path: route.path });
+      refuseUpgrade(socket, '403 Forbidden');
+      return;
+    }
+    upgrades.handleUpgrade(request, socket, head, ws => {
+      route.open(ws);
+    });
+  });
 }
 
 /**
@@ -87,11 +156,14 @@ export function startTwilioWebhookListener({
   settings,
   hostname,
   routes,
+  sockets = [],
   logger,
 }: {
   settings: Pick<TwilioSettings, 'authToken' | 'webhookPublicUrl' | 'webhookPort'>;
   hostname: string;
   routes: readonly TwilioWebhookRoute[];
+  /** WebSocket addresses, such as a call's media stream. */
+  sockets?: readonly TwilioSocketRoute[];
   logger: Logger;
 }): Promise<ServerType> {
   const app = createTwilioWebhookApp({ settings, routes, logger });
@@ -100,6 +172,7 @@ export function startTwilioWebhookListener({
       logger.info(`Twilio listener on ${hostname}:${String(info.port)} (Twilio routes only)`);
       resolve(server);
     });
+    attachSocketRoutes({ server, settings, sockets, logger });
     server.on('error', (error: unknown) => {
       // Before the port is open this fails the start. After, it is only logged, by its kind.
       if (server.listening) {
@@ -121,12 +194,16 @@ export async function twilioListenerFor({
   twilio,
   hostname,
   routes,
+  sockets = [],
   logger,
 }: {
   twilio: TwilioSettings | undefined;
   hostname: string;
   routes: readonly TwilioWebhookRoute[];
+  sockets?: readonly TwilioSocketRoute[];
   logger: Logger;
 }): Promise<ServerType | undefined> {
-  return twilio === undefined ? undefined : startTwilioWebhookListener({ settings: twilio, hostname, routes, logger });
+  return twilio === undefined
+    ? undefined
+    : startTwilioWebhookListener({ settings: twilio, hostname, routes, sockets, logger });
 }

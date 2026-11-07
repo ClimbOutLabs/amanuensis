@@ -1248,6 +1248,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       createVoiceRouter({
         logger: deps.logger,
         resolveRequestContext,
+        app,
       }),
       authMiddleware,
     ),
