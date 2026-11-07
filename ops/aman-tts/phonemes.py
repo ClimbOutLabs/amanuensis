@@ -216,19 +216,9 @@ _PLAIN_NUMBER = re.compile(
 # number or run on. "and" inside such a gap joins them too when the left side ends in a scale and the right is
 # smaller ("1000 and 500" is "one thousand and five hundred"). Joined spellings are refused, except a date or
 # time that is written with a comma.
-_UNITS = (
-    r"zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen"
-    r"|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety"
-)
-_SCALE_WORDS = r"(?:hundred|thousand|million|billion|trillion|dozen|lakh|crore)s?|grand"
-_WORD_VALUES = {
-    word: value
-    for value, word in enumerate(
-        "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen"
-        " seventeen eighteen nineteen".split()
-    )
-} | {"twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90}
+# One table for number words: the plain numbers come from _ONES and _TENS above, the scales from here.
 _SCALE_VALUES = {
+    "dozen": 12,
     "hundred": 100,
     "thousand": 1_000,
     "grand": 1_000,
@@ -238,6 +228,11 @@ _SCALE_VALUES = {
     "billion": 1_000_000_000,
     "trillion": 1_000_000_000_000,
 }
+_WORD_VALUES = {word: value for value, word in enumerate(_ONES)} | {
+    word: value * 10 for value, word in enumerate(_TENS) if word != "_"
+}
+_UNITS = "|".join(_WORD_VALUES)
+_SCALE_WORDS = rf"(?:{'|'.join(_SCALE_VALUES)})s?"
 _NUMBER_WORD = rf"(?:{_UNITS}|{_SCALE_WORDS})"
 _DIGIT_SPELLING = r"\$?\d+(?:[,.:]\d+)*"
 _NUMBER_SPELLING = re.compile(
@@ -245,45 +240,57 @@ _NUMBER_SPELLING = re.compile(
     rf"(?:{_DIGIT_SPELLING}(?: (?:{_SCALE_WORDS})(?![A-Za-z0-9]))?"
     rf"|{_NUMBER_WORD}(?:[ -]{_NUMBER_WORD})*(?![A-Za-z0-9])(?!'[A-Za-z]))"
 )
-_SILENT_GAP = re.compile(r"[ \t\n\"'()\u2014\u2026;!?,:&.]+")
+# Characters that make no sound between two numbers, defined once so every gap rule agrees. "&", "an" and "n"
+# are not here: they are heard as "and".
+_GAP_CHARS = r"[ \t\n\"'()\u2014\u2026;!?,:.\-]"
+_SILENT_GAP = re.compile(rf"{_GAP_CHARS}+")
 _SENTENCE_STOP_GAP = re.compile(r"[.!?][ \t\n]+")
-_AND_GAP = re.compile(r"[ \t\n\"'(),;:]*and[ \t\n\"'(),;:]*", re.IGNORECASE)
+_AND = r"(?:\band\b|\ban\b|\bn\b|&)"
+_AND_GAP = re.compile(rf"{_GAP_CHARS}*(?:{_AND}{_GAP_CHARS}*)+", re.IGNORECASE)
+# "two hundred and fifty" is one amount written in words, so it is read as it is written.
+_WORD_AND_GAP = re.compile(r" +and +", re.IGNORECASE)
 _COMMA_GAP = re.compile(r", +")
+# Capitalised only: "may", "sat" and "sun" in lower case are ordinary words, not a date.
 _MONTH_OR_WEEKDAY = (
-    r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?"
-    r"|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|mon(?:day)?|tue(?:s(?:day)?)?|wed(?:nesday)?"
-    r"|thu(?:r(?:s(?:day)?)?)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)"
+    r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?|Sep(?:t(?:ember)?)?"
+    r"|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?|Mon(?:day)?|Tue(?:s(?:day)?)?|Wed(?:nesday)?"
+    r"|Thu(?:r(?:s(?:day)?)?)?|Fri(?:day)?|Sat(?:urday)?|Sun(?:day)?)"
 )
 # A comma is a pause, so it is plain only where a written date or time has one, and only after a month or a
 # weekday: a day and a year ("Nov 6, 2026"), a day and a time ("Nov 6, 2:30") or a year and a time.
-_AFTER_MONTH = re.compile(rf"(?i)\b{_MONTH_OR_WEEKDAY}\.?\s+$")
-_AFTER_MONTH_AND_DAY = re.compile(rf"(?i)\b{_MONTH_OR_WEEKDAY}\.?\s+\d{{1,2}},\s+$")
+_AFTER_MONTH = re.compile(rf"\b{_MONTH_OR_WEEKDAY}\.?\s+$")
+_AFTER_MONTH_AND_DAY = re.compile(rf"\b{_MONTH_OR_WEEKDAY}\.?\s+\d{{1,2}},\s+$")
 _DAY = re.compile(r"\d{1,2}")
 _YEAR = re.compile(r"(?:19|20)\d\d")
 _CLOCK = re.compile(r"\d{1,2}:\d\d")
 
 
+_PLAIN_AMOUNT = re.compile(r"\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?")
+
+
+def _scale_of(word: str) -> int | None:
+    word = word.lower()
+    return _SCALE_VALUES.get(word) or _SCALE_VALUES.get(word.removesuffix("s"))
+
+
 def _value(spelling: str) -> float | None:
-    """What a spelling counts to, or None when it is not a plain amount (a time, for one)."""
+    """What a spelling counts to, or None when it is not a plain amount (a time or "1.2.3", for one)."""
     text = spelling.lstrip("$")
     if text[:1].isdigit():
         digits, _, scale = text.partition(" ")
-        if ":" in digits:
+        if _PLAIN_AMOUNT.fullmatch(digits) is None:
             return None
-        amount = float(digits.replace(",", ""))
-        return amount * _SCALE_VALUES.get(scale.lower().rstrip("s"), 12 if scale.lower().startswith("dozen") else 1)
+        return float(digits.replace(",", "")) * (_scale_of(scale) or 1)
     total = 0.0
     current = 0.0
     for word in re.split(r"[ -]", text.lower()):
-        word = word.rstrip("s") if word.rstrip("s") in _SCALE_VALUES or word.rstrip("s") == "dozen" else word
+        scale = _scale_of(word)
         if word in _WORD_VALUES:
             current += _WORD_VALUES[word]
-        elif word == "dozen":
-            current = max(current, 1) * 12
-        elif word == "hundred":
-            current = max(current, 1) * 100
-        elif word in _SCALE_VALUES:
-            total += max(current, 1) * _SCALE_VALUES[word]
+        elif scale is not None and scale < 1000:
+            current = max(current, 1) * scale
+        elif scale is not None:
+            total += max(current, 1) * scale
             current = 0
     return total + current
 
@@ -294,16 +301,15 @@ def _ending_scale(spelling: str) -> int | None:
     if text[:1].isdigit():
         digits, _, scale = text.partition(" ")
         if scale:
-            return _SCALE_VALUES.get(scale.lower().rstrip("s"))
-        if ":" in digits or "." in digits:
+            return _scale_of(scale)
+        if _PLAIN_AMOUNT.fullmatch(digits) is None or "." in digits:
             return None
         whole = int(digits.replace(",", ""))
         for size in (10**12, 10**9, 10**7, 10**6, 10**5, 1000, 100):
             if whole >= size and whole % size == 0:
                 return size
         return None
-    last = re.split(r"[ -]", text.lower())[-1]
-    return _SCALE_VALUES.get(last.rstrip("s"))
+    return _scale_of(re.split(r"[ -]", text)[-1])
 
 
 def _plain_comma(*, text: str, left: re.Match[str], right: re.Match[str]) -> bool:
@@ -313,12 +319,18 @@ def _plain_comma(*, text: str, left: re.Match[str], right: re.Match[str]) -> boo
     return _YEAR.fullmatch(a) is not None and _CLOCK.fullmatch(b) is not None and _AFTER_MONTH_AND_DAY.search(before) is not None
 
 
+def _in_words(spelling: re.Match[str]) -> bool:
+    return not spelling.group().lstrip("$")[:1].isdigit()
+
+
 def _runs_numbers_together(text: str) -> bool:
     """True when two numbers written side by side are heard as one number or run on."""
     spellings = list(_NUMBER_SPELLING.finditer(text))
     for left, right in zip(spellings, spellings[1:]):
         gap = text[left.end() : right.start()]
         if _AND_GAP.fullmatch(gap):
+            if _WORD_AND_GAP.fullmatch(gap) and _in_words(left) and _in_words(right):
+                continue
             scale, smaller = _ending_scale(left.group()), _value(right.group())
             joined = scale is not None and smaller is not None and smaller < scale
         else:
@@ -333,8 +345,9 @@ _WRITTEN_WORD = re.compile(r"[^\W_]+(?:'[^\W_]+)*")
 _PLAIN_CHARS = re.compile(r"[A-Za-z0-9 \n\t.,!?;:'\"()%&+@=$\u2014\u2026-]*")
 _LONE_HYPHEN = re.compile(r"(?<![A-Za-z])-|-(?![A-Za-z])")
 # A dot inside web-address-like text ("my.bank.com", "t.co", "163.com") is not heard as written. A single letter
-# on each side ("e.g.", "p.m.", "U.S.") is said letter by letter and is allowed.
-_DOTTED_WORD = re.compile(r"[A-Za-z]{2,}\.[A-Za-z]|[A-Za-z0-9]\.[A-Za-z]{2,}")
+# on each side ("e.g.", "p.m.", "U.S.") is said letter by letter and is allowed, and so is a closing dot
+# ("Ph.D.").
+_DOTTED_WORD = re.compile(r"[A-Za-z0-9]\.[A-Za-z]{2,}")
 
 
 def _ordinal_suffix(n: int) -> str:

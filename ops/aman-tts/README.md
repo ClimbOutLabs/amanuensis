@@ -53,12 +53,15 @@ text that was checked is the text that is heard. The check needs no model.
   `11.06.2026`, `007`, `5 000`, `3th`, more than two cents), times that are not real (`9:60`), digits
   written as superscripts or other forms, links, code, list marks, a minus sign or range, line breaks
   other than a plain one, letters outside plain English, and web-address-like text (`my.bank.com`,
-  `t.co`, `163.com`; a single letter either side of a dot, as in `e.g.` and `p.m.`, is allowed).
+  `t.co`, `163.com`; a single letter after a dot, as in `e.g.`, `p.m.` and `Ph.D.`, is allowed).
   Numbers written side by side are judged by one rule. A _spelling_ is digits (`1,000`, `2:30`), digits and
   a scale word (`5 million`, `2 dozen`), or a run of number words (`twenty-five`). Two spellings joined by a
-  gap of only blanks, silent signs and pause marks (`1000 (500)`, `1000; 500`, `1000...500`, `1000 & 500`,
-  `twenty (5)`, `one, two`), or by `and` when the left ends in a scale and the right is smaller
-  (`1000 and $500`, `1,000,000 and 500,000`), are refused. Not refused: one sentence stop and a space
+  gap of only blanks, silent signs, dashes and pause marks (`1000 (500)`, `1000; 500`, `1000...500`,
+  `1000 — 500`, `twenty (5)`, `one, two`), or by `and` (also `an`, `n`, `&`, with signs around it) when
+  the left ends in a scale and the right is smaller (`1000 and $500`, `1000 & 500`, `1000 and—500`,
+  `1,000,000 and 500,000`), are refused. Two number words joined by a plain "and" are one amount in
+  words and are read (`two hundred and fifty`). A month or weekday excuses a comma only with a capital
+  letter. A text the check cannot judge is refused, never an error. Not refused: one sentence stop and a space
   (`Use 5. 3 more follow.`), ranges (`Between 100 and 150`, `Rooms 101 and 102`), and a date or time
   written with a comma after a month or weekday (`Fri Nov 6, 2:30`, `March 5, 2026`,
   `Nov 6, 2026, 2:30 pm`). `Pay 19, 99 dollars` and `Send 12, 2000 dollars` are refused. Plain

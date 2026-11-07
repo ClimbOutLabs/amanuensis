@@ -226,6 +226,15 @@ class SpeakRequest:
     exact: bool
 
 
+def _would_read_as_written(text: str) -> bool:
+    # A judge that fails is a refusal; the error is not logged because it may quote the card text.
+    try:
+        return reads_as_written(text)
+    except Exception:
+        LOGGER.warning("speak check failed: refusing the text")
+        return False
+
+
 def _parse_speak_body(body: bytes) -> SpeakRequest:
     try:
         payload = json.loads(body)
@@ -303,7 +312,7 @@ def create_app(
         if text.strip() == "":
             raise HTTPException(status_code=400, detail="text is empty")
         # The same whole text is judged here and then spoken below, so what was checked is what is heard.
-        if speak_request.exact and not reads_as_written(text):
+        if speak_request.exact and not _would_read_as_written(text):
             LOGGER.info("speak refused: would change text, chars=%d", len(text))
             raise HTTPException(
                 status_code=400,

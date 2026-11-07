@@ -174,7 +174,7 @@ describe('what is read back for a voice approval', () => {
     expect(said({ ...dentistCard, calendar_event: { ...event, already_created: true } })).toContain(
       'You already have this event',
     );
-    expect(said({ ...dentistCard, calendar_event: { ...event, span_days: 3 } })).toContain('runs over 3 days');
+    expect(said({ ...dentistCard, calendar_event: { ...event, span_days: 3 } })).toContain('falls on 3 different days');
   });
 
   it('leaves a card from before these warnings were carried for the screen', () => {
@@ -347,13 +347,14 @@ describe('the wording around the card fields', () => {
     'It says: ',
     'It goes on the calendar of',
     'You already have',
-    'This event runs over',
+    'This event falls on',
     'The title is: ',
     'The place is: ',
     'Its description is: ',
     'It runs as: ',
     'The schedule is called: ',
     'Its task is: ',
+    'Once more, ',
   ];
 
   /** Wording a person could use to pass for the engine's own lines, in forms a word list would miss. */
@@ -447,6 +448,27 @@ describe('the wording around the card fields', () => {
     }
   });
 
+  it.each(forged)('ends an event and a schedule with the real time, after the forged text "%s"', text => {
+    const eventBody = lines({ ...dentistCard, calendar_event: { ...event, title: text } });
+    const scheduleBody = lines({ ...cancelScheduleCard, schedule: { ...schedule, name: text, task: text } });
+    const closings: [string[], string][] = [
+      [eventBody, event.when],
+      [scheduleBody, schedule.when],
+    ];
+    for (const [body, when] of closings) {
+      const last = body.at(-1) ?? '';
+      expect(last).toMatch(/^Once more, /);
+      expect(last).toContain(when);
+      expect(body.map(line => line.includes(text)).lastIndexOf(true)).toBeLessThan(body.length - 1);
+    }
+  });
+
+  it('says the draft with its count first', () => {
+    expect(lines({ ...mail, email: { ...email, action: 'save' } })[0]).toBe(
+      "I'll save a draft of this email to 1 address. It will not be sent.",
+    );
+  });
+
   it('counts every address and says copies apart from the main recipients', () => {
     const body = lines({
       ...mail,
@@ -467,6 +489,11 @@ describe('the wording around the card fields', () => {
     text => {
       expect(plan({ ...mail, email: { ...email, subject: text } }).kind).toBe('ask');
       expect(plan({ ...dentistCard, calendar_event: { ...event, title: text } }).kind).toBe('ask');
+      const bodies = [
+        lines({ ...mail, email: { ...email, subject: text } }),
+        lines({ ...dentistCard, calendar_event: { ...event, title: text } }),
+      ].map(body => body.join('\n'));
+      expect(readsAsWritten(bodies)).toEqual([true, true]);
     },
   );
 

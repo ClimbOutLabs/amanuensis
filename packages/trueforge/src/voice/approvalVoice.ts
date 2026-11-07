@@ -177,9 +177,11 @@ function cardWordingMatchesShape(card: Tier3Card): boolean {
 }
 
 /**
- * Text a person supplied (a title, subject, name) sits last on a line of its own, after a fixed label, and
- * the counts of what the card holds are said first, so a name that sounds like another line contradicts what
- * was already heard. Only a line break is kept off the voice, because it would end the line early.
+ * What the read-back guarantees about text a person supplied (a title, subject, name): the counts and the
+ * real addresses are said first, in a fixed order, and each supplied text sits on a line of its own after a
+ * fixed label. Such a text is read as written, so it can add words but cannot hide or replace a real one,
+ * and an extra address contradicts the count. Event and schedule cards end with the real time or task, said
+ * again after all supplied text. Only a line break is kept off the voice, because it would end the line early.
  */
 const LINE_BREAK = /[\r\n\u2028\u2029\u0085]/u;
 
@@ -240,7 +242,7 @@ function readableBody(card: Tier3Card): string[] | undefined {
     return [
       email.action === 'send'
         ? `I'll send this ${email.reply_in_thread === null ? 'email' : 'reply'} to ${addresses}${copies}.`
-        : `I'll save this email as a draft to ${addresses}${copies}. It will not be sent.`,
+        : `I'll save a draft of this email to ${addresses}${copies}. It will not be sent.`,
       ...(email.reply_to === null ? [] : [`Replies will go to ${spokenAddress(email.reply_to)}.`]),
       ...(email.name_left_off ? ['The name was left off an address because it looked like an address.'] : []),
       ...email.to.map(mailbox => mailboxLine({ lead: 'To', mailbox })),
@@ -261,14 +263,16 @@ function readableBody(card: Tier3Card): string[] | undefined {
     ) {
       return undefined;
     }
+    const timing = `${event.when}, ${zoneWords(event.time_zone)} time, for ${event.duration}`;
     return [
-      `I'll add 1 event on ${event.when}, ${zoneWords(event.time_zone)} time, for ${event.duration}.`,
+      `I'll add 1 event on ${timing}.`,
       `It goes on the calendar of ${spokenAddress(event.calendar)}.`,
       ...(event.already_created ? ['You already have this event.'] : []),
-      ...(event.span_days > 1 ? [`This event runs over ${String(event.span_days)} days.`] : []),
+      ...(event.span_days > 1 ? [`This event falls on ${String(event.span_days)} different days.`] : []),
       `The title is: ${event.title}`,
       ...(event.location === '' ? [] : [`The place is: ${event.location}`]),
       ...(event.description === '' ? [] : [`Its description is: ${event.description}`]),
+      `Once more, the event is on ${timing}.`,
     ];
   }
   if (schedule !== null && schedule !== undefined) {
@@ -285,6 +289,7 @@ function readableBody(card: Tier3Card): string[] | undefined {
       `It runs as: ${schedule.runs_as}`,
       `The schedule is called: ${schedule.name}`,
       `Its task is: ${schedule.task}`,
+      `Once more, the schedule to delete runs ${schedule.when}, ${zoneWords(schedule.time_zone)} time.`,
     ];
   }
   return undefined;
