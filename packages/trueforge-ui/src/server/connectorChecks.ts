@@ -83,3 +83,41 @@ export function parseMemoryProviderCheck(body: unknown): MemoryProviderCheck {
   const result = parsed.data.data;
   return result.status === 'ok' ? { ok: true } : { ok: false, code: result.code, reason: result.reason };
 }
+
+const HomeAssistantCheckResultSchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('ok'), tool_count: z.number(), entity_count: z.number().nullable() }),
+  z.object({ status: z.literal('failed'), code: z.string(), reason: z.string() }),
+]);
+
+const HomeAssistantCheckResponseSchema = z.object({ data: HomeAssistantCheckResultSchema });
+
+/**
+ * Outcome of the Home Assistant connection check: the handshake and tool list, plus how many
+ * exposed entities the live-context tool named. A failure carries the one thing to fix.
+ */
+export type HomeAssistantCheck =
+  | { status: 'ok'; tool_count: number; entity_count: number | null }
+  | { status: 'failed'; code: string; reason: string };
+
+/** The Home Assistant check the Harness adds on top of the runtime's connector port. */
+export interface HomeAssistantCheckPort {
+  /** Dials the saved Home Assistant connector once and reports what it answered, changing nothing. */
+  checkHomeAssistant(req: { id: string }): Promise<HomeAssistantCheck>;
+}
+
+/** Whether a catalog implements the Home Assistant check. See {@link hasMemoryProviderCheck}. */
+export function hasHomeAssistantCheck(catalog: object): catalog is HomeAssistantCheckPort {
+  return typeof Reflect.get(catalog, 'checkHomeAssistant') === 'function';
+}
+
+/**
+ * Validates one Home Assistant check response at the boundary.
+ * @throws {Error} when the body does not match the contract
+ */
+export function parseHomeAssistantCheck(body: unknown): HomeAssistantCheck {
+  const parsed = HomeAssistantCheckResponseSchema.safeParse(body);
+  if (!parsed.success) {
+    throw new Error('Home Assistant check returned an unreadable response');
+  }
+  return parsed.data.data;
+}

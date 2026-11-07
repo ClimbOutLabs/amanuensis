@@ -90,6 +90,7 @@ export const AUTO_DENY_REASONS = [
   'steered_by_content',
   'tool_not_prepared',
   'unattended_run',
+  'home_assistant_refused',
 ] as const;
 export type AutoDenyReason = (typeof AUTO_DENY_REASONS)[number];
 
@@ -279,6 +280,11 @@ export interface TierDecision {
   inspection: boolean;
   /** Host of the connector the call goes to; a standing grant the user records on this ask binds to it. */
   grant_host: string | null;
+  /**
+   * Tool name a standing grant for this call is recorded under, when the grant covers a scope
+   * wider than the one tool (a Home Assistant domain, say). Null records under the tool's own name.
+   */
+  grant_tool_name: string | null;
   /** True for a private read: a sensitive path, or an argument with a path shape. Never eligible for a standing grant or chat scope. */
   secret_path_read: boolean;
   /** True for a send through the host's own Email sidecar. Steering changes the reason, never this, so the send-list step still runs. */
@@ -319,6 +325,7 @@ export function failClosedDecision(input: { reason_detail: string | null }): Tie
     shell_binding: null,
     inspection: false,
     grant_host: null,
+    grant_tool_name: null,
     secret_path_read: false,
     mail_send: false,
   };
@@ -339,6 +346,7 @@ function baseDecision(): Omit<TierDecision, 'tier' | 'reason' | 'reason_detail'>
     shell_binding: null,
     inspection: false,
     grant_host: null,
+    grant_tool_name: null,
     secret_path_read: false,
     mail_send: false,
   };
@@ -400,6 +408,7 @@ export function tier3Decision(input: {
   shell_binding?: ShellApprovalBinding | null | undefined;
   inspection?: boolean | undefined;
   grant_host?: string | null | undefined;
+  grant_tool_name?: string | null | undefined;
   secret_path_read?: boolean | undefined;
   mail_send?: boolean | undefined;
 }): TierDecision {
@@ -417,6 +426,7 @@ export function tier3Decision(input: {
     shell_binding: input.shell_binding ?? null,
     inspection: input.inspection === true,
     grant_host: input.grant_host ?? null,
+    grant_tool_name: input.grant_tool_name ?? null,
     secret_path_read: input.secret_path_read === true,
     mail_send: input.mail_send === true,
   };

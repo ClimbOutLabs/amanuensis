@@ -196,7 +196,13 @@ import {
 
 import type { CaldavEventReview } from '../calendar/caldav/eventReview';
 import { CALDAV_SERVER_NAME, isCaldavReadToolName } from '../calendar/caldav/toolContract';
+import {
+  HOME_ASSISTANT_SERVER_NAME,
+  homeAssistantTarget,
+  homeAssistantTargetLabel,
+} from '../homeassistant/toolContract';
 import { classifyCaldavTool } from './caldavTier';
+import { classifyHomeAssistantTool } from './homeAssistantTier';
 
 export interface SentinelAction {
   /** Original tool name (sandbox name or mcp server tool name). */
@@ -2653,6 +2659,55 @@ function hasStandingToolGrant(ctx: ClassifyContext, action: SentinelAction): Pro
   });
 }
 
+/** Whether a standing grant is stored under a scope key instead of the tool's own name (a Home Assistant domain). */
+function hasStandingScopeGrant(ctx: ClassifyContext, action: SentinelAction, scope_key: string): Promise<boolean> {
+  if (action.mcp_server_name === undefined) {
+    return Promise.resolve(false);
+  }
+  return ctx.services.tool_grants.hasToolGrant({
+    tenant_id: ctx.tenant_id,
+    created_by: ctx.created_by,
+    mcp_server_name: action.mcp_server_name,
+    tool_name: scope_key,
+    mcp_server_host: action.mcp_server_host ?? null,
+  });
+}
+
+/**
+ * Whether read content chose a Home Assistant change's target: the entity it names, or any address
+ * or link among its arguments, appears only in what the assistant read. Judged with the same
+ * provenance record that guards sends.
+ */
+function homeAssistantSteered(input: { action: SentinelAction; ctx: ClassifyContext }): boolean {
+  const { action, ctx } = input;
+  if (action.mcp_server_name !== HOME_ASSISTANT_SERVER_NAME) {
+    return false;
+  }
+  const target = homeAssistantTarget({ tool_name: action.tool_name, params: action.canonical_params });
+  const label = homeAssistantTargetLabel(target);
+  const values: string[] = [];
+  if (label !== null) {
+    values.push(label);
+  }
+  if (target.entity_id !== null) {
+    values.push(target.entity_id);
+  }
+  for (const value of Object.values(action.canonical_params)) {
+    if (typeof value === 'string') {
+      values.push(value);
+    } else if (Array.isArray(value)) {
+      for (const entry of value) {
+        if (typeof entry === 'string') {
+          values.push(entry);
+        }
+      }
+    }
+  }
+  return (
+    steeredDestinations({ provenance: ctx.web_search.provenance, addresses: [], values, reply_sender: null }).length > 0
+  );
+}
+
 /**
  * Calendar tools are the host's own, named by server. A read is silent but flagged as sensitive (so a session that
  * read the calendar can no longer search silently). A write always asks with the event in full; in a scheduled run
@@ -3676,6 +3731,22 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
   }
 
   if (action.tool_type === 'mcp') {
+    const homeAssistant = await classifyHomeAssistantTool({
+      action,
+      assistant: ctx.web_search.assistantName,
+      steered: homeAssistantSteered({ action, ctx }),
+      hasStandingGrant: (scope_key: string) => hasStandingScopeGrant(ctx, action, scope_key),
+      mintToken: () =>
+        mintPlainToken({
+          ctx,
+          tool_name: action.tool_name,
+          params: action.canonical_params,
+          connector: connectorBindingFor(action),
+        }),
+    });
+    if (homeAssistant !== undefined) {
+      return steeringChecked({ decision: homeAssistant, ctx, guests: [] });
+    }
     const caldav = await classifyCaldavTool({
       action,
       review: action.caldav_event ?? null,

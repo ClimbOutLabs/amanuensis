@@ -8,9 +8,11 @@ import { MEMORY_PROVIDER_MAX_TIMEOUT_MS } from '@truefoundry/trueforge-core/core
 import type { TrueForge, TrueForgeApi } from '@truefoundry/trueforge-sdk';
 import { z } from 'zod';
 import {
+  parseHomeAssistantCheck,
   parseMemoryProviderCheck,
   type ConnectorChecks,
   type ConnectorConnectionFailureKind,
+  type HomeAssistantCheckPort,
   type MemoryProviderCheck,
 } from '../../../server/connectorChecks.js';
 
@@ -321,6 +323,7 @@ export type HarnessConnectorCatalog = ConnectorCatalogServer<
   UiUpdateConnectorRequest
 > &
   ConnectorChecks &
+  HomeAssistantCheckPort &
   ConnectorToolGrants &
   GoogleSetupPort &
   EmailSetupPort &
@@ -465,6 +468,16 @@ export function createConnectorCatalog(
       });
     },
     checkMemoryProvider: async req => requestMemoryProviderCheck({ name: req.id, options: clientOptions }),
+    checkHomeAssistant: async req =>
+      parseHomeAssistantCheck(
+        await requestMcpServerRoute({
+          name: req.id,
+          route: 'home-assistant-check',
+          method: 'POST',
+          failureLabel: 'Home Assistant check',
+          options: clientOptions,
+        }),
+      ),
     listToolGrants: async req =>
       parseToolGrants(
         await requestMcpServerRoute({
