@@ -43,6 +43,7 @@
   "Finish connecting": "packages/trueforge-ui/src/containers/SettingsBuilder/GoogleSetupPanel.tsx",
   "Manage": "packages/trueforge-ui/src/containers/SettingsBuilder/ConnectorSettings.tsx",
   "Connect Calendar": "packages/trueforge-ui/src/containers/SettingsBuilder/GoogleSetupPanel.tsx",
+  "Connect Google Drive": "packages/trueforge-ui/src/containers/SettingsBuilder/GoogleSetupPanel.tsx",
   "Allow drafts and sending": "packages/trueforge-ui/src/containers/SettingsBuilder/GoogleSetupPanel.tsx",
   "Test connection": "packages/trueforge-ui/src/containers/SettingsBuilder/GoogleSetupPanel.tsx",
   "Reconnect": "packages/trueforge-ui/src/containers/SettingsBuilder/ConnectorSettings.tsx",
