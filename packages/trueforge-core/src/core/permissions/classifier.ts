@@ -2389,6 +2389,8 @@ function gmailWriteCard(input: { action: SentinelAction; agent_intent: string | 
       subject: escapeDisplayText(content.subject),
       body: escapeDisplayText(content.body, { keepNewlines: true }),
       reply_to: content.replyTo === null ? null : escapeDisplayText(content.replyTo),
+      from_name: content.fromName === '' ? null : escapeDisplayText(content.fromName),
+      name_left_off: content.nameLeftOff || replaces?.nameLeftOff === true,
       replaces:
         replaces === undefined
           ? null
@@ -2626,6 +2628,8 @@ function calendarWriteCard(input: {
       attendees: review.attendees.map(show),
       guests_emailed: review.guests_emailed,
       one_of_repeating: review.one_of_repeating,
+      already_created: review.action === 'create' && review.already_created,
+      span_days: review.span_days,
       before:
         review.before === null
           ? null

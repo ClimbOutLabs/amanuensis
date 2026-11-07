@@ -163,6 +163,7 @@ import { TrueFoundryServiceFoundryServerClient } from './truefoundry/TrueFoundry
 import { TrueFoundrySkillStore } from './truefoundry/TrueFoundrySkillStore';
 import { ensureWritableDataDir } from './utils/dataDir';
 import { startSttAvailabilityWatcher } from './voice/sttAvailability';
+import { attachVoiceSocket } from './voice/voiceSocket';
 
 /** Persistence + optional Redis wired for the selected topology. */
 interface ServerPersistence<TTransaction> {
@@ -1259,6 +1260,9 @@ try {
       controller?.start();
     },
   );
+
+  // Voice mode's WebSocket: the upgrade is handled here because the app's own router cannot take one.
+  attachVoiceSocket({ server, app, logger, requireClientCertificate: tlsServe !== undefined });
 
   server.on('error', (error: unknown) => {
     console.error('Failed to start server:', error instanceof Error ? error.message : error);
