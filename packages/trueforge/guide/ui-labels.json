@@ -1,6 +1,7 @@
 {
   "Settings": "packages/trueforge-ui/src/atoms/ShellActions.tsx",
   "Roles and Personas": "packages/trueforge-ui/src/containers/SettingsBuilder/index.tsx",
+  "Add": "packages/trueforge-ui/src/containers/SettingsBuilder/ConnectorSettings.tsx",
   "Add persona": "packages/trueforge-ui/src/containers/SettingsBuilder/PersonaSettings.tsx",
   "Name": "packages/trueforge-ui/src/containers/SettingsBuilder/PersonaSettings.tsx",
   "Also answers to": "packages/trueforge-ui/src/containers/SettingsBuilder/PersonaSettings.tsx",
