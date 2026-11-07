@@ -72,6 +72,7 @@ import { googleCapability, sandboxAttachmentStager } from './googleCapability';
 import { googleSetupCapability } from './googleSetupCapability';
 import { mapsCapability } from './mapsCapability';
 import { MemoryTurnResourceResolver } from './MemoryTurnResourceResolver';
+import { notesFolderCapability, type NotesFolderTurnContext } from './notesFolderCapability';
 import { pastChatsCapability, type PastChatsTurnContext } from './pastChatsCapability';
 import { personaCapability, type PersonaTurnContext } from './personaCapability';
 import { scheduleCapability, type ScheduleTurnContext } from './scheduleCapability';
@@ -2758,6 +2759,8 @@ export interface SpaceTurnContext {
   store: SpaceToolStore;
   /** Per-user Google logins; absent, no Gmail tools mount. */
   googleConnections?: GoogleConnectionStore | undefined;
+  /** The notes folder service; absent, no notes tools mount. */
+  notesFolder?: NotesFolderTurnContext | undefined;
   authority: SpaceTurnAuthority;
   /** Chat session id: keys the delta-failure breaker per session (see SpaceCapabilityOptions). */
   sessionId: string;
@@ -2826,6 +2829,7 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
       return resolved;
     }
     const google = await this.#google(input);
+    const notesFolder = await this.#notesFolder(input);
     const sentinel = this.#sentinel(input);
     const schedules = this.#space.schedules;
     const personas = this.#space.personas;
@@ -2862,6 +2866,7 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
             ]
           : []),
         ...google,
+        ...notesFolder,
         ...(personas === undefined
           ? []
           : [personaCapability({ ...personas, switches: this.switches, tracing: input.tracing, sentinel })]),
@@ -2921,6 +2926,24 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
     } catch (error) {
       this.#space.logger.warn(
         'Google tools not mounted: the Google login could not be read',
+        extractErrorLogFields(error),
+      );
+      return [];
+    }
+  }
+
+  /** A folder that cannot be checked costs the chat its notes tools, never the chat itself. */
+  async #notesFolder(input: Parameters<MemoryTurnResourceResolver['resolveAgentDefinition']>[0]) {
+    const notesFolder = this.#space.notesFolder;
+    if (notesFolder === undefined) {
+      return [];
+    }
+    try {
+      const capability = await notesFolderCapability({ service: notesFolder.service, tracing: input.tracing });
+      return capability === undefined ? [] : [capability];
+    } catch (error) {
+      this.#space.logger.warn(
+        'Notes tools not mounted: the notes folder could not be checked',
         extractErrorLogFields(error),
       );
       return [];
