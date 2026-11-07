@@ -238,12 +238,26 @@ describe('first-party marker on stored connectors', () => {
       ['http instead of https', 'http://hindsight.example.com/mcp/aman'],
       ['a host that ends with the listed host', 'https://evil-hindsight.example.com/mcp/aman'],
       ['a host that starts with the listed host', 'https://hindsight.example.com.attacker.example.net/mcp/aman'],
-      ['the listed host written before an @', 'https://hindsight.example.com@attacker.example.net/mcp/aman'],
     ])('does not mark a lookalike of the listed origin: %s', async (_label, url) => {
       const response = await save('POST', manifestOf('memory', { url, memory_provider: true }));
 
       expect(response.status).toBe(201);
       expect(await firstPartyOf('memory')).toBe(false);
+    });
+
+    it('refuses a lookalike that writes the listed host before an @', async () => {
+      // That address carries credentials (everything before the @), and the address check
+      // refuses an address with credentials in it at save time, so nothing is stored at all.
+      const response = await save(
+        'POST',
+        manifestOf('memory', {
+          url: 'https://hindsight.example.com@attacker.example.net/mcp/aman',
+          memory_provider: true,
+        }),
+      );
+
+      expect(response.status).toBe(400);
+      expect(await firstPartyOf('memory')).toBeUndefined();
     });
 
     it('marks nothing while the operator has listed nothing', async () => {

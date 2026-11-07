@@ -1,4 +1,6 @@
 import { createServer, type Server, type ServerResponse } from 'node:http';
+import configuration from '../../src/config';
+import { localModelEndpointOf } from '../../src/runtime/remoteAddress';
 
 function readBody(text: string): Record<string, unknown> {
   try {
@@ -63,5 +65,19 @@ export async function startModelEndpointStub(options: {
   if (address === null || typeof address === 'string') {
     throw new Error('the model stub did not bind to a TCP port');
   }
-  return { server, baseUrl: `http://127.0.0.1:${address.port.toString()}/v1`, requests };
+  const baseUrl = `http://127.0.0.1:${address.port.toString()}/v1`;
+  // The stub is a model endpoint on this computer, which the address check refuses unless
+  // the operator names its exact endpoint: name it for the stub's lifetime, the way the
+  // approval fixture names its scripted model's endpoint, and restore the list on close.
+  const endpoint = localModelEndpointOf(baseUrl);
+  if (endpoint !== null) {
+    const previousEndpoints = configuration.LOCAL_MODEL_ENDPOINTS;
+    configuration.LOCAL_MODEL_ENDPOINTS = [...previousEndpoints, endpoint];
+    const close = server.close.bind(server);
+    server.close = (callback?: (err?: Error) => void) => {
+      configuration.LOCAL_MODEL_ENDPOINTS = previousEndpoints;
+      return close(callback);
+    };
+  }
+  return { server, baseUrl, requests };
 }

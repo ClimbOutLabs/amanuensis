@@ -214,6 +214,12 @@ describe('mcp-servers routers', () => {
     // does the retaining. This endpoint is a different path: it dials the connector directly, so
     // the user's own settings view must keep showing everything the connector actually offers.
     const inert = await startInertMcpServer();
+    // The fixture listens on loopback, which the address check refuses at connection time; the
+    // operator of this test instance vouches for its origin, as an operator running a local
+    // memory provider would. Listing the origin grants no trust by itself: the row below is
+    // still stored first_party false, and the tools listing is all this test exercises.
+    const originalOrigins = configuration.FIRST_PARTY_MCP_ORIGINS;
+    configuration.FIRST_PARTY_MCP_ORIGINS = [inert.origin];
     try {
       const name = PROVIDER_TOOLS_LISTING_NAME;
       await mcpServerStore.upsertServer({
@@ -254,6 +260,7 @@ describe('mcp-servers routers', () => {
       // The store is shared across this suite, and only one connector may hold the memory-provider
       // flag: leaving this row behind would 409 every later test that enables the flag elsewhere.
       await mcpServerStore.deleteServer({ tenant_id: TENANT_ID, name: PROVIDER_TOOLS_LISTING_NAME });
+      configuration.FIRST_PARTY_MCP_ORIGINS = originalOrigins;
       await inert.close();
     }
   });
@@ -1950,6 +1957,109 @@ describe('mcp-servers routers', () => {
       expect(response.status).toBe(200);
       for (const created_by of [STANDALONE_REQUEST_CONTEXT.subject.id, OTHER_USER]) {
         expect(await toolGrantStore.hasToolGrant(grantFor({ created_by, tool_name: 'lookup_note' }))).toBe(false);
+      }
+    });
+  });
+
+  describe('the address check', () => {
+    function remoteBody(name: string, url: string) {
+      return { type: 'remote' as const, name, url, description: 'Address check case.' };
+    }
+
+    async function errorMessage(response: Response): Promise<string> {
+      const body = (await response.json()) as { error: { message: string } };
+      return body.error.message;
+    }
+
+    it('refuses to create a server at a loopback address, and saves nothing', async () => {
+      const response = await settingsRouter.request(
+        '/',
+        postInit(wrapManifest(remoteBody('loopback-create', 'http://127.0.0.1:9999/mcp'))),
+      );
+
+      expect(response.status).toBe(400);
+      expect(await errorMessage(response)).toContain('home network or the internet');
+      const missing = await settingsRouter.request('/loopback-create');
+      expect(missing.status).toBe(404);
+    });
+
+    it('refuses to replace a server with the cloud metadata address', async () => {
+      const response = await settingsRouter.request(
+        '/',
+        putInit(wrapManifest(remoteBody('metadata-put', 'http://169.254.169.254/mcp'))),
+      );
+
+      expect(response.status).toBe(400);
+      expect(await errorMessage(response)).toContain('on this computer or its own network');
+    });
+
+    it('refuses an address carrying a name and password', async () => {
+      const response = await settingsRouter.request(
+        '/',
+        postInit(wrapManifest(remoteBody('credentialed-create', 'https://user:secret@8.8.8.8/mcp'))),
+      );
+
+      expect(response.status).toBe(400);
+      expect(await errorMessage(response)).toContain('without a name and password in it');
+    });
+
+    it('creates a server at a public address', async () => {
+      const response = await settingsRouter.request(
+        '/',
+        postInit(wrapManifest(remoteBody('public-create', 'https://8.8.8.8/mcp'))),
+      );
+
+      expect(response.status).toBe(201);
+      await settingsRouter.request('/public-create', { method: 'DELETE' });
+    });
+
+    it('creates a server at a loopback address the operator listed as their own origin', async () => {
+      const originalOrigins = configuration.FIRST_PARTY_MCP_ORIGINS;
+      configuration.FIRST_PARTY_MCP_ORIGINS = ['http://127.0.0.1:9999'];
+      try {
+        const response = await settingsRouter.request(
+          '/',
+          postInit(wrapManifest(remoteBody('own-loopback-create', 'http://127.0.0.1:9999/mcp'))),
+        );
+
+        expect(response.status).toBe(201);
+      } finally {
+        configuration.FIRST_PARTY_MCP_ORIGINS = originalOrigins;
+        await settingsRouter.request('/own-loopback-create', { method: 'DELETE' });
+      }
+    });
+
+    it('refuses the tools listing for a stored server at a loopback address', async () => {
+      await mcpServerStore.upsertServer({
+        tenant_id: TENANT_ID,
+        name: 'loopback-tools',
+        manifest: remoteBody('loopback-tools', 'http://127.0.0.1:9999/mcp'),
+        first_party: false,
+      });
+      try {
+        const response = await mcpServersRouter.request('/loopback-tools/tools');
+
+        expect(response.status).toBe(422);
+        expect(await errorMessage(response)).toContain('on this computer or its own network');
+      } finally {
+        await mcpServerStore.deleteServer({ tenant_id: TENANT_ID, name: 'loopback-tools' });
+      }
+    });
+
+    it('refuses to start sign-in for a stored server at a loopback address', async () => {
+      await mcpServerStore.upsertServer({
+        tenant_id: TENANT_ID,
+        name: 'loopback-authorize',
+        manifest: remoteBody('loopback-authorize', 'http://127.0.0.1:9999/mcp'),
+        first_party: false,
+      });
+      try {
+        const response = await mcpServersRouter.request('/loopback-authorize/authorize?return_to=/settings');
+
+        expect(response.status).toBe(422);
+        expect(await errorMessage(response)).toContain('on this computer or its own network');
+      } finally {
+        await mcpServerStore.deleteServer({ tenant_id: TENANT_ID, name: 'loopback-authorize' });
       }
     });
   });

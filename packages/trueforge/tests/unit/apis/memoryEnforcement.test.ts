@@ -403,6 +403,10 @@ describe('Host-enforced memory: wiring through the real HTTP API and session sto
     configuration.MEMORY_BACKEND = 'hindsight';
     server = await startApprovalTestServer();
     hindsight = await startFakeHindsightServer();
+    // The fake is the operator's own memory service on this computer: its origin is listed
+    // alongside the fixture connector's, which is what lets a server on this computer be
+    // saved and connected to at all under the address check.
+    server.setFirstPartyOrigins([server.mcp.origin, new URL(hindsight.url).origin]);
   }, TURN_TIMEOUT_MS);
 
   afterAll(async () => {

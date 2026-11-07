@@ -218,6 +218,73 @@ export function parseFirstPartyMcpOrigins(raw: string | undefined): string[] {
 }
 
 /**
+ * Parses `LOCAL_MODEL_ENDPOINTS`: comma-separated exact `host:port` endpoints of model servers
+ * running on this computer or its own network that the operator names as allowed. A model base
+ * URL normally has to resolve to an address the server may connect to (see runtime/remoteAddress),
+ * which refuses this computer and its own networks; a base URL that names one of these exact
+ * endpoints is the one exception. Unset / blank → none, so no local model endpoint is allowed
+ * until the operator names it. Each entry is normalized (host lowercased, IPv6 hosts bracketed,
+ * the port written without leading zeros) and matched exactly, port included. Anything that is
+ * not an exact host and port fails the boot: a silently dropped typo would read as "no local
+ * model is allowed", and a bare host would suggest a match wider than the one the list makes.
+ */
+export function parseLocalModelEndpoints(raw: string | undefined): string[] {
+  if (raw === undefined || raw.trim() === '') {
+    return [];
+  }
+  const endpoints = new Set<string>();
+  for (const entry of raw
+    .split(',')
+    .map(part => part.trim())
+    .filter(part => part.length > 0)) {
+    const endpoint = normalizedLocalModelEndpoint(entry);
+    if (endpoint === undefined) {
+      throw new Error(
+        `LOCAL_MODEL_ENDPOINTS entries must be exact host:port endpoints such as localhost:11434 or [::1]:11434, got: ${entry}`,
+      );
+    }
+    endpoints.add(endpoint);
+  }
+  return [...endpoints];
+}
+
+function normalizedLocalModelEndpoint(entry: string): string | undefined {
+  let host: string;
+  let rawPort: string;
+  if (entry.startsWith('[')) {
+    const close = entry.indexOf(']');
+    if (close < 0 || entry.charAt(close + 1) !== ':') {
+      return undefined;
+    }
+    const inside = entry.slice(1, close);
+    if (isIP(inside) !== 6) {
+      return undefined;
+    }
+    host = `[${inside.toLowerCase()}]`;
+    rawPort = entry.slice(close + 2);
+  } else {
+    const colon = entry.lastIndexOf(':');
+    if (colon < 1) {
+      return undefined;
+    }
+    const rawHost = entry.slice(0, colon);
+    if (!/^[a-z0-9._-]+$/i.test(rawHost) || rawHost.includes('*')) {
+      return undefined;
+    }
+    host = rawHost.toLowerCase();
+    rawPort = entry.slice(colon + 1);
+  }
+  if (!/^\d+$/.test(rawPort)) {
+    return undefined;
+  }
+  const port = Number(rawPort);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    return undefined;
+  }
+  return `${host}:${String(port)}`;
+}
+
+/**
  * The mail sidecar is the operator's own service, so its origin is first-party whenever it is configured.
  * Listing it by hand would be one more value to keep in step, and compose's `environment` would replace
  * the one in `.env`.
@@ -1384,6 +1451,14 @@ export interface SharedServerConfiguration {
    */
   FIRST_PARTY_MCP_ORIGINS: string[];
   /**
+   * Exact `host:port` endpoints of model servers on this computer or its own network that the
+   * operator named as allowed, as normalized strings. A model base URL that names one of these
+   * endpoints may be saved and used even though its address is one the address check otherwise
+   * refuses. Empty means no local model endpoint is allowed. Env: `LOCAL_MODEL_ENDPOINTS`
+   * (comma-separated). Default empty.
+   */
+  LOCAL_MODEL_ENDPOINTS: string[];
+  /**
    * MCP endpoint of the mail sidecar. When set, the Email connector is registered at boot; when unset, the
    * sidecar is not configured and nothing mail-related is offered. Env: `MAIL_EMAIL_MCP_URL`. Default unset.
    */
@@ -2463,6 +2538,7 @@ const shared: SharedServerConfiguration = {
     }),
     mailUrl: mailSidecarMcpUrl,
   }),
+  LOCAL_MODEL_ENDPOINTS: parseLocalModelEndpoints(getEnv('LOCAL_MODEL_ENDPOINTS')),
   MAIL_EMAIL_MCP_URL: mailEmailMcpUrl,
   MAIL_SIDECAR_MCP_URL: mailSidecarMcpUrl,
   MAIL_EMAIL_ACCOUNT_URL: mailEmailAccountUrl,

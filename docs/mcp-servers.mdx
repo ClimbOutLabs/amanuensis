@@ -18,6 +18,12 @@ You can also use **Add MCP Server** to register any remote URL that is not in th
 
 The catalog entries under **Settings → Connectors** (Linear, Notion, GitHub, and others) come from the shipped MCP catalog — see [Initial Setup](/harness/initial-setup#what-is-supported-out-of-the-box) for how catalogs work and how to change what the UI offers.
 
+## Which addresses a server may use
+
+A server's address is checked when you save it and again each time the server connects. The address may be on the internet or on your home network. An address that points at the computer Aman runs on, at that computer's own internal network, or at a link-local or cloud metadata address is refused, and so is an address with a name and password in it. The check looks at the addresses the name resolves to, not just the name itself, so a name that resolves to a refused address is refused too.
+
+A server running on the same computer as Aman therefore cannot be added here. Whoever runs the server can still allow one exact server: listing its origin in the server's `FIRST_PARTY_MCP_ORIGINS` setting (see `packages/trueforge/.env.example`) marks it as the operator's own service, and the address check does not second-guess a listed origin.
+
 ## Authentication options
 
 - **No auth** — public or network-trusted servers.
