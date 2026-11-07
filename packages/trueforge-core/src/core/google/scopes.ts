@@ -4,7 +4,13 @@
  * full-calendar scope: calendar access is limited to events, and Drive access to the files Aman
  * created or the person opened with Aman.
  */
-export const GOOGLE_FEATURES = ['gmail_read', 'gmail_compose', 'calendar_read', 'calendar_write', 'drive_files'] as const;
+export const GOOGLE_FEATURES = [
+  'gmail_read',
+  'gmail_compose',
+  'calendar_read',
+  'calendar_write',
+  'drive_files',
+] as const;
 export type GoogleFeature = (typeof GOOGLE_FEATURES)[number];
 
 interface GoogleFeatureInfo {
