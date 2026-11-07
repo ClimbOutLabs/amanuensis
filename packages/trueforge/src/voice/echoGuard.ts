@@ -165,10 +165,11 @@ export class SpokenTextLog {
     this.#clock = clock;
   }
 
-  add(text: string): void {
+  /** `lastHeardAtMs` is when the last of the text finishes playing; the words are remembered from then. */
+  add({ text, lastHeardAtMs }: { text: string; lastHeardAtMs?: number }): void {
     const now = this.#clock.now();
     this.#entries = this.#entries.filter(entry => now - entry.atMs < SPOKEN_TEXT_MEMORY_MS);
-    this.#entries.push({ atMs: now, words: wordsOf(text) });
+    this.#entries.push({ atMs: lastHeardAtMs ?? now, words: wordsOf(text) });
   }
 
   /**

@@ -131,11 +131,13 @@ _LIST_MARKER = re.compile(r"^\s*(?:[-*+>]|\d+[.)])\s+")
 _STRIP_CHARS = re.compile(r"[*_#`~|<>\[\]{}]")
 _SPACES = re.compile(r"\s+")
 
+# Digits with their own thousands commas ("1,000"). A comma after a number is a pause of its own, not part of it.
+_DIGITS = r"(?:\d{1,3}(?:,\d{3})+(?!\d)|\d+)"
 _TOKEN = re.compile(
     r"(?P<time>\b\d{1,2}:\d{2}\b)"
-    r"|(?P<money>\$\d[\d,]*(?:\.\d+)?)"
+    rf"|(?P<money>\${_DIGITS}(?:\.\d+)?)"
     r"|(?P<ordinal>\b\d+(?:st|nd|rd|th)\b)"
-    r"|(?P<number>\d[\d,]*(?:\.\d+)?)"
+    rf"|(?P<number>{_DIGITS}(?:\.\d+)?)"
     r"|(?P<word>[A-Za-z]+(?:'[A-Za-z]+)*)"
     r"|(?P<punct>\.\.\.|[.,!?;:\u2014\u2026])"
     r"|(?P<symbol>[%&+@=])"
@@ -195,52 +197,134 @@ def spoken_words(text: str) -> list[str]:
 
 
 # Numbers whose reading cannot be mistaken: plain digits with no leading zero, thousands in groups
-# of three, at most two cents, and a real time of day. Anything else (1,5  007  10.0.0.1  11.06.2026
-# 3rd  9:60) is said differently from how it is written, so it is not one of these.
+# of three, at most two cents, a real time of day and an ordinal with its right ending (14th, 22nd). Anything
+# else (1,5  007  10.0.0.1  11.06.2026  3th  9:60) is said differently from how it is written.
 _NOT_MORE_DIGITS = r"(?![\w]|[.,:]\d)"
 _WHOLE = r"(?:0|[1-9]\d{0,2}(?:,\d{3})+|[1-9]\d*)"
 _PLAIN_NUMBER = re.compile(
     r"(?<![\w.,:$])(?:"
-    rf"(?P<money>\${_WHOLE}(?:\.\d{{2}})?)"
+    r"(?P<ordinal>[1-9]\d*(?:st|nd|rd|th))"
+    rf"|(?P<money>\${_WHOLE}(?:\.\d{{2}})?)"
     r"|(?P<time>(?:[01]?\d|2[0-3]):[0-5]\d)"
     rf"|(?P<number>{_WHOLE}(?:\.\d+)?)"
     r")" + _NOT_MORE_DIGITS
 )
-# Number spellings: digits (with their own comma, point or colon) and number words. Two of them with only
-# blanks or signs that make no sound or only a pause between them ("1000 500", "1000 (500)", "1000; 500",
-# "1000...500", "twenty (5)") run together when heard. Two words are said as written, so one digit is needed.
-_NUMBER_WORDS = (
-    r"(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen"
-    r"|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million"
-    r"|billion|trillion)"
+# How several numbers written side by side are heard. A "spelling" is one number as written: digits (with their
+# own comma, point or colon), digits and a scale word ("5 million", "2 dozen"), or a run of number words
+# ("twenty-five", "one thousand five hundred"). Two spellings joined by a gap of only blanks, signs that make no
+# sound and pause marks ("1000 500", "1000 (500)", "1000; 500", "1000...500", "twenty (5)") are heard as one
+# number or run on. "and" inside such a gap joins them too when the left side ends in a scale and the right is
+# smaller ("1000 and 500" is "one thousand and five hundred"). Joined spellings are refused, except a date or
+# time that is written with a comma.
+_UNITS = (
+    r"zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen"
+    r"|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety"
 )
-_NUMBER_SPELLING = re.compile(rf"(?i)\$?\d+(?:[,.:]\d+)*|\b{_NUMBER_WORDS}\b")
+_SCALE_WORDS = r"(?:hundred|thousand|million|billion|trillion|dozen|lakh|crore)s?|grand"
+_WORD_VALUES = {
+    word: value
+    for value, word in enumerate(
+        "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen"
+        " seventeen eighteen nineteen".split()
+    )
+} | {"twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90}
+_SCALE_VALUES = {
+    "hundred": 100,
+    "thousand": 1_000,
+    "grand": 1_000,
+    "lakh": 100_000,
+    "million": 1_000_000,
+    "crore": 10_000_000,
+    "billion": 1_000_000_000,
+    "trillion": 1_000_000_000_000,
+}
+_NUMBER_WORD = rf"(?:{_UNITS}|{_SCALE_WORDS})"
+_DIGIT_SPELLING = r"\$?\d+(?:[,.:]\d+)*"
+_NUMBER_SPELLING = re.compile(
+    rf"(?i)(?<![A-Za-z0-9])(?<![A-Za-z]')"
+    rf"(?:{_DIGIT_SPELLING}(?: (?:{_SCALE_WORDS})(?![A-Za-z0-9]))?"
+    rf"|{_NUMBER_WORD}(?:[ -]{_NUMBER_WORD})*(?![A-Za-z0-9])(?!'[A-Za-z]))"
+)
 _SILENT_GAP = re.compile(r"[ \t\n\"'()\u2014\u2026;!?,:&.]+")
 _SENTENCE_STOP_GAP = re.compile(r"[.!?][ \t\n]+")
+_AND_GAP = re.compile(r"[ \t\n\"'(),;:]*and[ \t\n\"'(),;:]*", re.IGNORECASE)
 _COMMA_GAP = re.compile(r", +")
-_SMALL_NUMBER = re.compile(r"\d{1,2}")
-_DATE_PART = re.compile(r"\d{1,2}:\d\d|(?:19|20)\d\d|\d{1,2}")
+_MONTH_OR_WEEKDAY = (
+    r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?"
+    r"|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|mon(?:day)?|tue(?:s(?:day)?)?|wed(?:nesday)?"
+    r"|thu(?:r(?:s(?:day)?)?)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)"
+)
+# A comma is a pause, so it is plain only where a written date or time has one, and only after a month or a
+# weekday: a day and a year ("Nov 6, 2026"), a day and a time ("Nov 6, 2:30") or a year and a time.
+_AFTER_MONTH = re.compile(rf"(?i)\b{_MONTH_OR_WEEKDAY}\.?\s+$")
+_AFTER_MONTH_AND_DAY = re.compile(rf"(?i)\b{_MONTH_OR_WEEKDAY}\.?\s+\d{{1,2}},\s+$")
+_DAY = re.compile(r"\d{1,2}")
+_YEAR = re.compile(r"(?:19|20)\d\d")
+_CLOCK = re.compile(r"\d{1,2}:\d\d")
+
+
+def _value(spelling: str) -> float | None:
+    """What a spelling counts to, or None when it is not a plain amount (a time, for one)."""
+    text = spelling.lstrip("$")
+    if text[:1].isdigit():
+        digits, _, scale = text.partition(" ")
+        if ":" in digits:
+            return None
+        amount = float(digits.replace(",", ""))
+        return amount * _SCALE_VALUES.get(scale.lower().rstrip("s"), 12 if scale.lower().startswith("dozen") else 1)
+    total = 0.0
+    current = 0.0
+    for word in re.split(r"[ -]", text.lower()):
+        word = word.rstrip("s") if word.rstrip("s") in _SCALE_VALUES or word.rstrip("s") == "dozen" else word
+        if word in _WORD_VALUES:
+            current += _WORD_VALUES[word]
+        elif word == "dozen":
+            current = max(current, 1) * 12
+        elif word == "hundred":
+            current = max(current, 1) * 100
+        elif word in _SCALE_VALUES:
+            total += max(current, 1) * _SCALE_VALUES[word]
+            current = 0
+    return total + current
+
+
+def _ending_scale(spelling: str) -> int | None:
+    """The scale a spelling ends in ("1000" and "one thousand" end in thousands, "1200" in hundreds)."""
+    text = spelling.lstrip("$")
+    if text[:1].isdigit():
+        digits, _, scale = text.partition(" ")
+        if scale:
+            return _SCALE_VALUES.get(scale.lower().rstrip("s"))
+        if ":" in digits or "." in digits:
+            return None
+        whole = int(digits.replace(",", ""))
+        for size in (10**12, 10**9, 10**7, 10**6, 10**5, 1000, 100):
+            if whole >= size and whole % size == 0:
+                return size
+        return None
+    last = re.split(r"[ -]", text.lower())[-1]
+    return _SCALE_VALUES.get(last.rstrip("s"))
+
+
+def _plain_comma(*, text: str, left: re.Match[str], right: re.Match[str]) -> bool:
+    a, b, before = left.group(), right.group(), text[: left.start()]
+    if _DAY.fullmatch(a) and (_YEAR.fullmatch(b) or _CLOCK.fullmatch(b)):
+        return _AFTER_MONTH.search(before) is not None
+    return _YEAR.fullmatch(a) is not None and _CLOCK.fullmatch(b) is not None and _AFTER_MONTH_AND_DAY.search(before) is not None
 
 
 def _runs_numbers_together(text: str) -> bool:
-    """True when two number spellings, at least one of them digits, are heard as one number or run on."""
+    """True when two numbers written side by side are heard as one number or run on."""
     spellings = list(_NUMBER_SPELLING.finditer(text))
     for left, right in zip(spellings, spellings[1:]):
         gap = text[left.end() : right.start()]
-        if (
-            _SILENT_GAP.fullmatch(gap) is None
-            or _SENTENCE_STOP_GAP.fullmatch(gap)
-            or not (left.group()[-1].isdigit() or right.group()[0] in "$0123456789")
-        ):
-            continue
-        # A comma is a plain pause between a day or list number and a year, a time or another small number.
-        if (
-            _COMMA_GAP.fullmatch(gap)
-            and _SMALL_NUMBER.fullmatch(left.group())
-            and _DATE_PART.fullmatch(right.group())
-        ):
-            continue
-        return True
+        if _AND_GAP.fullmatch(gap):
+            scale, smaller = _ending_scale(left.group()), _value(right.group())
+            joined = scale is not None and smaller is not None and smaller < scale
+        else:
+            joined = _SILENT_GAP.fullmatch(gap) is not None and _SENTENCE_STOP_GAP.fullmatch(gap) is None
+        if joined and not (_COMMA_GAP.fullmatch(gap) and _plain_comma(text=text, left=left, right=right)):
+            return True
     return False
 
 
@@ -248,14 +332,26 @@ _WRITTEN_WORD = re.compile(r"[^\W_]+(?:'[^\W_]+)*")
 # Characters the voice says as written: letters and digits, spaces, usual punctuation and a few symbols.
 _PLAIN_CHARS = re.compile(r"[A-Za-z0-9 \n\t.,!?;:'\"()%&+@=$\u2014\u2026-]*")
 _LONE_HYPHEN = re.compile(r"(?<![A-Za-z])-|-(?![A-Za-z])")
-# A dot inside a word ("my.bank.com", "mybank.com", "my-bank.com" all sound alike) is not heard as written.
-_DOTTED_WORD = re.compile(r"[A-Za-z]\.[A-Za-z]")
+# A dot inside web-address-like text ("my.bank.com", "t.co", "163.com") is not heard as written. A single letter
+# on each side ("e.g.", "p.m.", "U.S.") is said letter by letter and is allowed.
+_DOTTED_WORD = re.compile(r"[A-Za-z]{2,}\.[A-Za-z]|[A-Za-z0-9]\.[A-Za-z]{2,}")
+
+
+def _ordinal_suffix(n: int) -> str:
+    if n % 100 in (11, 12, 13):
+        return "th"
+    return {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
 
 
 def _spell_plain_number(match: re.Match[str]) -> str:
     kind = match.lastgroup
     value = match.group()
-    if kind == "money":
+    if kind == "ordinal":
+        digits, suffix = value[:-2], value[-2:]
+        if len(digits) > MAX_NUMBER_DIGITS or suffix != _ordinal_suffix(int(digits)):
+            return value  # "3th" stays digits, so the text is refused
+        words = ordinal_words(int(digits))
+    elif kind == "money":
         words = _money_words(value[1:])
     elif kind == "time":
         hours, minutes = value.split(":")

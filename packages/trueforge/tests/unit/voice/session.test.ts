@@ -1,3 +1,4 @@
+import { APPROVAL_LINES } from '../../../src/voice/approvalVoice';
 import type { OutputFormat } from '../../../src/voice/audio';
 import { IDLE_END_MS, VoiceSession, type TurnLatency } from '../../../src/voice/session';
 import type { SpeechProbability } from '../../../src/voice/vad/sileroVad';
@@ -41,6 +42,7 @@ function setup({
   holdAfterText,
   speechChanges,
   speechCannotCheck,
+  speechUnchecked,
   speechDelay,
   vad = new LoudnessVad(),
   onNote,
@@ -56,6 +58,7 @@ function setup({
   holdAfterText?: () => Promise<void>;
   speechChanges?: (text: string) => boolean;
   speechCannotCheck?: boolean;
+  speechUnchecked?: boolean;
   speechDelay?: (text: string) => Promise<void>;
   vad?: SpeechProbability;
   onNote?: (note: string) => void;
@@ -68,6 +71,7 @@ function setup({
     silentOn: speechSilentOn,
     changes: speechChanges,
     cannotCheck: speechCannotCheck,
+    unchecked: speechUnchecked,
     delay: speechDelay,
   });
   const turns = new FakeTurns({ message, approval: approvalReplies }, { gate, holdAfterText });
@@ -345,7 +349,8 @@ describe('approval by voice', () => {
     expect(t.tts.sentences).toEqual([
       'I have a draft.',
       [
-        "I'll send this reply to Victor at victor at example dot com.",
+        "I'll send this reply to 1 address.",
+        'To victor at example dot com, named Victor',
         'The subject is: Re: Thursday',
         'It says: Thursday at three works for me. See you then.',
       ].join('\n'),
@@ -356,7 +361,8 @@ describe('approval by voice', () => {
   it('reads a calendar event with its time and description, and a schedule with its task', async () => {
     const event = await readBack({ message: withCard(dentistCard) });
     const eventSpeech = event.tts.sentences.join(' ');
-    expect(eventSpeech).toContain('Dentist on Friday at 9, UTC time, for 1 hour');
+    expect(eventSpeech).toContain('Friday at 9, UTC time, for 1 hour');
+    expect(eventSpeech).toContain('The title is: Dentist');
     expect(eventSpeech).toContain('the calendar of me at example dot com');
     expect(eventSpeech).toContain('Bring the form.');
     const schedule = await readBack({ message: withCard(cancelScheduleCard) });
@@ -501,11 +507,15 @@ describe('approval by voice', () => {
   });
 
   it.each([
-    ['would say a word differently', { speechChanges: (text: string) => text.includes('It says') }],
-    ['cannot be asked', { speechCannotCheck: true }],
+    [
+      'would say a word differently',
+      { speechChanges: (text: string) => text.includes('It says') },
+      APPROVAL_LINES.cannotReadExactly,
+    ],
+    ['cannot be asked', { speechCannotCheck: true }, APPROVAL_LINES.leftForTheApp],
   ])(
     'reads none of the card when the voice %s, says it is left in the app, and takes no "yes"',
-    async (_name, check) => {
+    async (_name, check, line) => {
       const t = setup({ stt: ['send the reply', 'yes send it'], message: withCard(), ...check });
       await feed({ session: t.session, clock: t.clock, samples: says() });
       await t.session.settled();
@@ -514,13 +524,32 @@ describe('approval by voice', () => {
       expect(t.tts.sentences.join('\n')).not.toContain('Say ');
       // The opening line is part of the same text, so none of it is heard.
       expect(t.tts.sentences.join('\n')).not.toContain("I'll send");
-      expect(t.tts.sentences).toEqual(['I have a draft.', "I've left it in the app for you to approve."]);
-      expect(t.tts.sentences.at(-1)).toBe("I've left it in the app for you to approve.");
+      expect(t.tts.sentences).toEqual(['I have a draft.', line]);
       await feed({ session: t.session, clock: t.clock, samples: says() });
       await t.session.settled();
       expect(t.turns.answers).toEqual([]);
     },
   );
+
+  it('says why a card was left on the screen when the voice would not say it exactly, and shows it too', async () => {
+    const t = setup({ stt: ['send the reply'], message: withCard(), speechChanges: text => text.includes('It says') });
+    await feed({ session: t.session, clock: t.clock, samples: says() });
+    await t.session.settled();
+    expect(t.transport.events).toContainEqual({ type: 'notice', text: APPROVAL_LINES.cannotReadExactly });
+  });
+
+  it('tells a person the voice service is out of date, not that it is down, when nothing checked the words', async () => {
+    const t = setup({ stt: ['send the reply'], message: withCard(), speechUnchecked: true });
+    await feed({ session: t.session, clock: t.clock, samples: says() });
+    await t.session.settled();
+    expect(t.notes).toContain('tts_unchecked');
+    expect(t.transport.events).toContainEqual({
+      type: 'notice',
+      text: 'The voice service is out of date. Run aman upgrade, then try again.',
+    });
+    expect(t.transport.events.some(event => event.type === 'tts_failed')).toBe(false);
+    expect(t.tts.sentences.join(' ')).not.toContain('Say ');
+  });
 
   it('does not call a refusal of the words a broken voice', async () => {
     const t = setup({
@@ -550,7 +579,7 @@ describe('approval by voice', () => {
       await feed({ session: t.session, clock: t.clock, samples: quiet(9000) });
       await t.session.settled();
       expect(t.tts.sentences.join('\n')).not.toContain(refused);
-      expect(t.tts.sentences.at(-1)).toBe("I've left it in the app for you to approve.");
+      expect(t.tts.sentences.at(-1)).toBe(APPROVAL_LINES.cannotReadExactly);
       await feed({ session: t.session, clock: t.clock, samples: says() });
       await t.session.settled();
       expect(t.turns.answers).toEqual([]);
@@ -581,7 +610,8 @@ describe('approval by voice', () => {
     const t = await readBack({ message: withCard() });
     expect(t.tts.asked).toEqual([
       [
-        "I'll send this reply to Victor at victor at example dot com.",
+        "I'll send this reply to 1 address.",
+        'To victor at example dot com, named Victor',
         'The subject is: Re: Thursday',
         'It says: Thursday at three works for me. See you then.',
       ].join('\n'),
@@ -597,7 +627,7 @@ describe('approval by voice', () => {
     await feed({ session: t.session, clock: t.clock, samples: says() });
     await t.session.settled();
     expect(t.tts.sentences.join(' ')).not.toContain('5000');
-    expect(t.tts.sentences.at(-1)).toBe("I've left it in the app for you to approve.");
+    expect(t.tts.sentences.at(-1)).toBe(APPROVAL_LINES.cannotReadExactly);
   });
 
   it('says on the screen that it could not read the card when even the spoken line fails', async () => {
@@ -639,8 +669,107 @@ describe('approval by voice', () => {
     await t.session.end();
   });
 
-  /** A held instruction line: the card's body is made and played out, and the card is not yet waiting. */
-  async function withInstructionHeld() {
+  /**
+   * The card's body is made and played out, while the line telling how to answer, and the "I missed that"
+   * line if one is wanted, are each held until released: the order they reach the line decides the race.
+   */
+  async function withLinesHeld(later: string[] = []) {
+    const gates: { instruction: () => void; missed: () => void } = {
+      instruction: () => undefined,
+      missed: () => undefined,
+    };
+    const held = {
+      instruction: new Promise<void>(resolve => {
+        gates.instruction = resolve;
+      }),
+      missed: new Promise<void>(resolve => {
+        gates.missed = resolve;
+      }),
+    };
+    const t = setup({
+      stt: ['send the reply', ...later],
+      message: withCard(),
+      speechDelay: text =>
+        text.startsWith("Say '")
+          ? held.instruction
+          : text.startsWith('I missed that')
+            ? held.missed
+            : Promise.resolve(),
+    });
+    await feed({ session: t.session, clock: t.clock, samples: says() });
+    await feed({ session: t.session, clock: t.clock, samples: quiet(3000) });
+    return { t, releaseInstruction: gates.instruction, releaseMissed: gates.missed };
+  }
+
+  /** Three words spoken while the transcriber is busy, so the third is dropped and "I missed that" is wanted. */
+  async function overflowTheTranscriber(t: Awaited<ReturnType<typeof withLinesHeld>>['t']) {
+    t.stt.hold = true;
+    for (let n = 0; n < 2; n += 1) {
+      await feed({ session: t.session, clock: t.clock, samples: says() });
+    }
+    await feed({ session: t.session, clock: t.clock, samples: says(900, 700) });
+  }
+
+  it('does not take as an answer what was said before the card was read out, even when it is written down late', async () => {
+    const { t, releaseInstruction } = await withLinesHeld(['yes send it']);
+    t.stt.hold = true;
+    await feed({ session: t.session, clock: t.clock, samples: says() });
+    releaseInstruction();
+    await feed({ session: t.session, clock: t.clock, samples: quiet(3000) });
+    t.stt.hold = false;
+    t.stt.release('yes send it');
+    await t.session.settled();
+    expect(t.turns.answers).toEqual([]);
+    expect(t.notes).toContain('speech_before_card');
+    // It gets the reminder, and the card keeps waiting: said again after the read-back, the phrase works.
+    expect(t.tts.sentences.at(-1)).toContain('still waiting for your answer');
+    expect(t.turns.sent).toEqual(['send the reply']);
+    await feed({ session: t.session, clock: t.clock, samples: quiet(6000) });
+    await feed({ session: t.session, clock: t.clock, samples: says() });
+    await t.session.settled();
+    expect(t.turns.answers).toEqual([{ decision: 'allow', toolCallId: 'call-1' }]);
+  });
+
+  it('keeps a read-back that was cut off unanswerable when "I missed that" is queued after its last line', async () => {
+    const { t, releaseInstruction, releaseMissed } = await withLinesHeld(['yes send it']);
+    await overflowTheTranscriber(t);
+    // The line telling how to answer reaches the line first, then the missed line is queued behind it.
+    releaseInstruction();
+    await feed({ session: t.session, clock: t.clock, samples: quiet(64) });
+    releaseMissed();
+    await feed({ session: t.session, clock: t.clock, samples: quiet(64) });
+    expect(t.tts.sentences.at(-1)).toBe('I missed that. Please say it again.');
+    // The person talks over the instruction line, which was not heard through.
+    await feed({ session: t.session, clock: t.clock, samples: hum(700, 0.3, 1.7) });
+    // What was held comes back as filler, so it cannot be the reason the card is not answered.
+    t.stt.hold = false;
+    t.stt.release('hmm');
+    await t.session.settled();
+    // Well after the card would have been waiting, the exact phrase is said.
+    await feed({ session: t.session, clock: t.clock, samples: quiet(6000) });
+    await feed({ session: t.session, clock: t.clock, samples: says() });
+    await t.session.settled();
+    expect(t.turns.answers).toEqual([]);
+    expect(t.turns.sent).toEqual(['send the reply', 'yes send it']);
+    await t.session.end();
+  });
+
+  it('keeps a read-back that was cut off unanswerable when "I missed that" is queued before its last line', async () => {
+    const { t, releaseInstruction, releaseMissed } = await withLinesHeld();
+    await overflowTheTranscriber(t);
+    releaseMissed();
+    await feed({ session: t.session, clock: t.clock, samples: quiet(64) });
+    releaseInstruction();
+    await feed({ session: t.session, clock: t.clock, samples: quiet(64) });
+    await feed({ session: t.session, clock: t.clock, samples: hum(700, 0.3, 1.7) });
+    t.stt.hold = false;
+    t.stt.release('yes send it');
+    await t.session.settled();
+    expect(t.turns.answers).toEqual([]);
+    await t.session.end();
+  });
+
+  it('tells the screen when the person cut off a card before it could be waited on', async () => {
     let release: () => void = () => undefined;
     const held = new Promise<void>(resolve => {
       release = resolve;
@@ -651,41 +780,16 @@ describe('approval by voice', () => {
       speechDelay: text => (text.startsWith("Say '") ? held : Promise.resolve()),
     });
     await feed({ session: t.session, clock: t.clock, samples: says() });
-    await feed({ session: t.session, clock: t.clock, samples: quiet(3000) });
-    return { t, release };
-  }
-
-  it('does not take as an answer what was said before the card was read out, even when it is written down late', async () => {
-    const { t, release } = await withInstructionHeld();
-    t.stt.hold = true;
-    await feed({ session: t.session, clock: t.clock, samples: says() });
-    release();
-    await feed({ session: t.session, clock: t.clock, samples: quiet(3000) });
-    t.stt.hold = false;
-    t.stt.release('yes send it');
-    await t.session.settled();
-    expect(t.turns.answers).toEqual([]);
-    expect(t.notes).toContain('speech_before_card');
-    expect(t.turns.sent).toEqual(['send the reply', 'yes send it']);
-  });
-
-  it('keeps a read-back that was cut off unanswerable when "I missed that" is queued among its lines', async () => {
-    const { t, release } = await withInstructionHeld();
-    t.stt.hold = true;
-    for (let n = 0; n < 2; n += 1) {
-      await feed({ session: t.session, clock: t.clock, samples: says() });
-    }
-    await feed({ session: t.session, clock: t.clock, samples: says(900, 700) });
-    expect(t.tts.sentences.at(-1)).toBe('I missed that. Please say it again.');
-    // The instruction is made after the missed line, so the card is waiting while its last line is still unheard.
+    // The body is still playing when the person talks over it, so the held line is stopped.
+    await feed({ session: t.session, clock: t.clock, samples: hum(700, 0.3, 1.7) });
     release();
     await feed({ session: t.session, clock: t.clock, samples: quiet(64) });
-    await feed({ session: t.session, clock: t.clock, samples: hum(700, 0.3, 1.7) });
-    t.stt.hold = false;
-    t.stt.release('yes send it');
     await t.session.settled();
     expect(t.turns.answers).toEqual([]);
-    await t.session.end();
+    expect(t.transport.events).toContainEqual({
+      type: 'notice',
+      text: 'I stopped reading that card. It is waiting on the screen. Answer it there.',
+    });
   });
 
   it('does not take a "yes" for a card that was already answered on the screen, and treats it as a new turn', async () => {

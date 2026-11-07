@@ -60,6 +60,8 @@ jobs:
               # The voice tests read these to check the image carries the model the server pins.
               - 'Dockerfile'
               - 'Dockerfile.dev'
+              # A voice test runs the voice service's own read-back check on real calendar cards.
+              - 'ops/aman-tts/**'
               - 'package.json'
               - 'pnpm-workspace.yaml'
               - 'tsconfig.base.json'

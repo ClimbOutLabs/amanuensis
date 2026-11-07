@@ -6,7 +6,8 @@
  * goes back as the chat's own approval input for the same thread and tool call, so the usual replay and
  * `changed` checks apply. Cards that hold more than a person can safely check by ear stay on the screen.
  * Whether the voice would say a read-back exactly as written is the voice service's call, made in the same
- * request that speaks it; this file holds no copy of those rules.
+ * request that speaks it; this file holds no copy of those rules. It only spells out the digits of a time zone
+ * name, which the voice service then checks like any other word.
  */
 import type { Tier3Card } from '@truefoundry/trueforge-core/core';
 
@@ -82,18 +83,14 @@ function isEmpty(value: unknown): boolean {
   return value === null || value === undefined || value === false || (Array.isArray(value) && value.length === 0);
 }
 
-function mailboxNames(mailboxes: { name: string; address: string }[]): string {
-  const names = mailboxes.map(mailbox => {
-    const name = mailbox.name.trim();
-    // The address is read too, so a friendly name cannot stand in for a different address.
-    return name === '' || name === mailbox.address
-      ? spokenAddress(mailbox.address)
-      : `${name} at ${spokenAddress(mailbox.address)}`;
-  });
-  if (names.length <= 1) {
-    return names[0] ?? 'the recipient';
-  }
-  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1] ?? ''}`;
+/**
+ * One recipient on a line of its own. The address comes first and is said by the server's own rule; the
+ * friendly name is the person's text, so it comes last, labelled, and cannot stand in for an address.
+ */
+function mailboxLine({ lead, mailbox }: { lead: string; mailbox: { name: string; address: string } }): string {
+  const name = mailbox.name.trim();
+  const address = spokenAddress(mailbox.address);
+  return name === '' || name === mailbox.address ? `${lead} ${address}` : `${lead} ${address}, named ${name}`;
 }
 
 function verbFor(card: Tier3Card): ApprovalVerb {
@@ -180,24 +177,30 @@ function cardWordingMatchesShape(card: Tier3Card): boolean {
 }
 
 /**
- * The wording around the card's fields. A short field (a title, subject or name) that holds one of these, a
- * sentence stop or a line break could pass for the fixed wording or start a new line, so it stays on the screen.
+ * Text a person supplied (a title, subject, name) sits last on a line of its own, after a fixed label, and
+ * the counts of what the card holds are said first, so a name that sounds like another line contradicts what
+ * was already heard. Only a line break is kept off the voice, because it would end the line early.
  */
-const FIXED_WORDING =
-  /\b(?:it says|the subject is|it goes on|copying|replies will go|sent as|left off|you already have|runs over|description is|task is|i'll (?:send|save|add|delete)|for good|dot|dash)\b/i;
-const SENTENCE_BREAK = /[.!?\u2026]+(?:\s|$)|[\r\n\u2028\u2029\u0085]/u;
+const LINE_BREAK = /[\r\n\u2028\u2029\u0085]/u;
 
-/** True when the field can sit inside the fixed wording without changing what the sentence says. */
-const fitsInWording = (field: string): boolean => !SENTENCE_BREAK.test(field) && !FIXED_WORDING.test(field);
+/** True when the field stays on its own line. Stops and marks inside it are read as written ("Dr. Lee"). */
+const staysOnItsLine = (field: string): boolean => !LINE_BREAK.test(field);
 
-/** A zone name like Europe/Berlin, as words. */
-const zoneWords = (zone: string): string => zone.replace(/[/_]/g, ' ');
+const plural = ({ count, noun, many }: { count: number; noun: string; many: string }): string =>
+  `${String(count)} ${count === 1 ? noun : many}`;
+
+const DIGIT_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
+
+/** A zone name like Europe/Berlin or EST5EDT, as words. */
+const zoneWords = (zone: string): string =>
+  zone
+    .replace(/[/_]/g, ' ')
+    .replace(/\d/g, digit => ` ${DIGIT_WORDS[Number(digit)] ?? ''} `)
+    .replace(/ +/g, ' ')
+    .trim();
 
 /** `Etc/GMT+5` is five hours behind UTC, the way round people do not say it, so it is left for the screen. */
 const isOffsetZone = (zone: string): boolean => /^Etc\/GMT[+-]/.test(zone);
-
-/** "Fri Nov 6, 2:30 to 3:00 pm" as "Fri Nov 6 at 2:30 to 3:00 pm": a comma between a day and a time reads as two numbers. */
-const spokenWhen = (when: string): string => when.replace(/(\d), (?=\d{1,2}:\d\d)/g, '$1 at ');
 
 /** An address said so that every dot and hyphen is heard: "victor at my dash bank dot com". */
 const spokenAddress = (address: string): string =>
@@ -224,22 +227,25 @@ function readableBody(card: Tier3Card): string[] | undefined {
       email.to.length === 0 ||
       email.body.length > MAX_SPOKEN_BODY_CHARS ||
       ![email.subject, email.from_name ?? '', ...[...email.to, ...email.cc].map(mailbox => mailbox.name)].every(
-        fitsInWording,
+        staysOnItsLine,
       )
     ) {
       return undefined;
     }
-    const to = mailboxNames(email.to);
-    const opening =
-      email.action === 'send'
-        ? `I'll send this ${email.reply_in_thread === null ? 'email' : 'reply'} to ${to}.`
-        : `I'll save this email to ${to} as a draft. It will not be sent.`;
+    const addresses = plural({ count: email.to.length, noun: 'address', many: 'addresses' });
+    const copies =
+      email.cc.length === 0
+        ? ''
+        : ` and copy ${plural({ count: email.cc.length, noun: 'address', many: 'addresses' })}`;
     return [
-      opening,
-      ...(email.cc.length > 0 ? [`Copying ${mailboxNames(email.cc)}.`] : []),
+      email.action === 'send'
+        ? `I'll send this ${email.reply_in_thread === null ? 'email' : 'reply'} to ${addresses}${copies}.`
+        : `I'll save this email as a draft to ${addresses}${copies}. It will not be sent.`,
       ...(email.reply_to === null ? [] : [`Replies will go to ${spokenAddress(email.reply_to)}.`]),
-      ...(email.from_name === null ? [] : [`It will be sent as ${email.from_name}.`]),
       ...(email.name_left_off ? ['The name was left off an address because it looked like an address.'] : []),
+      ...email.to.map(mailbox => mailboxLine({ lead: 'To', mailbox })),
+      ...email.cc.map(mailbox => mailboxLine({ lead: 'Copying', mailbox })),
+      ...(email.from_name === null ? [] : [`It will be sent as: ${email.from_name}`]),
       `The subject is: ${email.subject}`,
       `It says: ${email.body}`,
     ];
@@ -251,16 +257,17 @@ function readableBody(card: Tier3Card): string[] | undefined {
       event.already_created === undefined ||
       event.span_days === undefined ||
       event.action !== 'create' ||
-      ![event.title, event.location, event.duration].every(fitsInWording)
+      ![event.title, event.location].every(staysOnItsLine)
     ) {
       return undefined;
     }
-    const place = event.location === '' ? '' : ` at ${event.location}`;
     return [
-      `I'll add the event ${event.title} on ${spokenWhen(event.when)}, ${zoneWords(event.time_zone)} time, for ${event.duration}${place}.`,
+      `I'll add 1 event on ${event.when}, ${zoneWords(event.time_zone)} time, for ${event.duration}.`,
       `It goes on the calendar of ${spokenAddress(event.calendar)}.`,
       ...(event.already_created ? ['You already have this event.'] : []),
       ...(event.span_days > 1 ? [`This event runs over ${String(event.span_days)} days.`] : []),
+      `The title is: ${event.title}`,
+      ...(event.location === '' ? [] : [`The place is: ${event.location}`]),
       ...(event.description === '' ? [] : [`Its description is: ${event.description}`]),
     ];
   }
@@ -269,12 +276,15 @@ function readableBody(card: Tier3Card): string[] | undefined {
       isOffsetZone(schedule.time_zone) ||
       !fieldsAreListed({ shape: schedule, rules: SCHEDULE_FIELD_RULES }) ||
       schedule.action !== 'delete' ||
-      ![schedule.name, schedule.when, schedule.runs_as].every(fitsInWording)
+      ![schedule.name, schedule.runs_as].every(staysOnItsLine)
     ) {
       return undefined;
     }
     return [
-      `I'll delete the schedule ${schedule.name} for good. It runs ${schedule.when}, ${zoneWords(schedule.time_zone)} time, as ${schedule.runs_as}. Its task is: ${schedule.task}`,
+      `I'll delete 1 schedule for good. It runs ${schedule.when}, ${zoneWords(schedule.time_zone)} time.`,
+      `It runs as: ${schedule.runs_as}`,
+      `The schedule is called: ${schedule.name}`,
+      `Its task is: ${schedule.task}`,
     ];
   }
   return undefined;
@@ -328,11 +338,12 @@ export function planVoiceApproval({
 export type SpokenAnswer = 'confirm' | 'deny' | 'other';
 
 /**
- * What a plain spoken answer looks like when written down: letters, spaces and commas, one closing stop or
- * "!", and closing quotes. Anything else (a question mark in any script, a trailing-off, a stop between
- * the words) is not an answer, so no list of marks has to be kept.
+ * What a plain spoken answer looks like when written down: words, each with at most one comma, stop or "!"
+ * after it ("Yes. Send it."), and closing quotes. A question mark in any script, a trailing-off, a dash or
+ * a bracket is not an answer, and the words must still match the phrase exactly.
  */
-const PLAIN_ANSWER = /^[\p{L}\s,]*[.!]?["'\u2019\u201d)\]]*\s*$/u;
+const WORD = "\\p{L}+(?:['\\u2019]\\p{L}+)?";
+const PLAIN_ANSWER = new RegExp(`^\\s*(?:${WORD}[,.!]?\\s+)*${WORD}[.!]?["'\\u2019\\u201d)\\]]*\\s*$`, 'u');
 
 /** Only the exact phrase for the card's verb confirms, and only a plain "no" turns it down. */
 export function classifyAnswer({ heard, verb }: { heard: string; verb: ApprovalVerb }): SpokenAnswer {
@@ -350,6 +361,7 @@ export const APPROVAL_LINES = {
   waiting: (verb: ApprovalVerb): string =>
     `That is still waiting for your answer. Say '${CONFIRM_PHRASES[verb].spoken}', or 'no', or answer it on the screen.`,
   leftForTheApp: "I've left it in the app for you to approve.",
+  cannotReadExactly: "I can't read that one out exactly, so I've left it in the app for you to approve.",
   turnedDown: 'Okay. I did not do it.',
   done: (verb: ApprovalVerb): string =>
     verb === 'send' ? 'Done. I sent it.' : verb === 'delete' ? 'Done. It is deleted.' : 'Done.',
