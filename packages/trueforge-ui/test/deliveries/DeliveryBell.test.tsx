@@ -138,6 +138,6 @@ describe('the bell', () => {
     const { api } = fakeServer([]);
     renderDevice(api);
     fireEvent.click(await screen.findByRole('button', { name: 'Notifications' }));
-    expect(await screen.findByText('Nothing yet. Reminders and notes show up here.')).toBeTruthy();
+    expect(await screen.findByText('Nothing yet. Reminders and your morning brief show up here.')).toBeTruthy();
   });
 });
