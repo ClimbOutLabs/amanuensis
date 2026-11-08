@@ -38,7 +38,7 @@ An app password is a separate password for apps like this one. It is not your us
 To connect an email account:
 
 1. Click **More** in the left bar, click **Settings**, then click **Connectors**.
-2. Find **Email** in the list and click **Connect**. If an account is already connected, click **Manage**, then click **Add another account**.
+2. Find **Email** in the list and click **Connect**. If an account is already connected, click **Manage**, then click the button that starts with "Add another".
 3. Pick your provider in **Email provider**. For a provider that is not on the list, pick Other and type the incoming and outgoing servers and ports.
 4. Type your **Email address**.
 5. Make an app password at your provider. The panel shows a short note for your provider. For some providers it also shows a link, **How to get an app password**.
@@ -82,7 +82,7 @@ An app password is a separate password for apps like this one. It is not your us
 
 The app signs in to your calendar once before it saves anything. If the sign-in fails, nothing is saved, and the panel says what to fix.
 
-You can connect more than one calendar account. To add another, click **Manage**, click **Add another account**, and fill in the form again. The Calendar card in Settings lists every connected account. One account is the default. To make a different account the default, click **Make default** next to it. Reads span every account, and answers say which account each calendar and event belongs to. A new event lands on the account of the calendar you pick for it, and the approval card names that calendar and its account before you approve. Nothing about an event changes after you approve it.
+You can connect more than one calendar account. To add another, click **Manage**, click the button that starts with "Add another", and fill in the form again. The Calendar card in Settings lists every connected account. One account is the default. To make a different account the default, click **Make default** next to it. Reads span every account, and answers say which account each calendar and event belongs to. A new event lands on the account of the calendar you pick for it, and the approval card names that calendar and its account before you approve. Nothing about an event changes after you approve it.
 
 To change one account, click **Manage**, then click **Change** next to it. To remove one account, click **Remove** next to it. This deletes that account's saved app password for good. If an account says the sign-in stopped working, or that the calendar is not working right now, click **Change** next to it and type the details again.
 

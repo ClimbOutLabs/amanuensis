@@ -186,6 +186,12 @@ function mergedToolResult(messages, tool) {
   if (tool === 'list_calendars') {
     merged.withheld = withheld;
   }
+  if (parts.length < messages.length) {
+    // At least one account answered and at least one did not: say so, so the merged answer is
+    // never mistaken for the whole picture. When no account answered, the caller returns the
+    // first error reply instead and this merge never runs.
+    notes.push('One account did not answer, so this answer may not be complete.');
+  }
   if (notes.length > 0) {
     merged.notes = notes;
   }

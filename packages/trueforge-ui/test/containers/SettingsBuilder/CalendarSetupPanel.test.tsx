@@ -402,7 +402,9 @@ describe('CalendarSetupPanel', () => {
     await waitFor(() => expect(port.setDefaultCalendarAccount).toHaveBeenCalledWith('work@example.invalid'));
     fireEvent.click(screen.getByRole('button', { name: 'Add another account' }));
     expect(await screen.findByLabelText(/calendar provider/i)).toBeTruthy();
-    expect((screen.getByLabelText(/email address/i) as HTMLInputElement).value).toBe('');
+    const emailField = screen.getByLabelText(/email address/i);
+    if (!(emailField instanceof HTMLInputElement)) throw new Error('email address field is not an input');
+    expect(emailField.value).toBe('');
   });
 
   it('asks the list to refresh when a save fails, since a cut-off save may still have gone through', async () => {

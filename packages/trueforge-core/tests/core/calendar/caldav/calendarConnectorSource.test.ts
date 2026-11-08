@@ -3,7 +3,7 @@ import {
   type CalendarAccountSnapshot,
 } from '../../../../src/core/calendar/caldav/CalendarConnectorSource';
 import type { CallToolResponse, ToolSource } from '../../../../src/core/mcp/IMCPServer';
-import { toolResultResponse } from '../../../../src/core/mcp/IMCPServer';
+import { isCallToolResponseResult, toolResultResponse } from '../../../../src/core/mcp/IMCPServer';
 
 const ALICE = 'alice@example.invalid';
 const BOB = 'bob@example.invalid';
@@ -15,7 +15,11 @@ function fakeInner() {
     id: 'Calendar',
     description: undefined,
     serverHost: undefined,
-    listTools: async () => ({ kind: 'auth_required' }),
+    listTools: async () => ({
+      authRequired: {
+        servers: [{ id: 'Calendar', name: 'Calendar', auth_url: 'https://auth.example.invalid' }],
+      },
+    }),
     toolCallInfo: async () => {
       throw new Error('not used');
     },
@@ -44,7 +48,8 @@ describe('the calendar connector account guard', () => {
       name: 'create_event',
       arguments: { calendar_id: `${BOB}|/dav/bob/work/`, summary: 'X' },
     });
-    expect(response.isError).toBeFalsy();
+    if (!isCallToolResponseResult(response)) throw new Error('expected the call to reach the connector');
+    expect(response.result.isError).toBeFalsy();
     expect(calls).toHaveLength(1);
     expect(calls[0]?.arguments?.['calendar_id']).toBe(`${BOB}|/dav/bob/work/`);
   });

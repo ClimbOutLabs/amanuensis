@@ -108,6 +108,5 @@
   "Make default": "packages/trueforge-ui/src/containers/SettingsBuilder/AccountSetupPanel.tsx",
   "Change": "packages/trueforge-ui/src/containers/SettingsBuilder/AccountSetupPanel.tsx",
   "Remove": "packages/trueforge-ui/src/containers/SettingsBuilder/AccountSetupPanel.tsx",
-  "Cancel": "packages/trueforge-ui/src/containers/SettingsBuilder/AccountSetupPanel.tsx",
   "From": "packages/trueforge-ui/src/sentinel/MailFromPicker.tsx"
 }

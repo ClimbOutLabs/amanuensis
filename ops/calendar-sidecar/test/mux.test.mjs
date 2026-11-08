@@ -203,3 +203,98 @@ describe('the calendar multiplexer', () => {
     assert.ok(reply.result.content[0].text.includes(ALICE));
   });
 });
+
+function failingGateway() {
+  const server = createServer(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) {
+      chunks.push(chunk);
+    }
+    const message = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    const reply = {
+      jsonrpc: '2.0',
+      id: message.id,
+      result: { content: [{ type: 'text', text: 'The calendar server could not be reached.' }], isError: true },
+    };
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(reply));
+  });
+  return { server };
+}
+
+describe('the calendar multiplexer when an account does not answer', () => {
+  const CAROL = 'carol@example.invalid';
+  const DAVE = 'dave@example.invalid';
+  let alice;
+  let carol;
+  let dave;
+  let partialMux;
+  let failingMux;
+  let partialUrl;
+  let failingUrl;
+
+  async function call(url, name) {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name, arguments: {} } }),
+    });
+    return JSON.parse(await response.text());
+  }
+
+  before(async () => {
+    alice = gateway({
+      email: ALICE,
+      calendars: [{ id: '/dav/alice/personal/', name: 'Personal' }],
+      events: [{ id: 'evt-a1', calendar: '/dav/alice/personal/', summary: 'A one' }],
+    });
+    carol = failingGateway();
+    dave = failingGateway();
+    await new Promise(done => alice.server.listen(0, '127.0.0.1', done));
+    await new Promise(done => carol.server.listen(0, '127.0.0.1', done));
+    await new Promise(done => dave.server.listen(0, '127.0.0.1', done));
+    partialMux = createMux({
+      targets: () => [
+        { email: ALICE, url: `http://127.0.0.1:${alice.server.address().port}/mcp` },
+        { email: CAROL, url: `http://127.0.0.1:${carol.server.address().port}/mcp` },
+      ],
+    });
+    failingMux = createMux({
+      targets: () => [
+        { email: CAROL, url: `http://127.0.0.1:${carol.server.address().port}/mcp` },
+        { email: DAVE, url: `http://127.0.0.1:${dave.server.address().port}/mcp` },
+      ],
+    });
+    await new Promise(done => partialMux.listen(0, '127.0.0.1', done));
+    await new Promise(done => failingMux.listen(0, '127.0.0.1', done));
+    partialUrl = `http://127.0.0.1:${partialMux.address().port}/mcp`;
+    failingUrl = `http://127.0.0.1:${failingMux.address().port}/mcp`;
+  });
+
+  after(() => {
+    partialMux?.close();
+    failingMux?.close();
+    alice?.server.close();
+    carol?.server.close();
+    dave?.server.close();
+  });
+
+  it('answers with what it has and notes that one account did not answer', async () => {
+    const reply = await call(partialUrl, 'list_events');
+    assert.notEqual(reply.result.isError, true);
+    assert.deepEqual(
+      reply.result.structuredContent.events.map(event => event.id),
+      [`${ALICE}|evt-a1`],
+    );
+    const notes = reply.result.structuredContent.notes ?? [];
+    assert.ok(
+      notes.some(note => note.includes('did not answer')),
+      `expected a note about the account that did not answer, got: ${JSON.stringify(notes)}`,
+    );
+  });
+
+  it('keeps the error when every account fails to answer', async () => {
+    const reply = await call(failingUrl, 'list_events');
+    assert.equal(reply.result.isError, true);
+  });
+});
