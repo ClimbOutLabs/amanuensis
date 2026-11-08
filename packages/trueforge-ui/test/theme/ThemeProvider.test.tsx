@@ -401,7 +401,7 @@ describe('ThemeProvider', () => {
     );
 
     expect(screen.getByTestId('mode')).toHaveTextContent('light');
-    expect(screen.getByRole('button', { name: 'Appearance' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Appearance' })).not.toBeInTheDocument();
   });
 
   it('lets a stored preference win over defaultMode', () => {

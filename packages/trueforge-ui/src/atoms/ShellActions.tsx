@@ -5,7 +5,6 @@ import { useOptionalCatalogServer, useServerCapabilities } from '../server/Serve
 import { useOptionalShellMode } from '../server/ShellModeContext.js';
 import { isSettingsChromeEnabled } from '../server/serverChrome.js';
 import { useSlot } from '../theme/SlotsProvider.js';
-import { AppearanceMenuButton } from './AppearanceChoices.js';
 import { BugReportButton } from './BugReportButton.js';
 import { auiButtonClass, railMenuRowClassName, sidebarRailButtonClassName } from './lib/buttonClasses.js';
 import { cn } from './lib/cn.js';
@@ -29,8 +28,9 @@ export function ShellActions({
 
   const hoverClass = 'hover:bg-secondary-button-hover hover:text-ghost-button-text';
 
-  // Footer order (top to bottom): Appearance, Settings, Sessions, Bugs, host slot (e.g. Logout).
-  // The menu rows carry no Appearance entry: light and dark has its own button on the chat header.
+  // Footer order (top to bottom): Settings, Sessions, Bugs, host slot (e.g. Logout).
+  // No surface here carries an Appearance pick: light and dark has its own button on the chat
+  // header, and the full pick lives on the Appearance page in Settings.
   // Sessions renders only in the labeled rail: the unlabeled header row never had it, and the
   // rail button styling does not fit an icon row.
   return (
@@ -41,7 +41,6 @@ export function ShellActions({
         className,
       )}
     >
-      {rows ? null : <AppearanceMenuButton className={hoverClass} />}
       {shell != null && settingsChromeEnabled ? (
         <button
           type="button"
