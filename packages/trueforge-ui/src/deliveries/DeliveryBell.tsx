@@ -12,8 +12,7 @@ import type { DeliveryItem } from './types.js';
 
 const KIND_WORDS: Record<string, string> = {
   reminder: 'Reminder',
-  note: 'Note',
-  nudge: 'Heads up',
+  brief: 'Morning brief',
   approval_waiting: 'Waiting for your ok',
 };
 
@@ -136,7 +135,7 @@ export function DeliveryBell() {
           </div>
           {items.length === 0 ? (
             <p className="text-text-secondary px-3 py-6 text-center text-sm">
-              Nothing yet. Reminders and notes show up here.
+              Nothing yet. Reminders and your morning brief show up here.
             </p>
           ) : (
             <ul className="min-h-0 flex-1 overflow-y-auto p-1">

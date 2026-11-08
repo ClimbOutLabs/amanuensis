@@ -20,10 +20,8 @@ export function pushTitle(kind: DeliveryKind): string {
   switch (kind) {
     case 'reminder':
       return 'Reminder';
-    case 'note':
-      return 'A note for you';
-    case 'nudge':
-      return 'Something needs you today';
+    case 'brief':
+      return 'Your morning brief';
     case 'approval_waiting':
       return 'Something is waiting for your ok';
   }

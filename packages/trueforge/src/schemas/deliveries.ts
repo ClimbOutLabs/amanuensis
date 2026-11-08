@@ -56,13 +56,9 @@ export const ReminderDeliverySchema = z
   .object({ kind: z.literal('reminder'), link: DeliveryLinkSchema.nullable(), ...deliveryShape })
   .openapi('ReminderDelivery');
 
-export const NoteDeliverySchema = z
-  .object({ kind: z.literal('note'), link: DeliveryLinkSchema.nullable(), ...deliveryShape })
-  .openapi('NoteDelivery');
-
-export const NudgeDeliverySchema = z
-  .object({ kind: z.literal('nudge'), link: DeliveryLinkSchema.nullable(), ...deliveryShape })
-  .openapi('NudgeDelivery');
+export const BriefDeliverySchema = z
+  .object({ kind: z.literal('brief'), link: DeliveryChatLinkSchema, ...deliveryShape })
+  .openapi('BriefDelivery');
 
 export const ApprovalWaitingDeliverySchema = z
   .object({ kind: z.literal('approval_waiting'), link: DeliveryApprovalLinkSchema, ...deliveryShape })
@@ -70,12 +66,7 @@ export const ApprovalWaitingDeliverySchema = z
 
 /** Later parts add a member here; the stored `kind` is plain text, so no migration is needed. */
 export const DeliverySchema = z
-  .discriminatedUnion('kind', [
-    ReminderDeliverySchema,
-    NoteDeliverySchema,
-    NudgeDeliverySchema,
-    ApprovalWaitingDeliverySchema,
-  ])
+  .discriminatedUnion('kind', [ReminderDeliverySchema, BriefDeliverySchema, ApprovalWaitingDeliverySchema])
   .openapi('Delivery');
 
 export const DeliveriesPageQuerySchema = z
