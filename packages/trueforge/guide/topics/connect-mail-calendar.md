@@ -38,7 +38,7 @@ An app password is a separate password for apps like this one. It is not your us
 To connect an email account:
 
 1. Click **More** in the left bar, click **Settings**, then click **Connectors**.
-2. Find **Email** in the list and click **Connect**. If an account is already connected, click **Manage**, then click **Add another account**.
+2. Find **Email** in the list and click **Connect**. If an account is already connected, click **Manage**, then click the button that starts with "Add another".
 3. Pick your provider in **Email provider**. For a provider that is not on the list, pick Other and type the incoming and outgoing servers and ports.
 4. Type your **Email address**.
 5. Make an app password at your provider. The panel shows a short note for your provider. For some providers it also shows a link, **How to get an app password**.
