@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createLogger } from 'winston';
@@ -144,6 +144,23 @@ describe('the notes folder settings endpoints', () => {
     expect(JSON.parse(refused.text).error.message).toBe(NOTES_FOLDER_OVERLAP_MESSAGE);
 
     const parent = await call({ method: 'POST', path: '/', body: { folder_path: root } });
+    expect(parent.status).toBe(400);
+    expect(JSON.parse(parent.text).error.message).toBe(NOTES_FOLDER_OVERLAP_MESSAGE);
+
+    const status = await call({ method: 'GET', path: '/status' });
+    expect(JSON.parse(status.text).data.state).toBe('not_connected');
+  });
+
+  it('refuses a link that leads to the memory folder, and one that leads around it', async () => {
+    const toMemory = path.join(root, 'link-to-memory');
+    await symlink(memoryDir, toMemory, 'dir');
+    const refused = await call({ method: 'POST', path: '/', body: { folder_path: toMemory } });
+    expect(refused.status).toBe(400);
+    expect(JSON.parse(refused.text).error.message).toBe(NOTES_FOLDER_OVERLAP_MESSAGE);
+
+    const aroundMemory = path.join(root, 'link-around-memory');
+    await symlink(root, aroundMemory, 'dir');
+    const parent = await call({ method: 'POST', path: '/', body: { folder_path: aroundMemory } });
     expect(parent.status).toBe(400);
     expect(JSON.parse(parent.text).error.message).toBe(NOTES_FOLDER_OVERLAP_MESSAGE);
 

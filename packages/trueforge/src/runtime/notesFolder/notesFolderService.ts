@@ -21,11 +21,11 @@ import {
   folderOverlapProblem,
   INBOX_FILE_MISSING_MESSAGE,
   isUnder,
+  normalizeNotePath,
   NOTE_ALREADY_THERE_MESSAGE,
   NOTE_NOT_FOUND_MESSAGE,
   NOTE_PATH_MESSAGE,
   notePathProblem,
-  normalizeNotePath,
   resolveFolderPath,
 } from './notesFolderPaths';
 import { chunkNote, scanNotesFolder, type NoteChunk } from './notesFolderScan';
@@ -197,7 +197,7 @@ export class NotesFolderService {
     const folder = resolveFolderPath(settings.folder_path);
     // A backstop behind the Settings check: however the settings were written, Aman never
     // indexes its own memory as the person's notes.
-    if (folderOverlapProblem({ folderPath: folder, memoryDir: this.deps.memoryDir }) !== null) {
+    if ((await folderOverlapProblem({ folderPath: folder, memoryDir: this.deps.memoryDir })) !== null) {
       this.deps.logger.warn('Notes folder overlaps the memory folder; the notes tools stay off');
       this.cache = undefined;
       return;
@@ -390,10 +390,21 @@ export class NotesFolderService {
     const rel = normalizeNotePath(relativePath);
     const target = path.join(folder, rel);
     const parent = path.dirname(target);
-    await mkdir(parent, { recursive: true });
     const realFolder = await realpath(folder).catch(() => null);
+    if (realFolder === null) {
+      throw new NotesFolderProblem(NOTE_PATH_MESSAGE);
+    }
+    // The place the new folders would be made is judged before any are made: a subfolder
+    // that is a link out of the notes folder refuses here, so a refusal leaves nothing
+    // behind outside the folder.
+    const anchor = await deepestExistingPath(parent);
+    const realAnchor = anchor === null ? null : await realpath(anchor).catch(() => null);
+    if (realAnchor === null || (realAnchor !== realFolder && !isUnder({ child: realAnchor, parent: realFolder }))) {
+      throw new NotesFolderProblem(NOTE_PATH_MESSAGE);
+    }
+    await mkdir(parent, { recursive: true });
     const realParent = await realpath(parent).catch(() => null);
-    if (realFolder === null || realParent === null || (realParent !== realFolder && !isUnder({ child: realParent, parent: realFolder }))) {
+    if (realParent === null || (realParent !== realFolder && !isUnder({ child: realParent, parent: realFolder }))) {
       throw new NotesFolderProblem(NOTE_PATH_MESSAGE);
     }
     const body = text.trim();
@@ -429,7 +440,7 @@ export class NotesFolderService {
     const folder = resolveFolderPath(settings.folder_path);
     // The same backstop as the index: however the settings were written, Aman's own memory
     // folder is never read or added to as if it were the person's notes.
-    const overlap = folderOverlapProblem({ folderPath: folder, memoryDir: this.deps.memoryDir });
+    const overlap = await folderOverlapProblem({ folderPath: folder, memoryDir: this.deps.memoryDir });
     if (overlap !== null) {
       throw new NotesFolderProblem(overlap);
     }
@@ -443,7 +454,13 @@ export class NotesFolderService {
   }
 
   /** The real path of a note inside the folder, or null when it is not there or leads out. */
-  private async resolveInside({ folder, relativePath }: { folder: string; relativePath: string }): Promise<string | null> {
+  private async resolveInside({
+    folder,
+    relativePath,
+  }: {
+    folder: string;
+    relativePath: string;
+  }): Promise<string | null> {
     const realFolder = await realpath(folder).catch(() => null);
     if (realFolder === null) {
       return null;
@@ -503,7 +520,14 @@ export class NotesFolderService {
 
 /** Keyword order over the chunks: how many of the query's words a chunk carries, heading first. */
 function keywordRank({ query, chunks }: { query: string; chunks: NoteChunk[] }): string[] {
-  const terms = [...new Set(query.toLowerCase().split(/[^a-z0-9]+/).filter(term => term !== ''))];
+  const terms = [
+    ...new Set(
+      query
+        .toLowerCase()
+        .split(/[^a-z0-9]+/)
+        .filter(term => term !== ''),
+    ),
+  ];
   if (terms.length === 0) {
     return [];
   }
@@ -534,6 +558,20 @@ function occurrences({ haystack, needle }: { haystack: string; needle: string })
     at = haystack.indexOf(needle, at + needle.length);
   }
   return count;
+}
+
+/** The deepest part of a path that is already on disk, or null when none of it is. */
+async function deepestExistingPath(target: string): Promise<string | null> {
+  let current: string | null = target;
+  while (current !== null) {
+    const info = await stat(current).catch(() => null);
+    if (info !== null) {
+      return current;
+    }
+    const parent = path.dirname(current);
+    current = parent === current ? null : parent;
+  }
+  return null;
 }
 
 /** The end of a file as an append needs it: whether it is there, its size and change time, and its last bytes. */

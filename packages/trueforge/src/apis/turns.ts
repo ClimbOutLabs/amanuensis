@@ -964,9 +964,7 @@ function createTurnResolver(deps: {
         deps.globalSettingsStore === undefined
           ? undefined
           : {
-              service: sharedNotesFolderService(
-                notesFolderServiceDeps({ settings: deps.globalSettingsStore, logger }),
-              ),
+              service: sharedNotesFolderService(notesFolderServiceDeps({ settings: deps.globalSettingsStore, logger })),
             },
       authority: { tenantId: tenant_id, userRef },
       sessionId,

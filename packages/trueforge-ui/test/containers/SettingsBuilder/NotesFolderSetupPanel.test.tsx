@@ -72,7 +72,9 @@ describe('the notes folder setup panel', () => {
     fireEvent.change(await screen.findByLabelText('Folder'), { target: { value: '/notes' } });
     fireEvent.change(screen.getByLabelText('Inbox file'), { target: { value: 'Ideas in.md' } });
     fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
-    await waitFor(() => expect(port.saveNotesFolder).toHaveBeenCalledWith({ folderPath: '/notes', inboxFile: 'Ideas in.md' }));
+    await waitFor(() =>
+      expect(port.saveNotesFolder).toHaveBeenCalledWith({ folderPath: '/notes', inboxFile: 'Ideas in.md' }),
+    );
     expect(await screen.findByText(/Connected to/)).toBeDefined();
     expect(screen.getByText(/It holds 12 notes\./)).toBeDefined();
   });
@@ -81,7 +83,7 @@ describe('the notes folder setup panel', () => {
     const port = makePort(statusOf());
     port.saveNotesFolder = vi.fn(async () => {
       throw new Error(
-        "That folder is where Aman keeps its own memory, so it cannot be your notes folder too. Pick the folder that holds your notes, such as the vault you open in Obsidian.",
+        'That folder is where Aman keeps its own memory, so it cannot be your notes folder too. Pick the folder that holds your notes, such as the vault you open in Obsidian.',
       );
     });
     renderPanel(port);

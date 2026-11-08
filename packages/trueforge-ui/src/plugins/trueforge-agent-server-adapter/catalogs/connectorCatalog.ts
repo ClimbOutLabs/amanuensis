@@ -18,8 +18,8 @@ import type { CalendarSetupPort } from '../../../server/calendarSetup.js';
 import { parseToolGrants, type ConnectorToolGrants } from '../../../server/connectorToolGrants.js';
 import type { EmailSetupPort } from '../../../server/emailSetup.js';
 import type { GoogleSetupPort } from '../../../server/googleSetup.js';
-import type { NotesFolderSetupPort } from '../../../server/notesFolderSetup.js';
 import type { MemoryProviderFields } from '../../../server/memoryProviderTypes.js';
+import type { NotesFolderSetupPort } from '../../../server/notesFolderSetup.js';
 import type { SearchProviderFields } from '../../../server/searchProviderTypes.js';
 import type {
   ConnectorAuth,

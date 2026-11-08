@@ -169,8 +169,8 @@ export default function NotesFolderSetupPanel({ open, onOpenChange, port, onChan
                 role="alert"
                 className="rounded-md border border-failure-bg/30 bg-failure-bg/10 px-3 py-2 text-failure-bg"
               >
-                This folder is saved, but your assistant cannot find it right now. Check the folder is still there,
-                or type the path again.
+                This folder is saved, but your assistant cannot find it right now. Check the folder is still there, or
+                type the path again.
               </p>
             ) : null}
             <p className="text-text-secondary">
@@ -208,8 +208,8 @@ export default function NotesFolderSetupPanel({ open, onOpenChange, port, onChan
                 autoComplete="off"
               />
               <p className="mt-2 text-text-secondary">
-                New entries from your assistant are added to this file, under a heading with the date and time.
-                Nothing else in your notes is ever changed.
+                New entries from your assistant are added to this file, under a heading with the date and time. Nothing
+                else in your notes is ever changed.
               </p>
             </div>
             <div className="flex flex-wrap items-center justify-between gap-2">

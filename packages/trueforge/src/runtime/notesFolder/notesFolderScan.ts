@@ -55,7 +55,13 @@ export async function countNoteFiles(folder: string): Promise<number> {
 }
 
 /** The notes under a directory: folder-relative paths with the real path each resolves to. */
-async function collectNotePaths({ dir, root }: { dir: string; root: string }): Promise<{ relativePath: string; real: string }[]> {
+async function collectNotePaths({
+  dir,
+  root,
+}: {
+  dir: string;
+  root: string;
+}): Promise<{ relativePath: string; real: string }[]> {
   const entries = await readdir(dir, { withFileTypes: true }).catch(() => null);
   if (entries === null) {
     return [];

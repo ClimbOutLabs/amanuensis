@@ -19,8 +19,7 @@ export function classifyNotesFolderTool(action: SentinelAction): TierDecision {
   if (isNotesFolderReadToolName(action.tool_name)) {
     return tier1Decision({
       reason: 'notes_read',
-      reason_detail:
-        action.tool_name === SEARCH_NOTES_TOOL_NAME ? 'Searched your notes.' : 'Read one of your notes.',
+      reason_detail: action.tool_name === SEARCH_NOTES_TOOL_NAME ? 'Searched your notes.' : 'Read one of your notes.',
       sensitive_read: true,
     });
   }

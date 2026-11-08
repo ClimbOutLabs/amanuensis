@@ -67,7 +67,6 @@ import {
 } from './approvalTokens';
 import { recordClassificationAudit } from './audit';
 import { browserOpenCard, classifyBrowserActionTool, classifyBrowserViewTool } from './browserTier';
-import { classifyNotesFolderTool } from './notesTier';
 import {
   BROWSER_OPEN_GUARD_REASON,
   BROWSER_OPEN_PRIVATE_DETAIL_REASON,
@@ -104,6 +103,7 @@ import {
   RENDER_ROUTE_TOOL_NAME,
 } from './mapsToolNames';
 import { provenanceForToolType, requiresNetwork } from './networkRequirements';
+import { classifyNotesFolderTool } from './notesTier';
 import {
   appendOutboundTrace,
   checkOutboundStrings,

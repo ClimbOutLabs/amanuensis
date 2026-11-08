@@ -65,8 +65,6 @@ export async function writeNotesFolderSettings(
 }
 
 /** Removes the settings; the folder is simply no longer connected. */
-export async function deleteNotesFolderSettings(
-  store: Pick<IGlobalSettingsStore, 'deleteSetting'>,
-): Promise<void> {
+export async function deleteNotesFolderSettings(store: Pick<IGlobalSettingsStore, 'deleteSetting'>): Promise<void> {
   await store.deleteSetting({ key: NOTES_FOLDER_SETTINGS_KEY });
 }

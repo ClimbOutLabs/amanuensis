@@ -20,6 +20,7 @@ import {
 } from '../runtime/notesFolder/notesFolderPaths';
 import { notesFolderServiceDeps, sharedNotesFolderService } from '../runtime/notesFolder/notesFolderRuntime';
 import { countNoteFiles } from '../runtime/notesFolder/notesFolderScan';
+import type { NotesFolderService } from '../runtime/notesFolder/notesFolderService';
 import {
   DEFAULT_INBOX_FILE_NAME,
   deleteNotesFolderSettings,
@@ -27,7 +28,6 @@ import {
   writeNotesFolderSettings,
   type NotesFolderSettings,
 } from '../runtime/notesFolder/notesFolderSettings';
-import type { NotesFolderService } from '../runtime/notesFolder/notesFolderService';
 import type { NotesFolderStatus, SaveNotesFolderRequest } from '../schemas/notesFolder';
 import { requireJsonOrSameOrigin } from './crossSite';
 
@@ -49,7 +49,12 @@ async function statusBody(settingsStore: Pick<IGlobalSettingsStore, 'getSetting'
   const folder = resolveFolderPath(settings.folder_path);
   const info = await stat(folder).catch(() => null);
   if (!info?.isDirectory()) {
-    return { state: 'not_working', folder_path: settings.folder_path, inbox_file: settings.inbox_file, note_count: null };
+    return {
+      state: 'not_working',
+      folder_path: settings.folder_path,
+      inbox_file: settings.inbox_file,
+      note_count: null,
+    };
   }
   return {
     state: 'connected',
@@ -73,7 +78,7 @@ async function saveProblem(request: SaveNotesFolderRequest): Promise<string | nu
   if (!info.isDirectory()) {
     return NOTES_FOLDER_NOT_A_FOLDER_MESSAGE;
   }
-  const overlap = folderOverlapProblem({
+  const overlap = await folderOverlapProblem({
     folderPath: resolved,
     memoryDir: path.resolve(configuration.MEMORY_MARKDOWN_DIR),
   });
@@ -88,7 +93,8 @@ async function saveProblem(request: SaveNotesFolderRequest): Promise<string | nu
 
 export function createNotesFolderRouter(deps: NotesFolderRouterDeps) {
   const service =
-    deps.service ?? sharedNotesFolderService(notesFolderServiceDeps({ settings: deps.settingsStore, logger: deps.logger }));
+    deps.service ??
+    sharedNotesFolderService(notesFolderServiceDeps({ settings: deps.settingsStore, logger: deps.logger }));
   const router = new OpenAPIHono();
   router.use('/', requireJsonOrSameOrigin());
   router.openapi(notesFolderRoutes.status, async c => {

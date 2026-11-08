@@ -1,11 +1,11 @@
 import { createRoute } from '@hono/zod-openapi';
+import { RequestErrorResponseSchema } from '../schemas/errors';
 import {
   GetNotesFolderResponseSchema,
   RemoveNotesFolderResponseSchema,
   SaveNotesFolderRequestSchema,
   SaveNotesFolderResponseSchema,
 } from '../schemas/notesFolder';
-import { RequestErrorResponseSchema } from '../schemas/errors';
 import { OpenApiTag } from './openapiTags';
 
 const unauthorized = {

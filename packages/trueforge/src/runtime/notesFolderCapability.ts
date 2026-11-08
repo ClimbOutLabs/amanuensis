@@ -122,7 +122,9 @@ export class NotesFolderToolSet extends LocalToolMCP {
       const truncated = note.content.length > MAX_READ_CHARS;
       return jsonResult({
         path: note.path,
-        content: truncated ? `${note.content.slice(0, MAX_READ_CHARS)}\n\n[The note continues past what is shown here.]` : note.content,
+        content: truncated
+          ? `${note.content.slice(0, MAX_READ_CHARS)}\n\n[The note continues past what is shown here.]`
+          : note.content,
         untrusted_content: NOTES_UNTRUSTED_NOTICE,
       });
     } catch (error) {

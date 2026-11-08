@@ -1,4 +1,4 @@
-import { appendFile, mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, mkdtemp, readFile, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createLogger } from 'winston';
@@ -107,8 +107,14 @@ async function connect(world: World, inboxFile = 'Aman inbox.md'): Promise<void>
 }
 
 async function seedNotes(world: World): Promise<void> {
-  await writeFile(path.join(world.vault, 'Garden.md'), '# Garden\n\nTomatoes need deep watering, and the seedlings want sun.\n');
-  await writeFile(path.join(world.vault, 'Kitchen.md'), '# Kitchen\n\nBoil the pasta and save a cup of water for the sauce recipe.\n');
+  await writeFile(
+    path.join(world.vault, 'Garden.md'),
+    '# Garden\n\nTomatoes need deep watering, and the seedlings want sun.\n',
+  );
+  await writeFile(
+    path.join(world.vault, 'Kitchen.md'),
+    '# Kitchen\n\nBoil the pasta and save a cup of water for the sauce recipe.\n',
+  );
 }
 
 describe('indexing and searching the notes folder', () => {
@@ -247,6 +253,19 @@ describe('creating notes', () => {
     );
   });
 
+  it('makes nothing outside the folder when a subfolder is a link out of it', async () => {
+    const world = await makeWorld({});
+    await connect(world);
+    const outside = path.join(world.root, 'outside');
+    await mkdir(outside, { recursive: true });
+    await symlink(outside, path.join(world.vault, 'Linked'), 'dir');
+    await expect(world.service.createNote({ relativePath: 'Linked/Deep/Note.md', text: 'No.' })).rejects.toThrow(
+      NOTE_PATH_MESSAGE,
+    );
+    await expect(stat(path.join(outside, 'Deep'))).rejects.toThrow();
+    await expect(stat(path.join(outside, 'Note.md'))).rejects.toThrow();
+  });
+
   it('puts a new note in search results', async () => {
     const world = await makeWorld({ embedder: undefined });
     await connect(world);
@@ -281,5 +300,40 @@ describe('the folder overlap refusal', () => {
 
     await writeNotesFolderSettings(world.settingsStore, { folder_path: world.root, inbox_file: 'Aman inbox.md' });
     await expect(world.service.appendToInbox('An entry.')).rejects.toThrow(NotesFolderProblem);
+  });
+
+  it('refuses a link to the memory folder, a link into it, and a link around it', async () => {
+    const world = await makeWorld({ embedder: undefined });
+    await writeFile(path.join(world.memoryDir, 'Memory.md'), '# Memory\n\nAman remembers this.\n');
+
+    const toMemory = path.join(world.root, 'link-to-memory');
+    await symlink(world.memoryDir, toMemory, 'dir');
+    await writeNotesFolderSettings(world.settingsStore, { folder_path: toMemory, inbox_file: 'Aman inbox.md' });
+    await expect(world.service.appendToInbox('An entry.')).rejects.toThrow(NOTES_FOLDER_OVERLAP_MESSAGE);
+    await expect(world.service.readNote('Memory.md')).rejects.toThrow(NOTES_FOLDER_OVERLAP_MESSAGE);
+    expect(await world.service.search({ query: 'remembers', limit: 5 })).toEqual([]);
+    await expect(stat(path.join(world.memoryDir, 'Aman inbox.md'))).rejects.toThrow();
+
+    const inside = path.join(world.memoryDir, 'sub');
+    await mkdir(inside, { recursive: true });
+    const intoMemory = path.join(world.root, 'link-into-memory');
+    await symlink(inside, intoMemory, 'dir');
+    await writeNotesFolderSettings(world.settingsStore, { folder_path: intoMemory, inbox_file: 'Aman inbox.md' });
+    await expect(world.service.appendToInbox('An entry.')).rejects.toThrow(NOTES_FOLDER_OVERLAP_MESSAGE);
+
+    const aroundMemory = path.join(world.root, 'link-around-memory');
+    await symlink(world.root, aroundMemory, 'dir');
+    await writeNotesFolderSettings(world.settingsStore, { folder_path: aroundMemory, inbox_file: 'Aman inbox.md' });
+    await expect(world.service.appendToInbox('An entry.')).rejects.toThrow(NOTES_FOLDER_OVERLAP_MESSAGE);
+  });
+
+  it('still connects through a link to a folder that is not the memory folder', async () => {
+    const world = await makeWorld({ embedder: undefined });
+    await seedNotes(world);
+    const link = path.join(world.root, 'link-to-vault');
+    await symlink(world.vault, link, 'dir');
+    await writeNotesFolderSettings(world.settingsStore, { folder_path: link, inbox_file: 'Aman inbox.md' });
+    await world.service.appendToInbox('Through the link.');
+    await expect(readFile(path.join(world.vault, 'Aman inbox.md'), 'utf8')).resolves.toContain('Through the link.');
   });
 });

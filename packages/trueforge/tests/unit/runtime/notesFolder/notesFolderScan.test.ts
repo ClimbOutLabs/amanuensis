@@ -36,7 +36,8 @@ describe('chunking a note', () => {
   it('keeps the heading a chunk sits under and leaves frontmatter out', () => {
     const chunks = chunkNote({
       relativePath: 'Trips.md',
-      content: '---\ntags: travel\n---\nIntro words.\n\n# Lisbon\n\nTram 28 and custard tarts.\n\n# Porto\n\nThe river at dusk.\n',
+      content:
+        '---\ntags: travel\n---\nIntro words.\n\n# Lisbon\n\nTram 28 and custard tarts.\n\n# Porto\n\nThe river at dusk.\n',
     });
     expect(chunks.map(chunk => ({ heading: chunk.heading, text: chunk.text }))).toEqual([
       { heading: null, text: 'Intro words.' },

@@ -1,12 +1,12 @@
+import { NOOP_AGENT_TRACING } from '@truefoundry/trueforge-core/core/tracing/NoopAgentTracing';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { NOOP_AGENT_TRACING } from '@truefoundry/trueforge-core/core/tracing/NoopAgentTracing';
 import { createLogger } from 'winston';
 import type { IGlobalSettingsStore } from '../../../src/db/globalSettingsStore';
-import { notesFolderCapability } from '../../../src/runtime/notesFolderCapability';
 import { NotesFolderService } from '../../../src/runtime/notesFolder/notesFolderService';
 import { writeNotesFolderSettings } from '../../../src/runtime/notesFolder/notesFolderSettings';
+import { notesFolderCapability } from '../../../src/runtime/notesFolderCapability';
 
 function makeSettingsStore(): IGlobalSettingsStore {
   const rows = new Map<string, string>();

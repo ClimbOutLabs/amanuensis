@@ -1,14 +1,16 @@
 /**
- * The path rules of the Notes folder connector, kept pure so they can be tested without a disk:
- * which folders may be picked (never one that overlaps Aman's own memory), which note paths a
- * tool may touch (inside the folder, Markdown only, never a way out), and what the inbox file
- * may be called (a plain file name, so an append can only ever land in the folder's top level).
- * Every problem is one plain sentence that says the one thing to do next.
+ * The path rules of the Notes folder connector: which folders may be picked (never one that
+ * overlaps Aman's own memory), which note paths a tool may touch (inside the folder, Markdown
+ * only, never a way out), and what the inbox file may be called (a plain file name, so an
+ * append can only ever land in the folder's top level). The overlap check follows links on
+ * disk before it compares, so a link cannot dress Aman's memory up as another folder. Every
+ * problem is one plain sentence that says the one thing to do next.
  */
+import { realpath } from 'node:fs/promises';
 import path from 'node:path';
 
 export const NOTES_FOLDER_OVERLAP_MESSAGE =
-  "That folder is where Aman keeps its own memory, so it cannot be your notes folder too. Pick the folder that holds your notes, such as the vault you open in Obsidian.";
+  'That folder is where Aman keeps its own memory, so it cannot be your notes folder too. Pick the folder that holds your notes, such as the vault you open in Obsidian.';
 export const NOTES_FOLDER_NOT_FOUND_MESSAGE =
   'Aman could not find that folder on this computer. Check the path and try again.';
 export const NOTES_FOLDER_NOT_A_FOLDER_MESSAGE =
@@ -46,9 +48,29 @@ export function isUnder({ child, parent }: { child: string; parent: string }): b
   return relative !== '' && !relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative);
 }
 
-/** The overlap problem for a picked folder, or null when it may be used. */
-export function folderOverlapProblem({ folderPath, memoryDir }: { folderPath: string; memoryDir: string }): string | null {
-  return pathsOverlap({ a: resolveFolderPath(folderPath), b: memoryDir }) ? NOTES_FOLDER_OVERLAP_MESSAGE : null;
+/** The real location of a path, links followed, or null when it is not on disk to be read. */
+async function realPathOrNull(target: string): Promise<string | null> {
+  return realpath(target).catch(() => null);
+}
+
+/**
+ * The overlap problem for a picked folder, or null when it may be used. Both sides are
+ * compared where they really are: a picked folder that is a link to the memory folder, into
+ * it, or around it is the same overlap as naming the place outright. A side that is not on
+ * disk yet is compared as written.
+ */
+export async function folderOverlapProblem({
+  folderPath,
+  memoryDir,
+}: {
+  folderPath: string;
+  memoryDir: string;
+}): Promise<string | null> {
+  const folder = resolveFolderPath(folderPath);
+  const memory = path.resolve(memoryDir);
+  const [realFolder, realMemory] = await Promise.all([realPathOrNull(folder), realPathOrNull(memory)]);
+  const overlap = pathsOverlap({ a: realFolder ?? folder, b: realMemory ?? memory });
+  return overlap ? NOTES_FOLDER_OVERLAP_MESSAGE : null;
 }
 
 /** The problem with an inbox file name, or null when it is a plain Markdown file name. */
