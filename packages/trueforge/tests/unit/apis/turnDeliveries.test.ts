@@ -149,7 +149,7 @@ async function deliveryWorld(logger: Logger) {
   const sent: Delivery[] = [];
   const senders: DeliveryChannelSender[] = [
     {
-      send: (input) => {
+      send: input => {
         sent.push(input.delivery);
         return Promise.resolve([
           { channel: 'web_push', outcome: 'sent', detail: null, target: null, attempted_at: new Date().toISOString() },
@@ -467,7 +467,7 @@ describe('finished turns reach the feed through the turn drain', () => {
     const sent: Delivery[] = [];
     const senders: DeliveryChannelSender[] = [
       {
-        send: (input) => {
+        send: input => {
           sent.push(input.delivery);
           return Promise.resolve([
             {
@@ -481,7 +481,12 @@ describe('finished turns reach the feed through the turn drain', () => {
         },
       },
     ];
-    const deliveries = createDeliveryService({ store, senders, audit: new SentinelAuditStore(db), logger: worldLogger });
+    const deliveries = createDeliveryService({
+      store,
+      senders,
+      audit: new SentinelAuditStore(db),
+      logger: worldLogger,
+    });
     const observer = createTurnDeliveryObserver({ store, deliveries, logger: worldLogger });
     return { store, sent, observer };
   }
