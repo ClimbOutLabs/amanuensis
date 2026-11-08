@@ -808,8 +808,8 @@ const ConnectorSettings = () => {
           <h4 className="text-sm font-semibold text-text-primary">Get connected in three steps</h4>
           <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-text-secondary">
             <li>
-              Find a connector in <span className="font-medium text-text-primary">Available</span> below and choose
-              Connect. Most need an API key or token from that service.
+              Find a connector under <span className="font-medium text-text-primary">Add a connector</span> below and
+              choose Connect. Most need an API key or token from that service.
             </li>
             <li>Choose it in the message box so {assistant} can use its tools in that chat.</li>
             <li>
@@ -923,7 +923,7 @@ const ConnectorSettings = () => {
                   id="available-connectors-heading"
                   className="mb-2 text-[0.8125rem] font-semibold uppercase text-text-secondary"
                 >
-                  Available · {availableConnectors.length}
+                  Add a connector · {availableConnectors.length}
                 </h4>
                 <div className="overflow-hidden rounded-xl border border-border bg-card-bg">
                   {availableConnectors.map(entry => renderCatalogEntry(entry))}
