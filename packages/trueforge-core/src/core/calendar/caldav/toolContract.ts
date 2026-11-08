@@ -34,6 +34,7 @@ export function isCaldavReadToolName(tool_name: string): boolean {
 export const CALDAV_WRITE_FIELDS: Partial<Record<CaldavToolName, readonly string[]>> = {
   create_event: [
     'calendar_id',
+    'account',
     'summary',
     'start',
     'end',
@@ -48,6 +49,7 @@ export const CALDAV_WRITE_FIELDS: Partial<Record<CaldavToolName, readonly string
   ],
   update_event: [
     'id',
+    'account',
     'scope',
     'summary',
     'start',
@@ -60,8 +62,8 @@ export const CALDAV_WRITE_FIELDS: Partial<Record<CaldavToolName, readonly string
     'transparent',
     'alarms',
   ],
-  delete_event: ['id', 'scope'],
-  respond_to_event: ['id', 'response'],
+  delete_event: ['id', 'account', 'scope'],
+  respond_to_event: ['id', 'account', 'response'],
 };
 
 export function isCaldavToolName(name: string): name is CaldavToolName {

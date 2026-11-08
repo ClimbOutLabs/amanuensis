@@ -93,6 +93,7 @@ import {
 import type { ActiveTurnRegistry, TurnAdmission } from '../runtime/activeTurns';
 import { findTurnArtifact } from '../runtime/artifacts/findTurnArtifact';
 import { submitArtifactPersistence } from '../runtime/artifacts/persistTurnArtifacts';
+import { getCalendarAccountState } from '../runtime/calendarAccount';
 import { chatModelName, resolveChatAssistant, scheduleRunsAs, type ChatRunner } from '../runtime/chatAssistant';
 import type { ChatSearchIndexer } from '../runtime/chatSearchIndexing';
 import { readChatSearchEnabled } from '../runtime/chatSearchSettings';
@@ -653,6 +654,32 @@ function createTurnResolver(deps: {
             .getPersona({ tenant_id, id: personaContext.persona_id, created_by: userRef })
             .catch(() => undefined);
           allowed = persona?.mail_accounts ?? null;
+        }
+        return { default_name: state?.default_key ?? null, allowed };
+      },
+      calendarAccountFacts: async () => {
+        const state = await getCalendarAccountState({
+          accountUrl: configuration.CALENDAR_ACCOUNT_URL,
+          fetchImpl: undefined,
+          logger,
+        }).catch(() => undefined);
+        if (state === undefined || !state.connected || state.accounts.length === 0) {
+          return undefined;
+        }
+        return { names: state.accounts.map(entry => entry.account.email), default_name: state.default_key };
+      },
+      calendarRouting: async () => {
+        const state = await getCalendarAccountState({
+          accountUrl: configuration.CALENDAR_ACCOUNT_URL,
+          fetchImpl: undefined,
+          logger,
+        }).catch(() => undefined);
+        let allowed: readonly string[] | null = null;
+        if (personaContext !== undefined && personaStore !== undefined) {
+          const persona = await personaStore
+            .getPersona({ tenant_id, id: personaContext.persona_id, created_by: userRef })
+            .catch(() => undefined);
+          allowed = persona?.calendar_accounts ?? null;
         }
         return { default_name: state?.default_key ?? null, allowed };
       },

@@ -70,6 +70,10 @@ const connectedReply = (signIn = 'ok') =>
       username: 'u',
       email: 'u@example.invalid',
       sign_in: signIn,
+      accounts: [
+        { url: 'https://nas.example.invalid/dav/', username: 'u', email: 'u@example.invalid', sign_in: signIn },
+      ],
+      default: 'u@example.invalid',
     }),
   );
 const emptyReply = () => new Response(JSON.stringify({ connected: false }));
@@ -211,6 +215,15 @@ describe('saving a calendar account', () => {
           username: 'person@gmail.com',
           email: 'person@gmail.com',
           sign_in: 'ok',
+          accounts: [
+            {
+              url: 'https://calendar.google.com/calendar/dav/person%40gmail.com/',
+              username: 'person@gmail.com',
+              email: 'person@gmail.com',
+              sign_in: 'ok',
+            },
+          ],
+          default: 'person@gmail.com',
         }),
       );
     });

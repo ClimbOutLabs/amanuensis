@@ -83,16 +83,93 @@ export function hostOf(url) {
   return new URL(url).hostname.toLowerCase();
 }
 
+/** The line that names the default account when it is not the first one in the file. */
+export const DEFAULT_ACCOUNT_KEY = 'AMAN_CALENDAR_DEFAULT_ACCOUNT';
+
+function accountLines(account) {
+  return [
+    `CALDAV_URL=${account.url}`,
+    `CALDAV_USERNAME=${account.username}`,
+    `CALDAV_PASSWORD=${account.password}`,
+    `CALDAV_USER_EMAIL=${account.email}`,
+  ];
+}
+
 export function renderAccount(account) {
-  return (
-    [
-      ACCOUNT_FILE_HEADER,
-      `CALDAV_URL=${account.url}`,
-      `CALDAV_USERNAME=${account.username}`,
-      `CALDAV_PASSWORD=${account.password}`,
-      `CALDAV_USER_EMAIL=${account.email}`,
-    ].join('\n') + '\n'
-  );
+  return [ACCOUNT_FILE_HEADER, ...accountLines(account)].join('\n') + '\n';
+}
+
+/**
+ * The whole account file for a list of accounts. The default line is written only when the default is
+ * not the first account, so a file with one account reads exactly as it always has.
+ */
+export function renderAccounts(accounts, defaultEmail) {
+  if (accounts.length === 0) {
+    return '';
+  }
+  const lines = [ACCOUNT_FILE_HEADER];
+  const resolved = defaultEmail ?? accounts[0].email;
+  if (resolved !== accounts[0].email) {
+    lines.push(`${DEFAULT_ACCOUNT_KEY}=${resolved}`);
+  }
+  for (const account of accounts) {
+    lines.push(...accountLines(account));
+  }
+  return lines.join('\n') + '\n';
+}
+
+/**
+ * Every complete, well-formed account in a file's text, in file order, with the named default.
+ * A block starts at its CALDAV_URL line. An incomplete or ill-formed block is left out, so one
+ * damaged entry never hides the accounts that are fine.
+ */
+export function parseAccounts(text) {
+  let namedDefault = null;
+  const blocks = [];
+  let current = null;
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    if (line === '' || line.startsWith('#')) {
+      continue;
+    }
+    const eq = line.indexOf('=');
+    if (eq <= 0) {
+      continue;
+    }
+    const key = line.slice(0, eq);
+    const value = line.slice(eq + 1);
+    if (key === DEFAULT_ACCOUNT_KEY) {
+      namedDefault = value;
+      continue;
+    }
+    if (key === 'CALDAV_URL') {
+      current = new Map();
+      blocks.push(current);
+    }
+    if (current !== null) {
+      current.set(key, value);
+    }
+  }
+  const accounts = [];
+  for (const values of blocks) {
+    const account = {
+      url: values.get('CALDAV_URL') ?? '',
+      username: values.get('CALDAV_USERNAME') ?? '',
+      password: values.get('CALDAV_PASSWORD') ?? '',
+      email: values.get('CALDAV_USER_EMAIL') ?? '',
+    };
+    if (accountIsWellFormed(account)) {
+      accounts.push(account);
+    }
+  }
+  const named = accounts.find(account => account.email === namedDefault);
+  return { accounts, defaultEmail: named === undefined ? null : named.email };
+}
+
+/** The account a call goes to when none is named: the named default, else the first account. */
+export function defaultAccount(list) {
+  const named = list.accounts.find(account => account.email === list.defaultEmail);
+  return named ?? list.accounts[0] ?? null;
 }
 
 /** The account in a file's text, or null when no complete, well-formed account is there. */

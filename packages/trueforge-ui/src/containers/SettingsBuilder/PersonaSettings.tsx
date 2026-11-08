@@ -42,12 +42,14 @@ type PersonaFormProps = {
   draft: PersonaDraft;
   aliasesText: string;
   mailAccountsText: string;
+  calendarAccountsText: string;
   busy: boolean;
   submitLabel: string;
   models: { name: string }[];
   onChange: (draft: PersonaDraft) => void;
   onAliasesTextChange: (value: string) => void;
   onMailAccountsTextChange: (value: string) => void;
+  onCalendarAccountsTextChange: (value: string) => void;
   onSubmit: (event: FormEvent) => void;
   onCancel: () => void;
 };
@@ -56,12 +58,14 @@ const PersonaForm: FC<PersonaFormProps> = ({
   draft,
   aliasesText,
   mailAccountsText,
+  calendarAccountsText,
   busy,
   submitLabel,
   models,
   onChange,
   onAliasesTextChange,
   onMailAccountsTextChange,
+  onCalendarAccountsTextChange,
   onSubmit,
   onCancel,
 }) => {
@@ -155,6 +159,23 @@ const PersonaForm: FC<PersonaFormProps> = ({
         </p>
       </div>
 
+      <div>
+        <label htmlFor="persona-calendar-accounts" className="mb-1.5 block text-sm font-medium text-text-primary">
+          Calendar accounts
+        </label>
+        <input
+          id="persona-calendar-accounts"
+          className={inputClassName}
+          value={calendarAccountsText}
+          placeholder="Every connected account"
+          onChange={event => onCalendarAccountsTextChange(event.target.value)}
+        />
+        <p className="mt-1 text-xs text-text-secondary">
+          Comma-separated addresses. This persona can only read and change these calendar accounts. Leave empty for
+          every connected account.
+        </p>
+      </div>
+
       <div className="flex gap-2">
         <Button type="submit" disabled={busy || draft.model_name === ''}>
           {submitLabel}
@@ -180,6 +201,7 @@ const PersonaSettings = () => {
   const [draft, setDraft] = useState<PersonaDraft>(EMPTY_PERSONA_DRAFT);
   const [aliasesText, setAliasesText] = useState('');
   const [mailAccountsText, setMailAccountsText] = useState('');
+  const [calendarAccountsText, setCalendarAccountsText] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [knowledgeOpenId, setKnowledgeOpenId] = useState<string | null>(null);
@@ -194,6 +216,7 @@ const PersonaSettings = () => {
     setDraft(EMPTY_PERSONA_DRAFT);
     setAliasesText('');
     setMailAccountsText('');
+    setCalendarAccountsText('');
     setError(null);
   };
 
@@ -203,6 +226,7 @@ const PersonaSettings = () => {
     setDraft({ ...EMPTY_PERSONA_DRAFT, model_name: models[0]?.name ?? '' });
     setAliasesText('');
     setMailAccountsText('');
+    setCalendarAccountsText('');
     setError(null);
   };
 
@@ -220,6 +244,7 @@ const PersonaSettings = () => {
     setDraft(toDraft(persona));
     setAliasesText(persona.aliases.join(', '));
     setMailAccountsText((persona.mail_accounts ?? []).join(', '));
+    setCalendarAccountsText((persona.calendar_accounts ?? []).join(', '));
     setError(null);
   };
 
@@ -229,6 +254,7 @@ const PersonaSettings = () => {
       ...draft,
       aliases: parseAliases(aliasesText),
       mail_accounts: parseAccountLimit(mailAccountsText),
+      calendar_accounts: parseAccountLimit(calendarAccountsText),
     };
     setBusy(true);
     setError(null);
@@ -337,12 +363,14 @@ const PersonaSettings = () => {
                   draft={draft}
                   aliasesText={aliasesText}
                   mailAccountsText={mailAccountsText}
+                  calendarAccountsText={calendarAccountsText}
                   busy={busy}
                   submitLabel="Save persona"
                   models={models}
                   onChange={setDraft}
                   onAliasesTextChange={setAliasesText}
                   onMailAccountsTextChange={setMailAccountsText}
+                  onCalendarAccountsTextChange={setCalendarAccountsText}
                   onSubmit={submit}
                   onCancel={closeForm}
                 />
@@ -356,12 +384,14 @@ const PersonaSettings = () => {
             draft={draft}
             aliasesText={aliasesText}
             mailAccountsText={mailAccountsText}
+            calendarAccountsText={calendarAccountsText}
             busy={busy}
             submitLabel="Create persona"
             models={models}
             onChange={setDraft}
             onAliasesTextChange={setAliasesText}
             onMailAccountsTextChange={setMailAccountsText}
+            onCalendarAccountsTextChange={setCalendarAccountsText}
             onSubmit={submit}
             onCancel={closeForm}
           />

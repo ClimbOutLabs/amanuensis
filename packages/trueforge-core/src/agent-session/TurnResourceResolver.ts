@@ -1,4 +1,5 @@
 import type { Logger } from 'winston';
+import { CalendarConnectorSource } from '../core/calendar/caldav/CalendarConnectorSource';
 import { CALDAV_SERVER_NAME } from '../core/calendar/caldav/toolContract';
 import { chatProvenanceCapability } from '../core/capabilities/builtins/ChatProvenance';
 import type { TaskChecklistAccess } from '../core/capabilities/builtins/TaskChecklist';
@@ -263,6 +264,20 @@ export class TurnResourceResolver<
        */
       mailAccountFacts?:
         (() => Promise<{ names: readonly string[]; default_name: string | null } | undefined>) | undefined;
+      /**
+       * How Calendar calls are routed for this turn: the default account, and the accounts this
+       * turn's persona may use (null when the persona is not limited). Read at most once per
+       * resolver. Omit when the host cannot say; calls then carry no persona limit.
+       */
+      calendarRouting?:
+        (() => Promise<{ default_name: string | null; allowed: readonly string[] | null } | undefined>) | undefined;
+      /**
+       * The connected Calendar accounts and the default among them, for the prompt's account list
+       * and the connector's account guard. Called at most once per resolver instance. Omit when
+       * the host cannot say; the prompt then names no accounts and calls are not scoped.
+       */
+      calendarAccountFacts?:
+        (() => Promise<{ names: readonly string[]; default_name: string | null } | undefined>) | undefined;
     },
   ) {
     this.#mailAccounts = deps.mailAccounts ?? new MailAccountDirectory();
@@ -297,6 +312,38 @@ export class TurnResourceResolver<
       return undefined;
     });
     return this.#mailAccountFactsPromise;
+  }
+
+  #calendarRoutingPromise?:
+    Promise<{ default_name: string | null; allowed: readonly string[] | null } | undefined> | undefined;
+
+  /** Single-flight; a failed read leaves the routing unknown rather than failing the turn. */
+  #resolveCalendarRouting(): Promise<{ default_name: string | null; allowed: readonly string[] | null } | undefined> {
+    const read = this.deps.calendarRouting;
+    if (read === undefined) {
+      return Promise.resolve(undefined);
+    }
+    this.#calendarRoutingPromise ??= read().catch((error: unknown) => {
+      this.deps.logger.warn('Calendar account routing could not be read', extractErrorLogFields(error));
+      return undefined;
+    });
+    return this.#calendarRoutingPromise;
+  }
+
+  #calendarAccountFactsPromise?:
+    Promise<{ names: readonly string[]; default_name: string | null } | undefined> | undefined;
+
+  /** Single-flight; a failed read leaves the accounts unnamed rather than failing the turn. */
+  #resolveCalendarAccountFacts(): Promise<{ names: readonly string[]; default_name: string | null } | undefined> {
+    const read = this.deps.calendarAccountFacts;
+    if (read === undefined) {
+      return Promise.resolve(undefined);
+    }
+    this.#calendarAccountFactsPromise ??= read().catch((error: unknown) => {
+      this.deps.logger.warn('Calendar accounts for the prompt could not be read', extractErrorLogFields(error));
+      return undefined;
+    });
+    return this.#calendarAccountFactsPromise;
   }
 
   #setUpConnectorNamesPromise?: Promise<readonly string[] | undefined> | undefined;
@@ -546,6 +593,20 @@ export class TurnResourceResolver<
               tracing,
               signal,
             });
+            if (entry.name === CALDAV_SERVER_NAME && first_party === true) {
+              return new CalendarConnectorSource({
+                inner: remote,
+                accounts: async () => {
+                  const facts = await this.#resolveCalendarAccountFacts();
+                  const routing = await this.#resolveCalendarRouting();
+                  return {
+                    names: facts?.names ?? [],
+                    default_name: routing?.default_name ?? facts?.default_name ?? null,
+                    allowed: routing?.allowed ?? null,
+                  };
+                },
+              });
+            }
             if (entry.name !== MAIL_CONNECTOR_NAME || first_party !== true) {
               return remote;
             }
@@ -638,6 +699,7 @@ export class TurnResourceResolver<
     // see #resolveConfiguredModels.
     const configuredModels = await this.#resolveConfiguredModels();
     const mailAccounts = await this.#resolveMailAccountFacts();
+    const calendarAccounts = await this.#resolveCalendarAccountFacts();
     const setUpConnectorNames = await this.#resolveSetUpConnectorNames();
 
     return {
@@ -656,6 +718,7 @@ export class TurnResourceResolver<
         modelRequestGate: resolvedModel.modelRequestGate,
         configuredModels,
         mailAccounts,
+        calendarAccounts,
         modelProperties: resolvedModel.modelProperties,
         clientTimezone: this.deps.clientTimezone,
         spokenReply: this.deps.spokenReply,

@@ -2202,6 +2202,16 @@ export class AgentThread {
     }
     if (this.definition.setUpConnectorNames?.includes(CALDAV_SERVER_NAME)) {
       capabilities.addSection('calendar-passwords', CALENDAR_PASSWORD_PROMPT);
+      const calendarAccounts = this.definition.calendarAccounts;
+      if (calendarAccounts !== undefined && calendarAccounts.names.length > 0) {
+        const listed = calendarAccounts.names
+          .map(name => (name === calendarAccounts.default_name ? `${name} (the default)` : name))
+          .join(', ');
+        capabilities.addSection(
+          'calendar-accounts',
+          `The Calendar connector has these accounts: ${listed}. Calendar and event ids name their account before a | sign, and answers say which account each calendar and event belongs to. Reads span every account unless you name one. A new event lands on the account of the calendar it names, so pick the calendar from the account the person means.`,
+        );
+      }
     }
     // A chat with no sandbox object has no exec tool. Whether to say the sandbox is off or that the server has none
     // comes from the host's server status, never from this chat alone.
