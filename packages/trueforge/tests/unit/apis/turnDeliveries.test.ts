@@ -257,7 +257,10 @@ describe('the turn delivery producers, watched directly', () => {
 
     const feed = await world.feed(ALICE);
     expect(feed).toHaveLength(2);
-    const byApproval = new Map(feed.map(d => [d.link.type === 'approval' ? d.link.approval_id : '', d]));
+    const byApproval = new Map<string, Delivery>();
+    for (const delivery of feed) {
+      if (delivery.kind === 'approval_waiting') byApproval.set(delivery.link.approval_id, delivery);
+    }
     expect(byApproval.get('entry-1')).toMatchObject({
       kind: 'approval_waiting',
       level: 'nudge',
