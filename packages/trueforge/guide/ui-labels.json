@@ -88,6 +88,8 @@
   "Build agent": "packages/trueforge-ui/src/layouts/SidebarLayout.tsx",
   "Chats": "packages/trueforge-ui/src/layouts/SidebarLayout.tsx",
   "New chat": "packages/trueforge-ui/src/containers/ThreadListContainer.tsx",
+  "Notifications": "packages/trueforge-ui/src/deliveries/DeliveryBell.tsx",
+  "Mark all seen": "packages/trueforge-ui/src/deliveries/DeliveryBell.tsx",
   "Light": "packages/trueforge-ui/src/atoms/AppearanceChoices.tsx",
   "Dark": "packages/trueforge-ui/src/atoms/AppearanceChoices.tsx",
   "Match my computer": "packages/trueforge-ui/src/atoms/AppearanceChoices.tsx",

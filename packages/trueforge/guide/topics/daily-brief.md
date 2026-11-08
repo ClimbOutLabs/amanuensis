@@ -8,4 +8,6 @@ Your morning brief. Click **Chats**, click **New chat**, then click the **Your m
 
 To get it every morning, click **Chats**, click **New chat**, and type "Every weekday at 7:30, send me my morning brief". A card shows the plan. Click **Allow**. The brief then arrives as a chat at that time. See "Running things on a schedule".
 
+When a scheduled brief has run, its first line also appears under **Notifications**. Click that line to open the brief's chat.
+
 Planning your day. Ask Aman to plan your day. It puts your tasks in a sensible order, adds times, and can suggest a place for lunch near where you will be. It works from your calendar and your to-do list. If you have not connected your calendar, tell Aman what is on your day.

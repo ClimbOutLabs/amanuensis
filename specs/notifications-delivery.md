@@ -10,7 +10,7 @@ A reminder only reached a person while an Aman tab was open. A tab that did not 
 
 ## Solution
 
-One server-side feed of things Aman wants a person to see, called deliveries. Each delivery has a kind (reminder, note, nudge, approval waiting), a level, a reason, and a record of every channel it was sent on. Reminders write to this feed. The app shows the feed under a bell with an unread count, and devices that opted in get a Web Push notice.
+One server-side feed of things Aman wants a person to see, called deliveries. Each delivery has a kind (reminder, brief, approval waiting), a level, a reason, and a record of every channel it was sent on. Reminders write to this feed. A finished brief run writes its digest sentence to the feed, and a turn that ends still waiting on the person's ok writes one item per waiting approval. The app shows the feed under a bell with an unread count, and devices that opted in get a Web Push notice.
 
 ## Design Decisions
 
@@ -32,6 +32,14 @@ One server-side feed of things Aman wants a person to see, called deliveries. Ea
 
 **Outbound pushes use the public-address guard.** A registered push address cannot point the server at an internal host. A device the push service reports gone is removed.
 
+**The brief producer only reads.** A brief run's delivery text is the digest sentence from the brief's own answer. An answer that does not read as a brief makes no delivery, and no summary is written for it. Nothing is generated at delivery time.
+
+**A waiting item names its card and nothing more.** The text of an approval waiting delivery is the waiting card's own headline sentence, with the rest of the entry counted and never named. Recipients, destinations and amounts a card carries never appear in a delivery.
+
+**Producers dedupe on their side.** The store has no dedupe and deliveries do not expire, so each producer looks for its own earlier delivery before making another. A finish seen twice, or a dispatch retried after a restart, still makes exactly one delivery.
+
+**A turn that started in Telegram makes no delivery.** Its approvals are asked and answered there, with its own buttons. A delivery waiting item also stays unread after its approval is answered elsewhere. Opening the item is what marks it seen.
+
 **Permissive licenses only.** The push library is MIT. The common `web-push` package is MPL-2.0 and is not used.
 
 ## Scope
@@ -42,7 +50,9 @@ One server-side feed of things Aman wants a person to see, called deliveries. Ea
 - A bell with the unread count in the main headers and a panel that lists deliveries; opening an item marks it seen
 - Web Push with a service worker, per-device opt-in in Settings, and plain words for iPhone (Home Screen needed), unsupported and blocked browsers
 - Every delivery and every channel attempt is written to the Activity log in plain words
-- Deliveries are included in data export and import, with an upgrade step and an older-shape fixture; push subscriptions are not exported
+- Deliveries are included in data export and import, with an upgrade step and an older-shape fixture. Push subscriptions are not exported
+- A producer that watches finished turns: a brief schedule's run leaves a brief delivery, and a finished turn's unanswered approvals leave one approval waiting delivery each, at nudge level
+- The note and nudge kinds are removed. Archived deliveries written with those kinds are read as reminders by the import upgrade step
 
 ## Privacy
 
@@ -66,6 +76,10 @@ All tests use synthetic data, never a person's real data.
 - An 11th device drops the oldest, and the dropped device reads as off in Settings
 - A full export with many devices per item imports
 - An upgraded install gets push keys
+- A brief run whose answer reads as a brief creates one brief delivery, and seeing the same finish again creates no second one
+- A brief run whose answer does not read as a brief, and a run that ends in error, create none
+- A held approval creates one approval waiting delivery with the card's headline, and identifiers planted in other card fields appear nowhere in it
+- An approval answered before its turn finished creates none, and a turn that started in Telegram creates none
 - The service worker takes no fetch events
 - Older export files import through the upgrade step
 

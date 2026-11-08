@@ -32,3 +32,7 @@ If the mail goes to an address that is not on your Email list, the buttons are *
 To take back an always allowed tool, click **More**, then **Settings**, then **Connectors**. Open the connector and stop allowing the tool.
 
 Some cards say "Part of this is not shown in full. Check it before you approve." Open the card to read all of it.
+
+## When you are not there
+
+If a chat or a schedule needs your ok while you are away, the card waits where it is. A line also appears under **Notifications**, saying what is waiting. Click the line to open the chat and answer the card. If you answer the card somewhere else, the line stays unread until you open it or click **Mark all seen**.
