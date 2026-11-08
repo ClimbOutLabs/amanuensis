@@ -49,6 +49,7 @@ import {
   type ToolResultSource,
 } from '@truefoundry/trueforge-core/core';
 import { readTurnedOffConnectorKeys } from '@truefoundry/trueforge-core/core/connectors/chatConnectorChoice';
+import { MAIL_CONNECTOR_NAME } from '@truefoundry/trueforge-core/core/email/mailConnector/toolContract';
 import { upgradeStoredTurnState } from '@truefoundry/trueforge-core/core/permissions/storedCards';
 import type { Context } from 'hono';
 import { HTTPException } from 'hono/http-exception';
@@ -421,6 +422,8 @@ function createTurnResolver(deps: {
   spaceStore: ISpaceStore;
   /** Per-user Google logins; absent, no Gmail tools mount. */
   googleConnectionStore?: IGoogleConnectionStore | undefined;
+  /** Instance settings, where the Email offer remembers a person's no. */
+  globalSettingsStore: IGlobalSettingsStore;
   /** From CreateTurnRequest.client_timezone. See ITurnResourceResolver.clientTimezone. */
   clientTimezone?: string | undefined;
   /** From CreateTurnRequest.spoken_reply. See ITurnResourceResolver.spokenReply. */
@@ -480,6 +483,7 @@ function createTurnResolver(deps: {
     personaStore,
     spaceStore,
     googleConnectionStore,
+    globalSettingsStore,
     turnArtifactStore,
     clientTimezone,
     spokenReply,
@@ -957,6 +961,11 @@ function createTurnResolver(deps: {
     {
       store: spaceStore,
       googleConnections: googleConnectionStore,
+      emailOffer: {
+        settings: globalSettingsStore,
+        mailConnectorRegistered: async () =>
+          (await mcpServerStore.listServers({ tenant_id, names: [MAIL_CONNECTOR_NAME] })).length > 0,
+      },
       authority: { tenantId: tenant_id, userRef },
       sessionId,
       schedules,
@@ -1787,6 +1796,7 @@ async function beginAcceptedTurnExecution(
         sessionStore: deps.sessionStore,
         spaceStore: deps.spaceStore,
         googleConnectionStore: deps.googleConnectionStore,
+        globalSettingsStore: deps.globalSettingsStore,
         logger: deps.logger,
         signal: abortController.signal,
         userRef,
@@ -2702,6 +2712,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       personaStore: deps.personaStore,
       spaceStore: deps.spaceStore,
       googleConnectionStore: deps.googleConnectionStore,
+      globalSettingsStore: deps.globalSettingsStore,
       clientTimezone: body.client_timezone,
       spokenReply: body.spoken_reply,
       toolOutputScreenEnabled,

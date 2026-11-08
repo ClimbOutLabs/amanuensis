@@ -44,6 +44,7 @@ import { ulid } from 'ulid';
 import type { Logger } from 'winston';
 import { z } from 'zod';
 import configuration from '../config';
+import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import {
   SpaceAggregateRevisionConflictError,
   SpaceFolderNotFoundError,
@@ -68,6 +69,7 @@ import {
 } from '../schemas/space';
 import { browserCapability } from './browserCapability';
 import { toolImagesCapability, type ToolImagesOptions } from './chatImages/toolImagesCapability';
+import { emailOfferCapability } from './emailOfferCapability';
 import { googleCapability, sandboxAttachmentStager } from './googleCapability';
 import { googleSetupCapability } from './googleSetupCapability';
 import { mapsCapability } from './mapsCapability';
@@ -2758,6 +2760,13 @@ export interface SpaceTurnContext {
   store: SpaceToolStore;
   /** Per-user Google logins; absent, no Gmail tools mount. */
   googleConnections?: GoogleConnectionStore | undefined;
+  /** The Email offer's footing: the remembered decline and the Email connector's registration. Absent, no offer mounts. */
+  emailOffer?:
+    | {
+        settings: Pick<IGlobalSettingsStore, 'getSetting' | 'setSetting'>;
+        mailConnectorRegistered: () => Promise<boolean>;
+      }
+    | undefined;
   authority: SpaceTurnAuthority;
   /** Chat session id: keys the delta-failure breaker per session (see SpaceCapabilityOptions). */
   sessionId: string;
@@ -2826,6 +2835,7 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
       return resolved;
     }
     const google = await this.#google(input);
+    const emailOffer = await this.#emailOffer(input);
     const sentinel = this.#sentinel(input);
     const schedules = this.#space.schedules;
     const personas = this.#space.personas;
@@ -2862,6 +2872,7 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
             ]
           : []),
         ...google,
+        ...emailOffer,
         ...(personas === undefined
           ? []
           : [personaCapability({ ...personas, switches: this.switches, tracing: input.tracing, sentinel })]),
@@ -2921,6 +2932,31 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
     } catch (error) {
       this.#space.logger.warn(
         'Google tools not mounted: the Google login could not be read',
+        extractErrorLogFields(error),
+      );
+      return [];
+    }
+  }
+
+  /** A state read that fails costs the chat the Email offer, never the chat itself. */
+  async #emailOffer(input: Parameters<MemoryTurnResourceResolver['resolveAgentDefinition']>[0]) {
+    const context = this.#space.emailOffer;
+    if (context === undefined || configuration.AMAN_EVAL_MODE) {
+      return [];
+    }
+    const owner = { tenant_id: input.tenant_id, created_by: input.created_by };
+    try {
+      const capability = await emailOfferCapability({
+        settings: context.settings,
+        mailConnectorRegistered: context.mailConnectorRegistered,
+        googleConnections: this.#space.googleConnections,
+        owner,
+        tracing: input.tracing,
+      });
+      return capability === undefined ? [] : [capability];
+    } catch (error) {
+      this.#space.logger.warn(
+        'Email connection offer not mounted: its state could not be read',
         extractErrorLogFields(error),
       );
       return [];
