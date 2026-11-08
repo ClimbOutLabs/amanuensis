@@ -105,8 +105,10 @@ function invalidFieldMessage(body: unknown): string {
 const calendarKind: ConnectorAccountKind<PublicCalendarAccount> = {
   label: 'Calendar',
   parseAccount: parseAgentAccount,
+  accountKey: account => account.email,
   connectorUnreachableMessage: CALENDAR_CONNECTOR_UNREACHABLE_MESSAGE,
   statusUnreachableMessage: CALENDAR_STATUS_UNREACHABLE_MESSAGE,
+  unknownAccountMessage: 'That calendar account is not connected. Connect it first, then try again.',
   saveRefusal: body => {
     switch (agentErrorKind(body)) {
       case 'sign_in_refused':
@@ -203,9 +205,20 @@ export async function saveCalendarAccount(
   return calendarClient.save(deps, resolved.payload);
 }
 
-/** Removes the saved account through the agent; the password is deleted for good. */
-export function removeCalendarAccount(deps: ConnectorAccountClientDeps): Promise<CalendarAccountState> {
-  return calendarClient.remove(deps);
+/**
+ * Removes saved accounts through the agent; their passwords are deleted for good. With an email address,
+ * only that account goes; without one, every account goes.
+ */
+export function removeCalendarAccount(deps: ConnectorAccountClientDeps, email?: string): Promise<CalendarAccountState> {
+  return calendarClient.remove(deps, email);
+}
+
+/** Makes one saved account the default: the one new events land on unless they say otherwise. */
+export function setCalendarDefaultAccount(
+  deps: ConnectorAccountClientDeps,
+  email: string,
+): Promise<CalendarAccountState> {
+  return calendarClient.setDefault(deps, email);
 }
 
 /**

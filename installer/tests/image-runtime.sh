@@ -80,7 +80,7 @@ if [ "$(id -u)" = 0 ] && command -v setpriv >/dev/null 2>&1 && command -v python
   trap 'if [ -n "${agent_tmp:-}" ]; then rm -rf "$agent_tmp"; fi; cleanup' EXIT
   agent="$REPO/ops/compose/mail-email/account_agent.py"
   agent_env() {
-    setpriv --bounding-set=-all --inh-caps=-all -- env AMAN_MAIL_ACCOUNT_FILE="$1" python3 "$agent" --print-child-env
+    setpriv --bounding-set=-all --inh-caps=-all -- env AMAN_MAIL_ACCOUNT_FILE="$1" python3 "$agent" --print-config
   }
   agent_write() {
     printf '%s\n' "$2" | setpriv --bounding-set=-all --inh-caps=-all -- env AMAN_MAIL_ACCOUNT_FILE="$1" python3 "$agent" --write-stdin
@@ -107,7 +107,7 @@ if [ "$(id -u)" = 0 ] && command -v setpriv >/dev/null 2>&1 && command -v python
   owned="$agent_tmp/owned.env"
   printf '%s\n' "$account_text" >"$owned"
   chmod 600 "$owned"
-  agent_env "$owned" | grep -q 'MCP_EMAIL_SERVER_EMAIL_ADDRESS=a@example.invalid' ||
+  agent_env "$owned" | grep -q 'account_name = "a@example.invalid"' ||
     agent_fail "the capability-free agent could not read the sidecar's own account file"
   agent_write "$owned" "$changed_text" | grep -qx 'saved' ||
     agent_fail "the capability-free agent could not save the sidecar's own account file"

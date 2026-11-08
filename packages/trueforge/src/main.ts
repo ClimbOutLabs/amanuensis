@@ -135,7 +135,7 @@ import { designateTavilyAtBoot, seedDefaultSearchProviderAtBoot } from './runtim
 import { createDeliveryService } from './runtime/delivery/deliveryService';
 import { createWebPushSender } from './runtime/delivery/webPushSender';
 import { EventSubscriptionRegistry } from './runtime/event-subscription';
-import { registerMailConnectorFromSavedAccountInBackground } from './runtime/mailAccount';
+import { getMailAccountState, registerMailConnectorFromSavedAccountInBackground } from './runtime/mailAccount';
 import { prepareMailPolicyAtBoot, registerMailConnectorAtBoot } from './runtime/mailConnector';
 import { warmEmbeddingsAtBoot } from './runtime/memory/embeddingRetrieval';
 import { createOutboundSecretSource } from './runtime/outboundSecrets';
@@ -808,6 +808,17 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     outboundSecrets,
     mailPolicyPath: configuration.MAIL_POLICY_FILE,
     mailPolicyStatusPath: configuration.MAIL_POLICY_STATUS_FILE,
+    mailAccounts: async () => {
+      const state = await getMailAccountState({
+        accountUrl: configuration.MAIL_EMAIL_ACCOUNT_URL,
+        fetchImpl: undefined,
+        logger,
+      });
+      return {
+        accounts: state.accounts.map(entry => entry.account.address),
+        default_account: state.default_key,
+      };
+    },
   });
   const sessions = new Sessions({ sessionStore, sentinelServices });
   const chatImages = createChatImageService({

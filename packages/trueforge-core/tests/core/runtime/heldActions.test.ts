@@ -201,6 +201,13 @@ function makeHarness(
     mail_listed_addresses: () => Promise.resolve(options.mail?.listed ?? []),
     mail_add_recipients: mailAdd,
     mail_list_loaded: mailLoaded,
+    // The mail world of these tests holds one account, which the sidecar names default.
+    mail_accounts: () =>
+      Promise.resolve(
+        options.mail === undefined
+          ? { accounts: [], default_account: null }
+          : { accounts: ['default'], default_account: 'default' },
+      ),
   };
   const callTool: CallToolMock = jest.fn<ReturnType<ToolSource['callTool']>, Parameters<ToolSource['callTool']>>(() =>
     Promise.resolve(toolResultResponse({ text: 'sent' })),
@@ -306,12 +313,16 @@ function heldContext(thread: AgentThread) {
   return thread.toSnapshot().context;
 }
 
-function approve(callId: string, scope?: 'once' | 'chat' | 'always') {
+function approve(callId: string, scope?: 'once' | 'chat' | 'always', fromAccount?: string) {
   return {
     type: EventType.USER_TOOL_APPROVAL,
     thread_id: ROOT_ID,
     tool_call_id: callId,
-    approval: { status: 'allow' as const, ...(scope === undefined ? {} : { scope }) },
+    approval: {
+      status: 'allow' as const,
+      ...(scope === undefined ? {} : { scope }),
+      ...(fromAccount === undefined ? {} : { from_account: fromAccount }),
+    },
   };
 }
 
@@ -749,13 +760,34 @@ describe('approving a held mail send to an address not on the Email list', () =>
     await answer(h, context, [approve('call-mail')]);
 
     expect(h.mailAdd).toHaveBeenCalledTimes(1);
-    expect(h.mailAdd).toHaveBeenCalledWith(OWNER, ['stranger@example.net']);
+    expect(h.mailAdd).toHaveBeenCalledWith({ ...OWNER, account: 'default' }, ['stranger@example.net']);
     expect(h.callTool).toHaveBeenCalledTimes(1);
     expect(h.callTool).toHaveBeenCalledWith(
       { name: 'send_email', arguments: MAIL_SEND_ARGS },
       expect.objectContaining({ status: 'allow' }),
       expect.anything(),
     );
+  });
+
+  it('a card pick of another account adds the new address to that account, not the one the card showed', async () => {
+    const { h, context } = await heldSend(['dana@example.com']);
+    await answer(h, context, [approve('call-mail', undefined, 'other@example.com')]);
+
+    expect(h.mailAdd).toHaveBeenCalledTimes(1);
+    expect(h.mailAdd).toHaveBeenCalledWith({ ...OWNER, account: 'other@example.com' }, ['stranger@example.net']);
+    expect(h.callTool).toHaveBeenCalledTimes(1);
+  });
+
+  it('a card pick of an account that already lists the address adds nothing, and still sends', async () => {
+    const { h, context } = await heldSend(['dana@example.com']);
+    h.base.mail_listed_addresses = ({ account }: { account: string | null }) =>
+      Promise.resolve(
+        account === 'other@example.com' ? ['stranger@example.net', 'dana@example.com'] : ['dana@example.com'],
+      );
+    await answer(h, context, [approve('call-mail', undefined, 'other@example.com')]);
+
+    expect(h.mailAdd).not.toHaveBeenCalled();
+    expect(h.callTool).toHaveBeenCalledTimes(1);
   });
 
   it('leaves the Email list alone for a connector that only carries the name Email, and still sends once approved', async () => {
@@ -775,7 +807,7 @@ describe('approving a held mail send to an address not on the Email list', () =>
     await answer(h, context, [approve('call-mail')]);
 
     expect(h.mailAdd).toHaveBeenCalledTimes(1);
-    expect(h.mailAdd).toHaveBeenCalledWith(OWNER, ['stranger@example.net']);
+    expect(h.mailAdd).toHaveBeenCalledWith({ ...OWNER, account: 'default' }, ['stranger@example.net']);
     expect(h.callTool).toHaveBeenCalledWith(
       { name: 'send_email', arguments: MAIL_SEND_ARGS },
       expect.objectContaining({ status: 'allow' }),
@@ -959,7 +991,7 @@ describe('approving a held mail draft to an address not on the Email list', () =
     await answer(h, context, [approve('call-draft')]);
 
     expect(h.mailAdd).toHaveBeenCalledTimes(1);
-    expect(h.mailAdd).toHaveBeenCalledWith(OWNER, ['stranger@example.net']);
+    expect(h.mailAdd).toHaveBeenCalledWith({ ...OWNER, account: 'default' }, ['stranger@example.net']);
     expect(h.callTool).toHaveBeenCalledTimes(1);
     expect(h.callTool).toHaveBeenCalledWith(
       { name: 'save_draft', arguments: MAIL_DRAFT_ARGS },

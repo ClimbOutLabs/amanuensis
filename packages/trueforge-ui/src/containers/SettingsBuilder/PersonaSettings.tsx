@@ -19,6 +19,8 @@ function toDraft(persona: Persona): PersonaDraft {
     aliases: persona.aliases,
     instructions: persona.instructions,
     model_name: persona.model_name,
+    mail_accounts: persona.mail_accounts,
+    calendar_accounts: persona.calendar_accounts,
   };
 }
 
@@ -30,14 +32,22 @@ function parseAliases(value: string): string[] {
     .filter(alias => alias.length > 0);
 }
 
+/** Account limits are edited as one comma-separated line of addresses; an empty line means no limit. */
+function parseAccountLimit(value: string): string[] | undefined {
+  const accounts = parseAliases(value);
+  return accounts.length === 0 ? undefined : accounts;
+}
+
 type PersonaFormProps = {
   draft: PersonaDraft;
   aliasesText: string;
+  mailAccountsText: string;
   busy: boolean;
   submitLabel: string;
   models: { name: string }[];
   onChange: (draft: PersonaDraft) => void;
   onAliasesTextChange: (value: string) => void;
+  onMailAccountsTextChange: (value: string) => void;
   onSubmit: (event: FormEvent) => void;
   onCancel: () => void;
 };
@@ -45,11 +55,13 @@ type PersonaFormProps = {
 const PersonaForm: FC<PersonaFormProps> = ({
   draft,
   aliasesText,
+  mailAccountsText,
   busy,
   submitLabel,
   models,
   onChange,
   onAliasesTextChange,
+  onMailAccountsTextChange,
   onSubmit,
   onCancel,
 }) => {
@@ -126,6 +138,23 @@ const PersonaForm: FC<PersonaFormProps> = ({
         </p>
       </div>
 
+      <div>
+        <label htmlFor="persona-mail-accounts" className="mb-1.5 block text-sm font-medium text-text-primary">
+          Email accounts
+        </label>
+        <input
+          id="persona-mail-accounts"
+          className={inputClassName}
+          value={mailAccountsText}
+          placeholder="Every connected account"
+          onChange={event => onMailAccountsTextChange(event.target.value)}
+        />
+        <p className="mt-1 text-xs text-text-secondary">
+          Comma-separated addresses. This persona can only read and send from these accounts. Leave empty for every
+          connected account.
+        </p>
+      </div>
+
       <div className="flex gap-2">
         <Button type="submit" disabled={busy || draft.model_name === ''}>
           {submitLabel}
@@ -150,6 +179,7 @@ const PersonaSettings = () => {
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState<PersonaDraft>(EMPTY_PERSONA_DRAFT);
   const [aliasesText, setAliasesText] = useState('');
+  const [mailAccountsText, setMailAccountsText] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [knowledgeOpenId, setKnowledgeOpenId] = useState<string | null>(null);
@@ -163,6 +193,7 @@ const PersonaSettings = () => {
     setEditingId(null);
     setDraft(EMPTY_PERSONA_DRAFT);
     setAliasesText('');
+    setMailAccountsText('');
     setError(null);
   };
 
@@ -171,6 +202,7 @@ const PersonaSettings = () => {
     setAdding(true);
     setDraft({ ...EMPTY_PERSONA_DRAFT, model_name: models[0]?.name ?? '' });
     setAliasesText('');
+    setMailAccountsText('');
     setError(null);
   };
 
@@ -187,12 +219,17 @@ const PersonaSettings = () => {
     setEditingId(persona.id);
     setDraft(toDraft(persona));
     setAliasesText(persona.aliases.join(', '));
+    setMailAccountsText((persona.mail_accounts ?? []).join(', '));
     setError(null);
   };
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    const payload: PersonaDraft = { ...draft, aliases: parseAliases(aliasesText) };
+    const payload: PersonaDraft = {
+      ...draft,
+      aliases: parseAliases(aliasesText),
+      mail_accounts: parseAccountLimit(mailAccountsText),
+    };
     setBusy(true);
     setError(null);
     void (editingId === null ? createPersona(payload) : updatePersona(editingId, payload))
@@ -299,11 +336,13 @@ const PersonaSettings = () => {
                 <PersonaForm
                   draft={draft}
                   aliasesText={aliasesText}
+                  mailAccountsText={mailAccountsText}
                   busy={busy}
                   submitLabel="Save persona"
                   models={models}
                   onChange={setDraft}
                   onAliasesTextChange={setAliasesText}
+                  onMailAccountsTextChange={setMailAccountsText}
                   onSubmit={submit}
                   onCancel={closeForm}
                 />
@@ -316,11 +355,13 @@ const PersonaSettings = () => {
           <PersonaForm
             draft={draft}
             aliasesText={aliasesText}
+            mailAccountsText={mailAccountsText}
             busy={busy}
             submitLabel="Create persona"
             models={models}
             onChange={setDraft}
             onAliasesTextChange={setAliasesText}
+            onMailAccountsTextChange={setMailAccountsText}
             onSubmit={submit}
             onCancel={closeForm}
           />

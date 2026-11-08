@@ -16,10 +16,11 @@ import {
   getCalendarAccountState,
   removeCalendarAccount,
   saveCalendarAccount,
+  setCalendarDefaultAccount,
   syncCalendarConnectorWithAccount,
   type PublicCalendarAccount,
 } from '../runtime/calendarAccount';
-import { connectionStateOf } from '../runtime/connectorAccount';
+import { connectionStateForSignIn, connectionStateOf } from '../runtime/connectorAccount';
 import type { CalendarAccountStatus, SaveCalendarAccountRequest } from '../schemas/calendarAccount';
 import { createConnectorAccountHandlers } from './connectorAccountHandlers';
 import { requireJsonOrSameOrigin } from './crossSite';
@@ -70,6 +71,8 @@ export function createCalendarAccountRouter(deps: CalendarAccountRouterDeps) {
       username: null,
       calendar_url: null,
       provider_key: DEFAULT_PROVIDER_KEY,
+      accounts: [],
+      default_address: null,
       providers: providerTable(),
     }),
     statusBody: state => ({
@@ -79,6 +82,15 @@ export function createCalendarAccountRouter(deps: CalendarAccountRouterDeps) {
       username: state.account?.username ?? null,
       calendar_url: state.account?.url ?? null,
       provider_key: state.account === null ? DEFAULT_PROVIDER_KEY : caldavProviderKeyForUrl(state.account.url),
+      accounts: state.accounts.map(entry => ({
+        email: entry.account.email,
+        username: entry.account.username,
+        calendar_url: entry.account.url,
+        provider_key: caldavProviderKeyForUrl(entry.account.url),
+        state: connectionStateForSignIn(entry.sign_in),
+        is_default: entry.account.email === state.default_key,
+      })),
+      default_address: state.default_key,
       providers: providerTable(),
     }),
     readState: options => getCalendarAccountState(clientDeps(), options),
@@ -90,7 +102,8 @@ export function createCalendarAccountRouter(deps: CalendarAccountRouterDeps) {
         username: request.username,
         calendar_url: request.calendar_url,
       }),
-    remove: () => removeCalendarAccount(clientDeps()),
+    remove: key => removeCalendarAccount(clientDeps(), key),
+    setDefault: key => setCalendarDefaultAccount(clientDeps(), key),
     sync: state =>
       syncCalendarConnectorWithAccount({
         state,
@@ -115,8 +128,15 @@ export function createCalendarAccountRouter(deps: CalendarAccountRouterDeps) {
     return answer.status === 400 ? c.json(answer.body, 400) : c.json(answer.body, 502);
   });
   router.openapi(calendarAccountRoutes.remove, async c => {
-    const answer = await handlers.remove();
+    const answer = await handlers.remove(c.req.valid('json').address);
     return answer.status === 200 ? c.json(answer.body, 200) : c.json(answer.body, 502);
+  });
+  router.openapi(calendarAccountRoutes.setDefault, async c => {
+    const answer = await handlers.setDefault(c.req.valid('json').address);
+    if (answer.status === 200) {
+      return c.json(answer.body, 200);
+    }
+    return answer.status === 400 ? c.json(answer.body, 400) : c.json(answer.body, 502);
   });
   return router;
 }

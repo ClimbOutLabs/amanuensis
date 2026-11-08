@@ -11,7 +11,7 @@
  */
 import { extractErrorLogFields } from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
-import { agentField, callAccountAgent } from './connectorAccountAgent';
+import { agentErrorKind, agentField, callAccountAgent } from './connectorAccountAgent';
 
 export type ConnectorAccountFailure =
   | 'sign_in_refused'
@@ -35,12 +35,26 @@ export class ConnectorAccountError extends Error {
 /** The last sign-in check's answer for the saved account. */
 export type SignInAnswer = 'ok' | 'refused' | 'unreachable';
 
-/** The saved account's state as a card shows it; the password is never part of it. */
+/** One saved account and its last sign-in check's answer. */
+export interface ConnectorAccountEntry<TAccount> {
+  account: TAccount;
+  sign_in: SignInAnswer;
+}
+
+/**
+ * The saved accounts' state as a card shows it; passwords are never part of it. `account` and `sign_in`
+ * are the default account's view of the same list, for the places that speak of one account.
+ */
 export interface ConnectorAccountState<TAccount> {
   connected: boolean;
-  /** Null when no account is saved. */
+  /** The default account's last sign-in answer; null when no account is saved. */
   sign_in: SignInAnswer | null;
+  /** The default account; null when no account is saved. */
   account: TAccount | null;
+  /** Every saved account, in saved order. */
+  accounts: ConnectorAccountEntry<TAccount>[];
+  /** The default account's key; null when no account is saved. */
+  default_key: string | null;
 }
 
 export interface ConnectorAccountClientDeps {
@@ -58,8 +72,12 @@ export interface ConnectorAccountKind<TAccount> {
   label: string;
   /** The agent's public account view, as parsed from an answer; unknown shapes parse to null. */
   parseAccount(body: object): TAccount | null;
+  /** The account's identity within the list; for both kinds today it is the email address. */
+  accountKey(account: TAccount): string;
   connectorUnreachableMessage: string;
   statusUnreachableMessage: string;
+  /** The plain line when a change names an account that is not saved. */
+  unknownAccountMessage: string;
   /** The plain failure for a save the agent refused, or null for an answer this kind does not know. */
   saveRefusal(body: unknown): { failure: ConnectorAccountFailure; message: string } | null;
 }
@@ -91,18 +109,51 @@ export function createConnectorAccountClient<TAccount>(kind: ConnectorAccountKin
       throw unreachable({ message: kind.connectorUnreachableMessage });
     }
     if (agentField(body, 'connected') !== true) {
-      return { connected: false, sign_in: null, account: null };
+      return { connected: false, sign_in: null, account: null, accounts: [], default_key: null };
     }
-    const account = kind.parseAccount(body);
-    if (account === null) {
+    const entries: ConnectorAccountEntry<TAccount>[] = [];
+    const listed = agentField(body, 'accounts');
+    if (Array.isArray(listed)) {
+      for (const listedItem of listed) {
+        const item: unknown = listedItem;
+        if (typeof item !== 'object' || item === null) {
+          throw unreachable({ message: kind.connectorUnreachableMessage });
+        }
+        const account = kind.parseAccount(item);
+        if (account === null) {
+          throw unreachable({ message: kind.connectorUnreachableMessage });
+        }
+        entries.push({ account, sign_in: signInAnswer(agentField(item, 'sign_in')) });
+      }
+    } else {
+      // An agent that still answers with one flat account reads as a list of one. This goes away
+      // once every account agent answers with the list.
+      const account = kind.parseAccount(body);
+      if (account === null) {
+        throw unreachable({ message: kind.connectorUnreachableMessage });
+      }
+      entries.push({ account, sign_in: signInAnswer(agentField(body, 'sign_in')) });
+    }
+    if (entries.length === 0) {
       throw unreachable({ message: kind.connectorUnreachableMessage });
     }
-    return { connected: true, sign_in: signInAnswer(agentField(body, 'sign_in')), account };
+    const named = agentField(body, 'default');
+    const chosen = entries.find(entry => kind.accountKey(entry.account) === named) ?? entries[0] ?? null;
+    if (chosen === null) {
+      throw unreachable({ message: kind.connectorUnreachableMessage });
+    }
+    return {
+      connected: true,
+      sign_in: chosen.sign_in,
+      account: chosen.account,
+      accounts: entries,
+      default_key: kind.accountKey(chosen.account),
+    };
   }
 
   async function call(
     deps: ConnectorAccountClientDeps,
-    input: { method: 'GET' | 'POST' | 'DELETE'; payload?: unknown; timeoutMs: number },
+    input: { method: 'GET' | 'POST' | 'DELETE'; payload?: unknown; timeoutMs: number; path?: string | undefined },
   ): Promise<{ status: number; body: unknown }> {
     if (deps.accountUrl === undefined) {
       throw unreachable({ message: kind.connectorUnreachableMessage });
@@ -155,30 +206,56 @@ export function createConnectorAccountClient<TAccount>(kind: ConnectorAccountKin
       throw unreachable({ message: kind.connectorUnreachableMessage });
     },
 
-    /** Removes the saved account through the agent; the password is deleted from the account file. */
-    async remove(deps: ConnectorAccountClientDeps): Promise<ConnectorAccountState<TAccount>> {
-      const { status, body } = await call(deps, { method: 'DELETE', timeoutMs: ACCOUNT_AGENT_TIMEOUTS_MS.remove });
+    /**
+     * Removes saved accounts through the agent; their passwords are deleted from the account file. With
+     * a key, only that account goes; without one, every account goes.
+     */
+    async remove(deps: ConnectorAccountClientDeps, key?: string): Promise<ConnectorAccountState<TAccount>> {
+      const { status, body } = await call(deps, {
+        method: 'DELETE',
+        payload: key === undefined ? {} : { address: key },
+        timeoutMs: ACCOUNT_AGENT_TIMEOUTS_MS.remove,
+      });
       if (status !== 200) {
         deps.logger.warn(`${kind.label} account agent refused a removal with an unexpected answer`);
         throw unreachable({ message: kind.connectorUnreachableMessage });
       }
       return stateFromBody(body);
     },
+
+    /** Makes one saved account the default: the one new mail goes out from, or new events land on. */
+    async setDefault(deps: ConnectorAccountClientDeps, key: string): Promise<ConnectorAccountState<TAccount>> {
+      const { status, body } = await call(deps, {
+        method: 'POST',
+        path: '/account/default',
+        payload: { address: key },
+        timeoutMs: ACCOUNT_AGENT_TIMEOUTS_MS.save,
+      });
+      if (status === 200) {
+        return stateFromBody(body);
+      }
+      if (agentErrorKind(body) === 'invalid') {
+        throw new ConnectorAccountError({ failure: 'invalid_request', message: kind.unknownAccountMessage });
+      }
+      deps.logger.warn(`${kind.label} account agent refused a default change with an unexpected answer`);
+      throw unreachable({ message: kind.connectorUnreachableMessage });
+    },
   };
+}
+
+/** The card's one word for one saved account, from its last sign-in answer. */
+export function connectionStateForSignIn(signIn: SignInAnswer): 'connected' | 'sign_in_stopped' | 'not_working' {
+  return signIn === 'refused' ? 'sign_in_stopped' : signIn === 'unreachable' ? 'not_working' : 'connected';
 }
 
 /** The card's one word for the account: saved and working, saved but refused, saved but unreachable, or none. */
 export function connectionStateOf<TAccount>(
   state: ConnectorAccountState<TAccount>,
 ): 'connected' | 'not_connected' | 'sign_in_stopped' | 'not_working' {
-  if (!state.connected) {
+  if (!state.connected || state.sign_in === null) {
     return 'not_connected';
   }
-  return state.sign_in === 'refused'
-    ? 'sign_in_stopped'
-    : state.sign_in === 'unreachable'
-      ? 'not_working'
-      : 'connected';
+  return connectionStateForSignIn(state.sign_in);
 }
 
 /**

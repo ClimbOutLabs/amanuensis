@@ -87,6 +87,13 @@ export const AgentApprovalDecisionAllowSchema = z
         'Omitted or once allows only this invocation; chat grants this exact tool for the current session; ' +
           'always allows this read-only connector tool for the caller until revoked.',
       ),
+    from_account: z
+      .string()
+      .optional()
+      .describe(
+        'For an approved Email send or draft: the account the person picked on the card. ' +
+          'Omitted means the account the card showed, which is the default unless the call named one.',
+      ),
   })
   .openapi('ApprovalAllow');
 

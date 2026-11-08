@@ -17,14 +17,18 @@ const refused = {
 };
 
 /**
- * The three routes of an account card (status, connect, remove), the same for Email and Calendar. Each kind
- * supplies its names, its sentences and its own schemas; the shape of the contract is written once.
+ * The routes of an account card (status, connect, remove, set default), the same for Email and
+ * Calendar. Each kind supplies its names, its sentences and its own schemas; the shape of the
+ * contract is written once.
  */
 export function createConnectorAccountRoutes<
   TGet extends z.ZodType,
   TSaveRequest extends z.ZodType,
   TSave extends z.ZodType,
+  TRemoveRequest extends z.ZodType,
   TRemove extends z.ZodType,
+  TSetDefaultRequest extends z.ZodType,
+  TSetDefault extends z.ZodType,
 >({
   group,
   noun,
@@ -43,7 +47,15 @@ export function createConnectorAccountRoutes<
   statusSentence: string;
   /** The ways a save can fail, as one sentence. */
   saveFailureSentence: string;
-  schemas: { get: TGet; saveRequest: TSaveRequest; save: TSave; remove: TRemove };
+  schemas: {
+    get: TGet;
+    saveRequest: TSaveRequest;
+    save: TSave;
+    removeRequest: TRemoveRequest;
+    remove: TRemove;
+    setDefaultRequest: TSetDefaultRequest;
+    setDefault: TSetDefault;
+  };
 }) {
   const nounWithArticle = `${/^[aeiou]/.test(noun) ? 'an' : 'a'} ${noun}`;
   const connectorUnreachable = {
@@ -101,13 +113,42 @@ export function createConnectorAccountRoutes<
       path: '/',
       tags: [OpenApiTag.PERSONALIZATION],
       summary: `Remove the ${noun}`,
-      description: 'Deletes the saved account and its app password from the sidecar for good.',
+      description:
+        'Deletes the named account and its app password from the sidecar for good, or every account when the body names none.',
       'x-fern-sdk-group-name': ['settings', group],
       'x-fern-sdk-method-name': 'remove_account',
+      request: {
+        body: { content: { 'application/json': { schema: schemas.removeRequest } }, required: false },
+      },
       responses: {
         200: {
           content: { 'application/json': { schema: schemas.remove } },
           description: 'The account is removed.',
+        },
+        ...connectorUnreachable,
+        ...unauthorized,
+        ...refused,
+      },
+    }),
+    setDefault: createRoute({
+      method: 'post',
+      path: '/default',
+      tags: [OpenApiTag.PERSONALIZATION],
+      summary: `Set the default ${noun}`,
+      description: `Makes the named connected account the default. Naming an account that is not connected changes nothing.`,
+      'x-fern-sdk-group-name': ['settings', group],
+      'x-fern-sdk-method-name': 'set_default_account',
+      request: {
+        body: { content: { 'application/json': { schema: schemas.setDefaultRequest } }, required: true },
+      },
+      responses: {
+        200: {
+          content: { 'application/json': { schema: schemas.setDefault } },
+          description: 'The default account is set.',
+        },
+        400: {
+          content: { 'application/json': { schema: RequestErrorResponseSchema } },
+          description: 'The named account is not connected.',
         },
         ...connectorUnreachable,
         ...unauthorized,

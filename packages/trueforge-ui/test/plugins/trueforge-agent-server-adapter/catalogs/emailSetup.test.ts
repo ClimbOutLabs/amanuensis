@@ -10,6 +10,33 @@ const STATUS_BODY = {
     state: 'connected',
     address: 'person@gmail.com',
     provider_key: 'gmail',
+    accounts: [
+      {
+        address: 'person@gmail.com',
+        provider_key: 'gmail',
+        state: 'connected',
+        is_default: true,
+        imap_host: 'imap.gmail.com',
+        imap_port: 993,
+        imap_mode: 'ssl',
+        smtp_host: 'smtp.gmail.com',
+        smtp_port: 465,
+        smtp_mode: 'ssl',
+      },
+      {
+        address: 'work@example.com',
+        provider_key: 'other',
+        state: 'connected',
+        is_default: false,
+        imap_host: 'imap.example.com',
+        imap_port: 993,
+        imap_mode: 'ssl',
+        smtp_host: 'smtp.example.com',
+        smtp_port: 465,
+        smtp_mode: 'ssl',
+      },
+    ],
+    default_address: 'person@gmail.com',
     providers: [
       {
         key: 'gmail',
@@ -66,6 +93,9 @@ describe('createEmailSetupApi', () => {
     expect(status.providerKey).toBe('gmail');
     expect(status.providers[0]?.imapHost).toBe('imap.gmail.com');
     expect(status.providers[0]?.helpUrl).toBe('https://support.google.com/accounts/answer/185833');
+    expect(status.accounts.map(account => account.address)).toEqual(['person@gmail.com', 'work@example.com']);
+    expect(status.accounts[0]?.isDefault).toBe(true);
+    expect(status.defaultAddress).toBe('person@gmail.com');
   });
 
   it('saves with snake_case on the wire, the session cookie, and no bearer header', async () => {
@@ -90,6 +120,21 @@ describe('createEmailSetupApi', () => {
     expect(seen[0]?.method).toBe('DELETE');
     expect(seen[0]?.body).toBe('{}');
     expect(JSON.stringify(seen[0]?.headers)).toContain('application/json');
+  });
+
+  it('remove with an address removes only that account', async () => {
+    const { api, seen } = apiWith(async () => reply(STATUS_BODY));
+    await api.removeEmailAccount('work@example.com');
+    expect(seen[0]?.method).toBe('DELETE');
+    expect(JSON.parse(seen[0]?.body ?? '{}')).toEqual({ address: 'work@example.com' });
+  });
+
+  it('set default posts the address to the default route', async () => {
+    const { api, seen } = apiWith(async () => reply(STATUS_BODY));
+    await api.setDefaultEmailAccount('work@example.com');
+    expect(seen[0]?.url).toBe('http://harness.test/api/v1/user/settings/email/default');
+    expect(seen[0]?.method).toBe('POST');
+    expect(JSON.parse(seen[0]?.body ?? '{}')).toEqual({ address: 'work@example.com' });
   });
 
   it('passes the server plain error line through, and nothing else', async () => {

@@ -5,8 +5,20 @@ import {
   type ConnectorAccountState,
 } from '../../../src/runtime/connectorAccount';
 
-const NONE: ConnectorAccountState<string> = { connected: false, sign_in: null, account: null };
-const SAVED: ConnectorAccountState<string> = { connected: true, sign_in: 'ok', account: 'owner' };
+const NONE: ConnectorAccountState<string> = {
+  connected: false,
+  sign_in: null,
+  account: null,
+  accounts: [],
+  default_key: null,
+};
+const SAVED: ConnectorAccountState<string> = {
+  connected: true,
+  sign_in: 'ok',
+  account: 'owner',
+  accounts: [{ account: 'owner', sign_in: 'ok' }],
+  default_key: 'owner',
+};
 
 function makeKind() {
   const readTimeouts: (number | undefined)[] = [];
@@ -29,6 +41,7 @@ function makeKind() {
           ? Promise.reject(new ConnectorAccountError({ failure: 'connector_unreachable', message: 'later' }))
           : Promise.resolve(SAVED),
       remove: () => Promise.resolve(NONE),
+      setDefault: () => Promise.resolve(SAVED),
       sync: (state: ConnectorAccountState<string>) => {
         synced.push(state);
         return Promise.resolve();

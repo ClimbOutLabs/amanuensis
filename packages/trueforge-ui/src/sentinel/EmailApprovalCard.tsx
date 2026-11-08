@@ -9,6 +9,7 @@ import { APPROVAL_CHOICES, EMAIL_CHOICES, isNewRecipientCard } from './approvalC
 import { approvalTime, approveVerb, declineVerb, emailQuestion } from './approvalCopy.js';
 import { ChangeRequestBox } from './ChangeRequestBox.js';
 import { countEmailWords, isLongEmailBody, splitEmailBody } from './emailBody.js';
+import { MailFromPicker, useMailFromPick } from './MailFromPicker.js';
 import {
   WAITING_FOR_YOU_LABEL,
   type SentinelApprovalCard,
@@ -22,12 +23,13 @@ export type EmailApprovalCardProps = {
   /** A card whose `email` is set. Anything else renders nothing. */
   card: SentinelApprovalCard;
   disabled?: boolean;
-  onApprove: () => void;
+  /** Approves; with the account picked on the card when the person changed it. */
+  onApprove: (fromAccount?: string) => void;
   onDeny: () => void;
   /** Passed only when the card may be revised. The text is the change the person typed. */
   onChangeRequest?: ((text: string) => void) | undefined;
   /** Passed only when the server offers a draft option for this approval. */
-  onSaveDraft?: (() => void) | undefined;
+  onSaveDraft?: ((fromAccount?: string) => void) | undefined;
 };
 
 function mailboxListText(mailboxes: readonly SentinelApprovalMailbox[]): string {
@@ -117,13 +119,14 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
 }) => {
   const [changing, setChanging] = useState(false);
   const [sentAt, setSentAt] = useState<string | null>(null);
+  const fromPick = useMailFromPick(card);
   const email: SentinelApprovalEmail | null = card.email;
   if (email === null) return null;
 
   const sending = email.action === 'send';
   const sendNow = () => {
     setSentAt(approvalTime(new Date()));
-    onApprove();
+    onApprove(fromPick.picked);
   };
 
   return (
@@ -142,6 +145,16 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
 
       <div className="border-t border-border px-4 py-3">
         <p className="mb-2 text-text-secondary">What will be sent</p>
+        {fromPick.choices.length > 1 && (
+          <div className="mb-2">
+            <MailFromPicker
+              choices={fromPick.choices}
+              value={fromPick.value}
+              onChange={fromPick.onChange}
+              disabled={disabled}
+            />
+          </div>
+        )}
         <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1.5">
           {email.reply_in_thread !== null && (
             <>
@@ -237,7 +250,7 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
                 variant="secondary"
                 size="small"
                 title={EMAIL_CHOICES.saveDraft.hint}
-                onClick={onSaveDraft}
+                onClick={() => onSaveDraft(fromPick.picked)}
                 disabled={disabled}
               >
                 {EMAIL_CHOICES.saveDraft.label}

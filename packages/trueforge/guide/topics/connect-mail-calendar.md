@@ -29,6 +29,36 @@ If Aman is in offline mode, turn it off first. Click **More**, click **Settings*
 
 The panel then says it is connected and shows your Google address.
 
+## Connect an email account with an app password
+
+Use this for an email account at a provider such as Gmail, Fastmail or Yahoo, or any other provider that gives you incoming and outgoing mail servers. You can connect several accounts this way, for example a personal account and a work account.
+
+An app password is a separate password for apps like this one. It is not your usual password. You make it at your email provider.
+
+To connect an email account:
+
+1. Click **More** in the left bar, click **Settings**, then click **Connectors**.
+2. Find **Email** in the list and click **Connect**. If an account is already connected, click **Manage**, then click **Add another account**.
+3. Pick your provider in **Email provider**. For a provider that is not on the list, pick Other and type the incoming and outgoing servers and ports.
+4. Type your **Email address**.
+5. Make an app password at your provider. The panel shows a short note for your provider. For some providers it also shows a link, **How to get an app password**.
+6. Type it in **App password**, then click **Connect**.
+
+The app signs in to your account once before it saves anything. If the sign-in fails, nothing is saved, and the panel says what to fix. Saving an account you already connected replaces its saved details and keeps your other accounts.
+
+To choose which account new email goes out from:
+
+1. Click **More**, click **Settings**, click **Connectors**, find **Email**, and click **Manage**.
+2. Click **Make default** on the account you want.
+
+New email goes out from the default account. When an email needs your OK, its card has a **From** picker when more than one account is connected. Pick the account there, before you approve. The account cannot be changed after you approve, and an OK you gave for one account never covers another.
+
+Each account keeps its own list of addresses you have approved. Approving a new address adds it to the list of the account the email goes from, and to no other account.
+
+To change an account, click **Manage**, then click **Change** on it. To remove one account, click **Manage**, then click **Remove** on it. This deletes that account's saved app password for good and keeps your other accounts.
+
+The app stores app passwords only on your computer, in the email connector. Your assistant never sees them. Never paste a password into a chat. A chat cannot connect an account. Use Settings.
+
 ## Connect your calendar
 
 1. Click **More**, click **Settings**, click **Connectors**, find **Google**, and click **Manage**.

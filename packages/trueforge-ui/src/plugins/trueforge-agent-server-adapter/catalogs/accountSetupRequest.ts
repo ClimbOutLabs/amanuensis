@@ -64,10 +64,15 @@ export function createAccountSetupRequest<TWire, TStatus>({
   const fetchImpl = options.fetch ?? ((input: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(input, init));
   const url = `${base}${path}`;
 
-  return async function request(input: { method: 'GET' | 'POST' | 'DELETE'; body?: unknown }): Promise<TStatus> {
+  return async function request(input: {
+    method: 'GET' | 'POST' | 'DELETE';
+    body?: unknown;
+    /** Extra path under the card's route, such as /default; the status read is the default GET. */
+    suffix?: string;
+  }): Promise<TStatus> {
     let response: Response;
     try {
-      response = await fetchImpl(input.method === 'GET' ? `${url}/status` : url, {
+      response = await fetchImpl(input.method === 'GET' ? `${url}/status` : `${url}${input.suffix ?? ''}`, {
         method: input.method,
         credentials: 'same-origin',
         headers: input.method === 'GET' ? {} : { 'Content-Type': 'application/json' },

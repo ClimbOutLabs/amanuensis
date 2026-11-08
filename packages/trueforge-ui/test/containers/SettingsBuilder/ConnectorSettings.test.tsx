@@ -760,6 +760,8 @@ describe('ConnectorSettings page order and vocabulary', () => {
       state: 'not_connected',
       address: null,
       providerKey: 'custom',
+      accounts: [],
+      defaultAddress: null,
       providers: [],
       ...overrides,
     };

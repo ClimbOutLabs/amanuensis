@@ -249,12 +249,56 @@ export class TurnResourceResolver<
        * Keeps the Email account names per chat across turns. Omit to keep them for one turn only.
        */
       mailAccounts?: MailAccountDirectory | undefined;
+      /**
+       * How Email calls are routed for this turn: the default account, and the accounts this turn's
+       * persona may use (null when the persona is not limited). Read at most once per resolver.
+       * Omit when the host cannot say; calls then use the first connected account and no limit.
+       */
+      mailRouting?:
+        (() => Promise<{ default_name: string | null; allowed: readonly string[] | null } | undefined>) | undefined;
+      /**
+       * The connected Email accounts and the default among them, for the prompt's account list.
+       * Called at most once per resolver instance. Omit when the host cannot say; the prompt then
+       * names no accounts.
+       */
+      mailAccountFacts?:
+        (() => Promise<{ names: readonly string[]; default_name: string | null } | undefined>) | undefined;
     },
   ) {
     this.#mailAccounts = deps.mailAccounts ?? new MailAccountDirectory();
   }
 
   readonly #mailAccounts: MailAccountDirectory;
+  #mailRoutingPromise?:
+    Promise<{ default_name: string | null; allowed: readonly string[] | null } | undefined> | undefined;
+
+  /** Single-flight; a failed read leaves the routing unknown rather than failing the turn. */
+  #resolveMailRouting(): Promise<{ default_name: string | null; allowed: readonly string[] | null } | undefined> {
+    const read = this.deps.mailRouting;
+    if (read === undefined) {
+      return Promise.resolve(undefined);
+    }
+    this.#mailRoutingPromise ??= read().catch((error: unknown) => {
+      this.deps.logger.warn('Email account routing could not be read', extractErrorLogFields(error));
+      return undefined;
+    });
+    return this.#mailRoutingPromise;
+  }
+  #mailAccountFactsPromise?: Promise<{ names: readonly string[]; default_name: string | null } | undefined> | undefined;
+
+  /** Single-flight; a failed read leaves the accounts unnamed rather than failing the turn. */
+  #resolveMailAccountFacts(): Promise<{ names: readonly string[]; default_name: string | null } | undefined> {
+    const read = this.deps.mailAccountFacts;
+    if (read === undefined) {
+      return Promise.resolve(undefined);
+    }
+    this.#mailAccountFactsPromise ??= read().catch((error: unknown) => {
+      this.deps.logger.warn('Email accounts for the prompt could not be read', extractErrorLogFields(error));
+      return undefined;
+    });
+    return this.#mailAccountFactsPromise;
+  }
+
   #setUpConnectorNamesPromise?: Promise<readonly string[] | undefined> | undefined;
 
   /** Single-flight; a failed read leaves the names unknown rather than failing the turn. */
@@ -507,13 +551,24 @@ export class TurnResourceResolver<
             }
             return new MailConnectorSource({
               inner: remote,
-              accounts: ({ fresh }) =>
-                this.#mailAccounts.accounts({
+              accounts: async ({ fresh }) => {
+                const kept = await this.#mailAccounts.accounts({
                   chat_id: session_id,
                   connector_url: url,
                   fresh,
-                  read: () => readMailAccountNames(remote),
-                }),
+                  read: async () => ({
+                    names: await readMailAccountNames(remote),
+                    default_name: null,
+                    allowed: null,
+                  }),
+                });
+                const routing = await this.#resolveMailRouting();
+                return {
+                  names: kept.names,
+                  default_name: routing?.default_name ?? kept.default_name,
+                  allowed: routing?.allowed ?? kept.allowed,
+                };
+              },
               now: () => new Date(),
               timeZone: this.deps.clientTimezone,
             });
@@ -582,6 +637,7 @@ export class TurnResourceResolver<
     // shared unchanged across the root thread and every sub-agent thread;
     // see #resolveConfiguredModels.
     const configuredModels = await this.#resolveConfiguredModels();
+    const mailAccounts = await this.#resolveMailAccountFacts();
     const setUpConnectorNames = await this.#resolveSetUpConnectorNames();
 
     return {
@@ -599,6 +655,7 @@ export class TurnResourceResolver<
         modelSupportsVision: resolvedModel.modelSupportsVision,
         modelRequestGate: resolvedModel.modelRequestGate,
         configuredModels,
+        mailAccounts,
         modelProperties: resolvedModel.modelProperties,
         clientTimezone: this.deps.clientTimezone,
         spokenReply: this.deps.spokenReply,
