@@ -212,7 +212,9 @@ describe('EmailSetupPanel', () => {
     await waitFor(() => expect(port.setDefaultEmailAccount).toHaveBeenCalledWith('work@example.com'));
     fireEvent.click(screen.getByRole('button', { name: 'Add another account' }));
     expect(await screen.findByLabelText(/email provider/i)).toBeTruthy();
-    expect((screen.getByLabelText(/email address/i) as HTMLInputElement).value).toBe('');
+    const emailField = screen.getByLabelText(/email address/i);
+    if (!(emailField instanceof HTMLInputElement)) throw new Error('email address field is not an input');
+    expect(emailField.value).toBe('');
   });
 
   it('Other shows the server fields, and web.de shows its hint with no link', async () => {

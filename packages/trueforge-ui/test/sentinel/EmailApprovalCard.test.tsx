@@ -353,7 +353,8 @@ describe('EmailApprovalCard account picker', () => {
       />,
     );
     const picker = screen.getByLabelText('From');
-    expect((picker as HTMLSelectElement).value).toBe('home@example.com');
+    if (!(picker instanceof HTMLSelectElement)) throw new Error('From picker is not a select');
+    expect(picker.value).toBe('home@example.com');
     fireEvent.change(picker, { target: { value: 'work@example.com' } });
     fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
     expect(onApprove).toHaveBeenCalledWith('work@example.com');
