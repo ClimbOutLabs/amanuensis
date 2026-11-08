@@ -775,6 +775,8 @@ describe('ConnectorSettings page order and vocabulary', () => {
       username: null,
       calendarUrl: null,
       providerKey: 'custom',
+      accounts: [],
+      defaultAddress: null,
       providers: [],
       ...overrides,
     };
