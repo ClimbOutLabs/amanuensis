@@ -188,6 +188,8 @@ export type SentinelApprovalInfo = {
   threadId: string | null;
   /** False when the server refuses chat scope for this call; absent from servers that do not say. */
   chatAllowOffered?: boolean | undefined;
+  /** Set when the server says a chat-scoped approval covers the whole site, not just this one call. */
+  chatGrantScope?: 'site' | undefined;
   /** True when the server lets the owner always allow this tool; the server refuses it for other tools. */
   alwaysAllowOffered?: boolean | undefined;
   /** Present only for an action a scheduled run held; such a card never pauses the chat. */
@@ -615,6 +617,7 @@ function parseApprovalInfo(
   const held = parseHeldInfo(ref);
   const notSaved = parseNotSaved(ref);
   const chatAllowOffered = ref.can_chat_allow ?? ref.canChatAllow;
+  const chatGrantScope = ref.chat_grant_scope ?? ref.chatGrantScope;
   const alwaysAllowOffered = ref.can_always_allow ?? ref.canAlwaysAllow;
   return {
     toolCallId,
@@ -622,6 +625,7 @@ function parseApprovalInfo(
     card,
     ...origin,
     ...(typeof chatAllowOffered === 'boolean' ? { chatAllowOffered } : {}),
+    ...(chatGrantScope === 'site' ? { chatGrantScope: 'site' as const } : {}),
     ...(typeof alwaysAllowOffered === 'boolean' ? { alwaysAllowOffered } : {}),
     ...(held === undefined ? {} : { held }),
     ...(notSaved === undefined ? {} : { notSaved }),

@@ -39,6 +39,8 @@ export type PermissionApprovalCardProps = {
   onApprove: () => void;
   /** Only passed when the server declared a chat-scoped allow for this call. */
   onApproveForChat?: (() => void) | undefined;
+  /** Only passed when the server says that chat-scoped allow covers the whole site, so the button can name it. */
+  chatGrantScope?: 'site' | undefined;
   /**
    * Records a standing "Always allow this tool" grant and approves this call. Only passed when the
    * server says the owner may always allow this tool; the card asks for confirmation first.
@@ -157,6 +159,7 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
   othersWaiting,
   onApprove,
   onApproveForChat,
+  chatGrantScope,
   onApproveAlways,
   onDeny,
   onChangeRequest,
@@ -317,7 +320,7 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
             disabled={disabled || sentAt !== null}
             className={cn('w-full', sentAt !== null && 'pointer-events-none opacity-0')}
           >
-            {chatGrantLabel(card)}
+            {chatGrantLabel(chatGrantScope)}
           </Button>
         )}
         {changing && onChangeRequest !== undefined && (

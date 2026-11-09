@@ -1,6 +1,8 @@
 import type { ApprovalDecision } from '../events/schema';
 import type { InternalEnrichedToolCall, InternalToolCallInfo } from '../llm/LLMTypes';
+import { BROWSER_OPEN_TOOL_NAME, isAmanBrowserCall } from '../permissions/browserToolNames';
 import {
+  BROWSER_OPEN_SITE_GRANT_REASONS,
   CHAT_GRANTABLE_CONSEQUENCE_REASONS,
   GRANT_BARRED_TIER_REASONS,
   OWN_CALENDAR_CHANGE_REASONS,
@@ -76,10 +78,39 @@ export function effectiveToolAdmissions(input: {
 }
 
 /**
+ * What a chat-scoped approval on this call covers beyond the call itself, or null when it binds the call.
+ * The one wider scope is a browser open the person vouched for by site: the server sets it, the card names
+ * it, and the grant key binds it, so the three can never drift apart.
+ */
+export function chatGrantScope(info: InternalToolCallInfo): 'site' | null {
+  return siteGrantableOpen(info) ? 'site' : null;
+}
+
+/**
+ * A browser open whose chat grant may cover its site: one of Aman's own browser opens, under a reason the
+ * site-grant set names, with a site on its card to bind to. A barred reason never qualifies, whatever the
+ * set says, and neither does a private read.
+ */
+function siteGrantableOpen(info: InternalToolCallInfo): boolean {
+  if (secretPathReadBarsDurableGrant(info) || tierBarsDurableGrant(info)) {
+    return false;
+  }
+  if (!isAmanBrowserCall(info) || info.original_tool_name !== BROWSER_OPEN_TOOL_NAME) {
+    return false;
+  }
+  if (info.tier_reason === undefined || !BROWSER_OPEN_SITE_GRANT_REASONS.has(info.tier_reason)) {
+    return false;
+  }
+  const host = info.tier3_card?.destination_host ?? null;
+  return host !== null && host !== '';
+}
+
+/**
  * Server-owned eligibility for "Always allow this here", the one chat-scoped grant. This only gates which calls may
  * *receive* chat scope; the scope's binding lives in the grant key: the tool and its destination, and for sandbox
  * exec an invocation digest over (purpose, command, cwd, env), so approving one command in a chat never authorizes a
  * different one or reaches another chat. A consequential action qualifies; a send and a steered call never do.
+ * A browser open qualifies only by site, under the reasons `chatGrantScope` names.
  */
 export function allowsChatApproval(info: InternalToolCallInfo): boolean {
   if (secretPathReadBarsDurableGrant(info)) {
@@ -92,6 +123,9 @@ export function allowsChatApproval(info: InternalToolCallInfo): boolean {
     return true;
   }
   if (info.tier_reason !== undefined && CHAT_GRANTABLE_CONSEQUENCE_REASONS.has(info.tier_reason)) {
+    return true;
+  }
+  if (chatGrantScope(info) === 'site') {
     return true;
   }
   return !tierBarsDurableGrant(info) && (info.effect === 'inspect' || info.effect === 'verify');
@@ -156,9 +190,23 @@ export function awaitsApproval(input: {
  * Durable identity for a chat-scoped approval. The identity is derived by the
  * server from the enriched tool call, never accepted from the browser. The card's
  * destination and recipient are part of it so a grant never follows a call to a different target.
+ * A site-scoped open is the one exception: its identity is the tool, the reason it was given on and
+ * the site, never the one address, so the grant covers the site the person approved and nothing else.
  */
 export function approvalGrantKey(info: InternalToolCallInfo): string {
   const card = info.tier3_card ?? null;
+  if (chatGrantScope(info) === 'site') {
+    return JSON.stringify([
+      APPROVAL_GRANT_VERSION,
+      info.type,
+      info.mcp_server_id,
+      info.original_tool_name,
+      null,
+      null,
+      card?.destination_host ?? null,
+      info.tier_reason ?? null,
+    ]);
+  }
   return JSON.stringify([
     APPROVAL_GRANT_VERSION,
     info.type,

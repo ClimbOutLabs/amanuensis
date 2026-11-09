@@ -95,6 +95,7 @@ import {
   allowsToolGrant,
   approvalGrantKey,
   awaitsApproval,
+  chatGrantScope,
   effectiveApprovalDecisions,
   effectiveToolAdmissions,
 } from '../mcp/approvalGrant';
@@ -5855,6 +5856,7 @@ export class AgentThread {
           // Tier and card ride on the approval event because the wire tool_info omits them.
           ...approvalCardFields(toolCall),
           can_chat_allow: allowsChatApproval(toolCall.tool_info),
+          chat_grant_scope: chatGrantScope(toolCall.tool_info),
           can_always_allow: allowsToolGrant(toolCall.tool_info),
         })),
       };

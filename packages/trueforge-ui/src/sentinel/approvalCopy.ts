@@ -54,14 +54,12 @@ export function approveVerb(card: SentinelApprovalCard): string {
 }
 
 /**
- * The words on the standing-grant button. A card that opens a page names the site the grant covers,
- * so the person can see what they are no longer being asked about. Other cards keep the shared words.
+ * The words on the standing-grant button. The server marks a card whose chat grant covers the whole
+ * site, and only that card names the site, so the words always match what the grant really covers.
+ * Every other card keeps the shared words.
  */
-export function chatGrantLabel(card: SentinelApprovalCard): string {
-  const host = card.destination_host;
-  return host !== null && card.plain_what.startsWith(`Open ${host}?`)
-    ? 'Always allow this site'
-    : APPROVAL_CHOICES.approveForChat.label;
+export function chatGrantLabel(grantScope: 'site' | undefined): string {
+  return grantScope === 'site' ? 'Always allow this site' : APPROVAL_CHOICES.approveForChat.label;
 }
 
 /** The verb on the quiet button that says no: Not now, except a new-recipient card, which says what will not happen. */

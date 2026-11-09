@@ -53,21 +53,12 @@ describe('approval copy', () => {
     expect(declineVerb(card)).toBe('Not now');
   });
 
-  it('names the site on the standing grant of a card that opens a page', () => {
-    const card = cardWith({
-      plain_what: 'Open evil.example? You did not ask for this. A page Aman read linked to this address.',
-      destination: 'https://evil.example/claim-prize',
-      destination_host: 'evil.example',
-    });
-    expect(chatGrantLabel(card)).toBe('Always allow this site');
+  it('names the site on the standing grant when the server marked the grant as covering it', () => {
+    expect(chatGrantLabel('site')).toBe('Always allow this site');
   });
 
-  it('keeps the shared grant words on a card that opens no page', () => {
-    const card = cardWith({
-      plain_what: 'Search the web with Tavily for harbour tides?',
-      destination_host: 'Tavily',
-    });
-    expect(chatGrantLabel(card)).toBe('Always allow this here');
+  it('keeps the shared grant words when the server set no wider scope', () => {
+    expect(chatGrantLabel(undefined)).toBe('Always allow this here');
   });
 
   it('never shows a search connector id on a held search stub', () => {

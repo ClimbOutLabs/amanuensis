@@ -286,6 +286,7 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
         othersWaiting={pendingApprovals.filter(pending => pending.approvalId !== approvalInfo.toolCallId).length}
         onApprove={() => onSelectOption(allowOnceId)}
         onApproveForChat={allowChatId === undefined ? undefined : () => onSelectOption(allowChatId)}
+        chatGrantScope={approvalInfo.chatGrantScope}
         onApproveAlways={approvalInfo.alwaysAllowOffered === true ? respondAlwaysAllow : undefined}
         onDeny={onDeny}
         onChangeRequest={onChangeRequest}

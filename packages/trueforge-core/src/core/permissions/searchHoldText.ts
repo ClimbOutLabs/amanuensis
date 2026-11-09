@@ -1,5 +1,6 @@
 /** Wording of held web search, page and map cards and their audit rows. Browser-safe: the UI reads it too. */
 import { TAVILY_API_HOST, TAVILY_CONNECTOR_HOST } from '../search/TavilyClient.js';
+import { escapeDisplayText } from './displayText.js';
 import type { OutboundGuardRule } from './outboundGuard.js';
 import type { ReadOrigin, ReadSource } from './provenance.js';
 
@@ -102,7 +103,8 @@ export function steeredDestinationSay(input: {
 /**
  * The body of a card for an open whose address read content chose: whose idea it was not, and where the
  * assistant read the link, in one plain line. The page is named by its host when the read named it, since
- * no title for it is kept. `origin.site` comes from the address itself, so it needs no escaping.
+ * no title for it is kept. `origin.site` is the host of the page the link was read on, taken from that
+ * page's own address when the read named it, and it is escaped for display like the destination host is.
  */
 export function steeredOpenSay(input: { assistant: string; origin: ReadOrigin }): string {
   const { assistant, origin } = input;
@@ -110,7 +112,7 @@ export function steeredOpenSay(input: { assistant: string; origin: ReadOrigin })
     origin.source === 'page' || origin.source === 'browser_page'
       ? origin.site === null
         ? `A page ${assistant} read`
-        : `A page on ${origin.site} that ${assistant} read`
+        : `A page on ${escapeDisplayText(origin.site)} that ${assistant} read`
       : origin.source === 'email' || origin.source === 'email_sender'
         ? `An email ${assistant} read`
         : origin.source === 'event'
