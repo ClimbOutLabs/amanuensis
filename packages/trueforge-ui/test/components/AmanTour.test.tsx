@@ -50,6 +50,18 @@ describe('AmanTour home', () => {
     localStorage.clear();
   });
 
+  it('sizes the suggestion cards to the screen and lets each card shrink to its column', () => {
+    const { container } = renderTour();
+
+    const list = container.querySelector('.aman-home-cards');
+    expect(list).toHaveClass('w-full', 'max-w-full');
+    const items = list?.querySelectorAll('li') ?? [];
+    expect(items.length).toBeGreaterThan(0);
+    for (const item of items) {
+      expect(item).toHaveClass('min-w-0');
+    }
+  });
+
   it('shows the greeting with the underline only under the first name', () => {
     const { container } = renderTour();
 

@@ -183,11 +183,11 @@ export function AmanTour({
           <h2 id="aman-home-cards-heading" className="m-0 text-[0.8125rem] font-normal text-text-secondary">
             Some things {assistant} can do
           </h2>
-          <ul className="m-0 grid list-none grid-cols-2 gap-2.5 p-0">
+          <ul className="aman-home-cards m-0 grid w-full max-w-full list-none grid-cols-2 gap-2.5 p-0">
             {slots.map(slot => {
               const busy = slot.kind === 'run_brief' && briefStarting;
               return (
-                <li key={slot.card.title}>
+                <li key={slot.card.title} className="min-w-0">
                   <button
                     type="button"
                     className={cn(CARD_CLASS, 'h-full w-full', busy && 'cursor-not-allowed opacity-50')}

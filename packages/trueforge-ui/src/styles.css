@@ -298,10 +298,12 @@
   color: var(--text-primary);
 }
 
-/* Keep the send action in the narrow composer footer instead of allowing the
- * selector row to push it beyond a 320px viewport. The breakpoint is below
- * the supported 390px layout, so ordinary mobile and desktop stay unchanged. */
-@media (max-width: 359px) {
+/* Narrow phones: below the supported 390px layout the composer footer stacks
+ * instead of squeezing into one line. The add row takes a line of its own, the
+ * model picker takes a full line so the selected model name stays readable,
+ * and the mic, voice and send controls share the line below at their usual
+ * sizes, so the card is only ever as tall as those stacked rows. */
+@media (max-width: 389px) {
   [data-slot='aui_composer-shell'] .aui-composer-footer {
     align-items: flex-start;
   }
@@ -318,15 +320,33 @@
     margin-left: 0;
   }
 
-  [data-slot='aui_composer-shell'] .aui-composer-model-button {
-    max-width: 7rem;
+  /* The right group stops being a box here, so the model picker and the voice
+   * controls inside it can land on separate lines of the actions row. */
+  [data-slot='aui_composer-shell'] .aui-composer-right-group {
+    display: contents;
   }
 
-  /* Send and its running-state Stop are 32px; give both the 44px touch target here. */
-  [data-slot='aui_composer-shell'] [data-slot='aui_composer-send'],
-  [data-slot='aui_composer-shell'] [data-slot='aui_composer-stop'] {
-    width: 2.75rem;
-    height: 2.75rem;
+  [data-slot='aui_composer-shell'] .aui-composer-model-selector {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
+  [data-slot='aui_composer-shell'] .aui-composer-model-button {
+    max-width: 100%;
+    width: 100%;
+  }
+
+  [data-slot='aui_composer-shell'] .aui-composer-model-label {
+    flex-basis: 100%;
+    max-width: 100%;
+  }
+}
+
+/* Narrow phones: the home suggestion cards stack in one column sized to the
+ * screen, so no card or line of its text runs past the right edge. */
+@media (max-width: 389px) {
+  .aman-home-cards {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
