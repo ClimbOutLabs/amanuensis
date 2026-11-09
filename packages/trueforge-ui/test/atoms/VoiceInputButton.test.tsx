@@ -259,6 +259,87 @@ describe('VoiceInputButton', () => {
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
+  it('says so when a tap recording hears nothing, instead of failing silently', async () => {
+    const { api, transcribeMock } = makeApi({
+      transcribe: async () => ({ ...DEFAULT_TRANSCRIPTION, text: ' ' }),
+    });
+    render(
+      <VoiceInputProvider api={api}>
+        <VoiceInputButton disabled={false} />
+      </VoiceInputProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Record voice message' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Stop and transcribe' }));
+
+    expect(await screen.findByText('Nothing was heard. Tap the mic and try again.')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(transcribeMock).toHaveBeenCalledTimes(1);
+    expect(await screen.findByRole('button', { name: 'Record voice message' })).toBeEnabled();
+  });
+
+  it('an address tidy-up on the same path leaves a recording alone; a real move ends it and says so', async () => {
+    const recorder = makeRecorder();
+    mockStartVoiceRecording.mockResolvedValueOnce(recorder);
+    const { api } = makeApi();
+    render(
+      <VoiceInputProvider api={api}>
+        <VoiceInputButton disabled={false} />
+      </VoiceInputProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Record voice message' }));
+    await screen.findByRole('button', { name: 'Stop and transcribe' });
+
+    // The app clearing a link or an error flag out of the address writes the same path.
+    act(() => {
+      window.dispatchEvent(new Event('trueforge:routechange'));
+    });
+    expect(recorder.cancel).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Stop and transcribe' })).toBeInTheDocument();
+
+    window.history.pushState({}, '', '/another-chat');
+    try {
+      act(() => {
+        window.dispatchEvent(new Event('trueforge:routechange'));
+      });
+      expect(recorder.cancel).toHaveBeenCalled();
+      expect(
+        await screen.findByText('Recording stopped before it finished. Tap the mic to try again.'),
+      ).toBeInTheDocument();
+    } finally {
+      window.history.pushState({}, '', '/');
+    }
+  });
+
+  it('backgrounding the app mid-recording says the recording was stopped', async () => {
+    const recorder = makeRecorder();
+    mockStartVoiceRecording.mockResolvedValueOnce(recorder);
+    const { api } = makeApi();
+    render(
+      <VoiceInputProvider api={api}>
+        <VoiceInputButton disabled={false} />
+      </VoiceInputProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Record voice message' }));
+    await screen.findByRole('button', { name: 'Stop and transcribe' });
+
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+    try {
+      act(() => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+    } finally {
+      Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+    }
+
+    expect(recorder.cancel).toHaveBeenCalled();
+    expect(
+      await screen.findByText('Recording stopped before it finished. Tap the mic to try again.'),
+    ).toBeInTheDocument();
+  });
+
   it('shows the limit notice after an auto-stopped segment transcribes', async () => {
     let autoStop: (() => void) | undefined;
     let resolveTranscribe!: (value: VoiceTranscription) => void;
@@ -583,6 +664,19 @@ describe('VoiceInputButton hands-free', () => {
     act(() => voiceReplyDone());
     await screen.findByText('Listening. Pause to send.');
     expect(mockStartVoiceRecording).toHaveBeenCalledTimes(2);
+  });
+
+  it('a listen that hears nothing just listens again, with no failure notice', async () => {
+    const { api } = makeApi({ transcribe: async () => ({ ...DEFAULT_TRANSCRIPTION, text: '' }) });
+    render(composer(api));
+    fireEvent.click(await screen.findByRole('button', { name: 'Start hands-free conversation' }));
+    await screen.findByText('Listening. Pause to send.');
+
+    act(() => silence?.('pause'));
+
+    await screen.findByText('Listening. Pause to send.');
+    expect(mockStartVoiceRecording).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText('Nothing was heard. Tap the mic and try again.')).toBeNull();
   });
 
   it('stops after a long quiet and says how to start again', async () => {

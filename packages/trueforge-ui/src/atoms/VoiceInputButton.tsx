@@ -29,6 +29,8 @@ import { Tooltip } from './primitives/Tooltip.js';
 const TRANSCRIBE_ERROR_MESSAGE = 'Transcription failed, try again or type instead.';
 const MIC_UNAVAILABLE_MESSAGE = 'Microphone unavailable. Check your microphone and try again.';
 const RECORD_LIMIT_MESSAGE = 'Recording stopped at the 3-minute limit. Tap the mic to record another segment.';
+const NOTHING_HEARD_MESSAGE = 'Nothing was heard. Tap the mic and try again.';
+const RECORDING_STOPPED_MESSAGE = 'Recording stopped before it finished. Tap the mic to try again.';
 const HANDS_FREE_QUIET_MESSAGE = 'Hands-free stopped because it was quiet for a while. Tap it to start again.';
 const HANDS_FREE_NOT_SENT_MESSAGE =
   'Hands-free stopped because the message could not be sent. Check the message box, then press Send.';
@@ -79,6 +81,11 @@ function VoiceInputButtonInner({
   const [notice, setNotice] = useState<string | null>(null);
   const [popoverOpen, setPopoverOpen] = useState(false);
   const recorderRef = useRef<VoiceRecorder | null>(null);
+  // Mirrors the `acquiring` state so teardown handlers can tell a start is still opening the mic.
+  const acquiringRef = useRef(false);
+  // The path the composer was on when it mounted; a route-change event on the same path is an
+  // address tidy-up (a link or an error flag being cleared), not a move to another chat.
+  const lastPathnameRef = useRef<string | null>(null);
   // Each start takes the next number; a stop bumps it, so a start still waiting on the mic is dropped.
   const startTokenRef = useRef(0);
   // The recording (or start) in progress is a hands-free listen.
@@ -129,31 +136,52 @@ function VoiceInputButtonInner({
     setPhase(current => (current === 'recording' || current === 'transcribing' ? 'idle' : current));
   }, []);
 
-  // Fail-closed on tab backgrounding: the voice session ends and tracks stop.
+  /** A spoken attempt is under way: the mic is opening, a recording is live, or words are being transcribed. */
+  const attemptInFlight = useCallback(
+    (): boolean =>
+      acquiringRef.current || recorderRef.current != null || abortRef.current != null || listeningRef.current,
+    [],
+  );
+
+  // Fail-closed on tab backgrounding: the voice session ends and tracks stop. When an attempt was
+  // under way, the button says so on the person's return; a recording never just vanishes.
   useEffect(() => {
     const onVisibilityChange = () => {
       if (document.visibilityState !== 'hidden') {
         return;
       }
+      const wasInFlight = attemptInFlight();
       cancelVoice();
       setHandsFree('off');
+      if (wasInFlight) {
+        setNotice(RECORDING_STOPPED_MESSAGE);
+      }
     };
     document.addEventListener('visibilitychange', onVisibilityChange);
     return () => document.removeEventListener('visibilitychange', onVisibilityChange);
-  }, [cancelVoice]);
+  }, [cancelVoice, attemptInFlight]);
 
   // Fail-closed on SPA route changes: the voice session ends and tracks stop,
   // even if the composer stays mounted across navigation. A hands-free conversation is left to the
   // chat itself: a new chat changes its address when it gets its id, and a real chat switch ends
-  // hands-free, which stops its listen (below).
+  // hands-free, which stops its listen (below). An address write that keeps the same path is not
+  // a navigation: the app itself writes the address to clear a delivery link or an error flag,
+  // and one of those landing mid-recording must not throw the recording away.
   useEffect(() => {
+    lastPathnameRef.current = window.location.pathname;
     const onRouteChange = () => {
+      if (window.location.pathname === lastPathnameRef.current) return;
+      lastPathnameRef.current = window.location.pathname;
       if (getHandsFree() !== 'off') return;
+      const wasInFlight = attemptInFlight();
       cancelVoice();
+      if (wasInFlight) {
+        setNotice(RECORDING_STOPPED_MESSAGE);
+      }
     };
     window.addEventListener('trueforge:routechange', onRouteChange);
     return () => window.removeEventListener('trueforge:routechange', onRouteChange);
-  }, [cancelVoice]);
+  }, [cancelVoice, attemptInFlight]);
 
   // Hands-free turned off from anywhere (the switch, a chat switch, leaving the chat) stops its listen.
   useEffect(() => {
@@ -195,6 +223,10 @@ function VoiceInputButtonInner({
         }
         if (autoStopped) {
           setNotice(RECORD_LIMIT_MESSAGE);
+        } else if (!spoke && getHandsFree() === 'off') {
+          // A tap or hold that heard nothing must say so. Hands-free is handled above: it
+          // simply listens again, and silence there is not a failure.
+          setNotice(NOTHING_HEARD_MESSAGE);
         }
       } catch {
         // Abort (cancel, unmount, route change, backgrounding) discards silently.
@@ -226,6 +258,7 @@ function VoiceInputButtonInner({
       setError(null);
       setNotice(null);
       setAcquiring(true);
+      acquiringRef.current = true;
       const token = ++startTokenRef.current;
       listeningRef.current = listen;
       try {
@@ -279,6 +312,7 @@ function VoiceInputButtonInner({
         }
         return false;
       } finally {
+        acquiringRef.current = false;
         if (mountedRef.current) {
           setAcquiring(false);
         }
