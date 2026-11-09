@@ -43,6 +43,9 @@ async function makeFrame(browser: Browser): Promise<string> {
 async function answerLiveRoutes(page: Page, options: { frame: string; tabs: unknown[] }): Promise<LiveCall[]> {
   const calls: LiveCall[] = [];
   let inputsInFlight = 0;
+  // Whose hand holds the tab, as the sidecar would report it; while the person holds it, the page
+  // is showing a human check, which is the moment takeover exists for.
+  let takeoverOn = false;
   await page.route('**/api/browser/live/**', async (route: Route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -65,12 +68,24 @@ async function answerLiveRoutes(page: Page, options: { frame: string; tabs: unkn
       });
       return;
     }
+    if (path === '/api/browser/live/takeover') {
+      takeoverOn = bodyOf(call)['on'] === true;
+    }
     const data =
       path === '/api/browser/live/tabs'
         ? { tabs: options.tabs }
         : path === '/api/browser/live/frame'
-          ? { status: 'ok', jpeg_base64: options.frame, width: 1280, height: 800 }
-          : { status: 'ok' };
+          ? {
+              status: 'ok',
+              jpeg_base64: options.frame,
+              width: 1280,
+              height: 800,
+              takeover: takeoverOn,
+              challenge: takeoverOn,
+            }
+          : path === '/api/browser/live/takeover'
+            ? { status: 'ok', takeover: takeoverOn }
+            : { status: 'ok' };
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data }) });
   });
   return calls;
@@ -216,6 +231,34 @@ async function checkLivePage(page: Page, calls: LiveCall[], label: string) {
     buffer: Buffer.from('hello'),
   });
   await page.getByText(NO_PLACE_FOR_FILE).waitFor({ timeout: RENDER_TIMEOUT_MS });
+
+  // Takeover: the person's own press streams as a press, a move and a release, never as a click
+  // act, and the human check the page is showing is named while they hold the tab.
+  await page.getByRole('button', { name: 'Take over' }).click();
+  await waitForCall(calls, call => call.path === '/api/browser/live/takeover' && bodyOf(call)['on'] === true);
+  await page.getByText('asking for a human check', { exact: false }).waitFor({ timeout: RENDER_TIMEOUT_MS });
+  const clicksBefore = calls.filter(call => isInput(call, 'click')).length;
+  const box = await picture.boundingBox();
+  assert.ok(box !== null, `${label}: the picture has a box to press`);
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.waitForTimeout(80);
+  await page.mouse.move(box.x + box.width / 2 + 20, box.y + box.height / 2 + 10);
+  await page.mouse.up();
+  await waitForCall(calls, call => isInput(call, 'up'));
+  const pointerKinds = calls.filter(call => call.path === '/api/browser/live/input').map(call => bodyOf(call)['kind']);
+  assert.ok(
+    pointerKinds.includes('down') && pointerKinds.includes('move'),
+    `${label}: the press and its move were sent under takeover`,
+  );
+  assert.ok(pointerKinds.indexOf('down') < pointerKinds.indexOf('up'), `${label}: the press lands before the release`);
+  assert.equal(
+    calls.filter(call => isInput(call, 'click')).length,
+    clicksBefore,
+    `${label}: no click act under takeover`,
+  );
+  await page.getByRole('button', { name: 'Hand back' }).click();
+  await waitForCall(calls, call => call.path === '/api/browser/live/takeover' && bodyOf(call)['on'] === false);
 
   // Picking the other tab moves the frames to it.
   await tabs.getByRole('button', { name: 'https://example.test/upload' }).click();

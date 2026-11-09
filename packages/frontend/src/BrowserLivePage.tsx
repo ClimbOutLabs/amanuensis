@@ -12,6 +12,7 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
   type WheelEvent as ReactWheelEvent,
 } from 'react';
 import { createAuthAwareFetch } from './authFetch';
@@ -105,6 +106,9 @@ async function loadTabs(): Promise<LiveTab[] | null> {
 /** How often a new frame is asked for while a tab is shown. */
 const FRAME_INTERVAL_MS = 500;
 
+/** How often a pointer move is sent while the person is driving under takeover; the rest are dropped. */
+const MOVE_THROTTLE_MS = 50;
+
 export function BrowserLivePage() {
   const [tabs, setTabs] = useState<LiveTab[]>([]);
   const [selected, setSelected] = useState<string | undefined>(undefined);
@@ -114,11 +118,18 @@ export function BrowserLivePage() {
   const [closed, setClosed] = useState(false);
   const [done, setDone] = useState(false);
   const [typeText, setTypeText] = useState('');
+  // Whose hand is on the shown tab, and whether it is asking for a human check; both read from the
+  // frame answers, so this page shows the browser's own state rather than its guess at it.
+  const [takeover, setTakeover] = useState(false);
+  const [challenge, setChallenge] = useState(false);
   // Bumped to look at a tab again after it answered closed; picking a tab or refreshing does it.
   const [frameRun, setFrameRun] = useState(0);
   const visible = useTabVisible();
   const imgRef = useRef<HTMLImageElement | null>(null);
   const lastWheelAtRef = useRef(0);
+  // Whether the person's pointer is down on the picture, and when its last move was sent.
+  const pressingRef = useRef(false);
+  const lastMoveAtRef = useRef(0);
   // Every act waits for the one before it, so keys typed fast reach the page in the order typed.
   const inputQueueRef = useRef<Promise<void>>(Promise.resolve());
 
@@ -166,6 +177,10 @@ export function BrowserLivePage() {
         if (isRecord(data) && data.status === 'ok' && typeof data.jpeg_base64 === 'string') {
           setFrame(data.jpeg_base64);
           setClosed(false);
+          if (typeof data.takeover === 'boolean') {
+            setTakeover(data.takeover);
+          }
+          setChallenge(data.challenge === true);
         } else if (isRecord(data) && data.status === 'closed') {
           // A closed tab stays closed until the person picks a tab or refreshes, so stop asking.
           setFrame(undefined);
@@ -204,10 +219,14 @@ export function BrowserLivePage() {
     [selected],
   );
 
-  const onFrameClick = (event: ReactMouseEvent<HTMLImageElement>) => {
+  /**
+   * Where a press on the picture falls in the frame it shows, in frame pixels and with the frame's
+   * size, or undefined while the picture is not ready to be pressed.
+   */
+  const framePoint = (event: { clientX: number; clientY: number }) => {
     const img = imgRef.current;
     if (img === null || img.naturalWidth === 0 || img.naturalHeight === 0) {
-      return;
+      return undefined;
     }
     // The picture inside its border: a click on the border's edge maps to the frame's own edge.
     const rect = img.getBoundingClientRect();
@@ -217,16 +236,75 @@ export function BrowserLivePage() {
     const width = rect.width - (img.offsetWidth - img.clientWidth);
     const height = rect.height - (img.offsetHeight - img.clientHeight);
     if (width === 0 || height === 0) {
-      return;
+      return undefined;
     }
     const clamp = (value: number, max: number) => Math.min(Math.max(value, 0), max);
-    sendInput({
-      kind: 'click',
+    return {
       x: clamp(Math.round(((event.clientX - left) / width) * img.naturalWidth), img.naturalWidth),
       y: clamp(Math.round(((event.clientY - top) / height) * img.naturalHeight), img.naturalHeight),
       image_width: img.naturalWidth,
       image_height: img.naturalHeight,
-    });
+    };
+  };
+
+  const onFrameClick = (event: ReactMouseEvent<HTMLImageElement>) => {
+    // Under takeover the press and release go as their own acts; a click act on top would double them.
+    if (takeover) {
+      return;
+    }
+    const point = framePoint(event);
+    if (point !== undefined) {
+      sendInput({ kind: 'click', ...point });
+    }
+  };
+
+  const onFramePointerDown = (event: ReactPointerEvent<HTMLImageElement>) => {
+    if (!takeover) {
+      return;
+    }
+    const point = framePoint(event);
+    if (point === undefined) {
+      return;
+    }
+    event.preventDefault();
+    pressingRef.current = true;
+    lastMoveAtRef.current = 0;
+    try {
+      // Holding the pointer keeps the stream coming even when the hand strays off the picture.
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Without capture the press still streams while the pointer stays over the picture.
+    }
+    sendInput({ kind: 'down', ...point });
+  };
+
+  const onFramePointerMove = (event: ReactPointerEvent<HTMLImageElement>) => {
+    // Under takeover the hand's whole path is the point, pressed or not: the approach is streamed
+    // too, throttled, so the page is driven the way the person actually moves over the picture.
+    if (!takeover) {
+      return;
+    }
+    const now = Date.now();
+    if (now - lastMoveAtRef.current < MOVE_THROTTLE_MS) {
+      return;
+    }
+    const point = framePoint(event);
+    if (point === undefined) {
+      return;
+    }
+    lastMoveAtRef.current = now;
+    sendInput({ kind: 'move', ...point });
+  };
+
+  const onFramePointerUp = (event: ReactPointerEvent<HTMLImageElement>) => {
+    if (!takeover || !pressingRef.current) {
+      return;
+    }
+    pressingRef.current = false;
+    const point = framePoint(event);
+    if (point !== undefined) {
+      sendInput({ kind: 'up', ...point });
+    }
   };
 
   const onFrameWheel = (event: ReactWheelEvent) => {
@@ -289,6 +367,22 @@ export function BrowserLivePage() {
     setTypeText('');
   };
 
+  /** Hands the shown tab to the person, or back to Aman; the answer says which hand holds it now. */
+  const onTakeoverToggle = () => {
+    if (selected === undefined) {
+      return;
+    }
+    liveCall('/api/browser/live/takeover', { tab: selected, on: !takeover })
+      .then(data => {
+        if (isRecord(data) && typeof data.takeover === 'boolean') {
+          setTakeover(data.takeover);
+        }
+      })
+      .catch((error: unknown) => {
+        setNote(error instanceof Error ? error.message : 'Takeover could not be changed. Try again in a moment.');
+      });
+  };
+
   if (done) {
     return (
       <main className="browser-live">
@@ -320,6 +414,10 @@ export function BrowserLivePage() {
               onClick={() => {
                 setSelected(tab.tab);
                 setFrame(undefined);
+                // The new tab's own state arrives with its first frame.
+                setTakeover(false);
+                setChallenge(false);
+                pressingRef.current = false;
                 setFrameRun(run => run + 1);
               }}
             >
@@ -340,18 +438,45 @@ export function BrowserLivePage() {
             {note}
           </p>
         ) : null}
+        {selected !== undefined && !closed ? (
+          <div className="browser-live-row">
+            <button type="button" className="browser-live-button" aria-pressed={takeover} onClick={onTakeoverToggle}>
+              {takeover ? 'Hand back' : 'Take over'}
+            </button>
+            {takeover ? (
+              <span className="browser-live-text">You are driving this page. Aman will not touch it.</span>
+            ) : null}
+          </div>
+        ) : null}
+        {takeover && challenge ? (
+          <p className="browser-live-note" role="status">
+            This site is asking for a human check. Takeover gives you your best chance at it.
+          </p>
+        ) : null}
         {frame !== undefined ? (
-          <div className="browser-live-frame" tabIndex={0} onKeyDown={onKeyDown} onWheel={onFrameWheel}>
+          <div
+            className={takeover ? 'browser-live-frame browser-live-frame-takeover' : 'browser-live-frame'}
+            tabIndex={0}
+            onKeyDown={onKeyDown}
+            onWheel={onFrameWheel}
+          >
             <img
               ref={imgRef}
               src={`data:image/jpeg;base64,${frame}`}
               alt="The page Aman has open, as it looks now"
+              draggable={takeover ? false : undefined}
               onClick={onFrameClick}
+              onPointerDown={onFramePointerDown}
+              onPointerMove={onFramePointerMove}
+              onPointerUp={onFramePointerUp}
+              onPointerCancel={onFramePointerUp}
             />
           </div>
         ) : null}
         <p className="browser-live-hint">
-          Click the picture, then type to fill in a field. Scrolling over the picture scrolls the page.
+          {takeover
+            ? 'Move and press on the picture to use the page, just as your hand does. Typing still works after you press the picture.'
+            : 'Click the picture, then type to fill in a field. Scrolling over the picture scrolls the page.'}
         </p>
         <div className="browser-live-row">
           <input
