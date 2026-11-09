@@ -16,6 +16,7 @@ import {
   approvalStub,
   approvalTime,
   approveVerb,
+  chatGrantLabel,
   declineVerb,
 } from './approvalCopy.js';
 import { CalendarEventDetails } from './CalendarEventDetails.js';
@@ -316,7 +317,7 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
             disabled={disabled || sentAt !== null}
             className={cn('w-full', sentAt !== null && 'pointer-events-none opacity-0')}
           >
-            {APPROVAL_CHOICES.approveForChat.label}
+            {chatGrantLabel(card)}
           </Button>
         )}
         {changing && onChangeRequest !== undefined && (
