@@ -144,6 +144,7 @@ const JSON_RESULT_COLUMNS = new Set([
   'thread_checkpoint',
   'event',
   'manifest',
+  'last_check',
   'network_approval',
   'metadata',
   'build_metadata',
