@@ -785,6 +785,24 @@ describe('VoiceInputButton hands-free', () => {
     expect(HTMLFormElement.prototype.requestSubmit).not.toHaveBeenCalled();
   });
 
+  it('backgrounding during a listen ends it as before, with no tap stopped notice', async () => {
+    await startHandsFree();
+    const recorder = await mockStartVoiceRecording.mock.results[0]?.value;
+
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    try {
+      act(() => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+    } finally {
+      visibility.mockRestore();
+    }
+
+    expect(recorder.cancel).toHaveBeenCalled();
+    expect(await screen.findByRole('button', { name: 'Start hands-free conversation' })).toBeInTheDocument();
+    expect(screen.queryByText('Recording stopped before it finished. Tap the mic to try again.')).toBeNull();
+  });
+
   it('ends after 30 minutes and says how to start again', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     try {

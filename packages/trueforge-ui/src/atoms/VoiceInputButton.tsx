@@ -143,17 +143,20 @@ function VoiceInputButtonInner({
     [],
   );
 
-  // Fail-closed on tab backgrounding: the voice session ends and tracks stop. When an attempt was
-  // under way, the button says so on the person's return; a recording never just vanishes.
+  // Fail-closed on tab backgrounding: the voice session ends and tracks stop. When a tap attempt was
+  // under way, the button says so on the person's return; a recording never just vanishes. A
+  // hands-free listen keeps its silent stop instead: the stopped notice is tap wording, and the
+  // conversation restarts from its own switch.
   useEffect(() => {
     const onVisibilityChange = () => {
       if (document.visibilityState !== 'hidden') {
         return;
       }
       const wasInFlight = attemptInFlight();
+      const wasHandsFree = getHandsFree() !== 'off';
       cancelVoice();
       setHandsFree('off');
-      if (wasInFlight) {
+      if (wasInFlight && !wasHandsFree) {
         setNotice(RECORDING_STOPPED_MESSAGE);
       }
     };
