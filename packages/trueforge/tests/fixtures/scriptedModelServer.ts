@@ -20,6 +20,21 @@ export const TEXT_DIRECTIVE_PREFIX = 'text:';
 const DEFAULT_TEXT_ARGUMENT = 'inert';
 const DEFAULT_CALL_TOOL_SERVER = 'inert';
 export const FINAL_TEXT = 'inert connector work is finished.';
+/** What `run:create_persona` asks to add, so a test can check the card and the saved persona against it. */
+export const SCRIPTED_PERSONA = {
+  name: 'Travel planner',
+  description: 'Plans trips and keeps the bookings in one place.',
+  instructions: 'Help plan trips. Keep answers short and list what is booked and what is not.',
+};
+/** What `run:create_schedule` asks to add. */
+export const SCRIPTED_SCHEDULE = {
+  name: 'friday-review',
+  task: 'Tell me what I finished this week and what is still open.',
+  repeat: 'weekly',
+  days: ['friday'],
+  time: '16:00',
+  time_zone: 'Europe/London',
+};
 /** Answers with the text of the last tool result instead of FINAL_TEXT, so a test can read what the tool returned. */
 export const QUOTE_TOOL_RESULT_DIRECTIVE = 'quote_tool_result';
 export const VERIFY_THEN_COMMIT_DIRECTIVE = 'verify_then_commit';
@@ -236,6 +251,12 @@ function argumentsJsonForTool({
   }
   if (name === 'usage_summary') {
     return '{}';
+  }
+  if (name.endsWith('create_persona')) {
+    return JSON.stringify(SCRIPTED_PERSONA);
+  }
+  if (name.endsWith('create_schedule')) {
+    return JSON.stringify(SCRIPTED_SCHEDULE);
   }
   return name.includes('ask_memory') ? '{"question":"inert"}' : JSON.stringify({ text });
 }

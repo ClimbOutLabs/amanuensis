@@ -52,15 +52,15 @@
     },
     "approval:persona": {
       "set": "approvals",
-      "tests": []
+      "tests": ["packages/frontend/tests/approvalKinds.browser.test.ts"]
     },
     "approval:plain": {
       "set": "approvals",
-      "tests": []
+      "tests": ["packages/frontend/tests/approvalKinds.browser.test.ts"]
     },
     "approval:schedule": {
       "set": "approvals",
-      "tests": []
+      "tests": ["packages/frontend/tests/approvalKinds.browser.test.ts"]
     },
     "calendar-preset:fastmail": {
       "set": "calendar",
@@ -698,9 +698,6 @@
   "not_yet": [
     "approval:calendar_event",
     "approval:email",
-    "approval:persona",
-    "approval:plain",
-    "approval:schedule",
     "calendar-preset:fastmail",
     "calendar-preset:gmx",
     "calendar-preset:google",
