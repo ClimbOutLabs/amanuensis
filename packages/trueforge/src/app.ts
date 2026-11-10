@@ -1316,8 +1316,8 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
   const uiBasePath = getPublicUiBasePath();
   const openApiSpecPath = `${uiBasePath}api/v1/openapi.json`;
   const openApiServerUrl = uiBasePath === '/' ? undefined : uiBasePath.replace(/\/$/, '');
-  mountApiDocs(app, { uiBasePath, openApiSpecPath });
-  app.get('/api/v1/openapi.json', c =>
+  mountApiDocs(app, { uiBasePath, openApiSpecPath, authMiddleware });
+  app.get('/api/v1/openapi.json', authMiddleware, c =>
     c.json(
       buildOpenApiDocument(app, {
         authEnabled,
