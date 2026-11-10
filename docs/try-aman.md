@@ -147,7 +147,7 @@ It shows your backups, newest first, and asks:
 Restore which backup (number):
 ```
 
-Type a number. It tells you what will be replaced and asks you to type `yes`. Before it changes anything it saves a copy of what you have now and shows you where that copy is. If something goes wrong it puts everything back and says so. To use the newest backup without the list, run `aman restore --latest`.
+Type a number. It tells you what will be replaced and asks you to type `yes`. The password goes back to the one you had when the backup was made. Before it changes anything it saves a copy of what you have now and shows you where that copy is. If something goes wrong it puts everything back and says so. To use the newest backup without the list, run `aman restore --latest`.
 
 ## Good to know
 

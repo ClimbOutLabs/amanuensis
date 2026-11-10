@@ -8,9 +8,9 @@ set -euo pipefail
 set_state() { printf '%s\n' "$1" >"$SB_STATE/db_gen"; }
 backup_dirs() { find "$AMAN_HOME/backups" -mindepth 1 -maxdepth 1 -type d | sort; }
 backup_count() { backup_dirs | wc -l | tr -d ' '; }
-restored_db() { cat "$SB_STATE/restored_aman_${1:-main}_data"; }
-restored_memory() { cat "$SB_STATE/volfs/aman_${1:-main}_data/data/memory/note.md"; }
-restored_login() { cat "$SB_STATE/volfs/aman_${1:-main}_dex/data/TAR-OF-aman_${1:-main}_dex"; }
+restored_db() { cat "$SB_STATE/restored_aman_${1}_data"; }
+restored_memory() { cat "$SB_STATE/volfs/aman_${1}_data/data/memory/note.md"; }
+restored_login() { cat "$SB_STATE/volfs/aman_${1}_dex/data/TAR-OF-aman_${1}_dex"; }
 add_instance() {
   with_input "$SENTINEL_PASSWORD
 "
@@ -49,9 +49,9 @@ test_restore_latest() {
   assert_flat_contains "$OUT" "This replaces the current chats and settings of main with the backup from"
   assert_flat_contains "$OUT" "A copy of the current state is saved first."
   assert_contains "$ERR" "Type yes to continue:"
-  assert_contains "$(restored_db)" "SQLITE-OF-aman_main_data-one"
-  assert_contains "$(restored_memory)" "memory-one"
-  assert_contains "$(restored_login)" "dex-one"
+  assert_contains "$(restored_db main)" "SQLITE-OF-aman_main_data-one"
+  assert_contains "$(restored_memory main)" "memory-one"
+  assert_contains "$(restored_login main)" "dex-one"
   assert_not_contains "$(cat "$AMAN_HOME/instances/main/.env")" "CHANGED_SINCE"
   assert_mode "$AMAN_HOME/instances/main/.env" 600
   assert_mode "$AMAN_HOME/instances/main/dex.env" 600
@@ -75,8 +75,8 @@ test_restore_by_time() {
 "
   run_install restore main "$(basename "$FIRST")"
   assert_rc 0
-  assert_contains "$(restored_db)" "SQLITE-OF-aman_main_data-one"
-  assert_contains "$(restored_memory)" "memory-one"
+  assert_contains "$(restored_db main)" "SQLITE-OF-aman_main_data-one"
+  assert_contains "$(restored_memory main)" "memory-one"
   assert_flat_contains "$OUT" "with the backup from $(printf '%s' "$(basename "$FIRST")" | sed 's/^\(....\)\(..\)\(..\)T\(..\)\(..\).*/\1-\2-\3 \4:\5/') UTC"
   sandbox_drop
 }
@@ -96,7 +96,7 @@ yes
   assert_contains "$ERR" "  1. "
   assert_contains "$ERR" "  2. "
   assert_contains "$ERR" " KB"
-  assert_contains "$(restored_db)" "SQLITE-OF-aman_main_data-one" "number 2 is the older backup"
+  assert_contains "$(restored_db main)" "SQLITE-OF-aman_main_data-one" "number 2 is the older backup"
   with_input "7
 "
   run_install restore
@@ -192,9 +192,9 @@ test_start_failure_puts_the_old_state_back() {
   run_install restore --latest
   assert_rc 1
   assert_flat_contains "$ERR$OUT" "The restore did not work, so main was put back the way it was."
-  assert_contains "$(restored_db)" "SQLITE-OF-aman_main_data-two"
-  assert_contains "$(restored_memory)" "memory-two"
-  assert_contains "$(restored_login)" "dex-two"
+  assert_contains "$(restored_db main)" "SQLITE-OF-aman_main_data-two"
+  assert_contains "$(restored_memory main)" "memory-two"
+  assert_contains "$(restored_login main)" "dex-two"
   assert_contains "$(cat "$AMAN_HOME/instances/main/.env")" "CHANGED_SINCE=1"
   assert_mode "$AMAN_HOME/instances/main/.env" 600
   assert_file "$SB_STATE/up/aman-main"
@@ -265,7 +265,7 @@ test_missing_settings_file_is_put_back() {
   assert_rc 0
   assert_file "$AMAN_HOME/instances/main/.env"
   assert_mode "$AMAN_HOME/instances/main/.env" 600
-  assert_contains "$(restored_db)" "SQLITE-OF-aman_main_data-one"
+  assert_contains "$(restored_db main)" "SQLITE-OF-aman_main_data-one"
   assert_contains "$(cat "$(backup_dirs | tail -n 1)/main/db.sqlite")" "SQLITE-OF-aman_main_data-two"
   sandbox_drop
 }
@@ -293,7 +293,7 @@ test_kept_backups() {
   run_install restore main "$(basename "$KEPT")"
   assert_rc 0
   assert_flat_contains "$OUT" "with the backup from $(basename "$KEPT" | sed 's/^\(....\)\(..\)\(..\)T\(..\)\(..\).*/\1-\2-\3 \4:\5/') UTC (before import)."
-  assert_contains "$(restored_db)" "SQLITE-OF-aman_main_data-one"
+  assert_contains "$(restored_db main)" "SQLITE-OF-aman_main_data-one"
   UNDO=$(backup_dirs | grep -- '-before-restore$')
   assert_contains "$(cat "$UNDO/main/db.sqlite")" "SQLITE-OF-aman_main_data-three" "the copy holds the state before the restore"
   assert_contains "$OUT" "go back with: aman restore main $(basename "$UNDO")"
@@ -330,6 +330,190 @@ test_nothing_to_restore() {
   sandbox_drop
 }
 
+# The value of KEY that Compose reads from an instance's settings: the last line.
+env_value() { sed -n "s/^$2=//p" "$AMAN_HOME/instances/$1/.env" | tail -n 1; }
+reg_value() { sed -n "s/^$2=//p" "$AMAN_HOME/state/instances/$1.conf" | tail -n 1; }
+dex_client_id() { sed -n 's/^ *- id: //p' "$AMAN_HOME/instances/$1/dex.yaml" | head -n 1; }
+
+test_restore_on_a_new_install_keeps_sign_in_working() {
+  t_begin "a backup restored on a new install gets this install's sign-in client, cookie and addresses, and keeps its own secrets and owner"
+  sandbox_new
+  install_machine
+  set_state one
+  run_install backup
+  local saved old_secret old_key old_client
+  saved=$(mktemp -d)
+  cp -R "$AMAN_HOME/backups/." "$saved/"
+  old_secret=$(env_value main OIDC_CLIENT_SECRET)
+  old_key=$(env_value main TRUEFORGE_API_KEY)
+  old_client=$(env_value main OIDC_CLIENT_ID)
+  sandbox_drop
+  # A new computer: a fresh install with its own sign-in client and another email, then the old backup copied in.
+  sandbox_new
+  with_input "$SENTINEL_PASSWORD
+"
+  run_install --yes --password-stdin --email new@example.invalid
+  assert_rc 0
+  mkdir -p "$AMAN_HOME/backups"
+  cp -R "$saved/." "$AMAN_HOME/backups/"
+  rm -rf "$saved"
+  local new_client new_cookie
+  new_client=$(reg_value main client_id)
+  new_cookie=$(reg_value main cookie_suffix)
+  [ "$new_client" != "$old_client" ] || t_fail "the fresh install made a new sign-in client"
+  with_input "yes
+"
+  run_install restore --latest
+  assert_rc 0
+  assert_flat_contains "$OUT" "You then sign in as owner@example.invalid, the email the backup was made with, not as new@example.invalid."
+  assert_eq "$(env_value main OIDC_CLIENT_ID)" "$new_client" "the app's sign-in client"
+  assert_eq "$(dex_client_id main)" "$new_client" "the sign-in service's client"
+  assert_eq "$(env_value main AUTH_COOKIE_SUFFIX)" "$new_cookie" "the cookie name"
+  assert_eq "$(env_value main PUBLIC_BASE_URL)" "$(reg_value main public_url)" "the app's address"
+  assert_eq "$(env_value main OIDC_ISSUER_URL)" "$(reg_value main login_url)/dex" "the sign-in address"
+  assert_eq "$(env_value main ALLOWED_ORIGINS)" "$(reg_value main origins)" "the addresses other devices use"
+  assert_eq "$(env_value main OIDC_CLIENT_SECRET)" "$old_secret" "the backup's client secret, which the app and the sign-in service both read"
+  assert_eq "$(env_value main TRUEFORGE_API_KEY)" "$old_key" "the backup's own key"
+  assert_eq "$(reg_value main owner_email)" owner@example.invalid "the owner of the chats"
+  assert_eq "$(env_value main OIDC_ADMIN_ROLE_VALUE)" owner@example.invalid
+  assert_eq "$(env_value main OIDC_ALLOWED_EMAILS)" owner@example.invalid
+  assert_contains "$(cat "$AMAN_HOME/instances/main/dex.yaml")" "email: 'owner@example.invalid'" "the sign-in service knows the backup's owner"
+  assert_contains "$(restored_db main)" "SQLITE-OF-aman_main_data-one"
+  assert_mode "$AMAN_HOME/instances/main/.env" 600
+  sandbox_drop
+}
+
+test_restore_takes_this_installs_addresses() {
+  t_begin "settings a backup holds for another place (addresses, proxy, a hand-made client id) give way to this install's record"
+  sandbox_new
+  install_machine
+  set_state one
+  run_install backup
+  local dir env
+  dir=$(backup_dirs | head -n 1)
+  env=$dir/main/env
+  sed -i.bak -e 's|^PUBLIC_BASE_URL=.*|PUBLIC_BASE_URL=http://old.example.invalid:9999|' "$env" && rm "$env.bak"
+  awk '/^# <<< end of managed block/ { print "ALLOWED_ORIGINS=http://old.example.invalid:9999"; print "LOGIN_UPSTREAM_URL=http://127.0.0.1:1/dex"; print "TRUSTED_PROXY_ADDRESSES=172.99.0.1" } { print }' "$env" >"$env.new" && mv "$env.new" "$env"
+  printf 'OIDC_CLIENT_ID=hand-made\nMY_OWN_SETTING=kept\n' >>"$env"
+  resum "$dir"
+  with_input "yes
+"
+  run_install restore --latest
+  assert_rc 0
+  assert_eq "$(env_value main PUBLIC_BASE_URL)" "$(reg_value main public_url)"
+  assert_eq "$(env_value main OIDC_CLIENT_ID)" "$(reg_value main client_id)"
+  assert_eq "$(dex_client_id main)" "$(reg_value main client_id)"
+  assert_eq "$(env_value main ALLOWED_ORIGINS)" "$(reg_value main origins)"
+  if [ -z "$(reg_value main origins)" ]; then
+    assert_not_contains "$(cat "$AMAN_HOME/instances/main/.env")" "ALLOWED_ORIGINS=" "an instance on this computer only lists no other addresses"
+  fi
+  assert_not_contains "$(cat "$AMAN_HOME/instances/main/.env")" "old.example.invalid"
+  assert_not_contains "$(cat "$AMAN_HOME/instances/main/.env")" "LOGIN_UPSTREAM_URL=http://127.0.0.1:1/dex"
+  assert_not_contains "$(cat "$AMAN_HOME/instances/main/.env")" "172.99.0.1"
+  assert_contains "$(cat "$AMAN_HOME/instances/main/.env")" "MY_OWN_SETTING=kept" "the person's own settings come back"
+  sandbox_drop
+}
+
+test_question_says_what_goes_back() {
+  t_begin "the question says the password goes back and devices may have to sign in again"
+  sandbox_new
+  install_machine
+  run_install backup
+  with_input "no
+"
+  run_install restore --latest
+  assert_rc 0
+  assert_flat_contains "$OUT" "The password goes back to the one main had then, and devices signed in now may have to sign in again."
+  assert_not_contains "$OUT" "You then sign in as" "the owner is the same"
+  sandbox_drop
+}
+
+test_no_answer_is_a_failure() {
+  t_begin "no answer, with or without --yes, changes nothing and fails with one next step; a typed no succeeds"
+  sandbox_new
+  install_machine
+  set_state one
+  run_install backup
+  set_state two
+  clear_input
+  run_install restore --latest
+  assert_rc 1
+  assert_flat_contains "$ERR" "No answer was given, so nothing was changed. Next: Run aman restore in a terminal and type your answer."
+  run_install restore --latest --yes
+  assert_rc 1
+  assert_flat_contains "$ERR" "No answer was given, so nothing was changed."
+  run_install restore
+  assert_rc 1
+  assert_flat_contains "$ERR" "No answer was given, so nothing was changed."
+  assert_no_path "$SB_STATE/restore_runs"
+  assert_eq "$(backup_count)" 1
+  sandbox_drop
+}
+
+test_refuses_a_database_from_a_newer_version() {
+  t_begin "a backup whose database a newer version of Aman updated is refused before anything is touched, and an unreadable one too"
+  sandbox_new
+  install_machine
+  run_install backup
+  local dir
+  dir=$(backup_dirs | head -n 1)
+  printf 'NEWER\n' >>"$dir/main/db.sqlite"
+  resum "$dir"
+  with_input "yes
+"
+  run_install restore --latest
+  assert_rc 1
+  assert_flat_contains "$ERR" "cannot be used because it was made by a newer version of Aman than this one. Nothing was changed."
+  assert_flat_contains "$ERR" "Update Aman with aman upgrade"
+  assert_file "$SB_STATE/backup_checks"
+  printf 'BROKEN\n' >"$dir/main/db.sqlite"
+  resum "$dir"
+  run_install restore --latest
+  assert_rc 1
+  assert_flat_contains "$ERR" "cannot be used because its chats cannot be read. Nothing was changed."
+  assert_no_path "$SB_STATE/restores"
+  assert_eq "$(backup_count)" 1
+  sandbox_drop
+}
+
+test_undo_of_an_instance_without_data() {
+  t_begin "undoing a restore of an instance that had no data takes the restored data away again"
+  sandbox_new
+  install_machine
+  set_state one
+  run_install backup
+  mkdir -p "$SB_STATE/no_db"
+  : >"$SB_STATE/no_db/aman_main_data"
+  STUB_UP_FAIL_ONCE=1
+  with_input "yes
+"
+  run_install restore --latest
+  assert_rc 1
+  assert_flat_contains "$ERR$OUT" "The restore did not work, so main was put back the way it was."
+  assert_contains "$(cat "$SB_STATE/restores")" "cleared aman_main_data"
+  assert_no_path "$SB_STATE/restored_aman_main_data"
+  sandbox_drop
+}
+
+test_failed_copy_after_putting_back_missing_files() {
+  t_begin "when the copy fails after missing settings were put back, the message says only those were written"
+  sandbox_new
+  install_machine
+  set_state one
+  run_install backup
+  rm "$AMAN_HOME/instances/main/.env"
+  STUB_BACKUP_FAIL=1
+  with_input "yes
+"
+  run_install restore --latest
+  assert_rc 1
+  assert_flat_contains "$ERR" "so the backup was not put back. Only the missing files main needs to start were written."
+  assert_not_contains "$ERR" "nothing was changed"
+  assert_eq "$(env_value main OIDC_CLIENT_ID)" "$(reg_value main client_id)" "the settings put back match this install"
+  assert_no_path "$SB_STATE/restore_runs"
+  sandbox_drop
+}
+
 test_restore_latest
 test_restore_by_time
 test_restore_asks_which_backup
@@ -342,4 +526,11 @@ test_other_instances_are_untouched
 test_missing_settings_file_is_put_back
 test_kept_backups
 test_nothing_to_restore
+test_restore_on_a_new_install_keeps_sign_in_working
+test_restore_takes_this_installs_addresses
+test_question_says_what_goes_back
+test_no_answer_is_a_failure
+test_refuses_a_database_from_a_newer_version
+test_undo_of_an_instance_without_data
+test_failed_copy_after_putting_back_missing_files
 tests_finish

@@ -37,7 +37,8 @@ What it can do today:
   shell's installer in the setup container with https on this computer
   and daily backups. Then the steps the earlier commands added run in
   their order: the adopt step puts the command and the Start menu
-  entries in place, the folder Aman keeps on the PC is made private,
+  entries in place (Aman, which opens it, Check Aman, Update Aman and
+  Backups), the folder Aman keeps on the PC is made private,
   Aman opens in the browser, and the home network is opened when the
   phone answer was yes. At the end a short getting started page opens
   in the browser; the page is also saved in the Amanuensis folder.
@@ -87,6 +88,11 @@ What it can do today:
   saves a copy of how the instance is now, puts the backup back, and
   puts the copy back if anything fails. Opening the backup happens in
   there too, so no tool it needs has to be on Windows.
+
+On Windows, a window that a double-click or a Start menu entry opened
+stays open at the end until the person presses Enter, so the result and
+any problem can be read; a successful `aman open` closes at once, and a
+terminal or the daily backup task never waits.
 
 Every sentence a person can read lives in `src/messages.ts`. A test checks
 each one for plain words and compares them all to the golden file in

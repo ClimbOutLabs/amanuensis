@@ -561,6 +561,23 @@ case "$cmd" in
           '  • Permissions start fresh, so each tool will ask again.'
         exit 0
         ;;
+      *"aman backup-check"*)
+        # Models the CLI on a database streamed in: one a newer version updated holds NEWER, one it cannot read BROKEN.
+        echo "backup-check" >>"$S/backup_checks"
+        db=$(cat)
+        case "$db" in
+          *BROKEN*) echo "file is not a database" >&2; exit 1 ;;
+          *NEWER*) printf '{"newer":true,"unknown_migrations":["29990101_000001_later"]}\n' ;;
+          *) printf '{"newer":false,"unknown_migrations":[]}\n' ;;
+        esac
+        exit 0
+        ;;
+      *"rm -f /data/db/db.sqlite /data/db"*)
+        # Empties an instance's database, as undoing a restore does when the instance had none.
+        rm -f "$S/restored_$vol"
+        echo "cleared $vol" >>"$S/restores"
+        exit 0
+        ;;
       *"aman backup"*)
         # Models the CLI: refuses a missing --target, writes db.sqlite, memory/, persona-knowledge/ and a manifest there.
         echo "$*" >>"$S/backup_runs"

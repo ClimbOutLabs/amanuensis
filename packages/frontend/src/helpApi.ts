@@ -1,17 +1,23 @@
 import { AMAN_GUIDE_NAME } from '@truefoundry/trueforge-core/core/personas/guide';
 import type {
   HelpApi,
+  HelpConnectorState,
+  HelpGoogleLoginState,
   HelpHealthCheck,
   HelpHealthItem,
   HelpHealthStatus,
   HelpHostReport,
   HelpHostReportState,
+  HelpSetupStep,
+  HelpState,
   Persona,
 } from '@truefoundry/trueforge-ui';
 
 const HEALTH_CHECK_URL = '/api/v1/help/health-check';
 const HEALTH_STATUSES: readonly HelpHealthStatus[] = ['pass', 'warn', 'fail', 'not_set_up'];
 const HOST_REPORT_STATES: readonly HelpHostReportState[] = ['ok', 'missing', 'invalid', 'stale'];
+const SETUP_STEP_IDS: readonly HelpSetupStep['id'][] = ['model', 'about_you'];
+const GOOGLE_LOGIN_STATES: readonly HelpGoogleLoginState[] = ['answered', 'needs_reconnect', 'no_answer', 'not_set_up'];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -67,6 +73,52 @@ function parseHostReport(value: unknown): HelpHostReport | null {
   };
 }
 
+function parseSetupStep(value: unknown): HelpSetupStep | null {
+  if (!isRecord(value) || !isOneOf(value.id, SETUP_STEP_IDS) || typeof value.done !== 'boolean') {
+    return null;
+  }
+  return { id: value.id, done: value.done };
+}
+
+function parseConnectorState(value: unknown): HelpConnectorState | null {
+  if (
+    !isRecord(value) ||
+    typeof value.name !== 'string' ||
+    typeof value.connected !== 'boolean' ||
+    !isNullableString(value.last_error)
+  ) {
+    return null;
+  }
+  return { name: value.name, connected: value.connected, last_error: value.last_error };
+}
+
+function parseState(value: unknown): HelpState | null {
+  if (
+    !isRecord(value) ||
+    !Array.isArray(value.setup_steps) ||
+    !Array.isArray(value.connectors) ||
+    !isOneOf(value.google_login, GOOGLE_LOGIN_STATES) ||
+    typeof value.sandbox_ready !== 'boolean' ||
+    typeof value.app_version !== 'string' ||
+    !isNullableString(value.build_ref)
+  ) {
+    return null;
+  }
+  const setupSteps = value.setup_steps.map(parseSetupStep);
+  const connectors = value.connectors.map(parseConnectorState);
+  if (setupSteps.some(step => step === null) || connectors.some(connector => connector === null)) {
+    return null;
+  }
+  return {
+    setup_steps: setupSteps.filter((step): step is HelpSetupStep => step !== null),
+    connectors: connectors.filter((connector): connector is HelpConnectorState => connector !== null),
+    google_login: value.google_login,
+    sandbox_ready: value.sandbox_ready,
+    app_version: value.app_version,
+    build_ref: value.build_ref,
+  };
+}
+
 /** Checks the response against the health check's fields. A response that does not match is an error, never a guess. */
 export function parseHelpHealthCheck(value: unknown): HelpHealthCheck {
   if (!isRecord(value) || typeof value.checked_at !== 'string' || typeof value.model_ready !== 'boolean') {
@@ -77,7 +129,8 @@ export function parseHelpHealthCheck(value: unknown): HelpHealthCheck {
   }
   const items = value.items.map(parseItem);
   const hostReport = parseHostReport(value.host_report);
-  if (items.some(item => item === null) || hostReport === null) {
+  const state = parseState(value.state);
+  if (items.some(item => item === null) || hostReport === null || state === null) {
     throw new Error('The help check response was invalid.');
   }
   return {
@@ -85,6 +138,7 @@ export function parseHelpHealthCheck(value: unknown): HelpHealthCheck {
     model_ready: value.model_ready,
     items: items.filter((item): item is HelpHealthItem => item !== null),
     host_report: hostReport,
+    state,
   };
 }
 
