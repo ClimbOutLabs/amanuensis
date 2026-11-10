@@ -27,7 +27,7 @@ export function releaseNotesText({
     `${MANIFEST_ASSET_NAME} lists every file on this page with its SHA-256 hash, and ${MANIFEST_SIGNATURE_ASSET_NAME} is its signature, made with the Aman release key.`,
     '',
     `1. Download ${MANIFEST_ASSET_NAME} and ${MANIFEST_SIGNATURE_ASSET_NAME} into the same folder as your file.`,
-    '2. Check the signature with [minisign](https://jedisct1.github.io/minisign/). It must say the signature is verified:',
+    '2. Check the signature with [minisign](https://github.com/jedisct1/minisign). It must say the signature is verified:',
     '',
     '   ```',
     `   minisign -Vm ${MANIFEST_ASSET_NAME} -P ${publicKey}`,
