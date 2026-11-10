@@ -78,6 +78,7 @@ import type { Kysely, Transaction } from 'kysely';
 import type { RedisClientType } from 'redis';
 import type { Logger } from 'winston';
 
+import { sweepExpiredPrivateChats } from './apis/privateChats';
 import { createServerApp } from './app';
 import { TrueForgeAuthorizer, type Authorizer } from './auth/authorizer';
 import { createAuthenticator } from './auth/createAuthenticator';
@@ -91,6 +92,7 @@ import type { DistributedServerConfiguration } from './config';
 import { createController } from './controller';
 import type { AgentRecord, IAgentStore } from './db/agentStore';
 import { BriefItemCompletionStore, type IBriefItemCompletionStore } from './db/briefItemCompletionStore';
+import type { IChatDeletionStore } from './db/chatDeletionStore';
 import type { IChatImageStore } from './db/chatImageStore';
 import type { ICompletedTurnEventStore } from './db/completedTurnEvents';
 import { DeliveryStore, type IDeliveryStore } from './db/deliveryStore';
@@ -197,6 +199,7 @@ interface ServerPersistence<TTransaction> {
   spaceStore: ISpaceStore<TTransaction>;
   repositoryStore: IRepositoryStore<TTransaction>;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
+  chatDeletionStore: IChatDeletionStore;
   chatImageStore: IChatImageStore<TTransaction>;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
@@ -379,6 +382,7 @@ async function createStandalonePersistence(options: {
       import('./db/sqlite/approval-token-store/SqliteApprovalTokenStore'),
       import('./db/sqlite/mcp-tool-grant-store/SqliteMcpToolGrantStore'),
       import('./db/sqlite/google-connection-store/SqliteGoogleConnectionStore'),
+      import('./db/sqlite/chat-deletion-store/SqliteChatDeletionStore'),
     ]),
   ]);
   const [
@@ -403,6 +407,7 @@ async function createStandalonePersistence(options: {
     { SqliteApprovalTokenStore },
     { SqliteMcpToolGrantStore },
     { SqliteGoogleConnectionStore },
+    { SqliteChatDeletionStore },
   ] = sqliteStores;
 
   const db = createSqliteDb(sqlitePath);
@@ -420,6 +425,7 @@ async function createStandalonePersistence(options: {
   });
   const sandboxProviderStore = new SqliteSandboxProviderStore(db);
   const skillStore = new SqliteSkillStore(db);
+  const turnArtifactStore = new SqliteTurnArtifactStore(db);
   return {
     withTransaction: callback => db.transaction().execute(callback),
     skillStore,
@@ -434,7 +440,8 @@ async function createStandalonePersistence(options: {
     mcpOAuthStore: mcpServerStore,
     tokenStore,
     scheduleStore: new SqliteScheduleStore(db),
-    turnArtifactStore: new SqliteTurnArtifactStore(db),
+    turnArtifactStore,
+    chatDeletionStore: new SqliteChatDeletionStore({ db, turnArtifactStore }),
     chatImageStore: new SqliteChatImageStore(db),
     globalSettingsStore: new SqliteGlobalSettingsStore(db),
     tokenFactoryUsageStore: new SqliteTokenFactoryUsageStore(db),
@@ -501,6 +508,7 @@ async function createDistributedPersistence(options: {
       import('./db/postgres/approval-token-store/PostgresApprovalTokenStore'),
       import('./db/postgres/mcp-tool-grant-store/PostgresMcpToolGrantStore'),
       import('./db/postgres/google-connection-store/PostgresGoogleConnectionStore'),
+      import('./db/postgres/chat-deletion-store/PostgresChatDeletionStore'),
     ]),
   ]);
   const [
@@ -525,6 +533,7 @@ async function createDistributedPersistence(options: {
     { PostgresApprovalTokenStore },
     { PostgresMcpToolGrantStore },
     { PostgresGoogleConnectionStore },
+    { PostgresChatDeletionStore },
   ] = postgresStores;
 
   const db = createDb({
@@ -557,6 +566,7 @@ async function createDistributedPersistence(options: {
   });
   const sandboxProviderStore = new PostgresSandboxProviderStore(db);
   const skillStore = new PostgresSkillStore(db);
+  const turnArtifactStore = new PostgresTurnArtifactStore(db);
   const agentStore = new PostgresAgentStore(db);
   const resolveModelProviderStore = buildResolveModelProviderStore({
     persistenceStore: modelProviderStore,
@@ -614,7 +624,8 @@ async function createDistributedPersistence(options: {
     mcpOAuthStore: mcpServerWithAuthStore,
     tokenStore,
     scheduleStore: new PostgresScheduleStore(db),
-    turnArtifactStore: new PostgresTurnArtifactStore(db),
+    turnArtifactStore,
+    chatDeletionStore: new PostgresChatDeletionStore({ db, turnArtifactStore }),
     chatImageStore: new PostgresChatImageStore(db),
     globalSettingsStore: new PostgresGlobalSettingsStore(db),
     tokenFactoryUsageStore: new PostgresTokenFactoryUsageStore(db),
@@ -658,6 +669,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     spaceStore,
     repositoryStore,
     turnArtifactStore,
+    chatDeletionStore,
     chatImageStore,
     globalSettingsStore,
     tokenFactoryUsageStore,
@@ -917,6 +929,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     spaceStore,
     repositoryStore,
     turnArtifactStore,
+    chatDeletionStore,
     globalSettingsStore,
     tokenFactoryBudget,
     sessionStore,
@@ -952,6 +965,19 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   // change, so a chat's first search does not pay for the build. With no folder connected the
   // service sits idle.
   startNotesFolderIndexing({ settings: globalSettingsStore, logger });
+
+  // Private chats that expired while the server was down are deleted before it serves anyone.
+  try {
+    const deleted = await sweepExpiredPrivateChats(
+      { sessions, sessionStore, chatDeletionStore, activeTurns, turnDrains, redis, logger },
+      { now: new Date() },
+    );
+    if (deleted > 0) {
+      logger.info('Deleted expired private chats at startup', { deleted });
+    }
+  } catch (error) {
+    logger.error('Could not delete expired private chats at startup', extractErrorLogFields(error));
+  }
 
   return {
     activeTurns,

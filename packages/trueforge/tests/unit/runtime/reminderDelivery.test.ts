@@ -205,6 +205,7 @@ describe('deliverReminder', () => {
       metadata: undefined,
       source_type: undefined,
       source_id: undefined,
+      include_private: false,
     });
     expect(all.data).toHaveLength(1);
     const turns = await sessionStore.listTurns({ session_id: firstId, limit: 10, page_token: undefined });

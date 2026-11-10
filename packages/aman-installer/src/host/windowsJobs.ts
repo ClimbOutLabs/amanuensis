@@ -15,6 +15,8 @@ export const SETUP_CMD_FILE_NAME = 'Aman-Setup.cmd';
 // The name the authority's certificate is downloaded under on the trust
 // page, and the name it is kept under in the Amanuensis folder here.
 export const CA_CERT_FILE_NAME = 'ca.crt';
+// The Start menu entry that opens Aman, running aman open.
+export const OPEN_AMAN_SHORTCUT_NAME = 'Aman';
 // The Start menu entry the plan names, running aman doctor.
 export const CHECK_AMAN_SHORTCUT_NAME = 'Check Aman';
 // The Start menu entry the upgrade keeps, running aman upgrade.
@@ -192,6 +194,9 @@ export interface WindowsJobs {
   listShortcuts: () => Promise<readonly ShortcutFacts[]>;
   // Points one shortcut at the aman command, opening Aman.
   pointShortcutAtOpen: (shortcutPath: string) => Promise<void>;
+  // Makes the "Aman" Start menu entry, or points the existing one at
+  // the aman command, opening Aman.
+  ensureOpenAmanShortcut: () => Promise<void>;
   // Makes the "Check Aman" Start menu entry, or points the existing one
   // at the aman command, running aman doctor.
   ensureCheckAmanShortcut: () => Promise<void>;
@@ -264,6 +269,10 @@ export interface WindowsJobs {
   // True when the port can be bound on loopback and on any-address: the
   // bind is the real test, as the shell's port check does it.
   portIsFree: (port: number) => Promise<boolean>;
+  // True when the given process is Windows Explorer: this program was
+  // started by a double-click or a Start menu entry, in a window of its
+  // own that closes the moment it ends, and not from a terminal.
+  startedFromExplorer: (parentPid: number) => Promise<boolean>;
 }
 
 // A PowerShell string literal: single-quoted, with its quotes doubled.
@@ -412,6 +421,16 @@ export function systemWindowsJobs(options: {
       );
     },
 
+    async ensureOpenAmanShortcut() {
+      await runPowerShell(
+        `$shell = New-Object -ComObject WScript.Shell; ` +
+          `$path = Join-Path ([Environment]::GetFolderPath('Programs')) ${psQuote(`${OPEN_AMAN_SHORTCUT_NAME}.lnk`)}; ` +
+          `$shortcut = $shell.CreateShortcut($path); ` +
+          `$shortcut.TargetPath = ${psQuote(paths.programsExePath)}; ` +
+          `$shortcut.Arguments = 'open'; $shortcut.Save()`,
+      );
+    },
+
     async ensureCheckAmanShortcut() {
       await runPowerShell(
         `$shell = New-Object -ComObject WScript.Shell; ` +
@@ -526,6 +545,13 @@ export function systemWindowsJobs(options: {
       if (shown.started && shown.exitCode === 0) {
         throw new WindowsJobError('the firewall rule could not be turned off');
       }
+    },
+
+    async startedFromExplorer(parentPid: number) {
+      const name = await runPowerShell(
+        `(Get-Process -Id ${String(Math.trunc(parentPid))} -ErrorAction SilentlyContinue).ProcessName`,
+      ).catch(() => '');
+      return name.trim().toLowerCase() === 'explorer';
     },
 
     async replaceSetupCmdCopyWithForwarder() {

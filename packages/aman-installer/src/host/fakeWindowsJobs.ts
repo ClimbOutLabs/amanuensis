@@ -3,6 +3,7 @@ import { win32 } from 'node:path';
 import {
   BACKUPS_SHORTCUT_NAME,
   CHECK_AMAN_SHORTCUT_NAME,
+  OPEN_AMAN_SHORTCUT_NAME,
   PHONE_SHORTCUT_NAME,
   RUN_ONCE_VALUE_NAME,
   SETUP_CMD_FORWARDER,
@@ -20,6 +21,7 @@ export type FakeWindowsJobStep =
   | 'path'
   | 'list'
   | 'point'
+  | 'open-entry'
   | 'check'
   | 'update'
   | 'backupsShortcut'
@@ -82,6 +84,7 @@ export class FakeWindowsJobs implements WindowsJobs {
   firewallOpen = false;
   firewallPorts: readonly number[] = [];
   readonly ops: string[] = [];
+  private readonly fromExplorer: boolean;
 
   constructor(options: {
     localAppDataDir: string;
@@ -109,6 +112,9 @@ export class FakeWindowsJobs implements WindowsJobs {
     // one (an entry written without the leading "!", say).
     runOncePending?: boolean;
     runOnceValueName?: string;
+    // Whether the program was started by Windows Explorer, as a test
+    // scripts it.
+    startedFromExplorer?: boolean;
   }) {
     const paths = windowsPaths(options.localAppDataDir);
     this.programsExePath = paths.programsExePath;
@@ -134,6 +140,7 @@ export class FakeWindowsJobs implements WindowsJobs {
     this.acls = new Map(options.acls ?? []);
     this.backupTask = options.backupTask ?? false;
     this.backupNames = [...(options.backups ?? [])];
+    this.fromExplorer = options.startedFromExplorer ?? false;
   }
 
   private step(name: FakeWindowsJobStep): void {
@@ -171,6 +178,19 @@ export class FakeWindowsJobs implements WindowsJobs {
     this.shortcuts = this.shortcuts.map(shortcut =>
       shortcut.path === shortcutPath ? { ...shortcut, target: this.programsExePath, args: 'open' } : shortcut,
     );
+    return Promise.resolve();
+  }
+
+  ensureOpenAmanShortcut(): Promise<void> {
+    this.step('open-entry');
+    const path = win32.join(this.startMenuProgramsDir, `${OPEN_AMAN_SHORTCUT_NAME}.lnk`);
+    const entry: ShortcutFacts = { path, target: this.programsExePath, args: 'open' };
+    const existing = this.shortcuts.findIndex(shortcut => shortcut.path === path);
+    if (existing === -1) {
+      this.shortcuts.push(entry);
+    } else {
+      this.shortcuts[existing] = entry;
+    }
     return Promise.resolve();
   }
 
@@ -359,5 +379,9 @@ export class FakeWindowsJobs implements WindowsJobs {
 
   portIsFree(port: number): Promise<boolean> {
     return Promise.resolve(!this.heldPorts.has(port));
+  }
+
+  startedFromExplorer(): Promise<boolean> {
+    return Promise.resolve(this.fromExplorer);
   }
 }
