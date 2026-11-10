@@ -256,14 +256,14 @@ jobs:
 
       - name: Setup Go
         if: matrix.package == 'sandbox-slot-agent'
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: ops/sandbox-slot/agent/go.mod
 
       # The chat image re-encode script runs in the sandbox guest on this Pillow pin; its tests run it on the host.
       - name: Setup Python
         if: matrix.package == 'trueforge' || matrix.package == 'aman-tts'
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
@@ -410,6 +410,7 @@ jobs:
         run: pnpm test:store:postgres
 
   # No dependency install: must run fast and stay green even when pnpm install fails.
+  # Also runs the outside-hosts check, which needs nothing installed either.
   private-data-scan:
     name: Private data scan
     runs-on: ubuntu-latest
@@ -426,6 +427,45 @@ jobs:
 
       - name: Scan tracked files for private data
         run: node scripts/check-no-private-data.mjs
+
+      # Shipped code may name only the outside hosts reviewed in scripts/external-hosts.allowlist.json.
+      - name: Check shipped code for outside hosts
+        run: npm run test:external-hosts
+
+      - name: Test the outside-hosts check
+        run: npm run test:external-hosts-scanner
+
+  # The help behind "Help, I'm stuck": its pack is regenerated from its sources, every surface has a
+  # topic, and every label, path, command and link a topic names is real.
+  help-guide:
+    name: Help guide
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Help pack is up to date
+        run: pnpm guide:check
+
+      - name: Every surface has a help topic
+        run: pnpm test:help-coverage
+
+      - name: Guide tests
+        run: pnpm test:aman-guide
 
   generated-contract-drift:
     name: Generated contract drift
@@ -451,6 +491,10 @@ jobs:
       - name: Regenerate and check committed contracts
         run: pnpm sdk:check
 
+      # The build rewrites this list. A stale committed copy leaves the lockfile out of date after a build.
+      - name: The amanuensis package lists what it ships
+        run: pnpm check:amanuensis-deps
+
   # https://github.com/marketplace/actions/alls-green#why
   check:
     if: always()
@@ -463,6 +507,7 @@ jobs:
       - chart-checks
       - store-tests
       - private-data-scan
+      - help-guide
       - generated-contract-drift
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -477,10 +522,11 @@ jobs:
           CHART_CHECKS: ${{ needs.chart-checks.result }}
           STORE_TESTS: ${{ needs.store-tests.result }}
           PRIVATE_DATA_SCAN: ${{ needs.private-data-scan.result }}
+          HELP_GUIDE: ${{ needs.help-guide.result }}
           GENERATED_CONTRACT_DRIFT: ${{ needs.generated-contract-drift.result }}
         run: |
           ok() { [ "$1" = success ] || [ "$1" = skipped ]; }
-          echo "detect-changes=$DETECT_CHANGES migration-order=$MIGRATION_ORDER typecheck-and-build=$TYPECHECK_AND_BUILD package-checks=$PACKAGE_CHECKS chart-checks=$CHART_CHECKS store-tests=$STORE_TESTS private-data-scan=$PRIVATE_DATA_SCAN generated-contract-drift=$GENERATED_CONTRACT_DRIFT"
+          echo "detect-changes=$DETECT_CHANGES migration-order=$MIGRATION_ORDER typecheck-and-build=$TYPECHECK_AND_BUILD package-checks=$PACKAGE_CHECKS chart-checks=$CHART_CHECKS store-tests=$STORE_TESTS private-data-scan=$PRIVATE_DATA_SCAN help-guide=$HELP_GUIDE generated-contract-drift=$GENERATED_CONTRACT_DRIFT"
           [ "$DETECT_CHANGES" = success ] || exit 1
           [ "$MIGRATION_ORDER" = success ] || exit 1
           [ "$TYPECHECK_AND_BUILD" = success ] || exit 1
@@ -489,4 +535,5 @@ jobs:
           ok "$CHART_CHECKS" || exit 1
           ok "$STORE_TESTS" || exit 1
           [ "$PRIVATE_DATA_SCAN" = success ] || exit 1
+          [ "$HELP_GUIDE" = success ] || exit 1
           [ "$GENERATED_CONTRACT_DRIFT" = success ] || exit 1

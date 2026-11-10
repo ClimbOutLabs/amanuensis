@@ -16,8 +16,8 @@
 </p>
 
 <p align="center">
-  <a href="#get-started"><strong>Get started</strong></a> &nbsp;·&nbsp;
-  <a href="#what-it-does">What it does</a> &nbsp;·&nbsp;
+  <a href="#-get-started"><strong>Get started</strong></a> &nbsp;·&nbsp;
+  <a href="#-what-it-does">What it does</a> &nbsp;·&nbsp;
   <a href="docs/privacy.md">Privacy</a>
 </p>
 
@@ -27,7 +27,7 @@
 
 ---
 
-## Why
+## 💡 Why
 
 Most AI assistants are built for people who already live in software: a keyboard, a prompt, patience for a wall of text, and the energy to explain everything from scratch every time.
 
@@ -35,7 +35,7 @@ Most people run a household, not a terminal. They carry the flyer, the bill, the
 
 Amanuensis is built for them. You give it a name (ours is Mannie). It wakes up before you do and has the day sorted. It drafts the email, then waits for you to say send. You never write a prompt: you say what's going on, the way you'd say it to a friend, and it takes it from there.
 
-## What it does
+## ✨ What it does
 
 - **Start the day already ahead.** Before coffee, it has read the overnight mail and the day's calendar. It tells you the few things that matter, the one that looks wrong, and the one that can wait until Friday.
 - **The reply you've been avoiding.** It finds the email that's been sitting there for nine days, drafts it in your voice, shows you, and sends when you say so.
@@ -48,9 +48,9 @@ Amanuensis is built for them. You give it a name (ours is Mannie). It wakes up b
 - **A place for what you'd lose in chat.** The meal plan, the medicine schedule, the moving checklist. It goes into a space: a living page that updates in place while the chat scrolls away.
 - **It's yours to keep.** Your memory is plain files on your disk. Back it up, export it, move it to a new machine, and it comes with you.
 
-## See it
+## 👀 See it
 
-### The morning brief
+### ☀️ The morning brief
 
 Every morning it reads the mail and the calendar and puts the day on one page: the top action item, what came in and who's waiting, replies drafted in your voice, every appointment with how to get there and when to leave, and tomorrow at a glance.
 
@@ -58,7 +58,7 @@ Every morning it reads the mail and the calendar and puts the day on one page: t
   <img src="./docs/screenshots/readme/brief-full.jpg" alt="A complete morning brief on one long page: route maps, the top action item, an email table, a draft reply, appointments with travel times, briefings per appointment and tomorrow at a glance" width="600">
 </p>
 
-### Leave on time, and see every step
+### 🕒 Leave on time, and see every step
 
 It works out when to leave for each appointment. Activity, on the right, records every step it took and why it was allowed.
 
@@ -66,7 +66,7 @@ It works out when to leave for each appointment. Activity, on the right, records
   <img src="./docs/screenshots/readme/brief.jpg" alt="A table of the day's appointments with where they are, how to get there and when to leave, and the Activity panel listing what the assistant read and did" width="850">
 </p>
 
-### Spaces
+### 🗂️ Spaces
 
 A living page with its sources, kept up to date by the assistant. Ask it to change something and the page updates in place.
 
@@ -74,7 +74,7 @@ A living page with its sources, kept up to date by the assistant. Ask it to chan
   <img src="./docs/screenshots/readme/space.jpg" alt="A space titled Apartment-Friendly Dog Breeds: a comparison table of four breeds with sources, kept up to date by the assistant" width="850">
 </p>
 
-### Memory you can read
+### 📖 Memory you can read
 
 Every memory is one plain sentence you can search, edit or forget.
 
@@ -82,7 +82,7 @@ Every memory is one plain sentence you can search, edit or forget.
   <img src="./docs/screenshots/readme/memory.jpg" alt="Settings, Memory: Nata remembers 22 things about you, with a search box, filters, and memories such as Maya's age, her remote work hours and her photography, each with Copy, Edit and Forget" width="850">
 </p>
 
-### Personas
+### 🎭 Personas
 
 Each persona has its own name, model, role and knowledge library.
 
@@ -90,15 +90,15 @@ Each persona has its own name, model, role and knowledge library.
   <img src="./docs/screenshots/readme/personas.jpg" alt="Settings, Roles and Personas: the persona Iris open for editing, with name, other names it answers to, its model Nemotron 3 Super, and its role text" width="850">
 </p>
 
-## Get started
+## 🚀 Get started
 
 Setup takes about 15 minutes. Here is what you need:
 
 - **A Mac or a Linux computer** with 16 GB of memory (8 GB is the bare minimum, and the first install is slow there) and free disk space: about 20 GB on a Mac, about 45 GB on Linux. Aman itself takes about 10 GB; on Linux it also keeps room for the two sandbox disks where it runs code. Windows works too, through a free Microsoft add-on called WSL 2: see the [Windows guide](docs/install-windows.md). Windows support is still new, so expect a few more bumps than on a Mac or Linux. If you get stuck, [tell us](https://github.com/ClimbOutLabs/amanuensis/issues) and we'll help.
 - **Docker**, the free program Aman runs inside. On a Mac, [download Docker Desktop](https://www.docker.com/products/docker-desktop/), install it and start it. On Linux, the installer can set Docker up for you.
-- **A Together AI account**, which gives Aman a model to think with. Signing up is free, and you pay Together for what you use. You can sign up now or after the install.
+- **A model to think with.** Either a model running on your own hardware, or an account with a cloud provider. You can sort this out after the install. Step 1 below walks through both.
 
-### Install
+### 🛠️ Install
 
 Open the **Terminal** app, paste these two lines, and press Enter. If your Mac offers to install developer tools the first time, accept, then paste the lines again.
 
@@ -111,15 +111,18 @@ The installer checks your computer first and tells you in plain words if somethi
 
 It also sets up sign-in, backups and phone access, and leaves an `aman` command behind. Run `aman doctor` if something seems wrong, and `aman upgrade` to get the newest version.
 
-### After you install
+### 👋 After you install
 
-**1. Get a Together AI key.** Aman needs a model to think with. [Together AI](https://www.together.ai) hosts open models and is the quickest way to start.
+**1. Give Aman a model to think with.** Aman is built to run at home, on a model on your own hardware. Run it that way and your chats and everything Aman knows about you never leave your computer, because the model is the one thing that would otherwise see all of it. That is how ours runs. The author's own Aman lives on an NVIDIA DGX Spark, a small computer on the desk, thinking locally around the clock. Ollama, LM Studio or any other local model server works the same way. Web searches, maps and connectors still talk to their own services either way. [Your data, your rules](#-your-data-your-rules) below has the full picture.
 
-- Sign up free at [api.together.ai](https://api.together.ai).
-- Open **Settings, API keys** ([direct link](https://api.together.ai/settings/projects/~current/api-keys)) and create a key.
-- Copy it. It is shown only once.
+Cloud models work too, and they are the quicker start. You bring your own key, Aman talks to the provider directly, and you pay the provider for what you use. One thing worth knowing: a ChatGPT or Claude subscription does not include this. The API key is a separate thing, billed by use.
 
-**2. Add it to Aman.** Open Aman and go to **Settings**, then **Models**. Together AI is built in: under **Available**, find **together** and click **Configure**. Paste the key you copied into the **API key** field and click **Create**. Nothing else to fill in: the address and the models come with it.
+- **OpenAI (the ChatGPT models).** Sign up at [platform.openai.com](https://platform.openai.com), add credit under **Settings, Billing**, then open [platform.openai.com/api-keys](https://platform.openai.com/api-keys) and click **Create new secret key**. Copy it. It is shown only once.
+- **Anthropic (Claude).** Sign up at [console.anthropic.com](https://console.anthropic.com), add credit under **Billing**, then open **Settings, API keys** and click **Create Key**. Copy it. It is shown only once.
+- **Google (Gemini).** Open [Google AI Studio](https://aistudio.google.com), click **Get API key** and create one. The free tier needs no card.
+- **Together AI.** Sign up free at [api.together.ai](https://api.together.ai), open **Settings, API keys** ([direct link](https://api.together.ai/settings/projects/~current/api-keys)) and create a key. Copy it. It is shown only once. Together hosts open models and is the cheapest way to start.
+
+**2. Add it to Aman.** Open Aman and go to **Settings**, then **Models**. For a cloud provider, find it under **Available**, click **Configure**, paste the key into the **API key** field and click **Create**. Nothing else to fill in. The address and the models come with it. For a local model, add it with the address it answers at on your own network instead of a key.
 
 Its models are now on your list. Pick the one you want in the menu under the message box.
 
@@ -147,7 +150,7 @@ None of these change what it's allowed to do. Sending, deleting and installing s
 
 **5. Connect your email and calendar.** This is where it starts carrying things for you. Go to **Settings, Connectors**:
 
-- **Gmail and Google Calendar.** Choose **Google**, then **Connect**. The panel walks you through making your own Google sign-in in about ten minutes, so your mail goes from Google straight to your computer and nobody else is in between. Connect mail first, then **Connect Calendar**. [Step-by-step guide](docs/google.mdx).
+- **Gmail and Google Calendar.** Choose **Google**, then **Connect**. The panel walks you through making your own Google sign-in in about ten minutes, so your mail goes from Google straight to your computer and nobody else is in between. Connect mail first, then **Connect Calendar**. For Google Calendar only, the simpler way is the **Calendar** card with an app password. [Step-by-step guide](docs/google.mdx#connect-google-calendar-with-an-app-password).
 - **Any other mailbox or calendar.** Choose **Email** for an IMAP mailbox (Outlook, iCloud, Fastmail and most others), and **Calendar** for a CalDAV calendar.
 
 Reading is quiet. Every draft, send and calendar change shows you a card first and waits for your OK.
@@ -158,17 +161,21 @@ Prefer another provider? Any service with an OpenAI-compatible API goes in the s
 
 More help: [full install guide](docs/install.mdx) · [Windows guide](docs/install-windows.md) · [first steps](docs/try-aman.md)
 
-## Your data, your rules
+## 🔒 Your data, your rules
 
 Your memory, chats, personas and settings live on your computer. Memory is plain Markdown files you can open in any text editor; [docs/memory.md](docs/memory.md) explains how it works.
 
 Be clear about one thing: **the model sees what you send it.** If you use a hosted model, the company running it sees each chat, including what Aman knows about you and anything it reads for you. To keep everything on your computer, use a local model. Web searches, maps and connectors still reach their own services. [docs/privacy.md](docs/privacy.md) lists exactly what goes where.
 
+The browser loads nothing from third parties: fonts and icons are bundled. The server contacts only the services you configure: your model provider, your mail and calendar, the connectors you add. The only other outside calls are the map services when you ask for a map, package sources such as npm and PyPI when a skill you approved installs packages, and one download of the memory search model from Hugging Face, which Aman checks against fixed fingerprints. CI fails if a new outside address appears in the code; the list is [scripts/external-hosts.allowlist.json](scripts/external-hosts.allowlist.json).
+
+When you want Aman to forget a conversation, start an incognito chat. Aman can still read what it knows, but saves nothing from the chat, and deletes it when you close it.
+
 Sending a message, deleting anything and installing anything always wait for your OK. That rule is enforced in code, on the tool itself, not left to the model's good behaviour.
 
-## For developers and the curious
+## 🔧 For developers and the curious
 
-### How it works
+### ⚙️ How it works
 
 ```mermaid
 flowchart LR
@@ -211,8 +218,6 @@ Aman began as a fork of [TrueForge](https://github.com/truefoundry/trueforge), a
 From TrueForge came the agent runtime, tool calling, the approvals framework, sessions, the HTTP server, storage, model providers, MCP support and the UI toolkit. Everything that makes it Amanuensis was built on top: memory, personas, spaces, the morning brief, mail and calendar, the approval cards, the security guards, the installer, the demo world and the look.
 
 The full accounting, area by area with pull request numbers and the git commands to check it, is in [docs/AMANUENSIS_ATTRIBUTION.md](docs/AMANUENSIS_ATTRIBUTION.md).
-
-Amanuensis was built for the Nebius × NVIDIA Global AI Hackathon and runs on NVIDIA Nemotron through Nebius Token Factory. [docs/token-factory.md](docs/token-factory.md) explains which model does which job, what it costs, and how the cost shows under each answer.
 
 ### Running from source
 
@@ -276,6 +281,6 @@ Read [AGENTS.md](AGENTS.md) and any package-level `AGENTS.md` before changing co
 
 Other ways to run it: [Docker Compose or Kubernetes](docs/quickstart.mdx#other-ways-to-run-it) · [deployment security](docs/deployment-security.mdx)
 
-## License and attribution
+## 📄 License and attribution
 
 Amanuensis is licensed under the [Mozilla Public License 2.0](LICENSE). It is derived from [TrueForge](https://github.com/truefoundry/trueforge) by [TrueFoundry](https://truefoundry.com); those portions are MIT licensed, Copyright 2024-2026 TrueFoundry, and their notices are kept in [NOTICE](NOTICE). Third-party components with their own terms are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
