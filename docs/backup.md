@@ -15,6 +15,8 @@ Each backup is a new folder inside the hidden `.amanuensis` folder in your home 
 - the certificate of the local certificate authority, but never its private key, so after a restore each device trusts this computer again;
 - a `SHA256SUMS` file to check every file in the folder.
 
+An incognito chat that is open when the backup runs is left out of it, because an incognito chat is gone when it closes. See [Privacy](/privacy#incognito-chats).
+
 If any part fails, the half-written folder is removed. The last 7 backups are kept and older ones are deleted.
 
 A backup made before an import or a restore has `-before-import` or `-before-restore` after its date. It does not count toward the 7 and stays until you delete it.

@@ -1,10 +1,11 @@
 import { BrandLogo } from '@truefoundry/trueforge-ui';
-import { buildLoginHref } from './authFetch';
+import { loginHrefReturningTo } from './authFetch';
 import './authScreens.css';
 
 /**
  * Pre-auth welcome gate. Rendered when the session probe (`/me`) is unauthenticated
- * (OIDC configured but no session cookie yet). "Let's Get Started" starts OIDC login.
+ * (OIDC configured but no session cookie yet). "Sign in" starts OIDC login and comes back to the
+ * address the person opened, so a link such as the live browser page still lands there.
  */
 export function GetStartedScreen() {
   return (
@@ -16,7 +17,7 @@ export function GetStartedScreen() {
           type="button"
           className="auth-screen-button"
           onClick={() => {
-            window.location.assign(buildLoginHref());
+            window.location.assign(loginHrefReturningTo(window.location));
           }}
         >
           Sign in

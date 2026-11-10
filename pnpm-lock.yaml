@@ -208,6 +208,9 @@ importers:
       '@anthropic-ai/sandbox-runtime':
         specifier: 0.0.76
         version: 0.0.76
+      '@block65/webcrypto-web-push':
+        specifier: 2.0.0
+        version: 2.0.0
       '@daytona/sdk':
         specifier: ^0.211.2
         version: 0.211.2(debug@4.4.3(supports-color@8.1.1))(supports-color@8.1.1)
@@ -307,6 +310,9 @@ importers:
       sqlite-vec:
         specifier: ^0.1.6
         version: 0.1.9
+      swagger-ui-dist:
+        specifier: 5.34.0
+        version: 5.34.0
       ulid:
         specifier: ^3.0.2
         version: 3.0.2
@@ -510,6 +516,9 @@ importers:
       sqlite-vec:
         specifier: ^0.1.6
         version: 0.1.9
+      swagger-ui-dist:
+        specifier: 5.34.0
+        version: 5.34.0
       ulid:
         specifier: ^3.0.2
         version: 3.0.2
@@ -634,6 +643,9 @@ importers:
       ulid:
         specifier: ^3.0.2
         version: 3.0.2
+      undici:
+        specifier: 7.29.1
+        version: 7.29.1
       winston:
         specifier: ^3.19.0
         version: 3.19.0
@@ -4098,6 +4110,9 @@ packages:
     resolution: {integrity: sha512-BfzEnDJOt9T8M989/lA37EcJgat01wLRnoi5dQf3QzOH7jzpqTAzdDbVfRljVr5r+jzKqpbHeyOfAaXxAd0PAA==}
     cpu: [x64]
     os: [win32]
+
+  '@scarf/scarf@1.4.0':
+    resolution: {integrity: sha512-xxeapPiUXdZAE3che6f3xogoJPeZgig6omHEy1rIY5WVsB3H2BHNnZH+gHG6x91SCWyQCzWGsuL2Hh3ClO5/qQ==}
 
   '@sinclair/typebox@0.27.12':
     resolution: {integrity: sha512-hhyNJ+nbR6ZR7pToHvllEFun9TL0sbL+tk/ON75lo+Xas054uez98qRbsuNt7MBCyZKK4+8Yli/OAGZhmfBZ/g==}
@@ -8582,6 +8597,9 @@ packages:
   svg-parser@2.0.4:
     resolution: {integrity: sha512-e4hG1hRwoOdRb37cIMSgzNsxyzKfayW6VOflrwvR+/bzrkyxY/31WkbgnQpgtrNp1SdpJvpUAGTa/ZoiPNDuRQ==}
 
+  swagger-ui-dist@5.34.0:
+    resolution: {integrity: sha512-H6tAIjr3XqE31PbkZl0OFya1ziRLDfTwh3J6OHdumPtPCLfjTnyLeagl/55kFNZcTOz9a9QI9WP0FXldwiGJag==}
+
   swr@2.5.1:
     resolution: {integrity: sha512-BRw55e8r0B7SpDN20CAzoQAHl7y1yP7/Zt7oqUjMv0vSt2u2Xnkm88Ws+VypbV9BXHQVuSuyVq7zMjO16wSExw==}
     peerDependencies:
@@ -12638,6 +12656,8 @@ snapshots:
 
   '@rollup/rollup-win32-x64-msvc@4.62.2':
     optional: true
+
+  '@scarf/scarf@1.4.0': {}
 
   '@sinclair/typebox@0.27.12': {}
 
@@ -17987,6 +18007,10 @@ snapshots:
   supports-preserve-symlinks-flag@1.0.0: {}
 
   svg-parser@2.0.4: {}
+
+  swagger-ui-dist@5.34.0:
+    dependencies:
+      '@scarf/scarf': 1.4.0
 
   swr@2.5.1(react@19.3.0):
     dependencies:

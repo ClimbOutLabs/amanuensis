@@ -865,3 +865,67 @@ func TestMirrorForwarderLivePip(t *testing.T) {
 		t.Fatalf("pip did not save the wheel: %v", err)
 	}
 }
+
+type sessionsBody struct {
+	Sessions []struct {
+		SessionID string `json:"session_id"`
+		Bytes     int64  `json:"bytes"`
+		Entries   int    `json:"entries"`
+		LastUsed  string `json:"last_used"`
+	} `json:"sessions"`
+}
+
+func sessionsOf(t *testing.T, rec *httptest.ResponseRecorder) sessionsBody {
+	t.Helper()
+	if rec.Code != 200 {
+		t.Fatalf("sessions: %d %s", rec.Code, rec.Body.String())
+	}
+	var b sessionsBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &b); err != nil {
+		t.Fatalf("sessions body is not the contract shape: %v", err)
+	}
+	return b
+}
+
+func TestSessionsListsTreesWithTheirSizes(t *testing.T) {
+	e := newEnv(t, true)
+	content := base64.StdEncoding.EncodeToString([]byte("hello"))
+	e.do("POST", "/v1/fs_write", map[string]any{"session_id": sessionID, "path": "/workspace/a.txt", "content_base64": content, "mode": 0o644})
+	e.do("POST", "/v1/fs_write", map[string]any{"session_id": runID, "path": "/workspace/b.txt", "content_base64": content, "mode": 0o644})
+	body := sessionsOf(t, e.do("GET", "/v1/sessions", nil))
+	if len(body.Sessions) != 2 {
+		t.Fatalf("got %d sessions, want 2", len(body.Sessions))
+	}
+	for _, s := range body.Sessions {
+		if s.Bytes < 5 || s.Entries < 2 {
+			t.Errorf("session %s: bytes %d entries %d, want the written file counted", s.SessionID, s.Bytes, s.Entries)
+		}
+		if _, err := time.Parse(time.RFC3339, s.LastUsed); err != nil {
+			t.Errorf("session %s: last_used %q does not parse: %v", s.SessionID, s.LastUsed, err)
+		}
+	}
+}
+
+func TestSessionsServesTheCachedWalkUntilItAges(t *testing.T) {
+	e := newEnv(t, true)
+	e.srv.SessionsMaxAge = time.Hour
+	content := base64.StdEncoding.EncodeToString([]byte("hello"))
+	e.do("POST", "/v1/fs_write", map[string]any{"session_id": sessionID, "path": "/workspace/a.txt", "content_base64": content, "mode": 0o644})
+	first := sessionsOf(t, e.do("GET", "/v1/sessions", nil))
+	if len(first.Sessions) != 1 {
+		t.Fatalf("got %d sessions, want 1", len(first.Sessions))
+	}
+	// A larger write lands after the walk; the cached listing must not see it yet.
+	big := base64.StdEncoding.EncodeToString([]byte(strings.Repeat("x", 8192)))
+	e.do("POST", "/v1/fs_write", map[string]any{"session_id": sessionID, "path": "/workspace/big.bin", "content_base64": big, "mode": 0o644})
+	second := sessionsOf(t, e.do("GET", "/v1/sessions", nil))
+	if len(second.Sessions) != 1 || second.Sessions[0].Bytes != first.Sessions[0].Bytes {
+		t.Fatalf("cached listing changed: first %+v, second %+v", first.Sessions, second.Sessions)
+	}
+	e.srv.SessionsMaxAge = time.Nanosecond
+	time.Sleep(2 * time.Millisecond)
+	third := sessionsOf(t, e.do("GET", "/v1/sessions", nil))
+	if len(third.Sessions) != 1 || third.Sessions[0].Bytes <= first.Sessions[0].Bytes {
+		t.Fatalf("aged listing did not walk again: first %+v, third %+v", first.Sessions, third.Sessions)
+	}
+}
