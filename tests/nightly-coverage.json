@@ -44,11 +44,11 @@
   "surfaces": {
     "approval:calendar_event": {
       "set": "approvals",
-      "tests": []
+      "tests": ["packages/frontend/tests/approvalKinds.browser.test.ts"]
     },
     "approval:email": {
       "set": "approvals",
-      "tests": []
+      "tests": ["packages/frontend/tests/approvalKinds.browser.test.ts"]
     },
     "approval:persona": {
       "set": "approvals",
@@ -696,8 +696,6 @@
     }
   },
   "not_yet": [
-    "approval:calendar_event",
-    "approval:email",
     "calendar-preset:fastmail",
     "calendar-preset:gmx",
     "calendar-preset:google",
