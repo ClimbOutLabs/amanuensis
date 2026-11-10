@@ -16,7 +16,20 @@ Aman Setup is one program that installs everything. You do not need a terminal, 
 
 **2. Run it.** Double-click `Aman-Setup.exe`. A window opens where Aman Setup shows what it is doing and asks its questions.
 
-If Windows shows a blue **Windows protected your PC** box, choose **More info**, then **Run anyway**. That box appears because the download is new to Windows, not because anything is wrong with it. The release page lists the file's checksum in `SHA256SUMS`, so you can confirm you have the real one.
+If Windows shows a blue **Windows protected your PC** box, choose **More info**, then **Run anyway**. The box appears because Aman Setup is not signed with a Windows publisher certificate, so Windows shows the publisher as unknown. It does not mean anything is wrong with the file.
+
+To be sure the file is ours before you run it, check it against the signed list on the release page:
+
+1. From the same release page, download `manifest.json` and `manifest.json.minisig` into the folder that holds `Aman-Setup.exe`.
+2. Check the list's signature with [minisign](https://github.com/jedisct1/minisign), using the release key from [SECURITY.md](../SECURITY.md#checking-a-download). It must say the signature is verified:
+
+   ```
+   minisign -Vm manifest.json -P <release key>
+   ```
+
+3. In PowerShell, in that folder, run `Get-FileHash .\Aman-Setup.exe`. The hash it prints must match the one next to `Aman-Setup.exe` in `manifest.json`.
+
+Every release page also prints the release key and these steps. `SHA256SUMS` on the release page lists the same hashes, but on its own it only shows the file was not damaged on the way, not who made it.
 
 **3. Let it install Docker Desktop.** If Docker Desktop is already on the computer, Aman Setup uses it, and starts it if it is not running. If not, Aman Setup downloads it from Docker, checks that the download is signed by Docker Inc, and installs it. Docker Desktop then needs the computer to restart. Aman Setup says:
 
