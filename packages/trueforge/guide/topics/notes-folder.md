@@ -18,7 +18,7 @@ Note: The folder can be one a sync app keeps up to date, such as Syncthing or Ne
 
 Note: The Docker install cannot use a notes folder yet. On that install Aman runs in a container, and no folder on your computer is passed through to it, so a folder path cannot be found. Aman Setup on Windows uses Docker, so it cannot use a notes folder yet either. A notes folder works on the npx install and on an install built from the source.
 
-Note: The folder cannot be one of the folders Aman keeps its own data in, or a folder inside one of them. Those are the folder for Aman's memory, the folder for persona knowledge, and the app data folder that holds Aman's database and sandbox workspaces. If you pick one of those folders, the panel says so and names the folder to pick instead: the one that holds your notes.
+Note: The folder cannot be one of the folders Aman keeps its own data in, or a folder inside one of them. Those are the folder for Aman's memory, the folder for persona knowledge, the app data folder that holds Aman's database, and the folder the sandbox slot workspaces live under. If you pick one of those folders, the panel says so and names the folder to pick instead: the one that holds your notes.
 
 Note: To search your notes, Aman keeps an index of them in its app data folder, in a folder named notes-folder-index. Nothing for the index is written into your notes folder.
 

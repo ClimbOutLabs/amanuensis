@@ -14,16 +14,24 @@ import { NotesFolderService, type NotesFolderServiceDeps } from './notesFolderSe
 let shared: NotesFolderService | undefined;
 
 /**
- * Every folder Aman keeps its own data in, resolved: its memory, its persona knowledge, and
- * the app data folder that holds its database, its sandbox workspaces and the files skills
- * download while they work. A notes folder may never overlap any of these.
+ * Every folder Aman keeps its own data in, resolved: its memory, its persona knowledge, the
+ * app data folder that holds its database and the local sandbox workspaces, and the places the
+ * slots backend keeps its own: the root the slot workspace disks live under (skills on a slot
+ * live inside that workspace, so the root covers them too) and, when one is set, the slots
+ * control folder. A notes folder may never overlap any of these.
  */
 export function notesFolderProtectedDirs(): string[] {
-  return [
+  const dirs = [
     path.resolve(configuration.MEMORY_MARKDOWN_DIR),
     path.resolve(configuration.PERSONA_KNOWLEDGE_DIR),
     path.resolve(configuration.APP_DATA_DIR),
+    path.resolve(configuration.SANDBOX_SLOTS_DISK_ROOT),
   ];
+  const slotsDir = configuration.SANDBOX_SLOTS_DIR.trim();
+  if (slotsDir !== '') {
+    dirs.push(path.resolve(slotsDir));
+  }
+  return dirs;
 }
 
 /** The service's dependencies from the instance configuration; the first caller's win. */

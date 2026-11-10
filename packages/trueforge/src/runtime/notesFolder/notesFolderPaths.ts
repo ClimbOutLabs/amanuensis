@@ -1,7 +1,8 @@
 /**
  * The path rules of the Notes folder connector: which folders may be picked (never one that
- * overlaps any of Aman's own data folders: its memory, its persona knowledge, or the app data
- * folder that holds its database and sandbox workspaces), which note paths a tool may touch
+ * overlaps any of Aman's own data folders: its memory, its persona knowledge, the app data
+ * folder that holds its database, or the root the sandbox slot workspace disks live under),
+ * which note paths a tool may touch
  * (inside the folder, Markdown only, never a way out), and what the inbox file may be called
  * (a plain file name, so an append can only ever land in the folder's top level). The overlap
  * check follows links on disk before it compares, so a link cannot dress one of Aman's

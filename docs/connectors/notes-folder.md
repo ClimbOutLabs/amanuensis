@@ -23,7 +23,7 @@ The two writes run without an approval card while the ask is yours, the same way
 
 ## The folder must sit outside Aman's own data
 
-The folder cannot overlap any folder Aman keeps its own data in: its memory folder, its persona knowledge folder, or the app data folder that holds its database and sandbox workspaces. Picking one of those folders, a folder inside one of them, or a folder one of them sits inside is refused, with a message naming the folder to pick instead. The check follows links before it compares, so a link into one of those folders is refused the same way. The service checks again when a tool runs, so a settings value written some other way cannot get around it.
+The folder cannot overlap any folder Aman keeps its own data in: its memory folder, its persona knowledge folder, the app data folder that holds its database, or the folder the sandbox slot workspaces live under. Picking one of those folders, a folder inside one of them, or a folder one of them sits inside is refused, with a message naming the folder to pick instead. The check follows links before it compares, so a link into one of those folders is refused the same way. The service checks again when a tool runs, so a settings value written some other way cannot get around it.
 
 ## Where the search index lives
 

@@ -41,11 +41,14 @@ describe('the notes folder settings endpoints', () => {
   const originalMemoryDir = configuration.MEMORY_MARKDOWN_DIR;
   const originalPersonaKnowledgeDir = configuration.PERSONA_KNOWLEDGE_DIR;
   const originalAppDataDir = configuration.APP_DATA_DIR;
+  const originalSlotsDiskRoot = configuration.SANDBOX_SLOTS_DISK_ROOT;
   let root: string;
   let vault: string;
   let memoryDir: string;
   let personaKnowledgeDir: string;
   let appDataDir: string;
+  let slotsRoot: string;
+  let slotWorkspace: string;
   let app: Hono;
   let service: NotesFolderService;
 
@@ -55,15 +58,19 @@ describe('the notes folder settings endpoints', () => {
     memoryDir = path.join(root, 'memory');
     personaKnowledgeDir = path.join(root, 'persona-knowledge');
     appDataDir = path.join(root, 'app-data');
+    slotsRoot = path.join(root, 'aman-slots');
+    slotWorkspace = path.join(slotsRoot, 'main');
     await mkdir(vault, { recursive: true });
     await mkdir(memoryDir, { recursive: true });
     await mkdir(personaKnowledgeDir, { recursive: true });
+    await mkdir(slotWorkspace, { recursive: true });
     await mkdir(appDataDir, { recursive: true });
     await writeFile(path.join(vault, 'Garden.md'), '# Garden\n\nTomatoes.\n');
     await writeFile(path.join(vault, 'Kitchen.md'), '# Kitchen\n\nPasta.\n');
     configuration.MEMORY_MARKDOWN_DIR = memoryDir;
     configuration.PERSONA_KNOWLEDGE_DIR = personaKnowledgeDir;
     configuration.APP_DATA_DIR = appDataDir;
+    configuration.SANDBOX_SLOTS_DISK_ROOT = slotsRoot;
     const settingsStore = makeSettingsStore();
     service = new NotesFolderService({
       settings: settingsStore,
@@ -81,6 +88,7 @@ describe('the notes folder settings endpoints', () => {
     configuration.MEMORY_MARKDOWN_DIR = originalMemoryDir;
     configuration.PERSONA_KNOWLEDGE_DIR = originalPersonaKnowledgeDir;
     configuration.APP_DATA_DIR = originalAppDataDir;
+    configuration.SANDBOX_SLOTS_DISK_ROOT = originalSlotsDiskRoot;
     service.stop();
   });
 
@@ -171,6 +179,25 @@ describe('the notes folder settings endpoints', () => {
     const appData = await call({ method: 'POST', path: '/', body: { folder_path: appDataDir } });
     expect(appData.status).toBe(400);
     expect(JSON.parse(appData.text).error.message).toBe(NOTES_FOLDER_OVERLAP_MESSAGE);
+
+    const status = await call({ method: 'GET', path: '/status' });
+    expect(JSON.parse(status.text).data.state).toBe('not_connected');
+  });
+
+  it('refuses the folder the sandbox slot workspaces live under at save time, a workspace in it, and a link to one', async () => {
+    const diskRootPick = await call({ method: 'POST', path: '/', body: { folder_path: slotsRoot } });
+    expect(diskRootPick.status).toBe(400);
+    expect(JSON.parse(diskRootPick.text).error.message).toBe(NOTES_FOLDER_OVERLAP_MESSAGE);
+
+    const workspace = await call({ method: 'POST', path: '/', body: { folder_path: slotWorkspace } });
+    expect(workspace.status).toBe(400);
+    expect(JSON.parse(workspace.text).error.message).toBe(NOTES_FOLDER_OVERLAP_MESSAGE);
+
+    const toWorkspace = path.join(root, 'link-to-slot-workspace');
+    await symlink(slotWorkspace, toWorkspace, 'dir');
+    const linked = await call({ method: 'POST', path: '/', body: { folder_path: toWorkspace } });
+    expect(linked.status).toBe(400);
+    expect(JSON.parse(linked.text).error.message).toBe(NOTES_FOLDER_OVERLAP_MESSAGE);
 
     const status = await call({ method: 'GET', path: '/status' });
     expect(JSON.parse(status.text).data.state).toBe('not_connected');

@@ -18,12 +18,16 @@ describe('the notes folder service wiring', () => {
     memory: configuration.MEMORY_MARKDOWN_DIR,
     personaKnowledge: configuration.PERSONA_KNOWLEDGE_DIR,
     appData: configuration.APP_DATA_DIR,
+    slotsDiskRoot: configuration.SANDBOX_SLOTS_DISK_ROOT,
+    slotsDir: configuration.SANDBOX_SLOTS_DIR,
   };
 
   afterEach(() => {
     configuration.MEMORY_MARKDOWN_DIR = original.memory;
     configuration.PERSONA_KNOWLEDGE_DIR = original.personaKnowledge;
     configuration.APP_DATA_DIR = original.appData;
+    configuration.SANDBOX_SLOTS_DISK_ROOT = original.slotsDiskRoot;
+    configuration.SANDBOX_SLOTS_DIR = original.slotsDir;
   });
 
   it('keeps the search index in the app data folder, not in the memory folder', () => {
@@ -41,6 +45,20 @@ describe('the notes folder service wiring', () => {
     configuration.MEMORY_MARKDOWN_DIR = '/aman/memory';
     configuration.PERSONA_KNOWLEDGE_DIR = '/aman/persona-knowledge';
     configuration.APP_DATA_DIR = '/aman/app-data';
-    expect(notesFolderProtectedDirs()).toEqual(['/aman/memory', '/aman/persona-knowledge', '/aman/app-data']);
+    configuration.SANDBOX_SLOTS_DISK_ROOT = '/aman/aman-slots';
+    configuration.SANDBOX_SLOTS_DIR = '';
+    expect(notesFolderProtectedDirs()).toEqual([
+      '/aman/memory',
+      '/aman/persona-knowledge',
+      '/aman/app-data',
+      '/aman/aman-slots',
+    ]);
+  });
+
+  it('protects the slots control folder too when one is set', () => {
+    configuration.SANDBOX_SLOTS_DISK_ROOT = '/aman/aman-slots';
+    configuration.SANDBOX_SLOTS_DIR = '/aman/slot-control';
+    expect(notesFolderProtectedDirs()).toContain('/aman/slot-control');
+    expect(notesFolderProtectedDirs()).toContain('/aman/aman-slots');
   });
 });

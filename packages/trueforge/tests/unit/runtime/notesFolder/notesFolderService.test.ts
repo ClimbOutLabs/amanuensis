@@ -350,6 +350,43 @@ describe('the folder overlap refusal', () => {
     await expect(stat(path.join(appData, 'Aman inbox.md'))).rejects.toThrow();
   });
 
+  it('refuses the folder the sandbox slot workspaces live under, and a workspace in it, directly and through a link', async () => {
+    const world = await makeWorld({ embedder: undefined });
+    const slotsRoot = path.join(world.root, 'aman-slots');
+    const workspace = path.join(slotsRoot, 'main');
+    await mkdir(workspace, { recursive: true });
+    const slotted = new NotesFolderService({
+      settings: world.settingsStore,
+      protectedDirs: [
+        world.memoryDir,
+        path.join(world.root, 'persona-knowledge'),
+        path.join(world.root, 'app-data'),
+        slotsRoot,
+      ],
+      indexDir: path.join(world.root, 'index-slots'),
+      embedder: undefined,
+      logger: createLogger({ silent: true }),
+    });
+    try {
+      await writeNotesFolderSettings(world.settingsStore, { folder_path: slotsRoot, inbox_file: 'Aman inbox.md' });
+      await expect(slotted.appendToInbox('An entry.')).rejects.toThrow(NOTES_FOLDER_OVERLAP_MESSAGE);
+
+      await writeNotesFolderSettings(world.settingsStore, { folder_path: workspace, inbox_file: 'Aman inbox.md' });
+      await expect(slotted.appendToInbox('An entry.')).rejects.toThrow(NOTES_FOLDER_OVERLAP_MESSAGE);
+      await expect(slotted.createNote({ relativePath: 'New.md', text: 'No.' })).rejects.toThrow(
+        NOTES_FOLDER_OVERLAP_MESSAGE,
+      );
+
+      const toWorkspace = path.join(world.root, 'link-to-slot-workspace');
+      await symlink(workspace, toWorkspace, 'dir');
+      await writeNotesFolderSettings(world.settingsStore, { folder_path: toWorkspace, inbox_file: 'Aman inbox.md' });
+      await expect(slotted.appendToInbox('An entry.')).rejects.toThrow(NOTES_FOLDER_OVERLAP_MESSAGE);
+      await expect(stat(path.join(workspace, 'Aman inbox.md'))).rejects.toThrow();
+    } finally {
+      slotted.stop();
+    }
+  });
+
   it('still connects through a link to a folder that is not the memory folder', async () => {
     const world = await makeWorld({ embedder: undefined });
     await seedNotes(world);

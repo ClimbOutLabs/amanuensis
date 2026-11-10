@@ -1534,6 +1534,13 @@ export interface SharedServerConfiguration {
    * Required when SANDBOX_BACKEND=slots.
    */
   SANDBOX_SLOTS_DIR: string;
+  /**
+   * Root the slot workspace disks live under, one folder per installer instance (`<root>/<instance>`).
+   * The slot tooling creates them there; the server only needs the root to know the place is its own.
+   * Env: `AMAN_SLOT_DISK_ROOT` (the override the installer's own checks use). Default '/var/lib/aman-slots',
+   * the root the installer always uses.
+   */
+  SANDBOX_SLOTS_DISK_ROOT: string;
   /** Disk quota of one chat's sandbox workspace on a slot, MiB. Env: `SANDBOX_SESSION_DISK_MB`. Default 2048. */
   SANDBOX_SESSION_DISK_MB: number;
   /**
@@ -2553,6 +2560,8 @@ const shared: SharedServerConfiguration = {
     defaultValue: SANDBOX_MAX_SLOTS,
   }),
   SANDBOX_SLOTS_DIR: getEnv('SANDBOX_SLOTS_DIR', { defaultValue: '' }) ?? '',
+  SANDBOX_SLOTS_DISK_ROOT:
+    getEnv('AMAN_SLOT_DISK_ROOT', { defaultValue: '/var/lib/aman-slots' }) ?? '/var/lib/aman-slots',
   SANDBOX_SESSION_DISK_MB: parsePositiveInt({
     envKey: 'SANDBOX_SESSION_DISK_MB',
     raw: getEnv('SANDBOX_SESSION_DISK_MB'),
