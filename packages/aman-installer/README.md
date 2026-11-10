@@ -45,7 +45,8 @@ What it can do today:
   `aman install --dry-run` prints what it would do and does nothing.
   Running Aman-Setup.exe with no command does what the computer in
   front of it needs: this install, the adopt step on a starter PC, or
-  the upgrade on an installed one.
+  the upgrade on an installed one. A copy the browser saved as
+  `Aman-Setup (1).exe` does the same.
 - `aman open`, on Windows, starts Docker if it needs to, waits for Aman
   to answer, and opens it in the browser. An Aman served over https on
   this computer opens at its https address, after this computer is set
@@ -112,3 +113,20 @@ lines are compared to golden files too.
 Build the single executable with `pnpm build:aman-installer` from the
 repository root. The bundle is made with esbuild and turned into one file
 with Node's single executable support and postject.
+
+## Releases
+
+Each release publishes the program for every system: `Aman-Setup.exe` and
+`aman-windows-x64.exe` (the same Windows program under two names),
+`aman-darwin-arm64` and `aman-linux-x64`, beside the source archive, the
+signed release record (`manifest.json` and `manifest.json.minisig`) and
+`SHA256SUMS`. The names live in `src/release/assetNames.ts`.
+
+`pnpm release:aman-installer <step>` runs the release tool
+(`src/release/tool.ts`): `stage` puts a built program into a folder under
+its release names, `build-manifest` and `assemble-manifest` make the record,
+`sign` signs it, `verify` checks a file against it, `checksums` writes
+`SHA256SUMS`, `notes` writes the published release page with the steps to
+check a download by hand, and `throwaway-key` makes a key for a dry run. The release
+workflows run these steps; `RELEASING.md` at the repository root describes
+the whole release.
