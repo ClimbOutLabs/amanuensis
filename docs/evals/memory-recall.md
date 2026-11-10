@@ -17,7 +17,9 @@ The story holds the hard cases on purpose. Facts change, such as the dates of th
 
 Twelve more are messages that have nothing to do with memory, such as "What is 17 times 23?". No entry in the world shares a topic word with them. For these, no memory should be shown at all.
 
-The files are in `packages/trueforge/tests/fixtures/memory/mayaWorld/`.
+**Unrelated messages.** The test also has 300 messages that have nothing to do with memory, such as "explain photosynthesis simply" or "How do I tune a ukulele?". 250 are in English and 50 are in ten other languages. They were written by someone who had never seen Maya's world, so they do not lean on it. Some are near her topics on purpose, such as cooking, travel and money, because real messages are. Twelve questions were too few to measure how often Aman shows a memory to a message that needs none, so these 300 measure it.
+
+The files are in `packages/trueforge/tests/fixtures/memory/mayaWorld/`. The 300 messages are in `unrelatedMessages.ts`, one per line.
 
 ## How a question is scored
 
@@ -30,6 +32,14 @@ The test writes the world into an empty memory folder, one day at a time, throug
 The scorecard counts these for all questions, for answers at most 14 days old, for answers older than that, and for each kind of question.
 
 This test reads what the model is shown. It does not read what the model then answers. A test that scores answers needs a model and is a separate step.
+
+### How the unrelated messages are counted
+
+After the 76 questions, the test asks the 300 unrelated messages on day 60. It uses the memory the condition already built for the questions, which by then holds the world through day 60. Each message is asked in its own new chat, with no earlier messages. They are asked last, so they cannot change the answers to the questions.
+
+A message counts when Aman shows it any memory at all, which means the memory block is not empty. The test records this as `shown a memory 123/300`. **Lower is better.** The best number is 0, because none of these messages needs a memory.
+
+The test also records the positions of the messages that were shown a memory, as ranges such as `3-5, 9, 14-20`. Position 1 is the first message in `unrelatedMessages.ts`. When the count moves, the positions show in the diff which messages moved.
 
 ### Two scoring rules
 
@@ -53,7 +63,7 @@ The pages in the third condition are the ones a perfect sorter would write. They
 
 The search by meaning needs a model of about 120 MB, and unit tests cannot download it. So the test uses vectors that were recorded from the real model once. They are in `packages/trueforge/tests/fixtures/memory/recordedVectors/`, in two files: a list of the texts and the numbers for each.
 
-Record them again when a text in the test changed, or when the model changed. A text that changed is a daily-log entry, a question, or a page. The test tells you when a text has no recorded vector. Record them with this one command, and name the folder that holds the downloaded model:
+Record them again when a text in the test changed, or when the model changed. A text that changed is a daily-log entry, a question, an unrelated message, or a page. The test tells you when a text has no recorded vector. Record them with this one command, and name the folder that holds the downloaded model:
 
 ```sh
 pnpm --filter @truefoundry/trueforge memory:record-vectors --model-dir <folder>
@@ -63,7 +73,7 @@ Then commit the two files it writes.
 
 ## The recorded score
 
-Today's numbers for all three conditions are written in `packages/trueforge/tests/unit/runtime/memory/fixtures/mayaRecallScore.test.ts`, together with the list of questions that are not clean in each condition. The test fails when any number moves.
+Today's numbers for all three conditions are written in `packages/trueforge/tests/unit/runtime/memory/fixtures/mayaRecallScore.test.ts`, together with the list of questions that are not clean in each condition and the two numbers for the unrelated messages. The test fails when any number moves.
 
 When your change moves a number, write the new number in that file in the same pull request. If the numbers of the first condition move, something other than your change is wrong, so find out why before you record them. The reviewer then sees the difference. A better score is the point of the change. A worse score needs a reason in the pull request.
 
@@ -75,4 +85,4 @@ pnpm --filter @truefoundry/trueforge test -- tests/unit/runtime/memory/fixtures
 
 ## Add to it
 
-Add a story entry in `story.ts` with the next free place on its day, and say what it should do to the pages. Add a question in `recallQuestions.ts` and name the entries that hold its answer. For a message that has nothing to do with memory, use the kind `nothing_to_recall` and name no entries. The other tests in the same folder check that the story stays consistent, that no noise entry holds an answer, that no entry shares a topic word with such a message, that the sorted pages read back correctly, and that the recorded vectors and the two scoring rules work.
+Add a story entry in `story.ts` with the next free place on its day, and say what it should do to the pages. Add a question in `recallQuestions.ts` and name the entries that hold its answer. For a message that has nothing to do with memory, use the kind `nothing_to_recall` and name no entries. The other tests in the same folder check that the story stays consistent, that no noise entry holds an answer, that no entry shares a topic word with such a message, that the sorted pages read back correctly, that the 300 unrelated messages are all different from each other and from the questions, and that the recorded vectors and the two scoring rules work.
