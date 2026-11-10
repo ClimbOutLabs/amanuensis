@@ -1,7 +1,7 @@
 import { GoogleApiError } from '@truefoundry/trueforge-core/core/google/errors';
 
 import type { StuckMessage } from '../../../../src/db/noticingStore';
-import type { MailMessage, MailSource, MailWindowRead } from '../../../../src/runtime/noticing/sources';
+import type { MailMessage, MailWindowRead, TimedMailSource } from '../../../../src/runtime/noticing/sources';
 import { MailSourceBusyError, MessageUnreadableError } from '../../../../src/runtime/noticing/sources';
 import {
   MAX_STUCK_PASSES,
@@ -39,9 +39,9 @@ function sourceOf({
   fits: number;
   trusted?: readonly string[];
   answer?: (input: { since: Date; before: Date; from: readonly string[] | undefined }) => MailWindowRead | undefined;
-}): { source: MailSource; asked: { since: Date; before: Date; from: readonly string[] | undefined }[] } {
+}): { source: TimedMailSource; asked: { since: Date; before: Date; from: readonly string[] | undefined }[] } {
   const asked: { since: Date; before: Date; from: readonly string[] | undefined }[] = [];
-  const source: MailSource = {
+  const source: TimedMailSource = {
     listNewMessages: ({ since, before, from }) => {
       asked.push({ since, before, from });
       const given = answer?.({ since, before, from });
@@ -59,7 +59,6 @@ function sourceOf({
     readText: () => Promise.resolve(''),
     laterInThread: () => Promise.resolve([]),
     trustedAuthenticationServers: trusted,
-    datesAreArrival: true,
   };
   return { source, asked };
 }
@@ -196,13 +195,13 @@ describe('readMailWindow when the rest of the window runs out of time', () => {
     const early = message({ id: 'early', at: new Date('2026-11-05T14:05:00.000Z') });
     const inbox = [early, message({ id: 'late', at: new Date('2026-11-05T14:50:00.000Z') })];
     let cellRead = false;
-    const source: MailSource = {
-      listNewMessages: ({ since, before, whole }) => {
+    const source: TimedMailSource = {
+      listNewMessages: ({ since, before }) => {
         const covers = since.getTime() <= bad.getTime() && before.getTime() > bad.getTime();
         if (covers && before.getTime() - since.getTime() > SHORTEST_WINDOW_MS) {
           return Promise.reject(new Error('cannot list'));
         }
-        if (whole !== true && before.getTime() - since.getTime() <= SHORTEST_WINDOW_MS) {
+        if (covers && before.getTime() - since.getTime() <= SHORTEST_WINDOW_MS) {
           // The few seconds are read last, and the rest of the window then has no time left.
           cellRead = true;
         }
@@ -212,7 +211,6 @@ describe('readMailWindow when the rest of the window runs out of time', () => {
       readText: () => Promise.resolve(''),
       laterInThread: () => Promise.resolve([]),
       trustedAuthenticationServers: [],
-      datesAreArrival: true,
     };
     const read = await readMailWindow({
       source,
@@ -238,17 +236,9 @@ describe('watchMail when a message cannot be read', () => {
   const outage = () => new MailSourceBusyError({ cause: new Error('Too many requests.') });
 
   /** A source whose `readText` fails for the ids in `failing`, and says what it read. */
-  function failingSource({
-    inbox,
-    failing,
-    datesAreArrival = true,
-  }: {
-    inbox: MailMessage[];
-    failing: Record<string, () => Error>;
-    datesAreArrival?: boolean;
-  }) {
+  function failingSource({ inbox, failing }: { inbox: MailMessage[]; failing: Record<string, () => Error> }) {
     const read: string[] = [];
-    const source: MailSource = {
+    const source: TimedMailSource = {
       listNewMessages: () => Promise.resolve({ read: 'all', messages: inbox }),
       readText: item => {
         read.push(item.id);
@@ -257,12 +247,11 @@ describe('watchMail when a message cannot be read', () => {
       },
       laterInThread: () => Promise.resolve([]),
       trustedAuthenticationServers: [],
-      datesAreArrival,
     };
     return { source, read };
   }
   const watch = (input: {
-    source: MailSource;
+    source: TimedMailSource;
     stuck?: StuckMessage | undefined;
     out_of_time?: () => boolean;
     log?: ReturnType<typeof logger>;
@@ -276,8 +265,6 @@ describe('watchMail when a message cannot be read', () => {
       stuck: input.stuck,
       out_of_time: input.out_of_time ?? (() => false),
       assistant: 'Mira',
-      handled: undefined,
-      max_width: undefined,
     });
   const ids = (found: { raise: { id: string }[]; track: { id: string }[] }) =>
     found.raise.concat(found.track).map(event => event.id);
@@ -325,8 +312,6 @@ describe('watchMail when a message cannot be read', () => {
       stuck: { message_id: 'b', passes: MAX_STUCK_PASSES - 1, since: SINCE },
       out_of_time: () => false,
       assistant: 'Mira',
-      handled: undefined,
-      max_width: undefined,
     });
     // b is tried again once c has read, and fails again.
     expect(read).toEqual(['a', 'b', 'c', 'b']);
@@ -469,7 +454,7 @@ describe('watchMail when a message cannot be read', () => {
   });
 
   describe("when a bill's thread cannot be checked", () => {
-    const threadFailing = (failure: () => Error): { source: MailSource } => {
+    const threadFailing = (failure: () => Error): { source: TimedMailSource } => {
       const { source } = failingSource({ inbox: [bill('a', 1), bill('b', 2)], failing: {} });
       return { source: { ...source, laterInThread: () => Promise.reject(failure()) } };
     };
@@ -487,12 +472,10 @@ describe('watchMail when a message cannot be read', () => {
     });
   });
 
-  it("starts the next pass at the failing message's arrival, or at the start where dates are written by the sender", async () => {
+  it("starts the next pass at the failing message's arrival", async () => {
     const inbox = [bill('a', 1), bill('b', 2), bill('c', 3)];
     const arrival = failingSource({ inbox, failing: { b: () => new Error('x') } });
     expect((await watch({ source: arrival.source })).resume_from).toEqual(inbox[1]?.received_at);
-    const written = failingSource({ inbox, failing: { b: () => new Error('x') }, datesAreArrival: false });
-    expect((await watch({ source: written.source })).resume_from).toEqual(SINCE);
   });
 
   it('passes over a message that can never be read at once, and clears the count', async () => {
@@ -519,9 +502,9 @@ describe('watchMail when a list fails', () => {
   // One message the connector cannot list: every window that holds it fails.
   const bad = at(20);
   const inbox = [bill('a', 10), bill('c', 40)];
-  const sourceWith = (failure: () => Error): { source: MailSource; windows: number[] } => {
+  const sourceWith = (failure: () => Error): { source: TimedMailSource; windows: number[] } => {
     const windows: number[] = [];
-    const source: MailSource = {
+    const source: TimedMailSource = {
       listNewMessages: ({ since, before }) => {
         windows.push(before.getTime() - since.getTime());
         if (since <= bad && bad < before) {
@@ -533,11 +516,10 @@ describe('watchMail when a list fails', () => {
       readText: () => Promise.resolve('Amount due by November 7'),
       laterInThread: () => Promise.resolve([]),
       trustedAuthenticationServers: [],
-      datesAreArrival: false,
     };
     return { source, windows };
   };
-  const pass = ({ source, since, stuck }: { source: MailSource; since: Date; stuck?: StuckMessage | undefined }) =>
+  const pass = ({ source, since, stuck }: { source: TimedMailSource; since: Date; stuck?: StuckMessage | undefined }) =>
     watchMail({
       source,
       settings,
@@ -547,8 +529,6 @@ describe('watchMail when a list fails', () => {
       stuck,
       out_of_time: () => false,
       assistant: 'Mira',
-      handled: undefined,
-      max_width: undefined,
     });
 
   it('halves the window to find the slice that fails, and passes it over after a few passes, with a warning', async () => {
@@ -569,8 +549,6 @@ describe('watchMail when a list fails', () => {
         stuck,
         out_of_time: () => false,
         assistant: 'Mira',
-        handled: undefined,
-        max_width: undefined,
       });
       seen.push(...found.raise.map(event => event.id));
       gaps.push(...found.gaps);
@@ -620,8 +598,6 @@ describe('watchMail when a list fails', () => {
       stuck: undefined,
       out_of_time: () => windows.length >= 2,
       assistant: 'Mira',
-      handled: undefined,
-      max_width: undefined,
     });
     expect(windows).toHaveLength(2);
     expect(found.stopped_by).toBeUndefined();
@@ -637,16 +613,14 @@ describe('watchMail keeps trouble and progress on every way of stopping', () => 
     ...message({ id, at: at(minute) }),
     subject: `Invoice ${id}: amount due by November 7`,
   });
-  const base = { settings, now: NOW, logger: logger(), assistant: 'Mira', handled: undefined };
+  const base = { settings, now: NOW, logger: logger(), assistant: 'Mira' };
   const sourceOf = ({
     inbox,
-    datesAreArrival,
     readText,
   }: {
     inbox: MailMessage[];
-    datesAreArrival: boolean;
     readText?: (item: MailMessage) => Promise<string>;
-  }): { source: MailSource; windows: { since: Date; before: Date }[] } => {
+  }): { source: TimedMailSource; windows: { since: Date; before: Date }[] } => {
     const windows: { since: Date; before: Date }[] = [];
     return {
       windows,
@@ -659,74 +633,18 @@ describe('watchMail keeps trouble and progress on every way of stopping', () => 
         readText: readText ?? (() => Promise.resolve('Amount due by November 7')),
         laterInThread: () => Promise.resolve([]),
         trustedAuthenticationServers: [],
-        datesAreArrival,
       },
     };
   };
 
-  it('lists a shorter window next time when an IMAP pass runs out of time, and gets through the mail', async () => {
-    const inbox = Array.from({ length: 10 }, (_, n) => bill(`b${String(n)}`, n + 1));
-    const { source } = sourceOf({ inbox, datesAreArrival: false });
-    const seen = new Set<string>();
-    let since = SINCE;
-    let max_width: number | undefined;
-    let passes = 0;
-    for (; passes < 40; passes += 1) {
-      let reads = 0;
-      const found = await watchMail({
-        ...base,
-        source,
-        since,
-        stuck: undefined,
-        max_width,
-        // The pass has time for three messages.
-        out_of_time: () => {
-          reads += 1;
-          return reads > 4;
-        },
-      });
-      found.raise.forEach(event => seen.add(event.id));
-      expect(found.stopped_by).toBeUndefined();
-      if (found.resume_from === undefined) {
-        break;
-      }
-      since = found.resume_from;
-      max_width = found.window_ms;
-    }
-    expect(passes).toBeLessThan(40);
-    expect(seen.size).toBe(10);
-  });
-
-  it('shows it fell behind when an IMAP pass runs out of time in a window it cannot make shorter', async () => {
-    const inbox = [bill('a', 0), bill('b', 0)];
-    const { source } = sourceOf({
-      inbox: inbox.map(item => ({ ...item, received_at: new Date(SINCE.getTime() + 500) })),
-      datesAreArrival: false,
-    });
-    let looks = 0;
-    const found = await watchMail({
-      ...base,
-      source,
-      since: SINCE,
-      now: new Date(SINCE.getTime() + 3000),
-      stuck: undefined,
-      max_width: undefined,
-      out_of_time: () => (looks += 1) > 1,
-    });
-    expect(found.timed_out).toBe(true);
-    expect(found.stopped_by).toBeUndefined();
-    expect(found.resume_from).toEqual(SINCE);
-  });
-
   it('shows it fell behind when a pass runs out of time before it read a single message', async () => {
-    const { source } = sourceOf({ inbox: [bill('a', 1)], datesAreArrival: true });
+    const { source } = sourceOf({ inbox: [bill('a', 1)] });
     let looks = 0;
     const found = await watchMail({
       ...base,
       source,
       since: at(1),
       stuck: undefined,
-      max_width: undefined,
       out_of_time: () => (looks += 1) > 1,
     });
     expect(found.timed_out).toBe(true);
@@ -738,7 +656,6 @@ describe('watchMail keeps trouble and progress on every way of stopping', () => 
     let calls = 0;
     const { source } = sourceOf({
       inbox: [bill('a', 1), bill('b', 2)],
-      datesAreArrival: true,
       readText: () => {
         calls += 1;
         return Promise.resolve('Amount due by November 7');
@@ -750,7 +667,6 @@ describe('watchMail keeps trouble and progress on every way of stopping', () => 
       source,
       since: SINCE,
       stuck: undefined,
-      max_width: undefined,
       // The time runs out right after the first read, before the thread check.
       out_of_time: () => {
         const was = expired;
@@ -775,13 +691,11 @@ describe('watchMail when a list fails', () => {
     stuck: undefined,
     out_of_time: () => false,
     assistant: 'Mira',
-    handled: undefined,
-    max_width: undefined,
   };
 
   it('stops and counts nothing when no list worked, whatever the window', async () => {
     const windows: number[] = [];
-    const source: MailSource = {
+    const source: TimedMailSource = {
       listNewMessages: ({ since, before }) => {
         windows.push(before.getTime() - since.getTime());
         return Promise.reject(failure());
@@ -789,7 +703,6 @@ describe('watchMail when a list fails', () => {
       readText: () => Promise.resolve(''),
       laterInThread: () => Promise.resolve([]),
       trustedAuthenticationServers: [],
-      datesAreArrival: false,
     };
     let stuck: StuckMessage | undefined;
     for (let pass = 0; pass < 6; pass += 1) {
@@ -810,7 +723,7 @@ describe('watchMail when a list fails', () => {
       subject: `Invoice ${id}: amount due by November 7`,
     });
     const inbox = [good('before', 10), good('after', 40)];
-    const source: MailSource = {
+    const source: TimedMailSource = {
       listNewMessages: ({ since, before }) =>
         since <= bad && bad < before
           ? Promise.reject(failure())
@@ -821,7 +734,6 @@ describe('watchMail when a list fails', () => {
       readText: () => Promise.resolve('Amount due by November 7'),
       laterInThread: () => Promise.resolve([]),
       trustedAuthenticationServers: [],
-      datesAreArrival: false,
     };
     const first = await watchMail({ ...base, source });
     // The mail before the failing seconds was read in the same pass, and the pass says where it got stuck.
@@ -852,13 +764,12 @@ describe('watchMail when a list fails', () => {
 
   it('names a stretch that cannot be listed by where it is, so the count carries over from pass to pass', async () => {
     const bad = new Date(SINCE.getTime() + 20 * 60_000 + 1500);
-    const source: MailSource = {
+    const source: TimedMailSource = {
       listNewMessages: ({ since, before }) =>
         since <= bad && bad < before ? Promise.reject(failure()) : Promise.resolve({ read: 'all', messages: [] }),
       readText: () => Promise.resolve(''),
       laterInThread: () => Promise.resolve([]),
       trustedAuthenticationServers: [],
-      datesAreArrival: false,
     };
     const first = await watchMail({ ...base, source, now: NOW });
     const later = await watchMail({
@@ -892,7 +803,7 @@ describe('watchMail when a message keeps failing', () => {
   }: {
     inbox: MailMessage[];
     failing: Record<string, (attempt: number) => Error | undefined>;
-  }): { source: MailSource; reads: string[] } => {
+  }): { source: TimedMailSource; reads: string[] } => {
     const attempts = new Map<string, number>();
     const reads: string[] = [];
     return {
@@ -908,12 +819,11 @@ describe('watchMail when a message keeps failing', () => {
         },
         laterInThread: () => Promise.resolve([]),
         trustedAuthenticationServers: [],
-        datesAreArrival: true,
       },
     };
   };
   const run = (input: {
-    source: MailSource;
+    source: TimedMailSource;
     stuck?: StuckMessage | undefined;
     now?: Date;
     log?: ReturnType<typeof logger>;
@@ -927,8 +837,6 @@ describe('watchMail when a message keeps failing', () => {
       stuck: input.stuck,
       out_of_time: () => false,
       assistant: 'Mira',
-      handled: undefined,
-      max_width: undefined,
     });
 
   it('does not count a failure that a retry after a good read gets past', async () => {
@@ -1004,7 +912,7 @@ describe('watchMail when a message keeps failing', () => {
       [plain, []],
     ] as const) {
       const { source } = sourceWith({ inbox: [bill('a', 1), item, bill('c', 3)], failing: { [item.id]: busy } });
-      const read: MailSource = { ...source, trustedAuthenticationServers: ['mx.example.net'] };
+      const read: TimedMailSource = { ...source, trustedAuthenticationServers: ['mx.example.net'] };
       const found = await run({
         source: {
           ...read,
@@ -1028,7 +936,7 @@ describe('watchMail when a message has held up passes for hours', () => {
   });
   const failing = (ids: Record<string, () => Error>, inbox: MailMessage[]) => {
     const read: string[] = [];
-    const source: MailSource = {
+    const source: TimedMailSource = {
       listNewMessages: () => Promise.resolve({ read: 'all', messages: inbox }),
       readText: item => {
         read.push(item.id);
@@ -1037,11 +945,10 @@ describe('watchMail when a message has held up passes for hours', () => {
       },
       laterInThread: () => Promise.resolve([]),
       trustedAuthenticationServers: [],
-      datesAreArrival: true,
     };
     return { source, read };
   };
-  const run = ({ source, stuck, log }: { source: MailSource; stuck?: StuckMessage; log?: { warn: jest.Mock } }) =>
+  const run = ({ source, stuck, log }: { source: TimedMailSource; stuck?: StuckMessage; log?: { warn: jest.Mock } }) =>
     watchMail({
       source,
       settings,
@@ -1051,8 +958,6 @@ describe('watchMail when a message has held up passes for hours', () => {
       stuck,
       out_of_time: () => false,
       assistant: 'Mira',
-      handled: undefined,
-      max_width: undefined,
     });
   const plain = () => new Error('The Email connector could not fetch the message.');
   const busy = () => new MailSourceBusyError({ cause: new Error('timed out') });
@@ -1122,7 +1027,7 @@ describe('watchMail with a flood and a bad header', () => {
   /** A connector that fails a window with the bad header unless it is within one page, which holds the flood first. */
   const connector = ({ flood, bad, bill }: { flood: Date; bad: Date; bill: MailMessage }) => {
     const lists: { since: Date; before: Date }[] = [];
-    const source: MailSource = {
+    const source: TimedMailSource = {
       listNewMessages: ({ since, before, from }) => {
         lists.push({ since, before });
         const holdsBad = since <= bad && bad < before;
@@ -1144,7 +1049,6 @@ describe('watchMail with a flood and a bad header', () => {
       readText: () => Promise.resolve('Amount due by November 7'),
       laterInThread: () => Promise.resolve([]),
       trustedAuthenticationServers: [],
-      datesAreArrival: false,
     };
     return { source, lists };
   };
@@ -1152,7 +1056,7 @@ describe('watchMail with a flood and a bad header', () => {
     ...message({ id: 'bill', at }),
     subject: 'Invoice: amount due by November 7',
   });
-  const watch = (source: MailSource, now: Date) =>
+  const watch = (source: TimedMailSource, now: Date) =>
     watchMail({
       source,
       settings,
@@ -1162,8 +1066,6 @@ describe('watchMail with a flood and a bad header', () => {
       stuck: undefined,
       out_of_time: () => false,
       assistant: 'Mira',
-      handled: undefined,
-      max_width: undefined,
     });
 
   it('passes a flood in the last cell over with a note, instead of halving for ever', async () => {
@@ -1200,12 +1102,11 @@ describe('watchMail window and thread checks', () => {
 
   it('does not check the thread of a bill that is due long after the window', async () => {
     const later = jest.fn(() => Promise.resolve<string[]>([]));
-    const source: MailSource = {
+    const source: TimedMailSource = {
       listNewMessages: () => Promise.resolve({ read: 'all', messages: [bill('far', 'December 20')] }),
       readText: () => Promise.resolve('Amount due by December 20'),
       laterInThread: later,
       trustedAuthenticationServers: [],
-      datesAreArrival: true,
     };
     const found = await watchMail({
       source,
@@ -1216,181 +1117,8 @@ describe('watchMail window and thread checks', () => {
       stuck: undefined,
       out_of_time: () => false,
       assistant: 'Mira',
-      handled: undefined,
-      max_width: undefined,
     });
     expect(found.track.map(event => event.id)).toEqual(['bill_due:far']);
     expect(later).not.toHaveBeenCalled();
-  });
-
-  it('halves the window of an IMAP pass that ran out of time at once, and shows it fell behind', async () => {
-    const source: MailSource = {
-      listNewMessages: () => Promise.resolve({ read: 'all', messages: [] }),
-      readText: () => Promise.resolve(''),
-      laterInThread: () => Promise.resolve([]),
-      trustedAuthenticationServers: [],
-      datesAreArrival: false,
-    };
-    const found = await watchMail({
-      source,
-      settings,
-      since: SINCE,
-      now: NOW,
-      logger: logger(),
-      stuck: undefined,
-      out_of_time: () => true,
-      assistant: 'Mira',
-      handled: undefined,
-      max_width: undefined,
-    });
-    expect(found.timed_out).toBe(true);
-    expect(found.resume_from).toEqual(SINCE);
-    expect(found.window_ms).toBe(30 * 60_000);
-  });
-
-  it('doubles the window only after a pass that read all of it', async () => {
-    const messages: MailMessage[] = [];
-    const source: MailSource = {
-      listNewMessages: () => Promise.resolve({ read: 'all', messages }),
-      readText: () => Promise.resolve(''),
-      laterInThread: () => Promise.resolve([]),
-      trustedAuthenticationServers: [],
-      datesAreArrival: false,
-    };
-    const input = {
-      source,
-      settings,
-      since: SINCE,
-      now: NOW,
-      logger: logger(),
-      stuck: undefined,
-      assistant: 'Mira',
-      handled: undefined,
-      max_width: 10 * 60_000,
-    };
-    expect((await watchMail({ ...input, out_of_time: () => false })).window_ms).toBe(20 * 60_000);
-    // A pass that ran out of time before it read anything lists half as much next time.
-    expect((await watchMail({ ...input, out_of_time: () => true })).window_ms).toBe(5 * 60_000);
-  });
-});
-
-describe('watchMail window after a pass that did not read all of it', () => {
-  it('does not double the window after a pass that stopped at a message, only after one that read it all', async () => {
-    const bill = {
-      ...message({ id: 'a', at: new Date('2026-11-05T14:02:00.000Z') }),
-      subject: 'Invoice: amount due by November 7',
-    };
-    const source: MailSource = {
-      listNewMessages: () => Promise.resolve({ read: 'all', messages: [bill] }),
-      readText: () => Promise.reject(new Error('The connector could not fetch the message.')),
-      laterInThread: () => Promise.resolve([]),
-      trustedAuthenticationServers: [],
-      datesAreArrival: false,
-    };
-    const found = await watchMail({
-      source,
-      settings: defaultReachSettings('UTC'),
-      since: SINCE,
-      now: NOW,
-      logger: logger(),
-      stuck: undefined,
-      out_of_time: () => false,
-      assistant: 'Mira',
-      handled: undefined,
-      max_width: 10 * 60_000,
-    });
-    expect(found.stopped_by).toBeDefined();
-    expect(found.window_ms).toBe(10 * 60_000);
-  });
-});
-
-describe('watchMail on a source that cannot resume at a message', () => {
-  const settings = defaultReachSettings('UTC');
-  const bill = (id: string, minute: number): MailMessage => ({
-    ...message({ id, at: new Date(SINCE.getTime() + minute * 60_000) }),
-    subject: `Invoice ${id}: amount due by November 7`,
-  });
-  const inbox = ['a', 'b', 'c', 'd', 'e', 'f'].map((id, index) => bill(id, index + 1));
-  const imap = (failing: (id: string, attempt: number) => boolean = () => false) => {
-    const read: string[] = [];
-    const attempts = new Map<string, number>();
-    const source: MailSource = {
-      listNewMessages: () => Promise.resolve({ read: 'all', messages: inbox }),
-      readText: item => {
-        read.push(item.id);
-        const attempt = (attempts.get(item.id) ?? 0) + 1;
-        attempts.set(item.id, attempt);
-        return failing(item.id, attempt)
-          ? Promise.reject(new Error('The Email connector could not fetch the message.'))
-          : Promise.resolve('Amount due by November 7');
-      },
-      laterInThread: () => Promise.resolve([]),
-      trustedAuthenticationServers: [],
-      datesAreArrival: false,
-    };
-    return { source, read };
-  };
-  const run = ({
-    source,
-    handled,
-    out_of_time = () => false,
-  }: {
-    source: MailSource;
-    handled?: readonly string[] | undefined;
-    out_of_time?: () => boolean;
-  }) =>
-    watchMail({
-      source,
-      settings,
-      since: SINCE,
-      now: NOW,
-      logger: logger(),
-      stuck: undefined,
-      out_of_time,
-      assistant: 'Mira',
-      handled,
-      max_width: undefined,
-    });
-
-  it('keeps what an out-of-time pass already read, and does not read it again', async () => {
-    const first = imap();
-    let looks = 0;
-    const found = await run({ source: first.source, out_of_time: () => (looks += 1) > 7 });
-    expect(found.timed_out).toBe(true);
-    expect(found.resume_from).toEqual(SINCE);
-    const handled = found.handled ?? [];
-    expect(handled.length).toBeGreaterThan(0);
-    expect(handled).toEqual(first.read.filter(id => handled.includes(id)));
-    const second = imap();
-    const again = await run({ source: second.source, handled });
-    expect(second.read.some(id => handled.includes(id))).toBe(false);
-    expect([...found.raise, ...again.raise].map(event => event.id).sort()).toEqual(
-      inbox.map(item => `bill_due:${item.id}`),
-    );
-    expect(again.resume_from).toBeUndefined();
-    expect(again.handled).toBeUndefined();
-  });
-
-  it('does not let two flaky messages hold the others back, and reads each of them in the end', async () => {
-    // b and e fail on their first two reads and then work.
-    const flaky = (id: string, attempt: number) => (id === 'b' || id === 'e') && attempt <= 2;
-    const { source } = imap(flaky);
-    const seen = new Set<string>();
-    let handled: readonly string[] | undefined;
-    let finished = false;
-    for (let pass = 0; pass < 6 && !finished; pass += 1) {
-      const found = await run({ source, handled });
-      found.raise.forEach(event => seen.add(event.id));
-      handled = found.handled;
-      finished = found.resume_from === undefined;
-    }
-    expect(finished).toBe(true);
-    expect([...seen].sort()).toEqual(inbox.map(item => `bill_due:${item.id}`));
-  });
-
-  it('forgets the handled messages once the pass moves on from the window', async () => {
-    const { source } = imap();
-    const found = await run({ source, handled: ['a', 'b'] });
-    expect(found.handled).toBeUndefined();
   });
 });

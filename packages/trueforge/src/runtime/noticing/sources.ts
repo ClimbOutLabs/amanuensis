@@ -1,3 +1,4 @@
+import type { MailCursor } from '../../db/noticingStore';
 import type { PersonOwner } from '../../db/personOwner';
 import type { CalendarProblemKind, MailSourceKind } from '../../schemas/reach';
 
@@ -26,13 +27,10 @@ export type MailRef = Pick<MailMessage, 'id' | 'thread_id' | 'received_at'>;
 /**
  * One read of the mail that reached the inbox in a window, by the mail server's own arrival time. `all` holds every
  * message in it, oldest first. `too_many` says the window holds more than was asked for, so a shorter one is needed.
- * `oldest` holds only the oldest part, because the source ran out of time. `skipped` counts messages in an `all` read that
- * the source could not list one by one and left out.
+ * `oldest` holds only the oldest part, because the source ran out of time.
  */
 export type MailWindowRead =
-  | { read: 'all'; messages: MailMessage[]; skipped?: number }
-  | { read: 'too_many' }
-  | { read: 'oldest'; messages: MailMessage[] };
+  { read: 'all'; messages: MailMessage[] } | { read: 'too_many' } | { read: 'oldest'; messages: MailMessage[] };
 
 /**
  * A read fails in one of three ways. This is the first: the message can never be read however often it is tried (it
@@ -76,7 +74,17 @@ export class MailTooSlowError extends MailSourceBusyError {
   }
 }
 
-export interface MailSource {
+interface MailReader {
+  /** The start of one message's text, for a watcher that needs more than the snippet. Throws MessageUnreadableError for a message it can never read. */
+  readText(message: MailMessage): Promise<string>;
+  /** The text of messages that came after this one in its thread, oldest first. A later reply it cannot read is left out. */
+  laterInThread(message: MailRef): Promise<string[]>;
+  /** The receiving servers whose Authentication-Results can be believed. Empty when this source passes on none. */
+  trustedAuthenticationServers: readonly string[];
+}
+
+/** A source that lists mail by when it arrived, and so resumes at the arrival of the first message it did not reach. */
+export interface TimedMailSource extends MailReader {
   /**
    * Mail that reached the inbox at or after `since` and before `before`, from the `from` addresses only when given.
    * Mail the person sent is left out.
@@ -88,23 +96,40 @@ export interface MailSource {
     from?: readonly string[];
     /** Whether the pass has used the time or calls it has. A long search checks it before every call it makes. */
     out_of_time: () => boolean;
-    /** Set for a list that tells a failing account from a failing message, so no search for one message is made. */
-    whole?: true;
   }): Promise<MailWindowRead>;
-  /** The start of one message's text, for a watcher that needs more than the snippet. Throws MessageUnreadableError for a message it can never read. */
-  readText(message: MailMessage): Promise<string>;
-  /** The text of messages that came after this one in its thread, oldest first. A later reply it cannot read is left out. */
-  laterInThread(message: MailRef): Promise<string[]>;
-  /** The receiving servers whose Authentication-Results can be believed. Empty when this source passes on none. */
-  trustedAuthenticationServers: readonly string[];
-  /**
-   * Whether `received_at` is when the server got the message. Where it is a Date the sender wrote, it can be moved
-   * to the edge of the window it was listed in, so it cannot say where to resume reading.
-   */
-  datesAreArrival: boolean;
   /** Set when a list fetches every message it finds with a call of its own, so a pass counts those against its calls. */
   fetchesEachListed?: true;
 }
+
+/** A message listed after a cursor, with the number the mail server gave it. */
+export type CursorMessage = MailMessage & { uid: number };
+
+/**
+ * A read of the mail after a cursor, in the order the server numbered it. `cursor` is the last message examined,
+ * including any that could not be listed (`skipped`), and `more` says the batch was full.
+ */
+export interface CursorRead {
+  messages: CursorMessage[];
+  skipped: number;
+  cursor: MailCursor;
+  more: boolean;
+}
+
+/** A source that numbers its mail, so a pass resumes exactly after the last message it handled. */
+export interface CursorMailSource extends MailReader {
+  /**
+   * Mail after `cursor`. With no cursor, or one for another mailbox generation, it starts at the first message that
+   * arrived at or after `since`.
+   */
+  listAfter(input: {
+    cursor: MailCursor | undefined;
+    since: Date;
+    limit: number;
+    out_of_time: () => boolean;
+  }): Promise<CursorRead>;
+}
+
+export type MailSource = TimedMailSource | CursorMailSource;
 
 export interface CalendarEventInfo {
   id: string;

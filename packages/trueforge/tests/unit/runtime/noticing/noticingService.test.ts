@@ -21,6 +21,7 @@ import {
   type ApprovalSource,
   type CalendarEventInfo,
   type CalendarSource,
+  type CursorMailSource,
   type MailMessage,
   type MailSource,
   type MailWindowRead,
@@ -181,7 +182,6 @@ async function setup({
         : Promise.resolve(texts[message.id] ?? message.snippet),
     laterInThread: jest.fn(() => Promise.resolve(later)),
     trustedAuthenticationServers: ['mx.example.net'],
-    datesAreArrival: true,
   };
   const calendarSource: CalendarSource = { listEvents: jest.fn(() => Promise.resolve(events)) };
   const sources: NoticingSources = {
@@ -326,7 +326,6 @@ describe('mail from an always-important sender', () => {
       checked_at: new Date('2026-11-01T09:00:00.000Z'),
       failure: undefined,
       stuck: undefined,
-      window_ms: undefined,
       source: undefined,
     });
     await service.run({ watcher: 'mail' });
@@ -1424,7 +1423,6 @@ describe('mail passes that keep failing', () => {
       checked_at: bills[0]?.received_at ?? NOW,
       failure: undefined,
       stuck: { message_id: 'm2', passes: 2, since: NOW },
-      window_ms: undefined,
       source: undefined,
     });
     sources.mail = { status: 'unreachable', error: new Error('connection refused'), kind: 'email_connector' };
@@ -1580,7 +1578,6 @@ describe('mail trouble follows how far behind the checkpoint is', () => {
       until: 1000,
       loses_nothing: true,
       arrange: ({ mailSource }) => {
-        mailSource.datesAreArrival = false;
         let reads = 0;
         jest.spyOn(mailSource, 'readText').mockImplementation(() => {
           reads += 1;
@@ -1594,7 +1591,6 @@ describe('mail trouble follows how far behind the checkpoint is', () => {
       until: 1000,
       loses_nothing: false,
       arrange: ({ mailSource }) => {
-        mailSource.datesAreArrival = false;
         let reads = 0;
         jest.spyOn(mailSource, 'readText').mockImplementation(() => {
           reads += 1;
@@ -1621,7 +1617,6 @@ describe('mail trouble follows how far behind the checkpoint is', () => {
       until: 6,
       loses_nothing: false,
       arrange: ({ mailSource, clock }, active) => {
-        mailSource.datesAreArrival = false;
         jest.spyOn(mailSource, 'readText').mockImplementation(() => {
           if (active()) {
             clock.now = new Date(clock.now.getTime() + 100_000);
@@ -1725,8 +1720,23 @@ describe('mail trouble follows how far behind the checkpoint is', () => {
             received_at: new Date(NOW.getTime() + 10 * 60_000 + Math.floor(random() * 28 * HOUR)),
           }),
         );
-        const built = await setup({ messages });
+        // A flood of newsletters in four seconds, which neither path may stall on.
+        const floodAt = NOW.getTime() + Math.floor(random() * 28 * HOUR);
+        const flood = Array.from({ length: 150 }, (_, index) =>
+          mail({
+            id: `f${String(index)}`,
+            thread_id: null,
+            from_address: 'news@shop.test',
+            from_name: null,
+            subject: 'This week',
+            snippet: '',
+            authentication_results: [],
+            received_at: new Date(floodAt + Math.floor((index * 4000) / 150)),
+          }),
+        );
+        const built = await setup({ messages: [...messages, ...flood] });
         const { service, store, clock, mailSource } = built;
+        mailSource.fetchesEachListed = true;
         const recorded: NoticingEvent[] = [];
         const real = store.recordAll.bind(store);
         jest.spyOn(store, 'recordAll').mockImplementation(async input => {
@@ -1738,12 +1748,18 @@ describe('mail trouble follows how far behind the checkpoint is', () => {
         let mode: (typeof MODES)[number] = 'clean';
         let reads = 0;
         let calls = 0;
-        jest.mocked(mailSource.listNewMessages).mockImplementation(input => {
+        /** The list faults both paths share; undefined lets the list go ahead. */
+        const listFault = (): Error | undefined => {
           calls += 1;
-          if (mode === 'list_busy') return Promise.reject(busy());
-          if (mode === 'list_plain') return Promise.reject(plain());
-          if (mode === 'list_flaky' && calls % 3 !== 0) return Promise.reject(plain());
+          if (mode === 'list_busy') return busy();
+          if (mode === 'list_plain') return plain();
+          if (mode === 'list_flaky' && calls % 3 !== 0) return plain();
           if (mode === 'slow_lists') clock.now = new Date(clock.now.getTime() + 12_000);
+          return undefined;
+        };
+        jest.mocked(mailSource.listNewMessages).mockImplementation(input => {
+          const fault = listFault();
+          if (fault !== undefined) return Promise.reject(fault);
           return list === undefined ? Promise.reject(plain()) : list(input);
         });
         mailSource.readText = message => {
@@ -1756,6 +1772,39 @@ describe('mail trouble follows how far behind the checkpoint is', () => {
             return Promise.reject(new MessageUnreadableError({ cause: new Error('gone') }));
           }
           return read(message);
+        };
+        // The IMAP path numbers mail in the order it arrived. Now and then the server renumbers it, and a few
+        // messages have headers it cannot read, so they are listed as skipped.
+        const universe = [...messages, ...flood].sort(
+          (a, b) => a.received_at.getTime() - b.received_at.getTime() || a.id.localeCompare(b.id),
+        );
+        const broken = new Set(messages.filter((_, index) => index % 15 === 7).map(message => message.id));
+        let uidvalidity = 1;
+        let renumbered = 0;
+        const imap: CursorMailSource = {
+          listAfter: ({ cursor, since, limit }) => {
+            const fault = listFault();
+            if (fault !== undefined) return Promise.reject(fault);
+            const after = cursor?.uidvalidity === uidvalidity ? cursor.last_uid : undefined;
+            const arrived = universe
+              .map((message, index) => ({ message, uid: renumbered + index + 1 }))
+              .filter(item => item.message.received_at.getTime() <= clock.now.getTime());
+            const wanted = arrived.filter(item =>
+              after === undefined ? item.message.received_at.getTime() >= since.getTime() : item.uid > after,
+            );
+            const taken = wanted.slice(0, limit);
+            return Promise.resolve({
+              messages: taken
+                .filter(item => !broken.has(item.message.id))
+                .map(item => ({ ...item.message, uid: item.uid })),
+              skipped: taken.filter(item => broken.has(item.message.id)).length,
+              cursor: { uidvalidity, last_uid: taken.at(-1)?.uid ?? after ?? renumbered + arrived.length },
+              more: wanted.length > taken.length,
+            });
+          },
+          readText: message => mailSource.readText(message),
+          laterInThread: ref => mailSource.laterInThread(ref),
+          trustedAuthenticationServers: [],
         };
         const told = (message: MailMessage): boolean =>
           recorded.some(
@@ -1776,14 +1825,14 @@ describe('mail trouble follows how far behind the checkpoint is', () => {
             mode = hours >= FAULTY_HOURS ? 'clean' : (MODES[Math.floor(random() * MODES.length)] ?? 'clean');
             // A source switch now and then, each way, whatever the fault is.
             if (random() < 0.4) {
-              const imap = random() < 0.5;
-              mailSource.datesAreArrival = !imap;
-              if (imap) {
-                delete mailSource.fetchesEachListed;
-              } else {
-                mailSource.fetchesEachListed = true;
-              }
-              built.sources.mail = { status: 'ready', source: mailSource, kind: imap ? 'email_connector' : 'google' };
+              built.sources.mail =
+                random() < 0.5
+                  ? { status: 'ready', source: imap, kind: 'email_connector' }
+                  : { status: 'ready', source: mailSource, kind: 'google' };
+            }
+            if (random() < 0.15) {
+              uidvalidity += 1;
+              renumbered += 1000;
             }
           }
           const ready = built.sources.mail;
@@ -1824,7 +1873,6 @@ describe('mail trouble follows how far behind the checkpoint is', () => {
       checked_at: new Date(NOW.getTime() - checked_ago),
       failure,
       stuck: undefined,
-      window_ms: undefined,
       source: 'google' as const,
     });
     expect(mailProblemOf({ checkpoint: stored(2 * HOUR), now: NOW })).toEqual({
@@ -1841,7 +1889,6 @@ describe('mail trouble follows how far behind the checkpoint is', () => {
 
   it('marks a pass that ran out of time as slow in the same pass', async () => {
     const { service, store, mailSource, clock } = await setup({ messages: bills });
-    mailSource.datesAreArrival = false;
     // An earlier pass recorded another reason, which running out of time replaces.
     await store.setCheckpoint({
       ...OWNER,
@@ -1849,7 +1896,6 @@ describe('mail trouble follows how far behind the checkpoint is', () => {
       checked_at: new Date(NOW.getTime() - 20 * 60_000),
       failure: { kind: 'other', since: new Date(NOW.getTime() - 30 * 60_000) },
       stuck: undefined,
-      window_ms: undefined,
       source: 'google',
     });
     jest.spyOn(mailSource, 'readText').mockImplementation(() => {
@@ -2004,7 +2050,6 @@ describe('mail trouble follows how far behind the checkpoint is', () => {
       checked_at: new Date('2026-11-03T09:00:00.000Z'),
       failure: undefined,
       stuck: undefined,
-      window_ms: undefined,
       source: 'google',
     });
     await service.run({ watcher: 'mail' });
@@ -2014,36 +2059,11 @@ describe('mail trouble follows how far behind the checkpoint is', () => {
     expect(notes[0]?.text).toMatch(/^Mira could not read some mail/);
   });
 
-  it('keeps the width of a catch-up window within a day', async () => {
-    const { service, store, mailSource, clock } = await setup({ messages: [] });
-    mailSource.datesAreArrival = false;
-    await store.setCheckpoint({
-      ...OWNER,
-      watcher: 'mail',
-      checked_at: new Date(NOW.getTime() - 23 * 3_600_000),
-      failure: { kind: 'too_slow', since: NOW },
-      stuck: undefined,
-      window_ms: 20 * 3_600_000,
-      source: 'google',
-    });
-    for (let pass = 0; pass < 4; pass += 1) {
-      clock.now = new Date(NOW.getTime() + pass * 10 * 60_000);
-      await service.run({ watcher: 'mail' });
-      const state = await checkpoint(store);
-      expect(state?.window_ms ?? 0).toBeLessThanOrEqual(24 * 3_600_000);
-      if (pass === 0) {
-        // The window did not reach now, so the doubled 40 hours is cut to a day.
-        expect(state?.window_ms).toBe(24 * 3_600_000);
-      }
-    }
-  });
-
   describe('when the mail source changes', () => {
     const carried = {
       checked_at: new Date(NOW.getTime() - 5 * 3_600_000),
       failure: { kind: 'other' as const, since: new Date(NOW.getTime() - 4 * 3_600_000) },
       stuck: { message_id: 'list:2026-11-05T10:00:00.000Z', passes: 2, since: new Date(NOW.getTime() - 4 * 3_600_000) },
-      window_ms: 600_000,
     };
 
     it.each([
@@ -2055,7 +2075,7 @@ describe('mail trouble follows how far behind the checkpoint is', () => {
       await store.setCheckpoint({ ...OWNER, watcher: 'mail', ...carried, source: before });
       await service.run({ watcher: 'mail' });
       const state = await checkpoint(store);
-      expect(state).toMatchObject({ source: now, stuck: undefined, window_ms: undefined });
+      expect(state).toMatchObject({ source: now, stuck: undefined });
       // The new source reads from where the old one got to, not from ten minutes ago.
       expect(jest.mocked(mailSource.listNewMessages)).toHaveBeenCalledWith(
         expect.objectContaining({ since: carried.checked_at }),
@@ -2072,7 +2092,6 @@ describe('mail trouble follows how far behind the checkpoint is', () => {
         checked_at: carried.checked_at,
         failure: { since: carried.failure.since },
         stuck: carried.stuck,
-        window_ms: carried.window_ms,
       });
       expect(mailProblemOf({ checkpoint: await checkpoint(store), now: clock.now })?.since).toEqual(
         carried.failure.since,
@@ -2111,7 +2130,6 @@ describe('mail trouble follows how far behind the checkpoint is', () => {
         checked_at: new Date(NOW.getTime() - 10 * 60_000),
         failure: undefined,
         stuck: undefined,
-        window_ms: undefined,
         source: undefined,
       });
       sources.mail = { status: 'none' };
@@ -2125,7 +2143,6 @@ describe('mail trouble follows how far behind the checkpoint is', () => {
       checked_at: new Date(NOW.getTime() - 3 * 3_600_000),
       failure: { kind: 'other' as const, since: new Date(NOW.getTime() - 2 * 3_600_000) },
       stuck: undefined,
-      window_ms: undefined,
       source: 'google' as const,
     };
 
@@ -2218,7 +2235,6 @@ describe('mail trouble follows how far behind the checkpoint is', () => {
   it('passes a stretch that cannot be listed over after three passes and tells of it once', async () => {
     const bad = new Date(NOW.getTime() - 5 * 60_000 + 1500);
     const { service, store, mailSource, clock, feed } = await setup({ messages: [] });
-    mailSource.datesAreArrival = false;
     const real = jest.mocked(mailSource.listNewMessages).getMockImplementation();
     jest.mocked(mailSource.listNewMessages).mockImplementation(input => {
       return input.since <= bad && bad < input.before
@@ -2232,28 +2248,6 @@ describe('mail trouble follows how far behind the checkpoint is', () => {
     const notes = (await feed()).filter(item => item.text.includes('could not read some mail'));
     expect(notes).toHaveLength(1);
     expect((await checkpoint(store))?.stuck).toBeUndefined();
-  });
-
-  it('remembers on IMAP what a pass that ran out of time already read, so no pass reads it again', async () => {
-    const { service, store, mailSource, clock } = await setup({ messages: bills });
-    mailSource.datesAreArrival = false;
-    const reads: string[] = [];
-    jest.spyOn(mailSource, 'readText').mockImplementation(message => {
-      reads.push(message.id);
-      clock.now = new Date(clock.now.getTime() + 100_000);
-      return Promise.resolve('Amount due by November 7');
-    });
-    await service.run({ watcher: 'mail' });
-    const first = await checkpoint(store);
-    expect(first?.handled).toEqual(['m1']);
-    expect(first?.checked_at.getTime()).toBeLessThan(NOW.getTime());
-    for (let pass = 1; pass <= 6; pass += 1) {
-      clock.now = new Date(NOW.getTime() + pass * 10 * 60_000);
-      await service.run({ watcher: 'mail' });
-    }
-    expect(new Set(reads).size).toBe(reads.length);
-    expect(reads.sort()).toEqual(['m1', 'm2', 'm3', 'm4']);
-    expect((await checkpoint(store))?.handled).toBeUndefined();
   });
 
   it('records where mail is read from', async () => {

@@ -90,7 +90,6 @@ describe('reach routes', () => {
       checked_at: minutesAgo(minutes),
       failure: { kind: 'too_slow' as const, since: minutesAgo(minutes) },
       stuck: undefined,
-      window_ms: undefined,
       source: undefined,
     });
 
@@ -116,7 +115,6 @@ describe('reach routes', () => {
         checked_at: minutesAgo(90),
         failure: undefined,
         stuck: undefined,
-        window_ms: undefined,
         source: 'google',
       });
       const mine = GetReachResponseSchema.parse(await (await call('')).json()).data;
