@@ -290,6 +290,43 @@ test_an_upgrade_moves_https_off_a_port_tailscale_took() {
   sandbox_drop
 }
 
+test_a_failed_backup_leaves_the_https_port_as_it_was() {
+  t_begin "when the backup before an upgrade fails, the https port and the addresses stay as they were"
+  sandbox_new
+  tailnet
+  install_machine
+  local origins
+  origins=$(env_value main ALLOWED_ORIGINS)
+  STUB_TS_SERVE_PORTS="8443"
+  STUB_BACKUP_FAIL=1
+  repo_commit_change "app change"
+  run_install upgrade
+  if [ "$RC" != 0 ]; then t_pass; else t_fail "the upgrade went ahead without a backup"; fi
+  assert_eq "$(reg_value main tls_port)" 8443
+  assert_eq "$(env_value main ALLOWED_ORIGINS)" "$origins"
+  assert_not_contains "$OUT$ERR" "now opens over https on port"
+  sandbox_drop
+}
+
+test_rebuilding_missing_parts_moves_https_off_a_port_tailscale_took() {
+  t_begin "an upgrade that only builds missing parts again also moves https off a port Tailscale serve took, before restarting"
+  sandbox_new
+  tailnet
+  install_machine
+  local app
+  app=$(sed -n 's/.*"app_image": "\([^"]*\)".*/\1/p' "$AMAN_HOME/release/release.json")
+  grep -Fxv "$app" "$SB_STATE/images" >"$SB_STATE/images.new" || true
+  mv "$SB_STATE/images.new" "$SB_STATE/images"
+  STUB_TS_SERVE_PORTS="8443"
+  run_install upgrade
+  assert_rc 0
+  assert_flat_contains "$OUT" "Building the missing parts again"
+  assert_eq "$(reg_value main tls_port)" 8444
+  assert_contains "$(compose)" "- '100.101.102.103:8444:8443'"
+  assert_not_contains "$(compose)" ":8443:8443'"
+  sandbox_drop
+}
+
 test_an_app_port_tailscale_serves_stops_before_anything_changes() {
   t_begin "an upgrade stops before the backup and the build when Tailscale serve is set up for the app port, which is never moved by itself"
   sandbox_new
@@ -609,6 +646,8 @@ test_a_computer_with_no_network_has_nothing_to_serve
 test_a_busy_https_port_moves_the_instance
 test_a_port_tailscale_serves_is_not_picked
 test_an_upgrade_moves_https_off_a_port_tailscale_took
+test_a_failed_backup_leaves_the_https_port_as_it_was
+test_rebuilding_missing_parts_moves_https_off_a_port_tailscale_took
 test_an_app_port_tailscale_serves_stops_before_anything_changes
 test_an_existing_instance_moves_to_https_and_back
 test_a_new_address_gets_a_new_certificate
