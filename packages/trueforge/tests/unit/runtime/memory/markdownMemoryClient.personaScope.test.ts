@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
@@ -7,7 +7,7 @@ import {
   type EmbeddingModelPhase,
 } from '../../../../src/runtime/memory/embeddingModel';
 import { EmbeddingSubsystem } from '../../../../src/runtime/memory/embeddingRetrieval';
-import { EmbeddingStore, hashEntryText } from '../../../../src/runtime/memory/embeddingStore';
+import { EmbeddingStore, hashEntryText, LOG_VECTORS_FILE } from '../../../../src/runtime/memory/embeddingStore';
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
 import { writeVaultSharing, type VaultScope } from '../../../../src/runtime/memory/markdownMemoryFiles';
 
@@ -487,7 +487,7 @@ async function waitForIndexed(subsystem: EmbeddingSubsystem, entries: number): P
 }
 
 async function storedIds(namespace: string): Promise<string[]> {
-  return (await EmbeddingStore.load({ namespaceDir: path.join(baseDir, namespace) })).ids();
+  return (await EmbeddingStore.load({ namespaceDir: path.join(baseDir, namespace), fileName: LOG_VECTORS_FILE })).ids();
 }
 
 describe('MarkdownMemoryClient persona vault scope with embeddings', () => {
@@ -573,7 +573,10 @@ describe('MarkdownMemoryClient persona vault scope with embeddings', () => {
     expect([...requested]).toEqual(['tenant-1__persona_Alpha']);
     // The index keeps the entry's time heading with the fact, as it does for a newly retained entry.
     await waitFor(async () => {
-      const store = await EmbeddingStore.load({ namespaceDir: path.join(baseDir, 'tenant-1__persona_Alpha') });
+      const store = await EmbeddingStore.load({
+        namespaceDir: path.join(baseDir, 'tenant-1__persona_Alpha'),
+        fileName: LOG_VECTORS_FILE,
+      });
       return store.get(entry.id)?.hash === hashEntryText(`## ${entry.timestamp}\n\n${edited}`);
     }, 'the edited fact to be re-indexed');
     expect(await storedIds(TENANT)).toEqual([]);

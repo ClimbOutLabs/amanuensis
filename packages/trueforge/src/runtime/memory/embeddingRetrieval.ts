@@ -9,7 +9,7 @@
 import { PromiseTimeoutError, withTimeout } from '@truefoundry/trueforge-core/core';
 import path from 'node:path';
 import { EMBEDDING_DIMENSIONS, getSharedEmbeddingModel, type EmbeddingModel } from './embeddingModel';
-import { EmbeddingStore, hashEntryText } from './embeddingStore';
+import { EmbeddingStore, hashEntryText, LOG_VECTORS_FILE } from './embeddingStore';
 import { namespaceDirFor, scanNamespaceEntries } from './markdownMemoryFiles';
 
 /** How many vector hits lead the ranking; bounded work per recall. */
@@ -213,6 +213,11 @@ export class EmbeddingSubsystem {
     this.batchSize = defaultBatchSize(options.batchSize);
     this.log = options.log;
     this.model = sharedModel(options);
+  }
+
+  /** The shared model, so the statement index embeds with the same one instead of loading a second. */
+  get embeddingModel(): EmbeddingModel {
+    return this.model;
   }
 
   getStatus(): EmbeddingStatus {
@@ -478,7 +483,7 @@ export class EmbeddingSubsystem {
     // the retry stays on the short cooldown instead of the 10-minute timer.
     let warmed = false;
     await this.queueStoreMutation(async () => {
-      this.store = await EmbeddingStore.load({ namespaceDir: this.namespaceDir() });
+      this.store = await EmbeddingStore.load({ namespaceDir: this.namespaceDir(), fileName: LOG_VECTORS_FILE });
       await this.backfill();
       warmed = this.store.isBackfilled;
     });
