@@ -291,6 +291,22 @@ describe('what is held, because content steered it', () => {
     ).toBe(false);
   });
 
+  it('shows the steering warning in the words the card renders, not only in its older sentence', async () => {
+    const ctx = makeCtx();
+    read(ctx, { tool_name: 'read_email', args: ['m1'], text: PHISH });
+    const decision = await classifyTier(
+      sendDraft(draft({ to: [{ name: 'Mom', address: 'collect@evil.example' }] })),
+      ctx,
+    );
+    expect(decision).toMatchObject({ tier: 3, reason: 'content_steered' });
+    // The card renders its copy, so the warning has to be in the copy: the headline names Mom,
+    // and the consequence carries where her address came from.
+    expect(decision.card?.copy?.headline).toBe('Send this email to Mom?');
+    expect(decision.card?.copy?.consequence).toBe(
+      "Once this is sent, it can't be unsent. This goes to Mom (collect@evil.example), whose address was in an email Aman read.",
+    );
+  });
+
   it("holds a forward to the Reply-To of a stranger's mail, and never lets the chat-wide answer cover it", async () => {
     const ctx = makeCtx();
     read(ctx, {

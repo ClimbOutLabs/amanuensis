@@ -68,6 +68,11 @@ describe('document read classification', () => {
     expect(decision.approval_token_id).not.toBeNull();
     expect(decision.card?.plain_what).toContain('/outside/report.pdf');
     expect(decision.card?.plain_what).toContain('outside the project folder');
+    expect(decision.card?.copy).toEqual({
+      headline: 'Read the file "/outside/report.pdf" outside the project folder?',
+      consequence: null,
+      reason: null,
+    });
   });
 
   it('asks when one path of several is outside, and the card names only that path', async () => {

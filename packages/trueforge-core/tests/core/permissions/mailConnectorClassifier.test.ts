@@ -274,6 +274,19 @@ describe('Email connector classifier', () => {
       expect(decision.approval_token_id).not.toBeNull();
     });
 
+    it('puts the new-recipient line in the copy the card renders, not only in its older sentence', async () => {
+      const decision = await classifyTier(
+        hostMailCall('send_email', { recipients: [STRANGER], subject: SUBJECT, body: 'Hi' }, OUTBOUND_WRITE),
+        ctxWithList([LISTED]),
+      );
+      expect(decision).toMatchObject({ tier: 3, auto_deny: null, reason: 'mail_new_recipient' });
+      // The permission card renders its copy and never shows plain_what, so the line a person
+      // needs (this address is new, and approving adds it) has to lead the copy's consequence.
+      expect(decision.card?.copy?.consequence).toBe(
+        `${NEW_RECIPIENT_LINE} Approving adds them to your send list and sends. Once this is sent, it can't be unsent.`,
+      );
+    });
+
     it('one unlisted address among listed ones is still a new recipient', async () => {
       const decision = await classifyTier(
         hostMailCall(

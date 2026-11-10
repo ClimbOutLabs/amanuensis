@@ -169,6 +169,28 @@ describe('PermissionApprovalCard', () => {
     expect(onApprove).toHaveBeenCalledTimes(1);
   });
 
+  it('shows the new-recipient line from the copy on a send to someone new', () => {
+    renderCard({
+      plain_what: 'Send an email to stranger@example.com?',
+      recipient: 'stranger@example.com',
+      cannot_be_undone: "Once this is sent, it can't be unsent.",
+      copy: {
+        headline: 'Send an email to stranger@example.com?',
+        consequence:
+          "New recipient. You have never emailed stranger@example.com. Approving adds them to your send list and sends. Once this is sent, it can't be unsent.",
+        reason: null,
+      },
+      safe_choice: true,
+      destructive: true,
+    });
+    expect(screen.getByRole('heading', { name: 'Send an email to stranger@example.com?' })).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "New recipient. You have never emailed stranger@example.com. Approving adds them to your send list and sends. Once this is sent, it can't be unsent.",
+      ),
+    ).toBeInTheDocument();
+  });
+
   it('keeps the action primary and the safe choice quiet on a reversible card', () => {
     renderCard({
       copy: {

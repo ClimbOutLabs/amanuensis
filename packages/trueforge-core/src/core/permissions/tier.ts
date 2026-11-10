@@ -211,9 +211,9 @@ export type ApprovalCardCopy = z.infer<typeof ApprovalCardCopySchema>;
 export const Tier3CardSchema = z
   .object({
     plain_what: z.string().describe('One plain-language sentence describing what will happen. No jargon.'),
-    copy: ApprovalCardCopySchema.nullable()
-      .optional()
-      .describe('The headline, consequence and reason the card renders, or null on cards saved before copy existed.'),
+    copy: ApprovalCardCopySchema.nullable().describe(
+      'The headline, consequence and reason the card renders. Every builder fills it from its copy owner; null only where a later choke point fills it, never on a finished card.',
+    ),
     safe_choice: z
       .boolean()
       .optional()

@@ -58,6 +58,7 @@ function textStream(): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantM
 
 const SEND_CARD: InternalToolCallInfo['tier3_card'] = {
   plain_what: 'Send an email.',
+  copy: null,
   plain_why: null,
   cannot_be_undone: null,
   why_asked_again: null,

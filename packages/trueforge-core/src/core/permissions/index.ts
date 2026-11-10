@@ -31,9 +31,11 @@ export {
 } from './browserToolNames';
 export type { BrowserToolName } from './browserToolNames';
 export {
+  browserCardCopy,
   calendarCardCopy,
   emailCardCopy,
   fileCardCopy,
+  joinLine,
   paymentCardCopy,
   sandboxCardCopy,
   simpleCardCopy,

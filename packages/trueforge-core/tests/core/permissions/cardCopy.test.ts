@@ -1,7 +1,9 @@
 import {
+  browserCardCopy,
   calendarCardCopy,
   emailCardCopy,
   fileCardCopy,
+  joinLine,
   paymentCardCopy,
   sandboxCardCopy,
   simpleCardCopy,
@@ -173,11 +175,46 @@ describe('sandboxCardCopy and simpleCardCopy', () => {
   });
 
   it('simple copy makes the question the headline', () => {
-    expect(simpleCardCopy({ headline: 'Create the schedule "Morning"?', undo: null })).toEqual({
+    expect(simpleCardCopy({ headline: 'Create the schedule "Morning"?', undo: null, reason: null })).toEqual({
       headline: 'Create the schedule "Morning"?',
       consequence: null,
       reason: null,
     });
+  });
+
+  it('simple copy carries the reason its kind asks with', () => {
+    expect(
+      simpleCardCopy({
+        headline: 'Search the web for storm damage?',
+        undo: null,
+        reason: 'Searches are set to ask, so Aman is checking with you first.',
+      }),
+    ).toEqual({
+      headline: 'Search the web for storm damage?',
+      consequence: null,
+      reason: 'Searches are set to ask, so Aman is checking with you first.',
+    });
+  });
+});
+
+describe('browserCardCopy and joinLine', () => {
+  it('browser copy leads with the question and carries why the open asks as the reason', () => {
+    expect(
+      browserCardCopy({
+        headline: 'Open https://example.test/page?',
+        reason: 'Aman found this link in something it read, and opening it would send more than the link said.',
+      }),
+    ).toEqual({
+      headline: 'Open https://example.test/page?',
+      consequence: null,
+      reason: 'Aman found this link in something it read, and opening it would send more than the link said.',
+    });
+  });
+
+  it('joinLine keeps the sentences that apply, in order, and is null when none apply', () => {
+    expect(joinLine([null, 'Second.'])).toBe('Second.');
+    expect(joinLine(['First.', 'Second.'])).toBe('First. Second.');
+    expect(joinLine([null, null])).toBeNull();
   });
 });
 

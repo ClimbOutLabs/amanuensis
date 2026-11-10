@@ -13,7 +13,7 @@ import type { Tier3Mailbox } from './tierMailbox';
  */
 
 /** The sentences that make one line, in order, skipping the ones that do not apply; null when none apply. */
-function joinLine(parts: readonly (string | null)[]): string | null {
+export function joinLine(parts: readonly (string | null)[]): string | null {
   const present = parts.filter((part): part is string => part !== null && part !== '');
   return present.length === 0 ? null : present.join(' ');
 }
@@ -96,8 +96,21 @@ export function sandboxCardCopy(input: {
 
 /**
  * Copy for a kind whose card sentence is already one checked question (a schedule, a persona, a held
- * search): the question is the headline and what cannot be undone is the consequence.
+ * search): the question is the headline, what cannot be undone is the consequence, and the sentence
+ * that says why this kind asks is the reason.
  */
-export function simpleCardCopy(input: { headline: string; undo: string | null }): ApprovalCardCopy {
-  return { headline: input.headline, consequence: input.undo, reason: null };
+export function simpleCardCopy(input: {
+  headline: string;
+  undo: string | null;
+  reason: string | null;
+}): ApprovalCardCopy {
+  return { headline: input.headline, consequence: input.undo, reason: input.reason };
+}
+
+/**
+ * Browser copy: opening a page or clicking a commit button sends nothing the card has to warn about
+ * beyond the action itself, so there is no consequence; why the open asks is the reason.
+ */
+export function browserCardCopy(input: { headline: string; reason: string | null }): ApprovalCardCopy {
+  return { headline: input.headline, consequence: null, reason: input.reason };
 }

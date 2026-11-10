@@ -3,6 +3,7 @@ import { autoDenyDecision, tier1Decision, tier2Decision, tier3Decision } from '.
 
 const card = {
   plain_what: 'Change `notes.md` in your workspace?',
+  copy: null,
   plain_why: null,
   cannot_be_undone: null,
   why_asked_again: null,

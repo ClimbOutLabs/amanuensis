@@ -127,7 +127,7 @@ import {
   holdSay,
   SEARCH_SERVER_FALLBACK,
   searchHoldAuditText,
-  searchHoldCardText,
+  searchHoldQuestion,
   searchProviderLabel,
   SECRET_SAY,
   steeredDestinationSay,
@@ -203,6 +203,7 @@ import {
   calendarCardCopy,
   emailCardCopy,
   fileCardCopy,
+  joinLine,
   paymentCardCopy,
   sandboxCardCopy,
   simpleCardCopy,
@@ -1238,6 +1239,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
     return tier3Decision({
       card: {
         plain_what: 'Run this command with custom environment variables?',
+        copy: null,
         plain_why: plainWhy(ctx.agent_intent),
         cannot_be_undone: 'This changes how programs start, which can make them run other code.',
         why_asked_again: null,
@@ -1302,6 +1304,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
       return tier3Decision({
         card: {
           plain_what: 'Run this program, even though it cannot be matched to a file in your workspace?',
+          copy: null,
           plain_why: plainWhy(ctx.agent_intent),
           cannot_be_undone: 'This runs a file, and it can do anything once started.',
           why_asked_again: null,
@@ -1351,6 +1354,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
         return tier3Decision({
           card: {
             plain_what: 'Run a script the assistant wrote earlier?',
+            copy: null,
             plain_why: plainWhy(ctx.agent_intent),
             cannot_be_undone: 'This script gets full access to your shell.',
             why_asked_again: null,
@@ -1390,6 +1394,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
         return tier3Decision({
           card: {
             plain_what: 'Run this command, even though no workspace is set?',
+            copy: null,
             plain_why: plainWhy(ctx.agent_intent),
             cannot_be_undone: 'No workspace is set, so this command can read any of your files.',
             why_asked_again: null,
@@ -1417,6 +1422,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
         return tier3Decision({
           card: {
             plain_what: 'Run this command from outside your workspace?',
+            copy: null,
             plain_why: plainWhy(ctx.agent_intent),
             cannot_be_undone: 'This runs outside your workspace and can reach system files.',
             why_asked_again: null,
@@ -1445,6 +1451,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
         return tier3Decision({
           card: {
             plain_what: 'Run a command that reaches a file outside your workspace?',
+            copy: null,
             plain_why: plainWhy(ctx.agent_intent),
             cannot_be_undone: 'This file is outside your workspace.',
             why_asked_again: null,
@@ -1512,6 +1519,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
     card: {
       plain_what:
         form.kind === 'compound' ? 'Run this command with pipes, chaining, or redirects?' : 'Run this command?',
+      copy: null,
       plain_why: plainWhy(ctx.agent_intent),
       cannot_be_undone: 'Commands can change or delete files.',
       why_asked_again: null,
@@ -1833,7 +1841,8 @@ async function decideTier2(input: {
 
 /**
  * Copy for a card that sends something out of the machine: the payment owner's copy when an amount
- * was extracted, the send sentence as the headline otherwise.
+ * was extracted, the send sentence as the headline otherwise. A notice the card has to carry (a new
+ * recipient, above all) leads the consequence, ahead of what cannot be undone.
  */
 function sendCardCopy(input: {
   plain_what: string;
@@ -1841,10 +1850,13 @@ function sendCardCopy(input: {
   recipient: string | null;
   destination: string | null;
   undo: string | null;
+  notice: string | null;
 }): ApprovalCardCopy {
-  return input.amount !== null
-    ? paymentCardCopy({ amount: input.amount, recipient: input.recipient, destination: input.destination })
-    : simpleCardCopy({ headline: input.plain_what, undo: input.undo });
+  const base =
+    input.amount !== null
+      ? paymentCardCopy({ amount: input.amount, recipient: input.recipient, destination: input.destination })
+      : simpleCardCopy({ headline: input.plain_what, undo: input.undo, reason: null });
+  return input.notice === null ? base : { ...base, consequence: joinLine([input.notice, base.consequence]) };
 }
 
 function externalServiceWhat(input: {
@@ -1983,12 +1995,12 @@ async function holdSearchCall(input: {
           max_chars: SEARCH_CARD_TEXT_MAX,
         });
   const tavily = tavilyText === null ? null : escapeDisplayText(tavilyText);
+  // The copy leads with the question alone; the sentence that says why this asks is its reason.
+  const question = tavily ?? searchHoldQuestion({ summary: escapeDisplayText(shown), page: input.page });
   const decision = tier3Decision({
     card: {
-      plain_what:
-        tavily === null
-          ? searchHoldCardText({ summary: escapeDisplayText(shown), say: input.say, page: input.page })
-          : withHoldSay(tavily, input.say),
+      plain_what: withHoldSay(question, input.say),
+      copy: simpleCardCopy({ headline: question, undo: null, reason: input.say }),
       plain_why: plainWhy(ctx.agent_intent),
       cannot_be_undone: null,
       why_asked_again: null,
@@ -2161,7 +2173,8 @@ async function classifyBrowserOpen(input: { action: SentinelAction; ctx: Classif
       card: browserOpenCard({
         url: shown,
         host: parsed === undefined ? null : escapeDisplayText(parsed.hostname),
-        plain_what: withHoldSay(`Open ${shown}?`, reasonSay),
+        headline: `Open ${shown}?`,
+        say: reasonSay,
         plain_why: plainWhy(ctx.agent_intent),
       }),
       reason,
@@ -2308,7 +2321,13 @@ function steeringChecked(input: {
     ...decision,
     reason: CONTENT_STEERED_REASON,
     reason_detail: say,
-    card: { ...card, plain_what: withHoldSay(card.plain_what, say) },
+    card: {
+      ...card,
+      plain_what: withHoldSay(card.plain_what, say),
+      // The card renders its copy, not plain_what, so the warning joins the consequence line too,
+      // where the person reads it before answering. A card with no copy yet keeps it in plain_what.
+      copy: card.copy === null ? null : { ...card.copy, consequence: joinLine([card.copy.consequence, say]) },
+    },
   };
 }
 
@@ -2521,7 +2540,7 @@ async function classifyMailRead(action: SentinelAction, ctx: ClassifyContext): P
     return tier3Decision({
       card: {
         plain_what: 'Allow marking these emails as read?',
-        copy: simpleCardCopy({ headline: 'Allow marking these emails as read?', undo: null }),
+        copy: simpleCardCopy({ headline: 'Allow marking these emails as read?', undo: null, reason: null }),
         plain_why: plainWhy(ctx.agent_intent),
         cannot_be_undone: null,
         why_asked_again: null,
@@ -2819,6 +2838,7 @@ function scheduleWriteCard(input: { review: Tier3Schedule; agent_intent: string 
     copy: simpleCardCopy({
       headline,
       undo: review.action === 'delete' ? 'Once deleted, the schedule is gone for good.' : null,
+      reason: null,
     }),
     // Deleting a schedule is gone for good, so its safe choice comes first; creating one is reversible.
     safe_choice: review.action === 'delete',
@@ -2853,7 +2873,7 @@ function personaWriteCard(input: { review: Tier3Persona; agent_intent: string | 
   const sentence = show(review.description).replace(/[.!?]+$/, '');
   return {
     plain_what: `Add a persona: ${show(review.name)}? ${sentence}.`,
-    copy: simpleCardCopy({ headline: `Add a persona: ${show(review.name)}?`, undo: null }),
+    copy: simpleCardCopy({ headline: `Add a persona: ${show(review.name)}?`, undo: null, reason: null }),
     plain_why: plainWhy(input.agent_intent),
     cannot_be_undone: null,
     why_asked_again: null,
@@ -3053,9 +3073,11 @@ async function classifyDocumentTool(action: SentinelAction, ctx: ClassifyContext
   }
   const named =
     outside.length === 1 ? `the file ${mapsCardLabel(outside[0])}` : `these files: ${joinedLabels(outside)}`;
+  const plain_what = `Read ${named} outside the project folder?`;
   return tier3Decision({
     card: {
-      plain_what: `Read ${named} outside the project folder?`,
+      plain_what,
+      copy: fileCardCopy({ headline: plain_what, undo: null }),
       plain_why: plainWhy(ctx.agent_intent),
       cannot_be_undone: null,
       why_asked_again: null,
@@ -3247,6 +3269,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
           recipient: fields.recipient,
           destination: fields.destination,
           undo: draft ? null : "Once this is sent, it can't be unsent.",
+          notice: `${newRecipientLine} Approving adds them to your send list and ${draft ? 'saves this draft' : 'sends'}.`,
         }),
         // A send to a new address reaches someone new and cannot be unsent: the safe choice comes first.
         safe_choice: !draft,
@@ -3298,6 +3321,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
           recipient: fields.recipient,
           destination: fields.destination,
           undo: "Once this is sent, it can't be unsent.",
+          notice: null,
         }),
         safe_choice: true,
         destructive: true,
@@ -3361,6 +3385,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
           recipient: fields.recipient,
           destination: fields.destination,
           undo: cannot_be_undone,
+          notice: null,
         }),
         safe_choice: reachesOut,
         destructive: reachesOut,
@@ -3413,6 +3438,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
           recipient: fields.recipient,
           destination: fields.destination,
           undo: isDestructive ? "Once deleted, it's gone for good." : "Once this runs, it can't be undone.",
+          notice: null,
         }),
         // A send or a delete puts the safe choice first; an install keeps the action first.
         safe_choice: namedSend || isDestructive,
@@ -3593,25 +3619,28 @@ function connectorApprovalCard(input: {
   // Only a read the host vouches for may say "your email" or "your calendar"; a connector that merely shares the name asks like any other.
   const hostMailRead = isHostMailRead(action);
   const hostCalendarRead = isHostCalendarRead(action);
+  const plain_what =
+    spaceToolLine(action) ??
+    extraction.connector_what ??
+    (hostCalendarRead
+      ? 'Allow looking at your calendar?'
+      : hostMailRead
+        ? 'Allow reading your email?'
+        : `Allow this new tool from ${escapeDisplayText(action.mcp_server_name ?? 'a connector you added')}?`);
+  // A connector's own read-only claim never lowers this; only a read the host vouches for leaves the warning out.
+  // A call that only saves a draft sends nothing, so it carries no send warning either.
+  const cannot_be_undone = extraction.staged_draft
+    ? null
+    : extraction.connector_what !== null
+      ? "Once this is sent, it can't be unsent."
+      : hostMailRead || hostCalendarRead
+        ? null
+        : 'It is not clear whether this can be undone.';
   return {
-    plain_what:
-      spaceToolLine(action) ??
-      extraction.connector_what ??
-      (hostCalendarRead
-        ? 'Allow looking at your calendar?'
-        : hostMailRead
-          ? 'Allow reading your email?'
-          : `Allow this new tool from ${escapeDisplayText(action.mcp_server_name ?? 'a connector you added')}?`),
+    plain_what,
+    copy: simpleCardCopy({ headline: plain_what, undo: cannot_be_undone, reason: null }),
     plain_why: plainWhy(input.agent_intent),
-    // A connector's own read-only claim never lowers this; only a read the host vouches for leaves the warning out.
-    // A call that only saves a draft sends nothing, so it carries no send warning either.
-    cannot_be_undone: extraction.staged_draft
-      ? null
-      : extraction.connector_what !== null
-        ? "Once this is sent, it can't be unsent."
-        : hostMailRead || hostCalendarRead
-          ? null
-          : 'It is not clear whether this can be undone.',
+    cannot_be_undone,
     why_asked_again: null,
     destination: fields.destination,
     recipient: fields.recipient,
@@ -3716,7 +3745,7 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
           copy:
             name === 'run_code'
               ? sandboxCardCopy({ headline: plain_what, undo: "Once this runs, it can't be undone.", reason: null })
-              : simpleCardCopy({ headline: plain_what, undo: "Once this runs, it can't be undone." }),
+              : simpleCardCopy({ headline: plain_what, undo: "Once this runs, it can't be undone.", reason: null }),
           plain_why: plainWhy(ctx.agent_intent),
           cannot_be_undone: "Once this runs, it can't be undone.",
           why_asked_again: null,
@@ -3763,9 +3792,18 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
           ? placesOutboundArguments(action.canonical_params)
           : action.canonical_params,
       );
+      const mapsPlain = mapsPlainWhat(action);
+      // Why maps asks (the person's setting, or the guard rule that stopped the silent run) is the copy's reason.
+      const mapsReason =
+        silent === undefined
+          ? holdSay(ctx.web_search.assistantName).maps_always
+          : silent.held.ok
+            ? null
+            : guardRuleSay({ rule: silent.held.rule, assistant: ctx.web_search.assistantName });
       return tier3Decision({
         card: {
-          plain_what: mapsPlainWhat(action),
+          plain_what: mapsPlain,
+          copy: simpleCardCopy({ headline: mapsPlain, undo: null, reason: mapsReason }),
           plain_why: plainWhy(ctx.agent_intent),
           cannot_be_undone: null,
           why_asked_again: null,
@@ -3778,12 +3816,7 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
           outbound_truncated: outbound.truncated,
         },
         reason: MAPS_ASK_REASON,
-        reason_detail:
-          silent === undefined
-            ? holdSay(ctx.web_search.assistantName).maps_always
-            : silent.held.ok
-              ? null
-              : guardRuleSay({ rule: silent.held.rule, assistant: ctx.web_search.assistantName }),
+        reason_detail: mapsReason,
         sensitive_read: false,
         approval_token_id: await mintPlainToken({
           ctx,

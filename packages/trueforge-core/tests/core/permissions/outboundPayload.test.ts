@@ -408,6 +408,11 @@ describe('connector card: unknown tools stay fail-closed', () => {
     expect(decision.tier).toBe(3);
     expect(decision.reason).toBe('unrecognized_tool');
     expect(card.plain_what).toBe('Allow this new tool from exa?');
+    expect(card.copy).toEqual({
+      headline: 'Allow this new tool from exa?',
+      consequence: 'It is not clear whether this can be undone.',
+      reason: null,
+    });
     expect(card.destination).toBe('https://api.example.com/data');
     expect(card.destination_host).toBe('mcp.exa.ai');
     expect(card.outbound_text).toBe('target: https://api.example.com/data\nn (number): 2');

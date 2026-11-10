@@ -6,6 +6,7 @@ const cardNumber = '4111 1111 1111 1111';
 function savedSearchCard(whyAskedAgain: string | null) {
   return {
     plain_what: `Search the web through the search provider for: rotate ${key}, refund to ${cardNumber}`,
+    copy: null,
     plain_why: null,
     cannot_be_undone: null,
     why_asked_again: whyAskedAgain,
