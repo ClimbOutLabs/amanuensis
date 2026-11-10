@@ -1,7 +1,11 @@
 import { existsSync } from 'node:fs';
-import { mkdir, rm } from 'node:fs/promises';
+import { mkdir, readdir, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
+import { join } from 'node:path';
 import type { Logger } from 'winston';
+
+import { errorCode } from '../cli/errorCode';
+import { removeSandbox } from './local/core/hostRun';
 
 const SOCKET_PARENT_MODE = 0o700;
 
@@ -50,4 +54,23 @@ export async function removeCodeModeSocketParent(socketParentPath: string): Prom
 
 export async function ensureLocalSandboxRootParent(sandboxRootPathParent: string): Promise<void> {
   await mkdir(sandboxRootPathParent, { recursive: true, mode: SOCKET_PARENT_MODE });
+}
+
+/** Removes every local sandbox a chat used. They all sit in the chat's own folder, which goes too. */
+export async function removeLocalChatSandboxes({ chatFolder }: { chatFolder: string }): Promise<void> {
+  let entries;
+  try {
+    entries = await readdir(chatFolder, { withFileTypes: true });
+  } catch (error) {
+    if (errorCode(error) === 'ENOENT') {
+      return;
+    }
+    throw error;
+  }
+  for (const entry of entries) {
+    if (entry.isDirectory()) {
+      await removeSandbox(join(chatFolder, entry.name));
+    }
+  }
+  await rm(chatFolder, { recursive: true, force: true });
 }

@@ -272,6 +272,7 @@ async function setup() {
       metadata: undefined,
       source_type: undefined,
       source_id: undefined,
+      include_private: false,
     });
     return all.data;
   }

@@ -16,6 +16,8 @@ Aman remembers things between conversations so you don't have to repeat yourself
 
 Memory is on by default. Amanuensis recalls from local Markdown files before every reply and retains what matters from each completed turn, so the model never has to remember to use it. Memories live as plain files under `MEMORY_MARKDOWN_DIR` (default `./data/memory`, relative to the server's working directory) — human-readable, portable, and yours. In Docker, mount a volume at that path so memories survive container recreates.
 
+An incognito chat reads memory but never writes to it. Aman recalls from the vaults as usual, but saves nothing from the chat, in any persona, and the chat never joins past-chat search. See [Privacy](/privacy#incognito-chats).
+
 Memories are scoped by persona. While a persona is active, what it learns is kept in that persona's own vault and is private to it until you share the vault. With no persona active, memories go to the shared vault, which every persona can read. A persona recalls from its own vault, the shared vault, and any vault shared with it. Renaming or deleting a persona never deletes its vault.
 
 ## Searching past chats

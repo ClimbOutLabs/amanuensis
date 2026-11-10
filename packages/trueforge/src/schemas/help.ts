@@ -30,6 +30,39 @@ export const HelpHostReportSchema = z
   })
   .openapi('HelpHostReport');
 
+export const HelpSetupStepSchema = z
+  .object({
+    id: z
+      .enum(['model', 'about_you'])
+      .describe('model: a default model is chosen. about_you: your name is saved in Personalization.'),
+    done: z.boolean().describe('Whether this setup step is done.'),
+  })
+  .openapi('HelpSetupStep');
+
+export const HelpConnectorStateSchema = z
+  .object({
+    name: z.string().describe('The connector name. Never a token or address.'),
+    connected: z.boolean().describe('Whether the connector answered this check with its tools.'),
+    last_error: z.string().nullable().describe('One plain sentence on why it did not answer this check, or null.'),
+  })
+  .openapi('HelpConnectorState');
+
+export const HelpGoogleLoginStateSchema = z
+  .enum(['answered', 'needs_reconnect', 'no_answer', 'not_set_up'])
+  .describe('The built-in Google login: answered, needs connecting again, did not answer, or not set up.')
+  .openapi('HelpGoogleLoginState');
+
+export const HelpStateSchema = z
+  .object({
+    setup_steps: z.array(HelpSetupStepSchema).describe('The first-run setup steps and whether each is done.'),
+    connectors: z.array(HelpConnectorStateSchema).describe('Each connector, whether it answered, and why not.'),
+    google_login: HelpGoogleLoginStateSchema,
+    sandbox_ready: z.boolean().describe('Whether the sandbox that reads files and runs code is ready.'),
+    app_version: z.string().describe('The version of Aman this server runs.'),
+    build_ref: z.string().nullable().describe('The build this server runs, or null when the build was not stamped.'),
+  })
+  .openapi('HelpState');
+
 export const HelpHealthCheckSchema = z
   .object({
     checked_at: z.string().describe('When this check ran, in UTC ISO 8601.'),
@@ -38,6 +71,7 @@ export const HelpHealthCheckSchema = z
       .array(HelpHealthItemSchema)
       .describe('Every live check with the model first, then failed or warned lines from the last full check.'),
     host_report: HelpHostReportSchema,
+    state: HelpStateSchema,
   })
   .openapi('HelpHealthCheck');
 
@@ -50,6 +84,8 @@ export type HelpHealthItem = z.infer<typeof HelpHealthItemSchema>;
 export type HelpHostReportState = z.infer<typeof HelpHostReportStateSchema>;
 export type HelpHostReport = z.infer<typeof HelpHostReportSchema>;
 export type HelpHealthCheck = z.infer<typeof HelpHealthCheckSchema>;
+export type HelpConnectorState = z.infer<typeof HelpConnectorStateSchema>;
+export type HelpState = z.infer<typeof HelpStateSchema>;
 
 /**
  * The file the installer writes after `aman doctor`, install, upgrade and refresh. Its shape is

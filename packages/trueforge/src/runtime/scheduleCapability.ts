@@ -52,6 +52,7 @@ import {
 } from '../schemas/schedule';
 import { ChatAssistantUnavailableError, type ChatAssistant } from './chatAssistant';
 import { firstRunAfter, nextTriggerAfter, validateManifest } from './cron';
+import { toolsForChat } from './privateChat';
 
 /** Cron day-of-week order: index 0 is Sunday. */
 const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'] as const;
@@ -135,6 +136,8 @@ interface ScheduleToolSetOptions extends ScheduleTurnContext {
   timeZone: string | undefined;
   sentinel: SentinelHostContext;
   now: () => Date;
+  /** True in an incognito chat: schedules and reminders can be listed but not set or changed, since they outlive the chat. */
+  keepsNothing?: boolean | undefined;
 }
 
 type Prepared<T> = { ok: true; value: T } | { ok: false; message: string };
@@ -380,7 +383,7 @@ export class ScheduleToolSet extends LocalToolMCP {
   }
 
   protected getTools(): ToolDefinition[] {
-    return this.#tools;
+    return toolsForChat({ tools: this.#tools, keepsNothing: this.#options.keepsNothing ?? false, chatOnly: new Set() });
   }
 
   override callTool(...[params, ...rest]: Parameters<LocalToolMCP['callTool']>): ReturnType<LocalToolMCP['callTool']> {
@@ -919,11 +922,18 @@ function buildScheduleInstruction(builder: InstructionBuilder): void {
   builder.addSection(SCHEDULE_INSTRUCTION_SECTION, SCHEDULE_INSTRUCTION);
 }
 
+const SCHEDULE_READ_INSTRUCTION =
+  'list_schedules and list_reminders show what is set. This incognito chat cannot set, change or cancel a schedule or a reminder.';
+
+function buildScheduleReadInstruction(builder: InstructionBuilder): void {
+  builder.addSection(SCHEDULE_INSTRUCTION_SECTION, SCHEDULE_READ_INSTRUCTION);
+}
+
 /** Attaches the schedule tools, and the rule that they are the only way to schedule, to one chat turn's root thread. */
 export function scheduleCapability(options: ScheduleToolSetOptions): AgentCapability {
   return {
     systemToolSets: [new ScheduleToolSet(options)],
-    instructionBuilders: [buildScheduleInstruction],
+    instructionBuilders: [options.keepsNothing === true ? buildScheduleReadInstruction : buildScheduleInstruction],
     bundle: 'schedules',
   };
 }

@@ -101,6 +101,7 @@ function stubTurnExecutionDeps(
   const sessionStore = new InMemorySessionStore<SessionCustom, TurnCustom>();
   return {
     mcpCatalog: McpCatalog.loadShipped(),
+    chatDeletionStore: { listDeletedChatModelUsage: () => Promise.resolve([]) },
     scheduleStore,
     briefItemStore: new BriefItemCompletionStore(db),
     ...deliveryDeps(db),

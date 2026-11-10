@@ -26,6 +26,7 @@ export async function openPostgresStores(options: {
   poolMax: number;
   statementTimeoutMs: number;
   idleInTransactionSessionTimeoutMs: number;
+  connectionTimeoutMs: number;
   migrate: boolean;
 }): Promise<ExportStores<Transaction<PostgresDatabase>>> {
   const db = createDb({
@@ -33,6 +34,11 @@ export async function openPostgresStores(options: {
     poolMax: options.poolMax,
     statementTimeoutMs: options.statementTimeoutMs,
     idleInTransactionSessionTimeoutMs: options.idleInTransactionSessionTimeoutMs,
+    connectionTimeoutMs: options.connectionTimeoutMs,
+    // A command-line run reports to the terminal; the failing query surfaces the error itself.
+    onIdleClientError: error => {
+      console.error(`A Postgres connection broke while idle: ${error.message}`);
+    },
   });
   try {
     if (options.migrate) {
