@@ -41,10 +41,20 @@ and names the person's profile (`owner`) and the chat's tab (`tab`).
   on this computer or a private network, then returns a read.
 - `POST /read { owner, tab }` — the page as text, in reading order: its title, its address, its
   headings and text, and its controls, each actionable one with a short ref (`e14`). A password,
-  payment or one-time-code field never shows its value.
+  payment or one-time-code field never shows its value. Each read says where the view is, in pixels
+  down the page (or the inner box that scrolls). A page too long for one read starts where the view
+  is, keeps its main heading and short alerts, and says that the part above it is left out.
 - `POST /scroll { owner, tab, direction }`, `POST /back { owner, tab }` — move around, then return a
   read.
 - `POST /screenshot { owner, tab }` — a PNG of the page, which the app shows to the person in the chat.
+  With it come `model_png_base64` and `text`. The first is the same picture with every password, card
+  or one-time-code field (shadow roots included) and every embedded frame covered, and a red box and
+  its ref on each control in view. The second is the page text from the same moment. The copy is
+  drawn in a worker, never in the page, from a layout read in an isolated world, and is left out when
+  it cannot be made safely.
+
+A step that fails answers 500 with a fixed `reason` (`timeout`, `navigation_failed`, `page_changed`,
+`page_script_error` or `unknown`), never the error's own text; the full error goes to the sidecar's log.
 
 - `POST /click-info`, `POST /click`, `POST /type`, `POST /select { owner, tab, ref, ... }` — act on a
   control by its ref. The app server asks the person first for a click that would submit something.

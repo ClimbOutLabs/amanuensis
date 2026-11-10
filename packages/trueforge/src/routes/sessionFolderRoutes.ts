@@ -118,6 +118,10 @@ export const setSessionFolderRoute = createRoute({
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
       description: 'Session or owner-scoped folder not found.',
     },
+    422: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Private chats cannot be filed in a folder.',
+    },
   },
 });
 
