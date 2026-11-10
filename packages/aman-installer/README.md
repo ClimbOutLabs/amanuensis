@@ -78,10 +78,15 @@ What it can do today:
 - `aman backups`, on Windows, lists the backups kept on the PC,
   newest first. The Start menu's Backups entry opens the folder.
 
-On Windows, a window that a double-click or a Start menu entry opened
-stays open at the end until the person presses Enter, so the result and
-any problem can be read; a successful `aman open` closes at once, and a
-terminal or the daily backup task never waits.
+On Windows, when this program is the only one using its window, the
+window stays open at the end until the person presses Enter, so the
+result and any problem can be read. That covers a double-click in
+Explorer or in a browser's download list, a Start menu entry and Windows
+Search: the console is asked which programs share it, so it does not
+matter what started the program. A successful `aman open` closes at
+once. A terminal never waits, because its shell shares the window, and
+the daily backup task never waits. When the console cannot be asked,
+nothing waits.
 
 Every sentence a person can read lives in `src/messages.ts`. A test checks
 each one for plain words and compares them all to the golden file in

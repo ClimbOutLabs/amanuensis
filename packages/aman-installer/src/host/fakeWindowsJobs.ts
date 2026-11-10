@@ -84,7 +84,7 @@ export class FakeWindowsJobs implements WindowsJobs {
   firewallOpen = false;
   firewallPorts: readonly number[] = [];
   readonly ops: string[] = [];
-  private readonly fromExplorer: boolean;
+  private readonly ownsConsole: boolean;
 
   constructor(options: {
     localAppDataDir: string;
@@ -114,7 +114,7 @@ export class FakeWindowsJobs implements WindowsJobs {
     runOnceValueName?: string;
     // Whether the program was started by Windows Explorer, as a test
     // scripts it.
-    startedFromExplorer?: boolean;
+    ownsItsConsole?: boolean;
   }) {
     const paths = windowsPaths(options.localAppDataDir);
     this.programsExePath = paths.programsExePath;
@@ -140,7 +140,7 @@ export class FakeWindowsJobs implements WindowsJobs {
     this.acls = new Map(options.acls ?? []);
     this.backupTask = options.backupTask ?? false;
     this.backupNames = [...(options.backups ?? [])];
-    this.fromExplorer = options.startedFromExplorer ?? false;
+    this.ownsConsole = options.ownsItsConsole ?? false;
   }
 
   private step(name: FakeWindowsJobStep): void {
@@ -381,7 +381,7 @@ export class FakeWindowsJobs implements WindowsJobs {
     return Promise.resolve(!this.heldPorts.has(port));
   }
 
-  startedFromExplorer(): Promise<boolean> {
-    return Promise.resolve(this.fromExplorer);
+  ownsItsConsole(): Promise<boolean> {
+    return Promise.resolve(this.ownsConsole);
   }
 }

@@ -116,8 +116,45 @@ test('the golden file holds every command line the Windows jobs run', async () =
   await jobs.clearRunOnceResume();
   assert.equal(await jobs.runOnceResumePending(), false);
   await jobs.keepComputerAwake();
+  assert.equal(await jobs.ownsItsConsole(4711), false);
   const golden = readFileSync(new URL('../golden/windows-jobs-commands.txt', import.meta.url), 'utf8');
   assert.equal(recording.goldenText(), golden);
+});
+
+// Answers the console probe with what GetConsoleProcessList left after
+// the probe took itself out, or fails it as a PowerShell that did not run.
+class ConsoleRunner implements ProcessRunner {
+  private readonly answer: ProcessResult;
+
+  constructor(answer: ProcessResult) {
+    this.answer = answer;
+  }
+
+  run(command: string, args: readonly string[]): Promise<ProcessResult> {
+    if (command === 'powershell' && (args[3] ?? '').includes('GetConsoleProcessList')) {
+      return Promise.resolve(this.answer);
+    }
+    return Promise.resolve({ exitCode: 1, stdout: '', stderr: 'unexpected command', started: true });
+  }
+
+  runBytes(): Promise<ProcessBytesResult> {
+    return Promise.resolve({ exitCode: 1, stdout: new Uint8Array(), stderr: '', started: false });
+  }
+}
+
+test('this program owns its console only when no other program shares the window', async () => {
+  const owns = (answer: ProcessResult) => jobsWith(new ConsoleRunner(answer)).ownsItsConsole(4711);
+  // A double-click, a browser's download list or a Start menu entry.
+  assert.equal(await owns(okResult('4711\r\n')), true);
+  // A terminal: its shell is on the same console.
+  assert.equal(await owns(okResult('4711\r\n3020\r\n')), false);
+  assert.equal(await owns(okResult('3020\r\n4711\r\n')), false);
+  // Some other program alone, or no console at all.
+  assert.equal(await owns(okResult('3020\r\n')), false);
+  assert.equal(await owns(okResult('')), false);
+  // A probe that could not run never makes a window wait.
+  assert.equal(await owns({ exitCode: 1, stdout: '4711\r\n', stderr: 'blocked', started: true }), false);
+  assert.equal(await owns({ exitCode: 1, stdout: '', stderr: '', started: false }), false);
 });
 
 test('the daily backup task is absent when the query fails, and a refused make fails as a job error', async () => {
