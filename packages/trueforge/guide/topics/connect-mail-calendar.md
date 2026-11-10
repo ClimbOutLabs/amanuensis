@@ -53,7 +53,7 @@ To choose which account new email goes out from:
 
 New email goes out from the default account. When an email needs your OK, its card has a **From** picker when more than one account is connected. Pick the account there, before you approve. The account cannot be changed after you approve, and an OK you gave for one account never covers another.
 
-Each account keeps its own list of addresses you have approved. Approving a new address adds it to the list of the account the email goes from, and to no other account.
+Each account keeps its own list of addresses you have approved. Approving a new address adds it to the list of the account the email goes from, and to no other account. When you connect a new account, Aman fills its list from that account's own Sent folder, using the addresses you sent mail to from that account in the last twelve months. The helper that sends your mail enforces one combined list, made by putting every account's list together. Aman itself is stricter. It checks each send against the list of the account the email goes from, and that is the check the card shows you.
 
 To change an account, click **Manage**, then click **Change** on it. To remove one account, click **Manage**, then click **Remove** on it. This deletes that account's saved app password for good and keeps your other accounts.
 
