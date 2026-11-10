@@ -58,6 +58,8 @@ describe('per-user audit log route', () => {
         spec: AgentSpecSchema.parse({ model: { name: 'p/m' }, instructions: 'Answer the user.' }),
       },
       custom: null,
+      is_incognito: false,
+      private_expires_at: null,
     });
   }
 

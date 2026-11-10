@@ -35,7 +35,7 @@
  * This module also registers `aman.profile.learned` in the harness's passthrough event
  * registry, the same way runtime/memory/memoryEvents.ts registers `aman.memory.recall`.
  */
-import type { SessionAgent, TurnStreamingEvent } from '@truefoundry/trueforge-core/agent-session';
+import type { SessionAgent, SessionRecord, TurnStreamingEvent } from '@truefoundry/trueforge-core/agent-session';
 import { newEventId, VercelAILLM, type ILLM } from '@truefoundry/trueforge-core/core';
 import { createHash } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -58,6 +58,7 @@ import type { MemoryClient } from './memory/memoryClient';
 import { AMAN_MEMORY_NAMESPACE } from './memory/memoryRetain';
 import { uuidv5 } from './memory/uuidv5';
 import { modelIdentity, type TurnModelUsage } from './modelUsage';
+import { sessionKeepsNothing } from './privateChat';
 import { getModelDetails } from './sessionResources';
 import { meterHelperLlm, type TokenFactoryBudget } from './tokenFactoryBudget';
 
@@ -329,6 +330,8 @@ export async function mirrorLearnedProfile(params: {
 
 /** Per-turn inputs the create-turn handler resolves up front and the drain carries to the pass. */
 export interface ProfileLearningDrainMember {
+  /** The chat the turn belongs to; nothing is learned from a private chat. */
+  session: Pick<SessionRecord, 'is_incognito'>;
   config: ProfileLearningPassConfig;
   personalizationStore: IPersonalizationStore;
   eventStore: ICompletedTurnEventStore;
@@ -655,6 +658,9 @@ async function runProfileLearningPass(params: SubmitProfileLearningParams): Prom
  * Never throws and never rejects: a learning failure must never affect the turn.
  */
 export async function submitProfileLearning(params: SubmitProfileLearningParams): Promise<void> {
+  if (sessionKeepsNothing({ session: params.session })) {
+    return;
+  }
   try {
     await runProfileLearningPass(params);
   } catch (error) {

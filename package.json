@@ -51,6 +51,7 @@
     "lock:aman-tts": "cd ops/aman-tts && pip-compile --generate-hashes --output-file=requirements.txt requirements.in",
     "sdk:generate": "bash scripts/generate-sdk.sh",
     "sdk:check": "bash scripts/check-generated-contracts.sh",
+    "check:amanuensis-deps": "pnpm --filter amanuensis check:deps",
     "sdk:types": "pnpm --filter @truefoundry/trueforge-sdk exec tsc --project ./tsconfig.cjs.json --emitDeclarationOnly --noCheck",
     "sync:check": "node scripts/sync-upstream.mjs --check",
     "sync:start": "node scripts/sync-upstream.mjs --start",
