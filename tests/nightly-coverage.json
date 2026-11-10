@@ -468,51 +468,54 @@
     },
     "settings:about": {
       "set": "account",
-      "tests": []
+      "tests": ["packages/frontend/tests/settingsPanels.browser.test.ts"]
     },
     "settings:audit": {
       "set": "safety",
-      "tests": []
+      "tests": ["packages/frontend/tests/settingsPanels.browser.test.ts"]
     },
     "settings:connectors": {
       "set": "connectors",
-      "tests": []
+      "tests": ["packages/frontend/tests/settingsPanels.browser.test.ts"]
     },
     "settings:memory": {
       "set": "memory",
-      "tests": []
+      "tests": ["packages/frontend/tests/settingsPanels.browser.test.ts"]
     },
     "settings:model-roles": {
       "set": "models",
-      "tests": []
+      "tests": ["packages/frontend/tests/settingsPanels.browser.test.ts"]
     },
     "settings:models": {
       "set": "models",
-      "tests": ["packages/frontend/tests/journeys/signedIn.journey.ts"]
+      "tests": [
+        "packages/frontend/tests/journeys/signedIn.journey.ts",
+        "packages/frontend/tests/settingsPanels.browser.test.ts"
+      ]
     },
     "settings:permissions": {
       "set": "safety",
-      "tests": []
+      "tests": ["packages/frontend/tests/settingsPanels.browser.test.ts"]
     },
     "settings:personalization": {
       "set": "account",
-      "tests": []
+      "tests": ["packages/frontend/tests/settingsPanels.browser.test.ts"]
     },
     "settings:reach-me": {
       "set": "reach",
-      "tests": []
+      "tests": ["packages/frontend/tests/settingsPanels.browser.test.ts"]
     },
     "settings:sandbox": {
       "set": "code",
-      "tests": []
+      "tests": ["packages/frontend/tests/settingsPanels.browser.test.ts"]
     },
     "settings:skills": {
       "set": "skills",
-      "tests": []
+      "tests": ["packages/frontend/tests/settingsPanels.browser.test.ts"]
     },
     "settings:themes": {
       "set": "appearance",
-      "tests": []
+      "tests": ["packages/frontend/tests/settingsPanels.browser.test.ts"]
     },
     "tour:ask_for": {
       "set": "home",
@@ -770,17 +773,6 @@
     "route:tokenFactoryUsage",
     "route:toolOutputScreen",
     "route:voice",
-    "settings:about",
-    "settings:audit",
-    "settings:connectors",
-    "settings:memory",
-    "settings:model-roles",
-    "settings:permissions",
-    "settings:personalization",
-    "settings:reach-me",
-    "settings:sandbox",
-    "settings:skills",
-    "settings:themes",
     "tour:ask_for",
     "tour:bill",
     "tour:brief",
