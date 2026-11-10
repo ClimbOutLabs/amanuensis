@@ -13,6 +13,7 @@ Amanuensis (Aman) is licensed under the Mozilla Public License 2.0 (see `LICENSE
 7. Llama Prompt Guard 2 (Llama 4 Community License)
 8. Mail and calendar connector sidecars (BSD-3-Clause, MIT)
 9. Local voice for spoken replies (Apache-2.0, MIT, BSD)
+10. Service logos and the API docs page (MIT, CC0-1.0, Apache-2.0)
 
 ## 1. sharp and libvips (LGPL-3.0-or-later)
 
@@ -770,3 +771,12 @@ The `ops/aman-tts` image reads replies aloud on the person's own computer. Its b
 | numpy                                       | BSD-3-Clause | NumPy Developers                                     | https://github.com/numpy/numpy                                         |
 
 `ops/aman-tts/kokoro_vocab.json` is the phoneme table from the Kokoro-82M model configuration (Apache-2.0). The Apache-2.0 license text is in `ops/aman-tts/LICENSE.Apache-2.0`, and the image carries misaki's copy at `/opt/aman-tts/assets/LICENSE.misaki`. The image installs no GPL or LGPL text-to-speech component: espeak-ng, phonemizer and num2words are deliberately not used. The numpy wheel bundles OpenBLAS (BSD-3-Clause) and the GCC runtime libraries (GPL-3.0 with the GCC Runtime Library Exception).
+
+## 10. Service logos and the API docs page (MIT, CC0-1.0, Apache-2.0)
+
+The model provider and MCP server logos in `packages/trueforge-ui/src/icons/catalog/` and the TypeScript mark in `packages/trueforge-ui/src/icons/typescript.svg` are bundled so the browser never loads them from another site. Each name and logo is a trademark of its owner and is shown only to label that service.
+
+- The OpenAI, Anthropic, Gemini, Fireworks, Z.ai, Moonshot, Alibaba, Together, Notion, Exa, GitHub and Tavily marks come from [Lobe Icons](https://github.com/lobehub/lobe-icons) (`@lobehub/icons-static-svg` 1.102.0), MIT License, Copyright (c) 2023 LobeHub. The MIT License text is reproduced in section 8.
+- The Linear, Sentry, Supabase, Stripe, Confluence, Jira, PostHog and TypeScript marks come from [Simple Icons](https://github.com/simple-icons/simple-icons) 16.36.0, released under CC0-1.0, which asks for no notice.
+
+The interactive API docs at `/api/v1/docs` serve [Swagger UI](https://github.com/swagger-api/swagger-ui) (`swagger-ui-dist`, Apache-2.0, Copyright SmartBear Software) from the server itself. Its package depends on `@scarf/scarf`, an install-time analytics script; `pnpm-workspace.yaml` keeps that script from running.

@@ -620,6 +620,32 @@ describe('the schedule rule in the system prompt', () => {
 
 const MEDICINE = { what: 'Take the medicine', at: '2026-10-19T18:00:00-04:00' };
 
+describe('in an incognito chat', () => {
+  it('only lists schedules and reminders: anything set here would outlive the chat', async () => {
+    const built = await setup();
+    const tools = new ScheduleToolSet({ ...built.options, keepsNothing: true });
+    expect((await tools.listTools()).result.tools.map(tool => tool.name).sort()).toEqual([
+      'list_reminders',
+      'list_schedules',
+    ]);
+    const refused = await tools.callTool({ name: 'set_reminder', arguments: MEDICINE });
+    expect(isCallToolResponseResult(refused) && refused.result.isError).toBe(true);
+    expect(await built.listAll()).toEqual([]);
+    expect(built.audit).toEqual([]);
+  });
+
+  it('tells the model it cannot set or change one here', async () => {
+    const built = await setup();
+    const prompt = InstructionBuilder.createSystemPrompt('test');
+    for (const build of scheduleCapability({ ...built.options, keepsNothing: true }).instructionBuilders ?? []) {
+      build(prompt);
+    }
+    const text = prompt.build();
+    expect(text).toContain('This incognito chat cannot set, change or cancel a schedule or a reminder.');
+    expect(text).not.toContain('use set_reminder');
+  });
+});
+
 describe('reminder tools', () => {
   it('sets a one-time reminder without a card, records it, and tells the activity log in plain words', async () => {
     const built = await setup();

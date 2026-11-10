@@ -44,7 +44,7 @@
           },
           {
             "group": "Your Data and Safety",
-            "pages": ["safety", "privacy", "schedules", "backup"]
+            "pages": ["safety", "privacy", "browser", "schedules", "backup"]
           },
           {
             "group": "TrueForge Harness",

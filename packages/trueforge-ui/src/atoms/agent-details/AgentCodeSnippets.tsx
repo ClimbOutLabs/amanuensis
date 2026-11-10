@@ -8,6 +8,16 @@ import type { AgentCodeSnippetsProps } from './types.js';
 
 type SnippetMode = 'stream' | 'nonStream';
 
+/** Aman's own guide to calling an agent from code; opens in a new tab and is never fetched. */
+const USE_AGENT_DOCS_URL = 'https://github.com/ClimbOutLabs/amanuensis/blob/main/docs/api/use-agent.mdx';
+
+/** Bundled language marks, so the panel never loads an icon from another site. */
+const SNIPPET_LANGUAGE_ICONS: Readonly<Record<string, string>> = { typescript: 'typescript' };
+
+function snippetLanguageIcon(language: string): string {
+  return Object.hasOwn(SNIPPET_LANGUAGE_ICONS, language) ? (SNIPPET_LANGUAGE_ICONS[language] ?? 'code') : 'code';
+}
+
 export default function AgentCodeSnippets({ snippets }: AgentCodeSnippetsProps) {
   const AgentCodeBlock = useSlot('AgentCodeBlock');
   const [selectedLanguage, setSelectedLanguage] = useState(snippets[0]?.language);
@@ -43,11 +53,7 @@ export default function AgentCodeSnippets({ snippets }: AgentCodeSnippetsProps) 
             )}
             onClick={() => setSelectedLanguage(snippet.language)}
           >
-            {snippet.icon ? (
-              <img src={snippet.icon} alt="" className="size-4 shrink-0 object-contain" />
-            ) : (
-              <Icon name="code" className="size-4 shrink-0" />
-            )}
+            <Icon name={snippetLanguageIcon(snippet.language)} className="size-4 shrink-0" />
             {snippet.labelName}
           </button>
         ))}
@@ -77,7 +83,7 @@ export default function AgentCodeSnippets({ snippets }: AgentCodeSnippetsProps) 
             ))}
           </div>
           <a
-            href="https://trueforge.dev/api/use-agent"
+            href={USE_AGENT_DOCS_URL}
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-1 text-xs text-text-secondary"
