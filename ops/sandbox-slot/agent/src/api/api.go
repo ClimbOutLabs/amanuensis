@@ -82,7 +82,10 @@ type Server struct {
 	MinFreeBytes int64
 	// TreeDir holds one workspace tree per session, on the slot volume.
 	TreeDir string
-	RootFS  string
+	// SessionsMaxAge bounds how old the sessions listing may be before the trees are walked again;
+	// zero means 30 seconds.
+	SessionsMaxAge time.Duration
+	RootFS         string
 	// OOMKills returns the slot cgroup's cumulative OOM kill count.
 	OOMKills func() int64
 	// MirrorSocketPath is where the package mirror gateway listens inside the control volume;
@@ -94,6 +97,7 @@ type Server struct {
 
 	sem      chan struct{}
 	sessions sessionLocks
+	stats    sessionsCache
 	once     sync.Once
 	mu       sync.Mutex
 	last     attest.Report
@@ -112,6 +116,7 @@ func (s *Server) Handler() http.Handler {
 	s.init()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/health", s.health)
+	mux.HandleFunc("GET /v1/sessions", s.sessionsList)
 	mux.HandleFunc("POST /v1/run_code", s.runCode)
 	mux.HandleFunc("POST /v1/exec", s.exec)
 	mux.HandleFunc("POST /v1/fs_read", s.fsRead)
