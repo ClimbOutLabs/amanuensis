@@ -1008,6 +1008,69 @@ await client.mcpServers.deleteAuthorization("name");
 </dl>
 </details>
 
+<details><summary><code>client.mcpServers.<a href="/src/api/resources/mcpServers/client/Client.ts">homeAssistantCheck</a>(name) -> TrueForge.HomeAssistantCheckResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Runs the MCP handshake against the saved connector, lists its tools, and reads the live-context tool once, so the answer says how many tools and exposed entities Aman can see, or the one thing to fix. Read-only: the connector is never modified, and a failed check is a 200 carrying the reason.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.mcpServers.homeAssistantCheck("name");
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**name:** `string` — MCP server name.
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `McpServersClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 <details><summary><code>client.mcpServers.<a href="/src/api/resources/mcpServers/client/Client.ts">memoryCheck</a>(name) -> TrueForge.MemoryProviderCheckResponse</code></summary>
 <dl>
 <dd>
