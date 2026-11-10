@@ -1,4 +1,4 @@
-import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { win32 } from 'node:path';
 
@@ -15,6 +15,9 @@ export const SETUP_CMD_FILE_NAME = 'Aman-Setup.cmd';
 // The name the authority's certificate is downloaded under on the trust
 // page, and the name it is kept under in the Amanuensis folder here.
 export const CA_CERT_FILE_NAME = 'ca.crt';
+// Left beside the aman command once a removal has cleared Docker, so a
+// run that finishes the Windows side does not need Docker running.
+export const DOCKER_REMOVED_MARK_FILE_NAME = 'docker-removed';
 // The Start menu entry that opens Aman, running aman open.
 export const OPEN_AMAN_SHORTCUT_NAME = 'Aman';
 // The Start menu entry that removes Aman, running aman uninstall.
@@ -74,6 +77,7 @@ export const SETUP_CMD_FORWARDER = [
 export interface WindowsPaths {
   programsDir: string;
   programsExePath: string;
+  dockerRemovedMarkPath: string;
   dataDir: string;
   setupCmdCopyPath: string;
   backupsDir: string;
@@ -88,6 +92,7 @@ export function windowsPaths(localAppDataDir: string): WindowsPaths {
   return {
     programsDir,
     programsExePath: win32.join(programsDir, EXE_FILE_NAME),
+    dockerRemovedMarkPath: win32.join(programsDir, DOCKER_REMOVED_MARK_FILE_NAME),
     dataDir,
     setupCmdCopyPath: win32.join(dataDir, SETUP_CMD_FILE_NAME),
     backupsDir: win32.join(dataDir, BACKUPS_FOLDER_NAME),
@@ -187,6 +192,7 @@ export interface WindowsJobs {
   readonly gettingStartedPath: string;
   // Copies the running executable into the Programs folder. 'already'
   // when the running executable is the copy there (adopt run twice).
+  // Either way a removal's Docker mark goes, since Aman is back.
   copySelfToPrograms: () => Promise<'copied' | 'already'>;
   // Adds the Programs folder to the user PATH and broadcasts the change
   // so new terminal windows see it. 'present' when it was already there.
@@ -278,6 +284,10 @@ export interface WindowsJobs {
   // started by a double-click or a Start menu entry, in a window of its
   // own that closes the moment it ends, and not from a terminal.
   startedFromExplorer: (parentPid: number) => Promise<boolean>;
+  // Whether an earlier removal already cleared Docker, and the mark
+  // that says so.
+  dockerSideRemoved: () => Promise<boolean>;
+  markDockerSideRemoved: () => Promise<void>;
   // The removal's Windows steps, each a no-op when there is nothing to
   // take away, so a removal that stopped part way can run again.
   // Deletes one shortcut file.
@@ -290,7 +300,8 @@ export interface WindowsJobs {
   // Takes the Programs folder back off the user PATH.
   removeProgramsFolderFromUserPath: () => Promise<void>;
   // Takes the local authority's certificate back out of the person's
-  // own Root store; Windows asks once with a Yes/No dialog.
+  // own Root store; Windows asks once with a Yes/No dialog. Fails when
+  // the certificate is still there afterwards, a No included.
   removeCaCertificateFromUserStore: () => Promise<void>;
   // Deletes the Amanuensis folder on this PC, or everything in it but
   // the backups folder.
@@ -341,6 +352,16 @@ export function systemWindowsJobs(options: {
     return result.stdout;
   };
 
+  // Read as UTF-8: Windows PowerShell otherwise prints in the console's
+  // old code page, which turns a name like José into other letters, and
+  // the PATH written back would carry them.
+  const readUserPath = async (): Promise<string> =>
+    (
+      await runPowerShell(
+        "[Console]::OutputEncoding = [Text.Encoding]::UTF8; [Environment]::GetEnvironmentVariable('Path', 'User')",
+      )
+    ).replace(/\r?\n$/, '');
+
   // The person's own account name, the way the access list prints it,
   // asked for once: the folder access jobs need it to grant access and
   // to say whose access is expected.
@@ -385,6 +406,9 @@ export function systemWindowsJobs(options: {
     gettingStartedPath: paths.gettingStartedPath,
 
     async copySelfToPrograms() {
+      await rm(paths.dockerRemovedMarkPath, { force: true }).catch((error: unknown) => {
+        throw new WindowsJobError('the note from an earlier removal could not be deleted', { cause: error });
+      });
       if (options.selfExePath.toLowerCase() === paths.programsExePath.toLowerCase()) {
         return 'already';
       }
@@ -396,10 +420,7 @@ export function systemWindowsJobs(options: {
     },
 
     async ensureProgramsFolderOnUserPath() {
-      const current = (await runPowerShell("[Environment]::GetEnvironmentVariable('Path', 'User')")).replace(
-        /\r?\n$/,
-        '',
-      );
+      const current = await readUserPath();
       if (userPathHasFolder({ pathValue: current, folder: paths.programsDir })) {
         return 'present';
       }
@@ -592,6 +613,21 @@ export function systemWindowsJobs(options: {
       return name.trim().toLowerCase() === 'explorer';
     },
 
+    async dockerSideRemoved() {
+      return access(paths.dockerRemovedMarkPath).then(
+        () => true,
+        () => false,
+      );
+    },
+
+    async markDockerSideRemoved() {
+      try {
+        await writeFile(paths.dockerRemovedMarkPath, '', 'utf8');
+      } catch (error) {
+        throw new WindowsJobError('the note that Docker is cleared could not be written', { cause: error });
+      }
+    },
+
     async removeShortcut(shortcutPath: string) {
       await runPowerShell(`Remove-Item -LiteralPath ${psQuote(shortcutPath)} -Force -ErrorAction SilentlyContinue`);
     },
@@ -625,10 +661,7 @@ export function systemWindowsJobs(options: {
     },
 
     async removeProgramsFolderFromUserPath() {
-      const current = (await runPowerShell("[Environment]::GetEnvironmentVariable('Path', 'User')")).replace(
-        /\r?\n$/,
-        '',
-      );
+      const current = await readUserPath();
       if (!userPathHasFolder({ pathValue: current, folder: paths.programsDir })) {
         return;
       }
@@ -642,12 +675,19 @@ export function systemWindowsJobs(options: {
 
     async removeCaCertificateFromUserStore() {
       // The certificate is found by the file the install kept, so only
-      // Aman's own authority is ever taken out of the store.
+      // Aman's own authority is ever taken out of the store. A No to the
+      // Windows dialog does not stop the script by itself, so the store
+      // is read again and a certificate still there fails the step.
       await runPowerShell(
-        `if (Test-Path -LiteralPath ${psQuote(paths.caCertPath)}) { ` +
+        `$ErrorActionPreference = 'Stop'; ` +
+          `if (Test-Path -LiteralPath ${psQuote(paths.caCertPath)}) { ` +
           `$cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2(${psQuote(paths.caCertPath)}); ` +
           `$store = New-Object System.Security.Cryptography.X509Certificates.X509Store('Root', 'CurrentUser'); ` +
-          `$store.Open('ReadWrite'); $store.Remove($cert); $store.Close() }`,
+          `$store.Open('ReadWrite'); try { $store.Remove($cert) } catch { } ; $store.Close(); ` +
+          `$check = New-Object System.Security.Cryptography.X509Certificates.X509Store('Root', 'CurrentUser'); ` +
+          `$check.Open('ReadOnly'); ` +
+          `$left = $check.Certificates.Find('FindByThumbprint', $cert.Thumbprint, $false).Count; $check.Close(); ` +
+          `if ($left -gt 0) { exit 1 } }`,
       );
     },
 

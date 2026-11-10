@@ -25,6 +25,7 @@ export type FakeWindowsJobStep =
   | 'open-entry'
   | 'remove-entry'
   | 'remove-shortcut'
+  | 'mark-docker'
   | 'remove-task'
   | 'remove-firewall'
   | 'remove-path'
@@ -99,6 +100,7 @@ export class FakeWindowsJobs implements WindowsJobs {
   caCertInStore = false;
   dataFolder: 'present' | 'backups-only' | 'gone' = 'present';
   programsFolderRemovalScheduled = false;
+  dockerRemovedMark = false;
 
   constructor(options: {
     localAppDataDir: string;
@@ -129,6 +131,8 @@ export class FakeWindowsJobs implements WindowsJobs {
     // Whether the program was started by Windows Explorer, as a test
     // scripts it.
     startedFromExplorer?: boolean;
+    // Whether an earlier removal left its note that Docker is cleared.
+    dockerRemovedMark?: boolean;
   }) {
     const paths = windowsPaths(options.localAppDataDir);
     this.programsExePath = paths.programsExePath;
@@ -155,6 +159,7 @@ export class FakeWindowsJobs implements WindowsJobs {
     this.backupTask = options.backupTask ?? false;
     this.backupNames = [...(options.backups ?? [])];
     this.fromExplorer = options.startedFromExplorer ?? false;
+    this.dockerRemovedMark = options.dockerRemovedMark ?? false;
   }
 
   private step(name: FakeWindowsJobStep): void {
@@ -166,6 +171,7 @@ export class FakeWindowsJobs implements WindowsJobs {
 
   copySelfToPrograms(): Promise<'copied' | 'already'> {
     this.step('copy');
+    this.dockerRemovedMark = false;
     if (this.selfExePath.toLowerCase() === this.programsExePath.toLowerCase()) {
       return Promise.resolve('already');
     }
@@ -410,6 +416,16 @@ export class FakeWindowsJobs implements WindowsJobs {
 
   startedFromExplorer(): Promise<boolean> {
     return Promise.resolve(this.fromExplorer);
+  }
+
+  dockerSideRemoved(): Promise<boolean> {
+    return Promise.resolve(this.dockerRemovedMark);
+  }
+
+  markDockerSideRemoved(): Promise<void> {
+    this.step('mark-docker');
+    this.dockerRemovedMark = true;
+    return Promise.resolve();
   }
 
   removeShortcut(shortcutPath: string): Promise<void> {

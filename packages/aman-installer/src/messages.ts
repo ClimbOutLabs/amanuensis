@@ -895,10 +895,14 @@ export const UNINSTALL_DOCKER_LEFTOVERS: Problem = {
   fix: 'Restart Docker Desktop, then run aman uninstall again; it carries on from where it stopped.',
 };
 
-export const UNINSTALL_WINDOWS_LEFTOVERS: Problem = {
-  happened: 'Aman is removed from Docker, but some of its entries on this PC could not be taken away.',
-  fix: 'Run aman uninstall again, and answer Yes if Windows asks; it carries on from where it stopped.',
-};
+// Names the command by its full path: the aman command may be off the
+// PATH by now, and the Start menu entry is the last thing to go.
+export function uninstallWindowsLeftoversProblem(exePath: string): Problem {
+  return {
+    happened: 'Aman is removed from Docker, but some of its parts on this PC are still here.',
+    fix: `Open Remove Aman from the Start menu, or run "${printable(exePath)}" uninstall, and answer Yes if Windows asks; it carries on from where it stopped.`,
+  };
+}
 
 // What the removal says before it asks, so the one yes is an informed one.
 export const UNINSTALL_PLAN_LINES: readonly string[] = [
@@ -1093,7 +1097,9 @@ export function allMessageLines(): string[] {
   lines.push(problemText(UNINSTALL_BACKUP_FAILED));
   lines.push(problemText(uninstallInstanceFailedProblem('main')));
   lines.push(problemText(UNINSTALL_DOCKER_LEFTOVERS));
-  lines.push(problemText(UNINSTALL_WINDOWS_LEFTOVERS));
+  lines.push(
+    problemText(uninstallWindowsLeftoversProblem('C:\\Users\\Friend\\AppData\\Local\\Programs\\Amanuensis\\aman.exe')),
+  );
   lines.push(...UNINSTALL_PLAN_LINES);
   lines.push(UNINSTALL_QUESTION);
   lines.push(uninstallBackupsQuestion('C:\\Users\\Friend\\AppData\\Local\\Amanuensis\\backups'));

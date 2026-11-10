@@ -188,7 +188,7 @@ Another install is running right now, so nothing was removed. Wait for it to fin
 The last backup could not be made, so nothing was removed. Run Check Aman from the Start menu to see what is wrong, then run aman uninstall again.
 The instance main could not be removed, so the removal stopped there. Read the lines above for the cause, then run aman uninstall again; it carries on from where it stopped.
 Some of what Aman kept in Docker could not be deleted. Restart Docker Desktop, then run aman uninstall again; it carries on from where it stopped.
-Aman is removed from Docker, but some of its entries on this PC could not be taken away. Run aman uninstall again, and answer Yes if Windows asks; it carries on from where it stopped.
+Aman is removed from Docker, but some of its parts on this PC are still here. Open Remove Aman from the Start menu, or run "C:\Users\Friend\AppData\Local\Programs\Amanuensis\aman.exe" uninstall, and answer Yes if Windows asks; it carries on from where it stopped.
 This removes Aman from this computer.
 It deletes your instances and everything they keep: chats, memory, files and settings.
 It deletes the Aman images in Docker Desktop, the aman command and the Start menu entries.

@@ -16,12 +16,12 @@ import {
   UNINSTALL_NOT_WINDOWS,
   UNINSTALL_PLAN_LINES,
   UNINSTALL_QUESTION,
-  UNINSTALL_WINDOWS_LEFTOVERS,
   problemText,
   uninstallBackupsKeptLine,
   uninstallBackupsQuestion,
   uninstallInstanceFailedProblem,
   uninstallRemovingInstanceLine,
+  uninstallWindowsLeftoversProblem,
 } from '../../src/messages.ts';
 import {
   RecordingProcessRunner,
@@ -130,7 +130,10 @@ const INSTALLED = summaryWith({
   ],
 });
 
-function jobsWith(failSteps: ReadonlySet<FakeWindowsJobStep> = new Set()): FakeWindowsJobs {
+function jobsWith(
+  failSteps: ReadonlySet<FakeWindowsJobStep> = new Set(),
+  options: { dockerRemovedMark?: boolean } = {},
+): FakeWindowsJobs {
   const jobs = new FakeWindowsJobs({
     localAppDataDir: LOCAL_APP_DATA,
     selfExePath: PATHS.programsExePath,
@@ -146,6 +149,7 @@ function jobsWith(failSteps: ReadonlySet<FakeWindowsJobStep> = new Set()): FakeW
       { path: 'C:\\Users\\Friend\\Desktop\\Other.lnk', target: 'C:\\Tools\\other.exe', args: '' },
     ],
     failSteps,
+    ...options,
   });
   jobs.firewallRule = true;
   jobs.caCertInStore = true;
@@ -157,8 +161,8 @@ function jobsWith(failSteps: ReadonlySet<FakeWindowsJobStep> = new Set()): FakeW
 function dockerAnswers(overrides: readonly [string, ProcessResult][] = []): Map<string, ProcessResult> {
   return new Map<string, ProcessResult>([
     [BACKUP_LINE, okResult('Saved a backup.\n')],
-    [removeLine('main'), okResult('Removed instance main and deleted its data.\n')],
-    [removeLine('sam'), okResult('Removed instance sam and deleted its data.\n')],
+    [removeLine('main'), okResult('rm -r /root/.aman/instances/main\nRemoved instance main.\n')],
+    [removeLine('sam'), okResult('rm -r /root/.aman/instances/sam\nRemoved instance sam.\n')],
     [VOLUME_LS, okResult('aman_home\naman_source\naman_stt_cache\nsomeone_else\n')],
     [commandLine('docker', ['volume', 'rm', 'aman_home']), okResult('')],
     [commandLine('docker', ['volume', 'rm', 'aman_source']), okResult('')],
@@ -226,9 +230,7 @@ test('uninstall keeps the backups by default: a last backup, every instance, Doc
     ...UNINSTALL_PLAN_LINES,
     'Saved a backup.',
     uninstallRemovingInstanceLine('main'),
-    'Removed instance main and deleted its data.',
     uninstallRemovingInstanceLine('sam'),
-    'Removed instance sam and deleted its data.',
     UNINSTALL_DONE_LINE,
     uninstallBackupsKeptLine(PATHS.backupsDir),
     UNINSTALL_DOCKER_KEPT_LINE,
@@ -245,6 +247,24 @@ test('uninstall keeps the backups by default: a last backup, every instance, Doc
   assert.equal(jobs.userPath, 'C:\\Tools');
   assert.equal(jobs.dataFolder, 'backups-only');
   assert.equal(jobs.programsFolderRemovalScheduled, true);
+  assert.equal(jobs.dockerRemovedMark, true);
+  // The prompts come first and the Start menu entries last, so a
+  // removal stopped by a No can still be started again.
+  assert.deepEqual(jobs.ops, [
+    'mark-docker',
+    'remove-task',
+    'runOnceQuery',
+    'remove-firewall',
+    'remove-cert',
+    'remove-data',
+    'remove-path',
+    'list',
+    'remove-shortcut',
+    'remove-shortcut',
+    'remove-shortcut',
+    'remove-shortcut',
+    'remove-programs',
+  ]);
 });
 
 test('uninstall answered yes twice deletes the backups and makes no last backup', async () => {
@@ -297,7 +317,8 @@ test('an instance that will not go stops the removal there, with the Windows sid
   const failed: ProcessResult = { exitCode: 1, stdout: '', stderr: 'could not stop\n', started: true };
   const { code, lines, recorded, jobs } = await run({ answers: dockerAnswers([[removeLine('main'), failed]]) });
   assert.equal(code, 1);
-  assert.equal(lines.at(-1), problemText(uninstallInstanceFailedProblem('main')));
+  // The shell's own lines are shown when they explain a failure.
+  assert.deepEqual(lines.slice(-2), ['could not stop', problemText(uninstallInstanceFailedProblem('main'))]);
   assert.ok(!recorded.includes(removeLine('sam')));
   assert.deepEqual(jobs.ops, []);
 });
@@ -315,16 +336,68 @@ test('a volume that will not go is reported, and the Windows side is left for th
   assert.deepEqual(jobs.ops, []);
 });
 
-test('a refused firewall prompt keeps the aman command so the removal can run again', async () => {
+// What a refused Windows prompt must leave behind: everything a second
+// run needs to be started and to find what is left.
+function assertFinishable(jobs: FakeWindowsJobs): void {
+  assert.equal(jobs.dataFolder, 'present');
+  assert.equal(jobs.userPath, `C:\\Tools;${PATHS.programsDir}`);
+  assert.ok(jobs.shortcuts.some(shortcut => shortcut.path === `${START_MENU}\\Aman.lnk`));
+  assert.equal(jobs.programsFolderRemovalScheduled, false);
+}
+
+test('a refused firewall prompt leaves the command, the entries and the folder for the next run', async () => {
   const jobs = jobsWith(new Set<FakeWindowsJobStep>(['remove-firewall']));
   const { code, lines } = await run({ jobs });
   assert.equal(code, 1);
-  assert.equal(lines.at(-1), problemText(UNINSTALL_WINDOWS_LEFTOVERS));
-  // Every other Windows step still ran; only the command's own folder stays.
+  assert.equal(lines.at(-1), problemText(uninstallWindowsLeftoversProblem(PATHS.programsExePath)));
+  assert.ok(lines.at(-1)?.includes(PATHS.programsExePath));
+  assert.ok(!lines.includes(UNINSTALL_DONE_LINE));
+  // The other prompt-free steps still ran.
   assert.equal(jobs.backupTask, false);
+  assertFinishable(jobs);
+});
+
+test('a No to the certificate dialog is not reported as removed, and the next run finishes it', async () => {
+  const refused = jobsWith(new Set<FakeWindowsJobStep>(['remove-cert']));
+  const first = await run({ jobs: refused });
+  assert.equal(first.code, 1);
+  assert.equal(first.lines.at(-1), problemText(uninstallWindowsLeftoversProblem(PATHS.programsExePath)));
+  assert.ok(!first.lines.includes(UNINSTALL_DONE_LINE));
+  assert.equal(refused.caCertInStore, true);
+  assertFinishable(refused);
+  assert.equal(refused.dockerRemovedMark, true);
+
+  // The second run, Docker Desktop closed: the Docker side is not read
+  // again, and the Windows side is finished.
+  const again = jobsWith(new Set(), { dockerRemovedMark: true });
+  again.caCertInStore = true;
+  const second = await run({
+    jobs: again,
+    store: storeWith(() => Promise.reject(new StateDockerError('docker did not answer'))),
+  });
+  assert.equal(second.code, 0);
+  assert.deepEqual(second.recorded, []);
+  assert.equal(again.caCertInStore, false);
+  assert.equal(again.dataFolder, 'backups-only');
+  assert.equal(again.programsFolderRemovalScheduled, true);
+  assert.ok(second.lines.includes(UNINSTALL_DONE_LINE));
+});
+
+test('a data folder that will not go keeps the PATH entry and the Start menu entries', async () => {
+  const jobs = jobsWith(new Set<FakeWindowsJobStep>(['remove-data']));
+  const { code, lines } = await run({ jobs });
+  assert.equal(code, 1);
+  assert.equal(lines.at(-1), problemText(uninstallWindowsLeftoversProblem(PATHS.programsExePath)));
   assert.equal(jobs.caCertInStore, false);
-  assert.equal(jobs.dataFolder, 'backups-only');
+  assert.equal(jobs.userPath, `C:\\Tools;${PATHS.programsDir}`);
+  assert.ok(jobs.shortcuts.some(shortcut => shortcut.path === `${START_MENU}\\Aman.lnk`));
   assert.equal(jobs.programsFolderRemovalScheduled, false);
+});
+
+test('setting Aman up again clears an earlier removal note, so Docker is cleared next time', async () => {
+  const jobs = jobsWith(new Set(), { dockerRemovedMark: true });
+  await jobs.copySelfToPrograms();
+  assert.equal(jobs.dockerRemovedMark, false);
 });
 
 test('uninstall on a PC with no instances left cleans up what is there', async () => {

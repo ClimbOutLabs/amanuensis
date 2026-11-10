@@ -14,12 +14,12 @@ import {
   UNINSTALL_PLAN_LINES,
   UNINSTALL_QUESTION,
   UNINSTALL_STATE_UNREADABLE,
-  UNINSTALL_WINDOWS_LEFTOVERS,
   problemText,
   uninstallBackupsKeptLine,
   uninstallBackupsQuestion,
   uninstallInstanceFailedProblem,
   uninstallRemovingInstanceLine,
+  uninstallWindowsLeftoversProblem,
 } from '../messages.ts';
 import type { ProcessRunner } from '../runner/processRunner.ts';
 import { StateDockerError, StateImageError, type StateStore, type StateSummary } from '../state/state.ts';
@@ -101,11 +101,14 @@ async function removeInstance(deps: UninstallDeps, name: string): Promise<boolea
     print(problemText(UNINSTALL_DOCKER_NOT_ANSWERING));
     return false;
   }
-  printOutput(print, result.stdout);
-  printOutput(print, result.stderr);
+  // The shell's own lines name the paths inside the container, which
+  // mean nothing on Windows; they are shown only when they explain a
+  // failure.
   if (result.exitCode === 0) {
     return true;
   }
+  printOutput(print, result.stdout);
+  printOutput(print, result.stderr);
   if (`${result.stdout}\n${result.stderr}`.includes('Another install is running right now')) {
     print(problemText(UNINSTALL_BUSY));
     return false;
@@ -149,11 +152,14 @@ async function removeDockerLeftovers(deps: UninstallDeps): Promise<boolean> {
   return clean;
 }
 
-// The Windows side: the shortcuts that point at Aman, the daily backup
-// task, the resume entry, the firewall rule, the PATH entry, the
-// certificate, and the folders. Every step is tried; the folder the
-// command lives in is deleted only when all the others went, so a
-// removal that stopped part way can be run again.
+// The Windows side, in an order that keeps a removal that stopped part
+// way finishable. First the steps that can meet a Windows prompt (the
+// firewall rule, the certificate) along with the backup task and the
+// resume entry: each is tried, and if any is left nothing else goes.
+// Then the data folder, which the certificate is found through, then
+// the PATH entry, and last the Start menu entries, among them Remove
+// Aman itself. The folder the command lives in goes only after all of
+// those.
 async function removeWindowsSide(deps: UninstallDeps, keepBackups: boolean): Promise<boolean> {
   const { jobs } = deps;
   const ours = new Set([jobs.programsExePath, jobs.backupsDir, jobs.setupCmdCopyPath].map(path => path.toLowerCase()));
@@ -165,14 +171,7 @@ async function removeWindowsSide(deps: UninstallDeps, keepBackups: boolean): Pro
       return false;
     }
   };
-  const results = [
-    await attempt(async () => {
-      for (const shortcut of await jobs.listShortcuts()) {
-        if (ours.has(shortcut.target.toLowerCase())) {
-          await jobs.removeShortcut(shortcut.path);
-        }
-      }
-    }),
+  const first = [
     await attempt(() => jobs.removeDailyBackupTask()),
     await attempt(async () => {
       if (await jobs.runOnceResumePending()) {
@@ -180,41 +179,41 @@ async function removeWindowsSide(deps: UninstallDeps, keepBackups: boolean): Pro
       }
     }),
     await attempt(() => jobs.removeFirewallRule()),
-    await attempt(() => jobs.removeProgramsFolderFromUserPath()),
-    // The certificate is found through the file in the Amanuensis
-    // folder, so it goes before the folder does.
     await attempt(() => jobs.removeCaCertificateFromUserStore()),
-    await attempt(() => jobs.removeDataFolder({ keepBackups })),
   ];
-  if (results.includes(false)) {
+  if (first.includes(false)) {
     return false;
   }
-  return attempt(() => jobs.removeProgramsFolderAfterExit());
+  const last: (() => Promise<void>)[] = [
+    () => jobs.removeDataFolder({ keepBackups }),
+    () => jobs.removeProgramsFolderFromUserPath(),
+    async () => {
+      for (const shortcut of await jobs.listShortcuts()) {
+        if (ours.has(shortcut.target.toLowerCase())) {
+          await jobs.removeShortcut(shortcut.path);
+        }
+      }
+    },
+    () => jobs.removeProgramsFolderAfterExit(),
+  ];
+  for (const step of last) {
+    if (!(await attempt(step))) {
+      return false;
+    }
+  }
+  return true;
 }
 
-// aman uninstall: removes Aman from a Windows computer, after one
-// question that names everything it deletes. Backups are kept, with a
-// last one made first, unless the second question is answered yes.
-// Docker Desktop stays: it is its own program, and other programs may
-// use it.
-export async function runUninstall(deps: UninstallDeps): Promise<number> {
-  const { host, jobs, print, confirm } = deps;
-  if (host.kind !== 'windows') {
-    print(problemText(UNINSTALL_NOT_WINDOWS));
-    return 1;
-  }
-  const summary = await readSummary(deps);
-  if (summary === null) {
-    return 1;
-  }
-  for (const line of UNINSTALL_PLAN_LINES) {
-    print(line);
-  }
-  if (!(await confirm(UNINSTALL_QUESTION))) {
-    print(UNINSTALL_DECLINED_LINE);
-    return 0;
-  }
-  const keepBackups = !(await confirm(uninstallBackupsQuestion(jobs.backupsDir)));
+// The Docker side: a last backup when the backups are kept, every
+// instance, then what is left in Docker. A note beside the aman command
+// records that it is done, so a run that only has the Windows side left
+// does not need Docker.
+async function removeDockerSide(
+  deps: UninstallDeps,
+  options: { summary: StateSummary; keepBackups: boolean },
+): Promise<boolean> {
+  const { print, jobs } = deps;
+  const { summary, keepBackups } = options;
   if (keepBackups && summary.instances.length > 0) {
     // The backup's own pointer to the Backups entry is left out: that
     // entry is about to go, and the closing lines name the folder.
@@ -228,20 +227,52 @@ export async function runUninstall(deps: UninstallDeps): Promise<number> {
     });
     if (backupCode !== 0) {
       print(problemText(UNINSTALL_BACKUP_FAILED));
-      return 1;
+      return false;
     }
   }
   for (const instance of summary.instances) {
     if (!(await removeInstance(deps, instance.name))) {
-      return 1;
+      return false;
     }
   }
   if (!(await removeDockerLeftovers(deps))) {
     print(problemText(UNINSTALL_DOCKER_LEFTOVERS));
+    return false;
+  }
+  // Without the note the next run only asks for Docker again.
+  await jobs.markDockerSideRemoved().catch(() => undefined);
+  return true;
+}
+
+// aman uninstall: removes Aman from a Windows computer, after one
+// question that names everything it deletes. Backups are kept, with a
+// last one made first, unless the second question is answered yes.
+// Docker Desktop stays: it is its own program, and other programs may
+// use it.
+export async function runUninstall(deps: UninstallDeps): Promise<number> {
+  const { host, jobs, print, confirm } = deps;
+  if (host.kind !== 'windows') {
+    print(problemText(UNINSTALL_NOT_WINDOWS));
+    return 1;
+  }
+  const dockerDone = await jobs.dockerSideRemoved();
+  const summary = dockerDone ? null : await readSummary(deps);
+  if (!dockerDone && summary === null) {
+    return 1;
+  }
+  for (const line of UNINSTALL_PLAN_LINES) {
+    print(line);
+  }
+  if (!(await confirm(UNINSTALL_QUESTION))) {
+    print(UNINSTALL_DECLINED_LINE);
+    return 0;
+  }
+  const keepBackups = !(await confirm(uninstallBackupsQuestion(jobs.backupsDir)));
+  if (summary !== null && !(await removeDockerSide(deps, { summary, keepBackups }))) {
     return 1;
   }
   if (!(await removeWindowsSide(deps, keepBackups))) {
-    print(problemText(UNINSTALL_WINDOWS_LEFTOVERS));
+    print(problemText(uninstallWindowsLeftoversProblem(jobs.programsExePath)));
     return 1;
   }
   print(UNINSTALL_DONE_LINE);

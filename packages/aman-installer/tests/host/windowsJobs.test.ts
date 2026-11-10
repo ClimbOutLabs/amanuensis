@@ -392,6 +392,15 @@ test('a page write that cannot happen fails as a Windows job error', async () =>
   await assert.rejects(jobs.writeDockerDesktopInstaller(new Uint8Array([1, 2, 3])), WindowsJobError);
 });
 
+test('the PATH is read as UTF-8, so an accented folder name is written back unchanged', async () => {
+  const recording = new RecordingProcessRunner(new AnswerRunner(`C:\\Users\\José\\bin;${PROGRAMS_DIR}\r\n`));
+  const jobs = jobsWith(recording);
+  await jobs.removeProgramsFolderFromUserPath();
+  const lines = recording.lines();
+  assert.ok(lines[0]?.includes('[Console]::OutputEncoding = [Text.Encoding]::UTF8'));
+  assert.ok(lines.at(-1)?.includes("SetEnvironmentVariable('Path', 'C:\\Users\\José\\bin', 'User')"));
+});
+
 test('the forwarder golden file is the forwarder, byte for byte', () => {
   const golden = readFileSync(new URL('../golden/aman-setup-forwarder.cmd', import.meta.url), 'utf8');
   assert.equal(SETUP_CMD_FORWARDER, golden);

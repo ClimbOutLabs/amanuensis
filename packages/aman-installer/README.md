@@ -85,9 +85,14 @@ What it can do today:
   itself. A second question decides the backups: they are kept, with a
   last backup made first, unless it is answered yes. Docker Desktop
   stays installed, and the last line says how to remove it. A removal
-  that stops part way says why and can be run again; the aman command
-  is deleted only once everything else is gone. The Start menu's
-  Remove Aman entry runs it.
+  that stops part way says why and can be run again. The steps that can
+  meet a Windows prompt (the firewall rule, the certificate) go before
+  the folder, the PATH entry and the Start menu entries, so a No leaves
+  everything a second run needs, and the message names the full path
+  to aman.exe. Once Docker is cleared a note beside the command says
+  so, and a second run finishes the Windows side without Docker
+  running. The aman command is deleted only once everything else is
+  gone. The Start menu's Remove Aman entry runs it.
 - `aman backups`, on Windows, lists the backups kept on the PC,
   newest first. The Start menu's Backups entry opens the folder.
 
