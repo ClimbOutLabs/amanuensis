@@ -6,7 +6,13 @@ import { chromium, type Browser, type Page } from 'playwright-core';
 import { createServer } from 'vite';
 
 import { startApprovalTestServer, type ApprovalTestServer } from '../../trueforge/tests/fixtures/approvalTestServer.ts';
-import { FINAL_TEXT, SCRIPTED_PERSONA, SCRIPTED_SCHEDULE } from '../../trueforge/tests/fixtures/scriptedModelServer.ts';
+import {
+  FINAL_TEXT,
+  SCRIPTED_DRAFT,
+  SCRIPTED_EVENT,
+  SCRIPTED_PERSONA,
+  SCRIPTED_SCHEDULE,
+} from '../../trueforge/tests/fixtures/scriptedModelServer.ts';
 import { inProcessApi, pausedSession } from './support/approvalChat.ts';
 import { featureShotPath, saveFailureShots } from './support/featureShots.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
@@ -43,89 +49,137 @@ async function savedNames({ api, path }: { api: ApprovalTestServer; path: string
   return response.text();
 }
 
-test(
-  'the plain, persona and schedule approval cards show what will happen, and Allow does it',
-  { timeout: 600_000 },
-  async () => {
-    const api = await startApprovalTestServer();
-    const viteCache = privateViteCache('approval-kinds');
-    const vite = await createServer({
-      cacheDir: viteCache.cacheDir,
-      root: fileURLToPath(new URL('../', import.meta.url)),
-      logLevel: 'error',
-      plugins: [inProcessApi(api)],
-      server: { host: '127.0.0.1', port: 0, strictPort: false },
+async function savedDraftIds(api: ApprovalTestServer): Promise<string[]> {
+  return (await api.evalSources().gmail.listDrafts({ maxResults: 10, pageToken: undefined })).draftIds;
+}
+
+/** How many events on the scripted day carry the scripted title. */
+async function savedEventCount(api: ApprovalTestServer): Promise<number> {
+  const day = SCRIPTED_EVENT.start.slice(0, 10);
+  const found = await api.evalSources().calendar.listEvents({
+    timeMin: `${day}T00:00:00`,
+    timeMax: `${day}T23:59:59`,
+    query: SCRIPTED_EVENT.title,
+    maxResults: 10,
+    pageToken: undefined,
+    timeZone: SCRIPTED_EVENT.time_zone,
+  });
+  return found.events.length;
+}
+
+test('each kind of approval card shows what will happen, and Allow does it', { timeout: 600_000 }, async () => {
+  const api = await startApprovalTestServer();
+  const viteCache = privateViteCache('approval-kinds');
+  const vite = await createServer({
+    cacheDir: viteCache.cacheDir,
+    root: fileURLToPath(new URL('../', import.meta.url)),
+    logLevel: 'error',
+    plugins: [inProcessApi(api)],
+    server: { host: '127.0.0.1', port: 0, strictPort: false },
+  });
+  let browser: Browser | undefined;
+  let current = 'approval:plain';
+  try {
+    await vite.listen();
+    const address = vite.httpServer?.address();
+    if (address == null || typeof address === 'string') throw new Error('Vite did not bind a TCP port');
+    const origin = `http://127.0.0.1:${address.port}`;
+    browser = await chromium.launch({ executablePath: findChromiumExecutable(chromium.executablePath()) });
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+
+    // The plain card: a connector's write tool, which carries no message, event, schedule or persona.
+    const paused = await pausedSession(api);
+    await page.goto(`${origin}/sessions/${paused.sessionId}`, {
+      waitUntil: 'domcontentloaded',
+      timeout: FIRST_LOAD_TIMEOUT_MS,
     });
-    let browser: Browser | undefined;
-    let current = 'approval:plain';
-    try {
-      await vite.listen();
-      const address = vite.httpServer?.address();
-      if (address == null || typeof address === 'string') throw new Error('Vite did not bind a TCP port');
-      const origin = `http://127.0.0.1:${address.port}`;
-      browser = await chromium.launch({ executablePath: findChromiumExecutable(chromium.executablePath()) });
-      const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    await page.getByText('Waiting for you').first().waitFor({ timeout: FIRST_LOAD_TIMEOUT_MS });
+    await page.screenshot({ path: await featureShotPath({ surface: current, step: '1-card' }) });
+    await allow(page);
+    await page.screenshot({ path: await featureShotPath({ surface: current, step: '2-allowed' }) });
 
-      // The plain card: a connector's write tool, which carries no message, event, schedule or persona.
-      const paused = await pausedSession(api);
-      await page.goto(`${origin}/sessions/${paused.sessionId}`, {
-        waitUntil: 'domcontentloaded',
-        timeout: FIRST_LOAD_TIMEOUT_MS,
-      });
-      await page.getByText('Waiting for you').first().waitFor({ timeout: FIRST_LOAD_TIMEOUT_MS });
-      await page.screenshot({ path: await featureShotPath({ surface: current, step: '1-card' }) });
-      await allow(page);
-      await page.screenshot({ path: await featureShotPath({ surface: current, step: '2-allowed' }) });
+    current = 'approval:persona';
+    assert.ok(
+      !(await savedNames({ api, path: '/api/v1/personas' })).includes(SCRIPTED_PERSONA.name),
+      'the persona does not exist before the card is allowed',
+    );
+    await askFromHome({ page, origin, ask: 'run:create_persona please' });
+    const personaCard = page.locator('main');
+    await personaCard.getByText(`Add the persona "${SCRIPTED_PERSONA.name}"?`).waitFor({ timeout: RENDER_TIMEOUT_MS });
+    await personaCard.getByText(SCRIPTED_PERSONA.description).first().waitFor({ timeout: RENDER_TIMEOUT_MS });
+    await page.screenshot({ path: await featureShotPath({ surface: current, step: '1-card' }) });
+    assert.ok(
+      !(await savedNames({ api, path: '/api/v1/personas' })).includes(SCRIPTED_PERSONA.name),
+      'nothing is saved while the card waits',
+    );
+    await allow(page);
+    assert.ok(
+      (await savedNames({ api, path: '/api/v1/personas' })).includes(SCRIPTED_PERSONA.name),
+      'Allow saved the persona',
+    );
+    await page.screenshot({ path: await featureShotPath({ surface: current, step: '2-allowed' }) });
 
-      current = 'approval:persona';
-      assert.ok(
-        !(await savedNames({ api, path: '/api/v1/personas' })).includes(SCRIPTED_PERSONA.name),
-        'the persona does not exist before the card is allowed',
-      );
-      await askFromHome({ page, origin, ask: 'run:create_persona please' });
-      const personaCard = page.locator('main');
-      await personaCard
-        .getByText(`Add the persona "${SCRIPTED_PERSONA.name}"?`)
-        .waitFor({ timeout: RENDER_TIMEOUT_MS });
-      await personaCard.getByText(SCRIPTED_PERSONA.description).first().waitFor({ timeout: RENDER_TIMEOUT_MS });
-      await page.screenshot({ path: await featureShotPath({ surface: current, step: '1-card' }) });
-      assert.ok(
-        !(await savedNames({ api, path: '/api/v1/personas' })).includes(SCRIPTED_PERSONA.name),
-        'nothing is saved while the card waits',
-      );
-      await allow(page);
-      assert.ok(
-        (await savedNames({ api, path: '/api/v1/personas' })).includes(SCRIPTED_PERSONA.name),
-        'Allow saved the persona',
-      );
-      await page.screenshot({ path: await featureShotPath({ surface: current, step: '2-allowed' }) });
+    current = 'approval:schedule';
+    await askFromHome({ page, origin, ask: 'run:create_schedule please' });
+    await page.locator('main').getByText(SCRIPTED_SCHEDULE.task).first().waitFor({ timeout: RENDER_TIMEOUT_MS });
+    await page
+      .locator('main')
+      .getByText(`Every Friday at 4:00 PM (${SCRIPTED_SCHEDULE.time_zone})`)
+      .waitFor({ timeout: RENDER_TIMEOUT_MS });
+    await page.screenshot({ path: await featureShotPath({ surface: current, step: '1-card' }) });
+    assert.ok(
+      !(await savedNames({ api, path: '/api/v1/schedules' })).includes(SCRIPTED_SCHEDULE.name),
+      'nothing is saved while the card waits',
+    );
+    await allow(page);
+    assert.ok(
+      (await savedNames({ api, path: '/api/v1/schedules' })).includes(SCRIPTED_SCHEDULE.name),
+      'Allow saved the schedule',
+    );
+    await page.screenshot({ path: await featureShotPath({ surface: current, step: '2-allowed' }) });
 
-      current = 'approval:schedule';
-      await askFromHome({ page, origin, ask: 'run:create_schedule please' });
-      await page.locator('main').getByText(SCRIPTED_SCHEDULE.task).first().waitFor({ timeout: RENDER_TIMEOUT_MS });
-      await page
-        .locator('main')
-        .getByText(`Every Friday at 4:00 PM (${SCRIPTED_SCHEDULE.time_zone})`)
-        .waitFor({ timeout: RENDER_TIMEOUT_MS });
-      await page.screenshot({ path: await featureShotPath({ surface: current, step: '1-card' }) });
-      assert.ok(
-        !(await savedNames({ api, path: '/api/v1/schedules' })).includes(SCRIPTED_SCHEDULE.name),
-        'nothing is saved while the card waits',
-      );
-      await allow(page);
-      assert.ok(
-        (await savedNames({ api, path: '/api/v1/schedules' })).includes(SCRIPTED_SCHEDULE.name),
-        'Allow saved the schedule',
-      );
-      await page.screenshot({ path: await featureShotPath({ surface: current, step: '2-allowed' }) });
-    } catch (error) {
-      await saveFailureShots({ browser, surface: current });
-      throw error;
-    } finally {
-      await browser?.close();
-      await vite.close();
-      viteCache.remove();
-      await api.close();
+    // Gmail and Google Calendar are the invented inbox and calendar from here on, so nothing reaches Google.
+    api.setEvalMode(true);
+
+    current = 'approval:email';
+    assert.deepEqual(await savedDraftIds(api), [], 'the inbox starts with no drafts');
+    await askFromHome({ page, origin, ask: 'run:draft_email please' });
+    const mailCard = page.locator('main');
+    await mailCard.getByText('Save this draft?').first().waitFor({ timeout: RENDER_TIMEOUT_MS });
+    for (const shown of [SCRIPTED_DRAFT.to[0], SCRIPTED_DRAFT.subject, SCRIPTED_DRAFT.body]) {
+      await mailCard.getByText(shown).first().waitFor({ timeout: RENDER_TIMEOUT_MS });
     }
-  },
-);
+    await page.screenshot({ path: await featureShotPath({ surface: current, step: '1-card' }) });
+    assert.deepEqual(await savedDraftIds(api), [], 'nothing is saved while the card waits');
+    await allow(page);
+    const [draftId, ...otherDrafts] = await savedDraftIds(api);
+    assert.ok(draftId !== undefined && otherDrafts.length === 0, 'Allow saved one draft');
+    const draft = await api.evalSources().gmail.getDraft(draftId);
+    const subject = draft.message?.payload?.headers?.find(header => header.name.toLowerCase() === 'subject');
+    assert.equal(subject?.value, SCRIPTED_DRAFT.subject, 'the saved draft is the one the card showed');
+    await page.screenshot({ path: await featureShotPath({ surface: current, step: '2-allowed' }) });
+
+    current = 'approval:calendar_event';
+    assert.equal(await savedEventCount(api), 0, 'the event is not in the calendar before the card is allowed');
+    await askFromHome({ page, origin, ask: 'run:create_event please' });
+    const eventCard = page.locator('main');
+    await eventCard
+      .getByText(`Add "${SCRIPTED_EVENT.title}" to your calendar?`)
+      .first()
+      .waitFor({ timeout: RENDER_TIMEOUT_MS });
+    await eventCard.getByText(SCRIPTED_EVENT.location).first().waitFor({ timeout: RENDER_TIMEOUT_MS });
+    await page.screenshot({ path: await featureShotPath({ surface: current, step: '1-card' }) });
+    assert.equal(await savedEventCount(api), 0, 'nothing is saved while the card waits');
+    await allow(page);
+    assert.equal(await savedEventCount(api), 1, 'Allow added the event');
+    await page.screenshot({ path: await featureShotPath({ surface: current, step: '2-allowed' }) });
+  } catch (error) {
+    await saveFailureShots({ browser, surface: current });
+    throw error;
+  } finally {
+    await browser?.close();
+    await vite.close();
+    viteCache.remove();
+    await api.close();
+  }
+});
