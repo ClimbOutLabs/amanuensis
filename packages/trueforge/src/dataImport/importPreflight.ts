@@ -199,6 +199,7 @@ export async function findInstanceData<TTransaction>(
       source_id: undefined,
       folder_id: undefined,
       no_folder: false,
+      include_private: false,
     });
     if (sessionPage.data.some(session => !ignoredSessions.has(session.session_id))) {
       found.push('chats');
