@@ -3,6 +3,7 @@
 import type * as TrueForge from "../../api/index.js";
 import * as core from "../../core/index.js";
 import type * as serializers from "../index.js";
+import { EmailAccountEntry } from "./EmailAccountEntry.js";
 import { EmailAccountStatusState } from "./EmailAccountStatusState.js";
 import { EmailProvider } from "./EmailProvider.js";
 
@@ -10,8 +11,10 @@ export const EmailAccountStatus: core.serialization.ObjectSchema<
     serializers.EmailAccountStatus.Raw,
     TrueForge.EmailAccountStatus
 > = core.serialization.object({
+    accounts: core.serialization.list(EmailAccountEntry),
     address: core.serialization.string().nullable(),
     available: core.serialization.boolean(),
+    defaultAddress: core.serialization.property("default_address", core.serialization.string().nullable()),
     providerKey: core.serialization.property("provider_key", core.serialization.string()),
     providers: core.serialization.list(EmailProvider),
     state: EmailAccountStatusState,
@@ -19,8 +22,10 @@ export const EmailAccountStatus: core.serialization.ObjectSchema<
 
 export declare namespace EmailAccountStatus {
     export interface Raw {
+        accounts: EmailAccountEntry.Raw[];
         address?: string | null;
         available: boolean;
+        default_address?: string | null;
         provider_key: string;
         providers: EmailProvider.Raw[];
         state: EmailAccountStatusState.Raw;

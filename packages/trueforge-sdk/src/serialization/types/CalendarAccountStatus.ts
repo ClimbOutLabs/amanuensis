@@ -3,6 +3,7 @@
 import type * as TrueForge from "../../api/index.js";
 import * as core from "../../core/index.js";
 import type * as serializers from "../index.js";
+import { CalendarAccountEntry } from "./CalendarAccountEntry.js";
 import { CalendarAccountStatusState } from "./CalendarAccountStatusState.js";
 import { CalendarProvider } from "./CalendarProvider.js";
 
@@ -10,8 +11,10 @@ export const CalendarAccountStatus: core.serialization.ObjectSchema<
     serializers.CalendarAccountStatus.Raw,
     TrueForge.CalendarAccountStatus
 > = core.serialization.object({
+    accounts: core.serialization.list(CalendarAccountEntry),
     available: core.serialization.boolean(),
     calendarUrl: core.serialization.property("calendar_url", core.serialization.string().nullable()),
+    defaultAddress: core.serialization.property("default_address", core.serialization.string().nullable()),
     email: core.serialization.string().nullable(),
     providerKey: core.serialization.property("provider_key", core.serialization.string()),
     providers: core.serialization.list(CalendarProvider),
@@ -21,8 +24,10 @@ export const CalendarAccountStatus: core.serialization.ObjectSchema<
 
 export declare namespace CalendarAccountStatus {
     export interface Raw {
+        accounts: CalendarAccountEntry.Raw[];
         available: boolean;
         calendar_url?: string | null;
+        default_address?: string | null;
         email?: string | null;
         provider_key: string;
         providers: CalendarProvider.Raw[];

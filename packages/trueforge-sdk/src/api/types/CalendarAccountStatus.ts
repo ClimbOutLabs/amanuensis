@@ -3,18 +3,22 @@
 import type * as TrueForge from "../index.js";
 
 export interface CalendarAccountStatus {
+    /** Every connected account, in saved order. */
+    accounts: TrueForge.CalendarAccountEntry[];
     /** Whether this instance has the Calendar connector at all; when false, no card is shown. */
     available: boolean;
-    /** The calendar address of the connected account; null when none. */
+    /** The calendar address of the default account; null when none. */
     calendarUrl: string | null;
-    /** The email address of the connected account; null when none is connected. */
+    /** The account new events land on; null when none is connected. */
+    defaultAddress: string | null;
+    /** The email address of the default account; null when none is connected. */
     email: string | null;
-    /** The provider of the connected account, worked out from its address; the picker default otherwise. */
+    /** The provider of the default account, worked out from its address; the picker default otherwise. */
     providerKey: string;
     /** The provider picker table, in display order. */
     providers: TrueForge.CalendarProvider[];
     /** Connected, not connected, connected but the saved sign-in no longer works, or saved but the server cannot be reached right now. */
     state: TrueForge.CalendarAccountStatusState;
-    /** The login name of the connected account; never the password. */
+    /** The login name of the default account; never the password. */
     username: string | null;
 }
