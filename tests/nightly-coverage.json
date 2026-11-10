@@ -180,31 +180,31 @@
     },
     "pill:behind": {
       "set": "home",
-      "tests": []
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
     },
     "pill:coming_up": {
       "set": "home",
-      "tests": []
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
     },
     "pill:help_me_think": {
       "set": "home",
-      "tests": []
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
     },
     "pill:just_moved": {
       "set": "home",
-      "tests": []
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
     },
     "pill:money": {
       "set": "home",
-      "tests": []
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
     },
     "pill:someone_i_look_after": {
       "set": "home",
-      "tests": []
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
     },
     "pill:write_hard": {
       "set": "home",
-      "tests": []
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
     },
     "route:agent": {
       "set": "persona",
@@ -447,7 +447,8 @@
       "set": "home",
       "tests": [
         "packages/frontend/tests/homeAndMenu.browser.test.ts",
-        "packages/frontend/tests/homeColumn.browser.test.ts"
+        "packages/frontend/tests/homeColumn.browser.test.ts",
+        "packages/frontend/tests/homeCards.browser.test.ts"
       ]
     },
     "screen:memory-sharing": {
@@ -519,27 +520,27 @@
     },
     "tour:ask_for": {
       "set": "home",
-      "tests": []
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
     },
     "tour:bill": {
       "set": "home",
-      "tests": []
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
     },
     "tour:brief": {
       "set": "home",
-      "tests": []
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
     },
     "tour:budget": {
       "set": "home",
-      "tests": []
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
     },
     "tour:care": {
       "set": "home",
-      "tests": []
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
     },
     "tour:chores": {
       "set": "home",
-      "tests": []
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
     },
     "tour:company": {
       "set": "home",
@@ -547,19 +548,19 @@
     },
     "tour:decide": {
       "set": "home",
-      "tests": []
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
     },
     "tour:dinner": {
       "set": "home",
-      "tests": []
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
     },
     "tour:doctor": {
       "set": "home",
-      "tests": []
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
     },
     "tour:dropping": {
       "set": "home",
-      "tests": []
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
     },
     "tour:explain": {
       "set": "home",
@@ -567,39 +568,39 @@
     },
     "tour:follow_up": {
       "set": "home",
-      "tests": []
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
     },
     "tour:forms": {
       "set": "home",
-      "tests": []
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
     },
     "tour:fresh": {
       "set": "home",
-      "tests": []
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
     },
     "tour:gathering": {
       "set": "home",
-      "tests": []
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
     },
     "tour:hard_talk": {
       "set": "home",
-      "tests": []
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
     },
     "tour:head": {
       "set": "home",
-      "tests": []
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
     },
     "tour:kindly": {
       "set": "home",
-      "tests": []
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
     },
     "tour:language": {
       "set": "home",
-      "tests": []
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
     },
     "tour:letter": {
       "set": "home",
-      "tests": []
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
     },
     "tour:locals_know": {
       "set": "home",
@@ -607,11 +608,11 @@
     },
     "tour:meds": {
       "set": "home",
-      "tests": []
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
     },
     "tour:money_due": {
       "set": "home",
-      "tests": []
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
     },
     "tour:neighborhood": {
       "set": "home",
@@ -619,35 +620,35 @@
     },
     "tour:next_meeting": {
       "set": "home",
-      "tests": []
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
     },
     "tour:overcharged": {
       "set": "home",
-      "tests": []
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
     },
     "tour:places": {
       "set": "home",
-      "tests": []
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
     },
     "tour:remember": {
       "set": "home",
-      "tests": []
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
     },
     "tour:say_no": {
       "set": "home",
-      "tests": []
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
     },
     "tour:school": {
       "set": "home",
-      "tests": []
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
     },
     "tour:sort_out": {
       "set": "home",
-      "tests": []
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
     },
     "tour:start": {
       "set": "home",
-      "tests": []
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
     },
     "tour:steps": {
       "set": "home",
@@ -655,11 +656,11 @@
     },
     "tour:subscriptions": {
       "set": "home",
-      "tests": []
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
     },
     "tour:talk": {
       "set": "home",
-      "tests": []
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
     },
     "tour:thanks": {
       "set": "home",
@@ -667,27 +668,27 @@
     },
     "tour:their_appointment": {
       "set": "home",
-      "tests": []
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
     },
     "tour:thread": {
       "set": "home",
-      "tests": []
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
     },
     "tour:today": {
       "set": "home",
-      "tests": []
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
     },
     "tour:trip": {
       "set": "home",
-      "tests": []
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
     },
     "tour:waiting": {
       "set": "home",
-      "tests": []
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
     },
     "tour:week": {
       "set": "home",
-      "tests": []
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
     }
   },
   "not_yet": [
@@ -725,13 +726,6 @@
     "email-preset:webde",
     "email-preset:yahoo",
     "email-preset:zoho",
-    "pill:behind",
-    "pill:coming_up",
-    "pill:help_me_think",
-    "pill:just_moved",
-    "pill:money",
-    "pill:someone_i_look_after",
-    "pill:write_hard",
     "route:agent",
     "route:agentImport",
     "route:auditLog",
@@ -773,48 +767,11 @@
     "route:tokenFactoryUsage",
     "route:toolOutputScreen",
     "route:voice",
-    "tour:ask_for",
-    "tour:bill",
-    "tour:brief",
-    "tour:budget",
-    "tour:care",
-    "tour:chores",
     "tour:company",
-    "tour:decide",
-    "tour:dinner",
-    "tour:doctor",
-    "tour:dropping",
     "tour:explain",
-    "tour:follow_up",
-    "tour:forms",
-    "tour:fresh",
-    "tour:gathering",
-    "tour:hard_talk",
-    "tour:head",
-    "tour:kindly",
-    "tour:language",
-    "tour:letter",
     "tour:locals_know",
-    "tour:meds",
-    "tour:money_due",
     "tour:neighborhood",
-    "tour:next_meeting",
-    "tour:overcharged",
-    "tour:places",
-    "tour:remember",
-    "tour:say_no",
-    "tour:school",
-    "tour:sort_out",
-    "tour:start",
     "tour:steps",
-    "tour:subscriptions",
-    "tour:talk",
-    "tour:thanks",
-    "tour:their_appointment",
-    "tour:thread",
-    "tour:today",
-    "tour:trip",
-    "tour:waiting",
-    "tour:week"
+    "tour:thanks"
   ]
 }
