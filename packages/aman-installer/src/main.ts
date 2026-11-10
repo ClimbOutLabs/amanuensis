@@ -143,6 +143,7 @@ const windowsJobs = systemWindowsJobs({
   runner,
   localAppDataDir: config.localAppDataDir,
   selfExePath: process.execPath,
+  selfPid: process.pid,
 });
 
 // Waits for Enter when the window would otherwise close unread.
