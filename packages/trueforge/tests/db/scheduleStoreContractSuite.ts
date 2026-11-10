@@ -74,6 +74,45 @@ export function runScheduleStoreContractSuite(deps: {
     expect(await store.getRunById({ id: pendingRun.id })).toEqual(pendingRun);
   });
 
+  it('reads the pending runs of several schedules in one call, and none for no schedules', async () => {
+    const store = deps.getScheduleStore();
+    const agent = await seedAgent();
+    const runFrom = new Date('2026-08-27T10:00:00.000Z');
+    const m = manifest({ cron: '0 13 * * *', timezone: 'UTC' });
+
+    const first = await store.createScheduleAndRun({
+      tenant_id: TENANT,
+      agent_id: agent.id,
+      agent_name: agent.name,
+      persona_id: null,
+      name: 'first',
+      manifest: m,
+      created_by_subject: USER_SUBJECT,
+      runFrom,
+    });
+    const second = await store.createScheduleAndRun({
+      tenant_id: TENANT,
+      agent_id: agent.id,
+      agent_name: agent.name,
+      persona_id: null,
+      name: 'second',
+      manifest: m,
+      created_by_subject: USER_SUBJECT,
+      runFrom,
+    });
+    if (first.pendingRun === undefined || second.pendingRun === undefined) {
+      throw new Error('Expected active schedules to create pending runs');
+    }
+
+    const runs = await store.getScheduledRunsFor({
+      tenant_id: TENANT,
+      schedule_ids: [first.schedule.id, second.schedule.id, 'no-such-schedule'],
+    });
+    expect(runs).toEqual(expect.arrayContaining([first.pendingRun, second.pendingRun]));
+    expect(runs).toHaveLength(2);
+    expect(await store.getScheduledRunsFor({ tenant_id: TENANT, schedule_ids: [] })).toEqual([]);
+  });
+
   it('create one-time schedule queues one run at its own time, and a done one queues none', async () => {
     const store = deps.getScheduleStore();
     const agent = await seedAgent();

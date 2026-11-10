@@ -131,10 +131,10 @@ const REMINDER_RUN: ScheduleRunRecord = {
 
 const ALL_SCHEDULES = [REMINDER, TASK, PAUSED_TASK];
 
-function fakeScheduleStore(): Pick<IScheduleStore, 'listSchedules' | 'getScheduledRunFor' | 'getSchedule'> {
+function fakeScheduleStore(): Pick<IScheduleStore, 'listSchedules' | 'getScheduledRunsFor' | 'getSchedule'> {
   return {
     listSchedules: () => Promise.resolve({ data: ALL_SCHEDULES, pagination: { limit: 200 } }),
-    getScheduledRunFor: input => Promise.resolve(input.schedule_id === REMINDER.id ? REMINDER_RUN : undefined),
+    getScheduledRunsFor: input => Promise.resolve(input.schedule_ids.includes(REMINDER.id) ? [REMINDER_RUN] : []),
     getSchedule: input => Promise.resolve(ALL_SCHEDULES.find(schedule => schedule.id === input.id)),
   };
 }
@@ -727,6 +727,128 @@ describe('GET /api/v1/today needs_ok', () => {
     const response = await router.request('/');
     expect(response.status).toBe(200);
     const today = GetTodayResponseSchema.parse(await response.json()).data;
+    expect(today.needs_ok).toEqual([]);
+  });
+
+  /**
+   * A long chat: the same held action as seedChat, then more events of the kinds the scan
+   * reads than one page holds, then (withAnswer) the turn that answers the hold.
+   */
+  async function seedLongChat(sessionId: string, withAnswer: boolean): Promise<void> {
+    await sessions.create({
+      tenant_id: TENANT,
+      session_id: sessionId,
+      created_by_subject: { subject_id: OWNER_ID, subject_type: 'user', subject_display_name: 'Ada' },
+      agent: { type: 'inline', spec: makeAgentSpec() },
+      external_id: null,
+    });
+    await sessionStore.updateSession({
+      tenant_id: TENANT,
+      session_id: sessionId,
+      agent: undefined,
+      title: 'Trip planning',
+      metadata: undefined,
+    });
+    await sessionStore.createTurn(makeCreateTurnInput<TurnCustom>({ sessionId, turnId: 'turn-1' }));
+    await sessionStore.appendToEvents({
+      session_id: sessionId,
+      turn_id: 'turn-1',
+      events: [
+        makeTurnCreatedEvent('turn-1'),
+        ToolApprovalRequiredEventSchema.parse({
+          type: 'tool.approval_required',
+          id: newEventId(),
+          created_at: new Date().toISOString(),
+          thread_id: 'main',
+          tool_calls: [
+            {
+              id: 'call-1',
+              source_event_id: 'evt-1',
+              held: true,
+              expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+              tier3_card: {
+                plain_what: 'Send the email to Ana',
+                plain_why: null,
+                cannot_be_undone: null,
+                why_asked_again: null,
+                destination: null,
+                recipient: null,
+                amount: null,
+                parsed_command: null,
+                outbound_text: null,
+                destination_host: null,
+                outbound_truncated: false,
+              },
+            },
+          ],
+        }),
+      ],
+    });
+    await sessionStore.appendToEvents({
+      session_id: sessionId,
+      turn_id: 'turn-1',
+      events: Array.from({ length: 250 }, () => makeTurnCreatedEvent('turn-1')),
+    });
+    if (withAnswer) {
+      const doneState = makeDoneTurnState();
+      await sessionStore.updateTurnState({
+        session_id: sessionId,
+        turn_id: 'turn-1',
+        state: doneState,
+        turn_done_event: makeTurnDoneEvent(doneState),
+      });
+      await sessionStore.createTurn(
+        makeCreateTurnInput<TurnCustom>({
+          sessionId,
+          turnId: 'turn-2',
+          previousTurnId: 'turn-1',
+          firstTurnId: 'turn-1',
+        }),
+      );
+      await sessionStore.appendToEvents({
+        session_id: sessionId,
+        turn_id: 'turn-2',
+        events: [
+          TurnCreatedEventSchema.parse({
+            type: 'turn.created',
+            id: newEventId(),
+            created_at: new Date().toISOString(),
+            turn_id: 'turn-2',
+            previous_turn_id: 'turn-1',
+            state: { status: 'running' },
+            thread_id: null,
+            input: [
+              {
+                type: 'user.tool_approval',
+                thread_id: 'main',
+                tool_call_id: 'call-1',
+                approval: { status: 'allow' },
+              },
+            ],
+          }),
+        ],
+      });
+    }
+  }
+
+  it('still lists a held action buried under more than a page of newer events', async () => {
+    await seedLongChat('chat-long-waiting', false);
+    const router = createTodayRouter(baseDeps({ sessionStore, sessions, now: () => new Date() }));
+    const today = await readNeedsOk(router);
+    expect(today.needs_ok).toEqual([
+      {
+        held_action_id: 'call-1',
+        title: 'Send the email to Ana',
+        origin: 'Trip planning',
+        session_id: 'chat-long-waiting',
+      },
+    ]);
+  });
+
+  it('drops a held action whose answer comes after more than a page of newer events', async () => {
+    await seedLongChat('chat-long-answered', true);
+    const router = createTodayRouter(baseDeps({ sessionStore, sessions, now: () => new Date() }));
+    const today = await readNeedsOk(router);
     expect(today.needs_ok).toEqual([]);
   });
 

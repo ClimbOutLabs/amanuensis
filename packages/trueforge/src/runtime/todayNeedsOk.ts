@@ -13,6 +13,7 @@ import {
   EventType,
   withoutClearedApprovalEvent,
   type ISessionStore,
+  type SessionEventItem,
   type SessionRecord,
   type Sessions,
 } from '@truefoundry/trueforge-core/agent-session';
@@ -27,8 +28,14 @@ import type { TodayNeedsOkItem } from '../schemas/today';
 const HELD_SCAN_WINDOW_MS = 48 * 60 * 60 * 1000;
 /** Most chats looked at for waiting actions, newest first. */
 const SESSION_SCAN_CAP = 50;
-/** Most events of the two kinds that matter read from one chat. */
-const EVENT_SCAN_LIMIT = 200;
+/** Events of the two kinds that matter read per page from one chat, newest first. */
+const EVENT_PAGE_SIZE = 200;
+/**
+ * Most pages read from one chat. The scan normally stops at the scan window's edge; this
+ * bound only guards against a chat with an unbounded event history, and reaching it is
+ * reported through `more` like any other cut.
+ */
+const EVENT_PAGE_CAP = 50;
 /** Most waiting actions the rail lists. */
 const ITEM_CAP = 20;
 
@@ -83,6 +90,7 @@ export async function listWaitingNeedsOk(
     metadata: undefined,
     source_type: undefined,
     source_id: undefined,
+    include_private: false,
   });
   const waiting: { item: TodayNeedsOkItem; held_at: string }[] = [];
   let scanCut = false;
@@ -121,10 +129,33 @@ async function waitingInSession(
     return { items: [], scanCut: false };
   }
   const cleared = await handle.clearedApprovalKeys();
-  const { data } = await handle.listEvents({
-    limit: EVENT_SCAN_LIMIT,
-    types: [EventType.TOOL_APPROVAL_REQUIRED, EventType.TURN_CREATED],
-  });
+  // The store reads newest first, so one page can hold a waiting action while its answer
+  // sits on a later page, or the other way round. Page until the scan window is covered,
+  // so a hold and its answer are always judged from the same read.
+  const cutoffMs = input.now.getTime() - HELD_SCAN_WINDOW_MS;
+  const data: SessionEventItem[] = [];
+  let scanCut = false;
+  let pageToken: string | undefined;
+  for (let page = 0; page < EVENT_PAGE_CAP; page += 1) {
+    const result = await handle.listEvents({
+      limit: EVENT_PAGE_SIZE,
+      page_token: pageToken,
+      types: [EventType.TOOL_APPROVAL_REQUIRED, EventType.TURN_CREATED],
+    });
+    data.push(...result.data);
+    const oldest = result.data.at(-1);
+    if (result.pagination.next_page_token === undefined) {
+      break;
+    }
+    if (oldest !== undefined && Date.parse(oldest.event.created_at) < cutoffMs) {
+      break;
+    }
+    if (page === EVENT_PAGE_CAP - 1) {
+      scanCut = true;
+      break;
+    }
+    pageToken = result.pagination.next_page_token;
+  }
   const answered = new Set<string>();
   for (const { event } of data) {
     if (event.type !== EventType.TURN_CREATED || event.input === undefined) {
@@ -162,11 +193,11 @@ async function waitingInSession(
     }
   }
   if (found.length === 0) {
-    return { items: [], scanCut: data.length >= EVENT_SCAN_LIMIT };
+    return { items: [], scanCut };
   }
   const origin = await originOf(deps, { tenant_id: input.tenant_id, session: input.session });
   return {
     items: found.map(entry => ({ ...entry, item: { ...entry.item, origin } })),
-    scanCut: data.length >= EVENT_SCAN_LIMIT,
+    scanCut,
   };
 }

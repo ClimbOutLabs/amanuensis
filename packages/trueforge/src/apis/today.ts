@@ -15,7 +15,7 @@ import type { Today, TodayDueReminder } from '../schemas/today';
 export interface TodayRouterDeps {
   googleConnectionStore: GoogleConnectionStore | undefined;
   mcpServerStore: Pick<IMcpServerStore, 'getServer'>;
-  scheduleStore: Pick<IScheduleStore, 'listSchedules' | 'getScheduledRunFor' | 'getSchedule'>;
+  scheduleStore: Pick<IScheduleStore, 'listSchedules' | 'getScheduledRunsFor' | 'getSchedule'>;
   sessionStore: Pick<ISessionStore<SessionCustom, TurnCustom>, 'listSessions' | 'getSessionByExternalId'>;
   sessions: Pick<Sessions<SessionCustom, TurnCustom>, 'get'>;
   calendarAccountUrl: string | undefined;
@@ -52,12 +52,19 @@ async function readDueAndCarrying(
     tenant_id: input.tenant_id,
     external_id: `reminders:${input.created_by}`,
   });
+  // One lookup for every reminder's pending run, not one per schedule.
+  const reminderIds = active.filter(schedule => schedule.manifest.kind === 'reminder').map(schedule => schedule.id);
+  const pendingRuns = await deps.scheduleStore.getScheduledRunsFor({
+    tenant_id: input.tenant_id,
+    schedule_ids: reminderIds,
+  });
+  const runBySchedule = new Map(pendingRuns.map(run => [run.schedule_id, run]));
   const due: TodayDueReminder[] = [];
   for (const schedule of active) {
     if (schedule.manifest.kind !== 'reminder') {
       continue;
     }
-    const run = await deps.scheduleStore.getScheduledRunFor({ tenant_id: input.tenant_id, schedule_id: schedule.id });
+    const run = runBySchedule.get(schedule.id);
     if (run === undefined || Date.parse(run.scheduled_for) > dayEnd.getTime()) {
       continue;
     }
