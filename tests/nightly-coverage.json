@@ -37,6 +37,7 @@
     "screen:help-chat": "The chat that \"Help, I'm stuck\" opens.",
     "screen:home": "The Home screen and its More menu.",
     "screen:memory-sharing": "The grid that sets which personas share which memories.",
+    "screen:phone-width": "Home, a chat and every Settings tab at phone widths, with nothing cut off at the side.",
     "screen:settings-tabs": "The strip of Settings tabs.",
     "screen:signed-in-journey": "Signing in on the built app, adding a model, chatting and signing out.",
     "screen:space-pictures": "Pictures on a saved page."
@@ -458,6 +459,10 @@
     "screen:memory-sharing": {
       "set": "memory",
       "tests": ["packages/frontend/tests/memorySharing.browser.test.ts"]
+    },
+    "screen:phone-width": {
+      "set": "chat",
+      "tests": ["packages/frontend/tests/phoneWidth.browser.test.ts"]
     },
     "screen:settings-tabs": {
       "set": "account",
