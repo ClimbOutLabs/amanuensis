@@ -49,6 +49,8 @@ describe('SqliteSessionStore (ISessionStore contract)', () => {
       metadata: {},
       agent: { type: 'inline', spec: makeAgentSpec() },
       custom: null,
+      is_incognito: false,
+      private_expires_at: null,
     });
     const grant = '["v1","mcp","github","create_issue"]';
     await store.createTurn(
@@ -82,6 +84,8 @@ describe('SqliteSessionStore (ISessionStore contract)', () => {
       metadata: {},
       agent: { type: 'inline', spec: makeAgentSpec() },
       custom: null,
+      is_incognito: false,
+      private_expires_at: null,
     });
     await env.db
       .updateTable('session')
@@ -135,6 +139,8 @@ describe('SqliteSessionStore (ISessionStore contract)', () => {
       metadata: {},
       agent: { type: 'inline', spec: makeAgentSpec() },
       custom: null,
+      is_incognito: false,
+      private_expires_at: null,
     });
     await env.db
       .updateTable('session')
@@ -198,6 +204,8 @@ describe('SqliteSessionStore (ISessionStore contract)', () => {
         metadata: {},
         agent: { type: 'inline', spec: makeAgentSpec() },
         custom: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
       await env.db
         .updateTable('session')
@@ -307,6 +315,8 @@ describe('SqliteSessionStore (ISessionStore contract)', () => {
       metadata: {},
       agent: { type: 'inline', spec: makeAgentSpec() },
       custom: null,
+      is_incognito: false,
+      private_expires_at: null,
     });
     await store.replaceTaskChecklist({
       tenant_id: 'restart-tenant',
