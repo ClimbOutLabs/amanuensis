@@ -128,7 +128,9 @@ describe('emailOfferCapability', () => {
     const { set } = await mountedSet();
     const result = await call(set, 'record_email_offer_decline');
     expect(result).toEqual({ recorded: true, reply_line: EMAIL_OFFER_DECLINE_LINE });
-    expect(EMAIL_OFFER_DECLINE_LINE).toBe('No problem. You can connect it any time in Settings, under Email');
+    expect(EMAIL_OFFER_DECLINE_LINE).toBe(
+      'No problem. You can connect it any time in Settings, then Connectors, from the Email card.',
+    );
     expect(settings.values.get(EMAIL_OFFER_DECLINED_SETTING_KEY)).toBe('true');
 
     const after = await call(set, 'email_connection_status');

@@ -1,7 +1,7 @@
 /**
  * Offering to connect email from a chat, at the moment of need. When a mail task arrives and no
  * email route is connected, the chat offers the connection on a question card instead of ending
- * at a pointer to Settings. The chat holds no secret and connects nothing itself: a yes sends the
+ * at a pointer to Settings. The chat holds no secret and connects nothing itself: a yes points the
  * person to the Email form in Settings, Connectors, the one place an app password is ever typed
  * (the settled rule from the email connector), and when they come back the original task runs
  * without being asked twice. A no is recorded once and holds in every chat; the only words after
@@ -26,7 +26,8 @@ import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 export const EMAIL_OFFER_DECLINED_SETTING_KEY = 'email_offer_declined';
 
 /** The whole reply after a no: one line, and it leaves Settings as the person's way back. */
-export const EMAIL_OFFER_DECLINE_LINE = 'No problem. You can connect it any time in Settings, under Email';
+export const EMAIL_OFFER_DECLINE_LINE =
+  'No problem. You can connect it any time in Settings, then Connectors, from the Email card.';
 
 export interface EmailOfferDeps {
   /** True exactly while a mail account is saved: the Email connector is registered only then. */

@@ -1,7 +1,9 @@
 /**
  * The Email offer, mounted by the real turn resolver: a person with no email connected and no
  * remembered no gets the offer tools in the chat. A saved mail account or a remembered decline
- * leaves the turn without them, so the offer cannot chase the person from a later chat.
+ * leaves the turn without them, so the offer cannot chase the person from a later chat. An
+ * unattended run (a schedule) never gets them: nobody can answer the card there, and a decline
+ * recorded by the run would hold in every chat.
  */
 import { AgentSpecSchema, type AgentSpec } from '@truefoundry/trueforge-core/agent-session';
 import type { ILLM } from '@truefoundry/trueforge-core/core';
@@ -87,11 +89,13 @@ describe('the Email offer mount', () => {
   let env: SqliteTestDatabase;
   let settings: SqliteGlobalSettingsStore;
   let mailConnectorRegistered: boolean;
+  let unattendedRun: boolean;
 
   beforeEach(async () => {
     env = await createSqliteTestDatabase();
     settings = new SqliteGlobalSettingsStore(env.db);
     mailConnectorRegistered = false;
+    unattendedRun = false;
   }, 120_000);
 
   afterEach(async () => {
@@ -126,6 +130,7 @@ describe('the Email offer mount', () => {
         sessionId: 's1',
         logger: createLogger({ silent: true }),
         startsAnswer: true,
+        unattended: unattendedRun,
         emailOffer: {
           settings,
           mailConnectorRegistered: () => Promise.resolve(mailConnectorRegistered),
@@ -182,5 +187,11 @@ describe('the Email offer mount', () => {
   it('mounts nothing after the person has turned the offer down', async () => {
     await settings.setSetting({ key: EMAIL_OFFER_DECLINED_SETTING_KEY, value: 'true' });
     expect(await offerCapability()).toBeUndefined();
+  });
+
+  it('mounts nothing on an unattended run, so no card waits unanswered and no decline can be recorded', async () => {
+    unattendedRun = true;
+    expect(await offerCapability()).toBeUndefined();
+    expect(await settings.getSetting({ key: EMAIL_OFFER_DECLINED_SETTING_KEY })).toBeUndefined();
   });
 });

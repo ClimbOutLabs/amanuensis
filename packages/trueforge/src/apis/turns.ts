@@ -972,6 +972,8 @@ function createTurnResolver(deps: {
       personas,
       logger,
       startsAnswer,
+      // A scheduled run has nobody to answer the Email offer card, so the offer stays unmounted.
+      unattended: deps.unattended,
     },
     { store: turnArtifactStore, tenantId: tenant_id, sessionId, turnId, logger },
     { sessionStore, budget: tokenFactoryBudget, authority: { tenantId: tenant_id, userRef } },

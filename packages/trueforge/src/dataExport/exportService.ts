@@ -43,6 +43,7 @@ import type { ITurnArtifactStore, TurnArtifactRecord } from '../db/turnArtifactS
 import { personaKnowledgeLocation } from '../personaKnowledge/knowledgePaths';
 import { openPersonaKnowledgeRepository } from '../personaKnowledge/sqliteKnowledgeRepository';
 import type { Persona } from '../personas/persona';
+import { EMAIL_OFFER_DECLINED_SETTING_KEY } from '../runtime/emailOfferCapability';
 import {
   CURATED_MEMORY_FILE,
   DAILY_LOG_FILE_PATTERN,
@@ -84,6 +85,7 @@ const MEMORY_LIST_TIMEOUT_MS = 10_000;
 /** Instance-wide, non-secret toggles. Anything not listed here never leaves in settings.json. */
 export const EXPORTED_GLOBAL_SETTING_KEYS = [
   DEFAULT_CHAT_MODEL_SETTING_KEY,
+  EMAIL_OFFER_DECLINED_SETTING_KEY,
   MEMORY_RECALL_ENABLED_SETTING_KEY,
   MEMORY_SCREEN_ENABLED_SETTING_KEY,
   MEMORY_SUMMARIZE_SETTING_KEY,

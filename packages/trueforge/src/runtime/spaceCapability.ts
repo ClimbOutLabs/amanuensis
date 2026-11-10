@@ -2778,6 +2778,11 @@ export interface SpaceTurnContext {
   personas?: PersonaTurnContext | undefined;
   /** The request carries a new message from the person, not an approval resuming the same answer. */
   startsAnswer: boolean;
+  /**
+   * No person watches this turn (a scheduled run): the Email offer never mounts, because nobody
+   * can answer its card and a decline recorded there would hold in every chat.
+   */
+  unattended?: boolean | undefined;
 }
 
 /**
@@ -2941,7 +2946,7 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
   /** A state read that fails costs the chat the Email offer, never the chat itself. */
   async #emailOffer(input: Parameters<MemoryTurnResourceResolver['resolveAgentDefinition']>[0]) {
     const context = this.#space.emailOffer;
-    if (context === undefined || configuration.AMAN_EVAL_MODE) {
+    if (context === undefined || configuration.AMAN_EVAL_MODE || this.#space.unattended === true) {
       return [];
     }
     const owner = { tenant_id: input.tenant_id, created_by: input.created_by };

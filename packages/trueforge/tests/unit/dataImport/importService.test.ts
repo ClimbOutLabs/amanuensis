@@ -42,6 +42,7 @@ import type { WithTransaction } from '../../../src/db/transaction';
 import { personaKnowledgeLocation } from '../../../src/personaKnowledge/knowledgePaths';
 import { openPersonaKnowledgeRepository } from '../../../src/personaKnowledge/sqliteKnowledgeRepository';
 import { amanGuidePersonaId, legacyAmanGuidePersonaId } from '../../../src/personas/amanGuide/identity';
+import { EMAIL_OFFER_DECLINED_SETTING_KEY } from '../../../src/runtime/emailOfferCapability';
 import { EMBEDDING_DIMENSIONS } from '../../../src/runtime/memory/embeddingModel';
 import { MarkdownMemoryClient } from '../../../src/runtime/memory/markdownMemoryClient';
 import type { MemoryClient } from '../../../src/runtime/memory/memoryClient';
@@ -1028,6 +1029,34 @@ describe('runDataImport keeps what the archive recorded', () => {
       expect((await target.stores.globalSettingsStore.getSetting({ key: 'memory_screen_enabled' }))?.value).toBe(
         'false',
       );
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('carries a remembered email offer decline through export and import', async () => {
+    const { source } = await seededArchive();
+    const target = await makeInstance('target-offer-decline');
+    try {
+      await source.stores.globalSettingsStore.setSetting({ key: EMAIL_OFFER_DECLINED_SETTING_KEY, value: 'true' });
+      const archive = await exportArchive(source);
+      const settings = recordAt(
+        parseJson(
+          new Map(readZipEntries(archive).map(entry => [entry.name, entry.data])).get('settings.json'),
+          'settings.json',
+        ),
+        'settings',
+      );
+      const carried = recordsAt(settings['instance'], 'instance settings').find(
+        setting => setting['key'] === EMAIL_OFFER_DECLINED_SETTING_KEY,
+      );
+      expect(carried?.['value']).toBe('true');
+
+      await runDataImport(importDeps(target), importRequest(archive));
+      expect(
+        (await target.stores.globalSettingsStore.getSetting({ key: EMAIL_OFFER_DECLINED_SETTING_KEY }))?.value,
+      ).toBe('true');
     } finally {
       await source.close();
       await target.close();

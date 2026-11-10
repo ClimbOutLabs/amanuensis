@@ -6,7 +6,7 @@ covers: waiting
 
 Once Aman can read your email, ask it to go through your unread mail. It tells you which messages need a reply first.
 
-If no email is connected, Aman may offer to connect it right in the chat when you ask for something that needs email. You still connect in Settings, and a password never goes in a chat. If you say not now, Aman remembers that choice and does not offer again. You can still connect any time in Settings, under Email.
+If no email is connected, Aman may offer to connect it right in the chat when you ask for something that needs email. You still connect in Settings, and a password never goes in a chat. If you say not now, Aman remembers that choice and does not offer again. You can still connect any time in Settings, then Connectors, from the Email card.
 
 Reading and searching is free. Aman can read and search your mail without asking you each time.
 
