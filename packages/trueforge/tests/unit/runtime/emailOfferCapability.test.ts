@@ -1,12 +1,16 @@
-import type { CallToolResponse } from '@truefoundry/trueforge-core/core';
+import type { AgentCapability, CallToolResponse, ContextMessage } from '@truefoundry/trueforge-core/core';
+import { createToolResponseV2, newEventId } from '@truefoundry/trueforge-core/core';
 import type { GoogleConnectionRecord } from '@truefoundry/trueforge-core/core/google/connection';
 import { NOOP_AGENT_TRACING } from '@truefoundry/trueforge-core/core/tracing/NoopAgentTracing';
 import type { GlobalSettingRecord, IGlobalSettingsStore } from '../../../src/db/globalSettingsStore';
 import { SqliteGoogleConnectionStore } from '../../../src/db/sqlite/google-connection-store/SqliteGoogleConnectionStore';
 import {
+  EMAIL_OFFER_CONNECT_OPTION,
   EMAIL_OFFER_DECLINE_LINE,
+  EMAIL_OFFER_DECLINE_OPTION,
   EMAIL_OFFER_DECLINED_SETTING_KEY,
   EMAIL_OFFER_INSTRUCTION,
+  EMAIL_OFFER_QUESTION,
   emailOfferCapability,
   readEmailConnectionState,
   type EmailOfferDeps,
@@ -64,6 +68,80 @@ function parsedObject(text: string): Record<string, unknown> {
   return parsed;
 }
 
+const OFFER_CALL_ID = 'call-offer';
+
+/** The assistant message that asked one question card, as the recorded context holds it. */
+function questionCardMessage(input: { question: string; options: string[] }): ContextMessage {
+  return {
+    role: 'assistant',
+    content: null,
+    tool_calls: [
+      {
+        id: OFFER_CALL_ID,
+        type: 'function',
+        function: {
+          name: 'ask_user_question',
+          arguments: JSON.stringify({ question: input.question, options: input.options }),
+        },
+        tool_info: {
+          type: 'truefoundry-system',
+          mcp_server_id: 'ask-user-question',
+          mcp_server_name: 'ask-user-question',
+          original_tool_name: 'ask_user_question',
+          is_approval_required: false,
+          is_client_side: true,
+        },
+      },
+    ],
+  };
+}
+
+/** The tool result the host records for a card answer, built by the host's own constructor. */
+function cardAnswerMessage(answer: string): ContextMessage {
+  return createToolResponseV2({
+    id: newEventId(),
+    thread_id: 'main',
+    tool_call_id: OFFER_CALL_ID,
+    created_at: '2026-11-07T00:01:00.000Z',
+    raw_content: answer,
+    model_content: null,
+    screen: null,
+    disposition: 'executed_ok',
+    remediation: undefined,
+    admission_provenance: { source: 'internal' },
+    memoized: false,
+    repeat_count: 1,
+  }).model_message;
+}
+
+function offerCardContext(answer: string): ContextMessage[] {
+  return [
+    { role: 'user', content: 'Can you read my latest mail?' },
+    questionCardMessage({
+      question: EMAIL_OFFER_QUESTION,
+      options: [EMAIL_OFFER_CONNECT_OPTION, EMAIL_OFFER_DECLINE_OPTION],
+    }),
+    cardAnswerMessage(answer),
+  ];
+}
+
+/** Runs the capability's own pre-model pass over a recorded context, as the thread does before every model call. */
+async function runPreModelPass(capability: AgentCapability, context: ContextMessage[]): Promise<void> {
+  const processors = capability.preLLMProcessors ?? [];
+  expect(processors).toHaveLength(1);
+  for (const processor of processors) {
+    const outputs: unknown[] = [];
+    for await (const output of processor.processPreLLM({
+      threadId: 'main',
+      currentContextUsage: { prompt_tokens: 0, completion_tokens: 0 },
+      context,
+    })) {
+      outputs.push(output);
+    }
+    expect(outputs).toEqual([]);
+  }
+}
+
 describe('emailOfferCapability', () => {
   let env: SqliteTestDatabase;
   let googleConnections: SqliteGoogleConnectionStore;
@@ -94,7 +172,7 @@ describe('emailOfferCapability', () => {
   async function mountedSet() {
     const capability = await emailOfferCapability(deps());
     const set = capability?.systemToolSets?.[0];
-    if (set === undefined) {
+    if (capability === undefined || set === undefined) {
       throw new Error('expected the Email offer tool set to be mounted');
     }
     return { capability, set };
@@ -124,10 +202,12 @@ describe('emailOfferCapability', () => {
     expect(typeof next === 'string' && next.includes('Offer the connection on the question card')).toBe(true);
   });
 
-  it('records a decline once, returns the one Settings line, and never mounts the offer again', async () => {
-    const { set } = await mountedSet();
+  it('records a decline that follows the offer card’s own decline answer, and never mounts the offer again', async () => {
+    const { capability, set } = await mountedSet();
+    await runPreModelPass(capability, offerCardContext(EMAIL_OFFER_DECLINE_OPTION));
     const result = await call(set, 'record_email_offer_decline');
-    expect(result).toEqual({ recorded: true, reply_line: EMAIL_OFFER_DECLINE_LINE });
+    expect(result).toMatchObject({ recorded: true, reply_line: EMAIL_OFFER_DECLINE_LINE });
+    expect(String(result['next_step'])).toContain('The no was remembered.');
     expect(EMAIL_OFFER_DECLINE_LINE).toBe(
       'No problem. You can connect it any time in Settings, then Connectors, from the Email card.',
     );
@@ -136,6 +216,65 @@ describe('emailOfferCapability', () => {
     const after = await call(set, 'email_connection_status');
     expect(after).toMatchObject({ connected: false, via: null, declined: true });
     expect(await emailOfferCapability(deps())).toBeUndefined();
+  });
+
+  it('records nothing when a decline is called with no card answer behind it', async () => {
+    const { capability, set } = await mountedSet();
+    await runPreModelPass(capability, [
+      { role: 'user', content: 'Can you read my latest mail?' },
+      { role: 'assistant', content: 'I would need email connected for that. Shall I offer it?' },
+      { role: 'user', content: 'No thanks.' },
+    ]);
+    const result = await call(set, 'record_email_offer_decline');
+    expect(result).toMatchObject({ recorded: false, reply_line: EMAIL_OFFER_DECLINE_LINE });
+    expect(String(result['next_step'])).toContain('The no was not remembered');
+    expect(settings.values.has(EMAIL_OFFER_DECLINED_SETTING_KEY)).toBe(false);
+
+    const after = await call(set, 'email_connection_status');
+    expect(after).toMatchObject({ connected: false, via: null, declined: false });
+  });
+
+  it('records nothing when the decline follows the card’s connect answer', async () => {
+    const { capability, set } = await mountedSet();
+    await runPreModelPass(capability, offerCardContext(EMAIL_OFFER_CONNECT_OPTION));
+    const result = await call(set, 'record_email_offer_decline');
+    expect(result).toMatchObject({ recorded: false, reply_line: EMAIL_OFFER_DECLINE_LINE });
+    expect(settings.values.has(EMAIL_OFFER_DECLINED_SETTING_KEY)).toBe(false);
+  });
+
+  it('records nothing for a free-text answer typed on the card instead of its decline choice', async () => {
+    const { capability, set } = await mountedSet();
+    await runPreModelPass(capability, offerCardContext('No way, not ever'));
+    const result = await call(set, 'record_email_offer_decline');
+    expect(result).toMatchObject({ recorded: false });
+    expect(settings.values.has(EMAIL_OFFER_DECLINED_SETTING_KEY)).toBe(false);
+  });
+
+  it('records nothing for the decline choice on some other question card', async () => {
+    const { capability, set } = await mountedSet();
+    await runPreModelPass(capability, [
+      { role: 'user', content: 'Can you read my latest mail?' },
+      questionCardMessage({
+        question: 'Shall I hook up your email for you?',
+        options: [EMAIL_OFFER_CONNECT_OPTION, EMAIL_OFFER_DECLINE_OPTION],
+      }),
+      cardAnswerMessage(EMAIL_OFFER_DECLINE_OPTION),
+    ]);
+    const result = await call(set, 'record_email_offer_decline');
+    expect(result).toMatchObject({ recorded: false });
+    expect(settings.values.has(EMAIL_OFFER_DECLINED_SETTING_KEY)).toBe(false);
+  });
+
+  it('records nothing when the card answer is no longer the exchange this turn continues from', async () => {
+    const { capability, set } = await mountedSet();
+    await runPreModelPass(capability, [
+      ...offerCardContext(EMAIL_OFFER_DECLINE_OPTION),
+      { role: 'assistant', content: 'Understood, we can work from what you paste instead.' },
+      { role: 'user', content: 'Actually, let us try something else.' },
+    ]);
+    const result = await call(set, 'record_email_offer_decline');
+    expect(result).toMatchObject({ recorded: false });
+    expect(settings.values.has(EMAIL_OFFER_DECLINED_SETTING_KEY)).toBe(false);
   });
 
   it('does not mount when a decline is already remembered', async () => {
@@ -179,6 +318,12 @@ describe('emailOfferCapability', () => {
     expect(EMAIL_OFFER_INSTRUCTION).toContain('"Not now"');
     expect(EMAIL_OFFER_INSTRUCTION).toContain('open Settings, then Connectors');
     expect(EMAIL_OFFER_INSTRUCTION).toContain('without making them ask again');
+  });
+
+  it('tells the model only a card answer is remembered, and a typed no is never claimed as remembered', () => {
+    expect(EMAIL_OFFER_INSTRUCTION).toContain('Only a no picked on the card is remembered');
+    expect(EMAIL_OFFER_INSTRUCTION).toContain('A no in their own words is not remembered');
+    expect(EMAIL_OFFER_INSTRUCTION).toContain('never say it was remembered');
   });
 
   it('keeps credentials out of chat in the offer wording', () => {
