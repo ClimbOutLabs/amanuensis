@@ -9,6 +9,7 @@ import { handleNonStatusCodeError } from "../../../../errors/handleNonStatusCode
 import * as errors from "../../../../errors/index.js";
 import * as serializers from "../../../../serialization/index.js";
 import * as TrueForge from "../../../index.js";
+import { RecallExclusionsClient } from "../resources/recallExclusions/client/Client.js";
 
 export declare namespace SessionsClient {
     export type Options = BaseClientOptions;
@@ -18,9 +19,14 @@ export declare namespace SessionsClient {
 
 export class SessionsClient {
     protected readonly _options: NormalizedClientOptionsWithAuth<SessionsClient.Options>;
+    protected _recallExclusions: RecallExclusionsClient | undefined;
 
     constructor(options: SessionsClient.Options) {
         this._options = normalizeClientOptionsWithAuth(options);
+    }
+
+    public get recallExclusions(): RecallExclusionsClient {
+        return (this._recallExclusions ??= new RecallExclusionsClient(this._options));
     }
 
     /**

@@ -26,6 +26,7 @@ import { SettingsClient } from "./api/resources/settings/client/Client.js";
 import { SkillsClient } from "./api/resources/skills/client/Client.js";
 import { SpaceFoldersClient } from "./api/resources/spaceFolders/client/Client.js";
 import { SpacesClient } from "./api/resources/spaces/client/Client.js";
+import { TodayClient } from "./api/resources/today/client/Client.js";
 import { VoiceClient } from "./api/resources/voice/client/Client.js";
 import type { BaseClientOptions, BaseRequestOptions } from "./BaseClient.js";
 import { type NormalizedClientOptionsWithAuth, normalizeClientOptionsWithAuth } from "./BaseClient.js";
@@ -61,6 +62,7 @@ export class TrueForge {
     protected _skills: SkillsClient | undefined;
     protected _spaceFolders: SpaceFoldersClient | undefined;
     protected _spaces: SpacesClient | undefined;
+    protected _today: TodayClient | undefined;
     protected _deliveries: DeliveriesClient | undefined;
     protected _voice: VoiceClient | undefined;
     protected _catalogs: CatalogsClient | undefined;
@@ -157,6 +159,10 @@ export class TrueForge {
 
     public get spaces(): SpacesClient {
         return (this._spaces ??= new SpacesClient(this._options));
+    }
+
+    public get today(): TodayClient {
+        return (this._today ??= new TodayClient(this._options));
     }
 
     public get deliveries(): DeliveriesClient {
