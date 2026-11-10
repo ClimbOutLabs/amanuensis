@@ -686,8 +686,6 @@ export async function watchMail({
           state.open = state.open === failed.message ? undefined : state.open;
         } else {
           settle({ message: failed.message, error: again.error });
-          if (state.held?.failed.message_id !== failed.message.id) {
-          }
         }
       }
       continue;
