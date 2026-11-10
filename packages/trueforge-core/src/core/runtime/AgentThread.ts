@@ -18,7 +18,11 @@ import { SUB_AGENT_IDENTITY } from '../capabilities/builtins/DynamicSubAgents';
 import { TOKEN_BUDGET_SAFETY_MARGIN } from '../capabilities/builtins/tokenBudgetConstants';
 import type { ToolResponseProcessor } from '../capabilities/ToolResponseProcessor';
 import { mailRecipientsNotListed } from '../email/mailConnector/recipientList';
-import { NEW_RECIPIENT_REFUSED, SEND_LIST_STILL_UPDATING } from '../email/mailConnector/sendListApproval';
+import {
+  NEW_RECIPIENT_ACCOUNT_SWITCHED,
+  NEW_RECIPIENT_REFUSED,
+  SEND_LIST_STILL_UPDATING,
+} from '../email/mailConnector/sendListApproval';
 import { MAIL_ACCOUNT_ARGUMENT, MAIL_CONNECTOR_NAME } from '../email/mailConnector/toolContract';
 import {
   AgentHarnessError,
@@ -2512,6 +2516,14 @@ export class AgentThread {
    * the account the approval is for, never another account. The account is the one the person picked
    * on the card when they picked one, else the one the card showed. An approval stays with its
    * account: a pick is part of this approval only and changes no default.
+   *
+   * A pick of a different account never adds an address here. The card the person approved named
+   * new addresses for the account it showed, not for the picked one, and a new address can only be
+   * added from a card made for its own account. So when the picked account has an address on the
+   * email that is not on its own list, the send stops before anything is added or sent, and the
+   * person asks for the send again from that account to get its card. Because no add ever happens
+   * for a picked account in this step, the send path's own check of the pick against the accounts
+   * this persona can use always runs before that account's list could change.
    */
   private async prepareMailRecipientAdds(input: {
     approvals: readonly UserToolApprovalMessage[];
@@ -2549,9 +2561,21 @@ export class AgentThread {
       let added: readonly string[] = cardAdded;
       if (picked !== undefined && picked !== card?.mail_from) {
         // The person changed the account on the card: which addresses are new is a question about
-        // the picked account's own list, so it is worked out again for that account.
+        // the picked account's own list, so it is worked out again for that account. Any address
+        // that is new for the picked account stops the send here, before any add, because the
+        // approved card never named it as new for that account. The refusal shape is used rather
+        // than drawing a fresh card in this step: cards are made when a call is classified, and
+        // this step only settles an approval that is already in hand, so a new card here would
+        // need a whole new hold and answer cycle in the approval path.
         const listed = await sentinel.services.mail_listed_addresses({ ...ctx, account: picked });
         added = mailRecipientsNotListed({ listed, params: parsedArgs });
+        if (added.length > 0) {
+          await this.auditMailPrepareFailure({
+            info: call.tool_info,
+            note: 'The picked account has a new address, so the send stopped before anything was added',
+          });
+          throw new InvalidAgentSendInputError(NEW_RECIPIENT_ACCOUNT_SWITCHED);
+        }
       }
       if (added.length > 0) {
         account ??= (await sentinel.services.mail_accounts(ctx)).default_account;

@@ -13,11 +13,13 @@ describe("PersonasClient", () => {
             data: [
                 {
                     aliases: ["aliases"],
+                    calendar_accounts: ["calendar_accounts"],
                     created_at: "2024-01-15T09:30:00Z",
                     created_by: "created_by",
                     display_name: "Zara",
                     id: "id",
                     instructions: "instructions",
+                    mail_accounts: ["mail_accounts"],
                     model_name: "model_name",
                     updated_at: "2024-01-15T09:30:00Z",
                     updated_by: "updated_by",
@@ -32,11 +34,13 @@ describe("PersonasClient", () => {
             data: [
                 {
                     aliases: ["aliases"],
+                    calendarAccounts: ["calendar_accounts"],
                     createdAt: new Date("2024-01-15T09:30:00.000Z"),
                     createdBy: "created_by",
                     displayName: "Zara",
                     id: "id",
                     instructions: "instructions",
+                    mailAccounts: ["mail_accounts"],
                     modelName: "model_name",
                     updatedAt: new Date("2024-01-15T09:30:00.000Z"),
                     updatedBy: "updated_by",
@@ -72,11 +76,13 @@ describe("PersonasClient", () => {
         const rawResponseBody = {
             data: {
                 aliases: ["aliases"],
+                calendar_accounts: ["calendar_accounts"],
                 created_at: "2024-01-15T09:30:00Z",
                 created_by: "created_by",
                 display_name: "Zara",
                 id: "id",
                 instructions: "instructions",
+                mail_accounts: ["mail_accounts"],
                 model_name: "model_name",
                 updated_at: "2024-01-15T09:30:00Z",
                 updated_by: "updated_by",
@@ -103,11 +109,13 @@ describe("PersonasClient", () => {
         expect(response).toEqual({
             data: {
                 aliases: ["aliases"],
+                calendarAccounts: ["calendar_accounts"],
                 createdAt: new Date("2024-01-15T09:30:00.000Z"),
                 createdBy: "created_by",
                 displayName: "Zara",
                 id: "id",
                 instructions: "instructions",
+                mailAccounts: ["mail_accounts"],
                 modelName: "model_name",
                 updatedAt: new Date("2024-01-15T09:30:00.000Z"),
                 updatedBy: "updated_by",
@@ -245,11 +253,13 @@ describe("PersonasClient", () => {
         const rawResponseBody = {
             data: {
                 aliases: ["aliases"],
+                calendar_accounts: ["calendar_accounts"],
                 created_at: "2024-01-15T09:30:00Z",
                 created_by: "created_by",
                 display_name: "Zara",
                 id: "id",
                 instructions: "instructions",
+                mail_accounts: ["mail_accounts"],
                 model_name: "model_name",
                 updated_at: "2024-01-15T09:30:00Z",
                 updated_by: "updated_by",
@@ -276,11 +286,13 @@ describe("PersonasClient", () => {
         expect(response).toEqual({
             data: {
                 aliases: ["aliases"],
+                calendarAccounts: ["calendar_accounts"],
                 createdAt: new Date("2024-01-15T09:30:00.000Z"),
                 createdBy: "created_by",
                 displayName: "Zara",
                 id: "id",
                 instructions: "instructions",
+                mailAccounts: ["mail_accounts"],
                 modelName: "model_name",
                 updatedAt: new Date("2024-01-15T09:30:00.000Z"),
                 updatedBy: "updated_by",

@@ -86,6 +86,8 @@
   "Delete space": "packages/trueforge-ui/src/containers/SpacesView.tsx",
   "More": "packages/trueforge-ui/src/layouts/SidebarLayout.tsx",
   "Build agent": "packages/trueforge-ui/src/layouts/SidebarLayout.tsx",
+  "Sign out": "packages/frontend/src/LogoutButton.tsx",
+  "Stay": "packages/frontend/src/LogoutButton.tsx",
   "Chats": "packages/trueforge-ui/src/layouts/SidebarLayout.tsx",
   "New chat": "packages/trueforge-ui/src/containers/ThreadListContainer.tsx",
   "Light": "packages/trueforge-ui/src/atoms/AppearanceChoices.tsx",
@@ -108,5 +110,8 @@
   "Make default": "packages/trueforge-ui/src/containers/SettingsBuilder/AccountSetupPanel.tsx",
   "Change": "packages/trueforge-ui/src/containers/SettingsBuilder/AccountSetupPanel.tsx",
   "Remove": "packages/trueforge-ui/src/containers/SettingsBuilder/AccountSetupPanel.tsx",
-  "From": "packages/trueforge-ui/src/sentinel/MailFromPicker.tsx"
+  "From": "packages/trueforge-ui/src/sentinel/MailFromPicker.tsx",
+  "Start incognito chat": "packages/trueforge-ui/src/atoms/privateChat/PrivateChatToggle.tsx",
+  "Close and delete": "packages/trueforge-ui/src/atoms/privateChat/PrivateChatBanner.tsx",
+  "Delete for good": "packages/trueforge-ui/src/atoms/privateChat/PrivateChatBanner.tsx"
 }

@@ -16,8 +16,8 @@
 </p>
 
 <p align="center">
-  <a href="#get-started"><strong>Get started</strong></a> &nbsp;·&nbsp;
-  <a href="#what-it-does">What it does</a> &nbsp;·&nbsp;
+  <a href="#-get-started"><strong>Get started</strong></a> &nbsp;·&nbsp;
+  <a href="#-what-it-does">What it does</a> &nbsp;·&nbsp;
   <a href="docs/privacy.md">Privacy</a>
 </p>
 
@@ -113,7 +113,7 @@ It also sets up sign-in, backups and phone access, and leaves an `aman` command 
 
 ### 👋 After you install
 
-**1. Give Aman a model to think with.** Aman is built to run at home, on a model on your own hardware. Run it that way and your chats and everything Aman knows about you never leave your computer, because the model is the one thing that would otherwise see all of it. That is how ours runs. The author's own Aman lives on an NVIDIA DGX Spark, a small computer on the desk, thinking locally around the clock. Ollama, LM Studio or any other local model server works the same way. Web searches, maps and connectors still talk to their own services either way. [Your data, your rules](#your-data-your-rules) below has the full picture.
+**1. Give Aman a model to think with.** Aman is built to run at home, on a model on your own hardware. Run it that way and your chats and everything Aman knows about you never leave your computer, because the model is the one thing that would otherwise see all of it. That is how ours runs. The author's own Aman lives on an NVIDIA DGX Spark, a small computer on the desk, thinking locally around the clock. Ollama, LM Studio or any other local model server works the same way. Web searches, maps and connectors still talk to their own services either way. [Your data, your rules](#-your-data-your-rules) below has the full picture.
 
 Cloud models work too, and they are the quicker start. You bring your own key, Aman talks to the provider directly, and you pay the provider for what you use. One thing worth knowing: a ChatGPT or Claude subscription does not include this. The API key is a separate thing, billed by use.
 
@@ -168,6 +168,8 @@ Your memory, chats, personas and settings live on your computer. Memory is plain
 Be clear about one thing: **the model sees what you send it.** If you use a hosted model, the company running it sees each chat, including what Aman knows about you and anything it reads for you. To keep everything on your computer, use a local model. Web searches, maps and connectors still reach their own services. [docs/privacy.md](docs/privacy.md) lists exactly what goes where.
 
 The browser loads nothing from third parties: fonts and icons are bundled. The server contacts only the services you configure: your model provider, your mail and calendar, the connectors you add. The only other outside calls are the map services when you ask for a map, package sources such as npm and PyPI when a skill you approved installs packages, and one download of the memory search model from Hugging Face, which Aman checks against fixed fingerprints. CI fails if a new outside address appears in the code; the list is [scripts/external-hosts.allowlist.json](scripts/external-hosts.allowlist.json).
+
+When you want Aman to forget a conversation, start an incognito chat. Aman can still read what it knows, but saves nothing from the chat, and deletes it when you close it.
 
 Sending a message, deleting anything and installing anything always wait for your OK. That rule is enforced in code, on the tool itself, not left to the model's good behaviour.
 

@@ -4,6 +4,7 @@
  */
 import type { LanguageModelUsage, ToolSet as ProviderToolSet, StepResultPerformance, TextStreamPart } from 'ai';
 import {
+  NEW_RECIPIENT_ACCOUNT_SWITCHED,
   NEW_RECIPIENT_REFUSED,
   SEND_LIST_STILL_UPDATING,
 } from '../../../src/core/email/mailConnector/sendListApproval';
@@ -769,13 +770,50 @@ describe('approving a held mail send to an address not on the Email list', () =>
     );
   });
 
-  it('a card pick of another account adds the new address to that account, not the one the card showed', async () => {
+  it('a card pick of another account with a new address for it adds nothing and sends nothing', async () => {
     const { h, context } = await heldSend(['dana@example.com']);
-    await answer(h, context, [approve('call-mail', undefined, 'other@example.com')]);
 
+    await expect(answer(h, context, [approve('call-mail', undefined, 'other@example.com')])).rejects.toThrow(
+      NEW_RECIPIENT_ACCOUNT_SWITCHED,
+    );
+    expect(h.mailAdd).not.toHaveBeenCalled();
+    expect(h.callTool).not.toHaveBeenCalled();
+
+    // The refused answer was not recorded, so the same card can still be approved as it was shown.
+    await answer(h, context, [approve('call-mail')]);
     expect(h.mailAdd).toHaveBeenCalledTimes(1);
-    expect(h.mailAdd).toHaveBeenCalledWith({ ...OWNER, account: 'other@example.com' }, ['stranger@example.net']);
+    expect(h.mailAdd).toHaveBeenCalledWith({ ...OWNER, account: 'default' }, ['stranger@example.net']);
     expect(h.callTool).toHaveBeenCalledTimes(1);
+  });
+
+  it('a card for an account that lists every address, answered with a pick of an account that lists none, adds nothing and sends nothing', async () => {
+    const { h, context } = await heldSend(['dana@example.com', 'stranger@example.net']);
+    h.base.mail_listed_addresses = ({ account }: { account: string | null }) =>
+      Promise.resolve(account === 'other@example.com' ? [] : ['dana@example.com', 'stranger@example.net']);
+
+    await expect(answer(h, context, [approve('call-mail', undefined, 'other@example.com')])).rejects.toThrow(
+      NEW_RECIPIENT_ACCOUNT_SWITCHED,
+    );
+    expect(h.mailAdd).not.toHaveBeenCalled();
+    expect(h.callTool).not.toHaveBeenCalled();
+  });
+
+  it('records the stopped send in the activity log when a card pick switches to an account with a new address', async () => {
+    const { h, context } = await heldSend(['dana@example.com']);
+
+    await expect(answer(h, context, [approve('call-mail', undefined, 'other@example.com')])).rejects.toThrow(
+      NEW_RECIPIENT_ACCOUNT_SWITCHED,
+    );
+
+    const stopped = h.audit.filter(record => record.outcome === 'auto_denied');
+    expect(stopped).toEqual([
+      expect.objectContaining({
+        tool_name: 'send_email',
+        description: expect.stringContaining('The picked account has a new address'),
+      }),
+    ]);
+    expect(h.mailAdd).not.toHaveBeenCalled();
+    expect(h.callTool).not.toHaveBeenCalled();
   });
 
   it('a card pick of an account that already lists the address adds nothing, and still sends', async () => {

@@ -11,8 +11,23 @@ describe("EmailClient", () => {
         const rawRequestBody = { address: "address", password: "password", provider_key: "provider_key" };
         const rawResponseBody = {
             data: {
+                accounts: [
+                    {
+                        address: "address",
+                        imap_host: "imap_host",
+                        imap_mode: "ssl",
+                        imap_port: 1,
+                        is_default: true,
+                        provider_key: "provider_key",
+                        smtp_host: "smtp_host",
+                        smtp_mode: "ssl",
+                        smtp_port: 1,
+                        state: "connected",
+                    },
+                ],
                 address: "address",
                 available: true,
+                default_address: "default_address",
                 provider_key: "provider_key",
                 providers: [
                     {
@@ -48,8 +63,23 @@ describe("EmailClient", () => {
         });
         expect(response).toEqual({
             data: {
+                accounts: [
+                    {
+                        address: "address",
+                        imapHost: "imap_host",
+                        imapMode: "ssl",
+                        imapPort: 1,
+                        isDefault: true,
+                        providerKey: "provider_key",
+                        smtpHost: "smtp_host",
+                        smtpMode: "ssl",
+                        smtpPort: 1,
+                        state: "connected",
+                    },
+                ],
                 address: "address",
                 available: true,
+                defaultAddress: "default_address",
                 providerKey: "provider_key",
                 providers: [
                     {
@@ -169,11 +199,26 @@ describe("EmailClient", () => {
     test("remove_account (1)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
+        const rawRequestBody = {};
         const rawResponseBody = {
             data: {
+                accounts: [
+                    {
+                        address: "address",
+                        imap_host: "imap_host",
+                        imap_mode: "ssl",
+                        imap_port: 1,
+                        is_default: true,
+                        provider_key: "provider_key",
+                        smtp_host: "smtp_host",
+                        smtp_mode: "ssl",
+                        smtp_port: 1,
+                        state: "connected",
+                    },
+                ],
                 address: "address",
                 available: true,
+                default_address: "default_address",
                 provider_key: "provider_key",
                 providers: [
                     {
@@ -196,6 +241,7 @@ describe("EmailClient", () => {
         server
             .mockEndpoint()
             .delete("/api/v1/user/settings/email")
+            .jsonBody(rawRequestBody)
             .respondWith()
             .statusCode(200)
             .jsonBody(rawResponseBody)
@@ -204,8 +250,23 @@ describe("EmailClient", () => {
         const response = await client.settings.email.removeAccount();
         expect(response).toEqual({
             data: {
+                accounts: [
+                    {
+                        address: "address",
+                        imapHost: "imap_host",
+                        imapMode: "ssl",
+                        imapPort: 1,
+                        isDefault: true,
+                        providerKey: "provider_key",
+                        smtpHost: "smtp_host",
+                        smtpMode: "ssl",
+                        smtpPort: 1,
+                        state: "connected",
+                    },
+                ],
                 address: "address",
                 available: true,
+                defaultAddress: "default_address",
                 providerKey: "provider_key",
                 providers: [
                     {
@@ -229,12 +290,13 @@ describe("EmailClient", () => {
     test("remove_account (2)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
+        const rawRequestBody = {};
         const rawResponseBody = { error: { message: "message" } };
 
         server
             .mockEndpoint()
             .delete("/api/v1/user/settings/email")
+            .jsonBody(rawRequestBody)
             .respondWith()
             .statusCode(401)
             .jsonBody(rawResponseBody)
@@ -248,12 +310,13 @@ describe("EmailClient", () => {
     test("remove_account (3)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
+        const rawRequestBody = {};
         const rawResponseBody = { error: { message: "message" } };
 
         server
             .mockEndpoint()
             .delete("/api/v1/user/settings/email")
+            .jsonBody(rawRequestBody)
             .respondWith()
             .statusCode(403)
             .jsonBody(rawResponseBody)
@@ -267,12 +330,13 @@ describe("EmailClient", () => {
     test("remove_account (4)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
+        const rawRequestBody = {};
         const rawResponseBody = { error: { message: "message" } };
 
         server
             .mockEndpoint()
             .delete("/api/v1/user/settings/email")
+            .jsonBody(rawRequestBody)
             .respondWith()
             .statusCode(502)
             .jsonBody(rawResponseBody)
@@ -283,14 +347,210 @@ describe("EmailClient", () => {
         }).rejects.toThrow(TrueForgeTypes.BadGatewayError);
     });
 
+    test("set_default_account (1)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { address: "address" };
+        const rawResponseBody = {
+            data: {
+                accounts: [
+                    {
+                        address: "address",
+                        imap_host: "imap_host",
+                        imap_mode: "ssl",
+                        imap_port: 1,
+                        is_default: true,
+                        provider_key: "provider_key",
+                        smtp_host: "smtp_host",
+                        smtp_mode: "ssl",
+                        smtp_port: 1,
+                        state: "connected",
+                    },
+                ],
+                address: "address",
+                available: true,
+                default_address: "default_address",
+                provider_key: "provider_key",
+                providers: [
+                    {
+                        help_hint: "help_hint",
+                        help_url: null,
+                        imap_host: "imap_host",
+                        imap_mode: "ssl",
+                        imap_port: 1,
+                        key: "key",
+                        name: "name",
+                        smtp_host: "smtp_host",
+                        smtp_mode: "ssl",
+                        smtp_port: 1,
+                    },
+                ],
+                state: "connected",
+            },
+        };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/user/settings/email/default")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        const response = await client.settings.email.setDefaultAccount({
+            address: "address",
+        });
+        expect(response).toEqual({
+            data: {
+                accounts: [
+                    {
+                        address: "address",
+                        imapHost: "imap_host",
+                        imapMode: "ssl",
+                        imapPort: 1,
+                        isDefault: true,
+                        providerKey: "provider_key",
+                        smtpHost: "smtp_host",
+                        smtpMode: "ssl",
+                        smtpPort: 1,
+                        state: "connected",
+                    },
+                ],
+                address: "address",
+                available: true,
+                defaultAddress: "default_address",
+                providerKey: "provider_key",
+                providers: [
+                    {
+                        helpHint: "help_hint",
+                        helpUrl: null,
+                        imapHost: "imap_host",
+                        imapMode: "ssl",
+                        imapPort: 1,
+                        key: "key",
+                        name: "name",
+                        smtpHost: "smtp_host",
+                        smtpMode: "ssl",
+                        smtpPort: 1,
+                    },
+                ],
+                state: "connected",
+            },
+        });
+    });
+
+    test("set_default_account (2)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { address: "address" };
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/user/settings/email/default")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(400)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.settings.email.setDefaultAccount({
+                address: "address",
+            });
+        }).rejects.toThrow(TrueForgeTypes.BadRequestError);
+    });
+
+    test("set_default_account (3)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { address: "address" };
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/user/settings/email/default")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(401)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.settings.email.setDefaultAccount({
+                address: "address",
+            });
+        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+    });
+
+    test("set_default_account (4)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { address: "address" };
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/user/settings/email/default")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(403)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.settings.email.setDefaultAccount({
+                address: "address",
+            });
+        }).rejects.toThrow(TrueForgeTypes.ForbiddenError);
+    });
+
+    test("set_default_account (5)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { address: "address" };
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/user/settings/email/default")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(502)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.settings.email.setDefaultAccount({
+                address: "address",
+            });
+        }).rejects.toThrow(TrueForgeTypes.BadGatewayError);
+    });
+
     test("get_status (1)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
 
         const rawResponseBody = {
             data: {
+                accounts: [
+                    {
+                        address: "address",
+                        imap_host: "imap_host",
+                        imap_mode: "ssl",
+                        imap_port: 1,
+                        is_default: true,
+                        provider_key: "provider_key",
+                        smtp_host: "smtp_host",
+                        smtp_mode: "ssl",
+                        smtp_port: 1,
+                        state: "connected",
+                    },
+                ],
                 address: "address",
                 available: true,
+                default_address: "default_address",
                 provider_key: "provider_key",
                 providers: [
                     {
@@ -321,8 +581,23 @@ describe("EmailClient", () => {
         const response = await client.settings.email.getStatus();
         expect(response).toEqual({
             data: {
+                accounts: [
+                    {
+                        address: "address",
+                        imapHost: "imap_host",
+                        imapMode: "ssl",
+                        imapPort: 1,
+                        isDefault: true,
+                        providerKey: "provider_key",
+                        smtpHost: "smtp_host",
+                        smtpMode: "ssl",
+                        smtpPort: 1,
+                        state: "connected",
+                    },
+                ],
                 address: "address",
                 available: true,
+                defaultAddress: "default_address",
                 providerKey: "provider_key",
                 providers: [
                     {
