@@ -14,7 +14,7 @@ import {
   listModelProvidersRoute,
   putModelProviderRoute,
 } from '../routes/modelProviderRoutes';
-import { isNamedLocalModelEndpoint, remoteUrlProblem } from '../runtime/remoteAddress';
+import { modelUrlProblem } from '../runtime/remoteAddress';
 import {
   modelProviderName,
   type ConfiguredModelProvider,
@@ -57,16 +57,13 @@ async function modelAddressRefusal({ baseUrl }: { baseUrl: string | undefined })
   if (baseUrl === undefined) {
     return undefined;
   }
-  if (isNamedLocalModelEndpoint({ url: baseUrl, endpoints: configuration.LOCAL_MODEL_ENDPOINTS })) {
-    return undefined;
-  }
-  const problem = await remoteUrlProblem({ url: baseUrl });
+  const problem = await modelUrlProblem({ url: baseUrl, endpoints: configuration.LOCAL_MODEL_ENDPOINTS });
   switch (problem) {
     case null:
     case 'unresolved':
       return undefined;
     case 'blocked':
-      return "That address is on this computer or its own network, so the server cannot use it for a model. To use a model on this computer, name its exact address (host and port) in the server's LOCAL_MODEL_ENDPOINTS setting.";
+      return "That address is on this computer, so the server cannot use it for a model. To use a model on this computer, name its exact address (host and port) in LOCAL_MODEL_ENDPOINTS. On an installed Aman, that setting is in the instance's settings file, ~/.amanuensis/instances/<name>/.env, below the block the installer manages. Restart the instance after changing it.";
     case 'invalid':
       return 'That address is not one the server can connect to. Enter the full address, starting with http:// or https://, without a name and password in it.';
   }

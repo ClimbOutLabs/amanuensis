@@ -2,6 +2,7 @@ import {
   allowedRemoteAddresses,
   isNamedLocalModelEndpoint,
   localModelEndpointOf,
+  modelUrlProblem,
   remoteUrlProblem,
   type ResolveAddresses,
 } from '../../../src/runtime/remoteAddress';
@@ -31,16 +32,16 @@ describe('allowedRemoteAddresses', () => {
     await expect(
       allowedRemoteAddresses({
         host: 'mcp.example.com',
-        deps: { resolveAddresses: PUBLIC, ownNetworkRanges: [] },
+        deps: { resolveAddresses: PUBLIC, ownAddresses: [] },
       }),
     ).resolves.toEqual({ ok: true, addresses: ['93.184.216.34'] });
   });
 
   it('allows home-network addresses: RFC 1918 and shared address space', async () => {
-    // Pinned empty own networks: the machine running the suite has its own, and they are not
+    // Pinned empty own addresses: the machine running the suite has its own, and they are not
     // what this case judges.
     for (const host of ['192.168.1.20', '10.0.0.5', '172.16.4.9', '100.64.1.1']) {
-      await expect(allowedRemoteAddresses({ host, deps: { ownNetworkRanges: [] } })).resolves.toMatchObject({
+      await expect(allowedRemoteAddresses({ host, deps: { ownAddresses: [] } })).resolves.toMatchObject({
         ok: true,
       });
     }
@@ -49,7 +50,7 @@ describe('allowedRemoteAddresses', () => {
   it('allows a home-network name: a .local name resolving to a private address', async () => {
     const deps = {
       resolveAddresses: resolverFor({ 'homeassistant.local': ['192.168.1.20'] }),
-      ownNetworkRanges: [],
+      ownAddresses: [],
     };
     await expect(allowedRemoteAddresses({ host: 'homeassistant.local', deps })).resolves.toMatchObject({
       ok: true,
@@ -92,24 +93,39 @@ describe('allowedRemoteAddresses', () => {
     });
   });
 
-  it('refuses an address on one of this instance’s own networks, and only those', async () => {
-    const deps = { ownNetworkRanges: ['172.20.0.5/16'] };
-    await expect(allowedRemoteAddresses({ host: '172.20.9.9', deps })).resolves.toEqual({
+  it('refuses this instance’s own address, and only that address on its network', async () => {
+    const deps = { ownAddresses: ['172.20.0.5'] };
+    await expect(allowedRemoteAddresses({ host: '172.20.0.5', deps })).resolves.toEqual({
       ok: false,
       reason: 'blocked',
     });
+    // Another address on the same home network is the person's own server to use: only the
+    // machine's own address is refused, not the whole subnet it sits on.
+    await expect(allowedRemoteAddresses({ host: '172.20.9.9', deps })).resolves.toMatchObject({ ok: true });
     await expect(allowedRemoteAddresses({ host: '172.21.0.1', deps })).resolves.toMatchObject({ ok: true });
-    await expect(allowedRemoteAddresses({ host: '172.20.9.9', deps: { ownNetworkRanges: [] } })).resolves.toMatchObject(
-      { ok: true },
-    );
+    await expect(allowedRemoteAddresses({ host: '172.20.0.5', deps: { ownAddresses: [] } })).resolves.toMatchObject({
+      ok: true,
+    });
   });
 
-  it('refuses an IPv6 address on one of this instance’s own IPv6 networks', async () => {
-    const deps = { ownNetworkRanges: ['fd00:1234::5/64'] };
-    await expect(allowedRemoteAddresses({ host: 'fd00:1234::99', deps })).resolves.toEqual({
+  it('refuses a name that resolves to this instance’s own address', async () => {
+    const deps = {
+      resolveAddresses: resolverFor({ 'this-machine.local': ['172.20.0.5'] }),
+      ownAddresses: ['172.20.0.5'],
+    };
+    await expect(allowedRemoteAddresses({ host: 'this-machine.local', deps })).resolves.toEqual({
       ok: false,
       reason: 'blocked',
     });
+  });
+
+  it('refuses this instance’s own IPv6 address, and only that address on its network', async () => {
+    const deps = { ownAddresses: ['fd00:1234::5'] };
+    await expect(allowedRemoteAddresses({ host: 'fd00:1234::5', deps })).resolves.toEqual({
+      ok: false,
+      reason: 'blocked',
+    });
+    await expect(allowedRemoteAddresses({ host: 'fd00:1234::99', deps })).resolves.toMatchObject({ ok: true });
   });
 
   it('judges an IPv4-mapped IPv6 address by the IPv4 address inside it', async () => {
@@ -121,9 +137,9 @@ describe('allowedRemoteAddresses', () => {
       ok: false,
       reason: 'blocked',
     });
-    await expect(
-      allowedRemoteAddresses({ host: '::ffff:8.8.8.8', deps: { ownNetworkRanges: [] } }),
-    ).resolves.toMatchObject({ ok: true });
+    await expect(allowedRemoteAddresses({ host: '::ffff:8.8.8.8', deps: { ownAddresses: [] } })).resolves.toMatchObject(
+      { ok: true },
+    );
   });
 
   it('reports a host that does not resolve as unresolved, whether the lookup is empty or fails', async () => {
@@ -141,14 +157,14 @@ describe('remoteUrlProblem', () => {
     await expect(
       remoteUrlProblem({
         url: 'https://mcp.example.com/mcp',
-        deps: { resolveAddresses: PUBLIC, ownNetworkRanges: [] },
+        deps: { resolveAddresses: PUBLIC, ownAddresses: [] },
       }),
     ).resolves.toBeNull();
   });
 
   it('passes a home-network http address, the shape a LAN server is saved with', async () => {
     await expect(
-      remoteUrlProblem({ url: 'http://192.168.1.20:8123/mcp_server/sse', deps: { ownNetworkRanges: [] } }),
+      remoteUrlProblem({ url: 'http://192.168.1.20:8123/mcp_server/sse', deps: { ownAddresses: [] } }),
     ).resolves.toBeNull();
   });
 
@@ -212,5 +228,39 @@ describe('local model endpoint naming', () => {
     expect(isNamedLocalModelEndpoint({ url: 'http://api.localhost:11434/v1', endpoints })).toBe(false);
     expect(isNamedLocalModelEndpoint({ url: 'http://localhost.evil.example:11434/v1', endpoints })).toBe(false);
     expect(isNamedLocalModelEndpoint({ url: 'http://localhost:11434/v1', endpoints: [] })).toBe(false);
+  });
+});
+
+describe('modelUrlProblem', () => {
+  it('passes a public model address', async () => {
+    await expect(
+      modelUrlProblem({
+        url: 'https://models.example.com/v1',
+        endpoints: [],
+        deps: { resolveAddresses: resolverFor({ 'models.example.com': ['93.184.216.34'] }), ownAddresses: [] },
+      }),
+    ).resolves.toBeNull();
+  });
+
+  it('passes the exact endpoint the operator named, though its address is refused', async () => {
+    await expect(
+      modelUrlProblem({ url: 'http://127.0.0.1:11434/v1', endpoints: ['127.0.0.1:11434'] }),
+    ).resolves.toBeNull();
+  });
+
+  it('refuses the same address on a port the operator did not name', async () => {
+    await expect(modelUrlProblem({ url: 'http://127.0.0.1:9999/v1', endpoints: ['127.0.0.1:11434'] })).resolves.toBe(
+      'blocked',
+    );
+  });
+
+  it('reports a model name that does not resolve as unresolved', async () => {
+    await expect(
+      modelUrlProblem({
+        url: 'https://gone.example.com/v1',
+        endpoints: [],
+        deps: { resolveAddresses: PUBLIC },
+      }),
+    ).resolves.toBe('unresolved');
   });
 });

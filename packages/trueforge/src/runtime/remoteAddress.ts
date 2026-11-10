@@ -8,18 +8,23 @@ import { networkInterfaces } from 'node:os';
  * when a connection is made. It is the calendar connector's rule (ops/calendar-sidecar's
  * account.mjs), ported here so the app and the sidecar refuse the same addresses: the host is
  * resolved, and the address is refused when any address it resolves to is loopback, link-local,
- * a cloud metadata address, another always-refused range, or an address on one of this
- * instance's own networks. Everything else is allowed, home-network addresses included.
+ * a cloud metadata address, another always-refused range, or one of this instance's own
+ * addresses. Everything else is allowed, home-network addresses included.
  *
- * A host that does not resolve is reported as 'unresolved', apart from the refused classes: it
- * connects nowhere, so the app's call sites leave it to the connection attempt, which fails on
- * its own, and the host is judged again on the next check if the name starts resolving. (The
- * calendar agent refuses an unresolvable address at save time because its save is an unattended
- * installer step; the app's saves are interactive and report the failed connection at use.)
+ * A host that does not resolve is reported as 'unresolved', apart from the refused classes.
+ * Saving leaves it to the connection attempt, which fails on its own, and the host is judged
+ * again on the next check if the name starts resolving. Using refuses it: a name that cannot
+ * be resolved cannot be checked, and the answers a name gives can change between a check that
+ * failed to resolve it and the dial that follows. (The calendar agent refuses an unresolvable
+ * address at save time because its save is an unattended installer step; the app's saves are
+ * interactive and report the failed connection at use.)
  *
- * One deliberate difference from the sidecar: an IPv4-mapped IPv6 address (::ffff:127.0.0.1) is
+ * Two deliberate differences from the sidecar. An IPv4-mapped IPv6 address (::ffff:127.0.0.1) is
  * judged by the IPv4 address inside it, the same unwrapping the maps address rule does, so the
- * mapped spelling cannot slip a refused IPv4 address past the IPv6 list.
+ * mapped spelling cannot slip a refused IPv4 address past the IPv6 list. And where the sidecar
+ * refuses every address on its own networks, because the other members of a container network
+ * are the app's own parts, the app refuses only its own addresses: the network a directly
+ * installed app sits on is the person's home network, whose other addresses are theirs to use.
  *
  * The check judges the addresses a host resolves to at the moment it runs. It does not pin the
  * connection that follows to those addresses; the MCP transports and the model client own their
@@ -33,10 +38,10 @@ export interface RemoteAddressDeps {
   /** Resolves a host name to every address it answers with. Tests inject a fake. */
   resolveAddresses?: ResolveAddresses | undefined;
   /**
-   * The CIDR ranges of this instance's own networks, such as '172.20.0.5/16'. Tests inject a
-   * fake set; the default reads the machine's own network interfaces.
+   * This instance's own addresses, the address of each of its network interfaces. Tests inject
+   * a fake set; the default reads the machine's own network interfaces.
    */
-  ownNetworkRanges?: readonly string[] | undefined;
+  ownAddresses?: readonly string[] | undefined;
 }
 
 const ALWAYS_BLOCKED = ((): BlockList => {
@@ -66,31 +71,23 @@ const ALWAYS_BLOCKED = ((): BlockList => {
   return blocked;
 })();
 
-/** The CIDR range of every address on this machine's own network interfaces. */
-export function ownNetworkRanges(): string[] {
-  const ranges: string[] = [];
+/** The address of every network interface on this machine: this instance's own addresses. */
+export function ownInterfaceAddresses(): string[] {
+  const addresses: string[] = [];
   for (const entries of Object.values(networkInterfaces())) {
     for (const entry of entries ?? []) {
-      if (entry.cidr !== null) {
-        ranges.push(entry.cidr);
-      }
+      addresses.push(entry.address);
     }
   }
-  return ranges;
+  return addresses;
 }
 
-function ownNetworksList(deps: RemoteAddressDeps): BlockList {
+function ownAddressList(deps: RemoteAddressDeps): BlockList {
   const own = new BlockList();
-  for (const range of deps.ownNetworkRanges ?? ownNetworkRanges()) {
-    const slash = range.lastIndexOf('/');
-    if (slash < 1) {
-      continue;
-    }
-    const address = range.slice(0, slash);
-    const prefix = Number(range.slice(slash + 1));
+  for (const address of deps.ownAddresses ?? ownInterfaceAddresses()) {
     const family = isIP(address);
-    if (family !== 0 && Number.isInteger(prefix)) {
-      own.addSubnet(address, prefix, family === 6 ? 'ipv6' : 'ipv4');
+    if (family !== 0) {
+      own.addAddress(address, family === 6 ? 'ipv6' : 'ipv4');
     }
   }
   return own;
@@ -155,7 +152,7 @@ export async function allowedRemoteAddresses({
   host: string;
   deps?: RemoteAddressDeps | undefined;
 }): Promise<RemoteAddressVerdict> {
-  const own = ownNetworksList(deps);
+  const own = ownAddressList(deps);
   if (isIP(host) !== 0) {
     return addressAllowed(host, own) ? { ok: true, addresses: [host] } : { ok: false, reason: 'blocked' };
   }
@@ -235,4 +232,25 @@ export function localModelEndpointOf(url: string): string | null {
 export function isNamedLocalModelEndpoint({ url, endpoints }: { url: string; endpoints: readonly string[] }): boolean {
   const endpoint = localModelEndpointOf(url);
   return endpoint !== null && endpoints.includes(endpoint);
+}
+
+/**
+ * The problem with a model base URL, or null when the URL may be used: the address check, with
+ * the one exception of an exact endpoint the operator named in `LOCAL_MODEL_ENDPOINTS`. Every
+ * place a model address is judged (saving, resolving for use, and following a redirect the
+ * provider answers with) goes through this one rule.
+ */
+export async function modelUrlProblem({
+  url,
+  endpoints,
+  deps = {},
+}: {
+  url: string;
+  endpoints: readonly string[];
+  deps?: RemoteAddressDeps | undefined;
+}): Promise<RemoteUrlProblem | null> {
+  if (isNamedLocalModelEndpoint({ url, endpoints })) {
+    return null;
+  }
+  return remoteUrlProblem({ url, deps });
 }

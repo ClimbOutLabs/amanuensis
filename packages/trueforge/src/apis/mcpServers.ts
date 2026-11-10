@@ -414,7 +414,7 @@ async function remoteAddressRefusal({ url }: { url: string }): Promise<string | 
     case 'unresolved':
       return undefined;
     case 'blocked':
-      return 'That address is on this computer or its own network, so the server cannot connect to it. Enter an address on your home network or the internet instead.';
+      return 'That address is on this computer, so the server cannot connect to it. Enter an address on your home network or the internet instead.';
     case 'invalid':
       return 'That address is not one the server can connect to. Enter the full address, starting with http:// or https://, without a name and password in it.';
   }

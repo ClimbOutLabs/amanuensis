@@ -20,6 +20,26 @@ import { SqliteMcpToolGrantStore } from '../../../src/db/sqlite/mcp-tool-grant-s
 import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { getMcpConnection } from '../../../src/runtime/sessionResources';
 
+// Name resolution is stubbed for the whole suite: a name with 'unresolvable' in it does not
+// resolve, localhost resolves to loopback, and every other name resolves to a public address.
+// The address check at connection time judges names by what they resolve to, so the suite's
+// answer cannot depend on the DNS of the machine running it.
+jest.mock('node:dns/promises', () => {
+  const actual = jest.requireActual<typeof import('node:dns/promises')>('node:dns/promises');
+  return {
+    ...actual,
+    lookup: async (hostname: string, options?: { all?: boolean | undefined }) => {
+      if (hostname.includes('unresolvable')) {
+        const error = new Error(`getaddrinfo ENOTFOUND ${hostname}`);
+        Reflect.set(error, 'code', 'ENOTFOUND');
+        throw error;
+      }
+      const entry = { address: hostname === 'localhost' ? '127.0.0.1' : '93.184.216.34', family: 4 };
+      return options?.all === true ? [entry] : entry;
+    },
+  };
+});
+
 const LISTED_ORIGIN = 'https://hindsight.example.com';
 const MEMORY_URL = `${LISTED_ORIGIN}/mcp/aman/`;
 const OTHER_BANK_URL = `${LISTED_ORIGIN}/mcp/other/`;

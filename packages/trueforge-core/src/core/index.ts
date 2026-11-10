@@ -299,7 +299,9 @@ export {
   DEFAULT_MODEL_HTTP_HEADERS_TIMEOUT_MS,
   DEFAULT_MODEL_HTTP_MAX_RETRIES,
   MCP_HTTP_HEADERS_TIMEOUT_MARGIN_MS,
+  OutboundRedirectRefusedError,
   configureOutboundFetches,
+  type OutboundRedirectCheck,
 } from './util/outboundFetch';
 export { PromiseTimeoutError, withTimeout } from './util/promiseUtils';
 export { isRedirectStatus, redirectTargetOrigin } from './util/redirects';

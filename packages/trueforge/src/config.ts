@@ -219,9 +219,9 @@ export function parseFirstPartyMcpOrigins(raw: string | undefined): string[] {
 
 /**
  * Parses `LOCAL_MODEL_ENDPOINTS`: comma-separated exact `host:port` endpoints of model servers
- * running on this computer or its own network that the operator names as allowed. A model base
+ * running on this computer that the operator names as allowed. A model base
  * URL normally has to resolve to an address the server may connect to (see runtime/remoteAddress),
- * which refuses this computer and its own networks; a base URL that names one of these exact
+ * which refuses this computer's own addresses; a base URL that names one of these exact
  * endpoints is the one exception. Unset / blank → none, so no local model endpoint is allowed
  * until the operator names it. Each entry is normalized (host lowercased, IPv6 hosts bracketed,
  * the port written without leading zeros) and matched exactly, port included. Anything that is
@@ -1451,7 +1451,7 @@ export interface SharedServerConfiguration {
    */
   FIRST_PARTY_MCP_ORIGINS: string[];
   /**
-   * Exact `host:port` endpoints of model servers on this computer or its own network that the
+   * Exact `host:port` endpoints of model servers on this computer that the
    * operator named as allowed, as normalized strings. A model base URL that names one of these
    * endpoints may be saved and used even though its address is one the address check otherwise
    * refuses. Empty means no local model endpoint is allowed. Env: `LOCAL_MODEL_ENDPOINTS`

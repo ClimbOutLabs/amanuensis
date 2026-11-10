@@ -26,6 +26,26 @@ import {
   startInertMcpServer,
 } from '../../fixtures/inertMcpServer';
 
+// Name resolution is stubbed for the whole suite: a name with 'unresolvable' in it does not
+// resolve, localhost resolves to loopback, and every other name resolves to a public address.
+// The address checks judge names by what they resolve to, so the suite's answer cannot depend
+// on the DNS of the machine running it.
+jest.mock('node:dns/promises', () => {
+  const actual = jest.requireActual<typeof import('node:dns/promises')>('node:dns/promises');
+  return {
+    ...actual,
+    lookup: async (hostname: string, options?: { all?: boolean | undefined }) => {
+      if (hostname.includes('unresolvable')) {
+        const error = new Error(`getaddrinfo ENOTFOUND ${hostname}`);
+        Reflect.set(error, 'code', 'ENOTFOUND');
+        throw error;
+      }
+      const entry = { address: hostname === 'localhost' ? '127.0.0.1' : '93.184.216.34', family: 4 };
+      return options?.all === true ? [entry] : entry;
+    },
+  };
+});
+
 const putBody = {
   type: 'remote' as const,
   name: 'deepwiki',
@@ -1990,7 +2010,9 @@ describe('mcp-servers routers', () => {
       );
 
       expect(response.status).toBe(400);
-      expect(await errorMessage(response)).toContain('on this computer or its own network');
+      expect(await errorMessage(response)).toContain(
+        'That address is on this computer, so the server cannot connect to it',
+      );
     });
 
     it('refuses an address carrying a name and password', async () => {
@@ -2040,7 +2062,9 @@ describe('mcp-servers routers', () => {
         const response = await mcpServersRouter.request('/loopback-tools/tools');
 
         expect(response.status).toBe(422);
-        expect(await errorMessage(response)).toContain('on this computer or its own network');
+        expect(await errorMessage(response)).toContain(
+          'has an address on this computer, so the server cannot connect to it',
+        );
       } finally {
         await mcpServerStore.deleteServer({ tenant_id: TENANT_ID, name: 'loopback-tools' });
       }
@@ -2057,7 +2081,9 @@ describe('mcp-servers routers', () => {
         const response = await mcpServersRouter.request('/loopback-authorize/authorize?return_to=/settings');
 
         expect(response.status).toBe(422);
-        expect(await errorMessage(response)).toContain('on this computer or its own network');
+        expect(await errorMessage(response)).toContain(
+          'That address is on this computer, so the server cannot connect to it',
+        );
       } finally {
         await mcpServerStore.deleteServer({ tenant_id: TENANT_ID, name: 'loopback-authorize' });
       }

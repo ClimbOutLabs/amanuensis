@@ -13,8 +13,9 @@ import type {
   OAuthTokens,
 } from '@modelcontextprotocol/sdk/shared/auth.js';
 import type { FetchLike } from '@modelcontextprotocol/sdk/shared/transport.js';
-import { McpConnectionError, McpDcrConfigurationError } from '@truefoundry/trueforge-core/core';
+import { McpConnectionError, McpDcrConfigurationError, isRedirectStatus } from '@truefoundry/trueforge-core/core';
 import { generateOAuthState } from '@truefoundry/trueforge-core/core/util/oauthState';
+import { remoteUrlProblem, type RemoteUrlProblem } from '../../runtime/remoteAddress';
 import {
   isOAuthAccessTokenUsable,
   mcpAuthorizationServerMetadata,
@@ -36,6 +37,76 @@ import type {
 /** Per-request timeout for MCP OAuth discovery, DCR, and token HTTP calls. */
 export const MCP_OAUTH_HTTP_TIMEOUT_MS = 15_000;
 
+/** How many redirects one sign-in dial follows before it stops. */
+const MAX_MCP_OAUTH_REDIRECTS = 5;
+
+/**
+ * A sign-in dial was stopped by the address check (see runtime/remoteAddress): the address the
+ * remote server named for discovery, registration, or the token call is one the server may not
+ * connect to, or could not be checked. Rides on McpConnectionError under its own class so the
+ * flows' error wrapping leaves its message, which already says what happened, as the answer.
+ */
+export class McpOAuthAddressRefusedError extends McpConnectionError {
+  constructor(problem: RemoteUrlProblem | 'redirect' | 'bad-redirect') {
+    super(
+      problem === 'blocked'
+        ? "Sign-in stopped. The address this connector's server named for sign-in is one the server may not connect to. Use a connector whose sign-in address is on the internet or your home network."
+        : problem === 'unresolved'
+          ? "Sign-in stopped. The address this connector's server named for sign-in did not resolve, so the server cannot check it. Try again, or check the connector's address in Settings."
+          : problem === 'invalid'
+            ? "Sign-in stopped. The address this connector's server named for sign-in is not a full http or https address."
+            : problem === 'bad-redirect'
+              ? 'Sign-in stopped. The sign-in address answered with a redirect that does not name an http or https address.'
+              : 'Sign-in stopped. The sign-in address kept redirecting.',
+      422,
+    );
+    this.name = 'McpOAuthAddressRefusedError';
+  }
+}
+
+/**
+ * One sign-in dial, behind the address check: the address is judged before it is connected to,
+ * and redirects are followed by hand so every hop is judged too. The endpoints dialed here are
+ * named by the remote server (its discovery answer names the authorization server, whose
+ * metadata names the registration and token endpoints), so the checks at save and connect
+ * time, which judge the address the person entered, cannot cover them.
+ */
+async function dialMcpOAuthUrl(url: string | URL, init: RequestInit): Promise<Response> {
+  let currentUrl = new URL(url);
+  let currentInit = init;
+  for (let hop = 0; ; hop += 1) {
+    const problem = await remoteUrlProblem({ url: currentUrl.href });
+    if (problem !== null) {
+      throw new McpOAuthAddressRefusedError(problem);
+    }
+    const response = await fetch(currentUrl, { ...currentInit, redirect: 'manual' });
+    if (!isRedirectStatus(response.status)) {
+      return response;
+    }
+    const location = response.headers.get('location');
+    let target: URL | undefined;
+    if (location !== null) {
+      try {
+        target = new URL(location, currentUrl);
+      } catch {
+        target = undefined;
+      }
+    }
+    await response.body?.cancel().catch(() => undefined);
+    if (target === undefined || (target.protocol !== 'http:' && target.protocol !== 'https:')) {
+      throw new McpOAuthAddressRefusedError('bad-redirect');
+    }
+    if (hop >= MAX_MCP_OAUTH_REDIRECTS) {
+      throw new McpOAuthAddressRefusedError('redirect');
+    }
+    // 307 and 308 repeat the request as it was; the older codes turn a POST into a bodiless GET.
+    if (response.status !== 307 && response.status !== 308 && currentInit.method?.toUpperCase() === 'POST') {
+      currentInit = { ...currentInit, method: 'GET', body: null };
+    }
+    currentUrl = target;
+  }
+}
+
 /**
  * Abort hung authorization-server HTTP. Merges with any caller `signal` so both can cancel the request.
  * Used by discoverOAuthServerInfo / registerClient / refreshAuthorization / exchangeAuthorization
@@ -44,7 +115,7 @@ export const MCP_OAUTH_HTTP_TIMEOUT_MS = 15_000;
 const mcpOAuthFetch: FetchLike = (url, init) => {
   const timeoutSignal = AbortSignal.timeout(MCP_OAUTH_HTTP_TIMEOUT_MS);
   const signal = init?.signal != null ? AbortSignal.any([init.signal, timeoutSignal]) : timeoutSignal;
-  return fetch(url, { ...init, signal });
+  return dialMcpOAuthUrl(url, { ...init, signal });
 };
 
 function isTimeoutError(error: unknown): boolean {
@@ -82,6 +153,9 @@ async function registerMcpClientWithAuthMethodFallback(params: {
       fetchFn: mcpOAuthFetch,
     });
   } catch (firstError: unknown) {
+    if (firstError instanceof McpOAuthAddressRefusedError) {
+      throw firstError;
+    }
     if (!(firstError instanceof InvalidClientMetadataError)) {
       throw mcpOAuthConnectionError(
         `Failed to dynamically register OAuth client for MCP server '${mcpServerName}'`,
@@ -96,6 +170,9 @@ async function registerMcpClientWithAuthMethodFallback(params: {
         fetchFn: mcpOAuthFetch,
       });
     } catch (secondError: unknown) {
+      if (secondError instanceof McpOAuthAddressRefusedError) {
+        throw secondError;
+      }
       throw mcpOAuthConnectionError(
         `Failed to dynamically register OAuth client for MCP server '${mcpServerName}'`,
         secondError,
@@ -139,6 +216,9 @@ async function discoverMcpAuthorizationServerMetadata(params: {
   try {
     discovered = await discoverOAuthServerInfo(mcpServerUrl, { fetchFn: mcpOAuthFetch });
   } catch (error: unknown) {
+    if (error instanceof McpOAuthAddressRefusedError) {
+      throw error;
+    }
     throw mcpOAuthConnectionError(
       `Failed to discover OAuth authorization server for MCP server '${mcpServerName}'`,
       error,
@@ -186,6 +266,9 @@ export async function createMcpOAuthClient(params: {
   try {
     discovered = await discoverOAuthServerInfo(mcpServerUrl, { fetchFn: mcpOAuthFetch });
   } catch (error: unknown) {
+    if (error instanceof McpOAuthAddressRefusedError) {
+      throw error;
+    }
     throw mcpOAuthConnectionError(
       `Failed to discover OAuth authorization server for MCP server '${mcpServerName}'`,
       error,
@@ -439,6 +522,9 @@ export async function completeMcpAuthorization<TTransaction>(params: {
       fetchFn: mcpOAuthFetch,
     });
   } catch (error: unknown) {
+    if (error instanceof McpOAuthAddressRefusedError) {
+      throw error;
+    }
     if (error instanceof InvalidClientError) {
       await params.mcpServerStore.deleteClient({ id: pending.id });
       throw new McpConnectionError('OAuth client registration is invalid; please retry connecting', 400, {

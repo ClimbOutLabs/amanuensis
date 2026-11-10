@@ -683,7 +683,10 @@ describe('the address check on model providers', () => {
     );
 
     expect(response.status).toBe(400);
-    expect(await errorMessage(response)).toContain('on this computer or its own network');
+    const message = await errorMessage(response);
+    expect(message).toContain('That address is on this computer, so the server cannot use it for a model');
+    expect(message).toContain('~/.amanuensis/instances/<name>/.env');
+    expect(message).toContain('Restart the instance after changing it');
   });
 
   it('refuses an address carrying a name and password', async () => {

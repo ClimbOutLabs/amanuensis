@@ -10,6 +10,26 @@ import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/Sqlite
 import { mcpOAuthCallbackUrl } from '../../../src/mcp/auth/mcpOAuthHelpers';
 import { getMcpConnection, RemoteAddressRefusedError } from '../../../src/runtime/sessionResources';
 
+// Name resolution is stubbed for the whole suite: a name with 'unresolvable' in it does not
+// resolve, localhost resolves to loopback, and every other name resolves to a public address.
+// The address check at connection time judges names by what they resolve to, so the suite's
+// answer cannot depend on the DNS of the machine running it.
+jest.mock('node:dns/promises', () => {
+  const actual = jest.requireActual<typeof import('node:dns/promises')>('node:dns/promises');
+  return {
+    ...actual,
+    lookup: async (hostname: string, options?: { all?: boolean | undefined }) => {
+      if (hostname.includes('unresolvable')) {
+        const error = new Error(`getaddrinfo ENOTFOUND ${hostname}`);
+        Reflect.set(error, 'code', 'ENOTFOUND');
+        throw error;
+      }
+      const entry = { address: hostname === 'localhost' ? '127.0.0.1' : '93.184.216.34', family: 4 };
+      return options?.all === true ? [entry] : entry;
+    },
+  };
+});
+
 describe('getMcpConnection', () => {
   let db: ReturnType<typeof createSqliteDb>;
   let mcpServerStore: IMcpServerWithAuthStore;
@@ -685,12 +705,13 @@ describe('getMcpConnection', () => {
       await expect(connectionFor('lan-mcp')).resolves.toMatchObject({ url: 'http://192.0.2.1:8080/mcp' });
     });
 
-    it('still resolves a server whose name does not resolve: it connects nowhere on its own', async () => {
+    it('refuses a server whose name does not resolve: it cannot be checked, so it is not dialled', async () => {
       await seed('unresolvable-mcp', 'https://mcp.unresolvable.invalid.example/mcp');
 
-      await expect(connectionFor('unresolvable-mcp')).resolves.toMatchObject({
-        url: 'https://mcp.unresolvable.invalid.example/mcp',
-      });
+      const attempt = connectionFor('unresolvable-mcp');
+      await expect(attempt).rejects.toBeInstanceOf(RemoteAddressRefusedError);
+      await expect(attempt).rejects.toMatchObject({ statusCode: 422 });
+      await expect(attempt).rejects.toThrow('did not resolve');
     });
 
     it('resolves a loopback server the operator listed as their own origin', async () => {
