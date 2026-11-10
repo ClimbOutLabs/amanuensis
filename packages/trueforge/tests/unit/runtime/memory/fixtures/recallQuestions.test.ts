@@ -11,6 +11,7 @@ import { mayaPageBySlug } from '../../../../fixtures/memory/mayaWorld/pages';
 import { MAYA_RECALL_QUESTIONS } from '../../../../fixtures/memory/mayaWorld/recallQuestions';
 import { RECALL_CATEGORIES } from '../../../../fixtures/memory/mayaWorld/schema';
 import { mayaSortedPages, writeMayaSortedPages } from '../../../../fixtures/memory/mayaWorld/sortedPages';
+import { MAYA_UNRELATED_MESSAGES } from '../../../../fixtures/memory/mayaWorld/unrelatedMessages';
 
 interface Source {
   day: number;
@@ -108,6 +109,34 @@ describe("recall questions over Maya's world", () => {
       }
     },
   );
+});
+
+/** A message with case and punctuation ignored, in any script. */
+function sameWords(text: string): string {
+  return text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ');
+}
+
+describe("the unrelated messages for Maya's world", () => {
+  it('are 300, none of them empty', () => {
+    expect(MAYA_UNRELATED_MESSAGES).toHaveLength(300);
+    expect(MAYA_UNRELATED_MESSAGES.filter(message => message.trim() === '')).toEqual([]);
+  });
+
+  it('are all different from each other', () => {
+    const seen = new Set<string>();
+    const repeated = MAYA_UNRELATED_MESSAGES.filter(message => {
+      const key = sameWords(message);
+      const again = seen.has(key);
+      seen.add(key);
+      return again;
+    });
+    expect(repeated).toEqual([]);
+  });
+
+  it('are all different from the messages of the recall questions', () => {
+    const asked = new Set(MAYA_RECALL_QUESTIONS.map(question => sameWords(question.message)));
+    expect(MAYA_UNRELATED_MESSAGES.filter(message => asked.has(sameWords(message)))).toEqual([]);
+  });
 });
 
 describe("the page wording of the recall questions over Maya's world", () => {
