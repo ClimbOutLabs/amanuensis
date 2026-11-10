@@ -46,7 +46,10 @@ export const SAVE_DRAFT_OPTION_ID = 'save_draft';
  * until cleared in skill settings, and denying remembers the sites as turned down for the skill.
  */
 export const SKILL_NETWORK_CHOICES = {
-  approve: { label: 'Allow once', hint: 'Allow these sites for this chat only. The command runs again with them.' },
+  approve: {
+    label: 'Allow once',
+    hint: 'Allow these sites for this chat only. The command runs again with them, unless it needs an approval of its own.',
+  },
   alwaysAllow: {
     label: 'Always allow for this skill',
     hint: 'Let this skill reach these sites in every chat, until you remove it in skill settings.',
