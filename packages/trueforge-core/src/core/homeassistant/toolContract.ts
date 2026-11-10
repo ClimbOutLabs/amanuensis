@@ -255,21 +255,36 @@ export function homeAssistantGrantScopeKey(target: HomeAssistantTarget): string 
 }
 
 /**
- * Every scope key a standing grant could cover this call under: its entity key, from the entity
- * id the call carries, and its domain key. Refusal is judged on every domain and device class
- * before this list is ever consulted, so a grant listed here cannot carry a call that also
- * names a refused domain or class. A name-only call returns no keys at all, so no stored grant
- * can run it without asking.
+ * What standing grants must cover for this call, as one group of scope keys per target the
+ * call names. Any one key in a group covers that group: an entity is covered by a grant for
+ * the entity itself or for its domain, and a domain the call names beyond its entities (a
+ * domain filter, or the tool set's domain) is covered by a grant for that domain. A call runs
+ * under standing grants only when every group is covered, so a grant for the first target
+ * alone never carries the rest. Refusal is judged on every domain and device class before
+ * this is ever consulted, so no grant here can carry a call that also names a refused domain
+ * or class. A name-only call returns no groups at all, so no stored grant can run it without
+ * asking.
  */
-export function homeAssistantGrantScopeKeys(target: HomeAssistantTarget): string[] {
-  const keys: string[] = [];
-  if (target.entity_id !== null) {
-    keys.push(`ha:entity:${target.entity_id}`);
+export function homeAssistantGrantCoverage(target: HomeAssistantTarget): string[][] {
+  const groups: string[][] = [];
+  const entity_domains = new Set<string>();
+  for (const entity_id of target.entity_ids) {
+    const keys = [`ha:entity:${entity_id}`];
+    const domain = homeAssistantDomainOfEntity(entity_id);
+    if (domain !== null) {
+      entity_domains.add(domain);
+      keys.push(`ha:domain:${domain}`);
+    }
+    if (!groups.some(group => group[0] === keys[0])) {
+      groups.push(keys);
+    }
   }
-  if (target.domain !== null) {
-    keys.push(`ha:domain:${target.domain}`);
+  for (const domain of target.domains) {
+    if (!entity_domains.has(domain)) {
+      groups.push([`ha:domain:${domain}`]);
+    }
   }
-  return keys;
+  return groups;
 }
 
 /** An entity id as a person says it: `light.living_room_lamp` becomes `Living room lamp`. */

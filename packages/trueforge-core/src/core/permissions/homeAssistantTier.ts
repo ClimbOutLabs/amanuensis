@@ -2,8 +2,8 @@ import {
   HOME_ASSISTANT_REFUSAL,
   HOME_ASSISTANT_SERVER_NAME,
   homeAssistantDomainLabel,
+  homeAssistantGrantCoverage,
   homeAssistantGrantScopeKey,
-  homeAssistantGrantScopeKeys,
   homeAssistantTarget,
   homeAssistantTargetLabel,
   homeAssistantToolBase,
@@ -28,8 +28,9 @@ export const HOME_ASSISTANT_CHANGE_REASON = 'home_assistant_change';
  * depend on the model. Only the connector the preset saved gets them; any other server returns
  * undefined and the generic path asks (fail closed).
  *
- * Reads run. A change asks, with the entity named on the card, unless a standing grant covers its
- * domain or the one entity. Locks, alarm panels, garage doors and covers that lead outside are
+ * Reads run. A change asks, with the entity named on the card, unless standing grants cover
+ * every target it names: each entity by a grant for that entity or its domain, and each further
+ * domain by a grant for that domain. Locks, alarm panels, garage doors and covers that lead outside are
  * refused outright, with no standing grant possible. A change that read content steered is
  * refused too, as a steered send is.
  */
@@ -84,11 +85,28 @@ export async function classifyHomeAssistantTool({
     });
   }
 
-  for (const scope_key of homeAssistantGrantScopeKeys(target)) {
-    if (await hasStandingGrant(scope_key)) {
+  const coverage = homeAssistantGrantCoverage(target);
+  if (coverage.length > 0) {
+    const covering: string[] = [];
+    let every_target_covered = true;
+    for (const group of coverage) {
+      let matched: string | null = null;
+      for (const scope_key of group) {
+        if (await hasStandingGrant(scope_key)) {
+          matched = scope_key;
+          break;
+        }
+      }
+      if (matched === null) {
+        every_target_covered = false;
+        break;
+      }
+      covering.push(matched);
+    }
+    if (every_target_covered) {
       return tier1Decision({
         reason: TOOL_GRANT_REASON,
-        reason_detail: `Always allowed: changes like this in Home Assistant (${scope_key}).`,
+        reason_detail: `Always allowed: changes like this in Home Assistant (${covering.join(', ')}).`,
         sensitive_read: false,
       });
     }

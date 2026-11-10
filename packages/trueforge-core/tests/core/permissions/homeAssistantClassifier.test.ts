@@ -178,6 +178,40 @@ describe('Home Assistant standing grants', () => {
     expect(decision).toMatchObject({ tier: 1, reason: TOOL_GRANT_REASON });
   });
 
+  it('cards a call that names two domains when only the first domain is granted', async () => {
+    const ctx = makeCtx();
+    await recordGrant(ctx, 'ha:domain:light');
+    const decision = await classifyTier(haAction('HassTurnOff', { domain: ['light', 'switch'] }), ctx);
+    expect(decision.tier).toBe(3);
+    expect(decision.auto_deny).toBeNull();
+    expect(decision.reason).toBe('home_assistant_change');
+  });
+
+  it('cards a call that names two entities when only the first entity is granted', async () => {
+    const ctx = makeCtx();
+    await recordGrant(ctx, 'ha:entity:light.kitchen');
+    const decision = await classifyTier(haAction('HassTurnOff', { entity_id: ['light.kitchen', 'switch.porch'] }), ctx);
+    expect(decision.tier).toBe(3);
+    expect(decision.auto_deny).toBeNull();
+    expect(decision.reason).toBe('home_assistant_change');
+  });
+
+  it('runs a call that names two domains when grants cover both domains', async () => {
+    const ctx = makeCtx();
+    await recordGrant(ctx, 'ha:domain:light');
+    await recordGrant(ctx, 'ha:domain:switch');
+    const decision = await classifyTier(haAction('HassTurnOff', { domain: ['light', 'switch'] }), ctx);
+    expect(decision).toMatchObject({ tier: 1, reason: TOOL_GRANT_REASON, card: null });
+  });
+
+  it('runs a call that names two entities when grants cover both, one by entity and one by domain', async () => {
+    const ctx = makeCtx();
+    await recordGrant(ctx, 'ha:entity:light.kitchen');
+    await recordGrant(ctx, 'ha:domain:switch');
+    const decision = await classifyTier(haAction('HassTurnOff', { entity_id: ['light.kitchen', 'switch.porch'] }), ctx);
+    expect(decision).toMatchObject({ tier: 1, reason: TOOL_GRANT_REASON, card: null });
+  });
+
   it('asks again once no grant is stored, so clearing a grant takes effect on the next call', async () => {
     const granted = makeCtx();
     await recordGrant(granted, 'ha:domain:light');

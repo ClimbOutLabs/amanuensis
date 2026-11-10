@@ -2,9 +2,9 @@ import {
   HOME_ASSISTANT_REFUSAL,
   homeAssistantDomainOfEntity,
   homeAssistantEntityLabel,
+  homeAssistantGrantCoverage,
   homeAssistantGrantLabel,
   homeAssistantGrantScopeKey,
-  homeAssistantGrantScopeKeys,
   homeAssistantTarget,
   homeAssistantToolBase,
   homeAssistantToolPrefix,
@@ -254,7 +254,7 @@ describe('Home Assistant grant scopes and labels', () => {
   it('scopes a grant by domain first, then by the one entity', () => {
     const byDomain = homeAssistantTarget({ tool_name: 'HassTurnOn', params: { entity_id: 'light.kitchen' } });
     expect(homeAssistantGrantScopeKey(byDomain)).toBe('ha:domain:light');
-    expect(homeAssistantGrantScopeKeys(byDomain)).toEqual(['ha:entity:light.kitchen', 'ha:domain:light']);
+    expect(homeAssistantGrantCoverage(byDomain)).toEqual([['ha:entity:light.kitchen', 'ha:domain:light']]);
     const bare = homeAssistantTarget({ tool_name: 'HassTurnOn', params: { area: 'Kitchen' } });
     expect(homeAssistantGrantScopeKey(bare)).toBeNull();
   });
@@ -263,13 +263,29 @@ describe('Home Assistant grant scopes and labels', () => {
     const byName = homeAssistantTarget({ tool_name: 'HassTurnOff', params: { name: 'Porch Light' } });
     expect(isHomeAssistantNameOnlyTarget(byName)).toBe(true);
     expect(homeAssistantGrantScopeKey(byName)).toBeNull();
-    expect(homeAssistantGrantScopeKeys(byName)).toEqual([]);
+    expect(homeAssistantGrantCoverage(byName)).toEqual([]);
     const byNameAndEntity = homeAssistantTarget({
       tool_name: 'HassTurnOff',
       params: { name: 'Porch Light', entity_id: 'light.porch' },
     });
     expect(isHomeAssistantNameOnlyTarget(byNameAndEntity)).toBe(false);
-    expect(homeAssistantGrantScopeKeys(byNameAndEntity)).toEqual(['ha:entity:light.porch', 'ha:domain:light']);
+    expect(homeAssistantGrantCoverage(byNameAndEntity)).toEqual([['ha:entity:light.porch', 'ha:domain:light']]);
+  });
+
+  it('asks a grant to cover every target a call names, not only the first', () => {
+    const twoDomains = homeAssistantTarget({
+      tool_name: 'HassTurnOff',
+      params: { domain: ['light', 'switch'] },
+    });
+    expect(homeAssistantGrantCoverage(twoDomains)).toEqual([['ha:domain:light'], ['ha:domain:switch']]);
+    const twoEntities = homeAssistantTarget({
+      tool_name: 'HassTurnOff',
+      params: { entity_id: ['light.kitchen', 'switch.porch'] },
+    });
+    expect(homeAssistantGrantCoverage(twoEntities)).toEqual([
+      ['ha:entity:light.kitchen', 'ha:domain:light'],
+      ['ha:entity:switch.porch', 'ha:domain:switch'],
+    ]);
   });
 
   it('says entity ids and grant keys in plain words', () => {
