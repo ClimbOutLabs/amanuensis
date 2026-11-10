@@ -290,17 +290,23 @@ name that is also on a page, the longer name takes the words: `นิดา` loa
 for `นิด`. A short name inside a longer word that has no page of its own still matches. Every other name still needs whole words,
 so `Sam` does not match `Samantha`.
 
+Names are looked for in the newest message first, then in the person's earlier messages of the same
+chat that the recall query already holds. A page named only in an earlier message ranks below every
+page named in the newest one, so a question such as "What can she not eat?" still loads the page for
+the person named a message ago.
+
 A name followed by `'s` (`Wendy's flight`) is a possessive match. It loads the page, but ranks below
 a direct mention, since the page may be about the owner and not the subject.
 
 Matches are ordered by:
 
-1. The vault, own vault first, then the shared vault, then any vault shared with the person. If two
+1. A name in the newest message before a name only in an earlier message.
+2. The vault, own vault first, then the shared vault, then any vault shared with the person. If two
    vaults have the same page, the first that has a readable copy is used. A page that cannot be read
    in one vault does not hide the same page in another.
-2. Direct mentions before possessive ones.
-3. People before matters.
-4. Where the name first appears in the message.
+3. Direct mentions before possessive ones.
+4. People before matters.
+5. Where the name first appears in the message.
 
 Two limits apply, on top of the normal recall budget:
 
@@ -319,6 +325,41 @@ such as "(you said, since 2026-03)". Facts from mail, the calendar, read content
 lines whose marker cannot be read, always end with "not confirmed" in that note, for example
 "(from mail, not confirmed, since 2026-03)". "How you write to them" is not shown with the page. Its lines
 are gathered, for every loaded contact, under one fixed heading after the pages (see below).
+
+A statement whose end date has passed is not shown as current. A statement under Now, Decided or Open
+whose `until` day is before today is shown under the Earlier label, with its dates, and the page file
+is not changed. Today is the calendar day in the time zone the chat already has, so a statement that
+ends today is still current.
+
+#### Single statements found by meaning
+
+After the named pages, the host looks for single statements that the newest message is about, on pages
+it did not name. It needs the meaning model (see `embeddingRetrieval.ts`); when the model is not ready
+it carries on without this step and never waits for a download.
+
+- **What is indexed.** Every statement bullet and every bullet typed by hand in Now, Decided, Open,
+  Unconfirmed and Earlier, one vector each. Not the lines under "How you write to them", and not a line
+  whose marker cannot be read. The vectors sit in `.statement-embeddings.json` in the vault folder, next to
+  the daily log's `.embeddings.json`, as ids, a hash of the embedded text and the vector, never the text.
+  The index is brought up to date on every turn: a changed statement is embedded again and a removed one is
+  dropped.
+- **What is embedded.** `Title (summary): statement`, where the summary is the line under the page title, or
+  else the first statement under Now that is the person's own. When the statement is itself the summary, or
+  there is no summary, it is `Title: statement`.
+- **When a statement may be shown.** Scores from the model cannot be compared between statements, so each
+  statement is measured against 460 fixed, ordinary messages (`comparisonMessages.ts`) that have nothing to
+  do with anyone's memory. Its standing for a message is how many standard deviations the message is closer
+  than those messages are on average. Rule 1: a statement is shown only when its standing is above 3.
+  Rule 2: for each of the 460 messages the best standing over all statements is kept; the message gets
+  statements only when its own best standing is above the 95th percentile of those 460 numbers. With fewer
+  than 5 statements nothing is found. Rule 2 uses the best standing over every vault the person may read.
+- **What is shown.** The best 6 statements by standing, leaving out pages already shown whole and showing
+  the same words on one page once. A statement that has ended (under Earlier, or `until` before today) is
+  left out unless it ended in the last 30 days or the message asks about the past ("used to", "before",
+  "originally" and a few more English words). The statements are grouped by page, pages in order of their
+  best statement, and each group is drawn by the same code as a whole page, with only the chosen lines and
+  no drafting lines. A group counts as a loaded page in the turn's memory event and shares the page token
+  limit; one that does not fit is dropped whole.
 
 ### Drafting rules
 

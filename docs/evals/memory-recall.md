@@ -55,7 +55,9 @@ The same 76 questions are asked three times. Each time the memory is set up in a
 
 1. **Log only, by words.** The memory holds only the daily log. Memories are found by their words. This is how the test ran before the other two were added. Its numbers must not move.
 2. **Log only, by meaning.** The memory is the same, but memories are also found by meaning. This shows what the search by meaning adds on its own.
-3. **Pages sorted, by meaning.** The memory also holds the pages about people and matters. Memories are found by meaning as well.
+3. **Pages sorted, by meaning.** The memory also holds the pages about people and matters. Memories are found by meaning as well, and so are single statements on the pages. A statement is shown only when the message comes clearly closer to it than 460 ordinary messages do, and a message that is close to nothing remembered is shown no statement at all (see `specs/memory-pages.md`, section 3).
+
+The log-only conditions still hold the one page the person typed by hand, so a question that names that page through an earlier message of the chat is found in all three conditions.
 
 The pages in the third condition are the ones a perfect sorter would write. They are built from the expected decisions of every entry, up to the end of the day of the question. So the numbers of the third condition are the best that sorting can reach. They are not what a real sorter reaches. A real sorter can only do worse or the same.
 
@@ -63,7 +65,7 @@ The pages in the third condition are the ones a perfect sorter would write. They
 
 The search by meaning needs a model of about 120 MB, and unit tests cannot download it. So the test uses vectors that were recorded from the real model once. They are in `packages/trueforge/tests/fixtures/memory/recordedVectors/`, in two files: a list of the texts and the numbers for each.
 
-Record them again when a text in the test changed, or when the model changed. A text that changed is a daily-log entry, a question, an unrelated message, or a page. The test tells you when a text has no recorded vector. Record them with this one command, and name the folder that holds the downloaded model:
+Record them again when a text in the test changed, or when the model changed. A text that changed is a daily-log entry, a question, an unrelated message, a comparison message, or a page. The test tells you when a text has no recorded vector. Record them with this one command, and name the folder that holds the downloaded model:
 
 ```sh
 pnpm --filter @truefoundry/trueforge memory:record-vectors --model-dir <folder>
@@ -85,4 +87,4 @@ pnpm --filter @truefoundry/trueforge test -- tests/unit/runtime/memory/fixtures
 
 ## Add to it
 
-Add a story entry in `story.ts` with the next free place on its day, and say what it should do to the pages. Add a question in `recallQuestions.ts` and name the entries that hold its answer. For a message that has nothing to do with memory, use the kind `nothing_to_recall` and name no entries. The other tests in the same folder check that the story stays consistent, that no noise entry holds an answer, that no entry shares a topic word with such a message, that the sorted pages read back correctly, that the 300 unrelated messages are all different from each other and from the questions, and that the recorded vectors and the two scoring rules work.
+Add a story entry in `story.ts` with the next free place on its day, and say what it should do to the pages. Add a question in `recallQuestions.ts` and name the entries that hold its answer. For a message that has nothing to do with memory, use the kind `nothing_to_recall` and name no entries. The other tests in the same folder check that the story stays consistent, that no noise entry holds an answer, that no entry shares a topic word with such a message, that the sorted pages read back correctly, that the 300 unrelated messages are all different from each other and from the questions, that none of the 460 comparison messages is the same as a question or an unrelated message, and that the recorded vectors and the two scoring rules work.

@@ -32,15 +32,17 @@ Everything stays in plain Markdown files in the memory folder. There is no datab
 In this order, each within its own size limit:
 
 1. **The pages the message names**, whole. A name, another name, or a role word counts.
-2. **Statements found by meaning.** Up to six statements from other pages that are about the same thing as the message, each shown under its page's title. A statement is indexed together with its page's title and summary line, so a short statement is found by what it is about.
+2. **Statements found by meaning.** Up to six statements from other pages that are about the same thing as the message, each shown under its page's title. A statement is indexed together with its page's title and summary line, so a short statement is found by what it is about. The summary line is the line under the title; when the person wrote none, it is the first statement under Now that is the person's own words. A statement from mail or anything read is never the summary.
 3. **Notes from the daily log, found by meaning**, for what is on no page: notes that have not been sorted onto pages yet, and the person's own words that belong on no page.
 4. **A short list of pages**, one line each (title and summary line), the most recently changed first, within a fixed size.
 
-A statement whose end date has passed is not shown as current. For 30 days it is shown as "Earlier, no longer true". After that it is shown only when the message asks about the past.
+A statement whose end date has passed is not shown as current. It is shown under the Earlier label, with its dates, for 30 days. After that it is shown only when the message asks about the past. A page named in an earlier message of the same chat is read too, after the pages the newest message names.
 
 ## 3. When a memory is shown
 
 Each statement and each note has a floor of its own. Aman keeps a fixed list of ordinary messages that have nothing to do with anyone's life, such as "What is the capital of Canada?". For each memory it measures how close those messages come to it. The memory is shown only when the person's message comes clearly closer than they do: above their average by three times their spread.
+
+A second rule works on the whole message. Aman keeps a list of 460 such ordinary messages. For each of them it records the best standing any statement reaches: how far above its own average its closeness is. A message gets statements by meaning only when its own best standing is above the 95th percentile of those 460 numbers. With hundreds of statements, the first rule alone lets some statement through for about one unrelated message in six, because there are so many chances. This second rule fixes the rate for the whole message. With fewer than 5 statements nothing is found by meaning.
 
 This replaces two rules. The check that compared the best match with the average match is removed. Notes that only share a word with the message are no longer added after the matches by meaning.
 
