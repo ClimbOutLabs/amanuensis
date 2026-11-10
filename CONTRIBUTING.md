@@ -167,6 +167,7 @@ Workspace tasks go through `package.json` scripts - if a repeatable workflow is 
 | `pnpm lint` / `pnpm format`                          | ESLint (with fixes) / Prettier                        |
 | `pnpm smoke` / `pnpm smoke:down`                     | Full Docker Compose stack + health check              |
 | `pnpm smoke:npx`                                     | Pack the published CLI and boot it like `npx`         |
+| `pnpm smoke:npx:amanuensis`                          | Pack `amanuensis` and start it with `npx`; CI runs it |
 | `pnpm chart:lint` / `pnpm chart:template`            | Validate the Helm chart                               |
 | `pnpm clean` / `pnpm clean:all`                      | Remove build outputs (+ `node_modules` for `:all`)    |
 
