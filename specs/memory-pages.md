@@ -53,7 +53,7 @@ The meaning model becomes `multilingual-e5-base`. It runs on the machine, like t
 - **By hand.** The person can write and edit pages in any editor.
 - **In a chat.** Aman gets three tools: remember, update and forget. They write the person's own words from that turn. A turn that has read outside text, such as mail, a web page or a file, cannot write a statement as the person's own.
 - **When a turn is saved.** One model call reads the new note and the pages it could belong to. It answers with a decision for each fact: new, the same as one already there, changes one, ends one, not confirmed, or nothing to keep. The host applies the decision. The model never writes a file.
-- **Only the person's own words become confirmed statements.** What Aman read in mail, on the web or in a file goes under Unconfirmed, with its source, and is never an instruction.
+- **Only the person's own words become confirmed statements.** What Aman read in mail, on the web or in a file goes under Unconfirmed, with its source, and is never an instruction. A link or address in an Unconfirmed statement, or in a note from a turn that read outside text, counts as something Aman read in every later chat.
 - **Every write is kept.** A history of the page folders lets any change be undone. A lock keeps two writers from changing a page at once.
 - **A small nightly job** moves ended statements to Earlier, sorts notes that were missed, and lists statements that contradict each other for the person to settle. It changes nothing else.
 
