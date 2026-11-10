@@ -245,6 +245,27 @@ A pull request runs only the test suites its changed files select. The **Nightly
 - To start a run by hand, open the **Actions** tab, pick **Nightly**, and choose **Run workflow**. A run started on a branch other than `main` does not open or close the issue.
 - The run uses a scripted model and needs no keys or accounts.
 
+### Every feature names its test
+
+[`tests/nightly-coverage.json`](tests/nightly-coverage.json) lists every feature: the Settings panels, approval cards, email and calendar presets, Home cards, installer commands and server route groups read from the code, plus the screens listed by hand under `screens`. Each row gives the feature's feature set (Chat, Memory, Reminders and so on) and the tests that exercise it. `pnpm nightly:coverage` prints how many features have a test and fails when:
+
+- a feature has no row, or a row names a feature that is gone;
+- a named test does not exist, or never mentions the feature's id;
+- a feature with no test is missing from `not_yet`.
+
+When you add a feature, add its row and its test in the same PR. Add it to `not_yet` only when the test truly cannot land yet, and say why in the PR.
+
+### Screenshots
+
+Browser tests save a picture at each named step with `featureShotPath({ surface, step })` from [`packages/frontend/tests/support/featureShots.ts`](packages/frontend/tests/support/featureShots.ts). The feature's id picks the folder, so pictures land in one folder per feature set. A failing test saves a picture of every open page with `FAILED` in its name.
+
+In CI the pictures go in a folder named for the run's date and time in UTC, such as `2026/11/10/0917/chat/`. The folder gets an `index.html` contact sheet and a `results.json`, and the run keeps it for 30 days as the **screenshots** download on the run's page. To see the same on your machine:
+
+```bash
+AMAN_SCREENSHOT_DIR=/tmp/aman-shots pnpm test:frontend
+pnpm nightly:gallery /tmp/aman-shots
+```
+
 ## Releases
 
 Releases are cut by the maintainer; contributors do not need to do anything release-specific.

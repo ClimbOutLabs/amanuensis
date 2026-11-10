@@ -41,6 +41,7 @@ jobs:
       packages: ${{ steps.packages.outputs.list }}
       chart: ${{ inputs.all_packages || steps.filter.outputs.chart }}
       store: ${{ inputs.all_packages || steps.filter.outputs.store }}
+      screenshot_folder: ${{ steps.stamp.outputs.folder }}
 
     steps:
       - name: Check out repository code
@@ -144,6 +145,11 @@ jobs:
               - 'Dockerfile.dev'
               - 'package.json'
               - '.github/workflows/ci.yml'
+
+      # One dated folder for the whole run, so two runs on one day keep their screenshots apart.
+      - name: Name the screenshot folder
+        id: stamp
+        run: echo "folder=$(date -u +%Y/%m/%d/%H%M)" >> "$GITHUB_OUTPUT"
 
       - name: Build package matrix
         id: packages
@@ -293,7 +299,26 @@ jobs:
           python -m pip install httpx==0.28.1
 
       - name: Test
+        env:
+          AMAN_SCREENSHOT_DIR: ${{ runner.temp }}/screenshots/${{ needs.detect-changes.outputs.screenshot_folder }}
         run: pnpm "test:${{ matrix.package }}"
+
+      # The browser tests save a picture at each named step, in one folder per feature set.
+      - name: Build the screenshot contact sheet
+        if: always() && matrix.package == 'frontend'
+        env:
+          SCREENSHOT_FOLDER: ${{ needs.detect-changes.outputs.screenshot_folder }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/screenshots/$SCREENSHOT_FOLDER"
+          pnpm nightly:gallery "$RUNNER_TEMP/screenshots/$SCREENSHOT_FOLDER" "Screenshots $SCREENSHOT_FOLDER UTC"
+
+      - name: Keep the screenshots
+        if: always() && matrix.package == 'frontend'
+        uses: actions/upload-artifact@v7
+        with:
+          name: screenshots
+          path: ${{ runner.temp }}/screenshots
+          retention-days: 30
 
   # The universal installer ships one executable per system. Build it on all
   # three systems and run it. Path-gated through the package matrix, like the
@@ -484,6 +509,34 @@ jobs:
       - name: Guide tests
         run: pnpm test:aman-guide
 
+  # Every feature names the test that exercises it, or is listed as not tested yet.
+  feature-coverage:
+    name: Feature coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Every feature names its test
+        run: pnpm nightly:coverage
+
+      - name: Coverage check and contact sheet tests
+        run: pnpm test:nightly-coverage
+
   generated-contract-drift:
     name: Generated contract drift
     runs-on: ubuntu-latest
@@ -525,6 +578,7 @@ jobs:
       - store-tests
       - private-data-scan
       - help-guide
+      - feature-coverage
       - generated-contract-drift
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -540,10 +594,11 @@ jobs:
           STORE_TESTS: ${{ needs.store-tests.result }}
           PRIVATE_DATA_SCAN: ${{ needs.private-data-scan.result }}
           HELP_GUIDE: ${{ needs.help-guide.result }}
+          FEATURE_COVERAGE: ${{ needs.feature-coverage.result }}
           GENERATED_CONTRACT_DRIFT: ${{ needs.generated-contract-drift.result }}
         run: |
           ok() { [ "$1" = success ] || [ "$1" = skipped ]; }
-          echo "detect-changes=$DETECT_CHANGES migration-order=$MIGRATION_ORDER typecheck-and-build=$TYPECHECK_AND_BUILD package-checks=$PACKAGE_CHECKS chart-checks=$CHART_CHECKS store-tests=$STORE_TESTS private-data-scan=$PRIVATE_DATA_SCAN help-guide=$HELP_GUIDE generated-contract-drift=$GENERATED_CONTRACT_DRIFT"
+          echo "detect-changes=$DETECT_CHANGES migration-order=$MIGRATION_ORDER typecheck-and-build=$TYPECHECK_AND_BUILD package-checks=$PACKAGE_CHECKS chart-checks=$CHART_CHECKS store-tests=$STORE_TESTS private-data-scan=$PRIVATE_DATA_SCAN help-guide=$HELP_GUIDE feature-coverage=$FEATURE_COVERAGE generated-contract-drift=$GENERATED_CONTRACT_DRIFT"
           [ "$DETECT_CHANGES" = success ] || exit 1
           [ "$MIGRATION_ORDER" = success ] || exit 1
           [ "$TYPECHECK_AND_BUILD" = success ] || exit 1
@@ -553,4 +608,5 @@ jobs:
           ok "$STORE_TESTS" || exit 1
           [ "$PRIVATE_DATA_SCAN" = success ] || exit 1
           [ "$HELP_GUIDE" = success ] || exit 1
+          [ "$FEATURE_COVERAGE" = success ] || exit 1
           [ "$GENERATED_CONTRACT_DRIFT" = success ] || exit 1

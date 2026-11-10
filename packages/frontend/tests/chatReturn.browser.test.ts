@@ -14,6 +14,7 @@ import {
   STALLED_ANSWER_START,
 } from '../../trueforge/tests/fixtures/scriptedModelServer.ts';
 import { inProcessApi } from './support/approvalChat.ts';
+import { featureShotPath, saveFailureShots } from './support/featureShots.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
 import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
 import { privateViteCache } from './support/viteCache.ts';
@@ -265,6 +266,9 @@ test('a chat left while its reply runs comes back live', { timeout: 900_000 }, a
         turnStartDelayMs = 0;
       }
       await expectLiveReply({ page, message });
+      await page.screenshot({
+        path: await featureShotPath({ surface: 'screen:chat-return', step: 'reply-live-after-return' }),
+      });
       assert.deepEqual(await userMessages(page), await reloadedUserMessages({ page, message }));
       await cancelStopsReply({ page, api, sessionId: charlie });
     });
@@ -376,6 +380,9 @@ test('a chat left while its reply runs comes back live', { timeout: 900_000 }, a
       assert.equal(await chatNotice(page).filter({ hasText: STILL_WORKING }).count(), 0);
       await cancelStopsReply({ page, api, sessionId: alpha });
     });
+  } catch (error) {
+    await saveFailureShots({ browser, surface: 'screen:chat-return' });
+    throw error;
   } finally {
     await browser?.close();
     await vite.close();
