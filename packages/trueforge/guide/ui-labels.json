@@ -108,5 +108,8 @@
   "Cancel": "packages/trueforge-ui/src/containers/SettingsBuilder/AccountSetupPanel.tsx",
   "Start incognito chat": "packages/trueforge-ui/src/atoms/privateChat/PrivateChatToggle.tsx",
   "Close and delete": "packages/trueforge-ui/src/atoms/privateChat/PrivateChatBanner.tsx",
-  "Delete for good": "packages/trueforge-ui/src/atoms/privateChat/PrivateChatBanner.tsx"
+  "Delete for good": "packages/trueforge-ui/src/atoms/privateChat/PrivateChatBanner.tsx",
+  "Take over": "packages/frontend/src/BrowserLivePage.tsx",
+  "Hand back": "packages/frontend/src/BrowserLivePage.tsx",
+  "Done": "packages/frontend/src/BrowserLivePage.tsx"
 }
