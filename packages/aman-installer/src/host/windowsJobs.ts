@@ -555,6 +555,9 @@ export function systemWindowsJobs(options: {
       // The probe is one of them, so it leaves itself out. What is left
       // is this program alone when no shell or other program shares
       // the window. A list longer than the buffer means others share it.
+      // This relies on the PowerShell child sharing this program's
+      // console: started hidden or detached, it would see no console and
+      // no window would ever wait.
       const stdout = await runPowerShell(
         `Add-Type -Name 'AmanConsole' -Namespace 'Aman' -MemberDefinition ` +
           `'[DllImport("kernel32.dll")] public static extern uint GetConsoleProcessList(uint[] lpdwProcessList, uint dwProcessCount);'; ` +

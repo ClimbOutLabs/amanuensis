@@ -112,8 +112,8 @@ export class FakeWindowsJobs implements WindowsJobs {
     // one (an entry written without the leading "!", say).
     runOncePending?: boolean;
     runOnceValueName?: string;
-    // Whether the program was started by Windows Explorer, as a test
-    // scripts it.
+    // Whether the program is the only one using its console window, as
+    // a test scripts it.
     ownsItsConsole?: boolean;
   }) {
     const paths = windowsPaths(options.localAppDataDir);
