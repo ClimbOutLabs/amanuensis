@@ -97,6 +97,29 @@ test_a_full_upgrade_moves_a_plain_http_instance_to_https() {
   sandbox_drop
 }
 
+test_upgrade_building_missing_parts_moves_a_plain_http_instance_to_https() {
+  t_begin "an upgrade that builds missing parts also moves an older plain http instance to https"
+  sandbox_new
+  lan
+  install_machine
+  record_plain_http
+  # One part of the installed version is missing, so the upgrade builds it again instead of
+  # finding everything in place.
+  grep -v -Fx "$(app_tag "$AMAN_HOME/release/release.json")" "$STUB_STATE/images" >"$STUB_STATE/images.new"
+  mv "$STUB_STATE/images.new" "$STUB_STATE/images"
+  : >"$STUB_LOG"
+  run_install upgrade
+  assert_rc 0
+  assert_flat_contains "$OUT" "Building the missing parts again"
+  assert_flat_contains "$OUT" "Moving instance main to https"
+  assert_eq "$(reg_value main tls)" local
+  assert_eq "$(reg_value main tls_port)" 8443
+  assert_eq "$(env_value main ALLOWED_ORIGINS)" "$HTTPS_ORIGINS"
+  assert_contains "$(compose)" "- '192.168.1.20:8443:8443'" "the moved instance is served over https"
+  assert_log_has "--force-recreate"
+  sandbox_drop
+}
+
 test_check_reports_without_changing() {
   t_begin "upgrade --check shows the change and touches nothing"
   sandbox_new
@@ -878,6 +901,7 @@ test_noop_when_current
 test_upgrade_check_names_the_move_to_https_and_changes_nothing
 test_upgrade_moves_a_plain_http_instance_to_https
 test_a_full_upgrade_moves_a_plain_http_instance_to_https
+test_upgrade_building_missing_parts_moves_a_plain_http_instance_to_https
 test_upgrade_reports_a_newer_version_when_the_checkout_is_behind_origin
 test_upgrade_stays_up_to_date_when_the_checkout_matches_origin
 test_upgrade_uses_the_checkout_when_it_is_ahead_of_origin
