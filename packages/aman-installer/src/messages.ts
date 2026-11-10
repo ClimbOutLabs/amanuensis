@@ -704,7 +704,7 @@ export const INSTALL_RESTART_NEEDED: Problem = {
 // is told to open it instead of being promised the automatic reopen.
 export const INSTALL_RESUME_FAILED: Problem = {
   happened: 'Docker Desktop needs a restart, but Aman Setup could not be set to open again by itself.',
-  fix: 'Restart your computer, then open Aman Setup from the Start menu.',
+  fix: 'Restart your computer, then open the Aman Setup download again from where you saved it, usually your Downloads folder.',
 };
 
 export const INSTALL_DOCKER_NOT_ANSWERING: Problem = {
@@ -834,6 +834,10 @@ export const INSTALL_PHONE_QUESTION =
   'Also use Aman from your phone and other devices on your home Wi-Fi? (yes or no):';
 
 export const INSTALL_YES_OR_NO_LINE = 'Please answer yes or no.';
+
+// Said at the end of a window a double-click or the Start menu opened,
+// so the person can read it before it closes.
+export const PRESS_ENTER_TO_CLOSE_LINE = 'Press Enter to close this window.';
 
 export const INSTALL_DONE_LINE = 'Aman is installed, and the getting started page is open in your browser.';
 
@@ -1002,5 +1006,6 @@ export function allMessageLines(): string[] {
   lines.push(INSTALL_YES_OR_NO_LINE);
   lines.push(INSTALL_DONE_LINE);
   lines.push(...INSTALL_DRY_RUN_LINES);
+  lines.push(PRESS_ENTER_TO_CLOSE_LINE);
   return lines;
 }

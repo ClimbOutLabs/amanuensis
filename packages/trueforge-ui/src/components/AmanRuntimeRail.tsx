@@ -47,6 +47,11 @@ export type AmanRuntimeRailProps = {
   /** @deprecated Wrap the rail and chat shell in `PersonalizationProvider` instead. */
   personalizationApi?: PersonalizationApi;
   /**
+   * The open chat is private. The rail then says nothing about what the assistant is doing in it;
+   * a connection problem still shows, since it says what to do next.
+   */
+  privateChat?: boolean;
+  /**
    * Ids of the approvals waiting on the person in this chat. Any id puts the panda in its waiting
    * state, and puts a live Waiting for you line above the history in the Activity row.
    */
@@ -192,6 +197,7 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
   personaName,
   status: statusOverride,
   pendingApprovalIds = [],
+  privateChat = false,
   auditFeed,
   onOpenAudits,
   sessionId,
@@ -210,7 +216,7 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
   const connectivity = useRuntimeConnectivity({ enabled: selfProbed });
   const status = statusOverride ?? connectivity.status;
   const waitingOnPerson = pendingApprovalIds.length > 0;
-  const statusLine = statusLineLabel({ status, activity, waitingOnPerson });
+  const statusLine = privateChat && status === 'ready' ? null : statusLineLabel({ status, activity, waitingOnPerson });
   // The desk's Home read. A change in the waiting approvals is the rail's own sign that the
   // day changed, so it doubles as the read's refresh signal beside the two-minute poll.
   const today = useRailToday(sessionId === undefined ? deskApi : undefined, pendingApprovalIds.join(','));
@@ -351,7 +357,9 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
             <RailHomeDesk today={today} onOpenChat={onOpenChat} />
           ) : null}
 
-          {sessionId !== undefined && deskApi !== undefined ? (
+          {/* A private chat's desk stays shut: what the assistant is using in it is exactly
+              what the rail must not describe for a chat that keeps nothing. */}
+          {sessionId !== undefined && deskApi !== undefined && !privateChat ? (
             <RailChatDesk sessionId={sessionId} deskApi={deskApi} onOpenMemorySettings={onOpenMemorySettings} />
           ) : null}
 

@@ -1767,6 +1767,26 @@
         ],
         "type": "object"
       },
+      "ChatPrivacy": {
+        "properties": {
+          "hosted_providers": {
+            "description": "Providers off this machine that may answer this chat; empty when it stays here.",
+            "items": {
+              "$ref": "#/components/schemas/HostedModelProvider"
+            },
+            "type": "array"
+          },
+          "leaves_machine": {
+            "description": "True when a model that may answer this chat runs off this machine.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "leaves_machine",
+          "hosted_providers"
+        ],
+        "type": "object"
+      },
       "CheckGoogleClientRequest": {
         "properties": {
           "client": {
@@ -2230,31 +2250,6 @@
         ],
         "type": "object"
       },
-      "CreateRecallExclusionRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "fact_text": {
-            "description": "The fact to stop recalling in this chat, in the plain words the recall showed for it.",
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "fact_text"
-        ],
-        "type": "object"
-      },
-      "CreateRecallExclusionResponse": {
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/RecallExclusion"
-          }
-        },
-        "required": [
-          "data"
-        ],
-        "type": "object"
-      },
       "CreateRepositoryPayload": {
         "additionalProperties": false,
         "properties": {
@@ -2398,6 +2393,10 @@
         "properties": {
           "agent": {
             "$ref": "#/components/schemas/CreateSessionAgent"
+          },
+          "is_incognito": {
+            "description": "True starts a private chat: nothing from it is remembered, and it is deleted when closed.",
+            "type": "boolean"
           },
           "metadata": {
             "$ref": "#/components/schemas/SessionMetadata"
@@ -3288,6 +3287,17 @@
         ],
         "type": "object"
       },
+      "GetChatPrivacyResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ChatPrivacy"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "GetDeliveryResponse": {
         "properties": {
           "data": {
@@ -3875,17 +3885,6 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/Space"
-          }
-        },
-        "required": [
-          "data"
-        ],
-        "type": "object"
-      },
-      "GetTodayResponse": {
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/Today"
           }
         },
         "required": [
@@ -4575,6 +4574,23 @@
           "sandbox_ready",
           "app_version",
           "build_ref"
+        ],
+        "type": "object"
+      },
+      "HostedModelProvider": {
+        "properties": {
+          "name": {
+            "description": "The provider name as configured.",
+            "type": "string"
+          },
+          "type": {
+            "description": "Provider type, for example `anthropic` or `custom`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "name"
         ],
         "type": "object"
       },
@@ -8957,23 +8973,6 @@
         ],
         "type": "string"
       },
-      "RecallExclusion": {
-        "properties": {
-          "fact_text": {
-            "description": "The fact, in the plain words the recall showed for it.",
-            "type": "string"
-          },
-          "session_id": {
-            "description": "The chat the fact is pulled out of.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "session_id",
-          "fact_text"
-        ],
-        "type": "object"
-      },
       "RegisteredCommandExecution": {
         "description": "Host-resolved registered-command execution metadata; absent for every other tool.",
         "properties": {
@@ -10156,11 +10155,22 @@
             "description": "Unique session id.",
             "type": "string"
           },
+          "is_incognito": {
+            "description": "True for a private chat: nothing from it is remembered, and it is deleted when it is closed.",
+            "type": "boolean"
+          },
           "metadata": {
             "$ref": "#/components/schemas/SessionMetadata"
           },
           "metrics": {
             "$ref": "#/components/schemas/SessionMetrics"
+          },
+          "private_expires_at": {
+            "description": "ISO 8601 time a private chat is deleted if it is not closed first; null for other chats.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "source": {
             "$ref": "#/components/schemas/SessionSource"
@@ -10188,7 +10198,9 @@
           "approval_grants",
           "metrics",
           "metadata",
-          "source"
+          "source",
+          "is_incognito",
+          "private_expires_at"
         ],
         "type": "object"
       },
@@ -11413,6 +11425,19 @@
         ],
         "type": "object"
       },
+      "SweepPrivateChatsResponse": {
+        "properties": {
+          "deleted": {
+            "description": "Private chats deleted because they expired.",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "deleted"
+        ],
+        "type": "object"
+      },
       "TaskStateConfig": {
         "default": {},
         "properties": {
@@ -12078,182 +12103,6 @@
         "description": "IANA time zone the cron expression is evaluated in.",
         "minLength": 1,
         "type": "string"
-      },
-      "Today": {
-        "properties": {
-          "as_of": {
-            "description": "The server time this view was read at, as an ISO 8601 instant.",
-            "type": "string"
-          },
-          "calendar": {
-            "description": "The local day's events from every connected calendar account. Once every timed event on the day has finished, the next morning's first event is added, marked as tomorrow's. Null, not an empty list, when no calendar is connected.",
-            "items": {
-              "$ref": "#/components/schemas/TodayCalendarEvent"
-            },
-            "type": [
-              "array",
-              "null"
-            ]
-          },
-          "carrying": {
-            "description": "How many schedules are switched on for the person.",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "due": {
-            "description": "Reminders due today or overdue, earliest first.",
-            "items": {
-              "$ref": "#/components/schemas/TodayDueReminder"
-            },
-            "type": "array"
-          },
-          "free_after": {
-            "description": "The first time after now with no event until the end of the day, or null when the day stays busy.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "needs_ok": {
-            "description": "Actions waiting for the person, oldest first.",
-            "items": {
-              "$ref": "#/components/schemas/TodayNeedsOkItem"
-            },
-            "type": "array"
-          },
-          "needs_ok_more": {
-            "description": "True when more actions are waiting than the list shows: the scan has caps, and it says so when one cuts.",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "calendar",
-          "free_after",
-          "due",
-          "needs_ok",
-          "needs_ok_more",
-          "carrying",
-          "as_of"
-        ],
-        "type": "object"
-      },
-      "TodayCalendarEvent": {
-        "properties": {
-          "all_day": {
-            "description": "True when the event runs all day rather than at a set time.",
-            "type": "boolean"
-          },
-          "calendar_account_id": {
-            "description": "The account the event came from: its sign-in address.",
-            "type": "string"
-          },
-          "day": {
-            "description": "Which day the event falls on: the person's local day, or the next morning's first event.",
-            "enum": [
-              "today",
-              "tomorrow"
-            ],
-            "type": "string"
-          },
-          "end_at": {
-            "description": "When the event ends, in the same form as `start_at`; null when the source gives no end.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "location": {
-            "description": "Where the event happens, or null when the event names no place.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "source": {
-            "description": "Which kind of calendar account the event came from.",
-            "enum": [
-              "google",
-              "caldav"
-            ],
-            "type": "string"
-          },
-          "start_at": {
-            "description": "When the event starts: an ISO 8601 instant, or a plain date for an all-day event.",
-            "type": "string"
-          },
-          "title": {
-            "description": "The event title as the calendar holds it.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "day",
-          "start_at",
-          "end_at",
-          "title",
-          "location",
-          "all_day",
-          "source",
-          "calendar_account_id"
-        ],
-        "type": "object"
-      },
-      "TodayDueReminder": {
-        "properties": {
-          "due_at": {
-            "description": "When the reminder was due, as an ISO 8601 instant.",
-            "type": "string"
-          },
-          "reminder_id": {
-            "description": "The reminder schedule id.",
-            "type": "string"
-          },
-          "session_id": {
-            "description": "The Reminders chat the reminder lands in, or null when that chat does not exist yet.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "title": {
-            "description": "What the reminder says.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "reminder_id",
-          "title",
-          "due_at",
-          "session_id"
-        ],
-        "type": "object"
-      },
-      "TodayNeedsOkItem": {
-        "properties": {
-          "held_action_id": {
-            "description": "The waiting tool call id.",
-            "type": "string"
-          },
-          "origin": {
-            "description": "Where the action came from: the chat title, or the schedule name for a run.",
-            "type": "string"
-          },
-          "session_id": {
-            "description": "The chat that holds the action, where it is answered.",
-            "type": "string"
-          },
-          "title": {
-            "description": "What the action would do, in the plain words of its card.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "held_action_id",
-          "title",
-          "origin",
-          "session_id"
-        ],
-        "type": "object"
       },
       "TogetherAIModelProvider": {
         "additionalProperties": false,
@@ -14528,6 +14377,10 @@
           "agent": {
             "$ref": "#/components/schemas/SessionAgentSpecBody"
           },
+          "is_incognito": {
+            "description": "Set only when a chat is created. A value that differs from the chat is refused.",
+            "type": "boolean"
+          },
           "metadata": {
             "$ref": "#/components/schemas/SessionMetadata"
           },
@@ -15561,6 +15414,42 @@
           "metrics"
         ],
         "x-fern-sdk-method-name": "get_meters"
+      }
+    },
+    "/api/internal/private-chats/sweep": {
+      "post": {
+        "description": "Delete private chats whose expiry time has passed. Safe to call any time.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SweepPrivateChatsResponse"
+                }
+              }
+            },
+            "description": "Sweep finished."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid service credential."
+          }
+        },
+        "summary": "Delete expired private chats",
+        "tags": [
+          "Internal"
+        ],
+        "x-fern-sdk-group-name": [
+          "internal",
+          "private_chats"
+        ],
+        "x-fern-sdk-method-name": "sweep"
       }
     },
     "/api/internal/schedules/runs/execute": {
@@ -20470,6 +20359,16 @@
             }
           },
           {
+            "description": "When true, your own open private chats are included. They are left out by default.",
+            "in": "query",
+            "name": "include_private",
+            "required": false,
+            "schema": {
+              "description": "When true, your own open private chats are included. They are left out by default.",
+              "type": "boolean"
+            }
+          },
+          {
             "description": "When true, only sessions created by the authenticated subject.",
             "in": "query",
             "name": "created_by_me",
@@ -20947,6 +20846,16 @@
               }
             },
             "description": "Session not found."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The chat is private, so no report is made from it."
           }
         },
         "summary": "Generate a redacted bug-report bundle for a session",
@@ -21284,6 +21193,16 @@
               }
             },
             "description": "Session or owner-scoped folder not found."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Private chats cannot be filed in a folder."
           }
         },
         "summary": "Assign a session to a folder",
@@ -21651,9 +21570,9 @@
         "x-fern-sdk-method-name": "list_activations"
       }
     },
-    "/api/v1/sessions/{session_id}/recall-exclusions": {
-      "post": {
-        "description": "Stops one recalled fact from being recalled again in this chat. The memory itself is not changed or deleted, and other chats still recall it.",
+    "/api/v1/sessions/{session_id}/privacy": {
+      "get": {
+        "description": "Whether the models that may answer this chat run on this machine, and which providers run elsewhere.",
         "parameters": [
           {
             "description": "Session identifier.",
@@ -21668,46 +21587,16 @@
             }
           }
         ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateRecallExclusionRequest"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
-          "201": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CreateRecallExclusionResponse"
+                  "$ref": "#/components/schemas/GetChatPrivacyResponse"
                 }
               }
             },
-            "description": "The exclusion as recorded."
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestErrorResponse"
-                }
-              }
-            },
-            "description": "Invalid request body."
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestErrorResponse"
-                }
-              }
-            },
-            "description": "Authentication required."
+            "description": "Where the chat is answered."
           },
           "403": {
             "content": {
@@ -21730,15 +21619,14 @@
             "description": "Session not found."
           }
         },
-        "summary": "Pull a fact out of one chat's memory recall",
+        "summary": "Where a chat is answered",
         "tags": [
           "Agent Sessions"
         ],
         "x-fern-sdk-group-name": [
-          "sessions",
-          "recallExclusions"
+          "sessions"
         ],
-        "x-fern-sdk-method-name": "create"
+        "x-fern-sdk-method-name": "get_privacy"
       }
     },
     "/api/v1/sessions/{session_id}/repository": {
@@ -25604,53 +25492,6 @@
         "x-fern-sdk-method-name": "revert"
       }
     },
-    "/api/v1/today": {
-      "get": {
-        "description": "The person's day read from stored state: calendar events, free time, due reminders, held actions and how many schedules are on. Nothing here asks the assistant anything, and no model is called.",
-        "parameters": [
-          {
-            "description": "The person's IANA time zone, which sets the local day. Read as UTC when absent or unknown.",
-            "in": "query",
-            "name": "client_timezone",
-            "required": false,
-            "schema": {
-              "description": "The person's IANA time zone, which sets the local day. Read as UTC when absent or unknown.",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GetTodayResponse"
-                }
-              }
-            },
-            "description": "The day, as the person's own records give it."
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestErrorResponse"
-                }
-              }
-            },
-            "description": "Authentication required."
-          }
-        },
-        "summary": "Get the day for the right rail's Home view",
-        "tags": [
-          "Capabilities"
-        ],
-        "x-fern-sdk-group-name": [
-          "today"
-        ],
-        "x-fern-sdk-method-name": "get"
-      }
-    },
     "/api/v1/user/audit-log": {
       "get": {
         "description": "Lists the authenticated user’s Sentinel audit entries from every chat, newest first, including chats that were deleted. Read-only and paged.",
@@ -25852,6 +25693,16 @@
               }
             },
             "description": "The chat was not found."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The chat is private, so it has no brief items."
           }
         },
         "summary": "Mark a morning brief item done",
