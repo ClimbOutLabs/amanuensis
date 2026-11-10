@@ -326,6 +326,10 @@
       "set": "account",
       "tests": []
     },
+    "route:privateChat": {
+      "set": "chat",
+      "tests": []
+    },
     "route:repository": {
       "set": "code",
       "tests": []
@@ -754,6 +758,7 @@
     "route:persona",
     "route:personaKnowledge",
     "route:personalization",
+    "route:privateChat",
     "route:repository",
     "route:runCode",
     "route:sandboxProvider",
