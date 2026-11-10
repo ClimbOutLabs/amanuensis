@@ -266,6 +266,19 @@ AMAN_SCREENSHOT_DIR=/tmp/aman-shots pnpm test:frontend
 pnpm nightly:gallery /tmp/aman-shots
 ```
 
+### The signed-in journey
+
+`pnpm test:journey` runs one person's first hour on the built app, the way an installed Aman runs: sign in through the real sign-in service (Dex), land on first run, add a model in Settings, chat, come back to the chat, and sign out. The test is [`packages/frontend/tests/journeys/signedIn.journey.ts`](packages/frontend/tests/journeys/signedIn.journey.ts). CI runs it on every pull request and every night, right after the build, and its pictures join the same **screenshots** download.
+
+To run it on your machine, build first. It needs Docker for the sign-in service and reaches no outside host.
+
+```bash
+pnpm build
+pnpm test:journey
+```
+
+On a machine with no Docker, set `AMAN_DEX_DIR` to a folder that holds the `dex` program and its `web` folder.
+
 ## Releases
 
 Releases are cut by the maintainer; contributors do not need to do anything release-specific.
