@@ -12,8 +12,8 @@ mcp_servers:
     name: notion
     url: https://mcp.notion.com/mcp
     description: >-
-      Search pages, read content, query databases, create pages. When you sign in, share the
-      pages and databases Aman may use; it cannot see anything you do not share.
+      Search pages, read content, query databases, create pages. Signing in gives the
+      connection the same access you have, so it can reach any page or database you can open.
     auth:
       type: dcr
   - type: remote

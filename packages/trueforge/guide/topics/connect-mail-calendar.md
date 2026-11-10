@@ -70,9 +70,9 @@ You can connect Notion, so Aman can search and read your pages and databases, an
 1. Click **More** in the left bar, click **Settings**, then click **Connectors**.
 2. Find notion in the list and click **Add**.
 3. Open the notion connector and click **Connect**.
-4. A Notion window opens. Sign in, pick your workspace, and share the pages and databases Aman may use.
+4. A Notion window opens. Sign in and pick your workspace.
 
-Aman cannot see a page or database you did not share. Every Notion tool asks you first before it runs.
+Signing in gives Aman the same access you have in Notion. Any page or database you can open, Aman can reach. Every Notion tool asks you first before it runs.
 
 ## Connect GitHub
 

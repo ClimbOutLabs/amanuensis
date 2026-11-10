@@ -718,9 +718,7 @@ const ConnectorSettings = () => {
 
         <div className="min-w-0 flex-1">
           <h5 className="truncate text-sm font-medium text-text-primary">{entry.name}</h5>
-          <p className="mt-0.5 line-clamp-2 text-sm text-text-secondary sm:truncate">
-            {entry.description ?? entry.url}
-          </p>
+          <p className="mt-0.5 text-sm text-text-secondary">{entry.description ?? entry.url}</p>
         </div>
 
         <div className="flex shrink-0 items-center gap-2">

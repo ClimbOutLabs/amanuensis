@@ -150,8 +150,10 @@ describe('shipped MCP catalog', () => {
     // registration, which is the sign-in the catalog's dcr shape runs.
     expect(notion.url).toBe('https://mcp.notion.com/mcp');
     expect(notion.auth?.type).toBe('dcr');
-    // The help line the preset carries: the connection sees only what the person shares with it.
-    expect(notion.description).toMatch(/share the\s+pages and databases/);
+    // The help line the preset carries: signing in gives the connection the same access
+    // the person has, so it can reach any page or database they can open.
+    expect(notion.description).toMatch(/same access you have/);
+    expect(notion.description).not.toMatch(/cannot see anything you do not share/);
   });
 
   it('ships the GitHub preset at the address and token shape GitHub documents', () => {

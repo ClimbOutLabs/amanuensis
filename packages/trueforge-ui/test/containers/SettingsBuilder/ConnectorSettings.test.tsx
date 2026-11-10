@@ -856,4 +856,19 @@ describe('ConnectorSettings page order and vocabulary', () => {
     await screen.findByRole('heading', { name: /Add a connector/ });
     expect(document.body.textContent ?? '').not.toMatch(/template/i);
   });
+
+  it('shows the whole catalog description, with no class cutting it off', async () => {
+    const notionEntry = {
+      id: 'notion',
+      name: 'notion',
+      description:
+        'Search pages, read content, query databases, create pages. Signing in gives the connection the same access you have, so it can reach any page or database you can open.',
+      url: 'https://mcp.notion.com/mcp',
+      auth: { type: 'dcr' as const },
+    };
+    renderSettings([parallelWeb], { ...accountPorts({}), getConnectorCatalog: async () => [notionEntry] });
+
+    const description = await screen.findByText(notionEntry.description);
+    expect(description.className).not.toMatch(/truncate|line-clamp/);
+  });
 });
