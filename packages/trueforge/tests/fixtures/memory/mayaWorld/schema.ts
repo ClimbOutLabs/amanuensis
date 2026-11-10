@@ -54,6 +54,7 @@ export const RECALL_CATEGORIES = [
   'matter_status',
   'unconfirmed_claim',
   'no_name_in_message',
+  'asked_in_other_words',
 ] as const;
 
 /** One thing the person asks, and what the memory shown to the model must then hold. */

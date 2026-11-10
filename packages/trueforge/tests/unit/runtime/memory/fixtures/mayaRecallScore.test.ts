@@ -21,9 +21,9 @@ import { MAYA_RECALL_QUESTIONS } from '../../../../fixtures/memory/mayaWorld/rec
  * answer shown and nothing unwanted beside it.
  */
 const RECORDED_SCORES: Record<string, string> = {
-  all: 'found 32/51, unwanted 4/16, clean 29/52',
-  'answer at most 14 days old': 'found 31/33, unwanted 4/11, clean 28/34',
-  'answer more than 14 days old': 'found 1/18, unwanted 0/5, clean 1/18',
+  all: 'found 32/63, unwanted 4/17, clean 29/64',
+  'answer at most 14 days old': 'found 31/39, unwanted 4/11, clean 28/40',
+  'answer more than 14 days old': 'found 1/24, unwanted 0/6, clean 1/24',
   current_value_of_changed_fact: 'found 9/13, unwanted 2/13, clean 7/13',
   relationship: 'found 2/5, unwanted 0/0, clean 2/5',
   household_plan: 'found 4/5, unwanted 0/0, clean 4/5',
@@ -33,6 +33,7 @@ const RECORDED_SCORES: Record<string, string> = {
   matter_status: 'found 5/5, unwanted 0/0, clean 5/5',
   unconfirmed_claim: 'found 4/4, unwanted 2/2, clean 3/5',
   no_name_in_message: 'found 1/4, unwanted 0/1, clean 1/4',
+  asked_in_other_words: 'found 0/12, unwanted 0/1, clean 0/12',
 };
 
 /** The questions that are not clean today, each with what went wrong. */
@@ -60,6 +61,18 @@ const RECORDED_MISSES: Record<string, 'not found' | 'unwanted shown' | 'not foun
   q49: 'not found',
   q50: 'not found',
   q52: 'not found',
+  q53: 'not found',
+  q54: 'not found',
+  q55: 'not found',
+  q56: 'not found',
+  q57: 'not found',
+  q58: 'not found',
+  q59: 'not found',
+  q60: 'not found',
+  q61: 'not found',
+  q62: 'not found',
+  q63: 'not found',
+  q64: 'not found',
 };
 
 function scoreLine(score: RecallScore): string {

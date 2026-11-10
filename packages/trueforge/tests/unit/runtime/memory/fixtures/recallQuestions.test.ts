@@ -1,3 +1,4 @@
+import { QUERY_STOPWORDS } from '../../../../../src/runtime/memory/stopWords';
 import { MAYA_ENTRIES, MAYA_STORY_IDS } from '../../../../fixtures/memory/mayaWorld/entries';
 import { MAYA_EVENTS } from '../../../../fixtures/memory/mayaWorld/events';
 import { MAYA_RECALL_QUESTIONS } from '../../../../fixtures/memory/mayaWorld/recallQuestions';
@@ -23,6 +24,12 @@ function sourceOf(id: string): Source | undefined {
         text: entry.content,
         madeAChange: entry.expected.some(decision => decision.decision === 'changed'),
       };
+}
+
+/** The words of a text that say what it is about. */
+function topicWords(text: string): Set<string> {
+  const words = text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  return new Set(words.filter(word => word.length > 2 && !QUERY_STOPWORDS.has(word)));
 }
 
 function within({ text, phrase }: { text: string; phrase: string }): boolean {
@@ -74,6 +81,13 @@ describe("recall questions over Maya's world", () => {
       }
       if (question.category === 'current_value_of_changed_fact') {
         expect(known.some(source => source.madeAChange)).toBe(true);
+      }
+      if (question.category === 'asked_in_other_words') {
+        // Word search must have nothing to hold on to: only the meaning links the question to its answer.
+        const asked = topicWords(question.message);
+        for (const source of known) {
+          expect([...topicWords(source.text)].filter(word => asked.has(word))).toEqual([]);
+        }
       }
     },
   );

@@ -13,7 +13,7 @@ The story holds the hard cases on purpose. Facts change, such as the dates of th
 
 **Expected decisions.** Every entry says what should happen to the pages about people and matters when that entry is sorted: a new fact, the same fact again, a changed fact, a fact that ended, something not confirmed, or nothing. The step that sorts entries into pages will be tested against these.
 
-**Questions.** Maya asks 52 questions on different days. Each question names the text that must be in the memory shown to the model. Some also name a text that should not be there, such as the old dates of the trip.
+**Questions.** Maya asks 64 questions on different days. Each question names the text that must be in the memory shown to the model. Some also name a text that should not be there, such as the old dates of the trip. Twelve questions are asked in other words: they share no topic word with the entry that holds the answer, such as "Who lives next door to us?" for the neighbour at number 14. Only a search by meaning can answer those.
 
 The files are in `packages/trueforge/tests/fixtures/memory/mayaWorld/`.
 
@@ -28,6 +28,8 @@ The test writes the world into an empty memory folder, one day at a time, throug
 The scorecard counts these for all questions, for answers at most 14 days old, for answers older than that, and for each kind of question.
 
 This test reads what the model is shown. It does not read what the model then answers. A test that scores answers needs a model and is a separate step.
+
+The test runs with the search by words only, because the search by meaning needs a model to be downloaded. So the recorded score for the questions asked in other words is 0 of 12. To see what the search by meaning adds, run the same questions on a machine that has the model.
 
 ## The recorded score
 
