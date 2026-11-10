@@ -67,7 +67,9 @@ describe('Notes folder tool classification', () => {
     expect(decision.tier).toBe(3);
     expect(decision.reason).toBe('content_steered');
     expect(decision.auto_deny).toBeNull();
-    expect(decision.card?.plain_what).toBe('Add this entry to your notes inbox file?');
+    expect(decision.card?.plain_what).toBe(
+      'Add this entry to your notes inbox file? Aman has read things written by other people in this chat, so this write may have been asked for by something it read, not by you.',
+    );
     expect(decision.reason_detail).toContain('may have been asked for by something it read, not by you');
     expect(decision.approval_token_id).not.toBeNull();
   });
@@ -77,7 +79,10 @@ describe('Notes folder tool classification', () => {
     expect(decision.tier).toBe(3);
     expect(decision.reason).toBe('content_steered');
     expect(decision.auto_deny).toBeNull();
-    expect(decision.card?.plain_what).toBe('Make this new note in your notes folder?');
+    expect(decision.card?.plain_what).toBe(
+      'Make this new note in your notes folder? Aman has read things written by other people in this chat, so this write may have been asked for by something it read, not by you.',
+    );
+    expect(decision.reason_detail).toContain('may have been asked for by something it read, not by you');
     expect(decision.approval_token_id).not.toBeNull();
   });
 

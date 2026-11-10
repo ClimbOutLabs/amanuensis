@@ -3535,10 +3535,12 @@ async function classifyNotesFolderToolCall(action: SentinelAction, ctx: Classify
   const outbound = renderOutboundArguments(action.canonical_params);
   return tier3Decision({
     card: {
-      plain_what:
+      plain_what: withHoldSay(
         action.tool_name === APPEND_TO_INBOX_TOOL_NAME
           ? 'Add this entry to your notes inbox file?'
           : 'Make this new note in your notes folder?',
+        say,
+      ),
       plain_why: plainWhy(ctx.agent_intent),
       cannot_be_undone: 'The added words stay in your notes until you take them out.',
       why_asked_again: null,
