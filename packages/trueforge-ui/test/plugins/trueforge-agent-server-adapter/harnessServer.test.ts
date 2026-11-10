@@ -23,6 +23,8 @@ const session = {
   created_by: 'trueforge-default',
   created_at: '2026-08-03T00:00:00.000Z',
   updated_at: '2026-08-03T00:00:00.000Z',
+  is_incognito: false,
+  private_expires_at: null,
 };
 
 const turnRequests: unknown[] = [];
@@ -347,6 +349,63 @@ describe('createHarnessChatServer', () => {
     assert.equal(new URL(listUrl, 'http://test.local').searchParams.get('agent_id'), 'agt_1');
     assert.equal(page.data[0]?.agentName, 'reviewer');
     assert.equal(page.data[0]?.isMutable, false);
+  });
+
+  it('starts a private chat only when asked, and reads the flag back', async () => {
+    let created: unknown;
+    const fetchPrivate: typeof fetch = async (input, init) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.endsWith('/api/v1/sessions') && init?.method === 'POST' && typeof init.body === 'string') {
+        created = JSON.parse(init.body);
+        return Response.json({
+          data: { ...session, is_incognito: true, private_expires_at: '2026-08-04T00:00:00.000Z' },
+        });
+      }
+      return new Response(`Unexpected request: ${url}`, { status: 500 });
+    };
+    const server = createHarnessChatServer({ fetch: fetchPrivate });
+
+    const chat = await server.createSession({ agentSpec: { model: { name: 'test/model' } }, isIncognito: true });
+
+    assert.equal(chat.isIncognito, true);
+    assert.equal(Reflect.get(created ?? {}, 'is_incognito'), true);
+    await server.createSession({ agentSpec: { model: { name: 'test/model' } } });
+    assert.equal(Reflect.has(created ?? {}, 'is_incognito'), false);
+  });
+
+  it('asks for private chats in the list only when told to', async () => {
+    const listUrls: string[] = [];
+    const fetchList: typeof fetch = async input => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.includes('/api/v1/sessions')) {
+        listUrls.push(url);
+        return Response.json({ data: [], pagination: { limit: 20 } });
+      }
+      return new Response(`Unexpected request: ${url}`, { status: 500 });
+    };
+    const server = createHarnessChatServer({ fetch: fetchList });
+
+    await server.listSessions({ limit: 10 });
+    await server.listSessions({ limit: 10, includePrivate: true });
+
+    const flags = listUrls.map(url => new URL(url, 'http://test.local').searchParams.get('include_private'));
+    assert.deepEqual(flags, [null, 'true']);
+  });
+
+  it('reads where a chat is answered', async () => {
+    const fetchPrivacy: typeof fetch = async input => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.endsWith('/api/v1/sessions/ses_1/privacy')) {
+        return Response.json({ data: { leaves_machine: false, hosted_providers: [] } });
+      }
+      return new Response(`Unexpected request: ${url}`, { status: 500 });
+    };
+    const server = createHarnessChatServer({ fetch: fetchPrivacy });
+
+    assert.deepEqual(await server.getChatPrivacy({ sessionId: 'ses_1' }), {
+      leavesMachine: false,
+      hostedProviders: [],
+    });
   });
 
   it('forwards createdByMe to listSessions as created_by_me', async () => {

@@ -118,10 +118,13 @@ async function createChat() {
     metadata: {},
     external_id: null,
     source: null,
+    is_incognito: false,
+    private_expires_at: null,
   });
   const turnDrains = new TurnDrainRegistry();
   const deps = {
     mcpCatalog: McpCatalog.loadShipped(),
+    chatDeletionStore: { listDeletedChatModelUsage: () => Promise.resolve([]) },
     globalSettingsStore: new SqliteGlobalSettingsStore(db),
     tokenFactoryBudget: uncappedTokenFactoryBudget,
     sessionStore,

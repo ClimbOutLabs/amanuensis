@@ -25,6 +25,7 @@ import { migrateSqliteToLatest } from '../../src/db/migrateSqlite';
 import type { IModelProviderStore } from '../../src/db/modelProviderStore';
 import { PostgresAgentStore } from '../../src/db/postgres/agent-store/PostgresAgentStore';
 import { PostgresApprovalTokenStore } from '../../src/db/postgres/approval-token-store/PostgresApprovalTokenStore';
+import { PostgresChatDeletionStore } from '../../src/db/postgres/chat-deletion-store/PostgresChatDeletionStore';
 import { PostgresChatImageStore } from '../../src/db/postgres/chat-image-store/PostgresChatImageStore';
 import { PostgresGlobalSettingsStore } from '../../src/db/postgres/global-settings-store/PostgresGlobalSettingsStore';
 import { PostgresGoogleConnectionStore } from '../../src/db/postgres/google-connection-store/PostgresGoogleConnectionStore';
@@ -46,6 +47,7 @@ import { PostgresTurnArtifactStore } from '../../src/db/postgres/turn-artifact-s
 import { SentinelAuditStore } from '../../src/db/sentinelAuditStore';
 import { SqliteAgentStore } from '../../src/db/sqlite/agent-store/SqliteAgentStore';
 import { SqliteApprovalTokenStore } from '../../src/db/sqlite/approval-token-store/SqliteApprovalTokenStore';
+import { SqliteChatDeletionStore } from '../../src/db/sqlite/chat-deletion-store/SqliteChatDeletionStore';
 import { SqliteChatImageStore } from '../../src/db/sqlite/chat-image-store/SqliteChatImageStore';
 import { createSqliteDb } from '../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
@@ -264,6 +266,7 @@ async function startSqlite(): Promise<OwnershipServer> {
   const personaStore = new SqlitePersonaStore(db);
   const globalSettingsStore = new SqliteGlobalSettingsStore(db);
   const app = createServerApp({
+    chatDeletionStore: new SqliteChatDeletionStore({ db, turnArtifactStore: new SqliteTurnArtifactStore(db) }),
     chatSearchIndexer: new ChatSearchIndexer({
       sessionStore,
       globalSettingsStore,
@@ -369,6 +372,7 @@ async function startPostgres(): Promise<OwnershipServer | undefined> {
   const personaStore = new PostgresPersonaStore(db);
   const globalSettingsStore = new PostgresGlobalSettingsStore(db);
   const app = createServerApp({
+    chatDeletionStore: new PostgresChatDeletionStore({ db, turnArtifactStore: new PostgresTurnArtifactStore(db) }),
     chatSearchIndexer: new ChatSearchIndexer({
       sessionStore,
       globalSettingsStore,
