@@ -99,6 +99,7 @@ import type { IModelProviderStore } from './db/modelProviderStore';
 import type { IPersonalizationStore } from './db/personalizationStore';
 import type { IPersonaStore } from './db/personaStore';
 import type { IPushSubscriptionStore } from './db/pushSubscriptionStore';
+import type { IRecallExclusionStore } from './db/recallExclusionStore';
 import type { IRepositoryStore } from './db/repositoryStore';
 import type { ISandboxProviderStore } from './db/sandboxProviderStore';
 import type { IScheduleStore } from './db/scheduleStore';
@@ -310,6 +311,8 @@ export interface ServerDeps<TTransaction> {
   /** Keeps the past-chat search index for people who turned the search on. */
   chatSearchIndexer: ChatSearchIndexer;
   briefItemStore: IBriefItemCompletionStore;
+  /** Facts pulled out of a chat's recall, stored with the chat. */
+  recallExclusionStore: IRecallExclusionStore;
   deliveryStore: IDeliveryStore;
   pushSubscriptionStore: IPushSubscriptionStore;
   /** The one door into the feed; due reminders go through it. */
@@ -1194,6 +1197,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     withAuth(
       createRecallExclusionsRouter({
         sessionStore: deps.sessionStore,
+        recallExclusionStore: deps.recallExclusionStore,
         resolveRequestContext,
       }),
       authMiddleware,
@@ -1331,6 +1335,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         chatSearchIndexer: deps.chatSearchIndexer,
         tokenFactoryBudget: deps.tokenFactoryBudget,
         chatDeletionStore: deps.chatDeletionStore,
+        recallExclusionStore: deps.recallExclusionStore,
         eventSubscriptions: deps.eventSubscriptions,
         resolveSandboxProviderStore: deps.resolveSandboxProviderStore,
         sandboxProviderResolver: deps.sandboxProviderResolver,

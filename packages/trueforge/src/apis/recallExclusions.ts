@@ -2,20 +2,21 @@ import { OpenAPIHono, type RouteHandler } from '@hono/zod-openapi';
 import type { ISessionStore } from '@truefoundry/trueforge-core/agent-session';
 
 import type { ResolveRequestContext } from '../auth/identity';
+import type { IRecallExclusionStore } from '../db/recallExclusionStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import { createRecallExclusionRoute } from '../routes/recallExclusionRoutes';
-import { excludeRecallFact } from '../runtime/memory/recallExclusions';
 import { checkSessionAccess } from './sessions';
 
 export interface RecallExclusionsRouterDeps {
   sessionStore: Pick<ISessionStore<SessionCustom, TurnCustom>, 'getSession'>;
+  recallExclusionStore: Pick<IRecallExclusionStore, 'add'>;
   resolveRequestContext: ResolveRequestContext;
 }
 
 /**
  * Pulling a fact out of one chat's recall (mounted at /api/v1/sessions). The exclusion is
- * recorded for this chat only; the recall path honours it from the next turn on, and the
- * memory itself is never touched.
+ * stored with the chat, so it lasts for the chat's life; the recall path honours it from the
+ * next turn on, and the memory itself is never touched.
  */
 export function createRecallExclusionsRouter(deps: RecallExclusionsRouterDeps) {
   const router = new OpenAPIHono();
@@ -36,7 +37,19 @@ export function createRecallExclusionsRouter(deps: RecallExclusionsRouterDeps) {
     ) {
       return c.json({ error: { message: 'Caller is not the session creator.' } }, 403);
     }
-    excludeRecallFact({ sessionId, factText: body.fact_text });
+    if (session.is_incognito) {
+      // A private chat keeps nothing: recording the fact's words with the chat would keep
+      // the one thing the chat exists not to keep.
+      return c.json(
+        { error: { message: 'A private chat keeps nothing, so a fact cannot be pulled out of its recall for later.' } },
+        400,
+      );
+    }
+    await deps.recallExclusionStore.add({
+      tenant_id: requestContext.tenant_id,
+      session_id: sessionId,
+      fact_text: body.fact_text,
+    });
     return c.json({ data: { session_id: sessionId, fact_text: body.fact_text } }, 201);
   };
 

@@ -29,7 +29,7 @@ export const createRecallExclusionRoute = createRoute({
     },
     400: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
-      description: 'Invalid request body.',
+      description: 'Invalid request body, or the chat is private and keeps nothing.',
     },
     401: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },

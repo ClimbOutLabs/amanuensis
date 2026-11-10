@@ -27,6 +27,7 @@ import { McpServerWithAuthStore } from '../src/db/McpServerWithAuthStore';
 import { BriefItemCompletionStore } from '../src/db/briefItemCompletionStore';
 import { DeliveryStore } from '../src/db/deliveryStore';
 import { PushSubscriptionStore } from '../src/db/pushSubscriptionStore';
+import { RecallExclusionStore } from '../src/db/recallExclusionStore';
 import { SentinelAuditStore, type SentinelAuditDatabase } from '../src/db/sentinelAuditStore';
 import { SqliteAgentStore } from '../src/db/sqlite/agent-store/SqliteAgentStore';
 import { SqliteChatDeletionStore } from '../src/db/sqlite/chat-deletion-store/SqliteChatDeletionStore';
@@ -142,6 +143,7 @@ const app = createServerApp({
   sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
   sentinelSettingsStore,
   briefItemStore: new BriefItemCompletionStore(db),
+  recallExclusionStore: new RecallExclusionStore(db),
   deliveryStore,
   pushSubscriptionStore: new PushSubscriptionStore(db),
   deliveryService: createDeliveryService({

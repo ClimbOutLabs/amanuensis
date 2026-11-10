@@ -11,11 +11,19 @@ export const RecallExclusionSchema = z
   })
   .openapi('RecallExclusion');
 
+/**
+ * The longest fact text an exclusion can carry. A recalled fact is one line of the recall
+ * block, whose whole budget is a few hundred tokens, so this sits far above any real fact
+ * while keeping a stored exclusion bounded.
+ */
+export const RECALL_EXCLUSION_FACT_TEXT_MAX_LENGTH = 2000;
+
 export const CreateRecallExclusionRequestSchema = z
   .object({
     fact_text: z
       .string()
       .min(1)
+      .max(RECALL_EXCLUSION_FACT_TEXT_MAX_LENGTH)
       .describe('The fact to stop recalling in this chat, in the plain words the recall showed for it.'),
   })
   .strict()

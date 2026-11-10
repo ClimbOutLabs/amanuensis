@@ -13,7 +13,14 @@ import winston from 'winston';
 
 import { hindsightMemoryCapability, type MemoryConfig } from '../../../../src/runtime/memory/memoryCapability';
 import type { MemoryClient } from '../../../../src/runtime/memory/memoryClient';
-import { excludeRecallFact } from '../../../../src/runtime/memory/recallExclusions';
+
+/** The facts each chat has pulled out of its recall, as the stored read returns them. */
+const pulledByChat = new Map<string, string[]>();
+
+/** Records a pull the way the endpoint stores it with the chat. */
+function pullFact(sessionId: string, factText: string): void {
+  pulledByChat.set(sessionId, [...(pulledByChat.get(sessionId) ?? []), factText]);
+}
 
 const CONFIG: MemoryConfig = {
   recallMaxTokens: 2048,
@@ -100,7 +107,7 @@ describe('recall exclusions from the rail', () => {
   it('drops the pulled fact from that chat only, from the next turn on', async () => {
     expect(await recallBlockFor('chat-a')).toContain(FACT);
 
-    excludeRecallFact({ sessionId: 'chat-a', factText: FACT });
+    pullFact('chat-a', FACT);
 
     const afterPull = await recallBlockFor('chat-a');
     expect(afterPull === null || !afterPull.includes(FACT)).toBe(true);
@@ -138,6 +145,7 @@ async function recallBlockServing(
       logger: winston.createLogger({ silent: true }),
       sessionId,
       previousTurnId: null,
+      loadRecallExclusions: () => Promise.resolve(pulledByChat.get(sessionId) ?? []),
     }),
   );
 }
@@ -146,14 +154,14 @@ describe('recall exclusions for facts shown shortened', () => {
   it('drops the full fact when the pull was recorded in its shortened form', async () => {
     expect(await recallBlockServing('chat-short-pull', [LONG_FACT])).toContain(LONG_FACT);
 
-    excludeRecallFact({ sessionId: 'chat-short-pull', factText: SHORTENED_FACT });
+    pullFact('chat-short-pull', SHORTENED_FACT);
 
     const afterPull = await recallBlockServing('chat-short-pull', [LONG_FACT]);
     expect(afterPull === null || !afterPull.includes('spare key')).toBe(true);
   });
 
   it('drops a shortened serving when the pull was recorded in full', async () => {
-    excludeRecallFact({ sessionId: 'chat-full-pull', factText: LONG_FACT });
+    pullFact('chat-full-pull', LONG_FACT);
 
     const afterPull = await recallBlockServing('chat-full-pull', [SHORTENED_FACT]);
     expect(afterPull === null || !afterPull.includes('gate code')).toBe(true);
@@ -161,7 +169,7 @@ describe('recall exclusions for facts shown shortened', () => {
 
   it('leaves a different fact that merely opens with the same words', async () => {
     const other = 'The gate code is 44179 for the back gate';
-    excludeRecallFact({ sessionId: 'chat-neighbour', factText: FACT });
+    pullFact('chat-neighbour', FACT);
 
     const block = await recallBlockServing('chat-neighbour', [FACT, other]);
     expect(block).toContain(other);
@@ -170,7 +178,7 @@ describe('recall exclusions for facts shown shortened', () => {
   });
 
   it('does not trust a shortening cut too short to name the fact', async () => {
-    excludeRecallFact({ sessionId: 'chat-short-stem', factText: 'The gate...' });
+    pullFact('chat-short-stem', 'The gate...');
 
     const block = await recallBlockServing('chat-short-stem', [LONG_FACT]);
     expect(block).toContain(LONG_FACT);
