@@ -11,6 +11,10 @@ const USAGE = `Usage: aman reset-password
 Sets a new password for the local sign-in on this computer. Run it on the machine
 that runs Aman, while Aman is stopped. It asks for the new password twice and does
 not show what you type. The npx form is: npx amanuensis --reset-password
+
+To check that Aman is stopped, it looks on the port Aman is set to use. If you
+start Aman with a different port, pass the same one here: the npx form is
+npx amanuensis --reset-password --port <n>, with your port in place of <n>.
 `;
 
 export interface ResetPasswordDeps {

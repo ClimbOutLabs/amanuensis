@@ -36,7 +36,8 @@ Set STANDALONE=false with Postgres and Redis for multi-replica peering.
 
 Options:
   --port <n>         HTTP port (default: ${String(DEFAULT_PORT)}, or PORT env)
-  --reset-password   Set a new password for the local sign-in (Aman must be stopped)
+  --reset-password   Set a new password for the local sign-in (Aman must be stopped).
+                     If you start Aman with --port, pass the same --port here too
   -h, --help         Show this help
 
 Data:

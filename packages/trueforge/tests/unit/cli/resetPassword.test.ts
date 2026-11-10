@@ -116,6 +116,18 @@ describe('reset-password', () => {
     expect(io.err.join('')).toContain('Use at least 8 characters for the password.');
   });
 
+  it('help says to pass the same port the server uses', async () => {
+    const { deps } = await setup();
+    const io = fakeIo();
+
+    const code = await runResetPassword({ args: ['--help'], io, deps });
+
+    expect(code).toBe(0);
+    const help = io.err.join('');
+    expect(help).toContain('--port');
+    expect(help).toContain('pass the same one');
+  });
+
   it('says there is nothing to reset when no sign-in exists yet', async () => {
     const { deps } = await setup({ withUser: false });
     const io = fakeIo();
