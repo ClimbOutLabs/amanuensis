@@ -86,6 +86,8 @@
   "Delete space": "packages/trueforge-ui/src/containers/SpacesView.tsx",
   "More": "packages/trueforge-ui/src/layouts/SidebarLayout.tsx",
   "Build agent": "packages/trueforge-ui/src/layouts/SidebarLayout.tsx",
+  "Sign out": "packages/frontend/src/LogoutButton.tsx",
+  "Stay": "packages/frontend/src/LogoutButton.tsx",
   "Chats": "packages/trueforge-ui/src/layouts/SidebarLayout.tsx",
   "New chat": "packages/trueforge-ui/src/containers/ThreadListContainer.tsx",
   "Light": "packages/trueforge-ui/src/atoms/AppearanceChoices.tsx",
