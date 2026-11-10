@@ -358,7 +358,7 @@ function renderPageLines(input: { title: string; page: MemoryPage }): RenderedLi
   return lines;
 }
 
-/** The page as plain lines for the model; see {@link renderPageLines}. */
+/** The page as the model sees it, without the sides. */
 export function renderPageForModel(input: { title: string; page: MemoryPage }): string {
   return renderPageLines(input)
     .map(line => line.text)
