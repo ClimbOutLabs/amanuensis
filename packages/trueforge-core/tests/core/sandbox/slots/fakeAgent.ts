@@ -33,6 +33,7 @@ export function attestation(
     duplicated?: string;
     diskMode?: 'hard' | 'vm' | 'none';
     workspaceBytes?: number;
+    storeFreeBytes?: number;
   } = {},
 ): SlotAttestation {
   const failing = new Set(overrides.failing ?? []);
@@ -59,6 +60,7 @@ export function attestation(
       platform: SLOT_PLATFORM,
       disk_mode: overrides.diskMode ?? 'none',
       workspace_bytes: overrides.workspaceBytes ?? 0,
+      store_free_bytes: overrides.storeFreeBytes ?? 0,
     },
   };
 }

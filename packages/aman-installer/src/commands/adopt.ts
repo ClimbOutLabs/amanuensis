@@ -77,7 +77,9 @@ export async function runAdopt(deps: AdoptDeps): Promise<number> {
         await jobs.pointShortcutAtOpen(shortcut.path);
       }
     }
+    await jobs.ensureOpenAmanShortcut();
     await jobs.ensureCheckAmanShortcut();
+    await jobs.ensureUpdateAmanShortcut();
     await jobs.replaceSetupCmdCopyWithForwarder();
     await jobs.ensureDailyBackupTask();
     await jobs.ensureBackupsShortcut();
