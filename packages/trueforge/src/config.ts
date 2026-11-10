@@ -21,9 +21,17 @@ import { fileURLToPath } from 'node:url';
 import envPaths from 'env-paths';
 
 import {
+  DEFAULT_MCP_HTTP_BODY_TIMEOUT_MS,
+  DEFAULT_MCP_HTTP_CONNECT_TIMEOUT_MS,
+  DEFAULT_MCP_HTTP_MAX_RETRIES,
+  DEFAULT_MODEL_HTTP_BODY_TIMEOUT_MS,
+  DEFAULT_MODEL_HTTP_CONNECT_TIMEOUT_MS,
+  DEFAULT_MODEL_HTTP_HEADERS_TIMEOUT_MS,
+  DEFAULT_MODEL_HTTP_MAX_RETRIES,
   DEFAULT_OCR_LANGUAGES,
   DEFAULT_SESSION_DISK_MB,
   GIT_NETWORK_ENV_NAMES,
+  MCP_HTTP_HEADERS_TIMEOUT_MARGIN_MS,
   pickGitNetworkEnv,
   TOKEN_FACTORY_DEFAULT_BASE_URL,
   validateRunCodeStartupConfig,
@@ -1325,6 +1333,50 @@ export interface SharedServerConfiguration {
   /** Max bytes for one remote MCP tool-call HTTP response body (not GET SSE). Env: `MCP_TOOL_CALL_MAX_RESPONSE_BYTES`. Default 50 MB. */
   MCP_TOOL_CALL_MAX_RESPONSE_BYTES: number;
   /**
+   * undici connect timeout for model-provider outbound fetch.
+   * Env: `MODEL_HTTP_CONNECT_TIMEOUT_MS`. Default 5000.
+   */
+  MODEL_HTTP_CONNECT_TIMEOUT_MS: number;
+  /**
+   * undici headersTimeout for model-provider outbound fetch.
+   * Env: `MODEL_HTTP_HEADERS_TIMEOUT_MS`. Default 300000, the same as the model's first-chunk wait.
+   */
+  MODEL_HTTP_HEADERS_TIMEOUT_MS: number;
+  /**
+   * undici bodyTimeout for model-provider outbound fetch (idle between body chunks).
+   * Env: `MODEL_HTTP_BODY_TIMEOUT_MS`. Default 300000.
+   */
+  MODEL_HTTP_BODY_TIMEOUT_MS: number;
+  /**
+   * Retries after the first model fetch for connect timeouts and 408/409/429/520-524/530
+   * (honors Retry-After up to 5s; a longer one is not retried). 0 turns retries off.
+   * Env: `MODEL_HTTP_MAX_RETRIES`. Default 2.
+   */
+  MODEL_HTTP_MAX_RETRIES: number;
+  /**
+   * undici connect timeout for MCP outbound fetch.
+   * Env: `MCP_HTTP_CONNECT_TIMEOUT_MS`. Default 5000.
+   */
+  MCP_HTTP_CONNECT_TIMEOUT_MS: number;
+  /**
+   * undici headersTimeout for MCP outbound fetch. A JSON-response MCP server sends headers only
+   * after the tool finishes, so this must outlast `MCP_REQUEST_TIMEOUT_MS` and a slow tool is
+   * reported as a slow tool. Env: `MCP_HTTP_HEADERS_TIMEOUT_MS`. Default and minimum
+   * `MCP_REQUEST_TIMEOUT_MS` plus 5 seconds.
+   */
+  MCP_HTTP_HEADERS_TIMEOUT_MS: number;
+  /**
+   * undici bodyTimeout for MCP outbound fetch (idle between body chunks). Default 30m so an idle
+   * event stream is not killed at undici's 300s. Env: `MCP_HTTP_BODY_TIMEOUT_MS`.
+   */
+  MCP_HTTP_BODY_TIMEOUT_MS: number;
+  /**
+   * Retries after the first MCP fetch for connect timeouts and 408/429/521-523/530 only (not
+   * 409/520/524: upstream may already have started the tool; honors Retry-After up to 5s, a
+   * longer one is not retried). 0 turns retries off. Env: `MCP_HTTP_MAX_RETRIES`. Default 2.
+   */
+  MCP_HTTP_MAX_RETRIES: number;
+  /**
    * Origins of the operator's own memory provider, as normalized `scheme://host[:port]` strings.
    * A connector saved as the memory provider on one of these origins is first-party: its tools that
    * declare `readOnlyHint` true and `openWorldHint` false run without an approval card. Empty means
@@ -1663,6 +1715,11 @@ export interface SharedServerConfiguration {
    * Env: `TURN_SUBSCRIBE_TIMEOUT_MS`. Default 600000.
    */
   TURN_SUBSCRIBE_TIMEOUT_MS: number;
+  /**
+   * Max ms to wait for one create-turn SSE write before dropping that client
+   * and keeping the turn drain running. Env: `TURN_SSE_STREAM_WRITE_TIMEOUT_MS`. Default 60000.
+   */
+  TURN_SSE_STREAM_WRITE_TIMEOUT_MS: number;
   /**
    * Max ms to wait for a peer executor's reply before failing with 424.
    * Env: `REDIS_REQUEST_REPLY_TIMEOUT_MS`. Default 60000.
@@ -2160,6 +2217,13 @@ export type DistributedServerConfiguration = SharedServerConfiguration & {
    * Env: `POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS`. Default 60000.
    */
   POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS: number;
+  /**
+   * How long a query waits for a Postgres connection: to open a new one, or for a busy pool to
+   * free one (pg uses one limit for both). Default `POSTGRES_STATEMENT_TIMEOUT_MS` plus 10 seconds,
+   * so a full pool of slow queries is waited out instead of failing the queries queued behind it.
+   * Env: `POSTGRES_CONNECT_TIMEOUT_MS`.
+   */
+  POSTGRES_CONNECT_TIMEOUT_MS: number;
   /** Peering URL shared by all replicas. Env: `REDIS_URL`. Default `redis://localhost:6379`. */
   REDIS_URL: string;
   /**
@@ -2230,6 +2294,53 @@ const serverExecutionTimeoutSeconds = parsePositiveInt({
   defaultValue: 1380,
 });
 
+/**
+ * The MCP headers wait must outlast the MCP request timeout, so a slow tool is reported as a slow
+ * tool and not as a dropped connection.
+ */
+function parseMcpHttpHeadersTimeoutMs(options: { raw: string | undefined; mcpRequestTimeoutMs: number }): number {
+  const minimum = options.mcpRequestTimeoutMs + MCP_HTTP_HEADERS_TIMEOUT_MARGIN_MS;
+  const value = parsePositiveInt({ envKey: 'MCP_HTTP_HEADERS_TIMEOUT_MS', raw: options.raw, defaultValue: minimum });
+  if (value < minimum) {
+    throw new Error(
+      `MCP_HTTP_HEADERS_TIMEOUT_MS is ${String(value)}, but it must be at least ${String(minimum)}: MCP_REQUEST_TIMEOUT_MS plus 5000, so a slow tool is reported as slow. Raise it, or remove it to use ${String(minimum)}.`,
+    );
+  }
+  return value;
+}
+
+/** Distributed mode's Postgres session limits; the connection wait defaults from the statement timeout. */
+function parsePostgresTimeouts(): {
+  POSTGRES_STATEMENT_TIMEOUT_MS: number;
+  POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS: number;
+  POSTGRES_CONNECT_TIMEOUT_MS: number;
+} {
+  const statementTimeoutMs = parsePositiveInt({
+    envKey: 'POSTGRES_STATEMENT_TIMEOUT_MS',
+    raw: getEnv('POSTGRES_STATEMENT_TIMEOUT_MS'),
+    defaultValue: 60_000,
+  });
+  return {
+    POSTGRES_STATEMENT_TIMEOUT_MS: statementTimeoutMs,
+    POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS: parsePositiveInt({
+      envKey: 'POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS',
+      raw: getEnv('POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS'),
+      defaultValue: 60_000,
+    }),
+    POSTGRES_CONNECT_TIMEOUT_MS: parsePositiveInt({
+      envKey: 'POSTGRES_CONNECT_TIMEOUT_MS',
+      raw: getEnv('POSTGRES_CONNECT_TIMEOUT_MS'),
+      defaultValue: statementTimeoutMs + 10_000,
+    }),
+  };
+}
+
+const mcpRequestTimeoutMs = parsePositiveInt({
+  envKey: 'MCP_REQUEST_TIMEOUT_MS',
+  raw: getEnv('MCP_REQUEST_TIMEOUT_MS'),
+  defaultValue: 4 * 60 * 1000,
+});
+
 const standalone = parseBoolean({
   envKey: 'STANDALONE',
   raw: getEnv('STANDALONE'),
@@ -2293,11 +2404,7 @@ const shared: SharedServerConfiguration = {
   SANDBOX_CATALOG_PATH: resolveOptionalPathEnv('SANDBOX_CATALOG_PATH'),
   FRONTEND_DIR: resolveFrontendDir(),
 
-  MCP_REQUEST_TIMEOUT_MS: parsePositiveInt({
-    envKey: 'MCP_REQUEST_TIMEOUT_MS',
-    raw: getEnv('MCP_REQUEST_TIMEOUT_MS'),
-    defaultValue: 4 * 60 * 1000,
-  }),
+  MCP_REQUEST_TIMEOUT_MS: mcpRequestTimeoutMs,
   MCP_CONNECT_TIMEOUT_MS: parsePositiveInt({
     envKey: 'MCP_CONNECT_TIMEOUT_MS',
     raw: getEnv('MCP_CONNECT_TIMEOUT_MS'),
@@ -2307,6 +2414,47 @@ const shared: SharedServerConfiguration = {
     envKey: 'MCP_TOOL_CALL_MAX_RESPONSE_BYTES',
     raw: getEnv('MCP_TOOL_CALL_MAX_RESPONSE_BYTES'),
     defaultValue: 50 * 1024 * 1024,
+  }),
+  MODEL_HTTP_CONNECT_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'MODEL_HTTP_CONNECT_TIMEOUT_MS',
+    raw: getEnv('MODEL_HTTP_CONNECT_TIMEOUT_MS'),
+    defaultValue: DEFAULT_MODEL_HTTP_CONNECT_TIMEOUT_MS,
+  }),
+  MODEL_HTTP_HEADERS_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'MODEL_HTTP_HEADERS_TIMEOUT_MS',
+    raw: getEnv('MODEL_HTTP_HEADERS_TIMEOUT_MS'),
+    defaultValue: DEFAULT_MODEL_HTTP_HEADERS_TIMEOUT_MS,
+  }),
+  MODEL_HTTP_BODY_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'MODEL_HTTP_BODY_TIMEOUT_MS',
+    raw: getEnv('MODEL_HTTP_BODY_TIMEOUT_MS'),
+    defaultValue: DEFAULT_MODEL_HTTP_BODY_TIMEOUT_MS,
+  }),
+  MODEL_HTTP_MAX_RETRIES: parsePositiveInt({
+    envKey: 'MODEL_HTTP_MAX_RETRIES',
+    raw: getEnv('MODEL_HTTP_MAX_RETRIES'),
+    defaultValue: DEFAULT_MODEL_HTTP_MAX_RETRIES,
+    minValue: 0,
+  }),
+  MCP_HTTP_CONNECT_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'MCP_HTTP_CONNECT_TIMEOUT_MS',
+    raw: getEnv('MCP_HTTP_CONNECT_TIMEOUT_MS'),
+    defaultValue: DEFAULT_MCP_HTTP_CONNECT_TIMEOUT_MS,
+  }),
+  MCP_HTTP_HEADERS_TIMEOUT_MS: parseMcpHttpHeadersTimeoutMs({
+    raw: getEnv('MCP_HTTP_HEADERS_TIMEOUT_MS'),
+    mcpRequestTimeoutMs,
+  }),
+  MCP_HTTP_BODY_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'MCP_HTTP_BODY_TIMEOUT_MS',
+    raw: getEnv('MCP_HTTP_BODY_TIMEOUT_MS'),
+    defaultValue: DEFAULT_MCP_HTTP_BODY_TIMEOUT_MS,
+  }),
+  MCP_HTTP_MAX_RETRIES: parsePositiveInt({
+    envKey: 'MCP_HTTP_MAX_RETRIES',
+    raw: getEnv('MCP_HTTP_MAX_RETRIES'),
+    defaultValue: DEFAULT_MCP_HTTP_MAX_RETRIES,
+    minValue: 0,
   }),
   FIRST_PARTY_MCP_ORIGINS: withMailSidecarOrigin({
     origins: firstPartyOriginsFor({
@@ -2528,6 +2676,11 @@ const shared: SharedServerConfiguration = {
     envKey: 'TURN_SUBSCRIBE_TIMEOUT_MS',
     raw: getEnv('TURN_SUBSCRIBE_TIMEOUT_MS'),
     defaultValue: 600_000,
+  }),
+  TURN_SSE_STREAM_WRITE_TIMEOUT_MS: parsePositiveInt({
+    envKey: 'TURN_SSE_STREAM_WRITE_TIMEOUT_MS',
+    raw: getEnv('TURN_SSE_STREAM_WRITE_TIMEOUT_MS'),
+    defaultValue: 60_000,
   }),
   REDIS_REQUEST_REPLY_TIMEOUT_MS: parsePositiveInt({
     envKey: 'REDIS_REQUEST_REPLY_TIMEOUT_MS',
@@ -2821,16 +2974,7 @@ const configuration: ServerConfiguration = standalone
         raw: getEnv('DATABASE_POOL_MAX'),
         defaultValue: 10,
       }),
-      POSTGRES_STATEMENT_TIMEOUT_MS: parsePositiveInt({
-        envKey: 'POSTGRES_STATEMENT_TIMEOUT_MS',
-        raw: getEnv('POSTGRES_STATEMENT_TIMEOUT_MS'),
-        defaultValue: 60_000,
-      }),
-      POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS: parsePositiveInt({
-        envKey: 'POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS',
-        raw: getEnv('POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS'),
-        defaultValue: 60_000,
-      }),
+      ...parsePostgresTimeouts(),
       REDIS_URL: resolveRedisUrl(),
       TRUEFOUNDRY_SERVICEFOUNDRY_SERVER_URL: getEnv('TRUEFOUNDRY_SERVICEFOUNDRY_SERVER_URL', { required: false }),
       TRUEFOUNDRY_API_KEY: getEnv('TRUEFOUNDRY_API_KEY', { required: false }),
