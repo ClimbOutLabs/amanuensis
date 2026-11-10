@@ -1,11 +1,13 @@
 import {
   HOME_ASSISTANT_REFUSAL,
   HOME_ASSISTANT_SERVER_NAME,
+  homeAssistantDomainLabel,
   homeAssistantGrantScopeKey,
   homeAssistantGrantScopeKeys,
   homeAssistantTarget,
   homeAssistantTargetLabel,
   homeAssistantToolBase,
+  isHomeAssistantNameOnlyTarget,
   isHomeAssistantReadTool,
   isHomeAssistantRefusedTarget,
   type HomeAssistantTarget,
@@ -151,15 +153,36 @@ function plainWhatFor({
   params: Record<string, unknown>;
   target: HomeAssistantTarget;
 }): string {
+  const headline = headlineFor({ tool_name, params, target });
+  // A call that names only a plain name gives Aman nothing to judge the device by: the card
+  // says so, rather than letting a name read as a kind.
+  if (isHomeAssistantNameOnlyTarget(target)) {
+    return `${headline}. Aman could not tell what kind of device this is`;
+  }
+  return headline;
+}
+
+function headlineFor({
+  tool_name,
+  params,
+  target,
+}: {
+  tool_name: string;
+  params: Record<string, unknown>;
+  target: HomeAssistantTarget;
+}): string {
   const base = homeAssistantToolBase(tool_name);
   const label = homeAssistantTargetLabel(target);
-  const shown = label === null ? null : escapeDisplayText(label);
+  const named = label === null ? null : escapeDisplayText(label);
+  // With no name or entity to show, the card names the area or floor and the domain instead,
+  // so the person can still tell what the call would act on.
+  const shown = named ?? areaTargetPhrase(target);
   if (base === 'HassTurnOn') {
-    if (target.domain === 'scene' && shown !== null) {
-      return `Run the ${shown} scene`;
+    if (target.domain === 'scene' && named !== null) {
+      return `Run the ${named} scene`;
     }
-    if (target.domain === 'script' && shown !== null) {
-      return `Run ${shown}`;
+    if (target.domain === 'script' && named !== null) {
+      return `Run ${named}`;
     }
     return shown === null ? 'Turn something on in Home Assistant' : `Turn on ${shown}`;
   }
@@ -187,6 +210,26 @@ function plainWhatFor({
     return shown === null ? 'Control a media player in Home Assistant' : `${mediaVerb(base)} ${shown}`;
   }
   return shown === null ? `Run ${base} in Home Assistant` : `Change ${shown} in Home Assistant`;
+}
+
+/**
+ * What a call acts on when it names no device: the domain in plain words, with the area or
+ * floor it is scoped to (`the covers in the Garage`). Null when it names none of those either.
+ */
+function areaTargetPhrase(target: HomeAssistantTarget): string | null {
+  const label = target.domain === null ? null : homeAssistantDomainLabel(target.domain);
+  const words = label === null ? null : label.charAt(0).toLowerCase() + label.slice(1);
+  if (target.area !== null) {
+    return words === null
+      ? `everything in the ${escapeDisplayText(target.area)}`
+      : `the ${words} in the ${escapeDisplayText(target.area)}`;
+  }
+  if (target.floor !== null) {
+    return words === null
+      ? `everything on the ${escapeDisplayText(target.floor)}`
+      : `the ${words} on the ${escapeDisplayText(target.floor)}`;
+  }
+  return words === null ? null : `the ${words}`;
 }
 
 function mediaVerb(base: string): string {

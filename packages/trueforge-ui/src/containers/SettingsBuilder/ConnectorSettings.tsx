@@ -65,12 +65,12 @@ function homeAssistantCheckMessage(result: HomeAssistantCheck): ConnectorCheckSt
   if (result.status === 'failed') {
     return { ok: false, message: result.reason };
   }
-  if (result.entity_count === null) {
-    return { ok: true, message: `Connected. ${String(result.tool_count)} tools available.` };
+  if (result.entityCount === null) {
+    return { ok: true, message: `Connected. ${String(result.toolCount)} tools available.` };
   }
   return {
     ok: true,
-    message: `Connected. ${String(result.tool_count)} ${result.tool_count === 1 ? 'tool' : 'tools'}, ${String(result.entity_count)} exposed ${result.entity_count === 1 ? 'entity' : 'entities'}`,
+    message: `Connected. ${String(result.toolCount)} ${result.toolCount === 1 ? 'tool' : 'tools'}, ${String(result.entityCount)} exposed ${result.entityCount === 1 ? 'entity' : 'entities'}`,
   };
 }
 

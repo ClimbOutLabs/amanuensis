@@ -49,6 +49,17 @@ export const HOME_ASSISTANT_REFUSED_DOMAINS = ['lock', 'alarm_control_panel'] as
 /** Cover device classes that lead outside the home. A cover inside the home still asks first. */
 export const HOME_ASSISTANT_REFUSED_COVER_DEVICE_CLASSES = ['garage', 'gate', 'door'] as const;
 
+/** Cover device classes that stay inside the home, so naming one settles what an area call acts on. */
+export const HOME_ASSISTANT_INSIDE_COVER_DEVICE_CLASSES = [
+  'awning',
+  'blind',
+  'curtain',
+  'damper',
+  'shade',
+  'shutter',
+  'window',
+] as const;
+
 /** Words in a target's name that mark it as one of the refused kinds when nothing else names its domain. */
 const REFUSED_NAME_PATTERN = /\b(lock|locks|alarm|garage)\b/i;
 
@@ -57,14 +68,24 @@ const REFUSED_COVER_PATTERN = /\b(garage|gate|door)\b/i;
 
 /** What a call acts on, read from the arguments Home Assistant's tools take. */
 export interface HomeAssistantTarget {
-  /** The entity the call names (`light.living_room_lamp`), or null when it names none. */
+  /** The first entity the call names (`light.living_room_lamp`), or null when it names none. */
   entity_id: string | null;
+  /** Every entity the call names, in the order the call names them. */
+  entity_ids: string[];
   /** The plain name the call names (`Living room lamp`), or null when it names none. */
   name: string | null;
-  /** The Home Assistant domain the call acts on, or null when the arguments do not say. */
+  /** The first Home Assistant domain the call acts on, or null when the arguments do not say. */
   domain: string | null;
-  /** The device class the call filters by, or null when it names none. */
+  /** Every domain the call acts on: its entities' domains, its domain filters, its tool set. */
+  domains: string[];
+  /** The first device class the call filters by, or null when it names none. */
   device_class: string | null;
+  /** Every device class the call filters by, in the order the call names them. */
+  device_classes: string[];
+  /** The area the call is scoped to, or null when it names none. An area is a target too. */
+  area: string | null;
+  /** The floor the call is scoped to, or null when it names none. A floor is a target too. */
+  floor: string | null;
 }
 
 function stringParam(params: Record<string, unknown>, key: string): string | null {
@@ -87,6 +108,24 @@ function firstStringParam(params: Record<string, unknown>, key: string): string 
   return null;
 }
 
+/** Every string a parameter carries, whether the call gives one value or a list of them. */
+function stringListParam(params: Record<string, unknown>, key: string): string[] {
+  const value = params[key];
+  if (typeof value === 'string' && value !== '') {
+    return [value];
+  }
+  if (Array.isArray(value)) {
+    const entries: string[] = [];
+    for (const entry of value) {
+      if (typeof entry === 'string' && entry !== '') {
+        entries.push(entry);
+      }
+    }
+    return entries;
+  }
+  return [];
+}
+
 /** The domain an entity id belongs to: the part before the dot. */
 export function homeAssistantDomainOfEntity(entity_id: string): string | null {
   const dot = entity_id.indexOf('.');
@@ -102,46 +141,82 @@ export function homeAssistantTarget(input: {
   params: Record<string, unknown>;
 }): HomeAssistantTarget {
   const params = input.params;
-  const entity_id = firstStringParam(params, 'entity_id');
+  const entity_ids = stringListParam(params, 'entity_id');
+  const entity_id = entity_ids[0] ?? null;
   const name = stringParam(params, 'name');
-  const device_class = firstStringParam(params, 'device_class');
-  const fromEntity = entity_id === null ? null : homeAssistantDomainOfEntity(entity_id);
-  const fromArgs = firstStringParam(params, 'domain');
+  const device_classes = stringListParam(params, 'device_class');
   const prefix = homeAssistantToolPrefix(input.tool_name);
   // A tool set named for a domain (the light set, the climate set) acts on that domain.
   const fromPrefix = prefix === null || prefix === 'intent' || prefix === 'homeassistant' ? null : prefix;
+  // Every domain the call touches, in the order the older single-domain read preferred them:
+  // an entity's own domain first, then the domain filters, then the tool set's domain. A call
+  // that names two domains acts on both, so refusal and grants judge the whole list.
+  const domains: string[] = [];
+  const addDomain = (domain: string | null): void => {
+    if (domain !== null && !domains.includes(domain)) {
+      domains.push(domain);
+    }
+  };
+  for (const id of entity_ids) {
+    addDomain(homeAssistantDomainOfEntity(id));
+  }
+  for (const domain of stringListParam(params, 'domain')) {
+    addDomain(domain);
+  }
+  addDomain(fromPrefix);
   return {
     entity_id,
+    entity_ids,
     name,
-    domain: fromEntity ?? fromArgs ?? fromPrefix,
-    device_class,
+    domain: domains[0] ?? null,
+    domains,
+    device_class: device_classes[0] ?? null,
+    device_classes,
+    area: firstStringParam(params, 'area'),
+    floor: firstStringParam(params, 'floor'),
   };
+}
+
+/**
+ * Whether the call names only a plain name: no entity id and no domain from any source. A name
+ * is a label, not a kind, so Aman cannot tell what kind of device such a call acts on, and no
+ * standing grant may cover it: a grant recorded for a name would cover every entity that
+ * happens to carry that name.
+ */
+export function isHomeAssistantNameOnlyTarget(target: HomeAssistantTarget): boolean {
+  return target.entity_id === null && target.domains.length === 0 && target.name !== null;
 }
 
 /** Whether the call touches a lock, an alarm, a garage door or a cover that leads outside. */
 export function isHomeAssistantRefusedTarget(target: HomeAssistantTarget): boolean {
-  if (target.domain !== null && (HOME_ASSISTANT_REFUSED_DOMAINS as readonly string[]).includes(target.domain)) {
+  // Any domain the call names counts, not just the first: a call that names a light and a lock
+  // acts on the lock too, so a light grant or a light reading must never carry it through.
+  if (target.domains.some(domain => (HOME_ASSISTANT_REFUSED_DOMAINS as readonly string[]).includes(domain))) {
     return true;
   }
-  if (target.domain === 'cover' && coverLeadsOutside(target)) {
+  if (target.domains.includes('cover') && coverLeadsOutside(target)) {
     return true;
   }
   // With no entity id and no domain to judge by, a name that says lock, alarm or garage is enough.
-  if (target.domain === null && target.name !== null && REFUSED_NAME_PATTERN.test(target.name)) {
+  if (target.domains.length === 0 && target.name !== null && REFUSED_NAME_PATTERN.test(target.name)) {
     return true;
   }
   return false;
 }
 
 /**
- * Whether a cover leads outside the home. The device class says so when the call carries one;
- * when it does not, the cover's own name or entity id says so instead, so a garage door is
- * refused whatever shape the call arrives in.
+ * Whether a cover leads outside the home. Any device class the call names says so when it is
+ * one of the outside classes, even when an inside class is named alongside it. When no class
+ * says so, the cover's own name or entity id says so instead, so a garage door is refused
+ * whatever shape the call arrives in. A call scoped to an area or a floor names no one cover:
+ * it reaches whatever covers that place holds, so it is refused unless it names a device class
+ * that stays inside the home.
  */
 function coverLeadsOutside(target: HomeAssistantTarget): boolean {
   if (
-    target.device_class !== null &&
-    (HOME_ASSISTANT_REFUSED_COVER_DEVICE_CLASSES as readonly string[]).includes(target.device_class)
+    target.device_classes.some(device_class =>
+      (HOME_ASSISTANT_REFUSED_COVER_DEVICE_CLASSES as readonly string[]).includes(device_class),
+    )
   ) {
     return true;
   }
@@ -149,7 +224,15 @@ function coverLeadsOutside(target: HomeAssistantTarget): boolean {
     return true;
   }
   // Entity ids join their words with underscores (`cover.garage_door`); read them as words.
-  if (target.entity_id !== null && REFUSED_COVER_PATTERN.test(target.entity_id.replace(/_/g, ' '))) {
+  if (target.entity_ids.some(id => REFUSED_COVER_PATTERN.test(id.replace(/_/g, ' ')))) {
+    return true;
+  }
+  if (
+    (target.area !== null || target.floor !== null) &&
+    !target.device_classes.some(device_class =>
+      (HOME_ASSISTANT_INSIDE_COVER_DEVICE_CLASSES as readonly string[]).includes(device_class),
+    )
+  ) {
     return true;
   }
   return false;
@@ -157,7 +240,9 @@ function coverLeadsOutside(target: HomeAssistantTarget): boolean {
 
 /**
  * The key a standing grant for this call is stored under: the domain it acts on when that is
- * known, else the one entity. Null when the call names neither, so no standing grant is offered.
+ * known, else the one entity, by its entity id. Null when the call names neither, so no standing
+ * grant is offered. A plain name is never a key: a grant under a name would silently cover every
+ * entity that happens to carry that name, where a grant under an entity id covers only that one.
  */
 export function homeAssistantGrantScopeKey(target: HomeAssistantTarget): string | null {
   if (target.domain !== null) {
@@ -166,19 +251,20 @@ export function homeAssistantGrantScopeKey(target: HomeAssistantTarget): string 
   if (target.entity_id !== null) {
     return `ha:entity:${target.entity_id}`;
   }
-  if (target.name !== null) {
-    return `ha:entity:${target.name.trim().toLowerCase()}`;
-  }
   return null;
 }
 
-/** Every scope key a standing grant could cover this call under: its entity key and its domain key. */
+/**
+ * Every scope key a standing grant could cover this call under: its entity key, from the entity
+ * id the call carries, and its domain key. Refusal is judged on every domain and device class
+ * before this list is ever consulted, so a grant listed here cannot carry a call that also
+ * names a refused domain or class. A name-only call returns no keys at all, so no stored grant
+ * can run it without asking.
+ */
 export function homeAssistantGrantScopeKeys(target: HomeAssistantTarget): string[] {
   const keys: string[] = [];
   if (target.entity_id !== null) {
     keys.push(`ha:entity:${target.entity_id}`);
-  } else if (target.name !== null) {
-    keys.push(`ha:entity:${target.name.trim().toLowerCase()}`);
   }
   if (target.domain !== null) {
     keys.push(`ha:domain:${target.domain}`);
@@ -227,6 +313,11 @@ const HOME_ASSISTANT_DOMAIN_LABELS: Record<string, string> = {
   button: 'Buttons',
   input_boolean: 'Switches',
 };
+
+/** A domain in plain words (`light` becomes `Lights`), or null when it has no plain name. */
+export function homeAssistantDomainLabel(domain: string): string | null {
+  return HOME_ASSISTANT_DOMAIN_LABELS[domain] ?? null;
+}
 
 /** A standing grant's scope key in plain words: what it covers, for Settings. */
 export function homeAssistantGrantLabel(scope_key: string): string | null {

@@ -8,6 +8,7 @@
  * definition instead of restating it. It collapses into the generated SDK once that carries
  * `POST /mcp-servers/{name}/memory-check`.
  */
+import type { TrueForgeApi } from '@truefoundry/trueforge-sdk';
 import { z } from 'zod';
 
 /**
@@ -84,20 +85,13 @@ export function parseMemoryProviderCheck(body: unknown): MemoryProviderCheck {
   return result.status === 'ok' ? { ok: true } : { ok: false, code: result.code, reason: result.reason };
 }
 
-const HomeAssistantCheckResultSchema = z.discriminatedUnion('status', [
-  z.object({ status: z.literal('ok'), tool_count: z.number(), entity_count: z.number().nullable() }),
-  z.object({ status: z.literal('failed'), code: z.string(), reason: z.string() }),
-]);
-
-const HomeAssistantCheckResponseSchema = z.object({ data: HomeAssistantCheckResultSchema });
-
 /**
  * Outcome of the Home Assistant connection check: the handshake and tool list, plus how many
- * exposed entities the live-context tool named. A failure carries the one thing to fix.
+ * exposed entities the live-context tool named. A failure carries the one thing to fix. The
+ * generated SDK owns this shape now that its client carries the check route, so the UI derives
+ * its type from there instead of restating the wire contract by hand.
  */
-export type HomeAssistantCheck =
-  | { status: 'ok'; tool_count: number; entity_count: number | null }
-  | { status: 'failed'; code: string; reason: string };
+export type HomeAssistantCheck = TrueForgeApi.HomeAssistantCheckResult;
 
 /** The Home Assistant check the Harness adds on top of the runtime's connector port. */
 export interface HomeAssistantCheckPort {
@@ -108,16 +102,4 @@ export interface HomeAssistantCheckPort {
 /** Whether a catalog implements the Home Assistant check. See {@link hasMemoryProviderCheck}. */
 export function hasHomeAssistantCheck(catalog: object): catalog is HomeAssistantCheckPort {
   return typeof Reflect.get(catalog, 'checkHomeAssistant') === 'function';
-}
-
-/**
- * Validates one Home Assistant check response at the boundary.
- * @throws {Error} when the body does not match the contract
- */
-export function parseHomeAssistantCheck(body: unknown): HomeAssistantCheck {
-  const parsed = HomeAssistantCheckResponseSchema.safeParse(body);
-  if (!parsed.success) {
-    throw new Error('Home Assistant check returned an unreadable response');
-  }
-  return parsed.data.data;
 }

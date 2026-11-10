@@ -9,6 +9,7 @@ import {
   homeAssistantToolBase,
   homeAssistantToolPrefix,
   isHomeAssistantLiveContextTool,
+  isHomeAssistantNameOnlyTarget,
   isHomeAssistantReadTool,
   isHomeAssistantRefusedTarget,
 } from '../../../src/core/homeassistant/toolContract';
@@ -49,7 +50,34 @@ describe('Home Assistant targets', () => {
       tool_name: 'HassTurnOff',
       params: { entity_id: 'light.living_room_lamp' },
     });
-    expect(target).toEqual({ entity_id: 'light.living_room_lamp', name: null, domain: 'light', device_class: null });
+    expect(target).toEqual({
+      entity_id: 'light.living_room_lamp',
+      entity_ids: ['light.living_room_lamp'],
+      name: null,
+      domain: 'light',
+      domains: ['light'],
+      device_class: null,
+      device_classes: [],
+      area: null,
+      floor: null,
+    });
+  });
+
+  it('reads domain and device class filters as whole lists, and area and floor as targets', () => {
+    const target = homeAssistantTarget({
+      tool_name: 'HassTurnOn',
+      params: { domain: ['cover'], device_class: ['curtain', 'garage'], area: 'Garage' },
+    });
+    expect(target.domains).toEqual(['cover']);
+    expect(target.device_classes).toEqual(['curtain', 'garage']);
+    expect(target.area).toBe('Garage');
+    const multi = homeAssistantTarget({
+      tool_name: 'HassTurnOff',
+      params: { domain: ['light', 'lock'], floor: 'Ground floor' },
+    });
+    expect(multi.domains).toEqual(['light', 'lock']);
+    expect(multi.domain).toBe('light');
+    expect(multi.floor).toBe('Ground floor');
   });
 
   it('reads name, domain and device class filters', () => {
@@ -157,6 +185,64 @@ describe('Home Assistant refused targets', () => {
     ).toBe(false);
   });
 
+  it('refuses a call that names a refused domain anywhere in its domain list', () => {
+    expect(
+      isHomeAssistantRefusedTarget(
+        homeAssistantTarget({ tool_name: 'HassTurnOff', params: { domain: ['light', 'lock'] } }),
+      ),
+    ).toBe(true);
+    expect(
+      isHomeAssistantRefusedTarget(
+        homeAssistantTarget({
+          tool_name: 'HassTurnOff',
+          params: { entity_id: ['light.kitchen', 'lock.front_door'] },
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      isHomeAssistantRefusedTarget(
+        homeAssistantTarget({ tool_name: 'HassTurnOff', params: { domain: ['light', 'switch'] } }),
+      ),
+    ).toBe(false);
+  });
+
+  it('refuses a cover when any device class in its list leads outside, even beside an inside class', () => {
+    expect(
+      isHomeAssistantRefusedTarget(
+        homeAssistantTarget({
+          tool_name: 'HassTurnOn',
+          params: { domain: ['cover'], device_class: ['curtain', 'garage'] },
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it('refuses a cover scoped to an area or floor with no inside device class named', () => {
+    expect(
+      isHomeAssistantRefusedTarget(
+        homeAssistantTarget({ tool_name: 'HassTurnOn', params: { area: 'Garage', domain: ['cover'] } }),
+      ),
+    ).toBe(true);
+    expect(
+      isHomeAssistantRefusedTarget(
+        homeAssistantTarget({ tool_name: 'HassTurnOn', params: { floor: 'Ground floor', domain: ['cover'] } }),
+      ),
+    ).toBe(true);
+    expect(
+      isHomeAssistantRefusedTarget(
+        homeAssistantTarget({
+          tool_name: 'HassTurnOn',
+          params: { area: 'Garage', domain: ['cover'], device_class: ['curtain'] },
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      isHomeAssistantRefusedTarget(
+        homeAssistantTarget({ tool_name: 'HassTurnOn', params: { area: 'Garage', domain: ['light'] } }),
+      ),
+    ).toBe(false);
+  });
+
   it('keeps the refusal line the brief fixes', () => {
     expect(HOME_ASSISTANT_REFUSAL).toBe(
       'Aman does not control locks, alarms or garage doors. Do that in Home Assistant.',
@@ -169,10 +255,21 @@ describe('Home Assistant grant scopes and labels', () => {
     const byDomain = homeAssistantTarget({ tool_name: 'HassTurnOn', params: { entity_id: 'light.kitchen' } });
     expect(homeAssistantGrantScopeKey(byDomain)).toBe('ha:domain:light');
     expect(homeAssistantGrantScopeKeys(byDomain)).toEqual(['ha:entity:light.kitchen', 'ha:domain:light']);
-    const byName = homeAssistantTarget({ tool_name: 'HassTurnOff', params: { name: 'Porch Light' } });
-    expect(homeAssistantGrantScopeKey(byName)).toBe('ha:entity:porch light');
     const bare = homeAssistantTarget({ tool_name: 'HassTurnOn', params: { area: 'Kitchen' } });
     expect(homeAssistantGrantScopeKey(bare)).toBeNull();
+  });
+
+  it('never scopes a grant by a plain name, so a name-only call is covered by no grant', () => {
+    const byName = homeAssistantTarget({ tool_name: 'HassTurnOff', params: { name: 'Porch Light' } });
+    expect(isHomeAssistantNameOnlyTarget(byName)).toBe(true);
+    expect(homeAssistantGrantScopeKey(byName)).toBeNull();
+    expect(homeAssistantGrantScopeKeys(byName)).toEqual([]);
+    const byNameAndEntity = homeAssistantTarget({
+      tool_name: 'HassTurnOff',
+      params: { name: 'Porch Light', entity_id: 'light.porch' },
+    });
+    expect(isHomeAssistantNameOnlyTarget(byNameAndEntity)).toBe(false);
+    expect(homeAssistantGrantScopeKeys(byNameAndEntity)).toEqual(['ha:entity:light.porch', 'ha:domain:light']);
   });
 
   it('says entity ids and grant keys in plain words', () => {

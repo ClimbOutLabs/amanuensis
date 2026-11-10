@@ -75,7 +75,14 @@ describe('Home Assistant changes', () => {
   it('cards the same change under a set prefix', async () => {
     const decision = await classifyTier(haAction('intent__HassTurnOn', { name: 'Living room lamp' }), makeCtx());
     expect(decision.tier).toBe(3);
-    expect(decision.card?.plain_what).toBe('Turn on Living room lamp');
+    expect(decision.card?.plain_what).toBe('Turn on Living room lamp. Aman could not tell what kind of device this is');
+  });
+
+  it('names the area and the domain on a card when the call names no device', async () => {
+    const decision = await classifyTier(haAction('HassTurnOff', { area: 'Kitchen', domain: ['light'] }), makeCtx());
+    expect(decision.tier).toBe(3);
+    expect(decision.auto_deny).toBeNull();
+    expect(decision.card?.plain_what).toBe('Turn off the lights in the Kitchen');
   });
 
   it('names the temperature on a climate card', async () => {
@@ -186,6 +193,55 @@ describe('Home Assistant standing grants', () => {
     await recordGrant(ctx, 'ha:domain:lock');
     const decision = await classifyTier(haAction('HassTurnOn', { entity_id: 'lock.front_door' }), ctx);
     expect(decision.auto_deny).toBe('home_assistant_refused');
+  });
+
+  it('refuses a call that names a lock beside a light, even under the light grant', async () => {
+    const ctx = makeCtx();
+    await recordGrant(ctx, 'ha:domain:light');
+    const decision = await classifyTier(haAction('HassTurnOff', { domain: ['light', 'lock'] }), ctx);
+    expect(decision.auto_deny).toBe('home_assistant_refused');
+    expect(decision.card).toBeNull();
+  });
+
+  it('refuses a cover call scoped to the garage area, even under the cover grant', async () => {
+    const ctx = makeCtx();
+    await recordGrant(ctx, 'ha:domain:cover');
+    const decision = await classifyTier(haAction('HassTurnOn', { area: 'Garage', domain: ['cover'] }), ctx);
+    expect(decision.auto_deny).toBe('home_assistant_refused');
+    expect(decision.card).toBeNull();
+  });
+
+  it('refuses a cover call whose device class list names a garage beside a curtain, even under the cover grant', async () => {
+    const ctx = makeCtx();
+    await recordGrant(ctx, 'ha:domain:cover');
+    const decision = await classifyTier(
+      haAction('HassTurnOn', { domain: ['cover'], device_class: ['curtain', 'garage'] }),
+      ctx,
+    );
+    expect(decision.auto_deny).toBe('home_assistant_refused');
+    expect(decision.card).toBeNull();
+  });
+
+  it('still asks for a cover call scoped to an area when it names an inside device class', async () => {
+    const decision = await classifyTier(
+      haAction('HassTurnOn', { area: 'Garage', domain: ['cover'], device_class: ['curtain'] }),
+      makeCtx(),
+    );
+    expect(decision.tier).toBe(3);
+    expect(decision.auto_deny).toBeNull();
+    expect(decision.reason).toBe('home_assistant_change');
+    expect(decision.card?.plain_what).toBe('Turn on the covers in the Garage');
+  });
+
+  it('cards a name-only call and never runs it under a grant recorded for that name', async () => {
+    const ctx = makeCtx();
+    await recordGrant(ctx, 'ha:entity:front door');
+    const decision = await classifyTier(haAction('HassTurnOff', { name: 'Front door' }), ctx);
+    expect(decision.tier).toBe(3);
+    expect(decision.auto_deny).toBeNull();
+    expect(decision.reason).toBe('home_assistant_change');
+    expect(decision.card?.plain_what).toBe('Turn off Front door. Aman could not tell what kind of device this is');
+    expect(decision.grant_tool_name).toBeNull();
   });
 
   it('never lets a stored cover grant run a garage door that arrives with no device class', async () => {
