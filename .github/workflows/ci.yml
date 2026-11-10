@@ -34,6 +34,7 @@ jobs:
       packages: ${{ steps.packages.outputs.list }}
       chart: ${{ steps.filter.outputs.chart }}
       store: ${{ steps.filter.outputs.store }}
+      installer: ${{ steps.filter.outputs.installer }}
 
     steps:
       - name: Check out repository code
@@ -125,6 +126,10 @@ jobs:
               - 'package.json'
               - 'pnpm-workspace.yaml'
               - 'tsconfig.base.json'
+              - '.github/workflows/ci.yml'
+            installer:
+              - 'installer/**'
+              - 'package.json'
               - '.github/workflows/ci.yml'
             chart:
               - 'charts/trueforge/**'
@@ -322,6 +327,42 @@ jobs:
         if: runner.os == 'Windows'
         run: packages/aman-installer/dist/aman.exe --version
 
+  # The shell installer and the aman command: shellcheck, the doctor's tests, and the stubbed installer suite split
+  # over six machines, because it runs each test file against a fresh copy of the installer.
+  installer-shell:
+    name: Installer shell (${{ matrix.part }}/6)
+    needs: detect-changes
+    if: needs.detect-changes.outputs.installer == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [1, 2, 3, 4, 5, 6]
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: Shellcheck
+        if: matrix.part == 1
+        run: pnpm lint:installer
+
+      - name: Doctor tests
+        if: matrix.part == 1
+        run: pnpm test:installer-doctor
+
+      - name: Installer tests
+        run: pnpm test:installer ${{ matrix.part }}/6
+
   chart-checks:
     name: Helm Chart
     needs: detect-changes
@@ -504,6 +545,7 @@ jobs:
       - typecheck-and-build
       - package-checks
       - aman-installer-exe
+      - installer-shell
       - chart-checks
       - store-tests
       - private-data-scan
@@ -519,6 +561,7 @@ jobs:
           TYPECHECK_AND_BUILD: ${{ needs.typecheck-and-build.result }}
           PACKAGE_CHECKS: ${{ needs.package-checks.result }}
           AMAN_INSTALLER_EXE: ${{ needs.aman-installer-exe.result }}
+          INSTALLER_SHELL: ${{ needs.installer-shell.result }}
           CHART_CHECKS: ${{ needs.chart-checks.result }}
           STORE_TESTS: ${{ needs.store-tests.result }}
           PRIVATE_DATA_SCAN: ${{ needs.private-data-scan.result }}
@@ -526,12 +569,13 @@ jobs:
           GENERATED_CONTRACT_DRIFT: ${{ needs.generated-contract-drift.result }}
         run: |
           ok() { [ "$1" = success ] || [ "$1" = skipped ]; }
-          echo "detect-changes=$DETECT_CHANGES migration-order=$MIGRATION_ORDER typecheck-and-build=$TYPECHECK_AND_BUILD package-checks=$PACKAGE_CHECKS chart-checks=$CHART_CHECKS store-tests=$STORE_TESTS private-data-scan=$PRIVATE_DATA_SCAN help-guide=$HELP_GUIDE generated-contract-drift=$GENERATED_CONTRACT_DRIFT"
+          echo "detect-changes=$DETECT_CHANGES migration-order=$MIGRATION_ORDER typecheck-and-build=$TYPECHECK_AND_BUILD package-checks=$PACKAGE_CHECKS installer-shell=$INSTALLER_SHELL chart-checks=$CHART_CHECKS store-tests=$STORE_TESTS private-data-scan=$PRIVATE_DATA_SCAN help-guide=$HELP_GUIDE generated-contract-drift=$GENERATED_CONTRACT_DRIFT"
           [ "$DETECT_CHANGES" = success ] || exit 1
           [ "$MIGRATION_ORDER" = success ] || exit 1
           [ "$TYPECHECK_AND_BUILD" = success ] || exit 1
           ok "$PACKAGE_CHECKS" || exit 1
           ok "$AMAN_INSTALLER_EXE" || exit 1
+          ok "$INSTALLER_SHELL" || exit 1
           ok "$CHART_CHECKS" || exit 1
           ok "$STORE_TESTS" || exit 1
           [ "$PRIVATE_DATA_SCAN" = success ] || exit 1
