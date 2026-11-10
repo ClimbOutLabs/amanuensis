@@ -1101,6 +1101,8 @@ describe('audit rows for schedule firings', () => {
       metadata: {},
       external_id: null,
       source: null,
+      is_incognito: false,
+      private_expires_at: null,
     });
     const { schedule, pendingRun } = await built.scheduleStore.createScheduleAndRun({
       tenant_id: 'default',
@@ -1176,6 +1178,8 @@ describe('audit rows for schedule firings', () => {
       metadata: {},
       external_id: null,
       source: null,
+      is_incognito: false,
+      private_expires_at: null,
     });
     const { pendingRun } = await built.scheduleStore.createScheduleAndRun({
       tenant_id: 'default',
@@ -1257,6 +1261,8 @@ describe('audit rows for schedule firings', () => {
       metadata: {},
       external_id: null,
       source: null,
+      is_incognito: false,
+      private_expires_at: null,
     });
     const sentinelSettingsStore = new SqliteSentinelSettingsStore(built.db);
     await sentinelSettingsStore.patch({

@@ -62,6 +62,8 @@ async function setup() {
       metadata: {},
       external_id: null,
       source: null,
+      is_incognito: false,
+      private_expires_at: null,
     });
     const turnId = `${input.sessionId}-turn-1`;
     const at = new Date('2026-10-19T21:00:00.000Z');
