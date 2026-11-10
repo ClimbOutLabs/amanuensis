@@ -143,6 +143,10 @@ describe('mapsServerUrlProblem', () => {
     expect(mapsServerUrlProblem({ field: 'router', value: 'http://169.254.169.254' })).toBe(message);
     expect(mapsServerUrlProblem({ field: 'router', value: 'https://169.254.169.254' })).toBe(message);
     expect(mapsServerUrlProblem({ field: 'router', value: 'https://metadata.google.internal' })).toBe(message);
+    expect(mapsServerUrlProblem({ field: 'router', value: 'https://metadata' })).toBe(message);
+    expect(mapsServerUrlProblem({ field: 'router', value: 'https://100.100.100.200' })).toBe(message);
+    expect(mapsServerUrlProblem({ field: 'router', value: 'https://[::ffff:169.254.169.254]' })).toBe(message);
+    expect(mapsServerUrlProblem({ field: 'router', value: 'https://metadata.example.com' })).toBeNull();
   });
 
   it('rejects something that is not an address at all', () => {
@@ -245,6 +249,40 @@ describe('testMapsServers', () => {
     expect(results.geocoder.ok).toBe(true);
   });
 
+  it('says the answer was the wrong kind when a server answers without a route', async () => {
+    const results = await testMapsServers({
+      servers: TEST_SERVERS,
+      fetchUpstream: (url: string) =>
+        url.includes('/route/')
+          ? Promise.resolve(
+              new Response(JSON.stringify({ code: 'NoRoute' }), {
+                status: 200,
+                headers: { 'content-type': 'application/json' },
+              }),
+            )
+          : okFetch(url),
+    });
+    expect(results.router.message).toBe(
+      'The driving route server answered, but not with a route. Check the address and try again.',
+    );
+    expect(results.geocoder.message).toBeNull();
+  });
+
+  it('names the error status when a server answers with one, instead of saying it did not answer', async () => {
+    const results = await testMapsServers({
+      servers: TEST_SERVERS,
+      fetchUpstream: (url: string) =>
+        url.startsWith('https://geocoder.example.com')
+          ? Promise.resolve(new Response('not here', { status: 404 }))
+          : okFetch(url),
+    });
+    expect(results.geocoder).toEqual({
+      ok: false,
+      message: 'The address search server answered with an error (HTTP 404). Check the address and try again.',
+    });
+    expect(results.router.ok).toBe(true);
+  });
+
   it('does not call a route server ok when it answers with something that is not a routing answer', async () => {
     const results = await testMapsServers({
       servers: TEST_SERVERS,
@@ -304,6 +342,9 @@ describe('testMapsServers', () => {
           : okFetch(url),
     });
     expect(results.tile.ok).toBe(false);
+    expect(results.tile.message).toBe(
+      'The map pictures server answered, but not with a picture. Check the address and try again.',
+    );
     expect(results.router.ok).toBe(true);
   });
 

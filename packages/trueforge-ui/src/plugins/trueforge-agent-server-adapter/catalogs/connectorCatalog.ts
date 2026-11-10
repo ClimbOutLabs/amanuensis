@@ -381,7 +381,7 @@ export function createConnectorCatalog(
     ...createGoogleSetupApi(client),
     ...createEmailSetupApi(clientOptions),
     ...createCalendarSetupApi(clientOptions),
-    ...createMapsSetupApi(clientOptions),
+    ...createMapsSetupApi(client),
     getConnectorCatalog: async () => {
       const body = await client.catalogs.mcpServers.list();
       return body.data.map(server => toUiCatalogEntry(server, { baseUrl: clientOptions.baseUrl }));

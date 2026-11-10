@@ -935,17 +935,20 @@ function ipv4AddressOf(host: string): string | null {
 /**
  * Whether `host` is a link-local address or a cloud metadata address. Those belong to the network or
  * to the cloud host itself, never to a maps server, so they are refused over https as well as http.
+ * The cloud metadata endpoints are matched by their well-known names and addresses: `metadata` and
+ * `metadata.google.internal` (Google Cloud), 169.254.169.254 (the link-local metadata address most
+ * clouds use) and 100.100.100.200 (Alibaba Cloud).
  */
 function isLinkLocalOrMetadataHost(host: string): boolean {
   const lowered = host.trim().toLowerCase();
   const bare = lowered.startsWith('[') && lowered.endsWith(']') ? lowered.slice(1, -1) : lowered;
-  if (bare === 'metadata.google.internal') {
+  if (bare === 'metadata' || bare === 'metadata.google.internal') {
     return true;
   }
   const ipv4 = ipv4AddressOf(bare);
   if (ipv4 !== null) {
-    const [a, b] = ipv4.split('.').map(part => Number.parseInt(part, 10));
-    return a === 169 && b === 254;
+    const [a, b, c, d] = ipv4.split('.').map(part => Number.parseInt(part, 10));
+    return (a === 169 && b === 254) || (a === 100 && b === 100 && c === 100 && d === 200);
   }
   const withoutZone = bare.split('%')[0] ?? '';
   if (isIP(withoutZone) === 6) {

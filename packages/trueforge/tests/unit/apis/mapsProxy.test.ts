@@ -205,6 +205,25 @@ describe('tile proxy route', () => {
     }
   });
 
+  it('does not serve a tile cached from the old address after the saved tile address changes', async () => {
+    const fromEnv = configuration.MAPS_URL_FROM_ENV.MAPS_TILE_URL;
+    configuration.MAPS_URL_FROM_ENV.MAPS_TILE_URL = false;
+    try {
+      savedSettings.set('maps_tile_url', 'https://tiles-a.example.internal/{z}/{x}/{y}.png');
+      fetchSpy.mockImplementation(() => Promise.resolve(pngResponse()));
+      expect((await get('7/3/4.png')).status).toBe(200);
+      expect((await get('7/3/4.png')).status).toBe(200);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      savedSettings.set('maps_tile_url', 'https://tiles-b.example.internal/{z}/{x}/{y}.png');
+      expect((await get('7/3/4.png')).status).toBe(200);
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      const [url] = fetchSpy.mock.calls[1] ?? [];
+      expect(String(url)).toBe('https://tiles-b.example.internal/7/3/4.png');
+    } finally {
+      configuration.MAPS_URL_FROM_ENV.MAPS_TILE_URL = fromEnv;
+    }
+  });
+
   it('rejects bad coordinates with 400 before any upstream call', async () => {
     for (const path of ['19/0/0.png', '2/4/0.png', '1e1/0/0.png', '0x5/0/0.png', '3/1/1.jpg']) {
       expect((await get(path)).status).toBe(400);

@@ -132,10 +132,20 @@ describe('maps config', () => {
     'https://169.254.169.254',
     'http://169.254.169.254',
     'https://metadata.google.internal',
+    'https://metadata',
+    'http://metadata',
+    'https://100.100.100.200',
+    'https://[::ffff:100.100.100.200]',
     'https://[fe80::1]',
   ])('refuses a link-local or cloud metadata maps address: %s', async url => {
     process.env['MAPS_GEOCODER_URL'] = url;
     await expect(loadConfig()).rejects.toThrow('MAPS_GEOCODER_URL must not be a link-local or cloud metadata address');
+  });
+
+  it('does not refuse a host that only starts with a metadata name', async () => {
+    process.env['MAPS_GEOCODER_URL'] = 'https://metadata.example.com';
+    const config = await loadConfig();
+    expect(config.MAPS_GEOCODER_URL).toBe('https://metadata.example.com');
   });
 
   it('does not treat lookalike hosts as loopback', async () => {

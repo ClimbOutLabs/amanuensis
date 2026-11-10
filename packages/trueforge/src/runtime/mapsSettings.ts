@@ -23,15 +23,13 @@ import configuration, {
 } from '../config';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import {
-  MAPS_SERVER_FIELDS,
   MAPS_SERVER_LABELS,
   mapsServerUrlProblem,
   type MapsServerField,
+  type MapsServerSettings,
   type MapsServerTestResult,
 } from '../schemas/mapsSettings';
 import { fetchSameOrigin } from './mapsUpstream';
-
-export { MAPS_SERVER_FIELDS, type MapsServerField };
 
 /** The maps server addresses in force, one per service. */
 export interface MapsServers {
@@ -46,7 +44,7 @@ export interface MapsServers {
 interface MapsServerFieldSpec {
   field: MapsServerField;
   /** Global settings key and wire field name; the two are the same by design. */
-  key: string;
+  key: keyof MapsServerSettings;
   defaultUrl: string;
   configUrl: () => string;
   fromEnv: () => boolean;
@@ -116,19 +114,13 @@ function specFor(field: MapsServerField): MapsServerFieldSpec {
   return spec;
 }
 
-/** The global settings key a field is saved under, for example `maps_router_url`. */
-export function mapsServerSettingKey(field: MapsServerField): string {
+/**
+ * The global settings key a field is saved under, for example `maps_router_url`.
+ * The wire field name is the same key, so the settings routes read and write
+ * through this one lookup instead of keeping a second list of the names.
+ */
+export function mapsServerSettingKey(field: MapsServerField): keyof MapsServerSettings {
   return specFor(field).key;
-}
-
-/** The plain name of a field's server, for messages, for example `driving route`. */
-export function mapsServerLabel(field: MapsServerField): string {
-  return MAPS_SERVER_LABELS[field];
-}
-
-/** The built-in default address for a field. */
-export function mapsServerDefaultUrl(field: MapsServerField): string {
-  return specFor(field).defaultUrl;
 }
 
 /** The saved form of an address: trimmed, with no trailing slash, as config keeps its own values. */
@@ -266,20 +258,41 @@ function defaultMapsFetch(url: string): Promise<Response> {
   });
 }
 
+/**
+ * How a probe failed, in the terms the result message is written in: the
+ * server answered with an error status, or it answered with the wrong kind
+ * of answer for the service. A probe that throws anything else never got an
+ * answer at all, and the message says so.
+ */
+type MapsProbeFailure = { kind: 'http'; status: number } | { kind: 'wrong-kind'; expected: string };
+
+/** A probe failure the result message describes as what actually happened. */
+class MapsProbeError extends Error {
+  readonly failure: MapsProbeFailure;
+
+  constructor(failure: MapsProbeFailure) {
+    super(
+      failure.kind === 'http' ? `answered with HTTP ${String(failure.status)}` : `answered without ${failure.expected}`,
+    );
+    this.name = 'MapsProbeError';
+    this.failure = failure;
+  }
+}
+
 async function probeRouteServer({ baseUrl, fetchUpstream }: { baseUrl: string; fetchUpstream: MapsFetch }) {
   const url =
     `${baseUrl}/route/v1/driving/${String(TEST_FROM.lng)},${String(TEST_FROM.lat)};` +
     `${String(TEST_TO.lng)},${String(TEST_TO.lat)}?overview=false`;
   const response = await fetchUpstream(url);
   if (!response.ok) {
-    throw new Error(`route server answered HTTP ${String(response.status)}`);
+    throw new MapsProbeError({ kind: 'http', status: response.status });
   }
   // The answer must be a routing answer: a body whose code says a route was
   // found, as OSRM sends. A page of another kind served with a 200 (an error
   // page, a login page) must not read as a working route server.
   const body: unknown = await response.json().catch(() => undefined);
   if (typeof body !== 'object' || body === null || !('code' in body) || body.code !== 'Ok') {
-    throw new Error('route server answered without a route');
+    throw new MapsProbeError({ kind: 'wrong-kind', expected: 'a route' });
   }
 }
 
@@ -287,13 +300,13 @@ async function probeGeocoder({ baseUrl, fetchUpstream }: { baseUrl: string; fetc
   const url = `${baseUrl}/search?q=${encodeURIComponent(TEST_ADDRESS)}&format=jsonv2&limit=1`;
   const response = await fetchUpstream(url);
   if (!response.ok) {
-    throw new Error(`address search server answered HTTP ${String(response.status)}`);
+    throw new MapsProbeError({ kind: 'http', status: response.status });
   }
   // The answer must be an address search answer: a JSON list of places, as
   // Nominatim sends. Anything else is some other server answering.
   const body: unknown = await response.json().catch(() => undefined);
   if (!Array.isArray(body)) {
-    throw new Error('address search server answered with something that is not a list of places');
+    throw new MapsProbeError({ kind: 'wrong-kind', expected: 'a list of places' });
   }
 }
 
@@ -304,14 +317,14 @@ async function probeTransit({ baseUrl, fetchUpstream }: { baseUrl: string; fetch
   });
   const response = await fetchUpstream(`${baseUrl}/plan?${query.toString()}`);
   if (!response.ok) {
-    throw new Error(`public transport server answered HTTP ${String(response.status)}`);
+    throw new MapsProbeError({ kind: 'http', status: response.status });
   }
   // The answer must be a journey plan: a JSON body holding an itineraries
   // list, as MOTIS sends.
   const body: unknown = await response.json().catch(() => undefined);
   const itineraries = typeof body === 'object' && body !== null && 'itineraries' in body ? body.itineraries : undefined;
   if (!Array.isArray(itineraries)) {
-    throw new Error('public transport server answered without a journey plan');
+    throw new MapsProbeError({ kind: 'wrong-kind', expected: 'a journey plan' });
   }
 }
 
@@ -319,14 +332,14 @@ async function probeTileServer({ baseUrl, fetchUpstream }: { baseUrl: string; fe
   const url = baseUrl.replace('{z}', '0').replace('{x}', '0').replace('{y}', '0');
   const response = await fetchUpstream(url);
   if (!response.ok) {
-    throw new Error(`map pictures server answered HTTP ${String(response.status)}`);
+    throw new MapsProbeError({ kind: 'http', status: response.status });
   }
   // The answer must be a picture. The tile proxy only serves image bodies, so
   // an answer with no picture type, or with another type, means the tiles
   // would never reach a map even though something answered.
   const contentType = response.headers.get('content-type') ?? '';
   if (!contentType.toLowerCase().startsWith('image/')) {
-    throw new Error('map pictures server answered with something that is not a picture');
+    throw new MapsProbeError({ kind: 'wrong-kind', expected: 'a picture' });
   }
 }
 
@@ -356,13 +369,29 @@ export async function testMapsServers({
 }): Promise<Record<MapsServerField, MapsServerTestResult>> {
   const resultFor = async (field: MapsServerField): Promise<MapsServerTestResult> => {
     const spec = specFor(field);
+    const label = MAPS_SERVER_LABELS[field];
     try {
       await PROBES[field]({ baseUrl: servers[spec.serversKey], fetchUpstream });
       return { ok: true, message: null };
-    } catch {
+    } catch (error) {
+      // The message says what actually happened: an error status, an answer
+      // of the wrong kind, or no answer at all.
+      if (error instanceof MapsProbeError) {
+        const failure = error.failure;
+        if (failure.kind === 'http') {
+          return {
+            ok: false,
+            message: `The ${label} server answered with an error (HTTP ${String(failure.status)}). Check the address and try again.`,
+          };
+        }
+        return {
+          ok: false,
+          message: `The ${label} server answered, but not with ${failure.expected}. Check the address and try again.`,
+        };
+      }
       return {
         ok: false,
-        message: `The ${MAPS_SERVER_LABELS[field]} server didn't answer. Check the address and that the server is running.`,
+        message: `The ${label} server didn't answer. Check the address and that the server is running.`,
       };
     }
   };

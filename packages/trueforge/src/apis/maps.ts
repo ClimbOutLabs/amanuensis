@@ -285,7 +285,14 @@ export function createMapsRouter(deps: MapsRouterDeps): OpenAPIHono {
       return c.json({ error: { message: 'Map tiles unavailable while offline.' } }, 503);
     }
 
-    const cacheKey = `${String(z)}/${String(x)}/${String(y)}`;
+    // The tile address is resolved on each request and is part of the cache
+    // key, so a tile cached from an address that has since been replaced in
+    // Settings is never served: the key changes with the address.
+    const tileUrl = await resolveMapsServerUrl({
+      deps: { globalSettingsStore: deps.globalSettingsStore, logger: deps.logger },
+      field: 'tile',
+    });
+    const cacheKey = JSON.stringify([tileUrl, z, x, y]);
     const cached = cache.get(cacheKey);
     if (cached !== undefined) {
       return new Response(cached.body, {
@@ -299,12 +306,6 @@ export function createMapsRouter(deps: MapsRouterDeps): OpenAPIHono {
       return c.json({ error: { message: 'Tile rate limit exceeded.' } }, 429);
     }
 
-    // The tile address is looked up on each request that misses the cache, so
-    // an address saved in Settings applies to the next tile with no restart.
-    const tileUrl = await resolveMapsServerUrl({
-      deps: { globalSettingsStore: deps.globalSettingsStore, logger: deps.logger },
-      field: 'tile',
-    });
     const upstreamUrl = tileUrl.replace('{z}', String(z)).replace('{x}', String(x)).replace('{y}', String(y));
     if (!(await acquireSlot())) {
       return c.json({ error: { message: 'Tile proxy is busy.' } }, 429);

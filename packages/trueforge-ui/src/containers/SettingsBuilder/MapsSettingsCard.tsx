@@ -8,7 +8,7 @@ import { Button } from '@/atoms/primitives/Button.js';
 import {
   MAPS_SERVER_FIELD_IDS,
   MAPS_SERVER_FIELD_LABELS,
-  mapsServerUrlProblem,
+  MapsSettingsSaveRefused,
   type MapsServerFieldId,
   type MapsSettingsState,
   type MapsSettingsTestResults,
@@ -74,24 +74,18 @@ export default function MapsSettingsCard({ port }: { port: MapsSetupPort }) {
   });
   const hasChanges = changedFields.length > 0;
 
-  /** The update for the current drafts, or the problems that stop it. */
-  const buildUpdate = (): { update: MapsSettingsUpdate } | { problems: Problems } => {
+  /**
+   * The update for the current drafts. The server is the one judge of an
+   * address, so the card sends what was typed; an empty field clears back to
+   * the default.
+   */
+  const buildUpdate = (): MapsSettingsUpdate => {
     const update: MapsSettingsUpdate = {};
-    const nextProblems: Problems = {};
     for (const fieldId of changedFields) {
       const draft = drafts[fieldId].trim();
-      if (draft === '') {
-        update[fieldId] = null;
-        continue;
-      }
-      const problem = mapsServerUrlProblem({ field: fieldId, value: draft });
-      if (problem !== null) {
-        nextProblems[fieldId] = problem;
-        continue;
-      }
-      update[fieldId] = draft;
+      update[fieldId] = draft === '' ? null : draft;
     }
-    return Object.keys(nextProblems).length > 0 ? { problems: nextProblems } : { update };
+    return update;
   };
 
   const applyState = (next: MapsSettingsState) => {
@@ -101,43 +95,39 @@ export default function MapsSettingsCard({ port }: { port: MapsSetupPort }) {
     setResults(null);
   };
 
-  const handleSave = async () => {
-    const built = buildUpdate();
-    if ('problems' in built) {
-      setProblems(built.problems);
-      return;
-    }
+  /**
+   * Saves the drafts. A refusal from the server names the problem under each
+   * field that has one; any other failure shows as one error for the card.
+   * Returns whether the addresses were saved.
+   */
+  const saveDrafts = async (): Promise<boolean> => {
     setBusy(true);
     setSaveError(null);
     try {
-      applyState(await port.updateMapsSettings(built.update));
+      applyState(await port.updateMapsSettings(buildUpdate()));
+      return true;
     } catch (error) {
-      setSaveError(getErrorMessage(error, 'The maps addresses could not be saved. Try again.'));
+      if (error instanceof MapsSettingsSaveRefused) {
+        setProblems(error.problems);
+      } else {
+        setSaveError(getErrorMessage(error, 'The maps addresses could not be saved. Try again.'));
+      }
+      return false;
     } finally {
       setBusy(false);
     }
+  };
+
+  const handleSave = async () => {
+    await saveDrafts();
   };
 
   const handleTest = async () => {
     // Test connections speaks to the addresses in force, so unsaved changes
     // are saved first; the brief's flow (type an address, test it, see ok)
     // then works in one press.
-    if (hasChanges) {
-      const built = buildUpdate();
-      if ('problems' in built) {
-        setProblems(built.problems);
-        return;
-      }
-      setBusy(true);
-      setSaveError(null);
-      try {
-        applyState(await port.updateMapsSettings(built.update));
-      } catch (error) {
-        setSaveError(getErrorMessage(error, 'The maps addresses could not be saved. Try again.'));
-        setBusy(false);
-        return;
-      }
-      setBusy(false);
+    if (hasChanges && !(await saveDrafts())) {
+      return;
     }
     setTesting(true);
     setSaveError(null);

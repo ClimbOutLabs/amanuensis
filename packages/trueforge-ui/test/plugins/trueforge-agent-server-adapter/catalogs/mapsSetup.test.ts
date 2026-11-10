@@ -1,6 +1,8 @@
+import { TrueForge } from '@truefoundry/trueforge-sdk';
 import { describe, expect, it } from 'vitest';
 
 import { createMapsSetupApi } from '@/plugins/trueforge-agent-server-adapter/catalogs/mapsSetup.js';
+import { MapsSettingsSaveRefused } from '@/server/mapsSetup.js';
 
 function fieldState(value: string | null, setByEnvironment = false) {
   return {
@@ -29,23 +31,32 @@ type Seen = { url: string; method: string; body: string | undefined };
 
 function apiWith(handler: (seen: Seen) => Promise<Response>) {
   const seen: Seen[] = [];
-  const api = createMapsSetupApi({
-    baseUrl: 'http://harness.test',
-    fetch: async (input, init) => {
-      const entry: Seen = {
-        url: String(input),
-        method: init?.method ?? 'GET',
-        body: typeof init?.body === 'string' ? init.body : undefined,
-      };
-      seen.push(entry);
-      return handler(entry);
-    },
-  });
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const entry: Seen = {
+      url: String(input),
+      method: init?.method ?? 'GET',
+      body: typeof init?.body === 'string' ? init.body : undefined,
+    };
+    seen.push(entry);
+    return handler(entry);
+  };
+  const api = createMapsSetupApi(new TrueForge({ baseUrl: 'http://harness.test', maxRetries: 0, fetch: fetchImpl }));
   return { api, seen };
 }
 
+/** The body the server answers a refused save with: one problem per field, each naming its wire field. */
+function refusalBody(problems: { field: string; message: string }[]): unknown {
+  return {
+    success: false,
+    error: {
+      name: 'ZodError',
+      message: JSON.stringify(problems.map(({ field, message }) => ({ code: 'custom', message, path: [field] }))),
+    },
+  };
+}
+
 describe('maps setup api', () => {
-  it('reads the settings and maps the wire fields', async () => {
+  it('reads the settings through the SDK client and maps the wire fields', async () => {
     const { api, seen } = apiWith(async () => reply(SETTINGS_BODY));
     const state = await api.getMapsSettings();
     expect(seen[0]?.url).toBe('http://harness.test/api/v1/settings/maps');
@@ -92,5 +103,48 @@ describe('maps setup api', () => {
   it('surfaces the server error message when a call fails', async () => {
     const { api } = apiWith(async () => reply({ error: { message: 'Admin access required.' } }, 403));
     await expect(api.getMapsSettings()).rejects.toThrow('Admin access required.');
+  });
+
+  it('turns a refused save into the problem for each field the server named', async () => {
+    const message =
+      'The driving route address is a link-local or cloud metadata address. Those addresses belong to the network itself, so they cannot be a maps server. Check the address and try again.';
+    const { api } = apiWith(async () => reply(refusalBody([{ field: 'maps_router_url', message }]), 400));
+    // This address is the IPv4-mapped form of the cloud metadata address.
+    const refused = api.updateMapsSettings({ router: 'https://[::ffff:169.254.169.254]' });
+    await expect(refused).rejects.toBeInstanceOf(MapsSettingsSaveRefused);
+    await expect(refused).rejects.toMatchObject({ problems: { router: message } });
+  });
+
+  it('names each refused field separately when a save has more than one problem', async () => {
+    const { api } = apiWith(async () =>
+      reply(
+        refusalBody([
+          { field: 'maps_router_url', message: 'The driving route address must start with http:// or https://.' },
+          {
+            field: 'maps_tile_url',
+            message:
+              'The map pictures address needs {z}, {x} and {y} in it, like https://tile.example.org/{z}/{x}/{y}.png.',
+          },
+        ]),
+        400,
+      ),
+    );
+    const refused = api.updateMapsSettings({
+      router: 'ftp://osrm.example.com',
+      tile: 'https://tile.example.org/tile.png',
+    });
+    await expect(refused).rejects.toMatchObject({
+      problems: {
+        router: 'The driving route address must start with http:// or https://.',
+        tile: 'The map pictures address needs {z}, {x} and {y} in it, like https://tile.example.org/{z}/{x}/{y}.png.',
+      },
+    });
+  });
+
+  it('never surfaces the raw validation text when a refusal cannot be read per field', async () => {
+    const { api } = apiWith(async () => reply({ error: { message: 'some raw validation text' } }, 400));
+    await expect(api.updateMapsSettings({ router: 'https://osrm.example.com' })).rejects.toThrow(
+      'The maps addresses could not be saved. Check them and try again.',
+    );
   });
 });

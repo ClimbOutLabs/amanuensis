@@ -22,15 +22,6 @@ export interface MapsSettingsRouterDeps<TTransaction> {
   testFetchUpstream?: MapsFetch;
 }
 
-const WIRE_KEY_BY_FIELD: Record<MapsServerField, keyof MapsServerSettings> = {
-  router: 'maps_router_url',
-  walking: 'maps_walking_router_url',
-  cycling: 'maps_cycling_router_url',
-  geocoder: 'maps_geocoder_url',
-  transit: 'maps_transit_url',
-  tile: 'maps_tile_url',
-};
-
 function toWireFieldState(display: MapsServerFieldDisplay): MapsServerFieldState {
   return {
     value: display.value,
@@ -69,11 +60,13 @@ export function createMapsSettingsRouter<TTransaction>(deps: MapsSettingsRouterD
     const before = await readMapsSettingsState(settingsDeps);
     const after: Record<MapsServerField, MapsServerFieldDisplay> = { ...before };
     for (const field of MAPS_SERVER_FIELDS) {
-      const value = body[WIRE_KEY_BY_FIELD[field]];
+      // The wire field name and the settings key are the same by design, so
+      // the one spec list in the runtime names both.
+      const key = mapsServerSettingKey(field);
+      const value = body[key];
       if (value === undefined) {
         continue;
       }
-      const key = mapsServerSettingKey(field);
       if (value === null) {
         await deps.globalSettingsStore.deleteSetting({ key });
       } else {

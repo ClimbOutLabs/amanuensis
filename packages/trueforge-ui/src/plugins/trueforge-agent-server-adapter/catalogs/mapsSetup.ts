@@ -1,147 +1,181 @@
-import { z } from 'zod';
+import type { TrueForge, TrueForgeApi } from '@truefoundry/trueforge-sdk';
 
 import {
-  MAPS_SERVER_FIELD_IDS,
+  MapsSettingsSaveRefused,
   type MapsServerFieldId,
+  type MapsServerFieldState,
+  type MapsSettingsFieldProblems,
   type MapsSettingsState,
   type MapsSettingsTestResults,
   type MapsSettingsUpdate,
   type MapsSetupPort,
 } from '../../../server/mapsSetup.js';
-import type { CreateTrueForgeClientOptions } from '../client.js';
 
 /**
- * Maps the maps server port onto the server's admin settings routes. Direct
- * fetch rather than the generated SDK client, which does not carry these
- * routes yet; the same base URL, token, and fetch the client was built from
- * are used, so cookie auth rides along on the default same-origin base URL.
+ * Maps the maps server port onto the generated SDK client for the maps
+ * settings routes. The server is the one judge of an address: this adapter
+ * sends what the person typed, and when the server refuses a save it turns
+ * the refusal into the problem for each field, so the card shows the message
+ * under the field it belongs to.
  */
 
-const MapsServerFieldStateWireSchema = z.object({
-  value: z.string().nullable(),
-  default_value: z.string(),
-  set_by_environment: z.boolean(),
-});
+/** Each card field with its SDK property name and the wire field name the server names it by in a refusal. */
+const FIELD_KEYS: readonly { field: MapsServerFieldId; sdk: keyof TrueForgeApi.MapsSettings; wire: string }[] = [
+  { field: 'router', sdk: 'mapsRouterUrl', wire: 'maps_router_url' },
+  { field: 'walking', sdk: 'mapsWalkingRouterUrl', wire: 'maps_walking_router_url' },
+  { field: 'cycling', sdk: 'mapsCyclingRouterUrl', wire: 'maps_cycling_router_url' },
+  { field: 'geocoder', sdk: 'mapsGeocoderUrl', wire: 'maps_geocoder_url' },
+  { field: 'transit', sdk: 'mapsTransitUrl', wire: 'maps_transit_url' },
+  { field: 'tile', sdk: 'mapsTileUrl', wire: 'maps_tile_url' },
+];
 
-const MapsSettingsWireSchema = z.object({
-  maps_router_url: MapsServerFieldStateWireSchema,
-  maps_walking_router_url: MapsServerFieldStateWireSchema,
-  maps_cycling_router_url: MapsServerFieldStateWireSchema,
-  maps_geocoder_url: MapsServerFieldStateWireSchema,
-  maps_transit_url: MapsServerFieldStateWireSchema,
-  maps_tile_url: MapsServerFieldStateWireSchema,
-});
+const FIELD_BY_WIRE_KEY: ReadonlyMap<string, MapsServerFieldId> = new Map(
+  FIELD_KEYS.map(({ field, wire }) => [wire, field]),
+);
 
-const MapsSettingsResponseSchema = z.object({ data: MapsSettingsWireSchema });
+function toFieldState(field: TrueForgeApi.MapsServerFieldState): MapsServerFieldState {
+  return { value: field.value, defaultUrl: field.defaultValue, setByEnvironment: field.setByEnvironment };
+}
 
-const MapsServerTestResultWireSchema = z.object({
-  ok: z.boolean(),
-  message: z.string().nullable(),
-});
-
-const MapsSettingsTestResponseSchema = z.object({
-  data: z.object({
-    maps_router_url: MapsServerTestResultWireSchema,
-    maps_walking_router_url: MapsServerTestResultWireSchema,
-    maps_cycling_router_url: MapsServerTestResultWireSchema,
-    maps_geocoder_url: MapsServerTestResultWireSchema,
-    maps_transit_url: MapsServerTestResultWireSchema,
-    maps_tile_url: MapsServerTestResultWireSchema,
-  }),
-});
-
-const WIRE_KEY_BY_FIELD: Record<MapsServerFieldId, string> = {
-  router: 'maps_router_url',
-  walking: 'maps_walking_router_url',
-  cycling: 'maps_cycling_router_url',
-  geocoder: 'maps_geocoder_url',
-  transit: 'maps_transit_url',
-  tile: 'maps_tile_url',
-};
-
-type MapsSettingsWire = z.infer<typeof MapsSettingsWireSchema>;
-
-function toMapsSettings(wire: MapsSettingsWire): MapsSettingsState {
-  const field = (wireField: z.infer<typeof MapsServerFieldStateWireSchema>) => ({
-    value: wireField.value,
-    defaultUrl: wireField.default_value,
-    setByEnvironment: wireField.set_by_environment,
-  });
+function toMapsSettingsState(settings: TrueForgeApi.MapsSettings): MapsSettingsState {
   return {
-    router: field(wire.maps_router_url),
-    walking: field(wire.maps_walking_router_url),
-    cycling: field(wire.maps_cycling_router_url),
-    geocoder: field(wire.maps_geocoder_url),
-    transit: field(wire.maps_transit_url),
-    tile: field(wire.maps_tile_url),
+    router: toFieldState(settings.mapsRouterUrl),
+    walking: toFieldState(settings.mapsWalkingRouterUrl),
+    cycling: toFieldState(settings.mapsCyclingRouterUrl),
+    geocoder: toFieldState(settings.mapsGeocoderUrl),
+    transit: toFieldState(settings.mapsTransitUrl),
+    tile: toFieldState(settings.mapsTileUrl),
   };
 }
 
-export function createMapsSetupApi(options: CreateTrueForgeClientOptions = {}): MapsSetupPort {
-  const base = (options.baseUrl ?? '/').replace(/\/+$/, '');
-  const fetchImpl = options.fetch ?? ((input: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(input, init));
+function toTestResults(test: TrueForgeApi.MapsSettingsTest): MapsSettingsTestResults {
+  return {
+    router: test.mapsRouterUrl,
+    walking: test.mapsWalkingRouterUrl,
+    cycling: test.mapsCyclingRouterUrl,
+    geocoder: test.mapsGeocoderUrl,
+    transit: test.mapsTransitUrl,
+    tile: test.mapsTileUrl,
+  };
+}
 
-  async function request({ method, path, body }: { method: string; path: string; body?: unknown }): Promise<unknown> {
-    const response = await fetchImpl(`${base}${path}`, {
-      method,
-      headers: {
-        ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
-        ...(options.token === undefined ? {} : { Authorization: `Bearer ${options.token}` }),
-      },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    });
-    const responseBody: unknown = await response.json().catch(() => undefined);
-    if (!response.ok) {
-      const failure = z.object({ error: z.object({ message: z.string() }) }).safeParse(responseBody);
-      throw new Error(
-        failure.success ? failure.data.error.message : `Maps settings failed with HTTP ${String(response.status)}`,
-      );
-    }
-    return responseBody;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+/** The HTTP status the SDK puts on the errors it throws, when it threw one of those. */
+function readHttpStatus(error: unknown): number | undefined {
+  if (!isRecord(error) || !('statusCode' in error)) {
+    return undefined;
   }
+  const statusCode: unknown = error.statusCode;
+  return typeof statusCode === 'number' ? statusCode : undefined;
+}
 
+/** The server's own message from an SDK error body, when the body carries one. */
+function readServerMessage(error: unknown): string | undefined {
+  if (!isRecord(error) || !isRecord(error.body) || !isRecord(error.body.error)) {
+    return undefined;
+  }
+  const message: unknown = error.body.error.message;
+  return typeof message === 'string' && message !== '' ? message : undefined;
+}
+
+/**
+ * The per-field problems from a refused save. The server answers a refused
+ * save with a 400 whose message lists one problem per field, each naming the
+ * wire field it belongs to. Anything that does not read that way is not a
+ * per-field refusal and gives null here.
+ */
+function fieldProblemsFromRefusal(error: unknown): MapsSettingsFieldProblems | null {
+  if (readHttpStatus(error) !== 400) {
+    return null;
+  }
+  const message = readServerMessage(error);
+  if (message === undefined) {
+    return null;
+  }
+  let issues: unknown;
+  try {
+    issues = JSON.parse(message);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(issues)) {
+    return null;
+  }
+  const problems: MapsSettingsFieldProblems = {};
+  for (const issue of issues) {
+    if (!isRecord(issue)) {
+      continue;
+    }
+    const path: unknown = issue.path;
+    const text: unknown = issue.message;
+    if (!Array.isArray(path) || typeof path[0] !== 'string' || typeof text !== 'string') {
+      continue;
+    }
+    const field = FIELD_BY_WIRE_KEY.get(path[0]);
+    if (field !== undefined && problems[field] === undefined) {
+      problems[field] = text;
+    }
+  }
+  return Object.keys(problems).length > 0 ? problems : null;
+}
+
+/** The error a failed call reports: the server's own message when it sent one. */
+function toPortError(error: unknown): Error {
+  const message = readServerMessage(error);
+  if (message !== undefined) {
+    return new Error(message, { cause: error });
+  }
+  const status = readHttpStatus(error);
+  if (status !== undefined) {
+    return new Error(`Maps settings failed with HTTP ${String(status)}`, { cause: error });
+  }
+  return error instanceof Error ? error : new Error('Maps settings failed', { cause: error });
+}
+
+export function createMapsSetupApi(client: TrueForge): MapsSetupPort {
   return {
     getMapsSettings: async () => {
-      const parsed = MapsSettingsResponseSchema.safeParse(
-        await request({ method: 'GET', path: '/api/v1/settings/maps' }),
-      );
-      if (!parsed.success) {
-        throw new Error('The server returned an unexpected maps settings payload');
+      try {
+        const response = await client.settings.maps.get();
+        return toMapsSettingsState(response.data);
+      } catch (error) {
+        throw toPortError(error);
       }
-      return toMapsSettings(parsed.data.data);
     },
     updateMapsSettings: async (update: MapsSettingsUpdate) => {
-      const body: Record<string, string | null> = {};
-      for (const fieldId of MAPS_SERVER_FIELD_IDS) {
-        const value = update[fieldId];
+      const request: TrueForgeApi.settings.MapsServerSettings = {};
+      for (const { field, sdk } of FIELD_KEYS) {
+        const value = update[field];
         if (value !== undefined) {
-          body[WIRE_KEY_BY_FIELD[fieldId]] = value;
+          request[sdk] = value;
         }
       }
-      const parsed = MapsSettingsResponseSchema.safeParse(
-        await request({ method: 'PUT', path: '/api/v1/settings/maps', body }),
-      );
-      if (!parsed.success) {
-        throw new Error('The server returned an unexpected maps settings payload');
+      try {
+        const response = await client.settings.maps.createOrUpdate(request);
+        return toMapsSettingsState(response.data);
+      } catch (error) {
+        const problems = fieldProblemsFromRefusal(error);
+        if (problems !== null) {
+          throw new MapsSettingsSaveRefused(problems);
+        }
+        if (readHttpStatus(error) === 400) {
+          // A refusal whose problems could not be read: never show the raw
+          // validation text, say in plain words that the save was refused.
+          throw new Error('The maps addresses could not be saved. Check them and try again.', { cause: error });
+        }
+        throw toPortError(error);
       }
-      return toMapsSettings(parsed.data.data);
     },
     testMapsSettings: async () => {
-      const parsed = MapsSettingsTestResponseSchema.safeParse(
-        await request({ method: 'POST', path: '/api/v1/settings/maps/test', body: {} }),
-      );
-      if (!parsed.success) {
-        throw new Error('The server returned an unexpected maps test payload');
+      try {
+        const response = await client.settings.maps.test();
+        return toTestResults(response.data);
+      } catch (error) {
+        throw toPortError(error);
       }
-      const data = parsed.data.data;
-      return {
-        router: data.maps_router_url,
-        walking: data.maps_walking_router_url,
-        cycling: data.maps_cycling_router_url,
-        geocoder: data.maps_geocoder_url,
-        transit: data.maps_transit_url,
-        tile: data.maps_tile_url,
-      } satisfies MapsSettingsTestResults;
     },
   };
 }

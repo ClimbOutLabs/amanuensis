@@ -115,6 +115,9 @@ describe('maps settings router', () => {
       'https://user:secret@osrm.example.com',
       'https://169.254.169.254',
       'https://metadata.google.internal',
+      'https://metadata',
+      'https://100.100.100.200',
+      'https://[::ffff:169.254.169.254]',
     ]) {
       const res = await router.request('/', putInit({ maps_router_url: value }));
       expect(res.status).toBe(400);
