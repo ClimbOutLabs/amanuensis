@@ -7,11 +7,12 @@ import { resolvePendingSwap } from './commands/upgrade.ts';
 import { installerConfig } from './config.ts';
 import { hostForPlatform } from './host/hostFor.ts';
 import { systemWindowsJobs, windowsPaths } from './host/windowsJobs.ts';
-import { UNEXPECTED_FAILURE, problemText } from './messages.ts';
+import { PRESS_ENTER_TO_CLOSE_LINE, UNEXPECTED_FAILURE, problemText } from './messages.ts';
 import { isSetupProgramName } from './release/assetNames.ts';
 import { fetchBytesFromNetwork } from './release/download.ts';
 import { SystemProcessRunner } from './runner/processRunner.ts';
 import { storeForHost } from './state/storeFor.ts';
+import { shouldHoldWindow } from './windowHold.ts';
 
 // The one entry point the single executable is built from.
 const host = hostForPlatform(process.platform);
@@ -139,15 +140,32 @@ if (args.length === 0 && invokedAsSetup()) {
 if (programsDir !== null) {
   resolvePendingSwap(programsDir);
 }
-runCli(args, {
+const windowsJobs = systemWindowsJobs({
+  runner,
+  localAppDataDir: config.localAppDataDir,
+  selfExePath: process.execPath,
+});
+
+// Waits for Enter when the window would otherwise close unread.
+async function holdWindowIfNeeded(exitCode: number): Promise<void> {
+  const hold = await shouldHoldWindow({
+    hostKind: host.kind,
+    interactive: process.stdin.isTTY,
+    command: args[0],
+    exitCode,
+    parentPid: process.ppid,
+    jobs: windowsJobs,
+  });
+  if (hold) {
+    await askLine(PRESS_ENTER_TO_CLOSE_LINE);
+  }
+}
+
+void runCli(args, {
   host,
   runner,
   store: storeForHost({ host, runner, stateHome: config.stateHome }),
-  windowsJobs: systemWindowsJobs({
-    runner,
-    localAppDataDir: config.localAppDataDir,
-    selfExePath: process.execPath,
-  }),
+  windowsJobs,
   probeHealth: async (url: string) => {
     try {
       const response = await fetch(url);
@@ -177,14 +195,17 @@ runCli(args, {
   hostName: hostname(),
   ask: askLine,
   askSecret: askSecretLine,
-}).then(
-  exitCode => {
+})
+  .then(
+    exitCode => exitCode,
+    () => {
+      // A failure no command planned for still owes the person one
+      // plain problem and a next step, never a silent exit.
+      console.log(problemText(UNEXPECTED_FAILURE));
+      return 1;
+    },
+  )
+  .then(async exitCode => {
     process.exitCode = exitCode;
-  },
-  () => {
-    // A failure no command planned for still owes the person one
-    // plain problem and a next step, never a silent exit.
-    console.log(problemText(UNEXPECTED_FAILURE));
-    process.exitCode = 1;
-  },
-);
+    await holdWindowIfNeeded(exitCode).catch(() => undefined);
+  });
