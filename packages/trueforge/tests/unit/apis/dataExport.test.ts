@@ -136,6 +136,8 @@ async function seedSession(
     metadata: {},
     external_id: null,
     source: null,
+    is_incognito: false,
+    private_expires_at: null,
   });
   if (input.folderId !== undefined) {
     await store.setSessionFolder({
