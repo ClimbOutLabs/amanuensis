@@ -51,7 +51,7 @@ function toWireProfile(profile: PersonalizationProfile): PersonalizationProfileW
 
 export function createPersonalizationRouter(deps: PersonalizationRouterDeps) {
   // Saving or deleting the profile also removes any copy an earlier version kept in memory, so
-  // what a person clears in Settings is gone everywhere. A failure here never fails the save.
+  // what a person clears in Settings is no longer used anywhere. A failure here never fails the save.
   const removeMemoryCopy = async (subjectId: string): Promise<void> => {
     try {
       await deleteLearnedProfileCopy({
