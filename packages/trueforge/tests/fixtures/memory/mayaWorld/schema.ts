@@ -55,6 +55,7 @@ export const RECALL_CATEGORIES = [
   'unconfirmed_claim',
   'no_name_in_message',
   'asked_in_other_words',
+  'nothing_to_recall',
 ] as const;
 
 /** One thing the person asks, and what the memory shown to the model must then hold. */
@@ -71,10 +72,20 @@ export const RecallQuestionSchema = z
     expected_text: z.string().min(1).optional(),
     /** A stale or unwanted value that should not be put in front of the model. */
     must_not_text: z.string().min(1).optional(),
-    /** The entries, or `event:<day>` for a hand edit, that justify the answer. */
-    source_entry_ids: z.array(z.string().min(1)).min(1),
+    /** The entries, or `event:<day>` for a hand edit, that justify the answer. Empty when the vault holds nothing on the subject. */
+    source_entry_ids: z.array(z.string().min(1)),
   })
-  .refine(question => question.expected_text !== undefined || question.must_not_text !== undefined, {
-    message: 'A question needs a text to find, a text to keep out, or both.',
-  });
+  .refine(
+    question =>
+      question.category === 'nothing_to_recall'
+        ? question.expected_text === undefined &&
+          question.must_not_text === undefined &&
+          question.source_entry_ids.length === 0
+        : (question.expected_text !== undefined || question.must_not_text !== undefined) &&
+          question.source_entry_ids.length > 0,
+    {
+      message:
+        'A question needs a text to find or a text to keep out, and the entries that justify it. A message with nothing to recall names none of them.',
+    },
+  );
 export type RecallQuestion = z.infer<typeof RecallQuestionSchema>;

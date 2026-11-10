@@ -19,23 +19,33 @@ export interface RecallAnswer {
   block: string;
   /** Whether the expected text is in the block; undefined when the question expects nothing. */
   found: boolean | undefined;
-  /** Whether the stale or unwanted text is in the block; undefined when the question names none. */
+  /**
+   * Whether something that should stay out is in the block: the stale or unwanted text the question
+   * names, or any memory at all when the message has nothing to recall. Undefined when neither applies.
+   */
   unwanted: boolean | undefined;
-  /** Days between the newest entry that holds the answer and the day of asking. */
-  answerAgeDays: number;
+  /** Days between the newest entry that holds the answer and the day of asking; undefined when the vault holds no answer. */
+  answerAgeDays: number | undefined;
 }
 
 function holds({ block, text }: { block: string; text: string }): boolean {
   return block.toLowerCase().includes(text.toLowerCase());
 }
 
-function answerAgeDays(question: RecallQuestion): number {
+function answerAgeDays(question: RecallQuestion): number | undefined {
   const days = question.source_entry_ids.flatMap(id => {
     const eventDay = /^event:(\d+)$/.exec(id)?.[1];
     const day = eventDay === undefined ? MAYA_ENTRIES.find(entry => entry.id === id)?.day : Number(eventDay);
     return day === undefined ? [] : [day];
   });
-  return question.as_of_day - Math.max(...days);
+  return days.length === 0 ? undefined : question.as_of_day - Math.max(...days);
+}
+
+function unwantedShown({ block, question }: { block: string; question: RecallQuestion }): boolean | undefined {
+  if (question.category === 'nothing_to_recall') {
+    return block !== '';
+  }
+  return question.must_not_text === undefined ? undefined : holds({ block, text: question.must_not_text });
 }
 
 function memoryBlockOf(events: AgentContextProcessorOutput[]): string {
@@ -84,7 +94,7 @@ export async function askMemory({ dir, question }: { dir: string; question: Reca
     question,
     block,
     found: question.expected_text === undefined ? undefined : holds({ block, text: question.expected_text }),
-    unwanted: question.must_not_text === undefined ? undefined : holds({ block, text: question.must_not_text }),
+    unwanted: unwantedShown({ block, question }),
     answerAgeDays: answerAgeDays(question),
   };
 }
@@ -96,7 +106,7 @@ export interface RecallScore {
   /** Questions whose expected text was shown, out of those that expect one. */
   found: number;
   expectsText: number;
-  /** Questions where a stale or unwanted text was shown, out of those that name one. */
+  /** Questions where something that should stay out was shown, out of those that have such a thing. */
   unwanted: number;
   namesUnwanted: number;
   /** Questions with everything expected shown and nothing unwanted shown. */
@@ -122,11 +132,11 @@ export function recallScorecard(answers: readonly RecallAnswer[]): RecallScore[]
     scoreOf({ group: 'all', answers }),
     scoreOf({
       group: `answer at most ${String(OLD_ANSWER_DAYS)} days old`,
-      answers: answers.filter(answer => answer.answerAgeDays <= OLD_ANSWER_DAYS),
+      answers: answers.filter(answer => answer.answerAgeDays !== undefined && answer.answerAgeDays <= OLD_ANSWER_DAYS),
     }),
     scoreOf({
       group: `answer more than ${String(OLD_ANSWER_DAYS)} days old`,
-      answers: answers.filter(answer => answer.answerAgeDays > OLD_ANSWER_DAYS),
+      answers: answers.filter(answer => answer.answerAgeDays !== undefined && answer.answerAgeDays > OLD_ANSWER_DAYS),
     }),
     ...categories.map(category =>
       scoreOf({ group: category, answers: answers.filter(answer => answer.question.category === category) }),

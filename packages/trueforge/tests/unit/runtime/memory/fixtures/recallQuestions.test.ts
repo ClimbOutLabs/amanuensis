@@ -89,6 +89,15 @@ describe("recall questions over Maya's world", () => {
           expect([...topicWords(source.text)].filter(word => asked.has(word))).toEqual([]);
         }
       }
+      if (question.category === 'nothing_to_recall') {
+        // Not one entry of the world is about the message, on any day.
+        const asked = topicWords(question.message);
+        expect(
+          MAYA_ENTRIES.filter(entry => [...topicWords(entry.content)].some(word => asked.has(word))).map(
+            entry => entry.id,
+          ),
+        ).toEqual([]);
+      }
     },
   );
 });

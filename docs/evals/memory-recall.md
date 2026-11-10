@@ -13,7 +13,9 @@ The story holds the hard cases on purpose. Facts change, such as the dates of th
 
 **Expected decisions.** Every entry says what should happen to the pages about people and matters when that entry is sorted: a new fact, the same fact again, a changed fact, a fact that ended, something not confirmed, or nothing. The step that sorts entries into pages will be tested against these.
 
-**Questions.** Maya asks 64 questions on different days. Each question names the text that must be in the memory shown to the model. Some also name a text that should not be there, such as the old dates of the trip. Twelve questions are asked in other words: they share no topic word with the entry that holds the answer, such as "Who lives next door to us?" for the neighbour at number 14. Only a search by meaning can answer those.
+**Questions.** Maya asks 76 questions on different days. Each question names the text that must be in the memory shown to the model. Some also name a text that should not be there, such as the old dates of the trip. Twelve questions are asked in other words: they share no topic word with the entry that holds the answer, such as "Who lives next door to us?" for the neighbour at number 14. Only a search by meaning can answer those.
+
+Twelve more are messages that have nothing to do with memory, such as "What is 17 times 23?". No entry in the world shares a topic word with them. For these, no memory should be shown at all.
 
 The files are in `packages/trueforge/tests/fixtures/memory/mayaWorld/`.
 
@@ -22,8 +24,8 @@ The files are in `packages/trueforge/tests/fixtures/memory/mayaWorld/`.
 The test writes the world into an empty memory folder, one day at a time, through the same code Aman uses to save memories. On the day of each question it runs the same step that builds the memory block before every reply. Then it reads the block.
 
 - **Found**: the expected text is in the block.
-- **Unwanted**: the stale or planted text is in the block.
-- **Clean**: the expected text is there, and no unwanted text is.
+- **Unwanted**: the stale or planted text is in the block. For a message that has nothing to do with memory, any memory in the block is unwanted.
+- **Clean**: the expected text is there, and nothing unwanted is. For a message that has nothing to do with memory, clean means the block is empty.
 
 The scorecard counts these for all questions, for answers at most 14 days old, for answers older than that, and for each kind of question.
 
@@ -45,4 +47,4 @@ pnpm --filter @truefoundry/trueforge test -- tests/unit/runtime/memory/fixtures
 
 ## Add to it
 
-Add a story entry in `story.ts` with the next free place on its day, and say what it should do to the pages. Add a question in `recallQuestions.ts` and name the entries that hold its answer. The other two tests in the same folder check that the story stays consistent and that no noise entry holds an answer.
+Add a story entry in `story.ts` with the next free place on its day, and say what it should do to the pages. Add a question in `recallQuestions.ts` and name the entries that hold its answer. For a message that has nothing to do with memory, use the kind `nothing_to_recall` and name no entries. The other two tests in the same folder check that the story stays consistent, that no noise entry holds an answer, and that no entry shares a topic word with such a message.

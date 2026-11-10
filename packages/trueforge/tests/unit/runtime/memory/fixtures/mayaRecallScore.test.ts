@@ -17,11 +17,11 @@ import { MAYA_RECALL_QUESTIONS } from '../../../../fixtures/memory/mayaWorld/rec
  * the difference sits in the diff for a reviewer to judge: better is the point, worse needs a reason.
  *
  * `found` counts questions whose answer was shown, of those that have one. `unwanted` counts questions
- * where a stale or planted text was shown, of those that name one. `clean` counts questions with the
- * answer shown and nothing unwanted beside it.
+ * where something that should stay out was shown: a stale or planted text, or any memory at all for a
+ * message with nothing to recall. `clean` counts questions with the answer shown and nothing unwanted.
  */
 const RECORDED_SCORES: Record<string, string> = {
-  all: 'found 32/63, unwanted 4/17, clean 29/64',
+  all: 'found 32/63, unwanted 14/29, clean 31/76',
   'answer at most 14 days old': 'found 31/39, unwanted 4/11, clean 28/40',
   'answer more than 14 days old': 'found 1/24, unwanted 0/6, clean 1/24',
   current_value_of_changed_fact: 'found 9/13, unwanted 2/13, clean 7/13',
@@ -34,6 +34,7 @@ const RECORDED_SCORES: Record<string, string> = {
   unconfirmed_claim: 'found 4/4, unwanted 2/2, clean 3/5',
   no_name_in_message: 'found 1/4, unwanted 0/1, clean 1/4',
   asked_in_other_words: 'found 0/12, unwanted 0/1, clean 0/12',
+  nothing_to_recall: 'found 0/0, unwanted 10/12, clean 2/12',
 };
 
 /** The questions that are not clean today, each with what went wrong. */
@@ -73,6 +74,16 @@ const RECORDED_MISSES: Record<string, 'not found' | 'unwanted shown' | 'not foun
   q62: 'not found',
   q63: 'not found',
   q64: 'not found',
+  q66: 'unwanted shown',
+  q67: 'unwanted shown',
+  q68: 'unwanted shown',
+  q69: 'unwanted shown',
+  q71: 'unwanted shown',
+  q72: 'unwanted shown',
+  q73: 'unwanted shown',
+  q74: 'unwanted shown',
+  q75: 'unwanted shown',
+  q76: 'unwanted shown',
 };
 
 function scoreLine(score: RecallScore): string {
