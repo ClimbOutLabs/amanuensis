@@ -16,6 +16,7 @@ import {
 import { ListSessionAuditLogRequestQuerySchema, ListSessionAuditLogResponseSchema } from '../schemas/sentinelAudit';
 import {
   CreateSessionRequestSchema,
+  GetChatPrivacyResponseSchema,
   GetOrCreateSessionByExternalIdRequestSchema,
   GetSessionResponseSchema,
   ListSessionsRequestQuerySchema,
@@ -330,6 +331,10 @@ export const createSessionBugReportRoute = createRoute({
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
       description: 'Session not found.',
     },
+    422: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'The chat is private, so no report is made from it.',
+    },
   },
 });
 
@@ -410,6 +415,31 @@ export const getSessionAuditLogRoute = createRoute({
     400: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
       description: 'Invalid query parameters.',
+    },
+    403: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Caller is not the session creator.',
+    },
+    404: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Session not found.',
+    },
+  },
+});
+
+export const getChatPrivacyRoute = createRoute({
+  method: 'get',
+  path: '/{session_id}/privacy',
+  tags: [OpenApiTag.AGENT_SESSIONS],
+  summary: 'Where a chat is answered',
+  description: 'Whether the models that may answer this chat run on this machine, and which providers run elsewhere.',
+  'x-fern-sdk-group-name': ['sessions'],
+  'x-fern-sdk-method-name': 'get_privacy',
+  request: { params: SessionIdParamsSchema },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: GetChatPrivacyResponseSchema } },
+      description: 'Where the chat is answered.',
     },
     403: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
