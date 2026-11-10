@@ -440,14 +440,14 @@ export function noteRetainItem({
   };
 }
 
-/** Newest daily files compared before a retain: the same window recall reads, so the check stays cheap. */
+/** Newest daily files compared before a retain. An older copy is stored again, and recall shows the two as one. */
 const DUPLICATE_CHECK_DAILY_FILES = 14;
 
 /**
  * The items not already in the vault this client writes into. An item that carries the read-content
  * origin (a finding, a reply note, or a fact from a turn that read a tool result) comes back turn after
  * turn while the same email or page is in view, so one whose body matches a live entry in the newest
- * daily files is not stored again. An older copy is not seen, which is the price of a bounded scan.
+ * daily files is not stored again.
  * Items from a turn that read nothing outside the chat, and backends with no listing, store every item.
  */
 async function withoutStoredCopies({

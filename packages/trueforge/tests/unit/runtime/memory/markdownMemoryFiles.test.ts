@@ -1,6 +1,6 @@
 import { MAIN_ASSISTANT_SHARING_KEY } from '@truefoundry/trueforge-core/core/memory/vaultSharing';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
@@ -281,6 +281,46 @@ describe('markdownMemoryFiles', () => {
           'md:tenant-1:2026-09-18.md#0',
         ]);
         expect(scan.entries[0]?.text).toContain('newer one');
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('reads a day file again when it grows, is rewritten at the same size, or is removed', async () => {
+      const dir = await makeDir();
+      try {
+        const nsDir = namespaceDirFor(dir, 'tenant-1');
+        const older = path.join(nsDir, 'memory', '2026-09-18.md');
+        const newer = path.join(nsDir, 'memory', '2026-09-19.md');
+        await mkdir(path.join(nsDir, 'memory'), { recursive: true });
+        await writeFile(older, '## 2026-09-18T10:00:00.000Z\n\ncode 1200\n', 'utf8');
+        await writeFile(newer, '## 2026-09-19T10:00:00.000Z\n\nfirst\n', 'utf8');
+        // Both files look long settled, so the next scan keeps what it parsed.
+        const settled = new Date(Date.now() - 60_000);
+        await utimes(older, settled, settled);
+        await utimes(newer, settled, settled);
+        const texts = async (): Promise<string[]> =>
+          (await scanNamespaceEntries({ baseDir: dir, namespace: 'tenant-1', maxDailyFiles: 14 })).entries.map(
+            entry => entry.text,
+          );
+        expect(await texts()).toEqual([expect.stringContaining('first'), expect.stringContaining('code 1200')]);
+        expect(await texts()).toEqual([expect.stringContaining('first'), expect.stringContaining('code 1200')]);
+
+        await appendFile(newer, '\n## 2026-09-19T11:00:00.000Z\n\nsecond\n', 'utf8');
+        expect(await texts()).toEqual([
+          expect.stringContaining('first'),
+          expect.stringContaining('second'),
+          expect.stringContaining('code 1200'),
+        ]);
+
+        // Same length, written right after a read: only the time tells the two apart, and it may not.
+        await writeFile(older, '## 2026-09-18T10:00:00.000Z\n\ncode 9931\n', 'utf8');
+        expect(await texts()).toContainEqual(expect.stringContaining('code 9931'));
+        await writeFile(older, '## 2026-09-18T10:00:00.000Z\n\ncode 4471\n', 'utf8');
+        expect(await texts()).toContainEqual(expect.stringContaining('code 4471'));
+
+        await rm(older);
+        expect(await texts()).toEqual([expect.stringContaining('first'), expect.stringContaining('second')]);
       } finally {
         await rm(dir, { recursive: true, force: true });
       }

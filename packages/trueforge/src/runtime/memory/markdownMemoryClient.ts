@@ -11,8 +11,9 @@
  * the shared vault, and vaults shared with it; each vault ranks separately and the
  * results interleave. An unscoped client uses the shared vault only.
  *
- * `recall()` reads `MEMORY.md` plus recent daily logs and ranks entries by keyword
- * overlap with the query. When an `EmbeddingSubsystem` is attached, recall also
+ * `recall()` reads `MEMORY.md` plus every daily log and ranks entries by keyword
+ * overlap with the query, so how long ago something was saved never decides whether
+ * it can be found. When an `EmbeddingSubsystem` is attached, recall also
  * ranks by meaning: a local embedding model scores entries by semantic similarity
  * and the two rankings fuse (RRF). The vector leg only contributes when the model
  * is ready and the background backfill has indexed the history; otherwise recall
@@ -60,6 +61,7 @@ import {
   latestTombstonesByEntry,
   markSummaryFailed,
   namespaceDirFor,
+  normalizedEntryBody,
   personaForVaultFilesystemNamespace,
   personaForVaultNamespace,
   readSummaryPending,
@@ -85,6 +87,7 @@ import type {
   SummaryOutcomeNote,
   UpdateMemoryVaultEntryOutcome,
 } from './memoryClient';
+import { isNoteTooOld, noteProvenanceFromMetadata } from './memoryNotes';
 import { loadPagesForMessage } from './memoryPageLoader';
 import { rankNamedPeopleFirst } from './recallNameBoost';
 import { statementIndexFor, type StatementIndex } from './statementIndex';
@@ -105,9 +108,6 @@ export interface MarkdownMemoryClientConfig {
    */
   embeddings?: EmbeddingSubsystemResolver | undefined;
 }
-
-/** How many daily log files recall scans, newest first, before the token budget cuts it off. */
-const RECALL_MAX_DAILY_FILES = 14;
 
 /**
  * Pending retains to each daily folder in this process. An entry's id is its position in the day's file,
@@ -252,7 +252,8 @@ export class MarkdownMemoryClient implements MemoryClient {
           scan: await scanNamespaceEntries({
             baseDir: this.baseDir,
             namespace,
-            maxDailyFiles: RECALL_MAX_DAILY_FILES,
+            // Recall reads the whole log: a memory's age must never decide whether it can be found.
+            maxDailyFiles: Number.POSITIVE_INFINITY,
             // Vault deletes hide entries and vault edits replace their text: recall
             // must see the same effective entries the vault lists.
             resolveTombstones: true,
@@ -268,6 +269,8 @@ export class MarkdownMemoryClient implements MemoryClient {
       }
 
       // Each vault ranks on its own corpus and index; the lists then interleave.
+      const asked = new Date(params.queryTimestamp);
+      const now = Number.isNaN(asked.getTime()) ? new Date() : asked;
       const rankedLists = await Promise.all(
         vaults.map(({ namespace, scan }) =>
           this.rankVault({
@@ -276,10 +279,18 @@ export class MarkdownMemoryClient implements MemoryClient {
             query: params.query,
             timeoutMs: params.timeoutMs,
             currentSessionId: params.currentSessionId,
+            now,
           }),
         ),
       );
+      // The same thing saved on several days is shown once, as its best-ranked copy.
+      const shown = new Set<string>();
       for (const item of interleaveRanked(rankedLists)) {
+        const body = normalizedEntryBody(item.text);
+        if (shown.has(body)) {
+          continue;
+        }
+        shown.add(body);
         const metadata = entryMetadata(item.text);
         const occurredAt = entryOccurredAt(item);
         // The time and the chat id travel as fields: recall shows the date, and can skip notes from the current chat.
@@ -300,18 +311,31 @@ export class MarkdownMemoryClient implements MemoryClient {
     }
   }
 
-  /** One vault's entries best-first: keyword overlap, fused with its own meaning index when ready, then notes naming a person the query asks about moved to the front. The chat being answered is left out. */
+  /**
+   * One vault's entries best-first: keyword overlap, fused with its own meaning index when ready, then
+   * notes naming a person the query asks about moved to the front. The chat being answered is left out.
+   * So is read content past its freshness limit: left in, it would use up the budget and then be dropped.
+   */
   private async rankVault(input: {
     namespace: string;
     scan: NamespaceScan;
     query: string;
     timeoutMs: number;
     currentSessionId: string | undefined;
+    now: Date;
   }): Promise<RankedMemory[]> {
-    const ownEntries = input.scan.entries.filter(entry =>
-      isFromSession({ metadata: entryMetadata(entry.text), sessionId: input.currentSessionId }),
-    );
-    const excludeIds = new Set(ownEntries.map(entry => entry.id));
+    const excludeIds = new Set<string>();
+    for (const entry of input.scan.entries) {
+      const metadata = entryMetadata(entry.text);
+      if (
+        isFromSession({ metadata, sessionId: input.currentSessionId }) ||
+        // A stored note always carries its source in a trailer, so every other entry skips the age check.
+        (noteProvenanceFromMetadata(metadata) !== undefined &&
+          isNoteTooOld({ metadata, text: entryRecallText(entry.text), now: input.now }))
+      ) {
+        excludeIds.add(entry.id);
+      }
+    }
     const entries = input.scan.entries.filter(entry => !excludeIds.has(entry.id));
     const words = queryWords(input.query);
     const scored = entries

@@ -489,3 +489,22 @@ the lock stay unchanged for 30 seconds on its own clock, never by comparing file
 is wrong cannot steal a live lock. After a crash, the next writer therefore waits up to 30 seconds. A
 writer gives up after 10 seconds and the model is told to try again. The daily-log append path does not
 take this lock.
+
+## Recall from the Markdown backend
+
+Recall ranks every live entry in the vault, from the newest daily file to the oldest. How long ago
+something was saved never decides whether it can be found; only the ranking and the token budget
+decide what is shown.
+
+- **Reading the log.** A scan checks each daily file's size, change time and identity, and reads a
+  file again only when one of them differs from the last read. A file changed in the last two seconds
+  is always read again, because a second change could carry the same time. So a hand edit or a restore
+  is seen on the next recall. The parsed text is kept per process, capped at 64 MiB, and the files read
+  longest ago are dropped first.
+- **Read content past its freshness limit** (`READ_CONTENT_NOTE_MAX_AGE_DAYS`) is left out before
+  ranking. Left in, it would use up the token budget and then be dropped by the capability, which
+  applies the same limit to every backend.
+- **Copies.** When the same text was saved on several days, recall shows its best-ranked copy once.
+- **Cost.** On a test vault of 1,000 daily files and 20,000 entries, a recall after the first one takes
+  100 to 200 ms on one core. The first recall after a start reads every file and takes about half a
+  second. A vault of 100 daily files takes about 30 ms.

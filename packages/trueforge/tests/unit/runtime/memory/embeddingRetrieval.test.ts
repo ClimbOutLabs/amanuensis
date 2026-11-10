@@ -799,6 +799,39 @@ describe('EmbeddingSubsystem', () => {
     }
   });
 
+  it('finds a memory by meaning however many days of notes came after it', async () => {
+    const fixture = await makeFixture();
+    try {
+      await retainTexts(fixture, ['Alex hotel in Madrid is Petit Palace'], '2026-01-05');
+      for (let day = 1; day <= 20; day += 1) {
+        await retainTexts(fixture, ['Lexie went to the park'], `2026-09-${String(day).padStart(2, '0')}`);
+      }
+      fixture.model.vectorForText = text => (text.includes('hotel') ? oneHot(0) : oneHot(1));
+      fixture.model.queryVector = oneHot(0);
+      fixture.subsystem.ensureWarmed();
+      await waitForState(fixture.subsystem, 'ready');
+
+      const client = new MarkdownMemoryClient({
+        baseDir: fixture.baseDir,
+        namespace: fixture.namespace,
+        embeddings: () => fixture.subsystem,
+      });
+      const outcome = await client.recall({
+        query: 'accommodation in Spain',
+        maxTokens: 4000,
+        queryTimestamp: '2026-09-21T10:00:00.000Z',
+        entityTokens: 0,
+        timeoutMs: 5000,
+      });
+      expect(outcome.ok).toBe(true);
+      if (outcome.ok) {
+        expect(outcome.results[0]?.text).toBe('Alex hotel in Madrid is Petit Palace');
+      }
+    } finally {
+      await cleanup(fixture);
+    }
+  });
+
   it('finds a memory by meaning when keywords do not match', async () => {
     const fixture = await makeFixture();
     try {

@@ -8,7 +8,8 @@
  * to the text recall returns — a mismatch would re-embed every entry on each pass.
  */
 import { createHash } from 'node:crypto';
-import { readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import type { Stats } from 'node:fs';
+import { readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { MAIN_ASSISTANT_SHARING_KEY } from '@truefoundry/trueforge-core/core/memory/vaultSharing';
@@ -422,12 +423,108 @@ export function estimateTokens(text: string): number {
   return Math.ceil(text.length / CHARS_PER_TOKEN);
 }
 
+/** One daily log as last read from disk, kept so a scan of the whole history only re-reads what changed. */
+interface ParsedDailyLog {
+  mtimeMs: number;
+  size: number;
+  ino: number;
+  /** False when the file was changed so close to the read that another change could carry the same time. */
+  settled: boolean;
+  chars: number;
+  entries: readonly ScannedMemoryEntry[];
+}
+
+/** A file changed this recently is read again next time, however its size and time compare. */
+const DAILY_LOG_SETTLE_MS = 2000;
+
+/** Most text kept parsed in this process across every vault; the files read longest ago are dropped first. */
+const PARSED_DAILY_LOG_MAX_CHARS = 64 * 1024 * 1024;
+
+/** Daily logs read at once: enough to make a first scan quick, few enough to stay far below the open-file limit. */
+const DAILY_LOG_READ_CONCURRENCY = 16;
+
+const parsedDailyLogs = new Map<string, ParsedDailyLog>();
+let parsedDailyLogChars = 0;
+
+function forgetParsedDailyLog(filePath: string): void {
+  const parsed = parsedDailyLogs.get(filePath);
+  if (parsed !== undefined) {
+    parsedDailyLogChars -= parsed.chars;
+    parsedDailyLogs.delete(filePath);
+  }
+}
+
+function keepParsedDailyLog({ filePath, parsed }: { filePath: string; parsed: ParsedDailyLog }): void {
+  forgetParsedDailyLog(filePath);
+  parsedDailyLogs.set(filePath, parsed);
+  parsedDailyLogChars += parsed.chars;
+  for (const oldest of parsedDailyLogs.keys()) {
+    if (parsedDailyLogChars <= PARSED_DAILY_LOG_MAX_CHARS || oldest === filePath) {
+      break;
+    }
+    forgetParsedDailyLog(oldest);
+  }
+}
+
 /**
- * Reads a namespace's `MEMORY.md` plus daily logs. `maxDailyFiles` bounds the scan:
- * recall passes the recent-files window; the embedding backfill passes `Infinity`
- * to index the whole history. `resolveTombstones` applies the memory vault's
- * edit/delete markers so listings, recall, and the embedding index all see the
- * effective entries; it defaults to false so raw scans stay byte-identical.
+ * One daily log's entries. The file is read again whenever its size, time or identity differs from the
+ * last read, so an edit made by hand or by another process is seen on the next scan.
+ */
+async function readDailyLogEntries({
+  filePath,
+  safeNamespace,
+  file,
+}: {
+  filePath: string;
+  safeNamespace: string;
+  file: string;
+}): Promise<readonly ScannedMemoryEntry[]> {
+  let content: string;
+  let stats: Stats;
+  let readAt: number;
+  try {
+    stats = await stat(filePath);
+    const known = parsedDailyLogs.get(filePath);
+    if (
+      known?.settled === true &&
+      known.mtimeMs === stats.mtimeMs &&
+      known.size === stats.size &&
+      known.ino === stats.ino
+    ) {
+      // Re-inserting moves the file to the recently read end.
+      parsedDailyLogs.delete(filePath);
+      parsedDailyLogs.set(filePath, known);
+      return known.entries;
+    }
+    readAt = Date.now();
+    content = await readFile(filePath, 'utf8');
+  } catch {
+    // A file removed or unreadable mid-scan holds no entries; the rest of the scan goes on.
+    forgetParsedDailyLog(filePath);
+    return [];
+  }
+  // Every later scan hands out these same objects, so a caller that changed one would change it for all.
+  const entries = Object.freeze(dailyLogEntries({ safeNamespace, file, content }).map(entry => Object.freeze(entry)));
+  keepParsedDailyLog({
+    filePath,
+    parsed: {
+      mtimeMs: stats.mtimeMs,
+      size: stats.size,
+      ino: stats.ino,
+      settled: readAt - stats.mtimeMs > DAILY_LOG_SETTLE_MS,
+      chars: content.length,
+      entries,
+    },
+  });
+  return entries;
+}
+
+/**
+ * Reads a namespace's `MEMORY.md` plus daily logs, newest file first. `maxDailyFiles` bounds the scan
+ * for callers that only need recent days; recall, the vault listing and the embedding backfill pass
+ * `Infinity` to read the whole history. `resolveTombstones` applies the memory vault's edit/delete
+ * markers so listings, recall, and the embedding index all see the effective entries; it defaults to
+ * false so raw scans stay byte-identical.
  */
 export async function scanNamespaceEntries(options: {
   baseDir: string;
@@ -460,14 +557,15 @@ export async function scanNamespaceEntries(options: {
   } catch {
     // Missing daily directory is normal for a fresh namespace.
   }
-  for (const file of files) {
-    let content: string;
-    try {
-      content = await readFile(path.join(dir, 'memory', file), 'utf8');
-    } catch {
-      continue;
+  for (let start = 0; start < files.length; start += DAILY_LOG_READ_CONCURRENCY) {
+    const batch = await Promise.all(
+      files
+        .slice(start, start + DAILY_LOG_READ_CONCURRENCY)
+        .map(file => readDailyLogEntries({ filePath: path.join(dir, 'memory', file), safeNamespace, file })),
+    );
+    for (const fileEntries of batch) {
+      entries.push(...fileEntries);
     }
-    entries.push(...dailyLogEntries({ safeNamespace, file, content }));
   }
   if (options.resolveTombstones === true) {
     const tombstones = await readVaultTombstones({ baseDir: options.baseDir, namespace: options.namespace });
