@@ -94,4 +94,19 @@ describe('SpeechOutput', () => {
     output.say({ text: 'two', role: 'body' });
     expect(await output.drain()).toBe('failed');
   });
+
+  it('keeps a lost sentence as the worse outcome when a later one is refused', async () => {
+    const output = outputFor({
+      async *stream({ text }) {
+        await Promise.resolve();
+        if (text === 'one') {
+          throw new Error('the voice stopped');
+        }
+        throw new WouldChangeTextError();
+      },
+    });
+    output.say({ text: 'one', role: 'body' });
+    output.say({ text: 'two', role: 'body', exact: true });
+    expect(await output.drain()).toBe('failed');
+  });
 });

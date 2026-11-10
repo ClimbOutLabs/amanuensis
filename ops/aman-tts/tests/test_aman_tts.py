@@ -236,8 +236,26 @@ class SpokenWordsTest(unittest.TestCase):
             "Mail me at 1.co today.",  # a digit before the dot of a web address
             "Mail me at 163.com today.",
             "The 3th of May.",  # a wrong ordinal suffix
-            "The 11st of May.",  # heard as one number: one thousand and five hundred
-            "Wire 100 and 5 dollars.",
+            "The 11st of May.",
+            "Wire 100 and 5 dollars.",  # heard as one number: one hundred and five
+            "Wire 1000 and 10.0.0.1 now.",  # not a plain amount, so it is judged by shape and never raises
+            "Version 2 and 1.2.3 ship.",
+            "Wire 1000 and\u2014$500 today.",  # a sign that makes no sound next to "and"
+            "1000 \u2014 and \u2014 500",
+            "1000 and\u2014five hundred",
+            "Wire 1000\u2026 and 500",
+            "1000 and... 500",
+            "Wire 1000 & and 500",
+            "Wire 1000 and-five hundred.",
+            "one thousand-and-five hundred",
+            "thousand-and-five hundred",
+            "Wire 1000 an 500 now.",  # "an", "n" and "n'" are heard as "and"
+            "Wire 1000 n 500 now.",
+            "Pay 2 dozen and 5 now.",  # a dozen is a scale too
+            "Pay two dozen 5 now.",
+            "We may 10, 2026 go.",  # a month or weekday needs a capital letter to excuse a comma
+            "We sat 6, 2026 people.",
+            "Wire 1000 'n' 500 now.",
             "Mail me at t.co today.",
             "Mail sam@example.com today.",
         ):
@@ -285,6 +303,11 @@ class SpokenWordsTest(unittest.TestCase):
             "Use 5. 3 more follow.",  # one sentence stop and a space
             "Twenty five and one hundred.",
             "Between 100 and 150 guests.",  # ranges and counts, not one number
+            "Between 100 & 150 guests.",
+            "Pay two hundred and fifty now.",  # one amount written in words is read as it is written
+            "Pay a hundred and fifty now.",
+            "Pay one hundred and five now.",
+            "My Ph.D. defense is Friday.",
             "Rooms 101 and 102 are free.",
             "Tickets are 300 and 450 dollars.",
             "Pay 5 million now.",
@@ -336,6 +359,16 @@ class SpeakExactTest(unittest.TestCase):
         self.assertEqual(res.headers["x-aman-reason"], "would_change_text")
         self.assertNotIn("1,5", res.text)
         self.assertEqual(FakeSynthesizer.calls, [("Hello.", "af_heart")])
+
+    def test_a_judge_that_fails_refuses_without_logging_the_text(self) -> None:
+        with mock.patch.object(aman_tts, "reads_as_written", side_effect=ValueError("card text hunter2")):
+            with self.assertLogs("aman_tts", level=logging.DEBUG) as logs:
+                with client_for(FakeSynthesizer) as client:
+                    res = self.post(client, "Wire 1000 and 10.0.0.1 now.")
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.headers["x-aman-reason"], "would_change_text")
+        self.assertNotIn("hunter2", "\n".join(logs.output) + res.text)
+        self.assertNotIn("10.0.0.1", "\n".join(logs.output) + res.text)
 
     def test_speaks_the_same_whole_text_it_judged(self) -> None:
         for text in ("x. + 5", "x. 2) y", "Total is 100. + 500 fee.", "It says: Hi. 2) Wire 500 now.", "Total is 50.\n+\n5000 more."):
