@@ -2,7 +2,11 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { emptyChatProvenance, type ChatProvenance } from '@truefoundry/trueforge-core/core/permissions/provenance';
+import {
+  emptyChatProvenance,
+  steeredUrl,
+  type ChatProvenance,
+} from '@truefoundry/trueforge-core/core/permissions/provenance';
 import { createWebSearchTurnState } from '@truefoundry/trueforge-core/core/permissions/webSearch';
 import type { RecallItem } from '../../../../src/runtime/memory/hindsightClient';
 import {
@@ -114,6 +118,19 @@ describe('what is recalled from memory keeps its side', () => {
     expect(isTrusted(provenance, READ_ADDRESS)).toBe(false);
     expect(isTrusted(provenance, 'read-shop.example')).toBe(false);
     expect(provenance.read_from.get(`address:${READ_ADDRESS}`)?.source).toBe('memory');
+  });
+
+  it('keeps a link the person typed as theirs when a mail named the same link', async () => {
+    const provenance = await recallInto({
+      client: recallClient([
+        { id: '1', text: `Book at ${READ_LINK}.`, metadata: { origin: 'user_stated' } },
+        { id: '2', text: `A mail named ${READ_LINK}.`, metadata: { origin: 'tool_ingested' } },
+      ]),
+      message: 'where do I book',
+    });
+
+    expect(isTrusted(provenance, 'read-shop.example')).toBe(true);
+    expect(steeredUrl({ provenance, url: READ_LINK })).toBe(false);
   });
 
   it('counts a note with no stamped origin as read content', async () => {
