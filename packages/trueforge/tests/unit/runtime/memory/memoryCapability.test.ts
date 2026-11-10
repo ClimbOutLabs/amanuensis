@@ -486,7 +486,7 @@ describe('HindsightMemoryProcessor.processPreLLM', () => {
     expect(typeof event['injected_block']).toBe('string');
 
     const messages = [{ role: 'user' as const, content: 'hi' }];
-    const result = ephemeral.processPreLLMEphemeral(messages);
+    const result = ephemeral.processPreLLMEphemeral(messages, { modelSupportsVision: false });
     expect(result?.[0]?.content).toBe(event['injected_block']);
   });
 
@@ -597,7 +597,7 @@ describe('HindsightMemoryProcessor.processPreLLM', () => {
     ];
     const snapshot = JSON.parse(JSON.stringify(original));
 
-    const result = ephemeral.processPreLLMEphemeral(original);
+    const result = ephemeral.processPreLLMEphemeral(original, { modelSupportsVision: false });
     expect(original).toEqual(snapshot);
     expect(result).toBeDefined();
     if (!result) {
@@ -633,11 +633,14 @@ describe('HindsightMemoryProcessor.processPreLLM', () => {
     await collect(processor.processPreLLM(makeExecution([{ role: 'user', content: 'What does Priya drink?' }])));
 
     const fileText = '<untrusted-document>invoice total is 40</untrusted-document>';
-    const result = ephemeral.processPreLLMEphemeral([
-      { role: 'system', content: 'sys' },
-      { role: 'user', content: 'What does Priya drink?' },
-      { role: 'user', content: [{ type: 'text', text: fileText }] },
-    ]);
+    const result = ephemeral.processPreLLMEphemeral(
+      [
+        { role: 'system', content: 'sys' },
+        { role: 'user', content: 'What does Priya drink?' },
+        { role: 'user', content: [{ type: 'text', text: fileText }] },
+      ],
+      { modelSupportsVision: false },
+    );
     expect(result?.map(message => message.role)).toEqual(['system', 'system', 'user', 'user']);
     expect(result?.[1]?.content).toEqual(expect.stringContaining('<aman-memory>'));
     expect(result?.[2]?.content).toBe('What does Priya drink?');
@@ -659,7 +662,9 @@ describe('HindsightMemoryProcessor.processPreLLM', () => {
     }
     await collect(processor.processPreLLM(makeExecution([{ role: 'user', content: 'hi' }])));
 
-    expect(ephemeral.processPreLLMEphemeral([{ role: 'user', content: 'hi' }])).toBeUndefined();
+    expect(
+      ephemeral.processPreLLMEphemeral([{ role: 'user', content: 'hi' }], { modelSupportsVision: false }),
+    ).toBeUndefined();
   });
 
   it('loads pending state defensively, resetting to empty on a bad shape', async () => {

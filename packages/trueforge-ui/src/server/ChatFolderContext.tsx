@@ -209,26 +209,16 @@ export function ChatFolderProvider({ store, children }: { store?: ChatFolderStor
   const moveChat = useCallback(
     async ({ sessionId, folderId }: { sessionId: string; folderId: string | null }) => {
       if (store === undefined) throw new Error('Chat folders are not available on this server');
-      const previous = assignments.get(sessionId);
+      // Applied only once the server accepts it: moving the row earlier would remount the dialog that shows a failure.
+      await store.setSessionFolder({ sessionId, folderId });
       setAssignments(current => {
         const next = new Map(current);
         if (folderId === null) next.delete(sessionId);
         else next.set(sessionId, folderId);
         return next;
       });
-      try {
-        await store.setSessionFolder({ sessionId, folderId });
-      } catch (error) {
-        setAssignments(current => {
-          const next = new Map(current);
-          if (previous === undefined) next.delete(sessionId);
-          else next.set(sessionId, previous);
-          return next;
-        });
-        throw error;
-      }
     },
-    [assignments, store],
+    [store],
   );
 
   const value = useMemo<ChatFolderContextValue | null>(() => {

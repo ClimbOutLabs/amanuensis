@@ -1,5 +1,6 @@
 import type { Transaction } from 'kysely';
 
+import { DeliveryStore } from '../../db/deliveryStore';
 import { migrateToLatest } from '../../db/migratePostgres';
 import { PostgresAgentStore } from '../../db/postgres/agent-store/PostgresAgentStore';
 import { createDb } from '../../db/postgres/client';
@@ -25,6 +26,7 @@ export async function openPostgresStores(options: {
   poolMax: number;
   statementTimeoutMs: number;
   idleInTransactionSessionTimeoutMs: number;
+  connectionTimeoutMs: number;
   migrate: boolean;
 }): Promise<ExportStores<Transaction<PostgresDatabase>>> {
   const db = createDb({
@@ -32,6 +34,11 @@ export async function openPostgresStores(options: {
     poolMax: options.poolMax,
     statementTimeoutMs: options.statementTimeoutMs,
     idleInTransactionSessionTimeoutMs: options.idleInTransactionSessionTimeoutMs,
+    connectionTimeoutMs: options.connectionTimeoutMs,
+    // A command-line run reports to the terminal; the failing query surfaces the error itself.
+    onIdleClientError: error => {
+      console.error(`A Postgres connection broke while idle: ${error.message}`);
+    },
   });
   try {
     if (options.migrate) {
@@ -57,6 +64,7 @@ export async function openPostgresStores(options: {
     tokenStore: new PostgresOAuthTokenStore(db),
     googleConnectionStore: new PostgresGoogleConnectionStore(db),
     auditStore: new SentinelAuditStore(db),
+    deliveryStore: new DeliveryStore(db),
     close: () => db.destroy(),
   };
 }

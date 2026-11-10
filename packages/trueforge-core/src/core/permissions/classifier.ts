@@ -35,7 +35,7 @@ import {
   MAIL_CONTENT_TOOL_NAME,
 } from '../email/mailConnector/toolContract';
 import { GOOGLE_SETUP_SERVER_ID, GOOGLE_SETUP_STATUS_TOOL_NAME } from '../google/setupToolContract';
-import type { DocumentScope, MapsHosts } from '../llm/LLMTypes';
+import type { BrowserClickReview, DocumentScope, MapsHosts } from '../llm/LLMTypes';
 import {
   isPersonaWriteToolName,
   LIST_PERSONAS_TOOL_NAME,
@@ -65,6 +65,14 @@ import {
   type ShellApprovalBinding,
 } from './approvalTokens';
 import { recordClassificationAudit } from './audit';
+import { browserOpenCard, classifyBrowserActionTool, classifyBrowserViewTool } from './browserTier';
+import {
+  BROWSER_OPEN_GUARD_REASON,
+  BROWSER_OPEN_PRIVATE_DETAIL_REASON,
+  BROWSER_OPEN_SILENT_REASON,
+  BROWSER_OPEN_TOOL_NAME,
+  BROWSER_OPEN_UNVOUCHED_REASON,
+} from './browserToolNames';
 import {
   FIRST_PARTY_TOOL_REASON,
   MAIL_MARK_AS_READ_REASON,
@@ -103,7 +111,15 @@ import {
   type OutboundGuardVerdict,
   type OutboundStrings,
 } from './outboundGuard';
-import { carriedPrivateDetails, hasReadContent, namesUrl, steeredDestinations, steeredLinks } from './provenance';
+import {
+  carriedPrivateDetails,
+  hasReadContent,
+  isPersonVouchedUrl,
+  namesUrl,
+  steeredDestinations,
+  steeredLinks,
+  steeredUrl,
+} from './provenance';
 import { isRunnerWorkflow } from './runner';
 import { scriptFileLoadsOnlyStandardCode, scriptFileText, scriptLoadsOnlyStandardCode } from './scriptImports';
 import {
@@ -243,6 +259,13 @@ export interface SentinelAction {
   persona_write?: Tier3Persona | undefined;
   /** The reminder a set or cancel call touches, settled by the schedule tool set so the activity line reads it plainly. */
   reminder?: ReminderLine | undefined;
+  /**
+   * Context for a browser_click call, read from the live page before the click: the site, the
+   * element's accessible name, whether it submits a form, and the form's values. Set by the browser
+   * tool set from the sidecar's read, never from model params. Undefined when the host could not
+   * read it, which fails the call closed to the generic Tier 3 path.
+   */
+  browser_click?: BrowserClickReview | undefined;
 }
 
 /** What the activity line says about one reminder: when it is due in plain words (set only), and what it says. */
@@ -2057,6 +2080,104 @@ async function classifySearchProviderTool(input: {
   });
 }
 
+/**
+ * Aman's own browser opening a page. The address goes to the site, so anything the assistant put in it leaves with
+ * the request: the open runs without asking only when it passes every check a search provider's page read passes,
+ * and, once the chat has read other people's content, only when the person vouched for the address. Otherwise it
+ * asks, with the exact address on the card; a scheduled run, with nobody to answer, skips the ones content steered.
+ *
+ * In order: the outbound secret guard (a held key is masked on the card), the person's search setting, the guard's
+ * other rules, the turn's silent lookup limit, a link that read content chose, a private detail of the person's in a
+ * chat that read other content, and an address the person never gave in a chat that read other content.
+ */
+async function classifyBrowserOpen(input: { action: SentinelAction; ctx: ClassifyContext }): Promise<TierDecision> {
+  const { action, ctx } = input;
+  const assistant = ctx.web_search.assistantName;
+  const say = holdSay(assistant);
+  const rawUrl = action.canonical_params['url'];
+  const url = typeof rawUrl === 'string' ? rawUrl : '';
+  const owner = { tenant_id: ctx.tenant_id, created_by: ctx.created_by };
+  const strings = collectOutboundStrings(action.canonical_params);
+  const provenance = ctx.web_search.provenance;
+  const ask = async (reason: string, reasonSay: string, shownUrl: string = url): Promise<TierDecision> => {
+    // The card shows the address as the browser will read it, so a look-alike spelling cannot hide the real site.
+    const parsed = URL.canParse(shownUrl) ? new URL(shownUrl) : undefined;
+    const shown = escapeDisplayText(parsed?.href ?? shownUrl);
+    return tier3Decision({
+      card: browserOpenCard({
+        url: shown,
+        host: parsed === undefined ? null : escapeDisplayText(parsed.hostname),
+        plain_what: withHoldSay(`Open ${shown}?`, reasonSay),
+        plain_why: plainWhy(ctx.agent_intent),
+      }),
+      reason,
+      reason_detail: reasonSay,
+      sensitive_read: false,
+      approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
+    });
+  };
+
+  const { secrets, verdict } = await outboundGuard({ ctx, strings });
+  if (!verdict.ok && verdict.rule === 'server_secret') {
+    const masked = maskServerSecrets({ params: action.canonical_params, secrets, earlier: ctx.web_search.sentText });
+    const maskedUrl = masked?.['url'];
+    return ask(BROWSER_OPEN_GUARD_REASON, SECRET_SAY, typeof maskedUrl === 'string' ? maskedUrl : HIDDEN_QUERY);
+  }
+  if (!(await ctx.services.searchWithoutAsking(owner))) {
+    return ask(BROWSER_OPEN_GUARD_REASON, say.search_setting);
+  }
+  if (!verdict.ok) {
+    return ask(BROWSER_OPEN_GUARD_REASON, guardRuleSay({ rule: verdict.rule, assistant }));
+  }
+  if (ctx.web_search.silentSearches >= SILENT_SEARCH_LIMIT) {
+    return autoDenyDecision({
+      reason: 'lookup_limit',
+      reason_detail: say.search_limit,
+      owner_message: say.search_limit,
+      sensitive_read: false,
+    });
+  }
+  // Opening exactly a link a page named is steered too: there is no link of the person's to compare it with.
+  if (steeredUrl({ provenance, url }) || steeredLinks({ provenance, values: [url] }).length > 0) {
+    return ctx.services.unattended
+      ? steeredSkipped(ctx)
+      : steeringChecked({
+          decision: await ask(
+            CONTENT_STEERED_REASON,
+            `${assistant} would only open this because a page it read named it, not you.`,
+          ),
+          ctx,
+          guests: [],
+        });
+  }
+  if (hasReadContent(provenance)) {
+    if (carriedPrivateDetails({ provenance, values: [url] }).length > 0) {
+      return ctx.services.unattended
+        ? privateDetailSkipped(ctx)
+        : ask(BROWSER_OPEN_PRIVATE_DETAIL_REASON, say.private_detail);
+    }
+    // After reading other people's content, an address the person never gave may have been put together to carry
+    // something out (a host built in pieces, a form id, data in the path or query), so it asks.
+    if (!isPersonVouchedUrl({ provenance, url })) {
+      return ctx.services.unattended
+        ? steeredSkipped(ctx)
+        : ask(
+            BROWSER_OPEN_UNVOUCHED_REASON,
+            `${assistant} has read things written by other people in this chat, and you did not give this address, so ${assistant} is checking with you first.`,
+          );
+    }
+  }
+  // The address leaves with this call, so a later silent lookup sees a secret split across the two.
+  if (strings !== undefined) {
+    ctx.web_search.sentText = appendOutboundTrace({ earlier: ctx.web_search.sentText, strings });
+  }
+  return tier1Decision({
+    reason: BROWSER_OPEN_SILENT_REASON,
+    reason_detail: `Opened: ${url}`,
+    sensitive_read: false,
+  });
+}
+
 /** A held call that is skipped rather than asked, for a scheduled run with nobody to answer. */
 function steeredSkipped(ctx: ClassifyContext): TierDecision {
   const assistant = ctx.web_search.assistantName;
@@ -3534,6 +3655,23 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
           connector: connectorBindingFor(action),
         }),
       });
+    }
+    // Aman's own browser. Opening a page sends its address, so it goes through the outbound checks (see
+    // classifyBrowserOpen); the tools that only look at the open page run silently, and the tools that
+    // act on it are classified by classifyBrowserActionTool (a commit click asks first).
+    if (action.tool_name === BROWSER_OPEN_TOOL_NAME) {
+      return classifyBrowserOpen({ action, ctx });
+    }
+    const browserView = classifyBrowserViewTool(action);
+    if (browserView !== undefined) {
+      return browserView;
+    }
+    const browserAction = await classifyBrowserActionTool({
+      action,
+      mintToken: () => mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
+    });
+    if (browserAction !== undefined) {
+      return steeringChecked({ decision: browserAction, ctx, guests: [] });
     }
   }
 

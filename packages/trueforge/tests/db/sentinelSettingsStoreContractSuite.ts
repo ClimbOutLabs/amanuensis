@@ -13,6 +13,8 @@ const keepAll = {
   search_without_asking: undefined,
   maps_without_asking: undefined,
   sandbox_without_asking: undefined,
+  chat_search_enabled: undefined,
+  package_downloads_without_project_allowed: undefined,
 };
 
 export function runSentinelSettingsStoreContractSuite(getStore: () => ISentinelSettingsStore): void {
@@ -23,6 +25,8 @@ export function runSentinelSettingsStoreContractSuite(getStore: () => ISentinelS
       search_without_asking: true,
       maps_without_asking: true,
       sandbox_without_asking: true,
+      chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
     });
   });
 
@@ -35,6 +39,8 @@ export function runSentinelSettingsStoreContractSuite(getStore: () => ISentinelS
       search_without_asking: false,
       maps_without_asking: true,
       sandbox_without_asking: false,
+      chat_search_enabled: true,
+      package_downloads_without_project_allowed: true,
     });
     expect(saved).toEqual({
       offline_mode: true,
@@ -42,8 +48,22 @@ export function runSentinelSettingsStoreContractSuite(getStore: () => ISentinelS
       search_without_asking: false,
       maps_without_asking: true,
       sandbox_without_asking: false,
+      chat_search_enabled: true,
+      package_downloads_without_project_allowed: true,
     });
     expect(await store.get(alice)).toEqual(saved);
+  });
+
+  it('the project-less download allowance turns on and off on its own', async () => {
+    const store = getStore();
+    expect(
+      (await store.patch({ ...alice, ...keepAll, package_downloads_without_project_allowed: true }))
+        .package_downloads_without_project_allowed,
+    ).toBe(true);
+    expect(
+      (await store.patch({ ...alice, ...keepAll, package_downloads_without_project_allowed: false }))
+        .package_downloads_without_project_allowed,
+    ).toBe(false);
   });
 
   it('patch keeps the fields it was not given', async () => {
@@ -55,6 +75,8 @@ export function runSentinelSettingsStoreContractSuite(getStore: () => ISentinelS
       search_without_asking: false,
       maps_without_asking: true,
       sandbox_without_asking: false,
+      chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
     });
 
     expect(await store.patch({ ...alice, ...keepAll, tier2_auto_allow: [] })).toEqual({
@@ -63,6 +85,8 @@ export function runSentinelSettingsStoreContractSuite(getStore: () => ISentinelS
       search_without_asking: false,
       maps_without_asking: true,
       sandbox_without_asking: false,
+      chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
     });
     await store.patch({ ...alice, ...keepAll, tier2_auto_allow: ['file_write'] });
     expect(await store.patch({ ...alice, ...keepAll, offline_mode: false })).toEqual({
@@ -71,6 +95,8 @@ export function runSentinelSettingsStoreContractSuite(getStore: () => ISentinelS
       search_without_asking: false,
       maps_without_asking: true,
       sandbox_without_asking: false,
+      chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
     });
     expect(await store.patch({ ...alice, ...keepAll, search_without_asking: true })).toEqual({
       offline_mode: false,
@@ -78,6 +104,8 @@ export function runSentinelSettingsStoreContractSuite(getStore: () => ISentinelS
       search_without_asking: true,
       maps_without_asking: true,
       sandbox_without_asking: false,
+      chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
     });
     expect(await store.patch({ ...alice, ...keepAll, maps_without_asking: false })).toEqual({
       offline_mode: false,
@@ -85,6 +113,8 @@ export function runSentinelSettingsStoreContractSuite(getStore: () => ISentinelS
       search_without_asking: true,
       maps_without_asking: false,
       sandbox_without_asking: false,
+      chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
     });
     expect(await store.patch({ ...alice, ...keepAll, sandbox_without_asking: true })).toEqual({
       offline_mode: false,
@@ -92,6 +122,26 @@ export function runSentinelSettingsStoreContractSuite(getStore: () => ISentinelS
       search_without_asking: true,
       maps_without_asking: false,
       sandbox_without_asking: true,
+      chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
+    });
+    expect(await store.patch({ ...alice, ...keepAll, chat_search_enabled: true })).toEqual({
+      offline_mode: false,
+      tier2_auto_allow: ['file_write'],
+      search_without_asking: true,
+      maps_without_asking: false,
+      sandbox_without_asking: true,
+      chat_search_enabled: true,
+      package_downloads_without_project_allowed: false,
+    });
+    expect(await store.patch({ ...alice, ...keepAll, offline_mode: true })).toEqual({
+      offline_mode: true,
+      tier2_auto_allow: ['file_write'],
+      search_without_asking: true,
+      maps_without_asking: false,
+      sandbox_without_asking: true,
+      chat_search_enabled: true,
+      package_downloads_without_project_allowed: false,
     });
   });
 
@@ -103,6 +153,8 @@ export function runSentinelSettingsStoreContractSuite(getStore: () => ISentinelS
       search_without_asking: true,
       maps_without_asking: true,
       sandbox_without_asking: true,
+      chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
     });
     expect(
       await store.patch({ tenant_id: 't1', created_by: 'carol', ...keepAll, search_without_asking: false }),
@@ -112,6 +164,8 @@ export function runSentinelSettingsStoreContractSuite(getStore: () => ISentinelS
       search_without_asking: false,
       maps_without_asking: true,
       sandbox_without_asking: true,
+      chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
     });
   });
 
@@ -124,6 +178,8 @@ export function runSentinelSettingsStoreContractSuite(getStore: () => ISentinelS
       search_without_asking: true,
       maps_without_asking: true,
       sandbox_without_asking: true,
+      chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
     });
   });
 
@@ -142,6 +198,8 @@ export function runSentinelSettingsStoreContractSuite(getStore: () => ISentinelS
       search_without_asking: false,
       maps_without_asking: false,
       sandbox_without_asking: false,
+      chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
     });
 
     const untouched = {
@@ -150,6 +208,8 @@ export function runSentinelSettingsStoreContractSuite(getStore: () => ISentinelS
       search_without_asking: true,
       maps_without_asking: true,
       sandbox_without_asking: true,
+      chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
     };
     expect(await store.get({ tenant_id: 't1', created_by: 'bob' })).toEqual(untouched);
     expect(await store.get({ tenant_id: 't2', created_by: 'alice' })).toEqual(untouched);

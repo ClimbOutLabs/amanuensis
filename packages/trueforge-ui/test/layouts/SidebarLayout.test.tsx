@@ -9,6 +9,7 @@ import { SpaceProvider, type SpaceStore } from '@/server/SpaceContext.js';
 import { SlotsProvider } from '@/theme/SlotsProvider.js';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { noSpaceFolders } from '../server/noSpaceFolders.js';
 
 import { RuntimeHarness } from '../containers/RuntimeHarness.js';
 import { createMockAgentUIServer, createMockCatalog, createMockScheduleServer } from '../server/mockServer.js';
@@ -226,6 +227,7 @@ function mockSpaceStore(): SpaceStore {
       throw new Error('not found');
     }),
     delete: vi.fn(async () => {}),
+    ...noSpaceFolders,
   };
 }
 

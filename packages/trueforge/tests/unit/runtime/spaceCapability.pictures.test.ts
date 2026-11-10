@@ -16,6 +16,7 @@ import type { SpaceRecord } from '../../../src/db/spaceStore';
 import { spaceCapability, type SpaceToolStore } from '../../../src/runtime/spaceCapability';
 import { SPACE_PICTURE_DATA_MAX_CHARS } from '../../../src/runtime/spaceLinks';
 import { isRecord } from '../../fixtures/jsonGuards';
+import { noSpaceFolders } from './spaceFolderStoreFake';
 
 const NOOP_EXECUTION_TRACE: AgentExecutionTrace = {
   runInContext: operation => operation(),
@@ -118,6 +119,7 @@ function makeStore(): SpaceToolStore {
       throw new Error('not used in these tests');
     },
     getSpace: async input => rows.get(input.space_id),
+    ...noSpaceFolders,
     getSpaceRevision: async () => undefined,
     listSpacesWithAggregate: async () => ({
       records: [...rows.values()],

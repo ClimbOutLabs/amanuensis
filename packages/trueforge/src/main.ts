@@ -9,7 +9,7 @@
  * (migrate, Redis, listen) are caught below and exit non-zero. SQLite vs
  * Postgres store modules stay dynamic so only the active engine is loaded.
  */
-import { extractErrorLogFields } from '@truefoundry/trueforge-core/core';
+import { configureOutboundFetches, extractErrorLogFields } from '@truefoundry/trueforge-core/core';
 import type { Context } from 'hono';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
@@ -50,6 +50,21 @@ try {
   process.exit(1);
 }
 
+configureOutboundFetches({
+  model: {
+    connectTimeoutMs: configuration.MODEL_HTTP_CONNECT_TIMEOUT_MS,
+    headersTimeoutMs: configuration.MODEL_HTTP_HEADERS_TIMEOUT_MS,
+    bodyTimeoutMs: configuration.MODEL_HTTP_BODY_TIMEOUT_MS,
+    maxRetries: configuration.MODEL_HTTP_MAX_RETRIES,
+  },
+  mcp: {
+    connectTimeoutMs: configuration.MCP_HTTP_CONNECT_TIMEOUT_MS,
+    headersTimeoutMs: configuration.MCP_HTTP_HEADERS_TIMEOUT_MS,
+    bodyTimeoutMs: configuration.MCP_HTTP_BODY_TIMEOUT_MS,
+    maxRetries: configuration.MCP_HTTP_MAX_RETRIES,
+  },
+});
+
 import { serve } from '@hono/node-server';
 import {
   CancellationReason,
@@ -78,6 +93,7 @@ import type { AgentRecord, IAgentStore } from './db/agentStore';
 import { BriefItemCompletionStore, type IBriefItemCompletionStore } from './db/briefItemCompletionStore';
 import type { IChatImageStore } from './db/chatImageStore';
 import type { ICompletedTurnEventStore } from './db/completedTurnEvents';
+import { DeliveryStore, type IDeliveryStore } from './db/deliveryStore';
 import type { IGlobalSettingsStore } from './db/globalSettingsStore';
 import type { IGoogleConnectionStore } from './db/googleConnectionStore';
 import type { IMcpServerStore, IMcpServerWithAuthStore } from './db/mcpServerStore';
@@ -88,6 +104,7 @@ import type { IPersonalizationStore } from './db/personalizationStore';
 import type { IPersonaStore } from './db/personaStore';
 import type { PostgresAgentStore } from './db/postgres/agent-store/PostgresAgentStore';
 import type { Database as PostgresDatabase } from './db/postgres/types';
+import { PushSubscriptionStore, type IPushSubscriptionStore } from './db/pushSubscriptionStore';
 import type { IRepositoryStore } from './db/repositoryStore';
 import type { ISandboxProviderStore } from './db/sandboxProviderStore';
 import type { IScheduleStore } from './db/scheduleStore';
@@ -106,13 +123,17 @@ import { serverTlsServeOptions } from './http/tls';
 import { createServerLogger, shouldColorize } from './logger';
 import type { IOAuthTokenStore } from './mcp/auth/types';
 import { PACKAGE_VERSION } from './packageVersion';
+import { closePersonaKnowledgeIndexers } from './personaKnowledge/knowledgeIndexer';
 import { ActiveTurnRegistry } from './runtime/activeTurns';
 import { registerCalendarConnectorForBoot } from './runtime/calendarAccount';
 import { createChatImageService } from './runtime/chatImages/chatImageService';
 import { CHAT_IMAGE_RETENTION_DAYS } from './runtime/chatImages/limits';
 import { createImageReencoder } from './runtime/chatImages/reencodeInSandbox';
+import { ChatSearchIndexer } from './runtime/chatSearchIndexing';
 import { recoverAbandonedCommandExecutions } from './runtime/commandExecutionRecovery';
 import { designateTavilyAtBoot, seedDefaultSearchProviderAtBoot } from './runtime/defaultSearchProvider';
+import { createDeliveryService } from './runtime/delivery/deliveryService';
+import { createWebPushSender } from './runtime/delivery/webPushSender';
 import { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { registerMailConnectorFromSavedAccountInBackground } from './runtime/mailAccount';
 import { prepareMailPolicyAtBoot, registerMailConnectorAtBoot } from './runtime/mailConnector';
@@ -124,6 +145,7 @@ import { getSharedRunCodeService } from './runtime/sessionResources';
 import { createTokenFactoryBudget } from './runtime/tokenFactoryBudget';
 import { ensureEnvManagedTokenFactoryProvider, seedEnvManagedDefaultChatModel } from './runtime/tokenFactoryProvider';
 import { TurnDrainRegistry } from './runtime/turnDrains';
+import { createPackageMirrorAllowanceCheck } from './sandbox/mirrors/packageMirrorAllowance';
 import { slotsBackendEnabled, startPackageMirrorGateway, startSkillNetworkGateway } from './sandbox/slotBackend';
 import { printStandaloneStartupBanner } from './startupBanner';
 import { TENANT_ID } from './tenancy';
@@ -184,6 +206,8 @@ interface ServerPersistence<TTransaction> {
   sentinelAuditStore: ISentinelAuditStore;
   sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
   briefItemStore: IBriefItemCompletionStore;
+  deliveryStore: IDeliveryStore;
+  pushSubscriptionStore: IPushSubscriptionStore;
   approvalTokenStore: ApprovalTokenStore;
   destroyDb: () => Promise<void>;
   redis: RedisClientType | undefined;
@@ -418,6 +442,8 @@ async function createStandalonePersistence(options: {
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
     briefItemStore: new BriefItemCompletionStore(db),
+    deliveryStore: new DeliveryStore(db),
+    pushSubscriptionStore: new PushSubscriptionStore(db),
     approvalTokenStore: new SqliteApprovalTokenStore(db),
     modelProviderStore,
     resolveModelProviderStore: () => modelProviderStore,
@@ -443,6 +469,7 @@ async function createDistributedPersistence(options: {
     DATABASE_POOL_MAX: databasePoolMax,
     POSTGRES_STATEMENT_TIMEOUT_MS: statementTimeoutMs,
     POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS: idleInTransactionSessionTimeoutMs,
+    POSTGRES_CONNECT_TIMEOUT_MS: connectionTimeoutMs,
     REDIS_URL: redisUrl,
     EXECUTOR_ID: executorId,
   } = configuration;
@@ -504,6 +531,13 @@ async function createDistributedPersistence(options: {
     poolMax: databasePoolMax,
     statementTimeoutMs,
     idleInTransactionSessionTimeoutMs,
+    connectionTimeoutMs,
+    onIdleClientError: error => {
+      logger.error(
+        'A Postgres connection in the pool broke; the next query opens a new one',
+        extractErrorLogFields(error),
+      );
+    },
   });
   await migrateToLatest(db);
   logger.info('Distributed mode: postgres');
@@ -588,6 +622,8 @@ async function createDistributedPersistence(options: {
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     sentinelSettingsStore: new PostgresSentinelSettingsStore(db),
     briefItemStore: new BriefItemCompletionStore(db),
+    deliveryStore: new DeliveryStore(db),
+    pushSubscriptionStore: new PushSubscriptionStore(db),
     approvalTokenStore: new PostgresApprovalTokenStore(db),
     modelProviderStore,
     resolveModelProviderStore,
@@ -629,6 +665,8 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     sentinelAuditStore,
     sentinelSettingsStore,
     briefItemStore,
+    deliveryStore,
+    pushSubscriptionStore,
     approvalTokenStore,
     destroyDb,
     redis,
@@ -754,6 +792,12 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     tokens: tokenStore,
     googleConnections: googleConnectionStore,
   });
+  const deliveryService = createDeliveryService({
+    store: deliveryStore,
+    senders: [createWebPushSender({ subscriptions: pushSubscriptionStore, settings: configuration.WEB_PUSH })],
+    audit: sentinelAuditStore,
+    logger,
+  });
   const sentinelServices = createSentinelServices({
     demoMode: configuration.DEMO_MODE,
     demoSendAllowlist: configuration.DEMO_SEND_ALLOWLIST,
@@ -832,7 +876,22 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   const resolveAgentStore = (c: Context) => persistence.resolveAgentStore(resolveRequestContext(c));
   const resolveSandboxProviderStore = (c: Context) => persistence.resolveSandboxProviderStore(resolveRequestContext(c));
   const resolveSkillStore = (c: Context) => persistence.resolveSkillStore(resolveRequestContext(c));
+  // Mirror grants are checked against the shared database, so turning downloads off or deleting a
+  // chat through any server ends them here too.
+  const packageMirrorAllowanceHolds = createPackageMirrorAllowanceCheck({
+    sessionStore,
+    repositoryStore,
+    sentinelSettingsStore,
+  });
+  const chatSearchIndexer = new ChatSearchIndexer({
+    sessionStore,
+    globalSettingsStore,
+    sentinelSettingsStore,
+    personaStore,
+    logger,
+  });
   const app = createServerApp({
+    chatSearchIndexer,
     modelCatalog,
     mcpCatalog,
     skillCatalog: SkillCatalog.load(),
@@ -864,6 +923,10 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     sentinelAuditStore,
     sentinelSettingsStore,
     briefItemStore,
+    deliveryStore,
+    pushSubscriptionStore,
+    deliveryService,
+    webPushPublicKey: configuration.WEB_PUSH?.publicKey,
     sessions,
     chatImages,
     activeTurns,
@@ -898,6 +961,8 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     chatImageStore,
     turnDrains,
     sentinelAuditStore,
+    chatSearchIndexer,
+    packageMirrorAllowanceHolds,
   };
 }
 
@@ -976,6 +1041,8 @@ try {
     chatImageStore,
     turnDrains,
     sentinelAuditStore,
+    chatSearchIndexer,
+    packageMirrorAllowanceHolds,
   } = configuration.STANDALONE
     ? await createServerRuntime(
         await createStandalonePersistence({ sqlitePath: configuration.SQLITE_PATH, logger }),
@@ -1018,6 +1085,9 @@ try {
     void sweepExpiredTurnArtifacts();
   }, 86_400_000);
   artifactRetentionTimer.unref();
+
+  // Finish past-chat search passes a stop, an import or a failed write left pending.
+  void chatSearchIndexer.resumePending();
 
   // Abandoned Google consents hold a client secret; consent reads already purge, this covers an idle install.
   const googlePendingPurgeTimer = setInterval(() => {
@@ -1167,7 +1237,7 @@ try {
 
   // The download-only package mirrors for the sandbox slots. Best effort: when they cannot
   // start, sandbox package downloads stay off and everything else keeps working.
-  await startPackageMirrorGateway({ logger });
+  await startPackageMirrorGateway({ logger, allowanceHolds: packageMirrorAllowanceHolds });
 
   // The skill network gateway for the sandbox slots. Best effort: when it cannot start,
   // approved skill sites stay unreachable and everything else keeps working.
@@ -1235,6 +1305,8 @@ try {
         logger.info(`Waiting for ${String(turnDrains.size)} in-flight turn drains before shutdown`);
       }
       await turnDrains.shutdownAndWait({ timeoutMs: configuration.TURN_DRAIN_SHUTDOWN_TIMEOUT_MS });
+      // Finish the library document being indexed; queued ones resume on the next start.
+      await closePersonaKnowledgeIndexers();
       clearInterval(commandExecutionRecoveryTimer);
       clearInterval(artifactRetentionTimer);
       oidcDiscovery?.stop();

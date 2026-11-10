@@ -59,6 +59,15 @@ describe('spaceWritesThisTurn', () => {
     expect(writes).toEqual([{ name: 'Dog breeds', link: DOGS_LINK, created: true, changes: 2, last_failed: false }]);
   });
 
+  it('does not count a move into a folder as a change to the space', () => {
+    const writes = spaceWritesThisTurn([
+      user,
+      call('m1', 'move_space', { space_name: 'Dog breeds', folder_name: 'Pets' }),
+      saved('m1'),
+    ]);
+    expect(writes).toEqual([]);
+  });
+
   it('counts an append as a change, but not a resend that was already at the end', () => {
     const appended = (id: string, extra: Record<string, unknown>): ContextMessage => ({
       role: 'tool',

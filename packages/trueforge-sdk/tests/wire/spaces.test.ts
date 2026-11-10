@@ -16,6 +16,7 @@ describe("SpacesClient", () => {
                     {
                         body: "body",
                         created_at: "2024-01-15T09:30:00Z",
+                        folder_id: null,
                         id: "id",
                         name: "name",
                         purpose: "purpose",
@@ -41,6 +42,7 @@ describe("SpacesClient", () => {
                     {
                         body: "body",
                         createdAt: new Date("2024-01-15T09:30:00.000Z"),
+                        folderId: null,
                         id: "id",
                         name: "name",
                         purpose: "purpose",
@@ -96,6 +98,7 @@ describe("SpacesClient", () => {
                 space: {
                     body: "body",
                     created_at: "2024-01-15T09:30:00Z",
+                    folder_id: "folder_id",
                     format: "markdown",
                     id: "id",
                     name: "name",
@@ -131,6 +134,7 @@ describe("SpacesClient", () => {
                 space: {
                     body: "body",
                     createdAt: new Date("2024-01-15T09:30:00.000Z"),
+                    folderId: "folder_id",
                     format: "markdown",
                     id: "id",
                     name: "name",
@@ -244,6 +248,7 @@ describe("SpacesClient", () => {
             data: {
                 body: "body",
                 created_at: "2024-01-15T09:30:00Z",
+                folder_id: "folder_id",
                 format: "markdown",
                 id: "id",
                 name: "name",
@@ -269,6 +274,7 @@ describe("SpacesClient", () => {
             data: {
                 body: "body",
                 createdAt: new Date("2024-01-15T09:30:00.000Z"),
+                folderId: "folder_id",
                 format: "markdown",
                 id: "id",
                 name: "name",
@@ -332,6 +338,7 @@ describe("SpacesClient", () => {
                 space: {
                     body: "body",
                     created_at: "2024-01-15T09:30:00Z",
+                    folder_id: "folder_id",
                     format: "markdown",
                     id: "id",
                     name: "name",
@@ -368,6 +375,7 @@ describe("SpacesClient", () => {
                 space: {
                     body: "body",
                     createdAt: new Date("2024-01-15T09:30:00.000Z"),
+                    folderId: "folder_id",
                     format: "markdown",
                     id: "id",
                     name: "name",
@@ -589,6 +597,86 @@ describe("SpacesClient", () => {
         }).rejects.toThrow(TrueForgeTypes.ConflictError);
     });
 
+    test("set_folder (1)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { folder_id: "folder_id" };
+        const rawResponseBody = {};
+
+        server
+            .mockEndpoint()
+            .put("/api/v1/spaces/space_id/folder")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        const response = await client.spaces.setFolder("space_id", {
+            folderId: "folder_id",
+        });
+        expect(response).toEqual({});
+    });
+
+    test("set_folder (2)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { folder_id: "x" };
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .put("/api/v1/spaces/space_id/folder")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(404)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.spaces.setFolder("space_id", {
+                folderId: "x",
+            });
+        }).rejects.toThrow(TrueForgeTypes.NotFoundError);
+    });
+
+    test("clear_folder (1)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = {};
+
+        server
+            .mockEndpoint()
+            .delete("/api/v1/spaces/space_id/folder")
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        const response = await client.spaces.clearFolder("space_id");
+        expect(response).toEqual({});
+    });
+
+    test("clear_folder (2)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .delete("/api/v1/spaces/space_id/folder")
+            .respondWith()
+            .statusCode(404)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.spaces.clearFolder("space_id");
+        }).rejects.toThrow(TrueForgeTypes.NotFoundError);
+    });
+
     test("revert (1)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
@@ -599,6 +687,7 @@ describe("SpacesClient", () => {
                 space: {
                     body: "body",
                     created_at: "2024-01-15T09:30:00Z",
+                    folder_id: "folder_id",
                     format: "markdown",
                     id: "id",
                     name: "name",
@@ -630,6 +719,7 @@ describe("SpacesClient", () => {
                 space: {
                     body: "body",
                     createdAt: new Date("2024-01-15T09:30:00.000Z"),
+                    folderId: "folder_id",
                     format: "markdown",
                     id: "id",
                     name: "name",

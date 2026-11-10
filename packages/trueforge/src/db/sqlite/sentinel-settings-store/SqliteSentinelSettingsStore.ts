@@ -27,6 +27,8 @@ export class SqliteSentinelSettingsStore implements ISentinelSettingsStore<Trans
         'search_without_asking' as const,
         'maps_without_asking' as const,
         'sandbox_without_asking' as const,
+        'chat_search_enabled' as const,
+        'package_downloads_without_project_allowed' as const,
         jsonText<SentinelUserSettings['tier2_auto_allow']>(eb.ref('tier2_auto_allow')).as('tier2_auto_allow'),
       ])
       .where('tenant_id', '=', input.tenant_id)
@@ -40,6 +42,8 @@ export class SqliteSentinelSettingsStore implements ISentinelSettingsStore<Trans
           search_without_asking: row.search_without_asking === 1,
           maps_without_asking: row.maps_without_asking === 1,
           sandbox_without_asking: row.sandbox_without_asking === 1,
+          chat_search_enabled: row.chat_search_enabled === 1,
+          package_downloads_without_project_allowed: row.package_downloads_without_project_allowed === 1,
         };
   }
 
@@ -60,6 +64,12 @@ export class SqliteSentinelSettingsStore implements ISentinelSettingsStore<Trans
         maps_without_asking: (input.maps_without_asking ?? DEFAULT_SENTINEL_USER_SETTINGS.maps_without_asking) ? 1 : 0,
         sandbox_without_asking:
           (input.sandbox_without_asking ?? DEFAULT_SENTINEL_USER_SETTINGS.sandbox_without_asking) ? 1 : 0,
+        chat_search_enabled: (input.chat_search_enabled ?? DEFAULT_SENTINEL_USER_SETTINGS.chat_search_enabled) ? 1 : 0,
+        package_downloads_without_project_allowed:
+          (input.package_downloads_without_project_allowed ??
+          DEFAULT_SENTINEL_USER_SETTINGS.package_downloads_without_project_allowed)
+            ? 1
+            : 0,
         created_at: timestamp,
         updated_at: timestamp,
       })
@@ -74,9 +84,17 @@ export class SqliteSentinelSettingsStore implements ISentinelSettingsStore<Trans
           ...(input.maps_without_asking === undefined
             ? {}
             : { maps_without_asking: input.maps_without_asking ? 1 : 0 }),
+          ...(input.chat_search_enabled === undefined
+            ? {}
+            : { chat_search_enabled: input.chat_search_enabled ? 1 : 0 }),
           ...(input.sandbox_without_asking === undefined
             ? {}
             : { sandbox_without_asking: input.sandbox_without_asking ? 1 : 0 }),
+          ...(input.package_downloads_without_project_allowed === undefined
+            ? {}
+            : {
+                package_downloads_without_project_allowed: input.package_downloads_without_project_allowed ? 1 : 0,
+              }),
         }),
       )
       .execute();

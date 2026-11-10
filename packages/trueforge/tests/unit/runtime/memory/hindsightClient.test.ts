@@ -610,27 +610,33 @@ describe('HindsightClient', () => {
       }
     });
 
-    it('stops retrying once the caller timeout is exhausted and reports the 503', async () => {
-      const fetchImpl = jest
-        .fn()
-        .mockResolvedValue(jsonResponse({ detail: 'busy' }, { status: 503, headers: { 'retry-after': '30' } }));
-      const client = new HindsightClient({
-        apiBase: 'https://hindsight.example',
-        bank: 'aman',
-        headers: {},
-        fetchImpl,
-      });
+    it('reports the 503 without waiting when Retry-After outlasts the caller timeout', async () => {
+      jest.useFakeTimers();
+      try {
+        const fetchImpl = jest
+          .fn()
+          .mockResolvedValueOnce(jsonResponse({ detail: 'busy' }, { status: 503, headers: { 'retry-after': '30' } }));
+        const client = new HindsightClient({
+          apiBase: 'https://hindsight.example',
+          bank: 'aman',
+          headers: {},
+          fetchImpl,
+        });
 
-      const outcome = await client.recall({
-        query: 'q',
-        maxTokens: 100,
-        entityTokens: 10,
-        queryTimestamp: '2026-08-30T00:00:00Z',
-        timeoutMs: 100,
-      });
+        // No timers are advanced, so this resolves only if the client does not sleep.
+        const outcome = await client.recall({
+          query: 'q',
+          maxTokens: 100,
+          entityTokens: 10,
+          queryTimestamp: '2026-08-30T00:00:00Z',
+          timeoutMs: 100,
+        });
 
-      expect(outcome).toMatchObject({ ok: false, code: 'http_error', httpStatus: 503 });
-      expect(fetchImpl).toHaveBeenCalledTimes(1);
+        expect(outcome).toMatchObject({ ok: false, code: 'http_error', httpStatus: 503 });
+        expect(fetchImpl).toHaveBeenCalledTimes(1);
+      } finally {
+        jest.useRealTimers();
+      }
     });
   });
 

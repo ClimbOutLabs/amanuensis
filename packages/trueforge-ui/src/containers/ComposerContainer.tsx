@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from 'react';
 import { CompactionStatusLine } from '../atoms/CompactionStatusLine.js';
 import { DraftCatalogProvider } from '../atoms/draft/DraftCatalogProvider.js';
 import { cn } from '../atoms/lib/cn.js';
+import { useSpokenReply } from '../components/SpokenReplyContext.js';
 import { useComposerBusyState } from '../hooks/useComposerBusyState.js';
 import { takeComposerPrefill, useComposerDraft } from '../hooks/useComposerDraft.js';
 import { useComposerPauseView } from '../hooks/useComposerPauseView.js';
@@ -14,6 +15,8 @@ import { useComposerPlaceholder } from '../hooks/useComposerPlaceholder.js';
 import { useActiveSessionCanManage } from '../hooks/useResourcePermissions.js';
 import { useOptionalShellMode } from '../server/ShellModeContext.js';
 import { SlotsProvider, useSlot, useSlotIsDefault } from '../theme/SlotsProvider.js';
+import { useSpeakVoiceReplies } from '../utils/speechReplyPreferences.js';
+import { armSpokenReply, clearDraftFromVoice, disarmSpokenReply, takeDraftFromVoice } from '../utils/voiceTurn.js';
 import { ApprovalNavContainer } from './ApprovalNavContainer.js';
 import { AskUserContainer } from './AskUserContainer.js';
 import { ComposerAttachmentsContainer } from './AttachmentsContainer.js';
@@ -53,8 +56,11 @@ function ComposerBody({
 }) {
   const ComposerShell = useSlot('ComposerShell');
   const aui = useAui();
+  const spokenReply = useSpokenReply();
+  const { enabled: speakVoiceReplies } = useSpeakVoiceReplies();
   const shell = useOptionalShellMode();
-  const hasText = useAuiState(s => s.composer.text.trim().length > 0);
+  const text = useAuiState(s => s.composer.text);
+  const hasText = text.trim().length > 0;
   const hasAttachments = useAuiState(s => s.composer.attachments.length > 0);
   const { agentSpec } = useTrueFoundryAgentSpec();
   // Named (immutable) agents use a server-side model; only draft/mutable composers pick one here.
@@ -62,6 +68,10 @@ function ComposerBody({
   const hasModel = Boolean(agentSpec?.model?.name?.trim());
   const { isBusy, send, resetBusy } = useComposerBusyState();
   useComposerDraft();
+  // Emptying the composer drops the voice draft, so a later typed message never counts as spoken.
+  useEffect(() => {
+    if (!hasText) clearDraftFromVoice();
+  }, [hasText]);
   useEffect(() => {
     const prefill = takeComposerPrefill();
     if (prefill !== null) aui.composer().setText(prefill);
@@ -81,11 +91,19 @@ function ComposerBody({
   const canSubmit = canSubmitComposer({ disabled, hasText, hasAttachments, requiresModel, hasModel });
   const submit = () => {
     if (!canSubmit) return;
-    send(() => aui.composer().send());
+    const fromVoice = takeDraftFromVoice();
+    // A new send ends any reply still being read; a voice send's reply is armed below.
+    spokenReply.stop();
+    send(() => {
+      // Only a reply that will be read aloud counts as spoken, so dictation alone keeps full answers.
+      armSpokenReply({ fromVoice: fromVoice && speakVoiceReplies && spokenReply.canSpeak(), text });
+      return aui.composer().send();
+    });
   };
   const stop = canManageSession
     ? () => {
         setIsStopping(true);
+        disarmSpokenReply();
         void (async () => {
           try {
             await cancel();

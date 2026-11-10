@@ -25,6 +25,7 @@ import {
   ZipSizeCapExceededError,
 } from '../dataExport/zipStreamWriter';
 import type { IAgentStore } from '../db/agentStore';
+import type { IDeliveryStore } from '../db/deliveryStore';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { IMcpServerWithAuthStore } from '../db/mcpServerStore';
 import type { IPersonalizationStore } from '../db/personalizationStore';
@@ -49,6 +50,7 @@ export interface DataExportRouterDeps<TTransaction> {
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
   sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
   sentinelAuditStore: ISentinelAuditStore;
+  deliveryStore: IDeliveryStore;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   tokenStore: IOAuthTokenStore<TTransaction>;
   resolveMcpServerStore: (c?: Context) => IMcpServerWithAuthStore<TTransaction>;
@@ -132,6 +134,7 @@ export function createDataExportRouter<TTransaction>(deps: DataExportRouterDeps<
               globalSettingsStore: deps.globalSettingsStore,
               sentinelSettingsStore: deps.sentinelSettingsStore,
               auditStore: deps.sentinelAuditStore,
+              deliveryStore: deps.deliveryStore,
               turnArtifactStore: deps.turnArtifactStore,
               mcpServerStore,
               listAgents: () =>

@@ -51,6 +51,7 @@ import {
   type ToolExecutionStartedEvent,
   type ToolResponseEventV2,
   type ToolResponseRequiredEvent,
+  type ToolResultDisposition,
   type UserToolApprovalMessage,
   type UserToolResponseMessage,
 } from '../events/schema';
@@ -108,7 +109,7 @@ import {
   FAILED_BATCH_STOP_AT,
   IDENTICAL_CALL_NUDGE_AT,
   IDENTICAL_CALL_STOP_AT,
-  isHostVouchedRead,
+  IDENTICAL_MOVE_STOP_AT,
   isReadOnlyCall,
   MAX_TOOL_MARKUP_RETRIES_PER_TURN,
   MAX_WRITE_CALLS_PER_TURN,
@@ -143,6 +144,7 @@ import {
 import { isExpiredApproval } from '../permissions/approvalExpiry';
 import type { ConnectorBinding } from '../permissions/approvalTokens';
 import { recordHeldActionAudit, recordNotPreparedRefusals } from '../permissions/audit';
+import { movesBrowserPage } from '../permissions/browserToolNames';
 import { isChangeRequestReason } from '../permissions/changeRequest';
 import { isHostVouchedReadReason } from '../permissions/connectorTrust';
 import {
@@ -267,7 +269,13 @@ import {
 import {
   BLOCKED_CALLS_PARENT_MESSAGE,
   blockedCallsStopMessage,
+  browserPageSeen,
+  changesSeenBy,
+  changesState,
+  countsTowardWriteCap,
   findUnbackedClaim,
+  isSandboxFileEditTool,
+  OUTSIDE_ACTION_RETRY_RESULT,
   REPEATED_ACTION_OWNER_MESSAGE,
   REPEATED_ACTION_RESULT,
   repetitionStopMessage,
@@ -1580,6 +1588,7 @@ export async function classifyUnstampedToolCall(input: {
       },
       maps_hosts: info.maps_hosts,
       document_scope: info.document_scope,
+      browser_click: info.browser_click,
     },
   });
   return { ...info, ...stampSentinelDecision({ decision }) };
@@ -1604,6 +1613,41 @@ function hostVouchedReadToolNames({
     }
   }
   return vouched;
+}
+
+/** Whether the call's own server says it stays inside that server's contained workspace. */
+function callStaysInWorkspace({
+  call,
+  toolMapping,
+}: {
+  call: Pick<InternalEnrichedToolCall, 'function'>;
+  toolMapping: Map<string, MappedMCPTool>;
+}): boolean {
+  const mapped = toolMapping.get(call.function.name);
+  return (
+    mapped?.toolSet.staysInWorkspace?.({ name: mapped.originalToolName, argumentsText: call.function.arguments }) ===
+    true
+  );
+}
+
+/** Whether the call goes to one of the sandbox's own file tools, looked up by the tool it maps to. */
+function isSandboxFileEditCall({
+  call,
+  toolMapping,
+}: {
+  call: Pick<InternalEnrichedToolCall, 'function'>;
+  toolMapping: Map<string, MappedMCPTool>;
+}): boolean {
+  const mapped = toolMapping.get(call.function.name);
+  return (
+    mapped !== undefined &&
+    isSandboxFileEditTool({ serverName: mapped.toolSet.name, toolName: mapped.originalToolName })
+  );
+}
+
+/** Whether a call reached its tool, whatever it answered. Refused, blocked and unsent calls did not. */
+function toolCallWasAttempted(disposition: ToolResultDisposition): boolean {
+  return disposition !== 'denied' && disposition !== 'policy_blocked' && disposition !== 'never_ran';
 }
 
 /** The names the model sees for the sandbox's run_code and exec tools; undefined when a tool is not offered. */
@@ -2056,6 +2100,12 @@ export class AgentThread {
       'current-date',
       `Today's date is ${dateUtc} (UTC).${localDateClause} Reason about past and future relative to this date, not to your training data.`,
     );
+    if (!this.parent && this.definition.spokenReply === true) {
+      builder.addSection(
+        'spoken-reply',
+        'The person spoke this message, and the app reads your reply aloud in a voice. Answer in a few short, plain sentences, with no lists, tables, headings, links or code. Never say you cannot speak or have no voice.',
+      );
+    }
     const personName = this.parent ? undefined : this.definition.identity?.personName?.trim();
     if (personName) {
       // Escaped: the name is user-authored text, so it cannot close the wrapping tag.
@@ -2973,7 +3023,10 @@ export class AgentThread {
     });
 
     for (const processor of this.preEphemeralLLMContextProcessors) {
-      messages = processor.processPreLLMEphemeral(messages) ?? messages;
+      messages =
+        processor.processPreLLMEphemeral(messages, {
+          modelSupportsVision: this.definition.modelSupportsVision === true,
+        }) ?? messages;
     }
 
     // Host-owned task state: re-injected fresh on EVERY model call, after
@@ -3233,6 +3286,12 @@ export class AgentThread {
         bankedCount: () => this.taskState.findings.length,
       });
       tfyManagedServers.push(this.taskStateToolSet);
+    }
+    // The guide's one live tool: a host-owned exception to readOnly, set only by the
+    // host for the guide persona. It joins the managed servers so the model is
+    // offered exactly this tool set and no other.
+    if (this.definition.guideSearchToolSet !== undefined) {
+      tfyManagedServers.push(this.definition.guideSearchToolSet);
     }
     if (this.sandbox) {
       tfyManagedServers.push(this.sandbox);
@@ -4582,19 +4641,30 @@ export class AgentThread {
 
   /**
    * Host-owned per-turn loop guard, run before dispatch, on counts shared by the whole turn. A call
-   * whose exact arguments already ran or were refused earlier in the turn is not run again. A tier 3
-   * call past MAX_WRITE_CALLS_PER_TURN is not run either, unless the host vouches it is a read
-   * (isHostVouchedRead). Both end the turn after their batch resolves, and the repeat also ends it when the same
-   * call comes straight after the one before.
+   * whose exact arguments already ran or were refused earlier in the turn is not run again, unless a
+   * change has run since. An action outside the sandbox workspace past MAX_WRITE_CALLS_PER_TURN is not
+   * run either (countsTowardWriteCap). Both end the turn after their batch resolves, and the repeat also
+   * ends it when the same call comes straight after the one before.
    */
-  private applyToolCallLoopGuard({ calls, turn }: { calls: InternalEnrichedToolCall[]; turn: TurnToolCallLedger }): {
+  private applyToolCallLoopGuard({
+    calls,
+    turn,
+    toolMapping,
+  }: {
+    calls: InternalEnrichedToolCall[];
+    turn: TurnToolCallLedger;
+    toolMapping: Map<string, MappedMCPTool>;
+  }): {
     calls: InternalEnrichedToolCall[];
     writeCapHit: boolean;
     repeatStop: boolean;
+    repeatedCallIds: ReadonlySet<string>;
   } {
     const seenInBatch = new Set<string>();
+    const repeatedCallIds = new Set<string>();
     let previous = turn.lastCallSignature;
     let writeCapBlocked = 0;
+    let admittedCappedInBatch = 0;
     let repeatedBlocked = 0;
     let repeatStop = false;
     const blocked = ({
@@ -4619,38 +4689,46 @@ export class AgentThread {
       const signature = toolCallSignature(call);
       const consecutive = signature === previous;
       previous = signature;
-      // An identical call may run again once a write has run since it last ran, since the state may have changed.
+      // An identical call may run again once something changed since it last ran, so tests can run
+      // again after an edit. An outside action never does: a send is the same send whatever changed.
       // A retryable error gets its one retry, whatever has run since.
+      const countsTowardCap = countsTowardWriteCap(call.tool_info, {
+        staysInWorkspace: callStaysInWorkspace({ call, toolMapping }),
+      });
+      // An outside action gets no automatic retry either: one that reported an error may still
+      // have gone out, so the model is told to check first.
       const lastRun = turn.callSignatures.get(signature);
       const alreadySeen =
         seenInBatch.has(signature) ||
         (lastRun !== undefined &&
-          !retryIsDue({ lastKind: lastRun.lastKind, retried: lastRun.retried }) &&
-          lastRun.writesAtLastRun >= turn.writeCallsThisTurn);
+          (countsTowardCap ||
+            (!retryIsDue({ lastKind: lastRun.lastKind, retried: lastRun.retried }) &&
+              lastRun.writesAtLastRun >= changesSeenBy(call.tool_info, turn))));
       const duplicateInStep = seenInBatch.has(signature);
       seenInBatch.add(signature);
       if (alreadySeen) {
         repeatedBlocked += 1;
+        repeatedCallIds.add(call.id);
         // A read gets a few identical calls in a row; a duplicate in one step is skipped and never counts.
         const readOnly = isReadOnlyCall(call.tool_info);
         const limit = readOnly ? REPEAT_LIMIT_READ_TOOLS : REPEAT_LIMIT_OTHER_TOOLS;
         const overLimit = duplicateInStep ? !readOnly : (lastRun?.count ?? 0) >= limit;
         repeatStop = repeatStop || (consecutive && overLimit);
-        return blocked({ call, message: REPEATED_ACTION_RESULT, ownerMessage: REPEATED_ACTION_OWNER_MESSAGE });
+        const mayHaveGoneOut = countsTowardCap && lastRun !== undefined && lastRun.lastKind !== 'ok';
+        return blocked({
+          call,
+          message: mayHaveGoneOut ? OUTSIDE_ACTION_RETRY_RESULT : REPEATED_ACTION_RESULT,
+          ownerMessage: REPEATED_ACTION_OWNER_MESSAGE,
+        });
       }
-      // Every tier 3 call counts except a read the host itself vouches for: a search or page read
-      // leaves the computer but has its own limits. A server's read-only claim is not enough. A write
-      // held for the owner in an unattended run does not run now.
-      if (
-        call.tool_info.tier === 3 &&
-        !isHostVouchedRead(call.tool_info) &&
-        call.tool_info.held_for_owner === undefined
-      ) {
-        if (turn.writeCallsThisTurn >= MAX_WRITE_CALLS_PER_TURN) {
+      // Only actions that can reach past the sandbox count (see countsTowardWriteCap), once they ran;
+      // the calls admitted in this batch are reserved so one batch cannot overshoot the cap.
+      if (countsTowardCap) {
+        if (turn.writeCallsThisTurn + admittedCappedInBatch >= MAX_WRITE_CALLS_PER_TURN) {
           writeCapBlocked += 1;
           return blocked({ call, message: WRITE_CAP_BLOCKED_RESULT, ownerMessage: WRITE_CAP_OWNER_MESSAGE });
         }
-        turn.writeCallsThisTurn += 1;
+        admittedCappedInBatch += 1;
       }
       return call;
     });
@@ -4665,7 +4743,7 @@ export class AgentThread {
         repeatStop,
       });
     }
-    return { calls: guarded, writeCapHit, repeatStop };
+    return { calls: guarded, writeCapHit, repeatStop, repeatedCallIds };
   }
 
   /**
@@ -4810,7 +4888,7 @@ export class AgentThread {
     // executeToolCalls can reach a provider. The tool-call budget admission
     // runs first, so an over-budget batch is capped deterministically before
     // any provider is reached.
-    const loopGuard = this.applyToolCallLoopGuard({ calls: executionCalls, turn: toolCallMemo.turn });
+    const loopGuard = this.applyToolCallLoopGuard({ calls: executionCalls, turn: toolCallMemo.turn, toolMapping });
     const budgetAdmittedCalls = this.applyToolCallBudgetAdmission(loopGuard.calls);
     const callsForDispatch = signal?.aborted
       ? budgetAdmittedCalls.map(call =>
@@ -4971,6 +5049,8 @@ export class AgentThread {
     if (approvalRequiredToolCalls.length > 0) {
       throw new Error('Unreachable');
     }
+    // The calls whose run changed something, so a call that changed only itself can tell (see below).
+    const changedByCallId = new Set<string>();
     for (const result of toolCallResults) {
       const toolCall = openCalls.find(call => call.id === result.message.tool_call_id);
       recordToolCallResult(this.metrics, {
@@ -4981,9 +5061,35 @@ export class AgentThread {
       logToolCallOutcome(this.logger, { toolName: toolCall?.function.name ?? 'unknown_tool', result });
       // Calls with no metadata count as writes, as isReadOnlyCall treats them.
       const writes = result.toolCallInfo === undefined || !isReadOnlyCall(result.toolCallInfo);
+      const countsTowardCap =
+        toolCall !== undefined &&
+        countsTowardWriteCap(toolCall.tool_info, {
+          staysInWorkspace: callStaysInWorkspace({ call: toolCall, toolMapping }),
+        });
+      // An outside action counts once it was attempted, whatever it reported: a send can arrive and
+      // still answer with an error. Only a call that never ran (refused, blocked, never sent) is free.
+      if (countsTowardCap && toolCallWasAttempted(result.disposition)) {
+        nextToolCallMemo.turn.writeCallsThisTurn += 1;
+      }
       if (result.disposition === 'executed_ok' && !result.failure) {
         if (writes) {
           nextToolCallMemo.turn.successfulWritesThisTurn += 1;
+        }
+        if (toolCall !== undefined && changesState(toolCall.tool_info, { countsTowardCap })) {
+          nextToolCallMemo.turn.changesThisTurn += 1;
+        }
+        // The browser's page has a count of its own: a step counts only when it reaches a page not
+        // seen before in this turn, so a scroll at the bottom of a page, or back and forth between
+        // two pages, moved nothing new.
+        if (toolCall !== undefined) {
+          const page = browserPageSeen({ info: toolCall.tool_info, text: result.message.content });
+          if (page !== undefined && !nextToolCallMemo.turn.browserPagesSeen.includes(page.digest)) {
+            nextToolCallMemo.turn.browserPagesSeen.push(page.digest);
+            if (page.moves) {
+              nextToolCallMemo.turn.browserPageChangesThisTurn += 1;
+              changedByCallId.add(toolCall.id);
+            }
+          }
         }
         if (result.toolCallInfo !== undefined) {
           for (const kind of stepKindsOf(result.toolCallInfo)) {
@@ -5337,7 +5443,7 @@ export class AgentThread {
         }
       }
       const previous = replyTurn.callSignatures.get(toolCallSignature(call));
-      if (call.tool_info.pre_dispatch_failure?.message !== REPEATED_ACTION_RESULT) {
+      if (!loopGuard.repeatedCallIds.has(call.id)) {
         settledByCallId.set(
           call.id,
           settleRetry({ previousKind: previous?.lastKind ?? null, previousRetried: previous?.retried ?? false, kind }),
@@ -5352,7 +5458,8 @@ export class AgentThread {
         this.noteUnfinished(unfinished);
       }
     }
-    // A step that landed a space write is progress, not spent budget; a build in parts needs many such steps.
+    // A step that landed a space write or a sandbox file edit is progress, not spent budget; a build in
+    // parts needs many such steps.
     const refundsSoFar = replyTurn.progressRefundsByThread.get(this.threadId) ?? 0;
     const refund = progressRefundFor({
       refundsSoFar,
@@ -5367,6 +5474,7 @@ export class AgentThread {
                 disposition: result.disposition,
                 failure: result.failure,
                 savedNothing: spaceWriteSavedNothing(result.message.content),
+                sandboxFileEdit: isSandboxFileEditCall({ call, toolMapping }),
               },
             ];
       }),
@@ -5417,17 +5525,25 @@ export class AgentThread {
       // snapshot, but not used for the stop/nudge decisions below (see callSignatureCountsThisTurn).
       const previousRecord = nextToolCallMemo.turn.callSignatures.get(signature);
       const settled = settledByCallId.get(callId);
+      // A browser step that moved the page starts from where it left it, so its own move does not
+      // count against it: the same scroll may run again, and is no loop. One that moved nothing is.
+      // A step that keeps moving still has a higher stop of its own (IDENTICAL_MOVE_STOP_AT) and no nudge.
+      const movedPage = movesBrowserPage(call.tool_info) && changedByCallId.has(callId);
       nextToolCallMemo.turn.callSignatures.set(signature, {
         count: (previousRecord?.count ?? 0) + 1,
-        writesAtLastRun: nextToolCallMemo.turn.writeCallsThisTurn,
+        writesAtLastRun: changesSeenBy(call.tool_info, nextToolCallMemo.turn) - (movedPage ? 1 : 0),
         lastKind: settled?.kind ?? previousRecord?.lastKind ?? null,
         retried: settled?.retried ?? previousRecord?.retried ?? false,
       });
       const thisTurnCount = (this.callSignatureCountsThisTurn.get(signature) ?? 0) + 1;
       this.callSignatureCountsThisTurn.set(signature, thisTurnCount);
-      if (thisTurnCount >= IDENTICAL_CALL_STOP_AT && repeatedSignature === undefined) {
+      if (
+        thisTurnCount >= (movedPage ? IDENTICAL_MOVE_STOP_AT : IDENTICAL_CALL_STOP_AT) &&
+        repeatedSignature === undefined
+      ) {
         repeatedSignature = call;
       } else if (
+        !movedPage &&
         thisTurnCount >= IDENTICAL_CALL_NUDGE_AT &&
         !nudgedSignaturesThisBatch.has(signature) &&
         !hasSentHostNoteThisTurn(this.context, 'identical_call', signature)

@@ -2,6 +2,8 @@
 
 import { useCallback, useState } from 'react';
 
+import { CALDAV_GOOGLE_PROVIDER_KEY } from '@truefoundry/trueforge-core/core/calendar/caldav/presets';
+
 import { auiInputClass } from '@/atoms/lib/inputClasses.js';
 import type { CalendarAccountStatus, CalendarSetupPort } from '@/server/calendarSetup.js';
 import AccountSetupPanel from './AccountSetupPanel.js';
@@ -23,7 +25,7 @@ const LABEL_CLASS = 'mb-2 block text-xs font-semibold uppercase tracking-wide te
  * is never shown back. The saved address and login are put back in the form so a change keeps them.
  */
 export default function CalendarSetupPanel({ open, onOpenChange, port, onChanged }: CalendarSetupPanelProps) {
-  const [providerKey, setProviderKey] = useState('fastmail');
+  const [providerKey, setProviderKey] = useState(CALDAV_GOOGLE_PROVIDER_KEY);
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -97,7 +99,20 @@ export default function CalendarSetupPanel({ open, onOpenChange, port, onChanged
                 ))}
               </select>
             </div>
+            {provider !== undefined && provider.setupSteps.length > 0 ? (
+              <div>
+                <p className={LABEL_CLASS}>Before you start</p>
+                <ol className="list-decimal space-y-1 pl-5 text-text-secondary">
+                  {provider.setupSteps.map(step => (
+                    <li key={step}>{step}</li>
+                  ))}
+                </ol>
+              </div>
+            ) : null}
             {provider?.serverUrl ? <p className="text-text-secondary">Calendar address: {provider.serverUrl}</p> : null}
+            {provider?.serverUrl == null && provider?.accountUrlTemplate ? (
+              <p className="text-text-secondary">Calendar address: filled in from your email address</p>
+            ) : null}
             {isOther ? (
               <div>
                 <label htmlFor="calendar-url" className={LABEL_CLASS}>

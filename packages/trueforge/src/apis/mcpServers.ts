@@ -849,6 +849,7 @@ export function createMcpServersRouter<TTransaction>(deps: McpServersRouterDeps<
       headers: connection.headers,
       requestTimeoutMs: configuration.MCP_REQUEST_TIMEOUT_MS,
       connectTimeoutMs: configuration.MCP_CONNECT_TIMEOUT_MS,
+      maxResponseBytes: configuration.MCP_TOOL_CALL_MAX_RESPONSE_BYTES,
       refuseRedirects: connection.first_party,
       logger: deps.logger,
       signal: c.req.raw.signal,

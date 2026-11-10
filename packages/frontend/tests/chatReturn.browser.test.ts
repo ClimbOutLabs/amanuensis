@@ -15,6 +15,7 @@ import {
 } from '../../trueforge/tests/fixtures/scriptedModelServer.ts';
 import { inProcessApi } from './support/approvalChat.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
+import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
 import { privateViteCache } from './support/viteCache.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
@@ -107,7 +108,7 @@ async function send({ page, text }: { page: Page; text: string }): Promise<void>
 
 /** A chat with one finished reply, made the way a person makes one. */
 async function finishedChat({ page, origin, text }: { page: Page; origin: string; text: string }): Promise<string> {
-  await page.goto(`${origin}/`, { waitUntil: 'domcontentloaded', timeout: RENDER_TIMEOUT_MS });
+  await page.goto(`${origin}/`, { waitUntil: 'domcontentloaded', timeout: FIRST_LOAD_TIMEOUT_MS });
   await composer(page).waitFor({ timeout: RENDER_TIMEOUT_MS });
   await send({ page, text });
   await page.locator('main').getByText(FINAL_TEXT).first().waitFor({ timeout: RENDER_TIMEOUT_MS });

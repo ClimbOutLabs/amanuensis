@@ -18,6 +18,7 @@ import { createLogger } from 'winston';
 import { McpCatalog } from '../../../src/catalog/McpCatalog';
 import { sessionPartIndex } from '../../../src/dataExport/sessionRecords';
 import { runDataImport, type DataImportDeps } from '../../../src/dataImport/importService';
+import { DeliveryStore } from '../../../src/db/deliveryStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { PostgresAgentStore } from '../../../src/db/postgres/agent-store/PostgresAgentStore';
 import { PostgresGlobalSettingsStore } from '../../../src/db/postgres/global-settings-store/PostgresGlobalSettingsStore';
@@ -80,6 +81,7 @@ async function makeSqliteInstance(label: string): Promise<Instance<SqliteTx>> {
     globalSettingsStore: new SqliteGlobalSettingsStore(db),
     sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
     auditStore: new SentinelAuditStore(db),
+    deliveryStore: new DeliveryStore(db),
     turnArtifactStore: new SqliteTurnArtifactStore(db),
     mcpServerStore: new SqliteMcpServerStore(db),
   };
@@ -113,6 +115,7 @@ async function makePostgresInstance(label: string): Promise<Instance<PgTx> | und
     globalSettingsStore: new PostgresGlobalSettingsStore(db),
     sentinelSettingsStore: new PostgresSentinelSettingsStore(db),
     auditStore: new SentinelAuditStore(db),
+    deliveryStore: new DeliveryStore(db),
     turnArtifactStore: new PostgresTurnArtifactStore(db),
     mcpServerStore: new PostgresMcpServerStore(db),
   };
@@ -142,6 +145,7 @@ async function importArchive<Tx>(instance: Instance<Tx>, archive: Buffer, userId
     scheduleStore: instance.stores.scheduleStore,
     globalSettingsStore: instance.stores.globalSettingsStore,
     auditStore: instance.stores.auditStore,
+    deliveryStore: instance.stores.deliveryStore,
     turnArtifactStore: instance.stores.turnArtifactStore,
     mcpServerStore: instance.stores.mcpServerStore,
     agentStore: instance.stores.agentStore,

@@ -29,6 +29,7 @@ import type {
 
 import { errorCode } from '../cli/errorCode';
 import type { AgentRecord } from '../db/agentStore';
+import type { IDeliveryStore } from '../db/deliveryStore';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { IMcpServerStore } from '../db/mcpServerStore';
 import type { IPersonalizationStore } from '../db/personalizationStore';
@@ -125,6 +126,7 @@ export interface DataExportDeps<TTransaction> {
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
   sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
   auditStore: Pick<ISentinelAuditStore, 'listOwned'>;
+  deliveryStore: Pick<IDeliveryStore, 'listForExport'>;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   mcpServerStore: IMcpServerStore<TTransaction>;
   /** The agents the user may manage; the entry point resolves them because access rules differ per deployment. */
@@ -425,7 +427,21 @@ export async function runDataExport<TTransaction>(
   const profile = await deps.personalizationStore.getProfile({ tenant_id: tenantId, created_by: subjectId });
   await writeJsonEntry(context, 'personalization.json', profile ?? null);
 
-  // spaces.json: each space with every revision.
+  // space_folders.json: shaped like folders.json so one import schema reads both.
+  const { folders: spaceFolders, assignments: spaceFolderAssignments } = await deps.spaceStore.readSpaceFolderSnapshot({
+    tenant_id: tenantId,
+    created_by: subjectId,
+  });
+  await writeJsonArrayEntry(
+    context,
+    'space_folders.json',
+    spaceFolders.map(({ id, ...folder }) => ({ ...folder, folder_id: id })),
+  );
+  const spaceFolderBySpaceId = new Map(
+    spaceFolderAssignments.map(assignment => [assignment.space_id, assignment.folder_id]),
+  );
+
+  // spaces.json: each space with every revision and the folder it sits in.
   async function* spaceEntries(): AsyncIterable<unknown> {
     let offset = 0;
     for (;;) {
@@ -449,7 +465,7 @@ export async function runDataExport<TTransaction>(
             revisions.push(record);
           }
         }
-        yield { space, revisions };
+        yield { space, revisions, folder_id: spaceFolderBySpaceId.get(space.id) ?? null };
       }
       if (page.length < PAGE_LIMIT) {
         return;
@@ -529,6 +545,13 @@ export async function runDataExport<TTransaction>(
     }
   }
   await writeJsonArrayEntry(context, 'audit.json', auditEntries());
+
+  // deliveries.json: this user's feed. Push devices belong to a device and are never exported.
+  await writeJsonArrayEntry(
+    context,
+    'deliveries.json',
+    await deps.deliveryStore.listForExport({ tenant_id: tenantId, created_by: subjectId }),
+  );
 
   // A persona vault is keyed by the persona's name, so another person's persona with the same name writes into it too.
   const othersPersonaNames = await personaNamesOfOthers(deps, { tenantId, subjectId });

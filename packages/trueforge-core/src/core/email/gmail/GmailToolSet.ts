@@ -198,7 +198,7 @@ export class GmailToolSet extends LocalToolMCP {
         tools.push(
           defineTool({
             name: DOWNLOAD_ATTACHMENT_TOOL_NAME,
-            description: `Fetch one attachment of a message into the sandbox workspace and return its path, so you can read it there (a PDF with ${EXTRACT_DOCUMENT_TEXT_TOOL_NAME}, a calendar invite or text file directly). Name the attachment by its handle from the message's attachments list.`,
+            description: `Fetch one attachment of a message into the sandbox workspace and return its path, so you can read it there with ${EXTRACT_DOCUMENT_TEXT_TOOL_NAME} (PDFs, images, Word, Excel, CSV, PowerPoint, OpenDocument, RTF, HTML, forwarded .eml or .msg e-mails, calendar invites and text files). Name the attachment by its handle from the message's attachments list.`,
             schema: DownloadAttachmentSchema,
             annotations: READ_ANNOTATIONS,
             handler: input => this.#downloadAttachment(input),
