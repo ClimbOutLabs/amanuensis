@@ -123,6 +123,7 @@ import { createChatPictureService } from './runtime/chatPictures/chatPictureServ
 import type { ChatSearchIndexer } from './runtime/chatSearchIndexing';
 import { resolveDefaultChatModel } from './runtime/defaultChatModel';
 import type { DeliveryService } from './runtime/delivery/deliveryService';
+import { createTurnDeliveryObserver } from './runtime/delivery/turnDeliveries';
 import type { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { resolveSandboxProvider } from './runtime/sessionResources';
 import { createSpacePictureService } from './runtime/spacePictures/spacePictureService';
@@ -493,11 +494,18 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     apiKey: configuration.NEBIUS_API_KEY,
     managedByTrueFoundry: isTrueFoundryModeEnabled(),
   });
+  /** Finished turns leave their brief and waiting items in the feed through this one observer. */
+  const turnDeliveryObserver = createTurnDeliveryObserver({
+    store: deps.deliveryStore,
+    deliveries: deps.deliveryService,
+    logger: deps.logger,
+  });
   const scheduleTurnDeps = {
     mcpCatalog: deps.mcpCatalog,
     scheduleStore: deps.scheduleStore,
     briefItemStore: deps.briefItemStore,
     deliveryService: deps.deliveryService,
+    deliveryObserver: turnDeliveryObserver,
     sessions: deps.sessions,
     agentStore: deps.agentStore,
     personaStore: deps.personaStore,
@@ -1262,6 +1270,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         globalSettingsStore: deps.globalSettingsStore,
         sentinelSettingsStore: deps.sentinelSettingsStore,
         chatSearchIndexer: deps.chatSearchIndexer,
+        deliveryObserver: turnDeliveryObserver,
         tokenFactoryBudget: deps.tokenFactoryBudget,
         eventSubscriptions: deps.eventSubscriptions,
         resolveSandboxProviderStore: deps.resolveSandboxProviderStore,

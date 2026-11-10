@@ -1087,6 +1087,65 @@ describe('audit rows for schedule firings', () => {
     expect(records[1]?.conversation_id).toBe(records[0]?.conversation_id);
   });
 
+  it('hands a brief run its schedule origin and the delivery observer, so its finish can deliver', async () => {
+    const built = await setup();
+    const agent = await built.agentStore.getAgent({ tenant_id: 'default', name: 'reporter' });
+    if (agent === undefined) {
+      throw new Error('The reporter agent was not created.');
+    }
+    const { schedule } = await built.scheduleStore.createScheduleAndRun({
+      tenant_id: 'default',
+      agent_id: agent.id,
+      agent_name: agent.name,
+      name: 'morning-brief',
+      persona_id: null,
+      manifest: ScheduleManifestSchema.parse({
+        task: 'Give me my morning brief.',
+        cron: '0 7 * * *',
+        timezone: 'America/Los_Angeles',
+      }),
+      created_by_subject: ALICE_SUBJECT,
+      runFrom: new Date('2026-11-06T12:00:00.000Z'),
+    });
+    const run = await built.scheduleStore.createRun({
+      tenant_id: 'default',
+      schedule_id: schedule.id,
+      name: 'morning-brief',
+      scheduled_for: new Date('2026-11-07T15:00:00.000Z'),
+      status: 'triggered',
+      created_by_subject: ALICE_SUBJECT,
+      triggered_at: new Date('2026-11-07T15:00:00.000Z'),
+    });
+    const actual = jest.requireActual<typeof import('../../../src/controller/scheduleDispatch')>(
+      '../../../src/controller/scheduleDispatch',
+    );
+    mockedStartScheduleRun.mockImplementation(actual.startScheduleRun);
+    mockedStartTurnInProcess.mockReset();
+    const turnFinished = jest.fn(() => Promise.resolve());
+    const execution = createScheduleExecutionRouter({
+      ...stubTurnExecutionDeps(built.agentStore, built.scheduleStore, built.db),
+      deliveryObserver: { turnFinished },
+    });
+
+    const response = await execution.request('/runs/execute', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ schedule_run_id: run.id }),
+    });
+
+    expect(response.status).toBe(204);
+    expect(mockedStartTurnInProcess).toHaveBeenCalledTimes(1);
+    const params = mockedStartTurnInProcess.mock.calls[0]?.[0];
+    expect(params?.deliveryOrigin).toEqual({
+      type: 'schedule',
+      name: 'morning-brief',
+      task: 'Give me my morning brief.',
+      scheduled_for: '2026-11-07T15:00:00.000Z',
+      timezone: 'America/Los_Angeles',
+    });
+    expect(params?.deps.deliveryObserver).toEqual({ turnFinished });
+  });
+
   it('adds a delivered reminder to the past-chat search as soon as it is written', async () => {
     const built = await setup();
     const agent = await built.agentStore.getAgent({ tenant_id: 'default', name: 'reporter' });

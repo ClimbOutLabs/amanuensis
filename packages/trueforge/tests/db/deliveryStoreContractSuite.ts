@@ -52,6 +52,50 @@ export function runDeliveryStoreContractSuite(getStore: () => IDeliveryStore): v
     expect(made.kind).toBe('approval_waiting');
   });
 
+  it('creates a brief delivery that reads back whole with its chat link', async () => {
+    const store = getStore();
+    const made = await store.create({
+      ...ALICE,
+      kind: 'brief',
+      level: 'nudge',
+      text: 'Three meetings today, and the dentist at noon.',
+      reason: 'Your morning brief ran at 7:00 AM.',
+      link: { type: 'chat', session_id: 's9' },
+    });
+    expect(made).toMatchObject({
+      kind: 'brief',
+      level: 'nudge',
+      text: 'Three meetings today, and the dentist at noon.',
+      reason: 'Your morning brief ran at 7:00 AM.',
+      link: { type: 'chat', session_id: 's9' },
+      seen_at: null,
+      attempts: [],
+    });
+    await expect(store.get({ ...ALICE, id: made.id })).resolves.toEqual(made);
+  });
+
+  it('finds a delivery by kind and link, for its owner only', async () => {
+    const store = getStore();
+    const link = { type: 'approval' as const, session_id: 's1', approval_id: 'a1' };
+    await store.create({
+      ...ALICE,
+      kind: 'approval_waiting',
+      level: 'nudge',
+      text: 'Send the email?',
+      reason: 'An action is waiting for your ok.',
+      link,
+    });
+    await expect(store.findByKindAndLink({ ...ALICE, kind: 'approval_waiting', link })).resolves.toMatchObject({
+      text: 'Send the email?',
+    });
+    await expect(store.findByKindAndLink({ ...BOB, kind: 'approval_waiting', link })).resolves.toBeUndefined();
+    await expect(store.findByKindAndLink({ ...OTHER_TENANT, kind: 'approval_waiting', link })).resolves.toBeUndefined();
+    await expect(
+      store.findByKindAndLink({ ...ALICE, kind: 'approval_waiting', link: { ...link, approval_id: 'a2' } }),
+    ).resolves.toBeUndefined();
+    await expect(store.findByKindAndLink({ ...ALICE, kind: 'reminder', link })).resolves.toBeUndefined();
+  });
+
   it('lists newest first and pages with a token', async () => {
     const store = getStore();
     const base = Date.now() - 60_000;

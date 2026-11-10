@@ -80,6 +80,11 @@ export interface RecordDeliveryAttemptInput extends DeliveryOwner {
   attempt: DeliveryAttempt;
 }
 
+export interface FindDeliveryByKindAndLinkInput extends DeliveryOwner {
+  kind: Delivery['kind'];
+  link: DeliveryLink;
+}
+
 export interface ImportDeliveriesInput extends DeliveryOwner {
   deliveries: readonly Delivery[];
 }
@@ -93,6 +98,8 @@ export interface IDeliveryStore {
   /** Adds one channel attempt. A delivery that is not the owner's is left alone and reads as missing. */
   recordAttempt(input: RecordDeliveryAttemptInput): Promise<boolean>;
   get(input: DeliveryOwner & { id: string }): Promise<Delivery | undefined>;
+  /** The owner's newest delivery of one kind carrying exactly this link, or undefined. Producers look here before creating, so a completion seen twice still makes one delivery. */
+  findByKindAndLink(input: FindDeliveryByKindAndLinkInput): Promise<Delivery | undefined>;
   /** The owner's deliveries, newest first. */
   list(input: ListDeliveriesInput): Promise<DeliveryPage>;
   /** Marks the owner's listed deliveries seen. Already seen ones keep their first time. Resolves to how many changed. */
@@ -235,6 +242,24 @@ export class DeliveryStore implements IDeliveryStore {
       .where('id', '=', input.id)
       .where('tenant_id', '=', input.tenant_id)
       .where('created_by', '=', input.created_by)
+      .executeTakeFirst();
+    if (row === undefined) {
+      return undefined;
+    }
+    const [delivery] = await this.#hydrate([row]);
+    return delivery;
+  }
+
+  async findByKindAndLink(input: FindDeliveryByKindAndLinkInput): Promise<Delivery | undefined> {
+    const row = await this.#db
+      .selectFrom('delivery')
+      .selectAll()
+      .where('tenant_id', '=', input.tenant_id)
+      .where('created_by', '=', input.created_by)
+      .where('kind', '=', input.kind)
+      .where('link', '=', JSON.stringify(input.link))
+      .orderBy('created_at', 'desc')
+      .orderBy('id', 'desc')
       .executeTakeFirst();
     if (row === undefined) {
       return undefined;

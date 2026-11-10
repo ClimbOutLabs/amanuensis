@@ -96,6 +96,7 @@ import { submitArtifactPersistence } from '../runtime/artifacts/persistTurnArtif
 import { chatModelName, resolveChatAssistant, scheduleRunsAs, type ChatRunner } from '../runtime/chatAssistant';
 import type { ChatSearchIndexer } from '../runtime/chatSearchIndexing';
 import { readChatSearchEnabled } from '../runtime/chatSearchSettings';
+import type { TurnDeliveryObserver, TurnDeliveryOrigin } from '../runtime/delivery/turnDeliveries';
 import { StreamGoneError, type EventSubscription, type EventSubscriptionRegistry } from '../runtime/event-subscription';
 import { buildInternalSourceToolPolicy, type InternalSourceState } from '../runtime/internalSourceGuard';
 import { mailAccountDirectory } from '../runtime/mailConnector';
@@ -228,6 +229,9 @@ export function toContentDisposition(path: string): string {
  * chat has to tell "your decision is stale, re-read the session" apart from "you contradicted
  * a decision already on record", and an HTTP status alone cannot say which.
  */
+/** Where an ordinary app chat turn comes from, for the deliveries its finish makes. */
+const CHAT_TURN_ORIGIN: TurnDeliveryOrigin = { type: 'chat' };
+
 export const TurnConflictCode = {
   STALE_APPROVAL_CONTINUATION: 'stale_approval_continuation',
   PREVIOUS_TURN_RUNNING: 'previous_turn_running',
@@ -294,6 +298,8 @@ export interface TurnsRouterDeps {
   sentinelSettingsStore?: ISentinelSettingsStore | undefined;
   /** Adds finished turns to the past-chat search for people who turned it on; absent, nothing is added. */
   chatSearchIndexer?: ChatSearchIndexer | undefined;
+  /** Puts a finished turn's brief and waiting items into the person's feed; absent, nothing is delivered. */
+  deliveryObserver?: TurnDeliveryObserver | undefined;
   /** Per-instance daily Token Factory counters; refuses new turns past `TOKEN_FACTORY_DAILY_TOKEN_CAP`. */
   tokenFactoryBudget: TokenFactoryBudget;
   /** Resumable live turn-event transport: create-turn writes, subscribe polls. */
@@ -325,6 +331,7 @@ export type BeginTurnExecutionDeps = Pick<
   | 'globalSettingsStore'
   | 'mcpCatalog'
   | 'tokenFactoryBudget'
+  | 'deliveryObserver'
 > & {
   agentStore: IAgentStore;
   modelProviderStore: IModelProviderStore;
@@ -1287,6 +1294,17 @@ export interface DrainTurnEventsInput {
         createdBy: string;
       }
     | undefined;
+  /** The finished turn's brief and waiting items reach the person's feed in the follow-up. */
+  deliveries?:
+    | {
+        observer: TurnDeliveryObserver;
+        tenantId: string;
+        /** Whose turn this is: the deliveries are that person's. */
+        createdBy: string;
+        /** Where the turn came from; it decides which deliveries the finish makes. */
+        origin: TurnDeliveryOrigin;
+      }
+    | undefined;
 }
 
 /** Events that show a turn reached the model. Connector startup, memory recall and a new sandbox are still setup. */
@@ -1428,8 +1446,18 @@ async function runTurnFollowUp(params: {
   markArtifactsCaptured: () => void;
 }): Promise<void> {
   const { input, state, ingestedToolOutput, toolResults, markArtifactsCaptured } = params;
-  const { turnEventStream, sessionId, turnId, logger, memory, artifacts, profileLearning, modelUsage, chatSearch } =
-    input;
+  const {
+    turnEventStream,
+    sessionId,
+    turnId,
+    logger,
+    memory,
+    artifacts,
+    profileLearning,
+    modelUsage,
+    chatSearch,
+    deliveries,
+  } = input;
   try {
     // First, and never behind a model call: the chat's next turn reuses the sandbox and waits
     // on this step, so its tools cannot change a file before this turn has saved it.
@@ -1501,6 +1529,16 @@ async function runTurnFollowUp(params: {
       created_by: chatSearch.createdBy,
       session_id: sessionId,
       turn_id: turnId,
+    });
+  }
+  if (deliveries !== undefined) {
+    // Last, and never throwing, so a delivery problem reaches nothing else in the follow-up.
+    await deliveries.observer.turnFinished({
+      tenant_id: deliveries.tenantId,
+      created_by: deliveries.createdBy,
+      session_id: sessionId,
+      state,
+      origin: deliveries.origin,
     });
   }
 }
@@ -1672,6 +1710,7 @@ export interface TurnEventDrainInput {
   modelUsage: ModelUsageDrainMember;
   memory?: DrainTurnEventsInput['memory'];
   chatSearch?: DrainTurnEventsInput['chatSearch'];
+  deliveries?: DrainTurnEventsInput['deliveries'];
 }
 
 /**
@@ -1688,6 +1727,8 @@ export async function beginTurnExecution(params: {
   unattended?: boolean | undefined;
   /** Built-in tool names this turn does not offer. */
   withheldTools?: readonly string[] | undefined;
+  /** Where this turn came from, for its deliveries; absent, the finish makes no deliveries. */
+  deliveryOrigin?: TurnDeliveryOrigin | undefined;
 }): Promise<{ turn: TurnHandle<TurnCustom>; drainInput: TurnEventDrainInput }> {
   const clocks = startTurnClocks({ sessionId: params.session.session_id, logger: params.deps.logger });
   try {
@@ -1893,6 +1934,15 @@ async function beginAcceptedTurnExecution(
               tenantId: tenant_id,
               createdBy: session.record.created_by_subject.subject_id,
             },
+      deliveries:
+        deps.deliveryObserver === undefined || params.deliveryOrigin === undefined
+          ? undefined
+          : {
+              observer: deps.deliveryObserver,
+              tenantId: tenant_id,
+              createdBy: session.record.created_by_subject.subject_id,
+              origin: params.deliveryOrigin,
+            },
       memory:
         deps.memoryClient === undefined
           ? undefined
@@ -1919,6 +1969,8 @@ export async function startTurnInProcess(params: {
   deps: BeginTurnExecutionDeps;
   unattended?: boolean | undefined;
   withheldTools?: readonly string[] | undefined;
+  /** Where this turn came from, for its deliveries; absent, the finish makes no deliveries. */
+  deliveryOrigin?: TurnDeliveryOrigin | undefined;
 }): Promise<TurnHandle<TurnCustom>> {
   const { turn, drainInput } = await beginTurnExecution(params);
 
@@ -3078,6 +3130,15 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
                   indexer: deps.chatSearchIndexer,
                   tenantId: requestContext.tenant_id,
                   createdBy: session.record.created_by_subject.subject_id,
+                },
+          deliveries:
+            deps.deliveryObserver === undefined
+              ? undefined
+              : {
+                  observer: deps.deliveryObserver,
+                  tenantId: requestContext.tenant_id,
+                  createdBy: session.record.created_by_subject.subject_id,
+                  origin: CHAT_TURN_ORIGIN,
                 },
           artifacts: {
             turnArtifactStore: deps.turnArtifactStore,

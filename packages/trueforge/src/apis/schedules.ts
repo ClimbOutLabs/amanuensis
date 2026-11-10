@@ -85,6 +85,7 @@ import {
 import type { ChatSearchIndexer } from '../runtime/chatSearchIndexing';
 import { validateManifest } from '../runtime/cron';
 import type { DeliveryService } from '../runtime/delivery/deliveryService';
+import type { TurnDeliveryObserver } from '../runtime/delivery/turnDeliveries';
 import type { EventSubscriptionRegistry } from '../runtime/event-subscription';
 import { createMemoryClient } from '../runtime/memory/createMemoryClient';
 import { resolveMemoryProvider } from '../runtime/memory/memoryProvider';
@@ -105,6 +106,8 @@ export interface ScheduleTurnExecutionDeps<TTransaction> {
   briefItemStore: IBriefItemCompletionStore;
   /** A due reminder is also put in the person's feed, and pushed to their devices, through this. */
   deliveryService: DeliveryService;
+  /** A finished run's brief and waiting items are put in the person's feed through this; absent, they are not. */
+  deliveryObserver?: TurnDeliveryObserver | undefined;
   sessions: Sessions<SessionCustom, TurnCustom>;
   activeTurns: ActiveTurnRegistry;
   /** Tracks in-flight turn event drains so shutdown can wait for them. */
@@ -295,11 +298,19 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
     // Nobody watches a scheduled run, so it holds what would ask instead of stopping at a card.
     unattended: true,
     withheldTools: scheduleWithheldTools({ name: item.schedule.name, task: item.schedule.manifest.task }),
+    deliveryOrigin: {
+      type: 'schedule',
+      name: item.schedule.name,
+      task: item.schedule.manifest.task,
+      scheduled_for: item.run.scheduled_for,
+      timezone: item.schedule.manifest.timezone,
+    },
     deps: {
       mcpCatalog: deps.mcpCatalog,
       activeTurns: deps.activeTurns,
       turnDrains: deps.turnDrains,
       eventSubscriptions: deps.eventSubscriptions,
+      deliveryObserver: deps.deliveryObserver,
       agentStore: deps.agentStore,
       modelProviderStore: deps.resolveModelProviderStore(c, prepared.agent),
       mcpServerStore: deps.resolveMcpServerStore(c, prepared.agent),

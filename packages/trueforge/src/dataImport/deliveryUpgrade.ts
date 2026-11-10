@@ -12,6 +12,14 @@ function defaultLevel(kind: unknown): 'note' | 'nudge' {
   return kind === 'note' ? 'note' : 'nudge';
 }
 
+/**
+ * Kinds the feed no longer has. Nothing could ever create them, and their meaning was always carried by
+ * their level, so an older export's items of those kinds come across as reminders at their own level.
+ */
+function currentKind(kind: unknown): unknown {
+  return kind === 'note' || kind === 'nudge' ? 'reminder' : kind;
+}
+
 /** Keeps the channel attempts that still read; each one that does not is counted, never invented. */
 function readableAttempts(raw: unknown): unknown[] {
   if (!Array.isArray(raw)) {
@@ -39,6 +47,7 @@ export function upgradeArchivedDeliveries(json: unknown): unknown {
     }
     return {
       ...record,
+      kind: currentKind(record['kind']),
       level: record['level'] ?? defaultLevel(record['kind']),
       reason: record['reason'] ?? UNRECORDED_REASON,
       seen_at: record['seen_at'] ?? null,

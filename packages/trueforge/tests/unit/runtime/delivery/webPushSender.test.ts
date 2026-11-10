@@ -83,8 +83,8 @@ describe('push payload', () => {
   });
 
   it('names no assistant and gives each kind plain words', () => {
-    expect(pushTitle('nudge')).toBe('Something needs you today');
-    for (const kind of ['reminder', 'note', 'nudge', 'approval_waiting'] as const) {
+    expect(pushTitle('brief')).toBe('Your morning brief');
+    for (const kind of ['reminder', 'brief', 'approval_waiting'] as const) {
       expect(pushTitle(kind)).not.toMatch(/mannie|aman/i);
     }
   });
