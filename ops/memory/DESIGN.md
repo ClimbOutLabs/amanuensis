@@ -121,6 +121,7 @@ the nightly pass can learn how the person writes to each contact.
   went out but whose copy in the Sent folder could not be filed (`sent-copy: failed` or `unknown`): the
   recipients have it, so it is saved. A failed or uncertain recipient is not saved. A denied, blocked or
   failed call writes nothing, `save_draft` writes nothing, and a send on any other connector writes nothing.
+  A send made in an incognito chat writes nothing either: the message goes out, but that chat keeps nothing.
 - **One place decides.** The turn drain watches each tool result and writes the note when a send's result
   qualifies. A send approved on a card runs in a later turn that never sees the message that asked for it,
   so that turn is handed the calls the person allowed, read from the end of the paused turn before the turn

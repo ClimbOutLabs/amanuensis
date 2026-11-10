@@ -4,6 +4,7 @@
  * turn to finish and does not depend on the turn's own memory save, so neither a turn that ends early nor a
  * lost turn takes the note with it.
  */
+import type { SessionRecord } from '@truefoundry/trueforge-core/agent-session';
 import { extractErrorLogFields } from '@truefoundry/trueforge-core/core';
 import {
   namedMailCopies,
@@ -21,6 +22,7 @@ import { isRecord } from '@truefoundry/trueforge-core/core/util/records';
 import type { Logger } from 'winston';
 import configuration from '../../config';
 import { redactSecretShapes } from '../../dataExport/secretScrub';
+import { sessionKeepsNothing } from '../privateChat';
 import { localDay } from './localDay';
 import { REPLACE_DOCUMENT_METADATA_KEY } from './markdownMemoryFiles';
 import type { MemoryClient } from './memoryClient';
@@ -171,10 +173,12 @@ export function sentMailNoteText({
 
 /**
  * Saves one sent message as a daily-log note. Never throws: a memory failure must not touch the turn.
- * Each send has its own operation id, so saving the same send twice writes it once.
+ * Each send has its own operation id, so saving the same send twice writes it once. A message sent
+ * from a private chat is not saved: the message went out, but the chat keeps nothing.
  */
 export async function saveSentMail({
   client,
+  session,
   sessionId,
   turnId,
   threadId,
@@ -185,6 +189,8 @@ export async function saveSentMail({
   logger,
 }: {
   client: MemoryClient;
+  /** The chat the send was made in. */
+  session: Pick<SessionRecord, 'is_incognito'>;
   sessionId: string;
   turnId: string;
   threadId: string;
@@ -194,6 +200,9 @@ export async function saveSentMail({
   timeZone: string | undefined;
   logger: Logger;
 }): Promise<void> {
+  if (sessionKeepsNothing({ session })) {
+    return;
+  }
   try {
     const text = sentMailNoteText({ mail });
     if (text === undefined) {

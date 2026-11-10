@@ -74,10 +74,12 @@ async function drain({
   client,
   stream,
   approvedCalls,
+  privateChat = false,
 }: {
   client: HindsightClient | undefined;
   stream: AsyncIterable<TurnStreamingEvent>;
   approvedCalls?: Awaited<ReturnType<typeof approvedToolCalls>>;
+  privateChat?: boolean;
 }): Promise<void> {
   const executionDeadline = new TurnExecutionDeadline({
     abortController: new AbortController(),
@@ -99,7 +101,7 @@ async function drain({
         ? undefined
         : {
             client,
-            session: { is_incognito: false },
+            session: { is_incognito: privateChat },
             userText: 'Tell Wendy I will be there at 7.',
             attachedFiles: false,
           },
@@ -329,6 +331,12 @@ describe('a sent message in the drain of a turn', () => {
     ]).flat();
     await drain({ client, stream: streamOf(rounds) });
     expect(sentNotes(retain)).toHaveLength(20);
+  });
+
+  it('writes nothing to memory for a send made in a private chat', async () => {
+    const { client, retain } = memoryClient();
+    await drain({ client, stream: streamOf(sendRound({})), privateChat: true });
+    expect(retain).not.toHaveBeenCalled();
   });
 
   it('does nothing when memory is off', async () => {

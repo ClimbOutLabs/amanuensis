@@ -1443,6 +1443,7 @@ async function runTurnEventDrain(params: {
           sentMailWrites.push(
             saveSentMail({
               client: memory.client,
+              session: memory.session,
               sessionId,
               turnId,
               threadId: event.thread_id,

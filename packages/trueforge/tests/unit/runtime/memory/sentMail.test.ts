@@ -229,6 +229,7 @@ describe('a sent message in memory', () => {
   function save(mail: SentMail, callId = 'c1', turnId = 't1', target: MarkdownMemoryClient = client) {
     return saveSentMail({
       client: target,
+      session: { is_incognito: false },
       sessionId: 'chat-1',
       turnId,
       threadId: 'main',
@@ -263,6 +264,24 @@ describe('a sent message in memory', () => {
     expect(await entries()).toHaveLength(1);
     await save(send, 'c2');
     expect(await entries()).toHaveLength(2);
+  });
+
+  it('is not saved when it was sent from a private chat', async () => {
+    const retain = jest.spyOn(client, 'retain');
+    await saveSentMail({
+      client,
+      session: { is_incognito: true },
+      sessionId: 'chat-1',
+      turnId: 't1',
+      threadId: 'main',
+      callId: 'c1',
+      mail: send,
+      sentAt: '2026-10-31T12:00:00.000Z',
+      timeZone: 'Europe/Madrid',
+      logger,
+    });
+    expect(retain).not.toHaveBeenCalled();
+    expect(await entries()).toEqual([]);
   });
 
   it('is not saved when it holds a secret', async () => {
@@ -354,6 +373,7 @@ describe('saving sent messages safely', () => {
   } = {}) {
     return saveSentMail({
       client: target,
+      session: { is_incognito: false },
       sessionId: 'chat-1',
       turnId,
       threadId: 'main',
