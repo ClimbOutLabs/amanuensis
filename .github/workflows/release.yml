@@ -31,11 +31,6 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
-env:
-  # Set to 'true' once the Windows signing account is ready. From then
-  # on a release tag refuses to build an unsigned Aman-Setup.exe.
-  REQUIRE_WINDOWS_SIGNING: 'false'
-
 jobs:
   prepare:
     name: Decide the release
@@ -84,13 +79,8 @@ jobs:
     needs: prepare
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
-    # Only a release tag's Windows build runs in the protected release
-    # environment, where the signing variables live and the owner
-    # approves the run. Pull requests never reach it.
-    environment: ${{ matrix.system == 'windows' && needs.prepare.outputs.publish == 'true' && 'release' || '' }}
     permissions:
       contents: read
-      id-token: write
     strategy:
       fail-fast: true
       matrix:
@@ -115,77 +105,14 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: '24'
-          cache: 'pnpm'
+          # No cache: a release is built from the tagged source alone.
+          cache: ''
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Build the executable
         run: pnpm build:aman-installer
-
-      # Signing runs only for a release tag's Windows build, and only
-      # when the release environment has all six signing variables.
-      - name: Decide whether this run signs
-        if: matrix.system == 'windows'
-        shell: bash
-        env:
-          PUBLISH: ${{ needs.prepare.outputs.publish }}
-          TENANT: ${{ vars.AZURE_TENANT_ID }}
-          CLIENT: ${{ vars.AZURE_CLIENT_ID }}
-          SUBSCRIPTION: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-          ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
-          ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
-          PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
-        run: |
-          ready=false
-          if [ "$PUBLISH" = true ] && [ -n "$TENANT" ] && [ -n "$CLIENT" ] && [ -n "$SUBSCRIPTION" ] \
-            && [ -n "$ENDPOINT" ] && [ -n "$ACCOUNT" ] && [ -n "$PROFILE" ]; then
-            ready=true
-          fi
-          echo "SIGNING_READY=$ready" >> "$GITHUB_ENV"
-
-      - name: Refuse an unsigned release once signing is required
-        if: matrix.system == 'windows' && needs.prepare.outputs.publish == 'true' && env.REQUIRE_WINDOWS_SIGNING == 'true' && env.SIGNING_READY != 'true'
-        shell: bash
-        run: |
-          echo "::error::Signing is required, but the release environment is missing one of its six signing variables. Add them in the repository's environment settings and run the release again."
-          exit 1
-
-      - name: Sign in to Azure for signing
-        if: env.SIGNING_READY == 'true'
-        uses: azure/login@v3
-        with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Sign the Windows program
-        if: env.SIGNING_READY == 'true'
-        uses: azure/artifact-signing-action@v2
-        with:
-          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
-          signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
-          certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
-          files: ${{ github.workspace }}\packages\aman-installer\dist\aman.exe
-          file-digest: SHA256
-          timestamp-rfc3161: http://timestamp.acs.microsoft.com
-          timestamp-digest: SHA256
-
-      - name: Check the Windows signature
-        if: env.SIGNING_READY == 'true'
-        shell: pwsh
-        run: |
-          $signature = Get-AuthenticodeSignature packages\aman-installer\dist\aman.exe
-          if ($signature.Status -ne 'Valid' -or $null -eq $signature.TimeStamperCertificate) {
-            Write-Output "::error::The signed program does not have a valid, timestamped signature: $($signature.StatusMessage)"
-            exit 1
-          }
-          Write-Output "Signed by $($signature.SignerCertificate.Subject)"
-
-      - name: Say the Windows program is not signed
-        if: matrix.system == 'windows' && env.SIGNING_READY != 'true'
-        shell: bash
-        run: echo "::notice::Aman-Setup.exe in this run is not signed. Signing runs on release tags once the release environment has its six signing variables."
 
       - name: Run the executable
         shell: bash
@@ -223,7 +150,8 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: '24'
-          cache: 'pnpm'
+          # No cache: a release is built from the tagged source alone.
+          cache: ''
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

@@ -100,6 +100,7 @@ signed release record (`manifest.json` and `manifest.json.minisig`) and
 (`src/release/tool.ts`): `stage` puts a built program into a folder under
 its release names, `build-manifest` and `assemble-manifest` make the record,
 `sign` signs it, `verify` checks a file against it, `checksums` writes
-`SHA256SUMS`, and `throwaway-key` makes a key for a dry run. The release
+`SHA256SUMS`, `notes` writes the published release page with the steps to
+check a download by hand, and `throwaway-key` makes a key for a dry run. The release
 workflows run these steps; `RELEASING.md` at the repository root describes
 the whole release.

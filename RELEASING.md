@@ -37,7 +37,7 @@ The **Release** workflow (`.github/workflows/release.yml`) starts on the tag. It
 - `manifest.json`, the release record: the SHA-256 of every file above and the image names for this source.
 - `SHA256SUMS`, the same hashes in the form `sha256sum --check` reads.
 
-The Windows build runs in the `release` environment, so it waits for your approval. The workflow ends with a **draft** release that carries all of these files.
+The workflow ends with a **draft** release that carries all of these files.
 
 ### 2. Sign the release record
 
@@ -57,15 +57,23 @@ Add `manifest.json.minisig` to the draft release, on the release page or with `g
 
 ### 3. Run the Publish release workflow
 
-Run **Publish release** (`.github/workflows/release-publish.yml`) from the Actions tab with the tag. It also runs in the `release` environment. It checks every file in the record with `aman verify`, using the release key built into Aman, writes `SHA256SUMS` again with the signature in it, and makes the release public and the latest. A file that does not match stops it, and the release stays a draft.
+Run **Publish release** (`.github/workflows/release-publish.yml`) from the Actions tab. Under **Use workflow from**, pick the tag (for example `v0.2.0`), and type the same tag in the box. A run started from `main` is refused, because the `release` environment only lets version tags in. The run waits for your approval, then:
 
-### Signing `Aman-Setup.exe`
+1. Checks the tag is a version tag on `main`, the one this run started from.
+2. Refuses a draft with any file the signed record does not list.
+3. Checks every file against the record with the release tool from the tagged source, then again with the release's own `aman verify`. Only the tool has the GitHub token's reach; the release's program runs with no token.
+4. Writes `SHA256SUMS` again with the signature in it, and the release page text: how to check a download by hand, with the release key.
+5. Reads the draft again, and makes the release public and the latest only if nothing changed since the checks.
 
-Windows code signing is not used for now: the program ships without a Windows publisher certificate, and people check a download against the signed record instead. The Publish release step puts those steps and the release key on the release page, and [SECURITY.md](SECURITY.md) carries them too. The workflow keeps a dormant hook for Azure Artifact Signing: it runs only when the `release` environment has these six variables (IDs, not secrets): `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_SUBSCRIPTION_ID`, `AZURE_SIGNING_ENDPOINT`, `AZURE_SIGNING_ACCOUNT` and `AZURE_SIGNING_PROFILE`. Sign-in to Azure would use GitHub's OIDC token, so no password is stored. Without the variables, signing is skipped and the run says so. If signing is ever set up, set `REQUIRE_WINDOWS_SIGNING` to `'true'` in `release.yml`, so a release tag can no longer build an unsigned program.
+A file that does not match stops it, and the release stays a draft.
+
+### No Windows code signing
+
+`Aman-Setup.exe` ships without a Windows publisher certificate, by the owner's decision on 2026-11-10, so Windows shows its "Windows protected your PC" box. People check a download against the signed record instead: every release page carries the steps and the release key, and so does [SECURITY.md](SECURITY.md). A test keeps the key in SECURITY.md the one compiled into Aman. Adding Windows signing later means a signing step in the Windows build job of `release.yml`.
 
 ### The `release` environment
 
-Create it once in the repository settings, under Environments: add the owner as a required reviewer, and allow only `v*` tags to deploy to it. The signing variables go there too.
+Create it in the repository settings, under Environments, **before the first tag**. If it does not exist, GitHub makes it on first use with no reviewer, and nothing waits for your approval. Add the owner as a required reviewer, and under deployment branches and tags allow only tags matching `v*`. Also add a tag ruleset for `v*` that blocks updating and deleting tags, so a tag cannot be moved between the Release run and the publish.
 
 ### Dry runs
 
