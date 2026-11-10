@@ -178,6 +178,11 @@ export default function NotesFolderSetupPanel({ open, onOpenChange, port, onChan
                 ? 'Saving replaces the saved folder. The folder is checked before anything is saved.'
                 : 'The folder is checked before anything is saved.'}
             </p>
+            <p className="text-text-secondary">
+              The Docker install cannot use a notes folder yet, because Aman runs in a container there and cannot reach
+              a folder on your computer. A notes folder works on the npx install and on an install built from the
+              source.
+            </p>
             <div>
               <label htmlFor="notes-folder-path" className={LABEL_CLASS}>
                 Folder

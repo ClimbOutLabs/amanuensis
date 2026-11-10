@@ -16,11 +16,15 @@ You can point Aman at a folder of your Markdown notes, such as the vault you ope
 
 Note: The folder can be one a sync app keeps up to date, such as Syncthing or Nextcloud. Obsidian does not need to be running, and no Obsidian plugin is needed. Aman reads the files themselves.
 
-Note: The folder cannot be the folder Aman keeps its own memory in, or a folder inside it. If you pick that folder, the panel says so and names the folder to pick instead: the one that holds your notes.
+Note: The Docker install cannot use a notes folder yet. On that install Aman runs in a container, and no folder on your computer is passed through to it, so a folder path cannot be found. Aman Setup on Windows uses Docker, so it cannot use a notes folder yet either. A notes folder works on the npx install and on an install built from the source.
+
+Note: The folder cannot be one of the folders Aman keeps its own data in, or a folder inside one of them. Those are the folder for Aman's memory, the folder for persona knowledge, and the app data folder that holds Aman's database and sandbox workspaces. If you pick one of those folders, the panel says so and names the folder to pick instead: the one that holds your notes.
+
+Note: To search your notes, Aman keeps an index of them in its app data folder, in a folder named notes-folder-index. Nothing for the index is written into your notes folder.
 
 ## To use your notes in a chat
 
-Ask about your notes in any chat, such as what you wrote about a trip or where an idea is written down. Aman searches the notes and reads the ones that match. To have something kept, ask Aman to add it to your inbox or to make a new note.
+Ask about your notes in any chat, such as what you wrote about a trip or where an idea is written down. Aman searches the notes and reads the ones that match. To have something kept, ask Aman to add it to your inbox or to make a new note. Once a chat has read things written by other people, adding to your notes asks first with a card, because the write may have been asked for by something Aman read rather than by you.
 
 Note: Aman adds an inbox entry under a heading with the date and time, so a file your sync app is also updating keeps both sets of words. If you ask Aman to change a note, it adds the new words as an inbox entry or a new note instead, and says that is what it did.
 
