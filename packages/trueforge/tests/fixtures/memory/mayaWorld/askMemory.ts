@@ -175,19 +175,24 @@ export async function warmEmbeddings({
 }
 
 /**
- * Asks one question in a new chat against the vault under `dir`, through the same step that builds the
- * memory block before every reply. The caller sets the clock to the day of asking.
+ * Runs the step that builds the memory block before every reply, in a new chat against the vault under
+ * `dir`, and returns the block, or an empty string when none is shown. The caller sets the clock to the day
+ * of asking.
  */
-export async function askMemory({
+export async function memoryBlockFor({
   dir,
-  question,
+  message,
+  earlierMessages,
+  chatId,
   embeddings,
 }: {
   dir: string;
-  question: RecallQuestion;
+  message: string;
+  earlierMessages: readonly string[];
+  chatId: string;
   /** A warm meaning search for this vault; left out, memory is found by words only. */
   embeddings?: EmbeddingSubsystem | undefined;
-}): Promise<RecallAnswer> {
+}): Promise<string> {
   const capability = hindsightMemoryCapability({
     client: new MarkdownMemoryClient({
       baseDir: dir,
@@ -196,7 +201,7 @@ export async function askMemory({
     }),
     config: serverMemoryConfig(),
     logger: winston.createLogger({ silent: true }),
-    sessionId: `ask-${question.id}`,
+    sessionId: chatId,
     previousTurnId: null,
     timeZone: 'UTC',
   });
@@ -205,11 +210,11 @@ export async function askMemory({
     throw new Error('The memory capability has no step that runs before the model.');
   }
   const context: ContextMessage[] = [
-    ...question.earlier_messages.flatMap((content): ContextMessage[] => [
+    ...earlierMessages.flatMap((content): ContextMessage[] => [
       { role: 'user', content },
       { role: 'assistant', content: 'OK.' },
     ]),
-    { role: 'user', content: question.message },
+    { role: 'user', content: message },
   ];
   const events: AgentContextProcessorOutput[] = [];
   for await (const event of processor.processPreLLM({
@@ -219,7 +224,26 @@ export async function askMemory({
   })) {
     events.push(event);
   }
-  const block = memoryBlockOf(events);
+  return memoryBlockOf(events);
+}
+
+/** Asks one question in a new chat against the vault under `dir`. The caller sets the clock to the day of asking. */
+export async function askMemory({
+  dir,
+  question,
+  embeddings,
+}: {
+  dir: string;
+  question: RecallQuestion;
+  embeddings?: EmbeddingSubsystem | undefined;
+}): Promise<RecallAnswer> {
+  const block = await memoryBlockFor({
+    dir,
+    message: question.message,
+    earlierMessages: question.earlier_messages,
+    chatId: `ask-${question.id}`,
+    embeddings,
+  });
   return {
     question,
     block,
