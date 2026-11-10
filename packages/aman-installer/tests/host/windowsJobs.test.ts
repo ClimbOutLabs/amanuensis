@@ -96,6 +96,7 @@ test('the golden file holds every command line the Windows jobs run', async () =
   assert.equal(await jobs.ensureProgramsFolderOnUserPath(), 'added');
   await jobs.listShortcuts();
   await jobs.pointShortcutAtOpen('C:\\Users\\Friend\\Desktop\\Aman.lnk');
+  await jobs.ensureOpenAmanShortcut();
   await jobs.ensureCheckAmanShortcut();
   await jobs.addCaCertificateToUserStore();
   await jobs.startDockerDesktop();

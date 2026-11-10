@@ -169,6 +169,8 @@ Be clear about one thing: **the model sees what you send it.** If you use a host
 
 The browser loads nothing from third parties: fonts and icons are bundled. The server contacts only the services you configure: your model provider, your mail and calendar, the connectors you add. The only other outside calls are the map services when you ask for a map, package sources such as npm and PyPI when a skill you approved installs packages, and one download of the memory search model from Hugging Face, which Aman checks against fixed fingerprints. CI fails if a new outside address appears in the code; the list is [scripts/external-hosts.allowlist.json](scripts/external-hosts.allowlist.json).
 
+When you want Aman to forget a conversation, start an incognito chat. Aman can still read what it knows, but saves nothing from the chat, and deletes it when you close it.
+
 Sending a message, deleting anything and installing anything always wait for your OK. That rule is enforced in code, on the tool itself, not left to the model's good behaviour.
 
 ## 🔧 For developers and the curious
@@ -269,7 +271,7 @@ Read [AGENTS.md](AGENTS.md) and any package-level `AGENTS.md` before changing co
 
 - [Introduction and architecture](docs/introduction.mdx)
 - [Models, roles and personas](docs/model-roles.mdx)
-- [MCP connectors](docs/mcp-servers.mdx), including [Home Assistant](docs/connectors/home-assistant.md)
+- [MCP connectors](docs/mcp-servers.mdx)
 - [Safety](docs/safety.md) and [privacy](docs/privacy.md)
 - [How memory works](docs/memory.md), the [memory design](ops/memory/DESIGN.md) and the [operations runbook](ops/memory/RUNBOOK.md)
 - [Sandbox](docs/sandbox.mdx), [schedules](docs/schedules.md), [backups](docs/backup.md), [voice input](docs/voice-input.mdx), [Aman's browser](docs/browser.md)

@@ -46,6 +46,8 @@ describeRealStores('command execution recovery across Postgres and Redis replica
       metadata: {},
       agent: { type: 'inline', spec: makeAgentSpec() },
       custom: null,
+      is_incognito: false,
+      private_expires_at: null,
     });
     await store.createTurn(makeCreateTurnInput({ sessionId, turnId }));
   });

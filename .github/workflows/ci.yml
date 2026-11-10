@@ -491,6 +491,10 @@ jobs:
       - name: Regenerate and check committed contracts
         run: pnpm sdk:check
 
+      # The build rewrites this list. A stale committed copy leaves the lockfile out of date after a build.
+      - name: The amanuensis package lists what it ships
+        run: pnpm check:amanuensis-deps
+
   # https://github.com/marketplace/actions/alls-green#why
   check:
     if: always()
