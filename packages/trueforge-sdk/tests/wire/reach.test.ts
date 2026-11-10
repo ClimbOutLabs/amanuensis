@@ -15,7 +15,7 @@ describe("ReachClient", () => {
                     calls: { available: true, note: "note", problem: null },
                     texts: { available: true, note: "note", problem: null },
                 },
-                calendar_problem: { since: "since" },
+                calendar_problem: { kind: "google_sign_in", since: "since" },
                 mail_problem: { kind: "too_slow", since: "since" },
                 mail_source: "google",
                 max_levels: {
@@ -60,6 +60,7 @@ describe("ReachClient", () => {
                     },
                 },
                 calendarProblem: {
+                    kind: "google_sign_in",
                     since: "since",
                 },
                 mailProblem: {
@@ -142,7 +143,7 @@ describe("ReachClient", () => {
                     calls: { available: true, note: "note", problem: null },
                     texts: { available: true, note: "note", problem: null },
                 },
-                calendar_problem: { since: "since" },
+                calendar_problem: { kind: "google_sign_in", since: "since" },
                 mail_problem: { kind: "too_slow", since: "since" },
                 mail_source: "google",
                 max_levels: {
@@ -221,6 +222,7 @@ describe("ReachClient", () => {
                     },
                 },
                 calendarProblem: {
+                    kind: "google_sign_in",
                     since: "since",
                 },
                 mailProblem: {

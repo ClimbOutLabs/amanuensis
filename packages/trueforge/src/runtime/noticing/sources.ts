@@ -1,5 +1,5 @@
 import type { PersonOwner } from '../../db/personOwner';
-import type { MailSourceKind } from '../../schemas/reach';
+import type { CalendarProblemKind, MailSourceKind } from '../../schemas/reach';
 
 /**
  * What the watchers read. Each port answers a narrow question, so a mail or calendar source other than Google can be
@@ -102,6 +102,8 @@ export interface MailSource {
    * to the edge of the window it was listed in, so it cannot say where to resume reading.
    */
   datesAreArrival: boolean;
+  /** Set when a list fetches every message it finds with a call of its own, so a pass counts those against its calls. */
+  fetchesEachListed?: true;
 }
 
 export interface CalendarEventInfo {
@@ -128,9 +130,15 @@ export type MailAccess =
   | { status: 'none' }
   | { status: 'unreachable'; error: unknown; kind: MailSourceKind };
 
+/** Whether a person's calendar can be watched, as for mail. */
+export type CalendarAccess =
+  | { status: 'ready'; source: CalendarSource }
+  | { status: 'none' }
+  | { status: 'unreachable'; error: unknown; kind: CalendarProblemKind };
+
 export interface NoticingSources {
   mail: MailAccess;
-  calendar: CalendarSource | undefined;
+  calendar: CalendarAccess;
 }
 
 /** A place that knows whose mail and calendar can be watched, and opens them. */

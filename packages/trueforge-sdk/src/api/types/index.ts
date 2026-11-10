@@ -48,6 +48,7 @@ export * from "./BuildIdentity.js";
 export * from "./CalendarAccountStatus.js";
 export * from "./CalendarAccountStatusState.js";
 export * from "./CalendarProblem.js";
+export * from "./CalendarProblemKind.js";
 export * from "./CalendarProvider.js";
 export * from "./CancelSessionResponse.js";
 export * from "./CapabilitiesData.js";

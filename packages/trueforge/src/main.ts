@@ -126,6 +126,7 @@ import { createCallChats } from './runtime/calls/callChats';
 import { callVoiceReady, createCallReadiness } from './runtime/calls/callVoiceReady';
 import { createPhoneCallService } from './runtime/calls/phoneCalls';
 import { createTwilioCallProvider } from './runtime/calls/twilioCalls';
+import { assistantNameFor } from './runtime/chatAssistant';
 import { createChatImageService } from './runtime/chatImages/chatImageService';
 import { CHAT_IMAGE_RETENTION_DAYS } from './runtime/chatImages/limits';
 import { createImageReencoder } from './runtime/chatImages/reencodeInSandbox';
@@ -988,9 +989,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     budget: tokenFactoryBudget,
     channels: reachChannels,
     logger,
-    assistantNameFor: async owner =>
-      (await personalizationStore.getProfile({ tenant_id: owner.tenant_id, created_by: owner.created_by }))
-        ?.assistant_name ?? 'Your assistant',
+    assistantNameFor: async owner => await assistantNameFor({ personalizationStore, owner }),
     timezoneFor: personTimezoneFor({
       scheduleStore,
       calendarTimezone: googleCalendarTimezoneFor({ connections: googleConnectionStore, fetchImpl: undefined }),

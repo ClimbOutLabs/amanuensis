@@ -19,6 +19,7 @@ import {
 } from '../../../../src/runtime/noticing/sources';
 import { readMailWindow, watchCalendar, watchMail } from '../../../../src/runtime/noticing/watchers';
 import { defaultReachSettings } from '../../../../src/schemas/reach';
+import { readMessages } from './mailWindowSupport';
 
 const NOW = new Date('2026-11-05T15:00:00.000Z');
 const OWNER = { tenant_id: 'default', created_by: 'owner-1' };
@@ -409,6 +410,26 @@ describe('sidecar mail source (IMAP)', () => {
       return { call, pageSizes };
     };
 
+    it('stops paging one by one as soon as the pass is out of time, before it asks for the next page', async () => {
+      const { call } = connector();
+      let singles = 0;
+      const source = sidecarMailSource({
+        call: (name, args) => {
+          singles += Number(args['page_size']) === 1 ? 1 : 0;
+          return call(name, args);
+        },
+        account: 'default',
+      });
+      const read = source.listNewMessages({
+        since: new Date('2026-11-05T14:55:00.000Z'),
+        before: new Date('2026-11-05T14:55:04.000Z'),
+        limit: 50,
+        out_of_time: () => singles >= 1,
+      });
+      await expect(read).rejects.toBeInstanceOf(MailTooSlowError);
+      expect(singles).toBe(1);
+    });
+
     it('finds the one bad message by paging, and reads the bill beside it in the same pass', async () => {
       const { call, pageSizes } = connector();
       const warnings = { warn: jest.fn() };
@@ -425,9 +446,9 @@ describe('sidecar mail source (IMAP)', () => {
         max_width: undefined,
       });
       // The one message the connector cannot list is told about in a fixed note.
-      expect(found.raise.map(event => event.id)).toEqual([
-        'mail_gap:2026-11-05T14:55:00.000Z:2026-11-05T14:55:04.000Z',
-        'bill_due:7',
+      expect(found.raise.map(event => event.id)).toEqual(['bill_due:7']);
+      expect(found.gaps).toEqual([
+        { from: new Date('2026-11-05T14:55:00.000Z'), to: new Date('2026-11-05T14:55:04.000Z') },
       ]);
       expect(found.resume_from).toBeUndefined();
       expect(found.stopped_by).toBeUndefined();
@@ -485,9 +506,9 @@ describe('sidecar mail source (IMAP)', () => {
         handled: undefined,
         max_width: undefined,
       });
-      expect(found.raise.map(event => event.id)).toEqual([
-        'mail_gap:2026-11-05T14:55:00.000Z:2026-11-05T14:55:04.000Z',
-        'bill_due:7',
+      expect(found.raise.map(event => event.id)).toEqual(['bill_due:7']);
+      expect(found.gaps).toEqual([
+        { from: new Date('2026-11-05T14:55:00.000Z'), to: new Date('2026-11-05T14:55:04.000Z') },
       ]);
       expect(found.stopped_by).toBeUndefined();
       expect(found.resume_from).toBeUndefined();
@@ -596,7 +617,7 @@ describe('sidecar mail source (IMAP)', () => {
         logger: { warn: jest.fn() },
         out_of_time: () => false,
       });
-      read.messages.forEach(message => seen.add(message.id));
+      readMessages(read).forEach(message => seen.add(message.id));
       if (read.resume_from === undefined) break;
       expect(read.resume_from.getTime()).toBeGreaterThan(since.getTime());
       since = read.resume_from;
@@ -764,7 +785,7 @@ describe('sidecar calendar source (CalDAV)', () => {
 describe('createSidecarNoticingSources', () => {
   const none: NoticingSourceProvider = {
     listOwners: () => Promise.resolve([OWNER]),
-    sourcesFor: () => Promise.resolve({ mail: { status: 'none' }, calendar: undefined }),
+    sourcesFor: () => Promise.resolve({ mail: { status: 'none' }, calendar: { status: 'none' } }),
   };
 
   it('offers nothing when no sidecar is set up', async () => {
@@ -776,7 +797,10 @@ describe('createSidecarNoticingSources', () => {
       logger: winston.createLogger({ silent: true }),
     });
     await expect(provider.listOwners()).resolves.toEqual([OWNER]);
-    await expect(provider.sourcesFor(OWNER)).resolves.toEqual({ mail: { status: 'none' }, calendar: undefined });
+    await expect(provider.sourcesFor(OWNER)).resolves.toEqual({
+      mail: { status: 'none' },
+      calendar: { status: 'none' },
+    });
   });
 
   it('keeps a person’s own Google sources over the sidecar', async () => {
@@ -786,7 +810,7 @@ describe('createSidecarNoticingSources', () => {
         source: sidecarMailSource({ call: mailTool([]).call, account: 'a' }),
         kind: 'google',
       },
-      calendar: undefined,
+      calendar: { status: 'none' },
     };
     const provider = createSidecarNoticingSources({
       mailUrl: 'http://mail.invalid/mcp',
@@ -807,8 +831,11 @@ describe('createSidecarNoticingSources', () => {
       logger: winston.createLogger({ silent: true }),
     });
     const second = { tenant_id: 'default', created_by: 'owner-2' };
-    expect((await provider.sourcesFor(OWNER)).calendar).toBeDefined();
-    await expect(provider.sourcesFor(second)).resolves.toEqual({ mail: { status: 'none' }, calendar: undefined });
+    expect((await provider.sourcesFor(OWNER)).calendar.status).toBe('ready');
+    await expect(provider.sourcesFor(second)).resolves.toEqual({
+      mail: { status: 'none' },
+      calendar: { status: 'none' },
+    });
   });
 
   it('lists the instance owner so the shared connectors are watched, and no one else', async () => {
@@ -831,14 +858,17 @@ describe('createSidecarNoticingSources', () => {
       instanceOwner: undefined,
       logger: winston.createLogger({ silent: true }),
     });
-    await expect(provider.sourcesFor(OWNER)).resolves.toEqual({ mail: { status: 'none' }, calendar: undefined });
+    await expect(provider.sourcesFor(OWNER)).resolves.toEqual({
+      mail: { status: 'none' },
+      calendar: { status: 'none' },
+    });
     await expect(provider.listOwners()).resolves.toEqual([OWNER]);
   });
 
   it('uses the shared connector only when Google gives no mail, never in place of a Google login that must be redone', async () => {
     const reconnect: NoticingSources = {
       mail: { status: 'unreachable', error: new Error('Google needs to be connected again.'), kind: 'google' },
-      calendar: undefined,
+      calendar: { status: 'none' },
     };
     const provider = createSidecarNoticingSources({
       mailUrl: 'http://mail.invalid/mcp',

@@ -69,7 +69,7 @@ export type ReachView = {
   /** Set once mail has gone unchecked for about an hour: since when, and what to do about it. */
   mailProblem: { since: string; kind: 'too_slow' | 'google_sign_in' | 'email_password' | 'other' } | null;
   /** Set once the calendar has gone unchecked for about an hour. */
-  calendarProblem: { since: string } | null;
+  calendarProblem: { since: string; kind: 'google_sign_in' | 'other' } | null;
   /** Where mail is read from, or null until it has been checked once. */
   mailSource: 'google' | 'email_connector' | null;
 };

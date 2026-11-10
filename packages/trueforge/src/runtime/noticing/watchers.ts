@@ -36,14 +36,6 @@ function senderLabel(message: MailMessage): string {
   return message.from_name === null ? message.from_address : `${message.from_name} (${message.from_address})`;
 }
 
-function localTime({ at, timezone }: { at: Date; timezone: string }): string {
-  try {
-    return at.toLocaleString('en-US', { timeZone: timezone, weekday: 'short', hour: 'numeric', minute: '2-digit' });
-  } catch {
-    return at.toISOString();
-  }
-}
-
 function localDate({ at, timezone }: { at: Date; timezone: string }): string {
   try {
     return at.toLocaleDateString('en-US', { timeZone: timezone, weekday: 'long', month: 'long', day: 'numeric' });
@@ -78,6 +70,8 @@ function sliceStartOf(stuck: StuckMessage | undefined): Date | undefined {
  */
 export interface MailFindings {
   raise: NoticingEvent[];
+  /** Mail passed over without being read; the caller tells about the whole stretch in one note. */
+  gaps: LeftBehind[];
   track: NoticingEvent[];
   resume_from: Date | undefined;
   stuck: StuckMessage | undefined;
@@ -114,20 +108,25 @@ export interface LeftBehind {
   to: Date;
 }
 
-export interface MailWindow {
-  messages: MailMessage[];
+interface WindowEnd {
   resume_from: Date | undefined;
   /** The end of the window this read listed. */
   before: Date;
-  /** The pass ran out of time before it read any mail. */
-  timed_out?: true;
-  /** The few seconds of mail that cannot be listed, when some lists worked and this stretch fails alone. */
-  unlistable?: { from: Date; to: Date; error: unknown };
-  /** No list worked, so the trouble is the account or the server and not a stretch of mail. */
-  list_failed?: { error: unknown };
   /** Mail in this window that was passed over without being read: a flood, or messages the server cannot list. */
   left_behind: LeftBehind[];
 }
+
+/** Reading stopped before any mail was read, or some was; only a read window carries messages. */
+export type MailWindow =
+  | (WindowEnd & {
+      status: 'read';
+      messages: MailMessage[];
+      /** The few seconds of mail that cannot be listed, when some lists worked and this stretch fails alone. */
+      unlistable?: { from: Date; to: Date; error: unknown };
+    })
+  | (WindowEnd & { status: 'timed_out' })
+  /** No list worked, so the trouble is the account or the server and not a stretch of mail. */
+  | (WindowEnd & { status: 'list_failed'; error: unknown });
 
 interface WindowInput {
   source: MailSource;
@@ -163,7 +162,7 @@ export async function readMailWindow(input: WindowInput): Promise<MailWindow> {
   let worked = false;
   for (;;) {
     if (out_of_time()) {
-      return { messages: [], resume_from: since, before, timed_out: true, left_behind: [] };
+      return { status: 'timed_out', resume_from: since, before, left_behind: [] };
     }
     const short = before.getTime() - since.getTime() <= SHORTEST_WINDOW_MS;
     let read: MailWindowRead;
@@ -184,6 +183,7 @@ export async function readMailWindow(input: WindowInput): Promise<MailWindow> {
     worked = true;
     if (read.read === 'all') {
       return {
+        status: 'read',
         messages: read.messages,
         resume_from: resumeAfter({ before, now }),
         before,
@@ -193,6 +193,7 @@ export async function readMailWindow(input: WindowInput): Promise<MailWindow> {
     if (read.read === 'oldest') {
       // Everything up to the newest message read was read. With none read, the next pass tries the same window.
       return {
+        status: 'read',
         messages: read.messages,
         resume_from: read.messages.at(-1)?.received_at ?? since,
         before,
@@ -201,7 +202,13 @@ export async function readMailWindow(input: WindowInput): Promise<MailWindow> {
     }
     if (short) {
       const flood = await readFlood({ source, since, before, keep_from, logger, out_of_time });
-      return { messages: flood.messages, resume_from: resumeAfter({ before, now }), before, left_behind: [flood.left] };
+      return {
+        status: 'read',
+        messages: flood.messages,
+        resume_from: resumeAfter({ before, now }),
+        before,
+        left_behind: [flood.left],
+      };
     }
     before = halfway({ since, before });
   }
@@ -270,12 +277,12 @@ async function locateFailure({
       left_behind.push(flood.left);
     }
   };
-  const stopped: MailWindow = { messages: [], resume_from: since, before, list_failed: { error }, left_behind: [] };
+  const stopped: MailWindow = { status: 'list_failed', resume_from: since, before, error, left_behind: [] };
   let hi = ceilGrid(before.getTime());
   let lo = since.getTime();
   if (!worked) {
     if (out_of_time()) {
-      return { messages: [], resume_from: since, before, timed_out: true, left_behind: [] };
+      return { status: 'timed_out', resume_from: since, before, left_behind: [] };
     }
     // A list at the start, and if that fails one at the end: when neither works the account or server is failing, and
     // nothing is passed over.
@@ -290,6 +297,9 @@ async function locateFailure({
       }
       if (hi - GRID_MS <= lo) {
         return stopped;
+      }
+      if (out_of_time()) {
+        return { status: 'timed_out', resume_from: since, before, left_behind: [] };
       }
       try {
         await list({ from: hi - GRID_MS, to: hi, whole: true });
@@ -322,13 +332,9 @@ async function locateFailure({
   }
   const reached = new Date(lo);
   if (out_of_time()) {
-    return {
-      messages,
-      resume_from: reached,
-      before,
-      left_behind,
-      ...(messages.length === 0 ? { timed_out: true as const } : {}),
-    };
+    return messages.length === 0
+      ? { status: 'timed_out', resume_from: reached, before, left_behind }
+      : { status: 'read', messages, resume_from: reached, before, left_behind };
   }
   const cell = { from: reached, to: new Date(hi) };
   let cellRead: MailWindowRead;
@@ -338,14 +344,21 @@ async function locateFailure({
     if (cellError instanceof MailSourceBusyError) {
       throw cellError;
     }
-    return { messages, resume_from: cell.from, before, left_behind, unlistable: { ...cell, error: cellError } };
+    return {
+      status: 'read',
+      messages,
+      resume_from: cell.from,
+      before,
+      left_behind,
+      unlistable: { ...cell, error: cellError },
+    };
   }
   if (cellRead.read === 'oldest') {
-    return { messages, resume_from: cell.from, before, left_behind };
+    return { status: 'read', messages, resume_from: cell.from, before, left_behind };
   }
   await take({ read: cellRead, from: lo, to: hi });
   if (hi >= before.getTime()) {
-    return { messages, resume_from: resumeAfter({ before, now }), before, left_behind };
+    return { status: 'read', messages, resume_from: resumeAfter({ before, now }), before, left_behind };
   }
   // The few seconds that failed are read or left out, so the pass goes on with the mail after them.
   let rest: MailWindow;
@@ -354,12 +367,19 @@ async function locateFailure({
   } catch (restError) {
     if (restError instanceof MailSourceBusyError) {
       // What was found around the cell is kept, and the next pass meets the busy server itself.
-      return { messages, resume_from: cell.to, before, left_behind };
+      return { status: 'read', messages, resume_from: cell.to, before, left_behind };
     }
     throw restError;
   }
-  if (rest.list_failed !== undefined) {
-    return { messages, resume_from: cell.to, before, left_behind };
+  if (rest.status !== 'read') {
+    // What was read before the rest of the window stays read, and the next pass starts after it.
+    return {
+      status: 'read',
+      messages,
+      resume_from: rest.status === 'timed_out' ? rest.resume_from : cell.to,
+      before,
+      left_behind: [...left_behind, ...rest.left_behind],
+    };
   }
   return { ...rest, messages: [...messages, ...rest.messages], left_behind: [...left_behind, ...rest.left_behind] };
 }
@@ -482,23 +502,25 @@ export async function watchMail({
     const half = Math.floor((width.getTime() - since.getTime()) / 2);
     return half >= GRID_MS ? half : undefined;
   };
-  if (window.list_failed !== undefined) {
+  if (window.status === 'list_failed') {
     return {
       raise: [],
+      gaps: [],
       track: [],
       resume_from: since,
       stuck,
-      stopped_by: { error: window.list_failed.error },
+      stopped_by: { error: window.error },
       window_ms: max_width,
       timed_out: false,
       handled: source.datesAreArrival ? undefined : handled?.slice(),
     };
   }
   const findings = {
-    raise: window.left_behind.map(gap => gapNote({ gap, settings, assistant })),
+    raise: new Array<NoticingEvent>(),
+    gaps: [...window.left_behind],
     track: new Array<NoticingEvent>(),
   };
-  if (window.timed_out === true) {
+  if (window.status === 'timed_out') {
     // Nothing was read, so the next pass lists a shorter window, and the pass shows it fell behind.
     return {
       ...findings,
@@ -572,6 +594,15 @@ export async function watchMail({
     state.held = { failed: stuckFor({ message_id: message.id, passes }), error };
   };
 
+  /** A message the server says it can never give is skipped at once, with a note when it may have mattered. */
+  const passOver = ({ message, error }: Failed): void => {
+    logger.warn('Passed over a mail that could not be read', { message_id: message.id, error: loggedError(error) });
+    const note = unreadNote({ message, always, settings, assistant });
+    if (note !== undefined) {
+      findings.raise.push(note);
+    }
+  };
+
   const alreadyHandled = new Set(source.datesAreArrival ? [] : (handled ?? []));
   const done = new Set<string>();
   for (const message of messages) {
@@ -613,10 +644,7 @@ export async function watchMail({
           state.open = state.open === failed.message ? undefined : state.open;
         } else if (again.error instanceof MessageUnreadableError) {
           done.add(failed.message.id);
-          logger.warn('Passed over a mail that could not be read', {
-            message_id: failed.message.id,
-            error: loggedError(again.error),
-          });
+          passOver({ message: failed.message, error: again.error });
           state.carried = state.carried?.message_id === failed.message.id ? undefined : state.carried;
           state.open = state.open === failed.message ? undefined : state.open;
         } else {
@@ -630,10 +658,7 @@ export async function watchMail({
     }
     if (result.error instanceof MessageUnreadableError) {
       done.add(message.id);
-      logger.warn('Passed over a mail that could not be read', {
-        message_id: message.id,
-        error: loggedError(result.error),
-      });
+      passOver({ message, error: result.error });
       state.carried = state.carried?.message_id === message.id ? undefined : state.carried;
       continue;
     }
@@ -660,11 +685,9 @@ export async function watchMail({
           passes: state.carried?.message_id === stoppedAt.id ? state.carried.passes : 0,
         });
   const slice =
-    window.unlistable === undefined
-      ? undefined
-      : countSlice({ slice: window.unlistable, stuck, now, logger, settings, assistant });
-  if (slice?.note !== undefined) {
-    findings.raise.push(slice.note);
+    window.unlistable === undefined ? undefined : countSlice({ slice: window.unlistable, stuck, now, logger });
+  if (slice?.gap !== undefined) {
+    findings.gaps.push(slice.gap);
   }
   const open = state.open;
   const resume_from =
@@ -708,16 +731,12 @@ function countSlice({
   stuck,
   now,
   logger,
-  settings,
-  assistant,
 }: {
   slice: { from: Date; to: Date; error: unknown };
   stuck: StuckMessage | undefined;
   now: Date;
   logger: Pick<Logger, 'warn'>;
-  settings: ReachSettings;
-  assistant: string;
-}): { resume_from: Date; stuck: StuckMessage | undefined; error: unknown; note?: NoticingEvent } {
+}): { resume_from: Date; stuck: StuckMessage | undefined; error: unknown; gap?: LeftBehind } {
   const key = listSliceKey(slice.from);
   const passes = stuck?.message_id === key ? stuck.passes + 1 : 1;
   if (passes < MAX_STUCK_PASSES) {
@@ -737,18 +756,17 @@ function countSlice({
     resume_from: slice.to,
     stuck: undefined,
     error: undefined,
-    note: gapNote({ gap: slice, settings, assistant }),
+    gap: { from: slice.from, to: slice.to },
   };
 }
 
 /** A time in the person's own words and zone, with the day, for a note that names mail they must go and find. */
-function localWhen({ at, timezone }: { at: Date; timezone: string }): string {
+function localWhen({ at, timezone, day = true }: { at: Date; timezone: string; day?: boolean }): string {
   try {
     return at.toLocaleString('en-US', {
       timeZone: timezone,
       weekday: 'short',
-      month: 'short',
-      day: 'numeric',
+      ...(day ? { month: 'short', day: 'numeric' } : {}),
       hour: 'numeric',
       minute: '2-digit',
     });
@@ -757,28 +775,37 @@ function localWhen({ at, timezone }: { at: Date; timezone: string }): string {
   }
 }
 
-/** A fixed note that some mail could not be read, naming when it arrived so the person can look for it. */
+/**
+ * A fixed note that some mail could not be read, naming when it arrived so the person can look for it. One note covers
+ * a whole stretch of trouble: while the stretch goes on it says "from", because more mail may still be passed over.
+ */
 export function gapNote({
   gap,
+  stretch,
+  ongoing,
   settings,
   assistant,
 }: {
   gap: LeftBehind;
+  /** Names the stretch, so every pass of it makes the same note and the person is told once. */
+  stretch: Date;
+  ongoing: boolean;
   settings: ReachSettings;
   assistant: string;
 }): NoticingEvent {
   const from = localWhen({ at: gap.from, timezone: settings.timezone });
   const to = localWhen({ at: gap.to, timezone: settings.timezone });
+  const when = ongoing ? `from ${from} on` : from === to ? `around ${from}` : `between ${from} and ${to}`;
   return {
-    id: `mail_gap:${gap.from.toISOString()}:${gap.to.toISOString()}`,
+    id: `mail_gap:${stretch.toISOString()}`,
     kind: 'mail_always',
     evidence: 'content',
-    summary: `${assistant} could not read some mail that arrived between ${from} and ${to}. Open your mail to check it.`,
-    facts: `${assistant} could not read some mail that arrived between ${from} and ${to}.`,
+    summary: `${assistant} could not read some mail that arrived ${when}. Open your mail to check it.`,
+    facts: `${assistant} could not read some mail that arrived ${when}.`,
     matched: 'Some mail could not be read, so it may hold something that matters.',
     link: null,
     mail_ref: null,
-    occurred_at: gap.to.toISOString(),
+    occurred_at: gap.from.toISOString(),
     due_at: null,
   };
 }
@@ -1031,7 +1058,7 @@ function clashEvent({
     kind: 'calendar_clash',
     evidence: first.own && second.own ? 'own' : 'content',
     summary: clip(
-      `"${clip(first.title, 60)}" at ${localTime({ at: first.start, timezone })} overlaps "${clip(second.title, 60)}" at ${localTime({ at: second.start, timezone })}.`,
+      `"${clip(first.title, 60)}" at ${localWhen({ at: first.start, timezone, day: false })} overlaps "${clip(second.title, 60)}" at ${localWhen({ at: second.start, timezone, day: false })}.`,
       300,
     ),
     facts: [
@@ -1062,7 +1089,7 @@ function travelEvent({ event, timezone }: { event: CalendarEventInfo; timezone: 
     kind: 'travel',
     evidence: event.own ? 'own' : 'content',
     summary: clip(
-      `"${clip(event.title, 80)}" starts at ${localTime({ at: event.start, timezone })}. Time to head out.`,
+      `"${clip(event.title, 80)}" starts at ${localWhen({ at: event.start, timezone, day: false })}. Time to head out.`,
       300,
     ),
     facts: [

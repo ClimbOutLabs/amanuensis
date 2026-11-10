@@ -16,7 +16,7 @@ import { callFailureWords } from '../runtime/calls/twilioCalls';
 import { TEST_WORDS } from '../runtime/delivery/deliveryChannel';
 import type { DeliveryService } from '../runtime/delivery/deliveryService';
 import { KIND_MAX_LEVEL } from '../runtime/noticing/levels';
-import { MAIL_PROBLEM_SHOWN_AFTER_MS, mailProblemOf } from '../runtime/noticing/noticingService';
+import { calendarProblemOf, mailProblemOf } from '../runtime/noticing/noticingService';
 import type { ChannelViewer } from '../runtime/noticing/reachChannels';
 import { suggestAlwaysImportant } from '../runtime/noticing/suggestions';
 import { smsFailureWords } from '../runtime/texts/smsProvider';
@@ -93,16 +93,17 @@ export function createReachRouter(deps: ReachRouterDeps) {
     const checkpoint = await deps.noticingStore.getCheckpoint({ ...owner, watcher: 'mail' });
     const calendar = await deps.noticingStore.getCheckpoint({ ...owner, watcher: 'calendar' });
     const problem = mailProblemOf({ checkpoint, now: now() });
-    const calendarFailure = calendar?.failure;
-    const calendarFailing =
-      calendarFailure !== undefined && now().getTime() - calendarFailure.since.getTime() >= MAIL_PROBLEM_SHOWN_AFTER_MS;
+    const calendarProblem = calendarProblemOf({ checkpoint: calendar, now: now() });
     return {
       settings: stored ?? defaultReachSettings('UTC'),
       saved: stored !== undefined,
       availability: deps.channels({ viewer: deps.isInstanceOwner(owner) ? 'owner' : 'person' }),
       max_levels: KIND_MAX_LEVEL,
       mail_problem: problem === undefined ? null : { since: problem.since.toISOString(), kind: problem.kind },
-      calendar_problem: calendarFailing ? { since: calendarFailure.since.toISOString() } : null,
+      calendar_problem:
+        calendarProblem === undefined
+          ? null
+          : { since: calendarProblem.since.toISOString(), kind: calendarProblem.kind },
       mail_source: checkpoint?.source ?? null,
     };
   };

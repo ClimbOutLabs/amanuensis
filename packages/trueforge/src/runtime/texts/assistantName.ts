@@ -1,5 +1,5 @@
 import type { IPersonalizationStore } from '../../db/personalizationStore';
-import { UNNAMED_ASSISTANT } from '../chatAssistant';
+import { assistantNameFor, UNNAMED_ASSISTANT } from '../chatAssistant';
 import { isPlainWords, plainText } from './textWords';
 
 /** The most of a name a text or a call carries, so a name cannot hold a message of its own. */
@@ -43,14 +43,13 @@ export function textName(name: string | null | undefined): string {
   return plainName(name) ?? UNNAMED_ASSISTANT;
 }
 
-/** The person's assistant name for a text, from their own settings. */
-export async function assistantNameFor({
+/** The person's assistant name, as their settings give it, made fit for a text. */
+export async function textAssistantName({
   personalization,
   owner,
 }: {
   personalization: Pick<IPersonalizationStore, 'getProfile'>;
   owner: { tenant_id: string; created_by: string };
 }): Promise<string> {
-  const profile = await personalization.getProfile(owner);
-  return textName(profile?.assistant_name);
+  return textName(await assistantNameFor({ personalizationStore: personalization, owner }));
 }

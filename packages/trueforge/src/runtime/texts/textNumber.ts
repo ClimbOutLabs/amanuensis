@@ -8,7 +8,7 @@ import type { PersonOwner } from '../../db/personOwner';
 import type { IReachSettingsStore } from '../../db/reachSettingsStore';
 import type { ITextContactStore } from '../../db/textContactStore';
 import { E164_PATTERN, type TextContact, type TextMode, type TextStatus } from '../../schemas/textMessages';
-import { assistantNameFor } from './assistantName';
+import { textAssistantName } from './assistantName';
 import type { SmsFailure, SmsProvider } from './smsProvider';
 import { claimTextLimits, codeTextLimits } from './textLimits';
 import { codeText, privateText } from './textWords';
@@ -147,7 +147,7 @@ export function createTextNumberService({
 
   return {
     async status(owner) {
-      const [contact, name] = await Promise.all([store.get(owner), assistantNameFor({ personalization, owner })]);
+      const [contact, name] = await Promise.all([store.get(owner), textAssistantName({ personalization, owner })]);
       const private_preview = privateText({ name, kind: 'reminder' });
       if (contact === undefined) {
         return {
