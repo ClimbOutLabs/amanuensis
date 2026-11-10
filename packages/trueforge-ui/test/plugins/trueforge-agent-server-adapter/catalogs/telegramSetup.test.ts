@@ -10,7 +10,7 @@ const STATUS_BODY = {
     state: 'awaiting_pairing',
     bot_name: 'House Bot',
     bot_username: 'house_bot',
-    pairing_code: '123456',
+    pairing_name: 'Sam S',
   },
 };
 
@@ -54,7 +54,7 @@ describe('createTelegramSetupApi', () => {
       state: 'awaiting_pairing',
       botName: 'House Bot',
       botUsername: 'house_bot',
-      pairingCode: '123456',
+      pairingName: 'Sam S',
     });
   });
 
@@ -70,7 +70,7 @@ describe('createTelegramSetupApi', () => {
 
   it('confirms a pairing against the confirm path', async () => {
     const { api, seen } = apiWith(async () =>
-      reply({ data: { ...STATUS_BODY.data, state: 'connected', pairing_code: null } }),
+      reply({ data: { ...STATUS_BODY.data, state: 'connected', pairing_name: null } }),
     );
     const status = await api.confirmTelegramPairing({ code: '123456' });
     expect(seen[0]?.url).toBe('http://harness.test/api/v1/user/settings/telegram/confirm');
@@ -78,10 +78,18 @@ describe('createTelegramSetupApi', () => {
     expect(status.state).toBe('connected');
   });
 
+  it('cancels a waiting pairing against the cancel path', async () => {
+    const { api, seen } = apiWith(async () => reply({ data: { ...STATUS_BODY.data, pairing_name: null } }));
+    const status = await api.cancelTelegramPairing();
+    expect(seen[0]?.method).toBe('POST');
+    expect(seen[0]?.url).toBe('http://harness.test/api/v1/user/settings/telegram/cancel-pairing');
+    expect(status.pairingName).toBeNull();
+  });
+
   it('removes with a JSON body, so the call is not mistaken for a cross-site one', async () => {
     const { api, seen } = apiWith(async () =>
       reply({
-        data: { available: true, state: 'not_connected', bot_name: null, bot_username: null, pairing_code: null },
+        data: { available: true, state: 'not_connected', bot_name: null, bot_username: null, pairing_name: null },
       }),
     );
     const status = await api.removeTelegram();

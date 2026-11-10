@@ -34,6 +34,8 @@ export function fakeTelegramConnection(overrides: FakeTelegramConnectionOverride
     pairing_expires_at: null,
     pairing_telegram_user_id: null,
     pairing_chat_id: null,
+    pairing_display_name: null,
+    last_update_id: null,
     poll_offset: null,
     transport: 'polling',
     webhook_secret: null,
@@ -117,13 +119,20 @@ export class InMemoryTelegramStore implements ITelegramStore {
         pairing_expires_at: input.expires_at.toISOString(),
         pairing_telegram_user_id: input.telegram_user_id,
         pairing_chat_id: input.chat_id,
+        pairing_display_name: input.display_name,
       };
     }
     return Promise.resolve();
   }
 
-  confirmPairing(owner: TelegramOwner): Promise<void> {
-    if (this.connection !== null && owns(owner, this.connection)) {
+  confirmPairing(input: Parameters<ITelegramStore['confirmPairing']>[0]): Promise<boolean> {
+    if (
+      this.connection !== null &&
+      owns(input, this.connection) &&
+      this.connection.pairing_code === input.code &&
+      this.connection.pairing_telegram_user_id !== null &&
+      this.connection.pairing_chat_id !== null
+    ) {
       this.connection = {
         ...this.connection,
         paired_telegram_user_id: this.connection.pairing_telegram_user_id,
@@ -132,9 +141,11 @@ export class InMemoryTelegramStore implements ITelegramStore {
         pairing_expires_at: null,
         pairing_telegram_user_id: null,
         pairing_chat_id: null,
+        pairing_display_name: null,
       };
+      return Promise.resolve(true);
     }
-    return Promise.resolve();
+    return Promise.resolve(false);
   }
 
   clearPairing(owner: TelegramOwner): Promise<void> {
@@ -145,9 +156,22 @@ export class InMemoryTelegramStore implements ITelegramStore {
         pairing_expires_at: null,
         pairing_telegram_user_id: null,
         pairing_chat_id: null,
+        pairing_display_name: null,
       };
     }
     return Promise.resolve();
+  }
+
+  claimUpdate(input: Parameters<ITelegramStore['claimUpdate']>[0]): Promise<boolean> {
+    if (this.connection === null || this.connection.id !== input.connection_id) {
+      return Promise.resolve(false);
+    }
+    const last = this.connection.last_update_id;
+    if (last !== null && Number(input.update_id) <= Number(last)) {
+      return Promise.resolve(false);
+    }
+    this.connection = { ...this.connection, last_update_id: input.update_id };
+    return Promise.resolve(true);
   }
 
   setPollOffset(input: Parameters<ITelegramStore['setPollOffset']>[0]): Promise<void> {

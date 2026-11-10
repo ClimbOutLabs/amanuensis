@@ -13,7 +13,7 @@ const TelegramAccountStatusWireSchema = z.object({
   state: z.enum(['not_connected', 'awaiting_pairing', 'connected']),
   bot_name: z.string().nullable(),
   bot_username: z.string().nullable(),
-  pairing_code: z.string().nullable(),
+  pairing_name: z.string().nullable(),
 });
 
 type TelegramAccountStatusWire = z.infer<typeof TelegramAccountStatusWireSchema>;
@@ -24,7 +24,7 @@ function toTelegramStatus(wire: TelegramAccountStatusWire): TelegramAccountStatu
     state: wire.state,
     botName: wire.bot_name,
     botUsername: wire.bot_username,
-    pairingCode: wire.pairing_code,
+    pairingName: wire.pairing_name,
   };
 }
 
@@ -43,12 +43,19 @@ export function createTelegramSetupApi(options: CreateTrueForgeClientOptions = {
     wireSchema: TelegramAccountStatusWireSchema,
     toStatus: toTelegramStatus,
   });
+  const cancelRequest = createAccountSetupRequest({
+    options,
+    path: `${TELEGRAM_SETTINGS_PATH}/cancel-pairing`,
+    wireSchema: TelegramAccountStatusWireSchema,
+    toStatus: toTelegramStatus,
+  });
 
   return {
     getTelegramStatus: async () => request({ method: 'GET' }),
     connectTelegram: async (req: { token: string }) => request({ method: 'POST', body: { token: req.token } }),
     confirmTelegramPairing: async (req: { code: string }) =>
       confirmRequest({ method: 'POST', body: { code: req.code } }),
+    cancelTelegramPairing: async () => cancelRequest({ method: 'POST', body: {} }),
     // A JSON body is sent on purpose: a bodiless state-changing call can be refused as
     // not-from-Aman when the instance is reached through its proxy address.
     removeTelegram: async () => request({ method: 'DELETE', body: {} }),

@@ -3,8 +3,10 @@ import winston from 'winston';
 
 import type { TelegramConnection, TelegramPendingApproval } from '../../../../src/db/telegramStore';
 import {
+  createTelegramRefusalThrottle,
   processTelegramUpdate,
   telegramCallbackData,
+  TELEGRAM_REFUSAL_COOLDOWN_MS,
   type TelegramTurnPort,
 } from '../../../../src/runtime/telegram/telegramChannel';
 import { createTelegramService } from '../../../../src/runtime/telegram/telegramService';
@@ -44,7 +46,15 @@ function harness(connection: TelegramConnection) {
   const client = new FakeTelegramClient();
   const service = createTelegramService({ store, publicBaseUrl: 'http://localhost', createClient: () => client });
   const turns = new FakeTurnPort();
-  const deps = { store, service, queue: immediateQueue, turns, logger, newCode: () => '654321' };
+  const deps = {
+    store,
+    service,
+    queue: immediateQueue,
+    turns,
+    logger,
+    refusals: createTelegramRefusalThrottle(),
+    newCode: () => '654321',
+  };
   return { store, client, turns, deps };
 }
 
@@ -76,6 +86,7 @@ describe('telegram channel pairing', () => {
     expect(client.sent[0]?.text).toContain('Your pairing code is 654321.');
     expect(store.connection?.pairing_code).toBe('654321');
     expect(store.connection?.pairing_telegram_user_id).toBe('555');
+    expect(store.connection?.pairing_display_name).toBe('Person');
   });
 
   it('refuses a second /start from another account while a code is live', async () => {
@@ -203,6 +214,30 @@ describe('telegram channel messages', () => {
     }
   });
 
+  it('marks a forwarded file as untrusted, next to the file part', async () => {
+    const { turns, deps } = harness(fakePairedConnection());
+    await processTelegramUpdate(deps, {
+      connection: fakePairedConnection(),
+      update: messageUpdate({
+        message: {
+          document: { file_id: 'doc-1', file_name: 'note.txt', file_size: 12 },
+          forward_origin: { type: 'user' },
+        },
+      }),
+    });
+    const input = turns.started[0]?.input[0];
+    if (input?.type !== 'user.message' || typeof input.content === 'string') {
+      throw new Error('expected content parts');
+    }
+    const note = input.content[0];
+    expect(note?.type).toBe('text');
+    if (note?.type === 'text') {
+      expect(note.text).toContain('<untrusted-document>');
+      expect(note.text).toContain('note.txt');
+    }
+    expect(input.content[1]?.type).toBe('file');
+  });
+
   it('answers a message it cannot read instead of starting a turn', async () => {
     const { client, turns, deps } = harness(fakePairedConnection());
     await processTelegramUpdate(deps, {
@@ -211,6 +246,65 @@ describe('telegram channel messages', () => {
     });
     expect(client.sent[0]?.text).toContain('I can only read text, photos and files here.');
     expect(turns.started).toHaveLength(0);
+  });
+});
+
+describe('telegram channel update claims', () => {
+  it('handles an update delivered twice only once', async () => {
+    const { turns, deps } = harness(fakePairedConnection());
+    const update = messageUpdate({ update_id: 7, message: { text: 'What is on tomorrow?' } });
+    await processTelegramUpdate(deps, { connection: fakePairedConnection(), update });
+    await processTelegramUpdate(deps, { connection: fakePairedConnection(), update });
+    expect(turns.started).toHaveLength(1);
+  });
+
+  it('still handles the next update after a duplicate', async () => {
+    const { turns, deps } = harness(fakePairedConnection());
+    await processTelegramUpdate(deps, {
+      connection: fakePairedConnection(),
+      update: messageUpdate({ update_id: 7, message: { text: 'one' } }),
+    });
+    await processTelegramUpdate(deps, {
+      connection: fakePairedConnection(),
+      update: messageUpdate({ update_id: 7, message: { text: 'one' } }),
+    });
+    await processTelegramUpdate(deps, {
+      connection: fakePairedConnection(),
+      update: messageUpdate({ update_id: 8, message: { text: 'two' } }),
+    });
+    expect(turns.started).toHaveLength(2);
+  });
+});
+
+describe('telegram channel refusals', () => {
+  it('tells a stranger once, not once per message, until the cooldown passes', async () => {
+    const store = new InMemoryTelegramStore();
+    store.connection = fakePairedConnection();
+    const client = new FakeTelegramClient();
+    const service = createTelegramService({ store, publicBaseUrl: 'http://localhost', createClient: () => client });
+    const turns = new FakeTurnPort();
+    let now = new Date('2026-11-06T12:00:00.000Z');
+    const deps = {
+      store,
+      service,
+      queue: immediateQueue,
+      turns,
+      logger,
+      refusals: createTelegramRefusalThrottle(),
+      now: () => now,
+      newCode: () => '654321',
+    };
+    const stranger = (update_id: number) =>
+      messageUpdate({ update_id, from_id: 999, chat_id: 888, message: { text: 'hi' } });
+    await processTelegramUpdate(deps, { connection: fakePairedConnection(), update: stranger(1) });
+    await processTelegramUpdate(deps, { connection: fakePairedConnection(), update: stranger(2) });
+    await processTelegramUpdate(deps, { connection: fakePairedConnection(), update: stranger(3) });
+    expect(client.sent).toHaveLength(1);
+    expect(client.sent[0]?.text).toBe('This bot is private. It answers only the person it is paired with.');
+
+    now = new Date(now.getTime() + TELEGRAM_REFUSAL_COOLDOWN_MS + 1000);
+    await processTelegramUpdate(deps, { connection: fakePairedConnection(), update: stranger(4) });
+    expect(client.sent).toHaveLength(2);
   });
 });
 

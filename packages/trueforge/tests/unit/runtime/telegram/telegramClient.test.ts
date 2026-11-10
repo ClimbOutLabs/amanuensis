@@ -157,6 +157,22 @@ describe('telegram client', () => {
   });
 });
 
+function hasLoneSurrogate(text: string): boolean {
+  for (let i = 0; i < text.length; i += 1) {
+    const code = text.charCodeAt(i);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = text.charCodeAt(i + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) {
+        return true;
+      }
+      i += 1;
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      return true;
+    }
+  }
+  return false;
+}
+
 describe('splitTelegramText', () => {
   it('keeps short text in one piece', () => {
     expect(splitTelegramText('hello')).toEqual(['hello']);
@@ -168,5 +184,16 @@ describe('splitTelegramText', () => {
     expect(parts.length).toBeGreaterThan(1);
     expect(parts.every(part => part.length <= 4096)).toBe(true);
     expect(parts.join('')).toContain('b'.repeat(100));
+  });
+
+  it('never cuts an emoji in half at the hard cut, and loses no text', () => {
+    // The emoji's two halves straddle the 4096 cut exactly: a naive cut leaves the first
+    // piece ending on half an emoji, which Telegram refuses, losing it and the rest.
+    const text = `${'a'.repeat(4095)}😀${'b'.repeat(500)}`;
+    const parts = splitTelegramText(text);
+    expect(parts.length).toBeGreaterThan(1);
+    expect(parts.every(part => part.length <= 4096)).toBe(true);
+    expect(parts.every(part => !hasLoneSurrogate(part))).toBe(true);
+    expect(parts.join('')).toBe(text);
   });
 });

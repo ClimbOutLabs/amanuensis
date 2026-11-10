@@ -20,10 +20,12 @@ export const TelegramAccountStatusSchema = z
     state: TelegramConnectionStateSchema,
     bot_name: z.string().nullable().describe('The bot name Telegram shows; null when no bot is connected.'),
     bot_username: z.string().nullable().describe('The bot username, without the @; null when no bot is connected.'),
-    pairing_code: z
+    pairing_name: z
       .string()
       .nullable()
-      .describe('The six-digit code the bot sent after /start, shown so it can be checked; null when none waits.'),
+      .describe(
+        'The name Telegram shows for the person waiting to pair, so they can be checked before pairing; null when nobody waits. The pairing code itself is never returned: the bot shows it only in Telegram.',
+      ),
   })
   .openapi('TelegramAccountStatus');
 
@@ -52,7 +54,9 @@ export const ConnectTelegramResponseSchema = z
 
 export const ConfirmTelegramPairingRequestSchema = z
   .object({
-    code: z.string().describe('The six-digit code the bot sent after /start, typed to confirm the pairing.'),
+    code: z
+      .string()
+      .describe('The six-digit code the bot sent in Telegram after /start, typed to confirm the pairing.'),
   })
   .openapi('ConfirmTelegramPairingRequest');
 
@@ -61,6 +65,10 @@ export type ConfirmTelegramPairingRequest = z.infer<typeof ConfirmTelegramPairin
 export const ConfirmTelegramPairingResponseSchema = z
   .object({ data: TelegramAccountStatusSchema })
   .openapi('ConfirmTelegramPairingResponse');
+
+export const CancelTelegramPairingResponseSchema = z
+  .object({ data: TelegramAccountStatusSchema })
+  .openapi('CancelTelegramPairingResponse');
 
 export const RemoveTelegramResponseSchema = z
   .object({ data: TelegramAccountStatusSchema })
@@ -167,6 +175,20 @@ export const TelegramUpdateSchema = z
   .openapi('TelegramUpdate');
 
 export type TelegramUpdate = z.infer<typeof TelegramUpdateSchema>;
+
+/**
+ * One update as Telegram posts it to the webhook. Only the id is promised at the door; the
+ * handler checks the rest itself, so an update in a shape this build cannot read is dropped
+ * with a success answer instead of an error Telegram would keep retrying.
+ */
+export const TelegramWebhookUpdateSchema = z
+  .object({
+    update_id: z.number().int().describe('Update id; the rest of the update is checked by the handler.'),
+  })
+  .passthrough()
+  .openapi('TelegramWebhookUpdate');
+
+export type TelegramWebhookUpdate = z.infer<typeof TelegramWebhookUpdateSchema>;
 
 /** What the controller posts to the server for one update it polled: the connection it belongs to and the update. */
 export const ProcessTelegramUpdateRequestSchema = z

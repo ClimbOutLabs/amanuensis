@@ -1,4 +1,5 @@
 import type { TurnRecord, TurnState } from '@truefoundry/trueforge-core/agent-session';
+import type { Tier3Card } from '@truefoundry/trueforge-core/core';
 import type { ActionRequiredEvent } from '@truefoundry/trueforge-core/core/events/schema';
 import winston from 'winston';
 
@@ -55,6 +56,39 @@ const APPROVAL_ACTION: ActionRequiredEvent = {
     },
   ],
 };
+
+type Card = Tier3Card;
+
+function cardWith(overrides: Partial<Card>): Card {
+  return {
+    plain_what: 'Do the thing.',
+    plain_why: null,
+    cannot_be_undone: null,
+    why_asked_again: null,
+    destination: null,
+    recipient: null,
+    amount: null,
+    parsed_command: null,
+    outbound_text: null,
+    destination_host: null,
+    outbound_truncated: false,
+    ...overrides,
+  };
+}
+
+function approvalAction(card: Card | null): ActionRequiredEvent {
+  return {
+    type: 'tool.approval_required',
+    id: 'event-1',
+    created_at: '2026-11-06T00:00:00.000Z',
+    thread_id: 'main',
+    tool_calls: [{ id: 'call-1', source_event_id: 'event-1', tier3_card: card }],
+  };
+}
+
+function doneTurnWith(action: ActionRequiredEvent): TurnRecord<TurnCustom> {
+  return turnWith({ status: 'done', output: null, required_actions: [action], completed_at: '2026-11-06T00:01:00.000Z' });
+}
 
 function harness(turn: TurnRecord<TurnCustom> | undefined) {
   const store = new InMemoryTelegramStore();
@@ -130,6 +164,102 @@ describe('telegram pending replies', () => {
       ],
     ]);
     expect(store.pendingReplies).toHaveLength(0);
+  });
+
+  it('sends an email approval with the whole message, subject, recipients and body', async () => {
+    const card = cardWith({
+      plain_what: 'Send this email.',
+      email: {
+        action: 'send',
+        to: [{ name: 'Sam', address: 'sam@example.com' }],
+        cc: [{ name: '', address: 'pat@example.com' }],
+        bcc: [],
+        subject: 'The summary you asked for',
+        body: 'Hello Sam,\n\nHere is the whole body, every word of it.\n\nBye.',
+        replaces: null,
+        reply_in_thread: null,
+        reply_to: null,
+      },
+    });
+    const { store, client, deps } = harness(doneTurnWith(approvalAction(card)));
+    await deliverPendingTelegramReplies(deps);
+    expect(client.sent).toHaveLength(1);
+    const sent = client.sent[0];
+    expect(sent?.text).toContain('Send this email.');
+    expect(sent?.text).toContain('To: Sam (sam@example.com)');
+    expect(sent?.text).toContain('Copy: pat@example.com');
+    expect(sent?.text).toContain('Subject: The summary you asked for');
+    expect(sent?.text).toContain('Here is the whole body, every word of it.');
+    expect(sent?.inline_buttons?.[0]?.map(button => button.text)).toEqual(['Approve', 'Deny']);
+    expect(store.pendingApprovals).toHaveLength(1);
+    expect(store.pendingApprovals[0]?.prompt).toBe(sent?.text);
+  });
+
+  it('sends a shell approval with the command itself, and a schedule with its whole task', async () => {
+    const shell = cardWith({ plain_what: 'Run a command.', parsed_command: 'rm -rf /tmp/old-backups' });
+    const first = harness(doneTurnWith(approvalAction(shell)));
+    await deliverPendingTelegramReplies(first.deps);
+    expect(first.client.sent[0]?.text).toContain('Command: rm -rf /tmp/old-backups');
+    expect(first.client.sent[0]?.inline_buttons).toBeDefined();
+
+    const schedule = cardWith({
+      plain_what: 'Make a schedule.',
+      schedule: {
+        action: 'create',
+        name: 'Morning brief',
+        when: 'Every day at 7 in the morning',
+        time_zone: 'America/Los_Angeles',
+        task: 'Read the calendar and the inbox, then write the brief in full sentences.',
+        runs_as: 'Aman',
+        next_runs: ['Tomorrow at 7:00 AM'],
+      },
+    });
+    const second = harness(doneTurnWith(approvalAction(schedule)));
+    await deliverPendingTelegramReplies(second.deps);
+    expect(second.client.sent[0]?.text).toContain(
+      'Read the calendar and the inbox, then write the brief in full sentences.',
+    );
+    expect(second.client.sent[0]?.inline_buttons).toBeDefined();
+  });
+
+  it('sends a persona approval with its whole instructions', async () => {
+    const persona = cardWith({
+      plain_what: 'Add a persona.',
+      persona: {
+        name: 'Scout',
+        description: 'Keeps an eye on new listings.',
+        instructions: 'You watch for new listings and summarise each one in two lines.',
+        model_name: 'house-model',
+      },
+    });
+    const { client, deps } = harness(doneTurnWith(approvalAction(persona)));
+    await deliverPendingTelegramReplies(deps);
+    expect(client.sent[0]?.text).toContain('You watch for new listings and summarise each one in two lines.');
+    expect(client.sent[0]?.inline_buttons).toBeDefined();
+  });
+
+  it('sends no buttons when the exact request text is cut, and points to the app', async () => {
+    const card = cardWith({
+      plain_what: 'Call the connector.',
+      outbound_text: 'query: a very long search',
+      outbound_truncated: true,
+    });
+    const { store, client, deps } = harness(doneTurnWith(approvalAction(card)));
+    await deliverPendingTelegramReplies(deps);
+    expect(client.sent).toHaveLength(1);
+    expect(client.sent[0]?.text).toContain('Part of this request is not shown in full.');
+    expect(client.sent[0]?.text).toContain('Open Aman to see the whole thing and answer there.');
+    expect(client.sent[0]?.inline_buttons).toBeUndefined();
+    expect(store.pendingApprovals).toHaveLength(0);
+  });
+
+  it('sends no buttons when the action has no card, and points to the app', async () => {
+    const { store, client, deps } = harness(doneTurnWith(approvalAction(null)));
+    await deliverPendingTelegramReplies(deps);
+    expect(client.sent).toHaveLength(1);
+    expect(client.sent[0]?.text).toContain('Telegram cannot show everything it will do');
+    expect(client.sent[0]?.inline_buttons).toBeUndefined();
+    expect(store.pendingApprovals).toHaveLength(0);
   });
 
   it('tells the person to open the app for an action buttons cannot answer', async () => {

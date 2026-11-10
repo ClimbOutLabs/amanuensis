@@ -1,4 +1,5 @@
 import type { ISessionStore } from '@truefoundry/trueforge-core/agent-session';
+import type { Tier3Card } from '@truefoundry/trueforge-core/core';
 import type { ActionRequiredEvent, ModelMessageEvent } from '@truefoundry/trueforge-core/core/events/schema';
 import type { Logger } from 'winston';
 import { z } from 'zod';
@@ -62,8 +63,167 @@ export function modelMessageText(output: ModelMessageEvent | null): string | und
   return undefined;
 }
 
-/** The plain-words text of one approval ask, from the card the app would show. */
-export function approvalPromptText(action: ActionRequiredEvent, toolCallId: string): string | undefined {
+/** One email recipient as the cards show it: `Name (address)`, or the bare address when it has no name. */
+function mailboxLine(mailbox: { name: string; address: string }): string {
+  return mailbox.name === '' ? mailbox.address : `${mailbox.name} (${mailbox.address})`;
+}
+
+/**
+ * Every line of one approval card, in the order the app's card shows them: what will happen,
+ * the exact details (the whole email, the whole calendar event, a schedule's whole task, a
+ * persona's whole instructions, the shell command, the exact request a connector will get),
+ * what cannot be undone, and the reason last. Nothing the card shows is left out: a person
+ * approving from Telegram decides on the same words as a person approving in the app.
+ */
+function approvalCardLines(card: Tier3Card): string[] {
+  const lines: string[] = [card.plain_what];
+  if (card.why_asked_again !== null) {
+    lines.push(card.why_asked_again);
+  }
+  if (card.recipient !== null) {
+    lines.push(`To: ${card.recipient}`);
+  }
+  if (card.destination !== null) {
+    lines.push(`Where: ${card.destination}`);
+  }
+  if (card.destination_host !== null) {
+    lines.push(`Sends to: ${card.destination_host}`);
+  }
+  if (card.amount !== null) {
+    lines.push(`Amount: ${card.amount}`);
+  }
+  if (card.parsed_command !== null) {
+    lines.push(`Command: ${card.parsed_command}`);
+  }
+  const email = card.email ?? null;
+  if (email !== null) {
+    if (email.reply_in_thread !== null) {
+      lines.push(`Reply in the thread of the message from ${email.reply_in_thread.from}.`);
+      lines.push(`Thread subject: ${email.reply_in_thread.subject}`);
+    }
+    lines.push(`To: ${email.to.map(mailboxLine).join(', ')}`);
+    if (email.cc.length > 0) {
+      lines.push(`Copy: ${email.cc.map(mailboxLine).join(', ')}`);
+    }
+    if (email.bcc.length > 0) {
+      lines.push(`Hidden copy: ${email.bcc.map(mailboxLine).join(', ')}`);
+    }
+    lines.push(`Subject: ${email.subject === '' ? 'No subject' : email.subject}`);
+    if (email.reply_to !== null) {
+      lines.push(`Replies go to: ${email.reply_to}`);
+    }
+    if (email.replaces !== null) {
+      lines.push(
+        `Replaces the saved draft "${email.replaces.subject}" to ${email.replaces.to.map(mailboxLine).join(', ')}`,
+      );
+    }
+    lines.push('Message body:');
+    lines.push(email.body);
+  }
+  const event = card.calendar_event ?? null;
+  if (event !== null) {
+    if (event.before !== null) {
+      lines.push('Now:');
+      lines.push(`Title: ${event.before.title}`);
+      lines.push(`When: ${event.before.when}`);
+      if (event.before.duration !== '') {
+        lines.push(`Length: ${event.before.duration}`);
+      }
+      if (event.before.location !== '') {
+        lines.push(`Where: ${event.before.location}`);
+      }
+      lines.push('After the change:');
+    } else {
+      lines.push('Exactly what will be saved:');
+    }
+    lines.push(`Calendar: Main calendar of ${event.calendar}`);
+    lines.push(`Title: ${event.title}`);
+    lines.push(`When: ${event.when}`);
+    lines.push(`Time zone: ${event.time_zone}`);
+    lines.push(`Length: ${event.duration}`);
+    if (event.location !== '') {
+      lines.push(`Where: ${event.location}`);
+    }
+    if (event.one_of_repeating) {
+      lines.push('Repeats: Only this one event of the series changes');
+    }
+    lines.push(`Guests: ${event.attendees.length === 0 ? 'None' : event.attendees.join(', ')}`);
+    if (event.attendees.length > 0) {
+      lines.push(
+        event.guests_emailed
+          ? 'Google will email every guest about this.'
+          : 'Google will not email the guests about this.',
+      );
+    }
+    if (event.description !== '') {
+      lines.push('Description:');
+      lines.push(event.description);
+    }
+  }
+  const schedule = card.schedule ?? null;
+  if (schedule !== null) {
+    lines.push(`Name: ${schedule.name}`);
+    lines.push(`When it runs: ${schedule.when} (${schedule.time_zone})`);
+    lines.push(`Runs as: ${schedule.runs_as}`);
+    if (schedule.action === 'create') {
+      lines.push('Starts: As soon as you approve.');
+    }
+    if (schedule.next_runs.length > 0) {
+      lines.push('Next runs:');
+      lines.push(...schedule.next_runs);
+    }
+    lines.push('What it will do each time:');
+    lines.push(schedule.task);
+  }
+  const persona = card.persona ?? null;
+  if (persona !== null) {
+    lines.push(`Name: ${persona.name}`);
+    lines.push(`For: ${persona.description}`);
+    lines.push(`Answers with: ${persona.model_name}`);
+    lines.push('Instructions:');
+    lines.push(persona.instructions);
+  }
+  if (
+    card.mail_new_recipients !== null &&
+    card.mail_new_recipients !== undefined &&
+    card.mail_new_recipients.length > 0
+  ) {
+    lines.push(`New email addresses: ${card.mail_new_recipients.join(', ')}`);
+  }
+  if (card.outbound_text !== null) {
+    lines.push('Full request:');
+    if (card.outbound_truncated) {
+      lines.push('Part of this request is not shown in full.');
+    }
+    lines.push(card.outbound_text);
+  }
+  if (card.cannot_be_undone !== null) {
+    lines.push(card.cannot_be_undone);
+  }
+  if (card.plain_why !== null) {
+    lines.push(`Why: ${card.plain_why}`);
+  }
+  return lines;
+}
+
+const APP_ONLY_APPROVAL_LINE =
+  'Aman needs your ok for an action, but Telegram cannot show everything it will do. Open Aman to see it and answer there.';
+const TRUNCATED_APPROVAL_LINE =
+  'Part of this action is not shown in full, so it cannot be approved from Telegram. Open Aman to see the whole thing and answer there.';
+
+export interface TelegramApprovalPrompt {
+  /** The text to send: the whole card, or the line that names the app when the card cannot be shown whole. */
+  text: string;
+  /**
+   * True when the text shows everything the card shows, so Approve and Deny buttons may ride
+   * it. False when the action has no card, or its exact request text is cut: the message then
+   * carries no buttons and the person answers in the app.
+   */
+  complete: boolean;
+}
+
+/** The Telegram form of one approval ask: the whole card, and whether buttons may ride it. */
+export function approvalPrompt(action: ActionRequiredEvent, toolCallId: string): TelegramApprovalPrompt | undefined {
   if (action.type !== 'tool.approval_required') {
     return undefined;
   }
@@ -72,25 +232,15 @@ export function approvalPromptText(action: ActionRequiredEvent, toolCallId: stri
     return undefined;
   }
   const card = call.tier3_card ?? null;
-  const lines: string[] = [card?.plain_what ?? 'Aman needs your ok to go on.'];
-  if (card !== null) {
-    if (card.plain_why !== null) {
-      lines.push(card.plain_why);
-    }
-    if (card.destination !== null) {
-      lines.push(`Where: ${card.destination}`);
-    }
-    if (card.recipient !== null) {
-      lines.push(`To: ${card.recipient}`);
-    }
-    if (card.amount !== null) {
-      lines.push(`Amount: ${card.amount}`);
-    }
-    if (card.cannot_be_undone !== null) {
-      lines.push(card.cannot_be_undone);
-    }
+  if (card === null) {
+    return { text: APP_ONLY_APPROVAL_LINE, complete: false };
   }
-  return lines.join('\n');
+  const lines = approvalCardLines(card);
+  if (card.outbound_truncated) {
+    lines.push(TRUNCATED_APPROVAL_LINE);
+    return { text: lines.join('\n'), complete: false };
+  }
+  return { text: lines.join('\n'), complete: true };
 }
 
 async function deliverOne(deps: TelegramReplyDeps, reply: TelegramPendingReply): Promise<void> {
@@ -137,8 +287,14 @@ async function deliverOne(deps: TelegramReplyDeps, reply: TelegramPendingReply):
         continue;
       }
       for (const call of action.tool_calls) {
-        const prompt = approvalPromptText(action, call.id);
+        const prompt = approvalPrompt(action, call.id);
         if (prompt === undefined) {
+          continue;
+        }
+        if (!prompt.complete) {
+          // Telegram cannot show this action whole, so it gets no buttons and no row for a
+          // button to point at: the ask is named, and the app is where it is answered.
+          await send(prompt.text);
           continue;
         }
         const pending = await deps.store.addPendingApproval({
@@ -149,10 +305,10 @@ async function deliverOne(deps: TelegramReplyDeps, reply: TelegramPendingReply):
           thread_id: action.thread_id,
           tool_call_id: call.id,
           chat_id: reply.chat_id,
-          prompt,
+          prompt: prompt.text,
           expires_at: call.expires_at ?? null,
         });
-        await send(prompt, [
+        await send(prompt.text, [
           [
             { text: 'Approve', callback_data: telegramCallbackData({ decision: 'allow', approval_id: pending.id }) },
             { text: 'Deny', callback_data: telegramCallbackData({ decision: 'deny', approval_id: pending.id }) },

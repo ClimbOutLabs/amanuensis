@@ -2,6 +2,7 @@ import { createRoute } from '@hono/zod-openapi';
 
 import { RequestErrorResponseSchema } from '../schemas/errors';
 import {
+  CancelTelegramPairingResponseSchema,
   ConfirmTelegramPairingRequestSchema,
   ConfirmTelegramPairingResponseSchema,
   ConnectTelegramRequestSchema,
@@ -9,7 +10,7 @@ import {
   GetTelegramAccountResponseSchema,
   ProcessTelegramUpdateRequestSchema,
   RemoveTelegramResponseSchema,
-  TelegramUpdateSchema,
+  TelegramWebhookUpdateSchema,
 } from '../schemas/telegram';
 import { OpenApiTag } from './openapiTags';
 
@@ -33,7 +34,7 @@ export const getTelegramStatusRoute = createRoute({
   tags: [OpenApiTag.PERSONALIZATION],
   summary: 'Get the Telegram bot status',
   description:
-    'Returns whether a bot is connected, its name, where pairing stands, and the pairing code while one waits. The bot token is never returned.',
+    'Returns whether a bot is connected, its name, where pairing stands, and the name of the person waiting to pair while one waits. The bot token and the pairing code are never returned: the code is shown only in Telegram.',
   'x-fern-sdk-group-name': ['settings', 'telegram'],
   'x-fern-sdk-method-name': 'get_status',
   responses: {
@@ -82,7 +83,7 @@ export const confirmTelegramPairingRoute = createRoute({
   tags: [OpenApiTag.PERSONALIZATION],
   summary: 'Confirm a Telegram pairing',
   description:
-    'Pairs the person who sent /start to the bot, when the code they type matches the code the bot sent them. Only that person can then talk to the bot.',
+    'Pairs the person who sent /start to the bot, when the code they type matches the code the bot sent them in Telegram. Only that person can then talk to the bot.',
   'x-fern-sdk-group-name': ['settings', 'telegram'],
   'x-fern-sdk-method-name': 'confirm_pairing',
   request: {
@@ -96,6 +97,29 @@ export const confirmTelegramPairingRoute = createRoute({
     400: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
       description: 'No code is waiting, it has expired, or the code does not match.',
+    },
+    ...unauthorized,
+    ...refused,
+  },
+});
+
+export const cancelTelegramPairingRoute = createRoute({
+  method: 'post',
+  path: '/cancel-pairing',
+  tags: [OpenApiTag.PERSONALIZATION],
+  summary: 'Cancel a waiting Telegram pairing',
+  description:
+    'Drops the pairing that is waiting, without pairing anyone, so a /start from someone else can be refused. The person can send /start again to start over.',
+  'x-fern-sdk-group-name': ['settings', 'telegram'],
+  'x-fern-sdk-method-name': 'cancel_pairing',
+  responses: {
+    200: {
+      content: { 'application/json': { schema: CancelTelegramPairingResponseSchema } },
+      description: 'No pairing is waiting now.',
+    },
+    400: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'No bot is connected.',
     },
     ...unauthorized,
     ...refused,
@@ -151,14 +175,14 @@ export const telegramWebhookRoute = createRoute({
   tags: [OpenApiTag.INTERNAL],
   summary: 'Receive one Telegram webhook update',
   description:
-    'The address Telegram posts updates to when a public https address is configured. The secret Telegram was given at setup must ride the call, or it is refused.',
+    'The address Telegram posts updates to when a public https address is configured. The secret Telegram was given at setup must ride the call, or it is refused. An update in a shape this build cannot read is dropped with the same success answer, so Telegram does not keep retrying it.',
   'x-fern-sdk-group-name': ['telegram'],
   'x-fern-sdk-method-name': 'webhook',
   request: {
-    body: { content: { 'application/json': { schema: TelegramUpdateSchema } }, required: true },
+    body: { content: { 'application/json': { schema: TelegramWebhookUpdateSchema } }, required: true },
   },
   responses: {
-    204: { description: 'The update was handled, or there was nothing in it to handle.' },
+    204: { description: 'The update was handled, dropped as unreadable, or there was nothing in it to handle.' },
     401: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
       description: 'The call did not carry the webhook secret.',

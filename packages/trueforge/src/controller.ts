@@ -40,7 +40,7 @@ export function createController<TTransaction>(params: {
   if (params.telegram !== undefined) {
     const service =
       params.telegram.service ??
-      createTelegramService({ store: params.telegram.store, publicBaseUrl: getPublicBaseUrl() });
+      createTelegramService({ store: params.telegram.store, publicBaseUrl: getPublicBaseUrl(), logger: params.logger });
     loops.push(
       telegramPollLoop({
         store: params.telegram.store,

@@ -280,7 +280,11 @@ export function createTelegramClient({
   };
 }
 
-/** Splits a long text into message-sized pieces, on line breaks where it can. */
+/**
+ * Splits a long text into message-sized pieces, on line breaks where it can. A hard cut never
+ * lands inside a surrogate pair: a piece ending on half an emoji is text Telegram refuses,
+ * which used to lose that piece and every piece after it.
+ */
 export function splitTelegramText(text: string): string[] {
   if (text.length <= TELEGRAM_MAX_MESSAGE_CHARS) {
     return [text];
@@ -290,7 +294,12 @@ export function splitTelegramText(text: string): string[] {
   while (rest.length > TELEGRAM_MAX_MESSAGE_CHARS) {
     const window = rest.slice(0, TELEGRAM_MAX_MESSAGE_CHARS);
     const breakAt = Math.max(window.lastIndexOf('\n\n'), window.lastIndexOf('\n'), window.lastIndexOf(' '));
-    const cut = breakAt > TELEGRAM_MAX_MESSAGE_CHARS / 2 ? breakAt : TELEGRAM_MAX_MESSAGE_CHARS;
+    let cut = breakAt > TELEGRAM_MAX_MESSAGE_CHARS / 2 ? breakAt : TELEGRAM_MAX_MESSAGE_CHARS;
+    const before = rest.charCodeAt(cut - 1);
+    const after = rest.charCodeAt(cut);
+    if (before >= 0xd800 && before <= 0xdbff && after >= 0xdc00 && after <= 0xdfff) {
+      cut -= 1;
+    }
     parts.push(rest.slice(0, cut).trimEnd());
     rest = rest.slice(cut).trimStart();
   }

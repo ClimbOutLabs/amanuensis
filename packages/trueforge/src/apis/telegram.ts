@@ -21,6 +21,7 @@ import type { AgentRecord } from '../db/agentStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { ITelegramStore, TelegramConnection } from '../db/telegramStore';
 import {
+  cancelTelegramPairingRoute,
   confirmTelegramPairingRoute,
   connectTelegramRoute,
   getTelegramStatusRoute,
@@ -33,6 +34,7 @@ import { resolveDefaultChatModel } from '../runtime/defaultChatModel';
 import { createMemoryClient } from '../runtime/memory/createMemoryClient';
 import { resolveMemoryProvider } from '../runtime/memory/memoryProvider';
 import {
+  createTelegramRefusalThrottle,
   processTelegramUpdate,
   TELEGRAM_CHAT_TITLE,
   TELEGRAM_METADATA_KEY,
@@ -41,6 +43,7 @@ import {
 } from '../runtime/telegram/telegramChannel';
 import { sendTelegramText, type TelegramSendQueue } from '../runtime/telegram/telegramSendQueue';
 import { TelegramSettingsError, type TelegramService } from '../runtime/telegram/telegramService';
+import { TelegramUpdateSchema, type TelegramUpdate } from '../schemas/telegram';
 import { readServerSandboxAvailable } from './capabilities';
 import { requireJsonOrSameOrigin } from './crossSite';
 import type { ScheduleTurnExecutionDeps } from './schedules';
@@ -253,6 +256,12 @@ export function createTelegramTurnPort<TTransaction>(params: {
   };
 }
 
+/**
+ * One refusal throttle for the whole server: the channel deps are rebuilt per call, and the
+ * throttle only holds back repeat refusals if it outlives them.
+ */
+const telegramRefusals = createTelegramRefusalThrottle();
+
 function channelDeps<TTransaction>(params: { c: Context; deps: TelegramTurnExecutionDeps<TTransaction> }) {
   return {
     store: params.deps.telegramStore,
@@ -260,6 +269,7 @@ function channelDeps<TTransaction>(params: { c: Context; deps: TelegramTurnExecu
     queue: params.deps.telegramQueue,
     turns: createTelegramTurnPort(params),
     logger: params.deps.logger,
+    refusals: telegramRefusals,
   };
 }
 
@@ -284,6 +294,12 @@ export function createTelegramExecutionRouter<TTransaction>(deps: TelegramTurnEx
   const router = new OpenAPIHono();
   router.openapi(processTelegramUpdateRoute, handler);
   return router;
+}
+
+/** One webhook update read from its loosely promised body, or undefined when its shape cannot be read. */
+export function readTelegramWebhookUpdate(body: unknown): TelegramUpdate | undefined {
+  const parsed = TelegramUpdateSchema.safeParse(body);
+  return parsed.success ? parsed.data : undefined;
 }
 
 /** The webhook Telegram posts updates to (mounted at /api/telegram). The secret it was given decides. */
@@ -323,7 +339,17 @@ export function createTelegramWebhookRouter<TTransaction>(deps: TelegramTurnExec
         created_by_subject: connection.created_by_subject,
       }),
     );
-    await processTelegramUpdate(channelDeps({ c, deps }), { connection, update: c.req.valid('json') });
+    // The route promises only the update id, so the update is checked here, not at the door:
+    // one in a shape this build cannot read is dropped with the same 204, because an error
+    // answer would make Telegram retry it forever. Polling skips such updates the same way.
+    const update = readTelegramWebhookUpdate(c.req.valid('json'));
+    if (update === undefined) {
+      deps.logger.warn('A Telegram webhook update could not be read and was dropped', {
+        connection_id: connection.id,
+      });
+      return c.body(null, 204);
+    }
+    await processTelegramUpdate(channelDeps({ c, deps }), { connection, update });
     return c.body(null, 204);
   };
   const router = new OpenAPIHono();
@@ -396,6 +422,23 @@ export function createTelegramSettingsRouter(deps: TelegramSettingsRouterDeps) {
       return c.json({ data: status }, 200);
     } catch (error) {
       // Confirming a pairing only ever fails with a 400: connect is the call that can be refused by Telegram.
+      if (error instanceof TelegramSettingsError) {
+        return c.json({ error: { message: error.message, type: error.failure } }, 400);
+      }
+      throw error;
+    }
+  });
+
+  router.openapi(cancelTelegramPairingRoute, async c => {
+    const requestContext = deps.resolveRequestContext(c);
+    try {
+      const status = await deps.telegramService.cancelPairing({
+        tenant_id: requestContext.tenant_id,
+        created_by: requestContext.subject.id,
+      });
+      return c.json({ data: status }, 200);
+    } catch (error) {
+      // Cancelling a pairing only ever fails with a 400: it makes no Telegram call to be refused.
       if (error instanceof TelegramSettingsError) {
         return c.json({ error: { message: error.message, type: error.failure } }, 400);
       }

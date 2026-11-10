@@ -1,17 +1,20 @@
+import { OpenAPIHono } from '@hono/zod-openapi';
 import { Hono } from 'hono';
 import winston from 'winston';
 
 import {
   createTelegramSettingsRouter,
   createTelegramWebhookSecretMiddleware,
+  readTelegramWebhookUpdate,
   TELEGRAM_SETTINGS_BASE_PATH,
   TELEGRAM_WEBHOOK_BASE_PATH,
 } from '../../../src/apis/telegram';
 import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
+import { telegramWebhookRoute } from '../../../src/routes/telegramRoutes';
 import { TelegramApiError } from '../../../src/runtime/telegram/telegramClient';
 import { createTelegramService } from '../../../src/runtime/telegram/telegramService';
 import { RequestErrorResponseSchema } from '../../../src/schemas/errors';
-import { GetTelegramAccountResponseSchema } from '../../../src/schemas/telegram';
+import { GetTelegramAccountResponseSchema, type TelegramUpdate } from '../../../src/schemas/telegram';
 import {
   FakeTelegramClient,
   fakeTelegramConnection,
@@ -57,7 +60,14 @@ async function connect(app: Hono): Promise<Response> {
 
 /** Walks the connection to a waiting code, as a /start to the bot would. */
 async function startPairing(store: InMemoryTelegramStore, expires_at: Date): Promise<void> {
-  await store.startPairing({ ...OWNER, code: '654321', expires_at, telegram_user_id: '555', chat_id: '777' });
+  await store.startPairing({
+    ...OWNER,
+    code: '654321',
+    expires_at,
+    telegram_user_id: '555',
+    chat_id: '777',
+    display_name: 'Sam S',
+  });
 }
 
 describe('the telegram settings endpoints', () => {
@@ -71,7 +81,7 @@ describe('the telegram settings endpoints', () => {
       state: 'not_connected',
       bot_name: null,
       bot_username: null,
-      pairing_code: null,
+      pairing_name: null,
     });
   });
 
@@ -152,6 +162,33 @@ describe('the telegram settings endpoints', () => {
     ]);
   });
 
+  it('names who is waiting to pair in the status, and never sends the code', async () => {
+    const { app, store } = makeSettingsApp();
+    await connect(app);
+    await startPairing(store, new Date(Date.now() + 60_000));
+    const response = await app.request(`${TELEGRAM_SETTINGS_BASE_PATH}/status`);
+    expect(response.status).toBe(200);
+    const raw: unknown = await response.json();
+    expect(JSON.stringify(raw)).not.toContain('654321');
+    const body = GetTelegramAccountResponseSchema.parse(raw);
+    expect(body.data.state).toBe('awaiting_pairing');
+    expect(body.data.pairing_name).toBe('Sam S');
+  });
+
+  it('cancelling a waiting pairing drops it, and the code no longer pairs', async () => {
+    const { app, store } = makeSettingsApp();
+    await connect(app);
+    await startPairing(store, new Date(Date.now() + 60_000));
+    const cancelled = await postJson(app, `${TELEGRAM_SETTINGS_BASE_PATH}/cancel-pairing`, {});
+    expect(cancelled.status).toBe(200);
+    const body = GetTelegramAccountResponseSchema.parse(await cancelled.json());
+    expect(body.data.pairing_name).toBeNull();
+    expect(store.connection?.pairing_code).toBeNull();
+    expect(store.connection?.paired_telegram_user_id).toBeNull();
+    const confirm = await postJson(app, `${TELEGRAM_SETTINGS_BASE_PATH}/confirm`, { code: '654321' });
+    expect(confirm.status).toBe(400);
+  });
+
   it('disconnect removes the bot and its token', async () => {
     const { app, store } = makeSettingsApp();
     await connect(app);
@@ -163,6 +200,34 @@ describe('the telegram settings endpoints', () => {
     const body = GetTelegramAccountResponseSchema.parse(await response.json());
     expect(body.data.state).toBe('not_connected');
     expect(store.connection).toBeNull();
+  });
+});
+
+describe('the telegram webhook route', () => {
+  it('hands a readable update over and drops an unreadable one with success, never an error', async () => {
+    const seen: (TelegramUpdate | undefined)[] = [];
+    const app = new OpenAPIHono();
+    app.openapi(telegramWebhookRoute, c => {
+      seen.push(readTelegramWebhookUpdate(c.req.valid('json')));
+      return c.body(null, 204);
+    });
+    const headers = { 'content-type': 'application/json' };
+    const good = await app.request('/webhook', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ update_id: 9 }),
+    });
+    expect(good.status).toBe(204);
+    // An update whose message this build cannot read: the door used to answer 400, which
+    // Telegram retries forever. Now the handler sees it, reads nothing, and answers 204.
+    const bad = await app.request('/webhook', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ update_id: 10, message: { chat: 'not-a-chat' } }),
+    });
+    expect(bad.status).toBe(204);
+    expect(seen[0]?.update_id).toBe(9);
+    expect(seen[1]).toBeUndefined();
   });
 });
 

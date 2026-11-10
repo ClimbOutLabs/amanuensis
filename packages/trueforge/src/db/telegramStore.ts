@@ -1,5 +1,5 @@
 import { CreatedBySubjectSchema, type CreatedBySubject } from '@truefoundry/trueforge-core/agent-session';
-import type { Kysely } from 'kysely';
+import { sql, type Kysely } from 'kysely';
 
 import { newId } from '../utils/id';
 
@@ -35,6 +35,10 @@ export interface TelegramConnectionTable {
   /** Who sent the /start the code belongs to; becomes the pairing only on confirm. */
   pairing_telegram_user_id: string | null;
   pairing_chat_id: string | null;
+  /** The waiting person's name as Telegram shows it, so Settings can name who would be paired. */
+  pairing_display_name: string | null;
+  /** The last update id the channel claimed, as text; null before the first update. */
+  last_update_id: string | null;
   /** Next update id to ask Telegram for, as text; null before the first poll. */
   poll_offset: string | null;
   /** polling, or webhook when a public https address is configured. */
@@ -107,6 +111,8 @@ export interface TelegramConnection {
   pairing_expires_at: string | null;
   pairing_telegram_user_id: string | null;
   pairing_chat_id: string | null;
+  pairing_display_name: string | null;
+  last_update_id: string | null;
   poll_offset: string | null;
   transport: 'polling' | 'webhook';
   webhook_secret: string | null;
@@ -158,6 +164,8 @@ export interface StartTelegramPairingInput extends TelegramOwner {
   expires_at: Date;
   telegram_user_id: string;
   chat_id: string;
+  /** The waiting person's name as Telegram shows it, kept so Settings can name who would be paired. */
+  display_name: string;
   /** Defaults to now. */
   now?: Date;
 }
@@ -202,10 +210,21 @@ export interface ITelegramStore {
   deleteConnection(owner: TelegramOwner): Promise<boolean>;
   /** Records the code a /start produced, and who sent it, until it is confirmed or expires. */
   startPairing(input: StartTelegramPairingInput): Promise<void>;
-  /** Makes the pairing stored by {@link startPairing} the connection's pairing and clears the code. */
-  confirmPairing(owner: TelegramOwner & { now?: Date }): Promise<void>;
+  /**
+   * Makes the pairing waiting under `code` the connection's pairing and clears the code, in one
+   * write that lands only while that code is still the waiting one. Resolves to whether anyone
+   * was paired: a /start that replaced the code in the meantime leaves the write unmatched, so
+   * a stale code can never pair whoever is waiting now.
+   */
+  confirmPairing(input: TelegramOwner & { code: string; now?: Date }): Promise<boolean>;
   /** Drops a waiting code without pairing anyone. */
   clearPairing(owner: TelegramOwner & { now?: Date }): Promise<void>;
+  /**
+   * Claims one update for handling, in one write that lands only when its id is past the last
+   * claimed one. Resolves to whether the caller claimed it: Telegram can deliver the same update
+   * twice (a slow poll answer, a webhook retry), and only the first claim is handled.
+   */
+  claimUpdate(input: { connection_id: string; update_id: string; now?: Date }): Promise<boolean>;
   /** Remembers where polling got to, so a restart does not re-read updates it already handed over. */
   setPollOffset(input: TelegramOwner & { poll_offset: string; now?: Date }): Promise<void>;
   /** Remembers the dedicated Telegram chat once it exists. */
@@ -256,6 +275,8 @@ function toConnection(row: TelegramConnectionTable): TelegramConnection {
     pairing_expires_at: toIsoOrNull(row.pairing_expires_at),
     pairing_telegram_user_id: row.pairing_telegram_user_id,
     pairing_chat_id: row.pairing_chat_id,
+    pairing_display_name: row.pairing_display_name,
+    last_update_id: row.last_update_id,
     poll_offset: row.poll_offset,
     transport: row.transport === 'webhook' ? 'webhook' : 'polling',
     webhook_secret: row.webhook_secret,
@@ -358,6 +379,8 @@ export class TelegramStore implements ITelegramStore {
       pairing_expires_at: null,
       pairing_telegram_user_id: null,
       pairing_chat_id: null,
+      pairing_display_name: null,
+      last_update_id: null,
       poll_offset: null,
       transport: input.transport,
       webhook_secret: input.webhook_secret,
@@ -400,6 +423,7 @@ export class TelegramStore implements ITelegramStore {
         pairing_expires_at: input.expires_at.toISOString(),
         pairing_telegram_user_id: input.telegram_user_id,
         pairing_chat_id: input.chat_id,
+        pairing_display_name: input.display_name,
         updated_at: (input.now ?? new Date()).toISOString(),
       })
       .where('tenant_id', '=', input.tenant_id)
@@ -407,28 +431,29 @@ export class TelegramStore implements ITelegramStore {
       .execute();
   }
 
-  async confirmPairing(owner: TelegramOwner & { now?: Date }): Promise<void> {
-    const current = await this.getConnection(owner);
-    if (current === undefined) {
-      return;
-    }
-    if (current.pairing_telegram_user_id === null || current.pairing_chat_id === null) {
-      return;
-    }
-    await this.#db
+  async confirmPairing(input: TelegramOwner & { code: string; now?: Date }): Promise<boolean> {
+    // One conditional write: the waiting person becomes the pairing only while the code being
+    // confirmed is still the stored one. A /start that landed after the code was read replaced
+    // the code, so this matches nothing and pairs nobody.
+    const result = await this.#db
       .updateTable('telegram_connection')
       .set({
-        paired_telegram_user_id: current.pairing_telegram_user_id,
-        paired_chat_id: current.pairing_chat_id,
+        paired_telegram_user_id: sql<string>`pairing_telegram_user_id`,
+        paired_chat_id: sql<string>`pairing_chat_id`,
         pairing_code: null,
         pairing_expires_at: null,
         pairing_telegram_user_id: null,
         pairing_chat_id: null,
-        updated_at: (owner.now ?? new Date()).toISOString(),
+        pairing_display_name: null,
+        updated_at: (input.now ?? new Date()).toISOString(),
       })
-      .where('tenant_id', '=', owner.tenant_id)
-      .where('created_by', '=', owner.created_by)
-      .execute();
+      .where('tenant_id', '=', input.tenant_id)
+      .where('created_by', '=', input.created_by)
+      .where('pairing_code', '=', input.code)
+      .where('pairing_telegram_user_id', 'is not', null)
+      .where('pairing_chat_id', 'is not', null)
+      .executeTakeFirst();
+    return result.numUpdatedRows > 0n;
   }
 
   async clearPairing(owner: TelegramOwner & { now?: Date }): Promise<void> {
@@ -439,11 +464,26 @@ export class TelegramStore implements ITelegramStore {
         pairing_expires_at: null,
         pairing_telegram_user_id: null,
         pairing_chat_id: null,
+        pairing_display_name: null,
         updated_at: (owner.now ?? new Date()).toISOString(),
       })
       .where('tenant_id', '=', owner.tenant_id)
       .where('created_by', '=', owner.created_by)
       .execute();
+  }
+
+  async claimUpdate(input: { connection_id: string; update_id: string; now?: Date }): Promise<boolean> {
+    // One conditional write: the id is recorded only when it is past the last claimed one, so
+    // two deliveries of the same update can never both be claimed.
+    const result = await this.#db
+      .updateTable('telegram_connection')
+      .set({ last_update_id: input.update_id, updated_at: (input.now ?? new Date()).toISOString() })
+      .where('id', '=', input.connection_id)
+      .where(
+        sql<boolean>`(last_update_id is null or cast(last_update_id as bigint) < cast(${input.update_id} as bigint))`,
+      )
+      .executeTakeFirst();
+    return result.numUpdatedRows > 0n;
   }
 
   async setPollOffset(input: TelegramOwner & { poll_offset: string; now?: Date }): Promise<void> {

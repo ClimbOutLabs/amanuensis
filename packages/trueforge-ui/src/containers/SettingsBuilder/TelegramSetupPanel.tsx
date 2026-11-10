@@ -23,8 +23,10 @@ const BOTFATHER_HELP = 'Open Telegram, message @BotFather, send /newbot, paste t
 /**
  * The Telegram card's setup panel: paste a bot token, then pair. The token is typed here and nowhere
  * else: it goes straight to the server endpoint, is cleared from this form on every answer, and is
- * never shown back. Pairing takes two steps on purpose: the bot sends a code to whoever messages it,
- * and the code is confirmed here, so only the person holding both can pair.
+ * never shown back. Pairing takes two steps on purpose: the bot sends the code only inside Telegram,
+ * and this panel shows the name of whoever is waiting to pair, so the owner pairs only when that
+ * name is theirs, by typing the code from Telegram. A stranger who messaged the bot first shows
+ * their own name here and can be cancelled instead of paired.
  */
 export default function TelegramSetupPanel({ open, onOpenChange, port, onChanged }: TelegramSetupPanelProps) {
   const [status, setStatus] = useState<TelegramAccountStatus | null>(null);
@@ -90,6 +92,10 @@ export default function TelegramSetupPanel({ open, onOpenChange, port, onChanged
   const handleConfirm = async (event: FormEvent) => {
     event.preventDefault();
     await run(() => port.confirmTelegramPairing({ code: code.trim() }), "Couldn't confirm that code. Try again.");
+  };
+
+  const handleCancelPairing = async () => {
+    await run(() => port.cancelTelegramPairing(), "Couldn't cancel that pairing. Try again.");
   };
 
   const handleRemove = async () => {
@@ -173,15 +179,23 @@ export default function TelegramSetupPanel({ open, onOpenChange, port, onChanged
             <ol className="list-decimal space-y-1 pl-5 text-text-secondary">
               <li>Open Telegram and message your bot.</li>
               <li>Send /start. The bot answers with a six-digit code.</li>
-              <li>Type that code here and press Pair.</li>
+              <li>Check the name below is yours, type the code from Telegram here and press Pair.</li>
             </ol>
-            {status.pairingCode !== null ? (
-              <p className="text-text-secondary">
-                The code in Settings is <span className="font-medium text-text-primary">{status.pairingCode}</span>.
-                Pair only when the code the bot sent you matches it.
-              </p>
+            <p className="text-text-secondary">
+              The code is shown only in Telegram, never here. This panel shows who is waiting to pair instead, so you
+              can check it is you before pairing.
+            </p>
+            {status.pairingName !== null ? (
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p>
+                  Waiting to pair: <span className="font-medium">{status.pairingName}</span>
+                </p>
+                <Button variant="ghost" type="button" disabled={busy} onClick={() => void handleCancelPairing()}>
+                  Cancel pairing
+                </Button>
+              </div>
             ) : (
-              <p className="text-text-secondary">No code is waiting yet. Send /start to your bot first.</p>
+              <p className="text-text-secondary">Nobody is waiting to pair yet. Send /start to your bot first.</p>
             )}
             <form onSubmit={event => void handleConfirm(event)} className="space-y-4">
               <div>

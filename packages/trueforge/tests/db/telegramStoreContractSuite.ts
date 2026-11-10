@@ -43,15 +43,56 @@ export function runTelegramStoreContractSuite(getStore: () => ITelegramStore): v
       expires_at: new Date(Date.now() + 60_000),
       telegram_user_id: '555',
       chat_id: '777',
+      display_name: 'Alice A',
     });
     const waiting = await store.getConnection(ALICE);
     expect(waiting?.pairing_code).toBe('123456');
     expect(waiting?.pairing_telegram_user_id).toBe('555');
-    await store.confirmPairing(ALICE);
+    expect(waiting?.pairing_display_name).toBe('Alice A');
+    await expect(store.confirmPairing({ ...ALICE, code: '123456' })).resolves.toBe(true);
     const paired = await store.getConnection(ALICE);
     expect(paired?.paired_telegram_user_id).toBe('555');
     expect(paired?.paired_chat_id).toBe('777');
     expect(paired?.pairing_code).toBeNull();
+    expect(paired?.pairing_display_name).toBeNull();
+  });
+
+  it('a code a newer /start replaced pairs nobody, and the newer pairing still waits', async () => {
+    const store = getStore();
+    await store.saveConnection(bot(ALICE));
+    await store.startPairing({
+      ...ALICE,
+      code: '111111',
+      expires_at: new Date(Date.now() + 60_000),
+      telegram_user_id: '555',
+      chat_id: '777',
+      display_name: 'Alice A',
+    });
+    await store.startPairing({
+      ...ALICE,
+      code: '222222',
+      expires_at: new Date(Date.now() + 60_000),
+      telegram_user_id: '999',
+      chat_id: '888',
+      display_name: 'Mallory M',
+    });
+    await expect(store.confirmPairing({ ...ALICE, code: '111111' })).resolves.toBe(false);
+    const waiting = await store.getConnection(ALICE);
+    expect(waiting?.paired_telegram_user_id).toBeNull();
+    expect(waiting?.pairing_telegram_user_id).toBe('999');
+    expect(waiting?.pairing_code).toBe('222222');
+  });
+
+  it('claims each update once, in order, per connection', async () => {
+    const store = getStore();
+    const saved = await store.saveConnection(bot(ALICE));
+    await expect(store.claimUpdate({ connection_id: saved.id, update_id: '10' })).resolves.toBe(true);
+    await expect(store.claimUpdate({ connection_id: saved.id, update_id: '10' })).resolves.toBe(false);
+    await expect(store.claimUpdate({ connection_id: saved.id, update_id: '9' })).resolves.toBe(false);
+    await expect(store.claimUpdate({ connection_id: saved.id, update_id: '11' })).resolves.toBe(true);
+    await expect(store.claimUpdate({ connection_id: 'no-such-connection', update_id: '12' })).resolves.toBe(false);
+    const connection = await store.getConnection(ALICE);
+    expect(connection?.last_update_id).toBe('11');
   });
 
   it('replacing the bot starts unpaired and drops what was waiting', async () => {
@@ -63,8 +104,9 @@ export function runTelegramStoreContractSuite(getStore: () => ITelegramStore): v
       expires_at: new Date(Date.now() + 60_000),
       telegram_user_id: '555',
       chat_id: '777',
+      display_name: 'Alice A',
     });
-    await store.confirmPairing(ALICE);
+    await store.confirmPairing({ ...ALICE, code: '123456' });
     await store.addPendingReply({
       ...ALICE,
       connection_id: first.id,

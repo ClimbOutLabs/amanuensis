@@ -803,7 +803,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     googleConnections: googleConnectionStore,
   });
   const telegramQueue = createTelegramSendQueue();
-  const telegramService = createTelegramService({ store: telegramStore, publicBaseUrl: getPublicBaseUrl() });
+  const telegramService = createTelegramService({ store: telegramStore, publicBaseUrl: getPublicBaseUrl(), logger });
   const deliveryService = createDeliveryService({
     store: deliveryStore,
     senders: [

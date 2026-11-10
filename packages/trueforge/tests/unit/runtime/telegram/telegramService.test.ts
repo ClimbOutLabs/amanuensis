@@ -32,6 +32,7 @@ async function connectAndStartPairing(
     expires_at: new Date(Date.now() + 60_000),
     telegram_user_id: '555',
     chat_id: '777',
+    display_name: 'Sam S',
   });
   return store.connection.id;
 }
@@ -45,7 +46,7 @@ describe('telegram connection service', () => {
       state: 'awaiting_pairing',
       bot_name: 'Test Bot',
       bot_username: 'test_bot',
-      pairing_code: null,
+      pairing_name: null,
     });
     expect(store.connection?.bot_token).toBe('123:good');
   });
@@ -116,12 +117,53 @@ describe('telegram connection service', () => {
       expires_at: new Date(Date.now() - 1000),
       telegram_user_id: '555',
       chat_id: '777',
+      display_name: 'Sam S',
     });
     const error: unknown = await service
       .confirmPairing({ ...TELEGRAM_TEST_OWNER, code: '123456' })
       .catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(TelegramSettingsError);
     expect(store.connection?.pairing_code).toBeNull();
+    expect(store.connection?.paired_telegram_user_id).toBeNull();
+  });
+
+  it('names who is waiting to pair in the status, and never returns the code', async () => {
+    const { store, service } = serviceWith(new FakeTelegramClient());
+    await connectAndStartPairing(store, service);
+    const status = await service.status(TELEGRAM_TEST_OWNER);
+    expect(status.state).toBe('awaiting_pairing');
+    expect(status.pairing_name).toBe('Sam S');
+    expect(JSON.stringify(status)).not.toContain('123456');
+  });
+
+  it('cancelling drops the waiting pairing and pairs nobody', async () => {
+    const { store, service } = serviceWith(new FakeTelegramClient());
+    await connectAndStartPairing(store, service);
+    const status = await service.cancelPairing(TELEGRAM_TEST_OWNER);
+    expect(status.state).toBe('awaiting_pairing');
+    expect(status.pairing_name).toBeNull();
+    expect(store.connection?.pairing_code).toBeNull();
+    expect(store.connection?.pairing_telegram_user_id).toBeNull();
+    expect(store.connection?.paired_telegram_user_id).toBeNull();
+    const error: unknown = await service
+      .confirmPairing({ ...TELEGRAM_TEST_OWNER, code: '123456' })
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(TelegramSettingsError);
+  });
+
+  it('refuses to pair when the waiting code was replaced after it was read', async () => {
+    const { store, service } = serviceWith(new FakeTelegramClient());
+    await connectAndStartPairing(store, service);
+    // A /start from someone else landed between the read and the write: the store's
+    // conditional write no longer matches the code that was checked.
+    store.confirmPairing = () => Promise.resolve(false);
+    const error: unknown = await service
+      .confirmPairing({ ...TELEGRAM_TEST_OWNER, code: '123456' })
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(TelegramSettingsError);
+    if (error instanceof TelegramSettingsError) {
+      expect(error.message).toContain('no longer the waiting one');
+    }
     expect(store.connection?.paired_telegram_user_id).toBeNull();
   });
 

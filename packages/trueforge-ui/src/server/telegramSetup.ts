@@ -1,7 +1,7 @@
 /**
  * The Telegram port the Harness adds on top of the runtime's connector port.
- * Hand-written wire types: the generated SDK has no Telegram settings routes yet, so the
- * adapter calls the server endpoints directly and maps their snake_case fields here.
+ * The wire types are hand-written here so this card keeps its own mapping of the server's
+ * snake_case fields; the adapter calls the settings Telegram endpoints directly.
  */
 
 /** Where the Telegram connection stands: no bot yet, a bot waiting to be paired, or paired and live. */
@@ -16,8 +16,12 @@ export interface TelegramAccountStatus {
   botName: string | null;
   /** The bot's username, without the @; null when no bot is connected. */
   botUsername: string | null;
-  /** The six-digit code the bot sent after /start, shown so it can be checked; null when none waits. */
-  pairingCode: string | null;
+  /**
+   * The name Telegram shows for the person waiting to pair; null when nobody waits. The
+   * pairing code itself is never part of the status: the bot shows it only in Telegram, so
+   * typing it here proves the person holds that chat.
+   */
+  pairingName: string | null;
 }
 
 /** Operations behind Settings, Connectors, Telegram. */
@@ -27,6 +31,8 @@ export interface TelegramSetupPort {
   connectTelegram(req: { token: string }): Promise<TelegramAccountStatus>;
   /** Pairs the person who sent /start, when the code matches the one the bot sent them. */
   confirmTelegramPairing(req: { code: string }): Promise<TelegramAccountStatus>;
+  /** Drops the pairing that is waiting, without pairing anyone, so a stranger's /start can be refused. */
+  cancelTelegramPairing(): Promise<TelegramAccountStatus>;
   /** Removes the bot, its token and its pairing for good. */
   removeTelegram(): Promise<TelegramAccountStatus>;
 }
