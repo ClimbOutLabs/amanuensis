@@ -315,6 +315,7 @@ const expectedRuntimeExports: Array<keyof typeof sdk> = [
   'usePersonalization',
   'usePersonas',
   'useImplementationPlanGrants',
+  'useIsPrivateChat',
   'useTrueFoundryAgentRuntime',
   'useTrueFoundryAgentSpec',
   'useTrueFoundryApprovals',

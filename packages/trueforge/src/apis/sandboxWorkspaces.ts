@@ -60,10 +60,13 @@ export function createSandboxWorkspacesRouter(deps: SandboxWorkspacesRouterDeps)
         const chat = chatBySandboxId.get(sandboxId);
         // Another person's chat is named only as theirs: its title is theirs to see.
         const yours = chat?.created_by_subject_id === requestContext.subject.id;
+        // A private chat stays out of every list by title, even for its owner.
+        const yourPrivate = yours && chat.is_private;
         workspaces.push({
           holder: chat === undefined ? 'none' : yours ? 'you' : 'someone_else',
           chat_id: yours ? chat.session_id : null,
-          chat_title: yours ? chat.title : null,
+          chat_title: yours && !chat.is_private ? chat.title : null,
+          chat_private: yourPrivate,
           sandbox_id: sandboxId,
           slot: slotListing.slot,
           bytes: session.bytes,

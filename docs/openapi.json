@@ -58,10 +58,6 @@
       "AgentCodeSnippet": {
         "additionalProperties": false,
         "properties": {
-          "icon": {
-            "format": "uri",
-            "type": "string"
-          },
           "label_name": {
             "minLength": 1,
             "type": "string"
@@ -77,7 +73,6 @@
         "required": [
           "label_name",
           "language",
-          "icon",
           "sample_code"
         ],
         "type": "object"
@@ -1282,6 +1277,13 @@
       },
       "CalendarProvider": {
         "properties": {
+          "account_url_template": {
+            "description": "A built-in calendar address made from the email address; null when the provider does not use one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "help_hint": {
             "description": "One plain sentence on how to get an app password.",
             "type": "string"
@@ -1294,7 +1296,7 @@
             ]
           },
           "key": {
-            "description": "Stable provider key, such as fastmail or other.",
+            "description": "Stable provider key, such as google or other.",
             "type": "string"
           },
           "name": {
@@ -1302,19 +1304,28 @@
             "type": "string"
           },
           "server_url": {
-            "description": "The built-in calendar address; null when it depends on the email domain or is typed.",
+            "description": "The built-in calendar address; null when it depends on the email domain, the email address or is typed.",
             "type": [
               "string",
               "null"
             ]
+          },
+          "setup_steps": {
+            "description": "Plain steps to show before the form; empty when the hint is enough.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           }
         },
         "required": [
           "key",
           "name",
           "server_url",
+          "account_url_template",
           "help_url",
-          "help_hint"
+          "help_hint",
+          "setup_steps"
         ],
         "type": "object"
       },
@@ -1753,6 +1764,26 @@
           "id",
           "type",
           "function"
+        ],
+        "type": "object"
+      },
+      "ChatPrivacy": {
+        "properties": {
+          "hosted_providers": {
+            "description": "Providers off this machine that may answer this chat; empty when it stays here.",
+            "items": {
+              "$ref": "#/components/schemas/HostedModelProvider"
+            },
+            "type": "array"
+          },
+          "leaves_machine": {
+            "description": "True when a model that may answer this chat runs off this machine.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "leaves_machine",
+          "hosted_providers"
         ],
         "type": "object"
       },
@@ -2362,6 +2393,10 @@
         "properties": {
           "agent": {
             "$ref": "#/components/schemas/CreateSessionAgent"
+          },
+          "is_incognito": {
+            "description": "True starts a private chat: nothing from it is remembered, and it is deleted when closed.",
+            "type": "boolean"
           },
           "metadata": {
             "$ref": "#/components/schemas/SessionMetadata"
@@ -3245,6 +3280,17 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/CapabilitiesData"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "GetChatPrivacyResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ChatPrivacy"
           }
         },
         "required": [
@@ -4308,6 +4354,41 @@
         ],
         "type": "object"
       },
+      "HelpConnectorState": {
+        "properties": {
+          "connected": {
+            "description": "Whether the connector answered this check with its tools.",
+            "type": "boolean"
+          },
+          "last_error": {
+            "description": "One plain sentence on why it did not answer this check, or null.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "description": "The connector name. Never a token or address.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "connected",
+          "last_error"
+        ],
+        "type": "object"
+      },
+      "HelpGoogleLoginState": {
+        "description": "The built-in Google login: answered, needs connecting again, did not answer, or not set up.",
+        "enum": [
+          "answered",
+          "needs_reconnect",
+          "no_answer",
+          "not_set_up"
+        ],
+        "type": "string"
+      },
       "HelpHealthCheck": {
         "properties": {
           "checked_at": {
@@ -4327,13 +4408,17 @@
           "model_ready": {
             "description": "Whether the default model answered the test call.",
             "type": "boolean"
+          },
+          "state": {
+            "$ref": "#/components/schemas/HelpState"
           }
         },
         "required": [
           "checked_at",
           "model_ready",
           "items",
-          "host_report"
+          "host_report",
+          "state"
         ],
         "type": "object"
       },
@@ -4425,6 +4510,89 @@
           "stale"
         ],
         "type": "string"
+      },
+      "HelpSetupStep": {
+        "properties": {
+          "done": {
+            "description": "Whether this setup step is done.",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "model: a default model is chosen. about_you: your name is saved in Personalization.",
+            "enum": [
+              "model",
+              "about_you"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "done"
+        ],
+        "type": "object"
+      },
+      "HelpState": {
+        "properties": {
+          "app_version": {
+            "description": "The version of Aman this server runs.",
+            "type": "string"
+          },
+          "build_ref": {
+            "description": "The build this server runs, or null when the build was not stamped.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "connectors": {
+            "description": "Each connector, whether it answered, and why not.",
+            "items": {
+              "$ref": "#/components/schemas/HelpConnectorState"
+            },
+            "type": "array"
+          },
+          "google_login": {
+            "$ref": "#/components/schemas/HelpGoogleLoginState"
+          },
+          "sandbox_ready": {
+            "description": "Whether the sandbox that reads files and runs code is ready.",
+            "type": "boolean"
+          },
+          "setup_steps": {
+            "description": "The first-run setup steps and whether each is done.",
+            "items": {
+              "$ref": "#/components/schemas/HelpSetupStep"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "setup_steps",
+          "connectors",
+          "google_login",
+          "sandbox_ready",
+          "app_version",
+          "build_ref"
+        ],
+        "type": "object"
+      },
+      "HostedModelProvider": {
+        "properties": {
+          "name": {
+            "description": "The provider name as configured.",
+            "type": "string"
+          },
+          "type": {
+            "description": "Provider type, for example `anthropic` or `custom`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "name"
+        ],
+        "type": "object"
       },
       "ImplementationPlan": {
         "additionalProperties": false,
@@ -10090,11 +10258,22 @@
             "description": "Unique session id.",
             "type": "string"
           },
+          "is_incognito": {
+            "description": "True for a private chat: nothing from it is remembered, and it is deleted when it is closed.",
+            "type": "boolean"
+          },
           "metadata": {
             "$ref": "#/components/schemas/SessionMetadata"
           },
           "metrics": {
             "$ref": "#/components/schemas/SessionMetrics"
+          },
+          "private_expires_at": {
+            "description": "ISO 8601 time a private chat is deleted if it is not closed first; null for other chats.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "source": {
             "$ref": "#/components/schemas/SessionSource"
@@ -10122,7 +10301,9 @@
           "approval_grants",
           "metrics",
           "metadata",
-          "source"
+          "source",
+          "is_incognito",
+          "private_expires_at"
         ],
         "type": "object"
       },
@@ -11344,6 +11525,19 @@
         },
         "required": [
           "data"
+        ],
+        "type": "object"
+      },
+      "SweepPrivateChatsResponse": {
+        "properties": {
+          "deleted": {
+            "description": "Private chats deleted because they expired.",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "deleted"
         ],
         "type": "object"
       },
@@ -14286,6 +14480,10 @@
           "agent": {
             "$ref": "#/components/schemas/SessionAgentSpecBody"
           },
+          "is_incognito": {
+            "description": "Set only when a chat is created. A value that differs from the chat is refused.",
+            "type": "boolean"
+          },
           "metadata": {
             "$ref": "#/components/schemas/SessionMetadata"
           },
@@ -15319,6 +15517,42 @@
           "metrics"
         ],
         "x-fern-sdk-method-name": "get_meters"
+      }
+    },
+    "/api/internal/private-chats/sweep": {
+      "post": {
+        "description": "Delete private chats whose expiry time has passed. Safe to call any time.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SweepPrivateChatsResponse"
+                }
+              }
+            },
+            "description": "Sweep finished."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid service credential."
+          }
+        },
+        "summary": "Delete expired private chats",
+        "tags": [
+          "Internal"
+        ],
+        "x-fern-sdk-group-name": [
+          "internal",
+          "private_chats"
+        ],
+        "x-fern-sdk-method-name": "sweep"
       }
     },
     "/api/internal/schedules/runs/execute": {
@@ -20228,6 +20462,16 @@
             }
           },
           {
+            "description": "When true, your own open private chats are included. They are left out by default.",
+            "in": "query",
+            "name": "include_private",
+            "required": false,
+            "schema": {
+              "description": "When true, your own open private chats are included. They are left out by default.",
+              "type": "boolean"
+            }
+          },
+          {
             "description": "When true, only sessions created by the authenticated subject.",
             "in": "query",
             "name": "created_by_me",
@@ -20705,6 +20949,16 @@
               }
             },
             "description": "Session not found."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The chat is private, so no report is made from it."
           }
         },
         "summary": "Generate a redacted bug-report bundle for a session",
@@ -21042,6 +21296,16 @@
               }
             },
             "description": "Session or owner-scoped folder not found."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Private chats cannot be filed in a folder."
           }
         },
         "summary": "Assign a session to a folder",
@@ -21407,6 +21671,65 @@
           "session-personas"
         ],
         "x-fern-sdk-method-name": "list_activations"
+      }
+    },
+    "/api/v1/sessions/{session_id}/privacy": {
+      "get": {
+        "description": "Whether the models that may answer this chat run on this machine, and which providers run elsewhere.",
+        "parameters": [
+          {
+            "description": "Session identifier.",
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "description": "Session identifier.",
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetChatPrivacyResponse"
+                }
+              }
+            },
+            "description": "Where the chat is answered."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Caller is not the session creator."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Session not found."
+          }
+        },
+        "summary": "Where a chat is answered",
+        "tags": [
+          "Agent Sessions"
+        ],
+        "x-fern-sdk-group-name": [
+          "sessions"
+        ],
+        "x-fern-sdk-method-name": "get_privacy"
       }
     },
     "/api/v1/sessions/{session_id}/repository": {
@@ -25509,6 +25832,16 @@
               }
             },
             "description": "The chat was not found."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The chat is private, so it has no brief items."
           }
         },
         "summary": "Mark a morning brief item done",

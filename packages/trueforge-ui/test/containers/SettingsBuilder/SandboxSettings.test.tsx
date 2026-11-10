@@ -361,6 +361,7 @@ describe('Chat workspaces card', () => {
             holder: 'you',
             chat_id: 'chat-1',
             chat_title: 'Trip planning',
+            chat_private: false,
             sandbox_id: `s1-${'a'.repeat(32)}`,
             slot: 1,
             bytes: 4096,
@@ -371,6 +372,7 @@ describe('Chat workspaces card', () => {
             holder: 'none',
             chat_id: null,
             chat_title: null,
+            chat_private: false,
             sandbox_id: `s1-${'c'.repeat(32)}`,
             slot: 1,
             bytes: 2048,
@@ -400,6 +402,7 @@ describe('Chat workspaces card', () => {
             holder: 'you',
             chat_id: 'chat-9',
             chat_title: null,
+            chat_private: false,
             sandbox_id: `s2-${'b'.repeat(32)}`,
             slot: 2,
             bytes: 1024,
@@ -417,6 +420,33 @@ describe('Chat workspaces card', () => {
     expect(card.getByText(/Slot 2 · 1 KB · Last used/)).toBeInTheDocument();
   });
 
+  it('shows your private chat as a private chat, without its title', async () => {
+    renderPage({
+      getRunCodeStatus: slotsReady,
+      listSandboxWorkspaces: async () => ({
+        slots: [{ slot: 1, workspace_count: 1, total_bytes: 1024, store_free_bytes: 2048 }],
+        workspaces: [
+          {
+            holder: 'you',
+            chat_id: 'chat-private',
+            chat_title: null,
+            chat_private: true,
+            sandbox_id: `s1-${'e'.repeat(32)}`,
+            slot: 1,
+            bytes: 1024,
+            entries: 1,
+            last_used: '2026-11-02T08:00:00.000Z',
+          },
+        ],
+      }),
+    });
+
+    await screen.findByRole('heading', { name: 'Chat workspaces' });
+    const card = cardOf('Chat workspaces');
+    expect(await card.findByText('A private chat')).toBeInTheDocument();
+    expect(card.queryByText('Untitled chat')).not.toBeInTheDocument();
+  });
+
   it("names another person's workspace without its chat title", async () => {
     renderPage({
       getRunCodeStatus: slotsReady,
@@ -427,6 +457,7 @@ describe('Chat workspaces card', () => {
             holder: 'someone_else',
             chat_id: null,
             chat_title: null,
+            chat_private: false,
             sandbox_id: `s1-${'d'.repeat(32)}`,
             slot: 1,
             bytes: 1024,

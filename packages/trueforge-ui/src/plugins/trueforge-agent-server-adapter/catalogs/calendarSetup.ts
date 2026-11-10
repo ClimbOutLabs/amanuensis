@@ -16,8 +16,10 @@ const CalendarProviderWireSchema = z.object({
   key: z.string(),
   name: z.string(),
   server_url: z.string().nullable(),
+  account_url_template: z.string().nullable(),
   help_url: z.string().nullable(),
   help_hint: z.string(),
+  setup_steps: z.array(z.string()),
 });
 
 const CalendarAccountStatusWireSchema = z.object({
@@ -44,8 +46,10 @@ function toCalendarStatus(wire: CalendarAccountStatusWire): CalendarAccountStatu
       key: provider.key,
       name: provider.name,
       serverUrl: provider.server_url,
+      accountUrlTemplate: provider.account_url_template,
       helpUrl: provider.help_url,
       helpHint: provider.help_hint,
+      setupSteps: provider.setup_steps,
     })),
   };
 }

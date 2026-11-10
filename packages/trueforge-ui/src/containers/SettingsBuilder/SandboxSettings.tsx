@@ -211,6 +211,9 @@ function StatusCard({
 function workspaceTitle(workspace: SandboxWorkspace): string {
   switch (workspace.holder) {
     case 'you':
+      if (workspace.chat_private) {
+        return 'A private chat';
+      }
       return workspace.chat_title ?? 'Untitled chat';
     case 'someone_else':
       return "Another person's chat";

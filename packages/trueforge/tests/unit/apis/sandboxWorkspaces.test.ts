@@ -23,6 +23,7 @@ function chatRecord(
   title: string | null,
   lastTurnId: string | null,
   owner: string = YOU,
+  privateChat = false,
 ): SessionRecord<SessionCustom> {
   return {
     tenant_id: 'default',
@@ -44,6 +45,8 @@ function chatRecord(
     metrics: { total_duration_ms: 0, total_turns: 0 },
     metadata: {},
     custom: null,
+    is_incognito: privateChat,
+    private_expires_at: privateChat ? new Date('2026-10-02T00:00:00.000Z') : null,
   };
 }
 
@@ -89,6 +92,7 @@ function fakeStore(
                   session_id: chat.session_id,
                   title: chat.title,
                   created_by_subject_id: chat.created_by_subject.subject_id,
+                  is_private: chat.is_incognito,
                   sandbox_id: sandboxId,
                 },
               ]
@@ -169,6 +173,7 @@ describe('sandbox workspaces listing', () => {
         holder: 'you',
         chat_id: 'chat-1',
         chat_title: 'Trip planning',
+        chat_private: false,
         sandbox_id: `s1-${SLOT_ONE_SESSION}`,
         slot: 1,
         bytes: 4096,
@@ -180,6 +185,7 @@ describe('sandbox workspaces listing', () => {
         holder: 'none',
         chat_id: null,
         chat_title: null,
+        chat_private: false,
         sandbox_id: `s1-${SLOT_ONE_ORPHAN}`,
         slot: 1,
         bytes: 2048,
@@ -190,6 +196,7 @@ describe('sandbox workspaces listing', () => {
         holder: 'you',
         chat_id: 'chat-2',
         chat_title: null,
+        chat_private: false,
         sandbox_id: `s2-${SLOT_TWO_SESSION}`,
         slot: 2,
         bytes: 8192,
@@ -232,6 +239,29 @@ describe('sandbox workspaces listing', () => {
       ['someone_else', null, null],
     ]);
     expect(JSON.stringify(listing)).not.toContain('Their private chat');
+  });
+
+  it('shows your own private chat as private, with no title', async () => {
+    const store = fakeStore(
+      [chatRecord('chat-private', 'Doctor visit notes', 'turn-private', YOU, true)],
+      [turnRecord('chat-private', 'turn-private', `s1-${SLOT_ONE_SESSION}`)],
+    );
+    const { listing } = await listWorkspaces({
+      sessionStore: store,
+      listSlotWorkspaces: () =>
+        Promise.resolve([
+          {
+            slot: 1,
+            storeFreeBytes: 1000,
+            sessions: [{ session_id: SLOT_ONE_SESSION, bytes: 1, entries: 1, last_used: '2026-11-01T10:00:00.000Z' }],
+          },
+        ]),
+    });
+
+    expect(listing.workspaces.map(w => [w.holder, w.chat_id, w.chat_title, w.chat_private])).toEqual([
+      ['you', 'chat-private', null, true],
+    ]);
+    expect(JSON.stringify(listing)).not.toContain('Doctor visit notes');
   });
 
   it('looks up every reported workspace in one read, in both forms a chat may have stored', async () => {

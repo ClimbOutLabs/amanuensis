@@ -9,6 +9,7 @@ const LISTING = {
       holder: 'you',
       chat_id: 'chat-1',
       chat_title: 'Trip planning',
+      chat_private: false,
       sandbox_id: `s1-${'a'.repeat(32)}`,
       slot: 1,
       bytes: 4096,

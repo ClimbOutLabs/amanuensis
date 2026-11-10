@@ -1,10 +1,14 @@
+import { createHash } from 'node:crypto';
+
 import type { InternalToolCallInfo } from '../llm/LLMTypes';
 import {
   isHostVouchedRead,
   isReadOnlyCall,
   MAX_WRITE_CALLS_PER_TURN,
   type TurnStepKind,
+  type TurnToolCallLedger,
 } from '../mcp/executeToolCalls';
+import { BROWSER_READ_TOOL_NAME, isAmanBrowserCall, movesBrowserPage } from '../permissions/browserToolNames';
 import {
   SANDBOX_APPLY_PATCH_TOOL_NAME,
   SANDBOX_EXEC_TOOL_NAME,
@@ -51,9 +55,37 @@ export function countsTowardWriteCap(info: InternalToolCallInfo, input: { staysI
 }
 
 /**
+ * The change count an identical call is judged against: the browser's own page count for a call of
+ * Aman's browser, and the turn's changes for everything else, so a scroll never lets another tool
+ * repeat, and a file edit never lets the browser repeat.
+ */
+export function changesSeenBy(
+  info: InternalToolCallInfo,
+  turn: Pick<TurnToolCallLedger, 'changesThisTurn' | 'browserPageChangesThisTurn'>,
+): number {
+  return isAmanBrowserCall(info) ? turn.browserPageChangesThisTurn : turn.changesThisTurn;
+}
+
+/**
+ * The page a successful browser call showed, as a digest of its text, and whether the call was a
+ * step that moves the page. Undefined for a call that shows no page (a screenshot, any other tool).
+ */
+export function browserPageSeen(input: {
+  info: InternalToolCallInfo;
+  text: string;
+}): { moves: boolean; digest: string } | undefined {
+  const moves = movesBrowserPage(input.info);
+  if (!moves && !(isAmanBrowserCall(input.info) && input.info.original_tool_name === BROWSER_READ_TOOL_NAME)) {
+    return undefined;
+  }
+  return { moves, digest: createHash('sha256').update(input.text).digest('hex') };
+}
+
+/**
  * Whether a call that ran changed something, so a different call made the same way may sensibly run
  * again (tests run again after a file edit, for example): any action the cap counts, and a sandbox
- * step whose effect is an edit, a commit or a push.
+ * step whose effect is an edit, a commit or a push. The browser's page has a count of its own
+ * (TurnToolCallLedger.browserPageChangesThisTurn).
  */
 export function changesState(info: InternalToolCallInfo, input: { countsTowardCap: boolean }): boolean {
   if (input.countsTowardCap) {

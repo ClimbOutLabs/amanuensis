@@ -96,6 +96,7 @@ export type {
   CreateTurnInput,
   DeleteSessionFolderInput,
   DeleteSessionInput,
+  ExpiredPrivateSession,
   FindChatsBySandboxIdsInput,
   FreezeAndGetTurnInput,
   GetCommandExecutionInput,
@@ -106,6 +107,7 @@ export type {
   GetTaskChecklistInput,
   GetTurnInput,
   ISessionStore,
+  ListExpiredPrivateSessionsInput,
   ListImplementationPlanGrantsInput,
   ListSessionEventsInput,
   ListSessionFoldersInput,
@@ -123,6 +125,7 @@ export type {
   ReplaceTaskChecklistInput,
   RevokeImplementationPlanGrantInput,
   RevokeImplementationPlanGrantResult,
+  SetPrivateExpiryInput,
   SetSessionFolderInput,
   StampImportedSessionInput,
   TurnContextAppend,
@@ -131,6 +134,7 @@ export type {
   UpdateSessionInput,
   UpdateTurnStateInput,
 } from './store/ISessionStore';
+export { assertPrivateExpiryMatches } from './store/privateSession';
 export {
   ApprovalRequestEndedError,
   ImplementationPlanGrantLifecycleError,

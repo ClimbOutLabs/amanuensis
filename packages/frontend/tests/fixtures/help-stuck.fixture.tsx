@@ -18,6 +18,17 @@ const HEALTH_BODY = {
   model_ready: health === 'ready',
   items: [],
   host_report: { state: 'ok', checked_at: '2026-10-21T08:55:00Z', message: null, next_step: null },
+  state: {
+    setup_steps: [
+      { id: 'model', done: health === 'ready' },
+      { id: 'about_you', done: false },
+    ],
+    connectors: [],
+    google_login: 'not_set_up',
+    sandbox_ready: true,
+    app_version: '1.4.0',
+    build_ref: null,
+  },
 };
 
 const stubFetch: typeof fetch = async input => {

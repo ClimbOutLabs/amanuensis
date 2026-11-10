@@ -32,6 +32,7 @@ import type {
   CreateTurnInput,
   DeleteSessionFolderInput,
   DeleteSessionInput,
+  ExpiredPrivateSession,
   FindChatsBySandboxIdsInput,
   FreezeAndGetTurnInput,
   GetCommandExecutionInput,
@@ -44,6 +45,7 @@ import type {
   ISessionStore,
   IndexChatMessagesInput,
   ListApprovalDismissalsInput,
+  ListExpiredPrivateSessionsInput,
   ListImplementationPlanGrantsInput,
   ListSessionEventsInput,
   ListSessionFoldersInput,
@@ -63,6 +65,7 @@ import type {
   RevokeImplementationPlanGrantInput,
   RevokeImplementationPlanGrantResult,
   SearchChatHistoryInput,
+  SetPrivateExpiryInput,
   SetSessionFolderInput,
   StampImportedSessionInput,
   TurnRecordWithoutSnapshot,
@@ -128,7 +131,9 @@ import {
   getOwnedIds as getOwnedIdsQuery,
   getSessionByExternalId as getSessionByExternalIdQuery,
   getSession as getSessionQuery,
+  listExpiredPrivateSessions as listExpiredPrivateSessionsQuery,
   listSessions as listSessionsQuery,
+  setPrivateExpiry as setPrivateExpiryQuery,
   stampImportedSession as stampImportedSessionQuery,
   updateSession as updateSessionQuery,
 } from './queries/sessions';
@@ -202,6 +207,14 @@ export class PostgresSessionStore implements ISessionStore<SessionCustom, TurnCu
 
   deleteSession(input: DeleteSessionInput): Promise<void> {
     return deleteSessionQuery(this.db, input);
+  }
+
+  setPrivateExpiry(input: SetPrivateExpiryInput): Promise<void> {
+    return setPrivateExpiryQuery(this.db, input);
+  }
+
+  listExpiredPrivateSessions(input: ListExpiredPrivateSessionsInput): Promise<ExpiredPrivateSession[]> {
+    return listExpiredPrivateSessionsQuery(this.db, input);
   }
 
   listImplementationPlanGrants(input: ListImplementationPlanGrantsInput): Promise<ImplementationPlanGrant[]> {
@@ -542,6 +555,8 @@ export class PostgresSessionStore implements ISessionStore<SessionCustom, TurnCu
           custom: session.custom !== null ? json(session.custom) : null,
           metadata: json(metadata),
           external_id: null,
+          is_incognito: false,
+          private_expires_at: null,
           metrics: json({ total_duration_ms: 0, total_turns: turns.length }),
           last_activity_timestamp_ms: session.last_activity_timestamp_ms,
           created_at: new Date(session.created_at),

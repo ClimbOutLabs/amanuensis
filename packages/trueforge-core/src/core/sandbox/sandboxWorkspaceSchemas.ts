@@ -9,13 +9,15 @@ export type SandboxWorkspaceHolder = z.infer<typeof SandboxWorkspaceHolderSchema
 
 /**
  * One chat's sandbox workspace on a slot, as the settings listing reports it. The chat fields are set only when
- * the holder is `you`: another person's chat is never named.
+ * the holder is `you`: another person's chat is never named, and your own private chat is never titled.
  */
 export const SandboxWorkspaceSchema = z.object({
   holder: SandboxWorkspaceHolderSchema,
   chat_id: z.string().nullable(),
-  /** The chat's title; null when the chat has none, and whenever the holder is not `you`. */
+  /** The chat's title; null when the chat has none, when it is private, and whenever the holder is not `you`. */
   chat_title: z.string().nullable(),
+  /** True when the holder is `you` and the chat is one of your private chats. */
+  chat_private: z.boolean(),
   /** The workspace's sandbox id, `s<slot>-<session id>`: the id chats record for their workspace. */
   sandbox_id: z.string(),
   /** Which slot the workspace lives on, 1-based. */

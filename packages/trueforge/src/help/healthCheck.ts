@@ -1,7 +1,14 @@
 import { CALDAV_SERVER_NAME } from '@truefoundry/trueforge-core/core/calendar/caldav/toolContract';
 import { MAIL_CONNECTOR_NAME } from '@truefoundry/trueforge-core/core/email/mailConnector/toolContract';
 
-import type { HelpHealthCheck, HelpHealthItem, HelpHostReport, HostReportFile } from '../schemas/help';
+import type {
+  HelpConnectorState,
+  HelpHealthCheck,
+  HelpHealthItem,
+  HelpHostReport,
+  HelpState,
+  HostReportFile,
+} from '../schemas/help';
 import type { HostReportRead } from './hostReport';
 
 /**
@@ -11,19 +18,32 @@ import type { HostReportRead } from './hostReport';
 export type ModelProbe =
   { kind: 'no_default' } | { kind: 'misconfigured' } | { kind: 'no_answer' } | { kind: 'answered' };
 
+/** Why a connector did not answer: it wants a fresh sign-in, it did not answer, or its saved settings are unreadable. */
+export type ConnectorProblem = 'needs_sign_in' | 'no_answer' | 'unreadable';
+
 export interface ConnectorProbe {
   /** The connector's name. Never a token or URL. */
   name: string;
-  ok: boolean;
+  /** Null when the connector answered with its tools. */
+  problem: ConnectorProblem | null;
 }
 
 export type SchedulerProbe = 'running' | 'stopped' | 'elsewhere';
 
 /** The built-in Google login: answered, needs connecting again, did not answer, or no Gmail or Calendar grant. */
-export type GoogleLoginProbe = 'answered' | 'needs_reconnect' | 'no_answer' | 'not_set_up';
+export type GoogleLoginProbe = HelpState['google_login'];
+
+/** The version this server runs. `buildRef` is null for a build nothing stamped. */
+export interface AppBuild {
+  version: string;
+  buildRef: string | null;
+}
 
 export interface HelpProbeResults {
   model: ModelProbe;
+  /** Whether the person's name is saved in Personalization, the setup step the first-run list shows. */
+  profileNamed: boolean;
+  app: AppBuild;
   connectors: ConnectorProbe[];
   google: GoogleLoginProbe;
   sandboxReady: boolean;
@@ -72,7 +92,7 @@ function connectorsItem(connectors: ConnectorProbe[]): HelpHealthItem {
   if (connectors.length === 0) {
     return { ...base, status: 'not_set_up', message: 'No connectors are set up yet.', next_step: null };
   }
-  const failed = connectors.filter(connector => !connector.ok).map(connector => connector.name);
+  const failed = connectors.filter(connector => connector.problem !== null).map(connector => connector.name);
   if (failed.length === 0) {
     const message =
       connectors.length === 1 ? 'The connector answered.' : `All ${String(connectors.length)} connectors answered.`;
@@ -134,7 +154,7 @@ function mailCalendarItem({
 }): HelpHealthItem {
   const base = { id: MAIL_CALENDAR_ITEM_ID, name: 'Email and calendar' };
   const configured = connectors.filter(connector => MAIL_CALENDAR_CONNECTOR_NAMES.includes(connector.name));
-  if (google === 'answered' || configured.some(connector => connector.ok)) {
+  if (google === 'answered' || configured.some(connector => connector.problem === null)) {
     return { ...base, status: 'pass', message: 'Email and calendar answered.', next_step: null };
   }
   if (google === 'needs_reconnect') {
@@ -212,6 +232,43 @@ function hostReportItems(hostReport: HostReportRead): HelpHealthItem[] {
     }));
 }
 
+/** One plain sentence per connector problem, so the guide can say what went wrong without a token or URL. */
+function connectorLastError(problem: ConnectorProblem | null): string | null {
+  switch (problem) {
+    case null:
+      return null;
+    case 'needs_sign_in':
+      return 'It needs you to sign in to it again.';
+    case 'no_answer':
+      return 'It did not answer.';
+    case 'unreadable':
+      return 'Its saved settings could not be read.';
+  }
+}
+
+/**
+ * The state the guide reads to say what to do next. Setup steps follow the first-run list on Home:
+ * a model is chosen, and the person's name is saved.
+ */
+function helpState(results: HelpProbeResults): HelpState {
+  const connectors: HelpConnectorState[] = results.connectors.map(connector => ({
+    name: connector.name,
+    connected: connector.problem === null,
+    last_error: connectorLastError(connector.problem),
+  }));
+  return {
+    setup_steps: [
+      { id: 'model', done: results.model.kind !== 'no_default' },
+      { id: 'about_you', done: results.profileNamed },
+    ],
+    connectors,
+    google_login: results.google,
+    sandbox_ready: results.sandboxReady,
+    app_version: results.app.version,
+    build_ref: results.app.buildRef,
+  };
+}
+
 /** Builds the help check from the probe results. Model comes first, so a missing model is the first thing shown. */
 export function buildHelpHealthCheck({ results, now }: { results: HelpProbeResults; now: Date }): HelpHealthCheck {
   return {
@@ -226,5 +283,6 @@ export function buildHelpHealthCheck({ results, now }: { results: HelpProbeResul
       ...hostReportItems(results.hostReport),
     ],
     host_report: hostReportSection(results.hostReport),
+    state: helpState(results),
   };
 }
