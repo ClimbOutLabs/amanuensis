@@ -23,6 +23,8 @@ export interface ListSessionsRequest {
     folderId?: string;
     /** When true, only sessions with no folder are returned. */
     noFolder?: boolean;
+    /** When true, your own open private chats are included. They are left out by default. */
+    includePrivate?: boolean;
     /** When true, only sessions created by the authenticated subject. */
     createdByMe?: boolean;
     /** Exact metadata pairs as metadata[key]=value. Sessions must contain all pairs. */
