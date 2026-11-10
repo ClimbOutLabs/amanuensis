@@ -17,6 +17,7 @@ import { buildHandoffTitle, buildIssuePrefillUrl, summarizeBundleForIssue } from
 import { getErrorMessage } from '../utils/getErrorMessage.js';
 import { auiButtonClass, railMenuRowClassName } from './lib/buttonClasses.js';
 import { auiInputClass } from './lib/inputClasses.js';
+import { menuTriggerFor } from './lib/menuTriggerFor.js';
 import { Button } from './primitives/Button.js';
 import { CenteredModal } from './primitives/CenteredModal.js';
 
@@ -58,13 +59,6 @@ function sessionBundleSummary(bundle: BugReportBundle): { turns: number; events:
   };
 }
 
-/** A menu row unmounts as it opens the dialog, so focus goes back to the menu's trigger instead. */
-function focusTargetFor(button: HTMLElement): HTMLElement {
-  const menuId = button.closest('[role="menu"]')?.id;
-  if (menuId == null || menuId === '') return button;
-  return document.querySelector<HTMLElement>(`[aria-controls="${CSS.escape(menuId)}"]`) ?? button;
-}
-
 /**
  * "Report a bug" button: an icon, or a labeled row for menus. Opens the app's bug report form.
  * Renders nothing when no host has wired a `BugReportProvider`.
@@ -90,7 +84,7 @@ export function BugReportButton({
           : auiButtonClass({ variant: 'ghost', size: 'icon' })
       }
       onClick={event => {
-        dialog.returnFocusRef.current = focusTargetFor(event.currentTarget);
+        dialog.returnFocusRef.current = menuTriggerFor(event.currentTarget);
         dialog.setOpen(true);
       }}
     >

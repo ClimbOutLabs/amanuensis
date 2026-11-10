@@ -55,7 +55,7 @@ import { createFirstRunGuideApi } from './firstRunGuideApi';
 import { GetStartedScreen } from './GetStartedScreen';
 import { createHelpApi } from './helpApi';
 import { createImplementationPlanGrantApi } from './implementationPlanGrantApi';
-import { LogoutButton } from './LogoutButton';
+import { LogoutButton, SignOutConfirmProvider } from './LogoutButton';
 import { createMemoryRecallApi } from './memoryRecallApi';
 import { createModelUsageApi } from './modelUsageApi';
 import { createPersonaApi } from './personaApi';
@@ -560,17 +560,19 @@ export function App() {
                                     }}
                                   >
                                     <ComposerDraftScopeProvider scope={draftScope}>
-                                      <AmanShell
-                                        defaultAgentSpec={boot.defaultAgentSpec}
-                                        openSettings={boot.openSettings}
-                                        displayName={session.displayName}
-                                        overrides={overrides}
-                                        modelName={
-                                          setup?.modelName ?? (boot.defaultAgentSpec.model.name || 'Choose a model')
-                                        }
-                                        version={boot.build?.version}
-                                        buildRef={boot.build?.ref}
-                                      />
+                                      <SignOutConfirmProvider>
+                                        <AmanShell
+                                          defaultAgentSpec={boot.defaultAgentSpec}
+                                          openSettings={boot.openSettings}
+                                          displayName={session.displayName}
+                                          overrides={overrides}
+                                          modelName={
+                                            setup?.modelName ?? (boot.defaultAgentSpec.model.name || 'Choose a model')
+                                          }
+                                          version={boot.build?.version}
+                                          buildRef={boot.build?.ref}
+                                        />
+                                      </SignOutConfirmProvider>
                                     </ComposerDraftScopeProvider>
                                   </AmanSetupProvider>
                                 </HelpProvider>
