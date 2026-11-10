@@ -219,11 +219,6 @@ export async function runCli(args: readonly string[], deps: CliDeps): Promise<nu
           ((): Promise<string | null> => {
             return Promise.resolve(null);
           }),
-        confirm:
-          deps.confirm ??
-          ((): Promise<boolean> => {
-            return Promise.resolve(false);
-          }),
       },
       request,
     );

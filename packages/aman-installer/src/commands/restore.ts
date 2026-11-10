@@ -1,3 +1,5 @@
+import { win32 } from 'node:path';
+
 import type { Host } from '../host/host.ts';
 import type { WindowsJobs } from '../host/windowsJobs.ts';
 import {
@@ -13,10 +15,15 @@ import {
   RESTORE_NOT_A_CHOICE,
   RESTORE_NOT_INSTALLED,
   RESTORE_NOT_WINDOWS,
-  RESTORE_NO_BACKUPS,
+  RESTORE_NO_ANSWER,
+  RESTORE_PASSWORD_LINE,
+  RESTORE_REMOVAL_NOTE_STUCK,
   RESTORE_STATE_UNREADABLE,
+  RESTORE_WORKING_LINE,
+  RESTORE_YES_PROMPT,
   problemText,
   restoreChoiceLine,
+  restoreNoBackupsProblem,
   restoreNoSuchBackupProblem,
   restoreNoSuchInstanceProblem,
   restoreQuestionLine,
@@ -35,8 +42,8 @@ export interface RestoreDeps {
   store: StateStore;
   jobs: WindowsJobs;
   print: (line: string) => void;
+  // A line typed in answer, or null when the input ended without one.
   ask: (question: string) => Promise<string | null>;
-  confirm: (question: string) => Promise<boolean>;
 }
 
 // What the person asked for, in the shell's own words: an instance name
@@ -88,17 +95,35 @@ export function backupLabel(backup: string): string {
 // shown a second time. Its prompt ends without a line break, because a
 // person's answer would end it, so the shell's next words follow it on
 // the same line and are kept.
-const SHELL_QUESTION = 'This replaces the current chats and settings of ';
+const SHELL_QUESTION = [
+  'This replaces the current chats and settings of ',
+  'The password goes back to the one ',
+  'A copy of the current state is saved first.',
+];
 const SHELL_PROMPT = /^.*Type yes to continue:\s*/;
 
-function show(print: (line: string) => void, text: string): void {
+// The shell prints the backups folder as the setup container mounts it;
+// the person reads it as the folder on the PC.
+function onThisPc({ line, backupsDir }: { line: string; backupsDir: string }): string {
+  return line.replace(
+    new RegExp(`${VOLUME_HOME.replaceAll('.', '\\.')}/backups(/[^\\s]*)?`, 'g'),
+    (_whole: string, rest: string | undefined) =>
+      rest === undefined ? backupsDir : win32.join(backupsDir, ...rest.split('/').filter(part => part !== '')),
+  );
+}
+
+function show({ print, text, backupsDir }: { print: (line: string) => void; text: string; backupsDir: string }): void {
   for (const raw of text.split('\n')) {
     const line = raw.replace(SHELL_PROMPT, '');
-    if (line.trim() !== '' && !line.startsWith(SHELL_QUESTION)) {
-      print(line);
+    if (line.trim() !== '' && !SHELL_QUESTION.some(start => line.startsWith(start))) {
+      print(onThisPc({ line, backupsDir }));
     }
   }
 }
+
+// The shell's own explanations, matched with its line wrapping undone.
+const SHELL_EXPLAINED =
+  /cannot be used because|There is no backup|was put back the way it was|could not be put back by itself|Nothing was changed|nothing was changed|No answer was given/;
 
 // aman restore, on Windows: puts an instance back from a backup in the
 // Backups folder on the PC. The exe picks the backup and asks the one
@@ -154,7 +179,7 @@ export async function runRestore(deps: RestoreDeps, request: RestoreRequest): Pr
 
   let backups: string[];
   try {
-    backups = (await jobs.listBackups()).filter(backup => BACKUP_NAME.test(backup));
+    backups = (await jobs.listBackups({ holding: name })).filter(backup => BACKUP_NAME.test(backup));
   } catch {
     print(problemText(RESTORE_COULD_NOT_LIST));
     return 1;
@@ -163,7 +188,7 @@ export async function runRestore(deps: RestoreDeps, request: RestoreRequest): Pr
   // sorts the backups; newest first is the order a person reads.
   backups.sort().reverse();
   if (backups.length === 0) {
-    print(problemText(RESTORE_NO_BACKUPS));
+    print(problemText(restoreNoBackupsProblem({ name, folder: jobs.backupsDir })));
     return 1;
   }
   let backup: string;
@@ -180,7 +205,12 @@ export async function runRestore(deps: RestoreDeps, request: RestoreRequest): Pr
     backups.forEach((each, index) => {
       print(restoreChoiceLine({ number: index + 1, label: backupLabel(each) }));
     });
-    const answer = (await deps.ask(RESTORE_CHOICE_QUESTION))?.trim() ?? '';
+    const typed = await deps.ask(RESTORE_CHOICE_QUESTION);
+    if (typed === null) {
+      print(problemText(RESTORE_NO_ANSWER));
+      return 1;
+    }
+    const answer = typed.trim();
     const picked = /^\d+$/.test(answer) ? backups[Number(answer) - 1] : undefined;
     if (picked === undefined) {
       print(problemText(RESTORE_NOT_A_CHOICE));
@@ -190,11 +220,27 @@ export async function runRestore(deps: RestoreDeps, request: RestoreRequest): Pr
   }
 
   const running = (await instanceState(runner, name)) !== 'stopped';
-  const agreed = await deps.confirm(restoreQuestionLine({ name, label: backupLabel(backup), running }));
-  if (!agreed) {
+  print(RESTORE_PASSWORD_LINE);
+  const agreed = await deps.ask(
+    `${restoreQuestionLine({ name, label: backupLabel(backup), running })} ${RESTORE_YES_PROMPT}`,
+  );
+  if (agreed === null) {
+    print(problemText(RESTORE_NO_ANSWER));
+    return 1;
+  }
+  if (!/^y(es)?$/i.test(agreed.trim())) {
     print(RESTORE_DECLINED_LINE);
     return 0;
   }
+  // An earlier removal's note that Docker is cleared stops being true
+  // once the restore brings an instance back.
+  try {
+    await jobs.clearDockerSideRemoved();
+  } catch {
+    print(problemText(RESTORE_REMOVAL_NOTE_STUCK));
+    return 1;
+  }
+  print(RESTORE_WORKING_LINE);
 
   // The question was asked above, so the shell's own question is
   // answered yes on its input; it asks nothing else.
@@ -227,12 +273,12 @@ export async function runRestore(deps: RestoreDeps, request: RestoreRequest): Pr
     return 1;
   }
   const stdout = new TextDecoder().decode(result.stdout);
-  show(print, stdout);
-  show(print, result.stderr);
+  show({ print, text: stdout, backupsDir: jobs.backupsDir });
+  show({ print, text: result.stderr, backupsDir: jobs.backupsDir });
   if (result.exitCode === 0) {
     return 0;
   }
-  const combined = `${stdout}\n${result.stderr}`;
+  const combined = `${stdout}\n${result.stderr}`.replace(/\s+/g, ' ');
   if (combined.includes('Another install is running right now')) {
     print(problemText(RESTORE_BUSY));
     return 1;
@@ -240,11 +286,7 @@ export async function runRestore(deps: RestoreDeps, request: RestoreRequest): Pr
   // The shell's refusals and its rollback each say what happened and
   // the one thing to do next, so only a failure it did not explain
   // gets this command's own words.
-  if (
-    !/cannot be used because|There is no backup|was put back the way it was|could not be put back by itself|Nothing was changed/.test(
-      combined,
-    )
-  ) {
+  if (!SHELL_EXPLAINED.test(combined)) {
     print(problemText(RESTORE_FAILED));
   }
   return 1;

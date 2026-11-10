@@ -18,10 +18,15 @@ import {
   RESTORE_NOT_A_CHOICE,
   RESTORE_NOT_INSTALLED,
   RESTORE_NOT_WINDOWS,
-  RESTORE_NO_BACKUPS,
+  RESTORE_NO_ANSWER,
+  RESTORE_PASSWORD_LINE,
+  RESTORE_REMOVAL_NOTE_STUCK,
   RESTORE_STATE_UNREADABLE,
+  RESTORE_WORKING_LINE,
+  RESTORE_YES_PROMPT,
   problemText,
   restoreChoiceLine,
+  restoreNoBackupsProblem,
   restoreNoSuchBackupProblem,
   restoreNoSuchInstanceProblem,
   restoreQuestionLine,
@@ -193,9 +198,13 @@ interface Scenario {
   listFails?: boolean;
   running?: boolean;
   answer?: string | null;
-  agree?: boolean;
+  // The answer to the yes question; yes unless a test says otherwise.
+  agree?: string | null;
   restore?: ProcessBytesResult;
   kind?: 'windows' | 'darwin';
+  dockerRemovedMark?: boolean;
+  clearFails?: boolean;
+  backupHolds?: ReadonlyMap<string, readonly string[]>;
 }
 
 async function run(scenario: Scenario): Promise<{
@@ -204,6 +213,7 @@ async function run(scenario: Scenario): Promise<{
   runner: RestoreRunner;
   questions: string[];
   confirms: string[];
+  jobs: FakeWindowsJobs;
 }> {
   const lines: string[] = [];
   const questions: string[] = [];
@@ -216,12 +226,21 @@ async function run(scenario: Scenario): Promise<{
     ]),
     restore: scenario.restore ?? DONE,
   });
+  const failSteps = new Set<FakeWindowsJobStep>();
+  if (scenario.listFails === true) {
+    failSteps.add('backupsList');
+  }
+  if (scenario.clearFails === true) {
+    failSteps.add('clear-docker-mark');
+  }
   const jobs = new FakeWindowsJobs({
     localAppDataDir: LOCAL_APP_DATA,
     selfExePath: 'C:\\Users\\Friend\\Downloads\\aman-windows-x64.exe',
     startMenuProgramsDir: 'C:\\Users\\Friend\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs',
     backups: [...(scenario.backups ?? [OLDER, NEWER, KEPT])],
-    ...(scenario.listFails === true ? { failSteps: new Set<FakeWindowsJobStep>(['backupsList']) } : {}),
+    dockerRemovedMark: scenario.dockerRemovedMark ?? false,
+    ...(scenario.backupHolds === undefined ? {} : { backupHolds: scenario.backupHolds }),
+    failSteps,
   });
   const code = await runRestore(
     {
@@ -233,17 +252,21 @@ async function run(scenario: Scenario): Promise<{
         lines.push(line);
       },
       ask: question => {
+        if (question.endsWith(RESTORE_YES_PROMPT)) {
+          confirms.push(question);
+          return Promise.resolve(scenario.agree === undefined ? 'yes' : scenario.agree);
+        }
         questions.push(question);
         return Promise.resolve(scenario.answer ?? null);
-      },
-      confirm: question => {
-        confirms.push(question);
-        return Promise.resolve(scenario.agree ?? true);
       },
     },
     { name: null, backup: null, latest: false, ...scenario.request },
   );
-  return { code, lines, runner, questions, confirms };
+  return { code, lines, runner, questions, confirms, jobs };
+}
+
+function yesQuestion(options: { name: string; label: string; running: boolean }): string {
+  return `${restoreQuestionLine(options)} ${RESTORE_YES_PROMPT}`;
 }
 
 test('the words a restore takes are the shell restore words', () => {
@@ -268,11 +291,13 @@ test('a named backup is put back with the shell restore, after one question, wit
   const { code, lines, runner, questions, confirms } = await run({ request: { backup: NEWER } });
   assert.equal(code, 0);
   assert.deepEqual(questions, []);
-  assert.deepEqual(confirms, [restoreQuestionLine({ name: 'main', label: '2026-10-09 03:30 UTC', running: true })]);
+  assert.deepEqual(confirms, [yesQuestion({ name: 'main', label: '2026-10-09 03:30 UTC', running: true })]);
   assert.deepEqual(runner.lines, [psLine('main'), commandLine('docker', restoreArgs('main', NEWER))]);
   assert.deepEqual(runner.inputs, ['yes\n'], "the shell's own question is answered on its input");
   assert.deepEqual(lines, [
-    'The current state of main is saved at /root/.amanuensis/backups/20261010T080000Z-before-restore',
+    RESTORE_PASSWORD_LINE,
+    RESTORE_WORKING_LINE,
+    `The current state of main is saved at ${BACKUPS_DIR}\\20261010T080000Z-before-restore`,
     'Done. main is back to how it was on 2026-10-09 03:30 UTC, and it is running.',
   ]);
 });
@@ -298,7 +323,7 @@ test('--latest takes the newest backup without a list', async () => {
 });
 
 test('an answer that is not a number from the list changes nothing', async () => {
-  for (const answer of ['', 'yes', '0', '4', '1.5', null]) {
+  for (const answer of ['', 'yes', '0', '4', '1.5']) {
     const { code, lines, runner, confirms } = await run({ answer });
     assert.equal(code, 1);
     assert.equal(lines.at(-1), problemText(RESTORE_NOT_A_CHOICE));
@@ -308,17 +333,116 @@ test('an answer that is not a number from the list changes nothing', async () =>
 });
 
 test('saying no at the question changes nothing and runs no restore', async () => {
-  const { code, lines, runner } = await run({ request: { backup: NEWER }, agree: false });
+  for (const agree of ['no', '', 'yess']) {
+    const { code, lines, runner, jobs } = await run({ request: { backup: NEWER }, agree, dockerRemovedMark: true });
+    assert.equal(code, 0);
+    assert.deepEqual(lines, [RESTORE_PASSWORD_LINE, RESTORE_DECLINED_LINE]);
+    assert.deepEqual(runner.lines, [psLine('main')]);
+    assert.equal(jobs.dockerRemovedMark, true, 'a no leaves the removal note alone');
+  }
+});
+
+test('no answer, at the list or at the question, changes nothing and fails with one next step', async () => {
+  const atList = await run({ answer: null });
+  const atQuestion = await run({ request: { backup: NEWER }, agree: null });
+  for (const outcome of [atList, atQuestion]) {
+    assert.equal(outcome.code, 1);
+    assert.equal(outcome.lines.at(-1), problemText(RESTORE_NO_ANSWER));
+    assert.equal(outcome.runner.inputs.length, 0);
+  }
+  assert.deepEqual(atList.confirms, []);
+});
+
+test('a yes clears the note an earlier removal left, before the restore runs', async () => {
+  const { code, runner, jobs } = await run({ request: { backup: NEWER }, dockerRemovedMark: true });
   assert.equal(code, 0);
-  assert.deepEqual(lines, [RESTORE_DECLINED_LINE]);
+  assert.equal(jobs.dockerRemovedMark, false);
+  assert.ok(runner.lines.includes(commandLine('docker', restoreArgs('main', NEWER))));
+});
+
+test('a removal note that cannot be cleared stops the restore before anything runs', async () => {
+  const { code, lines, runner } = await run({ request: { backup: NEWER }, dockerRemovedMark: true, clearFails: true });
+  assert.equal(code, 1);
+  assert.deepEqual(lines, [RESTORE_PASSWORD_LINE, problemText(RESTORE_REMOVAL_NOTE_STUCK)]);
   assert.deepEqual(runner.lines, [psLine('main')]);
+  assert.equal(runner.inputs.length, 0);
+});
+
+test('only the backups that hold the instance are listed', async () => {
+  const { lines, questions } = await run({
+    answer: '1',
+    backups: [OLDER, NEWER],
+    backupHolds: new Map([[NEWER, ['work']]]),
+  });
+  assert.deepEqual(questions, [RESTORE_CHOICE_QUESTION]);
+  assert.deepEqual(lines.slice(0, 2), [
+    RESTORE_LIST_HEADING_LINE,
+    restoreChoiceLine({ number: 1, label: '2026-10-08 03:30 UTC' }),
+  ]);
+  const none = await run({ backups: [NEWER], backupHolds: new Map([[NEWER, ['work']]]) });
+  assert.deepEqual(none.lines, [problemText(restoreNoBackupsProblem({ name: 'main', folder: BACKUPS_DIR }))]);
+});
+
+test('the password line comes right before the question', async () => {
+  const { lines, confirms } = await run({ request: { backup: NEWER }, agree: 'no' });
+  assert.deepEqual(lines, [RESTORE_PASSWORD_LINE, RESTORE_DECLINED_LINE]);
+  assert.equal(confirms.length, 1);
+});
+
+test("the shell's question lines are not shown again after the exe asked its own", async () => {
+  const { lines } = await run({
+    request: { backup: NEWER },
+    restore: bytesResult({
+      exitCode: 0,
+      stdout:
+        'This replaces the current chats and settings of main with the backup from 2026-10-09 03:30 UTC.\n' +
+        'The password goes back to the one main had then, and devices signed in now may have to sign in again.\n' +
+        'You then sign in as old@example.com, the email the backup was made with, not as new@example.com.\n' +
+        'A copy of the current state is saved first.\n' +
+        'Done. main is back to how it was on 2026-10-09 03:30 UTC, and it is running.\n',
+      stderr: '  ❯ Type yes to continue: ',
+    }),
+  });
+  assert.deepEqual(lines, [
+    RESTORE_PASSWORD_LINE,
+    RESTORE_WORKING_LINE,
+    'You then sign in as old@example.com, the email the backup was made with, not as new@example.com.',
+    'Done. main is back to how it was on 2026-10-09 03:30 UTC, and it is running.',
+  ]);
+});
+
+test('a shell message wrapped over two lines still counts as explained, so no second next step is added', async () => {
+  const wrapped = [
+    '  ✗ The backup from 2026-10-09 03:30 UTC (before restore) cannot be used',
+    '    because it was copied only in part or has been changed. Nothing was',
+    '    changed.',
+    '    Next: Pick another one with: aman restore main',
+  ].join('\n');
+  const refused = await run({
+    request: { backup: NEWER },
+    restore: bytesResult({ exitCode: 1, stdout: '', stderr: `${wrapped}\n` }),
+  });
+  assert.equal(refused.code, 1);
+  assert.ok(!refused.lines.includes(problemText(RESTORE_FAILED)));
+  const undo = [
+    '  ✗ The restore did not work and work-laptop could not be put back by',
+    '    itself. A copy of it from before is at /root/.amanuensis/backups/20261010T080000Z-before-restore.',
+    '    Next: Run: aman restore work-laptop 20261010T080000Z-before-restore',
+  ].join('\n');
+  const failed = await run({
+    request: { backup: NEWER },
+    restore: bytesResult({ exitCode: 1, stdout: '', stderr: `${undo}\n` }),
+  });
+  assert.ok(!failed.lines.includes(problemText(RESTORE_FAILED)));
+  assert.ok(
+    failed.lines.some(line => line.includes(`${BACKUPS_DIR}\\20261010T080000Z-before-restore.`)),
+    'the copy is named by its folder on the PC',
+  );
 });
 
 test('the question says a running instance is stopped, and does not say so for a stopped one', async () => {
   const stopped = await run({ request: { backup: NEWER }, running: false });
-  assert.deepEqual(stopped.confirms, [
-    restoreQuestionLine({ name: 'main', label: '2026-10-09 03:30 UTC', running: false }),
-  ]);
+  assert.deepEqual(stopped.confirms, [yesQuestion({ name: 'main', label: '2026-10-09 03:30 UTC', running: false })]);
   assert.ok(!(stopped.confirms[0] ?? '').includes('is running now'));
   const running = await run({ request: { backup: NEWER } });
   assert.ok((running.confirms[0] ?? '').includes('main is running now and is stopped while this happens.'));
@@ -362,7 +486,7 @@ test('with two instances the name is needed, and a name that is not there is ref
 
 test('no backups, a backup that is not there, and a folder that cannot be listed each say so', async () => {
   const none = await run({ backups: [] });
-  assert.deepEqual(none.lines, [problemText(RESTORE_NO_BACKUPS)]);
+  assert.deepEqual(none.lines, [problemText(restoreNoBackupsProblem({ name: 'main', folder: BACKUPS_DIR }))]);
   const unknown = await run({ request: { backup: '20250101T000000Z' } });
   assert.deepEqual(unknown.lines, [problemText(restoreNoSuchBackupProblem('20250101T000000Z'))]);
   const unlisted = await run({ listFails: true });
@@ -381,13 +505,13 @@ test("the shell's refusal and its rollback are shown in its own words, with noth
     restore: bytesResult({ exitCode: 1, stdout: '', stderr: `${refusal}\n` }),
   });
   assert.equal(refused.code, 1);
-  assert.deepEqual(refused.lines, [refusal]);
+  assert.deepEqual(refused.lines, [RESTORE_PASSWORD_LINE, RESTORE_WORKING_LINE, refusal]);
   const rolledBack = 'The restore did not work, so main was put back the way it was. The copy of it is at /x.';
   const back = await run({
     request: { backup: NEWER },
     restore: bytesResult({ exitCode: 1, stdout: `${rolledBack}\n`, stderr: '' }),
   });
-  assert.deepEqual(back.lines, [rolledBack]);
+  assert.deepEqual(back.lines, [RESTORE_PASSWORD_LINE, RESTORE_WORKING_LINE, rolledBack]);
 });
 
 test('a busy install, Docker not starting the helper, and an unexplained failure each say what to do', async () => {
@@ -400,9 +524,13 @@ test('a busy install, Docker not starting the helper, and an unexplained failure
     request: { backup: NEWER },
     restore: { exitCode: 1, stdout: new Uint8Array(), stderr: '', started: false },
   });
-  assert.deepEqual(notStarted.lines, [problemText(RESTORE_DOCKER_NOT_ANSWERING)]);
+  assert.deepEqual(notStarted.lines, [
+    RESTORE_PASSWORD_LINE,
+    RESTORE_WORKING_LINE,
+    problemText(RESTORE_DOCKER_NOT_ANSWERING),
+  ]);
   const odd = await run({ request: { backup: NEWER }, restore: bytesResult({ exitCode: 3, stdout: '', stderr: '' }) });
-  assert.deepEqual(odd.lines, [problemText(RESTORE_FAILED)]);
+  assert.deepEqual(odd.lines, [RESTORE_PASSWORD_LINE, RESTORE_WORKING_LINE, problemText(RESTORE_FAILED)]);
   for (const outcome of [busy, notStarted, odd]) {
     assert.equal(outcome.code, 1);
   }

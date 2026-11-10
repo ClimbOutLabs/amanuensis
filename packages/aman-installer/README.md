@@ -91,7 +91,7 @@ What it can do today:
   everything a second run needs, and the message names the full path
   to aman.exe. Once Docker is cleared a note beside the command says
   so, and a second run finishes the Windows side without Docker
-  running; an install takes the note away when it starts. When Docker
+  running; an install or a restore takes the note away when it starts. When Docker
   Desktop was removed first, its own removal took Aman's Docker data,
   and the command removes the Windows parts. The aman command is deleted only once everything else is
   gone. The Start menu's Remove Aman entry runs it.
@@ -101,8 +101,10 @@ What it can do today:
   those backups had it. It lists the backups newest first and asks
   which number to use; a backup's name or `--latest` picks one without
   the list, and an instance name picks the instance when there is more
-  than one. It asks once before anything changes, and says so when the
-  instance is running and will be stopped. Then it runs the shell's own
+  than one. It asks once before anything changes, says the password
+  goes back too, and says so when the instance is running and will be
+  stopped. No answer changes nothing and exits 1. A yes deletes the
+  note an earlier removal left to say Docker is cleared. Then it runs the shell's own
   restore in the setup container with the Backups folder on the PC
   mounted where the shell reads backups. The shell checks the backup,
   saves a copy of how the instance is now, puts the backup back, and

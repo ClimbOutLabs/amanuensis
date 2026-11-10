@@ -599,10 +599,26 @@ export const RESTORE_COULD_NOT_LIST: Problem = {
   fix: 'Run aman doctor to find what is wrong, then run aman restore again.',
 };
 
-export const RESTORE_NO_BACKUPS: Problem = {
-  happened: 'No backups have been made on this computer yet, so there is nothing to put back.',
-  fix: 'Run aman backup to make one now.',
+// Names the folder that was read, because a backup copied from another
+// computer has to land in it as its own folder to be found.
+export function restoreNoBackupsProblem({ name, folder }: { name: string; folder: string }): Problem {
+  return {
+    happened: `There is no backup of ${printable(name)} in ${printable(folder)}, so there is nothing to put back.`,
+    fix: `Run aman backup to make one now, or copy a backup folder from another computer into ${printable(folder)}.`,
+  };
+}
+
+export const RESTORE_NO_ANSWER: Problem = {
+  happened: 'No answer was given, so nothing was changed.',
+  fix: 'Run aman restore in a window and type your answer.',
 };
+
+export const RESTORE_REMOVAL_NOTE_STUCK: Problem = {
+  happened: 'A note left by an earlier removal of Aman could not be deleted, so nothing was changed.',
+  fix: 'Delete the file docker-removed in the folder %LOCALAPPDATA%\\Programs\\Amanuensis, then run aman restore again.',
+};
+
+export const RESTORE_WORKING_LINE = 'Putting the backup back. This can take a few minutes, so leave this window open.';
 
 export const RESTORE_NOT_A_CHOICE: Problem = {
   happened: 'That is not a number from the list, so nothing was changed.',
@@ -631,6 +647,12 @@ export const RESTORE_DECLINED_LINE = 'Nothing was changed.';
 export const RESTORE_LIST_HEADING_LINE = 'Backups kept on this computer, newest first:';
 
 export const RESTORE_CHOICE_QUESTION = 'Put back which backup? Type its number:';
+
+export const RESTORE_YES_PROMPT = 'Type yes to go ahead:';
+
+// Said before the question: a restore puts the old password and sign-in back too.
+export const RESTORE_PASSWORD_LINE =
+  'Your password goes back to the one you had then, and you may need to sign in again on your devices.';
 
 export function restoreUsageProblem(word: string): Problem {
   return {
@@ -1160,7 +1182,16 @@ export function allMessageLines(): string[] {
   lines.push(problemText(RESTORE_IMAGE_UNAVAILABLE));
   lines.push(problemText(RESTORE_STATE_UNREADABLE));
   lines.push(problemText(RESTORE_COULD_NOT_LIST));
-  lines.push(problemText(RESTORE_NO_BACKUPS));
+  lines.push(
+    problemText(
+      restoreNoBackupsProblem({ name: 'main', folder: 'C:\\Users\\Friend\\AppData\\Local\\Amanuensis\\backups' }),
+    ),
+  );
+  lines.push(problemText(RESTORE_NO_ANSWER));
+  lines.push(problemText(RESTORE_REMOVAL_NOTE_STUCK));
+  lines.push(RESTORE_WORKING_LINE);
+  lines.push(RESTORE_YES_PROMPT);
+  lines.push(RESTORE_PASSWORD_LINE);
   lines.push(problemText(RESTORE_NOT_A_CHOICE));
   lines.push(problemText(RESTORE_BOTH_GIVEN));
   lines.push(problemText(RESTORE_BUSY));
