@@ -247,7 +247,7 @@ export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
 
   /**
    * The memory page tools, offered only where pages can be written: the Markdown backend, a chat with memory on,
-   * and a root thread. A chat with memory switched off and an unattended run (recall off) get none.
+   * and a root thread. A chat with memory switched off, an unattended run (recall off) and a private chat get none.
    */
   #pageTools({
     input,
@@ -258,7 +258,8 @@ export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
     recallEnabled: boolean;
     isSubAgent: boolean;
   }): { capability: AgentCapability; watch: TurnReadWatch } | undefined {
-    const vaultDir = isSubAgent || !recallEnabled ? undefined : this.#memory.client?.pagesWriteDir?.();
+    const vaultDir =
+      isSubAgent || !recallEnabled || this.#memory.keepsNothing ? undefined : this.#memory.client?.pagesWriteDir?.();
     if (vaultDir === undefined) {
       return undefined;
     }
@@ -278,6 +279,7 @@ export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
         workspace_cwd: input.workspace_cwd ?? null,
         web_search: this.webSearchTurn,
       }),
+      keepsNothing: this.#memory.keepsNothing,
       watch,
     });
     return { capability, watch };

@@ -141,6 +141,7 @@ async function runTurn(steps: Call[], setup: TurnSetup = {}) {
     logger,
     tracing: NOOP_AGENT_TRACING,
     sentinel,
+    keepsNothing: false,
     watch,
   });
   const thread = new AgentThread({

@@ -133,6 +133,14 @@ describe('memory page tools are offered only where they can be used', () => {
     expect(pageToolNames(capabilities)).toEqual([]);
   });
 
+  it('offers none in a private chat, and keeps the private chat memory text', async () => {
+    const capabilities = await resolveWith({ client: markdownClient(), keepsNothing: true });
+    expect(pageToolNames(capabilities)).toEqual([]);
+    const text = instructionText(capabilities);
+    expect(text).toContain('This is an incognito chat');
+    expect(text).not.toContain('remember_fact');
+  });
+
   it('offers none to a sub-agent', async () => {
     expect(pageToolNames(await resolveWith({ client: markdownClient(), subAgent: true }))).toEqual([]);
   });

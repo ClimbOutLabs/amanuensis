@@ -362,7 +362,9 @@ old_text, new_text})` and `forget_fact({about, text})`. Each also takes an optio
 `matter`), and `remember_fact` an optional `about_writing`. They are offered only when memory is on for the
 chat, the memory backend is Markdown files, and the thread is the main one. A chat with memory switched
 off, an unattended run, a sub-agent and any other memory backend get none, and the memory instruction
-then keeps saying that no memory-write tool is available.
+then keeps saying that no memory-write tool is available. A private chat gets none either, because nothing
+from it is saved. If a call arrives anyway, it is refused with a sentence that says the chat is private and
+that the person can ask again in an ordinary chat.
 
 **Which page.** `about` is looked up only in the vault this chat writes to (the persona's own vault, else the
 shared one), by title or other name, with case, accents and punctuation ignored. A persona's chat

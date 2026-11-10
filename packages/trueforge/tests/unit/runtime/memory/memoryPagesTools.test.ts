@@ -32,7 +32,7 @@ afterEach(async () => {
   await rm(baseDir, { recursive: true, force: true });
 });
 
-function build(vaultDir: string, extra: { watch?: TurnReadWatch } = {}) {
+function build(vaultDir: string, extra: { watch?: TurnReadWatch; keepsNothing?: boolean } = {}) {
   const audit: AuditRecordInput[] = [];
   let n = 0;
   const watch = extra.watch ?? new TurnReadWatch();
@@ -55,6 +55,7 @@ function build(vaultDir: string, extra: { watch?: TurnReadWatch } = {}) {
       created_by: 'owner-1',
       conversation_id: 'chat-1',
     }),
+    keepsNothing: extra.keepsNothing ?? false,
     watch,
     newId: () => {
       n += 1;
@@ -352,6 +353,27 @@ describe('a turn that has read outside text', () => {
     const { tools } = build(baseDir, { watch: new TurnReadWatch() });
     const out = await call(tools, 'remember_fact', { about: 'Dr Okafor', text: 'Fine.', kind: 'person' });
     expect(out.isError).toBe(true);
+  });
+});
+
+describe('a private chat', () => {
+  it('refuses every tool with a plain sentence and writes nothing, not even history', async () => {
+    const { tools, audit } = build(baseDir, { keepsNothing: true });
+    await writePageFile({ vaultDir: baseDir, kind: 'person', slug: 'wendy', content: WENDY });
+    for (const [name, args] of [
+      ['remember_fact', { about: 'Wendy', text: 'Is rich.' }],
+      ['update_fact', { about: 'Wendy', old_text: 'Worked at Acme.', new_text: 'Is rich.' }],
+      ['forget_fact', { about: 'Wendy', text: 'Booked the movie for Saturday 7 PM.' }],
+    ] as const) {
+      const out = await call(tools, name, args);
+      expect(out.isError).toBe(true);
+      expect(out.text).toContain(
+        'Nothing was saved, because this is a private chat and nothing is saved from it. Tell the user in one plain line that you did not save it, and that they can ask again in an ordinary chat.',
+      );
+    }
+    expect(await pageText(baseDir, 'person', 'wendy')).toBe(WENDY);
+    await expect(stat(path.join(baseDir, VAULT_HISTORY_DIR))).rejects.toThrow();
+    expect(audit).toEqual([]);
   });
 });
 
