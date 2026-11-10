@@ -82,7 +82,8 @@ function connectedBody(overrides: AgentBody = {}): AgentBody {
     ...overrides,
   };
   const { connected: _connected, sign_in, ...account } = flat;
-  return { ...flat, accounts: [{ ...account, sign_in }], default: flat.email };
+  const email = flat['email'];
+  return { ...flat, accounts: [{ ...account, sign_in }], default: typeof email === 'string' ? email : null };
 }
 
 /** A fake MCP store for the connector registration the handlers keep in step; `failing` makes writes throw. */

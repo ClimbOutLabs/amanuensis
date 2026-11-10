@@ -73,7 +73,8 @@ function connectedBody(overrides: AgentBody = {}): AgentBody {
     ...overrides,
   };
   const { connected: _connected, sign_in, ...account } = flat;
-  return { ...flat, accounts: [{ ...account, sign_in }], default: flat.address };
+  const address = flat['address'];
+  return { ...flat, accounts: [{ ...account, sign_in }], default: typeof address === 'string' ? address : null };
 }
 
 /** A fake MCP store for the connector registration the save and remove handlers keep in step. */
