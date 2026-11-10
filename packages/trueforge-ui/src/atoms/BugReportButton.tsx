@@ -13,6 +13,7 @@ import {
   type BugReportHandoffTarget,
 } from '../components/BugReportContext.js';
 import { Icon } from '../icons/Icon.js';
+import { useIsPrivateChat } from '../server/privateChatStore.js';
 import { buildHandoffTitle, buildIssuePrefillUrl, summarizeBundleForIssue } from '../utils/bugReportHandoff.js';
 import { getErrorMessage } from '../utils/getErrorMessage.js';
 import { auiButtonClass, railMenuRowClassName } from './lib/buttonClasses.js';
@@ -108,7 +109,10 @@ export function BugReportDialog() {
 }
 
 function ConnectedBugReportDialog({ api, dialog }: { api: BugReportApi; dialog: BugReportDialogControl }) {
-  const sessionId = useAuiState(state => state.threadListItem.remoteId);
+  const activeSessionId = useAuiState(state => state.threadListItem.remoteId);
+  // A private chat never goes into a report: from one, the form sends the app report, which names no chat.
+  const isPrivateChat = useIsPrivateChat(activeSessionId);
+  const sessionId = isPrivateChat ? undefined : activeSessionId;
   const { open, setOpen, registerDialog, returnFocusRef } = dialog;
   useEffect(registerDialog, [registerDialog]);
   const [description, setDescription] = useState('');
