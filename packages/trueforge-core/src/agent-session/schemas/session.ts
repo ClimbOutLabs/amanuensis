@@ -116,6 +116,13 @@ export const SessionSchema = z
     metrics: SessionMetricsSchema,
     metadata: SessionMetadataSchema,
     source: SessionSourceSchema.nullable(),
+    is_incognito: z
+      .boolean()
+      .describe('True for a private chat: nothing from it is remembered, and it is deleted when it is closed.'),
+    private_expires_at: z
+      .string()
+      .nullable()
+      .describe('ISO 8601 time a private chat is deleted if it is not closed first; null for other chats.'),
   })
   .openapi('Session');
 
