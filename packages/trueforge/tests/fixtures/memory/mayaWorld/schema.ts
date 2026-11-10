@@ -70,6 +70,8 @@ export const RecallQuestionSchema = z
     category: z.enum(RECALL_CATEGORIES),
     /** Must appear in the memory block. Left out only when nothing in memory should be shown. */
     expected_text: z.string().min(1).optional(),
+    /** The same answer in the words a page states it in. The answer also counts as found when every one of these is in the block. */
+    page_wording: z.array(z.string().min(1)).min(1).optional(),
     /** A stale or unwanted value that should not be put in front of the model. */
     must_not_text: z.string().min(1).optional(),
     /** The entries, or `event:<day>` for a hand edit, that justify the answer. Empty when the vault holds nothing on the subject. */

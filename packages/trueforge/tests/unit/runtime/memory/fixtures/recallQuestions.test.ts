@@ -1,8 +1,16 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+
+import { draftingLines, renderPageForModel } from '../../../../../src/runtime/memory/memoryPageLoader';
+import { readMemoryPage, type PageKind } from '../../../../../src/runtime/memory/memoryPages';
 import { QUERY_STOPWORDS } from '../../../../../src/runtime/memory/stopWords';
 import { MAYA_ENTRIES, MAYA_STORY_IDS } from '../../../../fixtures/memory/mayaWorld/entries';
 import { MAYA_EVENTS } from '../../../../fixtures/memory/mayaWorld/events';
+import { mayaPageBySlug } from '../../../../fixtures/memory/mayaWorld/pages';
 import { MAYA_RECALL_QUESTIONS } from '../../../../fixtures/memory/mayaWorld/recallQuestions';
 import { RECALL_CATEGORIES } from '../../../../fixtures/memory/mayaWorld/schema';
+import { mayaSortedPages, writeMayaSortedPages } from '../../../../fixtures/memory/mayaWorld/sortedPages';
 
 interface Source {
   day: number;
@@ -100,4 +108,46 @@ describe("recall questions over Maya's world", () => {
       }
     },
   );
+});
+
+describe("the page wording of the recall questions over Maya's world", () => {
+  let dir: string;
+
+  beforeAll(async () => {
+    dir = await mkdtemp(path.join(tmpdir(), 'maya-wording-'));
+  });
+
+  afterAll(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  async function shownOnDay(day: number): Promise<string> {
+    const vaultDir = path.join(dir, `day-${String(day)}`);
+    await writeMayaSortedPages({ vaultDir, throughDay: day });
+    const lines: string[] = [];
+    for (const { kind, slug, title } of listedTitles(day)) {
+      const page = await readMemoryPage({ vaultDir, kind, slug, title });
+      if (page !== undefined) {
+        lines.push(renderPageForModel({ title, page }), ...draftingLines({ title, page }));
+      }
+    }
+    return lines.join('\n').toLowerCase();
+  }
+
+  function listedTitles(day: number): { kind: PageKind; slug: string; title: string }[] {
+    return mayaSortedPages(day).map(page => ({
+      kind: page.kind,
+      slug: page.slug,
+      title: mayaPageBySlug(page.slug)?.title ?? page.slug,
+    }));
+  }
+
+  it.each(
+    MAYA_RECALL_QUESTIONS.flatMap(question =>
+      question.page_wording === undefined ? [] : [[question.id, question] as const],
+    ),
+  )('%s: every string of the wording is on the sorted pages on the day of asking', async (_id, question) => {
+    const shown = await shownOnDay(question.as_of_day);
+    expect((question.page_wording ?? []).filter(text => !shown.includes(text.toLowerCase()))).toEqual([]);
+  });
 });

@@ -66,6 +66,7 @@ export const MAYA_RECALL_QUESTIONS: readonly RecallQuestion[] = z.array(RecallQu
     category: 'current_value_of_changed_fact',
     expected_text: 'Wednesdays at 14:00',
     must_not_text: 'Monday at 10:00',
+    page_wording: ['every Wednesday at 14:00'],
     source_entry_ids: ['d27_e01'],
   },
   {
@@ -75,6 +76,7 @@ export const MAYA_RECALL_QUESTIONS: readonly RecallQuestion[] = z.array(RecallQu
     category: 'current_value_of_changed_fact',
     expected_text: 'Wednesdays at 14:00',
     must_not_text: 'Monday at 10:00',
+    page_wording: ['every Wednesday at 14:00'],
     source_entry_ids: ['d27_e01'],
   },
   {
@@ -102,6 +104,7 @@ export const MAYA_RECALL_QUESTIONS: readonly RecallQuestion[] = z.array(RecallQu
     category: 'current_value_of_changed_fact',
     expected_text: 'fee to 520',
     must_not_text: '450',
+    page_wording: ['yearly return is 520'],
     source_entry_ids: ['d44_e01'],
   },
   {
@@ -172,6 +175,7 @@ export const MAYA_RECALL_QUESTIONS: readonly RecallQuestion[] = z.array(RecallQu
     message: 'When is Elena coming to stay?',
     category: 'household_plan',
     expected_text: 'September 1 to September 8',
+    page_wording: ['Elena is staying with Maya and Wendy', '2026-09-01 to 2026-09-08'],
     source_entry_ids: ['d23_e03'],
   },
   {
@@ -180,6 +184,7 @@ export const MAYA_RECALL_QUESTIONS: readonly RecallQuestion[] = z.array(RecallQu
     message: 'Who waters the plants while Wendy is away?',
     category: 'household_plan',
     expected_text: 'Aiko is watering the plants',
+    page_wording: ['Aiko waters the plants'],
     source_entry_ids: ['d10_e01'],
   },
   {
@@ -188,6 +193,7 @@ export const MAYA_RECALL_QUESTIONS: readonly RecallQuestion[] = z.array(RecallQu
     message: "When does Zoe's cast come off?",
     category: 'household_plan',
     expected_text: 'cast until September 15',
+    page_wording: ['Zoe has a cast on her arm', 'to 2026-09-15'],
     source_entry_ids: ['d21_e03'],
   },
   {
@@ -196,6 +202,7 @@ export const MAYA_RECALL_QUESTIONS: readonly RecallQuestion[] = z.array(RecallQu
     message: 'Who looks after the plants when we are in Madrid?',
     category: 'household_plan',
     expected_text: 'Aiko will water the plants',
+    page_wording: ['Aiko waters the plants'],
     source_entry_ids: ['d55_e02'],
   },
   {
@@ -246,6 +253,7 @@ export const MAYA_RECALL_QUESTIONS: readonly RecallQuestion[] = z.array(RecallQu
     message: 'Write Wendy an email about dinner on Friday.',
     category: 'how_you_write_to_them',
     expected_text: 'W, your train to the airport',
+    page_wording: ['Opens with "W,"'],
     source_entry_ids: ['d08_e02'],
   },
 
@@ -256,6 +264,7 @@ export const MAYA_RECALL_QUESTIONS: readonly RecallQuestion[] = z.array(RecallQu
     message: 'Is Sam Whitfield still on leave?',
     category: 'temporary_fact',
     expected_text: 'on leave until August 24',
+    page_wording: ['Sam Whitfield is on leave', 'to 2026-08-24'],
     source_entry_ids: ['d05_e01'],
   },
   {
@@ -264,6 +273,7 @@ export const MAYA_RECALL_QUESTIONS: readonly RecallQuestion[] = z.array(RecallQu
     message: "Is Wendy's car back from the garage?",
     category: 'temporary_fact',
     expected_text: 'garage until August 20',
+    page_wording: ["Wendy's car is at the garage", 'to 2026-08-20'],
     source_entry_ids: ['d06_e04'],
   },
   {
@@ -272,6 +282,7 @@ export const MAYA_RECALL_QUESTIONS: readonly RecallQuestion[] = z.array(RecallQu
     message: 'Can we cook at home, or is the kitchen still out of action?',
     category: 'temporary_fact',
     expected_text: 'kitchen is usable again',
+    page_wording: ['The kitchen cannot be used', 'to 2026-09-05'],
     source_entry_ids: ['d37_e01'],
   },
   {
@@ -280,6 +291,7 @@ export const MAYA_RECALL_QUESTIONS: readonly RecallQuestion[] = z.array(RecallQu
     message: 'Is Elena still staying with us?',
     category: 'temporary_fact',
     expected_text: 'Elena left this morning',
+    page_wording: ['Elena is staying with Maya and Wendy', 'to 2026-09-08'],
     source_entry_ids: ['d39_e01'],
   },
   {
@@ -288,6 +300,7 @@ export const MAYA_RECALL_QUESTIONS: readonly RecallQuestion[] = z.array(RecallQu
     message: 'Is Priya still covering for the director?',
     category: 'temporary_fact',
     expected_text: 'no longer covering for the director',
+    page_wording: ['Priya is covering for the director', 'to 2026-09-22'],
     source_entry_ids: ['d53_e01'],
   },
 
@@ -340,6 +353,7 @@ export const MAYA_RECALL_QUESTIONS: readonly RecallQuestion[] = z.array(RecallQu
     message: 'Is the kitchen renovation done?',
     category: 'matter_status',
     expected_text: 'kitchen renovation is finished',
+    page_wording: ['The renovation is finished'],
     source_entry_ids: ['d57_e01'],
   },
   {
@@ -348,6 +362,7 @@ export const MAYA_RECALL_QUESTIONS: readonly RecallQuestion[] = z.array(RecallQu
     message: 'Has the Halvorsen proposal gone out?',
     category: 'matter_status',
     expected_text: 'proposal went out today',
+    page_wording: ['The proposal was sent on September 18'],
     source_entry_ids: ['d49_e01'],
   },
   {
@@ -356,6 +371,7 @@ export const MAYA_RECALL_QUESTIONS: readonly RecallQuestion[] = z.array(RecallQu
     message: 'Does Marcus still need anything from me for the tax return?',
     category: 'matter_status',
     expected_text: 'sent the mortgage interest statement',
+    page_wording: ['Send Marcus the mortgage interest statement', 'to 2026-09-23'],
     source_entry_ids: ['d54_e01'],
   },
   {
@@ -364,6 +380,7 @@ export const MAYA_RECALL_QUESTIONS: readonly RecallQuestion[] = z.array(RecallQu
     message: 'Have we booked the flights for Madrid?',
     category: 'matter_status',
     expected_text: 'booked the flights to Madrid',
+    page_wording: ['Flights are booked'],
     source_entry_ids: ['d28_e01'],
   },
   {
@@ -372,6 +389,7 @@ export const MAYA_RECALL_QUESTIONS: readonly RecallQuestion[] = z.array(RecallQu
     message: 'Did Hotel Lumbre refund the deposit?',
     category: 'matter_status',
     expected_text: 'refunded the deposit',
+    page_wording: ['Hotel Lumbre has to refund the deposit of 120', 'to 2026-09-19'],
     source_entry_ids: ['d50_e02'],
   },
 
@@ -472,6 +490,7 @@ export const MAYA_RECALL_QUESTIONS: readonly RecallQuestion[] = z.array(RecallQu
     message: 'Something is dripping under the sink. Who fixes that for us?',
     category: 'asked_in_other_words',
     expected_text: 'Sam Rossi is the plumber',
+    page_wording: ["Sam Rossi is Maya's plumber"],
     source_entry_ids: ['d02_e02'],
   },
   {
@@ -504,6 +523,7 @@ export const MAYA_RECALL_QUESTIONS: readonly RecallQuestion[] = z.array(RecallQu
     message: "Who runs my daughter's class?",
     category: 'asked_in_other_words',
     expected_text: 'teacher this year is Ms Noor Haddad',
+    page_wording: ["Noor Haddad is Zoe's teacher this year"],
     source_entry_ids: ['d04_e02'],
   },
   {

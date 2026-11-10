@@ -55,8 +55,11 @@ const WRITING_SECTION = 'How you write to them';
 function isWritingSection({ page, section }: { page: MemoryPage; section: PageSectionBlock }): boolean {
   return page.frontMatter.kind === 'person' && section.name === WRITING_SECTION;
 }
-const UNCONFIRMED_LABEL = 'Unconfirmed (not confirmed by you)';
-const NOT_CONFIRMED_TRAILER = 'not confirmed';
+export const UNCONFIRMED_LABEL = 'Unconfirmed (not confirmed by you)';
+export const NOT_CONFIRMED_TRAILER = 'not confirmed';
+
+/** What the first line of every page in the memory block starts with. */
+export const PAGE_HEADER_START = '[page: ';
 
 /** The words that name the drafting section; reserved, so no page or recalled text may carry them. */
 const DRAFTING_HEADING_NAME = 'How the person writes to these contacts';
@@ -266,7 +269,7 @@ export function renderPageForModel(input: { title: string; page: MemoryPage }): 
   }
   const title = singleLine(input.title);
   const names = front.aliases.map(singleLine).filter(alias => alias !== '' && alias !== title);
-  const header = `[page: ${title} — ${flags.join(', ')}${names.length > 0 ? `; also called: ${names.join(', ')}` : ''}]`;
+  const header = `${PAGE_HEADER_START}${title} — ${flags.join(', ')}${names.length > 0 ? `; also called: ${names.join(', ')}` : ''}]`;
   const summary = page.preamble.map(pageSafeLine).filter(line => line !== '' && !line.startsWith('# '));
   const lines: string[] = [header, ...summary];
   const demoted = renderLines(
