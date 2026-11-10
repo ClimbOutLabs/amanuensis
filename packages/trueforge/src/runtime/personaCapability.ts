@@ -31,6 +31,7 @@ import { personaMatchKey, personaNameKeys, type Persona, type PersonaContent } f
 import { activateSessionPersona } from '../personas/sessionPersona';
 import { PersonaContentSchema, PersonaNameSchema } from '../schemas/persona';
 import type { PersonaSwitchLog } from './personaSwitchClaim';
+import { toolsForChat } from './privateChat';
 
 /** A description is one line in the card and in the persona list. */
 const PERSONA_DESCRIPTION_MAX_LENGTH = 160;
@@ -99,7 +100,12 @@ interface PersonaToolSetOptions extends PersonaTurnContext {
   switches: PersonaSwitchLog;
   tracing: AgentTracing;
   sentinel: SentinelHostContext;
+  /** True in an incognito chat: personas can be listed and switched to, but none can be added. */
+  keepsNothing?: boolean | undefined;
 }
+
+/** Switching persona changes this chat and nothing that outlives it. */
+const CHAT_ONLY_PERSONA_TOOLS: ReadonlySet<string> = new Set([USE_PERSONA_TOOL_NAME]);
 
 type Prepared<T> = { ok: true; value: T } | { ok: false; message: string };
 
@@ -189,7 +195,11 @@ export class PersonaToolSet extends LocalToolMCP {
   }
 
   protected getTools(): ToolDefinition[] {
-    return this.#tools;
+    return toolsForChat({
+      tools: this.#tools,
+      keepsNothing: this.#options.keepsNothing ?? false,
+      chatOnly: CHAT_ONLY_PERSONA_TOOLS,
+    });
   }
 
   /**
@@ -384,7 +394,17 @@ function buildPersonaInstruction(builder: InstructionBuilder): void {
   builder.addSection(PERSONA_INSTRUCTION_SECTION, PERSONA_INSTRUCTION);
 }
 
+const PERSONA_SWITCH_INSTRUCTION =
+  'To switch persona, call list_personas, then use_persona. This incognito chat cannot add a persona.';
+
+function buildPersonaSwitchInstruction(builder: InstructionBuilder): void {
+  builder.addSection(PERSONA_INSTRUCTION_SECTION, PERSONA_SWITCH_INSTRUCTION);
+}
+
 /** Attaches the persona tool to one chat turn's root thread. */
 export function personaCapability(options: PersonaToolSetOptions): AgentCapability {
-  return { systemToolSets: [new PersonaToolSet(options)], instructionBuilders: [buildPersonaInstruction] };
+  return {
+    systemToolSets: [new PersonaToolSet(options)],
+    instructionBuilders: [options.keepsNothing === true ? buildPersonaSwitchInstruction : buildPersonaInstruction],
+  };
 }
