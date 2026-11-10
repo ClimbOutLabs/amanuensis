@@ -282,11 +282,28 @@ export class OutboundRedirectRefusedError extends Error {
 const MAX_CHECKED_REDIRECTS = 5;
 
 /**
+ * The request with its Authorization and Cookie headers taken out, for a redirect hop to
+ * another origin. Every other header, and the rest of the request, travels as it was.
+ */
+function withoutCallerCredentials(init: RequestInit): RequestInit {
+  if (init.headers === undefined) {
+    return init;
+  }
+  const headers = new Headers(init.headers);
+  headers.delete('authorization');
+  headers.delete('cookie');
+  return { ...init, headers };
+}
+
+/**
  * Follow redirects by hand, putting every target to `check` before dialling it: a provider
  * whose base address passed the host's address check can still answer with a redirect to an
  * address that would have been refused, so no hop is followed on the transport's say-so. The
- * shape mirrors the MCP connection's redirect guard: at most MAX_CHECKED_REDIRECTS hops, and
- * 301/302/303 turn a POST into a bodiless GET while 307/308 replay the request as it was.
+ * MCP sign-in dial follows redirects the same way: at most MAX_CHECKED_REDIRECTS hops, 301,
+ * 302 and 303 turn a POST into a bodiless GET while 307 and 308 replay the request as it
+ * was, and a hop to another origin goes without the caller's Authorization and Cookie
+ * headers. Those headers belong to the origin the caller configured, the principle the MCP
+ * connection's redirect guard enforces by refusing such hops outright.
  */
 export function withCheckedRedirects(fetchFn: FetchFn, check: OutboundRedirectCheck): FetchFn {
   return async (input, init) => {
@@ -325,6 +342,9 @@ export function withCheckedRedirects(fetchFn: FetchFn, check: OutboundRedirectCh
       // 307 and 308 repeat the request as it was; the older codes turn a POST into a bodiless GET.
       if (response.status !== 307 && response.status !== 308 && currentInit.method?.toUpperCase() === 'POST') {
         currentInit = { ...currentInit, method: 'GET', body: null };
+      }
+      if (target.origin !== currentUrl.origin) {
+        currentInit = withoutCallerCredentials(currentInit);
       }
       currentUrl = target;
     }

@@ -65,13 +65,29 @@ export class McpOAuthAddressRefusedError extends McpConnectionError {
 }
 
 /**
+ * The request with its Authorization and Cookie headers taken out, for a redirect hop to
+ * another origin. Every other header, and the rest of the request, travels as it was.
+ */
+function withoutCallerCredentials(init: RequestInit): RequestInit {
+  if (init.headers === undefined) {
+    return init;
+  }
+  const headers = new Headers(init.headers);
+  headers.delete('authorization');
+  headers.delete('cookie');
+  return { ...init, headers };
+}
+
+/**
  * One sign-in dial, behind the address check: the address is judged before it is connected to,
  * and redirects are followed by hand so every hop is judged too. The endpoints dialed here are
  * named by the remote server (its discovery answer names the authorization server, whose
  * metadata names the registration and token endpoints), so the checks at save and connect
- * time, which judge the address the person entered, cannot cover them.
+ * time, which judge the address the person entered, cannot cover them. A hop to another
+ * origin goes without the caller's Authorization and Cookie headers: those belong to the
+ * origin the sign-in started from. Exported so tests can drive a single dial.
  */
-async function dialMcpOAuthUrl(url: string | URL, init: RequestInit): Promise<Response> {
+export async function dialMcpOAuthUrl(url: string | URL, init: RequestInit): Promise<Response> {
   let currentUrl = new URL(url);
   let currentInit = init;
   for (let hop = 0; ; hop += 1) {
@@ -102,6 +118,9 @@ async function dialMcpOAuthUrl(url: string | URL, init: RequestInit): Promise<Re
     // 307 and 308 repeat the request as it was; the older codes turn a POST into a bodiless GET.
     if (response.status !== 307 && response.status !== 308 && currentInit.method?.toUpperCase() === 'POST') {
       currentInit = { ...currentInit, method: 'GET', body: null };
+    }
+    if (target.origin !== currentUrl.origin) {
+      currentInit = withoutCallerCredentials(currentInit);
     }
     currentUrl = target;
   }
