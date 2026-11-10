@@ -16,6 +16,7 @@ describe("SandboxWorkspacesClient", () => {
                     {
                         bytes: 1,
                         chat_id: null,
+                        chat_private: true,
                         chat_title: null,
                         entries: 1,
                         holder: "you",
@@ -50,6 +51,7 @@ describe("SandboxWorkspacesClient", () => {
                     {
                         bytes: 1,
                         chatId: null,
+                        chatPrivate: true,
                         chatTitle: null,
                         entries: 1,
                         holder: "you",

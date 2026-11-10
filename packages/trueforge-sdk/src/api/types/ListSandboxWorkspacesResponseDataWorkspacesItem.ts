@@ -5,6 +5,7 @@ import type * as TrueForge from "../index.js";
 export interface ListSandboxWorkspacesResponseDataWorkspacesItem {
     bytes: number;
     chatId: string | null;
+    chatPrivate: boolean;
     chatTitle: string | null;
     entries: number;
     holder: TrueForge.ListSandboxWorkspacesResponseDataWorkspacesItemHolder;

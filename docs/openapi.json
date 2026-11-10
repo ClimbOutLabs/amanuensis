@@ -5725,6 +5725,9 @@
                         "null"
                       ]
                     },
+                    "chat_private": {
+                      "type": "boolean"
+                    },
                     "chat_title": {
                       "type": [
                         "string",
@@ -5758,6 +5761,7 @@
                     "holder",
                     "chat_id",
                     "chat_title",
+                    "chat_private",
                     "sandbox_id",
                     "slot",
                     "bytes",

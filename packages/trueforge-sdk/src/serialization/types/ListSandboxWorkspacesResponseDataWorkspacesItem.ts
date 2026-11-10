@@ -11,6 +11,7 @@ export const ListSandboxWorkspacesResponseDataWorkspacesItem: core.serialization
 > = core.serialization.object({
     bytes: core.serialization.number(),
     chatId: core.serialization.property("chat_id", core.serialization.string().nullable()),
+    chatPrivate: core.serialization.property("chat_private", core.serialization.boolean()),
     chatTitle: core.serialization.property("chat_title", core.serialization.string().nullable()),
     entries: core.serialization.number(),
     holder: ListSandboxWorkspacesResponseDataWorkspacesItemHolder,
@@ -23,6 +24,7 @@ export declare namespace ListSandboxWorkspacesResponseDataWorkspacesItem {
     export interface Raw {
         bytes: number;
         chat_id?: string | null;
+        chat_private: boolean;
         chat_title?: string | null;
         entries: number;
         holder: ListSandboxWorkspacesResponseDataWorkspacesItemHolder.Raw;
