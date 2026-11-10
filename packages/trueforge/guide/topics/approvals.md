@@ -1,7 +1,7 @@
 ---
 id: approvals
 title: Approval cards and permissions
-covers:
+covers: settings:permissions, approval:plain, approval:email, route:permission, route:sentinelSettings
 ---
 
 Aman shows an approval card before it does something that matters. Nothing happens until you answer.

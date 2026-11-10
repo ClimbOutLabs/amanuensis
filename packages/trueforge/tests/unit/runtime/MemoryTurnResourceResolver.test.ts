@@ -97,6 +97,7 @@ function memoryContext(
   searchProviderPresetNames?: () => readonly string[],
 ): MemoryTurnContext {
   return {
+    keepsNothing: false,
     // No client: these scenarios are about tool exposure, not about recall or retain.
     client: undefined,
     config: MEMORY_CONFIG,

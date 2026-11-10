@@ -93,6 +93,7 @@ import { scheduleToolsOf, specWithTools } from '../runtime/scheduleTools';
 import { resolveSandboxProvider, validateAgentSpec } from '../runtime/sessionResources';
 import type { TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
 import type { TurnDrainRegistry } from '../runtime/turnDrains';
+import type { DeletedChatUsageReader } from '../runtime/usageSummaryCapability';
 import type { Schedule, ScheduleRun } from '../schemas/schedule';
 import { agentIfAccessible, canReadAgentBoundResource, resolveManagedAgentIds } from './agentAccess';
 import { getTurnExecutionError, startTurnInProcess } from './turns';
@@ -142,6 +143,8 @@ export interface ScheduleTurnExecutionDeps<TTransaction> {
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
   /** Scheduled runs on Token Factory count against the same daily cap as chat turns. */
   tokenFactoryBudget: TokenFactoryBudget;
+  /** The usage counts deleted chats left, for the usage tool. */
+  chatDeletionStore: DeletedChatUsageReader;
   /** A scheduled run joins the past-chat search like any chat; absent, it is not added. */
   chatSearchIndexer?: ChatSearchIndexer | undefined;
   /** The activity log a firing is written to; absent, firings run exactly as before and are not recorded. */
@@ -315,6 +318,7 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
       sandboxProviderResolver: deps.sandboxProviderResolver,
       globalSettingsStore: deps.globalSettingsStore,
       tokenFactoryBudget: deps.tokenFactoryBudget,
+      chatDeletionStore: deps.chatDeletionStore,
       chatSearchIndexer: deps.chatSearchIndexer,
       personalizationProfile,
       personaContext: prepared.persona === undefined ? undefined : buildPersonaContext(prepared.persona),

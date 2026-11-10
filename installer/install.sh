@@ -223,7 +223,7 @@ Options
   --email-password-stdin  read the email app password from the input (see the line order above)
   --email-imap-host HOST, --email-imap-port N, --email-smtp-host HOST, --email-smtp-port N
                         the incoming and outgoing servers, for --email-provider other only
-  --calendar-provider NAME  the calendar provider: fastmail, yahoo, gmx, webde or other (with --yes: required)
+  --calendar-provider NAME  the calendar provider: google, fastmail, yahoo, gmx, webde or other (with --yes: required)
   --calendar-email ADDRESS  the email address of the calendar account (with --yes: required)
   --calendar-url URL    the https address of the calendar, for the other provider (with --yes: required for other)
   --calendar-user NAME  the calendar login name (default: the email address)
