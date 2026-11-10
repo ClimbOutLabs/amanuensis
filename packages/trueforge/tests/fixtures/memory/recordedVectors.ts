@@ -19,7 +19,6 @@ import {
 export const RECORD_COMMAND = 'pnpm --filter @truefoundry/trueforge memory:record-vectors --model-dir <folder>';
 const RECORD_ADVICE = `Run \`${RECORD_COMMAND}\` with the folder that holds the downloaded search model, then commit the two files it writes.`;
 
-const BATCH_SIZE = 16;
 const BYTES_PER_FLOAT = 4;
 
 const RecordedVectorsInfoSchema = z.strictObject({
@@ -183,16 +182,13 @@ export async function recordVectors({
   const vectors = new Map<string, readonly number[]>();
   for (const kind of ['query', 'passage'] as const) {
     const wanted = [...new Set(texts.filter(text => text.kind === kind).map(text => text.text))];
-    for (let start = 0; start < wanted.length; start += BATCH_SIZE) {
-      const batch = wanted.slice(start, start + BATCH_SIZE);
-      const embedded = kind === 'query' ? await model.embedQueries(batch) : await model.embedPassages(batch);
-      batch.forEach((text, index) => {
-        const vector = embedded[index];
-        if (vector === undefined) {
-          throw new Error('The model returned fewer vectors than texts it was given.');
-        }
-        vectors.set(recordedKey({ kind, text }), vector);
-      });
+    // One text at a time: a text's vector shifts slightly with what shares its batch, and a recording must not depend on the other texts.
+    for (const text of wanted) {
+      const [vector] = kind === 'query' ? await model.embedQueries([text]) : await model.embedPassages([text]);
+      if (vector === undefined) {
+        throw new Error('The model returned no vector for a text it was given.');
+      }
+      vectors.set(recordedKey({ kind, text }), vector);
     }
   }
   await writeRecordedVectors({ dir, vectors });

@@ -126,10 +126,10 @@ const LOG_ONLY_BY_WORDS_MISSES: Record<string, Miss> = {
 
 /** Condition 2: the daily log only, found by meaning as well as by words. */
 const LOG_ONLY_BY_MEANING_SCORES: Record<string, string> = {
-  all: 'found 31/63, unwanted 14/29, clean 30/76',
-  'answer at most 14 days old': 'found 30/39, unwanted 4/11, clean 27/40',
+  all: 'found 33/63, unwanted 14/29, clean 32/76',
+  'answer at most 14 days old': 'found 32/39, unwanted 4/11, clean 29/40',
   'answer more than 14 days old': 'found 1/24, unwanted 0/6, clean 1/24',
-  current_value_of_changed_fact: 'found 8/13, unwanted 2/13, clean 6/13',
+  current_value_of_changed_fact: 'found 9/13, unwanted 2/13, clean 7/13',
   relationship: 'found 2/5, unwanted 0/0, clean 2/5',
   household_plan: 'found 4/5, unwanted 0/0, clean 4/5',
   how_you_write_to_them: 'found 3/5, unwanted 0/0, clean 3/5',
@@ -138,13 +138,12 @@ const LOG_ONLY_BY_MEANING_SCORES: Record<string, string> = {
   matter_status: 'found 5/5, unwanted 0/0, clean 5/5',
   unconfirmed_claim: 'found 4/4, unwanted 2/2, clean 3/5',
   no_name_in_message: 'found 1/4, unwanted 0/1, clean 1/4',
-  asked_in_other_words: 'found 0/12, unwanted 0/1, clean 0/12',
+  asked_in_other_words: 'found 1/12, unwanted 0/1, clean 1/12',
   nothing_to_recall: 'found 0/0, unwanted 10/12, clean 2/12',
 };
 
 /** The questions that are not clean in condition 2. */
 const LOG_ONLY_BY_MEANING_MISSES: Record<string, Miss> = {
-  q01: 'not found',
   q02: 'not found',
   q04: 'not found',
   q06: 'not found',
@@ -172,7 +171,6 @@ const LOG_ONLY_BY_MEANING_MISSES: Record<string, Miss> = {
   q54: 'not found',
   q55: 'not found',
   q56: 'not found',
-  q57: 'not found',
   q58: 'not found',
   q59: 'not found',
   q60: 'not found',
@@ -194,8 +192,8 @@ const LOG_ONLY_BY_MEANING_MISSES: Record<string, Miss> = {
 
 /** Condition 3: the pages a perfect sorter would write, found by meaning as well as by words. */
 const PAGES_SORTED_BY_MEANING_SCORES: Record<string, string> = {
-  all: 'found 50/63, unwanted 14/29, clean 49/76',
-  'answer at most 14 days old': 'found 32/39, unwanted 4/11, clean 29/40',
+  all: 'found 51/63, unwanted 14/29, clean 50/76',
+  'answer at most 14 days old': 'found 33/39, unwanted 4/11, clean 30/40',
   'answer more than 14 days old': 'found 18/24, unwanted 0/6, clean 18/24',
   current_value_of_changed_fact: 'found 13/13, unwanted 2/13, clean 11/13',
   relationship: 'found 5/5, unwanted 0/0, clean 5/5',
@@ -206,7 +204,7 @@ const PAGES_SORTED_BY_MEANING_SCORES: Record<string, string> = {
   matter_status: 'found 5/5, unwanted 0/0, clean 5/5',
   unconfirmed_claim: 'found 4/4, unwanted 2/2, clean 3/5',
   no_name_in_message: 'found 1/4, unwanted 0/1, clean 1/4',
-  asked_in_other_words: 'found 2/12, unwanted 0/1, clean 2/12',
+  asked_in_other_words: 'found 3/12, unwanted 0/1, clean 3/12',
   nothing_to_recall: 'found 0/0, unwanted 10/12, clean 2/12',
 };
 
@@ -223,7 +221,6 @@ const PAGES_SORTED_BY_MEANING_MISSES: Record<string, Miss> = {
   q54: 'not found',
   q55: 'not found',
   q56: 'not found',
-  q57: 'not found',
   q58: 'not found',
   q59: 'not found',
   q62: 'not found',
@@ -257,9 +254,9 @@ const LOG_ONLY_BY_MEANING: Condition = {
   meaning: true,
   scores: LOG_ONLY_BY_MEANING_SCORES,
   misses: LOG_ONLY_BY_MEANING_MISSES,
-  unrelatedShown: 'shown a memory 245/300',
+  unrelatedShown: 'shown a memory 252/300',
   unrelatedShownAt:
-    '1, 3-10, 12-17, 19-27, 30-39, 41-45, 47, 49-74, 76, 79, 80, 82, 83, 85, 86, 88, 90, 92-104, 106-111, 113-116, 118, 120-146, 148-155, 157-159, 161-178, 180-191, 193-200, 202-207, 209-237, 239-242, 244-252, 255, 257-261, 263, 265, 266, 270, 272, 274, 275, 277, 278, 280-282, 295, 296, 299, 300',
+    '1, 3-10, 12-17, 19-27, 30-39, 41-45, 47, 49-74, 76, 79, 80, 82, 83, 85, 86, 88, 90, 92-104, 106-111, 113-116, 118-146, 148-159, 161-178, 180-191, 193-200, 202-207, 209-237, 239-242, 244-253, 255-261, 265, 266, 270, 272, 274, 275, 277, 278, 280-282, 288, 290-292, 295, 296, 299, 300',
 };
 const PAGES_SORTED_BY_MEANING: Condition = {
   name: 'pages sorted, by meaning',
@@ -267,9 +264,9 @@ const PAGES_SORTED_BY_MEANING: Condition = {
   meaning: true,
   scores: PAGES_SORTED_BY_MEANING_SCORES,
   misses: PAGES_SORTED_BY_MEANING_MISSES,
-  unrelatedShown: 'shown a memory 245/300',
+  unrelatedShown: 'shown a memory 252/300',
   unrelatedShownAt:
-    '1, 3-10, 12-17, 19-27, 30-39, 41-45, 47, 49-74, 76, 79, 80, 82, 83, 85, 86, 88, 90, 92-104, 106-111, 113-116, 118, 120-146, 148-155, 157-159, 161-178, 180-191, 193-200, 202-207, 209-237, 239-242, 244-252, 255, 257-261, 263, 265, 266, 270, 272, 274, 275, 277, 278, 280-282, 295, 296, 299, 300',
+    '1, 3-10, 12-17, 19-27, 30-39, 41-45, 47, 49-74, 76, 79, 80, 82, 83, 85, 86, 88, 90, 92-104, 106-111, 113-116, 118-146, 148-159, 161-178, 180-191, 193-200, 202-207, 209-237, 239-242, 244-253, 255-261, 265, 266, 270, 272, 274, 275, 277, 278, 280-282, 288, 290-292, 295, 296, 299, 300',
 };
 
 function scoreLine(score: RecallScore): string {

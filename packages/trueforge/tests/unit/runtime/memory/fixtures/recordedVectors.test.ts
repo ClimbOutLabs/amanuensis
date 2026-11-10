@@ -94,7 +94,7 @@ describe('recorded vectors', () => {
     },
   );
 
-  it('records in batches of 16 and writes the keys in sorted order', async () => {
+  it('records one text at a time and writes the keys in sorted order', async () => {
     const batches: string[][] = [];
     const model = {
       embedQueries: async (texts: string[]): Promise<number[][]> => {
@@ -103,7 +103,7 @@ describe('recorded vectors', () => {
       },
       embedPassages: async (texts: string[]): Promise<number[][]> => {
         batches.push(texts);
-        return texts.map((_, index) => vectorOf(100 + index));
+        return texts.map(() => vectorOf(100));
       },
     };
     const texts = Array.from({ length: 20 }, (_, index) => ({
@@ -111,7 +111,7 @@ describe('recorded vectors', () => {
       text: `text ${String(index)}`,
     }));
     await recordVectors({ texts: [...texts, { kind: 'query', text: 'text 0' }], model, dir });
-    expect(batches.map(batch => batch.length)).toEqual([1, 16, 4]);
+    expect(batches.map(batch => batch.length)).toEqual(Array.from({ length: 21 }, () => 1));
     const read = await readRecordedVectors({ dir });
     const keys = [...read.keys()];
     expect(keys).toHaveLength(21);
