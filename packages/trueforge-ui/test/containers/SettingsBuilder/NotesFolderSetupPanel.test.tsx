@@ -66,6 +66,12 @@ describe('the notes folder setup panel', () => {
     expect(screen.getByRole('button', { name: 'Connect' })).toBeDefined();
   });
 
+  it('says the Docker install cannot use a notes folder yet, and that Aman Setup on Windows is the same', async () => {
+    renderPanel(makePort(statusOf()));
+    expect(await screen.findByText(/Aman Setup on Windows uses Docker/)).toBeDefined();
+    expect(screen.getByText(/cannot use a notes folder yet either/)).toBeDefined();
+  });
+
   it('saves the folder and the inbox name the person typed', async () => {
     const port = makePort(statusOf());
     renderPanel(port);
