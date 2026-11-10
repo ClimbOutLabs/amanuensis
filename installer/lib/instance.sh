@@ -650,13 +650,33 @@ instance_address_change() { # name; prints open, close, refresh or nothing
     if [ -n "$(reg_get "$name" origins)" ]; then printf 'close'; fi
   elif [ -n "$(reg_get "$name" origins)" ] && [ "$(tls_target "$name")" != "$(reg_get "$name" tls)" ]; then
     printf 'refresh'
+  elif [ -n "$(reg_get "$name" origins)" ] && tls_port_taken_by_tailscale "$name"; then
+    printf 'refresh'
   fi
+}
+
+# True when the https port the installer picked for an instance is one Tailscale serve was set up for since.
+tls_port_taken_by_tailscale() { # name
+  local port
+  port=$(reg_get "$1" tls_port)
+  [ -n "$port" ] && tailscale_serves_port "$port"
+}
+
+# An instance opened on the network publishes its app port on this computer's Tailscale address too. When Tailscale
+# serve is set up for that port, Tailscale takes it while the instance restarts, so this stops before anything is
+# stopped. The app port is the one devices open, so it is never moved by itself.
+instance_tailscale_port_check() { # name
+  local name=$1 port
+  [ -n "$(reg_get "$name" origins)" ] || return 0
+  port=$(reg_get "$name" app_port)
+  [ -n "$port" ] && tailscale_serves_port "$port" || return 0
+  die "Tailscale serve on this computer is set up for port $port, which instance $name uses, so Tailscale would take the port while the instance restarts. Nothing was stopped. Turn that entry off (see: tailscale serve status), then run this again."
 }
 
 # Writes the list of addresses of an instance into its record and its settings: read again from this computer, plus
 # the names given with --address (kept from the first install unless new ones are given). Renders and restarts nothing.
 instance_apply_addresses() { # name open|close|refresh
-  local name=$1 mode=$2 origins='' extras env tls='' tls_port='' app_port
+  local name=$1 mode=$2 origins='' extras env tls='' tls_port='' app_port moved_from=
   env="$(instance_dir "$name")/.env"
   app_port=$(reg_get "$name" app_port)
   extras=${OPT_ADDRESSES:-$(reg_get "$name" extra_hosts)}
@@ -666,8 +686,18 @@ instance_apply_addresses() { # name open|close|refresh
     origins=$(network_origin_list "$app_port" '' $extras)
     if [ "$tls" = local ] && origins_reach_the_network "$origins"; then
       tls_port=$(reg_get "$name" tls_port)
+      moved_from=
+      # The https port was picked by the installer, so one that Tailscale serve was set up for since is picked again
+      # before anything restarts; Tailscale answers on that port at this computer's Tailscale address in any case.
+      if [ -n "$tls_port" ] && tailscale_serves_port "$tls_port"; then
+        moved_from=$tls_port
+        tls_port=
+      fi
       if [ -z "$tls_port" ]; then
         tls_port=$(pick_port 8443 "$(reg_all app_port) $(reg_all login_port) $(reg_all tls_port)") || die "No free port was found on this computer for https near 8443."
+      fi
+      if [ -n "$moved_from" ]; then
+        say "Tailscale serve on this computer is set up for port $moved_from, so instance $name now opens over https on port $tls_port. On each device, open it with the new port."
       fi
       # shellcheck disable=SC2086
       origins=$(network_origin_list "$app_port" "$tls_port" $extras)
@@ -1056,6 +1086,7 @@ cmd_instance_refresh() {
   lock_acquire
   load_installed_release
   warn_if_installed_older
+  instance_tailscale_port_check "$name"
   change=$(instance_address_change "$name")
   if [ -n "$change" ]; then
     instance_apply_addresses "$name" "$change"

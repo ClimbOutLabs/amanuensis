@@ -251,6 +251,66 @@ sys.exit(0 if s.connect_ex(("127.0.0.1",8443))==0 else 1)' 2>/dev/null && [ "$wa
   sandbox_drop
 }
 
+tailnet() {
+  fixture_network 192.168.1.20 tailscale0:100.101.102.103
+  fixture_hostname host
+  fixture_tailscale 100.101.102.103 host.example.ts.net
+}
+
+test_a_port_tailscale_serves_is_not_picked() {
+  t_begin "an install skips the https port Tailscale serve is set up for"
+  sandbox_new
+  tailnet
+  STUB_TS_SERVE_PORTS="443 8443"
+  install_machine
+  assert_rc 0
+  assert_eq "$(reg_value main tls_port)" 8444
+  assert_contains "$(compose)" "- '100.101.102.103:8444:8443'"
+  assert_not_contains "$(compose)" ":8443:8443'"
+  sandbox_drop
+}
+
+test_an_upgrade_moves_https_off_a_port_tailscale_took() {
+  t_begin "an upgrade moves the https port before restarting when Tailscale serve was set up for it since, so the new version and the rollback both start"
+  sandbox_new
+  tailnet
+  install_machine
+  assert_eq "$(reg_value main tls_port)" 8443
+  # Set up after the install, while the instance held the port: Tailscale takes it the moment the instance stops.
+  STUB_TS_SERVE_PORTS="443 8443"
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_eq "$(reg_value main tls_port)" 8444
+  assert_contains "$(env_value main ALLOWED_ORIGINS)" "https://100.101.102.103:8444"
+  assert_not_contains "$(env_value main ALLOWED_ORIGINS)" ":8443"
+  assert_contains "$(compose)" "- '100.101.102.103:8444:8443'"
+  assert_not_contains "$(compose)" ":8443:8443'"
+  assert_flat_contains "$OUT" "Tailscale serve on this computer is set up for port 8443, so instance main now opens over https on port 8444"
+  sandbox_drop
+}
+
+test_an_app_port_tailscale_serves_stops_before_anything_changes() {
+  t_begin "an upgrade stops before the backup and the build when Tailscale serve is set up for the app port, which is never moved by itself"
+  sandbox_new
+  tailnet
+  install_machine
+  local builds
+  builds=$(log_count "docker build")
+  STUB_TS_SERVE_PORTS="8791"
+  repo_commit_change "app change"
+  : >"$STUB_LOG"
+  run_install upgrade
+  if [ "$RC" != 0 ]; then t_pass; else t_fail "the upgrade went ahead"; fi
+  assert_flat_contains "$OUT$ERR" "Tailscale serve on this computer is set up for port 8791"
+  assert_flat_contains "$OUT$ERR" "Nothing was stopped."
+  assert_log_lacks "docker build"
+  assert_log_lacks " down"
+  assert_no_path "$AMAN_HOME/backups"
+  assert_eq "$(reg_value main app_port)" 8791
+  sandbox_drop
+}
+
 test_an_existing_instance_moves_to_https_and_back() {
   t_begin "a re-run moves an instance from before https to https, --tls off moves it back and stays, --tls local moves it on again"
   sandbox_new
@@ -547,6 +607,9 @@ test_tls_off_keeps_plain_http
 test_the_flag_is_checked
 test_a_computer_with_no_network_has_nothing_to_serve
 test_a_busy_https_port_moves_the_instance
+test_a_port_tailscale_serves_is_not_picked
+test_an_upgrade_moves_https_off_a_port_tailscale_took
+test_an_app_port_tailscale_serves_stops_before_anything_changes
 test_an_existing_instance_moves_to_https_and_back
 test_a_new_address_gets_a_new_certificate
 test_backups_carry_the_certificate_but_not_the_key
