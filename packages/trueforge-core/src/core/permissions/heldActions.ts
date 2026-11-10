@@ -202,6 +202,14 @@ export async function checkHeldReplay(input: {
       return { ok: false, reason: 'changed' };
     }
   }
+  // A skill network card holds no approval token of its own: the person answered a question
+  // about a skill's sites, and the card never showed this call. When the call as classified
+  // now asks for an approval of its own, the network answer cannot stand in for it, so the
+  // replay is refused and the call can be asked about on its own card instead. A call that
+  // does not ask on its own (the standing-grant case these cards are built for) still runs.
+  if (held.skill_network != null && heldTokenId === null && fresh.is_approval_required === true) {
+    return { ok: false, reason: 'changed' };
+  }
   if (!heldRemotesUnchanged({ held, fresh })) {
     return { ok: false, reason: 'changed' };
   }

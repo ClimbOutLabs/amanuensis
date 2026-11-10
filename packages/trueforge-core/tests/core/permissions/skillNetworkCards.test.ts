@@ -25,20 +25,41 @@ describe('buildSkillNetworkCard', () => {
     });
   });
 
-  it('names the one refused site the skill did not declare, and says it was refused', () => {
+  it('names the one refused site, says it was refused, and blames no skill for the attempt', () => {
     const card = buildSkillNetworkCard({
       skill_name: 'ten-x',
       hosts: ['uploads.example.com'],
       reason: 'undeclared_host',
     });
-    expect(card.plain_what).toBe('Let the ten-x skill reach uploads.example.com?');
-    expect(card.plain_why).toContain('did not name in advance');
+    // A refused connection cannot show which skill, if any, reached for the site, so the card
+    // asks about the site and says so. The skill stays in the payload, which is where the
+    // answer is filed, and nowhere in the words the person reads.
+    expect(card.plain_what).toBe('Allow a connection to uploads.example.com in this chat?');
     expect(card.plain_why).toContain('refused');
+    expect(card.plain_why).toContain('cannot tell which skill, if any, made the attempt');
+    expect(card.plain_why).not.toContain('The skill tried');
     expect(card.destination_host).toBe('uploads.example.com');
     expect(card.skill_network).toEqual({
       skill_name: 'ten-x',
       hosts: ['uploads.example.com'],
       reason: 'undeclared_host',
+      code_pin: null,
+    });
+  });
+
+  it('shows an international name decoded on the card and keeps the coded form in the question', () => {
+    const card = buildSkillNetworkCard({
+      skill_name: 'ten-x',
+      hosts: ['xn--mnchen-3ya.de'],
+      reason: 'first_use',
+    });
+    expect(card.plain_what).toBe('Let the ten-x skill reach münchen.de?');
+    expect(card.destination).toBe('münchen.de');
+    expect(card.destination_host).toBe('münchen.de');
+    expect(card.skill_network).toEqual({
+      skill_name: 'ten-x',
+      hosts: ['xn--mnchen-3ya.de'],
+      reason: 'first_use',
       code_pin: null,
     });
   });
@@ -143,6 +164,50 @@ describe('checkHeldReplay for a skill network card', () => {
     await expect(checkHeldReplay({ held: heldInfo, fresh, tokens, scope: SCOPE })).resolves.toEqual({
       ok: false,
       reason: 'changed',
+    });
+  });
+
+  /** A network card as production holds it: no approval token of its own, only the question. */
+  function networkHeld(): InternalToolCallInfo {
+    return info({
+      approval_token_id: null,
+      is_approval_required: false,
+      tier3_card: buildSkillNetworkCard({
+        skill_name: 'ten-x',
+        hosts: ['uploads.example.com'],
+        reason: 'undeclared_host',
+      }),
+      skill_network: {
+        skill_name: 'ten-x',
+        hosts: ['uploads.example.com'],
+        reason: 'undeclared_host',
+        code_pin: null,
+      },
+      held_for_owner: { expires_at: new Date(Date.now() + 60_000).toISOString() },
+    });
+  }
+
+  it('refuses the re-run when the command asks for an approval of its own the card never showed', async () => {
+    const tokens = new InMemoryApprovalTokenStore();
+    const freshToken = await tokens.mint({
+      ...SCOPE,
+      action_id: 'action-a',
+      canonical_params: { command: 'curl https://uploads.example.com' },
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+    });
+    const fresh = info({ approval_token_id: freshToken.token_id, tier3_card: card() });
+    await expect(checkHeldReplay({ held: networkHeld(), fresh, tokens, scope: SCOPE })).resolves.toEqual({
+      ok: false,
+      reason: 'changed',
+    });
+  });
+
+  it('still re-runs the command when it does not ask on its own, as a standing grant leaves it', async () => {
+    const tokens = new InMemoryApprovalTokenStore();
+    const fresh = info({ is_approval_required: false, tier3_card: undefined });
+    await expect(checkHeldReplay({ held: networkHeld(), fresh, tokens, scope: SCOPE })).resolves.toEqual({
+      ok: true,
+      approval_token_id: null,
     });
   });
 });

@@ -1,5 +1,5 @@
 import type { ISkillStore } from '../../db/skillStore';
-import { grantedSkillNetworkHosts, parseGitSkill } from '../../schemas/skill';
+import { grantedSkillNetworkHosts, isSkillNetworkHostName, parseGitSkill } from '../../schemas/skill';
 import type { SkillNetworkTokenRegistry } from './skillNetworkTokens';
 
 /** Why a network card is being asked: the skill's first use, or a site it reached for without declaring. */
@@ -113,8 +113,13 @@ export async function drainSkillNetworkCards(input: {
   if (refused.length > 0) {
     // A refused site is charged to the first mounted skill, in the order the chat mounted them,
     // that declares sites and has neither granted nor denied it: the gateway sees only the union
-    // of the chat's grants, so it cannot tell which mounted skill reached for the site.
+    // of the chat's grants, so it cannot tell which mounted skill reached for the site. A refused
+    // host that is not a site name at all (a bare address, say) raises no card: no answer could
+    // ever allow it, so there is nothing to ask about.
     for (const host of refused) {
+      if (!isSkillNetworkHostName(host)) {
+        continue;
+      }
       for (const record of records) {
         const manifest = parseGitSkill(record.manifest);
         const declared = manifest?.network_hosts ?? [];
@@ -145,7 +150,9 @@ export async function drainSkillNetworkCards(input: {
  * for, together with the declared sites already approved or allowed one by one, and never a
  * turned-down site); deny stores the sites as turned down for the skill, which also ends
  * their first-use card. Every answer clears the raised mark, so a later change can raise a
- * card again.
+ * card again. A host that is not a site name is dropped before anything is stored: an answer
+ * can never create a grant for a bare address, and nothing lands in the records that Settings
+ * would then be unable to show or clear.
  */
 export async function recordSkillNetworkAnswer(input: {
   store: ISkillStore;
@@ -159,18 +166,21 @@ export async function recordSkillNetworkAnswer(input: {
   answer: 'allow_once' | 'always_allow' | 'deny';
 }): Promise<void> {
   input.registry.clearCardRaised({ session_id: input.session_id, skill_name: input.skill_name });
+  const hosts = input.hosts.filter(host => isSkillNetworkHostName(host));
   if (input.answer === 'allow_once') {
-    input.registry.addSessionHosts({
-      tenant_id: input.tenant_id,
-      created_by: input.created_by,
-      session_id: input.session_id,
-      skill_name: input.skill_name,
-      hosts: input.hosts,
-    });
+    if (hosts.length > 0) {
+      input.registry.addSessionHosts({
+        tenant_id: input.tenant_id,
+        created_by: input.created_by,
+        session_id: input.session_id,
+        skill_name: input.skill_name,
+        hosts,
+      });
+    }
     return;
   }
   if (input.answer === 'deny') {
-    for (const host of input.hosts) {
+    for (const host of hosts) {
       await input.store.setSkillNetworkHostDecision({
         tenant_id: input.tenant_id,
         name: input.skill_name,
@@ -191,25 +201,25 @@ export async function recordSkillNetworkAnswer(input: {
     // either, so it waits for its own card.
     const denied = new Set(record?.network_denied_hosts ?? []);
     const named = new Set<string>([...(record?.network_approval ?? []), ...(record?.network_allowed_hosts ?? [])]);
-    const hosts = new Set<string>();
-    for (const host of input.hosts) {
+    const approved = new Set<string>();
+    for (const host of hosts) {
       if (!denied.has(host)) {
-        hosts.add(host);
+        approved.add(host);
       }
     }
     for (const host of declared) {
       if (named.has(host) && !denied.has(host)) {
-        hosts.add(host);
+        approved.add(host);
       }
     }
     await input.store.setSkillNetworkApproval({
       tenant_id: input.tenant_id,
       name: input.skill_name,
-      hosts: [...hosts],
+      hosts: [...approved],
     });
     return;
   }
-  for (const host of input.hosts) {
+  for (const host of hosts) {
     await input.store.setSkillNetworkHostDecision({
       tenant_id: input.tenant_id,
       name: input.skill_name,

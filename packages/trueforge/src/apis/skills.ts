@@ -56,7 +56,11 @@ function toSkillNetworkApproval(
   viewer?: { tenant_id: string; created_by: string },
 ): SkillNetworkApproval {
   const declared = parseGitSkill(record.manifest)?.network_hosts ?? [];
-  const effective = effectiveSkillNetworkHosts({ declared, approved: record.network_approval });
+  const effective = effectiveSkillNetworkHosts({
+    declared,
+    approved: record.network_approval,
+    denied: record.network_denied_hosts,
+  });
   const denied = new Set(record.network_denied_hosts);
   return {
     declared_hosts: [...declared],

@@ -6,9 +6,25 @@
  * chat with no approval in force, one card asks for the declared sites still missing; when the gateway
  * refuses a site the skill did not declare, one card asks for that site. The turn never waits
  * on a card: commands run without the grant meanwhile and the gateway refuses what is not
- * granted. Answering records the decision and re-runs the held command, like any held action.
+ * granted. Answering records the decision and re-runs the held command, like any held action,
+ * unless the command needs an approval of its own: then the re-run is refused and the command
+ * is asked about on its own card, and only the answer about the sites is kept.
+ *
+ * A first-use card names its skill because the sites come from that skill's own declaration.
+ * A card for a refused site names no skill: the gateway sees only the chat's combined grant,
+ * so which skill, if any, reached for the site cannot be told, and the card says so instead of
+ * blaming the skill the answer is filed under.
  */
+import { domainToUnicode } from 'node:url';
 import type { Tier3Card, Tier3SkillNetwork } from './tier';
+
+/**
+ * A site name as a person reads it. Names are stored and matched in their coded form, so an
+ * international name shows decoded on the card while the question itself keeps the coded form.
+ */
+function displaySiteName(host: string): string {
+  return domainToUnicode(host);
+}
 
 /** The three answers a network card takes. */
 export type SkillNetworkAnswer = 'allow_once' | 'always_allow' | 'deny';
@@ -37,13 +53,14 @@ export function buildSkillNetworkCard(input: {
   hosts: readonly string[];
   reason: Tier3SkillNetwork['reason'];
 }): Tier3Card {
-  const sites = input.hosts.join(', ');
+  const sites = input.hosts.map(displaySiteName).join(', ');
   const skill_network: Tier3SkillNetwork = {
     skill_name: input.skill_name,
     hosts: [...input.hosts],
     reason: input.reason,
     code_pin: null,
   };
+  const singleSite = input.hosts.length === 1 ? displaySiteName(input.hosts[0] ?? '') : null;
   if (input.reason === 'first_use') {
     return {
       plain_what: `Let the ${input.skill_name} skill reach ${sites}?`,
@@ -55,14 +72,14 @@ export function buildSkillNetworkCard(input: {
       amount: null,
       parsed_command: null,
       outbound_text: null,
-      destination_host: input.hosts.length === 1 ? (input.hosts[0] ?? null) : null,
+      destination_host: singleSite,
       outbound_truncated: false,
       skill_network,
     };
   }
   return {
-    plain_what: `Let the ${input.skill_name} skill reach ${sites}?`,
-    plain_why: `The skill tried to reach ${sites}, which it did not name in advance, and the connection was refused.`,
+    plain_what: `Allow a connection to ${sites} in this chat?`,
+    plain_why: `A command in this chat tried to reach ${sites}, which is not one of the sites approved for the skills in this chat, and the connection was refused. Aman cannot tell which skill, if any, made the attempt.`,
     cannot_be_undone: null,
     why_asked_again: null,
     destination: sites,
@@ -70,7 +87,7 @@ export function buildSkillNetworkCard(input: {
     amount: null,
     parsed_command: null,
     outbound_text: null,
-    destination_host: input.hosts.length === 1 ? (input.hosts[0] ?? null) : null,
+    destination_host: singleSite,
     outbound_truncated: false,
     skill_network,
   };

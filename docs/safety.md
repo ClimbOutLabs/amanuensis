@@ -39,6 +39,17 @@ In a scheduled run a held call is skipped, and the run tells you in one line.
 
 You can choose to let file writes run without a card. That is the only kind of action you can relax this way.
 
+## Skills and the network
+
+A skill can name the sites it needs to reach. Naming a site grants nothing on its own, and a skill can only ever reach named sites it has been allowed.
+
+- The first time a skill with named sites runs in a chat, a card asks whether the skill may reach the sites it names. **Allow once** covers this chat only. **Always allow** remembers the sites for that skill in every chat. **Deny** remembers the refusal. You can change any of these later in Settings, then Skills.
+- Turning down one named site does not switch off the others. The sites you approved still work, and the turned-down site stays out. Clearing its refusal in Settings grants nothing by itself, because your approval never named that site. A card asks about the list again first.
+- If a command tries to reach a site no skill named, the connection is refused and a card asks about that one site. The card names no skill, because a refused connection cannot show which skill, if any, made the attempt.
+- Connections to bare addresses are always refused, and no card can allow them. That covers addresses on your own machine, such as 127.0.0.1, addresses on your home network, and the address a cloud machine keeps its own settings behind.
+- No card ever waits inside a connection. The connection is refused first, and the question is asked in the chat.
+- Approving a card runs the held command again, unless the command needs an approval of its own. Then that approval is asked for on its own card, and only your answer about the sites is kept.
+
 ## Scheduled runs never act on their own
 
 A scheduled run has nobody watching it, so it never sends or changes anything by itself.

@@ -387,7 +387,7 @@ describe('recordSkillNetworkAnswer', () => {
     expect(grant?.hosts).toEqual(['api.github.com', 'github.com']);
   });
 
-  it('always allow on a first-use card never approves a turned-down site, which a card can ask about again once its denial is cleared', async () => {
+  it('always allow on a first-use card grants the approved sites even when another declared site was turned down', async () => {
     const registry = new SkillNetworkTokenRegistry();
     const { store, records } = mutableStore([
       record({
@@ -407,19 +407,72 @@ describe('recordSkillNetworkAnswer', () => {
       reason: 'first_use',
       answer: 'always_allow',
     });
+    // The turned-down site is never written into the approval, and the approval still takes
+    // effect for the site the person did approve: the grant resolves, and no card asks again.
     expect(records.get('ten-x')?.network_approval).toEqual(['github.com']);
-    await expect(
-      resolveSkillNetworkGrant({ store, registry, ...CALL, skillNames: ['ten-x'] }),
-    ).resolves.toBeUndefined();
+    const grant = await resolveSkillNetworkGrant({ store, registry, ...CALL, skillNames: ['ten-x'] });
+    expect(grant?.hosts).toEqual(['github.com']);
+    await expect(drainSkillNetworkCards({ store, registry, ...CALL, skillNames: ['ten-x'] })).resolves.toEqual([]);
 
+    // Clearing the denial grants nothing on its own: the stored approval never named the
+    // turned-down site, so the list needs a fresh approval and a card asks for it whole again.
     await store.setSkillNetworkHostDecision({
       tenant_id: 'default',
       name: 'ten-x',
       host: 'api.github.com',
       decision: 'none',
     });
+    await expect(
+      resolveSkillNetworkGrant({ store, registry, ...CALL, skillNames: ['ten-x'] }),
+    ).resolves.toBeUndefined();
     const cardsAfterClear = await drainSkillNetworkCards({ store, registry, ...CALL, skillNames: ['ten-x'] });
     expect(cardsAfterClear).toEqual([{ skill_name: 'ten-x', hosts: TEN_X_HOSTS, reason: 'first_use' }]);
+  });
+
+  it('an answer about a bare address stores nothing, so no grant for one can ever be created', async () => {
+    const registry = new SkillNetworkTokenRegistry();
+    const { store, records } = mutableStore([
+      record({ manifest: gitManifest({ network_hosts: TEN_X_HOSTS }), network_approval: TEN_X_HOSTS }),
+    ]);
+    await recordSkillNetworkAnswer({
+      store,
+      registry,
+      ...CALL,
+      skill_name: 'ten-x',
+      hosts: ['169.254.169.254'],
+      reason: 'undeclared_host',
+      answer: 'always_allow',
+    });
+    expect(records.get('ten-x')?.network_allowed_hosts).toEqual([]);
+    await recordSkillNetworkAnswer({
+      store,
+      registry,
+      ...CALL,
+      skill_name: 'ten-x',
+      hosts: ['127.0.0.1'],
+      reason: 'undeclared_host',
+      answer: 'allow_once',
+    });
+    expect(registry.sessionHosts({ session_id: CALL.session_id, skill_name: 'ten-x' })).toEqual([]);
+    await recordSkillNetworkAnswer({
+      store,
+      registry,
+      ...CALL,
+      skill_name: 'ten-x',
+      hosts: ['10.0.0.5'],
+      reason: 'undeclared_host',
+      answer: 'deny',
+    });
+    expect(records.get('ten-x')?.network_denied_hosts).toEqual([]);
+  });
+
+  it('a refused bare address raises no card', async () => {
+    const registry = new SkillNetworkTokenRegistry();
+    const store = storeWith([
+      record({ manifest: gitManifest({ network_hosts: TEN_X_HOSTS }), network_approval: TEN_X_HOSTS }),
+    ]);
+    registry.recordRefusal({ session_id: CALL.session_id, host: '127.0.0.1' });
+    await expect(drainSkillNetworkCards({ store, registry, ...CALL, skillNames: ['ten-x'] })).resolves.toEqual([]);
   });
 
   it('always allow on a first-use card does not approve a site the declaration gained after the card was raised', async () => {
