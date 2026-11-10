@@ -30,7 +30,9 @@ Settings has no button for these. In a terminal, type `aman doctor` to check eac
 <<<<<<< HEAD
 On Windows, the Start menu has entries for the common ones, so you do not need a terminal. "Aman" opens Aman in your browser. "Check Aman" checks each part of your install. "Update Aman" updates Aman. "Remove Aman" removes Aman from this computer, the same as typing `aman uninstall`. It asks before it deletes your data, keeps your backups unless you say otherwise, and leaves Docker Desktop installed. When one of these opens a window, the window stays open until you press Enter, so you can read what it says. The one exception is "Aman": its window closes by itself once your browser opens.
 =======
+
 On Windows, the Start menu has entries for the common ones, so you do not need a terminal. "Aman" opens Aman in your browser. "Check Aman" checks each part of your install. "Update Aman" updates Aman. When one of these opens a window, the window stays open until you press Enter, so you can read what it says. The one exception is "Aman": its window closes by itself once your browser opens.
->>>>>>> fix/windows-start-menu-open
+
+> > > > > > > fix/windows-start-menu-open
 
 When you ask for help, say what you were doing and what you saw on the screen.
