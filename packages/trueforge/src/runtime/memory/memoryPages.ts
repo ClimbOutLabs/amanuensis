@@ -22,7 +22,7 @@ const PAGE_FOLDERS: Readonly<Record<PageKind, string>> = { person: 'people', mat
 
 /** The sections a page may have. */
 const PAGE_SECTIONS = ['How you write to them', 'Now', 'Decided', 'Open', 'Unconfirmed', 'Earlier'] as const;
-const PageSectionSchema = z.enum(PAGE_SECTIONS);
+export const PageSectionSchema = z.enum(PAGE_SECTIONS);
 export type PageSection = z.infer<typeof PageSectionSchema>;
 
 const MatterStatusSchema = z.enum(['active', 'done']);
