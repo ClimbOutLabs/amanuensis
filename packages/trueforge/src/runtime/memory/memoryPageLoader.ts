@@ -33,6 +33,10 @@ export interface LoadedPage {
   drafting: string[];
   /** True when a line is not the person's own words, so the page may hold text read elsewhere. */
   holdsOutsideText: boolean;
+  /** The rendered lines of `text` that are the person's own: the header, the summary, their typed lines and confirmed statements. */
+  ownLines: string[];
+  /** The rendered lines of `text` that are read content: Unconfirmed statements, and any from mail, calendar, read content, inference or an unreadable marker. */
+  readLines: string[];
   /** Tokens for the page and its drafting lines, plus the drafting heading and end line when this is the first page with drafting lines. */
   estimatedTokens: number;
 }
@@ -227,8 +231,32 @@ function instructionText(line: PageLine): string | undefined {
 
 const COMMENT_PATTERN = /<!--[\s\S]*?(?:-->|$)/g;
 
-function renderLines(lines: readonly PageLine[]): string[] {
-  return lines.map(renderLine).filter((line): line is string => line !== undefined);
+/** A rendered page line and whose words it holds. `frame` is the host's own label, recorded on neither side. */
+interface RenderedLine {
+  text: string;
+  side: 'own' | 'read' | 'frame';
+}
+
+/**
+ * Whose words a page line holds. The person's side is the listed cases, so a kind of line added later is read
+ * content until someone decides otherwise: a line they typed with no marker, or a confirmed statement from their
+ * own words or a message they sent. Anything under Unconfirmed is read content whatever its marker says.
+ */
+function lineSide({ line, unconfirmed }: { line: PageLine; unconfirmed: boolean }): 'own' | 'read' {
+  if (unconfirmed) {
+    return 'read';
+  }
+  if (line.kind === 'other') {
+    return 'own';
+  }
+  return line.kind === 'fact' && INSTRUCTION_SOURCES.has(line.fact.marker.src) ? 'own' : 'read';
+}
+
+function renderLines({ lines, unconfirmed }: { lines: readonly PageLine[]; unconfirmed: boolean }): RenderedLine[] {
+  return lines.flatMap(line => {
+    const text = renderLine(line);
+    return text === undefined ? [] : [{ text, side: lineSide({ line, unconfirmed }) }];
+  });
 }
 
 function dateSpan(marker: FactMarker): string | undefined {
@@ -268,14 +296,14 @@ function renderLine(line: PageLine): string | undefined {
 }
 
 /**
- * The page as plain lines for the model: a header naming the page, its kind, flags and other
- * names; the summary; then each section that has content, its name as a label. Markers become
+ * The page as plain lines for the model, each with whose words it holds: a header naming the page, its kind,
+ * flags and other names; the summary; then each section that has content, its name as a label. Markers become
  * a short bracketed trailer so the model sees the source and dates without the comment syntax.
  * "How you write to them" is not shown here: its lines go under the one drafting heading (see
  * `draftingLines`). A line there that is not the person's own, and any line whose marker could not
  * be read, is shown with the unconfirmed facts instead, so it never reaches the drafting heading.
  */
-export function renderPageForModel(input: { title: string; page: MemoryPage }): string {
+function renderPageLines(input: { title: string; page: MemoryPage }): RenderedLine[] {
   const { page } = input;
   const front = page.frontMatter;
   const flags: string[] = [front.kind];
@@ -289,35 +317,52 @@ export function renderPageForModel(input: { title: string; page: MemoryPage }): 
   const names = front.aliases.map(singleLine).filter(alias => alias !== '' && alias !== title);
   const header = `${PAGE_HEADER_START}${title} — ${flags.join(', ')}${names.length > 0 ? `; also called: ${names.join(', ')}` : ''}]`;
   const summary = page.preamble.map(pageSafeLine).filter(line => line !== '' && !line.startsWith('# '));
-  const lines: string[] = [header, ...summary];
-  const demoted = renderLines(
-    page.sections.flatMap(section =>
+  const lines: RenderedLine[] = [header, ...summary].map(text => ({ text, side: 'own' }));
+  const demoted = renderLines({
+    lines: page.sections.flatMap(section =>
       section.name === 'Unconfirmed'
         ? []
         : section.lines.filter(
             line => line.kind === 'unreadable' || (isWritingSection({ page, section }) && !isInstructionLine(line)),
           ),
     ),
-  );
+    unconfirmed: false,
+  });
   let demotedShown = demoted.length === 0;
   for (const section of page.sections) {
     if (isWritingSection({ page, section })) {
       continue;
     }
     const unconfirmed = section.name === 'Unconfirmed';
-    const body = renderLines(unconfirmed ? section.lines : section.lines.filter(line => line.kind !== 'unreadable'));
+    const body = renderLines({
+      lines: unconfirmed ? section.lines : section.lines.filter(line => line.kind !== 'unreadable'),
+      unconfirmed,
+    });
     if (unconfirmed && !demotedShown) {
       body.push(...demoted);
       demotedShown = true;
     }
     if (body.length > 0) {
-      lines.push(`${unconfirmed ? UNCONFIRMED_LABEL : pageSafeLine(section.heading)}:`, ...body);
+      // A heading that is not one of the host's section names was written in the file, so it is read content.
+      lines.push(
+        unconfirmed
+          ? { text: `${UNCONFIRMED_LABEL}:`, side: 'frame' }
+          : { text: `${pageSafeLine(section.heading)}:`, side: section.name === undefined ? 'read' : 'frame' },
+        ...body,
+      );
     }
   }
   if (!demotedShown) {
-    lines.push(`${UNCONFIRMED_LABEL}:`, ...demoted);
+    lines.push({ text: `${UNCONFIRMED_LABEL}:`, side: 'frame' }, ...demoted);
   }
-  return lines.join('\n');
+  return lines;
+}
+
+/** The page as plain lines for the model; see {@link renderPageLines}. */
+export function renderPageForModel(input: { title: string; page: MemoryPage }): string {
+  return renderPageLines(input)
+    .map(line => line.text)
+    .join('\n');
 }
 
 interface Candidate {
@@ -419,7 +464,8 @@ export async function loadPagesForMessage(input: {
     }
     settled.add(key);
     stats.candidates += 1;
-    const text = renderPageForModel({ title: candidate.match.title, page });
+    const rendered = renderPageLines({ title: candidate.match.title, page });
+    const text = rendered.map(line => line.text).join('\n');
     const drafting = draftingLines({ title: candidate.match.title, page });
     const frameTokens = drafting.length > 0 && !hasDraftingFrame ? DRAFTING_FRAME_TOKENS : 0;
     const estimatedTokens = estimateTokens([text, ...drafting].join('\n')) + frameTokens;
@@ -440,6 +486,8 @@ export async function loadPagesForMessage(input: {
       text,
       drafting,
       holdsOutsideText: pageHoldsOutsideText(page),
+      ownLines: rendered.filter(line => line.side === 'own').map(line => line.text),
+      readLines: rendered.filter(line => line.side === 'read').map(line => line.text),
       estimatedTokens,
     });
   }

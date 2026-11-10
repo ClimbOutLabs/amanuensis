@@ -1,12 +1,7 @@
-import type {
-  AgentContextProcessorOutput,
-  AgentThreadExecutionContext,
-  ContextMessage,
-} from '@truefoundry/trueforge-core/core';
+import type { AgentContextProcessorOutput, ContextMessage } from '@truefoundry/trueforge-core/core';
 import { HOST_SUMMARY_PREFACE, InstructionBuilder, InternalEventType } from '@truefoundry/trueforge-core/core';
 import { steeredLinks } from '@truefoundry/trueforge-core/core/permissions/provenance';
 import { createWebSearchTurnState } from '@truefoundry/trueforge-core/core/permissions/webSearch';
-import winston from 'winston';
 import { BACKGROUND_NOT_WORK_SENTENCE } from '../../../../src/personalization/backgroundFraming';
 import { buildInternalSourceToolPolicy, createInternalSourceState } from '../../../../src/runtime/internalSourceGuard';
 import type {
@@ -42,24 +37,8 @@ import { parseMemoryPage } from '../../../../src/runtime/memory/memoryPages';
 import type { ScreenClassifyResult, ScreenClient } from '../../../../src/runtime/memory/screenClient';
 import { TurnReadWatch } from '../../../../src/runtime/memory/turnReadWatch';
 import { LEARNED_PROFILE_CLEARED_CONTENT } from '../../../../src/runtime/profileLearning';
+import { collect, DEFAULT_CONFIG, makeClient, makeExecution, makeLogger } from './memoryCapabilityTestKit';
 import { pageOf } from './pageFixtures';
-
-const DEFAULT_CONFIG: MemoryConfig = {
-  recallMaxTokens: 2048,
-  recallEntityTokens: 512,
-  recallTimeoutMs: 2500,
-  recallQueryWindow: 5,
-  recallMinScore: 0.5,
-  recallMaxItems: 12,
-  recallMaxEntities: 8,
-  preRecallGateEnabled: false,
-  retainTimeoutMs: 10_000,
-  sweepMaxPerTurn: 5,
-  screen: { enabled: false, url: '', authToken: '', threshold: 0.5, timeoutMs: 1500, maxConcurrency: 8 },
-  curated: { enabled: false, maxModels: 3, maxTokens: 512 },
-  reflect: { enabled: false, budget: 'low', maxTokens: 512, timeoutMs: 8000 },
-  pages: { maxCount: 6, maxTokens: 1500 },
-};
 
 /** DEFAULT_CONFIG with the recall screen turned on and its timeout small enough to keep tests fast. */
 function withScreenEnabled(overrides?: Partial<MemoryConfig['screen']>): MemoryConfig {
@@ -80,50 +59,6 @@ function withScreenEnabled(overrides?: Partial<MemoryConfig['screen']>): MemoryC
 /** A screen client stand-in whose classify verdicts are scripted per test. */
 function makeScreenClient(classify: jest.Mock): ScreenClient {
   return { classify } as unknown as ScreenClient;
-}
-
-function makeLogger() {
-  return winston.createLogger({ silent: true });
-}
-
-function makeClient(overrides: {
-  recall?: jest.Mock;
-  getOperation?: jest.Mock;
-  retryOperation?: jest.Mock;
-  retain?: jest.Mock;
-  getProfile?: jest.Mock;
-  listMentalModels?: jest.Mock;
-  reflect?: jest.Mock;
-}): HindsightClient {
-  return {
-    recall: overrides.recall ?? jest.fn().mockResolvedValue({ ok: true, results: [], entities: [] }),
-    retain: overrides.retain ?? jest.fn().mockResolvedValue({ ok: true }),
-    getOperation: overrides.getOperation ?? jest.fn().mockResolvedValue({ ok: true, status: 'unknown' }),
-    retryOperation: overrides.retryOperation ?? jest.fn().mockResolvedValue({ ok: true }),
-    getProfile:
-      overrides.getProfile ??
-      jest
-        .fn()
-        .mockResolvedValue({ ok: true, profile: { name: undefined, mission: undefined, background: undefined } }),
-    listMentalModels: overrides.listMentalModels ?? jest.fn().mockResolvedValue({ ok: true, models: [] }),
-    reflect: overrides.reflect ?? jest.fn().mockResolvedValue({ ok: true, text: '', basedOn: 0 }),
-  } as unknown as HindsightClient;
-}
-
-function makeExecution(context: ContextMessage[]): Readonly<AgentThreadExecutionContext> {
-  return {
-    threadId: 'main',
-    currentContextUsage: { prompt_tokens: 0, completion_tokens: 0 },
-    context,
-  };
-}
-
-async function collect(gen: AsyncIterable<AgentContextProcessorOutput>): Promise<AgentContextProcessorOutput[]> {
-  const events: AgentContextProcessorOutput[] = [];
-  for await (const event of gen) {
-    events.push(event);
-  }
-  return events;
 }
 
 function passthroughEvent(events: AgentContextProcessorOutput[]) {
@@ -950,6 +885,7 @@ describe('HindsightMemoryProcessor and where links come from', () => {
 
           occurred_start: '2026-08-14',
           text: 'Your cousin Wilhelmina Thrupp posts photos on photos.thrupp.example.',
+          metadata: { origin: 'user_stated' },
         },
       ],
       entities: [],
@@ -1913,6 +1849,9 @@ describe('HindsightMemoryProcessor pages layer', () => {
     page: pageOf({ front: { kind: 'person', title: 'Wendy', aliases: [], household: true } }),
     text: wendyText,
     drafting: [] as string[],
+    holdsOutsideText: false,
+    ownLines: wendyText.split('\n'),
+    readLines: [] as string[],
     estimatedTokens: estimateTokens(wendyText),
   };
   const fact: RecallItem = { id: '1', occurred_start: '2026-08-14', text: 'filed on 14 April' };

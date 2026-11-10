@@ -30,6 +30,7 @@ import {
   newEventId,
   personMessageIndex,
   recordPersonText,
+  recordUntrustedText,
   type WebSearchTurnState,
 } from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
@@ -577,6 +578,11 @@ function itemSourceLabel(item: RecallItem): string | undefined {
   return origin === undefined || origin === USER_STATED_ORIGIN ? undefined : READ_CONTENT_LABEL;
 }
 
+/** Whether the host stamped the note as the person's own words; no stamp, or any other, is read content. */
+function isUserStated(item: RecallItem): boolean {
+  return item.metadata?.[MEMORY_ORIGIN_METADATA_KEY] === USER_STATED_ORIGIN;
+}
+
 function formatItemLine(item: RecallItem): string {
   const date = item.occurred_start ? sanitizeMemoryLine(item.occurred_start.slice(0, 10)) : 'undated';
   const label = itemSourceLabel(item);
@@ -646,6 +652,13 @@ export interface FormattedMemoryBlock {
   includedReflection: boolean;
   /** Pages that made it into the block, in priority order. */
   includedPages: number;
+  /**
+   * What the block carries that is the person's own: notes stamped `user_stated`, and the own lines and drafting
+   * lines of the pages that made it in. The block's frame is on neither side.
+   */
+  personText: string[];
+  /** Everything else the block carries: it is read content, whatever it was recalled as. */
+  readText: string[];
 }
 
 // A stats line sized with placeholder digits larger than any realistic real one, so the
@@ -838,6 +851,8 @@ export function formatMemoryBlock(params: {
   // Pages have their own budget on top of the recall budget; the first page that would overflow
   // it, and every page after, is dropped so the model sees them in priority order.
   const pageTexts: string[] = [];
+  const personText: string[] = [];
+  const readText: string[] = [];
   const draftingBlock: string[] = [];
   let pageTokens = 0;
   let pagesDropped = 0;
@@ -849,6 +864,8 @@ export function formatMemoryBlock(params: {
       continue;
     }
     pageTexts.push(entry.text);
+    personText.push(...entry.ownLines, ...entry.drafting);
+    readText.push(...entry.readLines);
     pageTokens += tokens + frameTokens;
     draftingBlock.push(...entry.drafting);
   }
@@ -883,6 +900,7 @@ export function formatMemoryBlock(params: {
     }
     const fittedTokens = estimateTokens(fitted);
     curatedLines.push(fitted);
+    readText.push(fitted);
     curatedTokens += fittedTokens;
     remaining -= fittedTokens;
   }
@@ -925,6 +943,7 @@ export function formatMemoryBlock(params: {
       continue;
     }
     lines.push(line);
+    (isUserStated(item) ? personText : readText).push(line);
     usedTokens += lineTokens;
   }
 
@@ -962,6 +981,9 @@ export function formatMemoryBlock(params: {
   }
   const statsLine = `(${clauses.join('; ')})`;
 
+  // Entity summaries and the reflection are put together by the store and carry no origin of their own.
+  readText.push(...(entitiesLine ? [entitiesLine] : []), ...(reflectionLine !== undefined ? [reflectionLine] : []));
+
   const body = [
     MEMORY_FRAMING_SENTENCE,
     ...pageTexts,
@@ -984,6 +1006,8 @@ export function formatMemoryBlock(params: {
     curatedLines,
     includedReflection: reflectionLine !== undefined,
     includedPages: pageTexts.length,
+    personText,
+    readText,
   };
 }
 
@@ -1148,6 +1172,10 @@ interface PageEntry {
   text: string;
   drafting: string[];
   holdsOutsideText: boolean;
+  /** Sanitized lines of `text` that are the person's own words. */
+  ownLines: string[];
+  /** Sanitized lines of `text` that are read content. */
+  readLines: string[];
 }
 
 function pageEntryText(entry: PageEntry): string {
@@ -1770,8 +1798,14 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
         screening.injectedPages.some(page => page.holdsOutsideText),
     });
     if (this.webSearch !== undefined) {
-      // What the assistant remembers of the person is theirs: a link or address in it is theirs to use.
-      recordPersonText({ provenance: this.webSearch.provenance, text: formatted.block });
+      // Only the person's own words make a link or address theirs to use. What was read from mail, a page or a
+      // file stays read content when it is recalled, in this chat and every later one.
+      recordPersonText({ provenance: this.webSearch.provenance, text: formatted.personText.join('\n') });
+      recordUntrustedText({
+        provenance: this.webSearch.provenance,
+        text: formatted.readText.join('\n'),
+        source: 'memory',
+      });
     }
     // Layer stats describe the block as injected, not as fetched: a line the screen withheld or the
     // budget dropped is counted as such, so the event never claims more than the block carries.
@@ -1837,6 +1871,8 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
           text: sanitizeMemoryText(page.text),
           drafting: page.drafting.map(sanitizeMemoryLine),
           holdsOutsideText: page.holdsOutsideText,
+          ownLines: page.ownLines.map(sanitizeMemoryLine),
+          readLines: page.readLines.map(sanitizeMemoryLine),
         })),
         stats: { ...loaded.stats, withheld: 0 },
       };
