@@ -13,10 +13,8 @@
  * `buildDistillationMessages`). The pass is fire-and-forget from the turn event
  * drain: every failure silently no-ops and can never fail, block, or delay the turn it
  * learned from. Each write leaves an `aman.profile.learned` passthrough audit row on the
- * turn's event log, and a pass that reaches the end with learning still on mirrors the resulting
- * document into the memory provider under a per-user document id (deduplicated by an operation id
- * derived from the user, the revision the write produced, and the content); a cleared document
- * mirrors a tombstone that replaces the previous mirror.
+ * turn's event log. The document lives in the profile and in the prompt only; a pass that reaches
+ * the end with learning still on removes any copy an earlier version saved into memory.
  *
  * The profile row is the authoritative state. The audit event is best-effort by design, and has
  * to be: the row and the event live in different stores, so no transaction can hold both. After
@@ -27,10 +25,9 @@
  * deferred rather than dropped: it becomes that user's single queued rerun, which the running
  * pass picks up when it ends. The write is fenced on the revision the pass read before its model
  * call, so a user edit made while the model was thinking is never overwritten by a rewrite
- * distilled from the profile as it was, and the mirror always reflects the profile as re-read
- * after the model call rather than the snapshot taken before it. That re-read also carries the
- * switch: a pass that finds learning off, or the row gone, stops there and writes neither the
- * profile nor the mirror, so opting out during a model call takes effect on that pass.
+ * distilled from the profile as it was. That re-read also carries the switch: a pass that finds
+ * learning off, or the row gone, stops there and writes nothing, so opting out during a model
+ * call takes effect on that pass.
  *
  * This module also registers `aman.profile.learned` in the harness's passthrough event
  * registry, the same way runtime/memory/memoryEvents.ts registers `aman.memory.recall`.
@@ -53,10 +50,7 @@ import {
 } from '../personalization/profile';
 import { ProfileLearnedEventSchema, type ProfileLearnedEvent } from '../schemas/profileLearningEvents';
 import type { EventSubscription } from './event-subscription';
-import { REPLACE_DOCUMENT_METADATA_KEY } from './memory/markdownMemoryFiles';
 import type { MemoryClient } from './memory/memoryClient';
-import { AMAN_MEMORY_NAMESPACE } from './memory/memoryRetain';
-import { uuidv5 } from './memory/uuidv5';
 import { modelIdentity, type TurnModelUsage } from './modelUsage';
 import { sessionKeepsNothing } from './privateChat';
 import { getModelDetails } from './sessionResources';
@@ -80,8 +74,8 @@ declare module '../../../trueforge-core/src/core/events/PassthroughEvents' {
 /** `updated_by` actor for host-written learned-profile updates; also the rate-cap marker. */
 export const PROFILE_LEARNING_ACTOR = 'aman-learning';
 
-/** Prefix of the per-user Hindsight document id under which the learned profile is mirrored. */
-export const LEARNED_PROFILE_DOCUMENT_ID_PREFIX = 'aman-learned-profile-';
+/** Prefix of the document id an earlier version saved a copy of the learned profile under. */
+const LEARNED_PROFILE_DOCUMENT_ID_PREFIX = 'aman-learned-profile-';
 
 /**
  * Text an earlier version stored as a memory when the profile was cleared. Nothing writes it now;
@@ -243,86 +237,50 @@ function sha256Hex(text: string): string {
   return createHash('sha256').update(text, 'utf8').digest('hex');
 }
 
-/** The context line every mirror is retained with; a store without document ids recognises older copies by it. */
-export const LEARNED_PROFILE_CONTEXT = 'Learned user profile';
+/** The context line copies were saved with; a store without document ids recognises older copies by it. */
+const LEARNED_PROFILE_CONTEXT = 'Learned user profile';
 
-/** Per-user mirror document id; the hash keeps arbitrary user references id-safe. */
-export function learnedProfileDocumentId(userRef: string): string {
+/** The source the host stamped on copies; a store that returns metadata can tell a copy by it. */
+const LEARNED_PROFILE_SOURCE = 'aman-profile-learning';
+
+function learnedProfileDocumentId(userRef: string): string {
   return `${LEARNED_PROFILE_DOCUMENT_ID_PREFIX}${sha256Hex(userRef).slice(0, 16)}`;
 }
 
-/**
- * Deterministic mirror operation id: a retry of one write carries the same id and the provider's
- * 409 dedupes it, while every distinct write is a distinct operation.
- *
- * The revision is part of the derivation because content alone is not unique over time. A
- * document that goes A, then B, then back to A would otherwise resubmit A's already-completed
- * operation id, the 409 would read as success, and B would stay live in the bank forever.
- */
-export function learnedProfileOperationId(params: {
-  userRef: string;
-  document: string;
-  profileRevision: number;
-}): string {
-  return uuidv5({
-    name: `${params.userRef}\n${String(params.profileRevision)}\n${sha256Hex(params.document)}`,
-    namespace: AMAN_MEMORY_NAMESPACE,
-  });
+/** True for a recalled note an earlier version saved as a copy of the learned profile. Reads only host-stamped metadata. */
+export function isLearnedProfileCopy(metadata: Readonly<Record<string, string>> | undefined): boolean {
+  return (
+    metadata?.['source'] === LEARNED_PROFILE_SOURCE ||
+    metadata?.['document_id']?.startsWith(LEARNED_PROFILE_DOCUMENT_ID_PREFIX) === true
+  );
 }
 
 /**
- * Mirrors the learned document into the memory provider. Fire-and-forget; an unchanged document
- * at an unchanged revision resubmits under the same operation id and the provider's 409 reads as
- * success.
- * A non-empty document replaces the previous mirror under the same per-user document id. A null
- * or empty one deletes the mirror, so no memory is stored for a cleared profile. Skips when there
- * is no client, and when the user has no profile row at all, since nothing was ever mirrored.
+ * Removes the copy of the learned profile that an earlier version saved into memory. The document
+ * is in every prompt already, so memory holds none. A failure is logged and never thrown: the
+ * caller's own work must not fail on it.
  */
-export async function mirrorLearnedProfile(params: {
+export async function deleteLearnedProfileCopy(params: {
   client: MemoryClient | undefined;
   userRef: string;
-  document: string | null;
-  profileExists: boolean;
-  profileRevision: number;
-  timestamp: string;
-  retainTimeoutMs: number;
+  timeoutMs: number;
   logger: Logger;
 }): Promise<void> {
-  const { client, userRef, document, profileExists, profileRevision, timestamp, retainTimeoutMs, logger } = params;
+  const { client, userRef, timeoutMs, logger } = params;
   if (client === undefined) {
     return;
   }
-  if (!profileExists) {
-    return;
-  }
   try {
-    const outcome =
-      document === null || document.trim() === ''
-        ? await client.deleteDocument({
-            documentId: learnedProfileDocumentId(userRef),
-            context: LEARNED_PROFILE_CONTEXT,
-            timeoutMs: retainTimeoutMs,
-          })
-        : await client.retain({
-            items: [
-              {
-                content: document,
-                timestamp,
-                document_id: learnedProfileDocumentId(userRef),
-                context: LEARNED_PROFILE_CONTEXT,
-                metadata: { source: 'aman-profile-learning', [REPLACE_DOCUMENT_METADATA_KEY]: 'true' },
-              },
-            ],
-            operationId: learnedProfileOperationId({ userRef, document, profileRevision }),
-            timeoutMs: retainTimeoutMs,
-          });
+    const outcome = await client.deleteDocument({
+      documentId: learnedProfileDocumentId(userRef),
+      context: LEARNED_PROFILE_CONTEXT,
+      timeoutMs,
+    });
     if (!outcome.ok) {
-      logger.warn('Learned profile mirror submission failed', { reason: outcome.reason });
-    } else if (outcome.reason !== undefined) {
-      logger.debug('Learned profile mirror was already gone', { reason: outcome.reason });
+      logger.warn('Learned profile copy could not be removed from memory', { reason: outcome.reason });
     }
   } catch (error) {
-    logger.warn('Learned profile mirror threw unexpectedly', {
+    logger.warn('Learned profile copy removal threw unexpectedly', {
       reason: error instanceof Error ? error.message : String(error),
     });
   }
@@ -436,6 +394,15 @@ async function appendLearnedProfileEvent(params: {
   }
 }
 
+function removeCopy(params: SubmitProfileLearningParams): Promise<void> {
+  return deleteLearnedProfileCopy({
+    client: params.memoryClient,
+    userRef: params.createdBy,
+    timeoutMs: params.config.retainTimeoutMs,
+    logger: params.logger,
+  });
+}
+
 async function distillProfile(params: SubmitProfileLearningParams): Promise<void> {
   const { config } = params;
   const profile = await params.personalizationStore.getProfile({
@@ -493,18 +460,15 @@ async function distillProfile(params: SubmitProfileLearningParams): Promise<void
   const next = parseDistilledDocument(flattenLlmContent(result.output.content ?? null));
 
   // The model call is unbounded against the user, who may have edited, cleared, or opted out of
-  // the profile while it ran. Re-read before either path acts on the snapshot: the rewrite path
-  // fences on this revision, and the no-change path mirrors what this read found rather than the
-  // pre-model snapshot, so a profile edited or cleared mid-call never reaches the bank stale.
+  // the profile while it ran. Re-read before acting on the snapshot: the rewrite fences on this revision.
   const fresh = await params.personalizationStore.getProfile({
     tenant_id: params.tenantId,
     created_by: params.createdBy,
   });
 
-  // The switch is re-read for the same reason the revision is, and binds every remaining side
-  // effect rather than only the write. A user who turned learning off during the model call has
-  // said stop, and the mirror is a write to an external service, so it is exactly what stopping
-  // has to cover. A missing row is off for the same reason it is off before the model call.
+  // The switch is re-read for the same reason the revision is. A user who turned learning off
+  // during the model call has said stop. A missing row is off for the same reason it is off before
+  // the model call.
   if (fresh?.learning_enabled !== true) {
     params.logger.debug('Profile learning pass abandoned: learning was switched off during the model call', {
       sessionId: params.sessionId,
@@ -514,16 +478,7 @@ async function distillProfile(params: SubmitProfileLearningParams): Promise<void
   }
 
   if (next === undefined || next === currentDocument) {
-    await mirrorLearnedProfile({
-      client: params.memoryClient,
-      userRef: params.createdBy,
-      document: fresh.learned_profile,
-      profileExists: true,
-      profileRevision: fresh.revision,
-      timestamp: params.completedAt,
-      retainTimeoutMs: config.retainTimeoutMs,
-      logger: params.logger,
-    });
+    await removeCopy(params);
     return;
   }
 
@@ -587,16 +542,7 @@ async function distillProfile(params: SubmitProfileLearningParams): Promise<void
     logger: params.logger,
   });
 
-  await mirrorLearnedProfile({
-    client: params.memoryClient,
-    userRef: params.createdBy,
-    document: next,
-    profileExists: true,
-    profileRevision: updated.revision,
-    timestamp: params.completedAt,
-    retainTimeoutMs: config.retainTimeoutMs,
-    logger: params.logger,
-  });
+  await removeCopy(params);
 }
 
 function logPassFailure(params: SubmitProfileLearningParams, error: unknown): void {

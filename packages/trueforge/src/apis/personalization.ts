@@ -1,5 +1,7 @@
 import { OpenAPIHono, type RouteHandler } from '@hono/zod-openapi';
+import type { Logger } from 'winston';
 import type { ResolveRequestContext } from '../auth/identity';
+import configuration from '../config';
 import type { IPersonalizationStore } from '../db/personalizationStore';
 import { buildPersonalizationContext, type PersonalizationProfile } from '../personalization/profile';
 import {
@@ -8,12 +10,17 @@ import {
   getPersonalizationProfileRoute,
   updatePersonalizationProfileRoute,
 } from '../routes/personalizationRoutes';
+import type { MemoryClient } from '../runtime/memory/memoryClient';
+import { deleteLearnedProfileCopy } from '../runtime/profileLearning';
 import type { PersonalizationProfileWire, UpdatePersonalizationProfileRequest } from '../schemas/personalization';
 import { TENANT_ID } from './sessions';
 
 export interface PersonalizationRouterDeps {
   personalizationStore: IPersonalizationStore;
   resolveRequestContext: ResolveRequestContext;
+  /** The memory client for this person, or undefined when no memory is configured. */
+  resolveMemoryClient: (input: { tenantId: string; subjectId: string }) => Promise<MemoryClient | undefined>;
+  logger: Logger;
 }
 
 /**
@@ -43,6 +50,23 @@ function toWireProfile(profile: PersonalizationProfile): PersonalizationProfileW
 }
 
 export function createPersonalizationRouter(deps: PersonalizationRouterDeps) {
+  // Saving or deleting the profile also removes any copy an earlier version kept in memory, so
+  // what a person clears in Settings is gone everywhere. A failure here never fails the save.
+  const removeMemoryCopy = async (subjectId: string): Promise<void> => {
+    try {
+      await deleteLearnedProfileCopy({
+        client: await deps.resolveMemoryClient({ tenantId: TENANT_ID, subjectId }),
+        userRef: subjectId,
+        timeoutMs: configuration.MEMORY_RETAIN_TIMEOUT_MS,
+        logger: deps.logger,
+      });
+    } catch (error) {
+      deps.logger.warn('Learned profile copy could not be removed from memory', {
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+
   const getProfileHandler: RouteHandler<typeof getPersonalizationProfileRoute> = async c => {
     const requestContext = deps.resolveRequestContext(c);
     const profile = await deps.personalizationStore.getProfile({
@@ -65,12 +89,14 @@ export function createPersonalizationRouter(deps: PersonalizationRouterDeps) {
       // and a client that never sends the key never opts in.
       learning_enabled: body.profile.learning_enabled ?? false,
     });
+    await removeMemoryCopy(requestContext.subject.id);
     return c.json({ data: toWireProfile(profile) }, 200);
   };
 
   const deleteProfileHandler: RouteHandler<typeof deletePersonalizationProfileRoute> = async c => {
     const requestContext = deps.resolveRequestContext(c);
     await deps.personalizationStore.deleteProfile({ tenant_id: TENANT_ID, created_by: requestContext.subject.id });
+    await removeMemoryCopy(requestContext.subject.id);
     return c.json({}, 200);
   };
 

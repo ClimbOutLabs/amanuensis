@@ -126,6 +126,8 @@ import type { ChatSearchIndexer } from './runtime/chatSearchIndexing';
 import { resolveDefaultChatModel } from './runtime/defaultChatModel';
 import type { DeliveryService } from './runtime/delivery/deliveryService';
 import type { EventSubscriptionRegistry } from './runtime/event-subscription';
+import { createMemoryClient } from './runtime/memory/createMemoryClient';
+import { resolveMemoryProvider } from './runtime/memory/memoryProvider';
 import { resolveSandboxProvider } from './runtime/sessionResources';
 import { createSpacePictureService } from './runtime/spacePictures/spacePictureService';
 import { TokenFactoryDailyCapError, type TokenFactoryBudget } from './runtime/tokenFactoryBudget';
@@ -885,6 +887,29 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       createPersonalizationRouter({
         personalizationStore: deps.personalizationStore,
         resolveRequestContext,
+        logger: deps.logger,
+        resolveMemoryClient: async ({ tenantId, subjectId }) => {
+          const provider =
+            configuration.MEMORY_BACKEND === 'hindsight'
+              ? await resolveMemoryProvider({
+                  mcpServerStore: deps.resolveMcpServerStore(),
+                  tokenStore: deps.tokenStore,
+                  tenantId,
+                  clientName: configuration.MCP_DCR_OAUTH_CLIENT_NAME,
+                  userRef: subjectId,
+                  logger: deps.logger,
+                })
+              : undefined;
+          return createMemoryClient({
+            backend: configuration.MEMORY_BACKEND,
+            markdownDir: configuration.MEMORY_MARKDOWN_DIR,
+            namespace: tenantId,
+            hindsight:
+              provider === undefined
+                ? undefined
+                : { apiBase: provider.apiBase, bank: provider.bank, headers: provider.headers },
+          });
+        },
       }),
       authMiddleware,
     ),

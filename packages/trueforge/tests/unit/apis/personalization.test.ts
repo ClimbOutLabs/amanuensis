@@ -1,3 +1,4 @@
+import winston from 'winston';
 import { createPersonalizationRouter } from '../../../src/apis/personalization';
 import type { RequestContext } from '../../../src/auth/identity';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
@@ -32,6 +33,8 @@ describe('personalization router', () => {
     const router = createPersonalizationRouter({
       personalizationStore: new SqlitePersonalizationStore(db),
       resolveRequestContext: () => userA,
+      resolveMemoryClient: async () => undefined,
+      logger: winston.createLogger({ silent: true }),
     });
     const base = {
       assistant_name: null,
@@ -70,6 +73,8 @@ describe('personalization router', () => {
     const router = createPersonalizationRouter({
       personalizationStore: new SqlitePersonalizationStore(db),
       resolveRequestContext: () => user,
+      resolveMemoryClient: async () => undefined,
+      logger: winston.createLogger({ silent: true }),
     });
     const request = {
       profile: {
@@ -108,6 +113,8 @@ describe('personalization router', () => {
     const router = createPersonalizationRouter({
       personalizationStore: new SqlitePersonalizationStore(db),
       resolveRequestContext: () => userA,
+      resolveMemoryClient: async () => undefined,
+      logger: winston.createLogger({ silent: true }),
     });
     const profileFields = {
       assistant_name: 'Aman',
@@ -158,6 +165,8 @@ describe('personalization router', () => {
     const router = createPersonalizationRouter({
       personalizationStore: new SqlitePersonalizationStore(db),
       resolveRequestContext: () => userA,
+      resolveMemoryClient: async () => undefined,
+      logger: winston.createLogger({ silent: true }),
     });
     const profileFields = {
       assistant_name: 'Aman',
@@ -197,6 +206,8 @@ describe('personalization router', () => {
     const router = createPersonalizationRouter({
       personalizationStore: new SqlitePersonalizationStore(db),
       resolveRequestContext: () => userA,
+      resolveMemoryClient: async () => undefined,
+      logger: winston.createLogger({ silent: true }),
     });
     const profileFields = {
       assistant_name: null,
@@ -238,6 +249,8 @@ describe('personalization router', () => {
     const router = createPersonalizationRouter({
       personalizationStore: new SqlitePersonalizationStore(db),
       resolveRequestContext: () => userA,
+      resolveMemoryClient: async () => undefined,
+      logger: winston.createLogger({ silent: true }),
     });
     const emptyContent = {
       assistant_name: null,

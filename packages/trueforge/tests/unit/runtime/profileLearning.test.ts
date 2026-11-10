@@ -17,10 +17,6 @@ import { HindsightClient, type RetainOutcome } from '../../../src/runtime/memory
 import {
   buildDistillationMessages,
   isLearningRateCapped,
-  LEARNED_PROFILE_CONTEXT,
-  learnedProfileDocumentId,
-  learnedProfileOperationId,
-  mirrorLearnedProfile,
   parseDistilledDocument,
   PROFILE_LEARNING_ACTOR,
   submitProfileLearning,
@@ -84,7 +80,7 @@ type DeleteDocumentSpy = jest.SpyInstance<Promise<RetainOutcome>, Parameters<Hin
 type RetainSpy = jest.SpyInstance<Promise<RetainOutcome>, Parameters<HindsightClient['retain']>>;
 
 /**
- * A real client with `retain` scripted on the instance: the constructor and the method signature
+ * A real client with `retain` and `deleteDocument` scripted on the instance: the constructor and the method signature
  * are the client's own, so a change to either fails these tests at compile time. Its fetch is
  * wired to reject, which keeps an unscripted call from ever reaching the network.
  */
@@ -97,7 +93,7 @@ function retainingClient(outcome: RetainOutcome = { ok: true }): {
     apiBase: 'https://hindsight.test.example',
     bank: 'aman',
     headers: {},
-    fetchImpl: () => Promise.reject(new Error('the mirror must not reach the network in tests')),
+    fetchImpl: () => Promise.reject(new Error('the copy removal must not reach the network in tests')),
   });
   const retain = jest.spyOn(client, 'retain').mockResolvedValue(outcome);
   const deleteDocument = jest.spyOn(client, 'deleteDocument').mockResolvedValue({ ok: true });
@@ -233,102 +229,6 @@ describe('isLearningRateCapped', () => {
   });
 });
 
-const UUID_V5_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-
-describe('learned profile mirror identity', () => {
-  it('scopes the document id to the user', () => {
-    expect(learnedProfileDocumentId('user-a')).toBe(learnedProfileDocumentId('user-a'));
-    expect(learnedProfileDocumentId('user-a')).not.toBe(learnedProfileDocumentId('user-b'));
-    // A user reference is arbitrary text; the id stays id-safe whatever it holds.
-    expect(learnedProfileDocumentId('user a/b?c#d')).toMatch(/^aman-learned-profile-[0-9a-f]{16}$/);
-  });
-
-  it('derives the operation id from the user, the document, and the revision it was written at', () => {
-    const a = { userRef: 'user-a', document: '# A', profileRevision: 1 };
-    expect(learnedProfileOperationId(a)).toBe(learnedProfileOperationId({ ...a }));
-    expect(learnedProfileOperationId(a)).not.toBe(learnedProfileOperationId({ ...a, document: '# B' }));
-    expect(learnedProfileOperationId(a)).not.toBe(learnedProfileOperationId({ ...a, userRef: 'user-b' }));
-    expect(learnedProfileOperationId(a)).not.toBe(learnedProfileOperationId({ ...a, profileRevision: 2 }));
-    expect(learnedProfileOperationId(a)).toMatch(UUID_V5_PATTERN);
-  });
-
-  it('gives a reverted document its own operation id rather than reusing the completed one', () => {
-    // A, then B, then back to A. Without the revision the third write would resubmit the first
-    // write's id, the provider would 409 it as already done, and B would stay live in the bank.
-    const ids = [
-      learnedProfileOperationId({ userRef: 'user-a', document: '# A', profileRevision: 1 }),
-      learnedProfileOperationId({ userRef: 'user-a', document: '# B', profileRevision: 2 }),
-      learnedProfileOperationId({ userRef: 'user-a', document: '# A', profileRevision: 3 }),
-    ];
-    expect(new Set(ids).size).toBe(3);
-  });
-});
-
-describe('mirrorLearnedProfile', () => {
-  function mirrorParams(overrides: { document: string | null; profileRevision?: number; profileExists?: boolean }) {
-    return {
-      userRef: 'user-a',
-      profileExists: overrides.profileExists ?? true,
-      profileRevision: overrides.profileRevision ?? 3,
-      document: overrides.document,
-      timestamp: '2026-09-01T12:00:00.000Z',
-      retainTimeoutMs: 1_000,
-      logger: makeLogger(),
-    };
-  }
-
-  it('skips silently without a memory client', async () => {
-    const { retain } = retainingClient();
-    await mirrorLearnedProfile({ client: undefined, ...mirrorParams({ document: '# Learned' }) });
-    expect(retain).not.toHaveBeenCalled();
-  });
-
-  it('retains under the per-user document id with the content-derived operation id', async () => {
-    const { client, retain } = retainingClient();
-
-    await mirrorLearnedProfile({ client, ...mirrorParams({ document: '# Learned' }) });
-
-    expect(retain).toHaveBeenCalledTimes(1);
-    const call = retain.mock.calls[0]?.[0];
-    expect(call?.operationId).toBe(
-      learnedProfileOperationId({ userRef: 'user-a', document: '# Learned', profileRevision: 3 }),
-    );
-    expect(call?.items).toEqual([
-      {
-        content: '# Learned',
-        timestamp: '2026-09-01T12:00:00.000Z',
-        document_id: learnedProfileDocumentId('user-a'),
-        context: 'Learned user profile',
-        metadata: { source: 'aman-profile-learning', replace_document: 'true' },
-      },
-    ]);
-  });
-
-  it('deletes the mirrored document and stores no memory when the profile is cleared', async () => {
-    const { client, retain, deleteDocument } = retainingClient();
-
-    await mirrorLearnedProfile({ client, ...mirrorParams({ document: null }) });
-    await mirrorLearnedProfile({ client, ...mirrorParams({ document: '   ' }) });
-
-    expect(retain).not.toHaveBeenCalled();
-    expect(deleteDocument).toHaveBeenCalledTimes(2);
-    for (const [call] of deleteDocument.mock.calls) {
-      expect(call.documentId).toBe(learnedProfileDocumentId('user-a'));
-      expect(call.context).toBe(LEARNED_PROFILE_CONTEXT);
-    }
-  });
-
-  it('writes no tombstone for a user who has no profile row', async () => {
-    const { client, retain } = retainingClient();
-
-    // Nothing can ever have been mirrored for them, so there is nothing to replace and the
-    // bank stays free of a document asserting the absence of one that never existed.
-    await mirrorLearnedProfile({ client, ...mirrorParams({ document: null, profileExists: false }) });
-
-    expect(retain).not.toHaveBeenCalled();
-  });
-});
-
 describe('submitProfileLearning', () => {
   async function makeHarness(options?: {
     llmText?: string;
@@ -382,7 +282,7 @@ describe('submitProfileLearning', () => {
     expect(profile?.learned_profile).not.toBe('# Learned');
   });
 
-  it('stores the rewritten document, appends the audit event, and mirrors it', async () => {
+  it('stores the rewritten document, appends the audit event, and leaves no copy in memory', async () => {
     const harness = await makeHarness();
     await submitProfileLearning({ ...harness.member, ...turnFields() });
 
@@ -401,14 +301,16 @@ describe('submitProfileLearning', () => {
       revision: 2,
     });
 
-    expect(harness.retain).toHaveBeenCalledTimes(1);
-    expect(harness.retain.mock.calls[0]?.[0]?.operationId).toBe(
-      learnedProfileOperationId({ userRef: 'user-a', document: '# Learned', profileRevision: 2 }),
-    );
+    expect(harness.retain).not.toHaveBeenCalled();
+    expect(harness.deleteDocument).toHaveBeenCalledTimes(1);
+    expect(harness.deleteDocument.mock.calls[0]?.[0]).toMatchObject({
+      documentId: expect.stringMatching(/^aman-learned-profile-[0-9a-f]{16}$/),
+      context: 'Learned user profile',
+    });
     await harness.db.destroy();
   });
 
-  it('no-ops on an unchanged document but still mirrors it', async () => {
+  it('no-ops on an unchanged document and still leaves no copy in memory', async () => {
     const harness = await makeHarness();
     await seedProfile({ store: harness.personalizationStore, content: { learned_profile: '# Learned' } });
     const before = await harness.personalizationStore.getProfile({ tenant_id: 'default', created_by: 'user-a' });
@@ -418,11 +320,12 @@ describe('submitProfileLearning', () => {
     const after = await harness.personalizationStore.getProfile({ tenant_id: 'default', created_by: 'user-a' });
     expect(after).toEqual(before);
     expect(harness.eventStore.appends).toHaveLength(0);
-    expect(harness.retain).toHaveBeenCalledTimes(1);
+    expect(harness.retain).not.toHaveBeenCalled();
+    expect(harness.deleteDocument).toHaveBeenCalledTimes(1);
     await harness.db.destroy();
   });
 
-  it('mirrors the profile as re-read, not the snapshot, when the user clears it during an unchanged pass', async () => {
+  it('removes the copy and saves nothing when the user clears the profile during an unchanged pass', async () => {
     const harness = await makeHarness({
       onModelCall: async store => {
         await seedProfile({ store });
@@ -436,11 +339,10 @@ describe('submitProfileLearning', () => {
     expect(harness.eventStore.appends).toHaveLength(0);
     expect(harness.retain).not.toHaveBeenCalled();
     expect(harness.deleteDocument).toHaveBeenCalledTimes(1);
-    expect(harness.deleteDocument.mock.calls[0]?.[0].documentId).toBe(learnedProfileDocumentId('user-a'));
     await harness.db.destroy();
   });
 
-  it('writes no mirror at all when the profile row is gone by the end of an unchanged pass', async () => {
+  it('touches no memory when the profile row is gone by the end of an unchanged pass', async () => {
     const harness = await makeHarness({
       onModelCall: async store => {
         await store.deleteProfile({ tenant_id: 'default', created_by: 'user-a' });
@@ -450,7 +352,18 @@ describe('submitProfileLearning', () => {
 
     await submitProfileLearning({ ...harness.member, ...turnFields() });
 
-    expect(harness.retain).not.toHaveBeenCalled();
+    expect(harness.deleteDocument).not.toHaveBeenCalled();
+    await harness.db.destroy();
+  });
+
+  it('does not fail the pass when removing the old copy fails', async () => {
+    const harness = await makeHarness();
+    harness.deleteDocument.mockRejectedValue(new Error('disk gone'));
+
+    await submitProfileLearning({ ...harness.member, ...turnFields() });
+
+    const profile = await harness.personalizationStore.getProfile({ tenant_id: 'default', created_by: 'user-a' });
+    expect(profile?.learned_profile).toBe('# Learned');
     await harness.db.destroy();
   });
 
@@ -505,7 +418,7 @@ describe('submitProfileLearning', () => {
     await harness.db.destroy();
   });
 
-  it('writes nothing and mirrors nothing when the user turns learning off during the model call', async () => {
+  it('writes nothing when the user turns learning off during the model call', async () => {
     const harness = await makeHarness();
     const stored = await harness.personalizationStore.getProfile({ tenant_id: 'default', created_by: 'user-a' });
     if (stored === undefined) {
@@ -514,7 +427,7 @@ describe('submitProfileLearning', () => {
     // Turning the switch off moves the revision, so the fence alone would stop this pass and
     // hide whether the switch is honoured at all. Holding the revision still isolates it: the
     // post-model re-read reports learning off at the revision the pass fenced on, and only the
-    // switch can stop the rewrite from being written and mirrored.
+    // switch can stop the rewrite from being written.
     jest
       .spyOn(harness.personalizationStore, 'getProfile')
       .mockResolvedValueOnce(stored)
@@ -524,25 +437,25 @@ describe('submitProfileLearning', () => {
     // The model returns a document the profile does not hold, so this is the rewrite path.
     await submitProfileLearning({ ...harness.member, ...turnFields() });
 
-    expect(harness.retain).not.toHaveBeenCalled();
+    expect(harness.deleteDocument).not.toHaveBeenCalled();
     expect(upsert).not.toHaveBeenCalled();
     expect(harness.eventStore.appends).toHaveLength(0);
     await harness.db.destroy();
   });
 
-  it('mirrors nothing on the unchanged path when the user turns learning off during the model call', async () => {
+  it('touches no memory on the unchanged path when the user turns learning off during the model call', async () => {
     const harness = await makeHarness({
       onModelCall: async store => {
         await seedProfile({ store, content: { learned_profile: '# Learned', learning_enabled: false } });
       },
     });
     // The model returns this same document, so without the switch check the pass would take its
-    // no-change path and mirror the re-read profile to the bank after the user opted out.
+    // no-change path after the user opted out.
     await seedProfile({ store: harness.personalizationStore, content: { learned_profile: '# Learned' } });
 
     await submitProfileLearning({ ...harness.member, ...turnFields() });
 
-    expect(harness.retain).not.toHaveBeenCalled();
+    expect(harness.deleteDocument).not.toHaveBeenCalled();
     expect(harness.eventStore.appends).toHaveLength(0);
     const after = await harness.personalizationStore.getProfile({ tenant_id: 'default', created_by: 'user-a' });
     expect(after?.learned_profile).toBe('# Learned');
@@ -878,7 +791,7 @@ describe('submitProfileLearning', () => {
     await harness.db.destroy();
   });
 
-  it('keeps the profile write and the mirror when the audit append fails twice', async () => {
+  it('keeps the profile write when the audit append fails twice', async () => {
     const harness = await makeHarness();
     const append = jest
       .spyOn(harness.eventStore, 'appendEventsToDoneTurn')
@@ -890,7 +803,7 @@ describe('submitProfileLearning', () => {
     // The profile row is authoritative; a lost event never rolls it back.
     const profile = await harness.personalizationStore.getProfile({ tenant_id: 'default', created_by: 'user-a' });
     expect(profile?.learned_profile).toBe('# Learned');
-    expect(harness.retain).toHaveBeenCalledTimes(1);
+    expect(harness.deleteDocument).toHaveBeenCalledTimes(1);
     await harness.db.destroy();
   });
 
@@ -939,7 +852,7 @@ describe('submitProfileLearning', () => {
     const profile = await harness.personalizationStore.getProfile({ tenant_id: 'default', created_by: 'user-a' });
     expect(profile?.learned_profile).toBe('# Learned');
     expect(harness.eventStore.appends).toHaveLength(1);
-    expect(harness.retain).toHaveBeenCalledTimes(1);
+    expect(harness.deleteDocument).toHaveBeenCalledTimes(1);
     await harness.db.destroy();
   });
 });

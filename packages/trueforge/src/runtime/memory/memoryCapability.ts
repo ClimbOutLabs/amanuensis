@@ -35,7 +35,7 @@ import {
 import type { Logger } from 'winston';
 import { BACKGROUND_NOT_WORK_SENTENCE } from '../../personalization/backgroundFraming';
 import { noteRecallContent, type InternalSourceState } from '../internalSourceGuard';
-import { LEARNED_PROFILE_CLEARED_CONTENT } from '../profileLearning';
+import { isLearnedProfileCopy, LEARNED_PROFILE_CLEARED_CONTENT } from '../profileLearning';
 import type {
   BankProfile,
   EntitySummary,
@@ -1690,6 +1690,8 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
         items: recall.outcome.results.filter(
           item =>
             !item.text.trim().startsWith(LEARNED_PROFILE_CLEARED_CONTENT) &&
+            // The profile is in the prompt already; this covers copies saved before memory stopped keeping one.
+            !isLearnedProfileCopy(item.metadata) &&
             !isNoteTooOld({ metadata: item.metadata, text: item.text, now: new Date() }),
         ),
         entities: recall.outcome.entities,
