@@ -9,6 +9,7 @@ import { CHECKSUMS_ASSET_NAME, buildAssetNames } from './assetNames.ts';
 import { checksumsText } from './checksums.ts';
 import { buildManifest, manifestToBytes, parseManifest, type ReleaseManifest } from './manifest.ts';
 import { minisignPublicKeyBase64, signMinisign } from './minisign.ts';
+import { releaseNotesText } from './releaseNotes.ts';
 import { installerLibDir, sourceIdsFromCheckout } from './sourceIds.ts';
 
 // The release steps' tool, run by the release workflow and by hand on
@@ -224,6 +225,16 @@ async function verifyCommand(args: readonly string[]): Promise<number> {
   );
 }
 
+// Prints the published release page's text, for gh release edit.
+function notesCommand(args: readonly string[]): number {
+  const release = flagValue(args, '--release');
+  if (release === null) {
+    return fail('notes needs --release.');
+  }
+  process.stdout.write(releaseNotesText({ release }));
+  return 0;
+}
+
 const [command, ...rest] = process.argv.slice(2);
 let exitCode: number;
 if (command === 'stage') {
@@ -240,9 +251,11 @@ if (command === 'stage') {
   exitCode = await signCommand(rest);
 } else if (command === 'verify') {
   exitCode = await verifyCommand(rest);
+} else if (command === 'notes') {
+  exitCode = notesCommand(rest);
 } else {
   exitCode = fail(
-    'The release tool knows stage, build-manifest, assemble-manifest, sign, verify, checksums and throwaway-key.',
+    'The release tool knows stage, build-manifest, assemble-manifest, sign, verify, notes, checksums and throwaway-key.',
   );
 }
 process.exitCode = exitCode;

@@ -61,7 +61,7 @@ Run **Publish release** (`.github/workflows/release-publish.yml`) from the Actio
 
 ### Signing `Aman-Setup.exe`
 
-The Windows build signs the program with Azure Artifact Signing when the `release` environment has these six variables (IDs, not secrets): `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_SUBSCRIPTION_ID`, `AZURE_SIGNING_ENDPOINT`, `AZURE_SIGNING_ACCOUNT` and `AZURE_SIGNING_PROFILE`. Sign-in to Azure uses GitHub's OIDC token, so no password is stored. Without the variables, signing is skipped and the run says so. Once signing is set up, set `REQUIRE_WINDOWS_SIGNING` to `'true'` in `release.yml`, so a release tag can no longer build an unsigned program.
+Windows code signing is not used for now: the program ships without a Windows publisher certificate, and people check a download against the signed record instead. The Publish release step puts those steps and the release key on the release page, and [SECURITY.md](SECURITY.md) carries them too. The workflow keeps a dormant hook for Azure Artifact Signing: it runs only when the `release` environment has these six variables (IDs, not secrets): `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_SUBSCRIPTION_ID`, `AZURE_SIGNING_ENDPOINT`, `AZURE_SIGNING_ACCOUNT` and `AZURE_SIGNING_PROFILE`. Sign-in to Azure would use GitHub's OIDC token, so no password is stored. Without the variables, signing is skipped and the run says so. If signing is ever set up, set `REQUIRE_WINDOWS_SIGNING` to `'true'` in `release.yml`, so a release tag can no longer build an unsigned program.
 
 ### The `release` environment
 

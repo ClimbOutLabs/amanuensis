@@ -6,8 +6,9 @@ name: Publish release
 # workflow then checks every file against the signed record with the
 # release key compiled into Aman, both with the release's own Linux
 # program (aman verify) and with the release tool from the tagged
-# source, writes SHA256SUMS again with the signature in it, and makes
-# the release public.
+# source, writes SHA256SUMS again with the signature in it, puts the
+# steps to check a download by hand on the page, and makes the release
+# public.
 
 on:
   workflow_dispatch:
@@ -101,5 +102,8 @@ jobs:
 
       - name: Publish the release
         run: |
-          gh release edit "$RELEASE" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+          # The page says how to check a download by hand, with the key
+          # from the tagged source, the one the release's programs carry.
+          pnpm -s release:aman-installer notes --release "$RELEASE" > "$RUNNER_TEMP/notes.md"
+          gh release edit "$RELEASE" --repo "$GITHUB_REPOSITORY" --notes-file "$RUNNER_TEMP/notes.md" --draft=false --latest
           echo "::notice::Release $RELEASE is public."
