@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SpokenReplyProvider } from '@/components/SpokenReplyContext.js';
 import { AssistantMessageContainer } from '@/containers/AssistantMessageContainer.js';
+import { READ_WHOLE_MESSAGES_STORAGE_KEY } from '@/utils/speechReplyPreferences.js';
 import type { ServerVoiceApi } from '@/utils/spokenReplyPlayer.js';
 import {
   installSpeechSynthesis,
@@ -42,6 +43,27 @@ function renderAnswer({ serverVoice }: { serverVoice?: ServerVoiceApi } = {}) {
   );
 }
 
+const LONG_WORDS = Array.from({ length: 80 }, (_, index) => `word${String(index)}`);
+
+function renderLongAnswer() {
+  const longAnswer: ThreadMessageLike[] = [
+    { role: 'user', id: 'user-1', content: [{ type: 'text', text: 'Tell me everything' }] },
+    {
+      role: 'assistant',
+      id: 'assistant-1',
+      content: [{ type: 'text', text: LONG_WORDS.join(' ') }],
+      status: { type: 'complete', reason: 'stop' },
+    },
+  ];
+  return render(
+    <RuntimeHarness messages={longAnswer} isRunning={false}>
+      <ThreadPrimitive.Messages>
+        {({ message }) => (message.role === 'assistant' ? <AssistantMessageContainer /> : null)}
+      </ThreadPrimitive.Messages>
+    </RuntimeHarness>,
+  );
+}
+
 describe('finished answer read-aloud controls', () => {
   let synthesis: FakeSpeechSynthesis;
 
@@ -68,6 +90,23 @@ describe('finished answer read-aloud controls', () => {
 
     expect(synthesis.cancel).toHaveBeenCalled();
     expect(screen.getByRole('button', { name: 'Read aloud' })).toBeInTheDocument();
+  });
+
+  it('reads only the first stretch of a long answer on demand while whole messages are off', () => {
+    renderLongAnswer();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Read aloud' }));
+
+    expect(spokenTexts(synthesis)).toEqual([`${LONG_WORDS.slice(0, 60).join(' ')}. The rest is on screen.`]);
+  });
+
+  it('reads a long answer to the end on demand when whole messages are on', () => {
+    window.localStorage.setItem(READ_WHOLE_MESSAGES_STORAGE_KEY, 'true');
+    renderLongAnswer();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Read aloud' }));
+
+    expect(spokenTexts(synthesis)).toEqual([LONG_WORDS.join(' ')]);
   });
 
   it('shows no read-aloud control when the browser cannot read text aloud', () => {

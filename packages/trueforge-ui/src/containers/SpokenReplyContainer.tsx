@@ -6,11 +6,11 @@ import { useEffect, useRef } from 'react';
 
 import { useSpokenReply } from '../components/SpokenReplyContext.js';
 import { useOptionalSentinelState, type SentinelState } from '../sentinel/SentinelStateProvider.js';
-import { useSpeakVoiceReplies } from '../utils/speechReplyPreferences.js';
+import { useReadWholeMessages, useSpeakVoiceReplies } from '../utils/speechReplyPreferences.js';
 import {
+  answerReadoutText,
   approvalSpeechLine,
   finalAnswerSpeech,
-  limitSpeechWords,
   pendingApprovalCallIds,
   type SpeechContentPart,
 } from '../utils/speechText.js';
@@ -62,6 +62,7 @@ export function SpokenReplyContainer() {
   const messages = useAuiState(s => s.thread.messages);
   const threadId = useAuiState(s => s.threadListItem.id);
   const { enabled } = useSpeakVoiceReplies();
+  const { enabled: readWholeEnabled } = useReadWholeMessages();
   const spokenReply = useSpokenReply();
   const latestUser = lastMessageWithRole(messages, 'user');
   const latestUserId = latestUser?.id;
@@ -123,9 +124,9 @@ export function SpokenReplyContainer() {
       return;
     }
     const sentinelLine = approvalLine(message.content, sentinel);
-    const text = sentinelLine ?? limitSpeechWords(finalAnswerSpeech(message.content));
+    const text = sentinelLine ?? answerReadoutText(finalAnswerSpeech(message.content), { readWhole: readWholeEnabled });
     void spokenReply.speak(text, { key: message.id }).then(voiceReplyDone, voiceReplyDone);
-  }, [isRunning, messages, enabled, sentinel, threadId, spokenReply]);
+  }, [isRunning, messages, enabled, readWholeEnabled, sentinel, threadId, spokenReply]);
 
   return null;
 }
