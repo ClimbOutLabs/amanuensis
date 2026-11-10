@@ -2298,7 +2298,7 @@
             "$ref": "#/components/schemas/ResourceName"
           },
           "manifest": {
-            "$ref": "#/components/schemas/ScheduleManifest"
+            "$ref": "#/components/schemas/ScheduleManifestInput"
           },
           "name": {
             "$ref": "#/components/schemas/ResourceName"
@@ -9859,6 +9859,43 @@
           "kind": {
             "$ref": "#/components/schemas/ScheduleKind"
           },
+          "origin_session_id": {
+            "default": null,
+            "description": "The chat a reminder was set in, so its line lands in that chat when it fires. Null for tasks, for reminders set outside a chat, and for reminders saved before this was recorded.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "run_at": {
+            "$ref": "#/components/schemas/RunAt"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ScheduleStatus"
+          },
+          "task": {
+            "description": "First user message sent to the agent on every run.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "timezone": {
+            "$ref": "#/components/schemas/Timezone"
+          }
+        },
+        "required": [
+          "task"
+        ],
+        "type": "object"
+      },
+      "ScheduleManifestInput": {
+        "additionalProperties": false,
+        "properties": {
+          "cron": {
+            "$ref": "#/components/schemas/CronExpression"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ScheduleKind"
+          },
           "run_at": {
             "$ref": "#/components/schemas/RunAt"
           },
@@ -14276,7 +14313,7 @@
         "additionalProperties": false,
         "properties": {
           "manifest": {
-            "$ref": "#/components/schemas/ScheduleManifest"
+            "$ref": "#/components/schemas/ScheduleManifestInput"
           },
           "name": {
             "$ref": "#/components/schemas/ResourceName"
