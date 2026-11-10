@@ -168,7 +168,7 @@ const REFUSAL_MESSAGES: Record<string, string> = {
   stale_ref: 'That part of the page is gone. Read the page again to get a fresh ref, then try again.',
   no_such_option: 'That option is not on the list. Read the page again to see the choices, then try again.',
   takeover:
-    'The person has taken over this page in the live browser and is driving it themselves. Wait until they come back to the chat and say they are done, then read the page again.',
+    'The person has taken over this page in the live browser and is driving it themselves. Tell the person to press Hand back in the live view. Once they have, read the page again.',
 };
 
 function refusalMessage(reason: string): string {

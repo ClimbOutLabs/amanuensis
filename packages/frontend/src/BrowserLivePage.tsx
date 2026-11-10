@@ -47,11 +47,17 @@ function errorMessageOf(json: unknown): string | undefined {
 /**
  * One call to the live routes; answers with the route's `data`. A failed call throws with the
  * route's own message, so the person reads why (a closed tab, a file too big) and what to do.
+ * A keepalive call is finished by the browser even while the page itself is going away.
  */
-async function liveCall(path: string, body?: Record<string, unknown>): Promise<unknown> {
+async function liveCall(
+  path: string,
+  body?: Record<string, unknown>,
+  options?: { keepalive?: boolean },
+): Promise<unknown> {
   const response = await liveFetch(apiPath(path), {
     method: body === undefined ? 'GET' : 'POST',
     headers: { 'content-type': 'application/json' },
+    ...(options?.keepalive === true ? { keepalive: true } : {}),
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   const json: unknown = await response.json().catch(() => undefined);
@@ -132,6 +138,18 @@ export function BrowserLivePage() {
   const lastMoveAtRef = useRef(0);
   // Every act waits for the one before it, so keys typed fast reach the page in the order typed.
   const inputQueueRef = useRef<Promise<void>>(Promise.resolve());
+  // The shown tab and whose hand is on it, in refs, so the leaving handlers below can hand the tab
+  // back even at moments when no new frame will arrive to say whose hand it is in.
+  const selectedRef = useRef<string | undefined>(undefined);
+  const takeoverRef = useRef(false);
+
+  useEffect(() => {
+    selectedRef.current = selected;
+  }, [selected]);
+
+  useEffect(() => {
+    takeoverRef.current = takeover;
+  }, [takeover]);
 
   const applyTabs = useCallback((list: LiveTab[] | null) => {
     if (list === null) {
@@ -383,6 +401,44 @@ export function BrowserLivePage() {
       });
   };
 
+  /**
+   * Hands the shown tab back to Aman when the person leaves it without pressing Hand back, so a
+   * tab is never left in the person's hand after they have gone: Aman would refuse every step on
+   * it and the person would not know why. The ref is cleared first, so the leaving paths below
+   * send the hand back once between them.
+   */
+  const handBackOnLeave = useCallback((options?: { keepalive?: boolean }) => {
+    const tab = selectedRef.current;
+    if (tab === undefined || !takeoverRef.current) {
+      return;
+    }
+    takeoverRef.current = false;
+    void liveCall('/api/browser/live/takeover', { tab, on: false }, options).catch(() => {
+      // The person is leaving either way; a failed hand back leaves the tab as it was.
+    });
+  }, []);
+
+  // The page going away (pagehide), or this page closing inside the app (unmount), hands a
+  // taken-over tab back. Both send with keepalive, as the page may not wait for the answer.
+  useEffect(() => {
+    const onPageHide = () => {
+      handBackOnLeave({ keepalive: true });
+    };
+    window.addEventListener('pagehide', onPageHide);
+    return () => {
+      window.removeEventListener('pagehide', onPageHide);
+      handBackOnLeave({ keepalive: true });
+    };
+  }, [handBackOnLeave]);
+
+  // Frames are only asked for while this page is in view. When it goes out of view, the person has
+  // turned away from the tab, most often to the chat, so a taken-over tab is handed back too.
+  useEffect(() => {
+    if (!visible) {
+      handBackOnLeave();
+    }
+  }, [visible, handBackOnLeave]);
+
   if (done) {
     return (
       <main className="browser-live">
@@ -412,6 +468,10 @@ export function BrowserLivePage() {
               className="browser-live-button"
               aria-pressed={tab.tab === selected}
               onClick={() => {
+                // Leaving a taken-over tab for another one hands it back first.
+                if (tab.tab !== selected) {
+                  handBackOnLeave();
+                }
                 setSelected(tab.tab);
                 setFrame(undefined);
                 // The new tab's own state arrives with its first frame.
@@ -512,6 +572,8 @@ export function BrowserLivePage() {
             type="button"
             className="browser-live-button browser-live-button-primary"
             onClick={() => {
+              // Done leaves the live view, so a tab still in the person's hand is handed back.
+              handBackOnLeave();
               setDone(true);
             }}
           >

@@ -157,6 +157,85 @@ test('the live browser page shows the tab and sends clicks, typing and files to 
   }
 });
 
+test('leaving the live view hands a taken-over tab back', { timeout: 300_000 }, async () => {
+  const frontendRoot = fileURLToPath(new URL('../', import.meta.url));
+  const viteCache = privateViteCache('browser-live-leave');
+  const server = await createServer({
+    cacheDir: viteCache.cacheDir,
+    configFile: false,
+    optimizeDeps: DEV_OPTIMIZE_DEPS,
+    root: frontendRoot,
+    logLevel: 'silent',
+    // The published ui dist leaves core modules external, so resolve them from source like the app does.
+    resolve: { conditions: ['trueforge-dev', ...defaultClientConditions] },
+    server: { host: '127.0.0.1', port: 0 },
+  });
+  let browser: Browser | undefined;
+
+  /** Opens the live page on one tab and takes the tab over, waiting until the page shows it. */
+  async function openTakenOverPage(frame: string): Promise<{ contextPage: Page; calls: LiveCall[] }> {
+    if (browser === undefined) throw new Error('the test browser is not open');
+    const context = await browser.newContext({ viewport: VIEWPORTS[0], deviceScaleFactor: 1 });
+    const contextPage = await context.newPage();
+    const calls = await answerLiveRoutes(contextPage, {
+      frame,
+      tabs: [{ tab: 'chat-1', title: 'Sign in', url: 'https://example.test/login' }],
+    });
+    const address = server.httpServer?.address();
+    if (address == null || typeof address === 'string') throw new Error('Vite did not bind a TCP port');
+    await contextPage.goto(`http://127.0.0.1:${address.port}/tests/fixtures/browser-live.fixture.html`, {
+      waitUntil: 'domcontentloaded',
+      timeout: FIRST_LOAD_TIMEOUT_MS,
+    });
+    await contextPage.getByRole('button', { name: 'Take over' }).click();
+    await waitForCall(calls, call => call.path === '/api/browser/live/takeover' && bodyOf(call)['on'] === true);
+    await contextPage.getByText('You are driving this page', { exact: false }).waitFor({ timeout: RENDER_TIMEOUT_MS });
+    return { contextPage, calls };
+  }
+
+  try {
+    await server.listen();
+    browser = await chromium.launch({
+      executablePath: findChromiumExecutable(chromium.executablePath()),
+      headless: true,
+    });
+    const frame = await makeFrame(browser);
+
+    // Done, pressed while the tab is still in the person's hand, hands it back on the way out.
+    {
+      const { contextPage, calls } = await openTakenOverPage(frame);
+      await contextPage.getByRole('button', { name: 'Done' }).click();
+      await waitForCall(calls, call => call.path === '/api/browser/live/takeover' && bodyOf(call)['on'] === false);
+      await contextPage.context().close();
+    }
+
+    // The page going away (pagehide) hands the tab back too.
+    {
+      const { contextPage, calls } = await openTakenOverPage(frame);
+      await contextPage.evaluate(() => {
+        window.dispatchEvent(new Event('pagehide'));
+      });
+      await waitForCall(calls, call => call.path === '/api/browser/live/takeover' && bodyOf(call)['on'] === false);
+      await contextPage.context().close();
+    }
+
+    // The live view going out of view stops the frames, and hands the tab back with them.
+    {
+      const { contextPage, calls } = await openTakenOverPage(frame);
+      await contextPage.evaluate(() => {
+        Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      await waitForCall(calls, call => call.path === '/api/browser/live/takeover' && bodyOf(call)['on'] === false);
+      await contextPage.context().close();
+    }
+  } finally {
+    await browser?.close();
+    await server.close();
+    viteCache.remove();
+  }
+});
+
 async function checkLivePage(page: Page, calls: LiveCall[], label: string) {
   const picture = page.getByRole('img', { name: 'The page Aman has open, as it looks now' });
   await picture.waitFor({ state: 'visible', timeout: RENDER_TIMEOUT_MS });
