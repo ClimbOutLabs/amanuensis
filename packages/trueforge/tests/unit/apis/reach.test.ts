@@ -129,7 +129,7 @@ describe('reach routes', () => {
       channels: input =>
         reachChannelsFor({
           twilio: { accountSid: 'AC' },
-          voiceReady: true,
+          voice: 'ready',
           numberProblem: 'not_accepted',
           viewer: input?.viewer ?? 'person',
         }),

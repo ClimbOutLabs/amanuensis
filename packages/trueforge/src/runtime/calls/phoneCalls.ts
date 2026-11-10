@@ -25,6 +25,7 @@ import { maskedTarget } from '../texts/smsSender';
 import { canText } from '../texts/textNumber';
 import { privatePhrase } from '../texts/textWords';
 import { CALL_LINES, CallTurns, type CallChat } from './callTurns';
+import { callVoiceProblem, type CallVoice } from './callVoiceReady';
 import { messageLine } from './callWords';
 import { claimTestCall } from './testCallClaim';
 import { callFailureWords, MEDIA_STREAM_PATH, type CallProvider } from './twilioCalls';
@@ -32,8 +33,6 @@ import { callFailureWords, MEDIA_STREAM_PATH, type CallProvider } from './twilio
 /** Said where calls are offered while this server has no Twilio account. */
 export const CALLS_NOT_SET_UP =
   'Calls are not set up on this server. To set them up, add the Twilio details to the settings file and restart Aman.';
-/** Said where calls are offered while the parts that listen and speak are not running. */
-export const CALLS_NEED_VOICE = 'Calls need the voice parts of Aman. Start them, then try again in a minute.';
 
 /**
  * Twilio's requests for a call are refused after this, and no media session can open. Twilio rings for 25 seconds and
@@ -45,8 +44,8 @@ const MEDIA_TOKEN_TTL_MS = 30_000;
 /** Twilio sends `start` within milliseconds of the socket opening; a socket that names no call by then is closed. */
 const START_WAIT_MS = 3_000;
 /**
- * More lines than this waiting to name their call are not real calls. The one that has waited longest is closed, so
- * idle lines opened with a copied signature can never keep a real call out.
+ * More lines than this waiting to name their call are not real calls. The one that has waited longest is closed to
+ * make room. Each call has its own signed address, so only a signature Twilio made for a live call can fill places.
  */
 const MAX_WAITING_LINES = 8;
 /** Ended calls are kept this long, then forgotten. */
@@ -116,8 +115,10 @@ export interface PhoneCallService {
   answered(input: { params: URLSearchParams; query: URLSearchParams }): Promise<string>;
   /** Twilio's status webhook: how the call stands. */
   statusChanged(input: { params: URLSearchParams; query: URLSearchParams }): Promise<void>;
-  /** A media WebSocket Twilio opened. It must name a call Aman started, with its one-time token. */
-  media(socket: WebSocket): void;
+  /** Whether a call is waiting for its stream: placed here and not yet ended. Checked before the socket opens. */
+  mayStream(call_id: string): Promise<boolean>;
+  /** A media WebSocket Twilio opened at the address of this call. It must carry the call's one-time token. */
+  media(input: { socket: WebSocket; call_id: string }): void;
   /** Ends calls that never finished, such as one cut off when the server stopped, and forgets old ones. */
   sweep(): Promise<void>;
 }
@@ -138,7 +139,7 @@ interface PhoneCallDeps {
       }
     | undefined;
   /** Whether the parts that listen and speak are running now. */
-  voiceReady: () => Promise<boolean>;
+  voice: () => Promise<CallVoice>;
   /** Read when needed: the delivery service is made after its channels. */
   deliveries: () => Pick<DeliveryService, 'fallBack' | 'recordAttempt'>;
   chats: CallChats;
@@ -182,8 +183,10 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
   const limits: CallLimits = { ...DEFAULT_LIMITS, ...deps.limits };
   const { store, logger } = deps;
   const twilio = deps.twilio;
-  const streamUrl =
-    twilio === undefined ? undefined : `${twilio.publicUrl.replace(/^https:/, 'wss:')}${MEDIA_STREAM_PATH}`;
+  const streamUrlFor = (call_id: string): string | undefined =>
+    twilio === undefined
+      ? undefined
+      : `${twilio.publicUrl.replace(/^https:/, 'wss:')}${MEDIA_STREAM_PATH}/${encodeURIComponent(call_id)}`;
   /** Calls with an open line in this process; their own close writes them down. */
   const live = new Set<string>();
   /** Lines open but not yet named, oldest first. */
@@ -285,8 +288,9 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
     if (twilio === undefined) {
       return attempt({ outcome: 'skipped', detail: CALLS_NOT_SET_UP, target: null });
     }
-    if (!(await deps.voiceReady())) {
-      return attempt({ outcome: 'skipped', detail: CALLS_NEED_VOICE, target: null });
+    const voice = await deps.voice();
+    if (voice !== 'ready') {
+      return attempt({ outcome: 'skipped', detail: callVoiceProblem(voice), target: null });
     }
     const settings = await deps.reachSettings.get(owner);
     if (settings?.channels.calls !== true) {
@@ -381,7 +385,7 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
 
   async function answered({ params, query }: { params: URLSearchParams; query: URLSearchParams }): Promise<string> {
     const parsed = VoiceWebhookParamsSchema.safeParse(Object.fromEntries(params));
-    if (twilio === undefined || streamUrl === undefined || !parsed.success) {
+    if (twilio === undefined || !parsed.success) {
       return HANG_UP_TWIML;
     }
     const { AccountSid, CallSid, AnsweredBy = 'unknown' } = parsed.data;
@@ -394,6 +398,10 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
     }
     if (AnsweredBy === 'fax') {
       await endWithoutTalking({ call, outcome: 'no_answer', detail: ENDED_WORDS.noAnswer });
+      return HANG_UP_TWIML;
+    }
+    const streamUrl = streamUrlFor(call.id);
+    if (streamUrl === undefined) {
       return HANG_UP_TWIML;
     }
     const token = newToken();
@@ -731,7 +739,12 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
     };
   }
 
-  function media(socket: WebSocket): void {
+  async function mayStream(call_id: string): Promise<boolean> {
+    const call = await store.get(call_id);
+    return call?.status === 'connecting';
+  }
+
+  function media({ socket, call_id }: { socket: WebSocket; call_id: string }): void {
     let line: { call: PhoneCall; run: CallLine; transport: PhoneVoiceTransport } | undefined;
     let started = false;
     let closed = false;
@@ -794,7 +807,7 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
           token === undefined
             ? undefined
             : await store.redeemToken({ call_sid: frame.callSid, token_hash: tokenHash(token), now: now() });
-        if (call === undefined) {
+        if (call?.id !== call_id) {
           // Only the fact is logged: an unknown, used or expired token opens nothing.
           logger.warn('A media session was refused: it did not name a call Aman started');
           socket.close(1008, 'unknown call');
@@ -835,5 +848,5 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
     await store.prune({ ended_before: new Date(at - KEEP_ENDED_MS) });
   }
 
-  return { sender, answered, statusChanged, media, sweep };
+  return { sender, answered, statusChanged, mayStream, media, sweep };
 }

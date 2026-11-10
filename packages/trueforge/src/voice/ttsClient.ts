@@ -22,21 +22,29 @@ export function ttsBaseUrl(): string {
 
 const TTS_HEALTH_TIMEOUT_MS = 2_000;
 
+/** How the voice service stands: not answering or not loaded, an older one that cannot check exact speech, or ready. */
+export type TtsHealth = 'down' | 'no_exact' | 'ready';
+
+export async function readTtsHealth(): Promise<TtsHealth> {
+  try {
+    const response = await fetch(`${ttsBaseUrl()}/healthz`, { signal: AbortSignal.timeout(TTS_HEALTH_TIMEOUT_MS) });
+    const body: unknown = response.ok ? await response.json() : undefined;
+    if (typeof body !== 'object' || body === null || !('model_loaded' in body) || body.model_loaded !== true) {
+      return 'down';
+    }
+    return 'exact' in body && body.exact === true ? 'ready' : 'no_exact';
+  } catch {
+    return 'down';
+  }
+}
+
 /**
  * True when the voice service answers and has its model loaded. With `exact`, it must also say it checks exact speech:
  * an older service ignores `exact` and would speak anything.
  */
 export async function probeTtsHealth({ exact = false }: { exact?: boolean } = {}): Promise<boolean> {
-  try {
-    const response = await fetch(`${ttsBaseUrl()}/healthz`, { signal: AbortSignal.timeout(TTS_HEALTH_TIMEOUT_MS) });
-    const body: unknown = response.ok ? await response.json() : undefined;
-    if (typeof body !== 'object' || body === null || !('model_loaded' in body) || body.model_loaded !== true) {
-      return false;
-    }
-    return !exact || ('exact' in body && body.exact === true);
-  } catch {
-    return false;
-  }
+  const health = await readTtsHealth();
+  return health === 'ready' || (!exact && health === 'no_exact');
 }
 
 /** The service marks a 400 that is no fault with a header, not wording. */
@@ -71,7 +79,27 @@ export class WholeSamples {
   }
 }
 
-/** How long a conversation waits for a free place before giving up on one sentence. */
+/** How long the service asked callers to wait before trying again, when it said. */
+function retryAfterMs(response: Response): number | undefined {
+  const seconds = Number(response.headers.get('retry-after'));
+  return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : undefined;
+}
+
+function sleep({ ms, signal }: { ms: number; signal: AbortSignal }): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    signal.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timer);
+        reject(signal.reason instanceof Error ? signal.reason : new Error('stopped waiting'));
+      },
+      { once: true },
+    );
+  });
+}
+
+/** How long a conversation waits for a free place, or for a busy service, before giving up on one sentence. */
 const SHARE_WAIT_MS = 10_000;
 
 export class SidecarSpeechSynthesizer implements SpeechSynthesizer {
@@ -115,18 +143,30 @@ export class SidecarSpeechSynthesizer implements SpeechSynthesizer {
     signal: AbortSignal;
     exact?: boolean;
   }): AsyncIterable<Uint8Array> {
-    const response = await fetch(`${ttsBaseUrl()}/v1/speak`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        text,
-        format,
-        stream: true,
-        ...(exact ? { exact: true } : {}),
-        ...(this.#voice === undefined ? {} : { voice: this.#voice }),
-      }),
-      signal: AbortSignal.any([signal, AbortSignal.timeout(TTS_STREAM_TIMEOUT_MS)]),
+    const body = JSON.stringify({
+      text,
+      format,
+      stream: true,
+      ...(exact ? { exact: true } : {}),
+      ...(this.#voice === undefined ? {} : { voice: this.#voice }),
     });
+    const budgetEnds = Date.now() + SHARE_WAIT_MS;
+    let response: Response;
+    for (;;) {
+      response = await fetch(`${ttsBaseUrl()}/v1/speak`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body,
+        signal: AbortSignal.any([signal, AbortSignal.timeout(TTS_STREAM_TIMEOUT_MS)]),
+      });
+      // The service answers 429 once other requests queue up; asking again after the time it names usually works.
+      const waitMs = response.status === 429 ? retryAfterMs(response) : undefined;
+      if (waitMs === undefined || Date.now() + waitMs > budgetEnds) {
+        break;
+      }
+      await response.body?.cancel().catch(() => undefined);
+      await sleep({ ms: waitMs, signal });
+    }
     // A sentence with nothing to say aloud (a lone symbol) is skipped; any other refusal is a real failure.
     if (refusedFor({ response, reason: 'nothing_to_say' })) {
       return;

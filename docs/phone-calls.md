@@ -1,6 +1,6 @@
 ---
 title: 'Phone calls'
-description: 'Let your assistant call you, in its own voice, when something urgent needs you.'
+description: 'Let your assistant call you, in the voice of your computer, when something urgent needs you.'
 ---
 
 Your assistant can phone you when something urgent needs you. You can talk it through on the call. Calls are off until you turn them on, and a new install calls no one.
@@ -20,7 +20,7 @@ Otherwise the same thing reaches you as a nudge, and the bell says why.
 
 ## What the call sounds like
 
-- The call uses your assistant's own voice, made on your computer. Its name is the one you chose in Personalization.
+- The call uses the default voice of your computer, not the voice you picked for voice mode, because that choice is kept in your browser. The voice is made on your computer. The assistant's name is the one you chose in Personalization.
 - It starts by saying who is calling, who the call is for, and only the kind of thing: "Hi, this is Mannie, calling for Dana. Something needs you. Is this a good time?" The name it calls you by is the one you gave in Personalization. It plays this to the end, and anything said over it does not count as an answer.
 - It says more only after a short, plain yes, such as "Yes", "Yeah", "Sure" or "Okay". A longer reply, a question or someone saying "hold on" is not a yes, and neither is a yes that sounds like a question, such as "Yeah?". Then it asks once more. Say no and it says goodbye. If no one answers the question, it asks once more, then says goodbye. If no one said anything at all, it may have been a voicemail, so the call counts as missed and the text and the notice are sent. The phone cannot tell who picked up, so nothing private is said first.
 - **Whoever says yes hears the message.** The phone cannot tell if it is you. If someone else answers and says yes, they hear what the call is about and can ask about it. If a kind of thing is too private for that, untick it under "What may call you".
@@ -47,7 +47,7 @@ The chat keeps the call as a record, with what was said on both sides in quotes.
 ## Set it up
 
 1. Set up [Text messages](/text-messages) first. Calls use the same Twilio account, number and settings, and they ring the number you confirmed there. Your Twilio number must be able to make voice calls.
-2. Make sure the voice and speech parts of Aman are running. Calls use the same voice service and speech-to-text as voice mode. A call speaks with the default voice, because the voice you pick is kept in your browser. See [Voice input](/voice-input). While they are not running, Reach me shows calls as not available, and nothing rings.
+2. Make sure the voice and speech parts of Aman are running. Calls use the same voice service and speech-to-text as voice mode. A call speaks with the default voice, because the voice you pick is kept in your browser. See [Voice input](/voice-input). While they are not running, Reach me shows calls as not available, and nothing rings. If Reach me says the voice service is out of date, run `aman upgrade`, then try again.
 3. In Settings, Reach me, switch Phone calls on, tick what may call you, save, and press Try it next to Phone calls. Your phone rings with a test call. A test call never sends a text, and it does not count toward the time between calls. Each test call costs money, so Try it rings at most once every 2 minutes and 5 times a day.
 
 Aman tells Twilio where to reach it each time it calls, so there is no address to set in the Twilio console. Check two things there:
@@ -63,9 +63,9 @@ Calls use the same separate Twilio door as texts, on the same port (9201 unless 
 
 - `/twilio/voice`, when you pick up;
 - `/twilio/call-status`, when the call ends;
-- `/twilio/media`, a WebSocket that carries the sound of the call, as `wss://` at the same address.
+- `/twilio/media/` followed by the call's id, a WebSocket that carries the sound of the call, as `wss://` at the same address. Each call has its own address.
 
-Every request must carry Twilio's signature. The signature on the sound connection is the same for every call, so it only shows the request came through Twilio. What opens the line is a one-time key that Aman gave Twilio for that same call. The key works only once, within 30 seconds. Aman refuses anything else. The door never shows the Aman app or the sign-in page. Never publish the main Aman port.
+Every request must carry Twilio's signature. The signature on the sound connection covers that call's own address, so it opens no other call, and an address for a call Aman does not know or that already ended is refused before the connection opens. What opens the line is a one-time key that Aman gave Twilio for that same call. The key works only once, within 30 seconds. Aman refuses anything else. The door never shows the Aman app or the sign-in page. Never publish the main Aman port.
 
 - **Tailscale Funnel, on that port only.** `tailscale funnel 9201` carries the WebSocket too. Nothing else is needed.
 - **Your own domain with https.** Your web server must pass WebSockets on. Caddy does this on its own. With nginx, add the `Upgrade` and `Connection` headers for the `/twilio/` path.

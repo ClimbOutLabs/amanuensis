@@ -34,9 +34,12 @@ export interface TwilioWebhookRoute {
  * One WebSocket address on the listener, such as a call's media stream. It opens only after the handshake's signature
  * has been checked; what the socket then carries is the route's to check.
  */
+/** A WebSocket address of the form `<path>/<id>`. Twilio forbids a query string on one, but not a path. */
 export interface TwilioSocketRoute {
   path: string;
-  open(socket: WebSocket): void;
+  /** Whether the id names something that may open a socket; an id that does not is refused before the upgrade. */
+  admits(id: string): Promise<boolean>;
+  open(socket: WebSocket, id: string): void;
 }
 
 /** The most one media frame may hold. Twilio sends 20 ms of audio at a time, far smaller. */
@@ -117,15 +120,15 @@ function attachSocketRoutes({
   sockets: readonly TwilioSocketRoute[];
   logger: Logger;
 }): void {
-  const known = new Map(sockets.map(route => [route.path, route]));
   const upgrades = new WebSocketServer({ noServer: true, maxPayload: MAX_SOCKET_FRAME_BYTES });
   server.on('upgrade', (request: IncomingMessage, socket: Duplex, head: Buffer) => {
     const url = new URL(request.url ?? '/', 'http://localhost');
-    const route = known.get(url.pathname);
-    if (route === undefined) {
+    const match = socketRouteFor({ sockets, pathname: url.pathname });
+    if (match === undefined) {
       refuseUpgrade(socket, '404 Not Found');
       return;
     }
+    const { route, id } = match;
     const header = request.headers['x-twilio-signature'];
     const signature = Array.isArray(header) ? header[0] : header;
     const httpsUrl = `${settings.webhookPublicUrl}${url.pathname}${url.search}`;
@@ -142,10 +145,41 @@ function attachSocketRoutes({
       refuseUpgrade(socket, '403 Forbidden');
       return;
     }
-    upgrades.handleUpgrade(request, socket, head, ws => {
-      route.open(ws);
-    });
+    // Checked after the signature, so only a request Twilio signed for this exact address costs a lookup.
+    route
+      .admits(id)
+      .catch(() => false)
+      .then(
+        admitted => {
+          if (!admitted) {
+            refuseUpgrade(socket, '404 Not Found');
+            return;
+          }
+          upgrades.handleUpgrade(request, socket, head, ws => {
+            route.open(ws, id);
+          });
+        },
+        () => undefined,
+      );
   });
+}
+
+/** The socket route a path belongs to, and the one id after its prefix. */
+function socketRouteFor({
+  sockets,
+  pathname,
+}: {
+  sockets: readonly TwilioSocketRoute[];
+  pathname: string;
+}): { route: TwilioSocketRoute; id: string } | undefined {
+  for (const route of sockets) {
+    const prefix = `${route.path}/`;
+    if (pathname.startsWith(prefix)) {
+      const id = decodeURIComponent(pathname.slice(prefix.length));
+      return id === '' || id.includes('/') ? undefined : { route, id };
+    }
+  }
+  return undefined;
 }
 
 /**

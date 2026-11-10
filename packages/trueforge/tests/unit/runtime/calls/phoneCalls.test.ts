@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 
 import { CALL_LINES } from '../../../../src/runtime/calls/callTurns';
-import { CALLS_NEED_VOICE } from '../../../../src/runtime/calls/phoneCalls';
+import { CALLS_NEED_VOICE, CALLS_VOICE_OUT_OF_DATE } from '../../../../src/runtime/calls/callVoiceReady';
 import { readReachHistory } from '../../../../src/runtime/noticing/reachGate';
 import { SidecarSpeechSynthesizer, ttsBaseUrl } from '../../../../src/voice/ttsClient';
 import { ACCOUNT_SID, ALICE, CALL_SID, PHONE, callsHarness } from '../../../fixtures/callsHarness';
@@ -132,7 +132,7 @@ describe('phone calls as a channel of the delivery layer', () => {
 
   it('does not ring while the voice parts are not running, says so, and sends a text and a push instead', async () => {
     let ready = false;
-    h = await callsHarness({ voiceReady: () => ready });
+    h = await callsHarness({ voice: () => (ready ? 'ready' : 'not_running') });
     await h.readyToCall();
     const delivery = await h.callDelivery();
     expect(h.placed).toEqual([]);
@@ -140,6 +140,15 @@ describe('phone calls as a channel of the delivery layer', () => {
     expect(call).toMatchObject({ outcome: 'skipped', detail: CALLS_NEED_VOICE });
     expect(h.texts).toHaveLength(1);
     expect(h.pushes).toEqual([delivery.id]);
+  });
+
+  it('says the voice service is out of date, not just stopped, when it is too old to check', async () => {
+    h = await callsHarness({ voice: 'out_of_date' });
+    await h.readyToCall();
+    const delivery = await h.callDelivery();
+    expect(h.placed).toEqual([]);
+    const call = (await h.attemptsOf(delivery.id)).find(attempt => attempt.channel === 'call');
+    expect(call).toMatchObject({ outcome: 'skipped', detail: CALLS_VOICE_OUT_OF_DATE });
   });
 
   it('when no one answers, leaves one text and one push, and never calls again', async () => {
@@ -192,7 +201,9 @@ describe('phone calls as a channel of the delivery layer', () => {
     await h.readyToCall();
     const delivery = await h.callDelivery('Your bill of $482.10 from Northwind Power is due Friday.');
     const { twiml, token } = await h.answer('machine_end_beep');
-    expect(twiml).toContain('<Connect><Stream url="wss://aman.example.invalid/twilio/media">');
+    expect(twiml).toContain(
+      `<Connect><Stream url="wss://aman.example.invalid/twilio/media/${h.placed.at(-1)?.call_id ?? ''}">`,
+    );
     expect(twiml).not.toContain('<Say');
     const media = await h.openMedia({ token });
     expect(await media.closed).toBe(1000);
@@ -296,7 +307,7 @@ describe('phone calls as a channel of the delivery layer', () => {
 
   it('a test call that cannot ring yet does not use up a test', async () => {
     let ready = false;
-    h = await callsHarness({ voiceReady: () => ready });
+    h = await callsHarness({ voice: () => (ready ? 'ready' : 'not_running') });
     await h.readyToCall();
     const tryIt = () =>
       h.deliveries.deliver({

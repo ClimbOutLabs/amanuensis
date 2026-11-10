@@ -183,10 +183,10 @@ import { INBOUND_SMS_PATH, inboundSmsRoute } from './twilioWebhook/inboundSms';
 import { twilioListenerFor } from './twilioWebhook/listener';
 import { phoneCallRoutes } from './twilioWebhook/voiceCall';
 import { ensureWritableDataDir } from './utils/dataDir';
-import { speechLimiter } from './voice/speechRateLimit';
+import { speechLimiter, speechPersonKey } from './voice/speechRateLimit';
 import { isVoiceAvailable, startSttAvailabilityWatcher } from './voice/sttAvailability';
 import { SidecarSpeechToText } from './voice/sttClient';
-import { probeTtsHealth, SidecarSpeechSynthesizer } from './voice/ttsClient';
+import { readTtsHealth, SidecarSpeechSynthesizer } from './voice/ttsClient';
 import { SileroSpeechProbability } from './voice/vad/sileroVad';
 import { attachVoiceSocket, readyVadModel } from './voice/voiceSocket';
 
@@ -850,7 +850,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   const callReadiness = createCallReadiness(() =>
     callVoiceReady({
       sttReady: isVoiceAvailable,
-      ttsReady: () => probeTtsHealth({ exact: true }),
+      tts: readTtsHealth,
       vadModel: readyVadModel,
     }),
   );
@@ -864,7 +864,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   const reachChannels = (input?: { viewer: ChannelViewer }) =>
     reachChannelsFor({
       twilio: configuration.TWILIO,
-      voiceReady: callReadiness.current(),
+      voice: callReadiness.current(),
       numberProblem: twilioNumber.problem,
       viewer: input?.viewer ?? 'person',
     });
@@ -897,7 +897,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
             accountSid: configuration.TWILIO.accountSid,
             publicUrl: configuration.TWILIO.webhookPublicUrl,
           },
-    voiceReady: callReadiness.check,
+    voice: callReadiness.check,
     deliveries: () => {
       if (callDeps.deliveries === undefined) {
         throw new Error('The delivery service is not ready yet.');
@@ -925,7 +925,10 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     // instead of being turned away. The voice the person picked is kept in their browser, so calls use the default.
     speaking: owner =>
       new SidecarSpeechSynthesizer({
-        share: { limiter: speechLimiter, person: `${owner.tenant_id}:${owner.created_by}` },
+        share: {
+          limiter: speechLimiter,
+          person: speechPersonKey({ tenantId: owner.tenant_id, personId: owner.created_by }),
+        },
       }),
     listening: async () => ({
       vad: await SileroSpeechProbability.load({ model: await readyVadModel() }),

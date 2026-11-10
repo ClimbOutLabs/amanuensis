@@ -1,6 +1,7 @@
 import type { TwilioSettings } from '../../config';
 import type { ReachAvailability } from '../../schemas/reach';
-import { CALLS_NEED_VOICE, CALLS_NOT_SET_UP } from '../calls/phoneCalls';
+import { callVoiceProblem, type CallVoice } from '../calls/callVoiceReady';
+import { CALLS_NOT_SET_UP } from '../calls/phoneCalls';
 import type { PointNumberFailure } from '../texts/smsProvider';
 import { TEXTS_NOT_SET_UP } from '../texts/textWords';
 
@@ -47,12 +48,12 @@ const CALLS_PRIVACY_NOTE =
  */
 export function reachChannelsFor({
   twilio,
-  voiceReady,
+  voice,
   numberProblem,
   viewer,
 }: {
   twilio: Pick<TwilioSettings, 'accountSid'> | undefined;
-  voiceReady: boolean;
+  voice: CallVoice;
   numberProblem: PointNumberFailure | undefined;
   viewer: ChannelViewer;
 }): ReachAvailability {
@@ -65,8 +66,9 @@ export function reachChannelsFor({
       note: 'Texts travel through Twilio and the phone company.',
       problem: numberProblem === undefined ? null : numberProblemWords({ failure: numberProblem, viewer }),
     },
-    calls: voiceReady
-      ? { available: true, note: CALLS_PRIVACY_NOTE, problem: null }
-      : { available: false, note: CALLS_NEED_VOICE, problem: null },
+    calls:
+      voice === 'ready'
+        ? { available: true, note: CALLS_PRIVACY_NOTE, problem: null }
+        : { available: false, note: callVoiceProblem(voice), problem: null },
   };
 }

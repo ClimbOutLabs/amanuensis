@@ -5,9 +5,13 @@ import { EMPTY_TWIML, type TwilioSocketRoute, type TwilioWebhookRoute } from './
 /**
  * The phone call's addresses on the Twilio listener: the voice webhook Twilio asks once the call is answered, the
  * status webhook it tells how the call ended, and the media stream the conversation runs over. Each is signed by
- * Twilio; the media stream must also carry the one-time token the voice webhook gave out for that same call.
+ * Twilio; each call's media stream has its own address, so its signature opens no other call, and it must also carry the one-time token the voice webhook gave out for that same call.
  */
-export function phoneCallRoutes({ calls }: { calls: Pick<PhoneCallService, 'answered' | 'statusChanged' | 'media'> }): {
+export function phoneCallRoutes({
+  calls,
+}: {
+  calls: Pick<PhoneCallService, 'answered' | 'statusChanged' | 'media' | 'mayStream'>;
+}): {
   routes: TwilioWebhookRoute[];
   sockets: TwilioSocketRoute[];
 } {
@@ -32,8 +36,9 @@ export function phoneCallRoutes({ calls }: { calls: Pick<PhoneCallService, 'answ
     sockets: [
       {
         path: MEDIA_STREAM_PATH,
-        open: socket => {
-          calls.media(socket);
+        admits: id => calls.mayStream(id),
+        open: (socket, id) => {
+          calls.media({ socket, call_id: id });
         },
       },
     ],

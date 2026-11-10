@@ -18,13 +18,30 @@ function cutAtWord(text: string): string {
 /** Dashes and apostrophes that are not inside a word, which a voice would not say as written. */
 const LONE_MARKS = /(?<![A-Za-z])['-]+|['-]+(?![A-Za-z])/g;
 
+/** Letters that do not split into a base letter and an accent, so stripping accents would drop them. */
+const SPELLED_LETTERS: Record<string, string> = {
+  ø: 'o',
+  Ø: 'O',
+  ł: 'l',
+  Ł: 'L',
+  đ: 'd',
+  Đ: 'D',
+  æ: 'ae',
+  Æ: 'Ae',
+  ß: 'ss',
+};
+
+function spellOut(name: string): string {
+  return name.replace(/[øØłŁđĐæÆß]/g, letter => SPELLED_LETTERS[letter] ?? letter);
+}
+
 /**
  * A name from the person's settings, made fit to say or send: only letters, spaces, apostrophes and dashes inside
  * words, at most 20 of them, so it cannot carry a link or a number to call. The name is checked as given and again as
  * it will be used, since leaving out signs and cutting it can make new words. Undefined when it cannot be used.
  */
 export function plainName(name: string | null | undefined): string | undefined {
-  const plain = plainText(name ?? '');
+  const plain = plainText(spellOut(name ?? ''));
   const letters = cutAtWord(
     plain
       .replace(/[^A-Za-z '-]/g, ' ')

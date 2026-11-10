@@ -1,6 +1,6 @@
 import { SpeechRateLimiter } from '../../../src/voice/speechRateLimit';
 import { UncheckedSpeechError, WouldChangeTextError } from '../../../src/voice/transport';
-import { probeTtsHealth, SidecarSpeechSynthesizer, WholeSamples } from '../../../src/voice/ttsClient';
+import { probeTtsHealth, readTtsHealth, SidecarSpeechSynthesizer, WholeSamples } from '../../../src/voice/ttsClient';
 
 function streamOf(...pieces: Uint8Array[]): Response {
   return new Response(
@@ -203,6 +203,39 @@ describe('SidecarSpeechSynthesizer with exact', () => {
   });
 });
 
+describe('a voice service that is busy', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+    jest.useRealTimers();
+  });
+
+  const busy = () => new Response('busy', { status: 429, headers: { 'retry-after': '1' } });
+
+  it('is asked again after the time it says, within the budget, and then speaks', async () => {
+    const fetchSpy = jest
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(busy())
+      .mockResolvedValueOnce(streamOf(Uint8Array.of(1, 2)));
+    const started = Date.now();
+    const pieces = await collect(
+      new SidecarSpeechSynthesizer().stream({ text: 'Hello there.', format: 'mulaw8k', signal: never }),
+    );
+    expect(pieces).toHaveLength(1);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(900);
+  });
+
+  it('gives up when it says to wait longer than the budget allows', async () => {
+    const fetchSpy = jest
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response('busy', { status: 429, headers: { 'retry-after': '60' } }));
+    await expect(
+      collect(new SidecarSpeechSynthesizer().stream({ text: 'Hello there.', format: 'mulaw8k', signal: never })),
+    ).rejects.toThrow('429');
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('the voice service health check', () => {
   afterEach(() => {
     jest.restoreAllMocks();
@@ -225,5 +258,16 @@ describe('the voice service health check', () => {
     jest.restoreAllMocks();
     answering({ status: 'ok', model_loaded: false, exact: true });
     await expect(probeTtsHealth({ exact: true })).resolves.toBe(false);
+  });
+
+  it('tells down, too old to check exact speech, and ready apart', async () => {
+    answering({ status: 'ok', model_loaded: false });
+    await expect(readTtsHealth()).resolves.toBe('down');
+    jest.restoreAllMocks();
+    answering({ status: 'ok', model_loaded: true });
+    await expect(readTtsHealth()).resolves.toBe('no_exact');
+    jest.restoreAllMocks();
+    answering({ status: 'ok', model_loaded: true, exact: true });
+    await expect(readTtsHealth()).resolves.toBe('ready');
   });
 });

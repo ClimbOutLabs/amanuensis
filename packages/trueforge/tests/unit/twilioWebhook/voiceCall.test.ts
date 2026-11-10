@@ -34,12 +34,16 @@ describe('the Twilio listener for calls', () => {
 
   it('takes a media socket signed over the https form of its address too', async () => {
     h = await callsHarness();
+    await h.readyToCall();
+    await h.callDelivery();
+    await h.answer();
     const port = new URL(h.base).port;
-    const socket = new WebSocket(`ws://127.0.0.1:${port}${MEDIA_STREAM_PATH}`, {
+    const path = `${MEDIA_STREAM_PATH}/${h.placed.at(-1)?.call_id ?? ''}`;
+    const socket = new WebSocket(`ws://127.0.0.1:${port}${path}`, {
       headers: {
         'x-twilio-signature': twilioSignature({
           authToken: AUTH_TOKEN,
-          url: `${PUBLIC_URL}${MEDIA_STREAM_PATH}`,
+          url: `${PUBLIC_URL}${path}`,
           params: new URLSearchParams(),
         }),
       },
@@ -56,9 +60,81 @@ describe('the Twilio listener for calls', () => {
     socket.close();
   });
 
+  it('refuses a stream for a call it does not know, or that already ended, before the socket opens', async () => {
+    h = await callsHarness();
+    await h.readyToCall();
+    await h.callDelivery();
+    await h.answer();
+    expect((await h.openMedia({ token: 'x', callId: 'no-such-call', start: false })).refusedWith).toBe(404);
+    await h.status('completed');
+    await h.waitFor(async () => (await h.calls.getBySid(CALL_SID))?.status === 'ended');
+    expect((await h.openMedia({ token: 'x', start: false })).refusedWith).toBe(404);
+  });
+
+  it('gives each call its own signed address, so one call’s signature opens no other call', async () => {
+    h = await callsHarness();
+    await h.readyToCall();
+    await h.callDelivery();
+    await h.answer();
+    const port = new URL(h.base).port;
+    const callId = h.placed.at(-1)?.call_id ?? '';
+    const socket = new WebSocket(`ws://127.0.0.1:${port}${MEDIA_STREAM_PATH}/${callId}`, {
+      headers: {
+        'x-twilio-signature': twilioSignature({
+          authToken: AUTH_TOKEN,
+          url: `${PUBLIC_URL.replace(/^https:/, 'wss:')}${MEDIA_STREAM_PATH}/another-call`,
+          params: new URLSearchParams(),
+        }),
+      },
+    });
+    const refused = await new Promise<number | undefined>(resolve => {
+      socket.on('unexpected-response', (_request, response) => {
+        resolve(response.statusCode);
+      });
+      socket.on('open', () => {
+        resolve(undefined);
+      });
+    });
+    expect(refused).toBe(403);
+  });
+
+  it('refuses a stream whose start names a different call than its address', async () => {
+    h = await callsHarness();
+    await h.readyToCall();
+    await h.callDelivery();
+    const { token } = await h.answer();
+    // The address names a call that is live, but the start carries another call's key.
+    const other = await h.openMedia({ token, callSid: `CA${'e'.repeat(32)}` });
+    expect(await other.closed).toBe(1008);
+    expect(h.tts.sentences).toEqual([]);
+  });
+
+  it('still connects a real call while signed upgrades for an ended call arrive in a burst', async () => {
+    h = await callsHarness();
+    await h.readyToCall();
+    await h.callDelivery();
+    const { token } = await h.answer();
+    const ended = h.placed.at(-1)?.call_id ?? '';
+    const flood = await Promise.all(
+      Array.from({ length: 40 }, () => h.openMedia({ token: undefined, callId: `${ended}-old`, start: false })),
+    );
+    expect(flood.every(socket => socket.refusedWith === 404)).toBe(true);
+    const line = await h.openMedia({ token });
+    await h.waitFor(() => h.tts.sentences.length > 0);
+    line.socket.close();
+    await line.closed;
+  });
+
   it('serves nothing but its own routes, and takes no WebSocket at any other address', async () => {
     h = await callsHarness();
-    for (const path of ['/twilio/voice', '/twilio/call-status', '/twilio/media', '/api/v1/voice/stream', '/']) {
+    for (const path of [
+      '/twilio/voice',
+      '/twilio/call-status',
+      '/twilio/media',
+      '/twilio/media/x/y',
+      '/api/v1/voice/stream',
+      '/',
+    ]) {
       expect([path, (await fetch(`${h.base}${path}`)).status]).toEqual([path, 404]);
     }
     const stray = new WebSocket(`${h.base.replace('http:', 'ws:')}/api/v1/voice/stream`);
@@ -169,15 +245,15 @@ describe('the Twilio listener for calls', () => {
     expect(h.tts.sentences).toEqual([]);
   });
 
-  it('closes the line that has waited longest to name its call, so idle lines can never keep a real call out', async () => {
+  it('makes room for a line by closing the one that has waited longest to name its call, when 8 wait', async () => {
     h = await callsHarness();
     await h.readyToCall();
     await h.callDelivery();
+    const { token } = await h.answer();
     const waiting = [];
     for (let n = 0; n < 8; n += 1) {
       waiting.push(await h.openMedia({ token: undefined, start: false }));
     }
-    const { token } = await h.answer();
     const line = await h.openMedia({ token });
     expect(await waiting[0]?.closed).toBe(1013);
     await h.waitFor(() => h.tts.sentences.length > 0);
@@ -189,6 +265,9 @@ describe('the Twilio listener for calls', () => {
 
   it('closes a line that has not named its call within a few seconds', async () => {
     h = await callsHarness();
+    await h.readyToCall();
+    await h.callDelivery();
+    await h.answer();
     const started = Date.now();
     const idle = await h.openMedia({ token: undefined, start: false });
     expect(await idle.closed).toBe(1008);
@@ -202,8 +281,9 @@ describe('the Twilio listener for calls', () => {
     const { token } = await h.answer();
     const opened = await h.openMedia({ token });
     await h.waitFor(() => h.tts.sentences.length > 0);
+    // The call is no longer waiting for a stream, so a second one is refused before it opens.
     const again = await h.openMedia({ token });
-    expect(await again.closed).toBe(1008);
+    expect(again.refusedWith).toBe(404);
     opened.socket.close();
     await opened.closed;
   });

@@ -38,5 +38,6 @@ If Aman's voice cannot speak on the call, it hangs up and sends the text and the
 ## If calls do not work
 
 - If Reach me says calls are not available, start the voice parts of Aman, then try again in a minute.
+- If Reach me says the voice service is out of date, run `aman upgrade`, then try again.
 - If the test call never rings, check that your Twilio account may call your number. A trial account can only call numbers you verified with Twilio.
 - If Try it says to wait, you pressed it too often. Wait the time it says, then try again.

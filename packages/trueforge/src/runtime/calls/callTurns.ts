@@ -7,6 +7,8 @@ type GoodTimeAnswer = 'yes' | 'no' | 'unclear';
 const NO_WORDS = new Set(['no', 'nope', 'not', 'busy', 'later', 'bad', 'cant', 'cannot', 'driving', 'stop']);
 /** Words that are only ever a yes. "Go", "fine", "ok" and "alright" are left out: each also starts other replies. */
 const YES_WORDS = new Set(['yes', 'yeah', 'yep', 'yup', 'sure', 'okay']);
+/** Every question mark in use: Latin, Arabic, interrobang, reversed, and the emoji; NFKC folds the full-width ones. */
+const QUESTION_MARKS = /[?¿؟‽⸮❓❔]/;
 /** A yes is short: anything longer is a person saying something else, or not the person at all. */
 const MOST_YES_WORDS = 3;
 /** A "no" word that means yes or nothing at all, so the question is asked again. */
@@ -28,7 +30,7 @@ export function goodTimeAnswer(heard: string): GoodTimeAnswer {
     return 'no';
   }
   // A puzzled "Yeah?" is someone asking who is there, not saying yes, wherever the question mark falls.
-  const asked = /[?？¿]/.test(heard);
+  const asked = QUESTION_MARKS.test(heard.normalize('NFKC'));
   const yes = !asked && words.length > 0 && words.length <= MOST_YES_WORDS && words.every(word => YES_WORDS.has(word));
   return yes ? 'yes' : 'unclear';
 }

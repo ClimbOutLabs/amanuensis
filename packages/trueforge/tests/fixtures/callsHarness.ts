@@ -10,6 +10,7 @@ import { createSqliteDb } from '../../src/db/sqlite/client';
 import { SqlitePersonalizationStore } from '../../src/db/sqlite/personalization-store/SqlitePersonalizationStore';
 import { TextContactStore } from '../../src/db/textContactStore';
 import type { CallChat } from '../../src/runtime/calls/callTurns';
+import type { CallVoice } from '../../src/runtime/calls/callVoiceReady';
 import {
   createPhoneCallService,
   type CallChats,
@@ -46,7 +47,7 @@ export async function callsHarness({
   chat,
   assistantName = 'Mannie',
   limits,
-  voiceReady = true,
+  voice = 'ready',
   listening = () => Promise.resolve({ vad: new LoudnessVad(), stt: new FakeStt() }),
   tts = new FakeTts(),
   speaking,
@@ -56,7 +57,7 @@ export async function callsHarness({
   assistantName?: string;
   limits?: Partial<CallLimits>;
   /** A function lets a test switch the voice parts on part way through. */
-  voiceReady?: boolean | (() => boolean);
+  voice?: CallVoice | (() => CallVoice);
   /** What a conversation listens with; a test can make it slow or fail. */
   listening?: () => Promise<CallListening>;
   tts?: FakeTts;
@@ -149,7 +150,7 @@ export async function callsHarness({
     reachSettings,
     personalization,
     twilio: { provider, accountSid: ACCOUNT_SID, publicUrl: PUBLIC_URL },
-    voiceReady: () => Promise.resolve(typeof voiceReady === 'function' ? voiceReady() : voiceReady),
+    voice: () => Promise.resolve(typeof voice === 'function' ? voice() : voice),
     deliveries: () => deliveries,
     chats,
     speaking: speaking ?? (() => tts),
@@ -241,16 +242,20 @@ export async function callsHarness({
   async function openMedia({
     token,
     callSid = CALL_SID,
+    callId = placed.at(-1)?.call_id ?? 'none',
     sign = true,
     start = true,
   }: {
     token: string | undefined;
     callSid?: string;
+    /** The call whose address the stream opens at; the last call placed unless told otherwise. */
+    callId?: string;
     sign?: boolean;
     start?: boolean;
   }) {
-    const wssUrl = `${PUBLIC_URL.replace(/^https:/, 'wss:')}${MEDIA_STREAM_PATH}`;
-    const socket = new WebSocket(`ws://127.0.0.1:${String(port)}${MEDIA_STREAM_PATH}`, {
+    const path = `${MEDIA_STREAM_PATH}/${callId}`;
+    const wssUrl = `${PUBLIC_URL.replace(/^https:/, 'wss:')}${path}`;
+    const socket = new WebSocket(`ws://127.0.0.1:${String(port)}${path}`, {
       headers: sign
         ? {
             'x-twilio-signature': twilioSignature({

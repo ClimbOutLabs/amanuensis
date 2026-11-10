@@ -43,6 +43,13 @@ describe('a name from the person’s settings, said on a call', () => {
     expect(plainName('Call 555 0100 now')).toBeUndefined();
   });
 
+  it('spells letters that have no accent to strip, instead of dropping them', () => {
+    expect(plainName('Søren')).toBe('Soren');
+    expect(plainName('Łukasz')).toBe('Lukasz');
+    expect(plainName('Đặng')).toBe('Dang');
+    expect(plainName('Æsop Straße')).toBe('Aesop Strasse');
+  });
+
   it('drops a dash or an apostrophe that is not between two letters, also where the name was cut', () => {
     expect(plainName('Anna-Maria Gonzalez-Lopez')).toBe('Anna-Maria');
     expect(plainName('Abcdefghijklmnopqrs-tuv')).toBe('Abcdefghijklmnopqrs');
