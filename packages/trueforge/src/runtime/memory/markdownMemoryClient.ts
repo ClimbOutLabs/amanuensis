@@ -87,6 +87,7 @@ import type {
 } from './memoryClient';
 import { loadPagesForMessage } from './memoryPageLoader';
 import { rankNamedPeopleFirst } from './recallNameBoost';
+import { statementIndexFor, type StatementIndex } from './statementIndex';
 
 export interface MarkdownMemoryClientConfig {
   /** Base directory for all memory files; each namespace gets a subdirectory. */
@@ -554,24 +555,43 @@ export class MarkdownMemoryClient implements MemoryClient {
     );
   }
 
-  /** Every vault directory this client may read, own vault first; the same order recall uses. */
-  private async readVaultDirs(): Promise<string[]> {
+  /** Every vault this client may read, own vault first; the same order recall uses. */
+  private async readVaults(): Promise<{ namespace: string; dir: string }[]> {
     const readable = await vaultReadNamespaces({
       baseDir: this.baseDir,
       tenantNamespace: this.namespace,
       scope: this.vaultScope,
     });
-    return readable.map(namespace => namespaceDirFor(this.baseDir, namespace));
+    return readable.map(namespace => ({ namespace, dir: namespaceDirFor(this.baseDir, namespace) }));
+  }
+
+  /** The statement index of each readable vault, sharing the model the log search uses. Empty without meaning search. */
+  private statementIndexes(vaults: readonly { namespace: string; dir: string }[]): StatementIndex[] {
+    return vaults.flatMap(({ namespace, dir }) => {
+      const embeddings = this.embeddings?.(sanitizeNamespace(namespace));
+      if (embeddings === undefined) {
+        return [];
+      }
+      // Starts the model load when it has not run; the search itself never waits for a download.
+      embeddings.ensureWarmed();
+      return [statementIndexFor({ vaultDir: dir, model: embeddings.embeddingModel })];
+    });
   }
 
   pagesWriteDir(): string {
     return this.namespaceDir();
   }
 
-  async loadPages(params: { message: string; maxPages: number; maxTokens: number }): Promise<PageLoadResult> {
-    let vaultDirs: string[];
+  async loadPages(params: {
+    message: string;
+    earlierMessages: readonly string[];
+    today: string;
+    maxPages: number;
+    maxTokens: number;
+  }): Promise<PageLoadResult> {
+    let vaults: { namespace: string; dir: string }[];
     try {
-      vaultDirs = await this.readVaultDirs();
+      vaults = await this.readVaults();
     } catch {
       return {
         pages: [],
@@ -579,7 +599,12 @@ export class MarkdownMemoryClient implements MemoryClient {
         skippedFiles: [],
       };
     }
-    return loadPagesForMessage({ vaultDirs, writeVaultDir: this.namespaceDir(), ...params });
+    return loadPagesForMessage({
+      vaultDirs: vaults.map(vault => vault.dir),
+      writeVaultDir: this.namespaceDir(),
+      indexes: this.statementIndexes(vaults),
+      ...params,
+    });
   }
 
   async listEntries(params: { namespace: string; timeoutMs: number }): Promise<ListMemoryVaultEntriesOutcome> {

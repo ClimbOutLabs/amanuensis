@@ -1683,7 +1683,7 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
       this.timedRecall(query, recallBudgetTokens, recallEntityTokens),
       this.fetchCurated(query),
       this.fetchReflection(query, decision),
-      this.fetchPages(parts[parts.length - 1] ?? ''),
+      this.fetchPages(parts),
     ]);
     const curatedLines = [...(curated.profileLine !== undefined ? [curated.profileLine] : []), ...curated.modelLines];
 
@@ -1845,16 +1845,22 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
   }
 
   /**
-   * The pages the newest message names, rendered and sanitized, with the counts the event records.
+   * The pages the chat's messages name and the single statements the newest message is about, rendered and
+   * sanitized, with the counts the event records. `parts` are the query messages, oldest first.
    * `stats` is undefined on a backend without pages. Never fails the turn.
    */
-  private async fetchPages(message: string): Promise<{ entries: PageEntry[]; stats: MemoryPagesStats | undefined }> {
+  private async fetchPages(
+    parts: readonly string[],
+  ): Promise<{ entries: PageEntry[]; stats: MemoryPagesStats | undefined }> {
+    const message = parts[parts.length - 1] ?? '';
     if (this.client.loadPages === undefined || message === '') {
       return { entries: [], stats: undefined };
     }
     try {
       const loaded = await this.client.loadPages({
         message,
+        earlierMessages: parts.slice(0, -1),
+        today: localDay({ instant: new Date(), timeZone: this.timeZone }).date,
         maxPages: this.config.pages.maxCount,
         maxTokens: this.config.pages.maxTokens,
       });

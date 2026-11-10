@@ -1,6 +1,7 @@
 /**
- * Loads the pages a message names, in priority order and within caps, and renders them for the
- * model. Runs before recall on every turn; recall then covers everything the pages do not.
+ * Loads the pages a message names, in priority order and within caps, then the single statements it is
+ * about, and renders them for the model. Runs before recall on every turn; recall then covers everything
+ * the pages do not.
  */
 import type { MemoryPagesStats } from '../../schemas/memoryEvents';
 import { loadAliasIndex, matchAliases, type AliasMatch } from './aliasIndex';
@@ -8,6 +9,7 @@ import { estimateTokens } from './markdownMemoryFiles';
 import type { FactMarker, FactSource } from './memoryNotes';
 import {
   listSkippedPageFiles,
+  OWN_WORDS_SOURCES,
   readMemoryPage,
   unmarkedBulletText,
   type MemoryPage,
@@ -16,9 +18,11 @@ import {
   type PageSectionBlock,
 } from './memoryPages';
 import { foldName } from './pageSlug';
+import { endedBefore } from './statementDates';
+import { findStatements, type StatementHit, type StatementIndex } from './statementIndex';
 
-/** Why a page was loaded, recorded on the turn's memory event. */
-type PageLoadReason = 'direct' | 'possessive';
+/** Why a page was loaded: its name was in the message (`direct`, or `possessive` for "Wendy's"), or one of its statements was found by meaning. */
+type PageLoadReason = 'direct' | 'possessive' | 'meaning';
 
 export interface LoadedPage {
   vaultDir: string;
@@ -201,9 +205,6 @@ function isInstructionLine(line: PageLine): boolean {
   return line.kind === 'other' || (line.kind === 'fact' && INSTRUCTION_SOURCES.has(line.fact.marker.src));
 }
 
-/** The sources that are the person's own words typed or written by them; `sent_mail` is a message they sent, which may echo mail. */
-const OWN_WORDS_SOURCES: ReadonlySet<FactSource> = new Set<FactSource>(['you_said', 'you_edited']);
-
 /**
  * Whether any line of the page is not the person's own words: a fact from mail, the calendar, read content,
  * inference or a sent message, or a line whose marker cannot be read. Hand-written lines with no marker are theirs.
@@ -303,7 +304,7 @@ function renderLine(line: PageLine): string | undefined {
  * `draftingLines`). A line there that is not the person's own, and any line whose marker could not
  * be read, is shown with the unconfirmed facts instead, so it never reaches the drafting heading.
  */
-function renderPageLines(input: { title: string; page: MemoryPage }): RenderedLine[] {
+function renderPageLines(input: { title: string; page: MemoryPage; today?: string | undefined }): RenderedLine[] {
   const { page } = input;
   const front = page.frontMatter;
   const flags: string[] = [front.kind];
@@ -329,15 +330,34 @@ function renderPageLines(input: { title: string; page: MemoryPage }): RenderedLi
     unconfirmed: false,
   });
   let demotedShown = demoted.length === 0;
+  // A statement whose end date has passed is shown as earlier, wherever the page keeps it.
+  const ended = renderLines({
+    lines: page.sections.flatMap(section =>
+      section.name !== undefined && CURRENT_SECTIONS.has(section.name)
+        ? section.lines.filter(line => hasEnded({ line, today: input.today }))
+        : [],
+    ),
+    unconfirmed: false,
+  });
+  let endedShown = ended.length === 0;
   for (const section of page.sections) {
     if (isWritingSection({ page, section })) {
       continue;
     }
     const unconfirmed = section.name === 'Unconfirmed';
+    const current = section.name !== undefined && CURRENT_SECTIONS.has(section.name);
     const body = renderLines({
-      lines: unconfirmed ? section.lines : section.lines.filter(line => line.kind !== 'unreadable'),
+      lines: unconfirmed
+        ? section.lines
+        : section.lines.filter(
+            line => line.kind !== 'unreadable' && !(current && hasEnded({ line, today: input.today })),
+          ),
       unconfirmed,
     });
+    if (section.name === 'Earlier' && !endedShown) {
+      body.push(...ended);
+      endedShown = true;
+    }
     if (unconfirmed && !demotedShown) {
       body.push(...demoted);
       demotedShown = true;
@@ -352,14 +372,29 @@ function renderPageLines(input: { title: string; page: MemoryPage }): RenderedLi
       );
     }
   }
+  if (!endedShown) {
+    lines.push({ text: 'Earlier:', side: 'frame' }, ...ended);
+  }
   if (!demotedShown) {
     lines.push({ text: `${UNCONFIRMED_LABEL}:`, side: 'frame' }, ...demoted);
   }
   return lines;
 }
 
-/** The page as the model sees it, without the sides. */
-export function renderPageForModel(input: { title: string; page: MemoryPage }): string {
+/** The sections whose statements are true now, until their end date passes. */
+const CURRENT_SECTIONS: ReadonlySet<string> = new Set(['Now', 'Decided', 'Open']);
+
+function hasEnded({ line, today }: { line: PageLine; today: string | undefined }): boolean {
+  return (
+    today !== undefined &&
+    line.kind === 'fact' &&
+    line.fact.marker.until !== undefined &&
+    endedBefore({ until: line.fact.marker.until, today })
+  );
+}
+
+/** The page as the model sees it, without the sides. Without `today` (`YYYY-MM-DD`) no statement counts as ended. */
+export function renderPageForModel(input: { title: string; page: MemoryPage; today?: string | undefined }): string {
   return renderPageLines(input)
     .map(line => line.text)
     .join('\n');
@@ -369,13 +404,19 @@ interface Candidate {
   vaultIndex: number;
   vaultDir: string;
   match: AliasMatch;
+  /** False when the name is only in an earlier message of the chat. */
+  inNewest: boolean;
 }
 
 /**
- * Priority: the vault that comes first (own before shared before granted), a direct mention
- * before a possessive one, a person before a matter, then where the name first appears.
+ * Priority: a name in the newest message before one only in an earlier message, then the vault that comes
+ * first (own before shared before granted), a direct mention before a possessive one, a person before a matter,
+ * then where the name first appears.
  */
 function compareCandidates(a: Candidate, b: Candidate): number {
+  if (a.inNewest !== b.inNewest) {
+    return a.inNewest ? -1 : 1;
+  }
   if (a.vaultIndex !== b.vaultIndex) {
     return a.vaultIndex - b.vaultIndex;
   }
@@ -388,11 +429,44 @@ function compareCandidates(a: Candidate, b: Candidate): number {
   return a.match.position - b.match.position;
 }
 
+/** The page with only the chosen lines, `sectionIndex` to `lineIndex`es; sections left with none are gone. */
+function pageWithLines({
+  page,
+  chosen,
+}: {
+  page: MemoryPage;
+  chosen: ReadonlyMap<number, ReadonlySet<number>>;
+}): MemoryPage {
+  return {
+    ...page,
+    sections: page.sections.flatMap((section, sectionIndex) => {
+      const keep = chosen.get(sectionIndex);
+      return keep === undefined ? [] : [{ ...section, lines: section.lines.filter((_line, i) => keep.has(i)) }];
+    }),
+  };
+}
+
+/** Found statements grouped by page, pages in order of their best statement. */
+function groupHits(hits: readonly StatementHit[]): { hit: StatementHit; chosen: Map<number, Set<number>> }[] {
+  const groups = new Map<string, { hit: StatementHit; chosen: Map<number, Set<number>> }>();
+  for (const hit of hits) {
+    const key = `${hit.vaultDir}\n${hit.kind}/${hit.slug}`;
+    const group = groups.get(key) ?? { hit, chosen: new Map<number, Set<number>>() };
+    groups.set(key, group);
+    const lines = group.chosen.get(hit.sectionIndex) ?? new Set<number>();
+    lines.add(hit.lineIndex);
+    group.chosen.set(hit.sectionIndex, lines);
+  }
+  return [...groups.values()];
+}
+
 /**
  * The pages a message names across the vaults the scope may read, in priority order, capped
- * by count and by estimated tokens. `vaultDirs` is in read-priority order (own vault first).
- * A later vault's copy of a page is used only when no earlier vault has a readable one. A page that would overflow the token budget, and
- * every page after it, is dropped so the order the model sees stays the priority order.
+ * by count and by estimated tokens, then groups of the single statements it is about. `vaultDirs` is in
+ * read-priority order (own vault first). Names are looked for in the newest message first, then in the
+ * earlier ones. A later vault's copy of a page is used only when no earlier vault has a readable one. A page that would
+ * overflow the token budget, and every page after it, is dropped so the order the model sees stays the
+ * priority order. A group of statements that does not fit is dropped whole.
  * `skippedFiles` names page files left out because their name is not a page slug.
  * Never throws: a vault whose index or page cannot be read contributes nothing.
  */
@@ -401,25 +475,35 @@ export async function loadPagesForMessage(input: {
   /** The one vault this scope writes; only its name cache is saved to disk. */
   writeVaultDir: string;
   message: string;
+  /** The person's earlier messages of this chat, oldest first. */
+  earlierMessages?: readonly string[] | undefined;
+  /** The statement index of each vault folder that has one; none finds nothing by meaning. */
+  indexes?: readonly StatementIndex[] | undefined;
+  /** The calendar day `YYYY-MM-DD` in the person's time zone; without it no statement counts as ended and none is found by meaning. */
+  today?: string | undefined;
   maxPages: number;
   maxTokens: number;
 }): Promise<{ pages: LoadedPage[]; stats: PageLoadStats; skippedFiles: string[] }> {
   const candidates: Candidate[] = [];
   const skippedFiles: string[] = [];
   for (const [vaultIndex, vaultDir] of input.vaultDirs.entries()) {
-    let matches: AliasMatch[];
+    const found: Candidate[] = [];
     try {
       skippedFiles.push(...(await listSkippedPageFiles(vaultDir)));
-      matches = matchAliases({
-        index: await loadAliasIndex({ vaultDir, persist: vaultDir === input.writeVaultDir }),
-        text: input.message,
-      });
+      const index = await loadAliasIndex({ vaultDir, persist: vaultDir === input.writeVaultDir });
+      const texts = [
+        { text: input.message, inNewest: true },
+        ...(input.earlierMessages ?? []).map(text => ({ text, inNewest: false })),
+      ];
+      for (const { text, inNewest } of texts) {
+        for (const match of matchAliases({ index, text })) {
+          found.push({ vaultIndex, vaultDir, match, inNewest });
+        }
+      }
     } catch {
       continue;
     }
-    for (const match of matches) {
-      candidates.push({ vaultIndex, vaultDir, match });
-    }
+    candidates.push(...found);
   }
   candidates.sort(compareCandidates);
 
@@ -464,7 +548,7 @@ export async function loadPagesForMessage(input: {
     }
     settled.add(key);
     stats.candidates += 1;
-    const rendered = renderPageLines({ title: candidate.match.title, page });
+    const rendered = renderPageLines({ title: candidate.match.title, page, today: input.today });
     const text = rendered.map(line => line.text).join('\n');
     const drafting = draftingLines({ title: candidate.match.title, page });
     const frameTokens = drafting.length > 0 && !hasDraftingFrame ? DRAFTING_FRAME_TOKENS : 0;
@@ -486,6 +570,43 @@ export async function loadPagesForMessage(input: {
       text,
       drafting,
       holdsOutsideText: pageHoldsOutsideText(page),
+      ownLines: rendered.filter(line => line.side === 'own').map(line => line.text),
+      readLines: rendered.filter(line => line.side === 'read').map(line => line.text),
+      estimatedTokens,
+    });
+  }
+
+  // Statements of pages shown whole are not repeated. Each group goes through the page renderer with only its chosen lines.
+  const hits =
+    input.today === undefined
+      ? []
+      : await findStatements({
+          indexes: input.indexes ?? [],
+          message: input.message,
+          today: input.today,
+          skip: new Set(pages.map(page => `${page.kind}/${page.slug}`)),
+        });
+  for (const { hit, chosen } of groupHits(hits)) {
+    stats.candidates += 1;
+    const shown = pageWithLines({ page: hit.page, chosen });
+    const rendered = renderPageLines({ title: hit.title, page: shown, today: input.today });
+    const text = rendered.map(line => line.text).join('\n');
+    const estimatedTokens = estimateTokens(text);
+    if (overBudget || usedTokens + estimatedTokens > input.maxTokens) {
+      stats.dropped_over_budget += 1;
+      continue;
+    }
+    usedTokens += estimatedTokens;
+    pages.push({
+      vaultDir: hit.vaultDir,
+      kind: hit.kind,
+      slug: hit.slug,
+      title: singleLine(hit.title),
+      reason: 'meaning',
+      page: shown,
+      text,
+      drafting: [],
+      holdsOutsideText: pageHoldsOutsideText(shown),
       ownLines: rendered.filter(line => line.side === 'own').map(line => line.text),
       readLines: rendered.filter(line => line.side === 'read').map(line => line.text),
       estimatedTokens,

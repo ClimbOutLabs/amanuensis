@@ -1894,7 +1894,13 @@ describe('HindsightMemoryProcessor pages layer', () => {
       },
     );
     const event = await run({ client, message: 'Is Wendy free Saturday?' });
-    expect(loadPages).toHaveBeenCalledWith({ message: 'Is Wendy free Saturday?', maxPages: 6, maxTokens: 1500 });
+    expect(loadPages).toHaveBeenCalledWith({
+      message: 'Is Wendy free Saturday?',
+      earlierMessages: [],
+      today: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+      maxPages: 6,
+      maxTokens: 1500,
+    });
     expect(event['injected_block']).toBe(
       [
         '<aman-memory>',

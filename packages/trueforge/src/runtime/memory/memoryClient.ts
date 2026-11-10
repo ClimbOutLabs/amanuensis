@@ -106,10 +106,18 @@ export interface MemoryClient {
 
   /**
    * Optional: the people and matter pages a message names, across every vault this client may
-   * read, in priority order and within the caps. Only the markdown client implements it, as
+   * read, in priority order and within the caps, then the single statements it is about. Only the markdown client implements it, as
    * pages live beside the daily logs. Never throws.
    */
-  loadPages?(params: { message: string; maxPages: number; maxTokens: number }): Promise<PageLoadResult>;
+  loadPages?(params: {
+    message: string;
+    /** The person's earlier messages of this chat, oldest first; a page they name is loaded too. */
+    earlierMessages: readonly string[];
+    /** The calendar day `YYYY-MM-DD` in the person's time zone. */
+    today: string;
+    maxPages: number;
+    maxTokens: number;
+  }): Promise<PageLoadResult>;
 
   /**
    * Optional: the folder of the one vault this client's chat writes pages to (its persona's vault, else the

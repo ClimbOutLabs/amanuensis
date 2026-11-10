@@ -224,7 +224,13 @@ describe('1. persona isolation: pages load only from the vaults the scope may re
 
   it.each(SCENARIOS)('$name', async ({ asks, message, expected }) => {
     const client = new MarkdownMemoryClient({ baseDir, namespace: TENANT, vaultScope: SCOPES[asks] });
-    const { pages, stats } = await client.loadPages({ message, maxPages: 10, maxTokens: 10_000 });
+    const { pages, stats } = await client.loadPages({
+      message,
+      earlierMessages: [],
+      today: '2026-11-01',
+      maxPages: 10,
+      maxTokens: 10_000,
+    });
 
     expect(pages.map(page => `${vaultNameOf(page.vaultDir) ?? page.vaultDir}:${page.slug}`)).toEqual(expected);
     // Never a page from an unreadable vault, and the content really is that vault's.
