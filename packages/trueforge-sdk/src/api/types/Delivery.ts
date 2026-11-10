@@ -2,8 +2,4 @@
 
 import type * as TrueForge from "../index.js";
 
-export type Delivery =
-    | TrueForge.ApprovalWaitingDelivery
-    | TrueForge.NoteDelivery
-    | TrueForge.NudgeDelivery
-    | TrueForge.ReminderDelivery;
+export type Delivery = TrueForge.ApprovalWaitingDelivery | TrueForge.BriefDelivery | TrueForge.ReminderDelivery;

@@ -4,13 +4,12 @@ import type * as TrueForge from "../../api/index.js";
 import * as core from "../../core/index.js";
 import type * as serializers from "../index.js";
 import { ApprovalWaitingDelivery } from "./ApprovalWaitingDelivery.js";
-import { NoteDelivery } from "./NoteDelivery.js";
-import { NudgeDelivery } from "./NudgeDelivery.js";
+import { BriefDelivery } from "./BriefDelivery.js";
 import { ReminderDelivery } from "./ReminderDelivery.js";
 
 export const Delivery: core.serialization.Schema<serializers.Delivery.Raw, TrueForge.Delivery> =
-    core.serialization.undiscriminatedUnion([ApprovalWaitingDelivery, NoteDelivery, NudgeDelivery, ReminderDelivery]);
+    core.serialization.undiscriminatedUnion([ApprovalWaitingDelivery, BriefDelivery, ReminderDelivery]);
 
 export declare namespace Delivery {
-    export type Raw = ApprovalWaitingDelivery.Raw | NoteDelivery.Raw | NudgeDelivery.Raw | ReminderDelivery.Raw;
+    export type Raw = ApprovalWaitingDelivery.Raw | BriefDelivery.Raw | ReminderDelivery.Raw;
 }

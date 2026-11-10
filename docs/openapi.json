@@ -751,6 +751,68 @@
         ],
         "type": "object"
       },
+      "BriefDelivery": {
+        "properties": {
+          "attempts": {
+            "description": "Each channel tried, oldest first.",
+            "items": {
+              "$ref": "#/components/schemas/DeliveryAttempt"
+            },
+            "type": "array"
+          },
+          "created_at": {
+            "description": "When the delivery was made, ISO 8601 UTC.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Delivery id.",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "brief"
+            ],
+            "type": "string"
+          },
+          "level": {
+            "$ref": "#/components/schemas/DeliveryLevel"
+          },
+          "link": {
+            "$ref": "#/components/schemas/DeliveryChatLink"
+          },
+          "reason": {
+            "description": "Why this reached the person, in plain words.",
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          },
+          "seen_at": {
+            "description": "When the person first saw it on any device, or null while unread.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "text": {
+            "description": "What the person reads.",
+            "maxLength": 2000,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "link",
+          "id",
+          "level",
+          "text",
+          "reason",
+          "created_at",
+          "seen_at",
+          "attempts"
+        ],
+        "type": "object"
+      },
       "BriefItemCompletion": {
         "description": "The item as marked done.",
         "properties": {
@@ -2653,8 +2715,7 @@
         "discriminator": {
           "mapping": {
             "approval_waiting": "#/components/schemas/ApprovalWaitingDelivery",
-            "note": "#/components/schemas/NoteDelivery",
-            "nudge": "#/components/schemas/NudgeDelivery",
+            "brief": "#/components/schemas/BriefDelivery",
             "reminder": "#/components/schemas/ReminderDelivery"
           },
           "propertyName": "kind"
@@ -2664,10 +2725,7 @@
             "$ref": "#/components/schemas/ReminderDelivery"
           },
           {
-            "$ref": "#/components/schemas/NoteDelivery"
-          },
-          {
-            "$ref": "#/components/schemas/NudgeDelivery"
+            "$ref": "#/components/schemas/BriefDelivery"
           },
           {
             "$ref": "#/components/schemas/ApprovalWaitingDelivery"
@@ -7903,130 +7961,6 @@
           "auth",
           "models",
           "type"
-        ],
-        "type": "object"
-      },
-      "NoteDelivery": {
-        "properties": {
-          "attempts": {
-            "description": "Each channel tried, oldest first.",
-            "items": {
-              "$ref": "#/components/schemas/DeliveryAttempt"
-            },
-            "type": "array"
-          },
-          "created_at": {
-            "description": "When the delivery was made, ISO 8601 UTC.",
-            "type": "string"
-          },
-          "id": {
-            "description": "Delivery id.",
-            "type": "string"
-          },
-          "kind": {
-            "enum": [
-              "note"
-            ],
-            "type": "string"
-          },
-          "level": {
-            "$ref": "#/components/schemas/DeliveryLevel"
-          },
-          "link": {
-            "$ref": "#/components/schemas/DeliveryLink"
-          },
-          "reason": {
-            "description": "Why this reached the person, in plain words.",
-            "maxLength": 500,
-            "minLength": 1,
-            "type": "string"
-          },
-          "seen_at": {
-            "description": "When the person first saw it on any device, or null while unread.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "text": {
-            "description": "What the person reads.",
-            "maxLength": 2000,
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "kind",
-          "link",
-          "id",
-          "level",
-          "text",
-          "reason",
-          "created_at",
-          "seen_at",
-          "attempts"
-        ],
-        "type": "object"
-      },
-      "NudgeDelivery": {
-        "properties": {
-          "attempts": {
-            "description": "Each channel tried, oldest first.",
-            "items": {
-              "$ref": "#/components/schemas/DeliveryAttempt"
-            },
-            "type": "array"
-          },
-          "created_at": {
-            "description": "When the delivery was made, ISO 8601 UTC.",
-            "type": "string"
-          },
-          "id": {
-            "description": "Delivery id.",
-            "type": "string"
-          },
-          "kind": {
-            "enum": [
-              "nudge"
-            ],
-            "type": "string"
-          },
-          "level": {
-            "$ref": "#/components/schemas/DeliveryLevel"
-          },
-          "link": {
-            "$ref": "#/components/schemas/DeliveryLink"
-          },
-          "reason": {
-            "description": "Why this reached the person, in plain words.",
-            "maxLength": 500,
-            "minLength": 1,
-            "type": "string"
-          },
-          "seen_at": {
-            "description": "When the person first saw it on any device, or null while unread.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "text": {
-            "description": "What the person reads.",
-            "maxLength": 2000,
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "kind",
-          "link",
-          "id",
-          "level",
-          "text",
-          "reason",
-          "created_at",
-          "seen_at",
-          "attempts"
         ],
         "type": "object"
       },

@@ -4,30 +4,30 @@ import type * as TrueForge from "../../api/index.js";
 import * as core from "../../core/index.js";
 import type * as serializers from "../index.js";
 import { DeliveryAttempt } from "./DeliveryAttempt.js";
+import { DeliveryChatLink } from "./DeliveryChatLink.js";
 import { DeliveryLevel } from "./DeliveryLevel.js";
-import { DeliveryLink } from "./DeliveryLink.js";
 
-export const NudgeDelivery: core.serialization.ObjectSchema<serializers.NudgeDelivery.Raw, TrueForge.NudgeDelivery> =
+export const BriefDelivery: core.serialization.ObjectSchema<serializers.BriefDelivery.Raw, TrueForge.BriefDelivery> =
     core.serialization.object({
         attempts: core.serialization.list(DeliveryAttempt),
         createdAt: core.serialization.property("created_at", core.serialization.string()),
         id: core.serialization.string(),
-        kind: core.serialization.stringLiteral("nudge"),
+        kind: core.serialization.stringLiteral("brief"),
         level: DeliveryLevel,
-        link: DeliveryLink.nullable(),
+        link: DeliveryChatLink,
         reason: core.serialization.string(),
         seenAt: core.serialization.property("seen_at", core.serialization.string().nullable()),
         text: core.serialization.string(),
     });
 
-export declare namespace NudgeDelivery {
+export declare namespace BriefDelivery {
     export interface Raw {
         attempts: DeliveryAttempt.Raw[];
         created_at: string;
         id: string;
-        kind: "nudge";
+        kind: "brief";
         level: DeliveryLevel.Raw;
-        link?: DeliveryLink.Raw | null;
+        link: DeliveryChatLink.Raw;
         reason: string;
         seen_at?: string | null;
         text: string;

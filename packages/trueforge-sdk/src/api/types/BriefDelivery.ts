@@ -2,16 +2,16 @@
 
 import type * as TrueForge from "../index.js";
 
-export interface NudgeDelivery {
+export interface BriefDelivery {
     /** Each channel tried, oldest first. */
     attempts: TrueForge.DeliveryAttempt[];
     /** When the delivery was made, ISO 8601 UTC. */
     createdAt: string;
     /** Delivery id. */
     id: string;
-    kind: "nudge";
+    kind: "brief";
     level: TrueForge.DeliveryLevel;
-    link: TrueForge.DeliveryLink | null;
+    link: TrueForge.DeliveryChatLink;
     /** Why this reached the person, in plain words. */
     reason: string;
     /** When the person first saw it on any device, or null while unread. */
