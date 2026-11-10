@@ -9,6 +9,7 @@ import {
   BACKUP_SAVED_LINE,
   UNINSTALL_BACKUP_FAILED,
   UNINSTALL_DECLINED_LINE,
+  UNINSTALL_DOCKER_GONE_LINE,
   UNINSTALL_DOCKER_KEPT_LINE,
   UNINSTALL_DOCKER_LEFTOVERS,
   UNINSTALL_DOCKER_NOT_ANSWERING,
@@ -88,6 +89,7 @@ function removeLine(name: string): string {
   ]);
 }
 
+const DOCKER_VERSION = commandLine('docker', ['--version']);
 const VOLUME_LS = commandLine('docker', ['volume', 'ls', '--quiet']);
 const IMAGE_LS = commandLine('docker', ['image', 'ls', '--format', '{{.Repository}}:{{.Tag}}']);
 const SETUP_IMAGE_RM = commandLine('docker', ['image', 'rm', SETUP_IMAGE]);
@@ -297,6 +299,7 @@ test('uninstall refuses on a computer that is not Windows, before reading anythi
 test('uninstall with Docker not answering asks nothing and removes nothing', async () => {
   const { code, lines, questions, jobs } = await run({
     store: storeWith(() => Promise.reject(new StateDockerError('docker did not answer'))),
+    answers: new Map([[DOCKER_VERSION, okResult('Docker version 28.0.0\n')]]),
   });
   assert.equal(code, 1);
   assert.deepEqual(lines, [problemText(UNINSTALL_DOCKER_NOT_ANSWERING)]);
@@ -394,15 +397,22 @@ test('a data folder that will not go keeps the PATH entry and the Start menu ent
   assert.equal(jobs.programsFolderRemovalScheduled, false);
 });
 
-test('setting Aman up again clears an earlier removal note, so Docker is cleared next time', async () => {
-  const jobs = jobsWith(new Set(), { dockerRemovedMark: true });
-  await jobs.copySelfToPrograms();
-  assert.equal(jobs.dockerRemovedMark, false);
-});
-
 test('uninstall on a PC with no instances left cleans up what is there', async () => {
   const { code, recorded } = await run({ store: storeWith(() => Promise.resolve(summaryWith({}))) });
   assert.equal(code, 0);
   assert.ok(!recorded.includes(BACKUP_LINE));
   assert.equal(recorded[0], VOLUME_LS);
+});
+
+test('with Docker Desktop already taken off the computer, the Windows parts are still removed', async () => {
+  const { code, lines, recorded, jobs } = await run({
+    store: storeWith(() => Promise.reject(new StateDockerError('docker did not answer'))),
+    answers: new Map(),
+  });
+  assert.equal(code, 0);
+  assert.equal(lines[0], UNINSTALL_DOCKER_GONE_LINE);
+  assert.deepEqual(recorded, [DOCKER_VERSION]);
+  assert.equal(jobs.caCertInStore, false);
+  assert.equal(jobs.programsFolderRemovalScheduled, true);
+  assert.ok(lines.includes(UNINSTALL_DONE_LINE));
 });

@@ -192,7 +192,6 @@ export interface WindowsJobs {
   readonly gettingStartedPath: string;
   // Copies the running executable into the Programs folder. 'already'
   // when the running executable is the copy there (adopt run twice).
-  // Either way a removal's Docker mark goes, since Aman is back.
   copySelfToPrograms: () => Promise<'copied' | 'already'>;
   // Adds the Programs folder to the user PATH and broadcasts the change
   // so new terminal windows see it. 'present' when it was already there.
@@ -284,10 +283,12 @@ export interface WindowsJobs {
   // started by a double-click or a Start menu entry, in a window of its
   // own that closes the moment it ends, and not from a terminal.
   startedFromExplorer: (parentPid: number) => Promise<boolean>;
-  // Whether an earlier removal already cleared Docker, and the mark
-  // that says so.
+  // Whether an earlier removal already cleared Docker, the mark that
+  // says so, and taking it away again when an install starts, since
+  // the install puts Aman back in Docker.
   dockerSideRemoved: () => Promise<boolean>;
   markDockerSideRemoved: () => Promise<void>;
+  clearDockerSideRemoved: () => Promise<void>;
   // The removal's Windows steps, each a no-op when there is nothing to
   // take away, so a removal that stopped part way can run again.
   // Deletes one shortcut file.
@@ -406,9 +407,6 @@ export function systemWindowsJobs(options: {
     gettingStartedPath: paths.gettingStartedPath,
 
     async copySelfToPrograms() {
-      await rm(paths.dockerRemovedMarkPath, { force: true }).catch((error: unknown) => {
-        throw new WindowsJobError('the note from an earlier removal could not be deleted', { cause: error });
-      });
       if (options.selfExePath.toLowerCase() === paths.programsExePath.toLowerCase()) {
         return 'already';
       }
@@ -625,6 +623,14 @@ export function systemWindowsJobs(options: {
         await writeFile(paths.dockerRemovedMarkPath, '', 'utf8');
       } catch (error) {
         throw new WindowsJobError('the note that Docker is cleared could not be written', { cause: error });
+      }
+    },
+
+    async clearDockerSideRemoved() {
+      try {
+        await rm(paths.dockerRemovedMarkPath, { force: true });
+      } catch (error) {
+        throw new WindowsJobError('the note from an earlier removal could not be deleted', { cause: error });
       }
     },
 

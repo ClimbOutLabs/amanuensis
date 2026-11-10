@@ -5,6 +5,7 @@ import {
   UNINSTALL_BACKUP_FAILED,
   UNINSTALL_BUSY,
   UNINSTALL_DECLINED_LINE,
+  UNINSTALL_DOCKER_GONE_LINE,
   UNINSTALL_DOCKER_KEPT_LINE,
   UNINSTALL_DOCKER_LEFTOVERS,
   UNINSTALL_DOCKER_NOT_ANSWERING,
@@ -49,7 +50,10 @@ function printOutput(print: (line: string) => void, text: string): void {
   }
 }
 
-async function readSummary(deps: UninstallDeps): Promise<StateSummary | null> {
+// What the Docker side holds: the summary, nothing at all when Docker
+// Desktop has been taken off the computer (its own removal deletes
+// everything Aman kept in it), or null when it cannot be read, said.
+async function readSummary(deps: UninstallDeps): Promise<StateSummary | 'docker-gone' | null> {
   try {
     const summary = await deps.store.readSummary();
     if (summary.releaseUnreadable) {
@@ -59,6 +63,10 @@ async function readSummary(deps: UninstallDeps): Promise<StateSummary | null> {
     return summary;
   } catch (error) {
     if (error instanceof StateDockerError) {
+      const version = await deps.runner.run('docker', ['--version']);
+      if (!version.started) {
+        return 'docker-gone';
+      }
       deps.print(problemText(UNINSTALL_DOCKER_NOT_ANSWERING));
     } else if (error instanceof StateImageError) {
       deps.print(problemText(UNINSTALL_IMAGE_UNAVAILABLE));
@@ -256,9 +264,12 @@ export async function runUninstall(deps: UninstallDeps): Promise<number> {
     return 1;
   }
   const dockerDone = await jobs.dockerSideRemoved();
-  const summary = dockerDone ? null : await readSummary(deps);
-  if (!dockerDone && summary === null) {
+  const docker = dockerDone ? 'docker-gone' : await readSummary(deps);
+  if (docker === null) {
     return 1;
+  }
+  if (docker === 'docker-gone' && !dockerDone) {
+    print(UNINSTALL_DOCKER_GONE_LINE);
   }
   for (const line of UNINSTALL_PLAN_LINES) {
     print(line);
@@ -268,7 +279,7 @@ export async function runUninstall(deps: UninstallDeps): Promise<number> {
     return 0;
   }
   const keepBackups = !(await confirm(uninstallBackupsQuestion(jobs.backupsDir)));
-  if (summary !== null && !(await removeDockerSide(deps, { summary, keepBackups }))) {
+  if (docker !== 'docker-gone' && !(await removeDockerSide(deps, { summary: docker, keepBackups }))) {
     return 1;
   }
   if (!(await removeWindowsSide(deps, keepBackups))) {

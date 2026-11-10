@@ -91,7 +91,9 @@ What it can do today:
   everything a second run needs, and the message names the full path
   to aman.exe. Once Docker is cleared a note beside the command says
   so, and a second run finishes the Windows side without Docker
-  running. The aman command is deleted only once everything else is
+  running; an install takes the note away when it starts. When Docker
+  Desktop was removed first, its own removal took Aman's Docker data,
+  and the command removes the Windows parts. The aman command is deleted only once everything else is
   gone. The Start menu's Remove Aman entry runs it.
 - `aman backups`, on Windows, lists the backups kept on the PC,
   newest first. The Start menu's Backups entry opens the folder.

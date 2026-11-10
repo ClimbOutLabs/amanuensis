@@ -147,6 +147,7 @@ test('adopt moves the shortcuts, makes the Check Aman entry and replaces the sta
   assert.equal(code, 0);
   assert.deepEqual(lines, [ADOPTED_LINE]);
   assert.deepEqual(jobs.ops, [
+    'clear-docker-mark',
     'copy',
     'path',
     'list',

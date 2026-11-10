@@ -26,6 +26,7 @@ export type FakeWindowsJobStep =
   | 'remove-entry'
   | 'remove-shortcut'
   | 'mark-docker'
+  | 'clear-docker-mark'
   | 'remove-task'
   | 'remove-firewall'
   | 'remove-path'
@@ -171,7 +172,6 @@ export class FakeWindowsJobs implements WindowsJobs {
 
   copySelfToPrograms(): Promise<'copied' | 'already'> {
     this.step('copy');
-    this.dockerRemovedMark = false;
     if (this.selfExePath.toLowerCase() === this.programsExePath.toLowerCase()) {
       return Promise.resolve('already');
     }
@@ -425,6 +425,12 @@ export class FakeWindowsJobs implements WindowsJobs {
   markDockerSideRemoved(): Promise<void> {
     this.step('mark-docker');
     this.dockerRemovedMark = true;
+    return Promise.resolve();
+  }
+
+  clearDockerSideRemoved(): Promise<void> {
+    this.step('clear-docker-mark');
+    this.dockerRemovedMark = false;
     return Promise.resolve();
   }
 

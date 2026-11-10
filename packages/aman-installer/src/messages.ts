@@ -662,6 +662,11 @@ export function networkPhoneLine(address: string): string {
   return `On your phone, open ${printable(address)}.`;
 }
 
+export const INSTALL_REMOVAL_NOTE_STUCK: Problem = {
+  happened: 'A note left by an earlier removal of Aman could not be deleted, so the install did not start.',
+  fix: 'Delete the file docker-removed in the folder %LOCALAPPDATA%\\Programs\\Amanuensis, then open Aman Setup again.',
+};
+
 export const INSTALL_NOT_WINDOWS: Problem = {
   happened: 'The Aman Setup download sets Aman up on a Windows computer, and this is not one.',
   fix: 'Use the installer for this computer to set Aman up.',
@@ -897,12 +902,17 @@ export const UNINSTALL_DOCKER_LEFTOVERS: Problem = {
 
 // Names the command by its full path: the aman command may be off the
 // PATH by now, and the Start menu entry is the last thing to go.
+// The Run box takes the quoted path and the command as they are, where
+// PowerShell would not.
 export function uninstallWindowsLeftoversProblem(exePath: string): Problem {
   return {
     happened: 'Aman is removed from Docker, but some of its parts on this PC are still here.',
-    fix: `Open Remove Aman from the Start menu, or run "${printable(exePath)}" uninstall, and answer Yes if Windows asks; it carries on from where it stopped.`,
+    fix: `Open Remove Aman from the Start menu, or press the Windows key and R and enter "${printable(exePath)}" uninstall, then answer Yes if Windows asks.`,
   };
 }
+
+export const UNINSTALL_DOCKER_GONE_LINE =
+  'Docker Desktop is not on this computer any more, and it took what Aman kept in it when it went. Removing the rest.';
 
 // What the removal says before it asks, so the one yes is an informed one.
 export const UNINSTALL_PLAN_LINES: readonly string[] = [
@@ -1055,6 +1065,7 @@ export function allMessageLines(): string[] {
   lines.push(NETWORK_CLOSED_LINE);
   lines.push(networkPhoneLine('http://192.168.1.20:8791'));
   lines.push(problemText(INSTALL_NOT_WINDOWS));
+  lines.push(problemText(INSTALL_REMOVAL_NOTE_STUCK));
   lines.push(problemText(INSTALL_IMAGE_UNAVAILABLE));
   lines.push(problemText(INSTALL_DOWNLOAD_FAILED));
   lines.push(problemText(INSTALL_DOCKER_UNTRUSTED));
@@ -1108,5 +1119,6 @@ export function allMessageLines(): string[] {
   lines.push(UNINSTALL_DONE_LINE);
   lines.push(uninstallBackupsKeptLine('C:\\Users\\Friend\\AppData\\Local\\Amanuensis\\backups'));
   lines.push(UNINSTALL_DOCKER_KEPT_LINE);
+  lines.push(UNINSTALL_DOCKER_GONE_LINE);
   return lines;
 }

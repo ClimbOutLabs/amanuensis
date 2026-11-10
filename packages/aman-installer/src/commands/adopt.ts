@@ -64,6 +64,7 @@ export async function runAdopt(deps: AdoptDeps): Promise<number> {
     return 1;
   }
   try {
+    await jobs.clearDockerSideRemoved();
     await jobs.copySelfToPrograms();
     await jobs.ensureProgramsFolderOnUserPath();
     const shortcuts = await jobs.listShortcuts();
