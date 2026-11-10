@@ -8,6 +8,7 @@ import { createServer } from 'vite';
 import { startApprovalTestServer } from '../../trueforge/tests/fixtures/approvalTestServer.ts';
 import { FINAL_TEXT } from '../../trueforge/tests/fixtures/scriptedModelServer.ts';
 import { inProcessApi } from './support/approvalChat.ts';
+import { featureShotPath, saveFailureShots } from './support/featureShots.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
 import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
 import { privateViteCache } from './support/viteCache.ts';
@@ -77,6 +78,8 @@ test(
       await page.locator('main').getByText(FINAL_TEXT).first().waitFor({ timeout: RENDER_TIMEOUT_MS });
       await page.locator('.aui-thread-composer').waitFor({ timeout: RENDER_TIMEOUT_MS });
 
+      await page.screenshot({ path: await featureShotPath({ surface: 'route:session', step: 'new-chat-opened' }) });
+      await page.screenshot({ path: await featureShotPath({ surface: 'route:turn', step: 'reply-shown' }) });
       const bothOpen = await composerBox(page);
       assertCentred(bothOpen, 'both sides open');
       assert.equal(bothOpen.transition, '0.3s', 'the width change is smooth when motion is allowed');
@@ -89,6 +92,9 @@ test(
 
       await page.getByRole('button', { name: 'Hide panel' }).click();
       const bothFolded = await composerBox(page);
+      await page.screenshot({
+        path: await featureShotPath({ surface: 'screen:chat-layout', step: 'both-sides-folded' }),
+      });
       assert.ok(
         bothFolded.width > listFolded.width + 64,
         `folding the right panel widens it more (${bothFolded.width})`,
@@ -126,11 +132,15 @@ test(
           width: window.innerWidth,
         };
       });
+      await small.screenshot({ path: await featureShotPath({ surface: 'screen:chat-layout', step: 'phone-header' }) });
       assert.ok(!header.overflows, 'the phone header does not overflow');
       assert.ok(header.height <= 57, `the phone header is one line tall (${header.height})`);
       assert.ok(header.rightmost <= header.width, 'every header action is on screen');
       assert.equal(new Set(header.tops).size, 1, `every header control sits on one row (${header.tops.join(', ')})`);
       await phone.close();
+    } catch (error) {
+      await saveFailureShots({ browser, surface: 'screen:chat-layout' });
+      throw error;
     } finally {
       await browser?.close();
       await vite.close();
