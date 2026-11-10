@@ -12,6 +12,7 @@ import { MAYA_ENTRIES } from './entries';
 import { MAYA_EVENTS } from './events';
 import { mayaDate, mayaPageBySlug } from './pages';
 import type { MayaEntry, MayaEvent } from './schema';
+import { writeMayaSortedPages } from './sortedPages';
 
 /** The vault Maya's world is written into. */
 export const MAYA_NAMESPACE = 'maya';
@@ -83,15 +84,20 @@ async function applyHandEdit({ vaultDir, event }: { vaultDir: string; event: May
 /**
  * Writes days `fromDay` to `throughDay` of Maya's world into the vault under `dir`, through the same
  * writers the product uses. Call it again with the next range to move the world forward.
+ *
+ * With `sorted` false the only page is the one the person typed by hand. With `sorted` true the vault
+ * instead holds the pages a perfect sorter would have written by the end of `throughDay`.
  */
 export async function buildMayaVault({
   dir,
   throughDay,
   fromDay = 1,
+  sorted,
 }: {
   dir: string;
   throughDay: number;
   fromDay?: number;
+  sorted: boolean;
 }): Promise<void> {
   const client = new MarkdownMemoryClient({ baseDir: dir, namespace: MAYA_NAMESPACE });
   for (let day = fromDay; day <= throughDay; day += 1) {
@@ -100,8 +106,13 @@ export async function buildMayaVault({
     if (!outcome.ok) {
       throw new Error(`Day ${String(day)} could not be written: ${outcome.reason ?? 'no reason was given'}`);
     }
-    for (const event of MAYA_EVENTS.filter(candidate => candidate.day === day)) {
-      await applyHandEdit({ vaultDir: namespaceDirFor(dir, MAYA_NAMESPACE), event });
+    if (!sorted) {
+      for (const event of MAYA_EVENTS.filter(candidate => candidate.day === day)) {
+        await applyHandEdit({ vaultDir: namespaceDirFor(dir, MAYA_NAMESPACE), event });
+      }
     }
+  }
+  if (sorted) {
+    await writeMayaSortedPages({ vaultDir: namespaceDirFor(dir, MAYA_NAMESPACE), throughDay });
   }
 }

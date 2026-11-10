@@ -1,27 +1,36 @@
 import type { PageKind } from '../../../../src/runtime/memory/memoryPages';
 import { pageSlug } from '../../../../src/runtime/memory/pageSlug';
 
+export interface MayaPage {
+  title: string;
+  kind: PageKind;
+  /** Other names the page answers to. */
+  names: readonly string[];
+  /** Role words that name the page once the person has said so. */
+  roles: readonly string[];
+}
+
 /** Everyone and everything in Maya's world that could have a page. Maya is the owner and has none. */
 export const MAYA_PAGES = {
-  wendy: { title: 'Wendy', kind: 'person' },
-  zoe: { title: 'Zoe', kind: 'person' },
-  samRossi: { title: 'Sam Rossi', kind: 'person' },
-  samWhitfield: { title: 'Sam Whitfield', kind: 'person' },
-  priya: { title: 'Priya Nair', kind: 'person' },
-  tomas: { title: 'Tomás Herrera', kind: 'person' },
-  elena: { title: 'Elena Petrova', kind: 'person' },
-  dimitra: { title: 'Δήμητρα Παππά', kind: 'person' },
-  minsu: { title: '김민수', kind: 'person' },
-  marcus: { title: 'Marcus Bell', kind: 'person' },
-  aiko: { title: 'Aiko Tanaka', kind: 'person' },
-  noor: { title: 'Noor Haddad', kind: 'person' },
-  madrid: { title: 'The Madrid trip', kind: 'matter' },
-  kitchen: { title: 'Kitchen renovation', kind: 'matter' },
-  taxes: { title: '2025 tax return', kind: 'matter' },
-  halvorsen: { title: 'Halvorsen proposal', kind: 'matter' },
-  school: { title: "Zoe's school", kind: 'matter' },
-  dentist: { title: 'Family dentist', kind: 'matter' },
-} as const satisfies Record<string, { title: string; kind: PageKind }>;
+  wendy: { title: 'Wendy', kind: 'person', names: [], roles: ['wife'] },
+  zoe: { title: 'Zoe', kind: 'person', names: [], roles: ['daughter'] },
+  samRossi: { title: 'Sam Rossi', kind: 'person', names: [], roles: ['plumber'] },
+  samWhitfield: { title: 'Sam Whitfield', kind: 'person', names: [], roles: [] },
+  priya: { title: 'Priya Nair', kind: 'person', names: ['Priya'], roles: ['manager'] },
+  tomas: { title: 'Tomás Herrera', kind: 'person', names: ['Tomás'], roles: [] },
+  elena: { title: 'Elena Petrova', kind: 'person', names: ['Elena'], roles: [] },
+  dimitra: { title: 'Δήμητρα Παππά', kind: 'person', names: ['Δήμητρα', 'Dimitra'], roles: ['architect'] },
+  minsu: { title: '김민수', kind: 'person', names: ['Min-su', 'Minsu'], roles: [] },
+  marcus: { title: 'Marcus Bell', kind: 'person', names: ['Marcus'], roles: ['accountant'] },
+  aiko: { title: 'Aiko Tanaka', kind: 'person', names: ['Aiko'], roles: ['neighbour'] },
+  noor: { title: 'Noor Haddad', kind: 'person', names: ['Noor', 'Ms Haddad'], roles: ['teacher'] },
+  madrid: { title: 'The Madrid trip', kind: 'matter', names: ['Madrid'], roles: [] },
+  kitchen: { title: 'Kitchen renovation', kind: 'matter', names: ['kitchen'], roles: [] },
+  taxes: { title: '2025 tax return', kind: 'matter', names: ['tax return'], roles: [] },
+  halvorsen: { title: 'Halvorsen proposal', kind: 'matter', names: ['Halvorsen'], roles: [] },
+  school: { title: "Zoe's school", kind: 'matter', names: ['school'], roles: [] },
+  dentist: { title: 'Family dentist', kind: 'matter', names: ['dentist'], roles: [] },
+} as const satisfies Record<string, MayaPage>;
 
 export type MayaPageKey = keyof typeof MAYA_PAGES;
 
@@ -35,6 +44,6 @@ export function mayaDate(day: number): string {
 }
 
 /** The page a slug names, or undefined when the world has no such page. */
-export function mayaPageBySlug(slug: string): { title: string; kind: PageKind } | undefined {
+export function mayaPageBySlug(slug: string): MayaPage | undefined {
   return Object.values(MAYA_PAGES).find(page => pageSlug(page.title) === slug);
 }

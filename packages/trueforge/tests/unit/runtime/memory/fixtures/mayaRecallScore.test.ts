@@ -139,7 +139,7 @@ describe("recall over Maya's world", () => {
     const inOrder = [...MAYA_RECALL_QUESTIONS].sort((a, b) => a.as_of_day - b.as_of_day || a.id.localeCompare(b.id));
     for (const question of inOrder) {
       if (question.as_of_day > written) {
-        await buildMayaVault({ dir, fromDay: written + 1, throughDay: question.as_of_day });
+        await buildMayaVault({ dir, fromDay: written + 1, throughDay: question.as_of_day, sorted: false });
         written = question.as_of_day;
       }
       jest.setSystemTime(new Date(`${mayaDate(question.as_of_day)}T21:00:00.000Z`));

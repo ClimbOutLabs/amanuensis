@@ -184,10 +184,10 @@ describe("Maya's world", () => {
     beforeAll(async () => {
       dir = await mkdtemp(path.join(tmpdir(), 'maya-world-'));
       again = await mkdtemp(path.join(tmpdir(), 'maya-world-'));
-      await buildMayaVault({ dir, throughDay: MAYA_WORLD_DAYS });
+      await buildMayaVault({ dir, throughDay: MAYA_WORLD_DAYS, sorted: false });
       // In two steps, as the recall test moves the world forward.
-      await buildMayaVault({ dir: again, throughDay: 30 });
-      await buildMayaVault({ dir: again, fromDay: 31, throughDay: MAYA_WORLD_DAYS });
+      await buildMayaVault({ dir: again, throughDay: 30, sorted: false });
+      await buildMayaVault({ dir: again, fromDay: 31, throughDay: MAYA_WORLD_DAYS, sorted: false });
     }, 60_000);
 
     afterAll(async () => {
