@@ -1,5 +1,5 @@
 import type { AgentContextProcessorOutput, ContextMessage } from '@truefoundry/trueforge-core/core';
-import { InternalEventType } from '@truefoundry/trueforge-core/core';
+import { InternalEventType, type WebSearchTurnState } from '@truefoundry/trueforge-core/core';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import winston from 'winston';
@@ -185,6 +185,7 @@ export async function memoryBlockFor({
   earlierMessages,
   chatId,
   embeddings,
+  webSearch,
 }: {
   dir: string;
   message: string;
@@ -192,6 +193,8 @@ export async function memoryBlockFor({
   chatId: string;
   /** A warm meaning search for this vault; left out, memory is found by words only. */
   embeddings?: EmbeddingSubsystem | undefined;
+  /** The chat's search state, which keeps where each recalled link and address came from. */
+  webSearch?: WebSearchTurnState | undefined;
 }): Promise<string> {
   const capability = hindsightMemoryCapability({
     client: new MarkdownMemoryClient({
@@ -204,6 +207,7 @@ export async function memoryBlockFor({
     sessionId: chatId,
     previousTurnId: null,
     timeZone: 'UTC',
+    webSearch,
   });
   const processor = capability.preLLMProcessors?.[0];
   if (processor === undefined) {

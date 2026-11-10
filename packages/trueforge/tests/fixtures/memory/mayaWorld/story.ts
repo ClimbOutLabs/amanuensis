@@ -365,6 +365,11 @@ export const MAYA_STORY: readonly StoryLine[] = [
     then: [unsure({ page: 'madrid', text: 'Hotel Lumbre confirmed a double room, reference HL-48213.', seen: 8 })],
   }),
   said({ at: [8, 4], text: 'Maya prefers aisle seats on flights.', then: [ignore(ABOUT_MAYA)] }),
+  said({
+    at: [8, 5],
+    text: "Zoe's swimming timetable is at https://poolside-club.example/timetable.",
+    then: [fresh({ page: 'zoe', text: "Zoe's swimming timetable is at https://poolside-club.example/timetable." })],
+  }),
 
   // Day 9
   said({
@@ -411,6 +416,17 @@ export const MAYA_STORY: readonly StoryLine[] = [
     then: [unsure({ page: 'dentist', text: 'Zoe has a check-up with Dr Okafor on August 13 at 15:30.', seen: 10 })],
   }),
   said({ at: [10, 3], text: 'Maya goes to the gym at 6:30 on weekday mornings.', then: [ignore(ABOUT_MAYA)] }),
+  mail({
+    at: [10, 4],
+    text: "Dr Okafor's practice asked to confirm the booking at https://okafor-dental.example/confirm or by writing to bookings@okafor-dental.example.",
+    then: [
+      unsure({
+        page: 'dentist',
+        text: "Dr Okafor's practice asks to confirm the booking at https://okafor-dental.example/confirm or by writing to bookings@okafor-dental.example.",
+        seen: 10,
+      }),
+    ],
+  }),
 
   // Day 11
   mail({
