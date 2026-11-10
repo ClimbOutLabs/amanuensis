@@ -139,6 +139,8 @@ describe('beginTurnExecution tool-output screen wiring', () => {
       metadata: {},
       external_id: null,
       source: null,
+      is_incognito: false,
+      private_expires_at: null,
     });
     const record = await sessionStore.getSession({ tenant_id: TENANT_ID, session_id: 's1' });
     if (record === undefined) {
@@ -176,6 +178,7 @@ describe('beginTurnExecution tool-output screen wiring', () => {
       userRef: STANDALONE_REQUEST_CONTEXT.subject.id,
       deps: {
         mcpCatalog: McpCatalog.loadShipped(),
+        chatDeletionStore: { listDeletedChatModelUsage: () => Promise.resolve([]) },
         globalSettingsStore: store,
         tokenFactoryBudget: uncappedTokenFactoryBudget,
         sessionStore,

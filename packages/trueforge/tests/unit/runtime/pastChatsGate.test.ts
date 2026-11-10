@@ -35,6 +35,7 @@ const MEMORY_CONFIG: MemoryConfig = {
 };
 const NO_SCREEN: ToolOutputScreenConfig = { enabled: false, url: '', authToken: '', threshold: 0.5, timeoutMs: 1500 };
 const memory: MemoryTurnContext = {
+  keepsNothing: false,
   client: undefined,
   config: MEMORY_CONFIG,
   sessionId: 's1',
@@ -131,6 +132,7 @@ describe('the past-chat search switch', () => {
         logger: createLogger({ silent: true }),
       },
       {
+        deletedChats: { listDeletedChatModelUsage: () => Promise.resolve([]) },
         sessionStore,
         budget: uncappedTokenFactoryBudget,
         authority: { tenantId: OWNER.tenant_id, userRef: OWNER.created_by },

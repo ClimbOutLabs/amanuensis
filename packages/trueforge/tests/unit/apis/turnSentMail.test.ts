@@ -95,7 +95,14 @@ async function drain({
     turnDrains: new TurnDrainRegistry(),
     approvedCalls,
     memory:
-      client === undefined ? undefined : { client, userText: 'Tell Wendy I will be there at 7.', attachedFiles: false },
+      client === undefined
+        ? undefined
+        : {
+            client,
+            session: { is_incognito: false },
+            userText: 'Tell Wendy I will be there at 7.',
+            attachedFiles: false,
+          },
   });
 }
 

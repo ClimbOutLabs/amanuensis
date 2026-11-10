@@ -20,6 +20,7 @@ import {
   SpokenReplyProvider,
   ThemeProvider,
   TrueForgeUI,
+  useIsPrivateChat,
   useTheme,
   VoiceInputProvider,
   type AgentConfig,
@@ -237,6 +238,7 @@ function AmanShell({
   // Settings it opens. It starts shown, like the Settings button itself, which also
   // shows until capabilities say otherwise.
   const [settingsChromeEnabled, setSettingsChromeEnabled] = useState(true);
+  const activeChatIsPrivate = useIsPrivateChat(activeSessionId);
   return (
     <div className="aman-shell">
       <AmanChatSurface
@@ -258,6 +260,7 @@ function AmanShell({
         version={version}
         buildRef={buildRef}
         pendingApprovalIds={pendingApprovalIds}
+        privateChat={activeChatIsPrivate}
         auditFeed={activeSessionId === undefined ? undefined : <SentinelAuditFeed sessionId={activeSessionId} />}
         {...(settingsChromeEnabled ? { onOpenAudits: openAudits } : {})}
       />
