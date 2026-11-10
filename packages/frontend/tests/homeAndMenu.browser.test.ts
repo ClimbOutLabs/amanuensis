@@ -217,8 +217,11 @@ test(
       );
       await more.click({ timeout: RENDER_TIMEOUT_MS });
       await signOutRow.click({ timeout: RENDER_TIMEOUT_MS });
+      const leaves = signOutPage.waitForRequest(request => request.isNavigationRequest(), {
+        timeout: RENDER_TIMEOUT_MS,
+      });
       await question.getByRole('button', { name: 'Sign out' }).click({ timeout: RENDER_TIMEOUT_MS });
-      await signOutPage.waitForRequest(request => request.isNavigationRequest(), { timeout: RENDER_TIMEOUT_MS });
+      await leaves;
       assert.equal(signOutRequests, 1, 'Sign out asks the server once');
       await signOutContext.close();
 
