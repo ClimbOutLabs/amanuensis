@@ -1,7 +1,7 @@
 ---
 id: getting-help
 title: Getting help and reporting a bug
-covers:
+covers: command:doctor, command:backup, command:upgrade, command:password, route:help, route:bugReport
 ---
 
 ## Ask the guide
