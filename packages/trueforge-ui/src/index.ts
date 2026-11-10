@@ -437,6 +437,7 @@ export {
   shouldDownscaleImage,
   withImageDownscaling,
 } from './server/imageAttachmentAdapter.js';
+export { useIsPrivateChat } from './server/privateChatStore.js';
 export { ServerVoiceRefusal } from './utils/spokenReplyPlayer.js';
 export type {
   ServerVoiceApi,

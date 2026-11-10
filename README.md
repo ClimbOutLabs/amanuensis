@@ -173,6 +173,8 @@ Be clear about one thing: **the model sees what you send it.** If you use a host
 
 The browser loads nothing from third parties: fonts and icons are bundled. The server contacts only the services you configure: your model provider, your mail and calendar, the connectors you add. The only other outside calls are the map services when you ask for a map, package sources such as npm and PyPI when a skill you approved installs packages, and one download of the memory search model from Hugging Face, which Aman checks against fixed fingerprints. CI fails if a new outside address appears in the code; the list is [scripts/external-hosts.allowlist.json](scripts/external-hosts.allowlist.json).
 
+When you want Aman to forget a conversation, start an incognito chat. Aman can still read what it knows, but saves nothing from the chat, and deletes it when you close it.
+
 Sending a message, deleting anything and installing anything always wait for your OK. That rule is enforced in code, on the tool itself, not left to the model's good behaviour.
 
 ## 🔧 For developers and the curious
