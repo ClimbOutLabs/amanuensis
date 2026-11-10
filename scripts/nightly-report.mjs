@@ -28,6 +28,11 @@ function failureText({ failedJobs, runUrl }) {
  * `openIssue` is the number of the nightly issue that is open now, or undefined.
  */
 export function planReport({ result, failedJobs, openIssue, runUrl }) {
+  // A newer run on the same branch cancels this one. That says nothing about the tests, so the
+  // issue stays as the last finished run left it.
+  if (result === 'cancelled') {
+    return { action: 'none' };
+  }
   if (result === 'success') {
     if (openIssue === undefined) {
       return { action: 'none' };
@@ -105,7 +110,7 @@ async function main() {
     await call(`/issues/${String(plan.issue)}`, { method: 'PATCH', body: JSON.stringify({ state: 'closed' }) });
     console.log(`Closed issue #${String(plan.issue)}.`);
   } else {
-    console.log('The nightly run passed and no issue was open.');
+    console.log('Nothing to report: the run passed with no issue open, or it was cancelled.');
   }
 }
 

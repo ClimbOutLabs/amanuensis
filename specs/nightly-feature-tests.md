@@ -11,7 +11,7 @@ A pull request runs only the test suites its changed files select. A suite broke
 One nightly run on `main` that tests every feature, proves that it does, and keeps pictures of what it saw. It lands in small pull requests that all link this spec.
 
 1. **Nightly run.** `.github/workflows/nightly.yml` runs each night and can be started by hand. It calls the CI workflow with the path filters switched off, so every package suite, the store suites and every browser test run. The frontend suite also runs on pull requests that change the server, core or chat UI packages, because its browser tests load all three.
-2. **Failure issue.** A failed run opens one issue titled "Nightly tests failed" that lists the failed jobs and links the run. Later failures are added to it. The next passing run closes it. An open issue always means the last run did not pass.
+2. **Failure issue.** A failed run opens one issue titled "Nightly tests failed" that lists the failed jobs and links the run. Later failures are added to it. The next passing run closes it. A run that was cancelled changes nothing. An open issue always means the last finished run did not pass.
 3. **Coverage map.** The help check already reads every surface a person can reach from the code: Settings panels, approval card kinds, email and calendar presets, Home cards and pills, installer commands and server route groups. A coverage map names, for each surface, its feature set (Chat, Reminders, Persona, Memory and so on) and the test that exercises it. A CI check fails when a surface has no entry, when a named test does not exist, or when the test does not mention the surface. Surfaces with no test yet sit in a separate list, each with a reason, and the nightly run prints both counts.
 4. **Screenshots.** Tests save a picture at each named step through one helper that takes the surface id. The nightly run files them as `<year>/<month>/<day>/<time>/<feature set>/<surface>--<step>.png`, in UTC, so two runs on one day stay apart. A failed step saves a picture with `FAILED` in its name. The folder gets an `index.html` contact sheet grouped by feature set and a results file a later run can be compared with. The run uploads the folder as one artifact, kept for 30 days.
 5. **Filling the map.** Tests are added by area until the not-yet list is empty: a signed-in journey on the built app (sign in through a local login provider, first run, add a model, chat, approve, sign out), every Settings panel, every Home card, pill and approval kind, every email and calendar preset against stand-in servers, every installer command in Docker including backup then restore, then the remaining route groups.
@@ -32,7 +32,7 @@ The run reads source code and drives the app with a scripted model and synthetic
 
 ## Testing
 
-- `tests/nightly-report.test.mjs` (`pnpm run test:nightly-report`) covers the issue decisions with synthetic inputs: first failure, repeat failure, cancelled run, pass with and without an open issue, which jobs count as failed, and which issue is reused.
+- `tests/nightly-report.test.mjs` (`pnpm run test:nightly-report`) covers the issue decisions with synthetic inputs: first failure, repeat failure, a failure with no failed job, a cancelled run, pass with and without an open issue, which jobs count as failed, and which issue is reused.
 - The coverage check and the contact sheet builder each get a test over synthetic fixture trees, including the real repository passing its own check.
 - Every browser test uses synthetic data, never a person's real data.
 

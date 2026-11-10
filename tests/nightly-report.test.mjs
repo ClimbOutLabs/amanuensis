@@ -19,8 +19,17 @@ test('a repeat failure adds to the open issue instead of opening another', () =>
   assert.equal(plan.issue, 12);
 });
 
-test('a cancelled run counts as not passed, even with no failed job', () => {
-  const plan = planReport({ result: 'cancelled', failedJobs: [], openIssue: undefined, runUrl });
+test('a cancelled run leaves the issue as it was', () => {
+  assert.deepEqual(planReport({ result: 'cancelled', failedJobs: [], openIssue: undefined, runUrl }), {
+    action: 'none',
+  });
+  assert.deepEqual(planReport({ result: 'cancelled', failedJobs: ['Store Tests'], openIssue: 12, runUrl }), {
+    action: 'none',
+  });
+});
+
+test('a failure with no failed job still opens the issue', () => {
+  const plan = planReport({ result: 'failure', failedJobs: [], openIssue: undefined, runUrl });
   assert.equal(plan.action, 'open');
   assert.match(plan.body, /stopped before any job reported a failure/);
 });
