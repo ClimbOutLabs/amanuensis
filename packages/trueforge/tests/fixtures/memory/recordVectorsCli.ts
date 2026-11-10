@@ -16,7 +16,7 @@ async function main(): Promise<void> {
     args: process.argv.slice(2).filter(argument => argument !== '--'),
     options: { texts: { type: 'string' }, 'model-dir': { type: 'string' } },
   });
-  const textsFile = values['texts'];
+  const textsFile = values.texts;
   const modelDir = values['model-dir'];
   if (textsFile === undefined) {
     fail(`The --texts file is missing. The command lists it for you; run the whole command: ${RECORD_COMMAND}`);

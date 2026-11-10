@@ -142,16 +142,16 @@ export class RecordedEmbeddingModel extends EmbeddingModel {
     return 'ready';
   }
 
-  override async ensureReady(): Promise<boolean> {
-    return true;
+  override ensureReady(): Promise<boolean> {
+    return Promise.resolve(true);
   }
 
-  override async embedQueries(texts: string[]): Promise<number[][]> {
-    return this.lookUp({ kind: 'query', texts });
+  override embedQueries(texts: string[]): Promise<number[][]> {
+    return Promise.resolve(this.lookUp({ kind: 'query', texts }));
   }
 
-  override async embedPassages(texts: string[]): Promise<number[][]> {
-    return this.lookUp({ kind: 'passage', texts });
+  override embedPassages(texts: string[]): Promise<number[][]> {
+    return Promise.resolve(this.lookUp({ kind: 'passage', texts }));
   }
 
   private lookUp({ kind, texts }: { kind: RecordedText['kind']; texts: string[] }): number[][] {
