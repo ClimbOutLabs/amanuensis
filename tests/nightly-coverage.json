@@ -27,8 +27,8 @@
   },
   "screens": {
     "screen:answer-details": "The details under an answer open and close.",
-    "screen:approval-ended": "An approval card whose request has ended can be cleared but never run.",
     "screen:approval-card": "An approval card fits the chat and a phone, with every choice in reach.",
+    "screen:approval-ended": "An approval card whose request has ended can be cleared but never run.",
     "screen:browser-live": "The live view of the browser Aman is using.",
     "screen:chat-images": "Pictures in a chat.",
     "screen:chat-layout": "The chat screen with its side panels, on a computer and a phone.",
@@ -38,6 +38,7 @@
     "screen:home": "The Home screen and its More menu.",
     "screen:memory-sharing": "The grid that sets which personas share which memories.",
     "screen:settings-tabs": "The strip of Settings tabs.",
+    "screen:signed-in-journey": "Signing in on the built app, adding a model, chatting and signing out.",
     "screen:space-pictures": "Pictures on a saved page."
   },
   "surfaces": {
@@ -219,7 +220,7 @@
     },
     "route:auth": {
       "set": "account",
-      "tests": []
+      "tests": ["packages/frontend/tests/journeys/signedIn.journey.ts"]
     },
     "route:briefItem": {
       "set": "home",
@@ -307,7 +308,7 @@
     },
     "route:modelProvider": {
       "set": "models",
-      "tests": []
+      "tests": ["packages/frontend/tests/journeys/signedIn.journey.ts"]
     },
     "route:permission": {
       "set": "safety",
@@ -347,7 +348,10 @@
     },
     "route:session": {
       "set": "chat",
-      "tests": ["packages/frontend/tests/chatLayout.browser.test.ts"]
+      "tests": [
+        "packages/frontend/tests/chatLayout.browser.test.ts",
+        "packages/frontend/tests/journeys/signedIn.journey.ts"
+      ]
     },
     "route:sessionFolder": {
       "set": "chat",
@@ -379,7 +383,10 @@
     },
     "route:turn": {
       "set": "chat",
-      "tests": ["packages/frontend/tests/chatLayout.browser.test.ts"]
+      "tests": [
+        "packages/frontend/tests/chatLayout.browser.test.ts",
+        "packages/frontend/tests/journeys/signedIn.journey.ts"
+      ]
     },
     "route:voice": {
       "set": "voice",
@@ -427,7 +434,10 @@
     },
     "screen:first-run": {
       "set": "home",
-      "tests": ["packages/frontend/tests/firstRunGuide.browser.test.ts"]
+      "tests": [
+        "packages/frontend/tests/firstRunGuide.browser.test.ts",
+        "packages/frontend/tests/journeys/signedIn.journey.ts"
+      ]
     },
     "screen:help-chat": {
       "set": "help",
@@ -447,6 +457,10 @@
     "screen:settings-tabs": {
       "set": "account",
       "tests": ["packages/frontend/tests/settingsTabs.browser.test.ts"]
+    },
+    "screen:signed-in-journey": {
+      "set": "account",
+      "tests": ["packages/frontend/tests/journeys/signedIn.journey.ts"]
     },
     "screen:space-pictures": {
       "set": "spaces",
@@ -474,7 +488,7 @@
     },
     "settings:models": {
       "set": "models",
-      "tests": []
+      "tests": ["packages/frontend/tests/journeys/signedIn.journey.ts"]
     },
     "settings:permissions": {
       "set": "safety",
@@ -718,7 +732,6 @@
     "route:agent",
     "route:agentImport",
     "route:auditLog",
-    "route:auth",
     "route:briefItem",
     "route:bugReport",
     "route:calendarAccount",
@@ -740,7 +753,6 @@
     "route:memorySummarize",
     "route:memoryVault",
     "route:model",
-    "route:modelProvider",
     "route:permission",
     "route:persona",
     "route:personaKnowledge",
@@ -763,7 +775,6 @@
     "settings:connectors",
     "settings:memory",
     "settings:model-roles",
-    "settings:models",
     "settings:permissions",
     "settings:personalization",
     "settings:reach-me",

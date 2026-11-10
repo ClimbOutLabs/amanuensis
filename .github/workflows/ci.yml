@@ -207,6 +207,7 @@ jobs:
 
   typecheck-and-build:
     name: Format, Typecheck, Lint and Build
+    needs: detect-changes
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -245,6 +246,21 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+      # The built app with a real sign-in service beside it: sign in, add a model, chat, sign out.
+      - name: Signed-in journey on the built app
+        env:
+          AMAN_SCREENSHOT_DIR: ${{ runner.temp }}/screenshots/${{ needs.detect-changes.outputs.screenshot_folder }}
+        run: pnpm test:journey
+
+      - name: Keep the journey screenshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: screenshots-journey
+          path: ${{ runner.temp }}/screenshots
+          if-no-files-found: ignore
+          retention-days: 1
 
   # Path-gated tests only — format/lint are covered by the global job above.
   package-checks:
@@ -304,8 +320,47 @@ jobs:
         run: pnpm "test:${{ matrix.package }}"
 
       # The browser tests save a picture at each named step, in one folder per feature set.
-      - name: Build the screenshot contact sheet
+      - name: Keep the browser test screenshots
         if: always() && matrix.package == 'frontend'
+        uses: actions/upload-artifact@v7
+        with:
+          name: screenshots-frontend
+          path: ${{ runner.temp }}/screenshots
+          if-no-files-found: ignore
+          retention-days: 1
+
+  # Every job's screenshots in one dated folder, with a contact sheet, kept as one artifact.
+  screenshots:
+    name: Screenshots
+    needs: [detect-changes, typecheck-and-build, package-checks]
+    if: always() && needs.detect-changes.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Collect the screenshots from every job
+        uses: actions/download-artifact@v8
+        with:
+          pattern: screenshots-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/screenshots
+
+      - name: Build the screenshot contact sheet
         env:
           SCREENSHOT_FOLDER: ${{ needs.detect-changes.outputs.screenshot_folder }}
         run: |
@@ -313,7 +368,6 @@ jobs:
           pnpm nightly:gallery "$RUNNER_TEMP/screenshots/$SCREENSHOT_FOLDER" "Screenshots $SCREENSHOT_FOLDER UTC"
 
       - name: Keep the screenshots
-        if: always() && matrix.package == 'frontend'
         uses: actions/upload-artifact@v7
         with:
           name: screenshots
@@ -569,6 +623,7 @@ jobs:
       - migration-order
       - typecheck-and-build
       - package-checks
+      - screenshots
       - aman-installer-exe
       - chart-checks
       - store-tests
@@ -585,6 +640,7 @@ jobs:
           MIGRATION_ORDER: ${{ needs.migration-order.result }}
           TYPECHECK_AND_BUILD: ${{ needs.typecheck-and-build.result }}
           PACKAGE_CHECKS: ${{ needs.package-checks.result }}
+          SCREENSHOTS: ${{ needs.screenshots.result }}
           AMAN_INSTALLER_EXE: ${{ needs.aman-installer-exe.result }}
           CHART_CHECKS: ${{ needs.chart-checks.result }}
           STORE_TESTS: ${{ needs.store-tests.result }}
@@ -594,11 +650,12 @@ jobs:
           GENERATED_CONTRACT_DRIFT: ${{ needs.generated-contract-drift.result }}
         run: |
           ok() { [ "$1" = success ] || [ "$1" = skipped ]; }
-          echo "detect-changes=$DETECT_CHANGES migration-order=$MIGRATION_ORDER typecheck-and-build=$TYPECHECK_AND_BUILD package-checks=$PACKAGE_CHECKS chart-checks=$CHART_CHECKS store-tests=$STORE_TESTS private-data-scan=$PRIVATE_DATA_SCAN help-guide=$HELP_GUIDE feature-coverage=$FEATURE_COVERAGE generated-contract-drift=$GENERATED_CONTRACT_DRIFT"
+          echo "detect-changes=$DETECT_CHANGES migration-order=$MIGRATION_ORDER typecheck-and-build=$TYPECHECK_AND_BUILD package-checks=$PACKAGE_CHECKS screenshots=$SCREENSHOTS chart-checks=$CHART_CHECKS store-tests=$STORE_TESTS private-data-scan=$PRIVATE_DATA_SCAN help-guide=$HELP_GUIDE feature-coverage=$FEATURE_COVERAGE generated-contract-drift=$GENERATED_CONTRACT_DRIFT"
           [ "$DETECT_CHANGES" = success ] || exit 1
           [ "$MIGRATION_ORDER" = success ] || exit 1
           [ "$TYPECHECK_AND_BUILD" = success ] || exit 1
           ok "$PACKAGE_CHECKS" || exit 1
+          ok "$SCREENSHOTS" || exit 1
           ok "$AMAN_INSTALLER_EXE" || exit 1
           ok "$CHART_CHECKS" || exit 1
           ok "$STORE_TESTS" || exit 1
