@@ -843,7 +843,7 @@ print_instance_summary() {
     elif origins_reach_the_network "$origins"; then
       # The warning is only for sign-in that crosses the network: an instance that only ever answers on this
       # computer keeps sign-in on this computer, so there is nothing to warn about.
-      ui_line "Sign-in on your home network is not encrypted. Use the Tailscale address to keep it private."
+      ui_line "Sign-in on your home network is not encrypted. Run the installer again to move this instance to https."
     fi
     if [ -n "$bookmark" ]; then ui_line "Bookmark $bookmark: it keeps working when this computer's address changes."; fi
   elif ! is_loopback_origin "$url"; then

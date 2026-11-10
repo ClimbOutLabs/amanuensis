@@ -331,6 +331,23 @@ test_a_failed_move_to_https_keeps_plain_http_and_is_tried_again() {
   sandbox_drop
 }
 
+test_a_plain_http_instance_is_told_to_run_the_installer_again() {
+  t_begin "an instance still on plain http is told to run the installer again to move it, not to use another address"
+  sandbox_new
+  lan
+  install_machine
+  local plain_origins="http://127.0.0.1:8791,http://localhost:8791,http://192.168.1.20:8791,http://host:8791,http://host.local:8791"
+  sed -i 's/^tls=.*/tls=off/' "$AMAN_HOME/state/instances/main.conf"
+  sed -i 's/^tls_port=.*/tls_port=/' "$AMAN_HOME/state/instances/main.conf"
+  sed -i "s|^origins=.*|origins=$plain_origins|" "$AMAN_HOME/state/instances/main.conf"
+  sed -i "s|^ALLOWED_ORIGINS=.*|ALLOWED_ORIGINS=$plain_origins|" "$AMAN_HOME/instances/main/.env"
+  run_install instance add main --yes
+  assert_rc 0
+  assert_flat_contains "$OUT" "Sign-in on your home network is not encrypted. Run the installer again to move this instance to https."
+  assert_not_contains "$(flat "$OUT")" "Use the Tailscale address"
+  sandbox_drop
+}
+
 test_a_new_address_gets_a_new_certificate() {
   t_begin "refresh adds a new address of this computer to the origins and to the certificate, and keeps the authority"
   sandbox_new
@@ -590,6 +607,7 @@ test_a_computer_with_no_network_has_nothing_to_serve
 test_a_busy_https_port_moves_the_instance
 test_an_existing_instance_moves_to_https
 test_a_failed_move_to_https_keeps_plain_http_and_is_tried_again
+test_a_plain_http_instance_is_told_to_run_the_installer_again
 test_a_new_address_gets_a_new_certificate
 test_backups_carry_the_certificate_but_not_the_key
 test_renewal_issues_what_is_due

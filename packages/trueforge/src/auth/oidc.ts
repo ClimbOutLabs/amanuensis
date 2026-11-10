@@ -23,8 +23,8 @@ import { safeReturnTo } from './safeReturnTo';
 const CALLBACK_PATH = '/api/v1/auth/callback';
 const OAUTH_STATE_MAX_AGE_SECONDS = 10 * 60;
 const ID_TOKEN_COOKIE_MAX_AGE_SECONDS = 24 * 60 * 60;
-// Where the sign-in cookie travels over plain http (an install reached only on this computer), it is kept for less
-// time, since nothing protects it on the way.
+// Where the sign-in cookie travels over plain http, at any of the addresses the instance answers on, it is kept
+// for less time, since nothing protects it on the way.
 const ID_TOKEN_COOKIE_MAX_AGE_PLAIN_HTTP_SECONDS = 12 * 60 * 60;
 
 /** JWKS + claim config used by cookie JWT verification when auth is enabled. */
