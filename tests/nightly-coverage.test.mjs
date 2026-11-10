@@ -101,6 +101,13 @@ test('a named test must exist and must mention the feature', async () => {
 
   const silent = await problemsFor({ map: goodMap(), testText: "shot('screen:chat-layout');" });
   assert.match(silent[0], /tests\/chat\.test\.ts never mentions "route:session"/);
+
+  // A longer id that starts the same way is another feature, not a mention of this one.
+  const longer = await problemsFor({
+    map: goodMap(),
+    testText: "shot('route:sessionFolder'); shot('screen:chat-layout');",
+  });
+  assert.match(longer[0], /never mentions "route:session"/);
 });
 
 test('feature sets must be real, used, and safe as folder names', async () => {

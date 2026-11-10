@@ -63,6 +63,16 @@ export async function readCoverageMap(coveragePath) {
   return { featureSets, screens, surfaces, notYet };
 }
 
+/** Whether a test's text names this feature itself, not a longer id that starts the same way. */
+function mentions({ text, id }) {
+  for (let at = text.indexOf(id); at !== -1; at = text.indexOf(id, at + 1)) {
+    if (!/[A-Za-z0-9_-]/.test(text.charAt(at + id.length))) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /** The file name a feature's screenshots start with: its id with the colon made safe for every system. */
 export function surfaceFileName(surface) {
   return surface.replace(':', '.');
@@ -129,7 +139,7 @@ export async function checkNightlyCoverage({ repoRoot, codeSurfaces }) {
       const text = testText.get(test);
       if (text === undefined) {
         problems.push(`"${id}" names the test ${test}, which does not exist. Fix the path.`);
-      } else if (!text.includes(id)) {
+      } else if (!mentions({ text, id })) {
         problems.push(
           `${test} never mentions "${id}". Save its screenshots under that name in the test, or remove the test from the row.`,
         );
