@@ -64,6 +64,7 @@ const TOOL_RESULT_SOURCE_OF_READ: Record<ReadSource, ToolResultSource> = {
   browser_page: 'web',
   file: 'attachment',
   tool_result: 'other',
+  memory: 'other',
   other: 'other',
 };
 

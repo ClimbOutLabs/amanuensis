@@ -15,9 +15,9 @@ interface ProvenanceValues {
   overflowed: boolean;
 }
 
-/** Where the assistant read a value: as the sender of an email, or the kind of content it appeared in. */
+/** Where the assistant read a value: as the sender of an email, or the kind of content it appeared in. `memory` is read earlier and saved. */
 export type ReadSource =
-  'email_sender' | 'email' | 'event' | 'page' | 'browser_page' | 'file' | 'tool_result' | 'other';
+  'email_sender' | 'email' | 'event' | 'page' | 'browser_page' | 'file' | 'tool_result' | 'memory' | 'other';
 
 export interface ReadOrigin {
   source: ReadSource;
@@ -296,10 +296,11 @@ export function recordUntrustedText(input: { provenance: ChatProvenance; text: s
     input.source === 'event' ||
     input.source === 'browser_page' ||
     input.source === 'file' ||
+    input.source === 'memory' ||
     input.source === 'other'
   ) {
-    // The person's own events, the pages their signed-in browser shows, their files and the host's notes on
-    // their chat hold their details too.
+    // The person's own events, the pages their signed-in browser shows, their files, their saved memory and the
+    // host's notes on their chat hold their details too.
     recordDetails(input.provenance, input.text);
   }
   for (const key of recordText(input.provenance.untrusted, input.text)) {

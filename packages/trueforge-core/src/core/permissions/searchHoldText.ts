@@ -68,7 +68,7 @@ export function holdSay(assistant: string) {
 }
 
 /** The place an address or link was read, as a card names it. */
-const READ_PLACE: Record<ReadSource, string> = {
+const READ_PLACE: Record<Exclude<ReadSource, 'memory'>, string> = {
   email_sender: 'an email',
   email: 'an email',
   event: 'a calendar event',
@@ -89,6 +89,11 @@ export function steeredDestinationSay(input: {
 }): string {
   const { assistant } = input;
   const sentences = input.destinations.map(({ who, kind, source }) => {
+    if (source === 'memory') {
+      return kind === 'link'
+        ? `This goes to ${who}, which ${assistant} read earlier and saved to memory.`
+        : `This goes to ${who}, whose address ${assistant} read earlier and saved to memory.`;
+    }
     if (kind === 'link') {
       return `This goes to ${who}, which was in ${READ_PLACE[source]} ${assistant} read.`;
     }

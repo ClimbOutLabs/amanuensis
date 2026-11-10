@@ -543,6 +543,7 @@ export {
   isTrustedPicture,
   recordPageImageUrls,
   recordPersonText,
+  recordUntrustedText,
   searchResultUrls,
 } from './permissions/provenance';
 export type { SearchResultUrls } from './permissions/provenance';
