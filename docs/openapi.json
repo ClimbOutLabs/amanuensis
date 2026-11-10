@@ -11705,6 +11705,38 @@
               "null"
             ]
           },
+          "copy": {
+            "description": "The headline, consequence and reason the card renders, or null on cards saved before copy existed.",
+            "properties": {
+              "consequence": {
+                "description": "What follows from approving, in one line, or null when nothing needs saying.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "headline": {
+                "description": "What will happen, in one sentence, in words the person recognises.",
+                "type": "string"
+              },
+              "reason": {
+                "description": "Why the tier asks, in plain words, or null when it needs no reason.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "headline",
+              "consequence",
+              "reason"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          },
           "destination": {
             "description": "Verifiable destination (URL, service name), or null.",
             "type": [
@@ -11718,6 +11750,10 @@
               "string",
               "null"
             ]
+          },
+          "destructive": {
+            "description": "True when the action destroys or sends something for good, so its button wears the destructive ink.",
+            "type": "boolean"
           },
           "email": {
             "$ref": "#/components/schemas/Tier3Email"
@@ -11781,6 +11817,10 @@
               "string",
               "null"
             ]
+          },
+          "safe_choice": {
+            "description": "True when the safe choice is the primary button: the action is irreversible or reaches other people.",
+            "type": "boolean"
           },
           "schedule": {
             "$ref": "#/components/schemas/Tier3Schedule"

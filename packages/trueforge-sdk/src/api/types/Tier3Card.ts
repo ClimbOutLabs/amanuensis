@@ -8,10 +8,14 @@ export interface Tier3Card {
     calendarEvent?: TrueForge.Tier3CalendarEvent | null;
     /** A short note on what can't be reversed, or null. */
     cannotBeUndone: string | null;
+    /** The headline, consequence and reason the card renders, or null on cards saved before copy existed. */
+    copy?: TrueForge.Tier3CardCopy | null;
     /** Verifiable destination (URL, service name), or null. */
     destination: string | null;
     /** Host of the connector server that receives the call, or null when it is not a remote server. */
     destinationHost: string | null;
+    /** True when the action destroys or sends something for good, so its button wears the destructive ink. */
+    destructive?: boolean;
     email?: TrueForge.Tier3Email | null;
     /** True when a card carrying mail_new_recipients approves saving a draft rather than sending. */
     mailDraft?: boolean;
@@ -32,6 +36,8 @@ export interface Tier3Card {
     plainWhy: string | null;
     /** Verifiable recipient (address, handle), or null. */
     recipient: string | null;
+    /** True when the safe choice is the primary button: the action is irreversible or reaches other people. */
+    safeChoice?: boolean;
     schedule?: TrueForge.Tier3Schedule | null;
     /** Actual cause of re-escalation, or null on first ask. */
     whyAskedAgain: string | null;

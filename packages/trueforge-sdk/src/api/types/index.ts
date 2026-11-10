@@ -486,6 +486,7 @@ export * from "./Tier3CalendarEvent.js";
 export * from "./Tier3CalendarEventAction.js";
 export * from "./Tier3CalendarEventBefore.js";
 export * from "./Tier3Card.js";
+export * from "./Tier3CardCopy.js";
 export * from "./Tier3Email.js";
 export * from "./Tier3EmailAction.js";
 export * from "./Tier3EmailReplaces.js";
