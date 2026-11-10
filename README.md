@@ -152,7 +152,6 @@ None of these change what it's allowed to do. Sending, deleting and installing s
 
 - **Gmail and Google Calendar.** Choose **Google**, then **Connect**. The panel walks you through making your own Google sign-in in about ten minutes, so your mail goes from Google straight to your computer and nobody else is in between. Connect mail first, then **Connect Calendar**. For Google Calendar only, the simpler way is the **Calendar** card with an app password. [Step-by-step guide](docs/google.mdx#connect-google-calendar-with-an-app-password).
 - **Any other mailbox or calendar.** Choose **Email** for an IMAP mailbox (Outlook, iCloud, Fastmail and most others), and **Calendar** for a CalDAV calendar.
-- **Your notes.** Choose **Notes folder** and point Aman at a folder of Markdown notes, such as the vault you open in Obsidian. Aman can search and read them, add entries to one inbox file, and make new notes; it never changes or deletes a note you wrote.
 
 Reading is quiet. Every draft, send and calendar change shows you a card first and waits for your OK.
 
