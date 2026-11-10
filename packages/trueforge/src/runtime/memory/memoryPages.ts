@@ -13,7 +13,7 @@ import path from 'node:path';
 import { parse, stringify, type ToStringOptions } from 'yaml';
 import { z } from 'zod';
 
-import { FactMarkerSchema, formatMarker, splitFactMarker, type FactMarker } from './memoryNotes';
+import { FactMarkerSchema, formatMarker, splitFactMarker, type FactMarker, type FactSource } from './memoryNotes';
 import { isPageSlug, pageSlug, UNTITLED_PAGE_SLUG } from './pageSlug';
 
 const PAGE_KINDS = ['person', 'matter'] as const;
@@ -200,6 +200,31 @@ export function pageFacts(page: MemoryPage): FactLocation[] {
     }
   }
   return found;
+}
+
+/** The sources that are the person's own words typed or written by them; `sent_mail` is a message they sent, which may echo mail. */
+export const OWN_WORDS_SOURCES: ReadonlySet<FactSource> = new Set<FactSource>(['you_said', 'you_edited']);
+
+/**
+ * What the page is about, in a few words: the line under the title when the person wrote one, otherwise the
+ * first statement under Now that is the person's own (confirmed from their words or typed by hand). A statement
+ * from mail, the calendar or anything read is never the summary. Undefined when the page has neither.
+ */
+export function pageSummary(page: MemoryPage): string | undefined {
+  const written = page.preamble.map(line => line.trim()).find(line => line !== '' && !line.startsWith('# '));
+  if (written !== undefined) {
+    return written;
+  }
+  for (const line of page.sections.find(section => section.name === 'Now')?.lines ?? []) {
+    if (line.kind === 'fact' && OWN_WORDS_SOURCES.has(line.fact.marker.src)) {
+      return line.fact.text;
+    }
+    const typed = line.kind === 'other' ? unmarkedBulletText(line.raw) : undefined;
+    if (typed !== undefined && typed !== '') {
+      return typed;
+    }
+  }
+  return undefined;
 }
 
 /** The sections a fresh page of each kind may list, in page order. "How you write to them" is for people only. */
