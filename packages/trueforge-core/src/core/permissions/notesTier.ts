@@ -1,7 +1,9 @@
 /**
  * Tier rules for the notes folder tools. The folder is the person's own notes on the computer
  * Aman runs on, and nothing in it reaches anyone else, so reads and the two add-only writes run
- * without asking (Tier 1), the same way a reminder does. The writes are shaped so they cannot
+ * without asking (Tier 1), the same way a reminder does. One exception lives in the classifier,
+ * not here: once a chat has read content that is not the person's own words, a write asks
+ * first with a card, because the write may have been asked for by that content. The writes are shaped so they cannot
  * change a word the person already wrote: an append only adds an entry to the one inbox file
  * the person named, and a create only makes a file that does not exist yet. An unknown notes
  * tool fails closed.

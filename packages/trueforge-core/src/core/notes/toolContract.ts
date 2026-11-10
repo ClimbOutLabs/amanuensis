@@ -2,8 +2,9 @@
  * Canonical owner of the notes folder tool contract: names, parameter schemas and annotations.
  * The folder is the person's own notes on their own computer: searching and reading them, adding
  * an entry to the inbox file they named, and making a new note all run without a card, the same
- * way a reminder does. Nothing here edits or deletes a note: the write tools can only add, never
- * change what is already written.
+ * way a reminder does, unless the chat has read content that is not the person's own words, in
+ * which case a write asks first. Nothing here edits or deletes a note: the write tools can only
+ * add, never change what is already written.
  */
 import { z } from 'zod';
 
