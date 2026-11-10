@@ -13,6 +13,7 @@ describe("ModelProvidersClient", () => {
             data: [
                 {
                     env_managed: true,
+                    last_check: { checked_at: "checked_at", kind: "answered", message: "message" },
                     manifest: {
                         auth: { api_key: "api_key" },
                         models: [{ model_id: "model_id", name: "name", properties: {} }],
@@ -36,6 +37,11 @@ describe("ModelProvidersClient", () => {
             data: [
                 {
                     envManaged: true,
+                    lastCheck: {
+                        checkedAt: "checked_at",
+                        kind: "answered",
+                        message: "message",
+                    },
                     manifest: {
                         auth: {
                             apiKey: "api_key",
@@ -106,6 +112,7 @@ describe("ModelProvidersClient", () => {
         const rawResponseBody = {
             data: {
                 env_managed: true,
+                last_check: { checked_at: "checked_at", kind: "answered", message: "message" },
                 manifest: {
                     auth: { api_key: "api_key" },
                     base_url: "base_url",
@@ -143,6 +150,11 @@ describe("ModelProvidersClient", () => {
         expect(response).toEqual({
             data: {
                 envManaged: true,
+                lastCheck: {
+                    checkedAt: "checked_at",
+                    kind: "answered",
+                    message: "message",
+                },
                 manifest: {
                     auth: {
                         apiKey: "api_key",
@@ -319,6 +331,7 @@ describe("ModelProvidersClient", () => {
         const rawResponseBody = {
             data: {
                 env_managed: true,
+                last_check: { checked_at: "checked_at", kind: "answered", message: "message" },
                 manifest: {
                     auth: { api_key: "api_key" },
                     base_url: "base_url",
@@ -356,6 +369,11 @@ describe("ModelProvidersClient", () => {
         expect(response).toEqual({
             data: {
                 envManaged: true,
+                lastCheck: {
+                    checkedAt: "checked_at",
+                    kind: "answered",
+                    message: "message",
+                },
                 manifest: {
                     auth: {
                         apiKey: "api_key",
