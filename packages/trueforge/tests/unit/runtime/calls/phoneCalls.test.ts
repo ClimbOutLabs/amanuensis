@@ -289,7 +289,7 @@ describe('phone calls as a channel of the delivery layer', () => {
       test: 'call',
     });
     expect(delivery.attempts.find(attempt => attempt.channel === 'call')?.detail).toBe(
-      'The call could not be started. Try again in a minute.',
+      'The call could not be started. Try again in 2 minutes.',
     );
     expect(h.texts).toEqual([]);
   });
@@ -475,6 +475,60 @@ describe('a call that ends while its line opens', () => {
     await h.waitFor(async () => (await h.calls.getBySid(CALL_SID))?.status === 'ended');
   });
 
+  it('writes no chat when the person hangs up while the message is still being spoken', async () => {
+    let reached: () => void = () => undefined;
+    const speaking = new Promise<void>(resolve => {
+      reached = resolve;
+    });
+    const begun: string[] = [];
+    const tts: FakeTts = new FakeTts({
+      delay: text => {
+        if (!text.includes('school pickup')) {
+          return Promise.resolve();
+        }
+        reached();
+        // Held until the line is closed, as a slow voice is when the person hangs up.
+        return new Promise<void>(resolve => {
+          tts.signals.get(text)?.addEventListener('abort', () => {
+            resolve();
+          });
+        });
+      },
+    });
+    h = await callsHarness({
+      tts,
+      chat: {
+        turns: new FakeTurns({ message: [] }),
+        begin: () => {
+          begun.push('chat-1');
+          return Promise.resolve('chat-1');
+        },
+      },
+      listening: () => Promise.resolve({ vad: new LoudnessVad(), stt: new FakeStt('yes') }),
+    });
+    await h.readyToCall();
+    const delivery = await h.callDelivery();
+    const media = await h.openMedia({ token: (await h.answer()).token });
+    await sayYes(media);
+    await speaking;
+    media.socket.close();
+    await h.waitFor(async () => (await h.calls.getBySid(CALL_SID))?.status === 'ended');
+    await pause(100);
+    expect(begun).toEqual([]);
+    expect((await h.calls.getBySid(CALL_SID))?.session_id).toBeNull();
+    const calls = (await h.attemptsOf(delivery.id)).filter(attempt => attempt.channel === 'call');
+    expect(calls.at(-1)?.detail).not.toContain('in the chat');
+  });
+
+  it('lets a call that was placed wait about 2 minutes for Twilio, not 5', async () => {
+    h = await callsHarness();
+    await h.readyToCall();
+    await h.callDelivery();
+    const call = await h.calls.getBySid(CALL_SID);
+    const waited = Date.parse(call?.expires_at ?? '') - Date.parse(call?.created_at ?? '');
+    expect(waited).toBe(2 * 60_000);
+  });
+
   it('when the voice cannot speak the message after a yes, writes no chat and sends a text and a push', async () => {
     const begun: string[] = [];
     h = await callsHarness({
@@ -620,10 +674,7 @@ describe('a call that ends while its line opens', () => {
     await h.waitFor(async () => (await h.calls.getBySid(CALL_SID))?.status === 'ended');
     expect((await h.calls.getBySid(CALL_SID))?.outcome).toBe('answered');
     const calls = (await h.attemptsOf(delivery.id)).filter(attempt => attempt.channel === 'call');
-    expect(calls.map(attempt => attempt.detail)).toEqual([
-      'The phone is ringing.',
-      'You answered. The call ended. Anything that was said is in the chat.',
-    ]);
+    expect(calls.map(attempt => attempt.detail)).toEqual(['The phone is ringing.', 'You answered. The call ended.']);
     expect(h.texts).toEqual([]);
   });
 
@@ -677,7 +728,7 @@ describe('a call that ends while its line opens', () => {
     h.nextCall.result = { outcome: 'unknown' };
     const delivery = await h.callDelivery();
     expect(h.texts).toEqual([]);
-    h.clock.now = new Date(h.clock.now.getTime() + 6 * 60_000);
+    h.clock.now = new Date(h.clock.now.getTime() + 3 * 60_000);
     await h.service.sweep();
     expect(h.texts).toHaveLength(1);
     expect(h.pushes).toEqual([delivery.id]);

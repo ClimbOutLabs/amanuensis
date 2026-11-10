@@ -46,7 +46,7 @@ export const CALL_LINES = {
   askAgain: 'Sorry, I did not catch that. Is this a good time? A one-word answer is best.',
   giveUp: 'I will leave it in the app for you. Goodbye.',
   noChat: 'I cannot talk it through on the phone right now. Please open the app to see it. Goodbye.',
-  timeUp: 'I need to go now. Everything we said is in the chat in the app. Goodbye.',
+  timeUp: 'I need to go now. Please open the app. Goodbye.',
   voicemail: (name: string): string => `This is ${name}. Something needs you. Please open the app.`,
 } as const;
 

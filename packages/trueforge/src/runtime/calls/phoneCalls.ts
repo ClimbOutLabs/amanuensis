@@ -35,8 +35,11 @@ export const CALLS_NOT_SET_UP =
 /** Said where calls are offered while the parts that listen and speak are not running. */
 export const CALLS_NEED_VOICE = 'Calls need the voice parts of Aman. Start them, then try again in a minute.';
 
-/** Twilio's requests for a call are refused after this, and no media session can open. */
-const CALL_LIFETIME_MS = 5 * 60_000;
+/**
+ * Twilio's requests for a call are refused after this, and no media session can open. Twilio rings for 25 seconds and
+ * its requests follow within a minute, so a call it never confirmed is ended, and texted about, soon after.
+ */
+const CALL_LIFETIME_MS = 2 * 60_000;
 /** A media token must be used within this long of Twilio being told about it. */
 const MEDIA_TOKEN_TTL_MS = 30_000;
 /** Twilio sends `start` within milliseconds of the socket opening; a socket that names no call by then is closed. */
@@ -81,7 +84,8 @@ const ENDED_WORDS = {
   saidNo: 'You answered and said it was not a good time. It is waiting for you in the app.',
   noYes: 'You answered, but the call ended before you said it was a good time. It is waiting for you in the app.',
   noChat: 'You answered, but the assistant could not talk it through on the phone. It is waiting for you in the app.',
-  ended: 'You answered. The call ended. Anything that was said is in the chat.',
+  ended: 'You answered. The call ended.',
+  endedInChat: 'You answered. The call ended. Anything that was said is in the chat.',
 } as const;
 
 /** What a call listens with. It speaks with the voice service's default voice. */
@@ -329,8 +333,8 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
       return attempt({
         outcome: 'sent',
         detail: test
-          ? 'Twilio did not confirm the call. If your phone does not ring in a minute, try again.'
-          : 'Twilio did not confirm the call. If it does not ring, a text and a notice follow in a few minutes.',
+          ? 'Twilio did not confirm the call. If your phone does not ring in 2 minutes, try again.'
+          : 'Twilio did not confirm the call. If it does not ring, a text and a notice follow in about 2 minutes.',
         target,
       });
     }
@@ -435,7 +439,12 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
     } else if (call.mode === 'voicemail') {
       await endWithoutTalking({ call, outcome: 'voicemail', detail: ENDED_WORDS.voicemail });
     } else {
-      await endAnswered({ call, outcome: 'answered', detail: ENDED_WORDS.ended, session_id: call.session_id });
+      await endAnswered({
+        call,
+        outcome: 'answered',
+        detail: call.session_id === null ? ENDED_WORDS.ended : ENDED_WORDS.endedInChat,
+        session_id: call.session_id,
+      });
     }
   }
 
@@ -611,7 +620,10 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
               notHeard(ENDED_WORDS.messageNotSaid);
               return;
             }
-            written ??= writeChat();
+            // A line that was hung up on while it spoke was already written down without a chat.
+            if (!ended) {
+              written ??= writeChat();
+            }
           });
         },
         askedAgain: () => {

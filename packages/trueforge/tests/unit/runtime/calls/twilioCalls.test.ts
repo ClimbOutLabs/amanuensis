@@ -1,4 +1,5 @@
 import { callFailureWords, createTwilioCallProvider } from '../../../../src/runtime/calls/twilioCalls';
+import { PublicFetchError } from '../../../../src/runtime/publicFetch';
 import type { TwilioFetch } from '../../../../src/runtime/twilio/rest';
 
 const settings = {
@@ -65,7 +66,6 @@ describe('starting a call through Twilio', () => {
     [400, { code: 21211 }, 'invalid_number'],
     [400, { code: 13224 }, 'invalid_number'],
     [400, { code: 99999 }, 'unreachable'],
-    [500, {}, 'unreachable'],
   ] as const)('reads a %s refusal with %j as %s', async (status, body, failure) => {
     const t = replying(status, body);
     expect(
@@ -74,6 +74,46 @@ describe('starting a call through Twilio', () => {
       outcome: 'failed',
       failure,
     });
+  });
+
+  it.each([500, 502, 503])('cannot tell whether a call started when Twilio answers %s', async status => {
+    const t = replying(status, {});
+    expect(
+      await createTwilioCallProvider({ settings, fetchTwilio: t.fetchTwilio }).place({ to: '+1', call_id: 'c' }),
+    ).toEqual({ outcome: 'unknown' });
+  });
+
+  const failing = (error: unknown) => createTwilioCallProvider({ settings, fetchTwilio: () => Promise.reject(error) });
+  const withCode = (code: string) => new TypeError('fetch failed', { cause: Object.assign(new Error(code), { code }) });
+
+  it.each(['ENOTFOUND', 'ECONNREFUSED', 'EHOSTUNREACH', 'ENETUNREACH', 'CERT_HAS_EXPIRED'])(
+    'knows no call started when the request never reached Twilio (%s)',
+    async code => {
+      expect(await failing(withCode(code)).place({ to: '+1', call_id: 'c' })).toEqual({
+        outcome: 'failed',
+        failure: 'unreachable',
+      });
+    },
+  );
+
+  it('knows no call started when the address was refused before any request', async () => {
+    const error = new PublicFetchError({
+      problem: { kind: 'lookup_failed', hostname: 'api.twilio.com' },
+      message: 'Twilio could not be reached.',
+      cause: undefined,
+    });
+    expect(await failing(error).place({ to: '+1', call_id: 'c' })).toEqual({
+      outcome: 'failed',
+      failure: 'unreachable',
+    });
+  });
+
+  it.each([
+    ['a timeout', new DOMException('The operation timed out.', 'TimeoutError')],
+    ['a reset', withCode('ECONNRESET')],
+    ['a closed socket', withCode('UND_ERR_SOCKET')],
+  ])('cannot tell whether a call started after %s, since the request may have been sent', async (_what, error) => {
+    expect(await failing(error).place({ to: '+1', call_id: 'c' })).toEqual({ outcome: 'unknown' });
   });
 
   it('never throws, and what it says carries no number or credential', async () => {
@@ -92,7 +132,7 @@ describe('starting a call through Twilio', () => {
     );
     expect(callFailureWords({ failure: 'not_accepted', test: false })).toContain('Check the account id and auth token');
     expect(callFailureWords({ failure: 'unreachable', test: true })).toBe(
-      'The call could not be started. Try again in a minute.',
+      'The call could not be started. Try again in 2 minutes.',
     );
     expect(callFailureWords({ failure: 'unreachable', test: false })).toBe(
       'The call could not be started. It was sent as a text and a notice instead.',

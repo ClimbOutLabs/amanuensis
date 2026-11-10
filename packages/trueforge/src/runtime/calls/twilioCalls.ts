@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { TwilioSettings } from '../../config';
 import { CallSidSchema } from '../../schemas/phoneCalls';
 import type { ResolveAddresses } from '../publicFetch';
+import { PublicFetchError } from '../publicFetch';
 import { postTwilioForm, publicTwilioFetch, twilioErrorCode, twilioRefusal, type TwilioFetch } from '../twilio/rest';
 
 /** Why a call could not be started. The words for the person are written by whoever shows it. */
@@ -38,6 +39,28 @@ const TIME_LIMIT_SECONDS = 11 * 60;
 const INVALID_NUMBER_CODES = new Set([13223, 13224, 21211, 21214, 21215, 21216, 21217, 21401]);
 
 const CreatedCallSchema = z.object({ sid: CallSidSchema });
+
+/** Connection errors that mean the request never left this machine, so no call can have started. */
+const NOT_SENT_CODES = new Set(['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'EHOSTUNREACH', 'ENETUNREACH']);
+
+/**
+ * Whether a failed request may still have reached Twilio. Only an address refused up front, or a connection that
+ * could not be made, sent nothing; a timeout, a reset or anything unknown may have come after Twilio made the call.
+ */
+function requestMayHaveReached(error: unknown): boolean {
+  if (error instanceof PublicFetchError) {
+    return false;
+  }
+  const code =
+    error instanceof Error && error.cause instanceof Error && 'code' in error.cause ? error.cause.code : undefined;
+  if (
+    typeof code === 'string' &&
+    (NOT_SENT_CODES.has(code) || code.startsWith('CERT_') || code.startsWith('ERR_TLS'))
+  ) {
+    return false;
+  }
+  return true;
+}
 
 /**
  * Starts a call through Twilio's REST API. Twilio answers to the voice webhook with the call's own id, and asks the
@@ -86,10 +109,12 @@ export function createTwilioCallProvider({
         if (code !== undefined && INVALID_NUMBER_CODES.has(code)) {
           return { outcome: 'failed', failure: 'invalid_number' };
         }
-        return { outcome: 'failed', failure: twilioRefusal(reply.status) };
-      } catch {
-        // The request may have reached Twilio before the answer was lost.
-        return { outcome: 'unknown' };
+        // A server error may come after Twilio made the call, so it is not a sure failure.
+        return reply.status >= 500
+          ? { outcome: 'unknown' }
+          : { outcome: 'failed', failure: twilioRefusal(reply.status) };
+      } catch (error) {
+        return requestMayHaveReached(error) ? { outcome: 'unknown' } : { outcome: 'failed', failure: 'unreachable' };
       }
     },
   };
@@ -107,7 +132,7 @@ export function callFailureWords({ failure, test }: { failure: CallFailure; test
       return 'Twilio did not accept the sign-in details. Check the account id and auth token in the settings file.';
     case 'unreachable':
       return test
-        ? 'The call could not be started. Try again in a minute.'
+        ? 'The call could not be started. Try again in 2 minutes.'
         : 'The call could not be started. It was sent as a text and a notice instead.';
   }
 }
