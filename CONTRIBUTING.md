@@ -237,6 +237,14 @@ Prettier and ESLint run as pre-commit hooks via husky + lint-staged.
 6. Open the PR. The maintainer will review it; squash-merge is the norm.
 7. **Please avoid rebasing or force-pushing once a maintainer has started reviewing.** It can make iterative reviewing harder. To update your branch, merge `main` instead. We squash-merge at the end, so messy in-PR history is fine.
 
+## Nightly run
+
+A pull request runs only the test suites its changed files select. The **Nightly** workflow ([`.github/workflows/nightly.yml`](.github/workflows/nightly.yml)) runs every suite on `main` each night, including all the browser tests, whatever changed that day. It reuses the CI workflow, so a suite added to CI is in the nightly run too.
+
+- When a nightly run fails, it opens an issue titled **Nightly tests failed** that lists the failed jobs and links the run. Later failures are added to the same issue. The next run that passes closes it.
+- To start a run by hand, open the **Actions** tab, pick **Nightly**, and choose **Run workflow**. A run started on a branch other than `main` does not open or close the issue.
+- The run uses a scripted model and needs no keys or accounts.
+
 ## Releases
 
 Releases are cut by the maintainer; contributors do not need to do anything release-specific.
