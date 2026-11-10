@@ -38,7 +38,7 @@ describe('the notes folder capability', () => {
     const settingsStore = makeSettingsStore();
     const service = new NotesFolderService({
       settings: settingsStore,
-      memoryDir: path.join(root, 'memory'),
+      protectedDirs: [path.join(root, 'memory')],
       indexDir: path.join(root, 'index'),
       embedder: undefined,
       logger: createLogger({ silent: true }),

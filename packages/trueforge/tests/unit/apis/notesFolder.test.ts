@@ -39,9 +39,13 @@ function makeSettingsStore(): IGlobalSettingsStore {
 
 describe('the notes folder settings endpoints', () => {
   const originalMemoryDir = configuration.MEMORY_MARKDOWN_DIR;
+  const originalPersonaKnowledgeDir = configuration.PERSONA_KNOWLEDGE_DIR;
+  const originalAppDataDir = configuration.APP_DATA_DIR;
   let root: string;
   let vault: string;
   let memoryDir: string;
+  let personaKnowledgeDir: string;
+  let appDataDir: string;
   let app: Hono;
   let service: NotesFolderService;
 
@@ -49,15 +53,21 @@ describe('the notes folder settings endpoints', () => {
     root = await mkdtemp(path.join(tmpdir(), 'notes-api-'));
     vault = path.join(root, 'vault');
     memoryDir = path.join(root, 'memory');
+    personaKnowledgeDir = path.join(root, 'persona-knowledge');
+    appDataDir = path.join(root, 'app-data');
     await mkdir(vault, { recursive: true });
     await mkdir(memoryDir, { recursive: true });
+    await mkdir(personaKnowledgeDir, { recursive: true });
+    await mkdir(appDataDir, { recursive: true });
     await writeFile(path.join(vault, 'Garden.md'), '# Garden\n\nTomatoes.\n');
     await writeFile(path.join(vault, 'Kitchen.md'), '# Kitchen\n\nPasta.\n');
     configuration.MEMORY_MARKDOWN_DIR = memoryDir;
+    configuration.PERSONA_KNOWLEDGE_DIR = personaKnowledgeDir;
+    configuration.APP_DATA_DIR = appDataDir;
     const settingsStore = makeSettingsStore();
     service = new NotesFolderService({
       settings: settingsStore,
-      memoryDir,
+      protectedDirs: [memoryDir, personaKnowledgeDir, appDataDir],
       indexDir: path.join(root, 'index'),
       embedder: undefined,
       logger: createLogger({ silent: true }),
@@ -69,6 +79,8 @@ describe('the notes folder settings endpoints', () => {
 
   afterEach(() => {
     configuration.MEMORY_MARKDOWN_DIR = originalMemoryDir;
+    configuration.PERSONA_KNOWLEDGE_DIR = originalPersonaKnowledgeDir;
+    configuration.APP_DATA_DIR = originalAppDataDir;
     service.stop();
   });
 
@@ -146,6 +158,19 @@ describe('the notes folder settings endpoints', () => {
     const parent = await call({ method: 'POST', path: '/', body: { folder_path: root } });
     expect(parent.status).toBe(400);
     expect(JSON.parse(parent.text).error.message).toBe(NOTES_FOLDER_OVERLAP_MESSAGE);
+
+    const status = await call({ method: 'GET', path: '/status' });
+    expect(JSON.parse(status.text).data.state).toBe('not_connected');
+  });
+
+  it("refuses Aman's persona knowledge folder and its app data folder at save time", async () => {
+    const knowledge = await call({ method: 'POST', path: '/', body: { folder_path: personaKnowledgeDir } });
+    expect(knowledge.status).toBe(400);
+    expect(JSON.parse(knowledge.text).error.message).toBe(NOTES_FOLDER_OVERLAP_MESSAGE);
+
+    const appData = await call({ method: 'POST', path: '/', body: { folder_path: appDataDir } });
+    expect(appData.status).toBe(400);
+    expect(JSON.parse(appData.text).error.message).toBe(NOTES_FOLDER_OVERLAP_MESSAGE);
 
     const status = await call({ method: 'GET', path: '/status' });
     expect(JSON.parse(status.text).data.state).toBe('not_connected');

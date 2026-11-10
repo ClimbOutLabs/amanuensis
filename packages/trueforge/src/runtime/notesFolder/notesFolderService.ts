@@ -48,9 +48,9 @@ export class NotesFolderProblem extends Error {
 
 export interface NotesFolderServiceDeps {
   settings: Pick<IGlobalSettingsStore, 'getSetting'>;
-  /** Aman's own memory folder, resolved; the notes folder may never overlap it. */
-  memoryDir: string;
-  /** Where the index cache lives, inside Aman's own area. */
+  /** Aman's own data folders, resolved; the notes folder may never overlap any of them. */
+  protectedDirs: readonly string[];
+  /** Where the index cache lives, inside Aman's app data folder. */
   indexDir: string;
   /** The shared embedding model, or undefined when embeddings are off: search is keywords only. */
   embedder: NotesEmbedder | undefined;
@@ -196,9 +196,11 @@ export class NotesFolderService {
     }
     const folder = resolveFolderPath(settings.folder_path);
     // A backstop behind the Settings check: however the settings were written, Aman never
-    // indexes its own memory as the person's notes.
-    if ((await folderOverlapProblem({ folderPath: folder, memoryDir: this.deps.memoryDir })) !== null) {
-      this.deps.logger.warn('Notes folder overlaps the memory folder; the notes tools stay off');
+    // indexes one of its own data folders as the person's notes.
+    if ((await folderOverlapProblem({ folderPath: folder, protectedDirs: this.deps.protectedDirs })) !== null) {
+      this.deps.logger.warn(
+        'Notes folder overlaps one of the folders Aman keeps its own data in. The notes tools stay off',
+      );
       this.cache = undefined;
       return;
     }
@@ -438,9 +440,9 @@ export class NotesFolderService {
       );
     }
     const folder = resolveFolderPath(settings.folder_path);
-    // The same backstop as the index: however the settings were written, Aman's own memory
-    // folder is never read or added to as if it were the person's notes.
-    const overlap = await folderOverlapProblem({ folderPath: folder, memoryDir: this.deps.memoryDir });
+    // The same backstop as the index: however the settings were written, one of Aman's own
+    // data folders is never read or added to as if it were the person's notes.
+    const overlap = await folderOverlapProblem({ folderPath: folder, protectedDirs: this.deps.protectedDirs });
     if (overlap !== null) {
       throw new NotesFolderProblem(overlap);
     }

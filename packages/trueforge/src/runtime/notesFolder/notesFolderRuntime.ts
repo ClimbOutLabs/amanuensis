@@ -1,8 +1,8 @@
 /**
  * The one notes folder service for the process: the Settings endpoints, the per-turn tools and
  * the background indexing all share it, so the index is built once and the watcher has one
- * owner. The index cache lives in a hidden folder inside Aman's own memory area, never in the
- * person's notes folder.
+ * owner. The index cache lives in Aman's app data folder, never in the person's notes folder
+ * and never in Aman's memory folder.
  */
 import path from 'node:path';
 import type { Logger } from 'winston';
@@ -13,6 +13,19 @@ import { NotesFolderService, type NotesFolderServiceDeps } from './notesFolderSe
 
 let shared: NotesFolderService | undefined;
 
+/**
+ * Every folder Aman keeps its own data in, resolved: its memory, its persona knowledge, and
+ * the app data folder that holds its database, its sandbox workspaces and the files skills
+ * download while they work. A notes folder may never overlap any of these.
+ */
+export function notesFolderProtectedDirs(): string[] {
+  return [
+    path.resolve(configuration.MEMORY_MARKDOWN_DIR),
+    path.resolve(configuration.PERSONA_KNOWLEDGE_DIR),
+    path.resolve(configuration.APP_DATA_DIR),
+  ];
+}
+
 /** The service's dependencies from the instance configuration; the first caller's win. */
 export function notesFolderServiceDeps({
   settings,
@@ -21,11 +34,10 @@ export function notesFolderServiceDeps({
   settings: Pick<IGlobalSettingsStore, 'getSetting'>;
   logger: Pick<Logger, 'warn' | 'info'>;
 }): NotesFolderServiceDeps {
-  const memoryDir = path.resolve(configuration.MEMORY_MARKDOWN_DIR);
   return {
     settings,
-    memoryDir,
-    indexDir: path.join(memoryDir, '.notes-folder'),
+    protectedDirs: notesFolderProtectedDirs(),
+    indexDir: path.join(path.resolve(configuration.APP_DATA_DIR), 'notes-folder-index'),
     embedder: configuration.MEMORY_EMBEDDINGS_ENABLED
       ? getSharedEmbeddingModel({ modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR })
       : undefined,

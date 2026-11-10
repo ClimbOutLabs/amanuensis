@@ -1,13 +1,12 @@
 /**
  * Notes folder API under /api/v1/user/settings/notes-folder: the Settings Notes folder card's
  * endpoints. There is no account and nothing to sign in to: saving checks the folder itself
- * (there, a folder, and not Aman's own memory) and stores only its path and the inbox file name.
+ * (there, a folder, and not one of Aman's own data folders) and stores only its path and the
+ * inbox file name.
  */
 import { OpenAPIHono } from '@hono/zod-openapi';
 import { stat } from 'node:fs/promises';
-import path from 'node:path';
 import type { Logger } from 'winston';
-import configuration from '../config';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import { notesFolderRoutes } from '../routes/notesFolderRoutes';
 import {
@@ -18,7 +17,11 @@ import {
   NOTES_FOLDER_NOT_FOUND_MESSAGE,
   resolveFolderPath,
 } from '../runtime/notesFolder/notesFolderPaths';
-import { notesFolderServiceDeps, sharedNotesFolderService } from '../runtime/notesFolder/notesFolderRuntime';
+import {
+  notesFolderProtectedDirs,
+  notesFolderServiceDeps,
+  sharedNotesFolderService,
+} from '../runtime/notesFolder/notesFolderRuntime';
 import { countNoteFiles } from '../runtime/notesFolder/notesFolderScan';
 import type { NotesFolderService } from '../runtime/notesFolder/notesFolderService';
 import {
@@ -80,7 +83,7 @@ async function saveProblem(request: SaveNotesFolderRequest): Promise<string | nu
   }
   const overlap = await folderOverlapProblem({
     folderPath: resolved,
-    memoryDir: path.resolve(configuration.MEMORY_MARKDOWN_DIR),
+    protectedDirs: notesFolderProtectedDirs(),
   });
   if (overlap !== null) {
     return overlap;

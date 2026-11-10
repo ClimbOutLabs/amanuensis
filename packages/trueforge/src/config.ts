@@ -1542,6 +1542,12 @@ export interface SharedServerConfiguration {
    * only thing that lives here.
    */
   SANDBOX_MIRROR_CACHE_DIR: string;
+  /**
+   * The app data folder itself: the root the database, the sandbox workspaces and the notes
+   * folder index live under. Env: `APP_DATA_DIR` (optional absolute path). Default: the
+   * env-paths data dir, which sits under the home directory.
+   */
+  APP_DATA_DIR: string;
   /** Largest single package file the mirrors will fetch, bytes. Env: `SANDBOX_MIRROR_DOWNLOAD_MAX_BYTES`. Default 1 GiB. */
   SANDBOX_MIRROR_DOWNLOAD_MAX_BYTES: number;
   /** Largest total mirror cache, bytes. Env: `SANDBOX_MIRROR_CACHE_MAX_BYTES`. Default 10 GiB. */
@@ -2553,6 +2559,7 @@ const shared: SharedServerConfiguration = {
     defaultValue: DEFAULT_SESSION_DISK_MB,
   }),
   SANDBOX_MIRROR_CACHE_DIR: path.join(appDataDir, 'package-mirror-cache'),
+  APP_DATA_DIR: appDataDir,
   SANDBOX_MIRROR_DOWNLOAD_MAX_BYTES: parsePositiveInt({
     envKey: 'SANDBOX_MIRROR_DOWNLOAD_MAX_BYTES',
     raw: getEnv('SANDBOX_MIRROR_DOWNLOAD_MAX_BYTES'),

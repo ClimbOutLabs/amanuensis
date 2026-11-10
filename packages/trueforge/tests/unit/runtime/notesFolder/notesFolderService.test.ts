@@ -92,7 +92,7 @@ async function makeWorld(options?: {
   const { store } = makeSettingsStore();
   const service = new NotesFolderService({
     settings: store,
-    memoryDir,
+    protectedDirs: [memoryDir, path.join(root, 'persona-knowledge'), path.join(root, 'app-data')],
     indexDir: path.join(root, 'index'),
     embedder: options?.embedder,
     logger: createLogger({ silent: true }),
@@ -325,6 +325,29 @@ describe('the folder overlap refusal', () => {
     await symlink(world.root, aroundMemory, 'dir');
     await writeNotesFolderSettings(world.settingsStore, { folder_path: aroundMemory, inbox_file: 'Aman inbox.md' });
     await expect(world.service.appendToInbox('An entry.')).rejects.toThrow(NOTES_FOLDER_OVERLAP_MESSAGE);
+  });
+
+  it("refuses Aman's persona knowledge folder and its app data folder, directly and through a link", async () => {
+    const world = await makeWorld({ embedder: undefined });
+    const personaKnowledge = path.join(world.root, 'persona-knowledge');
+    const appData = path.join(world.root, 'app-data');
+    await mkdir(personaKnowledge, { recursive: true });
+    await mkdir(appData, { recursive: true });
+
+    await writeNotesFolderSettings(world.settingsStore, { folder_path: personaKnowledge, inbox_file: 'Aman inbox.md' });
+    await expect(world.service.appendToInbox('An entry.')).rejects.toThrow(NOTES_FOLDER_OVERLAP_MESSAGE);
+
+    await writeNotesFolderSettings(world.settingsStore, { folder_path: appData, inbox_file: 'Aman inbox.md' });
+    await expect(world.service.appendToInbox('An entry.')).rejects.toThrow(NOTES_FOLDER_OVERLAP_MESSAGE);
+    await expect(world.service.createNote({ relativePath: 'New.md', text: 'No.' })).rejects.toThrow(
+      NOTES_FOLDER_OVERLAP_MESSAGE,
+    );
+
+    const toAppData = path.join(world.root, 'link-to-app-data');
+    await symlink(appData, toAppData, 'dir');
+    await writeNotesFolderSettings(world.settingsStore, { folder_path: toAppData, inbox_file: 'Aman inbox.md' });
+    await expect(world.service.appendToInbox('An entry.')).rejects.toThrow(NOTES_FOLDER_OVERLAP_MESSAGE);
+    await expect(stat(path.join(appData, 'Aman inbox.md'))).rejects.toThrow();
   });
 
   it('still connects through a link to a folder that is not the memory folder', async () => {
