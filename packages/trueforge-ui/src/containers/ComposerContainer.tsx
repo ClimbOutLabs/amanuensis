@@ -70,7 +70,8 @@ function ComposerBody({
   const requiresModel = shell == null || (shell.mode.status === 'active' && shell.mode.isMutable);
   const hasModel = Boolean(agentSpec?.model?.name?.trim());
   const { isBusy, send, resetBusy } = useComposerBusyState();
-  useComposerDraft();
+  // An incognito chat keeps nothing, so its unsent text is never saved in the tab either.
+  useComposerDraft({ saves: !privateFrame });
   // Emptying the composer drops the voice draft, so a later typed message never counts as spoken.
   useEffect(() => {
     if (!hasText) clearDraftFromVoice();

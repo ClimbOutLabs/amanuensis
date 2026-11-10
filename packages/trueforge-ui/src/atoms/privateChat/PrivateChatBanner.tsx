@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 
 import { useToasterOptional } from '../../containers/ToasterContainer.js';
 import { Icon } from '../../icons/Icon.js';
+import { onPersonaMutationSettled } from '../../personaMutationGate.js';
 import { hasChatPrivacy } from '../../plugins/trueforge-agent-server-adapter/privateChats.js';
 import { forgetPrivateChat } from '../../server/privateChatStore.js';
 import { useOptionalServer } from '../../server/ServerContext.js';
@@ -22,10 +23,26 @@ const CLOSE_FAILED_MESSAGE = 'This chat was not deleted. Check your connection, 
 const bannerClass =
   'border-text-primary bg-card-bg text-text-primary mb-2 flex w-full flex-wrap items-center gap-2 rounded-[1.25rem] border px-3.5 py-2 text-sm';
 
-/** Where the open private chat is answered, read once per chat. Undefined until the server says. */
+/**
+ * Where the open private chat is answered. Read again whenever that can change: a turn starts or ends
+ * (the model may switch persona), the persona pill is used, or the window comes back into focus (a
+ * model may have changed in another tab). The last answer stays on screen while the next one loads.
+ */
 function useChatPrivacy(sessionId: string | undefined): TrueForgeApi.ChatPrivacy | undefined {
   const server = useOptionalServer();
+  const isRunning = useAuiState(state => state.thread.isRunning);
+  const [reads, setReads] = useState(0);
   const [privacy, setPrivacy] = useState<{ sessionId: string; value: TrueForgeApi.ChatPrivacy } | undefined>();
+  useEffect(() => {
+    if (sessionId === undefined) return;
+    const readAgain = () => setReads(count => count + 1);
+    const unsubscribe = onPersonaMutationSettled(readAgain);
+    window.addEventListener('focus', readAgain);
+    return () => {
+      unsubscribe();
+      window.removeEventListener('focus', readAgain);
+    };
+  }, [sessionId]);
   useEffect(() => {
     if (sessionId === undefined || server == null || !hasChatPrivacy(server)) return;
     let cancelled = false;
@@ -38,7 +55,7 @@ function useChatPrivacy(sessionId: string | undefined): TrueForgeApi.ChatPrivacy
     return () => {
       cancelled = true;
     };
-  }, [server, sessionId]);
+  }, [server, sessionId, isRunning, reads]);
   return privacy !== undefined && privacy.sessionId === sessionId ? privacy.value : undefined;
 }
 

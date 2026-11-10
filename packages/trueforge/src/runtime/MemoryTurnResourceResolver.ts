@@ -215,6 +215,11 @@ export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
     this.#toolOutputScreen = toolOutputScreen;
   }
 
+  /** True in an incognito chat: nothing from it may outlive it. */
+  protected get keepsNothing(): boolean {
+    return this.#memory.keepsNothing;
+  }
+
   /**
    * The spec with the set-up Email and Calendar connectors attached, unless the chat turned
    * them off. A set-up list that could not be read attaches nothing: a turn must not gain a
