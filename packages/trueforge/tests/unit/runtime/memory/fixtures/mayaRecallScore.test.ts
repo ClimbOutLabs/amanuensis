@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import {
   askMemory,
+  memoryBlockFor,
   recallScorecard,
   warmEmbeddings,
   type RecallAnswer,
@@ -11,7 +12,9 @@ import {
 } from '../../../../fixtures/memory/mayaWorld/askMemory';
 import { buildMayaVault } from '../../../../fixtures/memory/mayaWorld/buildVault';
 import { mayaDate } from '../../../../fixtures/memory/mayaWorld/pages';
+import { positionRanges } from '../../../../fixtures/memory/mayaWorld/positionRanges';
 import { MAYA_RECALL_QUESTIONS } from '../../../../fixtures/memory/mayaWorld/recallQuestions';
+import { MAYA_UNRELATED_MESSAGES } from '../../../../fixtures/memory/mayaWorld/unrelatedMessages';
 import {
   readRecordedVectors,
   RECORD_COMMAND,
@@ -22,6 +25,9 @@ const RECORDED_VECTORS_DIR = path.join(__dirname, '../../../../fixtures/memory/r
 
 /** When set, the test only writes the texts the meaning search asks for to this file, for recording their vectors. */
 const TEXTS_FILE = process.env['MEMORY_TEST_TEXTS_FILE'];
+
+/** The day the questions end on, and the day the unrelated messages are asked. */
+const LAST_DAY = 60;
 
 type Miss = 'not found' | 'unwanted shown' | 'not found, unwanted shown';
 
@@ -34,6 +40,10 @@ type Miss = 'not found' | 'unwanted shown' | 'not found, unwanted shown';
  * where something that should stay out was shown as current: a stale or planted text, or any memory at
  * all for a message with nothing to recall. `clean` counts questions with the answer shown and nothing
  * unwanted shown.
+ *
+ * `unrelatedShown` counts the 300 messages that have nothing to do with memory that were shown any memory
+ * on day 60, each in a new chat; lower is better. `unrelatedShownAt` lists their positions, 1 to 300, so
+ * a reviewer sees which messages moved.
  */
 interface Condition {
   name: string;
@@ -43,6 +53,8 @@ interface Condition {
   meaning: boolean;
   scores: Record<string, string>;
   misses: Record<string, Miss>;
+  unrelatedShown: string;
+  unrelatedShownAt: string;
 }
 
 /** Condition 1: the daily log only, found by words. Its numbers are the baseline and must not move. */
@@ -235,6 +247,9 @@ const LOG_ONLY_BY_WORDS: Condition = {
   meaning: false,
   scores: LOG_ONLY_BY_WORDS_SCORES,
   misses: LOG_ONLY_BY_WORDS_MISSES,
+  unrelatedShown: 'shown a memory 227/300',
+  unrelatedShownAt:
+    '1, 3-10, 12-17, 19-27, 30-39, 41-45, 47, 49-64, 66-69, 71-74, 76, 79, 80, 82, 83, 85, 86, 88, 90, 92-104, 106-111, 113-116, 118, 120-134, 136-138, 140, 142-146, 148-155, 157-159, 161-175, 177, 178, 180-191, 193-200, 202-207, 209-237, 239-242, 244-250, 252, 255, 257-259, 261, 265, 272, 274, 275, 296, 299',
 };
 const LOG_ONLY_BY_MEANING: Condition = {
   name: 'log only, by meaning',
@@ -242,6 +257,9 @@ const LOG_ONLY_BY_MEANING: Condition = {
   meaning: true,
   scores: LOG_ONLY_BY_MEANING_SCORES,
   misses: LOG_ONLY_BY_MEANING_MISSES,
+  unrelatedShown: 'shown a memory 245/300',
+  unrelatedShownAt:
+    '1, 3-10, 12-17, 19-27, 30-39, 41-45, 47, 49-74, 76, 79, 80, 82, 83, 85, 86, 88, 90, 92-104, 106-111, 113-116, 118, 120-146, 148-155, 157-159, 161-178, 180-191, 193-200, 202-207, 209-237, 239-242, 244-252, 255, 257-261, 263, 265, 266, 270, 272, 274, 275, 277, 278, 280-282, 295, 296, 299, 300',
 };
 const PAGES_SORTED_BY_MEANING: Condition = {
   name: 'pages sorted, by meaning',
@@ -249,6 +267,9 @@ const PAGES_SORTED_BY_MEANING: Condition = {
   meaning: true,
   scores: PAGES_SORTED_BY_MEANING_SCORES,
   misses: PAGES_SORTED_BY_MEANING_MISSES,
+  unrelatedShown: 'shown a memory 245/300',
+  unrelatedShownAt:
+    '1, 3-10, 12-17, 19-27, 30-39, 41-45, 47, 49-74, 76, 79, 80, 82, 83, 85, 86, 88, 90, 92-104, 106-111, 113-116, 118, 120-146, 148-155, 157-159, 161-178, 180-191, 193-200, 202-207, 209-237, 239-242, 244-252, 255, 257-261, 263, 265, 266, 270, 272, 274, 275, 277, 278, 280-282, 295, 296, 299, 300',
 };
 
 function scoreLine(score: RecallScore): string {
@@ -277,7 +298,7 @@ describe("recall over Maya's world", () => {
     return dir;
   }
 
-  async function ask(condition: Condition): Promise<RecallAnswer[]> {
+  async function ask(condition: Condition): Promise<{ answers: RecallAnswer[]; unrelatedShown: number[] }> {
     const dir = await vaultDir();
     const answers: RecallAnswer[] = [];
     let written = 0;
@@ -296,10 +317,37 @@ describe("recall over Maya's world", () => {
       const embeddings = condition.meaning ? await warmEmbeddings({ dir, model }) : undefined;
       answers.push(await askMemory({ dir, question, embeddings }));
     }
-    return answers;
+    if (written !== LAST_DAY) {
+      throw new Error(
+        `The questions end on day ${String(written)}, not day ${String(LAST_DAY)}. Change LAST_DAY to match.`,
+      );
+    }
+    // The questions end on day 60, so this vault is ready. Asked last, so nothing here can change an answer above.
+    jest.setSystemTime(new Date(`${mayaDate(LAST_DAY)}T21:00:00.000Z`));
+    const embeddings = condition.meaning ? await warmEmbeddings({ dir, model }) : undefined;
+    const unrelatedShown: number[] = [];
+    for (const [index, message] of MAYA_UNRELATED_MESSAGES.entries()) {
+      const block = await memoryBlockFor({
+        dir,
+        message,
+        earlierMessages: [],
+        chatId: `unrelated-${String(index + 1)}`,
+        embeddings,
+      });
+      if (block !== '') {
+        unrelatedShown.push(index + 1);
+      }
+    }
+    return { answers, unrelatedShown };
   }
 
-  function expectRecorded({ condition, answers }: { condition: Condition; answers: RecallAnswer[] }): void {
+  function expectRecorded({
+    condition,
+    asked: { answers, unrelatedShown },
+  }: {
+    condition: Condition;
+    asked: { answers: RecallAnswer[]; unrelatedShown: number[] };
+  }): void {
     const misses = Object.fromEntries(
       answers.flatMap(answer => {
         const miss = missOf(answer);
@@ -310,6 +358,10 @@ describe("recall over Maya's world", () => {
     expect(Object.fromEntries(recallScorecard(answers).map(score => [score.group, scoreLine(score)]))).toEqual(
       condition.scores,
     );
+    expect(`shown a memory ${String(unrelatedShown.length)}/${String(MAYA_UNRELATED_MESSAGES.length)}`).toBe(
+      condition.unrelatedShown,
+    );
+    expect(positionRanges(unrelatedShown)).toBe(condition.unrelatedShownAt);
   }
 
   function expectNothingMissing(): void {
@@ -363,15 +415,15 @@ describe("recall over Maya's world", () => {
   }
 
   it(`scores as recorded: ${LOG_ONLY_BY_WORDS.name}`, async () => {
-    expectRecorded({ condition: LOG_ONLY_BY_WORDS, answers: await ask(LOG_ONLY_BY_WORDS) });
+    expectRecorded({ condition: LOG_ONLY_BY_WORDS, asked: await ask(LOG_ONLY_BY_WORDS) });
   }, 120_000);
 
   it.each([LOG_ONLY_BY_MEANING, PAGES_SORTED_BY_MEANING])(
     'scores as recorded: $name',
     async condition => {
-      const answers = await ask(condition);
+      const asked = await ask(condition);
       expectNothingMissing();
-      expectRecorded({ condition, answers });
+      expectRecorded({ condition, asked });
     },
     300_000,
   );
