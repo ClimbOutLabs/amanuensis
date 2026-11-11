@@ -65,8 +65,8 @@ export function VoiceReplySettings() {
             Read whole messages aloud
           </p>
           <p id="voice-reply-whole-hint" className="mt-1 text-xs leading-snug text-text-secondary">
-            When this is off, a long message is read in part and the rest stays on screen, as today. When it is on, the
-            readout reads the whole message, however long it is. Saved in this browser only.
+            When this is off, a long message is read in part and the rest stays on screen. When it is on, the readout
+            reads the whole message, however long it is. Saved in this browser only.
           </p>
         </div>
         <Switch
