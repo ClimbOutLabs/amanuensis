@@ -24,14 +24,6 @@ import {
   McpServerManifestAuthSchema,
   McpServerTypeSchema,
 } from './mcpServerCommon';
-export {
-  McpSearchToolsSchema,
-  McpServerDescriptionSchema,
-  McpServerManifestAuthSchema,
-  McpServerTypeSchema,
-  type McpServerManifestAuth,
-  type McpServerType,
-} from './mcpServerCommon';
 
 export const McpServerNameParamsSchema = z
   .object({ name: z.string().min(1).describe('MCP server name.') })
