@@ -9,7 +9,7 @@ Aman can send you a text message when something needs you and you are away from 
 ## What a text says
 
 - **Private (recommended)** is the default. A text says only your assistant's name and the kind of thing, such as "a reminder is due". It never holds names, amounts or what a message said.
-- **Full** carries the words of a reminder. A locked screen can show them, and the phone company can read them. Something your assistant noticed still gets the Private words. A reminder goes out in Full only when it is plain words. Times, dates, amounts such as $20 and codes such as Q3 are fine, with at most 6 digits in all. A link, a long number, a sign inside a word such as a slash, an at sign or a dot, the word "dot", "point" or "period" between two words, or a toll-free number spelled with letters such as "1 800 Flowers" sends the Private words instead, and Activity says why. To get a reminder's words by text, leave out links and long numbers.
+- **Full** carries the words of a reminder. A locked screen can show them, and the phone company can read them. Something your assistant noticed still gets the Private words. A reminder goes out in Full only when it is plain words. Times, dates, amounts such as $20 and codes such as Q3 are fine, with at most 6 digits in all. A link, a long number, a sign inside a word such as a slash, an at sign or a dot, a dot between two words (so "Done. Next, call Sam" goes Private too), the word "dot", "point" or "period" between two words, or a toll-free number spelled with letters such as "1 800 Flowers" sends the Private words instead, and Activity says why. To get a reminder's words by text, leave out links and long numbers.
 
 The text with your confirmation code holds only the code.
 

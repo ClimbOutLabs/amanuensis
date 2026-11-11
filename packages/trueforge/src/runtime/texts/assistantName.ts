@@ -5,7 +5,7 @@ import { isPlainWords, plainText } from './textWords';
 /** The most of the assistant's name a text carries, so a name cannot hold a message of its own. */
 const TEXT_NAME_MAX = 20;
 
-/** Cuts at the last whole word, so a cut never makes a new word, such as comet cut to com. */
+/** Cuts at the last whole word that fits, or after 20 characters when one word is longer. The cut name is checked again. */
 function cutAtWord(text: string): string {
   if (text.length <= TEXT_NAME_MAX) {
     return text;

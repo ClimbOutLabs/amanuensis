@@ -1,7 +1,7 @@
 import type { Delivery, DeliveryAttempt, DeliveryChannel } from '../../schemas/deliveries';
 
-/** The words of every Try it test, the only words a test may send in Full. */
-export const TEST_WORDS = 'This is a test. If you can read this, it works.';
+/** The words of every Try it test, the only words a test may send in Full. One sentence, so the dot rule never holds it back. */
+export const TEST_WORDS = 'This is a test, and it works if you can read this.';
 
 /**
  * One way a delivery can reach a person beyond the feed. A later part adds a sender for a new channel without
