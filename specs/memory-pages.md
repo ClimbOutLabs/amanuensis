@@ -70,7 +70,15 @@ Sorting at save time ships switched on only when it gets at least 9 of 10 decisi
 
 ## 5. Settings
 
-A Memory pages screen lists the pages, shows one, and lets the person edit, delete and undo.
+A Pages tab sits beside Memories and Sharing in Settings, then Memory, and on the standalone Memory page. It shows only with the Markdown memory.
+
+- **List.** People and matters in two groups. Each row has the title, the summary line and a count of lines waiting to be confirmed. A search box matches the title and the other names. With no pages it says what a page is and that Aman fills pages as the person talks. Files in the page folders with names Aman cannot read are listed, with what to do.
+- **One page.** The sections in order. The person's own lines are plain. A line Aman read says where it came from, and a line under Unconfirmed says it is not confirmed and has Confirm and Dismiss. Earlier is collapsed.
+- **Edit.** The page as Markdown text, with Save and Cancel. A save is one history entry and is treated exactly like a hand edit in the file. It is refused, with a message that says what to do, when the page changed since it was opened or when the text is not a page.
+- **Delete page.** Held for 10 seconds with Undo, then sent. The history keeps the page.
+- **Recent changes.** The last changes with Undo on each. An undo is a new history entry. It is refused while a later change left the same pages different, and the message names that change.
+
+Incognito chats are not involved: this is Settings.
 
 ## Scope
 

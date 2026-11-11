@@ -562,6 +562,19 @@ is wrong cannot steal a live lock. After a crash, the next writer therefore wait
 writer gives up after 10 seconds and the model is told to try again. The daily-log append path does not
 take this lock.
 
+### The Pages screen
+
+Settings, then Memory, then Pages (and the standalone Memory page) lets the person read and fix pages. The tab is offered only when the server reports the Markdown backend and has the pages routes. The routes are under `/api/v1/memory/pages` and take the same optional `namespace` query as the saved-notes routes: the shared vault by default, `persona:<name>` for a persona's vault. The vault folder is the tenant's own, so another person's pages are unreachable. With any other backend each route answers 501.
+
+- **List** returns each page's kind, name, title, other names, summary line, the day the file last changed (UTC) and the number of lines under Unconfirmed, plus the `.md` files in the page folders whose names are not page names.
+- **Read** returns the sections in order. Each line has its text, its id (none for a line typed by hand that has no marker yet), its source in plain words, its dates and `own`, which is `lineSide` from the page loader, so the screen and the model's prompt agree on what counts as the person's own. It also returns the page's Markdown and a `version`, the SHA-256 of that text.
+- **Save an edit** takes the new Markdown and the `version` it started from. A page that differs from that version is refused with a 409 that says to reload; a difference in hidden markers alone, which comes from taking in earlier hand edits, is not a change. The text must start with a settings block that has a title, must not be empty or longer than 60,000 characters, and must not add a hidden note that cannot be read. The save runs in `commitPageChange` as one history entry, and `markEditedPage` marks it as a hand edit made in the file: new or changed lines become `you_edited`.
+- **Confirm** moves an Unconfirmed line to a section the page's kind has (Now by default) as `you_edited`, keeping its id and setting `since` to the day. **Dismiss** removes it. Each is one history entry. A line without an id cannot be addressed and is changed in the editor.
+- **Delete** removes the file in `commitPageChange`; the history keeps it.
+- **Changes and undo.** The list shows the last 10 history entries. Undo of an entry puts each page it touched back as it was just before the entry (or removes a page the entry added) and commits that as a new entry, so history is never rewritten. It is refused with a 409 when a later entry left any of those pages different from how the entry left them, and the message names that entry. Entries that cancel each other, such as an undo and the change it undid, do not block. Entries are named by their full commit id. With no git on the server, the list is marked unavailable and an undo is refused.
+
+The screen's delete waits 10 seconds on the client before the request is sent, like forgetting a saved note, and uses the same hook. A refusal from the server is shown as written.
+
 ### Sorting a saved note
 
 After a turn's notes are saved, each new note can be sorted onto pages. This is `pageSorter.ts`. It runs

@@ -106,5 +106,11 @@
   "Cancel": "packages/trueforge-ui/src/containers/SettingsBuilder/AccountSetupPanel.tsx",
   "Start incognito chat": "packages/trueforge-ui/src/atoms/privateChat/PrivateChatToggle.tsx",
   "Close and delete": "packages/trueforge-ui/src/atoms/privateChat/PrivateChatBanner.tsx",
-  "Delete for good": "packages/trueforge-ui/src/atoms/privateChat/PrivateChatBanner.tsx"
+  "Delete for good": "packages/trueforge-ui/src/atoms/privateChat/PrivateChatBanner.tsx",
+  "Pages": "packages/trueforge-ui/src/containers/SettingsBuilder/MemorySection.tsx",
+  "Confirm": "packages/trueforge-ui/src/atoms/memory/MemoryPageView.tsx",
+  "Dismiss": "packages/trueforge-ui/src/atoms/memory/MemoryPageView.tsx",
+  "Edit page": "packages/trueforge-ui/src/atoms/memory/MemoryPageView.tsx",
+  "Delete page": "packages/trueforge-ui/src/atoms/memory/MemoryPageView.tsx",
+  "Undo": "packages/trueforge-ui/src/atoms/memory/MemoryPagesPanel.tsx"
 }
