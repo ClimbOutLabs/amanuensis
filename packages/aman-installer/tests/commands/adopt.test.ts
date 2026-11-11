@@ -147,6 +147,7 @@ test('adopt moves the shortcuts, makes the Check Aman entry and replaces the sta
   assert.equal(code, 0);
   assert.deepEqual(lines, [ADOPTED_LINE]);
   assert.deepEqual(jobs.ops, [
+    'clear-docker-mark',
     'copy',
     'path',
     'list',
@@ -155,6 +156,7 @@ test('adopt moves the shortcuts, makes the Check Aman entry and replaces the sta
     'open-entry',
     'check',
     'update',
+    'remove-entry',
     'forwarder',
     'task',
     'backupsShortcut',
@@ -174,7 +176,7 @@ test('adopt moves the shortcuts, makes the Check Aman entry and replaces the sta
   assert.ok(jobs.userPath.includes('C:\\Users\\Friend\\AppData\\Local\\Programs\\Amanuensis'));
 });
 
-test('adopt on a fresh install makes the Aman and Update Aman entries', async () => {
+test('adopt on a fresh install makes the Aman, Update Aman and Remove Aman entries', async () => {
   const jobs = jobsWith({ shortcuts: [] });
   const { code } = await run(storeWith(summaryWith({ release: RELEASE })), jobs);
   assert.equal(code, 0);
@@ -184,6 +186,9 @@ test('adopt on a fresh install makes the Aman and Update Aman entries', async ()
   const update = jobs.shortcuts.find(shortcut => shortcut.path === `${START_MENU_PROGRAMS}\\Update Aman.lnk`);
   assert.equal(update?.target, PROGRAMS_EXE);
   assert.equal(update?.args, 'upgrade');
+  const remove = jobs.shortcuts.find(shortcut => shortcut.path === `${START_MENU_PROGRAMS}\\Remove Aman.lnk`);
+  assert.equal(remove?.target, PROGRAMS_EXE);
+  assert.equal(remove?.args, 'uninstall');
 });
 
 test('adopt turns the daily backup on: the task, the Backups entry and the record', async () => {

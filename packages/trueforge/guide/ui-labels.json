@@ -113,5 +113,10 @@
   "Remove folder": "packages/trueforge-ui/src/containers/SettingsBuilder/NotesFolderSetupPanel.tsx",
   "Start incognito chat": "packages/trueforge-ui/src/atoms/privateChat/PrivateChatToggle.tsx",
   "Close and delete": "packages/trueforge-ui/src/atoms/privateChat/PrivateChatBanner.tsx",
-  "Delete for good": "packages/trueforge-ui/src/atoms/privateChat/PrivateChatBanner.tsx"
+  "Delete for good": "packages/trueforge-ui/src/atoms/privateChat/PrivateChatBanner.tsx",
+  "Audit": "packages/trueforge-ui/src/containers/SettingsBuilder/index.tsx",
+  "Show": "packages/trueforge-ui/src/sentinel/AuditLogSettings.tsx",
+  "From": "packages/trueforge-ui/src/sentinel/AuditLogSettings.tsx",
+  "To": "packages/trueforge-ui/src/sentinel/AuditLogSettings.tsx",
+  "Clear dates": "packages/trueforge-ui/src/sentinel/AuditLogSettings.tsx"
 }
