@@ -25,6 +25,7 @@ import type {
   ApprovalDismissalRecord,
   BeginImplementationPlanDispatchInput,
   BeginImplementationPlanDispatchResult,
+  ChatBySandboxId,
   ChatSearchHit,
   ClearChatSearchIndexInput,
   CommandExecutionRecord,
@@ -35,6 +36,7 @@ import type {
   DeleteSessionFolderInput,
   DeleteSessionInput,
   ExpiredPrivateSession,
+  FindChatsBySandboxIdsInput,
   FreezeAndGetTurnInput,
   GetCommandExecutionInput,
   GetOwnedIdsInput,
@@ -716,6 +718,32 @@ export class InMemorySessionStore<
       }
     }
     return ids;
+  }
+
+  async findChatsBySandboxIds(input: FindChatsBySandboxIdsInput): Promise<readonly ChatBySandboxId[]> {
+    if (input.sandbox_ids.length === 0) {
+      return [];
+    }
+    const wanted = new Set(input.sandbox_ids);
+    const chats: ChatBySandboxId[] = [];
+    for (const stored of this.sessions.values()) {
+      const record = stored.record;
+      if (record.tenant_id !== input.tenant_id || record.last_turn_id === null) {
+        continue;
+      }
+      const latest = this.turns.get(turnKey({ session_id: record.session_id, turn_id: record.last_turn_id }));
+      const sandboxId = latest?.snapshot.sandbox_info?.sandbox_id;
+      if (sandboxId !== undefined && wanted.has(sandboxId)) {
+        chats.push({
+          session_id: record.session_id,
+          title: record.title,
+          created_by_subject_id: record.created_by_subject.subject_id,
+          is_private: record.is_incognito,
+          sandbox_id: sandboxId,
+        });
+      }
+    }
+    return chats;
   }
 
   async getSessionByExternalId(input: GetSessionByExternalIdInput): Promise<SessionRecord<TSessionCustom> | undefined> {

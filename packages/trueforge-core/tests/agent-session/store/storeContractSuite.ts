@@ -893,6 +893,86 @@ export function runStoreContractSuite<
     });
   });
 
+  describe('findChatsBySandboxIds', () => {
+    async function chatWithSandbox(
+      store: Store,
+      input: { session_id: string; owner: string; turns: (string | null)[]; private_chat?: boolean },
+    ): Promise<void> {
+      const privateChat = input.private_chat ?? false;
+      await store.createSession({
+        tenant_id: tenant,
+        session_id: input.session_id,
+        created_by_subject: { subject_id: input.owner, subject_type: 'user', subject_display_name: input.owner },
+        agent: { type: 'inline', spec: makeAgentSpec() },
+        custom: null,
+        metadata: {},
+        external_id: null,
+        source: null,
+        is_incognito: privateChat,
+        private_expires_at: privateChat ? new Date(Date.now() + 3_600_000) : null,
+      });
+      let previous: string | null = null;
+      for (const [index, sandboxId] of input.turns.entries()) {
+        const turnId = `${input.session_id}-t${String(index)}`;
+        await store.createTurn(
+          makeCreateTurnInput({
+            sessionId: input.session_id,
+            turnId,
+            previousTurnId: previous,
+            sandbox_info: sandboxId === null ? null : { sandbox_id: sandboxId },
+          }),
+        );
+        const state = makeDoneTurnState();
+        await store.updateTurnState({
+          session_id: input.session_id,
+          turn_id: turnId,
+          state,
+          turn_done_event: makeTurnDoneEvent(state),
+        });
+        previous = turnId;
+      }
+    }
+
+    it('finds the chats whose latest turn holds an asked sandbox id, with their owner, in this tenant only', async () => {
+      const store = createStore();
+      await chatWithSandbox(store, { session_id: 'mine', owner: createdBy, turns: ['v1:slots:s1-aaa'] });
+      await chatWithSandbox(store, { session_id: 'theirs', owner: 'user-2', turns: ['s2-bbb'] });
+      // A chat that moved to another workspace in its latest turn holds only the newer one.
+      await chatWithSandbox(store, { session_id: 'moved', owner: createdBy, turns: ['s1-old', 's1-new'] });
+      await chatWithSandbox(store, { session_id: 'no-code', owner: createdBy, turns: [null] });
+
+      const found = await store.findChatsBySandboxIds({
+        tenant_id: tenant,
+        sandbox_ids: ['v1:slots:s1-aaa', 's2-bbb', 's1-old', 's1-new', 'missing'],
+      });
+
+      expect([...found].sort((a, b) => a.session_id.localeCompare(b.session_id))).toEqual([
+        {
+          session_id: 'mine',
+          title: null,
+          created_by_subject_id: createdBy,
+          is_private: false,
+          sandbox_id: 'v1:slots:s1-aaa',
+        },
+        { session_id: 'moved', title: null, created_by_subject_id: createdBy, is_private: false, sandbox_id: 's1-new' },
+        { session_id: 'theirs', title: null, created_by_subject_id: 'user-2', is_private: false, sandbox_id: 's2-bbb' },
+      ]);
+      await expect(
+        store.findChatsBySandboxIds({ tenant_id: 'other-tenant', sandbox_ids: ['s2-bbb'] }),
+      ).resolves.toEqual([]);
+      await expect(store.findChatsBySandboxIds({ tenant_id: tenant, sandbox_ids: [] })).resolves.toEqual([]);
+    });
+
+    it('marks a private chat as private', async () => {
+      const store = createStore();
+      await chatWithSandbox(store, { session_id: 'secret', owner: createdBy, turns: ['s1-ccc'], private_chat: true });
+
+      await expect(store.findChatsBySandboxIds({ tenant_id: tenant, sandbox_ids: ['s1-ccc'] })).resolves.toEqual([
+        { session_id: 'secret', title: null, created_by_subject_id: createdBy, is_private: true, sandbox_id: 's1-ccc' },
+      ]);
+    });
+  });
+
   describe('deleteSession', () => {
     it('removes all session data, is idempotent, and is a no-op when tenant_id does not match', async () => {
       const store = createStore();

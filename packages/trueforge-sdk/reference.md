@@ -10251,6 +10251,62 @@ await client.settings.sandboxProviders.upgradeImage("provider_id");
 </dl>
 </details>
 
+## Settings SandboxWorkspaces
+<details><summary><code>client.settings.sandboxWorkspaces.<a href="/src/api/resources/settings/resources/sandboxWorkspaces/client/Client.ts">list</a>() -> TrueForge.ListSandboxWorkspacesResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Asks every sandbox slot which chat workspaces it holds and joins them to their chats, with the space each takes and the room left on each slot. Read-only: nothing is created, moved or removed.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.sandboxWorkspaces.list();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `SandboxWorkspacesClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 ## Settings Skills
 <details><summary><code>client.settings.skills.<a href="/src/api/resources/settings/resources/skills/client/Client.ts">list</a>() -> TrueForge.ListSkillsResponse</code></summary>
 <dl>

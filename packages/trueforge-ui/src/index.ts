@@ -295,6 +295,13 @@ export type {
 } from './components/RepositoryWorkContext.js';
 export { RunCodeStatusProvider, useOptionalRunCodeStatus } from './components/RunCodeStatusContext.js';
 export type { RunCodeStatus, RunCodeStatusApi } from './components/RunCodeStatusContext.js';
+export { SandboxWorkspacesProvider, useOptionalSandboxWorkspaces } from './components/SandboxWorkspacesContext.js';
+export type {
+  SandboxWorkspace,
+  SandboxWorkspaceListing,
+  SandboxWorkspaceSlot,
+  SandboxWorkspacesApi,
+} from './components/SandboxWorkspacesContext.js';
 export { SpokenReplyProvider, useSpokenReply } from './components/SpokenReplyContext.js';
 export type { TourCapabilities } from './components/tourPrompts.js';
 export { VoiceInputProvider, useOptionalVoiceInput } from './components/VoiceInputContext.js';

@@ -8,12 +8,19 @@ import { Spinner } from '@/atoms/primitives/Spinner.js';
 import { Switch } from '@/atoms/primitives/Switch.js';
 import { useOptionalRepositoryWork, type RepositorySummary } from '@/components/RepositoryWorkContext.js';
 import { useOptionalRunCodeStatus, type RunCodeStatus } from '@/components/RunCodeStatusContext.js';
+import {
+  useOptionalSandboxWorkspaces,
+  type SandboxWorkspace,
+  type SandboxWorkspaceListing,
+} from '@/components/SandboxWorkspacesContext.js';
 import { useOptionalSentinelApiState } from '@/sentinel/SentinelApiContext.js';
 import { useServerCapabilities } from '@/server/ServerContext.js';
 import { getErrorMessage } from '@/utils/getErrorMessage.js';
 
 import {
+  formatBytes,
   formatCheckedAgo,
+  formatLastUsed,
   formatMegabytes,
   formatSeconds,
   presentRunCodeStatus,
@@ -196,6 +203,100 @@ function StatusCard({
         </div>
       )}
       <TechnicalDetails lines={lines} />
+    </Card>
+  );
+}
+
+/** What a workspace row is called: your chat's title, or whose it is when it is not yours to name. */
+function workspaceTitle(workspace: SandboxWorkspace): string {
+  switch (workspace.holder) {
+    case 'you':
+      if (workspace.chat_private) {
+        return 'Incognito chat';
+      }
+      return workspace.chat_title ?? 'Untitled chat';
+    case 'someone_else':
+      return "Another person's chat";
+    case 'none':
+      return 'A workspace with no chat';
+  }
+}
+
+/**
+ * Settings > Sandbox > Chat workspaces: which chats hold a workspace on which slot, how much space
+ * each takes, and the room left on each slot. The server joins the slots' sessions to their chats;
+ * this card only reports, so nothing here can be changed or removed. Shown only on the slots
+ * backend, the one where chats hold workspaces on slots.
+ */
+function ChatWorkspacesCard({ status }: { status: RunCodeStatus | null }) {
+  const workspacesApi = useOptionalSandboxWorkspaces();
+  const [listing, setListing] = useState<SandboxWorkspaceListing | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const slotsBackend = status?.backend === 'slots';
+
+  useEffect(() => {
+    if (workspacesApi === null || !slotsBackend) return;
+    let current = true;
+    workspacesApi
+      .listSandboxWorkspaces()
+      .then(next => {
+        if (current) setListing(next);
+      })
+      .catch((err: unknown) => {
+        if (current) setError(getErrorMessage(err, 'unknown error'));
+      });
+    return () => {
+      current = false;
+    };
+  }, [workspacesApi, slotsBackend]);
+
+  if (workspacesApi === null || !slotsBackend) return null;
+
+  return (
+    <Card headingId="sandbox-workspaces-heading" title="Chat workspaces">
+      <p className="mt-2 text-sm text-text-secondary">
+        A chat gets a workspace on a sandbox slot the first time the assistant runs code in it, and keeps it: the files
+        the code writes, uploads and results live there.
+      </p>
+      {error !== null && (
+        <p className="mt-2 text-sm text-failure-bg" role="alert">
+          The chat workspaces could not be listed. {error}
+        </p>
+      )}
+      {listing === null && error === null && (
+        <p className="mt-2 text-sm text-text-secondary">Reading the workspaces…</p>
+      )}
+      {listing !== null && (
+        <>
+          <dl className="mt-2 divide-y divide-border text-sm">
+            {listing.slots.map(slot => (
+              <Row key={slot.slot} label={`Slot ${String(slot.slot)}`}>
+                {slot.workspace_count === 0
+                  ? `No chat workspaces, ${formatBytes(slot.store_free_bytes)} of room left`
+                  : `${String(slot.workspace_count)} chat workspace${slot.workspace_count === 1 ? '' : 's'}, ${formatBytes(slot.total_bytes)} used, ${formatBytes(slot.store_free_bytes)} of room left`}
+              </Row>
+            ))}
+          </dl>
+          {listing.workspaces.length === 0 ? (
+            <p className="mt-3 text-sm text-text-secondary">
+              No chat holds a workspace right now. One appears here the first time the assistant runs code in a chat.
+            </p>
+          ) : (
+            <ul className="mt-3 space-y-2">
+              {listing.workspaces.map(workspace => (
+                <li key={workspace.sandbox_id} className="text-sm">
+                  <p className="text-text-primary">{workspaceTitle(workspace)}</p>
+                  <p className="text-text-secondary">
+                    Slot {String(workspace.slot)} · {formatBytes(workspace.bytes)} · Last used{' '}
+                    {formatLastUsed(workspace.last_used)}
+                    {workspace.holder === 'none' ? ' · No chat on this server is linked to this workspace.' : ''}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
     </Card>
   );
 }
@@ -440,6 +541,7 @@ const SandboxSettings = () => {
       )}
 
       <LimitsCard limits={limits} />
+      <ChatWorkspacesCard status={status} />
       <PackageDownloadsCard />
     </div>
   );

@@ -77,6 +77,23 @@ export interface GetSessionInput {
   session_id: string;
 }
 
+export interface FindChatsBySandboxIdsInput {
+  tenant_id: string;
+  /** Sandbox ids exactly as chats record them; pass each form a chat may have stored. */
+  sandbox_ids: readonly string[];
+}
+
+/** A chat whose latest turn holds one of the asked sandbox ids. */
+export interface ChatBySandboxId {
+  session_id: string;
+  title: string | null;
+  created_by_subject_id: string;
+  /** True for a private chat, which listings show without its title. */
+  is_private: boolean;
+  /** The sandbox id as the chat recorded it. */
+  sandbox_id: string;
+}
+
 export interface GetOwnedIdsInput {
   tenant_id: string;
   ids: readonly string[];
@@ -652,6 +669,12 @@ export interface ISessionStore<
    * Does **not** bump `last_activity_timestamp_ms`.
    */
   getOwnedIds(input: GetOwnedIdsInput): Promise<readonly string[]>;
+
+  /**
+   * Chats in the tenant whose latest turn recorded one of `sandbox_ids`, in one read. Empty `sandbox_ids` → `[]`.
+   * Does **not** bump `last_activity_timestamp_ms`.
+   */
+  findChatsBySandboxIds(input: FindChatsBySandboxIdsInput): Promise<readonly ChatBySandboxId[]>;
 
   /**
    * Lookup by tenant-scoped `external_id`. Missing or null external ids are not found.

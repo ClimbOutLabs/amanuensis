@@ -14,6 +14,7 @@ import type {
   ApprovalDismissalRecord,
   BeginImplementationPlanDispatchInput,
   BeginImplementationPlanDispatchResult,
+  ChatBySandboxId,
   ChatSearchHit,
   ClearChatSearchIndexInput,
   CommandExecutionRecord,
@@ -24,6 +25,7 @@ import type {
   DeleteSessionFolderInput,
   DeleteSessionInput,
   ExpiredPrivateSession,
+  FindChatsBySandboxIdsInput,
   FreezeAndGetTurnInput,
   GetCommandExecutionInput,
   GetOwnedIdsInput,
@@ -114,6 +116,7 @@ import {
 import {
   createSession as createSessionQuery,
   deleteSession as deleteSessionQuery,
+  findChatsBySandboxIds as findChatsBySandboxIdsQuery,
   getOwnedIds as getOwnedIdsQuery,
   getSessionByExternalId as getSessionByExternalIdQuery,
   getSession as getSessionQuery,
@@ -228,6 +231,10 @@ export class SqliteSessionStore implements ISessionStore<SessionCustom, TurnCust
 
   getOwnedIds(input: GetOwnedIdsInput): Promise<readonly string[]> {
     return getOwnedIdsQuery(this.db, input);
+  }
+
+  findChatsBySandboxIds(input: FindChatsBySandboxIdsInput): Promise<readonly ChatBySandboxId[]> {
+    return findChatsBySandboxIdsQuery(this.db, input);
   }
 
   getSessionByExternalId(input: GetSessionByExternalIdInput): Promise<SessionRecord<SessionCustom> | undefined> {
