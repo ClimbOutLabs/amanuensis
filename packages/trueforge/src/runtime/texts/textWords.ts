@@ -121,8 +121,6 @@ const AM_PM_TIME = /^(\d{1,2})(?:[:.](\d{2}))?([ap])\.?m$/;
 const CLOCK_TIME = /^(\d{1,2}):(\d{2})$/;
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const SLASHED_DATE = /^(\d{1,2})\/(\d{1,2})(?:\/(\d{2}|\d{4}))?$/;
-/** Endings that make a spoken dot read out a site, such as evil dot com. */
-const SITE_ENDINGS = new Set(['com', 'net', 'org', 'io', 'co', 'uk', 'us', 'info', 'biz', 'app', 'dev', 'me', 'ai']);
 /** Words that only ever start a site. */
 const SITE_WORDS = new Set(['www', 'http', 'https']);
 /** Currency signs plainText writes as letters; any other one is dropped, and would change the amount's meaning. */
@@ -204,13 +202,12 @@ export function isPlainWords(text: string): boolean {
   for (const [index, word] of words.entries()) {
     const previous = words[index - 1];
     const next = words[index + 1];
-    const spoken = NUMBER_WORDS.get(word);
-    const counted = spoken === undefined && !WORD.test(word) ? digitWord(word) : undefined;
-    const plainWord = WORD.test(word) || ABBREVIATION.test(word) || word === 'w/';
-    if (!plainWord && counted === undefined) {
+    const isWord = WORD.test(word);
+    const counted = isWord ? undefined : digitWord(word);
+    if (!isWord && !ABBREVIATION.test(word) && word !== 'w/' && counted === undefined) {
       return false;
     }
-    if (SITE_WORDS.has(word) || (word === 'dot' && SITE_ENDINGS.has(next ?? ''))) {
+    if (SITE_WORDS.has(word) || (word === 'dot' && previous !== undefined && next !== undefined)) {
       return false;
     }
     if (
@@ -219,18 +216,23 @@ export function isPlainWords(text: string): boolean {
     ) {
       return false;
     }
-    digits += spoken ?? counted?.digits ?? 0;
-    // A number read out in a row: number words and bare numbers alike, joined by "and".
-    if (spoken !== undefined || counted?.bare === true) {
-      numberRun += 1;
-      if (numberRun >= 3 || (numberRun >= 2 && (word === 'hundred' || word === 'thousand'))) {
-        return false;
+    digits += counted?.digits ?? 0;
+    // A word joined by dashes or apostrophes is read part by part, so joining cannot hide a spelled number or letters.
+    let bare = counted?.bare === true;
+    for (const part of isWord ? word.split(/['-]/) : [word]) {
+      const spoken = NUMBER_WORDS.get(part);
+      digits += spoken ?? 0;
+      // A number read out in a row: number words and bare numbers alike, joined by "and".
+      if (spoken !== undefined || bare) {
+        numberRun += 1;
+        bare = false;
+        if (numberRun >= 3 || (numberRun >= 2 && (part === 'hundred' || part === 'thousand'))) {
+          return false;
+        }
+      } else if (part !== 'and') {
+        numberRun = 0;
       }
-    } else if (word !== 'and') {
-      numberRun = 0;
-    }
-    // Single letters in a row spell a site or a number letter by letter, also when joined by dashes.
-    for (const part of word.split('-')) {
+      // Single letters in a row spell a site or a number letter by letter.
       letterRun = /^[a-z]$/.test(part) ? letterRun + 1 : 0;
       if (letterRun >= 3) {
         return false;

@@ -77,6 +77,11 @@ describe('the words of a text', () => {
       'e! v! i! l! c! o! m!',
       // A site read out in words.
       'Pay at evil dot com',
+      'Visit evil dot help today',
+      'Visit evil dot xyz',
+      'Visit evil dot museum',
+      'Visit evil dot ly slash abc',
+      'Pay bank dot example',
       'Visit www evil',
       'Open https evil',
       // A number read out in a row, in words or digits, whatever joins them.
@@ -90,6 +95,20 @@ describe('the words of a text', () => {
       'call five! five! five! one! two!',
       'call five? five? five?',
       'call "five" "five" "five"',
+      // The same numbers joined by dashes or apostrophes, alone or mixed with digits or spaces.
+      'call five-five-five-one-two-three-four',
+      'call five-five-five',
+      'call fifty-five-five',
+      "call five'five'five'one",
+      "call five'five five",
+      'call five-five five',
+      'call 5 five-five',
+      'call five-five-5',
+      'call 5-five-5',
+      'call twenty-five-five',
+      'call one-eight-hundred',
+      'visit e-v-i-l',
+      "visit e'v'i'l",
       'call five: five: five',
       'call nought five five',
       'call niner niner niner',
@@ -158,6 +177,12 @@ describe('the words of a text', () => {
       '5k run Sat 7am',
       'Flight AA100 at 6:05',
       'Take the B12 pills',
+      // Ordinary words joined by dashes or apostrophes, and one number written as a hyphenated word.
+      'Doctor follow-up at 3pm',
+      "It's O'Brien's turn, rock 'n' roll",
+      'Buy twenty-five stamps',
+      'Book a one-on-one with Sam',
+      'Cancel the e-mail from Jean-Luc',
       // Ranges, and a date next to a time.
       'Yoga 3-4pm',
       'Yoga 7:30-9:30',
@@ -170,9 +195,9 @@ describe('the words of a text', () => {
       'Bring snacks, e.g. fruit',
       'Plan the U.S. trip',
       'Lunch w/ Sam',
-      'Wear the polka dot dress',
       'Rom com night with Sam',
       'Call Aunt Dot',
+      'Dot called about the meeting',
       'Send the slides to Marketing 40 minutes early',
     ]) {
       expect([text, textBody({ test: false, name: 'Mannie', delivery: delivery(text), mode: 'full' })]).toEqual([

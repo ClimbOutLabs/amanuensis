@@ -26,9 +26,9 @@ import {
   type CalendarSource,
   type MailMessage,
   type MailRef,
-  type MailSource,
   type MailWindowRead,
   type NoticingSourceProvider,
+  type TimedMailSource,
 } from './sources';
 
 /** The server whose Authentication-Results Gmail writes into every message it receives. */
@@ -129,7 +129,7 @@ async function listNew({
   before,
   limit,
   from,
-}: Parameters<MailSource['listNewMessages']>[0] & {
+}: Parameters<TimedMailSource['listNewMessages']>[0] & {
   api: Pick<GmailApiPort, 'listMessages' | 'getMessageHeaders'>;
 }): Promise<MailWindowRead> {
   const after = Math.floor(since.getTime() / 1000) - 1;
@@ -174,10 +174,9 @@ async function listNew({
 /** Gmail as a mail source, read with the person's own Google login and read-only calls. */
 export function gmailMailSource(
   api: Pick<GmailApiPort, 'listMessages' | 'getMessageHeaders' | 'getMessage' | 'getThread'>,
-): MailSource {
+): TimedMailSource {
   return {
     trustedAuthenticationServers: GMAIL_AUTHENTICATION_SERVERS,
-    datesAreArrival: true,
     fetchesEachListed: true,
     async listNewMessages(input) {
       try {

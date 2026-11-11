@@ -1,4 +1,3 @@
-import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { extractErrorLogFields, RemoteMCP } from '@truefoundry/trueforge-core/core';
 import { CALDAV_SERVER_NAME } from '@truefoundry/trueforge-core/core/calendar/caldav/toolContract';
 import { deliveredMailboxOf } from '@truefoundry/trueforge-core/core/email/gmail/mailbox';
@@ -14,6 +13,7 @@ import {
 } from '@truefoundry/trueforge-core/core/email/mailConnector/toolContract';
 import { isRecord } from '@truefoundry/trueforge-core/core/util/records';
 import type { Logger } from 'winston';
+import { z } from 'zod';
 
 import type { PersonOwner } from '../../db/personOwner';
 import {
@@ -23,14 +23,15 @@ import {
   MessageUnreadableError,
   type CalendarEventInfo,
   type CalendarSource,
+  type CursorMailSource,
+  type CursorMessage,
+  type CursorRead,
   type MailAccess,
   type MailMessage,
   type MailRef,
-  type MailSource,
   type NoticingSourceProvider,
   type NoticingSources,
 } from './sources';
-import { SHORTEST_WINDOW_MS } from './watchers';
 
 /** Calls one tool on a sidecar and returns its result as the MCP client gives it. */
 export type CallSidecarTool = (name: string, args: Record<string, unknown>) => Promise<unknown>;
@@ -38,8 +39,6 @@ export type CallSidecarTool = (name: string, args: Record<string, unknown>) => P
 /** Longest one watcher pass may keep a sidecar session open; the client ends the session after this. */
 const SIDECAR_SESSION_MS = 4 * 60_000;
 const TEXT_CHARACTERS = 3000;
-/** The most the sidecar lists in one call. */
-const PAGE_SIZE = 100;
 /** Longest one calendar call may take. The client cancels a call that runs over, so none is left running. */
 const CALENDAR_CALL_MS = 30_000;
 /**
@@ -82,11 +81,6 @@ function replySays({ error, pattern }: { error: unknown; pattern: RegExp }): boo
   return false;
 }
 
-/** Whether the connector gave up on a call by its own time limit. */
-function saysTimedOut(error: unknown): boolean {
-  return replySays({ error, pattern: /timed out|timeout/i });
-}
-
 /** Whether the connector could not log in to the mail account. */
 function saysLoginFailed(error: unknown): boolean {
   return replySays({ error, pattern: /not connected|login failed|authentication failed|invalid credentials/i });
@@ -95,17 +89,6 @@ function saysLoginFailed(error: unknown): boolean {
 /** Replies that say the mail server or the connection to it is out of reach, not anything about a message. */
 function saysUnavailable(error: unknown): boolean {
   return saysLoginFailed(error) || replySays({ error, pattern: /timed out|timeout|transport/i });
-}
-
-/** Whether an error, or one it was caused by, is the MCP client giving up on a call that took too long. */
-function isCallTimeout(error: unknown): boolean {
-  const timedOut: number = ErrorCode.RequestTimeout;
-  for (let current: unknown = error; current instanceof Error; current = current.cause) {
-    if (current instanceof McpError && current.code === timedOut) {
-      return true;
-    }
-  }
-  return false;
 }
 
 const LATER_MESSAGES = 10;
@@ -193,11 +176,111 @@ function toMailMessage({
   };
 }
 
+/** One request to the mail sidecar's account agent for the mail after a cursor, answered as the app reads it. */
+export type ListAfterAgent = (request: {
+  uidvalidity: number | null;
+  last_uid: number | null;
+  since: string;
+  limit: number;
+}) => Promise<CursorRead>;
+
+const AgentMessageSchema = z.object({
+  uid: z.number().int().positive(),
+  internal_date: z.string(),
+  from_address: z.string().min(1),
+  from_name: z.string().nullable(),
+  subject: z.string(),
+});
+
+const AgentReplySchema = z.object({
+  uidvalidity: z.number().int().nonnegative(),
+  last_uid: z.number().int().nonnegative(),
+  more: z.boolean(),
+  skipped: z.number().int().nonnegative(),
+  messages: z.array(z.unknown()),
+});
+
+const AgentErrorSchema = z.object({ error: z.string() });
+
+/**
+ * The account agent's list of mail after a cursor. A message the agent sent that does not read as a message is counted
+ * as skipped, and the cursor is already past it.
+ */
+export function imapAgent({ url, fetchImpl }: { url: string; fetchImpl: typeof fetch | undefined }): ListAfterAgent {
+  return async request => {
+    let response: Response;
+    try {
+      response = await (fetchImpl ?? fetch)(`${url}/list_after`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(request),
+        signal: AbortSignal.timeout(MAIL_CALL_MS),
+        redirect: 'error',
+      });
+    } catch (error) {
+      throw error instanceof Error && error.name === 'TimeoutError'
+        ? new MailTooSlowError({ cause: error })
+        : new MailSourceBusyError({ cause: error });
+    }
+    const body: unknown = await response.json().catch(() => undefined);
+    if (!response.ok) {
+      const failure = AgentErrorSchema.safeParse(body);
+      const word = failure.success ? failure.data.error : 'unknown';
+      if (word === 'login_failed') {
+        throw new MailLoginFailedError({ cause: new Error('The Email connector could not log in.') });
+      }
+      throw word === 'unavailable'
+        ? new MailSourceBusyError({ cause: new Error('The mail server could not be reached.') })
+        : new Error(`The mail agent could not list mail (${word}).`);
+    }
+    const reply = AgentReplySchema.parse(body);
+    let skipped = reply.skipped;
+    const messages: CursorMessage[] = [];
+    for (const raw of reply.messages) {
+      const message = AgentMessageSchema.safeParse(raw);
+      const arrived = message.success ? new Date(message.data.internal_date) : undefined;
+      if (!message.success || arrived === undefined || Number.isNaN(arrived.getTime())) {
+        skipped += 1;
+        continue;
+      }
+      const { uid, from_address, from_name, subject } = message.data;
+      const bare = bareSubject(subject);
+      messages.push({
+        id: String(uid),
+        uid,
+        // The mail has no thread, so the subject stands in for one when a later reply is looked for.
+        thread_id: bare === '' ? null : bare,
+        from_address: from_address.toLowerCase(),
+        from_name,
+        subject,
+        snippet: '',
+        received_at: arrived,
+        // The agent does not pass on the receiving server's checks, so no sender can be vouched for.
+        authentication_results: [],
+      });
+    }
+    return {
+      messages,
+      skipped,
+      cursor: { uidvalidity: reply.uidvalidity, last_uid: reply.last_uid },
+      more: reply.more,
+    };
+  };
+}
+
 /**
  * The Email sidecar (IMAP) as a mail source. Its tools give no Authentication-Results, so an always-important sender
  * is never verified here and its mail is read as ordinary mail. Bills and deadlines still work.
  */
-export function sidecarMailSource({ call, account }: { call: CallSidecarTool; account: string }): MailSource {
+export function sidecarMailSource({
+  call,
+  account,
+  agent,
+}: {
+  call: CallSidecarTool;
+  account: string;
+  agent: ListAfterAgent;
+}): CursorMailSource {
   /**
    * Calls a tool. A dropped or abandoned call, the session ending, and a reply that says the connector ran out of time,
    * lost the connection or could not log in say the server is busy. The connector's other errors pass on as they are,
@@ -232,73 +315,17 @@ export function sidecarMailSource({ call, account }: { call: CallSidecarTool; ac
   };
   return {
     trustedAuthenticationServers: [],
-    datesAreArrival: false,
-    async listNewMessages({ since, before, limit, from, out_of_time, whole }) {
-      // The sidecar picks and orders mail by the server's arrival time, which is what the window means. The Date a
-      // sender wrote can be late or early, so it is never used to pick or order. A window longer than a few seconds
-      // is read in one call. A short one may be read page by page, where mail deleted meanwhile can shift a page and
-      // hide one message of those few seconds, which is accepted.
-      const size = Math.min(limit + 1, PAGE_SIZE);
-      const short = before.getTime() - since.getTime() <= SHORTEST_WINDOW_MS;
-      const listed: unknown[] = [];
-      let skipped = 0;
-      for (const address of from ?? [undefined]) {
-        const page = async (input: { page: number; size: number }): Promise<unknown[]> =>
-          emailsOfResult(
-            await asked(MAIL_LIST_TOOL_NAME, {
-              account_name: account,
-              mailbox: 'INBOX',
-              since: since.toISOString(),
-              before: before.toISOString(),
-              ...(address === undefined ? {} : { from_address: address }),
-              page: input.page,
-              page_size: input.size,
-              order: 'asc',
-            }).catch((error: unknown) => {
-              throw isCallTimeout(error) || saysTimedOut(error) ? new MailTooSlowError({ cause: error }) : error;
-            }),
-          );
-        let emails: unknown[];
-        let byPage = short;
-        try {
-          emails = await page({ page: 1, size });
-        } catch (error) {
-          if (error instanceof MailSourceBusyError || !short || whole === true) {
-            throw error;
-          }
-          // The connector fetches headers only for the messages on the page it lists, and fails the whole page when
-          // one message's headers do not parse. In a few seconds of mail, one message at a time finds the one.
-          const found = await listOneByOne({ page, error, limit, out_of_time });
-          emails = found.emails;
-          skipped += found.skipped;
-          byPage = false;
-        }
-        // A few seconds of mail may hold more than one page. Longer windows are too big to read once a page is full.
-        for (let number = 2; byPage && emails.length >= size && emails.length <= limit; number += 1) {
-          if (out_of_time()) {
-            throw new MailTooSlowError({ cause: new Error('The pass ran out of time.') });
-          }
-          const more = await page({ page: number, size });
-          emails.push(...more);
-          if (more.length < size) {
-            break;
-          }
-        }
-        if (emails.length >= size && (!short || emails.length > limit)) {
-          return { read: 'too_many' };
-        }
-        listed.push(...emails);
-        if (listed.length > limit) {
-          return { read: 'too_many' };
-        }
+    async listAfter({ cursor, since, limit, out_of_time }) {
+      if (out_of_time()) {
+        throw new MailTooSlowError({ cause: new Error('The pass ran out of time.') });
       }
-      return {
-        read: 'all',
-        messages: listed
-          .map(email => toMailMessage({ email, arrived: { from: since, to: before } }))
-          .filter((message): message is MailMessage => message !== undefined),
-        ...(skipped > 0 ? { skipped } : {}),
-      };
+      const reply = await agent({
+        uidvalidity: cursor?.uidvalidity ?? null,
+        last_uid: cursor?.last_uid ?? null,
+        since: since.toISOString(),
+        limit,
+      });
+      return reply;
     },
     async readText(message) {
       const [found] = await bodiesOf([message.id]).catch((error: unknown) => {
@@ -335,69 +362,6 @@ export function sidecarMailSource({ call, account }: { call: CallSidecarTool; ac
       return ids.length === 0 ? [] : (await bodiesOf(ids)).map(item => item.body);
     },
   };
-}
-
-/** The most messages a few seconds of mail may lose to one-by-one listing before the stretch counts as unlistable. */
-const MOST_SKIPPED_ONE_BY_ONE = 20;
-/** Pages that fail this many times in a row with none working before them say the account is failing, not a message. */
-const MOST_BAD_IN_A_ROW = 6;
-
-/**
- * Messages in a few seconds of mail are listed one per page, so only a message the connector cannot list is lost. A
- * page that fails is tried once more before its message is left out. Once any page has worked, the rest are listed
- * however many fail, so mail around a few bad headers is still read.
- */
-async function listOneByOne({
-  page,
-  error,
-  limit,
-  out_of_time,
-}: {
-  page: (input: { page: number; size: number }) => Promise<unknown[]>;
-  error: unknown;
-  limit: number;
-  out_of_time: () => boolean;
-}): Promise<{ emails: unknown[]; skipped: number }> {
-  const emails: unknown[] = [];
-  let skipped = 0;
-  let inARow = 0;
-  const pageTwice = async (number: number): Promise<unknown[]> => {
-    try {
-      return await page({ page: number, size: 1 });
-    } catch (first) {
-      if (first instanceof MailSourceBusyError) {
-        throw first;
-      }
-      if (out_of_time()) {
-        throw new MailTooSlowError({ cause: first });
-      }
-      return await page({ page: number, size: 1 });
-    }
-  };
-  for (let number = 1; emails.length <= limit; number += 1) {
-    if (out_of_time()) {
-      throw new MailTooSlowError({ cause: error });
-    }
-    try {
-      const [email] = await pageTwice(number);
-      if (email === undefined) {
-        break;
-      }
-      emails.push(email);
-      inARow = 0;
-    } catch (pageError) {
-      if (pageError instanceof MailSourceBusyError) {
-        throw pageError;
-      }
-      skipped += 1;
-      inARow += 1;
-      // Pages that all fail are the account or the server, not one message, and so are too many bad ones.
-      if ((emails.length === 0 && inARow >= MOST_BAD_IN_A_ROW) || skipped > MOST_SKIPPED_ONE_BY_ONE) {
-        throw error;
-      }
-    }
-  }
-  return { emails, skipped };
 }
 
 /** An ISO time with an offset or Z. A time with neither says no instant, so it is left out. */
@@ -468,12 +432,15 @@ export function sidecarCalendarSource({ call }: { call: CallSidecarTool }): Cale
  */
 export function createSidecarNoticingSources({
   mailUrl,
+  mailAgentUrl,
   calendarUrl,
   primary,
   instanceOwner,
   logger,
 }: {
   mailUrl: string | undefined;
+  /** The mail sidecar's account agent, which lists new mail. Without it the shared mailbox is not watched. */
+  mailAgentUrl: string | undefined;
   calendarUrl: string | undefined;
   primary: NoticingSourceProvider;
   /** Who the shared connectors belong to, or undefined when the instance names no owner. */
@@ -481,13 +448,17 @@ export function createSidecarNoticingSources({
   logger: Logger;
 }): NoticingSourceProvider {
   /** The shared mail connector, told apart as not set up (no account) or set up but out of reach. */
-  async function mailFromSidecar(url: string): Promise<MailAccess> {
+  async function mailFromSidecar({ url, agentUrl }: { url: string; agentUrl: string }): Promise<MailAccess> {
     try {
       const call = sidecarTools({ name: MAIL_CONNECTOR_NAME, url, logger, callMs: MAIL_CALL_MS });
       const [account] = accountNamesOfResult(await call(MAIL_ACCOUNT_LIST_TOOL_NAME, {}));
       return account === undefined
         ? { status: 'none' }
-        : { status: 'ready', source: sidecarMailSource({ call, account }), kind: 'email_connector' };
+        : {
+            status: 'ready',
+            source: sidecarMailSource({ call, account, agent: imapAgent({ url: agentUrl, fetchImpl: undefined }) }),
+            kind: 'email_connector',
+          };
     } catch (error) {
       logger.warn('The Email sidecar could not be reached for noticing', extractErrorLogFields(error));
       return {
@@ -512,7 +483,10 @@ export function createSidecarNoticingSources({
       // The person's own Google login wins. The shared connector is read only when Google gives no mail at all, so a
       // login that has to be redone is shown instead of being hidden by another mailbox.
       return {
-        mail: own.mail.status !== 'none' || mailUrl === undefined ? own.mail : await mailFromSidecar(mailUrl),
+        mail:
+          own.mail.status !== 'none' || mailUrl === undefined || mailAgentUrl === undefined
+            ? own.mail
+            : await mailFromSidecar({ url: mailUrl, agentUrl: mailAgentUrl }),
         calendar:
           own.calendar.status !== 'none' || calendarUrl === undefined
             ? own.calendar

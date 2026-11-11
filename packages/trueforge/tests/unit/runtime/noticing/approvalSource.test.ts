@@ -131,7 +131,11 @@ describe('sessionApprovalSource', () => {
       },
     ]);
     expect(listSessions).toHaveBeenCalledTimes(2);
-    expect(listSessions.mock.calls[0]?.[0]).toMatchObject({ tenant_id: 'default', created_by_or_agent_ids: undefined });
+    expect(listSessions.mock.calls[0]?.[0]).toMatchObject({
+      tenant_id: 'default',
+      created_by_or_agent_ids: undefined,
+      include_private: false,
+    });
     expect(getTurn.mock.calls.map(call => call[0].session_id)).toEqual(['a', 'b', 'c']);
   });
 });

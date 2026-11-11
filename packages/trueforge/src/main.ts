@@ -1000,6 +1000,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   const noticingService = createNoticingService({
     sources: createSidecarNoticingSources({
       mailUrl: configuration.MAIL_SIDECAR_MCP_URL,
+      mailAgentUrl: configuration.MAIL_EMAIL_ACCOUNT_URL,
       calendarUrl: configuration.CALENDAR_SIDECAR_MCP_URL,
       primary: createGoogleNoticingSources({ connections: googleConnectionStore, fetchImpl: undefined, logger }),
       instanceOwner: noticingInstanceOwner,
