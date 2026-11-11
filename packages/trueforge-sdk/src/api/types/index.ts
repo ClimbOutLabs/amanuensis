@@ -416,6 +416,7 @@ export * from "./SaveEmailAccountResponse.js";
 export * from "./Schedule.js";
 export * from "./ScheduleKind.js";
 export * from "./ScheduleManifest.js";
+export * from "./ScheduleManifestInput.js";
 export * from "./ScheduleRun.js";
 export * from "./ScheduleRunStatus.js";
 export * from "./ScheduleStatus.js";

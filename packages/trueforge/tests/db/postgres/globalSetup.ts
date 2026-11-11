@@ -1,7 +1,8 @@
 /**
  * Probes for a reachable Postgres before the store suite runs and publishes the
  * outcome through the environment, so the suite can skip rather than fail when
- * no database is available.
+ * no database is available on a developer's machine. CI always has the database
+ * and Redis, so there a missing one fails the run instead of passing with nothing tested.
  */
 import { connect } from 'node:net';
 import { Pool } from 'pg';
@@ -9,6 +10,7 @@ import { Pool } from 'pg';
 const CONFIGURED_URL_ENV = 'SESSION_STORE_TEST_PG_URL';
 const ENABLED_ENV = 'PG_STORE_TESTS_ENABLED';
 const ADMIN_URL_ENV = 'PG_STORE_TESTS_ADMIN_URL';
+const REDIS_URL_ENV = 'COMMAND_EXECUTION_TEST_REDIS_URL';
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 55432;
@@ -45,6 +47,13 @@ async function probeUrl(url: string): Promise<boolean> {
 }
 
 export default async function setupPostgresStoreTests(): Promise<void> {
+  const onCi = process.env['CI'] === 'true';
+  const redisUrl = process.env[REDIS_URL_ENV];
+  if (onCi && (redisUrl === undefined || redisUrl === '')) {
+    throw new Error(
+      `The store tests that need Redis would be skipped. Set ${REDIS_URL_ENV} on the CI step that runs them.`,
+    );
+  }
   const configuredUrl = process.env[CONFIGURED_URL_ENV];
   if (configuredUrl !== undefined && configuredUrl !== '') {
     if (await probeUrl(configuredUrl)) {
@@ -63,6 +72,11 @@ export default async function setupPostgresStoreTests(): Promise<void> {
     }
   }
 
+  if (onCi) {
+    throw new Error(
+      `No Postgres answered, so every Postgres store test would be skipped. Start the Postgres service for this CI job and set ${CONFIGURED_URL_ENV} to it.`,
+    );
+  }
   process.env[ENABLED_ENV] = '0';
   console.warn(
     `Postgres store tests skipped: set ${CONFIGURED_URL_ENV} or start Postgres on ${DEFAULT_HOST}:${String(DEFAULT_PORT)}`,

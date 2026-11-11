@@ -167,6 +167,7 @@ Workspace tasks go through `package.json` scripts - if a repeatable workflow is 
 | `pnpm lint` / `pnpm format`                          | ESLint (with fixes) / Prettier                        |
 | `pnpm smoke` / `pnpm smoke:down`                     | Full Docker Compose stack + health check              |
 | `pnpm smoke:npx`                                     | Pack the published CLI and boot it like `npx`         |
+| `pnpm smoke:npx:amanuensis`                          | Pack `amanuensis` and start it with `npx`; CI runs it |
 | `pnpm chart:lint` / `pnpm chart:template`            | Validate the Helm chart                               |
 | `pnpm clean` / `pnpm clean:all`                      | Remove build outputs (+ `node_modules` for `:all`)    |
 
@@ -236,6 +237,14 @@ Prettier and ESLint run as pre-commit hooks via husky + lint-staged.
 5. Keep PRs focused and reasonably small; describe **what** changed and **why** in the description.
 6. Open the PR. The maintainer will review it; squash-merge is the norm.
 7. **Please avoid rebasing or force-pushing once a maintainer has started reviewing.** It can make iterative reviewing harder. To update your branch, merge `main` instead. We squash-merge at the end, so messy in-PR history is fine.
+
+## Nightly run
+
+A pull request runs only the test suites its changed files select. The **Nightly** workflow ([`.github/workflows/nightly.yml`](.github/workflows/nightly.yml)) runs every suite on `main` each night, including all the browser tests, whatever changed that day. It reuses the CI workflow, so a suite added to CI is in the nightly run too.
+
+- When a nightly run fails, it opens an issue titled **Nightly tests failed** that lists the failed jobs and links the run. Later failures are added to the same issue. The next run that passes closes it. A cancelled run changes nothing.
+- To start a run by hand, open the **Actions** tab, pick **Nightly**, and choose **Run workflow**. A run started on a branch other than `main` does not open or close the issue.
+- The run uses a scripted model and needs no keys or accounts.
 
 ## Releases
 
