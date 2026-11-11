@@ -111,6 +111,10 @@
       "set": "install",
       "tests": []
     },
+    "command:local-model": {
+      "set": "install",
+      "tests": []
+    },
     "command:migrate": {
       "set": "install",
       "tests": []
@@ -314,6 +318,10 @@
     "route:modelProvider": {
       "set": "models",
       "tests": ["packages/frontend/tests/journeys/signedIn.journey.ts"]
+    },
+    "route:notesFolder": {
+      "set": "connectors",
+      "tests": []
     },
     "route:permission": {
       "set": "safety",
@@ -717,6 +725,7 @@
     "command:doctor",
     "command:import",
     "command:install",
+    "command:local-model",
     "command:migrate",
     "command:network",
     "command:open",
@@ -759,6 +768,7 @@
     "route:memorySummarize",
     "route:memoryVault",
     "route:model",
+    "route:notesFolder",
     "route:permission",
     "route:persona",
     "route:personaKnowledge",
