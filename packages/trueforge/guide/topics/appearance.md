@@ -1,7 +1,7 @@
 ---
 id: appearance
 title: Changing how Aman looks
-covers:
+covers: settings:themes
 ---
 
 ## Switch between light and dark quickly
