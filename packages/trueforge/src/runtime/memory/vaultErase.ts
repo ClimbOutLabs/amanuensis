@@ -99,7 +99,7 @@ function rewriteDailyLog({
 }
 
 /** Writes the whole file beside the old one and renames it over, so a reader never sees half a file. */
-async function replaceFile({ file, content }: { file: string; content: string }): Promise<void> {
+export async function replaceFile({ file, content }: { file: string; content: string }): Promise<void> {
   const temporary = path.join(path.dirname(file), `.${path.basename(file)}.${randomUUID()}.tmp`);
   try {
     await writeFile(temporary, content, 'utf8');

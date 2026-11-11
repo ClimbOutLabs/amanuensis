@@ -1,6 +1,6 @@
 import type { ILLM } from '@truefoundry/trueforge-core/core';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import winston from 'winston';
@@ -142,6 +142,33 @@ describe('learned profile copy in memory', () => {
 
     expect(saved.status).toBe(200);
     expect(await liveTextsHolding(client, LEARNED_TEXT)).toEqual([]);
+    await db.destroy();
+  });
+
+  it('removes a copy that closes with "From you", found by its document id', async () => {
+    const { db, client, router, saveOldCopy } = await harness();
+    await saveOldCopy();
+    const day = await readFile(path.join(dir, 'default', 'memory', '2026-08-30.md'), 'utf8');
+    expect(day.trimEnd().endsWith('> From you')).toBe(true);
+
+    await router.request('/profile', { method: 'DELETE' });
+
+    expect(await liveTextsHolding(client, LEARNED_TEXT)).toEqual([]);
+    await db.destroy();
+  });
+
+  it('keeps a note of the person that only ends with the copy’s context line and has no document id', async () => {
+    const { db, client, router } = await harness();
+    await mkdir(path.join(dir, 'default', 'memory'), { recursive: true });
+    await writeFile(
+      path.join(dir, 'default', 'memory', '2026-08-30.md'),
+      `## 2026-08-30T12:00:00.000Z\n\n${LEARNED_TEXT}\n\n> Learned user profile\n\n> From you\n\n`,
+      'utf8',
+    );
+
+    await router.request('/profile', { method: 'DELETE' });
+
+    expect(await liveTextsHolding(client, LEARNED_TEXT)).toHaveLength(1);
     await db.destroy();
   });
 

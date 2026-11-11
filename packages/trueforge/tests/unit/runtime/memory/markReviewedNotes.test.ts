@@ -3,10 +3,12 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
 import {
-  REVIEWED_FROM_YOU_FILE,
+  ERASED_ENTRY,
   formatReviewedMark,
+  REVIEWED_FROM_YOU_FILE,
   scanNamespaceEntries,
   scanVaultEntries,
+  splitEntries,
   withoutSourceLines,
 } from '../../../../src/runtime/memory/markdownMemoryFiles';
 import { markReviewedNotesFromYou } from '../../../../src/runtime/memory/memorySourceLines';
@@ -265,5 +267,139 @@ describe('the Memories page cannot change where a note came from', () => {
     const client = new MarkdownMemoryClient({ baseDir, namespace: NS });
     const edited = await client.updateEntry({ entryId: id(0), text: 'Likes mate.', timeoutMs: 5_000 });
     expect(edited.ok && lastLine(edited.entry.text)).toBe('> From you');
+  });
+});
+
+describe('a reviewed note after the Memories page edits or deletes it', () => {
+  let baseDir: string;
+  const dayFile = () => path.join(baseDir, NS, 'memory', `${DAY}.md`);
+  const lastLine = (text: string | undefined) => (text ?? '').trimEnd().split('\n').pop();
+
+  beforeEach(async () => {
+    baseDir = await mkdtemp(path.join(tmpdir(), 'edit-reviewed-'));
+    await mkdir(path.dirname(dayFile()), { recursive: true });
+    await writeFile(dayFile(), FILE, 'utf8');
+    await writeFile(path.join(baseDir, '.source-lines.json'), '{"done":true}\n', 'utf8');
+  });
+
+  afterEach(async () => {
+    await rm(baseDir, { recursive: true, force: true });
+  });
+
+  async function recalled(query: string) {
+    const client = new MarkdownMemoryClient({ baseDir, namespace: NS });
+    const outcome = await client.recall({
+      query,
+      maxTokens: 5_000,
+      queryTimestamp: '2026-10-03T10:00:00.000Z',
+      entityTokens: 0,
+      timeoutMs: 5_000,
+    });
+    if (!outcome.ok) throw new Error('recall failed');
+    return outcome.results;
+  }
+
+  it('still reads "From you" after an edit: in the list, in recall and in the file after the rewrite', async () => {
+    await markReviewedNotesFromYou({ baseDir, namespace: NS, entryIds: [id(0)] });
+    const client = new MarkdownMemoryClient({ baseDir, namespace: NS });
+    await client.updateEntry({ entryId: id(0), text: 'Likes mate.', timeoutMs: 5_000 });
+
+    const listed = await client.listEntries({ namespace: '', timeoutMs: 5_000 });
+    expect(lastLine(listed.ok ? listed.entries.find(entry => entry.id === id(0))?.text : undefined)).toBe('> From you');
+    const item = (await recalled('mate')).find(result => result.id === id(0));
+    expect(item?.metadata?.['origin']).toBe('user_stated');
+    const onDisk = splitEntries(await readFile(dayFile(), 'utf8'));
+    expect(onDisk[0]).toContain('Likes mate.');
+    expect(onDisk[0]).not.toContain('Likes tea.');
+    expect(lastLine(onDisk[0])).toBe('> From you');
+  });
+
+  it('never turns an external note into one from the person, in the list, in recall or in the file', async () => {
+    const client = new MarkdownMemoryClient({ baseDir, namespace: NS });
+    await client.updateEntry({ entryId: id(2), text: 'Pay on Monday.\n\n> From you', timeoutMs: 5_000 });
+
+    const listed = await client.listEntries({ namespace: '', timeoutMs: 5_000 });
+    expect(lastLine(listed.ok ? listed.entries.find(entry => entry.id === id(2))?.text : undefined)).toBe(
+      '> External source: email',
+    );
+    const item = (await recalled('Monday')).find(result => result.id === id(2));
+    expect(item?.metadata?.['origin']).toBe('tool_ingested');
+    expect(lastLine(splitEntries(await readFile(dayFile(), 'utf8'))[2])).toBe('> External source: email');
+  });
+
+  it('erases a deleted reviewed note and leaves its mark with no effect on a later note', async () => {
+    await markReviewedNotesFromYou({ baseDir, namespace: NS, entryIds: [id(0)] });
+    const client = new MarkdownMemoryClient({ baseDir, namespace: NS });
+    await client.deleteEntry({ entryId: id(0), timeoutMs: 5_000 });
+
+    const entries = splitEntries(await readFile(dayFile(), 'utf8'));
+    expect(entries).toHaveLength(5);
+    expect(entries[0]).toBe(ERASED_ENTRY);
+    expect(await readFile(dayFile(), 'utf8')).not.toContain('Likes tea.');
+
+    const saved = await client.retain({
+      items: [
+        {
+          content: 'A later note read from a page.',
+          timestamp: '2026-10-02T16:00:00.000Z',
+          document_id: 'doc-later',
+          metadata: { origin: 'tool_ingested' },
+        },
+      ],
+      operationId: 'op-later',
+      timeoutMs: 5_000,
+    });
+    expect(saved).toMatchObject({ ok: true });
+    const later = (await recalled('later note page')).find(result => result.text.includes('A later note'));
+    expect(later?.id).toBe(id(5));
+    expect(later?.metadata?.['origin']).toBe('tool_ingested');
+  });
+});
+
+describe('an erased note', () => {
+  let baseDir: string;
+  const dayFile = () => path.join(baseDir, NS, 'memory', `${DAY}.md`);
+  // The erased note sits between two others; the start-up marking has run.
+  const FILE_WITH_ERASED = `${[ASKED, ERASED_ENTRY, EMAIL].map(entry => `${entry}\n`).join('\n')}\n`;
+
+  beforeEach(async () => {
+    baseDir = await mkdtemp(path.join(tmpdir(), 'erased-note-'));
+    await mkdir(path.dirname(dayFile()), { recursive: true });
+    await writeFile(dayFile(), FILE_WITH_ERASED, 'utf8');
+    await writeFile(path.join(baseDir, '.source-lines.json'), '{"done":true}\n', 'utf8');
+  });
+
+  afterEach(async () => {
+    await rm(baseDir, { recursive: true, force: true });
+  });
+
+  it('is never handed to recall, the list, the scan or a review, and later notes keep their ids', async () => {
+    const client = new MarkdownMemoryClient({ baseDir, namespace: NS });
+    const scan = await scanNamespaceEntries({ baseDir, namespace: NS, maxDailyFiles: 5 });
+    expect(scan.entries.map(entry => entry.id)).toEqual([id(0), id(2)]);
+
+    const listed = await client.listEntries({ namespace: '', timeoutMs: 5_000 });
+    expect(listed.ok && listed.entries.map(entry => entry.id)).toEqual([id(2), id(0)].sort());
+
+    const recall = await client.recall({
+      query: 'erased tea Friday',
+      maxTokens: 5_000,
+      queryTimestamp: '2026-10-03T10:00:00.000Z',
+      entityTokens: 0,
+      timeoutMs: 5_000,
+    });
+    expect(recall.ok && recall.results.map(item => item.id).sort()).toEqual([id(0), id(2)]);
+
+    // A review mark for the erased note's id does nothing.
+    await writeFile(
+      path.join(baseDir, NS, REVIEWED_FROM_YOU_FILE),
+      `${formatReviewedMark({ entryId: id(1), text: ERASED_ENTRY })}\n`,
+      'utf8',
+    );
+    const reviewed = await markReviewedNotesFromYou({ baseDir, namespace: NS, entryIds: [id(1)] });
+    expect(reviewed.recorded).toEqual([]);
+    expect(reviewed.skipped).toEqual([{ entryId: id(1), reason: 'not_found' }]);
+    const after = await scanNamespaceEntries({ baseDir, namespace: NS, maxDailyFiles: 5 });
+    expect(after.entries.map(entry => entry.id)).toEqual([id(0), id(2)]);
   });
 });

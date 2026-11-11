@@ -1,9 +1,16 @@
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
-import { entryMetadata, splitEntries, withSourceLines } from '../../../../src/runtime/memory/markdownMemoryFiles';
+import {
+  dailyLogEntries,
+  entryMetadata,
+  ERASED_ENTRY,
+  splitEntries,
+  withSourceLines,
+} from '../../../../src/runtime/memory/markdownMemoryFiles';
 import { ensureMemorySourceLines } from '../../../../src/runtime/memory/memorySourceLines';
+import { withVaultLock } from '../../../../src/runtime/memory/vaultLock';
 
 const OWN_NOTE = ['## 2026-10-01T09:00:00.000Z', 'Maya lives in Lisbon.', '<!-- session_id: chat-1 -->'].join('\n\n');
 const READ_NOTE = [
@@ -54,6 +61,23 @@ describe('older notes get a line that says where they came from', () => {
       ].join('\n\n'),
     );
     expect(entryMetadata(entry ?? '')['origin']).toBe('tool_ingested');
+  });
+});
+
+describe('an erased note in an older day', () => {
+  const DAY_WITH_ERASED = `${[OWN_NOTE, ERASED_ENTRY, BARE_NOTE].map(entry => `${entry}\n`).join('\n')}\n`;
+
+  it('stays exactly as it is and gets no source line', () => {
+    const { content, marked } = withSourceLines(DAY_WITH_ERASED);
+    expect(marked).toBe(2);
+    const entries = splitEntries(content);
+    expect(entries[1]).toBe(ERASED_ENTRY);
+    expect(entries[2]).toBe(`${BARE_NOTE}\n\n> External source: no record`);
+  });
+
+  it('is never listed, and the notes after it keep their ids', () => {
+    const listed = dailyLogEntries({ safeNamespace: 'default', file: '2026-10-01.md', content: DAY_WITH_ERASED });
+    expect(listed.map(entry => entry.id)).toEqual(['md:default:2026-10-01.md#0', 'md:default:2026-10-01.md#2']);
   });
 });
 
@@ -134,5 +158,43 @@ describe('the one-time marking of a memory folder', () => {
     expect(entries[3]).toBe(
       ['## 2026-10-01T15:00:00.000Z', 'Maya moved to Porto.', '<!-- session_id: chat-9 -->', '> From you'].join('\n\n'),
     );
+  });
+  it('waits for the vault lock and leaves no temporary file behind', async () => {
+    const file = await writeOldDay('default');
+    let release: () => void = () => undefined;
+    const held = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    let locked: () => void = () => undefined;
+    const hasLock = new Promise<void>(resolve => {
+      locked = resolve;
+    });
+    const holder = withVaultLock({ vaultDir: path.join(baseDir, 'default') }, async () => {
+      locked();
+      await held;
+    });
+    await hasLock;
+
+    const marking = ensureMemorySourceLines({ baseDir });
+    await new Promise(resolve => setTimeout(resolve, 150));
+    expect(await readFile(file, 'utf8')).toBe(OLD_DAY);
+
+    release();
+    await holder;
+    expect(await marking).toEqual({ filesChanged: 1, notesMarked: 2 });
+    expect(await readFile(file, 'utf8')).toBe(withSourceLines(OLD_DAY).content);
+    expect(await readdir(path.dirname(file))).toEqual(['2026-10-01.md']);
+  });
+
+  it('leaves an erased note in its place and marks the others', async () => {
+    const file = path.join(baseDir, 'default', 'memory', '2026-10-01.md');
+    await mkdir(path.dirname(file), { recursive: true });
+    await writeFile(file, `${[OWN_NOTE, ERASED_ENTRY, BARE_NOTE].map(entry => `${entry}\n`).join('\n')}\n`, 'utf8');
+
+    expect(await ensureMemorySourceLines({ baseDir })).toEqual({ filesChanged: 1, notesMarked: 2 });
+
+    const entries = splitEntries(await readFile(file, 'utf8'));
+    expect(entries).toHaveLength(3);
+    expect(entries[1]).toBe(ERASED_ENTRY);
   });
 });

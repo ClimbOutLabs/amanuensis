@@ -1,5 +1,5 @@
 import { constants } from 'node:fs';
-import { copyFile, mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import {
@@ -18,6 +18,8 @@ import {
   upgradeLegacyEntries,
   withSourceLines,
 } from './markdownMemoryFiles';
+import { replaceFile } from './vaultErase';
+import { withVaultLock } from './vaultLock';
 
 /** Records, in the memory folder, that the notes saved before entries named their source were marked. */
 const STATE_FILE = '.source-lines.json';
@@ -82,9 +84,7 @@ async function markDailyFile(input: { vaultDir: string; file: string }): Promise
       throw error;
     }
   }
-  const temporary = `${filePath}.source-lines.tmp`;
-  await writeFile(temporary, content, 'utf8');
-  await rename(temporary, filePath);
+  await replaceFile({ file: filePath, content });
   return marked;
 }
 
@@ -96,13 +96,16 @@ async function markAll(baseDir: string): Promise<SourceLinesReport | undefined> 
   try {
     for (const vault of await vaultDirs(baseDir)) {
       const vaultDir = path.join(baseDir, vault);
-      for (const file of await dailyFiles(path.join(vaultDir, 'memory'))) {
-        const marked = await markDailyFile({ vaultDir, file });
-        if (marked > 0) {
-          report.filesChanged += 1;
-          report.notesMarked += marked;
+      // One vault at a time, under the lock a save or an erase takes, so a rewrite never loses a note saved meanwhile.
+      await withVaultLock({ vaultDir }, async () => {
+        for (const file of await dailyFiles(path.join(vaultDir, 'memory'))) {
+          const marked = await markDailyFile({ vaultDir, file });
+          if (marked > 0) {
+            report.filesChanged += 1;
+            report.notesMarked += marked;
+          }
         }
-      }
+      });
     }
     await mkdir(baseDir, { recursive: true });
     await writeFile(path.join(baseDir, STATE_FILE), `${JSON.stringify({ done: true })}\n`, 'utf8');
