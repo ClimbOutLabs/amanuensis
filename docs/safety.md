@@ -46,6 +46,8 @@ A scheduled run has nobody watching it, so it never sends or changes anything by
 - It can read and search, the same as a chat.
 - Any action that would show a card in a chat is held instead. It is not run, and the model is told it was saved for you.
 - If you let file writes run without a card in chat, a scheduled run ignores that choice and holds them too.
+- If you let Aman run code in the sandbox without asking, a scheduled run ignores that choice as well. It holds code, new files and package installs.
+- A chat you are in can set or cancel a reminder, and pause or resume a schedule, without a card. A scheduled run holds each of those.
 - When the run finishes, its chat ends with a **Needs your OK** list: "Aman held these for you. Nothing has been done yet." Each item shows what will happen, with **Approve** and **Deny**, and for some read-only connector tools also **Always allow**.
 - The list is built by the app from what was held, not from the model's words, so the model cannot hide an item or add a fake one.
 - Held actions expire after 24 hours. Up to 20 are kept per chat; if more were held, the list says how many were not saved so you can ask again in chat.
