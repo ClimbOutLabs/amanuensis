@@ -37,10 +37,10 @@ local_model_host_network() {
 }
 
 # This computer's own addresses and names, comma-separated: its loopback names, every address it has on a network
-# (Tailscale's included), its names, its Tailscale name, and every host the instance answers at. The app uses the list
-# only to tell that a model address is this computer.
-this_computer_addresses() { # name
-  local host list='' origin
+# (Tailscale's included), its names and its Tailscale name. The app uses the list only to tell that a model address is
+# this computer. The hosts given with --address are left out, since one may name another machine that forwards here.
+this_computer_addresses() {
+  local host list=''
   for host in 127.0.0.1 localhost host.docker.internal $(network_ipv4_addresses) $(network_tailscale_ip) $(network_hostname) \
     $(network_tailscale_name); do
     host=$(lowercase "$host")
@@ -51,12 +51,6 @@ this_computer_addresses() { # name
     host="$(network_hostname).local"
     case ",$list," in *",$host,"*) ;; *) list="$list,$host" ;; esac
   fi
-  while IFS= read -r origin; do
-    [ -n "$origin" ] || continue
-    host=$(lowercase "$(origin_host "$origin")")
-    case ",$list," in *",$host,"*) continue ;; esac
-    list="$list,$host"
-  done < <(reg_get "$1" origins | tr ',' '\n')
   printf '%s' "$list"
 }
 
@@ -66,7 +60,7 @@ local_model_render_args() { # name
   ports=$(local_model_ports "$name")
   if local_model_bridge_available; then
     available=1
-    addresses=$(this_computer_addresses "$name")
+    addresses=$(this_computer_addresses)
     if [ -n "$ports" ]; then
       on=1
       if local_model_host_network; then
@@ -104,6 +98,10 @@ cmd_instance_local_model() {
   lock_acquire
   load_installed_release
   warn_if_installed_older
+  # An app image built before the bridge has no folder for its socket files, and the bridge would not start.
+  if [ "$OPT_REMOVE" != 1 ] && ! D run --rm --network none --entrypoint test "$REL_APP_TAG" -d /run/aman-local-model >/dev/null 2>&1; then
+    die "The installed Aman is older than the local model bridge, so nothing changed. Run aman upgrade, then run this command again."
+  fi
   ports=$(local_model_ports "$name")
   if [ "$OPT_REMOVE" = 1 ]; then
     case ",$ports," in *",$port,"*) ;; *) die "Instance $name does not carry port $port. Nothing changed." ;; esac

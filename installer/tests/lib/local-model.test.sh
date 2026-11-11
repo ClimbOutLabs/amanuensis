@@ -96,7 +96,21 @@ test_only_a_port_of_this_computer_is_taken() {
   sandbox_drop
 }
 
+test_an_app_image_from_before_the_bridge_is_refused() {
+  t_begin "an installed app image from before the bridge is refused with the one step to take, and nothing changes"
+  sandbox_new
+  install_machine
+  STUB_OLD_APP_IMAGE=1
+  run_install instance local-model main 30031
+  STUB_OLD_APP_IMAGE=
+  assert_rc 1
+  assert_flat_contains "$OUT$ERR" "The installed Aman is older than the local model bridge, so nothing changed. Run aman upgrade"
+  assert_not_contains "$(cat "$AMAN_HOME/state/instances/main.conf")" "local_models="
+  sandbox_drop
+}
+
 test_no_port_named_means_no_bridge
+test_an_app_image_from_before_the_bridge_is_refused
 test_naming_a_port_starts_the_bridge
 test_docker_desktop_dials_the_host_name
 test_removing_the_last_port_takes_the_bridge_away
