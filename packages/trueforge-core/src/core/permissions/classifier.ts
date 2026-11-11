@@ -11,12 +11,14 @@
  * either. Returns a TierDecision with stable reason codes, the approval card,
  * the Tier 2 kind, and the tracked-execution approval binding.
  */
-import { existsSync, readFileSync, realpathSync } from 'fs';
+import { realpathSync } from 'fs';
 import os from 'os';
 import path from 'path';
 import { DOCUMENTS_SERVER_ID, EXTRACT_DOCUMENT_TEXT_TOOL_NAME } from '../../documents/toolContract';
 import type { CalendarWriteReview } from '../calendar/eventWrite';
 import { CALENDAR_SERVER_ID, isCalendarReadToolName, isCalendarWriteToolName } from '../calendar/toolContract';
+import { DRIVE_SERVER_ID, isDriveReadToolName, isDriveWriteToolName } from '../drive/toolContract';
+import type { DriveWriteReview } from '../drive/writeReview';
 import type { ReviewableDraft } from '../email/gmail/draftReview';
 import type { AnsweredMessage } from '../email/gmail/replyThread';
 import {
@@ -111,6 +113,7 @@ import {
   collectOutboundStrings,
   describeOutboundRule,
   maskServerSecrets,
+  OUTBOUND_MAX_PLUMBING_CHARS,
   type OutboundGuardVerdict,
   type OutboundStrings,
 } from './outboundGuard';
@@ -150,11 +153,11 @@ import {
 } from './shellAllowlist';
 import {
   autoDenyDecision,
+  CONNECTOR_READ_GUARD_REASON,
   CONTENT_STEERED_REASON,
   failClosedDecision,
   SANDBOX_COMMAND_REASON,
   SANDBOX_FILE_WRITE_REASON,
-  SANDBOX_PACKAGE_INSTALL_REASON,
   SANDBOX_RUN_CODE_REASON,
   tier1Decision,
   tier2Decision,
@@ -256,6 +259,11 @@ export interface SentinelAction {
    * for a change, the event as Google holds it now, so the card shows what would really be written.
    */
   calendar_write?: CalendarWriteReview | undefined;
+  /**
+   * The Drive write a create or append would make, settled by the Drive tool set from the validated call and,
+   * for an append, the spreadsheet as Google holds it now, so the card shows what would really be written.
+   */
+  drive_write?: DriveWriteReview | undefined;
   /** The schedule a create or delete would save or remove, settled by the schedule tool set from the store. */
   schedule_write?: Tier3Schedule | undefined;
   /** The persona a create would add, settled by the persona tool set from the request and the owner's personas. */
@@ -287,6 +295,8 @@ export interface ClassifyContext extends SentinelCallIdentity {
   path_resolution?: PathResolution | undefined;
   /** Reads file digests from a remote sandbox, so approvals can bind to file content there too. */
   file_digest?: FileDigest | undefined;
+  /** `none` when nothing run in the calling sandbox can reach a network; set by the sandbox provider. Absent means it may. */
+  sandbox_network?: 'none' | undefined;
 }
 
 /** Longest place string the approval card shows; the tool schemas cap the same fields at this length. */
@@ -863,23 +873,6 @@ function withInternetNote({ decision, action }: { decision: TierDecision; action
 /** Package managers whose installs go through the sandbox package gateway. */
 const PACKAGE_MANAGER_COMMANDS: ReadonlySet<string> = new Set(['npm', 'pnpm', 'yarn', 'pip', 'pip3']);
 
-/** Install flags that only change how packages are saved or reported. Any other flag asks. */
-const SAFE_INSTALL_FLAGS: ReadonlySet<string> = new Set([
-  '-q',
-  '--quiet',
-  '-U',
-  '--upgrade',
-  '--no-input',
-  '-D',
-  '--save-dev',
-  '-S',
-  '--save',
-]);
-
-/** A package name with an optional scope, extras, and version pin. A web address, a path, or a bare dot name does not match. */
-const PLAIN_PACKAGE_SPEC =
-  /^(?!\.+$)(@[A-Za-z0-9._-]+\/)?[A-Za-z0-9._-]+(\[[A-Za-z0-9,._-]+\])?([=<>!~^@]{1,2}[A-Za-z0-9.*_+-]+)?$/u;
-
 /** `python -m pip` runs the same pip, so its argv is classified as pip's. */
 function pipEquivalentArgv(argv: readonly string[]): readonly string[] {
   const [program, flag, module] = argv;
@@ -901,14 +894,6 @@ function isPackageInstallArgv(input: readonly string[]): boolean {
 }
 
 /**
- * Installers whose install scripts run the package's own code, and so run code from the repository on a
- * local path. Their silent installs must pass IGNORE_SCRIPTS_FLAG. pip always runs build hooks and .pth
- * files, so every pip install keeps its card.
- */
-const SCRIPT_RUNNING_INSTALLERS: ReadonlySet<string> = new Set(['npm', 'pnpm', 'yarn']);
-const IGNORE_SCRIPTS_FLAG = '--ignore-scripts';
-
-/**
  * Files that can turn install scripts or install hooks back on. Any one of them present in a folder the
  * install reads from means the install asks.
  */
@@ -920,36 +905,6 @@ const INSTALL_HOOK_FILES: readonly string[] = [
   '.yarnrc.yml',
   'pnpm-workspace.yaml',
 ];
-
-/** Installers whose hook files and install-script defaults change by version, so the version must be declared. */
-const VERSION_GATED_INSTALLERS: ReadonlySet<string> = new Set(['pnpm', 'yarn']);
-
-/** A packageManager field that names pnpm or yarn with a full version, such as `pnpm@11.16.0+sha512...`. */
-const DECLARED_PACKAGE_MANAGER = /^(pnpm|yarn)@\d+\.\d+\.\d+/u;
-
-/**
- * True when the install names only plain packages, so every download goes through the package gateway,
- * and it runs no install scripts. Any pip install, and any npm, pnpm or yarn install without the ignore flag, asks.
- */
-function isPlainPackageInstall(input: readonly string[]): boolean {
-  if (!isPackageInstallArgv(input)) {
-    return false;
-  }
-  const argv = pipEquivalentArgv(input);
-  const [program] = argv;
-  if (program === undefined || !SCRIPT_RUNNING_INSTALLERS.has(program)) {
-    return false;
-  }
-  const operands = argv.slice(2);
-  const packages = operands.filter(word => !word.startsWith('-'));
-  const flags = operands.filter(word => word.startsWith('-'));
-  return (
-    packages.length > 0 &&
-    packages.every(spec => PLAIN_PACKAGE_SPEC.test(spec)) &&
-    flags.includes(IGNORE_SCRIPTS_FLAG) &&
-    flags.every(flag => flag === IGNORE_SCRIPTS_FLAG || SAFE_INSTALL_FLAGS.has(flag))
-  );
-}
 
 /**
  * The install's own folder, then each folder above it up to the workspace root. An install outside the workspace
@@ -990,45 +945,15 @@ async function installHooksPresent({ ctx, cwd }: { ctx: ClassifyContext; cwd: st
   return false;
 }
 
-/** The packageManager field of a package.json, or null when the file cannot be read or names none. */
-function declaredPackageManager(manifest: string): string | null {
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(manifest, 'utf8'));
-    if (typeof parsed === 'object' && parsed !== null && 'packageManager' in parsed) {
-      return typeof parsed.packageManager === 'string' ? parsed.packageManager : null;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
 /**
- * True when the package.json nearest the install names this installer's version. Its hook files and script
- * defaults depend on that version, so an install whose version is unknown asks. A remote sandbox cannot be
- * read from here, so its version is never known.
+ * Whether in-sandbox work may skip its card: the person's switch is on and the sandbox has no network.
+ * The sandbox is what contains such work, so one that can reach a network always asks.
  */
-function installerVersionDeclared({
-  installer,
-  ctx,
-  cwd,
-}: {
-  installer: string;
-  ctx: ClassifyContext;
-  cwd: string | null;
-}): boolean {
-  if (ctx.path_resolution === 'remote') {
-    return false;
-  }
-  const base = resolveIdentityCwd(ctx, cwd);
-  const manifest = installFolderChain({ base, root: ctx.workspace_cwd })
-    .map(folder => path.join(folder, 'package.json'))
-    .find(file => existsSync(file));
-  if (manifest === undefined) {
-    return false;
-  }
-  const declared = declaredPackageManager(manifest) ?? '';
-  return DECLARED_PACKAGE_MANAGER.exec(declared)?.[1] === installer;
+async function sandboxWorkRunsSilently(ctx: ClassifyContext): Promise<boolean> {
+  return (
+    ctx.sandbox_network === 'none' &&
+    (await ctx.services.sandboxWithoutAsking({ tenant_id: ctx.tenant_id, created_by: ctx.created_by }))
+  );
 }
 
 /** The plain line the activity list shows for a silent run. */
@@ -1066,11 +991,11 @@ function silentRunScript(argv: readonly string[]): string | undefined {
 }
 
 /**
- * The silent run a command gets with the switch on: a plain package install, or a script run of a file Aman
- * wrote in this conversation. A script run of any other file (a repo file, a download, an unknown file) keeps
- * its card, and so does a test runner, which runs code it finds in the repo.
+ * The silent run a command gets with the switch on: a script run of a file Aman wrote in this conversation.
+ * A script run of any other file (a repo file, a download, an unknown file) keeps its card, and so does a
+ * test runner, which runs code it finds in the repo. A package install is never placed here: it always asks.
  */
-async function sandboxRunPlacement({
+function sandboxRunPlacement({
   command,
   parsed,
   ctx,
@@ -1080,23 +1005,13 @@ async function sandboxRunPlacement({
   parsed: ParsedSimpleCommand | undefined;
   ctx: ClassifyContext;
   cwd: string | null;
-}): Promise<{ reason: string; reason_detail: string } | null> {
+}): { reason: string; reason_detail: string } | null {
   if (parsed === undefined) {
     return null;
   }
   const program = parsed.argv[0];
-  if (program === undefined) {
+  if (program === undefined || isPackageInstallArgv(parsed.argv)) {
     return null;
-  }
-  // An install that is not plain (index URL, path, web address, requirements file) asks, whatever its program.
-  if (isPackageInstallArgv(parsed.argv)) {
-    const installer = pipEquivalentArgv(parsed.argv)[0] ?? '';
-    const versionUnknown =
-      VERSION_GATED_INSTALLERS.has(installer) && !installerVersionDeclared({ installer, ctx, cwd });
-    if (!isPlainPackageInstall(parsed.argv) || versionUnknown || (await installHooksPresent({ ctx, cwd }))) {
-      return null;
-    }
-    return { reason: SANDBOX_PACKAGE_INSTALL_REASON, reason_detail: sandboxRunDetail(command) };
   }
   const script = silentRunScript(parsed.argv);
   if (script === undefined) {
@@ -1204,7 +1119,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
   const cwd = stringParam(action.canonical_params, 'cwd');
   const env = envOverrides(action.canonical_params);
   const offline = await services.isOffline({ tenant_id: ctx.tenant_id, created_by: ctx.created_by });
-  const sandboxSilent = await services.sandboxWithoutAsking({ tenant_id: ctx.tenant_id, created_by: ctx.created_by });
+  const sandboxSilent = await sandboxWorkRunsSilently(ctx);
 
   // Agent-controlled env vars (e.g. LD_PRELOAD, PYTHONPATH, NODE_OPTIONS)
   // can inject code into allowlisted commands: escalate for approval.
@@ -1256,7 +1171,7 @@ async function classifyExecShell(action: SentinelAction, ctx: ClassifyContext): 
   // With the user's switch on, a run of a script Aman wrote in this conversation is placed here and skips
   // the card. The containment checks below still apply to it.
   const parsed = parseSimpleCommand(command);
-  const silentRun = sandboxSilent ? await sandboxRunPlacement({ command, parsed, ctx, cwd }) : null;
+  const silentRun = sandboxSilent ? sandboxRunPlacement({ command, parsed, ctx, cwd }) : null;
 
   // Write-then-execute check BEFORE allowlist matching. Scan every segment
   // of a compound command (`;`, `&&`, `||`, `|`): a tracked script hidden
@@ -1701,10 +1616,7 @@ async function classifySandboxWrite(action: SentinelAction, ctx: ClassifyContext
   const everyTargetIsSilentlyWritable = absolute.every(target =>
     silentWriteTarget({ p: target, cwd: targets.cwd, ctx }),
   );
-  if (
-    everyTargetIsSilentlyWritable &&
-    (await ctx.services.sandboxWithoutAsking({ tenant_id: ctx.tenant_id, created_by: ctx.created_by }))
-  ) {
+  if (everyTargetIsSilentlyWritable && (await sandboxWorkRunsSilently(ctx))) {
     return tier1Decision({
       reason: SANDBOX_FILE_WRITE_REASON,
       reason_detail: `Changed ${namedWriteTargets(targets.paths)} in your workspace.`,
@@ -2739,6 +2651,111 @@ async function classifyCalendarTool(action: SentinelAction, ctx: ClassifyContext
   });
 }
 
+/**
+ * The approval card for a Drive write, built from the write the host will really make, never from model
+ * prose: a create shows its whole text, an append shows every row.
+ */
+function driveWriteCard(input: { review: DriveWriteReview; agent_intent: string | null }): Tier3Card {
+  const { review } = input;
+  const base = {
+    plain_why: plainWhy(input.agent_intent),
+    cannot_be_undone: null,
+    why_asked_again: null,
+    destination: null,
+    recipient: null,
+    amount: null,
+    parsed_command: null,
+    destination_host: null,
+    outbound_truncated: false,
+  };
+  if (review.action === 'create_doc') {
+    return {
+      ...base,
+      plain_what: `Create a Google Doc named ${cardSubject(review.file_name)} in your Google Drive?${review.text === '' ? ' It starts empty.' : ''}`,
+      outbound_text: review.text === '' ? null : escapeDisplayText(review.text, { keepNewlines: true }),
+    };
+  }
+  const rows = review.rows.map(row => row.map(cell => escapeDisplayText(cell)).join(', ')).join('\n');
+  const sharing =
+    review.shared_with === null
+      ? ' This file is shared with other people.'
+      : review.shared_with > 0
+        ? ` This file is shared with ${String(review.shared_with)} ${review.shared_with === 1 ? 'person' : 'people'}.`
+        : '';
+  return {
+    ...base,
+    plain_what: `Add ${String(review.rows.length)} ${review.rows.length === 1 ? 'row' : 'rows'} to the tab "${escapeDisplayText(review.sheet_name ?? '')}" of the Google Sheet ${cardSubject(review.file_name)}?${sharing}`,
+    outbound_text: rows,
+  };
+}
+
+/**
+ * Drive tools are the host's own, named by server so a connector's tool of the same name never takes this
+ * path. Reads are silent but flagged as sensitive, as Gmail's are. A write asks with the whole write on the
+ * card, unless a standing grant covers the tool; any other name fails closed. Once the chat has read content
+ * that is not the person's own words, a write may have been asked for by that content rather than by the
+ * person, so it asks first with the steering line on the card, no grant covers it, and a run with nobody
+ * to answer skips it, the same way a steered notes write does.
+ */
+async function classifyDriveTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
+  if (await ctx.services.isOffline({ tenant_id: ctx.tenant_id, created_by: ctx.created_by })) {
+    return autoDenyDecision({
+      reason: 'offline_mode',
+      reason_detail: 'Google Drive needs network access, which is disabled while offline.',
+      sensitive_read: false,
+    });
+  }
+  if (isDriveReadToolName(action.tool_name)) {
+    return tier1Decision({
+      reason: 'google_drive_read',
+      reason_detail: 'Read your Google Drive files.',
+      sensitive_read: true,
+    });
+  }
+  if (!isDriveWriteToolName(action.tool_name)) {
+    return failClosedDecision({ reason_detail: 'Unknown Drive tool.' });
+  }
+  const review = action.drive_write;
+  if (review === undefined) {
+    return autoDenyDecision({
+      reason: 'destination_unverifiable',
+      reason_detail: 'The change could not be loaded to show you, so it was not offered.',
+      sensitive_read: false,
+    });
+  }
+  if (hasReadContent(ctx.web_search.provenance)) {
+    if (ctx.services.unattended) {
+      return steeredSkipped(ctx);
+    }
+    const assistant = ctx.web_search.assistantName;
+    const say =
+      `${assistant} has read things written by other people in this chat, so this write may have been ` +
+      `asked for by something it read, not by you.`;
+    const card = driveWriteCard({ review, agent_intent: ctx.agent_intent });
+    return tier3Decision({
+      card: { ...card, plain_what: withHoldSay(card.plain_what, say) },
+      reason: CONTENT_STEERED_REASON,
+      reason_detail: say,
+      sensitive_read: false,
+      approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
+    });
+  }
+  if (await hasStandingToolGrant(ctx, action)) {
+    return tier1Decision({
+      reason: TOOL_GRANT_REASON,
+      reason_detail: `Always allowed: \`${action.tool_name}\` on your Google Drive.`,
+      sensitive_read: false,
+    });
+  }
+  return tier3Decision({
+    card: driveWriteCard({ review, agent_intent: ctx.agent_intent }),
+    reason: 'google_drive_write',
+    reason_detail: 'Creating a Doc or adding rows to a Sheet always asks.',
+    sensitive_read: false,
+    approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
+  });
+}
+
 /** The approval card for creating or deleting a schedule, built from what the host will save or remove. */
 function scheduleWriteCard(input: { review: Tier3Schedule; agent_intent: string | null }): Tier3Card {
   const { review } = input;
@@ -3422,17 +3439,10 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     !extraction.sends &&
     !containsSecretPath(action.canonical_params)
   ) {
-    if (closedWorldRead && action.mcp_first_party === true) {
-      return tier1Decision({
-        reason: FIRST_PARTY_TOOL_REASON,
-        reason_detail: `First-party read-only tool \`${action.tool_name}\`${
-          action.mcp_server_name === undefined ? '' : ` on ${action.mcp_server_name}`
-        }.`,
-        sensitive_read: readsPrivateData,
-      });
-    }
+    const firstParty = closedWorldRead && action.mcp_first_party === true;
     // A path-like argument is never admitted by a standing grant; a first-party read is not grant-based.
-    if (
+    const grantedOn =
+      !firstParty &&
       action.mcp_server_name !== undefined &&
       !pathLike &&
       (await services.tool_grants.hasToolGrant({
@@ -3442,10 +3452,27 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
         tool_name: action.tool_name,
         mcp_server_host: action.mcp_server_host ?? null,
       }))
-    ) {
+        ? action.mcp_server_name
+        : undefined;
+    if (firstParty || grantedOn !== undefined) {
+      const stopped = await guardUnaskedConnectorRead({ action, ctx, extraction, sensitive_read: readsPrivateData });
+      if (stopped !== undefined) {
+        return stopped;
+      }
+    }
+    if (firstParty) {
+      return tier1Decision({
+        reason: FIRST_PARTY_TOOL_REASON,
+        reason_detail: `First-party read-only tool \`${action.tool_name}\`${
+          action.mcp_server_name === undefined ? '' : ` on ${action.mcp_server_name}`
+        }.`,
+        sensitive_read: readsPrivateData,
+      });
+    }
+    if (grantedOn !== undefined) {
       return tier1Decision({
         reason: TOOL_GRANT_REASON,
-        reason_detail: `Always allowed: \`${action.tool_name}\` on ${action.mcp_server_name}.`,
+        reason_detail: `Always allowed: \`${action.tool_name}\` on ${grantedOn}.`,
         sensitive_read: readsPrivateData,
         inspection: grantableRead,
       });
@@ -3474,6 +3501,79 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     inspection: grantableRead,
     grant_host: action.mcp_server_host ?? null,
     secret_path_read: containsSecretPath(action.canonical_params) || pathLike,
+    approval_token_id: await mintPlainToken({
+      ctx,
+      tool_name: action.tool_name,
+      params: action.canonical_params,
+      connector: connectorBindingFor(action),
+    }),
+  });
+}
+
+/** Top-level argument names that hold one record's id: a page, a message, a commit, a place in a list. */
+const RECORD_ID_FIELD = /^(?:id|sha|cursor)$|(?:_id|Id|ID)$/;
+
+/** The one id field of a read that may hold a random-looking value: the longest id short enough to be one. */
+function recordIdField(params: Record<string, unknown>): string[] {
+  let longest: { key: string; length: number } | undefined;
+  for (const [key, value] of Object.entries(params)) {
+    if (
+      RECORD_ID_FIELD.test(key) &&
+      typeof value === 'string' &&
+      value.length <= OUTBOUND_MAX_PLUMBING_CHARS &&
+      value.length > (longest?.length ?? 0)
+    ) {
+      longest = { key, length: value.length };
+    }
+  }
+  return longest === undefined ? [] : [longest.key];
+}
+
+/**
+ * The outbound secret guard over a connector read that would run without a card: one on the host's own connector,
+ * or one the person always allows. What it sends goes to that connector's server, so it stops on the same things
+ * a silent search does. A record id is expected to look random, so one read may carry one short id that skips only
+ * the coded-text rule. The agent names the arguments, so every other id field is read as ordinary text. Returns the
+ * decision that stops the read, or undefined when it may run.
+ */
+async function guardUnaskedConnectorRead(input: {
+  action: SentinelAction;
+  ctx: ClassifyContext;
+  extraction: ExtractionResult;
+  sensitive_read: boolean;
+}): Promise<TierDecision | undefined> {
+  const { action, ctx } = input;
+  const strings = collectOutboundStrings(action.canonical_params, recordIdField(action.canonical_params));
+  const { verdict } = await outboundGuard({ ctx, strings });
+  if (verdict.ok) {
+    // The text leaves with this call, so a later silent read, search or map sees a secret split across them.
+    if (strings !== undefined) {
+      ctx.web_search.sentText = appendOutboundTrace({ earlier: ctx.web_search.sentText, strings });
+    }
+    return undefined;
+  }
+  const server = escapeDisplayText(action.mcp_server_name ?? 'a connector you added');
+  // A key this computer holds is never put on a card, so the read stops without one.
+  if (verdict.rule === 'server_secret') {
+    return autoDenyDecision({
+      reason: 'outbound_guard',
+      reason_detail: `This did not run: it would send text to ${server}, and ${describeOutboundRule(verdict.rule)}. Leave the key out and try again.`,
+      sensitive_read: false,
+    });
+  }
+  const assistant = ctx.web_search.assistantName;
+  const say =
+    verdict.rule === 'too_long' ? holdSay(assistant).long_read : guardRuleSay({ rule: verdict.rule, assistant });
+  const card = connectorApprovalCard({ action, extraction: input.extraction, agent_intent: ctx.agent_intent });
+  return tier3Decision({
+    card: {
+      ...card,
+      plain_what: withHoldSay(`Look this up on ${server}?`, say),
+      cannot_be_undone: "Once this is sent, it can't be unsent.",
+    },
+    reason: CONNECTOR_READ_GUARD_REASON,
+    reason_detail: say,
+    sensitive_read: input.sensitive_read,
     approval_token_id: await mintPlainToken({
       ctx,
       tool_name: action.tool_name,
@@ -3644,6 +3744,9 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === CALENDAR_SERVER_ID) {
     return steeringChecked({ decision: await classifyCalendarTool(action, ctx), ctx, guests: [] });
   }
+  if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === DRIVE_SERVER_ID) {
+    return steeringChecked({ decision: await classifyDriveTool(action, ctx), ctx, guests: [] });
+  }
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === GOOGLE_SETUP_SERVER_ID) {
     return steeringChecked({ decision: classifyGoogleSetupTool(action), ctx, guests: [] });
   }
@@ -3686,10 +3789,7 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
     ) {
       return classifyRunnerTool(action, ctx);
     }
-    if (
-      name === 'run_code' &&
-      (await ctx.services.sandboxWithoutAsking({ tenant_id: ctx.tenant_id, created_by: ctx.created_by }))
-    ) {
+    if (name === 'run_code' && (await sandboxWorkRunsSilently(ctx))) {
       const silentRun = await runCodePlacement({ params: action.canonical_params, ctx });
       if (silentRun !== null) {
         return tier1Decision({ ...silentRun, sensitive_read: false });
@@ -3833,6 +3933,8 @@ export async function classifyHostToolCall(input: {
   path_resolution?: PathResolution | undefined;
   /** Reads file digests from the calling tool's remote sandbox. */
   file_digest?: FileDigest | undefined;
+  /** `none` when nothing run in the calling tool's sandbox can reach a network. */
+  sandbox_network?: 'none' | undefined;
 }): Promise<TierDecision> {
   // Normalize canonical params to JSON form once, here, so every caller mints
   // approval tokens over the same value the verify path re-parses from the
@@ -3850,6 +3952,7 @@ export async function classifyHostToolCall(input: {
     ...ctx,
     path_resolution: input.path_resolution,
     file_digest: input.file_digest,
+    sandbox_network: input.sandbox_network,
   });
   await recordClassificationAudit({
     services: ctx.services,

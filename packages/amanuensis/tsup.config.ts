@@ -38,6 +38,7 @@ export default defineConfig([
     // rather than resolving an unrelated version from the registry.
     entry: {
       main: '../trueforge/dist/main.js',
+      aman: '../trueforge/dist/aman.js',
       ...migrationEntries('postgres'),
       ...migrationEntries('sqlite'),
     },
