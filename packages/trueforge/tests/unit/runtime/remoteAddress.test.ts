@@ -1,5 +1,6 @@
 import {
   allowedRemoteAddresses,
+  configureRemoteAddressCheck,
   isNamedLocalModelEndpoint,
   localModelEndpointOf,
   modelUrlProblem,
@@ -106,6 +107,68 @@ describe('allowedRemoteAddresses', () => {
     await expect(allowedRemoteAddresses({ host: '172.20.0.5', deps: { ownAddresses: [] } })).resolves.toMatchObject({
       ok: true,
     });
+  });
+
+  it('refuses every address in a container network range, and only those ranges', async () => {
+    // A container install names its own networks: a neighbour on one of them (the calendar
+    // connector at 172.30.0.4, say) is one of the app's own parts, not a server the person
+    // added, so the whole range is refused, not just this instance's own address on it.
+    const deps = { ownAddresses: ['172.30.0.5'], ownNetworkRanges: ['172.30.0.0/16', 'fd00:beef::/64'] };
+    await expect(allowedRemoteAddresses({ host: '172.30.0.4', deps })).resolves.toEqual({
+      ok: false,
+      reason: 'blocked',
+    });
+    await expect(allowedRemoteAddresses({ host: '172.30.255.254', deps })).resolves.toEqual({
+      ok: false,
+      reason: 'blocked',
+    });
+    await expect(allowedRemoteAddresses({ host: 'fd00:beef::99', deps })).resolves.toEqual({
+      ok: false,
+      reason: 'blocked',
+    });
+    // The person's home network is outside the named ranges and stays usable.
+    await expect(allowedRemoteAddresses({ host: '192.168.1.20', deps })).resolves.toMatchObject({ ok: true });
+    await expect(allowedRemoteAddresses({ host: '172.31.0.4', deps })).resolves.toMatchObject({ ok: true });
+    // And with no ranges in force, as on a host run, the neighbour address is allowed.
+    await expect(
+      allowedRemoteAddresses({ host: '172.30.0.4', deps: { ownAddresses: ['172.30.0.5'] } }),
+    ).resolves.toMatchObject({ ok: true });
+  });
+
+  it('refuses a name that resolves into a container network range', async () => {
+    const deps = {
+      resolveAddresses: resolverFor({ 'calendar-caldav': ['172.30.0.4'] }),
+      ownAddresses: [],
+      ownNetworkRanges: ['172.30.0.0/16'],
+    };
+    await expect(allowedRemoteAddresses({ host: 'calendar-caldav', deps })).resolves.toEqual({
+      ok: false,
+      reason: 'blocked',
+    });
+  });
+
+  it('refuses an IPv4-mapped IPv6 address whose IPv4 address is in a container network range', async () => {
+    const deps = { ownAddresses: [], ownNetworkRanges: ['172.30.0.0/16'] };
+    await expect(allowedRemoteAddresses({ host: '::ffff:172.30.0.4', deps })).resolves.toEqual({
+      ok: false,
+      reason: 'blocked',
+    });
+  });
+
+  it('uses the configured container network ranges when a call names none', async () => {
+    configureRemoteAddressCheck({ ownNetworkRanges: ['172.30.0.0/16'] });
+    try {
+      await expect(allowedRemoteAddresses({ host: '172.30.0.4', deps: { ownAddresses: [] } })).resolves.toEqual({
+        ok: false,
+        reason: 'blocked',
+      });
+      // An explicit set on the call wins over the configured one.
+      await expect(
+        allowedRemoteAddresses({ host: '172.30.0.4', deps: { ownAddresses: [], ownNetworkRanges: [] } }),
+      ).resolves.toMatchObject({ ok: true });
+    } finally {
+      configureRemoteAddressCheck({ ownNetworkRanges: [] });
+    }
   });
 
   it('refuses a name that resolves to this instance’s own address', async () => {

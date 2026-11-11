@@ -301,7 +301,10 @@ export {
   MCP_HTTP_HEADERS_TIMEOUT_MARGIN_MS,
   OutboundRedirectRefusedError,
   configureOutboundFetches,
+  withCheckedRedirects,
+  withoutCrossOriginCredentials,
   type OutboundRedirectCheck,
+  type OutboundRedirectRefusalKind,
 } from './util/outboundFetch';
 export { PromiseTimeoutError, withTimeout } from './util/promiseUtils';
 export { isRedirectStatus, redirectTargetOrigin } from './util/redirects';

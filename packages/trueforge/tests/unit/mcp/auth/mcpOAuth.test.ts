@@ -949,7 +949,7 @@ describe('the address check on sign-in dials', () => {
     expect(client.client.clientId).toBe('dyn-client-1');
   });
 
-  it('drops Authorization and Cookie when a sign-in redirect crosses origins, and keeps them within the origin', async () => {
+  it('drops the credential headers when a sign-in redirect crosses origins, and keeps them within the origin', async () => {
     const received: Array<{ url: string; headers: Headers }> = [];
     const stubDial = (redirectTarget: string): void => {
       received.length = 0;
@@ -964,23 +964,32 @@ describe('the address check on sign-in dials', () => {
     };
     const sent = {
       method: 'POST',
-      headers: { Authorization: 'Basic Y2xpZW50OnNlY3JldA==', Cookie: 'session=person-session' },
+      headers: {
+        Authorization: 'Basic Y2xpZW50OnNlY3JldA==',
+        Cookie: 'session=person-session',
+        'X-Api-Key': 'sign-in-key-header',
+        'Api-Key': 'sign-in-key-alt-header',
+      },
       body: 'grant_type=refresh_token',
     };
 
     stubDial('https://mcp.example.com/token');
     await dialMcpOAuthUrl(`${AS_ORIGIN}/token`, sent);
     expect(received.map(entry => entry.url)).toEqual([`${AS_ORIGIN}/token`, 'https://mcp.example.com/token']);
-    // The first dial carries the credentials, as the caller sent them; the other origin sees neither.
+    // The first dial carries the credentials, as the caller sent them; the other origin sees none of them.
     expect(received[0]?.headers.get('authorization')).toBe('Basic Y2xpZW50OnNlY3JldA==');
     expect(received[1]?.headers.get('authorization')).toBeNull();
     expect(received[1]?.headers.get('cookie')).toBeNull();
+    expect(received[1]?.headers.get('x-api-key')).toBeNull();
+    expect(received[1]?.headers.get('api-key')).toBeNull();
 
     stubDial(`${AS_ORIGIN}/token-final`);
     await dialMcpOAuthUrl(`${AS_ORIGIN}/token`, sent);
     expect(received.map(entry => entry.url)).toEqual([`${AS_ORIGIN}/token`, `${AS_ORIGIN}/token-final`]);
     expect(received[1]?.headers.get('authorization')).toBe('Basic Y2xpZW50OnNlY3JldA==');
     expect(received[1]?.headers.get('cookie')).toBe('session=person-session');
+    expect(received[1]?.headers.get('x-api-key')).toBe('sign-in-key-header');
+    expect(received[1]?.headers.get('api-key')).toBe('sign-in-key-alt-header');
   });
 
   it('refuses to dial a token endpoint whose name does not resolve', async () => {

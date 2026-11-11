@@ -271,27 +271,38 @@ type FetchFn = (input: string | URL, init?: RequestInit) => Promise<Response>;
  */
 export type OutboundRedirectCheck = (url: string) => Promise<boolean>;
 
-/** A model request was stopped at a redirect the redirect check refuses or cannot judge. */
+/** Why a checked redirect was stopped: the target named no usable address, the chain ran too long, or the check refused the target. */
+export type OutboundRedirectRefusalKind = 'bad-redirect' | 'too-many' | 'refused';
+
+/** A request was stopped at a redirect the redirect check refuses or cannot judge. */
 export class OutboundRedirectRefusedError extends Error {
-  constructor(message: string) {
+  readonly kind: OutboundRedirectRefusalKind;
+
+  constructor(message: string, kind: OutboundRedirectRefusalKind = 'refused') {
     super(message);
     this.name = 'OutboundRedirectRefusedError';
+    this.kind = kind;
   }
 }
 
 const MAX_CHECKED_REDIRECTS = 5;
 
 /**
- * The request with its Authorization and Cookie headers taken out, for a redirect hop to
- * another origin. Every other header, and the rest of the request, travels as it was.
+ * The request with its credential headers taken out, for a redirect hop to another origin:
+ * Authorization, Cookie, and the API key headers (`x-api-key`, `api-key`). Those belong to
+ * the origin the caller configured, so none of them travels to a different one. Every other
+ * header, and the rest of the request, travels as it was. This is the one place that decides
+ * which headers are credentials for a cross-origin hop; every checked redirect loop uses it.
  */
-function withoutCallerCredentials(init: RequestInit): RequestInit {
+export function withoutCrossOriginCredentials(init: RequestInit): RequestInit {
   if (init.headers === undefined) {
     return init;
   }
   const headers = new Headers(init.headers);
   headers.delete('authorization');
   headers.delete('cookie');
+  headers.delete('x-api-key');
+  headers.delete('api-key');
   return { ...init, headers };
 }
 
@@ -299,11 +310,12 @@ function withoutCallerCredentials(init: RequestInit): RequestInit {
  * Follow redirects by hand, putting every target to `check` before dialling it: a provider
  * whose base address passed the host's address check can still answer with a redirect to an
  * address that would have been refused, so no hop is followed on the transport's say-so. The
- * MCP sign-in dial follows redirects the same way: at most MAX_CHECKED_REDIRECTS hops, 301,
- * 302 and 303 turn a POST into a bodiless GET while 307 and 308 replay the request as it
- * was, and a hop to another origin goes without the caller's Authorization and Cookie
- * headers. Those headers belong to the origin the caller configured, the principle the MCP
- * connection's redirect guard enforces by refusing such hops outright.
+ * MCP sign-in dial follows redirects through this same loop: at most MAX_CHECKED_REDIRECTS
+ * hops, 301, 302 and 303 turn a POST into a bodiless GET while 307 and 308 replay the
+ * request as it was, and a hop to another origin goes without the caller's credential
+ * headers (see withoutCrossOriginCredentials). Those headers belong to the origin the
+ * caller configured, the principle the MCP connection's redirect guard enforces by refusing
+ * such hops outright.
  */
 export function withCheckedRedirects(fetchFn: FetchFn, check: OutboundRedirectCheck): FetchFn {
   return async (input, init) => {
@@ -327,11 +339,13 @@ export function withCheckedRedirects(fetchFn: FetchFn, check: OutboundRedirectCh
       if (target === undefined || (target.protocol !== 'http:' && target.protocol !== 'https:')) {
         throw new OutboundRedirectRefusedError(
           `model server answered HTTP ${String(response.status)} with a redirect that does not name an http(s) address, so the request was stopped`,
+          'bad-redirect',
         );
       }
       if (hop >= MAX_CHECKED_REDIRECTS) {
         throw new OutboundRedirectRefusedError(
           `model server kept redirecting (more than ${String(MAX_CHECKED_REDIRECTS)} redirects), so the request was stopped`,
+          'too-many',
         );
       }
       if (!(await check(target.href))) {
@@ -344,7 +358,7 @@ export function withCheckedRedirects(fetchFn: FetchFn, check: OutboundRedirectCh
         currentInit = { ...currentInit, method: 'GET', body: null };
       }
       if (target.origin !== currentUrl.origin) {
-        currentInit = withoutCallerCredentials(currentInit);
+        currentInit = withoutCrossOriginCredentials(currentInit);
       }
       currentUrl = target;
     }

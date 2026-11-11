@@ -13,7 +13,12 @@ import type {
   OAuthTokens,
 } from '@modelcontextprotocol/sdk/shared/auth.js';
 import type { FetchLike } from '@modelcontextprotocol/sdk/shared/transport.js';
-import { McpConnectionError, McpDcrConfigurationError, isRedirectStatus } from '@truefoundry/trueforge-core/core';
+import {
+  McpConnectionError,
+  McpDcrConfigurationError,
+  OutboundRedirectRefusedError,
+  withCheckedRedirects,
+} from '@truefoundry/trueforge-core/core';
 import { generateOAuthState } from '@truefoundry/trueforge-core/core/util/oauthState';
 import { remoteUrlProblem, type RemoteUrlProblem } from '../../runtime/remoteAddress';
 import {
@@ -36,9 +41,6 @@ import type {
 
 /** Per-request timeout for MCP OAuth discovery, DCR, and token HTTP calls. */
 export const MCP_OAUTH_HTTP_TIMEOUT_MS = 15_000;
-
-/** How many redirects one sign-in dial follows before it stops. */
-const MAX_MCP_OAUTH_REDIRECTS = 5;
 
 /**
  * A sign-in dial was stopped by the address check (see runtime/remoteAddress): the address the
@@ -65,64 +67,39 @@ export class McpOAuthAddressRefusedError extends McpConnectionError {
 }
 
 /**
- * The request with its Authorization and Cookie headers taken out, for a redirect hop to
- * another origin. Every other header, and the rest of the request, travels as it was.
- */
-function withoutCallerCredentials(init: RequestInit): RequestInit {
-  if (init.headers === undefined) {
-    return init;
-  }
-  const headers = new Headers(init.headers);
-  headers.delete('authorization');
-  headers.delete('cookie');
-  return { ...init, headers };
-}
-
-/**
  * One sign-in dial, behind the address check: the address is judged before it is connected to,
- * and redirects are followed by hand so every hop is judged too. The endpoints dialed here are
- * named by the remote server (its discovery answer names the authorization server, whose
- * metadata names the registration and token endpoints), so the checks at save and connect
- * time, which judge the address the person entered, cannot cover them. A hop to another
- * origin goes without the caller's Authorization and Cookie headers: those belong to the
- * origin the sign-in started from. Exported so tests can drive a single dial.
+ * and redirects are followed through the core checked redirect loop (withCheckedRedirects),
+ * which puts every hop to the same check before dialling it and takes the caller's credential
+ * headers off a hop to another origin. The endpoints dialed here are named by the remote
+ * server (its discovery answer names the authorization server, whose metadata names the
+ * registration and token endpoints), so the checks at save and connect time, which judge the
+ * address the person entered, cannot cover them. A refusal the loop reports in its own terms
+ * is restated in this flow's: a chain that never ends, or a redirect that names no usable
+ * address. Exported so tests can drive a single dial.
  */
 export async function dialMcpOAuthUrl(url: string | URL, init: RequestInit): Promise<Response> {
-  let currentUrl = new URL(url);
-  let currentInit = init;
-  for (let hop = 0; ; hop += 1) {
-    const problem = await remoteUrlProblem({ url: currentUrl.href });
-    if (problem !== null) {
-      throw new McpOAuthAddressRefusedError(problem);
-    }
-    const response = await fetch(currentUrl, { ...currentInit, redirect: 'manual' });
-    if (!isRedirectStatus(response.status)) {
-      return response;
-    }
-    const location = response.headers.get('location');
-    let target: URL | undefined;
-    if (location !== null) {
-      try {
-        target = new URL(location, currentUrl);
-      } catch {
-        target = undefined;
+  const start = new URL(url);
+  const startProblem = await remoteUrlProblem({ url: start.href });
+  if (startProblem !== null) {
+    throw new McpOAuthAddressRefusedError(startProblem);
+  }
+  const checkedFetch = withCheckedRedirects(
+    (input, hopInit) => fetch(input, hopInit),
+    async target => {
+      const problem = await remoteUrlProblem({ url: target });
+      if (problem !== null) {
+        throw new McpOAuthAddressRefusedError(problem);
       }
+      return true;
+    },
+  );
+  try {
+    return await checkedFetch(start, init);
+  } catch (error) {
+    if (error instanceof OutboundRedirectRefusedError) {
+      throw new McpOAuthAddressRefusedError(error.kind === 'too-many' ? 'redirect' : 'bad-redirect');
     }
-    await response.body?.cancel().catch(() => undefined);
-    if (target === undefined || (target.protocol !== 'http:' && target.protocol !== 'https:')) {
-      throw new McpOAuthAddressRefusedError('bad-redirect');
-    }
-    if (hop >= MAX_MCP_OAUTH_REDIRECTS) {
-      throw new McpOAuthAddressRefusedError('redirect');
-    }
-    // 307 and 308 repeat the request as it was; the older codes turn a POST into a bodiless GET.
-    if (response.status !== 307 && response.status !== 308 && currentInit.method?.toUpperCase() === 'POST') {
-      currentInit = { ...currentInit, method: 'GET', body: null };
-    }
-    if (target.origin !== currentUrl.origin) {
-      currentInit = withoutCallerCredentials(currentInit);
-    }
-    currentUrl = target;
+    throw error;
   }
 }
 

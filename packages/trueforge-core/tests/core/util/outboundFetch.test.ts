@@ -315,10 +315,15 @@ describe('withCheckedRedirects', () => {
     expect(kept.inits[1]?.body).toBe('{"prompt":"hi"}');
   });
 
-  it('drops Authorization and Cookie on a 307 to another origin, and keeps them on one within the origin', async () => {
+  it('drops the credential headers on a 307 to another origin, and keeps them on one within the origin', async () => {
     const sent = {
       method: 'POST',
-      headers: { Authorization: 'Bearer PROVIDER-KEY', Cookie: 'session=person-session' },
+      headers: {
+        Authorization: 'Bearer PROVIDER-KEY',
+        Cookie: 'session=person-session',
+        'X-Api-Key': 'provider-key-header',
+        'Api-Key': 'provider-key-alt-header',
+      },
       body: '{"prompt":"hi"}',
     };
 
@@ -327,11 +332,13 @@ describe('withCheckedRedirects', () => {
       'https://models.other.example/v1': response(200),
     });
     await withCheckedRedirects(crossed.fetchFn, async () => true)('https://model.example/v1', sent);
-    // The first dial carries the credentials, as the caller sent them; the other origin sees neither.
+    // The first dial carries the credentials, as the caller sent them; the other origin sees none of them.
     expect(new Headers(crossed.inits[0]?.headers).get('authorization')).toBe('Bearer PROVIDER-KEY');
     const crossedTarget = new Headers(crossed.inits[1]?.headers);
     expect(crossedTarget.get('authorization')).toBeNull();
     expect(crossedTarget.get('cookie')).toBeNull();
+    expect(crossedTarget.get('x-api-key')).toBeNull();
+    expect(crossedTarget.get('api-key')).toBeNull();
 
     const within = urlFetch({
       'https://model.example/v1': redirectTo('https://model.example/v2', 307),
@@ -341,6 +348,8 @@ describe('withCheckedRedirects', () => {
     const withinTarget = new Headers(within.inits[1]?.headers);
     expect(withinTarget.get('authorization')).toBe('Bearer PROVIDER-KEY');
     expect(withinTarget.get('cookie')).toBe('session=person-session');
+    expect(withinTarget.get('x-api-key')).toBe('provider-key-header');
+    expect(withinTarget.get('api-key')).toBe('provider-key-alt-header');
   });
 
   it('stops a redirect chain that never ends', async () => {

@@ -21,10 +21,16 @@ import { networkInterfaces } from 'node:os';
  *
  * Two deliberate differences from the sidecar. An IPv4-mapped IPv6 address (::ffff:127.0.0.1) is
  * judged by the IPv4 address inside it, the same unwrapping the maps address rule does, so the
- * mapped spelling cannot slip a refused IPv4 address past the IPv6 list. And where the sidecar
- * refuses every address on its own networks, because the other members of a container network
- * are the app's own parts, the app refuses only its own addresses: the network a directly
- * installed app sits on is the person's home network, whose other addresses are theirs to use.
+ * mapped spelling cannot slip a refused IPv4 address past the IPv6 list. And the sidecar, which
+ * always runs in a container, refuses every address on its own networks from the addresses of
+ * its own interfaces, while the app learns its container networks from a setting instead: the
+ * installer writes the ranges Docker gave the instance's networks into
+ * `CONTAINER_NETWORK_RANGES` (see config.ts), and main.ts hands them to this check through
+ * configureRemoteAddressCheck. A container install therefore refuses its whole container
+ * networks, whose other members are the app's own parts (its connectors among them), exactly
+ * as the sidecar does. An app run directly on the host has no such setting and refuses only
+ * its own addresses: the network it sits on is the person's home network, whose other
+ * addresses are theirs to use.
  *
  * The check judges the addresses a host resolves to at the moment it runs. It does not pin the
  * connection that follows to those addresses; the MCP transports and the model client own their
@@ -42,6 +48,21 @@ export interface RemoteAddressDeps {
    * a fake set; the default reads the machine's own network interfaces.
    */
   ownAddresses?: readonly string[] | undefined;
+  /**
+   * CIDR ranges of this instance's own container networks, refused as well as its own
+   * addresses. Tests inject a fake set; the default is the set main.ts configured from the
+   * `CONTAINER_NETWORK_RANGES` setting, which the installer writes for a container install and
+   * a host run leaves empty.
+   */
+  ownNetworkRanges?: readonly string[] | undefined;
+}
+
+/** The container network ranges main.ts configured from the server settings, if any. */
+let configuredOwnNetworkRanges: readonly string[] = [];
+
+/** Hands the check the container network ranges from the server settings (see config.ts). */
+export function configureRemoteAddressCheck(config: { ownNetworkRanges: readonly string[] }): void {
+  configuredOwnNetworkRanges = config.ownNetworkRanges;
 }
 
 const ALWAYS_BLOCKED = ((): BlockList => {
@@ -82,12 +103,30 @@ export function ownInterfaceAddresses(): string[] {
   return addresses;
 }
 
+/**
+ * The addresses this check refuses because they are this instance's own: its own addresses,
+ * plus every address in one of its container network ranges when ranges are in force. A range
+ * that does not parse is skipped here; the settings parser refuses it at startup, so a range
+ * that reaches this list has already been judged there.
+ */
 function ownAddressList(deps: RemoteAddressDeps): BlockList {
   const own = new BlockList();
   for (const address of deps.ownAddresses ?? ownInterfaceAddresses()) {
     const family = isIP(address);
     if (family !== 0) {
       own.addAddress(address, family === 6 ? 'ipv6' : 'ipv4');
+    }
+  }
+  for (const range of deps.ownNetworkRanges ?? configuredOwnNetworkRanges) {
+    const slash = range.lastIndexOf('/');
+    if (slash < 1) {
+      continue;
+    }
+    const network = range.slice(0, slash);
+    const family = isIP(network);
+    const prefix = Number(range.slice(slash + 1));
+    if (family !== 0 && Number.isInteger(prefix)) {
+      own.addSubnet(network, prefix, family === 6 ? 'ipv6' : 'ipv4');
     }
   }
   return own;

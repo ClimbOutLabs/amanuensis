@@ -346,6 +346,18 @@ test_public_url_rules() {
   sandbox_drop
 }
 
+test_container_network_ranges_are_written() {
+  t_begin "an instance learns the ranges of its own container networks into its settings"
+  sandbox_new
+  install_machine
+  printf '%s\n' "aman-nets_default 172.30.0.0/16" "aman-nets_calendar 172.31.0.0/16" "aman-nets_link 172.32.0.0/16" >"$SB_STATE/network_subnets"
+  add_instance nets
+  assert_rc 0
+  assert_eq "$(env_value nets CONTAINER_NETWORK_RANGES)" "172.30.0.0/16,172.31.0.0/16,172.32.0.0/16" "the app refuses the addresses of its own container networks"
+  assert_contains "$(cat "$STUB_LOG")" "--force-recreate --no-deps --wait --wait-timeout 120 app"
+  sandbox_drop
+}
+
 test_url_validation() {
   t_begin "http, path and half-configured public URLs are refused"
   sandbox_new
@@ -710,6 +722,7 @@ test_add_warns_when_the_installed_version_differs
 test_add_without_a_name_asks_for_one
 test_add_without_a_name_and_no_terminal_is_a_usage_error
 test_public_url_rules
+test_container_network_ranges_are_written
 test_url_validation
 test_a_new_instance_points_to_settings_for_a_model
 test_add_before_install_is_refused
