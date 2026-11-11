@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { DraftCatalogProvider } from '@/atoms/draft/DraftCatalogProvider.js';
 import { MemoryVaultPage } from '@/atoms/memory/MemoryVaultPage.js';
 import TruefoundrySettingsBuilder from '@/containers/SettingsBuilder/index.js';
+import type { MemoryPagesCatalog } from '@/plugins/trueforge-agent-server-adapter/catalogs/memoryPagesCatalog.js';
 import type { MemoryVaultCatalog } from '@/plugins/trueforge-agent-server-adapter/catalogs/memoryVaultCatalog.js';
 import { ServerProvider } from '@/server/ServerContext.js';
 import { ShellModeProvider, useShellMode } from '@/server/ShellModeContext.js';
@@ -77,7 +78,26 @@ const vaultCatalog: MemoryVaultCatalog = {
   updateSharing: async sharing => sharing,
 };
 
-function createServer(options: { memorySetUp: boolean }): AgentUIServer {
+const pagesCatalog: MemoryPagesCatalog = {
+  listPages: async () => ({ pages: [], skippedFiles: [] }),
+  getPage: async () => {
+    throw new Error('not used in these tests');
+  },
+  savePage: async () => {
+    throw new Error('not used in these tests');
+  },
+  confirmLine: async () => {
+    throw new Error('not used in these tests');
+  },
+  dismissLine: async () => {
+    throw new Error('not used in these tests');
+  },
+  deletePage: async () => {},
+  listChanges: async () => ({ available: true, changes: [] }),
+  undoChange: async () => {},
+};
+
+function createServer(options: { memorySetUp: boolean; withPages?: boolean }): AgentUIServer {
   const response = {
     data: {
       sandbox: { enabled: true },
@@ -93,7 +113,11 @@ function createServer(options: { memorySetUp: boolean }): AgentUIServer {
     getCapabilities: async () => response,
   });
   // The vault is a companion surface the adapter attaches beside the typed server.
-  const server = { ...base, memoryVault: vaultCatalog };
+  const server = {
+    ...base,
+    memoryVault: vaultCatalog,
+    ...(options.withPages === true ? { memoryPages: pagesCatalog } : {}),
+  };
   return server;
 }
 
@@ -136,6 +160,18 @@ async function openMemorySection() {
 }
 
 describe('Settings Memory section', () => {
+  it('offers a Pages tab only when the server keeps pages', async () => {
+    const { unmount } = render(<TestShell server={createServer({ memorySetUp: true })} />);
+    await openMemorySection();
+    expect(screen.queryByRole('tab', { name: 'Pages' })).not.toBeInTheDocument();
+    unmount();
+
+    render(<TestShell server={createServer({ memorySetUp: true, withPages: true })} />);
+    await openMemorySection();
+    fireEvent.click(screen.getByRole('tab', { name: 'Pages' }));
+    expect(await screen.findByText(/A page is a short note/)).toBeInTheDocument();
+  });
+
   it('has one Memory entry in the list and no Memory vault entry', async () => {
     render(<TestShell server={createServer({ memorySetUp: true })} />);
     await openSettings();

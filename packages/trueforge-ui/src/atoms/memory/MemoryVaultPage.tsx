@@ -3,16 +3,19 @@
 import { useState } from 'react';
 
 import { useAssistantDisplayName } from '../../components/PersonalizationContext.js';
+import { MemoryPagesPanel } from './MemoryPagesPanel.js';
 import { MemoryTabs } from './MemoryTabs.js';
 import { MemoryVaultFactsPanel, MemoryVaultSharingPanel } from './MemoryVaultPanels.js';
+import { useMemoryPagesAvailable } from './useMemoryPagesState.js';
 import { useMemoryVaultState } from './useMemoryVaultState.js';
 
-type MemoryVaultTab = 'facts' | 'sharing';
+type MemoryVaultTab = 'facts' | 'pages' | 'sharing';
 
 /** Browse, search, edit, forget, export, and import what Aman remembers, and manage sharing. */
 export function MemoryVaultPage() {
   const assistant = useAssistantDisplayName();
   const state = useMemoryVaultState();
+  const pagesAvailable = useMemoryPagesAvailable();
   const [tab, setTab] = useState<MemoryVaultTab>('facts');
 
   return (
@@ -28,13 +31,16 @@ export function MemoryVaultPage() {
         ariaLabel="Memory sections"
         tabs={[
           { id: 'facts', label: 'Memories' },
+          ...(pagesAvailable ? [{ id: 'pages' as const, label: 'Pages' }] : []),
           { id: 'sharing', label: 'Sharing' },
         ]}
         activeTab={tab}
         onTabChange={setTab}
       />
 
-      {tab === 'sharing' ? <MemoryVaultSharingPanel state={state} /> : <MemoryVaultFactsPanel state={state} />}
+      {tab === 'sharing' ? <MemoryVaultSharingPanel state={state} /> : null}
+      {tab === 'pages' && pagesAvailable ? <MemoryPagesPanel /> : null}
+      {tab === 'facts' || (tab === 'pages' && !pagesAvailable) ? <MemoryVaultFactsPanel state={state} /> : null}
     </div>
   );
 }

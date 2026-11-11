@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import { getErrorMessage } from '../../../utils/getErrorMessage.js';
 import type { CreateTrueForgeClientOptions } from '../client.js';
+import { createMemoryRequester } from './memoryRequest.js';
 
 /** One memory fact as the vault presents it. */
 const MemoryVaultEntrySchema = z.object({
@@ -43,8 +44,6 @@ export interface MemoryVaultCatalog {
   updateSharing(sharing: MemoryVaultSharing): Promise<MemoryVaultSharing>;
 }
 
-const ErrorSchema = z.object({ error: z.object({ message: z.string() }) });
-
 function parseEntry(body: unknown): MemoryVaultEntry {
   const parsed = z.object({ data: MemoryVaultEntrySchema }).safeParse(body);
   if (!parsed.success) {
@@ -77,37 +76,7 @@ function parseSharing(body: unknown): MemoryVaultSharing {
  * same-origin, and a host pointing the UI at another origin supplies its own `fetch`.
  */
 export function createMemoryVaultCatalog(options: CreateTrueForgeClientOptions = {}): MemoryVaultCatalog {
-  const base = (options.baseUrl ?? '/').replace(/\/+$/, '');
-  const fetchImpl = options.fetch ?? ((input: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(input, init));
-
-  async function request<T>(
-    method: 'GET' | 'PUT' | 'POST' | 'DELETE',
-    path: string,
-    body: unknown,
-    parse: (payload: unknown) => T,
-  ): Promise<T> {
-    const response = await fetchImpl(`${base}${path}`, {
-      method,
-      headers: {
-        ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
-        ...(options.token === undefined ? {} : { Authorization: `Bearer ${options.token}` }),
-      },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    });
-    const responseBody: unknown = await response.json().catch(() => undefined);
-    if (!response.ok) {
-      const failure = ErrorSchema.safeParse(responseBody);
-      throw new Error(
-        failure.success ? failure.data.error.message : `Memory request failed with HTTP ${String(response.status)}`,
-      );
-    }
-    return parse(responseBody);
-  }
-
-  const namespaceQuery = (namespace: string | undefined): string => {
-    const trimmed = (namespace ?? '').trim();
-    return trimmed === '' ? '' : `?namespace=${encodeURIComponent(trimmed)}`;
-  };
+  const { request, namespaceQuery } = createMemoryRequester(options);
 
   return {
     listEntries: namespace =>

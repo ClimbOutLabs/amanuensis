@@ -1,0 +1,325 @@
+// @vitest-environment jsdom
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { MemoryPagesPanel } from '@/atoms/memory/MemoryPagesPanel.js';
+import { FORGET_UNDO_MS } from '@/atoms/memory/useForgetWithUndo.js';
+import type {
+  MemoryPageChanges,
+  MemoryPageDetail,
+  MemoryPageLine,
+  MemoryPagesCatalog,
+} from '@/plugins/trueforge-agent-server-adapter/catalogs/memoryPagesCatalog.js';
+import { ServerProvider } from '@/server/ServerContext.js';
+import { createMockAgentUIServer, createMockCatalog } from '../../server/mockServer.js';
+
+function line(over: Partial<MemoryPageLine> & { text: string }): MemoryPageLine {
+  return {
+    id: null,
+    source: 'you_said',
+    sourceLabel: 'You said it',
+    own: true,
+    since: null,
+    until: null,
+    seen: null,
+    ...over,
+  };
+}
+
+const WENDY: MemoryPageDetail = {
+  kind: 'person',
+  slug: 'wendy',
+  title: 'Wendy',
+  otherNames: ['my wife'],
+  summary: 'The owner’s wife.',
+  confirmableSections: ['How you write to them', 'Now'],
+  markdown: '---\ntitle: Wendy\n---\n',
+  version: 'v1',
+  sections: [
+    { name: 'Now', lines: [line({ id: 'f_01', text: 'Plays tennis on Fridays.' })] },
+    {
+      name: 'Unconfirmed',
+      lines: [
+        line({
+          id: 'f_03',
+          text: 'Might travel in November.',
+          source: 'read_content',
+          sourceLabel: 'Something Aman read',
+          own: false,
+        }),
+      ],
+    },
+    { name: 'Earlier', lines: [line({ id: 'f_04', text: 'Worked at Acme.', until: '2026-03' })] },
+  ],
+};
+
+const MADRID: MemoryPageDetail = {
+  ...WENDY,
+  kind: 'matter',
+  slug: 'madrid',
+  title: 'The Madrid move',
+  otherNames: ['Madrid'],
+  summary: 'Moving in spring.',
+  sections: [{ name: 'Now', lines: [line({ text: 'Lease signed.' })] }],
+};
+
+function summaryOf(page: MemoryPageDetail, unconfirmedCount: number) {
+  return {
+    kind: page.kind,
+    slug: page.slug,
+    title: page.title,
+    otherNames: page.otherNames,
+    summary: page.summary,
+    changedOn: '2026-11-01',
+    unconfirmedCount,
+  };
+}
+
+function createCatalog({
+  pages = [WENDY, MADRID],
+  changes,
+}: {
+  pages?: MemoryPageDetail[];
+  changes?: MemoryPageChanges;
+}) {
+  let stored = pages;
+  const calls = {
+    confirm: vi.fn(),
+    dismiss: vi.fn(),
+    save: vi.fn(),
+    remove: vi.fn(),
+    undo: vi.fn(),
+  };
+  const find = (slug: string): MemoryPageDetail => {
+    const found = stored.find(page => page.slug === slug);
+    if (found === undefined) throw new Error('There is no page with that name. Reload the list.');
+    return found;
+  };
+  const catalog: MemoryPagesCatalog = {
+    listPages: async () => ({
+      pages: stored.map(page =>
+        summaryOf(page, page.sections.find(section => section.name === 'Unconfirmed')?.lines.length ?? 0),
+      ),
+      skippedFiles: [],
+    }),
+    getPage: async ({ slug }) => find(slug),
+    savePage: async options => {
+      calls.save(options);
+      return find(options.slug);
+    },
+    confirmLine: async options => {
+      calls.confirm(options);
+      const page: MemoryPageDetail = {
+        ...find(options.slug),
+        sections: [
+          { name: 'Now', lines: [line({ id: 'f_03', text: 'Might travel in November.', source: 'you_edited' })] },
+        ],
+      };
+      stored = stored.map(item => (item.slug === page.slug ? page : item));
+      return page;
+    },
+    dismissLine: async options => {
+      calls.dismiss(options);
+      const page: MemoryPageDetail = { ...find(options.slug), sections: [{ name: 'Now', lines: [] }] };
+      stored = stored.map(item => (item.slug === page.slug ? page : item));
+      return page;
+    },
+    deletePage: async target => {
+      calls.remove(target);
+      stored = stored.filter(page => page.slug !== target.slug);
+    },
+    listChanges: async () => changes ?? { available: true, changes: [] },
+    undoChange: async options => {
+      calls.undo(options);
+    },
+  };
+  return { catalog, calls };
+}
+
+function renderPanel(catalog: MemoryPagesCatalog) {
+  const server = { ...createMockAgentUIServer({ catalog: createMockCatalog() }), memoryPages: catalog };
+  return render(
+    <ServerProvider server={server}>
+      <MemoryPagesPanel />
+    </ServerProvider>,
+  );
+}
+
+async function openWendy() {
+  fireEvent.click(await screen.findByRole('button', { name: /Wendy/ }));
+  await screen.findByRole('heading', { name: 'Wendy' });
+}
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+describe('MemoryPagesPanel', () => {
+  it('says what pages are when there are none', async () => {
+    renderPanel(createCatalog({ pages: [] }).catalog);
+    expect(await screen.findByText(/A page is a short note about one person or one matter/)).toBeInTheDocument();
+    expect(screen.getByText(/fills pages as you talk/)).toBeInTheDocument();
+  });
+
+  it('lists people and matters with a count of lines to confirm, and searches names and other names', async () => {
+    renderPanel(createCatalog({}).catalog);
+    const people = await screen.findByRole('region', { name: 'People' });
+    expect(within(people).getByText('Wendy')).toBeInTheDocument();
+    expect(within(people).getByText('1 to confirm')).toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: 'Matters' })).getByText('The Madrid move')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search pages' }), { target: { value: 'my wife' } });
+    expect(screen.queryByText('The Madrid move')).not.toBeInTheDocument();
+    expect(screen.getByText('Wendy')).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search pages' }), { target: { value: 'zzz' } });
+    expect(screen.getByText(/No page has that name/)).toBeInTheDocument();
+  });
+
+  it('marks lines Aman read, keeps own lines plain, and collapses Earlier', async () => {
+    renderPanel(createCatalog({}).catalog);
+    await openWendy();
+    const unconfirmed = screen.getByRole('region', { name: 'Unconfirmed' });
+    expect(within(unconfirmed).getByText('Not confirmed')).toBeInTheDocument();
+    expect(within(unconfirmed).getByText('Something Aman read')).toBeInTheDocument();
+    const now = screen.getByRole('region', { name: 'Now' });
+    expect(within(now).queryByText('Not confirmed')).not.toBeInTheDocument();
+    expect(within(now).queryByText('You said it')).not.toBeInTheDocument();
+    const earlier = screen.getByText(/^Earlier/).closest('details');
+    expect(earlier).not.toHaveAttribute('open');
+  });
+
+  it('confirms a line into the chosen section and dismisses another', async () => {
+    const { catalog, calls } = createCatalog({});
+    renderPanel(catalog);
+    await openWendy();
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm: Might travel in November.' }));
+    await waitFor(() =>
+      expect(calls.confirm).toHaveBeenCalledWith(
+        expect.objectContaining({ factId: 'f_03', section: 'Now', slug: 'wendy' }),
+      ),
+    );
+    await waitFor(() => expect(screen.queryByRole('button', { name: /^Confirm:/ })).not.toBeInTheDocument());
+  });
+
+  it('dismisses an unconfirmed line', async () => {
+    const { catalog, calls } = createCatalog({});
+    renderPanel(catalog);
+    await openWendy();
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss: Might travel in November.' }));
+    await waitFor(() => expect(calls.dismiss).toHaveBeenCalledWith(expect.objectContaining({ factId: 'f_03' })));
+    await waitFor(() => expect(screen.queryByText('Might travel in November.')).not.toBeInTheDocument());
+  });
+
+  it('edits the text and shows a refusal exactly as the server wrote it', async () => {
+    const { catalog, calls } = createCatalog({});
+    const refusal =
+      'Nothing was saved. This page changed after you opened it. Reload the page to see what is there now.';
+    catalog.savePage = async options => {
+      calls.save(options);
+      throw new Error(refusal);
+    };
+    renderPanel(catalog);
+    await openWendy();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit page' }));
+    const editor = screen.getByRole('textbox', { name: 'Edit page text' });
+    expect(editor).toHaveValue(WENDY.markdown);
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    fireEvent.change(editor, { target: { value: `${WENDY.markdown}- hi\n` } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(refusal);
+    expect(calls.save).toHaveBeenCalledWith(
+      expect.objectContaining({ version: 'v1', markdown: `${WENDY.markdown}- hi\n` }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('textbox', { name: 'Edit page text' })).not.toBeInTheDocument();
+  });
+
+  it('closes the editor after a good save', async () => {
+    const { catalog } = createCatalog({});
+    renderPanel(catalog);
+    await openWendy();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit page' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Edit page text' }), { target: { value: 'new text' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(screen.queryByRole('textbox', { name: 'Edit page text' })).not.toBeInTheDocument());
+  });
+
+  it('holds a delete for the undo window and sends it afterwards', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { catalog, calls } = createCatalog({});
+    renderPanel(catalog);
+    await openWendy();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete page' }));
+    expect(await screen.findByText('Page deleted.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Wendy/ })).not.toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(FORGET_UNDO_MS + 100));
+    await waitFor(() =>
+      expect(calls.remove).toHaveBeenCalledWith(expect.objectContaining({ kind: 'person', slug: 'wendy' })),
+    );
+  });
+
+  it('brings a page back when the delete is undone before it is sent', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { catalog, calls } = createCatalog({});
+    renderPanel(catalog);
+    await openWendy();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete page' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Undo' }));
+    expect(await screen.findByRole('button', { name: /Wendy/ })).toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(FORGET_UNDO_MS * 2));
+    expect(calls.remove).not.toHaveBeenCalled();
+  });
+
+  it('lists recent changes, undoes one, and disables undo while a later change blocks it', async () => {
+    const { catalog, calls } = createCatalog({
+      changes: {
+        available: true,
+        changes: [
+          {
+            id: 'a'.repeat(40),
+            changedAt: '2026-11-02T10:00:00.000Z',
+            message: 'You: edited the page for Wendy',
+            pages: [{ kind: 'person', slug: 'wendy' }],
+            undoBlockedBy: null,
+          },
+          {
+            id: 'b'.repeat(40),
+            changedAt: '2026-11-01T10:00:00.000Z',
+            message: 'You: dismissed X (Wendy)',
+            pages: [{ kind: 'person', slug: 'wendy' }],
+            undoBlockedBy: 'You: edited the page for Wendy',
+          },
+        ],
+      },
+    });
+    renderPanel(catalog);
+    const recent = await screen.findByRole('region', { name: 'Recent changes' });
+    expect(within(recent).getByRole('button', { name: 'Undo: You: dismissed X (Wendy)' })).toBeDisabled();
+    expect(within(recent).getByText(/Undo "You: edited the page for Wendy" first\./)).toBeInTheDocument();
+    fireEvent.click(within(recent).getByRole('button', { name: 'Undo: You: edited the page for Wendy' }));
+    await waitFor(() => expect(calls.undo).toHaveBeenCalledWith({ changeId: 'a'.repeat(40), namespace: '' }));
+  });
+
+  it('shows the server’s refusal when an undo is refused', async () => {
+    const { catalog } = createCatalog({
+      changes: {
+        available: true,
+        changes: [
+          {
+            id: 'a'.repeat(40),
+            changedAt: '2026-11-02T10:00:00.000Z',
+            message: 'You: edited the page for Wendy',
+            pages: [],
+            undoBlockedBy: null,
+          },
+        ],
+      },
+    });
+    catalog.undoChange = async () => {
+      throw new Error('Nothing was undone. A later change also changed these pages. Undo that change first.');
+    };
+    renderPanel(catalog);
+    fireEvent.click(await screen.findByRole('button', { name: /^Undo:/ }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Undo that change first.');
+  });
+});
