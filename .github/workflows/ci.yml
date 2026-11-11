@@ -442,6 +442,13 @@ jobs:
       - name: Scan tracked files for private data
         run: node scripts/check-no-private-data.mjs
 
+      # An unfinished merge is valid text to every formatter and builder, so only this step sees it.
+      - name: Check tracked files for leftover conflict markers
+        run: npm run test:conflict-markers
+
+      - name: Test the conflict-marker check
+        run: npm run test:conflict-markers-scanner
+
       # Shipped code may name only the outside hosts reviewed in scripts/external-hosts.allowlist.json.
       - name: Check shipped code for outside hosts
         run: npm run test:external-hosts
