@@ -136,6 +136,8 @@ async function seedSession(
     metadata: {},
     external_id: null,
     source: null,
+    is_incognito: false,
+    private_expires_at: null,
   });
   if (input.folderId !== undefined) {
     await store.setSessionFolder({
@@ -293,6 +295,7 @@ describe('Data export route', () => {
         run_at: null,
         kind: 'task',
         urgent: false,
+        origin_session_id: null,
       },
       created_by_subject: subject('alice'),
       runFrom: new Date(),
@@ -311,6 +314,7 @@ describe('Data export route', () => {
         run_at: null,
         kind: 'task',
         urgent: false,
+        origin_session_id: null,
       },
       created_by_subject: subject('bob'),
       runFrom: new Date(),

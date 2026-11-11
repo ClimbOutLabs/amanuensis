@@ -1,6 +1,7 @@
 {
   "Settings": "packages/trueforge-ui/src/atoms/ShellActions.tsx",
   "Roles and Personas": "packages/trueforge-ui/src/containers/SettingsBuilder/index.tsx",
+  "Add": "packages/trueforge-ui/src/containers/SettingsBuilder/ConnectorSettings.tsx",
   "Add persona": "packages/trueforge-ui/src/containers/SettingsBuilder/PersonaSettings.tsx",
   "Name": "packages/trueforge-ui/src/containers/SettingsBuilder/PersonaSettings.tsx",
   "Also answers to": "packages/trueforge-ui/src/containers/SettingsBuilder/PersonaSettings.tsx",
@@ -87,6 +88,8 @@
   "Delete space": "packages/trueforge-ui/src/containers/SpacesView.tsx",
   "More": "packages/trueforge-ui/src/layouts/SidebarLayout.tsx",
   "Build agent": "packages/trueforge-ui/src/layouts/SidebarLayout.tsx",
+  "Sign out": "packages/frontend/src/LogoutButton.tsx",
+  "Stay": "packages/frontend/src/LogoutButton.tsx",
   "Chats": "packages/trueforge-ui/src/layouts/SidebarLayout.tsx",
   "New chat": "packages/trueforge-ui/src/containers/ThreadListContainer.tsx",
   "Light": "packages/trueforge-ui/src/atoms/AppearanceChoices.tsx",
@@ -107,5 +110,18 @@
   "Cancel": "packages/trueforge-ui/src/containers/SettingsBuilder/AccountSetupPanel.tsx",
   "Reach me": "packages/trueforge-ui/src/containers/SettingsBuilder/index.tsx",
   "Try it": "packages/trueforge-ui/src/deliveries/ReachPreferences.tsx",
-  "Call me for reminders I mark urgent": "packages/trueforge-ui/src/deliveries/ReachPreferences.tsx"
+  "Call me for reminders I mark urgent": "packages/trueforge-ui/src/deliveries/ReachPreferences.tsx",
+  "Notes folder": "packages/trueforge-ui/src/containers/SettingsBuilder/NotesFolderSetupPanel.tsx",
+  "Folder": "packages/trueforge-ui/src/containers/SettingsBuilder/NotesFolderSetupPanel.tsx",
+  "Inbox file": "packages/trueforge-ui/src/containers/SettingsBuilder/NotesFolderSetupPanel.tsx",
+  "Change folder": "packages/trueforge-ui/src/containers/SettingsBuilder/NotesFolderSetupPanel.tsx",
+  "Remove folder": "packages/trueforge-ui/src/containers/SettingsBuilder/NotesFolderSetupPanel.tsx",
+  "Start incognito chat": "packages/trueforge-ui/src/atoms/privateChat/PrivateChatToggle.tsx",
+  "Close and delete": "packages/trueforge-ui/src/atoms/privateChat/PrivateChatBanner.tsx",
+  "Delete for good": "packages/trueforge-ui/src/atoms/privateChat/PrivateChatBanner.tsx",
+  "Audit": "packages/trueforge-ui/src/containers/SettingsBuilder/index.tsx",
+  "Show": "packages/trueforge-ui/src/sentinel/AuditLogSettings.tsx",
+  "From": "packages/trueforge-ui/src/sentinel/AuditLogSettings.tsx",
+  "To": "packages/trueforge-ui/src/sentinel/AuditLogSettings.tsx",
+  "Clear dates": "packages/trueforge-ui/src/sentinel/AuditLogSettings.tsx"
 }

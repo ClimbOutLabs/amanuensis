@@ -47,6 +47,10 @@
             "pages": ["safety", "privacy", "browser", "schedules", "reach-me", "backup"]
           },
           {
+            "group": "Connectors",
+            "pages": ["connectors/notes-folder"]
+          },
+          {
             "group": "TrueForge Harness",
             "pages": [
               {

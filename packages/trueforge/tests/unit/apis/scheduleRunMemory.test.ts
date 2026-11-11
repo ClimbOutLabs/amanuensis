@@ -139,6 +139,7 @@ describe('scheduled run memory wiring', () => {
     app.route(
       '/',
       createSchedulesRouter({
+        chatDeletionStore: { listDeletedChatModelUsage: () => Promise.resolve([]) },
         mcpCatalog: McpCatalog.loadShipped(),
         scheduleStore,
         briefItemStore: new BriefItemCompletionStore(db),

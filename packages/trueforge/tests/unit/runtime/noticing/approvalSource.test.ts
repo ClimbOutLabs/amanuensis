@@ -26,6 +26,8 @@ function session({ id, owner, updated }: { id: string; owner: string; updated: s
     metrics: { total_duration_ms: 0, total_turns: 0 },
     metadata: {},
     custom: null,
+    is_incognito: false,
+    private_expires_at: null,
   };
 }
 
@@ -129,7 +131,11 @@ describe('sessionApprovalSource', () => {
       },
     ]);
     expect(listSessions).toHaveBeenCalledTimes(2);
-    expect(listSessions.mock.calls[0]?.[0]).toMatchObject({ tenant_id: 'default', created_by_or_agent_ids: undefined });
+    expect(listSessions.mock.calls[0]?.[0]).toMatchObject({
+      tenant_id: 'default',
+      created_by_or_agent_ids: undefined,
+      include_private: false,
+    });
     expect(getTurn.mock.calls.map(call => call[0].session_id)).toEqual(['a', 'b', 'c']);
   });
 });

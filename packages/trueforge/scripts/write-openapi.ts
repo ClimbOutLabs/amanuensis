@@ -31,6 +31,7 @@ import { PushSubscriptionStore } from '../src/db/pushSubscriptionStore';
 import { ReachSettingsStore } from '../src/db/reachSettingsStore';
 import { SentinelAuditStore, type SentinelAuditDatabase } from '../src/db/sentinelAuditStore';
 import { SqliteAgentStore } from '../src/db/sqlite/agent-store/SqliteAgentStore';
+import { SqliteChatDeletionStore } from '../src/db/sqlite/chat-deletion-store/SqliteChatDeletionStore';
 import { SqliteChatImageStore } from '../src/db/sqlite/chat-image-store/SqliteChatImageStore';
 import { createSqliteDb } from '../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
@@ -94,6 +95,7 @@ const skillStore = new SqliteSkillStore(db);
 const sandboxProviderStore = new SqliteSandboxProviderStore(db);
 const modelProviderStore = new SqliteModelProviderStore(db);
 const turnArtifactStore = new SqliteTurnArtifactStore(db);
+const chatDeletionStore = new SqliteChatDeletionStore({ db, turnArtifactStore });
 const deliveryStore = new DeliveryStore(db);
 const personaStore = new SqlitePersonaStore(db);
 const globalSettingsStore = new SqliteGlobalSettingsStore(db);
@@ -135,6 +137,7 @@ const app = createServerApp({
   withTransaction: callback => db.transaction().execute(callback),
   scheduleStore: new SqliteScheduleStore(db),
   turnArtifactStore,
+  chatDeletionStore,
   globalSettingsStore,
   tokenFactoryBudget: createTokenFactoryBudget({ store: new SqliteTokenFactoryUsageStore(db), cap: undefined }),
   tokenStore,

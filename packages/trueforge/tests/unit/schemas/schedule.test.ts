@@ -117,6 +117,7 @@ describe('one-time schedule', () => {
       status: 'active',
       kind: 'task',
       urgent: false,
+      origin_session_id: null,
     });
   });
 
