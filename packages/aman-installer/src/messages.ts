@@ -33,6 +33,7 @@ export const HELP_LINES: readonly string[] = [
   'Run aman backup to make a backup of Aman now, in the Backups folder on this computer.',
   'Run aman backups to list the backups kept on this computer.',
   'Run aman verify and name a downloaded file to check it against its signed release record.',
+  'Run aman uninstall to remove Aman from this Windows computer.',
 ];
 
 export const DOCKER_NOT_INSTALLED: Record<SystemKind, Problem> = {
@@ -661,6 +662,11 @@ export function networkPhoneLine(address: string): string {
   return `On your phone, open ${printable(address)}.`;
 }
 
+export const INSTALL_REMOVAL_NOTE_STUCK: Problem = {
+  happened: 'A note left by an earlier removal of Aman could not be deleted, so the install did not start.',
+  fix: 'Delete the file docker-removed in the folder %LOCALAPPDATA%\\Programs\\Amanuensis, then open Aman Setup again.',
+};
+
 export const INSTALL_NOT_WINDOWS: Problem = {
   happened: 'The Aman Setup download sets Aman up on a Windows computer, and this is not one.',
   fix: 'Use the installer for this computer to set Aman up.',
@@ -704,7 +710,7 @@ export const INSTALL_RESTART_NEEDED: Problem = {
 // is told to open it instead of being promised the automatic reopen.
 export const INSTALL_RESUME_FAILED: Problem = {
   happened: 'Docker Desktop needs a restart, but Aman Setup could not be set to open again by itself.',
-  fix: 'Restart your computer, then open Aman Setup from the Start menu.',
+  fix: 'Restart your computer, then open the Aman Setup download again from where you saved it, usually your Downloads folder.',
 };
 
 export const INSTALL_DOCKER_NOT_ANSWERING: Problem = {
@@ -835,6 +841,10 @@ export const INSTALL_PHONE_QUESTION =
 
 export const INSTALL_YES_OR_NO_LINE = 'Please answer yes or no.';
 
+// Said at the end of a window a double-click or the Start menu opened,
+// so the person can read it before it closes.
+export const PRESS_ENTER_TO_CLOSE_LINE = 'Press Enter to close this window.';
+
 export const INSTALL_DONE_LINE = 'Aman is installed, and the getting started page is open in your browser.';
 
 // What aman install --dry-run prints: the steps it would take, in
@@ -847,6 +857,92 @@ export const INSTALL_DRY_RUN_LINES: readonly string[] = [
   'It puts the aman command and the Start menu entries in place, and opens Aman in your browser.',
   'It opens a short getting started page in your browser at the end.',
 ];
+
+export const UNINSTALL_NOT_WINDOWS: Problem = {
+  happened: 'aman uninstall removes an Aman set up with the Aman Setup download, and this is not a Windows computer.',
+  fix: 'Run installer/install.sh instance remove with the name of each instance and --purge-data instead.',
+};
+
+export const UNINSTALL_DOCKER_NOT_ANSWERING: Problem = {
+  happened: 'Docker is not answering, so Aman cannot be removed from it.',
+  fix: 'Open Docker Desktop from the Start menu, wait until it says it is running, then run aman uninstall again.',
+};
+
+export const UNINSTALL_IMAGE_UNAVAILABLE: Problem = {
+  happened: 'Docker could not download the small helper it needs to remove Aman.',
+  fix: 'Check your internet connection, then run aman uninstall again.',
+};
+
+export const UNINSTALL_STATE_UNREADABLE: Problem = {
+  happened: 'The record of what is installed could not be read, so nothing was removed.',
+  fix: 'Run aman doctor to find what is wrong, then run aman uninstall again.',
+};
+
+export const UNINSTALL_BUSY: Problem = {
+  happened: 'Another install is running right now, so nothing was removed.',
+  fix: `Wait for it to finish, or wait ${String(LOCK_TIMING.deadSeconds / 60)} minutes if you stopped an install a moment ago, then run aman uninstall again.`,
+};
+
+export const UNINSTALL_BACKUP_FAILED: Problem = {
+  happened: 'The last backup could not be made, so nothing was removed.',
+  fix: 'Run Check Aman from the Start menu to see what is wrong, then run aman uninstall again.',
+};
+
+export function uninstallInstanceFailedProblem(name: string): Problem {
+  return {
+    happened: `The instance ${printable(name)} could not be removed, so the removal stopped there.`,
+    fix: 'Read the lines above for the cause, then run aman uninstall again; it carries on from where it stopped.',
+  };
+}
+
+export const UNINSTALL_DOCKER_LEFTOVERS: Problem = {
+  happened: 'Some of what Aman kept in Docker could not be deleted.',
+  fix: 'Restart Docker Desktop, then run aman uninstall again; it carries on from where it stopped.',
+};
+
+// Names the command by its full path: the aman command may be off the
+// PATH by now, and the Start menu entry is the last thing to go.
+// The Run box takes the quoted path and the command as they are, where
+// PowerShell would not.
+export function uninstallWindowsLeftoversProblem(exePath: string): Problem {
+  return {
+    happened: 'Aman is removed from Docker, but some of its parts on this PC are still here.',
+    fix: `Open Remove Aman from the Start menu, or press the Windows key and R and enter "${printable(exePath)}" uninstall, then answer Yes if Windows asks.`,
+  };
+}
+
+export const UNINSTALL_DOCKER_GONE_LINE =
+  'Docker Desktop is not on this computer any more, and it took what Aman kept in it when it went. Removing the rest.';
+
+// What the removal says before it asks, so the one yes is an informed one.
+export const UNINSTALL_PLAN_LINES: readonly string[] = [
+  'This removes Aman from this computer.',
+  'It deletes your instances and everything they keep: chats, memory, files and settings.',
+  'It deletes the Aman images in Docker Desktop, the aman command and the Start menu entries.',
+  'It takes away the daily backup task, the home network rule and the certificate Aman added.',
+  'Docker Desktop stays installed, because other programs may use it.',
+];
+
+export const UNINSTALL_QUESTION = 'Remove Aman and delete all of its data?';
+
+export function uninstallBackupsQuestion(backupsDir: string): string {
+  return `Delete your backups folder ${printable(backupsDir)} too? A last backup is made in it first unless you say yes.`;
+}
+
+export const UNINSTALL_DECLINED_LINE = 'Nothing was removed.';
+
+export function uninstallRemovingInstanceLine(name: string): string {
+  return `Removing the instance ${printable(name)}.`;
+}
+
+export const UNINSTALL_DONE_LINE = 'Aman is removed from this computer.';
+
+export function uninstallBackupsKeptLine(backupsDir: string): string {
+  return `Your backups are kept in ${printable(backupsDir)}. Delete that folder when you no longer need them.`;
+}
+
+export const UNINSTALL_DOCKER_KEPT_LINE =
+  'Docker Desktop is still installed. If nothing else uses it, remove it in Windows Settings, under Apps.';
 
 // Every message, in a fixed order, for the golden file reviewers read.
 export function allMessageLines(): string[] {
@@ -969,6 +1065,7 @@ export function allMessageLines(): string[] {
   lines.push(NETWORK_CLOSED_LINE);
   lines.push(networkPhoneLine('http://192.168.1.20:8791'));
   lines.push(problemText(INSTALL_NOT_WINDOWS));
+  lines.push(problemText(INSTALL_REMOVAL_NOTE_STUCK));
   lines.push(problemText(INSTALL_IMAGE_UNAVAILABLE));
   lines.push(problemText(INSTALL_DOWNLOAD_FAILED));
   lines.push(problemText(INSTALL_DOCKER_UNTRUSTED));
@@ -1002,5 +1099,26 @@ export function allMessageLines(): string[] {
   lines.push(INSTALL_YES_OR_NO_LINE);
   lines.push(INSTALL_DONE_LINE);
   lines.push(...INSTALL_DRY_RUN_LINES);
+  lines.push(PRESS_ENTER_TO_CLOSE_LINE);
+  lines.push(problemText(UNINSTALL_NOT_WINDOWS));
+  lines.push(problemText(UNINSTALL_DOCKER_NOT_ANSWERING));
+  lines.push(problemText(UNINSTALL_IMAGE_UNAVAILABLE));
+  lines.push(problemText(UNINSTALL_STATE_UNREADABLE));
+  lines.push(problemText(UNINSTALL_BUSY));
+  lines.push(problemText(UNINSTALL_BACKUP_FAILED));
+  lines.push(problemText(uninstallInstanceFailedProblem('main')));
+  lines.push(problemText(UNINSTALL_DOCKER_LEFTOVERS));
+  lines.push(
+    problemText(uninstallWindowsLeftoversProblem('C:\\Users\\Friend\\AppData\\Local\\Programs\\Amanuensis\\aman.exe')),
+  );
+  lines.push(...UNINSTALL_PLAN_LINES);
+  lines.push(UNINSTALL_QUESTION);
+  lines.push(uninstallBackupsQuestion('C:\\Users\\Friend\\AppData\\Local\\Amanuensis\\backups'));
+  lines.push(UNINSTALL_DECLINED_LINE);
+  lines.push(uninstallRemovingInstanceLine('main'));
+  lines.push(UNINSTALL_DONE_LINE);
+  lines.push(uninstallBackupsKeptLine('C:\\Users\\Friend\\AppData\\Local\\Amanuensis\\backups'));
+  lines.push(UNINSTALL_DOCKER_KEPT_LINE);
+  lines.push(UNINSTALL_DOCKER_GONE_LINE);
   return lines;
 }

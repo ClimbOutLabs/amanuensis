@@ -64,6 +64,7 @@ export async function runAdopt(deps: AdoptDeps): Promise<number> {
     return 1;
   }
   try {
+    await jobs.clearDockerSideRemoved();
     await jobs.copySelfToPrograms();
     await jobs.ensureProgramsFolderOnUserPath();
     const shortcuts = await jobs.listShortcuts();
@@ -77,7 +78,10 @@ export async function runAdopt(deps: AdoptDeps): Promise<number> {
         await jobs.pointShortcutAtOpen(shortcut.path);
       }
     }
+    await jobs.ensureOpenAmanShortcut();
     await jobs.ensureCheckAmanShortcut();
+    await jobs.ensureUpdateAmanShortcut();
+    await jobs.ensureRemoveAmanShortcut();
     await jobs.replaceSetupCmdCopyWithForwarder();
     await jobs.ensureDailyBackupTask();
     await jobs.ensureBackupsShortcut();
