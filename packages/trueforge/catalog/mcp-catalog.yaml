@@ -11,7 +11,9 @@ mcp_servers:
   - type: remote
     name: notion
     url: https://mcp.notion.com/mcp
-    description: Search pages, read content, query databases, create pages.
+    description: >-
+      Search pages, read content, query databases, create pages. Signing in gives the
+      connection the same access you have, so it can reach any page or database you can open.
     auth:
       type: dcr
   - type: remote
@@ -46,7 +48,10 @@ mcp_servers:
   - type: remote
     name: github
     url: https://api.githubcopilot.com/mcp/
-    description: Work with issues, pull requests, repository files, and CI status.
+    description: >-
+      Work with issues, pull requests, repository files, and CI status. Connect with a
+      personal access token from your GitHub settings; give it only the repositories and
+      permissions it needs.
     auth:
       type: header
       headers:

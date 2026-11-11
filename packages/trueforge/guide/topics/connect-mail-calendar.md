@@ -78,3 +78,28 @@ To connect it in Aman:
 5. In Home Assistant, expose each entity Aman may see (its settings, then Voice assistants, then Expose). Only exposed entities are visible to Aman.
 
 Reading the state of your home runs on its own. A change, such as turning off a lamp, asks you first, unless you allow that kind of device for good on the card. You can see what you allowed, and take it back, on the Home Assistant connector's page in Settings. Aman never controls locks, alarms or garage doors.
+
+## Connect Notion
+
+You can connect Notion, so Aman can search and read your pages and databases, and make new ones.
+
+1. Click **More** in the left bar, click **Settings**, then click **Connectors**.
+2. Find notion in the list and click **Add**.
+3. Open the notion connector and click **Connect**.
+4. A Notion window opens. Sign in and pick your workspace.
+
+Signing in gives Aman the same access you have in Notion. Any page or database you can open, Aman can reach. Every Notion tool asks you first before it runs.
+
+## Connect GitHub
+
+You can connect GitHub, so Aman can work with your issues, pull requests, repository files and CI status.
+
+First, make a token in GitHub. Open your GitHub settings, then Developer settings, then Personal access tokens, and make a fine-grained token. Give it only the repositories and permissions Aman needs.
+
+To connect it in Aman:
+
+1. Click **More** in the left bar, click **Settings**, then click **Connectors**.
+2. Find github in the list and click **Connect**.
+3. Paste the token, then click **Connect**.
+
+Every GitHub tool asks you first before it runs.
