@@ -2989,6 +2989,13 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
     } catch (error) {
       this.#space.logger.warn(
         'Email connection offer not mounted: its state could not be read',
+        extractErrorLogFields(error),
+      );
+      return [];
+    }
+  }
+
+  /** A folder that cannot be checked costs the chat its notes tools, never the chat itself. */
   async #notesFolder(input: Parameters<MemoryTurnResourceResolver['resolveAgentDefinition']>[0]) {
     const notesFolder = this.#space.notesFolder;
     if (notesFolder === undefined) {
