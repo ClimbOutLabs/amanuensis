@@ -351,6 +351,7 @@ One more setting decides whether saved notes are sorted onto pages at all:
 | Setting               | Default  | Meaning                                                                                        |
 | --------------------- | -------- | ---------------------------------------------------------------------------------------------- |
 | `MEMORY_PAGE_SORTING` | `report` | `off` does nothing. `report` only records what sorting would do. `on` writes pages. See below. |
+| `MEMORY_NIGHTLY_JOB`  | `true`   | Once a day per vault, tidies pages in the server's quiet hours. See "The nightly job".         |
 
 A page that would go over the token limit is left out, and so is every page after it. That way the
 model always sees the highest-priority pages. Each turn's memory event records how many pages matched,
@@ -624,6 +625,45 @@ again under the lock; if a statement the model named has changed since the promp
 successful write the note is added to `.handled-notes` as `page` when anything was written or confirmed, and
 `none` when every decision was `ignore` or the list was empty. A refused reply, a failed call or a failed write
 adds nothing, so the note stays unsorted and recall keeps showing it from the log.
+
+## The nightly job
+
+`nightlyService.ts` starts a timer with the server (Markdown backend, `MEMORY_NIGHTLY_JOB` on) that looks at the
+server's clock every ten minutes. In the quiet hours (02:00 to 05:00, server time) `runNightlyJob` goes through the
+shared vault and each persona's vault one after the other and stops starting vaults when the hours end. A failure in one
+vault is logged and does not stop the others. The job is not part of any chat, so an incognito chat neither starts it nor
+feeds it.
+
+**Once a day per vault.** `claimNightlyDay` reads and writes `last_run_day` in `.memory-state/nightly.json` under the
+vault lock. Two processes starting together cannot both take the day. The day is taken before any work, so a crash halfway
+is repeated the next day, and every step is safe to repeat. A vault that stays busy for 3 seconds is skipped and tried at
+the next look. The lock is taken for each small change and never around a model call, so a save or a page edit is not held up.
+
+**The model without a turn.** `nightlyService.ts` builds the summarizer's context by hand: it respects the summaries switch
+(`readMemorySummarizeSetting`), uses the persona's own model for a persona's vault and otherwise the model new chats start
+on (`resolveDefaultChatModel`), and goes through `summaryModelFor`, so the same client, light-reasoning request, time
+budget, limit on calls at once and token budget apply. A turn's own summary model setting on its agent is not known here.
+With no model, steps 2 and 3 are skipped.
+
+**Step 1: ended statements, no model, every mode.** A fact under Now, Decided or Open whose `until` is before today
+(`endedBefore`: `2026-10` ends on 31 October) moves to Earlier with that `until`, through `moveFactToEarlier`, for all pages in
+one `commitPageChange` that says "Aman moved 3 ended lines to Earlier". Unconfirmed and "How you write to them" are not
+touched. When nothing ended, nothing is written, not even a history.
+
+**Step 2: missed notes.** Entries of the last 14 days from the daily log (deleted ones are resolved away, erased ones are
+not entries), not in `.handled-notes`, and, in `report` mode, with no line in `.sorter-report.jsonl`, oldest first, at most 40,
+each through `sortNote` with the configured mode. `off` asks nothing. A note whose sorting fails is counted in
+`note_tries`; after three nights it is left alone, and three failures in a row end the step for the night.
+
+**Step 3: statements that disagree.** Pages whose fingerprint differs from `looked_at` in `nightly.json`, at most 20 a run.
+Pages with fewer than two current statements are marked looked at with no call. The reply is
+`{"pairs":[{"a":"<id>","b":"<id>","reason":"<one line, at most 200 characters>"}]}`. A reply that does not parse, is longer than 4000
+characters, has more than 10 pairs, names an id that was not shown or names one line twice is refused whole and the page is
+marked looked at. A failed call ends the step and the page is tried again next time. The host keeps at most 5 pairs, and
+after the call it reads the page again and drops a pair whose line changed or ended. `disagreements.json` holds, per pair,
+the page, both ids with a fingerprint of the text, the day found and the reason, plus the pairs the person dismissed. The
+Pages routes show a pair only while both lines are current and unchanged and the pair is not dismissed. The page is never
+written.
 
 ## Recall from the Markdown backend
 

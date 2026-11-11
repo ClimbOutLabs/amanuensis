@@ -27,4 +27,6 @@ Open a page to read it in order. A line you said or wrote yourself looks plain. 
 - Choose **Edit page** to change the whole page as text, then **Save**. If the page changed while you were editing, Aman asks you to reload it and try again. Nothing is lost.
 - Choose **Delete page** to remove a page. For a few seconds you can choose **Undo** to cancel it.
 
+Once a night Aman also checks each page for two lines that cannot both be true. When it finds some, the page row says how many pairs disagree, and the page shows **These lines disagree** at the top with both lines and a short reason. Aman changes nothing on the page. If one line is wrong, use **Edit page** to fix it. If the pair is fine, choose **Not a problem** and Aman will not list those two lines again. In the same nightly tidy, a line whose end day has passed moves to Earlier by itself.
+
 Under Recent changes you see the last things that changed on your pages. Choose **Undo** next to one to put those pages back as they were. Aman never erases its history, so an undo is a new change. If a later change also touched the page, Aman tells you which change to undo first.
