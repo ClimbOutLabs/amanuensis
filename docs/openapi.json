@@ -348,6 +348,38 @@
         ],
         "type": "object"
       },
+      "ApprovalCardCopy": {
+        "description": "The headline, consequence and reason the card renders. Every builder fills it from its copy owner; null only where a later choke point fills it, never on a finished card.",
+        "properties": {
+          "consequence": {
+            "description": "What follows from approving, in one line, or null when nothing needs saying.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "headline": {
+            "description": "What will happen, in one sentence, in words the person recognises.",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Why the tier asks, in plain words, or null when it needs no reason.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "headline",
+          "consequence",
+          "reason"
+        ],
+        "type": [
+          "object",
+          "null"
+        ]
+      },
       "ApprovalDecision": {
         "discriminator": {
           "mapping": {
@@ -11913,36 +11945,7 @@
             ]
           },
           "copy": {
-            "description": "The headline, consequence and reason the card renders, or null on cards saved before copy existed.",
-            "properties": {
-              "consequence": {
-                "description": "What follows from approving, in one line, or null when nothing needs saying.",
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "headline": {
-                "description": "What will happen, in one sentence, in words the person recognises.",
-                "type": "string"
-              },
-              "reason": {
-                "description": "Why the tier asks, in plain words, or null when it needs no reason.",
-                "type": [
-                  "string",
-                  "null"
-                ]
-              }
-            },
-            "required": [
-              "headline",
-              "consequence",
-              "reason"
-            ],
-            "type": [
-              "object",
-              "null"
-            ]
+            "$ref": "#/components/schemas/ApprovalCardCopy"
           },
           "destination": {
             "description": "Verifiable destination (URL, service name), or null.",
@@ -12042,6 +12045,7 @@
         },
         "required": [
           "plain_what",
+          "copy",
           "plain_why",
           "cannot_be_undone",
           "why_asked_again",

@@ -3,8 +3,8 @@
 import type * as TrueForge from "../../api/index.js";
 import * as core from "../../core/index.js";
 import type * as serializers from "../index.js";
+import { ApprovalCardCopy } from "./ApprovalCardCopy.js";
 import { Tier3CalendarEvent } from "./Tier3CalendarEvent.js";
-import { Tier3CardCopy } from "./Tier3CardCopy.js";
 import { Tier3Email } from "./Tier3Email.js";
 import { Tier3Persona } from "./Tier3Persona.js";
 import { Tier3Schedule } from "./Tier3Schedule.js";
@@ -14,7 +14,7 @@ export const Tier3Card: core.serialization.ObjectSchema<serializers.Tier3Card.Ra
         amount: core.serialization.string().nullable(),
         calendarEvent: core.serialization.property("calendar_event", Tier3CalendarEvent.optionalNullable()),
         cannotBeUndone: core.serialization.property("cannot_be_undone", core.serialization.string().nullable()),
-        copy: Tier3CardCopy.optionalNullable(),
+        copy: ApprovalCardCopy.nullable(),
         destination: core.serialization.string().nullable(),
         destinationHost: core.serialization.property("destination_host", core.serialization.string().nullable()),
         destructive: core.serialization.boolean().optional(),
@@ -45,7 +45,7 @@ export declare namespace Tier3Card {
         amount?: string | null;
         calendar_event?: (Tier3CalendarEvent.Raw | null | undefined) | null;
         cannot_be_undone?: string | null;
-        copy?: (Tier3CardCopy.Raw | null | undefined) | null;
+        copy?: ApprovalCardCopy.Raw | null;
         destination?: string | null;
         destination_host?: string | null;
         destructive?: boolean | null;

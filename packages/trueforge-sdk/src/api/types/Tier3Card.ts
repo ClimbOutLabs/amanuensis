@@ -8,8 +8,7 @@ export interface Tier3Card {
     calendarEvent?: TrueForge.Tier3CalendarEvent | null;
     /** A short note on what can't be reversed, or null. */
     cannotBeUndone: string | null;
-    /** The headline, consequence and reason the card renders, or null on cards saved before copy existed. */
-    copy?: TrueForge.Tier3CardCopy | null;
+    copy: TrueForge.ApprovalCardCopy | null;
     /** Verifiable destination (URL, service name), or null. */
     destination: string | null;
     /** Host of the connector server that receives the call, or null when it is not a remote server. */
