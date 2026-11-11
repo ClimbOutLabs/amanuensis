@@ -5,6 +5,7 @@ import {
   CHECK_AMAN_SHORTCUT_NAME,
   OPEN_AMAN_SHORTCUT_NAME,
   PHONE_SHORTCUT_NAME,
+  REMOVE_AMAN_SHORTCUT_NAME,
   RUN_ONCE_VALUE_NAME,
   SETUP_CMD_FORWARDER,
   UPDATE_AMAN_SHORTCUT_NAME,
@@ -22,6 +23,16 @@ export type FakeWindowsJobStep =
   | 'list'
   | 'point'
   | 'open-entry'
+  | 'remove-entry'
+  | 'remove-shortcut'
+  | 'mark-docker'
+  | 'clear-docker-mark'
+  | 'remove-task'
+  | 'remove-firewall'
+  | 'remove-path'
+  | 'remove-cert'
+  | 'remove-data'
+  | 'remove-programs'
   | 'check'
   | 'update'
   | 'backupsShortcut'
@@ -85,6 +96,12 @@ export class FakeWindowsJobs implements WindowsJobs {
   firewallPorts: readonly number[] = [];
   readonly ops: string[] = [];
   private readonly ownsConsole: boolean;
+  // What the removal did, as a test reads it back.
+  firewallRule = false;
+  caCertInStore = false;
+  dataFolder: 'present' | 'backups-only' | 'gone' = 'present';
+  programsFolderRemovalScheduled = false;
+  dockerRemovedMark = false;
 
   constructor(options: {
     localAppDataDir: string;
@@ -115,6 +132,8 @@ export class FakeWindowsJobs implements WindowsJobs {
     // Whether the program is the only one using its console window, as
     // a test scripts it.
     ownsItsConsole?: boolean;
+    // Whether an earlier removal left its note that Docker is cleared.
+    dockerRemovedMark?: boolean;
   }) {
     const paths = windowsPaths(options.localAppDataDir);
     this.programsExePath = paths.programsExePath;
@@ -141,6 +160,7 @@ export class FakeWindowsJobs implements WindowsJobs {
     this.backupTask = options.backupTask ?? false;
     this.backupNames = [...(options.backups ?? [])];
     this.ownsConsole = options.ownsItsConsole ?? false;
+    this.dockerRemovedMark = options.dockerRemovedMark ?? false;
   }
 
   private step(name: FakeWindowsJobStep): void {
@@ -185,6 +205,19 @@ export class FakeWindowsJobs implements WindowsJobs {
     this.step('open-entry');
     const path = win32.join(this.startMenuProgramsDir, `${OPEN_AMAN_SHORTCUT_NAME}.lnk`);
     const entry: ShortcutFacts = { path, target: this.programsExePath, args: 'open' };
+    const existing = this.shortcuts.findIndex(shortcut => shortcut.path === path);
+    if (existing === -1) {
+      this.shortcuts.push(entry);
+    } else {
+      this.shortcuts[existing] = entry;
+    }
+    return Promise.resolve();
+  }
+
+  ensureRemoveAmanShortcut(): Promise<void> {
+    this.step('remove-entry');
+    const path = win32.join(this.startMenuProgramsDir, `${REMOVE_AMAN_SHORTCUT_NAME}.lnk`);
+    const entry: ShortcutFacts = { path, target: this.programsExePath, args: 'uninstall' };
     const existing = this.shortcuts.findIndex(shortcut => shortcut.path === path);
     if (existing === -1) {
       this.shortcuts.push(entry);
@@ -383,5 +416,71 @@ export class FakeWindowsJobs implements WindowsJobs {
 
   ownsItsConsole(): Promise<boolean> {
     return Promise.resolve(this.ownsConsole);
+  }
+
+  dockerSideRemoved(): Promise<boolean> {
+    return Promise.resolve(this.dockerRemovedMark);
+  }
+
+  markDockerSideRemoved(): Promise<void> {
+    this.step('mark-docker');
+    this.dockerRemovedMark = true;
+    return Promise.resolve();
+  }
+
+  clearDockerSideRemoved(): Promise<void> {
+    this.step('clear-docker-mark');
+    this.dockerRemovedMark = false;
+    return Promise.resolve();
+  }
+
+  removeShortcut(shortcutPath: string): Promise<void> {
+    this.step('remove-shortcut');
+    this.shortcuts = this.shortcuts.filter(shortcut => shortcut.path !== shortcutPath);
+    return Promise.resolve();
+  }
+
+  removeDailyBackupTask(): Promise<void> {
+    this.step('remove-task');
+    this.backupTask = false;
+    return Promise.resolve();
+  }
+
+  removeFirewallRule(): Promise<void> {
+    this.step('remove-firewall');
+    this.firewallRule = false;
+    this.firewallOpen = false;
+    return Promise.resolve();
+  }
+
+  removeProgramsFolderFromUserPath(): Promise<void> {
+    this.step('remove-path');
+    const wanted = this.programsDir.toLowerCase();
+    this.userPath = this.userPath
+      .split(';')
+      .filter(entry => entry.trim() !== '' && entry.trim().replace(/\\+$/, '').toLowerCase() !== wanted)
+      .join(';');
+    return Promise.resolve();
+  }
+
+  removeCaCertificateFromUserStore(): Promise<void> {
+    this.step('remove-cert');
+    this.caCertInStore = false;
+    return Promise.resolve();
+  }
+
+  removeDataFolder({ keepBackups }: { keepBackups: boolean }): Promise<void> {
+    this.step('remove-data');
+    this.dataFolder = keepBackups ? 'backups-only' : 'gone';
+    if (!keepBackups) {
+      this.backupNames = [];
+    }
+    return Promise.resolve();
+  }
+
+  removeProgramsFolderAfterExit(): Promise<void> {
+    this.step('remove-programs');
+    this.programsFolderRemovalScheduled = true;
+    return Promise.resolve();
   }
 }
