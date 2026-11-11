@@ -279,10 +279,10 @@ export class MailConnectorSource implements ToolSource {
       return refusal(foldered.refused);
     }
     const { args } = foldered;
-    const reads_only = isMailReadToolName(params.name);
+    const readsOnly = isMailReadToolName(params.name);
     const send = async (sent: Record<string, unknown>) => {
       const response = await this.#inner.callTool({ ...params, arguments: sent }, approvalDecision, context);
-      return reads_only ? plainReadFailure(response) : response;
+      return readsOnly ? plainReadFailure(response) : response;
     };
     if (params.name !== MAIL_LIST_TOOL_NAME || args['since'] !== undefined) {
       const sent = await send(args);

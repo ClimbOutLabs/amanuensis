@@ -11,7 +11,7 @@ export interface ListedMailbox {
  * folder is "[Gmail]/Sent Mail", Outlook's is "Sent Items"), so a common name is matched by the mark.
  */
 const STANDARD_FOLDERS: readonly { flag: string; words: readonly string[] }[] = [
-  { flag: '\\sent', words: ['sent', 'sentmail', 'sentitems', 'sentmessages', 'outbox'] },
+  { flag: '\\sent', words: ['sent', 'sentmail', 'sentitems', 'sentmessages'] },
   { flag: '\\drafts', words: ['drafts', 'draft'] },
   { flag: '\\trash', words: ['trash', 'bin', 'deleted', 'deleteditems', 'deletedmessages'] },
   { flag: '\\junk', words: ['junk', 'spam', 'junkemail', 'junkmail', 'bulk', 'bulkmail'] },

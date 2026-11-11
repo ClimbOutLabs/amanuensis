@@ -53,6 +53,8 @@ describe('resolveMailboxName', () => {
   it('finds nothing for a folder the account does not have, or when two folders fit equally', () => {
     expect(resolveMailboxName({ requested: 'Archive', mailboxes: MARKED })).toBeUndefined();
     expect(resolveMailboxName({ requested: 'Taxes', mailboxes: MARKED })).toBeUndefined();
+    // An outbox holds mail not yet sent, so it is never read as the sent folder.
+    expect(resolveMailboxName({ requested: 'Outbox', mailboxes: MARKED })).toBeUndefined();
     const twoSent: ListedMailbox[] = [
       { name: 'Sent', delimiter: '/', flags: ['\\Sent'] },
       { name: 'Old/Sent', delimiter: '/', flags: ['\\Sent'] },
