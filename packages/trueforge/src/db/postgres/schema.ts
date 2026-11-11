@@ -60,6 +60,7 @@ export const TABLES_TO_MOVE = [
   'global_settings',
   'token_factory_usage',
   'token_factory_model_usage',
+  'deleted_chat_model_usage',
   'sentinel_audit',
   'sentinel_user_settings',
   'approval_token',

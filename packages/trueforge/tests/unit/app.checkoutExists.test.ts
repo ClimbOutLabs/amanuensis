@@ -138,6 +138,8 @@ function sessionRecord(lastTurnId: string | null): SessionRecord<SessionCustom> 
     session_id: SESSION_ID,
     created_by_subject: { subject_id: 'user-1', subject_type: 'user', subject_display_name: 'user-1' },
     agent: { type: 'reference', id: 'agent-1', name: 'test-agent' },
+    is_incognito: false,
+    private_expires_at: null,
     title: null,
     folder_id: null,
     repository_id: null,

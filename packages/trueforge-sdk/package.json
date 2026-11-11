@@ -44,17 +44,6 @@
             },
             "default": "./dist/cjs/api/resources/internal/exports.js"
         },
-        "./telegram": {
-            "import": {
-                "types": "./dist/esm/api/resources/telegram/exports.d.mts",
-                "default": "./dist/esm/api/resources/telegram/exports.mjs"
-            },
-            "require": {
-                "types": "./dist/cjs/api/resources/telegram/exports.d.ts",
-                "default": "./dist/cjs/api/resources/telegram/exports.js"
-            },
-            "default": "./dist/cjs/api/resources/telegram/exports.js"
-        },
         "./agents": {
             "import": {
                 "types": "./dist/esm/api/resources/agents/exports.d.mts",
@@ -385,6 +374,17 @@
             },
             "default": "./dist/cjs/api/resources/internal/resources/metrics/exports.js"
         },
+        "./internal/privateChats": {
+            "import": {
+                "types": "./dist/esm/api/resources/internal/resources/privateChats/exports.d.mts",
+                "default": "./dist/esm/api/resources/internal/resources/privateChats/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/internal/resources/privateChats/exports.d.ts",
+                "default": "./dist/cjs/api/resources/internal/resources/privateChats/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/internal/resources/privateChats/exports.js"
+        },
         "./internal/schedules": {
             "import": {
                 "types": "./dist/esm/api/resources/internal/resources/schedules/exports.d.mts",
@@ -406,17 +406,6 @@
                 "default": "./dist/cjs/api/resources/internal/resources/sessions/exports.js"
             },
             "default": "./dist/cjs/api/resources/internal/resources/sessions/exports.js"
-        },
-        "./internal/telegram": {
-            "import": {
-                "types": "./dist/esm/api/resources/internal/resources/telegram/exports.d.mts",
-                "default": "./dist/esm/api/resources/internal/resources/telegram/exports.mjs"
-            },
-            "require": {
-                "types": "./dist/cjs/api/resources/internal/resources/telegram/exports.d.ts",
-                "default": "./dist/cjs/api/resources/internal/resources/telegram/exports.js"
-            },
-            "default": "./dist/cjs/api/resources/internal/resources/telegram/exports.js"
         },
         "./internal/agents": {
             "import": {
@@ -638,16 +627,16 @@
             },
             "default": "./dist/cjs/api/resources/settings/resources/google/exports.js"
         },
-        "./settings/telegram": {
+        "./settings/notes": {
             "import": {
-                "types": "./dist/esm/api/resources/settings/resources/telegram/exports.d.mts",
-                "default": "./dist/esm/api/resources/settings/resources/telegram/exports.mjs"
+                "types": "./dist/esm/api/resources/settings/resources/notes/exports.d.mts",
+                "default": "./dist/esm/api/resources/settings/resources/notes/exports.mjs"
             },
             "require": {
-                "types": "./dist/cjs/api/resources/settings/resources/telegram/exports.d.ts",
-                "default": "./dist/cjs/api/resources/settings/resources/telegram/exports.js"
+                "types": "./dist/cjs/api/resources/settings/resources/notes/exports.d.ts",
+                "default": "./dist/cjs/api/resources/settings/resources/notes/exports.js"
             },
-            "default": "./dist/cjs/api/resources/settings/resources/telegram/exports.js"
+            "default": "./dist/cjs/api/resources/settings/resources/notes/exports.js"
         },
         "./package.json": "./package.json"
     },

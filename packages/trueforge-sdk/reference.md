@@ -66,72 +66,6 @@ await client.internal.listPermissions({
 </dl>
 </details>
 
-## Telegram
-<details><summary><code>client.telegram.<a href="/src/api/resources/telegram/client/Client.ts">webhook</a>({ ...params }) -> void</code></summary>
-<dl>
-<dd>
-
-#### 📝 Description
-
-<dl>
-<dd>
-
-<dl>
-<dd>
-
-The address Telegram posts updates to when a public https address is configured. The secret Telegram was given at setup must ride the call, or it is refused.
-</dd>
-</dl>
-</dd>
-</dl>
-
-#### 🔌 Usage
-
-<dl>
-<dd>
-
-<dl>
-<dd>
-
-```typescript
-await client.telegram.webhook({
-    updateId: 1
-});
-
-```
-</dd>
-</dl>
-</dd>
-</dl>
-
-#### ⚙️ Parameters
-
-<dl>
-<dd>
-
-<dl>
-<dd>
-
-**request:** `TrueForge.TelegramUpdate`
-
-</dd>
-</dl>
-
-<dl>
-<dd>
-
-**requestOptions:** `TelegramClient.RequestOptions`
-
-</dd>
-</dl>
-</dd>
-</dl>
-
-
-</dd>
-</dl>
-</details>
-
 ## Agents
 <details><summary><code>client.agents.<a href="/src/api/resources/agents/client/Client.ts">list</a>({ ...params }) -> core.Page&lt;TrueForge.Agent, TrueForge.ListAgentsResponse&gt;</code></summary>
 <dl>
@@ -4697,6 +4631,69 @@ await client.sessions.revokeImplementationPlanGrant("session_id", "grant_id");
 </dl>
 </details>
 
+<details><summary><code>client.sessions.<a href="/src/api/resources/sessions/client/Client.ts">getPrivacy</a>(session_id) -> TrueForge.GetChatPrivacyResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Whether the models that may answer this chat run on this machine, and which providers run elsewhere.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.sessions.getPrivacy("session_id");
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**session_id:** `string` — Session identifier.
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `SessionsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 <details><summary><code>client.sessions.<a href="/src/api/resources/sessions/client/Client.ts">listTurns</a>(session_id, { ...params }) -> core.Page&lt;TrueForge.Turn, TrueForge.ListTurnsResponse&gt;</code></summary>
 <dl>
 <dd>
@@ -7907,6 +7904,62 @@ await client.internal.metrics.getMeters({
 </dl>
 </details>
 
+## Internal PrivateChats
+<details><summary><code>client.internal.privateChats.<a href="/src/api/resources/internal/resources/privateChats/client/Client.ts">sweep</a>() -> TrueForge.SweepPrivateChatsResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Delete private chats whose expiry time has passed. Safe to call any time.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.internal.privateChats.sweep();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `PrivateChatsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 ## Internal Schedules
 <details><summary><code>client.internal.schedules.<a href="/src/api/resources/internal/resources/schedules/client/Client.ts">executeRun</a>({ ...params }) -> void</code></summary>
 <dl>
@@ -8031,75 +8084,6 @@ await client.internal.sessions.getOrCreateByExternalId({
 <dd>
 
 **requestOptions:** `SessionsClient.RequestOptions`
-
-</dd>
-</dl>
-</dd>
-</dl>
-
-
-</dd>
-</dl>
-</details>
-
-## Internal Telegram
-<details><summary><code>client.internal.telegram.<a href="/src/api/resources/internal/resources/telegram/client/Client.ts">processUpdate</a>({ ...params }) -> void</code></summary>
-<dl>
-<dd>
-
-#### 📝 Description
-
-<dl>
-<dd>
-
-<dl>
-<dd>
-
-Handles one update the controller polled for a connection: a message becomes a turn, a button tap answers an approval. Called only with the service credential.
-</dd>
-</dl>
-</dd>
-</dl>
-
-#### 🔌 Usage
-
-<dl>
-<dd>
-
-<dl>
-<dd>
-
-```typescript
-await client.internal.telegram.processUpdate({
-    connectionId: "connection_id",
-    update: {
-        updateId: 1
-    }
-});
-
-```
-</dd>
-</dl>
-</dd>
-</dl>
-
-#### ⚙️ Parameters
-
-<dl>
-<dd>
-
-<dl>
-<dd>
-
-**request:** `TrueForge.internal.ProcessTelegramUpdateRequest`
-
-</dd>
-</dl>
-
-<dl>
-<dd>
-
-**requestOptions:** `TelegramClient.RequestOptions`
 
 </dd>
 </dl>
@@ -8711,7 +8695,7 @@ await client.memory.vault.delete("entry_id");
 <dl>
 <dd>
 
-Lists the authenticated user’s Sentinel audit entries from every chat, newest first, including chats that were deleted. Read-only and paged.
+Lists the authenticated user’s Sentinel audit entries from every chat, newest first, including chats that were deleted. Can be narrowed by outcome and by a from and to time. Read-only and paged.
 </dd>
 </dl>
 </dd>
@@ -11611,8 +11595,8 @@ await client.settings.google.testConnection();
 </dl>
 </details>
 
-## Settings Telegram
-<details><summary><code>client.settings.telegram.<a href="/src/api/resources/settings/resources/telegram/client/Client.ts">connect</a>({ ...params }) -> TrueForge.ConnectTelegramResponse</code></summary>
+## Settings Notes
+<details><summary><code>client.settings.notes.<a href="/src/api/resources/settings/resources/notes/client/Client.ts">saveFolder</a>({ ...params }) -> TrueForge.SaveNotesFolderResponse</code></summary>
 <dl>
 <dd>
 
@@ -11624,7 +11608,7 @@ await client.settings.google.testConnection();
 <dl>
 <dd>
 
-Checks the bot token with Telegram first and saves the connection only when it passes. The token is stored with the connection and never returned.
+Checks the folder first and saves it only when it can be used: it must be there, be a folder, and not be where Aman keeps its own memory.
 </dd>
 </dl>
 </dd>
@@ -11639,8 +11623,8 @@ Checks the bot token with Telegram first and saves the connection only when it p
 <dd>
 
 ```typescript
-await client.settings.telegram.connect({
-    token: "token"
+await client.settings.notes.saveFolder({
+    folderPath: "folder_path"
 });
 
 ```
@@ -11657,7 +11641,7 @@ await client.settings.telegram.connect({
 <dl>
 <dd>
 
-**request:** `TrueForge.settings.ConnectTelegramRequest`
+**request:** `TrueForge.settings.SaveNotesFolderRequest`
 
 </dd>
 </dl>
@@ -11665,7 +11649,7 @@ await client.settings.telegram.connect({
 <dl>
 <dd>
 
-**requestOptions:** `TelegramClient.RequestOptions`
+**requestOptions:** `NotesClient.RequestOptions`
 
 </dd>
 </dl>
@@ -11677,7 +11661,7 @@ await client.settings.telegram.connect({
 </dl>
 </details>
 
-<details><summary><code>client.settings.telegram.<a href="/src/api/resources/settings/resources/telegram/client/Client.ts">remove</a>() -> TrueForge.RemoveTelegramResponse</code></summary>
+<details><summary><code>client.settings.notes.<a href="/src/api/resources/settings/resources/notes/client/Client.ts">removeFolder</a>() -> TrueForge.RemoveNotesFolderResponse</code></summary>
 <dl>
 <dd>
 
@@ -11689,7 +11673,7 @@ await client.settings.telegram.connect({
 <dl>
 <dd>
 
-Removes the bot, its token and its pairing for good. Messages to the bot are no longer answered.
+Forgets the folder. Nothing inside the folder is changed or removed.
 </dd>
 </dl>
 </dd>
@@ -11704,7 +11688,7 @@ Removes the bot, its token and its pairing for good. Messages to the bot are no 
 <dd>
 
 ```typescript
-await client.settings.telegram.remove();
+await client.settings.notes.removeFolder();
 
 ```
 </dd>
@@ -11720,7 +11704,7 @@ await client.settings.telegram.remove();
 <dl>
 <dd>
 
-**requestOptions:** `TelegramClient.RequestOptions`
+**requestOptions:** `NotesClient.RequestOptions`
 
 </dd>
 </dl>
@@ -11732,7 +11716,7 @@ await client.settings.telegram.remove();
 </dl>
 </details>
 
-<details><summary><code>client.settings.telegram.<a href="/src/api/resources/settings/resources/telegram/client/Client.ts">confirmPairing</a>({ ...params }) -> TrueForge.ConfirmTelegramPairingResponse</code></summary>
+<details><summary><code>client.settings.notes.<a href="/src/api/resources/settings/resources/notes/client/Client.ts">getStatus</a>() -> TrueForge.GetNotesFolderResponse</code></summary>
 <dl>
 <dd>
 
@@ -11744,7 +11728,7 @@ await client.settings.telegram.remove();
 <dl>
 <dd>
 
-Pairs the person who sent /start to the bot, when the code they type matches the code the bot sent them. Only that person can then talk to the bot.
+Returns whether a notes folder is connected, the folder, the inbox file name, and how many notes the folder holds.
 </dd>
 </dl>
 </dd>
@@ -11759,9 +11743,7 @@ Pairs the person who sent /start to the bot, when the code they type matches the
 <dd>
 
 ```typescript
-await client.settings.telegram.confirmPairing({
-    code: "code"
-});
+await client.settings.notes.getStatus();
 
 ```
 </dd>
@@ -11777,70 +11759,7 @@ await client.settings.telegram.confirmPairing({
 <dl>
 <dd>
 
-**request:** `TrueForge.settings.ConfirmTelegramPairingRequest`
-
-</dd>
-</dl>
-
-<dl>
-<dd>
-
-**requestOptions:** `TelegramClient.RequestOptions`
-
-</dd>
-</dl>
-</dd>
-</dl>
-
-
-</dd>
-</dl>
-</details>
-
-<details><summary><code>client.settings.telegram.<a href="/src/api/resources/settings/resources/telegram/client/Client.ts">getStatus</a>() -> TrueForge.GetTelegramAccountResponse</code></summary>
-<dl>
-<dd>
-
-#### 📝 Description
-
-<dl>
-<dd>
-
-<dl>
-<dd>
-
-Returns whether a bot is connected, its name, where pairing stands, and the pairing code while one waits. The bot token is never returned.
-</dd>
-</dl>
-</dd>
-</dl>
-
-#### 🔌 Usage
-
-<dl>
-<dd>
-
-<dl>
-<dd>
-
-```typescript
-await client.settings.telegram.getStatus();
-
-```
-</dd>
-</dl>
-</dd>
-</dl>
-
-#### ⚙️ Parameters
-
-<dl>
-<dd>
-
-<dl>
-<dd>
-
-**requestOptions:** `TelegramClient.RequestOptions`
+**requestOptions:** `NotesClient.RequestOptions`
 
 </dd>
 </dl>
