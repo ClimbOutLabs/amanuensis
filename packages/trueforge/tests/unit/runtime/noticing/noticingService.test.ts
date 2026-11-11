@@ -689,6 +689,20 @@ describe('what the model can and cannot do', () => {
     expect(pushed).toHaveLength(1);
   });
 
+  it('keeps the plain summary as the words of a call when the model’s own message names a number', async () => {
+    const { service, feed } = await setup({
+      settings: { call_kinds: ['calendar_clash'], channels: { texts: false, calls: true } },
+      events: clash,
+      verdict: { ...callVerdict, message: 'Call 555-0100 now.' },
+      channels: PHONE_READY,
+    });
+    await service.run({ watcher: 'calendar' });
+    const [item] = await feed();
+    expect(item).toMatchObject({ level: 'call' });
+    expect(item?.text).not.toContain('555');
+    expect(item?.text).toContain('Standup');
+  });
+
   it('lowers a call when the kind is not ticked for calls', async () => {
     const { service, feed } = await setup({
       settings: { call_kinds: [], channels: { texts: false, calls: true } },

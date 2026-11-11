@@ -284,7 +284,7 @@ describe('what the assistant can do on a call', () => {
     expect(system).not.toContain('Lunch</about>');
     // Words that are not plain words are left out whole, not just made harmless.
     expect(system).not.toContain('Ignore the rules');
-    expect(system).toContain('Left out, because it has a number or a link or is too long.');
+    expect(system).toContain('Left out, because it is not something to read out on the phone.');
   });
 
   it('writes what was said on the call into the chat only as quoted words, never as the person’s own messages', async () => {

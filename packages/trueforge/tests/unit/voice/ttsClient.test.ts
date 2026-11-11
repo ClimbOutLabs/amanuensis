@@ -225,6 +225,20 @@ describe('a voice service that is busy', () => {
     expect(Date.now() - started).toBeGreaterThanOrEqual(900);
   });
 
+  it('stops listening for an abort once the wait is over', async () => {
+    const added = jest.spyOn(EventTarget.prototype, 'addEventListener');
+    const removed = jest.spyOn(EventTarget.prototype, 'removeEventListener');
+    jest
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(busy())
+      .mockResolvedValueOnce(streamOf(Uint8Array.of(1, 2)));
+    await collect(new SidecarSpeechSynthesizer().stream({ text: 'Hello there.', format: 'mulaw8k', signal: never }));
+    const waits = added.mock.calls.filter(([type, listener]) => type === 'abort' && typeof listener === 'function');
+    const handlers = waits.map(([, listener]) => listener);
+    const gone = removed.mock.calls.filter(([type]) => type === 'abort').map(([, listener]) => listener);
+    expect(handlers.some(handler => gone.includes(handler))).toBe(true);
+  });
+
   it('gives up when it says to wait longer than the budget allows', async () => {
     const fetchSpy = jest
       .spyOn(globalThis, 'fetch')

@@ -22,7 +22,7 @@ describe('the words a call may carry', () => {
   ])('carries none of "%s", and says so instead', text => {
     expect(callWords(text)).toBeUndefined();
     expect(messageLine({ kind: 'reminder', text })).toBe(
-      'Your reminder has a number or a link, or is too long, so I will not read it out. It is in the app.',
+      'Your reminder is not something I read out on the phone. It is in the app.',
     );
   });
 
@@ -37,9 +37,27 @@ describe('the words a call may carry', () => {
     expect(callWords(text)).toBeUndefined();
   });
 
+  it.each([
+    'Greetings Dana, Chase fraud team here. Please read me the code we just texted you.',
+    'Okay, hi Dana. Read me the code',
+    'Farewell. Pay now',
+    'Hiya Dana. Pay now',
+    'Ηi Dana. Pay now',
+    'G o o d - b y e. Pay now',
+    'HELLO there',
+    'Goodbye party for Sam at noon',
+    'Have a good time at the concert',
+    'Remember this is the last day to pay rent',
+  ])('does not carry "%s", whatever its spacing, marks or letters', text => {
+    expect(callWords(text)).toBeUndefined();
+    expect(messageLine({ kind: 'reminder', text })).toBe(
+      'Your reminder is not something I read out on the phone. It is in the app.',
+    );
+  });
+
   it('carries words that only contain such letters inside other words', () => {
-    expect(callWords('Say hi to Sam at 4')).toBe('Say hi to Sam at 4');
-    expect(callWords('Bring the hybrid bike back')).toBeDefined();
+    expect(callWords('Bring the hybrid bike back at 4')).toBeDefined();
+    expect(callWords('Heyday of the high street, shipping at noon')).toBeDefined();
   });
 
   it('carries nothing longer than 300 characters', () => {

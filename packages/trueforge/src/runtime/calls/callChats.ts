@@ -18,7 +18,7 @@ const COULD_NOT_ANSWER = 'Sorry, I could not answer that. You can see it in the 
 export type CallAsk = (input: { messages: LLMCreateParams['messages']; signal: AbortSignal }) => Promise<string>;
 
 /** Said in place of words a call may not carry, so the model can tell the person where to find them. */
-const LEFT_OUT = 'Left out, because it has a number or a link or is too long. It is in the app.';
+const LEFT_OUT = 'Left out, because it is not something to read out on the phone. It is in the app.';
 
 /** Keeps what a delivery says as plain information inside the block that holds it. */
 function asData(text: string): string {

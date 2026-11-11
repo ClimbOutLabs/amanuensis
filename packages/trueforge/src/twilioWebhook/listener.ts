@@ -148,24 +148,34 @@ function attachSocketRoutes({
       return;
     }
     // Checked after the signature, so only a request Twilio signed for this exact address costs a lookup.
-    route
-      .admits(id)
-      .catch(() => false)
-      .then(
-        admitted => {
-          if (!admitted) {
-            refuseUpgrade(socket, '404 Not Found');
-            return;
-          }
-          upgrades.handleUpgrade(request, socket, head, ws => {
-            route.open(ws, id);
-          });
-        },
-        () => undefined,
-      );
+    void (async () => {
+      try {
+        const admitted = await route.admits(id).catch(() => false);
+        if (socket.destroyed) {
+          return;
+        }
+        if (!admitted) {
+          refuseUpgrade(socket, '404 Not Found');
+          return;
+        }
+        upgrades.handleUpgrade(request, socket, head, ws => {
+          route.open(ws, id);
+        });
+      } catch (error) {
+        logger.warn('A Twilio socket was refused because it could not be opened', {
+          error_class: error instanceof Error ? error.name : typeof error,
+        });
+        refuseUpgrade(socket, '404 Not Found');
+      }
+    })();
   };
   // Nothing on this port is trusted, so an upgrade that fails in any way is refused and the server carries on.
   server.on('upgrade', (request: IncomingMessage, socket: Duplex, head: Buffer) => {
+    // Node drops its own error listener before this event, so a connection that resets while the call is looked up
+    // would otherwise have none. It goes first, before any work that waits.
+    socket.on('error', () => {
+      socket.destroy();
+    });
     try {
       handleUpgrade(request, socket, head);
     } catch (error) {

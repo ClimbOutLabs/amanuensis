@@ -1,3 +1,4 @@
+import { connect } from 'node:net';
 import WebSocket from 'ws';
 
 import { MEDIA_STREAM_PATH } from '../../../src/runtime/calls/twilioCalls';
@@ -93,6 +94,52 @@ describe('the Twilio listener for calls', () => {
       expect((await h.answer()).token).toBeDefined();
     },
   );
+
+  it('keeps serving when a signed stream is reset while its call is looked up', async () => {
+    h = await callsHarness();
+    await h.readyToCall();
+    await h.callDelivery();
+    await h.answer();
+    const callId = h.placed.at(-1)?.call_id ?? '';
+    // The lookup takes a moment, long enough for the other end to go away first.
+    const lookup = h.calls.get.bind(h.calls);
+    jest.spyOn(h.calls, 'get').mockImplementation(async id => {
+      await new Promise(resolve => setTimeout(resolve, 150));
+      return lookup(id);
+    });
+    const path = `${MEDIA_STREAM_PATH}/${callId}`;
+    const signature = twilioSignature({
+      authToken: AUTH_TOKEN,
+      url: `${PUBLIC_URL.replace(/^https:/, 'wss:')}${path}`,
+      params: new URLSearchParams(),
+    });
+    const socket = connect({ host: '127.0.0.1', port: Number(new URL(h.base).port) });
+    await new Promise<void>(resolve => {
+      socket.on('connect', resolve);
+    });
+    socket.on('error', () => undefined);
+    socket.write(
+      [
+        `GET ${path} HTTP/1.1`,
+        'Host: 127.0.0.1',
+        'Upgrade: websocket',
+        'Connection: Upgrade',
+        'Sec-WebSocket-Version: 13',
+        'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==',
+        `X-Twilio-Signature: ${signature}`,
+        '',
+        '',
+      ].join('\r\n'),
+    );
+    await new Promise(resolve => setTimeout(resolve, 30));
+    socket.resetAndDestroy();
+    await new Promise(resolve => setTimeout(resolve, 300));
+    const reply = await h.twilioPost({
+      path: `/twilio/voice?call=${callId}`,
+      fields: { AccountSid: ACCOUNT_SID, CallSid: CALL_SID, AnsweredBy: 'human' },
+    });
+    expect(reply.status).toBe(200);
+  });
 
   it('gives each call its own signed address, so one call’s signature opens no other call', async () => {
     h = await callsHarness();
