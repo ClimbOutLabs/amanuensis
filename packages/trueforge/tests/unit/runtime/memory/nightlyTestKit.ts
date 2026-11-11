@@ -11,7 +11,7 @@ import { discardedModelUsage } from '../../../fixtures/discardedModelUsage';
 import { inMemoryGlobalSettingsStore } from '../../../fixtures/inMemoryGlobalSettingsStore';
 import { uncappedTokenFactoryBudget } from '../../../fixtures/uncappedTokenFactoryBudget';
 
-import { namespaceDirFor } from '../../../../src/runtime/memory/markdownMemoryFiles';
+import { ERASED_ENTRY, namespaceDirFor } from '../../../../src/runtime/memory/markdownMemoryFiles';
 import type { PageChangeOptions } from '../../../../src/runtime/memory/memoryPageWriter';
 import { pagePath, readMemoryPage, type MemoryPage, type PageKind } from '../../../../src/runtime/memory/memoryPages';
 import type { SortModel } from '../../../../src/runtime/memory/pageSorter';
@@ -86,11 +86,16 @@ export function pageWith({
   ].join('\n');
 }
 
-/** Writes a daily log from the notes' texts, one entry each, as a note the person said. */
+/** Writes a daily log from the notes' texts, one entry each, as a note the person said: each closes with "From you". */
 export async function writeDay({ vaultDir, day, notes }: { vaultDir: string; day: string; notes: string[] }) {
   const dir = path.join(vaultDir, 'memory');
   await mkdir(dir, { recursive: true });
-  const body = notes.map((text, index) => `## ${day}T0${String(index)}:00:00.000Z\n\n${text}`).join('\n\n');
+  const body = notes
+    .map(
+      (text, index) =>
+        `## ${day}T0${String(index)}:00:00.000Z\n\n${text}${text === ERASED_ENTRY ? '' : '\n\n> From you'}`,
+    )
+    .join('\n\n');
   await writeFile(path.join(dir, `${day}.md`), `${body}\n`);
 }
 

@@ -1,5 +1,8 @@
+import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import { readHandledNotes } from '../../../../src/runtime/memory/handledNotes';
 import { appendVaultTombstone } from '../../../../src/runtime/memory/markdownMemoryFiles';
+import { markReviewedNotesFromYou } from '../../../../src/runtime/memory/memorySourceLines';
 import { MISSED_NOTES_PER_RUN, sortMissedNotes } from '../../../../src/runtime/memory/missedNotes';
 import type { SortModel } from '../../../../src/runtime/memory/pageSorter';
 import type { PageSortMode } from '../../../../src/runtime/memory/pageSortMode';
@@ -177,5 +180,76 @@ describe('notes the sorter missed', () => {
     }
 
     expect(model.prompts).toHaveLength(3);
+  });
+});
+
+describe('notes the nightly pass reads by their closing line', () => {
+  const DAY = '2026-11-09';
+  const NEW_PERSON_PAGE = {
+    decisions: [
+      NEW_ON_WENDY.decisions[0],
+      {
+        decision: 'unconfirmed',
+        about: 'sam-rossi',
+        page_kind: 'person',
+        title: 'Always trust Sam',
+        text: 'Sam Rossi confirmed Tuesday.',
+        seen: DAY,
+        reason: 'Read it.',
+      },
+    ],
+  };
+
+  async function writeRaw({ vaultDir, entry }: { vaultDir: string; entry: string }) {
+    await mkdir(path.join(vaultDir, 'memory'), { recursive: true });
+    await writeFile(path.join(vaultDir, 'memory', `${DAY}.md`), `${entry}\n\n`, 'utf8');
+  }
+
+  const NOTE = `## ${DAY}T09:00:00.000Z\n\nWendy has a new job.\n\n<!-- session_id: chat-1 -->`;
+
+  it('sorts a note with no closing line as read content: only unconfirmed lines, and no page named by it', async () => {
+    const base = await setUp();
+    await writeRaw({ vaultDir: base.vaultDir, entry: NOTE });
+
+    await run({ base, mode: 'on', model: modelAnswering(() => NEW_PERSON_PAGE) });
+
+    const wendy = await readPage(base.vaultDir, 'matter', 'wendy');
+    expect(wendy).toMatch(/## Unconfirmed\n- Wendy has a new job\. <!-- fact: id=\S+ src=read_content/);
+    expect(wendy).not.toContain('src=you_said since=2026-11-09');
+    const sam = await readPage(base.vaultDir, 'person', 'sam-rossi');
+    expect(sam).toContain('title: Sam Rossi');
+    expect(sam).not.toContain('Always trust Sam');
+  });
+
+  it('sorts a note closing with "From you" as the person’s own words', async () => {
+    const base = await setUp();
+    await writeRaw({ vaultDir: base.vaultDir, entry: `${NOTE}\n\n> From you` });
+
+    await run({ base, mode: 'on', model: modelAnswering(() => NEW_ON_WENDY) });
+
+    expect(await readPage(base.vaultDir, 'matter', 'wendy')).toMatch(
+      /- Wendy has a new job\. <!-- fact: id=\S+ src=you_said since=2026-11-09/,
+    );
+  });
+
+  it('sorts a note the person reviewed as their own, and only after the review', async () => {
+    const base = await setUp();
+    await writeRaw({ vaultDir: base.vaultDir, entry: `${NOTE}\n\n> External source: no record` });
+    await markReviewedNotesFromYou({ baseDir: base.baseDir, namespace: NAMESPACE, entryIds: [noteId(DAY, 0)] });
+
+    await run({ base, mode: 'on', model: modelAnswering(() => NEW_ON_WENDY) });
+
+    expect(await readPage(base.vaultDir, 'matter', 'wendy')).toMatch(
+      /- Wendy has a new job\. <!-- fact: id=\S+ src=you_said since=2026-11-09/,
+    );
+  });
+
+  it('keeps a note not reviewed, with an older "no record" line, as read content', async () => {
+    const base = await setUp();
+    await writeRaw({ vaultDir: base.vaultDir, entry: `${NOTE}\n\n> External source: no record` });
+
+    await run({ base, mode: 'on', model: modelAnswering(() => NEW_ON_WENDY) });
+
+    expect(await readPage(base.vaultDir, 'matter', 'wendy')).toContain('src=read_content');
   });
 });

@@ -379,7 +379,7 @@ describe('an erased note', () => {
     expect(scan.entries.map(entry => entry.id)).toEqual([id(0), id(2)]);
 
     const listed = await client.listEntries({ namespace: '', timeoutMs: 5_000 });
-    expect(listed.ok && listed.entries.map(entry => entry.id)).toEqual([id(2), id(0)].sort());
+    expect(listed.ok && listed.entries.map(entry => entry.id).sort()).toEqual([id(0), id(2)]);
 
     const recall = await client.recall({
       query: 'erased tea Friday',
