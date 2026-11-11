@@ -280,6 +280,19 @@ pnpm test:journey
 
 On a machine with no Docker, set `AMAN_DEX_DIR` to a folder that holds the `dex` program and its `web` folder.
 
+## Docs website
+
+The docs website is built from the pages in `docs/` and the help topics in `packages/trueforge/guide/topics/`. Those files are the only copy: edit them, never the site. [`docs/README.md`](docs/README.md) is the docs home, and the website's menu follows its sections, so a new page goes in that table too.
+
+The "Docs site" workflow builds the website on every pull request that touches these pages and publishes it to GitHub Pages when the change reaches `main`. To build it on your own machine, install Python 3, then run:
+
+```bash
+pip install -r docs-site/requirements.txt
+pnpm docs:site:build
+```
+
+The finished site is in `docs-site/site/`. Open `docs-site/site/index.html`, or run `python3 -m http.server -d docs-site/site` and open `http://localhost:8000`.
+
 ## Releases
 
 Releases are cut by the maintainer; contributors do not need to do anything release-specific.
