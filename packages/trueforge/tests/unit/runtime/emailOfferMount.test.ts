@@ -44,6 +44,7 @@ const memory: MemoryTurnContext = {
   previousTurnId: null,
   summarize: undefined,
   providerServerName: undefined,
+  keepsNothing: false,
 };
 
 const STORE: SpaceToolStore = {
@@ -145,6 +146,7 @@ describe('the Email offer mount', () => {
       },
       {
         sessionStore: new SqliteSessionStore(env.db),
+        deletedChats: { listDeletedChatModelUsage: () => Promise.resolve([]) },
         budget: uncappedTokenFactoryBudget,
         authority: { tenantId: OWNER.tenant_id, userRef: OWNER.created_by },
       },
