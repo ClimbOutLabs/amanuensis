@@ -36,7 +36,7 @@ import {
 } from '../email/mailConnector/toolContract';
 import { GOOGLE_SETUP_SERVER_ID, GOOGLE_SETUP_STATUS_TOOL_NAME } from '../google/setupToolContract';
 import type { BrowserClickReview, DocumentScope, MapsHosts } from '../llm/LLMTypes';
-import { isMemoryPagesToolName, MEMORY_PAGES_SERVER_ID } from '../memory/pagesToolContract';
+import { isMemoryPagesReadToolName, isMemoryPagesToolName, MEMORY_PAGES_SERVER_ID } from '../memory/pagesToolContract';
 import {
   isPersonaWriteToolName,
   LIST_PERSONAS_TOOL_NAME,
@@ -2898,13 +2898,21 @@ function classifyReminderTool(action: SentinelAction): TierDecision {
 }
 
 /**
- * Memory page tools are the host's own, named by server. They write the person's own words from this chat to
+ * Memory page tools are the host's own, named by server. Three write the person's own words from this chat to
  * their own pages and leave a commit that undoes the write, so they run without asking; the tools themselves
- * refuse in a chat that has read outside text. Any other name fails closed.
+ * refuse in a chat that has read outside text. Two only read the person's own pages, and run without asking
+ * too. Any other name fails closed.
  */
 function classifyMemoryPagesTool(action: SentinelAction): TierDecision {
   if (!isMemoryPagesToolName(action.tool_name)) {
     return failClosedDecision({ reason_detail: 'Unknown memory tool.' });
+  }
+  if (isMemoryPagesReadToolName(action.tool_name)) {
+    return tier1Decision({
+      reason: 'memory_page_read',
+      reason_detail: 'Look at your pages.',
+      sensitive_read: false,
+    });
   }
   return tier1Decision({
     reason: 'memory_page_write',

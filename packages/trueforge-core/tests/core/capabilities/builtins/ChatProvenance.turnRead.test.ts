@@ -68,6 +68,18 @@ describe('turnReadOutsideText', () => {
     ).toBe(false);
   });
 
+  it('does not count the page reading tools as outside text by their name', () => {
+    expect(
+      turnReadOutsideText([
+        USER,
+        { role: 'assistant', content: null, tool_calls: [call('c1', 'list_pages'), call('c2', 'read_page')] },
+        { role: 'tool', tool_call_id: 'c1', content: '{"pages":[]}' },
+        { role: 'tool', tool_call_id: 'c2', content: '[page: Wendy]' },
+      ]),
+    ).toBe(false);
+    expect(callReturnsOutsideContent(call('c3', 'Notes__read_page'))).toBe(true);
+  });
+
   it('counts a wrapped call to a tool that merely shares a page tool name as outside text', () => {
     const wrapped = call('c1', 'call_tool', { mcp_server: 'Notes', tool_name: 'remember_fact', input: {} });
     expect(
