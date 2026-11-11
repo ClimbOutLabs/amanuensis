@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { access, chmod, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { access, chmod, mkdir, mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -618,4 +618,77 @@ test('a run that stalls right after its lock appears keeps it, and a run arrivin
   assert.equal(await stalled.done, 0);
   await access(join(home, 'held-first'));
   await assert.rejects(access(join(home, 'held-second')));
+});
+
+// In the volume each run's shell is process 1 of its own container, so two runs
+// started in the same second share the pid and the time.
+function scriptAsProcessOne(options: { home: string; command: string; token?: string }): string {
+  const script = volumeLockedScript({ home: options.home, command: options.command, timing: FAST });
+  const changed =
+    options.token === undefined
+      ? script.replace('token="$$-$(date +%s)', 'token="1-1700000000')
+      : script.replace(/token="[^;]*;/, `token="${options.token}";`);
+  assert.notEqual(changed, script, 'the token line was not found');
+  return changed;
+}
+
+async function secondRunWhileFirstHolds(options: { token?: string }): Promise<{ home: string; status: number | null }> {
+  const home = await freshHome();
+  const first = spawn('sh', ['-c', scriptAsProcessOne({ home, command: ': > held-first; sleep 3', ...options })], {
+    stdio: 'ignore',
+  });
+  const firstDone = new Promise<number | null>(resolve => {
+    first.on('close', resolve);
+  });
+  for (let tries = 0; tries < 50; tries += 1) {
+    if (
+      await access(join(home, 'held-first')).then(
+        () => true,
+        () => false,
+      )
+    ) {
+      break;
+    }
+    await pause(100);
+  }
+  const second = spawnSync('sh', ['-c', scriptAsProcessOne({ home, command: ': > held-second', ...options })]);
+  assert.equal(await firstDone, 0);
+  return { home, status: second.status };
+}
+
+test('two runs that start as process 1 in the same second never both hold the lock', async () => {
+  const { home, status } = await secondRunWhileFirstHolds({});
+  assert.equal(status, 3);
+  await assert.rejects(access(join(home, 'held-second')));
+  assert.deepEqual(await readdir(join(home, 'state')), []);
+});
+
+test('a run whose folder lands inside a lock already there does not hold it, even with the same token', async () => {
+  const { home, status } = await secondRunWhileFirstHolds({ token: 'same' });
+  assert.equal(status, 3);
+  await assert.rejects(access(join(home, 'held-second')));
+  assert.deepEqual(await readdir(join(home, 'state')), []);
+});
+
+test('the holder clears folders left unfinished by runs that stopped, and leaves fresh ones alone', async () => {
+  const home = await freshHome();
+  const now = Math.floor(Date.now() / 1000);
+  for (const { name, file, age } of [
+    { name: 'lock.new-gone', file: 'beat', age: 60 },
+    { name: 'takeover.new-gone', file: 'since', age: 60 },
+    { name: 'lock.new-filling', file: 'beat', age: 0 },
+  ]) {
+    await mkdir(join(home, 'state', name), { recursive: true });
+    await writeFile(join(home, 'state', name, file), `${String(now - age)}\n`);
+  }
+  const result = runScript({ home, command: ': > held' });
+  assert.equal(result.status, 0);
+  assert.deepEqual(await readdir(join(home, 'state')), ['lock.new-filling']);
+});
+
+test('two runs that start as process 1 in the same second still get different owner tokens', () => {
+  const line = /token="[^;]*;/.exec(scriptAsProcessOne({ home: '/h', command: WRITE }));
+  assert.ok(line, 'the token line was not found');
+  const tokenOf = () => spawnSync('sh', ['-c', `${line[0]} printf '%s' "$token"`]).stdout.toString();
+  assert.notEqual(tokenOf(), tokenOf());
 });

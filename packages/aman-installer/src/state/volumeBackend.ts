@@ -68,11 +68,12 @@ export function volumeLockedScript(options: { home: string; command: string; tim
     'mkdir -p state;',
     'chmod 700 state;',
     'age_of() { b=$(cat "$1" 2>/dev/null); case "$b" in \'\'|*[!0-9]*) return 1 ;; esac; echo $(( $(date +%s) - b )); };',
-    // A folder with no timestamp yet belongs to a run between mkdir and its first write, so it is given a moment.
+    // A folder with no timestamp yet comes from an older installer, which made it with mkdir and wrote the time just after.
     `is_live() { [ -d "$1" ] || return 1; n=0; while [ "$n" -lt 3 ]; do if a=$(age_of "$1/$2"); then [ "$a" -lt ${dead} ]; return; fi; n=$((n + 1)); sleep 1; done; return 1; };`,
-    'token="$$-$(date +%s)";',
-    // A rename onto a folder that is already there lands inside it, so that copy is cleared too.
-    'publish() { new="state/$1.new-$token"; mkdir "$new" 2>/dev/null || return 1; printf \'%s\\n\' "$token" > "$new/owner"; date +%s > "$new/$2"; printf \'%s\\n\' "$$" > "$new/pid"; mv "$new" "state/$1" 2>/dev/null; [ "$(cat "state/$1/owner" 2>/dev/null)" = "$token" ] && return 0; rm -rf "$new" "state/$1/$1.new-$token"; return 1; };',
+    // The script's shell is process 1 in its container, so the pid and the second alone repeat between runs.
+    'token="$$-$(date +%s)-$(hostname 2>/dev/null)-$(od -An -N4 -tu4 /dev/urandom 2>/dev/null | tr -d " ")";',
+    // A rename onto a folder that is already there lands inside it, which never counts as holding it.
+    'publish() { new="state/$1.new-$token"; mkdir "$new" 2>/dev/null || return 1; printf \'%s\\n\' "$token" > "$new/owner"; date +%s > "$new/$2"; printf \'%s\\n\' "$$" > "$new/pid"; mv "$new" "state/$1" 2>/dev/null; if [ -e "state/$1/$1.new-$token" ]; then rm -rf "state/$1/$1.new-$token"; return 1; fi; [ "$(cat "state/$1/owner" 2>/dev/null)" = "$token" ] && return 0; rm -rf "$new"; return 1; };',
     'if ! publish lock beat; then',
     'is_live state/lock beat && exit 3;',
     'if ! publish takeover since; then',
@@ -96,6 +97,8 @@ export function volumeLockedScript(options: { home: string; command: string; tim
     'if ! publish lock beat; then rm -rf state/takeover; exit 3; fi;',
     'rm -rf state/takeover;',
     'fi;',
+    // A run that stopped before it could publish leaves its unfinished folder behind; the holder clears those once their time is past the dead limit.
+    `for d in state/*.new-*; do [ -d "$d" ] || continue; a=$(age_of "$d/beat" || age_of "$d/since") && [ "$a" -ge ${dead} ] && rm -rf "$d"; done;`,
     'beat() { date +%s > "state/lock/beat.$$" && mv -f "state/lock/beat.$$" state/lock/beat; };',
     // The beat stops with the holder, and never touches a lock another run took over.
     `( while sleep ${String(timing.beatSeconds)}; do kill -0 "$$" 2>/dev/null || exit 0; [ "$(cat state/lock/owner 2>/dev/null)" = "$token" ] || exit 0; beat; done ) </dev/null >/dev/null 2>&1 &`,

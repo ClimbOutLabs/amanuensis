@@ -106,12 +106,19 @@ copy is checked, so an incognito chat open at backup time is not kept.
 Only one run works on a home at a time. The lock is the folder `state/lock`.
 A run makes it whole: it fills a folder of its own (`lock.new-<token>`) with
 `owner`, `beat` and `pid`, then renames that folder to `state/lock` in one
-step. If `state/lock` is already there the rename fails or lands inside it, so
-the run holds the lock only when `state/lock/owner` then holds its token;
-otherwise it removes what it made. No run ever sees a lock half made, so a run
-that stalls while taking the lock cannot be mistaken for a dead one, and can
-never write into a lock another run made meanwhile. Three programs follow this
-contract: the shell installer (`lock_acquire` in `lib/common.sh`), the
+step. If `state/lock` is already there the rename fails or lands inside it. A
+folder that landed inside never counts as holding the lock; otherwise the run
+holds it only when `state/lock/owner` then holds its token, and if not it
+removes what it made. No run ever sees a lock half made, so a run that stalls
+while taking the lock cannot be mistaken for a dead one, and can never write
+into a lock another run made meanwhile. The token must differ between any two
+runs: in the volume each run's shell is process 1 of its own container, so the
+script adds the container's name and a random number to the pid and the time.
+A run that stops before its rename leaves its `*.new-<token>` folder behind;
+the next holder removes those once their time is past the dead limit, and
+leaves a fresh one alone because another run may be filling it.
+
+Three programs follow this contract: the shell installer (`lock_acquire` in `lib/common.sh`), the
 TypeScript installer's folder lock, and the script the TypeScript installer
 runs against the `aman_home` volume. Each run, shell or TypeScript, uses the
 same rules, so a lock taken by one is honoured by the others.

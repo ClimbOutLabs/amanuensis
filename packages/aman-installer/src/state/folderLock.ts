@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { LOCK_TIMING, type LockTiming } from './lockTiming.ts';
@@ -45,8 +45,8 @@ async function ageOf(file: string): Promise<number | null> {
 }
 
 // Whether the folder shows a sign of life in its file within the dead limit.
-// A folder with no time yet belongs to a run between mkdir and its first
-// write, so it is given a moment.
+// A folder with no time yet comes from an older installer, which made it with
+// mkdir and wrote the time just after, so it is given a moment.
 async function isLive(options: { dir: string; file: string; timing: LockTiming }): Promise<boolean> {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const age = await ageOf(join(options.dir, options.file));
@@ -100,6 +100,20 @@ async function publishFolder(options: { target: string; token: string; timeFile:
   }
   await rm(fresh, { recursive: true, force: true });
   return false;
+}
+
+// A run that stopped before it could publish leaves its unfinished folder
+// behind. The holder clears those once their time is past the dead limit, so a
+// folder another run is filling right now is left alone.
+async function sweepUnfinished(options: { stateDir: string; timing: LockTiming }): Promise<void> {
+  const names = await readdir(options.stateDir).catch(() => []);
+  for (const name of names.filter(entry => entry.includes('.new-'))) {
+    const dir = join(options.stateDir, name);
+    const age = (await ageOf(join(dir, 'beat'))) ?? (await ageOf(join(dir, 'since')));
+    if (age !== null && age >= options.timing.deadSeconds) {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
 }
 
 // Takes the lock over from a stopped holder, as the shell does (installer/STATE.md,
@@ -185,6 +199,7 @@ export async function withFolderLock(options: {
   }, timing.beatSeconds * 1000);
   beat.unref();
   try {
+    await sweepUnfinished({ stateDir, timing });
     await options.run();
   } finally {
     clearInterval(beat);

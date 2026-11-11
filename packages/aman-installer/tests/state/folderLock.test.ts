@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -47,5 +47,21 @@ test('the lock folder never appears without its owner and beat', async () => {
   await watch;
   assert.deepEqual(seen, []);
   assert.deepEqual(await readdir(join(home, 'state')), []);
+  await rm(home, { recursive: true, force: true });
+});
+
+test('the holder clears folders left unfinished by runs that stopped, and leaves fresh ones alone', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'aman-folder-lock-'));
+  const now = Math.floor(Date.now() / 1000);
+  for (const { name, file, age } of [
+    { name: 'lock.new-gone', file: 'beat', age: 60 },
+    { name: 'takeover.new-gone', file: 'since', age: 60 },
+    { name: 'lock.new-filling', file: 'beat', age: 0 },
+  ]) {
+    await mkdir(join(home, 'state', name), { recursive: true });
+    await writeFile(join(home, 'state', name, file), `${String(now - age)}\n`);
+  }
+  await withFolderLock({ home, run: async () => undefined, timing: { beatSeconds: 1, deadSeconds: 3 } });
+  assert.deepEqual(await readdir(join(home, 'state')), ['lock.new-filling']);
   await rm(home, { recursive: true, force: true });
 });

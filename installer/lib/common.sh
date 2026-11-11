@@ -250,7 +250,7 @@ lock_age_of() {
 }
 
 # Whether the folder $1 shows a sign of life in its file $2 within the dead limit. A folder with no time yet
-# belongs to a run between mkdir and its first write, so it is given a moment.
+# comes from an older installer, which made it with mkdir and wrote the time just after, so it is given a moment.
 lock_is_live() {
   local tries=0 age
   [ -d "$1" ] || return 1
@@ -281,9 +281,24 @@ lock_publish() {
   date +%s >"$new/$2"
   printf '%s\n' "$$" >"$new/pid"
   mv "$new" "$target" 2>/dev/null || true
+  if [ -e "${target:?}/${new##*/}" ]; then
+    rm -rf "${target:?}/${new##*/}"
+    return 1
+  fi
   if [ "$(cat "$target/owner" 2>/dev/null || true)" = "$LOCK_TOKEN" ]; then return 0; fi
-  rm -rf "$new" "${target:?}/${new##*/}"
+  rm -rf "$new"
   return 1
+}
+
+# A run that stopped before it could publish leaves its unfinished folder behind. The holder clears those once
+# their time is past the dead limit, so a folder another run is filling right now is left alone.
+lock_sweep_unfinished() {
+  local d age
+  for d in "$STATE_DIR"/*.new-*; do
+    [ -d "$d" ] || continue
+    age=$(lock_age_of "$d/beat" || lock_age_of "$d/since") || continue
+    if [ "$age" -ge "$LOCK_DEAD_SECONDS" ]; then rm -rf "$d"; fi
+  done
 }
 
 # A takeover goes through a second folder, state/takeover, published like the lock: only the run holding it
@@ -322,6 +337,7 @@ lock_acquire() {
   LOCK_TOKEN="$$-$(date +%s)"
   if ! lock_publish "$lock" beat; then lock_take_over "$lock"; fi
   LOCK_HELD=1
+  lock_sweep_unfinished
   lock_beat_start "$lock"
 }
 
