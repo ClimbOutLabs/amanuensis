@@ -107,14 +107,13 @@ describe('memory vault', () => {
   });
 
   describe('updateEntry', () => {
-    it('replaces the text while keeping the id and leaving the daily log untouched', async () => {
+    it('replaces the text while keeping the id, and the daily log holds the new wording', async () => {
       const { client, dir } = await makeClient();
       try {
         await retainTwo(client);
         const before = entriesOf(await client.listEntries({ namespace: '', timeoutMs: TIMEOUT_MS }));
         const id = before[0]?.id ?? '';
         const logPath = path.join(dir, 'tenant-1', 'memory', '2026-09-26.md');
-        const logBefore = await readFile(logPath, 'utf8');
 
         const updated = await client.updateEntry({ entryId: id, text: 'Lives in Barcelona', timeoutMs: TIMEOUT_MS });
         expect(updated.ok).toBe(true);
@@ -123,9 +122,12 @@ describe('memory vault', () => {
           expect(updated.entry.text).toBe('Lives in Barcelona');
         }
 
-        // The daily log is append-only: no marker inside it.
-        expect(await readFile(logPath, 'utf8')).toBe(logBefore);
-        // The marker lives in the append-only marker file.
+        // The old wording is gone from the daily log, and no marker is written inside it.
+        const log = await readFile(logPath, 'utf8');
+        expect(log).toContain('Lives in Barcelona');
+        expect(log).not.toContain('Prefers morning meetings');
+        expect(log).not.toContain('vault-entry');
+        // The marker lives in the marker file.
         const markers = await readVaultTombstones({ baseDir: dir, namespace: 'tenant-1' });
         expect(markers).toHaveLength(1);
         expect(markers[0]).toMatchObject({ entryId: id, action: 'updated', text: 'Lives in Barcelona' });

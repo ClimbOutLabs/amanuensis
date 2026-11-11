@@ -74,6 +74,7 @@ import {
   withOriginalHiddenMarkers,
   type NamespaceScan,
   type VaultScope,
+  type VaultTombstone,
 } from './markdownMemoryFiles';
 import type {
   DeleteMemoryVaultEntryOutcome,
@@ -88,6 +89,8 @@ import type {
 import { loadPagesForMessage } from './memoryPageLoader';
 import { rankNamedPeopleFirst } from './recallNameBoost';
 import { statementIndexFor, type StatementIndex } from './statementIndex';
+import { VaultEraseError, eraseMarkedEntries } from './vaultErase';
+import { VaultBusyError, VaultLockLostError, withVaultLock } from './vaultLock';
 
 export interface MarkdownMemoryClientConfig {
   /** Base directory for all memory files; each namespace gets a subdirectory. */
@@ -183,6 +186,9 @@ const VAULT_MAX_ENTRY_TEXT_LENGTH = 32768;
 function failureReason(prefix: string, error: unknown): string {
   if (isDataDirConfigurationError(error)) {
     return USER_FACING_STORAGE_UNAVAILABLE_MESSAGE;
+  }
+  if (error instanceof VaultEraseError || error instanceof VaultBusyError || error instanceof VaultLockLostError) {
+    return error.message;
   }
   return `${prefix}: ${error instanceof Error ? error.message : String(error)}`;
 }
@@ -403,28 +409,33 @@ export class MarkdownMemoryClient implements MemoryClient {
             : [],
         ),
       );
-      for (const [day, items] of byDay) {
-        const filePath = path.join(this.dailyDir(), `${day}.md`);
-        // Entry ids are positional; count what is already there before appending.
-        let existing = 0;
-        try {
-          existing = splitEntries(await readFile(filePath, 'utf8')).length;
-        } catch {
-          existing = 0;
+      // Counting what is there and appending are one step under the lock, so an erase rewriting the
+      // same day's file cannot drop the new entries or shift their positions.
+      await this.withWriteLock(this.writeNamespace, async () => {
+        await this.finishEarlierErases(this.writeNamespace);
+        for (const [day, items] of byDay) {
+          const filePath = path.join(this.dailyDir(), `${day}.md`);
+          // Entry ids are positional; count what is already there before appending.
+          let existing = 0;
+          try {
+            existing = splitEntries(await readFile(filePath, 'utf8')).length;
+          } catch {
+            existing = 0;
+          }
+          const blocks = items.map((item, offset) => {
+            const text = formatRetainEntry(item);
+            const id = `md:${this.writeNamespace}:${day}.md#${String(existing + offset)}`;
+            indexed.push({ id, text });
+            return text;
+          });
+          // Each block ends with a newline and blocks are blank-line separated,
+          // matching the historical append format exactly.
+          await writeFile(filePath, `${blocks.map(block => `${block}\n`).join('\n')}\n`, {
+            flag: 'a',
+            encoding: 'utf8',
+          });
         }
-        const blocks = items.map((item, offset) => {
-          const text = formatRetainEntry(item);
-          const id = `md:${this.writeNamespace}:${day}.md#${String(existing + offset)}`;
-          indexed.push({ id, text });
-          return text;
-        });
-        // Each block ends with a newline and blocks are blank-line separated,
-        // matching the historical append format exactly.
-        await writeFile(filePath, `${blocks.map(block => `${block}\n`).join('\n')}\n`, {
-          flag: 'a',
-          encoding: 'utf8',
-        });
-      }
+      });
 
       await this.hideEntries(replaced);
       await this.recordOperation(params.operationId);
@@ -534,6 +545,14 @@ export class MarkdownMemoryClient implements MemoryClient {
     // One budget for the whole lookup: the scan and the marker read share it.
     return withTimeout(
       (async (): Promise<{ filesystemNamespace: string; deleted: boolean; text: string } | undefined> => {
+        const tombstones = await readVaultTombstones({
+          baseDir: this.baseDir,
+          namespace: filesystemNamespace,
+        });
+        // A deleted entry's text is gone from its file, so the marker alone says it was there.
+        if (latestTombstonesByEntry(tombstones).get(entryId)?.action === 'deleted') {
+          return { filesystemNamespace, deleted: true, text: '' };
+        }
         const scan = await scanNamespaceEntries({
           baseDir: this.baseDir,
           namespace: filesystemNamespace,
@@ -543,12 +562,7 @@ export class MarkdownMemoryClient implements MemoryClient {
         if (original === undefined) {
           return undefined;
         }
-        const tombstones = await readVaultTombstones({
-          baseDir: this.baseDir,
-          namespace: filesystemNamespace,
-        });
-        const deleted = latestTombstonesByEntry(tombstones).get(entryId)?.action === 'deleted';
-        return { filesystemNamespace, deleted, text: original.text };
+        return { filesystemNamespace, deleted: false, text: original.text };
       })(),
       timeoutMs,
       `markdown vault lookup ${entryId}`,
@@ -714,8 +728,7 @@ export class MarkdownMemoryClient implements MemoryClient {
       }
       const timestamp = new Date().toISOString();
       await withTimeout(
-        appendVaultTombstone({
-          baseDir: this.baseDir,
+        this.markAndErase({
           namespace: target.filesystemNamespace,
           tombstone: { entryId: params.entryId, action: 'updated', text: clean, timestamp },
         }),
@@ -751,22 +764,17 @@ export class MarkdownMemoryClient implements MemoryClient {
       if (target === undefined) {
         return vaultNotFound(params.entryId);
       }
-      if (!target.deleted) {
-        await withTimeout(
-          appendVaultTombstone({
-            baseDir: this.baseDir,
-            namespace: target.filesystemNamespace,
-            tombstone: {
-              entryId: params.entryId,
-              action: 'deleted',
-              text: undefined,
-              timestamp: new Date().toISOString(),
-            },
-          }),
-          params.timeoutMs,
-          `markdown vault mark ${params.entryId}`,
-        );
-      }
+      // An entry already marked deleted still gets its erase run again: that is how a failed one is retried.
+      await withTimeout(
+        this.markAndErase({
+          namespace: target.filesystemNamespace,
+          tombstone: target.deleted
+            ? undefined
+            : { entryId: params.entryId, action: 'deleted', text: undefined, timestamp: new Date().toISOString() },
+        }),
+        params.timeoutMs,
+        `markdown vault mark ${params.entryId}`,
+      );
       return { ok: true };
     } catch (error) {
       if (error instanceof PromiseTimeoutError) {
@@ -835,15 +843,48 @@ export class MarkdownMemoryClient implements MemoryClient {
       .map(entry => entry.id);
   }
 
-  /** Hides entries with the vault's delete marker. The log stays append-only: recall skips hidden entries. */
+  /** Hides entries with the vault's delete marker and erases their text from the dated files. */
   private async hideEntries(entryIds: readonly string[]): Promise<void> {
+    if (entryIds.length === 0) {
+      return;
+    }
     const timestamp = new Date().toISOString();
-    for (const entryId of entryIds) {
-      await appendVaultTombstone({
-        baseDir: this.baseDir,
-        namespace: this.writeNamespace,
-        tombstone: { entryId, action: 'deleted', text: undefined, timestamp },
-      });
+    await this.withWriteLock(this.writeNamespace, async () => {
+      for (const entryId of entryIds) {
+        await appendVaultTombstone({
+          baseDir: this.baseDir,
+          namespace: this.writeNamespace,
+          tombstone: { entryId, action: 'deleted', text: undefined, timestamp },
+        });
+      }
+      await eraseMarkedEntries({ baseDir: this.baseDir, namespace: this.writeNamespace });
+    });
+  }
+
+  private async withWriteLock<T>(namespace: string, work: () => Promise<T>): Promise<T> {
+    return withVaultLock({ vaultDir: namespaceDirFor(this.baseDir, namespace) }, work);
+  }
+
+  /**
+   * Writes a marker, then erases from the dated files what it hides, in one hold of the vault lock. The marker
+   * goes first so the person's view changes at once; when the erase fails the marker stays, the person is told
+   * to try again, and the next write to the vault finishes the erase.
+   */
+  private async markAndErase(input: { namespace: string; tombstone: VaultTombstone | undefined }): Promise<void> {
+    await this.withWriteLock(input.namespace, async () => {
+      if (input.tombstone !== undefined) {
+        await appendVaultTombstone({ baseDir: this.baseDir, namespace: input.namespace, tombstone: input.tombstone });
+      }
+      await eraseMarkedEntries({ baseDir: this.baseDir, namespace: input.namespace });
+    });
+  }
+
+  /** Finishes erases that markers asked for but an earlier failure or an older version left undone. Never blocks a save. */
+  private async finishEarlierErases(namespace: string): Promise<void> {
+    try {
+      await eraseMarkedEntries({ baseDir: this.baseDir, namespace, onlyIfNew: true });
+    } catch {
+      // The save goes ahead; the marker file still holds the work, so the next write tries again.
     }
   }
 
