@@ -132,6 +132,55 @@ describe('Home Assistant refusals', () => {
     expect(decision.grant_tool_name).toBeNull();
   });
 
+  it.each([
+    ['homeassistant__call_action', { action: 'lock.unlock', target: { entity_id: 'lock.front_door' } }],
+    [
+      'homeassistant__call_action',
+      { action: 'alarm_control_panel.disarm', target: { entity_id: 'alarm_control_panel.home' } },
+    ],
+    ['call_action', { action: 'lock.unlock', target: { entity_id: 'lock.front_door' } }],
+    ['intent__call_action', { action: 'cover.open_cover', target: { entity_id: 'cover.garage_door' } }],
+  ])('refuses the generic action tool %s outright, with the fixed line', async (tool_name, params) => {
+    const decision = await classifyTier(haAction(tool_name, params), makeCtx());
+    expect(decision.tier).toBe(3);
+    expect(decision.auto_deny).toBe('home_assistant_refused');
+    expect(decision.owner_message).toBe(HOME_ASSISTANT_REFUSAL);
+    expect(decision.card).toBeNull();
+    expect(decision.grant_tool_name).toBeNull();
+  });
+
+  it('refuses a garage door cover call through the generic action tool, even under the cover grant', async () => {
+    const ctx = makeCtx();
+    await recordGrant(ctx, 'ha:domain:cover');
+    const decision = await classifyTier(
+      haAction('homeassistant__call_action', {
+        domain: 'cover',
+        service: 'open_cover',
+        target: { entity_id: 'cover.garage_door' },
+      }),
+      ctx,
+    );
+    expect(decision.auto_deny).toBe('home_assistant_refused');
+    expect(decision.owner_message).toBe(HOME_ASSISTANT_REFUSAL);
+    expect(decision.card).toBeNull();
+  });
+
+  it('refuses a lock call through the generic action tool, even under a homeassistant grant', async () => {
+    const ctx = makeCtx();
+    await recordGrant(ctx, 'ha:domain:homeassistant');
+    const decision = await classifyTier(
+      haAction('homeassistant__call_action', {
+        domain: 'homeassistant',
+        service: 'turn_off',
+        target: { entity_id: 'lock.front_door' },
+      }),
+      ctx,
+    );
+    expect(decision.auto_deny).toBe('home_assistant_refused');
+    expect(decision.owner_message).toBe(HOME_ASSISTANT_REFUSAL);
+    expect(decision.card).toBeNull();
+  });
+
   it('refuses a garage device class that names no domain, instead of carding the whole area', async () => {
     const decision = await classifyTier(
       haAction('HassTurnOn', { area: 'Garage', device_class: ['garage'] }),
@@ -252,6 +301,27 @@ describe('Home Assistant standing grants', () => {
     const cleared = await classifyTier(haAction('HassTurnOn', { entity_id: 'light.kitchen' }), makeCtx());
     expect(cleared.tier).toBe(3);
     expect(cleared.reason).toBe('home_assistant_change');
+  });
+
+  it('asks for an unknown write tool even under a domain grant that covers its target', async () => {
+    const ctx = makeCtx();
+    await recordGrant(ctx, 'ha:domain:switch');
+    const decision = await classifyTier(haAction('HassBrewCoffee', { entity_id: 'switch.coffee_machine' }), ctx);
+    expect(decision.tier).toBe(3);
+    expect(decision.auto_deny).toBeNull();
+    expect(decision.reason).toBe('home_assistant_change');
+    expect(decision.card).not.toBeNull();
+    expect(decision.grant_tool_name).toBeNull();
+  });
+
+  it('asks for an unknown write tool even under an entity grant for its target', async () => {
+    const ctx = makeCtx();
+    await recordGrant(ctx, 'ha:entity:switch.coffee_machine');
+    const decision = await classifyTier(haAction('HassBrewCoffee', { entity_id: 'switch.coffee_machine' }), ctx);
+    expect(decision.tier).toBe(3);
+    expect(decision.auto_deny).toBeNull();
+    expect(decision.reason).toBe('home_assistant_change');
+    expect(decision.grant_tool_name).toBeNull();
   });
 
   it('never runs a refused target under a grant', async () => {

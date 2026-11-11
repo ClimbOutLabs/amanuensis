@@ -10,6 +10,8 @@ import {
   homeAssistantTargetLabel,
   homeAssistantToolBase,
   homeAssistantToolPrefix,
+  isHomeAssistantCallActionTool,
+  isHomeAssistantKnownChangeTool,
   isHomeAssistantLiveContextTool,
   isHomeAssistantNameOnlyTarget,
   isHomeAssistantReadTool,
@@ -23,6 +25,27 @@ describe('Home Assistant tool names', () => {
     expect(homeAssistantToolBase('HassTurnOff')).toBe('HassTurnOff');
     expect(homeAssistantToolPrefix('climate__HassClimateSetTemperature')).toBe('climate');
     expect(homeAssistantToolPrefix('HassTurnOff')).toBeNull();
+  });
+
+  it('knows the generic action tool under any prefix', () => {
+    expect(isHomeAssistantCallActionTool('call_action')).toBe(true);
+    expect(isHomeAssistantCallActionTool('homeassistant__call_action')).toBe(true);
+    expect(isHomeAssistantCallActionTool('intent__call_action')).toBe(true);
+    expect(isHomeAssistantCallActionTool('HassTurnOn')).toBe(false);
+    expect(isHomeAssistantCallActionTool('homeassistant__GetLiveContext')).toBe(false);
+  });
+
+  it('knows the change tools by name, and no others', () => {
+    expect(isHomeAssistantKnownChangeTool('HassTurnOn')).toBe(true);
+    expect(isHomeAssistantKnownChangeTool('intent__HassTurnOff')).toBe(true);
+    expect(isHomeAssistantKnownChangeTool('HassClimateSetTemperature')).toBe(true);
+    expect(isHomeAssistantKnownChangeTool('light__HassLightSet')).toBe(true);
+    expect(isHomeAssistantKnownChangeTool('HassSetPosition')).toBe(true);
+    expect(isHomeAssistantKnownChangeTool('HassMediaPlay')).toBe(true);
+    expect(isHomeAssistantKnownChangeTool('homeassistant__call_action')).toBe(false);
+    expect(isHomeAssistantKnownChangeTool('HassBrewCoffee')).toBe(false);
+    expect(isHomeAssistantKnownChangeTool('turn_off')).toBe(false);
+    expect(isHomeAssistantKnownChangeTool('GetLiveContext')).toBe(false);
   });
 
   it('knows the live-context tool under any prefix', () => {

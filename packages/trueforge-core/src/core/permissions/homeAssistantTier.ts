@@ -8,6 +8,8 @@ import {
   homeAssistantTarget,
   homeAssistantTargetLabel,
   homeAssistantToolBase,
+  isHomeAssistantCallActionTool,
+  isHomeAssistantKnownChangeTool,
   isHomeAssistantNameOnlyTarget,
   isHomeAssistantReadTool,
   isHomeAssistantRefusedTarget,
@@ -32,8 +34,10 @@ export const HOME_ASSISTANT_CHANGE_REASON = 'home_assistant_change';
  * Reads run. A change asks, with the entity named on the card, unless standing grants cover
  * every target it names: each entity by a grant for that entity or its domain, and each further
  * domain by a grant for that domain. Locks, alarm panels, garage doors and covers that lead outside are
- * refused outright, with no standing grant possible. A change that read content steered is
- * refused too, as a steered send is.
+ * refused outright, with no standing grant possible. The generic action tool is refused
+ * outright too: it can run any service and names its target where these rules cannot read it.
+ * A write tool Aman does not know asks every time, with no standing grant possible. A change
+ * that read content steered is refused too, as a steered send is.
  */
 export async function classifyHomeAssistantTool({
   action,
@@ -59,6 +63,18 @@ export async function classifyHomeAssistantTool({
   }
   const params = action.canonical_params;
   const target = homeAssistantTarget({ tool_name: action.tool_name, params });
+
+  // The generic action tool is refused before anything else, reads included: it can run a
+  // lock, alarm or garage service while naming its target inside arguments these rules
+  // cannot judge, so no card and no grant may carry it.
+  if (isHomeAssistantCallActionTool(action.tool_name)) {
+    return autoDenyDecision({
+      reason: 'home_assistant_refused',
+      reason_detail: HOME_ASSISTANT_REFUSAL,
+      owner_message: HOME_ASSISTANT_REFUSAL,
+      sensitive_read: false,
+    });
+  }
 
   if (isHomeAssistantReadTool({ tool_name: action.tool_name, read_only_hint: action.mcp_hints.read_only_hint })) {
     return tier1Decision({
@@ -86,7 +102,10 @@ export async function classifyHomeAssistantTool({
     });
   }
 
-  const coverage = homeAssistantGrantCoverage(target);
+  // Standing grants cover only the change tools Aman knows. A write tool outside that set
+  // asks every time, and its card offers no grant to record.
+  const known_change = isHomeAssistantKnownChangeTool(action.tool_name);
+  const coverage = known_change ? homeAssistantGrantCoverage(target) : [];
   if (coverage.length > 0) {
     const covering: string[] = [];
     let every_target_covered = true;
@@ -125,7 +144,7 @@ export async function classifyHomeAssistantTool({
     sensitive_read: false,
     approval_token_id: await mintToken(),
     grant_host: action.mcp_server_host ?? null,
-    grant_tool_name: homeAssistantGrantScopeKey(target),
+    grant_tool_name: known_change ? homeAssistantGrantScopeKey(target) : null,
   });
 }
 

@@ -41,6 +41,34 @@ export function isHomeAssistantLiveContextTool(tool_name: string): boolean {
 }
 
 /**
+ * The generic action tool newer servers serve beside the intent tools. It runs any service,
+ * naming the service and its target inside its own arguments, where the target rules cannot
+ * read them: a lock unlock or an alarm disarm arrives looking like any other call.
+ */
+export function isHomeAssistantCallActionTool(tool_name: string): boolean {
+  return homeAssistantToolBase(tool_name) === 'call_action';
+}
+
+/** The change tools Aman knows by name: the intent tools whose cards it can word. */
+export const HOME_ASSISTANT_KNOWN_CHANGE_TOOL_NAMES = [
+  'HassTurnOn',
+  'HassTurnOff',
+  'HassClimateSetTemperature',
+  'HassLightSet',
+  'HassSetPosition',
+] as const;
+
+/**
+ * Whether a change tool is one Aman knows: a named intent, or one of the media set, which the
+ * server names the same way. A write tool outside this set asks every time and no standing
+ * grant covers it, because Aman cannot say in advance what it does.
+ */
+export function isHomeAssistantKnownChangeTool(tool_name: string): boolean {
+  const base = homeAssistantToolBase(tool_name);
+  return (HOME_ASSISTANT_KNOWN_CHANGE_TOOL_NAMES as readonly string[]).includes(base) || base.startsWith('HassMedia');
+}
+
+/**
  * Domains Aman never controls, whatever the person allows: the locks and alarm panels Home
  * Assistant itself keeps away from assistants unless the person exposes them by hand.
  */
@@ -312,11 +340,17 @@ export function homeAssistantTargetLabel(target: HomeAssistantTarget): string | 
   }
   if (target.entity_ids.length > 1) {
     const labels = target.entity_ids.map(id => homeAssistantEntityLabel(id));
+    const [first, second] = labels;
+    const last = labels[labels.length - 1];
+    if (first === undefined || last === undefined) {
+      return null;
+    }
     if (labels.length > 3) {
-      const [first, second] = labels;
+      if (second === undefined) {
+        return null;
+      }
       return `${first}, ${second} and ${String(labels.length - 2)} more`;
     }
-    const last = labels[labels.length - 1];
     return `${labels.slice(0, -1).join(', ')} and ${last}`;
   }
   if (target.entity_id !== null) {
@@ -342,11 +376,13 @@ export function homeAssistantDomainsLabel(domains: string[]): string | null {
     }
     labels.push(label.charAt(0).toLowerCase() + label.slice(1));
   }
+  const [first, second] = labels;
+  if (first === undefined || second === undefined) {
+    return null;
+  }
   if (labels.length > 2) {
-    const [first, second] = labels;
     return `the ${first} and ${second} and ${String(labels.length - 2)} more`;
   }
-  const [first, second] = labels;
   return `the ${first} and ${second}`;
 }
 
