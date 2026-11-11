@@ -143,6 +143,36 @@ describe('a read by record id still runs without a card', () => {
     expect(decision).toMatchObject({ tier: 3, reason: CONNECTOR_READ_GUARD_REASON });
   });
 
+  it('reads by a page id next to a short workspace id', async () => {
+    const ctx = makeCtx(await servicesWithGrants(['get_page']));
+    const decision = await classifyTier(
+      grantedRead('get_page', { workspace_id: 'T024BE7LD', page_id: '0f3a9c2e7b1d4e6f8a5b3c2d1e0f9a8b' }),
+      ctx,
+    );
+    expect(decision).toMatchObject({ tier: 1, reason: TOOL_GRANT_REASON, card: null });
+  });
+
+  it('asks when a second id field carries a short code too', async () => {
+    const ctx = makeCtx(await servicesWithGrants(['get_page']));
+    const decision = await classifyTier(
+      grantedRead('get_page', {
+        page_id: '0f3a9c2e7b1d4e6f8a5b3c2d1e0f9a8b',
+        parent_id: '7c1e5a9d3b2f4086a1c3e5d7f9b0a2c4',
+      }),
+      ctx,
+    );
+    expect(decision).toMatchObject({ tier: 3, reason: CONNECTOR_READ_GUARD_REASON });
+  });
+
+  it('asks when many id fields each carry a short code', async () => {
+    const ctx = makeCtx(await servicesWithGrants(['get_page']));
+    const params = Object.fromEntries(
+      Array.from({ length: 30 }, (_, index) => [`part${index}_id`, `Zm9vYmFyYmF6cXV4${index}Y29ycGdlZ3JhdWx0Z2FycGx5`]),
+    );
+    const decision = await classifyTier(grantedRead('get_page', params), ctx);
+    expect(decision).toMatchObject({ tier: 3, reason: CONNECTOR_READ_GUARD_REASON });
+  });
+
   it('still stops a key this computer holds in an id field', async () => {
     const ctx = makeCtx(await servicesWithGrants(['get_page']));
     const decision = await classifyTier(grantedRead('get_page', { page_id: HELD_KEY }), ctx);

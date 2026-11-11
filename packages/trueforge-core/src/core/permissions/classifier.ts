@@ -110,6 +110,7 @@ import {
   collectOutboundStrings,
   describeOutboundRule,
   maskServerSecrets,
+  OUTBOUND_MAX_PLUMBING_CHARS,
   type OutboundGuardVerdict,
   type OutboundStrings,
 } from './outboundGuard';
@@ -3430,11 +3431,28 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
 /** Top-level argument names that hold one record's id: a page, a message, a commit, a place in a list. */
 const RECORD_ID_FIELD = /^(?:id|sha|cursor)$|(?:_id|Id|ID)$/;
 
+/** The one id field of a read that may hold a random-looking value: the longest id short enough to be one. */
+function recordIdField(params: Record<string, unknown>): string[] {
+  let longest: { key: string; length: number } | undefined;
+  for (const [key, value] of Object.entries(params)) {
+    if (
+      RECORD_ID_FIELD.test(key) &&
+      typeof value === 'string' &&
+      value.length <= OUTBOUND_MAX_PLUMBING_CHARS &&
+      value.length > (longest?.length ?? 0)
+    ) {
+      longest = { key, length: value.length };
+    }
+  }
+  return longest === undefined ? [] : [longest.key];
+}
+
 /**
  * The outbound secret guard over a connector read that would run without a card: one on the host's own connector,
  * or one the person always allows. What it sends goes to that connector's server, so it stops on the same things
- * a silent search does. A record id is expected to look random, so one short id in an id field skips only the
- * coded-text rule. Returns the decision that stops the read, or undefined when it may run.
+ * a silent search does. A record id is expected to look random, so one read may carry one short id that skips only
+ * the coded-text rule. The agent names the arguments, so every other id field is read as ordinary text. Returns the
+ * decision that stops the read, or undefined when it may run.
  */
 async function guardUnaskedConnectorRead(input: {
   action: SentinelAction;
@@ -3443,8 +3461,7 @@ async function guardUnaskedConnectorRead(input: {
   sensitive_read: boolean;
 }): Promise<TierDecision | undefined> {
   const { action, ctx } = input;
-  const idFields = Object.keys(action.canonical_params).filter(key => RECORD_ID_FIELD.test(key));
-  const strings = collectOutboundStrings(action.canonical_params, idFields);
+  const strings = collectOutboundStrings(action.canonical_params, recordIdField(action.canonical_params));
   const { verdict } = await outboundGuard({ ctx, strings });
   if (verdict.ok) {
     // The text leaves with this call, so a later silent read, search or map sees a secret split across them.
