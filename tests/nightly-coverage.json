@@ -127,6 +127,10 @@
       "set": "install",
       "tests": []
     },
+    "command:restore": {
+      "set": "install",
+      "tests": []
+    },
     "command:setup": {
       "set": "install",
       "tests": []
@@ -314,6 +318,10 @@
     "route:modelProvider": {
       "set": "models",
       "tests": ["packages/frontend/tests/journeys/signedIn.journey.ts"]
+    },
+    "route:notesFolder": {
+      "set": "memory",
+      "tests": []
     },
     "route:permission": {
       "set": "safety",
@@ -721,6 +729,7 @@
     "command:network",
     "command:open",
     "command:password",
+    "command:restore",
     "command:setup",
     "command:status",
     "command:uninstall",
@@ -759,6 +768,7 @@
     "route:memorySummarize",
     "route:memoryVault",
     "route:model",
+    "route:notesFolder",
     "route:permission",
     "route:persona",
     "route:personaKnowledge",
