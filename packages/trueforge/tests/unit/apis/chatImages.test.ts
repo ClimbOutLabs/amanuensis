@@ -153,10 +153,11 @@ describe('chat image routes', () => {
   });
 
   it('describes a show result in the documented shape', () => {
-    expect(TurnImagesResultSchema.parse({ status: 'ask', count: 3, host: null })).toEqual({
+    expect(TurnImagesResultSchema.parse({ status: 'ask', count: 3, host: null, url: null })).toEqual({
       status: 'ask',
       count: 3,
       host: null,
+      url: null,
     });
   });
 });

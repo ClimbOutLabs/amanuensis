@@ -391,6 +391,19 @@ test('a redirect that stays on the site is followed', { skip: !browsersAvailable
   });
 });
 
+test(
+  'refuses to open an address with a sign-in name before the site, and the site hears nothing',
+  { skip: !browsersAvailable },
+  async () => {
+    await withWorld(async ({ sidecar, siteA }) => {
+      const hitsBefore = siteA.hits.length;
+      const result = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://lake-house@site-a.test/' });
+      assert.deepEqual(result, { status: 'refused', reason: 'sign_in_in_address' });
+      assert.equal(siteA.hits.length, hitsBefore);
+    });
+  },
+);
+
 test('refuses to open a private address before the browser is touched', { skip: !browsersAvailable }, async () => {
   await withWorld(async ({ sidecar, internalUrl, internal }) => {
     const result = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: `${internalUrl}/` });
