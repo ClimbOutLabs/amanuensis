@@ -135,6 +135,10 @@
       "set": "install",
       "tests": []
     },
+    "command:uninstall": {
+      "set": "install",
+      "tests": []
+    },
     "command:upgrade": {
       "set": "install",
       "tests": []
@@ -719,6 +723,7 @@
     "command:password",
     "command:setup",
     "command:status",
+    "command:uninstall",
     "command:upgrade",
     "command:verify",
     "command:version",
