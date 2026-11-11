@@ -510,6 +510,29 @@ describe("with maps set to run without asking, only the person's own places run 
     expect(decision).toMatchObject({ tier: 3, reason: 'maps_tool', reason_detail: READ_PLACE_SAY });
   });
 
+  it('asks for an address only a search result named', async () => {
+    const ctx = mapsOnCtx();
+    recordPersonText({ provenance: ctx.web_search.provenance, text: 'Find me a clinic that is open today.' });
+    recordToolResultProvenance({
+      state: ctx.web_search,
+      tool_name: 'web_search',
+      argument_values: ['clinic open today'],
+      texts: [
+        JSON.stringify({
+          results: [
+            {
+              title: 'Harbour Family Clinic',
+              url: 'https://clinic.example/',
+              content: 'Open today at 12 Example Street, Lisbon 1100-000.',
+            },
+          ],
+        }),
+      ],
+    });
+    const decision = await classifyTier(mapsAction('render_map', { place_name: '12 Example Street, Lisbon' }), ctx);
+    expect(decision).toMatchObject({ tier: 3, reason: 'maps_tool', reason_detail: READ_PLACE_SAY });
+  });
+
   it('runs a place the person named themselves, also after the chat read mail', async () => {
     const ctx = mapsOnCtx();
     recordPersonText({ provenance: ctx.web_search.provenance, text: 'Show me 12 Harbour Street in Lisbon.' });

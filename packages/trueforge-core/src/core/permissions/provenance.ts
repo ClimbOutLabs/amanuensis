@@ -46,7 +46,10 @@ export interface ChatProvenance {
    * cap no new word is kept, so a place that uses one counts as not theirs: it fails toward asking.
    */
   own_words: Set<string>;
-  /** True once the chat has read content other than the person's own calendar: mail, a page, a file, tool output. */
+  /**
+   * True once the chat has read content other than the person's own calendar: mail, a page, a search's results,
+   * a file, tool output.
+   */
   read_beyond_calendar: boolean;
 }
 
@@ -482,6 +485,10 @@ export function searchResultUrls(node: unknown): SearchResultUrls {
  */
 export function recordSearchResults(input: { provenance: ChatProvenance; texts: readonly string[] }): void {
   for (const text of input.texts) {
+    if (text.trim() !== '') {
+      // An excerpt is a page's words, so a place it names is not the person's own.
+      input.provenance.read_beyond_calendar = true;
+    }
     let parsed: unknown;
     try {
       parsed = JSON.parse(text);
