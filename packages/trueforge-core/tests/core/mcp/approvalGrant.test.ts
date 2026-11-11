@@ -306,6 +306,72 @@ describe('chat grant key', () => {
   });
 });
 
+describe('a chat grant is tied to the target the card names', () => {
+  const card = (target: { destination?: string; recipient?: string; destination_host?: string }) => ({
+    plain_what: 'x',
+    plain_why: null,
+    cannot_be_undone: null,
+    why_asked_again: null,
+    destination: target.destination ?? null,
+    recipient: target.recipient ?? null,
+    amount: null,
+    parsed_command: null,
+    outbound_text: null,
+    destination_host: target.destination_host ?? null,
+    outbound_truncated: false,
+  });
+  const consequence = (reason: string): InternalToolCallInfo => ({
+    ...toolInfo('tracker', 'archive_item'),
+    tier: 3,
+    tier_reason: reason,
+  });
+
+  it.each([
+    ['a destination', { destination: 'Team notes' }],
+    ['a recipient', { recipient: 'ana@example.com' }],
+    ['a site', { destination_host: 'tracker.example.com' }],
+  ])('offers chat scope for a consequential action whose card names %s', (_label, target) => {
+    expect(allowsChatApproval({ ...consequence('destructive_action'), tier3_card: card(target) })).toBe(true);
+  });
+
+  it.each(['connector_outbound', 'destructive_action', 'mcp_destructive_hint', 'mcp_open_world_hint'])(
+    'offers no chat scope for a %s action whose card names no target',
+    reason => {
+      expect(allowsChatApproval({ ...consequence(reason), tier3_card: card({}) })).toBe(false);
+      expect(allowsChatApproval({ ...consequence(reason), tier3_card: card({ destination: '  ' }) })).toBe(false);
+      expect(allowsChatApproval(consequence(reason))).toBe(false);
+    },
+  );
+
+  it.each(['schedule_write', 'persona_write'])('offers no chat scope for a %s card', reason => {
+    expect(allowsChatApproval({ ...consequence(reason), tier3_card: card({}) })).toBe(false);
+  });
+
+  it('does not admit a second call from a grant stored for an action that names no target', () => {
+    const first = { ...consequence('destructive_action'), tier3_card: card({}) };
+    const effective = effectiveToolAdmissions({
+      calls: [toolCall('later', first)],
+      decisions: new Map(),
+      chatApprovalGrants: new Set([approvalGrantKey(first)]),
+      implementationPlanGrants: new Set(),
+    });
+    expect(effective.get('later')).toEqual({ decision: undefined, admission_provenance: { source: 'automatic' } });
+  });
+
+  it('still admits a second call to the same target from its grant, and not one to another target', () => {
+    const toNotes = { ...consequence('destructive_action'), tier3_card: card({ destination: 'Team notes' }) };
+    const toOther = { ...consequence('destructive_action'), tier3_card: card({ destination: 'Public page' }) };
+    const effective = effectiveToolAdmissions({
+      calls: [toolCall('same', toNotes), toolCall('other', toOther)],
+      decisions: new Map(),
+      chatApprovalGrants: new Set([approvalGrantKey(toNotes)]),
+      implementationPlanGrants: new Set(),
+    });
+    expect(effective.get('same')?.decision).toEqual({ status: 'allow', scope: 'chat' });
+    expect(effective.get('other')?.decision).toBeUndefined();
+  });
+});
+
 describe('always-allow grant eligibility', () => {
   it('admits only a connector tool the host classified as inspection', () => {
     expect(allowsToolGrant({ ...toolInfo('notes', 'lookup_note'), effect: 'inspect' })).toBe(true);

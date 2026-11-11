@@ -55,8 +55,9 @@ export const GRANT_BARRED_TIER_REASONS: ReadonlySet<string> = new Set([
 
 /**
  * Consequential actions a person may answer once for the whole chat with "Always allow this here". The chat grant
- * binds the tool and its destination, never a standing grant across chats. A send, a guest change and a steered call
- * are never among them: each of those asks every time.
+ * binds the tool and its destination, never a standing grant across chats, so it is offered only when the card
+ * names one. A send, a guest change, a steered call, and creating a schedule or a persona are never among them:
+ * each of those asks every time.
  */
 export const CHAT_GRANTABLE_CONSEQUENCE_REASONS: ReadonlySet<string> = new Set([
   'gmail_draft',
@@ -64,8 +65,6 @@ export const CHAT_GRANTABLE_CONSEQUENCE_REASONS: ReadonlySet<string> = new Set([
   'destructive_action',
   'mcp_destructive_hint',
   'mcp_open_world_hint',
-  'schedule_write',
-  'persona_write',
 ]);
 
 /**

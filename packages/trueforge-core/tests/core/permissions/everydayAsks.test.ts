@@ -239,7 +239,7 @@ describe('sends and guest changes ask every time, with only Allow and Not now', 
   it('still lets the chat-wide answer cover saving a draft, which sends nothing', async () => {
     const saved = await classifyTier({ ...sendDraft(draft({})), tool_name: 'draft_email' }, makeCtx());
     expect(saved.reason).toBe('gmail_draft');
-    expect(allowsChatApproval(gmailInfo('draft_email', saved.reason))).toBe(true);
+    expect(allowsChatApproval({ ...gmailInfo('draft_email', saved.reason), tier3_card: saved.card })).toBe(true);
   });
 
   it("asks as usual for a reply to the sender of the message it answers, read by the host from the person's mail", async () => {
