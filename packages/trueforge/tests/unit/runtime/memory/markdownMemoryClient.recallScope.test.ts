@@ -164,7 +164,7 @@ describe('MarkdownMemoryClient recall scope', () => {
       const items = await recallItems({ client, query: 'who is the dentist', currentSessionId: 'chat-now' });
       expect(items).toHaveLength(1);
       expect(items[0]?.text).toContain('Dr Rivera');
-      expect(items[0]?.metadata).toBeUndefined();
+      expect(items[0]?.metadata).toEqual({ origin: 'user_stated' });
       expect(items[0]?.occurred_start).toBe('2026-09-19T12:00:00.000Z');
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -187,7 +187,7 @@ describe('MarkdownMemoryClient recall scope', () => {
       });
       const items = await recallItems({ client, query: 'who is the dentist', currentSessionId: 'chat-now' });
       expect(items[0]?.occurred_start).toBe('2026-10-26T09:15:58.000Z');
-      expect(items[0]?.metadata).toEqual({ session_id: 'chat-old' });
+      expect(items[0]?.metadata).toEqual({ origin: 'user_stated', session_id: 'chat-old' });
       expect(items[0]?.text).not.toContain('session_id');
       const stored = await readFile(path.join(dir, 'tenant-1', 'memory', '2026-10-26.md'), 'utf8');
       expect(stored).toContain('<!-- session_id: chat-old -->');
