@@ -8,6 +8,7 @@ import { hostForPlatform } from './host/hostFor.ts';
 import { systemWindowsJobs, windowsPaths } from './host/windowsJobs.ts';
 import { createLineInput, type LineInput } from './lineInput.ts';
 import { PRESS_ENTER_TO_CLOSE_LINE, UNEXPECTED_FAILURE, problemText } from './messages.ts';
+import { isSetupProgramName } from './release/assetNames.ts';
 import { fetchBytesFromNetwork } from './release/download.ts';
 import { SystemProcessRunner } from './runner/processRunner.ts';
 import { storeForHost } from './state/storeFor.ts';
@@ -124,7 +125,7 @@ async function askSecretLine(question: string): Promise<string | null> {
 // command list decides which, from what is on the computer.
 function invokedAsSetup(): boolean {
   for (const path of [process.argv[1] ?? '', process.execPath]) {
-    if (/^aman-setup(\.exe)?$/i.test(basename(path))) {
+    if (isSetupProgramName(basename(path))) {
       return true;
     }
   }

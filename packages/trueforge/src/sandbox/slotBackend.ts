@@ -4,6 +4,7 @@ import {
   forgetShownSkillNotices,
   GitBridge,
   rawSandboxId,
+  SlotFullStateLog,
   slotMirrorSocketPathsIn,
   SlotSandboxProvider,
   slotSkillNetworkSocketPathsIn,
@@ -137,6 +138,9 @@ export async function startSkillNetworkGateway({
   }
 }
 
+/** One per process: a provider is made per call, and the full warning should follow the slots, not the calls. */
+const slotFullStateLog = new SlotFullStateLog();
+
 export function createSlotSandboxProvider({ logger }: { logger: Logger }): SlotSandboxProvider {
   return new SlotSandboxProvider({
     socketPaths: slotSocketPaths(),
@@ -146,6 +150,7 @@ export function createSlotSandboxProvider({ logger }: { logger: Logger }): SlotS
     logger,
     sleepMs: undefined,
     gitBridge: gitBridge({ logger }),
+    fullStateLog: slotFullStateLog,
   });
 }
 
