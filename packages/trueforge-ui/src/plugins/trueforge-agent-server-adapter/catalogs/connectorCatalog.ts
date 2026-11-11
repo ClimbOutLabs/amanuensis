@@ -20,6 +20,7 @@ import type { EmailSetupPort } from '../../../server/emailSetup.js';
 import type { GoogleSetupPort } from '../../../server/googleSetup.js';
 import type { MapsSetupPort } from '../../../server/mapsSetup.js';
 import type { MemoryProviderFields } from '../../../server/memoryProviderTypes.js';
+import type { NotesFolderSetupPort } from '../../../server/notesFolderSetup.js';
 import type { SearchProviderFields } from '../../../server/searchProviderTypes.js';
 import type {
   ConnectorAuth,
@@ -38,6 +39,7 @@ import { createCalendarSetupApi } from './calendarSetup.js';
 import { createEmailSetupApi } from './emailSetup.js';
 import { createGoogleSetupApi } from './googleSetup.js';
 import { createMapsSetupApi } from './mapsSetup.js';
+import { createNotesFolderSetupApi } from './notesFolderSetup.js';
 
 export type UiConnectorAuth = ConnectorAuth;
 export type UiConnectorAuthPublic = ConnectorAuthPublic;
@@ -327,7 +329,8 @@ export type HarnessConnectorCatalog = ConnectorCatalogServer<
   GoogleSetupPort &
   EmailSetupPort &
   CalendarSetupPort &
-  MapsSetupPort;
+  MapsSetupPort &
+  NotesFolderSetupPort;
 
 /** Settings connector port for `createTrueFoundryServer`. Delete omitted; disconnect unsupported. */
 export function createConnectorCatalog(
@@ -382,6 +385,7 @@ export function createConnectorCatalog(
     ...createEmailSetupApi(clientOptions),
     ...createCalendarSetupApi(clientOptions),
     ...createMapsSetupApi(client),
+    ...createNotesFolderSetupApi(clientOptions),
     getConnectorCatalog: async () => {
       const body = await client.catalogs.mcpServers.list();
       return body.data.map(server => toUiCatalogEntry(server, { baseUrl: clientOptions.baseUrl }));

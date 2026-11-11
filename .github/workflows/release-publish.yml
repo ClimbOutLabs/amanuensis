@@ -1,0 +1,171 @@
+name: Publish release
+
+# The last step of a release. The Release workflow leaves a draft with
+# every file and an unsigned record; the owner signs the record on
+# their own machine and adds manifest.json.minisig to the draft. This
+# workflow then checks every file against the signed record with the
+# release key compiled into Aman: first with the release tool from the
+# tagged source, and only then with the release's own Linux program,
+# which never sees a token. It writes SHA256SUMS again with the
+# signature in it, puts the steps to check a download by hand on the
+# page, checks the draft has not changed since, and makes the release
+# public.
+#
+# Start it from the tag ("Use workflow from" set to the tag), so the
+# release environment, which allows only version tags, lets it run.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The version tag of the draft release to publish, for example v1.2.3. Pick the same tag under "Use workflow from".
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Check and publish ${{ inputs.tag }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: release
+    permissions:
+      contents: write
+    env:
+      RELEASE: ${{ inputs.tag }}
+      REF: ${{ github.ref }}
+
+    steps:
+      # The key and the tool come from the tagged source, so the tag has
+      # to be the one the Release workflow built from: a version tag on
+      # main, and the ref this run was started from.
+      - name: Check the tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! printf '%s' "$RELEASE" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
+            echo "::error::$RELEASE is not a version tag. Use the form v1.2.3."
+            exit 1
+          fi
+          if [ "$REF" != "refs/tags/$RELEASE" ]; then
+            echo "::error::This run was started from $REF. Start it again with $RELEASE picked under \"Use workflow from\"."
+            exit 1
+          fi
+          sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE" --jq .sha)
+          status=$(gh api "repos/$GITHUB_REPOSITORY/compare/$sha...main" --jq .status)
+          if [ "$status" != ahead ] && [ "$status" != identical ]; then
+            echo "::error::The tag $RELEASE points at a commit that is not on main. Tag a commit on main and cut the release again."
+            exit 1
+          fi
+          echo "DIR=$RUNNER_TEMP/release" >> "$GITHUB_ENV"
+
+      - name: Check out the tagged source
+        uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          # No cache: the checks run on the tagged source alone.
+          cache: ''
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Download the draft's files
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$DIR"
+          release_json=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq "[.[] | select(.tag_name == \"$RELEASE\" and .draft == true)] | first")
+          if [ -z "$release_json" ] || [ "$release_json" = null ]; then
+            echo "::error::There is no draft release for $RELEASE. Push the tag first and let the Release workflow finish."
+            exit 1
+          fi
+          printf '%s' "$release_json" | jq -r '.assets[] | "\(.id) \(.name)"' | while read -r id name; do
+            gh api -H 'Accept: application/octet-stream' "repos/$GITHUB_REPOSITORY/releases/assets/$id" \
+              > "$DIR/$name"
+          done
+          ls -l "$DIR"
+
+      - name: Check the record is signed, names this release, and covers every file
+        run: |
+          cd "$DIR"
+          if [ ! -f manifest.json.minisig ]; then
+            echo "::error::The draft has no manifest.json.minisig. Sign manifest.json and add the signature to the draft. RELEASING.md has the steps."
+            exit 1
+          fi
+          named=$(jq -r .release manifest.json)
+          if [ "$named" != "$RELEASE" ]; then
+            echo "::error::manifest.json is the record for $named, not $RELEASE. Sign the record from this draft."
+            exit 1
+          fi
+          # A file the record does not list would go public unchecked.
+          extra=$(comm -23 <(ls -1 | sort) \
+            <({ jq -r '.files | keys[]' manifest.json; printf '%s\n' manifest.json manifest.json.minisig SHA256SUMS; } | sort))
+          if [ -n "$extra" ]; then
+            echo "::error::The draft has files the signed record does not list: $extra. Delete them from the draft, then run this again."
+            exit 1
+          fi
+
+      # The tagged source's tool checks every file first, the release's
+      # own Linux program among them. Only then does that program run,
+      # as the check a person runs, and no token is in its environment.
+      - name: Check every file with the release tool from the tagged source
+        run: |
+          for name in $(jq -r '.files | keys[]' "$DIR/manifest.json"); do
+            pnpm -s release:aman-installer verify --file "$DIR/$name"
+          done
+
+      - name: Check every file with the release's own aman verify
+        run: |
+          cd "$DIR"
+          chmod +x aman-linux-x64
+          for name in $(jq -r '.files | keys[]' manifest.json); do
+            ./aman-linux-x64 verify "$name"
+          done
+
+      - name: Write SHA256SUMS with the signature in it
+        run: |
+          rm -f "$DIR/SHA256SUMS"
+          pnpm -s release:aman-installer checksums --dir "$DIR"
+          cd "$DIR"
+          sha256sum --check --strict SHA256SUMS
+
+      - name: Write the release page text
+        run: pnpm -s release:aman-installer notes --release "$RELEASE" > "$RUNNER_TEMP/notes.md"
+
+      # The draft is read again just before it goes public, so a file
+      # changed after the checks stops the publish.
+      - name: Check the draft is unchanged, then publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$RELEASE" --repo "$GITHUB_REPOSITORY" --clobber "$DIR/SHA256SUMS"
+          again="$RUNNER_TEMP/again"
+          mkdir -p "$again"
+          release_json=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq "[.[] | select(.tag_name == \"$RELEASE\" and .draft == true)] | first")
+          printf '%s' "$release_json" | jq -r '.assets[] | "\(.id) \(.name)"' | while read -r id name; do
+            gh api -H 'Accept: application/octet-stream' "repos/$GITHUB_REPOSITORY/releases/assets/$id" \
+              > "$again/$name"
+          done
+          if ! diff -r "$DIR" "$again" > /dev/null; then
+            echo "::error::The draft changed while it was being checked. Look at the draft's files, then run this again."
+            exit 1
+          fi
+          gh release edit "$RELEASE" --repo "$GITHUB_REPOSITORY" --notes-file "$RUNNER_TEMP/notes.md" --draft=false --latest
+          echo "::notice::Release $RELEASE is public."
