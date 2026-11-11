@@ -263,7 +263,7 @@ export function modelProviderName(provider: ModelProviderManifest): ResourceName
 
 /** How the connection check run when a provider was saved came out. */
 export const ModelProviderCheckKindSchema = z
-  .enum(['answered', 'key_refused', 'unreachable', 'server_error'])
+  .enum(['answered', 'key_refused', 'unreachable', 'timed_out', 'server_error'])
   .openapi('ModelProviderCheckKind');
 
 export type ModelProviderCheckKind = z.infer<typeof ModelProviderCheckKindSchema>;

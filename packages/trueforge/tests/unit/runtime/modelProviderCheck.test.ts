@@ -5,6 +5,7 @@ import type { ModelProviderManifest } from '../../../src/schemas/modelProvider';
 
 const mockCreateNonStream = jest.fn();
 const mockGetModelDetails = jest.fn();
+const mockLlmSignals: (AbortSignal | undefined)[] = [];
 
 jest.mock('@truefoundry/trueforge-core/core', () => {
   const actual = jest.requireActual<typeof import('@truefoundry/trueforge-core/core')>(
@@ -12,15 +13,21 @@ jest.mock('@truefoundry/trueforge-core/core', () => {
   );
   return {
     ...actual,
-    VercelAILLM: jest.fn().mockImplementation(() => ({
-      createNonStream: (...args: unknown[]) => mockCreateNonStream(...args),
-    })),
+    VercelAILLM: jest.fn().mockImplementation((options: { signal?: AbortSignal }) => {
+      mockLlmSignals.push(options.signal);
+      return {
+        createNonStream: (...args: unknown[]) => mockCreateNonStream(...args),
+      };
+    }),
   };
 });
 
 jest.mock('../../../src/runtime/sessionResources', () => ({
   getModelDetails: (...args: unknown[]) => mockGetModelDetails(...args),
 }));
+
+// A short limit for this suite only, so the timed-out test does not wait out the real one.
+jest.mock('../../../src/help/healthProbes', () => ({ MODEL_PROBE_TIMEOUT_MS: 25 }));
 
 const silentLogger = createLogger({ silent: true });
 
@@ -46,6 +53,7 @@ const checkSavedProvider = createModelProviderChecker({ logger: silentLogger });
 beforeEach(() => {
   mockCreateNonStream.mockReset();
   mockGetModelDetails.mockReset();
+  mockLlmSignals.length = 0;
   mockGetModelDetails.mockResolvedValue({
     providerConfig: { provider: { type: 'custom', name: 'my-llm' }, model: { id: 'llama-3', name: 'llama-3' } },
     streamTimeout: { firstChunkMs: 1_000, chunkMs: 1_000, progressTimeoutMs: 1_000 },
@@ -84,6 +92,36 @@ describe('createModelProviderChecker', () => {
 
     expect(check.kind).toBe('unreachable');
     expect(check.message).toBe(
+      'The model server did not answer. Check the server is running and the address is right, then save again.',
+    );
+  });
+
+  it('reports timed out when the test call is still unanswered at the time limit', async () => {
+    // A slow local server: the call ends only when the probe's own time limit cuts it off.
+    mockCreateNonStream.mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          const signal = mockLlmSignals[0];
+          if (signal === undefined) {
+            reject(new Error('the checker handed no signal to the test call'));
+            return;
+          }
+          if (signal.aborted) {
+            reject(signal.reason);
+            return;
+          }
+          signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+        }),
+    );
+
+    const check = await checkSavedProvider({ tenant_id: 'default', store: fakeStore(), record: RECORD });
+
+    expect(check.kind).toBe('timed_out');
+    expect(check.message).toBe(
+      'The model server took too long to answer. It may still be starting up, or busy loading the model. ' +
+        'Wait a moment, then save again.',
+    );
+    expect(check.message).not.toBe(
       'The model server did not answer. Check the server is running and the address is right, then save again.',
     );
   });

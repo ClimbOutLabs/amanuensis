@@ -39,13 +39,19 @@ export type UiModelProviderCatalogEntry = ModelProviderCatalogEntry<UiModelEntry
  * {@link modelProviderCheckOf}, which checks the shape instead of trusting it.
  */
 export interface UiModelProviderCheck {
-  kind: 'answered' | 'key_refused' | 'unreachable' | 'server_error';
+  kind: 'answered' | 'key_refused' | 'unreachable' | 'timed_out' | 'server_error';
   message: string;
   checkedAt: string;
 }
 
 function isModelProviderCheckKind(value: string): value is UiModelProviderCheck['kind'] {
-  return value === 'answered' || value === 'key_refused' || value === 'unreachable' || value === 'server_error';
+  return (
+    value === 'answered' ||
+    value === 'key_refused' ||
+    value === 'unreachable' ||
+    value === 'timed_out' ||
+    value === 'server_error'
+  );
 }
 
 /** The save-time check outcome a provider value carries, when it carries a well-formed one. */
