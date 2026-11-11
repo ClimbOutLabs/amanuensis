@@ -59,15 +59,19 @@ restore_checksums_ok() { # dir
 
 # Whether the app can open the backup's database. A database that a newer version of Aman has updated records changes
 # this version does not have, and the app refuses to start on it. Prints "newer", "unreadable" or nothing.
+# An app image from before this check has no backup-check; its backups are then judged by the version record alone, as
+# they were before. A wrong guess there still fails safely: the app does not start, and the restore is undone.
 restore_database_check() { # db file, app image
   local out
-  out=$(D run --rm -i --network none "$2" sh -c 'cat >/tmp/check.sqlite && aman backup-check --sqlite /tmp/check.sqlite' <"$1" 2>/dev/null) || {
+  out=$(D run --rm -i --network none "$2" sh -c 'cat >/tmp/check.sqlite || exit 1
+aman help 2>&1 | grep -q backup-check || { echo "{\"check\":\"none\"}"; exit 0; }
+aman backup-check --sqlite /tmp/check.sqlite' <"$1" 2>/dev/null) || {
     echo unreadable
     return 0
   }
   case "$out" in
     *'"newer":true'*) echo newer ;;
-    *'"newer":false'*) ;;
+    *'"newer":false'* | *'"check":"none"'*) ;;
     *) echo unreadable ;;
   esac
 }

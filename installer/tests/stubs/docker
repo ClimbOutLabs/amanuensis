@@ -565,6 +565,11 @@ case "$cmd" in
         # Models the CLI on a database streamed in: one a newer version updated holds NEWER, one it cannot read BROKEN.
         echo "backup-check" >>"$S/backup_checks"
         db=$(cat)
+        # An app image from before the check was added does not list it.
+        if [ -f "$S/image_without_backup_check" ]; then
+          printf '{"check":"none"}\n'
+          exit 0
+        fi
         case "$db" in
           *BROKEN*) echo "file is not a database" >&2; exit 1 ;;
           *NEWER*) printf '{"newer":true,"unknown_migrations":["29990101_000001_later"]}\n' ;;

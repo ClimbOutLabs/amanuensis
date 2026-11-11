@@ -476,6 +476,22 @@ test_refuses_a_database_from_a_newer_version() {
   sandbox_drop
 }
 
+test_app_image_without_the_database_check() {
+  t_begin "an app image from before the database check still restores, judged by the version record as before"
+  sandbox_new
+  install_machine
+  run_install backup
+  : >"$SB_STATE/image_without_backup_check"
+  with_input "yes
+"
+  run_install restore --latest
+  assert_rc 0
+  assert_file "$SB_STATE/backup_checks"
+  assert_not_contains "$ERR" "cannot be read"
+  assert_file "$SB_STATE/restores"
+  sandbox_drop
+}
+
 test_undo_of_an_instance_without_data() {
   t_begin "undoing a restore of an instance that had no data takes the restored data away again"
   sandbox_new
@@ -531,6 +547,7 @@ test_restore_takes_this_installs_addresses
 test_question_says_what_goes_back
 test_no_answer_is_a_failure
 test_refuses_a_database_from_a_newer_version
+test_app_image_without_the_database_check
 test_undo_of_an_instance_without_data
 test_failed_copy_after_putting_back_missing_files
 tests_finish
