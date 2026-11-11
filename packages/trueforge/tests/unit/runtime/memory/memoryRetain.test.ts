@@ -127,6 +127,7 @@ describe('submitRetain', () => {
     retain.mockResolvedValue({ ok: true });
 
     await submitRetain({
+      session: { is_incognito: false },
       client,
       sessionId: 's1',
       turnId: 't1',
@@ -154,6 +155,7 @@ describe('submitRetain', () => {
     retain.mockResolvedValue({ ok: true });
 
     await submitRetain({
+      session: { is_incognito: false },
       client,
       sessionId: 's1',
       turnId: 't1',
@@ -173,6 +175,7 @@ describe('submitRetain', () => {
 
     await expect(
       submitRetain({
+        session: { is_incognito: false },
         client,
         sessionId: 's1',
         turnId: 't1',
@@ -191,6 +194,7 @@ describe('submitRetain', () => {
 
     await expect(
       submitRetain({
+        session: { is_incognito: false },
         client,
         sessionId: 's1',
         turnId: 't1',
@@ -241,6 +245,7 @@ describe('submitRetainWithVerification', () => {
 
   function submitParams(client: HindsightClient): SubmitRetainParams {
     return {
+      session: { is_incognito: false },
       client,
       sessionId: 's1',
       turnId: 't1',
