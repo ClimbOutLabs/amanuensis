@@ -39,6 +39,7 @@ import { createMcpOAuthRouter } from './apis/mcpOAuth';
 import { createMcpServersRouter } from './apis/mcpServers';
 import { createMemoryVaultRouter } from './apis/memoryVault';
 import { createModelsRouter } from './apis/models';
+import { createNotesFolderRouter, NOTES_FOLDER_SETTINGS_BASE_PATH } from './apis/notesFolder';
 import { createPermissionsRouter } from './apis/permissions';
 import { createPersonaKnowledgeRouter } from './apis/personaKnowledge';
 import { createPersonalizationRouter } from './apis/personalization';
@@ -91,6 +92,7 @@ import type { ICompletedTurnEventStore } from './db/completedTurnEvents';
 import type { IDeliveryStore } from './db/deliveryStore';
 import type { IGlobalSettingsStore } from './db/globalSettingsStore';
 import type { IGoogleConnectionStore } from './db/googleConnectionStore';
+import type { ILocalUserStore } from './db/localUserStore';
 import type { IMcpServerWithAuthStore } from './db/mcpServerStore';
 import type { IMcpToolGrantStore } from './db/mcpToolGrantStore';
 import type { IModelProviderStore } from './db/modelProviderStore';
@@ -340,6 +342,8 @@ export interface ServerDeps<TTransaction> {
   logger: Logger;
   /** Background OIDC discovery; undefined when browser login is disabled. */
   oidcDiscovery: OidcDiscoveryHandle | undefined;
+  /** The local user store, present only in local sign-in mode. */
+  localUserStore: ILocalUserStore | undefined;
   /** Startup-selected authenticator; middleware is built from this once per app. */
   authenticator: Authenticator;
   /** Startup-selected agent authorization policy. */
@@ -603,6 +607,14 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       oidcDiscovery: deps.oidcDiscovery,
       logger: deps.logger,
       authMiddleware,
+      ...(deps.localUserStore === undefined
+        ? {}
+        : {
+            localSignIn: {
+              localUserStore: deps.localUserStore,
+              globalSettingsStore: deps.globalSettingsStore,
+            },
+          }),
     }),
   );
   app.route(
@@ -989,6 +1001,21 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
           fetchImpl: undefined,
           logger: deps.logger,
           mcpServerStore: deps.resolveMcpServerStore(),
+        }),
+        adminAuthMiddleware,
+      ),
+      createUiSessionAuthMiddleware(deps.authenticator),
+    ),
+  );
+  // Same guard as the accounts: the notes folder belongs to the whole instance. It holds no
+  // secret; the path and the inbox file name are all that is saved.
+  app.route(
+    NOTES_FOLDER_SETTINGS_BASE_PATH,
+    withAuth(
+      withAdminAuth(
+        createNotesFolderRouter({
+          logger: deps.logger,
+          settingsStore: deps.globalSettingsStore,
         }),
         adminAuthMiddleware,
       ),

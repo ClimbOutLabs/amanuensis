@@ -52,6 +52,28 @@ const TOOL_WORDS: ReadonlyMap<string, ToolWords> = new Map([
     'update_event',
     'calendar_write',
   ]),
+  ...words(
+    { doing: 'Checking your Google Drive files', done: 'Read your Google Drive files', thing: 'Your Drive files' },
+    ['list_files', 'read_drive_file', 'google_drive_read'],
+  ),
+  ...words(
+    {
+      doing: 'Changing your Google Drive files',
+      done: 'Changed your Google Drive files',
+      thing: 'A Google Drive change',
+    },
+    ['create_doc', 'append_rows', 'google_drive_write'],
+  ),
+  ...words({ doing: 'Searching your notes', done: 'Searched your notes', thing: 'A notes search' }, [
+    'search_notes',
+    'notes_read',
+  ]),
+  ...words({ doing: 'Reading a note', done: 'Read note', thing: 'A note' }, ['read_note']),
+  ...words({ doing: 'Adding to your notes inbox', done: 'Added to your notes inbox', thing: 'A notes inbox entry' }, [
+    'append_to_inbox',
+    'notes_write',
+  ]),
+  ...words({ doing: 'Making a note', done: 'Made a note', thing: 'A new note' }, ['create_note']),
   ...words({ doing: 'Searching the web', done: 'Searched the web', thing: 'A web search' }, [
     'tavily_search',
     'web_search',

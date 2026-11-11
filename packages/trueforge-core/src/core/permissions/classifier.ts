@@ -17,6 +17,8 @@ import path from 'path';
 import { DOCUMENTS_SERVER_ID, EXTRACT_DOCUMENT_TEXT_TOOL_NAME } from '../../documents/toolContract';
 import type { CalendarWriteReview } from '../calendar/eventWrite';
 import { CALENDAR_SERVER_ID, isCalendarReadToolName, isCalendarWriteToolName } from '../calendar/toolContract';
+import { DRIVE_SERVER_ID, isDriveReadToolName, isDriveWriteToolName } from '../drive/toolContract';
+import type { DriveWriteReview } from '../drive/writeReview';
 import type { ReviewableDraft } from '../email/gmail/draftReview';
 import type { AnsweredMessage } from '../email/gmail/replyThread';
 import {
@@ -36,6 +38,7 @@ import {
 } from '../email/mailConnector/toolContract';
 import { GOOGLE_SETUP_SERVER_ID, GOOGLE_SETUP_STATUS_TOOL_NAME } from '../google/setupToolContract';
 import type { BrowserClickReview, DocumentScope, MapsHosts } from '../llm/LLMTypes';
+import { APPEND_TO_INBOX_TOOL_NAME, isNotesFolderWriteToolName, NOTES_FOLDER_SERVER_ID } from '../notes/toolContract';
 import {
   isPersonaWriteToolName,
   LIST_PERSONAS_TOOL_NAME,
@@ -102,6 +105,7 @@ import {
   RENDER_ROUTE_TOOL_NAME,
 } from './mapsToolNames';
 import { provenanceForToolType, requiresNetwork } from './networkRequirements';
+import { classifyNotesFolderTool } from './notesTier';
 import {
   appendOutboundTrace,
   checkOutboundStrings,
@@ -253,6 +257,11 @@ export interface SentinelAction {
    * for a change, the event as Google holds it now, so the card shows what would really be written.
    */
   calendar_write?: CalendarWriteReview | undefined;
+  /**
+   * The Drive write a create or append would make, settled by the Drive tool set from the validated call and,
+   * for an append, the spreadsheet as Google holds it now, so the card shows what would really be written.
+   */
+  drive_write?: DriveWriteReview | undefined;
   /** The schedule a create or delete would save or remove, settled by the schedule tool set from the store. */
   schedule_write?: Tier3Schedule | undefined;
   /** The persona a create would add, settled by the persona tool set from the request and the owner's personas. */
@@ -2734,6 +2743,111 @@ async function classifyCalendarTool(action: SentinelAction, ctx: ClassifyContext
   });
 }
 
+/**
+ * The approval card for a Drive write, built from the write the host will really make, never from model
+ * prose: a create shows its whole text, an append shows every row.
+ */
+function driveWriteCard(input: { review: DriveWriteReview; agent_intent: string | null }): Tier3Card {
+  const { review } = input;
+  const base = {
+    plain_why: plainWhy(input.agent_intent),
+    cannot_be_undone: null,
+    why_asked_again: null,
+    destination: null,
+    recipient: null,
+    amount: null,
+    parsed_command: null,
+    destination_host: null,
+    outbound_truncated: false,
+  };
+  if (review.action === 'create_doc') {
+    return {
+      ...base,
+      plain_what: `Create a Google Doc named ${cardSubject(review.file_name)} in your Google Drive?${review.text === '' ? ' It starts empty.' : ''}`,
+      outbound_text: review.text === '' ? null : escapeDisplayText(review.text, { keepNewlines: true }),
+    };
+  }
+  const rows = review.rows.map(row => row.map(cell => escapeDisplayText(cell)).join(', ')).join('\n');
+  const sharing =
+    review.shared_with === null
+      ? ' This file is shared with other people.'
+      : review.shared_with > 0
+        ? ` This file is shared with ${String(review.shared_with)} ${review.shared_with === 1 ? 'person' : 'people'}.`
+        : '';
+  return {
+    ...base,
+    plain_what: `Add ${String(review.rows.length)} ${review.rows.length === 1 ? 'row' : 'rows'} to the tab "${escapeDisplayText(review.sheet_name ?? '')}" of the Google Sheet ${cardSubject(review.file_name)}?${sharing}`,
+    outbound_text: rows,
+  };
+}
+
+/**
+ * Drive tools are the host's own, named by server so a connector's tool of the same name never takes this
+ * path. Reads are silent but flagged as sensitive, as Gmail's are. A write asks with the whole write on the
+ * card, unless a standing grant covers the tool; any other name fails closed. Once the chat has read content
+ * that is not the person's own words, a write may have been asked for by that content rather than by the
+ * person, so it asks first with the steering line on the card, no grant covers it, and a run with nobody
+ * to answer skips it, the same way a steered notes write does.
+ */
+async function classifyDriveTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
+  if (await ctx.services.isOffline({ tenant_id: ctx.tenant_id, created_by: ctx.created_by })) {
+    return autoDenyDecision({
+      reason: 'offline_mode',
+      reason_detail: 'Google Drive needs network access, which is disabled while offline.',
+      sensitive_read: false,
+    });
+  }
+  if (isDriveReadToolName(action.tool_name)) {
+    return tier1Decision({
+      reason: 'google_drive_read',
+      reason_detail: 'Read your Google Drive files.',
+      sensitive_read: true,
+    });
+  }
+  if (!isDriveWriteToolName(action.tool_name)) {
+    return failClosedDecision({ reason_detail: 'Unknown Drive tool.' });
+  }
+  const review = action.drive_write;
+  if (review === undefined) {
+    return autoDenyDecision({
+      reason: 'destination_unverifiable',
+      reason_detail: 'The change could not be loaded to show you, so it was not offered.',
+      sensitive_read: false,
+    });
+  }
+  if (hasReadContent(ctx.web_search.provenance)) {
+    if (ctx.services.unattended) {
+      return steeredSkipped(ctx);
+    }
+    const assistant = ctx.web_search.assistantName;
+    const say =
+      `${assistant} has read things written by other people in this chat, so this write may have been ` +
+      `asked for by something it read, not by you.`;
+    const card = driveWriteCard({ review, agent_intent: ctx.agent_intent });
+    return tier3Decision({
+      card: { ...card, plain_what: withHoldSay(card.plain_what, say) },
+      reason: CONTENT_STEERED_REASON,
+      reason_detail: say,
+      sensitive_read: false,
+      approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
+    });
+  }
+  if (await hasStandingToolGrant(ctx, action)) {
+    return tier1Decision({
+      reason: TOOL_GRANT_REASON,
+      reason_detail: `Always allowed: \`${action.tool_name}\` on your Google Drive.`,
+      sensitive_read: false,
+    });
+  }
+  return tier3Decision({
+    card: driveWriteCard({ review, agent_intent: ctx.agent_intent }),
+    reason: 'google_drive_write',
+    reason_detail: 'Creating a Doc or adding rows to a Sheet always asks.',
+    sensitive_read: false,
+    approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
+  });
+}
+
 /** The approval card for creating or deleting a schedule, built from what the host will save or remove. */
 function scheduleWriteCard(input: { review: Tier3Schedule; agent_intent: string | null }): Tier3Card {
   const { review } = input;
@@ -3512,6 +3626,56 @@ export function approvalCardForGatedCall(input: { action: SentinelAction; agent_
 }
 
 /**
+ * A notes folder call. Reads and the two add-only writes run without asking, the same way a
+ * reminder does, while the ask is the person's own. Once the chat has read content that is
+ * not the person's own words, a write may have been asked for by that content rather than by
+ * the person, so it asks first with a card, the same way a steered send does; on a run with
+ * nobody to answer, the write is skipped instead.
+ */
+async function classifyNotesFolderToolCall(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
+  const decision = classifyNotesFolderTool(action);
+  if (!isNotesFolderWriteToolName(action.tool_name) || !hasReadContent(ctx.web_search.provenance)) {
+    return decision;
+  }
+  if (ctx.services.unattended) {
+    return steeredSkipped(ctx);
+  }
+  const assistant = ctx.web_search.assistantName;
+  const say =
+    `${assistant} has read things written by other people in this chat, so this write may have been ` +
+    `asked for by something it read, not by you.`;
+  const outbound = renderOutboundArguments(action.canonical_params);
+  return tier3Decision({
+    card: {
+      plain_what: withHoldSay(
+        action.tool_name === APPEND_TO_INBOX_TOOL_NAME
+          ? 'Add this entry to your notes inbox file?'
+          : 'Make this new note in your notes folder?',
+        say,
+      ),
+      plain_why: plainWhy(ctx.agent_intent),
+      cannot_be_undone: 'The added words stay in your notes until you take them out.',
+      why_asked_again: null,
+      destination: null,
+      recipient: null,
+      amount: null,
+      parsed_command: null,
+      outbound_text: outbound.text,
+      destination_host: null,
+      outbound_truncated: outbound.truncated,
+    },
+    reason: CONTENT_STEERED_REASON,
+    reason_detail: say,
+    sensitive_read: false,
+    approval_token_id: await mintPlainToken({
+      ctx,
+      tool_name: action.tool_name,
+      params: action.canonical_params,
+    }),
+  });
+}
+
+/**
  * The single authoritative tier classifier. Fail-closed on anything
  * unrecognized; MCP hints escalate, and lower a connector tool only through
  * first-party trust or a standing grant.
@@ -3524,6 +3688,9 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
   }
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === CALENDAR_SERVER_ID) {
     return steeringChecked({ decision: await classifyCalendarTool(action, ctx), ctx, guests: [] });
+  }
+  if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === DRIVE_SERVER_ID) {
+    return steeringChecked({ decision: await classifyDriveTool(action, ctx), ctx, guests: [] });
   }
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === GOOGLE_SETUP_SERVER_ID) {
     return steeringChecked({ decision: classifyGoogleSetupTool(action), ctx, guests: [] });
@@ -3539,6 +3706,9 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
   }
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === SPACE_SERVER_ID) {
     return classifySpaceTool(action);
+  }
+  if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === NOTES_FOLDER_SERVER_ID) {
+    return classifyNotesFolderToolCall(action, ctx);
   }
   if (
     action.tool_type === 'truefoundry-system' &&
