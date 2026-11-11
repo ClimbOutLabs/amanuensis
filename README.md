@@ -163,7 +163,7 @@ More help: [full install guide](docs/install.mdx) · [Windows guide](docs/instal
 
 ## 🔒 Your data, your rules
 
-Your memory, chats, personas and settings live on your computer. Memory is plain Markdown files you can open in any text editor; [docs/memory.md](docs/memory.md) explains how it works.
+Your memory, chats, personas and settings live on your computer. Memory is plain Markdown. You can read and edit it on the Memory page in Settings, and you can [export it](docs/install.mdx#exporting-one-persons-data) as a folder of Markdown files at any time. If you run Aman from source, the memory is a folder on your disk that you can open in any text editor. [docs/memory.md](docs/memory.md) explains how it works.
 
 Be clear about one thing: **the model sees what you send it.** If you use a hosted model, the company running it sees each chat, including what Aman knows about you and anything it reads for you. To keep everything on your computer, use a local model. Web searches, maps and connectors still reach their own services. [docs/privacy.md](docs/privacy.md) lists exactly what goes where.
 
