@@ -215,6 +215,38 @@ func Write(root, guestPath string, content []byte, mode os.FileMode) error {
 	return nil
 }
 
+// Session is one session tree's measured size and last use, for reporting to the server.
+type Session struct {
+	ID string
+	// Bytes is the space the tree's files occupy on disk, allocated blocks counted, not file sizes.
+	Bytes int64
+	// Entries is how many files and folders the tree holds, the tree's own root counted.
+	Entries  int
+	LastUsed time.Time
+}
+
+// Sessions measures every session tree under parent. The measure is the disk guard's own: allocated
+// bytes, counted without following symlinks, so a link planted in a tree cannot lead the walk outside it.
+func Sessions(parent string) []Session {
+	dirs, err := os.ReadDir(parent)
+	if err != nil {
+		return nil
+	}
+	var out []Session
+	for _, e := range dirs {
+		if !e.IsDir() || !ValidSessionID(e.Name()) {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		bytes, entries := lease.Usage(Root(parent, e.Name()))
+		out = append(out, Session{ID: e.Name(), Bytes: bytes, Entries: entries, LastUsed: info.ModTime()})
+	}
+	return out
+}
+
 // Count returns how many session trees exist under parent.
 func Count(parent string) int {
 	entries, err := os.ReadDir(parent)

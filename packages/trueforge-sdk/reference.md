@@ -8695,7 +8695,7 @@ await client.memory.vault.delete("entry_id");
 <dl>
 <dd>
 
-Lists the authenticated user’s Sentinel audit entries from every chat, newest first, including chats that were deleted. Read-only and paged.
+Lists the authenticated user’s Sentinel audit entries from every chat, newest first, including chats that were deleted. Can be narrowed by outcome and by a from and to time. Read-only and paged.
 </dd>
 </dl>
 </dd>

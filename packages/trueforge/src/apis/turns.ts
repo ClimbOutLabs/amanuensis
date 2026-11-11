@@ -2806,6 +2806,8 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
                 personalizationStore: deps.personalizationStore,
               }),
               logger: deps.logger,
+              // A reminder set in this chat fires back into this chat.
+              session_id: session.session_id,
             },
     });
 
