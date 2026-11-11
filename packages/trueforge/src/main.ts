@@ -140,6 +140,7 @@ import { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { registerMailConnectorFromSavedAccountInBackground } from './runtime/mailAccount';
 import { prepareMailPolicyAtBoot, registerMailConnectorAtBoot } from './runtime/mailConnector';
 import { warmEmbeddingsAtBoot } from './runtime/memory/embeddingRetrieval';
+import { startNightlyMemoryJob } from './runtime/memory/nightlyService';
 import { createOutboundSecretSource } from './runtime/outboundSecrets';
 import { seedOwnerNameAtBoot } from './runtime/ownerName';
 import { createSentinelServices } from './runtime/sentinelServices';
@@ -972,6 +973,10 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   } catch (error) {
     logger.error('Could not delete expired private chats at startup', extractErrorLogFields(error));
   }
+
+  // Once a day per vault, in the quiet hours: ended lines move to Earlier, missed notes are sorted, and lines
+  // that disagree are listed. Best effort: a failure is logged and never reaches a turn.
+  startNightlyMemoryJob({ personaStore, modelProviderStore, globalSettingsStore, tokenFactoryBudget, logger });
 
   return {
     activeTurns,

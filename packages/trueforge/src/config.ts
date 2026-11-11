@@ -2049,6 +2049,13 @@ export interface SharedServerConfiguration {
    */
   MEMORY_PAGE_SORTING: PageSortMode;
   /**
+   * Whether the nightly job tidies pages once a day for each vault, in the server's quiet hours: it moves ended
+   * lines to Earlier, sorts notes the sorter missed (as `MEMORY_PAGE_SORTING` allows) and lists lines that
+   * disagree. It never edits a line's words. Only consulted when `MEMORY_BACKEND` is `markdown`.
+   * Env: `MEMORY_NIGHTLY_JOB`. Default `true`.
+   */
+  MEMORY_NIGHTLY_JOB: boolean;
+  /**
    * Nebius Token Factory API key. Populated from the Secure Vault into the deployment
    * environment; never committed or logged. With a key set, startup also writes a read-only
    * `tokenfactory` provider and makes its default model the chat default.
@@ -2935,6 +2942,11 @@ const shared: SharedServerConfiguration = {
     envKey: 'MEMORY_PAGE_SORTING',
     raw: getEnv('MEMORY_PAGE_SORTING'),
     defaultValue: 'report',
+  }),
+  MEMORY_NIGHTLY_JOB: parseBoolean({
+    envKey: 'MEMORY_NIGHTLY_JOB',
+    raw: getEnv('MEMORY_NIGHTLY_JOB'),
+    defaultValue: true,
   }),
   NEBIUS_API_KEY: getEnv('NEBIUS_API_KEY'),
   SEARCH_PROVIDER: parseSearchProviderChoice({ envKey: 'SEARCH_PROVIDER', raw: getEnv('SEARCH_PROVIDER') }),
