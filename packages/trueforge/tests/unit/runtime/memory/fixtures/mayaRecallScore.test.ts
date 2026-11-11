@@ -129,12 +129,12 @@ const LOG_ONLY_BY_MEANING_SCORES: Record<string, string> = {
   relationship: 'found 5/5, unwanted 0/0, clean 5/5',
   asked_in_other_words: 'found 5/12, unwanted 1/1, clean 5/12',
   household_plan: 'found 5/5, unwanted 0/0, clean 5/5',
-  how_you_write_to_them: 'found 1/5, unwanted 0/0, clean 1/5',
+  how_you_write_to_them: 'found 2/5, unwanted 0/0, clean 2/5',
   current_value_of_changed_fact: 'found 9/13, unwanted 13/13, clean 0/13',
   unconfirmed_claim: 'found 4/4, unwanted 2/2, clean 3/5',
   no_name_in_message: 'found 3/4, unwanted 1/1, clean 2/4',
   temporary_fact: 'found 5/5, unwanted 0/0, clean 5/5',
-  matter_status: 'found 5/5, unwanted 0/0, clean 5/5',
+  matter_status: 'found 4/5, unwanted 0/0, clean 4/5',
   earlier_fact: 'found 4/5, unwanted 0/0, clean 4/5',
 };
 
