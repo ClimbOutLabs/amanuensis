@@ -1,7 +1,7 @@
 ---
 id: memory
 title: Memory
-covers: settings:memory, route:memoryRecall, route:memoryScreen, route:memorySummarize, route:memoryVault, route:memoryPages
+covers: settings:memory, route:memoryRecall, route:memoryScreen, route:memorySummarize, route:memoryPageSorting, route:memoryNightly, route:memoryVault, route:memoryPages
 ---
 
 Aman remembers what matters to you. Ask "What do you remember about me so far?" to see it.
@@ -28,5 +28,7 @@ Open a page to read it in order. A line you said or wrote yourself looks plain. 
 - Choose **Delete page** to remove a page. For a few seconds you can choose **Undo** to cancel it.
 
 Once a night Aman also checks each page for two lines that cannot both be true. When it finds some, the page row says how many pairs disagree, and the page shows **These lines disagree** at the top with both lines and a short reason. Aman changes nothing on the page. If one line is wrong, use **Edit page** to fix it. If the pair is fine, choose **Not a problem** and Aman will not list those two lines again. In the same nightly tidy, a line whose end day has passed moves to Earlier by itself.
+
+Two helpers work on your pages while you are not chatting. Both start off, and both use the model. Open Settings, then Memory, to switch them on. Under **Sort what Aman saves onto pages**, choose Off, **Only note what it would do** or On. With On, what Aman read can only ever be added as not confirmed. Switch on **Tidy pages once a day** to have Aman move ended lines to Earlier, sort notes it missed and list lines that disagree, in the night. A change counts at once, with no restart. You only see these when memory is kept as Markdown files.
 
 Under Recent changes you see the last things that changed on your pages. Choose **Undo** next to one to put those pages back as they were. Aman never erases its history, so an undo is a new change. If a later change also touched the page, Aman tells you which change to undo first.

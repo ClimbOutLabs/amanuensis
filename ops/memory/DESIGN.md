@@ -348,10 +348,17 @@ Two limits apply, on top of the normal recall budget:
 
 One more setting decides whether saved notes are sorted onto pages at all:
 
-| Setting               | Default  | Meaning                                                                                        |
-| --------------------- | -------- | ---------------------------------------------------------------------------------------------- |
-| `MEMORY_PAGE_SORTING` | `report` | `off` does nothing. `report` only records what sorting would do. `on` writes pages. See below. |
-| `MEMORY_NIGHTLY_JOB`  | `true`   | Once a day per vault, tidies pages in the server's quiet hours. See "The nightly job".         |
+| Setting               | Default | Meaning                                                                                        |
+| --------------------- | ------- | ---------------------------------------------------------------------------------------------- |
+| `MEMORY_PAGE_SORTING` | `off`   | `off` does nothing. `report` only records what sorting would do. `on` writes pages. See below. |
+| `MEMORY_NIGHTLY_JOB`  | `false` | Once a day per vault, tidies pages in the server's quiet hours. See "The nightly job".         |
+
+Both are only the starting choice. Settings, then Memory, stores an override in the global settings store
+(`memory_page_sorting_mode`, `memory_nightly_job_enabled`) that wins over the environment value, and clearing it
+falls back to the environment value. `memoryPageSortingSettings.ts` and `memoryNightlySettings.ts` own the read, in
+the style of `memorySummarizeSettings.ts`, and apply the Markdown-only rule for the effective value. The routes are
+`/api/v1/settings/memory-page-sorting` and `/api/v1/settings/memory-nightly`. Both keys travel with an
+administrator's export and are filled in on import only where the new server has none.
 
 A page that would go over the token limit is left out, and so is every page after it. That way the
 model always sees the highest-priority pages. Each turn's memory event records how many pages matched,
@@ -585,7 +592,8 @@ limit. It uses the summarizer's model, so with no model set nothing is sorted. A
 it sorts nothing. A message the person sent is sorted the same way once its note is saved. Each persona's notes
 are sorted into that persona's own pages.
 
-**Three modes, one setting.** `MEMORY_PAGE_SORTING` is `off`, `report` or `on`, and defaults to `report`.
+**Three modes, one setting.** `MEMORY_PAGE_SORTING` is `off`, `report` or `on`, and defaults to `off`. The sorter reads the stored setting after each
+save (the turn's summary context carries the settings store), so a change in Settings counts from the next save.
 `off` calls no model. `report` calls the model and checks the answer exactly as `on` does, but writes no page
 and no line in `.handled-notes`. It adds one JSON line to `.sorter-report.jsonl` in the vault folder: the note
 id, its day, the decisions after the host's rules, and why a reply was refused or a call failed. It never holds
@@ -628,8 +636,9 @@ adds nothing, so the note stays unsorted and recall keeps showing it from the lo
 
 ## The nightly job
 
-`nightlyService.ts` starts a timer with the server (Markdown backend, `MEMORY_NIGHTLY_JOB` on) that looks at the
-server's clock every ten minutes. In the quiet hours (02:00 to 05:00, server time) `runNightlyJob` goes through the
+`nightlyService.ts` starts a timer with the server (Markdown backend) that looks at the server's clock every ten
+minutes. Each look in the quiet hours first reads the stored tidy-up setting (`MEMORY_NIGHTLY_JOB` is only its default,
+off) and the stored sorting setting, so a change in Settings counts without a restart. In the quiet hours (02:00 to 05:00, server time) `runNightlyJob` goes through the
 shared vault and each persona's vault one after the other and stops starting vaults when the hours end. A failure in one
 vault is logged and does not stop the others. The job is not part of any chat, so an incognito chat neither starts it nor
 feeds it.

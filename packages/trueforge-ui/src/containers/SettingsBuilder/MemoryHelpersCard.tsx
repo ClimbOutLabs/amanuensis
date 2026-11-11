@@ -123,7 +123,7 @@ export function MemoryHelpersCard({ markdown }: { markdown: boolean }) {
   return (
     <section aria-labelledby="memory-helpers-heading" className="rounded-xl border border-border bg-card-bg p-4">
       <h4 id="memory-helpers-heading" className="text-sm font-medium text-text-primary">
-        Pages
+        Sorting and tidying
       </h4>
       <p className="mt-1 text-sm text-text-secondary">Both of these start off. Switch them on when you want them.</p>
       <div className="mt-4 border-t border-border pt-4">
