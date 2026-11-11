@@ -13,6 +13,21 @@ Deliberate principles: recall is user-visible byte for byte; one dispatch
 path, no side channel; empty recall returns a distinguishable empty, never
 filler; credentials by reference, never by value.
 
+## Where a note came from, and the one-time review
+
+Each Markdown note closes with `> From you` or `> External source: <what>`. A note with no such line counts as external. The start-up step gave older notes `> External source: no record`; it is the only step that rewrites a dated file.
+
+The person can review older notes once. A note is offered only when all of these hold, and any check that cannot be made refuses it:
+
+- It closes with exactly `> External source: no record`, names a chat and carries no note marker.
+- It has no edit or delete marker.
+- Its chat still exists, belongs to the same person and ran under the persona whose vault holds the note.
+- The turn that saved the note is found by its finish time. That turn and every turn before it in the chat attached no file and received no tool result from outside. `runtime/memory/turnOutsideInput.ts` owns that rule. The live save and the review both ask it. Turns after the saving turn do not count.
+
+Marking never rewrites a dated file. `markReviewedNotesFromYou` appends one line per note to `.reviewed-from-you` in the vault: the entry id, a tab, and the SHA-256 of the entry's text as the dated file holds it. `scanNamespaceEntries` applies the marks to each scanned entry before vault markers, so recall, the Memories page, the search index, the vault export and an edit all see `> From you`. A mark counts only while the hash still matches and the note still closes with exactly `> External source: no record`; otherwise it is ignored, so a forged or stale line does nothing. The full export carries the file and the import retargets its ids like vault markers.
+
+The review routes are `GET` and `POST /api/v1/memory/vault/review`. The list examines at most 200 notes per request and returns a cursor. The apply route takes at most 200 ids, and runs the full check again for each id before it records anything. There is no route that marks notes without ids the person sent.
+
 ## Secret references
 
 The server stores MCP auth header values plaintext in the manifest jsonb

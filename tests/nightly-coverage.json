@@ -36,6 +36,7 @@
     "screen:first-run": "Home on a fresh install, with the first-run guide.",
     "screen:help-chat": "The chat that \"Help, I'm stuck\" opens.",
     "screen:home": "The Home screen and its More menu.",
+    "screen:memory-review": "The list where older notes with no record of their source are ticked as the person's own.",
     "screen:memory-sharing": "The grid that sets which personas share which memories.",
     "screen:phone-width": "Home, a chat and every Settings tab at phone widths, with nothing cut off at the side.",
     "screen:settings-tabs": "The strip of Settings tabs.",
@@ -464,6 +465,10 @@
         "packages/frontend/tests/homeCards.browser.test.ts"
       ]
     },
+    "screen:memory-review": {
+      "set": "memory",
+      "tests": []
+    },
     "screen:memory-sharing": {
       "set": "memory",
       "tests": ["packages/frontend/tests/memorySharing.browser.test.ts"]
@@ -786,6 +791,7 @@
     "route:tokenFactoryUsage",
     "route:toolOutputScreen",
     "route:voice",
+    "screen:memory-review",
     "settings:account",
     "tour:company",
     "tour:explain",

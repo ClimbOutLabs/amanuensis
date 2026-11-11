@@ -128,5 +128,7 @@
   "Show": "packages/trueforge-ui/src/sentinel/AuditLogSettings.tsx",
   "From": "packages/trueforge-ui/src/sentinel/AuditLogSettings.tsx",
   "To": "packages/trueforge-ui/src/sentinel/AuditLogSettings.tsx",
-  "Clear dates": "packages/trueforge-ui/src/sentinel/AuditLogSettings.tsx"
+  "Clear dates": "packages/trueforge-ui/src/sentinel/AuditLogSettings.tsx",
+  "Review older notes": "packages/trueforge-ui/src/atoms/memory/MemoryReviewPanel.tsx",
+  "Mark the ticked notes as from me": "packages/trueforge-ui/src/atoms/memory/MemoryReviewPanel.tsx"
 }
