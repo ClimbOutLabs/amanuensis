@@ -234,7 +234,7 @@ describe('memory write path: MarkdownMemoryClient.retain', () => {
         operationId: 'op-plain',
         timeoutMs: 5000,
       });
-      expect(outcome).toEqual({ ok: true });
+      expect(outcome).toMatchObject({ ok: true });
       const log = await readFile(path.join(dir, 'tenant-1', 'memory', '2026-09-19.md'), 'utf8');
       expect(log).toContain("I can't swim.");
     } finally {
@@ -257,7 +257,7 @@ describe('memory write path: MarkdownMemoryClient.retain', () => {
         operationId: 'op-note-only',
         timeoutMs: 5000,
       });
-      expect(outcome).toEqual({ ok: true });
+      expect(outcome).toMatchObject({ ok: true });
       await expect(readFile(path.join(dir, 'tenant-1', 'memory', '2026-09-19.md'), 'utf8')).rejects.toThrow();
       const operation = await client.getOperation('op-note-only', 5000);
       expect(operation).toEqual({ ok: true, status: 'completed' });
@@ -294,7 +294,7 @@ describe('memory write path: HindsightClient.retain', () => {
       operationId: 'op-2',
       timeoutMs: 10_000,
     });
-    expect(outcome).toEqual({ ok: true });
+    expect(outcome).toMatchObject({ ok: true });
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 });

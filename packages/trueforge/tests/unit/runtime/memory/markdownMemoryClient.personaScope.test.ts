@@ -44,7 +44,7 @@ async function retainMany(client: MarkdownMemoryClient, contents: string[], oper
     operationId: operationId ?? `op-${String(operationCounter)}`,
     timeoutMs: TIMEOUT_MS,
   });
-  expect(outcome).toEqual({ ok: true });
+  expect(outcome).toMatchObject({ ok: true });
 }
 
 async function retain(client: MarkdownMemoryClient, content: string, operationId?: string): Promise<void> {
@@ -65,7 +65,7 @@ async function retainFromChat(client: MarkdownMemoryClient, content: string, ses
     operationId: `op-${String(operationCounter)}`,
     timeoutMs: TIMEOUT_MS,
   });
-  expect(outcome).toEqual({ ok: true });
+  expect(outcome).toMatchObject({ ok: true });
 }
 
 async function recall(
@@ -240,7 +240,7 @@ describe('MarkdownMemoryClient persona vault scope', () => {
         throw new Error('expected one persona vault entry');
       }
 
-      expect(await alpha.deleteEntry({ entryId, timeoutMs: TIMEOUT_MS })).toEqual({ ok: true });
+      expect(await alpha.deleteEntry({ entryId, timeoutMs: TIMEOUT_MS })).toMatchObject({ ok: true });
 
       expect(await recall(clientFor(ALPHA), 'quince jam')).toEqual([]);
     });

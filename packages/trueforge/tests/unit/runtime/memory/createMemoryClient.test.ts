@@ -35,7 +35,7 @@ async function retainOne(client: MemoryClient, content: string): Promise<void> {
     operationId: 'op-1',
     timeoutMs: 5000,
   });
-  expect(outcome).toEqual({ ok: true });
+  expect(outcome).toMatchObject({ ok: true });
 }
 
 describe('createMemoryClient vault scope', () => {

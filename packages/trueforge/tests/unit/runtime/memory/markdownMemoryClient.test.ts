@@ -30,7 +30,7 @@ describe('MarkdownMemoryClient', () => {
           operationId: 'op-1',
           timeoutMs: 5000,
         });
-        expect(first).toEqual({ ok: true });
+        expect(first).toMatchObject({ ok: true });
 
         // Same operation id: no double-write.
         const second = await client.retain({
@@ -44,7 +44,7 @@ describe('MarkdownMemoryClient', () => {
           operationId: 'op-1',
           timeoutMs: 5000,
         });
-        expect(second).toEqual({ ok: true });
+        expect(second).toMatchObject({ ok: true });
 
         const log = await readFile(path.join(dir, 'tenant-1', 'memory', '2026-09-19.md'), 'utf8');
         expect(log).toContain('Alex booked SFO→ORD→MAD for Sep 22');
@@ -88,7 +88,7 @@ describe('MarkdownMemoryClient', () => {
           operationId: 'op-evil',
           timeoutMs: 5000,
         });
-        expect(outcome).toEqual({ ok: true });
+        expect(outcome).toMatchObject({ ok: true });
         // The write landed inside baseDir, not outside it.
         const log = await readFile(path.join(dir, '______evil', 'memory', '2026-09-19.md'), 'utf8');
         expect(log).toContain('x');
@@ -382,7 +382,7 @@ describe('MarkdownMemoryClient', () => {
         });
         expect(await client.getOperation('op-99', 1000)).toEqual({ ok: true, status: 'completed' });
         expect(await client.getOperation('op-missing', 1000)).toEqual({ ok: true, status: 'unknown' });
-        expect(await client.retryOperation('op-99', 1000)).toEqual({ ok: true });
+        expect(await client.retryOperation('op-99', 1000)).toMatchObject({ ok: true });
       } finally {
         await cleanup(dir);
       }

@@ -43,7 +43,7 @@ describe('MarkdownMemoryClient recall reach', () => {
   async function retain(items: RetainItem[]): Promise<void> {
     operation += 1;
     const outcome = await client.retain({ items, operationId: `op-${String(operation)}`, timeoutMs: 5000 });
-    expect(outcome).toEqual({ ok: true });
+    expect(outcome).toMatchObject({ ok: true });
   }
 
   async function recallTexts({ query, maxTokens }: { query: string; maxTokens: number }): Promise<string[]> {

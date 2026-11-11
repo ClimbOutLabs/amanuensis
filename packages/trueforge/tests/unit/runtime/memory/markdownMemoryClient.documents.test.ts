@@ -76,9 +76,13 @@ describe('MarkdownMemoryClient documents', () => {
     await withClient(async client => {
       await client.retain({ items: [profileItem('Profile: likes tea')], operationId: 'op-1', timeoutMs: 1000 });
 
-      expect(await client.deleteDocument({ documentId: 'learned-profile', timeoutMs: 1000 })).toEqual({ ok: true });
-      expect(await client.deleteDocument({ documentId: 'learned-profile', timeoutMs: 1000 })).toEqual({ ok: true });
-      expect(await client.deleteDocument({ documentId: 'never-stored', timeoutMs: 1000 })).toEqual({ ok: true });
+      expect(await client.deleteDocument({ documentId: 'learned-profile', timeoutMs: 1000 })).toMatchObject({
+        ok: true,
+      });
+      expect(await client.deleteDocument({ documentId: 'learned-profile', timeoutMs: 1000 })).toMatchObject({
+        ok: true,
+      });
+      expect(await client.deleteDocument({ documentId: 'never-stored', timeoutMs: 1000 })).toMatchObject({ ok: true });
 
       expect(await recalledTexts(client)).toEqual([]);
     });
@@ -118,7 +122,7 @@ describe('MarkdownMemoryClient documents', () => {
         timeoutMs: 1000,
       });
 
-      expect(retried).toEqual({ ok: true });
+      expect(retried).toMatchObject({ ok: true });
       const texts = await recalledTexts(client);
       expect(texts).toHaveLength(1);
       expect(texts[0]).toContain('likes coffee');

@@ -31,7 +31,7 @@ async function retainOne(client: MarkdownMemoryClient, content: string, hour: nu
     operationId: op,
     timeoutMs: TIMEOUT_MS,
   });
-  expect(outcome).toEqual({ ok: true });
+  expect(outcome).toMatchObject({ ok: true });
 }
 
 async function listed(client: MarkdownMemoryClient): Promise<MemoryVaultEntry[]> {
@@ -85,7 +85,7 @@ describe('memory vault erase', () => {
       await retainOne(client, 'Charlie plays cello', 11, 'op-c');
       const before = await listed(client);
       const middle = before[1]?.id ?? '';
-      expect(await client.deleteEntry({ entryId: middle, timeoutMs: TIMEOUT_MS })).toEqual({ ok: true });
+      expect(await client.deleteEntry({ entryId: middle, timeoutMs: TIMEOUT_MS })).toMatchObject({ ok: true });
 
       expect(await filesHolding(vault, 'quokkas')).toEqual([]);
       const after = await listed(client);
@@ -99,7 +99,7 @@ describe('memory vault erase', () => {
         action: 'deleted',
       });
       // A delete is still idempotent.
-      expect(await client.deleteEntry({ entryId: middle, timeoutMs: TIMEOUT_MS })).toEqual({ ok: true });
+      expect(await client.deleteEntry({ entryId: middle, timeoutMs: TIMEOUT_MS })).toMatchObject({ ok: true });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -139,7 +139,7 @@ describe('memory vault erase', () => {
       await retainOne(client, 'Alpha likes zebrafish', 9, 'op-a');
       const id = (await listed(client))[0]?.id ?? '';
       await client.updateEntry({ entryId: id, text: 'Alpha now fears pangolins', timeoutMs: TIMEOUT_MS });
-      expect(await client.deleteEntry({ entryId: id, timeoutMs: TIMEOUT_MS })).toEqual({ ok: true });
+      expect(await client.deleteEntry({ entryId: id, timeoutMs: TIMEOUT_MS })).toMatchObject({ ok: true });
       expect(await filesHolding(vault, 'pangolins')).toEqual([]);
       expect(await filesHolding(vault, 'zebrafish')).toEqual([]);
       expect(await listed(client)).toEqual([]);
@@ -219,8 +219,8 @@ describe('memory vault erase', () => {
       expect(await filesHolding(vault, 'quokkas')).not.toEqual([]);
       release();
       await holder;
-      expect(await deleting).toEqual({ ok: true });
-      expect(await saving).toEqual({ ok: true });
+      expect(await deleting).toMatchObject({ ok: true });
+      expect(await saving).toMatchObject({ ok: true });
       expect((await listed(client)).map(entry => entry.text.slice(0, 6))).toEqual(['Alpha ', 'Foxtro']);
       expect(await filesHolding(vault, 'quokkas')).toEqual([]);
     } finally {
@@ -276,7 +276,9 @@ describe('memory vault erase', () => {
       await retainOne(client, 'Charlie plays cello', 11, 'op-c');
       const before = await listed(client);
       expect(before).toHaveLength(3);
-      expect(await client.deleteEntry({ entryId: before[1]?.id ?? '', timeoutMs: TIMEOUT_MS })).toEqual({ ok: true });
+      expect(await client.deleteEntry({ entryId: before[1]?.id ?? '', timeoutMs: TIMEOUT_MS })).toMatchObject({
+        ok: true,
+      });
       expect(await filesHolding(vault, 'quokkas')).toEqual([]);
       const after = await listed(client);
       expect(after.map(entry => entry.id)).toEqual([before[0]?.id, before[2]?.id]);

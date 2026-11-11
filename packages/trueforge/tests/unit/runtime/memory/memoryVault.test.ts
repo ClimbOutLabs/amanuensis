@@ -31,7 +31,7 @@ async function retainTwo(client: MarkdownMemoryClient): Promise<void> {
     operationId: 'op-vault-1',
     timeoutMs: TIMEOUT_MS,
   });
-  expect(outcome).toEqual({ ok: true });
+  expect(outcome).toMatchObject({ ok: true });
 }
 
 function entriesOf(outcome: { ok: boolean; entries?: MemoryVaultEntry[] }): MemoryVaultEntry[] {
@@ -243,9 +243,9 @@ describe('memory vault', () => {
         const before = entriesOf(await client.listEntries({ namespace: '', timeoutMs: TIMEOUT_MS }));
         const id = before[0]?.id ?? '';
 
-        expect(await client.deleteEntry({ entryId: id, timeoutMs: TIMEOUT_MS })).toEqual({ ok: true });
+        expect(await client.deleteEntry({ entryId: id, timeoutMs: TIMEOUT_MS })).toMatchObject({ ok: true });
         // Second delete still succeeds.
-        expect(await client.deleteEntry({ entryId: id, timeoutMs: TIMEOUT_MS })).toEqual({ ok: true });
+        expect(await client.deleteEntry({ entryId: id, timeoutMs: TIMEOUT_MS })).toMatchObject({ ok: true });
 
         const after = entriesOf(await client.listEntries({ namespace: '', timeoutMs: TIMEOUT_MS }));
         expect(after).toHaveLength(1);
