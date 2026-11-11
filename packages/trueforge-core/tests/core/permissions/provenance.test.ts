@@ -1,15 +1,18 @@
 import {
   carriedPrivateDetails,
+  type ChatProvenance,
   emptyChatProvenance,
   hasReadContent,
   isTrustedLink,
   namesUrl,
   recordEmailText,
   recordPersonText,
+  recordReplyText,
   recordSearchResults,
   recordUntrustedText,
   steeredDestinations,
   steeredLinks,
+  steeredUrl,
 } from '../../../src/core/permissions/provenance';
 
 // Invented hosts and people only.
@@ -122,6 +125,67 @@ describe('where a link came from', () => {
         found => found.value,
       ),
     ).toEqual([]);
+  });
+
+  it("steers an address only the assistant's own reply named, and says the reply is where it was", () => {
+    const provenance = emptyChatProvenance();
+    recordPersonText({ provenance, text: 'who takes print orders' });
+    recordReplyText({ provenance, text: 'Orders go to Bookings@Harbour-Prints.example.' });
+    expect(
+      steeredDestinations({
+        provenance,
+        addresses: ['bookings@harbour-prints.example'],
+        values: [],
+        reply_sender: null,
+      }),
+    ).toEqual([{ value: 'bookings@harbour-prints.example', kind: 'address', origin: { source: 'reply', name: null } }]);
+  });
+
+  it.each([
+    { name: 'before the reply', first: 'person' },
+    { name: 'after the reply', first: 'reply' },
+  ])('never steers an address the person gave $name, though the reply names it too', ({ first }) => {
+    const provenance = emptyChatProvenance();
+    const person = (): void => recordPersonText({ provenance, text: 'email dana@example.org about Friday' });
+    const reply = (): void => recordReplyText({ provenance, text: 'I will write to dana@example.org.' });
+    if (first === 'person') {
+      person();
+      reply();
+    } else {
+      reply();
+      person();
+    }
+    expect(
+      steeredDestinations({ provenance, addresses: ['dana@example.org'], values: [], reply_sender: null }),
+    ).toEqual([]);
+  });
+
+  it('names the place the assistant read an address over its own reply that repeated it', () => {
+    const origin = (provenance: ChatProvenance) =>
+      steeredDestinations({ provenance, addresses: ['desk@vendor.example'], values: [], reply_sender: null }).map(
+        found => found.origin.source,
+      );
+    const replyFirst = emptyChatProvenance();
+    recordReplyText({ provenance: replyFirst, text: 'Their desk is desk@vendor.example.' });
+    recordUntrustedText({ provenance: replyFirst, text: 'Contact desk@vendor.example', source: 'page' });
+    expect(origin(replyFirst)).toEqual(['page']);
+    const readFirst = emptyChatProvenance();
+    recordUntrustedText({ provenance: readFirst, text: 'Contact desk@vendor.example', source: 'page' });
+    recordReplyText({ provenance: readFirst, text: 'Their desk is desk@vendor.example.' });
+    expect(origin(readFirst)).toEqual(['page']);
+  });
+
+  it("leaves a reply's links and sites as they were, and does not count a reply as other people's content", () => {
+    const provenance = emptyChatProvenance();
+    recordReplyText({
+      provenance,
+      text: 'See https://docs.python.example/3/ or forms.example, or call +1 415 555 0132, or write to me@home.example.',
+    });
+    expect(hasReadContent(provenance)).toBe(false);
+    expect(steeredUrl({ provenance, url: 'https://docs.python.example/3/library/asyncio.html?x=1' })).toBe(false);
+    expect(steeredUrl({ provenance, url: 'https://forms.example/' })).toBe(false);
+    expect(isTrustedLink({ provenance, url: 'https://docs.python.example/3/' })).toBe(false);
+    expect(carriedPrivateDetails({ provenance, values: ['me@home.example +1 415 555 0132'] })).toEqual([]);
   });
 
   it('fails toward asking once read content carried more addresses than it can keep', () => {
