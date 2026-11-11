@@ -26,6 +26,8 @@ An incognito chat reads memory but never writes to it. Aman recalls from the vau
 
 Memories are scoped by persona. While a persona is active, what it learns is kept in that persona's own vault and is private to it until you share the vault. With no persona active, memories go to the shared vault, which every persona can read. A persona recalls from its own vault, the shared vault, and any vault shared with it. Renaming or deleting a persona never deletes its vault.
 
+When you delete a memory on the Memories page, Aman removes its text from your disk. When you edit one, the old wording is replaced by the new wording. A backup or an export you made earlier still holds what it held, so delete those too if you want the words gone from them.
+
 ## Searching past chats
 
 Aman can also look through your earlier chats when you ask, for example "what did we decide about the trip?". This is off until you turn on past-chat search in Settings. While it is off, nothing from your chats is added to the search. When you turn it on, Aman adds your earlier chats in the background, then adds each new chat as it finishes. When you turn it off, everything it added is removed.

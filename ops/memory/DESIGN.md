@@ -157,6 +157,30 @@ the nightly pass can learn how the person writes to each contact.
 - **Old files.** Notes already on disk keep their exact bytes. Only a new source word, `sent_mail`, can
   appear in the hidden note marker.
 
+## Deleting and editing a saved note
+
+Saved notes live in dated files, `memory/YYYY-MM-DD.md`, and a note's id is its file and its position there.
+Deleting or editing a note on the Memories page appends a marker to `.vault-tombstones.md` (every reader applies
+it) and then rewrites the dated file in place, so the text does not stay on disk. All of this happens under the
+vault lock, and saving a note takes the same lock, so a note saved during a rewrite is not lost.
+
+- A deleted note's block becomes the bare line `## [erased]`. It still counts as a position, so later notes keep
+  their ids, and readers skip it. Nothing else of the note is left in the file.
+- An edited note's block becomes the new wording, with the hidden lines it carried (heading time, chat id,
+  document id, note line, id-shaped context line) kept. A `## ` line in the new wording is stored with a leading
+  backslash so it cannot split the entry. Readers still take the wording from the marker.
+- Only each note's latest marker is kept in the marker file, so an earlier edit's wording does not stay there.
+- The file is written whole to a temporary file in the same folder and renamed over the old one.
+- The marker is written first, then the erase. If the erase fails, the person sees "try again", the marker
+  stays, and a retry of the same delete or edit, or the next save to the vault, finishes the erase.
+- Notes deleted or edited before this existed are cleaned the same way the next time the vault is written to,
+  when its marker file has changed since the last full run in this process. Running it again changes nothing.
+
+Other copies of note text on disk: `.embeddings.json` and `.statement-embeddings.json` hold a hash and a vector per
+entry, never the text; a deleted note's vector is dropped at the next index pass and an edited note's is
+replaced. `.memory-history` tracks only `people/` and `matters/`, never the dated files. Exports made earlier,
+and backups, keep what they held.
+
 ## Pages
 
 Pages are short Markdown files about one person or one matter. They sit beside the daily log in a
