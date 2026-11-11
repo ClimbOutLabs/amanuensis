@@ -252,7 +252,9 @@ describe('Home Assistant refused targets', () => {
       ),
     ).toBe(true);
     expect(
-      isHomeAssistantRefusedTarget(homeAssistantTarget({ tool_name: 'HassTurnOn', params: { device_class: ['gate'] } })),
+      isHomeAssistantRefusedTarget(
+        homeAssistantTarget({ tool_name: 'HassTurnOn', params: { device_class: ['gate'] } }),
+      ),
     ).toBe(true);
     expect(
       isHomeAssistantRefusedTarget(
@@ -266,9 +268,7 @@ describe('Home Assistant refused targets', () => {
       isHomeAssistantRefusedTarget(homeAssistantTarget({ tool_name: 'HassTurnOn', params: { area: 'Garage' } })),
     ).toBe(true);
     expect(
-      isHomeAssistantRefusedTarget(
-        homeAssistantTarget({ tool_name: 'HassTurnOn', params: { floor: 'Ground floor' } }),
-      ),
+      isHomeAssistantRefusedTarget(homeAssistantTarget({ tool_name: 'HassTurnOn', params: { floor: 'Ground floor' } })),
     ).toBe(true);
     expect(
       isHomeAssistantRefusedTarget(
@@ -367,8 +367,6 @@ describe('Home Assistant grant scopes and labels', () => {
   it('says several domains in plain words, and one domain not at all', () => {
     expect(homeAssistantDomainsLabel(['light'])).toBeNull();
     expect(homeAssistantDomainsLabel(['light', 'switch'])).toBe('the lights and switches');
-    expect(homeAssistantDomainsLabel(['light', 'switch', 'fan', 'cover'])).toBe(
-      'the lights and switches and 2 more',
-    );
+    expect(homeAssistantDomainsLabel(['light', 'switch', 'fan', 'cover'])).toBe('the lights and switches and 2 more');
   });
 });
