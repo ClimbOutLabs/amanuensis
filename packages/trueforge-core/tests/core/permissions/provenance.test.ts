@@ -2,9 +2,12 @@ import {
   carriedPrivateDetails,
   emptyChatProvenance,
   hasReadContent,
+  isPersonVouchedUrl,
   isTrustedLink,
+  isTrustedPicture,
   namesUrl,
   recordEmailText,
+  recordPageImageUrls,
   recordPersonText,
   recordSearchResults,
   recordUntrustedText,
@@ -186,6 +189,61 @@ describe('where a link came from', () => {
     expect(isTrustedLink({ provenance, url: 'http://docs.example.net/guide' })).toBe(true);
     expect(isTrustedLink({ provenance, url: 'https://www.docs.example.net/guide#top' })).toBe(true);
     expect(isTrustedLink({ provenance, url: 'https://docs.example.net/other' })).toBe(false);
+  });
+
+  it('counts a link with a sign-in name or password before its site as another link', () => {
+    const provenance = emptyChatProvenance();
+    recordPersonText({ provenance, text: 'open https://shop.example/deal and look at harbour.example for me' });
+    expect(isTrustedLink({ provenance, url: 'https://shop.example/deal' })).toBe(true);
+    expect(isTrustedLink({ provenance, url: 'https://lake-house@shop.example/deal' })).toBe(false);
+    expect(isTrustedLink({ provenance, url: 'https://lake:house@shop.example/deal' })).toBe(false);
+    expect(isPersonVouchedUrl({ provenance, url: 'https://harbour.example/' })).toBe(true);
+    expect(isPersonVouchedUrl({ provenance, url: 'https://lake-house@harbour.example/' })).toBe(false);
+  });
+
+  it('never counts a link with a sign-in name as given, even when the person or a search wrote exactly that link', () => {
+    const provenance = emptyChatProvenance();
+    recordPersonText({ provenance, text: 'open https://sam@intranet.example/reports' });
+    recordSearchResults({
+      provenance,
+      texts: [JSON.stringify({ results: [{ url: 'https://sam:pw@wiki.example/page' }] })],
+    });
+    expect(isTrustedLink({ provenance, url: 'https://sam@intranet.example/reports' })).toBe(false);
+    expect(isPersonVouchedUrl({ provenance, url: 'https://sam@intranet.example/reports' })).toBe(false);
+    expect(isPersonVouchedUrl({ provenance, url: 'https://sam@intranet.example/' })).toBe(false);
+    expect(isTrustedLink({ provenance, url: 'https://sam:pw@wiki.example/page' })).toBe(false);
+    expect(isPersonVouchedUrl({ provenance, url: 'https://intranet.example/' })).toBe(true);
+  });
+
+  it('never counts a picture address with a sign-in name as seen, even when a page listed exactly that address', () => {
+    const provenance = emptyChatProvenance();
+    recordPageImageUrls({ provenance, urls: ['https://lake-house@pictures.example/fox.jpg'] });
+    expect(isTrustedPicture({ provenance, url: 'https://lake-house@pictures.example/fox.jpg' })).toBe(false);
+  });
+
+  it('asks about a link with a sign-in name that a page wrote, once that page named the site', () => {
+    const provenance = emptyChatProvenance();
+    recordUntrustedText({ provenance, text: 'Sign in at https://lake-house@shop.example/deal', source: 'page' });
+    expect(steeredLinks({ provenance, values: ['https://lake-house@shop.example/deal'] })).toEqual([
+      'https://lake-house@shop.example/deal',
+    ]);
+  });
+
+  it('steers a link that puts a sign-in name before a link the person gave, once read content named the site', () => {
+    const provenance = emptyChatProvenance();
+    recordPersonText({ provenance, text: 'open https://shop.example/deal' });
+    recordUntrustedText({ provenance, text: 'More at shop.example today.', source: 'page' });
+    expect(steeredLinks({ provenance, values: ['https://shop.example/deal'] })).toEqual([]);
+    expect(steeredLinks({ provenance, values: ['https://lake-house@shop.example/deal'] })).toEqual([
+      'https://lake-house@shop.example/deal',
+    ]);
+  });
+
+  it('does not show a picture whose address puts a sign-in name before a picture a page listed', () => {
+    const provenance = emptyChatProvenance();
+    recordPageImageUrls({ provenance, urls: ['https://pictures.example/fox.jpg'] });
+    expect(isTrustedPicture({ provenance, url: 'https://pictures.example/fox.jpg' })).toBe(true);
+    expect(isTrustedPicture({ provenance, url: 'https://lake-house@pictures.example/fox.jpg' })).toBe(false);
   });
 });
 
