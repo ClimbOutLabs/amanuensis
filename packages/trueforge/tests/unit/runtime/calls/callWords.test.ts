@@ -61,8 +61,8 @@ describe('the words a call may carry', () => {
   });
 
   it('carries nothing longer than 300 characters', () => {
-    const sentence = 'The fox jumps over the lazy dog. ';
-    expect(callWords(sentence.repeat(9).trim())).toBeDefined();
-    expect(callWords(sentence.repeat(10).trim())).toBeUndefined();
+    const sentence = 'The fox jumps over the lazy dog and ';
+    expect(callWords(sentence.repeat(8).trim())).toBeDefined();
+    expect(callWords(sentence.repeat(9).trim())).toBeUndefined();
   });
 });
