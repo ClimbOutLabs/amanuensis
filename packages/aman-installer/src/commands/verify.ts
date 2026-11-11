@@ -10,6 +10,7 @@ import {
   verifyOkLine,
   type Problem,
 } from '../messages.ts';
+import { MANIFEST_ASSET_NAME, MANIFEST_SIGNATURE_ASSET_NAME } from '../release/assetNames.ts';
 import { checkDownloadedFile, checkSignedManifest } from '../release/verify.ts';
 
 export interface VerifyDeps {
@@ -40,11 +41,11 @@ export async function runVerify(deps: VerifyDeps, options: { file: string | unde
   }
   const file = options.file;
   const dir = dirname(file);
-  const manifestBytes = await readOrNull(join(dir, 'manifest.json'));
+  const manifestBytes = await readOrNull(join(dir, MANIFEST_ASSET_NAME));
   if (manifestBytes === null) {
     return fail(VERIFY_MANIFEST_MISSING);
   }
-  const signatureBytes = await readOrNull(join(dir, 'manifest.json.minisig'));
+  const signatureBytes = await readOrNull(join(dir, MANIFEST_SIGNATURE_ASSET_NAME));
   if (signatureBytes === null) {
     return fail(VERIFY_SIGNATURE_MISSING);
   }

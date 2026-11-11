@@ -145,7 +145,7 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
       </header>
 
       <div className="border-t border-border px-4 py-3">
-        <p className="mb-2 text-text-secondary">What will be sent</p>
+        <p className="mb-2 text-text-secondary">{sending ? 'What will be sent' : 'What will be saved'}</p>
         <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1.5">
           {email.reply_in_thread !== null && (
             <>
