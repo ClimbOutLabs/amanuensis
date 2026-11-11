@@ -37,7 +37,7 @@ const SUMMARIZE_MAX_CHARACTERS = 2000;
 const SUMMARIZE_MAX_FACTS = 8;
 
 /** Bound, in characters, on each side of the exchange sent to the summarizer. */
-const SUMMARIZE_MAX_INPUT_CHARACTERS = 8000;
+export const SUMMARIZE_MAX_INPUT_CHARACTERS = 8000;
 
 /** How much of a long side is kept from its start, and from its end. */
 const SUMMARIZE_KEPT_HEAD_CHARACTERS = 2000;
@@ -582,6 +582,103 @@ export function summaryLlmResolver(params: {
   };
 }
 
+/** What one helper-model question came back with: the reply text, or why there is none. */
+export type HelperModelAnswer =
+  | { status: 'answered'; reply: string; cutShort: boolean }
+  | {
+      status: 'failed';
+      reason: string;
+      fallback: Extract<SummaryFallbackReason, 'model_unresolved' | 'model_failed' | 'model_timeout'>;
+    };
+
+/**
+ * Asks the summarization model one question, under the shared limit on concurrent calls. The reply is cut off
+ * by the token cap at most once more: when it holds no readable answer it is asked again with more room. A
+ * timeout or a repetition stop gets one retry through a fresh client. Never throws.
+ */
+export async function askSummaryModel({
+  messages,
+  modelFqn,
+  resolveLlm,
+  isReadable,
+  maxOutputTokens = SUMMARIZE_MAX_OUTPUT_TOKENS,
+  logger,
+}: {
+  messages: { role: 'system' | 'user'; content: string }[];
+  modelFqn: string;
+  resolveLlm: (modelFqn: string) => Promise<ILLM>;
+  /** Says whether a reply holds an answer; a cut-off reply that does not is asked again with more room. */
+  isReadable: (reply: string) => boolean;
+  maxOutputTokens?: number | undefined;
+  logger: Logger;
+}): Promise<HelperModelAnswer> {
+  // Bound concurrency across overlapping turn drains; the slot is acquired before the LLM client is built
+  // so queueing never eats the call budget.
+  return withSummarizeSlot(async (): Promise<HelperModelAnswer> => {
+    let llm: ILLM;
+    try {
+      llm = await resolveLlm(modelFqn);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      logger.debug('Memory summarization model did not resolve', { reason });
+      return { status: 'failed', reason, fallback: 'model_unresolved' };
+    }
+    // One attempt over one client: the call, its cut-off retry, and the reading of the reply. Both attempts
+    // run this same shape, so a retried attempt behaves exactly like a first one.
+    const runAttempt = async (attemptLlm: ILLM): Promise<HelperModelAnswer> => {
+      // Cap the generation so the model cannot burn tokens for the full call budget on output that
+      // would be discarded anyway.
+      let result = await attemptLlm.createNonStream({ messages, max_tokens: maxOutputTokens });
+      let reply = flattenLlmContent(result.output.content ?? null).trim();
+      // A reply cut off by the cap with no answer in it (a model that spent the cap thinking)
+      // gets one retry with more room, never a guess.
+      if (result.finish_reason === 'length' && (reply === '' || !isReadable(reply))) {
+        logger.debug('Memory summarization was cut off by its token cap; retrying with more room');
+        result = await attemptLlm.createNonStream({
+          messages,
+          max_tokens: Math.max(maxOutputTokens, SUMMARIZE_RETRY_MAX_OUTPUT_TOKENS),
+        });
+        reply = flattenLlmContent(result.output.content ?? null).trim();
+      }
+      return { status: 'answered', reply, cutShort: result.finish_reason === 'length' && reply === '' };
+    };
+    try {
+      try {
+        return await runAttempt(llm);
+      } catch (error) {
+        if (!isTimeoutError(error) && !isRepetitionError(error)) {
+          throw error;
+        }
+        // A timeout or a repetition stop gets one retry, as a cut-off reply does. Either
+        // failure sits in the attempt, not in the request: the model may only have been
+        // crowded out by other turns that have since finished, or its reasoning may have
+        // looped this once. The retry resolves a fresh client, because the timed-out
+        // client cannot serve it (its time budget is spent and its abort signal has
+        // fired). It asks for the same output as the first attempt: a longer reply would
+        // take more time, not arrive any likelier.
+        logger.debug(
+          isTimeoutError(error)
+            ? 'Memory summarization timed out; retrying once'
+            : 'Memory summarization stopped on repeated reasoning; retrying once',
+        );
+        let retryLlm: ILLM;
+        try {
+          retryLlm = await resolveLlm(modelFqn);
+        } catch (resolveError) {
+          const resolveReason = resolveError instanceof Error ? resolveError.message : String(resolveError);
+          logger.debug('Memory summarization model did not resolve for the retry', { reason: resolveReason });
+          throw error;
+        }
+        return await runAttempt(retryLlm);
+      }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      logger.debug('Memory summarization failed', { reason });
+      return { status: 'failed', reason, fallback: isTimeoutError(error) ? 'model_timeout' : 'model_failed' };
+    }
+  });
+}
+
 /**
  * Pulls the durable facts out of one turn's exchange via the LLM.
  *
@@ -624,106 +721,48 @@ export async function summarizeTurnContent(params: {
   if (summarizationModelFqn === undefined || summarizationModelFqn.trim() === '') {
     return { status: 'skipped', reason: 'no-model-configured' };
   }
-  // Bound concurrency across overlapping turn drains; skips above never hold a slot.
-  // The slot is acquired before the LLM client is built so queueing never eats the
-  // call budget.
-  return withSummarizeSlot(async () => {
-    const resolveLlm = params.resolveLlm ?? summaryLlmResolver(params);
-    let llm: ILLM;
-    try {
-      llm = await resolveLlm(summarizationModelFqn);
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      logger.debug('Memory summarization model did not resolve', { reason });
-      return { status: 'failed', reason, fallback: 'model_unresolved' };
-    }
-    // One attempt over one client: the summary call, its cut-off retry, and the reading of
-    // the reply. Returns the attempt's result, or throws the call's error for the caller to
-    // classify. Both attempts run this same shape, so a retried attempt behaves exactly
-    // like a first one.
-    const runAttempt = async (
-      attemptLlm: ILLM,
-      messages: { role: 'system' | 'user'; content: string }[],
-    ): Promise<SummarizeTurnResult> => {
-      // Cap the generation so the model cannot burn tokens for the full call budget on output
-      // the length validation would discard anyway.
-      let result = await attemptLlm.createNonStream({ messages, max_tokens: SUMMARIZE_MAX_OUTPUT_TOKENS });
-      let reply = flattenLlmContent(result.output.content ?? null).trim();
-      // A reply cut off by the cap with no answer in it (a model that spent the cap thinking)
-      // gets one retry with more room, never a guess.
-      if (result.finish_reason === 'length' && (reply === '' || parseSummaryReply(reply).kind === 'unreadable')) {
-        logger.debug('Memory summarization was cut off by its token cap; retrying with more room');
-        result = await attemptLlm.createNonStream({ messages, max_tokens: SUMMARIZE_RETRY_MAX_OUTPUT_TOKENS });
-        reply = flattenLlmContent(result.output.content ?? null).trim();
-      }
-      if (result.finish_reason === 'length' && reply === '') {
-        return { status: 'failed', reason: 'summary-cut-short', fallback: 'summary_cut_short' };
-      }
-      if (reply === '') {
-        return { status: 'failed', reason: 'summary-empty', fallback: 'summary_empty' };
-      }
-      if (reply.length > SUMMARIZE_MAX_CHARACTERS) {
-        return { status: 'failed', reason: 'summary-too-long', fallback: 'summary_too_long' };
-      }
-      const parsed = parseSummaryReply(reply);
-      if (parsed.kind === 'unreadable') {
-        return { status: 'failed', reason: 'summary-unreadable', fallback: 'summary_unreadable' };
-      }
-      if (parsed.kind === 'nothing') {
-        return { status: 'nothing_to_keep' };
-      }
-      const facts = keepFactsFromPerson({
-        facts: parsed.facts,
-        userText,
-        assistantQuestion,
-        personName: params.personName,
-      });
-      return facts.length === 0 ? { status: 'nothing_to_keep' } : { status: 'summarized', facts };
-    };
-    try {
-      const messages = buildSummarizationMessages({
-        userText,
-        assistantQuestion,
-        turnDate: params.turnDate,
-        timeZone: params.timeZone,
-        textLeftOut,
-        personName: params.personName,
-      });
-      try {
-        return await runAttempt(llm, messages);
-      } catch (error) {
-        if (!isTimeoutError(error) && !isRepetitionError(error)) {
-          throw error;
-        }
-        // A timeout or a repetition stop gets one retry, as a cut-off reply does. Either
-        // failure sits in the attempt, not in the request: the model may only have been
-        // crowded out by other turns that have since finished, or its reasoning may have
-        // looped this once. The retry resolves a fresh client, because the timed-out
-        // client cannot serve it (its time budget is spent and its abort signal has
-        // fired), and one shape for both keeps the retry honest. It asks for the same
-        // output as the first attempt: a longer reply would take more time, not arrive
-        // any likelier.
-        logger.debug(
-          isTimeoutError(error)
-            ? 'Memory summarization timed out; retrying once'
-            : 'Memory summarization stopped on repeated reasoning; retrying once',
-        );
-        let retryLlm: ILLM;
-        try {
-          retryLlm = await resolveLlm(summarizationModelFqn);
-        } catch (resolveError) {
-          const resolveReason = resolveError instanceof Error ? resolveError.message : String(resolveError);
-          logger.debug('Memory summarization model did not resolve for the retry', { reason: resolveReason });
-          throw error;
-        }
-        return await runAttempt(retryLlm, messages);
-      }
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      logger.debug('Memory summarization failed', { reason });
-      return { status: 'failed', reason, fallback: isTimeoutError(error) ? 'model_timeout' : 'model_failed' };
-    }
+  const messages = buildSummarizationMessages({
+    userText,
+    assistantQuestion,
+    turnDate: params.turnDate,
+    timeZone: params.timeZone,
+    textLeftOut,
+    personName: params.personName,
   });
+  const answer = await askSummaryModel({
+    messages,
+    modelFqn: summarizationModelFqn,
+    resolveLlm: params.resolveLlm ?? summaryLlmResolver(params),
+    isReadable: reply => parseSummaryReply(reply).kind !== 'unreadable',
+    logger,
+  });
+  if (answer.status === 'failed') {
+    return { status: 'failed', reason: answer.reason, fallback: answer.fallback };
+  }
+  const { reply } = answer;
+  if (answer.cutShort) {
+    return { status: 'failed', reason: 'summary-cut-short', fallback: 'summary_cut_short' };
+  }
+  if (reply === '') {
+    return { status: 'failed', reason: 'summary-empty', fallback: 'summary_empty' };
+  }
+  if (reply.length > SUMMARIZE_MAX_CHARACTERS) {
+    return { status: 'failed', reason: 'summary-too-long', fallback: 'summary_too_long' };
+  }
+  const parsed = parseSummaryReply(reply);
+  if (parsed.kind === 'unreadable') {
+    return { status: 'failed', reason: 'summary-unreadable', fallback: 'summary_unreadable' };
+  }
+  if (parsed.kind === 'nothing') {
+    return { status: 'nothing_to_keep' };
+  }
+  const facts = keepFactsFromPerson({
+    facts: parsed.facts,
+    userText,
+    assistantQuestion,
+    personName: params.personName,
+  });
+  return facts.length === 0 ? { status: 'nothing_to_keep' } : { status: 'summarized', facts };
 }
 
 /**
