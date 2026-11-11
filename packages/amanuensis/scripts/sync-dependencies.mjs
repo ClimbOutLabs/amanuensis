@@ -8,6 +8,9 @@
  * may point at a package that is not on the registry.
  *
  * Run before tsup, which reads `dependencies` to decide what stays external.
+ *
+ * `--check` writes nothing and fails when the committed list is out of date, so the lockfile and
+ * the list cannot drift apart on main.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -42,6 +45,11 @@ const manifest = readManifest(packageRoot);
 
 if (JSON.stringify(manifest.dependencies) === JSON.stringify(dependencies)) {
   console.log('dependencies already match the packages this wrapper ships');
+} else if (process.argv.includes('--check')) {
+  console.error(
+    'packages/amanuensis/package.json does not list the same dependencies as the packages it ships. Run "pnpm --filter amanuensis build:deps" and "pnpm install", then commit both files.',
+  );
+  process.exitCode = 1;
 } else {
   manifest.dependencies = dependencies;
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
