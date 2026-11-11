@@ -195,7 +195,7 @@ export class VoiceSession {
     this.#lastArrivalAtMs = this.#clock.now();
     this.#resetIdle();
     this.#cancelMax = this.#clock.after(MAX_CONVERSATION_MS, () => {
-      void this.#finish('That was a long conversation, so voice mode has ended. Tap voice mode to start again.');
+      this.#finishAlone('That was a long conversation, so voice mode has ended. Tap voice mode to start again.');
     });
   }
 
@@ -205,10 +205,30 @@ export class VoiceSession {
     await this.end();
   }
 
+  /** Ends the conversation on its own, from a timer or a check. A failure to end it is noted and ends it again. */
+  #finishAlone(notice: string): void {
+    this.#finish(notice).catch((error: unknown) => {
+      this.#abandon({ error, where: 'finish' });
+    });
+  }
+
+  /** Something the conversation runs on its own failed: note its kind and end the conversation. */
+  #abandon({ error, where }: { error: unknown; where: string }): void {
+    this.#deps.onNote?.(`${where}_failed:${error instanceof Error ? error.name : 'unknown'}`);
+    if (this.#ended) {
+      return;
+    }
+    this.#finish('Voice mode stopped because something went wrong. Tap voice mode to start again.').catch(
+      (second: unknown) => {
+        this.#deps.onNote?.(`end_failed:${second instanceof Error ? second.name : 'unknown'}`);
+      },
+    );
+  }
+
   #resetIdle(): void {
     this.#cancelIdle?.();
     this.#cancelIdle = this.#clock.after(IDLE_END_MS, () => {
-      void this.#finish('Voice mode ended because it was quiet for a while. Tap voice mode to start again.');
+      this.#finishAlone('Voice mode ended because it was quiet for a while. Tap voice mode to start again.');
     });
   }
 
@@ -226,7 +246,7 @@ export class VoiceSession {
     if (this.#creditMs < 0) {
       // A microphone delivers one second of sound per second; more than that is not a microphone.
       this.#deps.onNote?.('faster_than_real_time');
-      void this.#finish('Voice mode could not keep up with your microphone. Tap voice mode to start again.');
+      this.#finishAlone('Voice mode could not keep up with your microphone. Tap voice mode to start again.');
       return;
     }
     const joined = new Int16Array(this.#samples.length + incoming.length);
@@ -243,7 +263,7 @@ export class VoiceSession {
       if (this.#backlog >= MAX_BACKLOG_WINDOWS) {
         // Audio is arriving faster than it can be listened to, which a microphone never does.
         this.#deps.onNote?.('backlog');
-        void this.#finish('Voice mode could not keep up with your microphone. Tap voice mode to start again.');
+        this.#finishAlone('Voice mode could not keep up with your microphone. Tap voice mode to start again.');
         return;
       }
       this.#backlog += 1;
@@ -297,7 +317,11 @@ export class VoiceSession {
       // A line the person cut off was said well enough; only a voice that could not say it counts as unsaid.
       return whole || abort.signal.aborted;
     });
-    this.#turnChain = spoken.then(() => undefined);
+    // The caller gets the failure through `spoken`, so the chain itself only has to carry on.
+    this.#turnChain = spoken.then(
+      () => undefined,
+      () => undefined,
+    );
     return spoken;
   }
 
@@ -466,6 +490,9 @@ export class VoiceSession {
     this.#working += 1;
     this.#turnChain = this.#turnChain
       .then(() => this.#handle({ heard, text, marks }))
+      .catch((error: unknown) => {
+        this.#abandon({ error, where: 'turn' });
+      })
       .finally(() => {
         this.#working -= 1;
         this.#refreshState();

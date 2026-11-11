@@ -1268,3 +1268,41 @@ describe('a long turn, noises and order', () => {
     expect(t.notes.some(note => note.startsWith('accept_failed'))).toBe(true);
   });
 });
+
+describe('work the conversation runs on its own that fails', () => {
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown): void => {
+    unhandled.push(reason);
+  };
+  beforeEach(() => {
+    unhandled.length = 0;
+    process.on('unhandledRejection', onUnhandled);
+  });
+  afterEach(() => {
+    process.off('unhandledRejection', onUnhandled);
+    jest.restoreAllMocks();
+  });
+  const afterPromises = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 20));
+
+  it('ends the conversation, and notes the kind of failure, when a turn throws', async () => {
+    const t = setup({ stt: ['what is on my calendar'] });
+    jest.spyOn(t.turns, 'sendMessage').mockRejectedValueOnce(new Error('the turn failed'));
+    await feed({ session: t.session, clock: t.clock, samples: says() });
+    await t.session.settled();
+    await afterPromises();
+    expect(t.notes).toContain('turn_failed:Error');
+    expect(t.transport.closed).toBe(true);
+    expect(unhandled).toEqual([]);
+  });
+
+  it('notes it, and carries on, when ending the conversation from a timer fails', async () => {
+    const t = setup({});
+    jest.spyOn(t.transport, 'close').mockImplementationOnce(() => {
+      throw new Error('the line would not close');
+    });
+    t.clock.advance(IDLE_END_MS + 5000);
+    await afterPromises();
+    expect(t.notes).toContain('finish_failed:Error');
+    expect(unhandled).toEqual([]);
+  });
+});
