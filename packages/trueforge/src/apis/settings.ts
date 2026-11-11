@@ -20,6 +20,7 @@ import { getSharedRunCodeService } from '../runtime/sessionResources';
 import type { TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
 import { sandboxDisabledByInstaller } from '../sandbox/slotBackend';
 import { createFirstRunGuideRouter } from './firstRunGuide';
+import { createMapsSettingsRouter } from './mapsSettings';
 import { createSettingsMcpServersRouter } from './mcpServers';
 import { createMemoryRecallRouter } from './memoryRecall';
 import { createMemoryScreensRouter } from './memoryScreens';
@@ -95,6 +96,13 @@ export function createSettingsRouter<TTransaction>(deps: SettingsRouterDeps<TTra
       sandboxDisabledByInstaller,
       imageConfigured: () => configuration.SANDBOX_BACKEND === 'slots' || configuration.SANDBOX_IMAGE.trim() !== '',
       ensureReady: signal => getSharedRunCodeService(deps.logger).ensureReady(signal),
+    }),
+  );
+  router.route(
+    '/maps',
+    createMapsSettingsRouter({
+      globalSettingsStore: deps.globalSettingsStore,
+      logger: deps.logger,
     }),
   );
   router.route(

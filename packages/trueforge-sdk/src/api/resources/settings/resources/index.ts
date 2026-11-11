@@ -6,6 +6,8 @@ export * from "./firstRunGuide/client/requests/index.js";
 export * as firstRunGuide from "./firstRunGuide/index.js";
 export * from "./google/client/requests/index.js";
 export * as google from "./google/index.js";
+export * from "./maps/client/requests/index.js";
+export * as maps from "./maps/index.js";
 export * from "./mcpServers/client/requests/index.js";
 export * as mcpServers from "./mcpServers/index.js";
 export * from "./memoryRecalls/client/requests/index.js";

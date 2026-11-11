@@ -426,10 +426,10 @@ function createTurnResolver(deps: {
   /** Lists the person's personas, so the search keeps to the chats this persona may recall; absent, the tool is not offered. */
   personaStore: Pick<IPersonaStore, 'listPersonas'> | undefined;
   spaceStore: ISpaceStore;
+  /** The instance's global settings: the notes folder choice lives in it, and the maps server addresses are resolved from it once per turn; absent, no notes tools mount and the maps tools use the environment addresses only. */
+  globalSettingsStore?: IGlobalSettingsStore | undefined;
   /** Per-user Google logins; absent, no Gmail tools mount. */
   googleConnectionStore?: IGoogleConnectionStore | undefined;
-  /** The instance's global settings, where the notes folder choice lives; absent, no notes tools mount. */
-  globalSettingsStore?: IGlobalSettingsStore | undefined;
   /** From CreateTurnRequest.client_timezone. See ITurnResourceResolver.clientTimezone. */
   clientTimezone?: string | undefined;
   /** From CreateTurnRequest.spoken_reply. See ITurnResourceResolver.spokenReply. */
@@ -490,6 +490,7 @@ function createTurnResolver(deps: {
     chatSearchEnabled,
     personaStore,
     spaceStore,
+    globalSettingsStore,
     googleConnectionStore,
     turnArtifactStore,
     clientTimezone,
@@ -970,6 +971,7 @@ function createTurnResolver(deps: {
     {
       store: spaceStore,
       googleConnections: googleConnectionStore,
+      globalSettingsStore,
       notesFolder:
         deps.globalSettingsStore === undefined
           ? undefined
