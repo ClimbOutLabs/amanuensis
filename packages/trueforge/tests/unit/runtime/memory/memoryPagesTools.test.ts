@@ -56,6 +56,7 @@ function build(vaultDir: string, extra: { watch?: TurnReadWatch; keepsNothing?: 
       conversation_id: 'chat-1',
     }),
     keepsNothing: extra.keepsNothing ?? false,
+    maxPageTokens: 1500,
     watch,
     newId: () => {
       n += 1;

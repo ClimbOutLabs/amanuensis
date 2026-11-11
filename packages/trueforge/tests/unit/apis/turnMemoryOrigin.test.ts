@@ -109,6 +109,20 @@ describe('drainTurnEvents memory origin', () => {
     expect(await retainedOrigin({ attachedFiles: false, earlier })).toBe('user_stated');
   });
 
+  it.each(['list_pages', 'read_page'])(
+    'does not mark a turn that only used %s, as when the loader shows a page, and the tool tells the turn itself what a page holds',
+    async name => {
+      const earlier = toolRound({ id: 'c1', name });
+      expect(await retainedOrigin({ attachedFiles: false, earlier })).toBe('user_stated');
+    },
+  );
+
+  it('marks a turn whose wrapped call reaches a connector tool that shares a page reading name', async () => {
+    const args = JSON.stringify({ mcp_server: 'Notes', tool_name: 'read_page', input: {} });
+    const earlier = toolRound({ id: 'c1', name: 'call_tool', args });
+    expect(await retainedOrigin({ attachedFiles: false, earlier })).toBe('tool_ingested');
+  });
+
   it.each([
     'web_fetch',
     'web_search',

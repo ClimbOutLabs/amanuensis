@@ -187,6 +187,28 @@ export function neutralizeReservedText(text: string): string {
   return result;
 }
 
+// Matches `<aman-memory` and `</aman-memory`, case-insensitively, so memory text cannot break out of the
+// `<aman-memory>` wrapper by injecting its own closing (or opening) delimiter.
+const MEMORY_DELIMITER_PATTERN = /<\/?aman-memory/gi;
+// ASCII control characters other than tab (0x09) and newline (0x0A).
+// eslint-disable-next-line no-control-regex -- deliberately matching control characters to strip them.
+const CONTROL_CHAR_PATTERN = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g;
+
+/**
+ * Neutralizes text before it is shown to the model inside the `<aman-memory>` block or by a memory tool: strips
+ * ASCII control characters (other than tab and newline), replaces any delimiter-escape attempt with an inert
+ * bracketed form, and removes the reserved drafting heading and end line in any disguise. The one owner of this rule.
+ */
+export function sanitizeMemoryText(text: string): string {
+  const delimited = text.replace(CONTROL_CHAR_PATTERN, '').replace(MEMORY_DELIMITER_PATTERN, '[aman-memory]');
+  return neutralizeReservedText(delimited);
+}
+
+/** As `sanitizeMemoryText`, and also collapses newlines so a memory stays on one line. */
+export function sanitizeMemoryLine(text: string): string {
+  return sanitizeMemoryText(text).replace(/\r\n|\r|\n/g, ' ');
+}
+
 /** What a household page adds under the drafting heading. */
 export const HOUSEHOLD_LINE = 'Bookings and plans from this person are shared plans, not mail to answer.';
 
@@ -218,6 +240,24 @@ export function pageHoldsOutsideText(page: MemoryPage): boolean {
     ),
   );
 }
+
+/**
+ * Whether a page's name counts as the person's own: the page holds at least one line in their own words, a
+ * confirmed statement from what they said or wrote, or a bullet they typed by hand. A page with none was made
+ * from something Aman read, and a model chose its name. The one owner of this rule wherever a name is shown.
+ */
+export function pageNameIsOwn(page: MemoryPage): boolean {
+  return page.sections.some(section =>
+    section.lines.some(line =>
+      line.kind === 'fact'
+        ? OWN_WORDS_SOURCES.has(line.fact.marker.src)
+        : line.kind === 'other' && unmarkedBulletText(line.raw) !== undefined,
+    ),
+  );
+}
+
+/** What a page header says when the page's name is not the person's own. */
+export const NAME_NOT_CONFIRMED_FLAG = 'name not confirmed by you';
 
 /** The instruction a line carries: a bullet's text or a hand-written prose line; headings and blanks carry none. */
 function instructionText(line: PageLine): string | undefined {
@@ -305,7 +345,13 @@ function renderLine(line: PageLine): string | undefined {
  * `draftingLines`). A line there that is not the person's own, and any line whose marker could not
  * be read, is shown with the unconfirmed facts instead, so it never reaches the drafting heading.
  */
-function renderPageLines(input: { title: string; page: MemoryPage; today?: string | undefined }): RenderedLine[] {
+function renderPageLines(input: {
+  title: string;
+  page: MemoryPage;
+  today?: string | undefined;
+  /** Whether the name is the person's own; for a page shown in part this is decided on the whole page. */
+  nameIsOwn?: boolean | undefined;
+}): RenderedLine[] {
   const { page } = input;
   const front = page.frontMatter;
   const flags: string[] = [front.kind];
@@ -314,6 +360,9 @@ function renderPageLines(input: { title: string; page: MemoryPage; today?: strin
   }
   if (front.kind === 'matter') {
     flags.push(front.status);
+  }
+  if (!(input.nameIsOwn ?? pageNameIsOwn(page))) {
+    flags.push(NAME_NOT_CONFIRMED_FLAG);
   }
   const title = singleLine(input.title);
   const names = front.aliases.map(singleLine).filter(alias => alias !== '' && alias !== title);
@@ -590,7 +639,12 @@ export async function loadPagesForMessage(input: {
   for (const { hit, chosen } of groupHits(hits)) {
     stats.candidates += 1;
     const shown = pageWithLines({ page: hit.page, chosen });
-    const rendered = renderPageLines({ title: hit.title, page: shown, today: input.today });
+    const rendered = renderPageLines({
+      title: hit.title,
+      page: shown,
+      today: input.today,
+      nameIsOwn: pageNameIsOwn(hit.page),
+    });
     const text = rendered.map(line => line.text).join('\n');
     const estimatedTokens = estimateTokens(text);
     if (overBudget || usedTokens + estimatedTokens > input.maxTokens) {

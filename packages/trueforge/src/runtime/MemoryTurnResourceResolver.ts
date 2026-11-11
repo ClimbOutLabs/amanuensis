@@ -280,6 +280,7 @@ export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
         web_search: this.webSearchTurn,
       }),
       keepsNothing: this.#memory.keepsNothing,
+      maxPageTokens: this.#memory.config.pages.maxTokens,
       watch,
     });
     return { capability, watch };

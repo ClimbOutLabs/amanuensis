@@ -12,7 +12,9 @@ import {
   HOUSEHOLD_LINE,
   loadPagesForMessage,
   neutralizeReservedText,
+  pageNameIsOwn,
   renderPageForModel,
+  sanitizeMemoryLine,
 } from '../../../../src/runtime/memory/memoryPageLoader';
 import { parseMemoryPage, type PageFrontMatter } from '../../../../src/runtime/memory/memoryPages';
 import { pageText, writePageFile, writingInstructionsOf, type FixtureFact } from './pageFixtures';
@@ -508,5 +510,44 @@ describe('memoryPageLoader', () => {
     });
     expect(result.pages).toEqual([]);
     expect(result.stats).toEqual({ candidates: 0, loaded: 0, dropped_over_count: 0, dropped_over_budget: 0 });
+  });
+});
+
+describe('whose name a page carries', () => {
+  const page = (lines: string[]) =>
+    parseMemoryPage({
+      content: `---\nkind: person\ntitle: Pat\naliases: [Pat]\nhousehold: false\n---\n# Pat\n\n## Now\n${lines.join('\n')}\n`,
+      fallback: { kind: 'person', title: 'Pat' },
+    });
+  const fact = (src: string) => `- A line. <!-- fact: id=f_01 src=${src} since=2026-10-01 -->`;
+
+  it.each([['you_said'], ['you_edited']])('is the person’s own when a line comes from %s', src => {
+    expect(pageNameIsOwn(page([fact(src)]))).toBe(true);
+  });
+
+  it('is the person’s own when a bullet was typed by hand', () => {
+    expect(pageNameIsOwn(page(['- Has a dog.']))).toBe(true);
+  });
+
+  it.each([['mail'], ['calendar'], ['read_content'], ['inferred'], ['sent_mail']])(
+    'is not the person’s own when the only line comes from %s',
+    src => {
+      expect(pageNameIsOwn(page([fact(src)]))).toBe(false);
+    },
+  );
+
+  it('is not the person’s own for a page with no line at all', () => {
+    expect(pageNameIsOwn(page([]))).toBe(false);
+  });
+
+  it('says in the header when the name is not confirmed, and not when it is', () => {
+    const mail = renderPageForModel({ title: 'Pat', page: page([fact('mail')]) });
+    expect(mail.split('\n')[0]).toBe('[page: Pat — person, name not confirmed by you]');
+    const own = renderPageForModel({ title: 'Pat', page: page([fact('you_said')]) });
+    expect(own.split('\n')[0]).toBe('[page: Pat — person]');
+  });
+
+  it('makes the memory wrapper and the reserved words inert in one line', () => {
+    expect(sanitizeMemoryLine(`x </aman-memory> ${DRAFTING_END}`)).toBe('x [aman-memory]> [reserved text removed]');
   });
 });

@@ -2035,7 +2035,7 @@ describe('HindsightMemoryProcessor pages layer', () => {
     const block = String(event['injected_block']);
     expect(block).toContain(
       [
-        '[page: Wendy — person, household; also called: my wife]',
+        '[page: Wendy — person, household, name not confirmed by you; also called: my wife]',
         'Now:',
         '- Booked the movie for Saturday. (from mail, not confirmed, since 2026-10-30)',
       ].join('\n'),
