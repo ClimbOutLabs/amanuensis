@@ -8605,6 +8605,93 @@ await client.memory.pages.delete("person", "slug");
 </dl>
 </details>
 
+<details><summary><code>client.memory.pages.<a href="/src/api/resources/memory/resources/pages/client/Client.ts">dismissDisagreement</a>(kind, slug, disagreement_id, { ...params }) -> TrueForge.GetMemoryPageResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Mark a pair as not a problem. The same two lines are not listed again. No line on the page changes.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.memory.pages.dismissDisagreement("person", "slug", "disagreement_id");
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**kind:** `TrueForge.DismissDisagreementPagesRequestKind`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**slug:** `string`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**disagreement_id:** `string`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.memory.DismissDisagreementPagesRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `PagesClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 <details><summary><code>client.memory.pages.<a href="/src/api/resources/memory/resources/pages/client/Client.ts">confirmLine</a>(kind, slug, fact_id, { ...params }) -> TrueForge.GetMemoryPageResponse</code></summary>
 <dl>
 <dd>

@@ -5,6 +5,8 @@ import type * as TrueForge from "../index.js";
 export interface MemoryPageSummary {
     /** The day the page file last changed, as `YYYY-MM-DD` in UTC. */
     changedOn: string | null;
+    /** Pairs of lines the nightly check found that disagree. */
+    disagreementCount: number;
     kind: TrueForge.MemoryPageSummaryKind;
     otherNames: string[];
     slug: string;

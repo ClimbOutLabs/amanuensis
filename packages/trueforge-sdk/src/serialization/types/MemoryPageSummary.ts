@@ -10,6 +10,7 @@ export const MemoryPageSummary: core.serialization.ObjectSchema<
     TrueForge.MemoryPageSummary
 > = core.serialization.object({
     changedOn: core.serialization.property("changed_on", core.serialization.string().nullable()),
+    disagreementCount: core.serialization.property("disagreement_count", core.serialization.number()),
     kind: MemoryPageSummaryKind,
     otherNames: core.serialization.property("other_names", core.serialization.list(core.serialization.string())),
     slug: core.serialization.string(),
@@ -21,6 +22,7 @@ export const MemoryPageSummary: core.serialization.ObjectSchema<
 export declare namespace MemoryPageSummary {
     export interface Raw {
         changed_on?: string | null;
+        disagreement_count: number;
         kind: MemoryPageSummaryKind.Raw;
         other_names: string[];
         slug: string;

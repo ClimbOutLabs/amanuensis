@@ -4,6 +4,7 @@ import type * as TrueForge from "../../api/index.js";
 import * as core from "../../core/index.js";
 import type * as serializers from "../index.js";
 import { MemoryPageConfirmableSectionsItem } from "./MemoryPageConfirmableSectionsItem.js";
+import { MemoryPageDisagreement } from "./MemoryPageDisagreement.js";
 import { MemoryPageKind } from "./MemoryPageKind.js";
 import { MemoryPageSection } from "./MemoryPageSection.js";
 
@@ -13,6 +14,7 @@ export const MemoryPage: core.serialization.ObjectSchema<serializers.MemoryPage.
             "confirmable_sections",
             core.serialization.list(MemoryPageConfirmableSectionsItem),
         ),
+        disagreements: core.serialization.list(MemoryPageDisagreement),
         kind: MemoryPageKind,
         markdown: core.serialization.string(),
         otherNames: core.serialization.property("other_names", core.serialization.list(core.serialization.string())),
@@ -26,6 +28,7 @@ export const MemoryPage: core.serialization.ObjectSchema<serializers.MemoryPage.
 export declare namespace MemoryPage {
     export interface Raw {
         confirmable_sections: MemoryPageConfirmableSectionsItem.Raw[];
+        disagreements: MemoryPageDisagreement.Raw[];
         kind: MemoryPageKind.Raw;
         markdown: string;
         other_names: string[];

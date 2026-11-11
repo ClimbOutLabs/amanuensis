@@ -14,6 +14,7 @@ describe("PagesClient", () => {
                 pages: [
                     {
                         changed_on: null,
+                        disagreement_count: 1,
                         kind: "person",
                         other_names: ["other_names"],
                         slug: "slug",
@@ -40,6 +41,7 @@ describe("PagesClient", () => {
                 pages: [
                     {
                         changedOn: null,
+                        disagreementCount: 1,
                         kind: "person",
                         otherNames: ["other_names"],
                         slug: "slug",
@@ -478,6 +480,15 @@ describe("PagesClient", () => {
         const rawResponseBody = {
             data: {
                 confirmable_sections: ["How you write to them"],
+                disagreements: [
+                    {
+                        first: { id: "id", text: "text" },
+                        found_on: "found_on",
+                        id: "id",
+                        reason: "reason",
+                        second: { id: "id", text: "text" },
+                    },
+                ],
                 kind: "person",
                 markdown: "markdown",
                 other_names: ["other_names"],
@@ -517,6 +528,21 @@ describe("PagesClient", () => {
         expect(response).toEqual({
             data: {
                 confirmableSections: ["How you write to them"],
+                disagreements: [
+                    {
+                        first: {
+                            id: "id",
+                            text: "text",
+                        },
+                        foundOn: "found_on",
+                        id: "id",
+                        reason: "reason",
+                        second: {
+                            id: "id",
+                            text: "text",
+                        },
+                    },
+                ],
                 kind: "person",
                 markdown: "markdown",
                 otherNames: ["other_names"],
@@ -666,6 +692,15 @@ describe("PagesClient", () => {
         const rawResponseBody = {
             data: {
                 confirmable_sections: ["How you write to them"],
+                disagreements: [
+                    {
+                        first: { id: "id", text: "text" },
+                        found_on: "found_on",
+                        id: "id",
+                        reason: "reason",
+                        second: { id: "id", text: "text" },
+                    },
+                ],
                 kind: "person",
                 markdown: "markdown",
                 other_names: ["other_names"],
@@ -709,6 +744,21 @@ describe("PagesClient", () => {
         expect(response).toEqual({
             data: {
                 confirmableSections: ["How you write to them"],
+                disagreements: [
+                    {
+                        first: {
+                            id: "id",
+                            text: "text",
+                        },
+                        foundOn: "found_on",
+                        id: "id",
+                        reason: "reason",
+                        second: {
+                            id: "id",
+                            text: "text",
+                        },
+                    },
+                ],
                 kind: "person",
                 markdown: "markdown",
                 otherNames: ["other_names"],
@@ -1007,6 +1057,218 @@ describe("PagesClient", () => {
         }).rejects.toThrow(TrueForgeTypes.NotImplementedError);
     });
 
+    test("dismiss_disagreement (1)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = {
+            data: {
+                confirmable_sections: ["How you write to them"],
+                disagreements: [
+                    {
+                        first: { id: "id", text: "text" },
+                        found_on: "found_on",
+                        id: "id",
+                        reason: "reason",
+                        second: { id: "id", text: "text" },
+                    },
+                ],
+                kind: "person",
+                markdown: "markdown",
+                other_names: ["other_names"],
+                sections: [
+                    {
+                        lines: [
+                            {
+                                id: null,
+                                own: true,
+                                seen: null,
+                                since: null,
+                                source: "you_said",
+                                source_label: "source_label",
+                                text: "text",
+                                until: null,
+                            },
+                        ],
+                        name: "name",
+                    },
+                ],
+                slug: "slug",
+                summary: "summary",
+                title: "title",
+                version: "version",
+            },
+        };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/memory/pages/person/slug/disagreements/disagreement_id/dismiss")
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        const response = await client.memory.pages.dismissDisagreement("person", "slug", "disagreement_id");
+        expect(response).toEqual({
+            data: {
+                confirmableSections: ["How you write to them"],
+                disagreements: [
+                    {
+                        first: {
+                            id: "id",
+                            text: "text",
+                        },
+                        foundOn: "found_on",
+                        id: "id",
+                        reason: "reason",
+                        second: {
+                            id: "id",
+                            text: "text",
+                        },
+                    },
+                ],
+                kind: "person",
+                markdown: "markdown",
+                otherNames: ["other_names"],
+                sections: [
+                    {
+                        lines: [
+                            {
+                                id: null,
+                                own: true,
+                                seen: null,
+                                since: null,
+                                source: "you_said",
+                                sourceLabel: "source_label",
+                                text: "text",
+                                until: null,
+                            },
+                        ],
+                        name: "name",
+                    },
+                ],
+                slug: "slug",
+                summary: "summary",
+                title: "title",
+                version: "version",
+            },
+        });
+    });
+
+    test("dismiss_disagreement (2)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/memory/pages/person/slug/disagreements/disagreement_id/dismiss")
+            .respondWith()
+            .statusCode(400)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.memory.pages.dismissDisagreement("person", "slug", "disagreement_id");
+        }).rejects.toThrow(TrueForgeTypes.BadRequestError);
+    });
+
+    test("dismiss_disagreement (3)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/memory/pages/person/slug/disagreements/disagreement_id/dismiss")
+            .respondWith()
+            .statusCode(401)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.memory.pages.dismissDisagreement("person", "slug", "disagreement_id");
+        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+    });
+
+    test("dismiss_disagreement (4)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/memory/pages/person/slug/disagreements/disagreement_id/dismiss")
+            .respondWith()
+            .statusCode(404)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.memory.pages.dismissDisagreement("person", "slug", "disagreement_id");
+        }).rejects.toThrow(TrueForgeTypes.NotFoundError);
+    });
+
+    test("dismiss_disagreement (5)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/memory/pages/person/slug/disagreements/disagreement_id/dismiss")
+            .respondWith()
+            .statusCode(409)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.memory.pages.dismissDisagreement("person", "slug", "disagreement_id");
+        }).rejects.toThrow(TrueForgeTypes.ConflictError);
+    });
+
+    test("dismiss_disagreement (6)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/memory/pages/person/slug/disagreements/disagreement_id/dismiss")
+            .respondWith()
+            .statusCode(500)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.memory.pages.dismissDisagreement("person", "slug", "disagreement_id");
+        }).rejects.toThrow(TrueForgeTypes.InternalServerError);
+    });
+
+    test("dismiss_disagreement (7)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/memory/pages/person/slug/disagreements/disagreement_id/dismiss")
+            .respondWith()
+            .statusCode(501)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.memory.pages.dismissDisagreement("person", "slug", "disagreement_id");
+        }).rejects.toThrow(TrueForgeTypes.NotImplementedError);
+    });
+
     test("confirm_line (1)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
@@ -1014,6 +1276,15 @@ describe("PagesClient", () => {
         const rawResponseBody = {
             data: {
                 confirmable_sections: ["How you write to them"],
+                disagreements: [
+                    {
+                        first: { id: "id", text: "text" },
+                        found_on: "found_on",
+                        id: "id",
+                        reason: "reason",
+                        second: { id: "id", text: "text" },
+                    },
+                ],
                 kind: "person",
                 markdown: "markdown",
                 other_names: ["other_names"],
@@ -1054,6 +1325,21 @@ describe("PagesClient", () => {
         expect(response).toEqual({
             data: {
                 confirmableSections: ["How you write to them"],
+                disagreements: [
+                    {
+                        first: {
+                            id: "id",
+                            text: "text",
+                        },
+                        foundOn: "found_on",
+                        id: "id",
+                        reason: "reason",
+                        second: {
+                            id: "id",
+                            text: "text",
+                        },
+                    },
+                ],
                 kind: "person",
                 markdown: "markdown",
                 otherNames: ["other_names"],
@@ -1209,6 +1495,15 @@ describe("PagesClient", () => {
         const rawResponseBody = {
             data: {
                 confirmable_sections: ["How you write to them"],
+                disagreements: [
+                    {
+                        first: { id: "id", text: "text" },
+                        found_on: "found_on",
+                        id: "id",
+                        reason: "reason",
+                        second: { id: "id", text: "text" },
+                    },
+                ],
                 kind: "person",
                 markdown: "markdown",
                 other_names: ["other_names"],
@@ -1248,6 +1543,21 @@ describe("PagesClient", () => {
         expect(response).toEqual({
             data: {
                 confirmableSections: ["How you write to them"],
+                disagreements: [
+                    {
+                        first: {
+                            id: "id",
+                            text: "text",
+                        },
+                        foundOn: "found_on",
+                        id: "id",
+                        reason: "reason",
+                        second: {
+                            id: "id",
+                            text: "text",
+                        },
+                    },
+                ],
                 kind: "person",
                 markdown: "markdown",
                 otherNames: ["other_names"],

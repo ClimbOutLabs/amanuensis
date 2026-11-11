@@ -317,6 +317,8 @@ export * from "./MemoryPage.js";
 export * from "./MemoryPageChange.js";
 export * from "./MemoryPageChanges.js";
 export * from "./MemoryPageConfirmableSectionsItem.js";
+export * from "./MemoryPageDisagreement.js";
+export * from "./MemoryPageDisagreementLine.js";
 export * from "./MemoryPageKind.js";
 export * from "./MemoryPageLine.js";
 export * from "./MemoryPageLineSource.js";

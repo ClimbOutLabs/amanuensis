@@ -5,6 +5,8 @@ import type * as TrueForge from "../index.js";
 export interface MemoryPage {
     /** The sections an unconfirmed line on this page can move to. */
     confirmableSections: TrueForge.MemoryPageConfirmableSectionsItem[];
+    /** Pairs of lines that disagree and are not dismissed. */
+    disagreements: TrueForge.MemoryPageDisagreement[];
     kind: TrueForge.MemoryPageKind;
     markdown: string;
     otherNames: string[];

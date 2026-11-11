@@ -985,6 +985,173 @@ export class PagesClient {
     }
 
     /**
+     * Mark a pair as not a problem. The same two lines are not listed again. No line on the page changes.
+     *
+     * @param {TrueForge.memory.DismissDisagreementPagesRequestKind} kind
+     * @param {string} slug
+     * @param {string} disagreement_id
+     * @param {TrueForge.memory.DismissDisagreementPagesRequest} request
+     * @param {PagesClient.RequestOptions} requestOptions - Request-specific configuration.
+     *
+     * @throws {@link TrueForge.BadRequestError}
+     * @throws {@link TrueForge.UnauthorizedError}
+     * @throws {@link TrueForge.NotFoundError}
+     * @throws {@link TrueForge.ConflictError}
+     * @throws {@link TrueForge.InternalServerError}
+     * @throws {@link TrueForge.NotImplementedError}
+     * @throws {@link errors.TrueForgeError}
+     * @throws {@link errors.TrueForgeTimeoutError}
+     *
+     * @example
+     *     await client.memory.pages.dismissDisagreement("person", "slug", "disagreement_id")
+     */
+    public dismissDisagreement(
+        kind: TrueForge.memory.DismissDisagreementPagesRequestKind,
+        slug: string,
+        disagreement_id: string,
+        request: TrueForge.memory.DismissDisagreementPagesRequest = {},
+        requestOptions?: PagesClient.RequestOptions,
+    ): core.HttpResponsePromise<TrueForge.GetMemoryPageResponse> {
+        return core.HttpResponsePromise.fromPromise(
+            this.__dismissDisagreement(kind, slug, disagreement_id, request, requestOptions),
+        );
+    }
+
+    private async __dismissDisagreement(
+        kind: TrueForge.memory.DismissDisagreementPagesRequestKind,
+        slug: string,
+        disagreement_id: string,
+        request: TrueForge.memory.DismissDisagreementPagesRequest = {},
+        requestOptions?: PagesClient.RequestOptions,
+    ): Promise<core.WithRawResponse<TrueForge.GetMemoryPageResponse>> {
+        const { namespace } = request;
+        const _queryParams: Record<string, unknown> = {
+            namespace,
+        };
+        const _authRequest: core.AuthRequest = await this._options.authProvider.getAuthRequest();
+        const _headers: core.Fetcher.Args["headers"] = mergeHeaders(
+            _authRequest.headers,
+            this._options?.headers,
+            requestOptions?.headers,
+        );
+        const _response = await (this._options.fetcher ?? core.fetcher)({
+            url: core.url.join(
+                (await core.Supplier.get(this._options.baseUrl)) ??
+                    (await core.Supplier.get(this._options.environment)),
+                `api/v1/memory/pages/${core.url.encodePathParam(serializers.memory.DismissDisagreementPagesRequestKind.jsonOrThrow(kind, { omitUndefined: true }))}/${core.url.encodePathParam(slug)}/disagreements/${core.url.encodePathParam(disagreement_id)}/dismiss`,
+            ),
+            method: "POST",
+            headers: _headers,
+            queryString: core.url
+                .queryBuilder()
+                .addMany(_queryParams)
+                .mergeAdditional(requestOptions?.queryParams)
+                .build(),
+            timeoutMs: (requestOptions?.timeoutInSeconds ?? this._options?.timeoutInSeconds ?? 60) * 1000,
+            maxRetries: requestOptions?.maxRetries ?? this._options?.maxRetries,
+            abortSignal: requestOptions?.abortSignal,
+            fetchFn: this._options?.fetch,
+            logging: this._options.logging,
+        });
+        if (_response.ok) {
+            return {
+                data: serializers.GetMemoryPageResponse.parseOrThrow(_response.body, {
+                    unrecognizedObjectKeys: "passthrough",
+                    allowUnrecognizedUnionMembers: true,
+                    allowUnrecognizedEnumValues: true,
+                    skipValidation: true,
+                    breadcrumbsPrefix: ["response"],
+                }),
+                rawResponse: _response.rawResponse,
+            };
+        }
+
+        if (_response.error.reason === "status-code") {
+            switch (_response.error.statusCode) {
+                case 400:
+                    throw new TrueForge.BadRequestError(
+                        serializers.RequestErrorResponse.parseOrThrow(_response.error.body, {
+                            unrecognizedObjectKeys: "passthrough",
+                            allowUnrecognizedUnionMembers: true,
+                            allowUnrecognizedEnumValues: true,
+                            skipValidation: true,
+                            breadcrumbsPrefix: ["response"],
+                        }),
+                        _response.rawResponse,
+                    );
+                case 401:
+                    throw new TrueForge.UnauthorizedError(
+                        serializers.RequestErrorResponse.parseOrThrow(_response.error.body, {
+                            unrecognizedObjectKeys: "passthrough",
+                            allowUnrecognizedUnionMembers: true,
+                            allowUnrecognizedEnumValues: true,
+                            skipValidation: true,
+                            breadcrumbsPrefix: ["response"],
+                        }),
+                        _response.rawResponse,
+                    );
+                case 404:
+                    throw new TrueForge.NotFoundError(
+                        serializers.RequestErrorResponse.parseOrThrow(_response.error.body, {
+                            unrecognizedObjectKeys: "passthrough",
+                            allowUnrecognizedUnionMembers: true,
+                            allowUnrecognizedEnumValues: true,
+                            skipValidation: true,
+                            breadcrumbsPrefix: ["response"],
+                        }),
+                        _response.rawResponse,
+                    );
+                case 409:
+                    throw new TrueForge.ConflictError(
+                        serializers.RequestErrorResponse.parseOrThrow(_response.error.body, {
+                            unrecognizedObjectKeys: "passthrough",
+                            allowUnrecognizedUnionMembers: true,
+                            allowUnrecognizedEnumValues: true,
+                            skipValidation: true,
+                            breadcrumbsPrefix: ["response"],
+                        }),
+                        _response.rawResponse,
+                    );
+                case 500:
+                    throw new TrueForge.InternalServerError(
+                        serializers.RequestErrorResponse.parseOrThrow(_response.error.body, {
+                            unrecognizedObjectKeys: "passthrough",
+                            allowUnrecognizedUnionMembers: true,
+                            allowUnrecognizedEnumValues: true,
+                            skipValidation: true,
+                            breadcrumbsPrefix: ["response"],
+                        }),
+                        _response.rawResponse,
+                    );
+                case 501:
+                    throw new TrueForge.NotImplementedError(
+                        serializers.RequestErrorResponse.parseOrThrow(_response.error.body, {
+                            unrecognizedObjectKeys: "passthrough",
+                            allowUnrecognizedUnionMembers: true,
+                            allowUnrecognizedEnumValues: true,
+                            skipValidation: true,
+                            breadcrumbsPrefix: ["response"],
+                        }),
+                        _response.rawResponse,
+                    );
+                default:
+                    throw new errors.TrueForgeError({
+                        statusCode: _response.error.statusCode,
+                        body: _response.error.body,
+                        rawResponse: _response.rawResponse,
+                    });
+            }
+        }
+
+        return handleNonStatusCodeError(
+            _response.error,
+            _response.rawResponse,
+            "POST",
+            "/api/v1/memory/pages/{kind}/{slug}/disagreements/{disagreement_id}/dismiss",
+        );
+    }
+
+    /**
      * Move a line from Unconfirmed to a section of the page as the person’s own words.
      *
      * @param {TrueForge.memory.ConfirmLinePagesRequestKind} kind
