@@ -70,7 +70,7 @@ Inside Aman, click **Help, I'm stuck** at the top of the screen. The guide check
 
 ## Updating and backups
 
-**`aman upgrade` says there is nothing new.** `aman upgrade` uses the copy of the code in the folder you installed from, and does not download the new version itself. Get it first, then upgrade: `git -C ~/amanuensis pull && aman upgrade`. Use the path of the folder you installed from in place of `~/amanuensis`.
+**`aman upgrade` says there is nothing new.** `aman upgrade` uses the copy of the code in the folder you installed from, and does not download the new version itself. Get the newest release into that folder first, then upgrade. [The aman command](commands.md#update-aman) has the exact lines.
 
 **An update failed.** The old version comes back on its own, and your data was backed up first. Run `aman doctor` and follow its **Next:** lines, then run `aman upgrade` again.
 

@@ -231,7 +231,7 @@ export function siteDocsHome(markdown) {
       skipping = SITE_LEAVES_OUT.includes(bold[1]);
       skipLevel = skipping ? 'group' : undefined;
     }
-    const guideRow = /^\|\s*\[([^\]]+)\]\(#[^)]*\)/.exec(line);
+    const guideRow = /^(?:\|\s*|-\s+)\[([^\]]+)\]\(#[^)]*\)/.exec(line);
     if (skipping || (guideRow && SITE_LEAVES_OUT.includes(guideRow[1]))) {
       continue;
     }
@@ -242,7 +242,7 @@ export function siteDocsHome(markdown) {
 
 /**
  * Builds the site menu from the docs home: each "## Guide" is a section, each bold line inside
- * it a subsection, and the first link in each table row a page. Links to a heading or another
+ * it a subsection, and the first link in each list item (or table row) a page. Links to a heading or another
  * site stay on the home page only.
  */
 export function navFromDocsHome(markdown) {
@@ -267,7 +267,7 @@ export function navFromDocsHome(markdown) {
       items.push(group);
       continue;
     }
-    const row = /^\|\s*\[([^\]]+)\]\(([^)\s#]+)\)/.exec(line);
+    const row = /^(?:\|\s*|-\s+)\[([^\]]+)\]\(([^)\s#]+)\)/.exec(line);
     if (!row || /^[a-z]+:/i.test(row[2])) {
       continue;
     }
@@ -326,6 +326,13 @@ export async function buildDocsSite({
     await mkdir(path.dirname(path.join(outDir, target)), { recursive: true });
     await writeFile(path.join(outDir, target), rewriteLinks(text, { fromHelp: false, fromFile: target, pages }));
   }
+
+  // Aman's own font, mark and site style, copied from the app so the site matches it.
+  const brandDir = path.join(outDir, 'assets', 'aman');
+  await mkdir(brandDir, { recursive: true });
+  await cp(path.join(repoRoot, 'packages/trueforge-ui/src/fonts.css'), path.join(brandDir, 'fonts.css'));
+  await cp(path.join(repoRoot, 'packages/frontend/public/favicon.svg'), path.join(brandDir, 'logo.svg'));
+  await cp(path.join(repoRoot, 'docs-site/aman.css'), path.join(brandDir, 'aman.css'));
 
   await mkdir(path.join(outDir, HELP_DIR), { recursive: true });
   for (const name of (await readdir(topicsDir)).filter(n => n.endsWith('.md'))) {

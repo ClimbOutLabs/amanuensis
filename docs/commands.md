@@ -55,24 +55,32 @@ Each of these checks one area. Add `--fix` to repair what it finds. A fix asks b
 
 `aman doctor instance`, `aman doctor network` and `aman doctor sandbox` also take `--instance NAME`. `aman doctor sandbox` takes `--disk-gb N` to set the size of each sandbox disk, and `--no-hard-disk-limit` where the computer cannot make fixed-size disks.
 
-## Back up your data
+## Back up and restore your data
 
-| Command            | What it does               |
-| ------------------ | -------------------------- |
-| `aman backup`      | Back up every instance now |
-| `aman backup NAME` | Back up one instance now   |
+| Command                 | What it does                                                                                     |
+| ----------------------- | ------------------------------------------------------------------------------------------------ |
+| `aman backup`           | Back up every instance now                                                                       |
+| `aman backup NAME`      | Back up one instance now                                                                         |
+| `aman restore`          | Put Aman back the way it was in a backup. It lists the backups, newest first, and asks which one |
+| `aman restore --latest` | Put back the newest backup without the list                                                      |
+| `aman restore NAME`     | Restore one instance when there are several                                                      |
 
-Backups go to `~/.amanuensis/backups`, one folder per backup. Aman keeps the seven newest. [Backups](backup.md) explains what is in them and how to copy one off your computer. To turn daily backups on or off, see [Installer commands](#installer-commands).
+Backups go to `~/.amanuensis/backups`, one folder per backup. Aman keeps the seven newest. A restore says what it will replace and waits for you to type `yes`, and saves a copy of what you have now first. [Backups](backup.md) explains what is in them, how a restore works and how to copy a backup off your computer. To turn daily backups on or off, see [Installer commands](#installer-commands).
 
 ## Update Aman
 
-`aman upgrade` updates Aman to the copy of the code in the folder you installed from. It does not download the new version itself, so get it first:
+`aman upgrade` updates Aman to the copy of the code in the folder you installed from. It does not download the new version itself, so first get the newest release into that folder. Run these lines in it (here `~/amanuensis`; use your own folder):
 
 ```bash
-git -C ~/amanuensis pull && aman upgrade
+cd ~/amanuensis
+VERSION=$(curl -fsSL -o /dev/null -w '%{url_effective}' https://github.com/ClimbOutLabs/amanuensis/releases/latest)
+VERSION=${VERSION##*/}
+git fetch --tags
+git checkout "$VERSION"
+aman upgrade
 ```
 
-Use the path of the folder you installed from in place of `~/amanuensis`. To move to one release instead, run `git fetch --tags` and `git checkout vX.Y.Z` in that folder, then `aman upgrade`.
+The second and third lines ask GitHub which release is the newest. Always update to a release, not to the code that is still being worked on.
 
 | Command                | What it does                                                                                              |
 | ---------------------- | --------------------------------------------------------------------------------------------------------- |
@@ -145,23 +153,24 @@ Some jobs are done by the installer itself. Run these in the folder you installe
 
 On a PC set up with Aman Setup, type these in **PowerShell**. The Start menu entries **Aman**, **Check Aman**, **Update Aman**, **Backups** and **Remove Aman** run the matching commands for you.
 
-| Command              | What it does                                                                                                        |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `aman`               | List these commands                                                                                                 |
-| `aman --version`     | Show which version this is                                                                                          |
-| `aman status`        | Show what is installed and whether it is running                                                                    |
-| `aman open`          | Open Aman in your browser, starting Docker Desktop first if it needs to                                             |
-| `aman doctor`        | Check this computer and each instance                                                                               |
-| `aman doctor docker` | Check that Docker is ready for Aman                                                                                 |
-| `aman network open`  | Let phones and other devices on your home network reach Aman                                                        |
-| `aman network close` | Close Aman to your home network again                                                                               |
-| `aman backup`        | Make a backup now, in the Backups folder on this computer                                                           |
-| `aman backups`       | List the backups kept on this computer                                                                              |
-| `aman upgrade`       | Update Aman to the newest version                                                                                   |
-| `aman verify FILE`   | Check a downloaded file against its signed release record                                                           |
-| `aman install`       | Set Aman up on this computer for the first time                                                                     |
-| `aman adopt`         | Move a PC set up with Aman Setup onto the `aman` command                                                            |
-| `aman uninstall`     | Remove Aman from this computer. It asks before it deletes your data and keeps your backups unless you say otherwise |
+| Command              | What it does                                                                                                           |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `aman`               | List these commands                                                                                                    |
+| `aman --version`     | Show which version this is                                                                                             |
+| `aman status`        | Show what is installed and whether it is running                                                                       |
+| `aman open`          | Open Aman in your browser, starting Docker Desktop first if it needs to                                                |
+| `aman doctor`        | Check this computer and each instance                                                                                  |
+| `aman doctor docker` | Check that Docker is ready for Aman                                                                                    |
+| `aman network open`  | Let phones and other devices on your home network reach Aman                                                           |
+| `aman network close` | Close Aman to your home network again                                                                                  |
+| `aman backup`        | Make a backup now, in the Backups folder on this computer                                                              |
+| `aman backups`       | List the backups kept on this computer                                                                                 |
+| `aman restore`       | Put Aman back the way it was in one of those backups. It says which backup it will use and waits for you to type `yes` |
+| `aman upgrade`       | Update Aman to the newest version                                                                                      |
+| `aman verify FILE`   | Check a downloaded file against its signed release record                                                              |
+| `aman install`       | Set Aman up on this computer for the first time                                                                        |
+| `aman adopt`         | Move a PC set up with Aman Setup onto the `aman` command                                                               |
+| `aman uninstall`     | Remove Aman from this computer. It asks before it deletes your data and keeps your backups unless you say otherwise    |
 
 The [Windows guide](install-windows.md) walks through Aman Setup.
 

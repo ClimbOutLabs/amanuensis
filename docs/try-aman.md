@@ -19,13 +19,24 @@ Open a terminal.
 - Mac: open the **Terminal** app (press Command+Space and type "Terminal").
 - Linux: open your terminal.
 
-Then run these three lines, one at a time. Replace `vX.Y.Z` with the version the person who sent you this told you to use.
+Aman is installed from its latest release, never from the code that is still being worked on. Run these lines one at a time. The first two ask GitHub which release is the newest, and the third shows it:
 
 ```
-git clone https://github.com/ClimbOutLabs/amanuensis
-cd amanuensis
-git checkout vX.Y.Z
+VERSION=$(curl -fsSL -o /dev/null -w '%{url_effective}' https://github.com/ClimbOutLabs/amanuensis/releases/latest)
+VERSION=${VERSION##*/}
+echo "Installing Aman $VERSION"
 ```
+
+It prints the version, such as `Installing Aman v0.2.0`. If it prints `Installing Aman releases` instead, there is no release yet; ask the person who sent you this guide which version to use. Then get that version of the code:
+
+```
+git clone --branch "$VERSION" https://github.com/ClimbOutLabs/amanuensis
+cd amanuensis
+```
+
+Git may say "You are in 'detached HEAD' state". That is expected: it means you have one fixed version, not the code that changes every day.
+
+On Linux, if a line says `curl: command not found` or `git: command not found`, run `sudo apt install -y curl git` and try again.
 
 On a Mac, the first `git` command may show a window offering to install "command line developer tools". Click Install and wait, then run the line again.
 
@@ -102,12 +113,14 @@ A few common ones:
 
 ## Updating
 
-On Windows, run **Update Aman** from the Start menu. On a Mac or Linux, when a new version comes out, run (replace the version):
+On Windows, run **Update Aman** from the Start menu. On a Mac or Linux, run these lines in the folder you installed from. They find the newest release, get its code, and update Aman to it:
 
 ```
 cd amanuensis
+VERSION=$(curl -fsSL -o /dev/null -w '%{url_effective}' https://github.com/ClimbOutLabs/amanuensis/releases/latest)
+VERSION=${VERSION##*/}
 git fetch --tags
-git checkout vX.Y.Z
+git checkout "$VERSION"
 aman upgrade
 ```
 
