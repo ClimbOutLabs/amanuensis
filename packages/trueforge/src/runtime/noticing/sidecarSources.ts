@@ -188,11 +188,13 @@ export function imapMessageId({ uidvalidity, uid }: { uidvalidity: number; uid: 
 const IMAP_MESSAGE_ID = /^imap:(\d+):(\d+)$/;
 
 /**
- * What events about an IMAP message are named by: its Message-ID, which stays the same when the mailbox is renumbered.
- * It is hashed, since the header is free text of any length.
+ * What events about an IMAP message are named by: its Message-ID with its sender, Date header and subject, none of
+ * which change when the mailbox is renumbered. A message that copies another's Message-ID, or a sender that reuses
+ * one, still makes its own event. Hashed, since headers are free text of any length.
  */
-function messageIdKey(messageId: string): string {
-  return `mid:${createHash('sha256').update(messageId).digest('hex').slice(0, 32)}`;
+function messageKey(parts: { message_id: string; from_address: string; date: string | null; subject: string }): string {
+  const hashed = JSON.stringify([parts.message_id, parts.from_address, parts.date, parts.subject]);
+  return `mid:${createHash('sha256').update(hashed).digest('hex').slice(0, 32)}`;
 }
 
 /** The UID the Email connector's tools take for a message id. */
@@ -223,6 +225,7 @@ const AgentMessageSchema = z.object({
   from_name: z.string().nullable(),
   subject: z.string(),
   message_id: z.string().nullish(),
+  date: z.string().nullish(),
 });
 
 const AgentReplySchema = z.object({
@@ -309,12 +312,15 @@ export function imapAgent({ url, fetchImpl }: { url: string; fetchImpl: typeof f
         skipped += 1;
         continue;
       }
-      const { uid, from_address, from_name, subject, message_id } = message.data;
+      const { uid, from_address, from_name, subject, message_id, date } = message.data;
       const bare = bareSubject(subject);
       messages.push({
         id: imapMessageId({ uidvalidity: reply.uidvalidity, uid }),
         uid,
-        key: message_id === null || message_id === undefined ? undefined : messageIdKey(message_id),
+        key:
+          message_id === null || message_id === undefined
+            ? undefined
+            : messageKey({ message_id, from_address: from_address.toLowerCase(), date: date ?? null, subject }),
         // The mail has no thread, so the subject stands in for one when a later reply is looked for.
         thread_id: bare === '' ? null : bare,
         from_address: from_address.toLowerCase(),

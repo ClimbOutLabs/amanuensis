@@ -5,7 +5,8 @@ It accepts one sign-in for USER with PASSWORD exactly as given, writes the passw
 and writes its port to PORT_FILE once it listens. It serves connections until it is stopped.
 With MAILBOX_FILE (JSON, read again at every EXAMINE so a test can change it) it also serves a read-only INBOX:
 {"uidvalidity": 1, "messages": [{"uid": 1, "internal_date": "05-Nov-2026 14:55:00 +0000", "header": "From: ...",
-"refuse": false, "gone": false}], "fetch_delay_ms": 0}. A message with "refuse" fails any FETCH of headers that includes
+"refuse": false, "gone": false}], "fetch_delay_ms": 0, "no_uidnext": false}. With "no_uidnext" EXAMINE gives no
+UIDNEXT. A message with "refuse" fails any FETCH of headers that includes
 it with NO, as a server that cannot parse it would, while the reply still carries the other messages. A message with
 "gone" is found by SEARCH but has no FETCH reply, as one deleted in between. A message with "batch_refuse" is left out of
 a FETCH of headers for several messages, which then ends with NO, but is given when asked for alone. Like a real server, a bare set in SEARCH is
@@ -87,9 +88,10 @@ def mailbox_command(conn, tag, command, argtext):
     uids = [item["uid"] for item in messages]
     if command == "EXAMINE":
         top = max(uids, default=0)
+        next_line = "" if box.get("no_uidnext") else "* OK [UIDNEXT %d] ok\r\n" % (top + 1)
         conn.sendall(
-            ("* %d EXISTS\r\n* OK [UIDVALIDITY %d] ok\r\n* OK [UIDNEXT %d] ok\r\n%s OK [READ-ONLY] done\r\n"
-             % (len(messages), box["uidvalidity"], top + 1, tag)).encode()
+            ("* %d EXISTS\r\n* OK [UIDVALIDITY %d] ok\r\n%s%s OK [READ-ONLY] done\r\n"
+             % (len(messages), box["uidvalidity"], next_line, tag)).encode()
         )
         return
     sub, _, rest = argtext.partition(" ")

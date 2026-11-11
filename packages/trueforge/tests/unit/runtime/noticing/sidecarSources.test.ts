@@ -20,6 +20,7 @@ import {
   MailSourceBusyError,
   MailTooSlowError,
   MessageUnreadableError,
+  type CursorRead,
   type NoticingSourceProvider,
   type NoticingSources,
 } from '../../../../src/runtime/noticing/sources';
@@ -198,6 +199,17 @@ describe('sidecar mail source (IMAP)', () => {
         limit: 10,
       },
     ]);
+  });
+
+  it('sends back the part of the mailbox still to be dated', async () => {
+    const { agent, asked } = mailboxAgent([]);
+    await mailSource(mailTool([]).call, agent).listAfter({
+      cursor: { uidvalidity: 1, last_uid: 200, dated: { to_uid: 912, since: SINCE } },
+      since: new Date('2026-11-05T14:40:00.000Z'),
+      limit: 10,
+      out_of_time: () => false,
+    });
+    expect(asked[0]).toMatchObject({ last_uid: 200, dated_to_uid: 912, dated_since: SINCE.toISOString() });
   });
 
   it('fails the list without asking when the pass is already out of time', async () => {
@@ -413,33 +425,41 @@ describe('sidecar mail source (IMAP)', () => {
       ]);
     });
 
-    it('names a message by its Message-ID, which stays the same when the mailbox is renumbered', async () => {
+    it('names a message by its Message-ID, sender, date and subject, which stay the same when it is renumbered', async () => {
       const header = {
         internal_date: '2026-11-05T14:55:00+00:00',
         from_address: 'a@b.test',
         from_name: null,
         subject: 'Invoice',
+        message_id: '<bill-1@power.test>',
+        date: 'Thu, 5 Nov 2026 14:55:00 +0000',
       };
-      const numbering = (uidvalidity: number, uid: number) =>
-        ask(
-          reply(200, {
-            uidvalidity,
-            last_uid: uid,
-            dated_to_uid: null,
-            dated_since: null,
-            more: false,
-            skipped: 0,
-            messages: [
-              { ...header, uid, message_id: '<bill-1@power.test>' },
-              { ...header, uid: uid + 1, message_id: null },
-            ],
-          }),
-        );
-      const [before, after] = await Promise.all([numbering(3, 9), numbering(4, 1)]);
-      expect(before.messages[0]?.key).toMatch(/^mid:[0-9a-f]{32}$/);
-      expect(after.messages[0]?.key).toBe(before.messages[0]?.key);
-      expect(after.messages[0]?.id).not.toBe(before.messages[0]?.id);
-      expect(before.messages[1]?.key).toBeUndefined();
+      const keysOf = async (uidvalidity: number, messages: Record<string, unknown>[]) =>
+        (
+          await ask(
+            reply(200, {
+              uidvalidity,
+              last_uid: messages.length,
+              dated_to_uid: null,
+              dated_since: null,
+              more: false,
+              skipped: 0,
+              messages: messages.map((message, index) => ({ ...header, uid: index + 1, ...message })),
+            }),
+          )
+        ).messages.map(message => message.key);
+      const [first, renumbered] = await Promise.all([keysOf(3, [{}]), keysOf(4, [{}])]);
+      expect(first[0]).toMatch(/^mid:[0-9a-f]{32}$/);
+      expect(renumbered[0]).toBe(first[0]);
+      // The same Message-ID from another sender, on another date or with another subject is another message.
+      const others = await keysOf(3, [
+        { from_address: 'spoof@evil.test' },
+        { date: 'Sat, 5 Dec 2026 14:55:00 +0000' },
+        { subject: 'Invoice for December' },
+        { message_id: null },
+      ]);
+      expect(new Set([first[0], ...others.slice(0, 3)]).size).toBe(4);
+      expect(others[3]).toBeUndefined();
     });
 
     it('carries the part of the mailbox still to be dated in the cursor', async () => {
@@ -522,6 +542,47 @@ describe('sidecar mail source (IMAP)', () => {
         out_of_time: input.out_of_time ?? (() => false),
         assistant: 'Mira',
       });
+
+    it('keeps the dating on the cursor when the pass stops below it, after a later call said nothing of it', async () => {
+      const dated = { to_uid: 5, since: SINCE };
+      const bill = (uid: number) => ({
+        id: imapMessageId({ uidvalidity: 1, uid }),
+        uid,
+        thread_id: 'Invoice',
+        from_address: 'billing@power.test',
+        from_name: null,
+        subject: 'Invoice: amount due by November 7',
+        snippet: '',
+        received_at: new Date(`2026-11-05T14:5${String(uid)}:00.000Z`),
+        authentication_results: [],
+      });
+      const replies: CursorRead[] = [
+        { messages: [bill(1), bill(2)], skipped: 0, cursor: { uidvalidity: 1, last_uid: 5, dated }, more: true },
+        { messages: [], skipped: 0, cursor: { uidvalidity: 1, last_uid: 5 }, more: false },
+      ];
+      const agent: ListAfterAgent = () => {
+        const next = replies.shift();
+        return next === undefined ? Promise.reject(new Error('asked too often')) : Promise.resolve(next);
+      };
+      let reads = 0;
+      const found = await watchMail({
+        source: mailSource((name, args) => {
+          if (name === 'get_emails_content') {
+            reads += 1;
+          }
+          return billsTool()(name, args);
+        }, agent),
+        settings: defaultReachSettings('UTC'),
+        since: SINCE,
+        now: NOW,
+        logger: { warn: jest.fn() },
+        cursor: undefined,
+        stuck: undefined,
+        out_of_time: () => reads >= 1,
+        assistant: 'Mira',
+      });
+      expect(found.cursor).toEqual({ uidvalidity: 1, last_uid: 1, dated });
+    });
 
     it('reads the bill beside a header that does not parse, and tells of the one it could not list', async () => {
       const { agent } = mailboxAgent([

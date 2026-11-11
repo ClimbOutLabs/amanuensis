@@ -1,59 +1,14 @@
-import { renderMailAccountEnv } from '@truefoundry/trueforge-core/core/email/mailConnector/accountFile';
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
-
 import type { MailCursor } from '../../../src/db/noticingStore';
 import { imapAgent, imapMailboxValidity, type ListAfterAgent } from '../../../src/runtime/noticing/sidecarSources';
 import { MailLoginFailedError } from '../../../src/runtime/noticing/sources';
-
-const REPO_ROOT = resolve(__dirname, '..', '..', '..', '..', '..');
-const AGENT = resolve(REPO_ROOT, 'ops/compose/mail-email/account_agent.py');
-const FAKE_IMAP = resolve(REPO_ROOT, 'installer/tests/fake_imap.py');
+import { startMailAgent, stored, type MailAgentHarness, type Stored } from './mailAgentSupport';
 
 const PASSWORD = 'CANARY-LIST-PASSWORD-4k2q';
-const AGENT_PORT = 19775;
-const ADDRESS = 'person@example.com';
-const URL = `http://127.0.0.1:${String(AGENT_PORT)}`;
-
-interface Stored {
-  uid: number;
-  internal_date: string;
-  header: string;
-  refuse?: boolean;
-  gone?: boolean;
-  batch_refuse?: boolean;
-}
-
-/** A message as the fake server stores it, arrived `minute` minutes after 14:00 UTC on 5 November 2026. */
-function stored({ uid, minute, header }: { uid: number; minute: number; header?: string }): Stored {
-  const time = `${String(14 + Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}:00`;
-  return {
-    uid,
-    internal_date: `05-Nov-2026 ${time} +0000`,
-    header: header ?? `From: Power Co <billing@power.test>\nSubject: Invoice ${String(uid)}`,
-  };
-}
-
-async function eventually(check: () => boolean, timeoutMs = 15_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!check()) {
-    if (Date.now() > deadline) {
-      throw new Error('condition not met in time');
-    }
-    await new Promise(resolvePromise => setTimeout(resolvePromise, 100));
-  }
-}
+const PORT = 19775;
+const URL = `http://127.0.0.1:${String(PORT)}`;
 
 describe('the mail account agent lists new mail by number', () => {
-  let dir: string;
-  let mailboxFile: string;
-  let accountFile: string;
-  let imapPort: number;
-  let imap: ChildProcess | undefined;
-  let agent: ChildProcess | undefined;
-  let agentOutput = '';
+  let harness: MailAgentHarness | undefined;
   const ask = imapAgent({ url: URL, fetchImpl: undefined });
   /** A list request with no part of the mailbox still to be dated, unless the test says otherwise. */
   const list = (request: Omit<Parameters<ListAfterAgent>[0], 'dated_to_uid' | 'dated_since'>) =>
@@ -67,106 +22,19 @@ describe('the mail account agent lists new mail by number', () => {
   });
   const validity = imapMailboxValidity({ url: URL, fetchImpl: undefined });
 
-  function setMailbox({
-    uidvalidity,
-    messages,
-    fetch_delay_ms = 0,
-  }: {
-    uidvalidity: number;
-    messages: Stored[];
-    fetch_delay_ms?: number;
-  }): void {
-    writeFileSync(mailboxFile, JSON.stringify({ uidvalidity, messages, fetch_delay_ms }));
+  function setMailbox(box: { uidvalidity: number; messages: Stored[]; fetch_delay_ms?: number; no_uidnext?: boolean }) {
+    harness?.setMailbox(box);
   }
-
-  function saveAccount(password: string): void {
-    writeFileSync(
-      accountFile,
-      renderMailAccountEnv({
-        address: ADDRESS,
-        password,
-        imap_host: 'localhost',
-        imap_port: imapPort,
-        imap_mode: 'ssl',
-        smtp_host: 'localhost',
-        smtp_port: 465,
-        smtp_mode: 'ssl',
-      }),
-      { mode: 0o600 },
-    );
-  }
-
-  const commands = (): string => {
-    const file = join(dir, 'imap.port.commands');
-    return existsSync(file) ? readFileSync(file, 'utf8') : '';
-  };
+  const saveAccount = (password: string) => harness?.saveAccount(password);
+  const commands = (): string => harness?.commands() ?? '';
 
   beforeAll(async () => {
-    dir = mkdtempSync(join(tmpdir(), 'mail-list-'));
-    accountFile = join(dir, '.env.mail-email');
-    mailboxFile = join(dir, 'mailbox.json');
-    setMailbox({ uidvalidity: 1, messages: [] });
-    const cert = join(dir, 'cert.pem');
-    const key = join(dir, 'key.pem');
-    execFileSync(
-      'openssl',
-      [
-        'req',
-        '-x509',
-        '-newkey',
-        'rsa:2048',
-        '-nodes',
-        '-days',
-        '1',
-        '-subj',
-        '/CN=localhost',
-        '-addext',
-        'subjectAltName=DNS:localhost',
-        '-keyout',
-        key,
-        '-out',
-        cert,
-      ],
-      { stdio: 'ignore' },
-    );
-    const portFile = join(dir, 'imap.port');
-    imap = spawn('python3', [FAKE_IMAP, 'ssl', cert, key, ADDRESS, PASSWORD, portFile, mailboxFile], {
-      stdio: 'ignore',
-    });
-    await eventually(() => existsSync(portFile) && readFileSync(portFile, 'utf8').trim() !== '');
-    imapPort = Number(readFileSync(portFile, 'utf8').trim());
-    saveAccount(PASSWORD);
-    agent = spawn('python3', [AGENT], {
-      env: {
-        ...process.env,
-        AMAN_MAIL_ACCOUNT_FILE: accountFile,
-        AMAN_MAIL_ACCOUNT_PORT: String(AGENT_PORT),
-        // Short, so a test can see the work stop in time; every call still gets through at least one message.
-        AMAN_MAIL_LIST_SECONDS: '2',
-        SSL_CERT_FILE: cert,
-      },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    agent.stdout?.on('data', (chunk: Buffer) => {
-      agentOutput += chunk.toString();
-    });
-    agent.stderr?.on('data', (chunk: Buffer) => {
-      agentOutput += chunk.toString();
-    });
-    let up = false;
-    await eventually(() => {
-      fetch(`${URL}/account`)
-        .then(response => {
-          up = response.ok;
-        })
-        .catch(() => undefined);
-      return up;
-    });
+    // Short, so a test can see the work stop in time; every call still gets through at least one message.
+    harness = await startMailAgent({ port: PORT, password: PASSWORD, list_seconds: 2 });
   }, 60_000);
 
   afterAll(() => {
-    agent?.kill('SIGKILL');
-    imap?.kill('SIGKILL');
+    harness?.stop();
   });
 
   it('starts at the mail that arrived since the given time, and says where it got to', async () => {
@@ -179,7 +47,12 @@ describe('the mail account agent lists new mail by number', () => {
       subject: 'Invoice 4',
       received_at: new Date('2026-11-05T14:30:00.000Z'),
     });
-    expect(read.cursor).toEqual({ uidvalidity: 7, last_uid: 4 });
+    // The dated UIDs come back with the cursor, though all are behind it, for a pass that stops earlier.
+    expect(read.cursor).toEqual({
+      uidvalidity: 7,
+      last_uid: 4,
+      dated: { to_uid: 4, since: new Date('2026-11-05T14:10:00.000Z') },
+    });
     expect(read.more).toBe(false);
   }, 30_000);
 
@@ -196,7 +69,45 @@ describe('the mail account agent lists new mail by number', () => {
     setMailbox({ uidvalidity: 8, messages: [stored({ uid: 1, minute: 0 }), stored({ uid: 2, minute: 30 })] });
     const read = await list({ uidvalidity: 7, last_uid: 4, since: '2026-11-05T14:10:00.000Z', limit: 10 });
     expect(read.messages.map(message => message.uid)).toEqual([2]);
-    expect(read.cursor).toEqual({ uidvalidity: 8, last_uid: 2 });
+    expect(read.cursor).toEqual({
+      uidvalidity: 8,
+      last_uid: 2,
+      dated: { to_uid: 2, since: new Date('2026-11-05T14:10:00.000Z') },
+    });
+  }, 30_000);
+
+  it('dates the mail already in the mailbox when the server gives no UIDNEXT, by its highest UID', async () => {
+    setMailbox({
+      uidvalidity: 19,
+      messages: [stored({ uid: 3, minute: 0 }), stored({ uid: 4, minute: 30 })],
+      no_uidnext: true,
+    });
+    const read = await list({ uidvalidity: null, last_uid: null, since: '2026-11-05T14:10:00.000Z', limit: 10 });
+    expect(read.messages.map(message => message.uid)).toEqual([4]);
+  }, 30_000);
+
+  it('reads the Message-ID and Date headers as sent, unfolded, so odd values stay apart', async () => {
+    const header = (id: string) =>
+      `From: Power Co <billing@power.test>\nSubject: Invoice\nDate: Thu, 5 Nov 2026\n 14:30:00 +0000\nMessage-ID: ${id}`;
+    setMailbox({
+      uidvalidity: 20,
+      messages: [
+        { ...stored({ uid: 1, minute: 30 }), header: header('<ünï cødé "q" ;,@x.test>') },
+        { ...stored({ uid: 2, minute: 30 }), header: header('<ünï other@x.test>') },
+      ],
+    });
+    const response = await fetch(`${URL}/list_after`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ uidvalidity: null, last_uid: null, since: '2026-11-05T14:10:00.000Z', limit: 10 }),
+    });
+    const body: unknown = await response.json();
+    expect(body).toMatchObject({
+      messages: [
+        { uid: 1, message_id: '<ünï cødé "q" ;,@x.test>', date: 'Thu, 5 Nov 2026 14:30:00 +0000' },
+        { uid: 2, message_id: '<ünï other@x.test>' },
+      ],
+    });
   }, 30_000);
 
   it('says the inbox UIDVALIDITY now, so a UID kept from another numbering is not trusted', async () => {
@@ -277,7 +188,7 @@ describe('the mail account agent lists new mail by number', () => {
       .slice(before)
       .split('\n')
       .filter(line => /^UID FETCH \d+ /.test(line));
-    expect(alone).toEqual(['UID FETCH 2 (INTERNALDATE BODY.PEEK[HEADER.FIELDS (FROM SUBJECT MESSAGE-ID)])']);
+    expect(alone).toEqual(['UID FETCH 2 (INTERNALDATE BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE MESSAGE-ID)])']);
   }, 30_000);
 
   it('does not count a message deleted between the search and the fetch as one it could not read', async () => {
@@ -360,7 +271,7 @@ describe('the mail account agent lists new mail by number', () => {
     }
     expect(calls).toBeGreaterThan(1);
     expect(seen).toEqual([451, 452, 453]);
-    expect(read.cursor).toEqual({ uidvalidity: 17, last_uid: 453, dated: undefined });
+    expect(read.cursor).toMatchObject({ uidvalidity: 17, last_uid: 453 });
   }, 120_000);
 
   it('opens the inbox read-only, fetches headers without marking mail read, and never fetches a body', () => {
@@ -368,7 +279,7 @@ describe('the mail account agent lists new mail by number', () => {
     expect(sent).toContain('EXAMINE INBOX');
     expect(sent).not.toMatch(/^SELECT /m);
     expect(sent).not.toMatch(/STORE|EXPUNGE/);
-    expect(sent).toContain('BODY.PEEK[HEADER.FIELDS (FROM SUBJECT MESSAGE-ID)]');
+    expect(sent).toContain('BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE MESSAGE-ID)]');
     expect(sent).not.toMatch(/BODY\[(?!HEADER)/);
   });
 
@@ -378,8 +289,8 @@ describe('the mail account agent lists new mail by number', () => {
       list({ uidvalidity: null, last_uid: null, since: '2026-11-05T14:00:00.000Z', limit: 10 }),
     ).rejects.toBeInstanceOf(MailLoginFailedError);
     saveAccount(PASSWORD);
-    expect(agentOutput).not.toContain(PASSWORD);
-    expect(agentOutput).not.toContain('CANARY-WRONG-LIST-PASSWORD');
+    expect(harness?.output()).not.toContain(PASSWORD);
+    expect(harness?.output()).not.toContain('CANARY-WRONG-LIST-PASSWORD');
   }, 30_000);
 
   it('refuses a request it cannot read', async () => {
