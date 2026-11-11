@@ -3,4 +3,6 @@
 export interface SandboxCapability {
     /** Whether a sandbox provider is configured for this tenant. */
     enabled: boolean;
+    /** Why the sandbox is off, in plain words; present only when it is off and a reason is known. */
+    reason?: string;
 }
