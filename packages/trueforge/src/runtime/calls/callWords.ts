@@ -1,5 +1,5 @@
 import type { Delivery } from '../../schemas/deliveries';
-import { isPlainWords } from '../texts/textWords';
+import { checkedWords } from '../texts/textWords';
 import { CALL_LINES } from './callTurns';
 
 /** The most of a delivery's words a call carries; anything longer stays in the app. */
@@ -89,8 +89,12 @@ export function callWords(text: string): string | undefined {
   if (soundsLikeTheCall(text)) {
     return undefined;
   }
-  const words = text.replace(/\s+/g, ' ').trim();
-  return words !== '' && words.length <= CALL_WORDS_MAX && isPlainWords(words) ? words : undefined;
+  // The words are checked as the call will say them: as given, and again after the texts' cleaning, which drops
+  // accents and signs a voice could say differently. What is returned is that cleaned form.
+  const words = checkedWords({ text: text.replace(/\s+/g, ' ').trim(), room: Number.MAX_SAFE_INTEGER });
+  return words !== undefined && words !== '' && words.length <= CALL_WORDS_MAX && !soundsLikeTheCall(words)
+    ? words
+    : undefined;
 }
 
 /** The line said once the person said yes: what the call is about, or why it is not read out. */

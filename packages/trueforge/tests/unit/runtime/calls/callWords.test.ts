@@ -60,6 +60,12 @@ describe('the words a call may carry', () => {
     expect(callWords('Heyday of the high street, shipping at noon')).toBeDefined();
   });
 
+  it('says the cleaned form of the words, and refuses what only the cleaned form gives away', () => {
+    expect(callWords('Dentist at 2:30 p.m. – bring the forms')).toBe('Dentist at 2:30 p.m. - bring the forms');
+    expect(callWords('Visit evil.example')).toBeUndefined();
+    expect(callWords('Visit evil\u200b.example')).toBeUndefined();
+  });
+
   it('carries nothing longer than 300 characters', () => {
     const sentence = 'The fox jumps over the lazy dog and ';
     expect(callWords(sentence.repeat(8).trim())).toBeDefined();
