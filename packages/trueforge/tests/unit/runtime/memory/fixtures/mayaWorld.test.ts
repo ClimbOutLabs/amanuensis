@@ -22,7 +22,8 @@ function decisions(kind: ExpectedDecision['decision']): ExpectedDecision[] {
 
 async function vaultHash(dir: string): Promise<string> {
   const hash = createHash('sha256');
-  const names = (await readdir(dir, { recursive: true })).sort();
+  // The lock folder holds who saved when, which differs between two builds of the same vault.
+  const names = (await readdir(dir, { recursive: true })).filter(name => !name.includes('.memory-state')).sort();
   for (const name of names) {
     const file = path.join(dir, name);
     const content = await readFile(file).catch(() => undefined);
