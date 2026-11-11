@@ -3,11 +3,11 @@
 // assistant attribution blocks, footers and trailers, links to private assistant workspaces,
 // private project-folder paths, or a privacy/license checklist in the description.
 //
-// It reads three things: the description (PR_BODY), the message of every commit in
-// BASE..HEAD, and every line the pull request adds. Each pattern names the places it applies to,
+// It reads the title (PR_TITLE), which a squash merge makes the commit's first line, the description
+// (PR_BODY), the message of every commit in BASE..HEAD, and every line the pull request adds. Each pattern names the places it applies to,
 // because a word that is wrong in a description can be fine in code.
 //
-// Usage: PR_BODY="..." node scripts/check-pr-hygiene.mjs --base <sha> --head <sha>
+// Usage: PR_TITLE="..." PR_BODY="..." node scripts/check-pr-hygiene.mjs --base <sha> --head <sha>
 
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
@@ -37,7 +37,7 @@ export const RULES = [
   },
   {
     name: 'assistant footer',
-    pattern: /Generated with \[?Claude Code/i,
+    pattern: /Generated (?:with|by) \[?Claude Code|\bclaude\.com\/claude-code\b/i,
     where: ['body', 'commit', 'added'],
     fix: 'Remove the footer.',
   },
@@ -76,13 +76,17 @@ export const RULES = [
 ];
 
 /**
- * Every rule broken by the description, a commit message or an added line.
- * @param {{ body: string, commits: { sha: string, message: string }[], addedLines: { file: string, line: number, text: string }[] }} input
+ * Every rule broken by the title, the description, a commit message or an added line.
+ * @param {{ title?: string, body: string, commits: { sha: string, message: string }[], addedLines: { file: string, line: number, text: string }[] }} input
  * @returns {string[]}
  */
-export function findHygieneProblems({ body, commits, addedLines }) {
+export function findHygieneProblems({ title = '', body, commits, addedLines }) {
   const problems = [];
   for (const rule of RULES) {
+    // A squash merge turns the title into the commit's first line, so it is read like a commit message.
+    if (rule.where.includes('commit') && rule.pattern.test(title)) {
+      problems.push(`PR title: ${rule.name}. ${rule.fix}`);
+    }
     if (rule.where.includes('body') && rule.pattern.test(body)) {
       problems.push(`PR description: ${rule.name}. ${rule.fix}`);
     }
@@ -113,19 +117,36 @@ export function parseAddedLines(diff) {
   const added = [];
   let file = '';
   let line = 0;
+  // Lines still owed to the current hunk, from its header. Inside a hunk an added line may itself start
+  // with "++ " or "@@", so headers are only read once the hunk's counts run out.
+  let oldLeft = 0;
+  let newLeft = 0;
   for (const raw of diff.split('\n')) {
+    if (oldLeft > 0 || newLeft > 0) {
+      if (raw.startsWith('+')) {
+        if (file) {
+          added.push({ file, line, text: raw.slice(1) });
+        }
+        line += 1;
+        newLeft -= 1;
+      } else if (raw.startsWith('-')) {
+        oldLeft -= 1;
+      } else if (raw.startsWith(' ')) {
+        line += 1;
+        oldLeft -= 1;
+        newLeft -= 1;
+      }
+      continue;
+    }
     if (raw.startsWith('+++ ')) {
       file = raw === '+++ /dev/null' ? '' : raw.replace(/^\+\+\+ b\//, '');
       continue;
     }
-    const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(raw);
+    const hunk = /^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(raw);
     if (hunk) {
-      line = Number(hunk[1]);
-      continue;
-    }
-    if (file && raw.startsWith('+')) {
-      added.push({ file, line, text: raw.slice(1) });
-      line += 1;
+      oldLeft = hunk[1] === undefined ? 1 : Number(hunk[1]);
+      line = Number(hunk[2]);
+      newLeft = hunk[3] === undefined ? 1 : Number(hunk[3]);
     }
   }
   return added;
@@ -155,16 +176,17 @@ function main() {
   const base = argValue('--base');
   const head = argValue('--head');
   if (!base || !head) {
-    console.error('Usage: PR_BODY="..." node scripts/check-pr-hygiene.mjs --base <sha> --head <sha>');
+    console.error('Usage: PR_TITLE="..." PR_BODY="..." node scripts/check-pr-hygiene.mjs --base <sha> --head <sha>');
     process.exit(2);
   }
   const problems = findHygieneProblems({
+    title: process.env.PR_TITLE ?? '',
     body: process.env.PR_BODY ?? '',
     commits: readCommits({ base, head }),
     addedLines: parseAddedLines(git(['diff', '--no-color', '--no-ext-diff', '-U0', `${base}...${head}`])),
   });
   if (problems.length === 0) {
-    console.log('PR description, commit messages and added lines are clean.');
+    console.log('PR title, description, commit messages and added lines are clean.');
     return;
   }
   console.error('This pull request carries text that must not reach the public repository:');

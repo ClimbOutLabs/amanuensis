@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 // Fails (exit 1) when a pull request adds a TypeScript type assertion (`as T`, `<T>x`) or a non-null
 // assertion (`x!`), which AGENTS.md forbids. `as const` stays allowed. Only lines the pull request
-// adds are reported, so the check can run while older assertions are still being removed.
+// adds are reported, so the check can run while older assertions are still being removed. An assertion
+// counts as added when the line it starts on or the line it ends on is added: `<T>x` sits on the first,
+// and `} as T` or `)!` closing a longer expression sits on the last. A changed file that does not parse
+// fails the check wherever the error is, since nothing in it can be checked.
 //
 // Usage: node scripts/check-new-assertions.mjs --base <sha> --head <sha>
 
@@ -12,7 +15,8 @@ import { fileURLToPath } from 'node:url';
 import tseslint from 'typescript-eslint';
 import { parseAddedLines } from './check-pr-hygiene.mjs';
 
-// Generated or vendored code that this repository does not write by hand.
+// Generated code, and the vendored Gmail MCP fork under mcp/, whose lint config also allows its own
+// non-null assertions so upstream syncs stay mechanical.
 const NOT_OURS = [/^packages\/trueforge-sdk\//, /^mcp\//, /\.gen\.ts$/];
 const TYPESCRIPT = /\.(?:ts|tsx|mts|cts)$/;
 
@@ -69,8 +73,12 @@ export async function findNewAssertions({ rootDir, linesByFile }) {
     for (const message of result.messages) {
       if (message.fatal) {
         problems.push(`${file}:${message.line}: could not be read: ${message.message}`);
-      } else if (added.has(message.line)) {
-        problems.push(`${file}:${message.line}: ${message.message} Use a sound type, a guard or a schema instead.`);
+      } else {
+        const endLine = message.endLine ?? message.line;
+        const addedLine = added.has(message.line) ? message.line : added.has(endLine) ? endLine : undefined;
+        if (addedLine !== undefined) {
+          problems.push(`${file}:${addedLine}: ${message.message} Use a sound type, a guard or a schema instead.`);
+        }
       }
     }
   }

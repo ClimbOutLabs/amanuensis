@@ -50,6 +50,33 @@ test('assertions on lines the pull request did not add pass', async () => {
   });
 });
 
+test('an assertion that closes a longer expression counts when its closing line is added', async () => {
+  const continued = [
+    'const existing = {',
+    '  k: 1,',
+    '} as { k: number };',
+    'const found = [1].find(',
+    '  x => x > 0,',
+    ')!;',
+    'export { existing, found };',
+  ].join('\n');
+  await withTree({ 'packages/p/src/y.ts': continued }, async rootDir => {
+    const onlyClosing = await findNewAssertions({
+      rootDir,
+      linesByFile: new Map([['packages/p/src/y.ts', new Set([3, 6])]]),
+    });
+    assert.deepEqual(
+      onlyClosing.map(problem => problem.split(':').slice(0, 2).join(':')),
+      ['packages/p/src/y.ts:3', 'packages/p/src/y.ts:6'],
+    );
+    const onlyMiddle = await findNewAssertions({
+      rootDir,
+      linesByFile: new Map([['packages/p/src/y.ts', new Set([2, 5])]]),
+    });
+    assert.deepEqual(onlyMiddle, [], 'editing inside an older asserted expression adds no assertion');
+  });
+});
+
 test('only hand-written TypeScript is read', () => {
   const lines = addedTypeScriptLines([
     { file: 'packages/p/src/a.ts', line: 1 },
