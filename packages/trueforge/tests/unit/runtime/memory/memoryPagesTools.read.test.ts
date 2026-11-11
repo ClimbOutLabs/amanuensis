@@ -5,6 +5,7 @@ import { mkdtemp, rm, stat, utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createLogger } from 'winston';
+import { z } from 'zod';
 
 import {
   DRAFTING_END,
@@ -66,24 +67,18 @@ async function call(tools: MemoryPagesToolSet, name: string, args: Record<string
   return { isError: response.result.isError === true, text: first?.type === 'text' ? first.text : '' };
 }
 
-interface Listed {
-  kind: string;
-  title: string;
-  summary?: string;
-}
-
-interface ListAnswer {
-  pages: Listed[];
-  not_confirmed?: { label: string; pages: Listed[] };
-  left_out?: number;
-  next?: string;
-}
+const ListedSchema = z.object({ kind: z.string(), title: z.string(), summary: z.string().optional() });
+const ListAnswerSchema = z.object({
+  pages: z.array(ListedSchema),
+  not_confirmed: z.object({ label: z.string(), pages: z.array(ListedSchema) }).optional(),
+  left_out: z.number().optional(),
+  next: z.string().optional(),
+});
 
 async function list(tools: MemoryPagesToolSet, args: Record<string, unknown> = {}) {
   const out = await call(tools, 'list_pages', args);
   expect(out.isError).toBe(false);
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- the test knows the shape the tool writes
-  return { text: out.text, answer: JSON.parse(out.text) as ListAnswer };
+  return { text: out.text, answer: ListAnswerSchema.parse(JSON.parse(out.text)) };
 }
 
 function pageFile({ title, aliases = [], lines }: { title: string; aliases?: string[]; lines: string[] }): string {
