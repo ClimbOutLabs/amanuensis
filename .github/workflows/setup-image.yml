@@ -1,0 +1,160 @@
+name: Setup image
+
+# The setup image is the container the Windows installer runs the
+# shell installer in. Every pull request that touches the installer
+# builds it and runs installer/install.sh inside it, and checks the
+# image installer/release.json pins the same way. A change to the image
+# is published to GitHub's registry from its own pull request (never
+# from a fork) and again when it reaches main, so the pull request can
+# move the pin to the image it built and prove that pin before merging.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - '.github/workflows/setup-image.yml'
+      - 'installer/setup-image/**'
+      - 'installer/install.sh'
+      - 'installer/lib/**'
+      - 'installer/release.json'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/setup-image.yml'
+      - 'installer/setup-image/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  built:
+    name: Check the built setup image (${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: x64
+          - os: ubuntu-24.04-arm
+            arch: arm64
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Build the setup image
+        run: pnpm build:setup-image
+
+      - name: Run the shell installer in the built image
+        run: pnpm test:setup-image aman-setup:local
+
+  pinned:
+    name: Check the pinned setup image (${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: x64
+          - os: ubuntu-24.04-arm
+            arch: arm64
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Run the shell installer in the pinned image
+        run: |
+          pinned=$(jq -r .setup_image installer/release.json)
+          echo "The pinned setup image is $pinned"
+          docker pull "$pinned"
+          pnpm test:setup-image "$pinned"
+
+  publish:
+    name: Publish the setup image
+    needs: built
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Decide whether the image changed
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if git diff --quiet "$BASE" HEAD -- installer/setup-image/Dockerfile; then
+            echo "CHANGED=false" >> "$GITHUB_ENV"
+            echo "The setup image did not change, so nothing is published."
+          else
+            echo "CHANGED=true" >> "$GITHUB_ENV"
+          fi
+
+      - name: Setup pnpm
+        if: env.CHANGED == 'true'
+        uses: pnpm/action-setup@v6
+
+      - name: Set up arm64 builds
+        if: env.CHANGED == 'true'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        if: env.CHANGED == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Sign in to GitHub's registry
+        if: env.CHANGED == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+
+      - name: Build and push for x64 and arm64
+        if: env.CHANGED == 'true'
+        run: |
+          docker buildx build --platform linux/amd64,linux/arm64 \
+            -t "ghcr.io/climboutlabs/aman-setup:${GITHUB_SHA::12}" \
+            -t ghcr.io/climboutlabs/aman-setup:latest \
+            --metadata-file "$RUNNER_TEMP/metadata.json" --push installer/setup-image
+          digest=$(jq -r '."containerimage.digest"' "$RUNNER_TEMP/metadata.json")
+          echo "DIGEST=$digest" >> "$GITHUB_ENV"
+
+      # Pulled back without a sign-in, because that is how a person's
+      # computer pulls it.
+      - name: Check the published image as a stranger would pull it
+        if: env.CHANGED == 'true'
+        run: |
+          docker logout ghcr.io
+          image="ghcr.io/climboutlabs/aman-setup@$DIGEST"
+          if ! docker pull "$image"; then
+            echo "::error::The published image cannot be pulled without signing in. Make the aman-setup package public in the organization's package settings, then run this workflow again."
+            exit 1
+          fi
+          pnpm test:setup-image "$image"
+          {
+            echo "Published $image"
+            echo
+            echo "Put this line in installer/release.json in place of the setup_image line:"
+            echo
+            echo "    \"setup_image\": \"$image\","
+          } >> "$GITHUB_STEP_SUMMARY"

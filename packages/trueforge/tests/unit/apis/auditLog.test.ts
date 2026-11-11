@@ -58,6 +58,8 @@ describe('per-user audit log route', () => {
         spec: AgentSpecSchema.parse({ model: { name: 'p/m' }, instructions: 'Answer the user.' }),
       },
       custom: null,
+      is_incognito: false,
+      private_expires_at: null,
     });
   }
 
@@ -130,5 +132,89 @@ describe('per-user audit log route', () => {
   it('refuses a forged page token and an unknown outcome', async () => {
     expect((await server.request(`${AUDIT_PATH}?page_token=not-a-token`, asUser(ALICE))).status).toBe(400);
     expect((await server.request(`${AUDIT_PATH}?outcome=held`, asUser(ALICE))).status).toBe(400);
+  });
+
+  it('filters by a from and to time, keeping the entries on both covered boundary instants', async () => {
+    const CAROL = 'carol@audit.example';
+    const row = (tool_name: string, created_at: string) => ({
+      id: `carol-${tool_name}`,
+      conversation_id: 'carol-chat',
+      tier: 3,
+      tool_name,
+      description: `Entry ${tool_name}`,
+      outcome: 'approved' as const,
+      auto_deny_reason: null,
+      created_at,
+    });
+    await new SentinelAuditStore(server.db()).importRecords({
+      tenant_id: 'default',
+      created_by: CAROL,
+      records: [
+        row('just_before', '2026-09-30T23:59:59.999Z'),
+        row('at_from', '2026-10-01T00:00:00.000Z'),
+        row('middle', '2026-10-02T12:00:00.000Z'),
+        row('last_covered', '2026-10-03T23:59:59.999Z'),
+        row('at_to', '2026-10-04T00:00:00.000Z'),
+      ],
+    });
+
+    const from = encodeURIComponent('2026-10-01T00:00:00.000Z');
+    const to = encodeURIComponent('2026-10-04T00:00:00.000Z');
+    const ranged = await list(CAROL, `?from=${from}&to=${to}`);
+    expect(ranged.data.map(entry => entry.tool_name)).toEqual(['last_covered', 'middle', 'at_from']);
+
+    const fromOnly = await list(CAROL, `?from=${from}`);
+    expect(fromOnly.data.map(entry => entry.tool_name)).toEqual(['at_to', 'last_covered', 'middle', 'at_from']);
+
+    const toOnly = await list(CAROL, `?to=${to}`);
+    expect(toOnly.data.map(entry => entry.tool_name)).toEqual(['last_covered', 'middle', 'at_from', 'just_before']);
+
+    expect((await server.request(`${AUDIT_PATH}?from=not-a-time`, asUser(CAROL))).status).toBe(400);
+    expect((await server.request(`${AUDIT_PATH}?to=2026-10-04`, asUser(CAROL))).status).toBe(400);
+  });
+
+  it('reads a bound with an offset or without milliseconds as the same instant', async () => {
+    const DAVE = 'dave@audit.example';
+    const row = (tool_name: string, created_at: string) => ({
+      id: `dave-${tool_name}`,
+      conversation_id: 'dave-chat',
+      tier: 3,
+      tool_name,
+      description: `Entry ${tool_name}`,
+      outcome: 'approved' as const,
+      auto_deny_reason: null,
+      created_at,
+    });
+    await new SentinelAuditStore(server.db()).importRecords({
+      tenant_id: 'default',
+      created_by: DAVE,
+      records: [
+        row('before', '2026-09-30T18:29:59.999Z'),
+        row('at_start', '2026-09-30T18:30:00.000Z'),
+        row('exported_with_offset', '2026-10-01T09:00:00+05:30'),
+        row('at_end', '2026-10-01T18:30:00.000Z'),
+      ],
+    });
+
+    // The start of 1 October in India, sent with its offset, is 18:30 UTC the day before.
+    const from = encodeURIComponent('2026-10-01T00:00:00+05:30');
+    const to = encodeURIComponent('2026-10-02T00:00:00+05:30');
+    const offsetBounds = await list(DAVE, `?from=${from}&to=${to}`);
+    expect(offsetBounds.data.map(entry => entry.tool_name)).toEqual(['exported_with_offset', 'at_start']);
+
+    // Without milliseconds, an exact instant is still the same instant.
+    const noMillis = await list(DAVE, `?from=${encodeURIComponent('2026-09-30T18:30:00Z')}`);
+    expect(noMillis.data.map(entry => entry.tool_name)).toEqual(['at_end', 'exported_with_offset', 'at_start']);
+    const toNoMillis = await list(DAVE, `?to=${encodeURIComponent('2026-10-01T18:30:00Z')}`);
+    expect(toNoMillis.data.map(entry => entry.tool_name)).toEqual(['exported_with_offset', 'at_start', 'before']);
+  });
+
+  it('refuses a start that is not before the end, with the next step', async () => {
+    const response = await server.request(
+      `${AUDIT_PATH}?from=${encodeURIComponent('2026-10-05T00:00:00.000Z')}&to=${encodeURIComponent('2026-10-01T00:00:00.000Z')}`,
+      asUser(ALICE),
+    );
+    expect(response.status).toBe(400);
+    expect(JSON.stringify(await response.json())).toContain('Pick an earlier start date');
   });
 });
