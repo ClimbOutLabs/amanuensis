@@ -205,6 +205,7 @@ read anything from outside the chat, so only the person's own words in the curre
     .memory-state/        notes Aman keeps for itself, and the lock
     .memory-history/      a git history of the two page folders
     .handled-notes        daily-log notes the sorter handled: note id, tab, then page or none; only added to
+    .sorter-report.jsonl  what the sorter would have done, one JSON line per note, in report mode only
 
 The slug comes from the title: lowercase, accents dropped from Latin and Greek letters (and Cyrillic `ё` read as `е`), other characters that
 are not letters or digits turned into dashes, cut at 64 characters (and at 200 bytes, so the file name
@@ -344,6 +345,12 @@ Two limits apply, on top of the normal recall budget:
 | ------------------------- | ------- | -------------------------------------------- |
 | `MEMORY_PAGES_MAX_COUNT`  | 6       | Most pages loaded in one turn.               |
 | `MEMORY_PAGES_MAX_TOKENS` | 1500    | Estimated size of all loaded pages together. |
+
+One more setting decides whether saved notes are sorted onto pages at all:
+
+| Setting               | Default  | Meaning                                                                                        |
+| --------------------- | -------- | ---------------------------------------------------------------------------------------------- |
+| `MEMORY_PAGE_SORTING` | `report` | `off` does nothing. `report` only records what sorting would do. `on` writes pages. See below. |
 
 A page that would go over the token limit is left out, and so is every page after it. That way the
 model always sees the highest-priority pages. Each turn's memory event records how many pages matched,
@@ -554,6 +561,54 @@ the lock stay unchanged for 30 seconds on its own clock, never by comparing file
 is wrong cannot steal a live lock. After a crash, the next writer therefore waits up to 30 seconds. A
 writer gives up after 10 seconds and the model is told to try again. The daily-log append path does not
 take this lock.
+
+### Sorting a saved note
+
+After a turn's notes are saved, each new note can be sorted onto pages. This is `pageSorter.ts`. It runs
+after the reply, never in front of it: the save returns first, a failure is logged and never fails the
+save, and at most two sorting or summary calls run at once, because it uses the summarizer's model call and its
+limit. It uses the summarizer's model, so with no model set nothing is sorted. A private chat saves nothing, so
+it sorts nothing. A message the person sent is sorted the same way once its note is saved. Each persona's notes
+are sorted into that persona's own pages.
+
+**Three modes, one setting.** `MEMORY_PAGE_SORTING` is `off`, `report` or `on`, and defaults to `report`.
+`off` calls no model. `report` calls the model and checks the answer exactly as `on` does, but writes no page
+and no line in `.handled-notes`. It adds one JSON line to `.sorter-report.jsonl` in the vault folder: the note
+id, its day, the decisions after the host's rules, and why a reply was refused or a call failed. It never holds
+the note's text. The file is kept under 256 KiB by dropping its oldest lines. `on` writes pages and the list of
+handled notes. The default stays `report` until sorting gets at least 9 of 10 decision cases right with a hosted
+model and with a local one (see the memory recall test). There is no Settings control and no API field yet.
+
+**The question.** One model call per note. The model gets the note, its day and where it came from; up to five
+pages shown whole, each statement with an id in square brackets; and a list of every page with its kind, title
+and summary line. The five are the pages the note names by title or other name, then the pages whose
+statements are closest in meaning to the note when the meaning search is ready. The prompt is bounded by the
+summarizer's input limit: a note is cut in the middle, and a page that does not fit is left out whole, and the
+prompt says which. The reply is `{"decisions": [...]}` with at most eight decisions, each `new`, `same`,
+`changed`, `ended`, `unconfirmed` or `ignore`. An existing statement is named by its id, never by its text.
+The model never names a file or a source.
+
+**What the host allows.** The host decides from the note's stored origin and source, never from its text.
+
+| The note is                            | Allowed                                                                                                                                                                                                                                                          |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The person's own words (`user_stated`) | All six decisions. New and changed statements are written as `you_said`.                                                                                                                                                                                         |
+| A message the person sent              | A new line under "How you write to them" is written as `sent_mail`. Any other new fact is unconfirmed. It cannot change or end a `you_said` or `you_edited` statement.                                                                                           |
+| Anything else, or no readable origin   | New, changed and ended all become an unconfirmed line with the note's source: `mail`, `calendar`, `read_content`, or `inferred` for the assistant's reply. Nothing confirmed is changed, ended or removed, and nothing is written under "How you write to them". |
+
+A `same` decision only moves the statement's `seen` day. A decision that would write a line a page already
+holds becomes `same`. A reply that does not parse, names a page that does not exist, names an id that was not
+shown (or is already under Earlier), has a slug that is not a page name, holds more than eight decisions or
+holds a line that is not plain text is refused whole: nothing is written, the note is not marked handled, and
+the reason is logged.
+
+**Applying.** All decisions for one note are applied in one `commitPageChange`, so the person's hand edits are
+taken in first and the change is one history entry such as `Aman sorted a saved note onto pages (1 new, 1 changed)`.
+A `changed` decision moves the old statement to Earlier with its end day and adds the new one. The page is read
+again under the lock; if a statement the model named has changed since the prompt, nothing is written. After a
+successful write the note is added to `.handled-notes` as `page` when anything was written or confirmed, and
+`none` when every decision was `ignore` or the list was empty. A refused reply, a failed call or a failed write
+adds nothing, so the note stays unsorted and recall keeps showing it from the log.
 
 ## Recall from the Markdown backend
 

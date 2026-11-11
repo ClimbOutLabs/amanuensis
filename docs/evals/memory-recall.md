@@ -85,6 +85,18 @@ When your change moves a number, write the new number in that file in the same p
 pnpm --filter @truefoundry/trueforge test -- tests/unit/runtime/memory/fixtures
 ```
 
+## Score the sorter
+
+The same story is used to score the sorter that puts a saved note onto pages. For each story entry, the vault holds the pages a perfect sorter would have made from the earlier entries. A case is right when the decision kinds, the pages and, for same, changed and ended, the statement match what the story says. The text of new statements is not compared. Tests check the scorer with no model: one that answers perfectly gets every case right, and one that answers ignore to everything gets only the ignore cases right.
+
+To score a real model, run this by hand. Nothing runs it automatically.
+
+```sh
+pnpm --filter @truefoundry/trueforge memory:sort-score -- --base-url <url> --model <name> [--api-key-env <NAME>] [--out <file>] [--all]
+```
+
+`--base-url` is an OpenAI-compatible endpoint. The key is read from the environment variable named by `--api-key-env` and is never printed. The command prints "N of M right" and a line per decision kind. It writes every miss to the `--out` file with the entry, what was expected and what the model said, and at most the first 80 characters of the note. `--all` adds the unrelated entries. This run finds pages by name only, so it understates the product, which also searches by meaning.
+
 ## Add to it
 
 Add a story entry in `story.ts` with the next free place on its day, and say what it should do to the pages. Add a question in `recallQuestions.ts` and name the entries that hold its answer. For a message that has nothing to do with memory, use the kind `nothing_to_recall` and name no entries. The other tests in the same folder check that the story stays consistent, that no noise entry holds an answer, that no entry shares a topic word with such a message, that the sorted pages read back correctly, that the 300 unrelated messages are all different from each other and from the questions, that none of the 460 comparison messages is the same as a question or an unrelated message, and that the recorded vectors and the two scoring rules work.
