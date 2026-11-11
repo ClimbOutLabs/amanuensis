@@ -99,6 +99,7 @@ import type { ChatSearchIndexer } from '../runtime/chatSearchIndexing';
 import { readChatSearchEnabled } from '../runtime/chatSearchSettings';
 import { StreamGoneError, type EventSubscription, type EventSubscriptionRegistry } from '../runtime/event-subscription';
 import { buildInternalSourceToolPolicy, type InternalSourceState } from '../runtime/internalSourceGuard';
+import { localModelsFromConfig, placeOfModelHostFor } from '../runtime/localModels';
 import { mailAccountDirectory } from '../runtime/mailConnector';
 import { createMemoryClient } from '../runtime/memory/createMemoryClient';
 import type { MemoryClient } from '../runtime/memory/memoryClient';
@@ -553,6 +554,7 @@ function createTurnResolver(deps: {
             streamTimeout: resolved.streamTimeout,
             toolCallChunkMs: configuration.MODEL_STREAM_TOOL_CALL_IDLE_TIMEOUT_MS,
             toolArgumentLimits: SPACE_WRITE_TOOL_ARGUMENT_LIMITS,
+            placeOfModelHost: placeOfModelHostFor(localModelsFromConfig()),
           });
           return new UsageRecordingLLM({
             llm: client,

@@ -127,6 +127,7 @@ import type { ChatSearchIndexer } from './runtime/chatSearchIndexing';
 import { resolveDefaultChatModel } from './runtime/defaultChatModel';
 import type { DeliveryService } from './runtime/delivery/deliveryService';
 import type { EventSubscriptionRegistry } from './runtime/event-subscription';
+import { localModelsFromConfig } from './runtime/localModels';
 import { resolveSandboxProvider } from './runtime/sessionResources';
 import { createSpacePictureService } from './runtime/spacePictures/spacePictureService';
 import { TokenFactoryDailyCapError, type TokenFactoryBudget } from './runtime/tokenFactoryBudget';
@@ -821,6 +822,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         globalSettingsStore: deps.globalSettingsStore,
         tokenFactoryBudget: deps.tokenFactoryBudget,
         envManagedModelProviderNames: envManagedProviders,
+        localModels: localModelsFromConfig(),
         withTransaction: deps.withTransaction,
         logger: deps.logger,
         resolveRequestContext,

@@ -1,4 +1,4 @@
-import type { TextStreamPart, ToolSet } from 'ai';
+import { APICallError, type TextStreamPart, type ToolSet } from 'ai';
 import type {
   AgentContextProcessorOutput,
   AgentThreadExecutionContext,
@@ -413,5 +413,108 @@ describe('ModelStreamFault retry', () => {
     }
     expect(doneEvent.error).toBe('Internal Server Error');
     expect(doneEvent.error).not.toContain('context is too long');
+  });
+
+  it.each([
+    ['this computer', 'this_computer' as const, 'This computer did not accept the connection at that address.'],
+    ['the local link', 'local_link' as const, 'Nothing answered at port 30031 on this computer.'],
+    ['another machine', 'elsewhere' as const, 'Check that the model server is running and can be reached'],
+  ])(
+    'says a refused connection to %s could not be reached, never that a reply broke off',
+    async (_label, place, words) => {
+      // The real stream mapping, fed the AI SDK's error for a fetch that was refused before any answer.
+      async function* refusedParts(): AsyncGenerator<TextStreamPart<ToolSet>> {
+        await Promise.resolve();
+        const socket = Object.assign(new Error('connect ECONNREFUSED 100.101.102.103:443'), { code: 'ECONNREFUSED' });
+        yield {
+          type: 'error',
+          error: new APICallError({
+            message: `Cannot connect to API: ${socket.message}`,
+            url: 'http://aman-local-model:30031/v1/chat/completions',
+            requestBodyValues: {},
+            cause: socket,
+            isRetryable: true,
+          }),
+        };
+      }
+      const create = jest.fn((): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> =>
+        mapStreamToChunks({
+          stream: refusedParts(),
+          chunkMeta: { id: 'test-id', created: 0, model: 'test-model' },
+          placeOfModelHost: () => place,
+        }),
+      );
+      const modelClient: ILLM = { create, createNonStream: jest.fn() };
+      const compaction = new RecordingCompaction();
+      const thread = new AgentThread({
+        threadId: 'main',
+        title: 'Main',
+        toolCallMemo: undefined,
+        turnToolCallLedger: undefined,
+        taskState: undefined,
+        isRequestContinuation: undefined,
+        tracing: NOOP_AGENT_TRACING,
+        logger: makeSilentLogger(),
+        definition: { modelClient, modelId: undefined, configuredModels: undefined, instruction: 'test', toolSets: [] },
+        context: [{ role: 'user', content: 'A question.' }],
+        capabilities: [{ preLLMProcessors: [compaction] }],
+      });
+
+      let doneEvent: InternalThreadDoneEvent | undefined;
+      for await (const event of thread.execute({ signal: new AbortController().signal })) {
+        if (event.type === InternalEventType.AGENT_DONE) {
+          doneEvent = event;
+        }
+      }
+
+      // Not a stream fault: no shortening, no stream-fault retry.
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(compaction.forcedFlags).toEqual([false]);
+      expect(doneEvent?.status).toBe('error');
+      expect(doneEvent?.handoff_cause).not.toBe('model_stream_fault');
+      if (doneEvent?.status !== 'error') {
+        throw new Error('expected an error-status AGENT_DONE event');
+      }
+      expect(doneEvent.error).toContain('so no reply was started');
+      expect(doneEvent.error).toContain(words);
+      expect(doneEvent.error).not.toContain('broke off');
+    },
+  );
+
+  it('still calls a reply that broke off after it began a stream fault', async () => {
+    // A socket reset while reading a response that had begun is not the SDK's call error.
+    async function* cutParts(): AsyncGenerator<TextStreamPart<ToolSet>> {
+      await Promise.resolve();
+      yield { type: 'error', error: Object.assign(new Error('terminated'), { code: 'UND_ERR_SOCKET' }) };
+    }
+    const create = jest.fn((): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> =>
+      mapStreamToChunks({
+        stream: cutParts(),
+        chunkMeta: { id: 'test-id', created: 0, model: 'test-model' },
+        placeOfModelHost: () => 'this_computer',
+      }),
+    );
+    const modelClient: ILLM = { create, createNonStream: jest.fn() };
+    const thread = new AgentThread({
+      threadId: 'main',
+      title: 'Main',
+      toolCallMemo: undefined,
+      turnToolCallLedger: undefined,
+      taskState: undefined,
+      isRequestContinuation: undefined,
+      tracing: NOOP_AGENT_TRACING,
+      logger: makeSilentLogger(),
+      definition: { modelClient, modelId: undefined, configuredModels: undefined, instruction: 'test', toolSets: [] },
+      context: [{ role: 'user', content: 'A question.' }],
+      capabilities: [],
+    });
+    let doneEvent: InternalThreadDoneEvent | undefined;
+    for await (const event of thread.execute({ signal: new AbortController().signal })) {
+      if (event.type === InternalEventType.AGENT_DONE) {
+        doneEvent = event;
+      }
+    }
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(doneEvent?.handoff_cause).toBe('model_stream_fault');
   });
 });

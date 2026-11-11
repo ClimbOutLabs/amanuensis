@@ -74,6 +74,7 @@ import {
   type ThinkingBlock,
 } from '../llm/LLMTypes';
 import { resolveMaxOutputTokens } from '../llm/maxOutputTokens';
+import { ModelUnreachableError } from '../llm/modelUnreachable';
 import { buildModelWaitingEvent } from '../llm/modelWaitingEvent';
 import { noticeAfter, REPEAT_STOP_NOTE, TOOL_MARKUP_NOTICE, UNBACKED_CLAIM_NOTES } from '../llm/replyNotices';
 import { toOpenAIResponseFormat } from '../llm/responseFormat';
@@ -3997,7 +3998,12 @@ export class AgentThread {
                 attempt,
                 step: this.metrics.iterations,
               });
-              yield this.generateErrorEvent(MODEL_SERVICE_UNAVAILABLE_MESSAGE, undefined, 'model_stream_fault');
+              // A connection that never started keeps its own words: the service did not refuse anything.
+              yield this.generateErrorEvent(
+                error instanceof ModelUnreachableError ? error.message : MODEL_SERVICE_UNAVAILABLE_MESSAGE,
+                undefined,
+                'model_stream_fault',
+              );
               return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
             }
             providerRetries++;

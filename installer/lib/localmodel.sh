@@ -1,0 +1,128 @@
+# shellcheck shell=bash
+# The local model bridge: a model server on this computer that an instance reaches over plumbing of its own, at
+# http://aman-local-model:PORT, instead of at one of this computer's network addresses. Those addresses can stop
+# answering the instance's containers after a network change, such as an update to Tailscale, and a model that listens
+# only on 127.0.0.1 never answers at them at all. The owner names each port with aman local-model; the instance carries
+# only those ports. Needs lib/network.sh, lib/registry.sh and lib/tls.sh.
+
+# The ports an instance's bridge carries, comma-separated, in the order they were added.
+local_model_ports() { reg_get "$1" local_models; }
+
+# The port of an endpoint on this computer, given as PORT, 127.0.0.1:PORT or localhost:PORT. Prints nothing when the
+# endpoint is not one, so the caller can say why.
+local_model_endpoint_port() {
+  local endpoint=$1 port
+  case "$endpoint" in
+    127.0.0.1:* | localhost:*) port=${endpoint#*:} ;;
+    *:*) return 0 ;;
+    *) port=$endpoint ;;
+  esac
+  [[ $port =~ ^[1-9][0-9]{3,4}$ ]] || return 0
+  [ "$port" -ge 1024 ] && [ "$port" -le 65535 ] || return 0
+  printf '%s' "$port"
+}
+
+# The bridge needs the instance's containers and this shell to see the same computer. On Windows the installer runs in
+# a container of its own (its home is the state volume), so this computer's addresses are not the ones it would see.
+local_model_bridge_available() { [ "$AMAN_HOME" != "$VOLUME_HOME" ]; }
+
+# Docker on this computer's own kernel: the host side shares this computer's network and dials 127.0.0.1. Under Docker
+# Desktop it dials host.docker.internal, which Docker Desktop points at this computer, loopback included.
+local_model_host_network() {
+  local os=''
+  [ "$(uname -s)" = Linux ] || return 1
+  if docker_available_for_probes; then os=$(D info --format '{{.OperatingSystem}}' 2>/dev/null || true); fi
+  case "$os" in *[Dd]ocker\ [Dd]esktop*) return 1 ;; esac
+  return 0
+}
+
+# This computer's own addresses and names, comma-separated: its loopback names, every address it has on a network
+# (Tailscale's included), its names, its Tailscale name, and every host the instance answers at. The app uses the list
+# only to tell that a model address is this computer.
+this_computer_addresses() { # name
+  local host list='' origin
+  for host in 127.0.0.1 localhost host.docker.internal $(network_ipv4_addresses) $(network_tailscale_ip) $(network_hostname) \
+    $(network_tailscale_name); do
+    host=$(lowercase "$host")
+    case ",$list," in *",$host,"*) continue ;; esac
+    list=${list:+$list,}$host
+  done
+  if [ -n "$(network_hostname)" ]; then
+    host="$(network_hostname).local"
+    case ",$list," in *",$host,"*) ;; *) list="$list,$host" ;; esac
+  fi
+  while IFS= read -r origin; do
+    [ -n "$origin" ] || continue
+    host=$(lowercase "$(origin_host "$origin")")
+    case ",$list," in *",$host,"*) continue ;; esac
+    list="$list,$host"
+  done < <(reg_get "$1" origins | tr ',' '\n')
+  printf '%s' "$list"
+}
+
+# The template values for an instance's compose file, as KEY=value arguments for render_template.
+local_model_render_args() { # name
+  local name=$1 ports available=0 on=0 hostnet=0 desktop=0 target='' addresses=''
+  ports=$(local_model_ports "$name")
+  if local_model_bridge_available; then
+    available=1
+    addresses=$(this_computer_addresses "$name")
+    if [ -n "$ports" ]; then
+      on=1
+      if local_model_host_network; then
+        hostnet=1
+        target=127.0.0.1
+      else
+        desktop=1
+        target=host.docker.internal
+      fi
+    fi
+  fi
+  printf '%s\n' "IF_LOCAL_BRIDGE=$available" "THIS_COMPUTER_ADDRESSES=$addresses" "IF_LOCAL_MODEL=$on" "LOCAL_MODEL_PORTS=$ports" \
+    "IF_LOCAL_MODEL_HOSTNET=$hostnet" "IF_LOCAL_MODEL_DESKTOP=$desktop" "LOCAL_MODEL_TARGET=$target"
+}
+
+# The bridge script sits beside the compose file, which mounts it read-only into both sides.
+local_model_files() { # instance dir
+  write_if_changed "$1/local-model-bridge.mjs" 644 <"$REPO_ROOT/ops/compose/local-model/bridge.mjs" || true
+}
+
+# aman local-model PORT [--remove]: adds a port of this computer to an instance's bridge, or takes it away, then starts
+# the instance again with it.
+cmd_instance_local_model() {
+  local name=${OPT_NAME:-} endpoint=${OPT_LOCAL_MODEL:-} port ports list='' p
+  [ -n "$name" ] && [ -n "$endpoint" ] || usage_die "usage: install.sh instance local-model <name> <port> [--remove]"
+  valid_name "$name" || usage_die "$(name_problem "$name")"
+  reg_exists "$name" || die "Instance $name does not exist."
+  port=$(local_model_endpoint_port "$endpoint")
+  [ -n "$port" ] ||
+    usage_die "$endpoint is not a port on this computer. Give the port your model server listens on, from 1024 to 65535, for example: aman local-model 11434"
+  local_model_bridge_available ||
+    die "The local model bridge is not available in this install yet. In Settings, give the model the address http://host.docker.internal:$port/v1 instead."
+  require_installed
+  docker_prepare
+  lock_acquire
+  load_installed_release
+  warn_if_installed_older
+  ports=$(local_model_ports "$name")
+  if [ "$OPT_REMOVE" = 1 ]; then
+    case ",$ports," in *",$port,"*) ;; *) die "Instance $name does not carry port $port. Nothing changed." ;; esac
+    for p in ${ports//,/ }; do
+      [ "$p" = "$port" ] || list=${list:+$list,}$p
+    done
+    if [ -n "$list" ]; then reg_set "$name" local_models "$list"; else reg_unset "$name" local_models; fi
+  else
+    case ",$ports," in
+      *",$port,"*) ;;
+      *) reg_set "$name" local_models "${ports:+$ports,}$port" ;;
+    esac
+  fi
+  instance_render "$name" "$REL_APP_TAG" "$REL_DEX_IMAGE"
+  instance_up "$name" recreate
+  if [ "$OPT_REMOVE" = 1 ]; then
+    ui_ok "Instance $name no longer carries port $port of this computer."
+  else
+    ui_ok "Instance $name reaches the model at port $port of this computer."
+    say "In Settings, Models, give the model the address http://aman-local-model:$port/v1"
+  fi
+}

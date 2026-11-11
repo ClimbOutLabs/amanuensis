@@ -14,6 +14,13 @@ import {
   putModelProviderRoute,
 } from '../routes/modelProviderRoutes';
 import {
+  isThisComputerModelUrl,
+  MODEL_ON_THIS_COMPUTER_CODE,
+  modelOnThisComputerMessage,
+  type LocalModels,
+  type ResolveHostAddresses,
+} from '../runtime/localModels';
+import {
   modelProviderName,
   type ConfiguredModelProvider,
   type CreateModelProviderRequest,
@@ -28,6 +35,10 @@ export interface ModelProvidersRouterDeps<TTransaction> {
   resolveRequestContext: ResolveRequestContext;
   /** Providers whose record the environment rewrites at startup; the API keeps them read-only. */
   envManagedNames: ReadonlySet<string>;
+  /** This computer and the local model bridge, so a model address that is this computer is steered to the bridge. */
+  localModels: LocalModels;
+  /** Name lookups for that check; tests replace it so no lookup leaves the machine. */
+  resolveHostAddresses?: ResolveHostAddresses;
 }
 
 /** Machine-readable `error.code` when a write targets an environment-managed provider. */
@@ -75,6 +86,38 @@ function resolveModelProviderManifestForWrite({
   };
 }
 
+/**
+ * The refusal for a model address that is this computer, or undefined when the address is fine to save. A model on
+ * this computer reached by one of its network addresses fails without warning when that address stops answering the
+ * app's containers, so it is never stored. The bridge is offered instead.
+ */
+async function modelOnThisComputerRefusal({
+  manifest,
+  localModels,
+  resolveHostAddresses,
+}: {
+  manifest: ModelProviderManifest;
+  localModels: LocalModels;
+  resolveHostAddresses: ResolveHostAddresses | undefined;
+}) {
+  const onThisComputer = await isThisComputerModelUrl({
+    baseUrl: manifest.base_url,
+    local: localModels,
+    ...(resolveHostAddresses === undefined ? {} : { resolveHostAddresses }),
+  });
+  if (!onThisComputer) {
+    return undefined;
+  }
+  return {
+    error: {
+      message: modelOnThisComputerMessage({ baseUrl: manifest.base_url, local: localModels }),
+      type: 'invalid_request',
+      code: MODEL_ON_THIS_COMPUTER_CODE,
+      param: 'manifest.base_url',
+    },
+  };
+}
+
 function toWireProvider({
   record,
   envManagedNames,
@@ -107,6 +150,14 @@ export function createModelProvidersRouter<TTransaction>(deps: ModelProvidersRou
     if (deps.envManagedNames.has(name)) {
       return c.json(envManagedConflict(name), 409);
     }
+    const refusal = await modelOnThisComputerRefusal({
+      manifest: provider,
+      localModels: deps.localModels,
+      resolveHostAddresses: deps.resolveHostAddresses,
+    });
+    if (refusal !== undefined) {
+      return c.json(refusal, 400);
+    }
     try {
       // Create has no prior row; redacted keep resolves to MissingStoredSecretError → 400.
       const manifest = resolveModelProviderManifestForWrite({ incoming: provider, existing: undefined });
@@ -135,6 +186,15 @@ export function createModelProvidersRouter<TTransaction>(deps: ModelProvidersRou
     const name = modelProviderName(provider);
     if (deps.envManagedNames.has(name)) {
       return c.json(envManagedConflict(name), 409);
+    }
+    // Before the transaction: the check may look a name up.
+    const refusal = await modelOnThisComputerRefusal({
+      manifest: provider,
+      localModels: deps.localModels,
+      resolveHostAddresses: deps.resolveHostAddresses,
+    });
+    if (refusal !== undefined) {
+      return c.json(refusal, 400);
     }
     try {
       // Lock → resolve secret from that snapshot → upsert, all in one txn so concurrent keep

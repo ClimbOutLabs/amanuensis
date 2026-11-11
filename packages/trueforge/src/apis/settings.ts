@@ -16,6 +16,7 @@ import type { IModelProviderStore } from '../db/modelProviderStore';
 import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
 import type { WithTransaction } from '../db/transaction';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
+import type { LocalModels, ResolveHostAddresses } from '../runtime/localModels';
 import { getSharedRunCodeService } from '../runtime/sessionResources';
 import type { TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
 import { sandboxDisabledByInstaller } from '../sandbox/slotBackend';
@@ -43,6 +44,10 @@ export interface SettingsRouterDeps<TTransaction> {
   tokenFactoryBudget: TokenFactoryBudget;
   /** Model providers the environment owns (see `envManagedModelProviderNames`). */
   envManagedModelProviderNames: ReadonlySet<string>;
+  /** This computer and the local model bridge (see `localModelsFromConfig`). */
+  localModels: LocalModels;
+  /** Name lookups for the this-computer check on model addresses; tests replace it. */
+  resolveHostAddresses?: ResolveHostAddresses;
   withTransaction: WithTransaction<TTransaction>;
   logger: Logger;
   resolveRequestContext: ResolveRequestContext;
@@ -57,6 +62,8 @@ export function createSettingsRouter<TTransaction>(deps: SettingsRouterDeps<TTra
       withTransaction: deps.withTransaction,
       resolveRequestContext: deps.resolveRequestContext,
       envManagedNames: deps.envManagedModelProviderNames,
+      localModels: deps.localModels,
+      ...(deps.resolveHostAddresses === undefined ? {} : { resolveHostAddresses: deps.resolveHostAddresses }),
     }),
   );
   router.route(

@@ -166,7 +166,7 @@ sandbox_drop() {
 
 # A tiny git checkout standing in for the repository: the build contexts and the slots compose file the doctor looks for.
 fixture_repo() {
-  mkdir -p "$1/ops/aman-stt" "$1/ops/aman-tts" "$1/ops/calendar-sidecar" "$1/ops/browser-sidecar" "$1/ops/compose/mail-email"
+  mkdir -p "$1/ops/aman-stt" "$1/ops/aman-tts" "$1/ops/calendar-sidecar" "$1/ops/browser-sidecar" "$1/ops/compose/mail-email" "$1/ops/compose/local-model"
   printf 'FROM scratch\n' >"$1/Dockerfile.dev"
   printf 'name: slots\n' >"$1/docker-compose.slots.yml"
   printf 'FROM scratch\n' >"$1/ops/aman-stt/Dockerfile"
@@ -178,6 +178,7 @@ fixture_repo() {
   printf '#!/bin/sh\n' >"$1/ops/compose/mail-email/entrypoint.sh"
   printf '# account agent fixture\n' >"$1/ops/compose/mail-email/account_agent.py"
   printf '# sign-in check fixture\n' >"$1/ops/compose/mail-email/email_check.py"
+  printf '// local model bridge fixture\n' >"$1/ops/compose/local-model/bridge.mjs"
   (
     cd "$1"
     git -c init.defaultBranch=main init -q .

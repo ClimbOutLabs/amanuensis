@@ -186,6 +186,8 @@ export type { FailoverLanguageModelOptions } from './llm/failoverLanguageModel';
 export type { AgentMetadata, ILLM, LLMCreateParams, LLMCreateParamsStreaming } from './llm/ILLM';
 export { ModelRequestGate } from './llm/ModelRequestGate';
 export type { ModelRequestSlot } from './llm/ModelRequestGate';
+export { ModelUnreachableError } from './llm/modelUnreachable';
+export type { ModelAddressPlace, PlaceOfModelHost } from './llm/modelUnreachable';
 export {
   MODEL_WAITING_EVENT_TYPE,
   MODEL_WAITING_MESSAGE,

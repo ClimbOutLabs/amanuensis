@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# The local model bridge: aman local-model names a port of this computer, and the instance reaches the model there
+# through two small services of its own, at aman-local-model, never through one of this computer's network addresses.
+set -euo pipefail
+# shellcheck source=../helpers.sh
+. "$(dirname "${BASH_SOURCE[0]}")/../helpers.sh"
+
+compose_file() { printf '%s' "$AMAN_HOME/instances/main/compose.yaml"; }
+# The lines of one service in the compose file.
+service_block() { awk -v svc="  $1:" '$0==svc{f=1;next} /^  [a-z]/{f=0} f' "$(compose_file)"; }
+
+test_no_port_named_means_no_bridge() {
+  t_begin "an instance with no port named has no bridge, but the app still gets this computer's addresses"
+  sandbox_new
+  fixture_network 192.168.1.20
+  fixture_tailscale 100.101.102.103 spark.example.ts.net
+  install_machine
+  assert_not_contains "$(cat "$(compose_file)")" "local-model-host:"
+  assert_not_contains "$(cat "$(compose_file)")" "local-model-link:"
+  assert_contains "$(cat "$(compose_file)")" "LOCAL_MODEL_PORTS: ''"
+  local addresses
+  addresses=$(sed -n "s/^ *THIS_COMPUTER_ADDRESSES: '\(.*\)'\$/\1/p" "$(compose_file)")
+  for host in 127.0.0.1 localhost host.docker.internal 192.168.1.20 100.101.102.103 spark.example.ts.net; do
+    assert_contains ",$addresses," ",$host," "this computer's addresses name $host"
+  done
+  sandbox_drop
+}
+
+test_naming_a_port_starts_the_bridge() {
+  t_begin "aman local-model PORT puts the two bridge services in the instance and tells the address to use"
+  sandbox_new
+  install_machine
+  run_install instance local-model main 30031
+  assert_rc 0
+  assert_flat_contains "$OUT" "give the model the address http://aman-local-model:30031/v1"
+  assert_eq "$(sed -n 's/^local_models=//p' "$AMAN_HOME/state/instances/main.conf")" 30031 "the port is recorded"
+  assert_contains "$(service_block local-model-host)" "LOCAL_MODEL_PORTS: '30031'"
+  assert_contains "$(service_block local-model-host)" "network_mode: host" "native Docker shares this computer's network"
+  assert_contains "$(service_block local-model-host)" "LOCAL_MODEL_TARGET: '127.0.0.1'"
+  assert_not_contains "$(service_block local-model-host)" "ports:" "the host side publishes nothing"
+  assert_contains "$(service_block local-model-link)" "- aman-local-model"
+  assert_not_contains "$(service_block local-model-link)" "ports:" "the link side publishes nothing"
+  assert_contains "$(service_block loopback)" "- local-model" "the app's network holder reaches the link side"
+  assert_contains "$(awk '/^  local-model:/{f=1;next} /^  [a-z]/{f=0} f' "$(compose_file)")" "internal: true"
+  assert_contains "$(cat "$(compose_file)")" "name: aman_main_local_model"
+  assert_eq "$(cat "$AMAN_HOME/instances/main/local-model-bridge.mjs")" "$(cat "$REPO/ops/compose/local-model/bridge.mjs")" "the bridge script sits beside the compose file"
+  run_install instance local-model main 127.0.0.1:11434
+  assert_rc 0
+  assert_eq "$(sed -n 's/^local_models=//p' "$AMAN_HOME/state/instances/main.conf")" 30031,11434 "a second port is added"
+  run_install instance refresh main
+  assert_rc 0
+  assert_contains "$(service_block local-model-link)" "LOCAL_MODEL_PORTS: '30031,11434'" "a refresh keeps the ports"
+  sandbox_drop
+}
+
+test_docker_desktop_dials_the_host_name() {
+  t_begin "under Docker Desktop the host side dials host.docker.internal from a network of its own"
+  sandbox_new
+  STUB_DOCKER_OS="Docker Desktop"
+  install_machine
+  run_install instance local-model main 11434
+  assert_rc 0
+  assert_contains "$(service_block local-model-host)" "LOCAL_MODEL_TARGET: 'host.docker.internal'"
+  assert_contains "$(service_block local-model-host)" "- local-model-egress"
+  assert_not_contains "$(service_block local-model-host)" "network_mode: host"
+  STUB_DOCKER_OS=
+  sandbox_drop
+}
+
+test_removing_the_last_port_takes_the_bridge_away() {
+  t_begin "--remove takes a port away, and the bridge goes with the last one"
+  sandbox_new
+  install_machine
+  run_install instance local-model main 30031
+  run_install instance local-model main 30031 --remove
+  assert_rc 0
+  assert_flat_contains "$OUT" "no longer carries port 30031"
+  assert_not_contains "$(cat "$AMAN_HOME/state/instances/main.conf")" "local_models="
+  assert_not_contains "$(cat "$(compose_file)")" "local-model-host:"
+  run_install instance local-model main 30031 --remove
+  assert_rc 1
+  assert_flat_contains "$OUT$ERR" "does not carry port 30031"
+  sandbox_drop
+}
+
+test_only_a_port_of_this_computer_is_taken() {
+  t_begin "an address of another machine, or a port outside 1024 to 65535, is refused before anything changes"
+  sandbox_new
+  install_machine
+  for bad in 192.168.1.30:8000 spark.example.ts.net:443 80 70000 abc; do
+    run_install instance local-model main "$bad"
+    assert_rc 2
+    assert_flat_contains "$OUT$ERR" "is not a port on this computer"
+  done
+  assert_not_contains "$(cat "$AMAN_HOME/state/instances/main.conf")" "local_models="
+  sandbox_drop
+}
+
+test_no_port_named_means_no_bridge
+test_naming_a_port_starts_the_bridge
+test_docker_desktop_dials_the_host_name
+test_removing_the_last_port_takes_the_bridge_away
+test_only_a_port_of_this_computer_is_taken
+tests_finish

@@ -221,6 +221,11 @@ instance_render() {
   if [ "$browser_on" = 1 ]; then
     write_if_changed "$dir/browser-seccomp.json" 644 <"$REPO_ROOT/ops/browser-sidecar/seccomp_profile.json" || true
   fi
+  # The local model bridge, when the owner named a port of this computer for it, and the list of this computer's own
+  # addresses the app uses to offer it.
+  local local_model_args=()
+  mapfile -t local_model_args < <(local_model_render_args "$name")
+  if [ -n "$(local_model_ports "$name")" ]; then local_model_files "$dir"; fi
   # The https folders are mounted from the home folder itself, except when the home is the state volume
   # (Windows): then the compose file mounts them from inside the volume, because a host folder the
   # daemon could read does not exist there.
@@ -233,7 +238,7 @@ instance_render() {
     "IF_EDGE=$edge_on" "LOGIN_HOST=$login_host" \
     "LOGIN_PORT=$login_port" "DEX_TELEMETRY_PORT=$DEX_TELEMETRY_PORT" "APP_PORTS=$app_ports" \
     "IF_TLS=$tls_on" "IF_TLS_HOST=$tls_host" "IF_TLS_VOLUME=$tls_volume" "CADDY_IMAGE=$(tls_image)" "TLS_USER=$(id -u):$(id -g)" "TLS_LEAF_DIR=$(tls_leaf_dir "$name")" \
-    "TLS_TRUST_DIR=$(tls_trust_dir "$name")" "TLS_HTTP_IN=$TLS_HTTP_IN" | write_if_changed "$dir/compose.yaml" 644 || true
+    "TLS_TRUST_DIR=$(tls_trust_dir "$name")" "TLS_HTTP_IN=$TLS_HTTP_IN" "${local_model_args[@]}" | write_if_changed "$dir/compose.yaml" 644 || true
   if [ "$tls_on" = 1 ]; then tls_prepare "$name" "$app_image"; fi
   if [ "$edge_on" = 1 ]; then edge_render "$name"; fi
   render_template "$TEMPLATES_DIR/instance/dex.yaml.tpl" \
