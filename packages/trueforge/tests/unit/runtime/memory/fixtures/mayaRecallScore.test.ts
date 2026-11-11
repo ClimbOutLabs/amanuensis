@@ -217,7 +217,7 @@ const LOG_ONLY_BY_MEANING: Condition = {
   misses: LOG_ONLY_BY_MEANING_MISSES,
   unrelatedShown: 'shown a memory 29/300',
   unrelatedShownAt:
-    '1, 5, 6, 16, 20, 46, 55, 56, 62, 73, 76, 102, 112, 113, 124, 125, 132, 136, 138, 141, 157, 177, 178, 216, 218, 235, 236, 238, 239',
+    '1, 5, 6, 16, 20, 46, 55, 56, 62, 73, 76, 102, 112, 113, 124-126, 136, 138, 141, 157, 177, 178, 216, 218, 235, 236, 238, 239',
 };
 const PAGES_SORTED_BY_MEANING: Condition = {
   name: 'pages sorted, by meaning',
