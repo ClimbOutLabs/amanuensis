@@ -1,6 +1,6 @@
 import type { ILLM } from '@truefoundry/trueforge-core/core';
 import { createHash } from 'node:crypto';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import winston from 'winston';
@@ -147,19 +147,13 @@ describe('learned profile copy in memory', () => {
 
   it('removes a copy saved before documents had ids', async () => {
     const { db, client, router } = await harness();
-    await client.retain({
-      items: [
-        {
-          content: LEARNED_TEXT,
-          timestamp: '2026-08-30T12:00:00.000Z',
-          document_id: 'older-copy',
-          context: 'Learned user profile',
-          metadata: { origin: 'user_stated' },
-        },
-      ],
-      operationId: '5b0c1c3e-2222-5111-8111-222222222222',
-      timeoutMs: 1_000,
-    });
+    // Saved before notes closed with a source line, so the file has none.
+    await mkdir(path.join(dir, 'default', 'memory'), { recursive: true });
+    await writeFile(
+      path.join(dir, 'default', 'memory', '2026-08-30.md'),
+      `## 2026-08-30T12:00:00.000Z\n\n${LEARNED_TEXT}\n\n> Learned user profile\n\n`,
+      'utf8',
+    );
     expect(await liveTextsHolding(client, LEARNED_TEXT)).toHaveLength(1);
 
     await router.request('/profile', { method: 'DELETE' });

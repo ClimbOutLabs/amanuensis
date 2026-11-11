@@ -2082,8 +2082,8 @@ describe('HindsightMemoryProcessor pages layer', () => {
         '<aman-memory>',
         MEMORY_FRAMING_SENTENCE,
         wendyText,
-        '[2026-08-14] filed on 14 April',
-        '(memory: 1 items, 0 entities; 8 tokens of 2048 budget; 1 pages)',
+        '[2026-08-14, from something read for the person] filed on 14 April',
+        '(memory: 1 items, 0 entities; 17 tokens of 2048 budget; 1 pages)',
         '</aman-memory>',
       ].join('\n'),
     );

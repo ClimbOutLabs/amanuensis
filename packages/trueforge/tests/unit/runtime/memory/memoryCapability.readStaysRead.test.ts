@@ -118,7 +118,7 @@ describe('what is recalled from memory keeps its side', () => {
     expect(isRead(provenance, 'read-shop.example')).toBe(true);
     expect(isTrusted(provenance, READ_ADDRESS)).toBe(false);
     expect(isTrusted(provenance, 'read-shop.example')).toBe(false);
-    expect(provenance.read_from.get(`address:${READ_ADDRESS}`)?.source).toBe('memory');
+    expect(provenance.read_from.get(`address:${READ_ADDRESS}`)?.source).toBe('tool_result');
   });
 
   it('keeps a link the person typed as theirs when a mail named the same link', async () => {
