@@ -329,6 +329,7 @@ export async function runDataExport<TTransaction>(
         source_id: undefined,
         folder_id: undefined,
         no_folder: false,
+        include_private: false,
       }),
     );
   }
@@ -677,6 +678,7 @@ async function personaNamesOfOthers<TTransaction>(
       source_id: undefined,
       folder_id: undefined,
       no_folder: false,
+      include_private: false,
     }),
   );
   for await (const session of sessions) {

@@ -81,7 +81,12 @@ async function retainedOrigin(input: { attachedFiles: boolean; earlier?: TurnStr
     executionDeadline,
     logger: winston.createLogger({ silent: true }),
     turnDrains: new TurnDrainRegistry(),
-    memory: { client, userText: 'Please read this.', attachedFiles: input.attachedFiles },
+    memory: {
+      session: { is_incognito: false },
+      client,
+      userText: 'Please read this.',
+      attachedFiles: input.attachedFiles,
+    },
   });
   const item = retain.mock.calls[0]?.[0].items[0];
   return item?.metadata?.[MEMORY_ORIGIN_METADATA_KEY];
