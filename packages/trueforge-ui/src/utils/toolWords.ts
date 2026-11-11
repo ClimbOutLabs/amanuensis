@@ -115,9 +115,11 @@ const TOOL_WORDS: ReadonlyMap<string, ToolWords> = new Map([
     'list_schedules',
     'schedule_read',
   ]),
-  ...words({ doing: 'Changing a schedule', done: 'Changed a schedule', thing: 'A schedule change' }, [
-    'create_schedule',
+  ...words({ doing: 'Creating a schedule', done: 'Created a schedule', thing: 'A new schedule' }, ['create_schedule']),
+  ...words({ doing: 'Deleting a schedule', done: 'Deleted a schedule', thing: 'A schedule to delete' }, [
     'delete_schedule',
+  ]),
+  ...words({ doing: 'Changing a schedule', done: 'Changed a schedule', thing: 'A schedule change' }, [
     'pause_schedule',
     'resume_schedule',
     'schedule_write',

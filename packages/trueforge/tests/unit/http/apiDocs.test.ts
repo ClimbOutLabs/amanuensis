@@ -1,10 +1,26 @@
 import { OpenAPIHono } from '@hono/zod-openapi';
+import { HTTPException } from 'hono/http-exception';
 
+import type { Authenticator } from '../../../src/auth/authenticator';
+import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
+import { createAuthMiddleware } from '../../../src/auth/middleware';
 import { mountApiDocs } from '../../../src/http/apiDocs';
 
-function appWithDocs(uiBasePath = '/'): OpenAPIHono {
+const SIGNED_IN: Authenticator = {
+  authenticate: () => Promise.resolve(STANDALONE_REQUEST_CONTEXT),
+};
+
+const NOT_SIGNED_IN: Authenticator = {
+  authenticate: () => Promise.reject(new HTTPException(401, { message: 'Authentication required' })),
+};
+
+function appWithDocs(uiBasePath = '/', authenticator: Authenticator = SIGNED_IN): OpenAPIHono {
   const app = new OpenAPIHono();
-  mountApiDocs(app, { uiBasePath, openApiSpecPath: `${uiBasePath}api/v1/openapi.json` });
+  mountApiDocs(app, {
+    uiBasePath,
+    openApiSpecPath: `${uiBasePath}api/v1/openapi.json`,
+    authMiddleware: createAuthMiddleware(authenticator),
+  });
   return app;
 }
 
@@ -33,6 +49,16 @@ describe('mountApiDocs', () => {
     for (const file of ['package.json', 'index.html', '..%2Fpackage.json', 'swagger-ui.css.map']) {
       const response = await app.request(`/api/v1/docs/assets/swagger-ui-dist/${file}`);
       expect(response.status).toBe(404);
+    }
+  });
+
+  it('refuses the docs page and its files to a caller who is not signed in', async () => {
+    const app = appWithDocs('/', NOT_SIGNED_IN);
+    const page = await app.request('/api/v1/docs');
+    expect(page.status).toBe(401);
+    for (const file of ['swagger-ui.css', 'swagger-ui-bundle.js']) {
+      const response = await app.request(`/api/v1/docs/assets/swagger-ui-dist/${file}`);
+      expect(response.status).toBe(401);
     }
   });
 });

@@ -205,6 +205,7 @@ function scheduleContext(logger: Logger): NonNullable<SpaceTurnContext['schedule
     chatAssistant: assistant,
     runsAs: () => Promise.resolve('you'),
     logger,
+    session_id: null,
   };
 }
 
@@ -288,6 +289,7 @@ export async function buildPersonalInstance(input: {
     previousTurnId: null,
     summarize: undefined,
     providerServerName: undefined,
+    keepsNothing: false,
   };
   const space: SpaceTurnContext = {
     store: unusedSpaceStore(),
@@ -329,6 +331,7 @@ export async function buildPersonalInstance(input: {
     },
     {
       sessionStore: unusedUsageSessionReader(),
+      deletedChats: { listDeletedChatModelUsage: () => unused('listDeletedChatModelUsage') },
       budget: unusedTokenFactoryBudget(),
       authority: { tenantId: TENANT_ID, userRef: CREATED_BY },
     },
