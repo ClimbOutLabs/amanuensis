@@ -6,6 +6,7 @@ import { chromium, type Browser, type Page, type Route } from 'playwright-core';
 import { createServer, defaultClientConditions } from 'vite';
 
 import { DEV_OPTIMIZE_DEPS } from '../src/devPrebundle.ts';
+import { featureShotPath, saveFailureShots } from './support/featureShots.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
 import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
 import { privateViteCache } from './support/viteCache.ts';
@@ -145,11 +146,15 @@ test('the live browser page shows the tab and sends clicks, typing and files to 
     const calls = await answerLiveRoutes(page, { frame, tabs: [] });
     await page.goto(fixtureUrl, { waitUntil: 'domcontentloaded', timeout: FIRST_LOAD_TIMEOUT_MS });
     await page.getByText('Aman has no page open right now', { exact: false }).waitFor({ timeout: RENDER_TIMEOUT_MS });
+    await page.screenshot({ path: await featureShotPath({ surface: 'screen:browser-live', step: 'no-page-open' }) });
     assert.ok(
       calls.every(call => call.path === '/api/browser/live/tabs'),
       'no tabs: only the tab list is asked for',
     );
     await context.close();
+  } catch (error) {
+    await saveFailureShots({ browser, surface: 'screen:browser-live' });
+    throw error;
   } finally {
     await browser?.close();
     await server.close();
