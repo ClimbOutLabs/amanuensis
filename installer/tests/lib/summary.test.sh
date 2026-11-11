@@ -57,12 +57,9 @@ SNAP
   sandbox_drop
 }
 
-test_fresh_install_without_a_model_over_plain_http() {
-  t_begin "the ending with --tls off, over plain http: the table with the nearest addresses first, the model as a next step, the daily backup and the update line"
+test_fresh_install_without_a_model_on_a_computer_with_no_network() {
+  t_begin "the ending on a computer with no network address: this computer's own addresses over plain http, the model as a next step, the daily backup and the update line"
   sandbox_new
-  fixture_network 192.168.1.20
-  fixture_hostname host
-  INSTALL_EXTRA=(--tls off)
   install_machine
   assert_eq "$(ending)" "$(cat <<'SNAP'
 Checking the result (6 of 6)
@@ -71,20 +68,13 @@ Checking the result (6 of 6)
 ------------------------------------------------------------------------
 Ready. Instance main is running.
 
-  + Open      http://192.168.1.20:8791
-              http://host.local:8791
-              http://host:8791
-              http://127.0.0.1:8791
+  + Open      http://127.0.0.1:8791
               http://localhost:8791
   + Sign in   owner@example.invalid
   > Model     not set: add one in Settings > Models
   + Run code  on, in a sandbox, with PDF and image reading
   + Data      saved in Docker
   + Backups   daily, keeps the last 7
-  Sign-in on your home network is not encrypted. Use the Tailscale
-  address to keep it private.
-  Bookmark host.local: it keeps working when this computer's address
-  changes.
   Open a new terminal window to use the aman command.
   Update later: aman upgrade
 ------------------------------------------------------------------------
@@ -159,7 +149,7 @@ SNAP
 }
 
 test_fresh_install_without_a_model
-test_fresh_install_without_a_model_over_plain_http
+test_fresh_install_without_a_model_on_a_computer_with_no_network
 test_install_with_token_factory
 test_install_with_a_problem
 tests_finish
