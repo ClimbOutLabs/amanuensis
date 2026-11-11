@@ -204,6 +204,7 @@ read anything from outside the chat, so only the person's own words in the curre
     matters/<slug>.md     one page per matter (a trip, a purchase, a project)
     .memory-state/        notes Aman keeps for itself, and the lock
     .memory-history/      a git history of the two page folders
+    .handled-notes        ids of daily-log notes the sorter has put on pages, one per line, only added to
 
 The slug comes from the title: lowercase, accents dropped from Latin and Greek letters (and Cyrillic `ё` read as `е`), other characters that
 are not letters or digits turned into dashes, cut at 64 characters (and at 200 bytes, so the file name
@@ -379,9 +380,12 @@ it carries on without this step and never waits for a download.
   statement is measured against 460 fixed, ordinary messages (`comparisonMessages.ts`) that have nothing to
   do with anyone's memory. Its standing for a message is how many standard deviations the message is closer
   than those messages are on average. Rule 1: a statement is shown only when its standing is above 3.
-  Rule 2: for each of the 460 messages the best standing over all statements is kept; the message gets
-  statements only when its own best standing is above the 95th percentile of those 460 numbers. With fewer
-  than 5 statements nothing is found. Rule 2 uses the best standing over every vault the person may read.
+  Rule 2: for each of the 460 messages the best standing over all statements and eligible log notes
+  (see [Log notes by meaning](#log-notes-by-meaning)) is kept; the message gets statements and notes only when
+  its own best standing is above the 95th percentile of those 460 numbers. With fewer than 5 statements and
+  eligible notes together nothing is found by meaning. Rule 2 uses the best standing over every vault the
+  person may read. The standing numbers, the percentile bar and the 460 messages belong to `standing.ts`,
+  and statements and notes share them.
 - **What is shown.** The best 6 statements by standing, leaving out pages already shown whole and showing
   the same words on one page once. A statement that has ended (under Earlier, or `until` before today) is
   left out unless it ended in the last 30 days or the message asks about the past ("used to", "before",
@@ -389,6 +393,36 @@ it carries on without this step and never waits for a download.
   best statement, and each group is drawn by the same code as a whole page, with only the chosen lines and
   no drafting lines. A group counts as a loaded page in the turn's memory event and shares the page token
   limit; one that does not fit is dropped whole.
+
+#### Log notes by meaning
+
+The daily log is searched under the same two rules, from the whole log: a note's age never decides whether
+it can be found. Shared words alone never show a note while the rules can judge.
+
+- **One gate per message.** `meaningGate.ts` works out, once for each message, the standing of every
+  statement and every eligible note, the percentile bar over all of them together, and whether the message
+  is clearly about something remembered. The capability asks the client for it once (`meaningGate`) and hands
+  the same answer to `recall` (the log) and `loadPages` (the pages), so the two paths cannot disagree. A page
+  the message names, now or earlier in the chat, is read whatever the gate says.
+- **Standing of a note.** A note's closeness to each of the 460 messages, their mean and their spread are
+  worked out from the vector the log's own store (`.embeddings.json`) already holds, so no note is embedded
+  twice and the embedded text is unchanged. `noteIndex.ts` keeps these numbers in memory for each vault
+  and model and measures again only the notes that were added or changed; removed notes are dropped. The
+  first search of a log with 5,000 notes takes about two seconds; the next about 0.1 seconds on the test
+  machine. No file format changed.
+- **Which notes are eligible.** A note the sorter has put on pages is covered by its statements, so it is
+  not shown from the log, unless it is the person's own words (`user_stated`; `recallMetadata` in
+  `markdownMemoryFiles.ts` reads a note's origin). A note the sorter has not handled is eligible. Notes from
+  the chat being answered and read content past its freshness limit are never eligible. The sorter records what it handled in
+  `.handled-notes` (see `handledNotes.ts` and `specs/memory-pages.md`, section 4).
+- **What is shown.** Notes with a standing above 3, best first, at most 4, or at most 6 when no vault has a
+  page statement. A note that names a person the message asks about moves to the front of those (the name
+  boost); it never adds a note. The token budget, the freshness limit, the recall screen and the rule that
+  the same text is shown once apply afterwards as before.
+- **Too little to judge.** With fewer than 5 statements and eligible notes together, the log is searched as
+  before: shared words, fused with meaning behind the peak test (`VECTOR_PEAK_THRESHOLD`), so a new vault
+  still recalls its first notes. A vault whose log vectors are not all built yet is searched the same way.
+- **Model not ready.** The log is searched by shared words and pages are read by name.
 
 ### Drafting rules
 
@@ -521,9 +555,11 @@ take this lock.
 
 ## Recall from the Markdown backend
 
-Recall ranks every live entry in the vault, from the newest daily file to the oldest. How long ago
-something was saved never decides whether it can be found; only the ranking and the token budget
-decide what is shown.
+Recall reads every live entry in the vault, from the newest daily file to the oldest. How long ago
+something was saved never decides whether it can be found. When the meaning model is ready and there
+are at least five statements and eligible notes to judge, notes are chosen by meaning under the two
+rules described under [Log notes by meaning](#log-notes-by-meaning); otherwise they are ranked by shared
+words, fused with meaning behind the peak test. The token budget decides how much of that is shown.
 
 - **Reading the log.** A scan checks each daily file's size, change time and identity, and reads a
   file again only when one of them differs from the last read. A file changed in the last two seconds

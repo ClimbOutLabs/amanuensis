@@ -53,9 +53,9 @@ This rule does not measure whether the model then uses a value shown under `Earl
 
 The same 76 questions are asked three times. Each time the memory is set up in a different way, and each has its own recorded score.
 
-1. **Log only, by words.** The memory holds only the daily log. Memories are found by their words. This is how the test ran before the other two were added. Its numbers must not move.
-2. **Log only, by meaning.** The memory is the same, but memories are also found by meaning. This shows what the search by meaning adds on its own.
-3. **Pages sorted, by meaning.** The memory also holds the pages about people and matters. Memories are found by meaning as well, and so are single statements on the pages. A statement is shown only when the message comes clearly closer to it than 460 ordinary messages do, and a message that is close to nothing remembered is shown no statement at all (see `specs/memory-pages.md`, section 3).
+1. **Log only, by words.** The memory holds only the daily log, and it is searched by shared words alone. It runs without the meaning model, so a change to the search by meaning does not move its numbers. Use it as the baseline.
+2. **Log only, by meaning.** The memory is the same, but notes are found by meaning. A note is shown only when the message comes clearly closer to it than 460 ordinary messages do, and a message that is close to nothing remembered is shown no note at all. Shared words alone show nothing.
+3. **Pages sorted, by meaning.** The memory also holds the pages about people and matters, and a list of the notes the sorter has already handled: every note saved before the day of the question counts as handled, because the sorter runs one day behind, and the notes of that day do not. Single statements on the pages and the notes that are still eligible are judged together, under the same two rules (see `specs/memory-pages.md`, section 3). A handled note is not shown again from the log unless it is the person's own words.
 
 The log-only conditions still hold the one page the person typed by hand, so a question that names that page through an earlier message of the chat is found in all three conditions.
 
@@ -77,7 +77,7 @@ Then commit the two files it writes.
 
 Today's numbers for all three conditions are written in `packages/trueforge/tests/unit/runtime/memory/fixtures/mayaRecallScore.test.ts`, together with the list of questions that are not clean in each condition and the two numbers for the unrelated messages. The test fails when any number moves.
 
-When your change moves a number, write the new number in that file in the same pull request. If the numbers of the first condition move, something other than your change is wrong, so find out why before you record them. The reviewer then sees the difference. A better score is the point of the change. A worse score needs a reason in the pull request.
+When your change moves a number, write the new number in that file in the same pull request. If the numbers of the first condition move, check that your change is meant to change the search by words, because that condition does not use the meaning model. The reviewer then sees the difference. A better score is the point of the change. A worse score needs a reason in the pull request.
 
 ## Run it
 

@@ -33,7 +33,7 @@ In this order, each within its own size limit:
 
 1. **The pages the message names**, whole. A name, another name, or a role word counts.
 2. **Statements found by meaning.** Up to six statements from other pages that are about the same thing as the message, each shown under its page's title. A statement is indexed together with its page's title and summary line, so a short statement is found by what it is about. The summary line is the line under the title; when the person wrote none, it is the first statement under Now that is the person's own words. A statement from mail or anything read is never the summary.
-3. **Notes from the daily log, found by meaning**, for what is on no page: notes that have not been sorted onto pages yet, and the person's own words that belong on no page.
+3. **Notes from the daily log, found by meaning**, from the whole log, for what is on no page: notes that have not been sorted onto pages yet, and the person's own words. At most four.
 4. **A short list of pages**, one line each (title and summary line), the most recently changed first, within a fixed size.
 
 A statement whose end date has passed is not shown as current. It is shown under the Earlier label, with its dates, for 30 days. After that it is shown only when the message asks about the past. A page named in an earlier message of the same chat is read too, after the pages the newest message names.
@@ -42,11 +42,13 @@ A statement whose end date has passed is not shown as current. It is shown under
 
 Each statement and each note has a floor of its own. Aman keeps a fixed list of ordinary messages that have nothing to do with anyone's life, such as "What is the capital of Canada?". For each memory it measures how close those messages come to it. The memory is shown only when the person's message comes clearly closer than they do: above their average by three times their spread.
 
-A second rule works on the whole message. Aman keeps a list of 460 such ordinary messages. For each of them it records the best standing any statement reaches: how far above its own average its closeness is. A message gets statements by meaning only when its own best standing is above the 95th percentile of those 460 numbers. With hundreds of statements, the first rule alone lets some statement through for about one unrelated message in six, because there are so many chances. This second rule fixes the rate for the whole message. With fewer than 5 statements nothing is found by meaning.
+A second rule works on the whole message. Aman keeps a list of 460 such ordinary messages. For each of them it records the best standing any statement or any eligible note reaches: how far above its own average its closeness is. A message gets statements and notes by meaning only when its own best standing, over statements and notes together, is above the 95th percentile of those 460 numbers. With hundreds of memories, the first rule alone lets something through for about one unrelated message in six, because there are so many chances. This second rule fixes the rate for the whole message. It is worked out once for each message, and the pages and the log both use that one answer. With fewer than 5 statements and eligible notes together there is too little to judge, and the log is searched by shared words as before.
 
-This replaces two rules. The check that compared the best match with the average match is removed. Notes that only share a word with the message are no longer added after the matches by meaning.
+A note is eligible unless the sorter has already put it on pages, because then its statements cover it. A note that is the person's own words stays eligible either way. At most 4 notes are shown for one message, or 6 when no page holds any statement yet.
 
-When the meaning model is still downloading or cannot run, Aman searches the daily log by shared words, as it does today, and still reads the pages the message names.
+This replaces two rules. The check that compared the best match with the average match is removed. Notes that only share a word with the message are no longer shown while the rules can judge. The log is searched from its first day to its last, not only the newest two weeks.
+
+When the meaning model is still downloading or cannot run, Aman searches the daily log by shared words, as it does today, and still reads the pages the message names. The same holds while there is too little to judge, so a new vault still recalls its first notes.
 
 The meaning model becomes `multilingual-e5-base`. It runs on the machine, like the model it replaces. Notes and statements already saved are indexed again in the background.
 
@@ -57,6 +59,7 @@ The meaning model becomes `multilingual-e5-base`. It runs on the machine, like t
 - **When a turn is saved.** One model call reads the new note and the pages it could belong to. It answers with a decision for each fact: new, the same as one already there, changes one, ends one, not confirmed, or nothing to keep. The host applies the decision. The model never writes a file.
 - **Only the person's own words become confirmed statements.** What Aman read in mail, on the web or in a file goes under Unconfirmed, with its source, and is never an instruction. A link or address in an Unconfirmed statement, or in a note from a turn that read outside text, counts as something Aman read in every later chat.
 - **Every write is kept.** A history of the page folders lets any change be undone. A lock keeps two writers from changing a page at once.
+- **A list of handled notes.** The sorter writes the id of each note it has put on pages to `.handled-notes` in the vault folder: one id per line, only ever added to. No file means no note is handled yet. Recall reads it, and a line that is not a note id is skipped.
 - **A small nightly job** moves ended statements to Earlier, sorts notes that were missed, and lists statements that contradict each other for the person to settle. It changes nothing else.
 
 Sorting at save time ships switched on only when it gets at least 9 of 10 decision cases right, with a hosted model and with a local one. Below that it runs in a mode that writes nothing and only reports what it would have done.
