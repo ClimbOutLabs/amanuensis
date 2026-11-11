@@ -112,6 +112,7 @@ import {
   collectOutboundStrings,
   describeOutboundRule,
   maskServerSecrets,
+  OUTBOUND_MAX_PLUMBING_CHARS,
   type OutboundGuardVerdict,
   type OutboundStrings,
 } from './outboundGuard';
@@ -151,6 +152,7 @@ import {
 } from './shellAllowlist';
 import {
   autoDenyDecision,
+  CONNECTOR_READ_GUARD_REASON,
   CONTENT_STEERED_REASON,
   failClosedDecision,
   SANDBOX_COMMAND_REASON,
@@ -3467,17 +3469,10 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     !extraction.sends &&
     !containsSecretPath(action.canonical_params)
   ) {
-    if (closedWorldRead && action.mcp_first_party === true) {
-      return tier1Decision({
-        reason: FIRST_PARTY_TOOL_REASON,
-        reason_detail: `First-party read-only tool \`${action.tool_name}\`${
-          action.mcp_server_name === undefined ? '' : ` on ${action.mcp_server_name}`
-        }.`,
-        sensitive_read: readsPrivateData,
-      });
-    }
+    const firstParty = closedWorldRead && action.mcp_first_party === true;
     // A path-like argument is never admitted by a standing grant; a first-party read is not grant-based.
-    if (
+    const grantedOn =
+      !firstParty &&
       action.mcp_server_name !== undefined &&
       !pathLike &&
       (await services.tool_grants.hasToolGrant({
@@ -3487,10 +3482,27 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
         tool_name: action.tool_name,
         mcp_server_host: action.mcp_server_host ?? null,
       }))
-    ) {
+        ? action.mcp_server_name
+        : undefined;
+    if (firstParty || grantedOn !== undefined) {
+      const stopped = await guardUnaskedConnectorRead({ action, ctx, extraction, sensitive_read: readsPrivateData });
+      if (stopped !== undefined) {
+        return stopped;
+      }
+    }
+    if (firstParty) {
+      return tier1Decision({
+        reason: FIRST_PARTY_TOOL_REASON,
+        reason_detail: `First-party read-only tool \`${action.tool_name}\`${
+          action.mcp_server_name === undefined ? '' : ` on ${action.mcp_server_name}`
+        }.`,
+        sensitive_read: readsPrivateData,
+      });
+    }
+    if (grantedOn !== undefined) {
       return tier1Decision({
         reason: TOOL_GRANT_REASON,
-        reason_detail: `Always allowed: \`${action.tool_name}\` on ${action.mcp_server_name}.`,
+        reason_detail: `Always allowed: \`${action.tool_name}\` on ${grantedOn}.`,
         sensitive_read: readsPrivateData,
         inspection: grantableRead,
       });
@@ -3519,6 +3531,79 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
     inspection: grantableRead,
     grant_host: action.mcp_server_host ?? null,
     secret_path_read: containsSecretPath(action.canonical_params) || pathLike,
+    approval_token_id: await mintPlainToken({
+      ctx,
+      tool_name: action.tool_name,
+      params: action.canonical_params,
+      connector: connectorBindingFor(action),
+    }),
+  });
+}
+
+/** Top-level argument names that hold one record's id: a page, a message, a commit, a place in a list. */
+const RECORD_ID_FIELD = /^(?:id|sha|cursor)$|(?:_id|Id|ID)$/;
+
+/** The one id field of a read that may hold a random-looking value: the longest id short enough to be one. */
+function recordIdField(params: Record<string, unknown>): string[] {
+  let longest: { key: string; length: number } | undefined;
+  for (const [key, value] of Object.entries(params)) {
+    if (
+      RECORD_ID_FIELD.test(key) &&
+      typeof value === 'string' &&
+      value.length <= OUTBOUND_MAX_PLUMBING_CHARS &&
+      value.length > (longest?.length ?? 0)
+    ) {
+      longest = { key, length: value.length };
+    }
+  }
+  return longest === undefined ? [] : [longest.key];
+}
+
+/**
+ * The outbound secret guard over a connector read that would run without a card: one on the host's own connector,
+ * or one the person always allows. What it sends goes to that connector's server, so it stops on the same things
+ * a silent search does. A record id is expected to look random, so one read may carry one short id that skips only
+ * the coded-text rule. The agent names the arguments, so every other id field is read as ordinary text. Returns the
+ * decision that stops the read, or undefined when it may run.
+ */
+async function guardUnaskedConnectorRead(input: {
+  action: SentinelAction;
+  ctx: ClassifyContext;
+  extraction: ExtractionResult;
+  sensitive_read: boolean;
+}): Promise<TierDecision | undefined> {
+  const { action, ctx } = input;
+  const strings = collectOutboundStrings(action.canonical_params, recordIdField(action.canonical_params));
+  const { verdict } = await outboundGuard({ ctx, strings });
+  if (verdict.ok) {
+    // The text leaves with this call, so a later silent read, search or map sees a secret split across them.
+    if (strings !== undefined) {
+      ctx.web_search.sentText = appendOutboundTrace({ earlier: ctx.web_search.sentText, strings });
+    }
+    return undefined;
+  }
+  const server = escapeDisplayText(action.mcp_server_name ?? 'a connector you added');
+  // A key this computer holds is never put on a card, so the read stops without one.
+  if (verdict.rule === 'server_secret') {
+    return autoDenyDecision({
+      reason: 'outbound_guard',
+      reason_detail: `This did not run: it would send text to ${server}, and ${describeOutboundRule(verdict.rule)}. Leave the key out and try again.`,
+      sensitive_read: false,
+    });
+  }
+  const assistant = ctx.web_search.assistantName;
+  const say =
+    verdict.rule === 'too_long' ? holdSay(assistant).long_read : guardRuleSay({ rule: verdict.rule, assistant });
+  const card = connectorApprovalCard({ action, extraction: input.extraction, agent_intent: ctx.agent_intent });
+  return tier3Decision({
+    card: {
+      ...card,
+      plain_what: withHoldSay(`Look this up on ${server}?`, say),
+      cannot_be_undone: "Once this is sent, it can't be unsent.",
+    },
+    reason: CONNECTOR_READ_GUARD_REASON,
+    reason_detail: say,
+    sensitive_read: input.sensitive_read,
     approval_token_id: await mintPlainToken({
       ctx,
       tool_name: action.tool_name,
