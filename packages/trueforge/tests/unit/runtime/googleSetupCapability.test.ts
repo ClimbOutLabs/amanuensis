@@ -121,9 +121,9 @@ describe('googleSetupCapability', () => {
     expect(await mount()).toBeUndefined();
   });
 
-  it('still mounts the read once the login is connected with Drive still off', async () => {
+  it('mounts nothing once mail and calendar are allowed, even with Drive still off: Drive is optional', async () => {
     await store.save(record({ granted_scopes: [READ, COMPOSE, CALENDAR_READ, CALENDAR_WRITE] }));
-    expect(await mount()).toBeDefined();
+    expect(await mount()).toBeUndefined();
   });
 
   it('mounts the walkthrough with the read for a user who never connected', async () => {

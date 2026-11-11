@@ -2768,9 +2768,15 @@ function driveWriteCard(input: { review: DriveWriteReview; agent_intent: string 
     };
   }
   const rows = review.rows.map(row => row.map(cell => escapeDisplayText(cell)).join(', ')).join('\n');
+  const sharing =
+    review.shared_with === null
+      ? ' This file is shared with other people.'
+      : review.shared_with > 0
+        ? ` This file is shared with ${String(review.shared_with)} ${review.shared_with === 1 ? 'person' : 'people'}.`
+        : '';
   return {
     ...base,
-    plain_what: `Add ${String(review.rows.length)} ${review.rows.length === 1 ? 'row' : 'rows'} to the tab "${escapeDisplayText(review.sheet_name ?? '')}" of the Google Sheet ${cardSubject(review.file_name)}?`,
+    plain_what: `Add ${String(review.rows.length)} ${review.rows.length === 1 ? 'row' : 'rows'} to the tab "${escapeDisplayText(review.sheet_name ?? '')}" of the Google Sheet ${cardSubject(review.file_name)}?${sharing}`,
     outbound_text: rows,
   };
 }
@@ -2778,7 +2784,10 @@ function driveWriteCard(input: { review: DriveWriteReview; agent_intent: string 
 /**
  * Drive tools are the host's own, named by server so a connector's tool of the same name never takes this
  * path. Reads are silent but flagged as sensitive, as Gmail's are. A write asks with the whole write on the
- * card, unless a standing grant covers the tool; any other name fails closed.
+ * card, unless a standing grant covers the tool; any other name fails closed. Once the chat has read content
+ * that is not the person's own words, a write may have been asked for by that content rather than by the
+ * person, so it asks first with the steering line on the card, no grant covers it, and a run with nobody
+ * to answer skips it, the same way a steered notes write does.
  */
 async function classifyDriveTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   if (await ctx.services.isOffline({ tenant_id: ctx.tenant_id, created_by: ctx.created_by })) {
@@ -2804,6 +2813,23 @@ async function classifyDriveTool(action: SentinelAction, ctx: ClassifyContext): 
       reason: 'destination_unverifiable',
       reason_detail: 'The change could not be loaded to show you, so it was not offered.',
       sensitive_read: false,
+    });
+  }
+  if (hasReadContent(ctx.web_search.provenance)) {
+    if (ctx.services.unattended) {
+      return steeredSkipped(ctx);
+    }
+    const assistant = ctx.web_search.assistantName;
+    const say =
+      `${assistant} has read things written by other people in this chat, so this write may have been ` +
+      `asked for by something it read, not by you.`;
+    const card = driveWriteCard({ review, agent_intent: ctx.agent_intent });
+    return tier3Decision({
+      card: { ...card, plain_what: withHoldSay(card.plain_what, say) },
+      reason: CONTENT_STEERED_REASON,
+      reason_detail: say,
+      sensitive_read: false,
+      approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
     });
   }
   if (await hasStandingToolGrant(ctx, action)) {

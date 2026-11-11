@@ -8,7 +8,12 @@
 import type { AgentCapability, AgentTracing, InstructionBuilder } from '@truefoundry/trueforge-core/core';
 import { defineTool, LocalToolMCP, toolResultResponse, type ToolDefinition } from '@truefoundry/trueforge-core/core';
 import type { GoogleConnectionStore, GoogleOwner } from '@truefoundry/trueforge-core/core/google/connection';
-import { GOOGLE_FEATURES, googleFeatureLabel, grantedFeatures } from '@truefoundry/trueforge-core/core/google/scopes';
+import {
+  GOOGLE_FEATURES,
+  googleFeatureLabel,
+  grantedFeatures,
+  type GoogleFeature,
+} from '@truefoundry/trueforge-core/core/google/scopes';
 import {
   GOOGLE_SETUP_READ_ANNOTATIONS,
   GOOGLE_SETUP_SERVER_ID,
@@ -123,12 +128,20 @@ interface GoogleSetupCapabilityOptions {
 }
 
 /**
+ * The features a chat is led through connecting: mail and calendar. Drive is optional, decided on
+ * purpose: a person who connected mail and calendar is done, and the setup read does not ride on
+ * every later chat just because Drive is still off. Drive is turned on from the Settings page,
+ * which the status read names whenever it does run.
+ */
+const SETUP_FEATURES: readonly GoogleFeature[] = GOOGLE_FEATURES.filter(feature => feature !== 'drive_files');
+
+/**
  * The guided setup for one turn. The walkthrough mounts only where its steps can still be acted on:
  * with no login, or an expired one, the Cloud steps are still ahead of the person, so the guidance
  * rides with the read. Once the login is connected, those steps are done and cannot be done again
  * from chat; what is still off is turned on from the Settings page, which the read's next step names,
  * so the read mounts alone and the walkthrough does not ride on every turn of a connected instance.
- * A login connected with everything allowed mounts nothing: there is nothing left to lead.
+ * A login connected with mail and calendar allowed mounts nothing: there is nothing left to lead.
  * Reading the login here is the same read the Google tools make.
  */
 export async function googleSetupCapability(
@@ -137,7 +150,7 @@ export async function googleSetupCapability(
   const record = await options.connections.get(options.owner);
   if (record?.status === 'connected') {
     const granted = grantedFeatures(record.granted_scopes);
-    if (GOOGLE_FEATURES.every(feature => granted.includes(feature))) {
+    if (SETUP_FEATURES.every(feature => granted.includes(feature))) {
       return undefined;
     }
     return { systemToolSets: [new GoogleSetupToolSet(options)] };

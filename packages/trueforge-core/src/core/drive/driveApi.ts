@@ -49,7 +49,7 @@ const SHEETS: GoogleRestProduct = {
   tooLargeMessage: 'That sheet is larger than Aman will read at once. Read one tab at a time.',
 };
 
-const FILE_FIELDS = 'id,name,mimeType,modifiedTime,size,webViewLink';
+const FILE_FIELDS = 'id,name,mimeType,modifiedTime,size,webViewLink,shared,permissions(id,type,role)';
 
 /** One word of a name search, safe inside the quoted query string Drive takes. */
 function quotedWord(word: string): string {

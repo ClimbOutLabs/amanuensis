@@ -30,6 +30,24 @@ const sheetFileRoute: Route = url => {
   return undefined;
 };
 
+const sharedSheetFileRoute: Route = url => {
+  if (url.pathname === '/drive/v3/files/sheet1') {
+    return json({
+      id: 'sheet1',
+      name: 'Expenses',
+      mimeType: SHEET_MIME_TYPE,
+      shared: true,
+      permissions: [
+        { id: 'p-owner', type: 'user', role: 'owner' },
+        { id: 'p-1', type: 'user', role: 'writer' },
+        { id: 'p-2', type: 'user', role: 'reader' },
+        { id: 'p-3', type: 'group', role: 'reader' },
+      ],
+    });
+  }
+  return undefined;
+};
+
 function spreadsheetRoute(titles: string[]): Route {
   return route('/v4/spreadsheets/sheet1', {
     spreadsheetId: 'sheet1',
@@ -175,6 +193,13 @@ describe('append_rows', () => {
     expect(info.tier3_card?.plain_what).toContain('Expenses');
     expect(info.tier3_card?.outbound_text).toBe('Coffee, 4\nTaxi, 12');
     expect(await approvalProblem({ tools, sentinel, info, call })).toBeUndefined();
+  });
+
+  it('says on the card how many people the Sheet is shared with, not counting its owner', async () => {
+    const { tools } = await build({ routes: [sharedSheetFileRoute, spreadsheetRoute(['Costs', 'Trips'])] });
+    const info = await tools.toolCallInfo({ name: 'append_rows', arguments: ROWS });
+    expect(info).toMatchObject({ tier: 3, tier_reason: 'google_drive_write' });
+    expect(info.tier3_card?.plain_what).toContain('This file is shared with 3 people.');
   });
 
   it('adds the rows after the existing ones once approved', async () => {

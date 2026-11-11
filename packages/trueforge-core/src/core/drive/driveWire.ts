@@ -5,6 +5,13 @@ export const DOC_MIME_TYPE = 'application/vnd.google-apps.document';
 export const SHEET_MIME_TYPE = 'application/vnd.google-apps.spreadsheet';
 export const FOLDER_MIME_TYPE = 'application/vnd.google-apps.folder';
 
+export const DrivePermissionSchema = z.object({
+  id: z.string().optional(),
+  type: z.string().optional(),
+  role: z.string().optional(),
+});
+export type DrivePermission = z.infer<typeof DrivePermissionSchema>;
+
 export const DriveFileSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -12,6 +19,8 @@ export const DriveFileSchema = z.object({
   modifiedTime: z.string().optional(),
   size: z.string().optional(),
   webViewLink: z.string().optional(),
+  shared: z.boolean().optional(),
+  permissions: z.array(DrivePermissionSchema).optional(),
 });
 export type DriveFile = z.infer<typeof DriveFileSchema>;
 

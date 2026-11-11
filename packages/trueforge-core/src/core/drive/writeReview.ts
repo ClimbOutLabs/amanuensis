@@ -4,6 +4,7 @@
  */
 import { createHash } from 'node:crypto';
 import { stableStringify } from '../permissions/approvalTokens';
+import type { DriveFile } from './driveWire';
 import type { CreateDocInput } from './toolContract';
 
 /**
@@ -22,6 +23,20 @@ export interface DriveWriteReview {
   text: string;
   /** The rows an append adds, in order; empty for a create. */
   rows: string[][];
+  /**
+   * How many other people the file is shared with, not counting its owner. Zero for a create, whose file
+   * does not exist yet, and for a file shared with nobody. Null when the file is shared but Google did
+   * not list who with, so the card can still say it is shared without naming a wrong number.
+   */
+  shared_with: number | null;
+}
+
+/** How many people a file is shared with besides its owner, read off the file as Google holds it. */
+export function sharedWithCount(file: DriveFile): number | null {
+  if (file.permissions !== undefined) {
+    return file.permissions.filter(permission => permission.role !== 'owner').length;
+  }
+  return file.shared === true ? null : 0;
 }
 
 /** The append as it will be sent, settled from the call and the spreadsheet as Google holds it. */
@@ -39,6 +54,7 @@ export function reviewForCreate(input: { call: CreateDocInput; account: string }
     sheet_name: null,
     text: input.call.text,
     rows: [],
+    shared_with: 0,
   };
 }
 
@@ -46,6 +62,7 @@ export function reviewForAppend(input: {
   account: string;
   file_name: string;
   request: AppendWriteRequest;
+  shared_with: number | null;
 }): DriveWriteReview {
   return {
     action: 'append_rows',
@@ -54,6 +71,7 @@ export function reviewForAppend(input: {
     sheet_name: input.request.sheet_title,
     text: '',
     rows: input.request.rows,
+    shared_with: input.shared_with,
   };
 }
 

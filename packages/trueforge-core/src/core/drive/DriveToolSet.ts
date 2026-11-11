@@ -32,7 +32,13 @@ import {
   type AppendRowsInput,
   type CreateDocInput,
 } from './toolContract';
-import { hashDriveWrite, reviewForAppend, reviewForCreate, type DriveWriteReview } from './writeReview';
+import {
+  hashDriveWrite,
+  reviewForAppend,
+  reviewForCreate,
+  sharedWithCount,
+  type DriveWriteReview,
+} from './writeReview';
 
 /** Key the host adds to an approved write: the hash of the write the card showed. */
 const REVIEW_HASH_KEY = 'review_hash';
@@ -211,7 +217,12 @@ export class DriveToolSet extends LocalToolMCP {
         return settled;
       }
       const { file, request } = settled;
-      const review = reviewForAppend({ account: this.#options.account, file_name: file.name, request });
+      const review = reviewForAppend({
+        account: this.#options.account,
+        file_name: file.name,
+        request,
+        shared_with: sharedWithCount(file),
+      });
       const hash = hashDriveWrite({ tool_name: APPEND_ROWS_TOOL_NAME, title: undefined, text: undefined, request });
       return { approved: { ...parsed.data, [REVIEW_HASH_KEY]: hash }, review };
     } catch (error) {
