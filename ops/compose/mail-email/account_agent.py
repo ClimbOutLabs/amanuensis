@@ -246,8 +246,9 @@ def remove_account():
 
 
 MOST_LISTED_PER_CALL = 500
-# The app gives up on a list after 75 seconds. Work stops starting new round trips after this long, and one round trip
-# can take up to the IMAP timeout, so an answer always comes before the app gives up.
+# The app gives up on a list after 75 seconds. Work stops starting new round trips after this long, so an answer
+# usually comes well before that. The first of each step is made whatever the time and may take up to the IMAP timeout,
+# so a server slow at every step can still run past it; that pass is then too slow and the next one tries again.
 LIST_WORK_SECONDS = float(os.environ.get("AMAN_MAIL_LIST_SECONDS", "35"))
 IMAP_TIMEOUT_SECONDS = 20
 CANDIDATES_PER_FETCH = 200
@@ -329,44 +330,69 @@ def internal_dates(conn, uids, out_of_time):
     return found, looked
 
 
+def search_uids(conn, *criteria):
+    """The UIDs a UID SEARCH gives, sorted."""
+    kind, data = conn.uid("SEARCH", None, *criteria)
+    if kind != "OK":
+        raise imaplib.IMAP4.error("search")
+    return sorted(int(part) for part in (data[0] or b"").split())
+
+
 def list_after(conn, payload, out_of_time=lambda: False):
     """Mail after a cursor, in UID order, read-only. With no cursor, or a cursor from another UIDVALIDITY, it starts
-    at the first message that arrived at or after `since`. A message whose headers cannot be read is counted in
-    `skipped` and the cursor moves past it, so one bad message never holds up the others. A message deleted while it
-    was being listed is simply gone, not skipped. Once the time is up it answers with what it got through and `more`."""
+    at the first message that arrived at or after `since`: every message already in the mailbox is dated, and the
+    rest are new. A listing by time that stops early says so in `dated_to_uid` and `dated_since`, which the next call
+    passes back, so the mail still to be dated is held to the same time. A message whose headers cannot be read is
+    counted in `skipped` and the cursor moves past it, so one bad message never holds up the others. A message
+    deleted while it was being listed is simply gone, not skipped. Once the time is up it answers with what it got
+    through and `more`."""
     kind, _ = conn.select("INBOX", readonly=True)
     if kind != "OK":
         raise imaplib.IMAP4.error("select")
     validity = int(conn.response("UIDVALIDITY")[1][0])
     next_data = conn.response("UIDNEXT")[1]
-    next_uid = int(next_data[0]) if next_data and next_data[0] else 1
     limit = max(1, min(int(payload["limit"]), MOST_LISTED_PER_CALL))
     cursor_valid = payload.get("last_uid") is not None and payload.get("uidvalidity") == validity
-    # How far the UIDs were looked at when the listing itself stopped early, so the older ones are not asked again.
-    looked_to = None
     if cursor_valid:
         last = int(payload["last_uid"])
-        # A bare set in SEARCH is message sequence numbers, so the UID key is what names UIDs after the cursor.
-        kind, data = conn.uid("SEARCH", None, "UID", "%d:*" % (last + 1))
-        if kind != "OK":
-            raise imaplib.IMAP4.error("search")
-        candidates = sorted(uid for uid in (int(part) for part in (data[0] or b"").split()) if uid > last)
+        dated_to = payload.get("dated_to_uid")
+        dated_since = parse_instant(payload["dated_since"]) if dated_to is not None else None
+        if dated_to is not None and dated_since is None:
+            raise ValueError("dated_since")
     else:
-        since = parse_instant(payload["since"])
-        if since is None:
+        # Every message in the mailbox now is dated; one that arrives from here on gets a higher UID and is new.
+        last = 0
+        if next_data and next_data[0]:
+            dated_to = int(next_data[0]) - 1
+        else:
+            # A server that gives no UIDNEXT still says its highest UID: "*" is the last message.
+            top = search_uids(conn, "UID", "*")
+            dated_to = top[-1] if top else 0
+        dated_since = parse_instant(payload["since"])
+        if dated_since is None:
             raise ValueError("since")
-        start = since - timedelta(days=1)
+    dated_to = int(dated_to) if dated_to is not None and int(dated_to) > last else None
+    # How far the dated UIDs were looked at when the time ran out, so the older ones are not asked again.
+    looked_to = None
+    if dated_to is None:
+        # The UID key names UIDs; a bare set in SEARCH would be message sequence numbers.
+        candidates = [uid for uid in search_uids(conn, "UID", "%d:*" % (last + 1)) if uid > last]
+    else:
+        start = dated_since - timedelta(days=1)
         # IMAP dates name the month in English whatever the locale, and SINCE goes by whole days, so a day earlier is asked.
         day = "%d-%s-%d" % (start.day, MONTHS[start.month - 1], start.year)
-        kind, data = conn.uid("SEARCH", None, "SINCE", day)
-        if kind != "OK":
-            raise imaplib.IMAP4.error("search")
-        listed = sorted(int(part) for part in (data[0] or b"").split())
+        listed = [
+            uid
+            for uid in search_uids(conn, "UID", "%d:%d" % (last + 1, dated_to), "SINCE", day)
+            if last < uid <= dated_to
+        ]
         dates, looked = internal_dates(conn, listed, out_of_time)
         if looked < len(listed):
             looked_to = listed[looked - 1]
             listed = listed[:looked]
-        candidates = [uid for uid in listed if uid in dates and dates[uid] >= since]
+        candidates = [uid for uid in listed if uid in dates and dates[uid] >= dated_since]
+        if looked_to is None:
+            candidates += [uid for uid in search_uids(conn, "UID", "%d:*" % (dated_to + 1)) if uid > dated_to]
     batch = candidates[:limit]
     more = len(candidates) > limit or looked_to is not None
     items, refused, handled = fetch_headers(conn, batch, out_of_time)
@@ -386,23 +412,26 @@ def list_after(conn, payload, out_of_time=lambda: False):
         else:
             found[uid] = message
     messages = [found[uid] for uid in batch if uid in found]
-    every_candidate_read = len(batch) == len(candidates)
-    if every_candidate_read and looked_to is not None:
-        last_uid = max([looked_to] + batch)
-    elif batch:
-        last_uid = batch[-1]
+    if len(batch) < len(candidates):
+        last_uid = batch[-1] if batch else last
+    elif looked_to is not None:
+        last_uid = max([last, looked_to] + batch)
     else:
-        last_uid = int(payload["last_uid"]) if cursor_valid else max(next_uid - 1, 0)
+        # Every candidate was read, so the dated UIDs with none left are behind the cursor too.
+        last_uid = max([last, dated_to or 0] + batch)
+    still_dated = dated_to is not None and last_uid < dated_to
     return {
         "uidvalidity": validity,
         "last_uid": last_uid,
+        "dated_to_uid": dated_to if still_dated else None,
+        "dated_since": dated_since.isoformat().replace("+00:00", "Z") if still_dated else None,
         "more": more,
         "skipped": len(unreadable - set(found)),
         "messages": messages,
     }
 
 
-HEADER_ITEMS = "(INTERNALDATE BODY.PEEK[HEADER.FIELDS (FROM SUBJECT)])"
+HEADER_ITEMS = "(INTERNALDATE BODY.PEEK[HEADER.FIELDS (FROM SUBJECT MESSAGE-ID)])"
 
 
 def uid_of(item):
@@ -462,6 +491,7 @@ def message_of(item):
             "from_address": address,
             "from_name": name or None,
             "subject": str(headers["Subject"] or ""),
+            "message_id": str(headers["Message-ID"] or "").strip() or None,
         }
     except Exception:
         return None
@@ -498,7 +528,7 @@ def with_imap(work):
 
 def handle_list_after(payload):
     """A list-after request: (HTTP status, body). Fixed words for every failure; the mail server's text can echo credentials.
-    The work is bounded so the answer comes inside the app's own limit for the call, and no IMAP session outlives it."""
+    The work stops starting round trips once its time is up, so the answer usually comes inside the app's own limit."""
     deadline = time.monotonic() + LIST_WORK_SECONDS
 
     def out_of_time():

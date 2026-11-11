@@ -19,6 +19,11 @@ export interface MailMessage {
   received_at: Date;
   /** Every Authentication-Results header, topmost first. Empty when the mail server added none. */
   authentication_results: string[];
+  /**
+   * What events about the message are named by, when its id can change: on IMAP, its Message-ID, so a renumbered
+   * mailbox listing it again raises nothing new. Events use the id when there is none.
+   */
+  key?: string | undefined;
 }
 
 /** Enough to find a message again: its id, its thread and when it came. */
