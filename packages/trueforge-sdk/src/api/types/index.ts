@@ -470,6 +470,8 @@ export * from "./SessionSourceType.js";
 export * from "./SetSessionFolderResponse.js";
 export * from "./SetSpaceFolderResponse.js";
 export * from "./SettingsCapability.js";
+export * from "./SignInCapability.js";
+export * from "./SignInCapabilityMode.js";
 export * from "./Skill.js";
 export * from "./SkillCapability.js";
 export * from "./SkillManifest.js";
