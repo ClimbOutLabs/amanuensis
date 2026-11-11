@@ -256,6 +256,14 @@ export function entryMetadata(text: string): Record<string, string> | undefined 
 }
 
 /**
+ * Metadata recall hands back for an entry. Every entry that is not the person's own words is saved with a
+ * source line, so an entry without one is theirs and is handed back stamped as such.
+ */
+export function recallMetadata(text: string): Record<string, string> {
+  return { [MEMORY_ORIGIN_METADATA_KEY]: USER_STATED_ORIGIN, ...splitEntryTrailers(text).metadata };
+}
+
+/**
  * True for an entry stored as a copy of a replaced document before entries recorded a document id.
  * Such a copy carries no trailer at all (a document mirror never recorded a chat or a source), and
  * its body closes with the document's own `> context` line. An entry with any trailer is a chat note
