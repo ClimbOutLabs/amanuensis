@@ -10083,6 +10083,248 @@ await client.settings.mcpServers.delete("name");
 </dl>
 </details>
 
+## Settings MemoryNightly
+<details><summary><code>client.settings.memoryNightly.<a href="/src/api/resources/settings/resources/memoryNightly/client/Client.ts">get</a>() -> TrueForge.GetMemoryNightlyResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Whether the nightly tidy-up runs: the stored override, or the `MEMORY_NIGHTLY_JOB` env default when none is stored, plus the effective state for a server that keeps memory as Markdown files.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.memoryNightly.get();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `MemoryNightlyClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.settings.memoryNightly.<a href="/src/api/resources/settings/resources/memoryNightly/client/Client.ts">createOrUpdate</a>({ ...params }) -> TrueForge.GetMemoryNightlyResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Persists the nightly tidy-up override: `true` or `false` turns it on or off; `null` clears it back to the `MEMORY_NIGHTLY_JOB` env default. The response carries the effective state.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.memoryNightly.createOrUpdate({
+    enabled: true
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.settings.UpdateMemoryNightlyRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `MemoryNightlyClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+## Settings MemoryPageSorting
+<details><summary><code>client.settings.memoryPageSorting.<a href="/src/api/resources/settings/resources/memoryPageSorting/client/Client.ts">get</a>() -> TrueForge.GetMemoryPageSortingResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+How saved notes are sorted onto pages: the stored override, or the `MEMORY_PAGE_SORTING` env default when none is stored, plus the effective mode for a server that keeps memory as Markdown files.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.memoryPageSorting.get();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `MemoryPageSortingClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.settings.memoryPageSorting.<a href="/src/api/resources/settings/resources/memoryPageSorting/client/Client.ts">createOrUpdate</a>({ ...params }) -> TrueForge.GetMemoryPageSortingResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Persists the page-sorting override: `off`, `report` (only note what it would do) or `on`; `null` clears it back to the `MEMORY_PAGE_SORTING` env default. The response carries the effective mode.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.settings.memoryPageSorting.createOrUpdate({
+    mode: "report"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.settings.UpdateMemoryPageSortingRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `MemoryPageSortingClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 ## Settings MemoryRecalls
 <details><summary><code>client.settings.memoryRecalls.<a href="/src/api/resources/settings/resources/memoryRecalls/client/Client.ts">get</a>() -> TrueForge.GetMemoryRecallResponse</code></summary>
 <dl>

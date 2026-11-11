@@ -3475,10 +3475,32 @@
         ],
         "type": "object"
       },
+      "GetMemoryNightlyResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MemoryNightly"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "GetMemoryPageResponse": {
         "properties": {
           "data": {
             "$ref": "#/components/schemas/MemoryPage"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "GetMemoryPageSortingResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MemoryPageSorting"
           }
         },
         "required": [
@@ -6764,6 +6786,33 @@
         ],
         "type": "object"
       },
+      "MemoryNightly": {
+        "properties": {
+          "default_enabled": {
+            "description": "The `MEMORY_NIGHTLY_JOB` env default used when no override is stored.",
+            "type": "boolean"
+          },
+          "effective_enabled": {
+            "description": "What the server will do: the stored setting, and only when memory is kept as Markdown files.",
+            "type": "boolean"
+          },
+          "enabled": {
+            "description": "The stored setting: the persisted override when set, else the `MEMORY_NIGHTLY_JOB` env default.",
+            "type": "boolean"
+          },
+          "overridden": {
+            "description": "Whether a persisted override is currently stored.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled",
+          "overridden",
+          "default_enabled",
+          "effective_enabled"
+        ],
+        "type": "object"
+      },
       "MemoryPage": {
         "properties": {
           "confirmable_sections": {
@@ -7060,6 +7109,48 @@
         "required": [
           "name",
           "lines"
+        ],
+        "type": "object"
+      },
+      "MemoryPageSorting": {
+        "properties": {
+          "default_mode": {
+            "description": "The `MEMORY_PAGE_SORTING` env default used when no override is stored.",
+            "enum": [
+              "off",
+              "report",
+              "on"
+            ],
+            "type": "string"
+          },
+          "effective_mode": {
+            "description": "What the server will do: the stored setting, or `off` when memory is not kept as Markdown files.",
+            "enum": [
+              "off",
+              "report",
+              "on"
+            ],
+            "type": "string"
+          },
+          "mode": {
+            "description": "The stored setting: the persisted override when set, else the env default.",
+            "enum": [
+              "off",
+              "report",
+              "on"
+            ],
+            "type": "string"
+          },
+          "overridden": {
+            "description": "Whether a persisted override is currently stored.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "mode",
+          "overridden",
+          "default_mode",
+          "effective_mode"
         ],
         "type": "object"
       },
@@ -14592,6 +14683,24 @@
         ],
         "type": "object"
       },
+      "UpdateMemoryNightlyRequest": {
+        "example": {
+          "enabled": true
+        },
+        "properties": {
+          "enabled": {
+            "description": "Persisted override: `true` or `false`. `null` clears the override back to the env default.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "type": "object"
+      },
       "UpdateMemoryPageRequest": {
         "properties": {
           "markdown": {
@@ -14608,6 +14717,30 @@
         "required": [
           "markdown",
           "version"
+        ],
+        "type": "object"
+      },
+      "UpdateMemoryPageSortingRequest": {
+        "example": {
+          "mode": "report"
+        },
+        "properties": {
+          "mode": {
+            "description": "Persisted override. Send `off`, `report` or `on`. `null` clears the override back to the env default.",
+            "enum": [
+              "off",
+              "report",
+              "on",
+              null
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "mode"
         ],
         "type": "object"
       },
@@ -24911,6 +25044,226 @@
           "mcpServers"
         ],
         "x-fern-sdk-method-name": "get"
+      }
+    },
+    "/api/v1/settings/memory-nightly": {
+      "get": {
+        "description": "Whether the nightly tidy-up runs: the stored override, or the `MEMORY_NIGHTLY_JOB` env default when none is stored, plus the effective state for a server that keeps memory as Markdown files.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetMemoryNightlyResponse"
+                }
+              }
+            },
+            "description": "The stored nightly tidy-up setting."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Admin access required."
+          }
+        },
+        "summary": "Get the nightly tidy-up setting",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "memoryNightly"
+        ],
+        "x-fern-sdk-method-name": "get"
+      },
+      "put": {
+        "description": "Persists the nightly tidy-up override: `true` or `false` turns it on or off; `null` clears it back to the `MEMORY_NIGHTLY_JOB` env default. The response carries the effective state.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMemoryNightlyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetMemoryNightlyResponse"
+                }
+              }
+            },
+            "description": "The stored nightly tidy-up setting after the update."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request body."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Admin access required."
+          }
+        },
+        "summary": "Create, replace, or clear the nightly tidy-up override",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "memoryNightly"
+        ],
+        "x-fern-sdk-method-name": "create_or_update"
+      }
+    },
+    "/api/v1/settings/memory-page-sorting": {
+      "get": {
+        "description": "How saved notes are sorted onto pages: the stored override, or the `MEMORY_PAGE_SORTING` env default when none is stored, plus the effective mode for a server that keeps memory as Markdown files.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetMemoryPageSortingResponse"
+                }
+              }
+            },
+            "description": "The stored page-sorting setting."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Admin access required."
+          }
+        },
+        "summary": "Get the page-sorting setting",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "memoryPageSorting"
+        ],
+        "x-fern-sdk-method-name": "get"
+      },
+      "put": {
+        "description": "Persists the page-sorting override: `off`, `report` (only note what it would do) or `on`; `null` clears it back to the `MEMORY_PAGE_SORTING` env default. The response carries the effective mode.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMemoryPageSortingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetMemoryPageSortingResponse"
+                }
+              }
+            },
+            "description": "The stored page-sorting setting after the update."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request body."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Admin access required."
+          }
+        },
+        "summary": "Create, replace, or clear the page-sorting override",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "memoryPageSorting"
+        ],
+        "x-fern-sdk-method-name": "create_or_update"
       }
     },
     "/api/v1/settings/memory-recalls": {
