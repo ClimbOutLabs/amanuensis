@@ -10,7 +10,7 @@ Memory is on by default. It is stored as plain Markdown files on your own comput
 
 Memory search uses a small model that runs on your computer. Nothing about it is sent away.
 
-Each memory ends with a line that says where it came from. "From you" means you said it in a chat. "External source" means it came from somewhere else, such as an email, a web page or an imported file. Aman treats only "From you" memories as your own words. It asks you before it uses a link or an address from any other memory. Changing a memory never changes where it came from. A memory saved before Aman kept this line shows "External source: no record". Aman treats it as external, because nothing shows where it came from.
+Each memory ends with a line that says where it came from. "From you" means you said it in a chat. "External source" means it came from somewhere else, such as an email, a web page or an imported file. Aman treats only "From you" memories as your own words. It asks you before it uses a link or an address from any other memory. Changing a memory never changes where it came from, and a memory you reviewed as your own still says "From you" after you edit it. A memory saved before Aman kept this line shows "External source: no record". Aman treats it as external, because nothing shows where it came from.
 
 You can review these older memories once. Open the Memories page and look for the note that starts "Some older notes have no record of where they came from". Click **Review older notes**. The list holds only memories Aman saved in a chat where it had read nothing from outside, and where you attached no file. Tick the ones that are your own words, then click **Mark the ticked notes as from me**. Nothing is ticked at the start, and nothing changes until you click. Memories that are not in the list stay external. You can also make a fact your own by saying it to Aman in a chat.
 
@@ -26,7 +26,7 @@ Pages are in two groups, People and Matters. Each row shows the name and one lin
 
 Aman does not list your pages in every reply. When you ask about something and no page was shown for it, it can look at the list and open a page that looks relevant. A page with no line of your own is listed apart, and its name is marked "not confirmed by you", because Aman made it from something it read.
 
-Open a page to read it in order. A line you said or wrote yourself looks plain. A line Aman read in mail, the calendar or elsewhere says where it came from. Lines under Unconfirmed say "Not confirmed". Aman never treats them as your words until you decide.
+Open a page to read it in order. A line you said or wrote yourself looks plain. A line Aman read in mail, the calendar or elsewhere says "External source:" and where it came from, the same words a memory uses. Lines under Unconfirmed say "Not confirmed". Aman never treats them as your words until you decide.
 
 - Choose **Confirm** to keep an unconfirmed line as yours. You can pick which section it goes to. The default is Now.
 - Choose **Dismiss** to remove an unconfirmed line.

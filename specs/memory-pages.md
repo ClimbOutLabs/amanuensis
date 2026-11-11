@@ -78,7 +78,7 @@ Sorting at save time starts off. The person may switch it to `report` or `on` in
 A Pages tab sits beside Memories and Sharing in Settings, then Memory, and on the standalone Memory page. It shows only with the Markdown memory.
 
 - **List.** People and matters in two groups. Each row has the title, the summary line and a count of lines waiting to be confirmed. A search box matches the title and the other names. With no pages it says what a page is and that Aman fills pages as the person talks. Files in the page folders with names Aman cannot read are listed, with what to do.
-- **One page.** The sections in order. The person's own lines are plain. A line Aman read says where it came from, and a line under Unconfirmed says it is not confirmed and has Confirm and Dismiss. Earlier is collapsed.
+- **One page.** The sections in order. The person's own lines are plain. The person's own lines say `From you`. A line that is not theirs says `External source:` and where it came from (`a message you sent`, `email`, `calendar`, `read content` or `Aman’s guess`), the same words a note uses. A line under Unconfirmed says it is not confirmed and has Confirm and Dismiss. Earlier is collapsed.
 - **Edit.** The page as Markdown text, with Save and Cancel. A save is one history entry and is treated exactly like a hand edit in the file. It is refused, with a message that says what to do, when the page changed since it was opened or when the text is not a page.
 - **Delete page.** Held for 10 seconds with Undo, then sent. The history keeps the page.
 - **Lines that disagree.** When the nightly check finds two lines that cannot both be true, the list row says how many pairs disagree. The page shows a block "These lines disagree" with both lines, the reason and a "Not a problem" button. The button drops the pair for good, for those two lines as they are. The person settles a real one by editing the page. Nothing on the page changes by itself.
@@ -103,7 +103,7 @@ Incognito chats are not involved: this is Settings.
 - The meaning model runs locally. Its one download is the model file.
 - Sorting at save time sends the new note and the pages it could belong to, to the same model the chat already uses. With a local model nothing leaves the machine.
 - An incognito chat reads pages and writes none. Every writer here asks the same question every other writer asks.
-- Text Aman read elsewhere is kept apart from the person's own words, is labelled with its source, and is never treated as an instruction.
+- Text Aman read elsewhere is kept apart from the person's own words, is labelled with its source in the words a note uses (`External source: ...`), and is never treated as an instruction. A note's origin is read from its closing line: a note with no line, or an older "no record" line, is read content for sorting, and one closing with `From you`, or reviewed as theirs, is the person's own.
 - Pages travel with an export and come back on import. The history and the index stay behind and are rebuilt.
 
 ## Testing

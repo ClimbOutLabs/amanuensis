@@ -17,7 +17,7 @@ filler; credentials by reference, never by value.
 
 ## Where a note came from, and the one-time review
 
-Each Markdown note closes with `> From you` or `> External source: <what>`. A note with no such line counts as external. The start-up step gave older notes `> External source: no record`; it is the only step that rewrites a dated file.
+Each Markdown note closes with `> From you` or `> External source: <what>`. A note with no such line counts as external. The start-up step gave older notes `> External source: no record`. It takes the vault lock for each vault and writes each file through a temporary file and a rename, as the erase does. It leaves an erased entry (`## [erased]`) byte for byte as it is, so no erased note gets a line and later notes keep their ids. A sent-mail note closes with `> External source: a message you sent`; the older `> Source: a message you sent` is still read as external sent mail and shown in the new words.
 
 The person can review older notes once. A note is offered only when all of these hold, and any check that cannot be made refuses it:
 
@@ -118,10 +118,11 @@ the recall screen is on they are classified like an untrusted-origin item (`cura
 `reflection:#0`): withheld when flagged or when the screen gave no verdict. The screen's time
 budget is charged for the recall call alone, not the parallel wall clock.
 
-The Markdown store writes a source line on every note that is not the person's own words, and nothing on
-their own. At recall it hands back each note with its origin: `tool_ingested` for a note with a source line,
-`user_stated` for one without. So the recall screen and the record of where links came from treat a person's
-own note the same way on both memory stores.
+The Markdown store writes a source line on every note: `> From you` for the person's own words and
+`> External source: <what>` for the rest. At recall it hands back each note with its origin: `user_stated`
+for a note that closes with `> From you`, `tool_ingested` for any other, including a note with no line. So the
+recall screen and the record of where links came from treat a person's own note the same way on both memory
+stores.
 
 The event's `layers` field records, per turn, whether a profile line and how many mental models
 were injected (and how many candidates the bank returned), the route and the pattern that selected
@@ -165,7 +166,7 @@ the nightly pass can learn how the person writes to each contact.
   save, so it is kept whether or not turn summaries are on, whether or not the turn's own save succeeds, and
   when the turn ends early. A later recovery of a lost turn neither drops it nor writes it twice.
 - **Source and label.** The note's source is `sent_mail` and its label reads "From a message you sent, Oct 31".
-  The Memories page shows "Source: a message you sent". The note is stored with the same origin as other tool
+  The note closes with `> External source: a message you sent`, and the Memories page shows those words. The note is stored with the same origin as other tool
   results (`tool_ingested`), so the recall screen holds it to the same strict posture: what a message says is
   data, never an instruction. Recall ages it like other read content: a note older than two weeks stays in
   the file but is not recalled.
@@ -189,6 +190,10 @@ vault lock, and saving a note takes the same lock, so a note saved during a rewr
 - An edited note's block becomes the new wording, with the hidden lines it carried (heading time, chat id,
   document id, note line, id-shaped context line) kept. A `## ` line in the new wording is stored with a leading
   backslash so it cannot split the entry. Readers still take the wording from the marker.
+- An edit keeps where the note came from. When the note was reviewed as the person's own, the rewrite reads it
+  with the review applied, so the edited block closes with `> From you`. An external note keeps its own line
+  whatever the new wording says. A deleted note's review mark stays in `.reviewed-from-you` and matches nothing
+  else, because ids are positions that are never reused.
 - Only each note's latest marker is kept in the marker file, so an earlier edit's wording does not stay there.
 - The file is written whole to a temporary file in the same folder and renamed over the old one.
 - The marker is written first, then the erase. If the erase fails, the person sees "try again", the marker
