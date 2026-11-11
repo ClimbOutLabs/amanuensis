@@ -382,6 +382,10 @@
       "set": "spaces",
       "tests": []
     },
+    "route:telegram": {
+      "set": "reach",
+      "tests": []
+    },
     "route:tokenFactoryUsage": {
       "set": "models",
       "tests": []
@@ -774,6 +778,7 @@
     "route:skill",
     "route:space",
     "route:spaceFolder",
+    "route:telegram",
     "route:tokenFactoryUsage",
     "route:toolOutputScreen",
     "route:voice",
