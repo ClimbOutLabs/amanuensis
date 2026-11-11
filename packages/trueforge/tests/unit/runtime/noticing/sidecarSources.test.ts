@@ -6,12 +6,14 @@ import {
   bareSubject,
   createSidecarNoticingSources,
   imapAgent,
+  imapMessageId,
   sidecarCalendarSource,
   sidecarMailSource,
   SidecarToolError,
   toolResultOf,
   type CallSidecarTool,
   type ListAfterAgent,
+  type MailboxValidity,
 } from '../../../../src/runtime/noticing/sidecarSources';
 import {
   MailLoginFailedError,
@@ -64,8 +66,11 @@ const EMAIL = {
 
 const noAgent: ListAfterAgent = () => Promise.reject(new Error('This source does not list mail.'));
 
-const mailSource = (call: CallSidecarTool, agent: ListAfterAgent = noAgent) =>
-  sidecarMailSource({ call, account: 'default', agent });
+const mailSource = (
+  call: CallSidecarTool,
+  agent: ListAfterAgent = noAgent,
+  validity: MailboxValidity = () => Promise.resolve(1),
+) => sidecarMailSource({ call, account: 'default', agent, validity });
 
 interface Arrival {
   uid: number;
@@ -107,7 +112,7 @@ function mailboxAgent(
       messages: taken
         .filter(item => !item.bad)
         .map(item => ({
-          id: String(item.uid),
+          id: imapMessageId({ uidvalidity, uid: item.uid }),
           uid: item.uid,
           thread_id: bareSubject(item.subject),
           from_address: 'billing@power.test',
@@ -159,7 +164,7 @@ describe('sidecar mail source (IMAP)', () => {
     expect(asked).toEqual([{ uidvalidity: 1, last_uid: 6, since: SINCE.toISOString(), limit: 50 }]);
     expect(read.cursor).toEqual({ uidvalidity: 1, last_uid: 7 });
     expect(read.messages[0]).toMatchObject({
-      id: '7',
+      id: 'imap:1:7',
       uid: 7,
       thread_id: 'Invoice',
       from_address: 'billing@power.test',
@@ -168,7 +173,8 @@ describe('sidecar mail source (IMAP)', () => {
       received_at: new Date('2026-11-05T14:55:00.000Z'),
     });
     expect(await source.readText(read.messages[0] ?? EMAIL_MESSAGE)).toBe('Amount due by November 7');
-    expect(calls.at(-1)?.[1]).toMatchObject({ mark_as_read: false });
+    // The connector's tools take the UID alone.
+    expect(calls.at(-1)?.[1]).toMatchObject({ email_ids: ['7'], mark_as_read: false });
     expect(source.trustedAuthenticationServers).toEqual([]);
   });
 
@@ -196,7 +202,7 @@ describe('sidecar mail source (IMAP)', () => {
   });
 
   describe('when the connector cannot give a message', () => {
-    const MAIL_REF = { id: '7', thread_id: 'Your invoice', received_at: new Date('2026-11-05T14:55:00.000Z') };
+    const MAIL_REF = { id: 'imap:1:7', thread_id: 'Your invoice', received_at: new Date('2026-11-05T14:55:00.000Z') };
     const asMail = {
       ...MAIL_REF,
       from_address: 'billing@power.test',
@@ -232,6 +238,30 @@ describe('sidecar mail source (IMAP)', () => {
       await expect(mailSource(call).laterInThread(MAIL_REF)).resolves.toEqual(['Paid, thanks']);
     });
 
+    it('never checks a bill from before the mailbox was renumbered against the mail now there', async () => {
+      // After renumbering, UID 8 is the bill itself and UID 7 a payment notice from another thread.
+      const sameBill = { ...EMAIL, email_id: '8', date: '2026-11-05T14:55:00+00:00' };
+      const { call, calls } = mailTool([sameBill], { '8': 'Amount due by November 7', '7': 'Paid, thanks' });
+      const asked: string[] = [];
+      const source = mailSource(call, noAgent, () => {
+        asked.push('validity');
+        return Promise.resolve(2);
+      });
+      const failure = source.laterInThread(MAIL_REF);
+      await expect(failure).rejects.toBeInstanceOf(MessageUnreadableError);
+      await expect(source.laterInThread(MAIL_REF)).rejects.toBeInstanceOf(MessageUnreadableError);
+      expect(calls).toEqual([]);
+      expect(asked).toEqual(['validity']);
+    });
+
+    it('checks the thread of a bill from the current numbering', async () => {
+      const paid = { ...EMAIL, email_id: '8', subject: 'Re: Your invoice', date: '2026-11-05T14:58:00+00:00' };
+      const { call } = mailTool([paid], { '8': 'Paid, thanks' });
+      await expect(mailSource(call, noAgent, () => Promise.resolve(1)).laterInThread(MAIL_REF)).resolves.toEqual([
+        'Paid, thanks',
+      ]);
+    });
+
     it('tracks a bill, and does not stop the pass, when the connector refuses the thread check', async () => {
       const bill = {
         ...asMail,
@@ -258,7 +288,7 @@ describe('sidecar mail source (IMAP)', () => {
           ...source,
           listAfter: () =>
             Promise.resolve({
-              messages: [{ ...bill, uid: 7 }],
+              messages: [{ ...bill, id: 'imap:1:7', uid: 7 }],
               skipped: 0,
               cursor: { uidvalidity: 1, last_uid: 7 },
               more: false,
@@ -272,7 +302,7 @@ describe('sidecar mail source (IMAP)', () => {
         out_of_time: () => false,
         assistant: 'Mira',
       });
-      expect(found.track.map(event => event.id)).toEqual(['bill_due:7']);
+      expect(found.track.map(event => event.id)).toEqual(['bill_due:imap:1:7']);
       expect(found.stopped_by).toBeUndefined();
     });
 
@@ -357,7 +387,9 @@ describe('sidecar mail source (IMAP)', () => {
       );
       expect(read.cursor).toEqual({ uidvalidity: 3, last_uid: 9 });
       expect(read.more).toBe(true);
-      expect(read.messages).toMatchObject([{ id: '9', thread_id: 'Hi', from_address: 'a@b.test', from_name: null }]);
+      expect(read.messages).toMatchObject([
+        { id: 'imap:3:9', uid: 9, thread_id: 'Hi', from_address: 'a@b.test', from_name: null },
+      ]);
     });
 
     it('counts a message it cannot read as skipped, and keeps the rest', async () => {
@@ -381,7 +413,7 @@ describe('sidecar mail source (IMAP)', () => {
         }),
       );
       expect(read.skipped).toBe(3);
-      expect(read.messages.map(message => message.id)).toEqual(['12']);
+      expect(read.messages.map(message => message.id)).toEqual(['imap:3:12']);
     });
 
     it('says a failed login is a login that must be redone, and an unreachable server is a busy one', async () => {
@@ -426,7 +458,7 @@ describe('sidecar mail source (IMAP)', () => {
         arrival({ uid: 8, at: '2026-11-05T14:55:01.000Z', bad: true }),
       ]);
       const found = await pass(agent, { cursor: undefined });
-      expect(found.raise.map(event => event.id)).toEqual(['bill_due:7']);
+      expect(found.raise.map(event => event.id)).toEqual(['bill_due:imap:1:7']);
       expect(found.gaps).toHaveLength(1);
       expect(found.stopped_by).toBeUndefined();
       expect(found.resume_from).toBeUndefined();
@@ -455,7 +487,7 @@ describe('sidecar mail source (IMAP)', () => {
         if (found.resume_from === undefined) break;
       }
       expect(passes).toBeLessThan(10);
-      expect(raised).toEqual(['bill_due:122']);
+      expect(raised).toEqual(['bill_due:imap:1:122']);
       expect(cursor).toEqual({ uidvalidity: 1, last_uid: 122 });
     });
 
@@ -510,7 +542,7 @@ describe('sidecar mail source (IMAP)', () => {
     const reply = { ...EMAIL, email_id: '8', subject: 'Re: Your invoice', date: '2026-11-05T14:58:00+00:00' };
     const { call, calls } = mailTool([reply], { '8': 'Thank you for your payment' });
     const later = await mailSource(call).laterInThread({
-      id: '7',
+      id: 'imap:1:7',
       thread_id: bareSubject('Re: Your invoice'),
       received_at: new Date('2026-11-05T14:55:00.000Z'),
     });
