@@ -653,6 +653,18 @@ test('a Docker Desktop download that is not from Docker Inc is refused before it
   assert.deepEqual(world.jobs.browserUrls, []);
 });
 
+test('an install clears an earlier removal note at the start, even one that then stops', async () => {
+  const world = await makeWorld({
+    dockerInstalled: false,
+    dockerRunning: false,
+    installerSigner: 'CN=Somebody Else, O=Somebody Else',
+  });
+  world.jobs.dockerRemovedMark = true;
+  const code = await runInstall(world.deps, { dryRun: false });
+  assert.equal(code, 1);
+  assert.equal(world.jobs.dockerRemovedMark, false);
+});
+
 test('a Docker Desktop download that cannot be checked is refused the same way', async () => {
   const world = await makeWorld({ dockerInstalled: false, dockerRunning: false, installerSigner: null });
   const code = await runInstall(world.deps, { dryRun: false });
