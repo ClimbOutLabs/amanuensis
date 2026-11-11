@@ -997,19 +997,31 @@ gateway_flag() { # origins public_url
   if [ -z "$1" ] && ! is_loopback_origin "$2"; then printf 1; else printf 0; fi
 }
 
-# Puts back the settings an instance's .env lost, from its record and the template that wrote it. A setting that is
-# still there is never changed, so existing secrets stay; a lost secret gets a new value that the app and the sign-in
-# service both read from this file. The Token Factory key cannot be made again and is skipped.
-instance_env_repair() {
-  local name=$1 env network_on=0 tf_on=0 tf_cap_on=0 demo_on=0 line key value tf_cap fresh=0 restored=0
-  env="$(instance_dir "$name")/.env"
-  # The name is recorded first, so a lost OWNER_NAME is put back with it rather than empty.
-  owner_name_backfill "$name"
+# The settings the template gives an instance from its record: its addresses, its sign-in client and owner, and new
+# secrets. Prints them; writes nothing.
+instance_env_from_record() { # name
+  local name=$1 network_on=0 tf_on=0 tf_cap_on=0 demo_on=0 tf_cap
   if [ -n "$(reg_get "$name" origins)" ]; then network_on=1; fi
   tf_cap=$(reg_get "$name" tf_cap)
   if [ -n "$tf_cap" ]; then tf_cap_on=1; fi
   if [ "$(reg_get "$name" demo)" = 1 ]; then demo_on=1; fi
   if [ "$(reg_get "$name" token_factory)" = 1 ]; then tf_on=1; fi
+  render_template "$TEMPLATES_DIR/instance/env.tpl" \
+    "PUBLIC_URL=$(reg_get "$name" public_url)" "IF_NETWORK=$network_on" "ORIGINS=$(reg_get "$name" origins)" \
+    "COOKIE_SUFFIX=$(reg_get "$name" cookie_suffix)" "ISSUER=$(reg_get "$name" login_url)/dex" "CLIENT_ID=$(reg_get "$name" client_id)" \
+    "IF_GATEWAY=$(gateway_flag "$(reg_get "$name" origins)" "$(reg_get "$name" public_url)")" "LOGIN_PORT=$(reg_get "$name" login_port)" \
+    "CLIENT_SECRET=$(rand_hex 32)" "OWNER_EMAIL=$(reg_get "$name" owner_email)" "OWNER_NAME=$(reg_get "$name" owner_name)" "API_KEY=$(rand_hex 32)" \
+    "IF_TOKEN_FACTORY=$tf_on" "TF_KEY=unused" "TF_MODEL=$(reg_get "$name" tf_model)" "IF_TF_CAP=$tf_cap_on" "TF_CAP=$tf_cap" "IF_DEMO=$demo_on"
+}
+
+# Puts back the settings an instance's .env lost, from its record and the template that wrote it. A setting that is
+# still there is never changed, so existing secrets stay; a lost secret gets a new value that the app and the sign-in
+# service both read from this file. The Token Factory key cannot be made again and is skipped.
+instance_env_repair() {
+  local name=$1 env line key value fresh=0 restored=0
+  env="$(instance_dir "$name")/.env"
+  # The name is recorded first, so a lost OWNER_NAME is put back with it rather than empty.
+  owner_name_backfill "$name"
   if [ ! -f "$env" ]; then fresh=1; fi
   while IFS= read -r line; do
     case "$line" in '' | '#'*) continue ;; esac
@@ -1025,12 +1037,7 @@ instance_env_repair() {
       env_managed_set "$env" "$key" "$value"
       restored=$((restored + 1))
     fi
-  done < <(render_template "$TEMPLATES_DIR/instance/env.tpl" \
-    "PUBLIC_URL=$(reg_get "$name" public_url)" "IF_NETWORK=$network_on" "ORIGINS=$(reg_get "$name" origins)" \
-    "COOKIE_SUFFIX=$(reg_get "$name" cookie_suffix)" "ISSUER=$(reg_get "$name" login_url)/dex" "CLIENT_ID=$(reg_get "$name" client_id)" \
-    "IF_GATEWAY=$(gateway_flag "$(reg_get "$name" origins)" "$(reg_get "$name" public_url)")" "LOGIN_PORT=$(reg_get "$name" login_port)" \
-    "CLIENT_SECRET=$(rand_hex 32)" "OWNER_EMAIL=$(reg_get "$name" owner_email)" "OWNER_NAME=$(reg_get "$name" owner_name)" "API_KEY=$(rand_hex 32)" \
-    "IF_TOKEN_FACTORY=$tf_on" "TF_KEY=unused" "TF_MODEL=$(reg_get "$name" tf_model)" "IF_TF_CAP=$tf_cap_on" "TF_CAP=$tf_cap" "IF_DEMO=$demo_on")
+  done < <(instance_env_from_record "$name")
   if [ "$restored" -gt 0 ]; then ui_ok "Put back $restored lost settings of instance $name"; fi
 }
 
