@@ -6,6 +6,8 @@ import { test } from 'node:test';
 import {
   SETUP_CMD_FORWARDER,
   WindowsJobError,
+  dockerDataFolder,
+  driveOf,
   parseAclListing,
   systemWindowsJobs,
   userPathHasFolder,
@@ -22,6 +24,7 @@ import {
 } from '../../src/runner/processRunner.ts';
 
 const LOCAL_APP_DATA = 'C:\\Users\\Friend\\AppData\\Local';
+const APP_DATA = 'C:\\Users\\Friend\\AppData\\Roaming';
 const SELF = 'C:\\Users\\Friend\\Downloads\\aman-windows-x64.exe';
 const PROGRAMS_DIR = 'C:\\Users\\Friend\\AppData\\Local\\Programs\\Amanuensis';
 const DATA_DIR = 'C:\\Users\\Friend\\AppData\\Local\\Amanuensis';
@@ -68,6 +71,9 @@ class AnswerRunner implements ProcessRunner {
       return Promise.resolve(okResult(''));
     }
     const script = args[3] ?? '';
+    if (script.includes('DriveInfo')) {
+      return Promise.resolve(okResult('53687091200\r\n'));
+    }
     if (script.includes("GetEnvironmentVariable('Path', 'User')")) {
       return Promise.resolve(okResult(this.userPath));
     }
@@ -86,7 +92,13 @@ class AnswerRunner implements ProcessRunner {
 }
 
 function jobsWith(runner: ProcessRunner, selfExePath: string = SELF) {
-  return systemWindowsJobs({ runner, localAppDataDir: LOCAL_APP_DATA, selfExePath, selfPid: 4242 });
+  return systemWindowsJobs({
+    runner,
+    localAppDataDir: LOCAL_APP_DATA,
+    appDataDir: APP_DATA,
+    selfExePath,
+    selfPid: 4242,
+  });
 }
 
 test('the golden file holds every command line the Windows jobs run', async () => {
@@ -117,6 +129,7 @@ test('the golden file holds every command line the Windows jobs run', async () =
   await jobs.clearRunOnceResume();
   assert.equal(await jobs.runOnceResumePending(), false);
   await jobs.keepComputerAwake();
+  assert.deepEqual(await jobs.dockerDataDriveSpace(), { status: 'read', drive: 'C:', freeBytes: 53687091200 });
   await jobs.removeShortcut('C:\\Users\\Friend\\Desktop\\Aman.lnk');
   await jobs.removeDailyBackupTask();
   await jobs.removeFirewallRule();
@@ -385,6 +398,7 @@ test('a page write that cannot happen fails as a Windows job error', async () =>
     runner: new AnswerRunner(''),
     // Far longer than any file name a disk allows, so the write fails.
     localAppDataDir: 'C:\\' + 'a'.repeat(300),
+    appDataDir: APP_DATA,
     selfExePath: SELF,
     selfPid: 4242,
   });
@@ -411,6 +425,7 @@ test('a forwarder write that cannot happen fails as a Windows job error', async 
     runner: new AnswerRunner(''),
     // Far longer than any file name a disk allows, so the write fails.
     localAppDataDir: 'C:\\' + 'a'.repeat(300),
+    appDataDir: APP_DATA,
     selfExePath: SELF,
     selfPid: 4242,
   });
@@ -422,6 +437,7 @@ test('a certificate write that cannot happen fails as a Windows job error', asyn
     runner: new AnswerRunner(''),
     // Far longer than any file name a disk allows, so the write fails.
     localAppDataDir: 'C:\\' + 'a'.repeat(300),
+    appDataDir: APP_DATA,
     selfExePath: SELF,
     selfPid: 4242,
   });
@@ -445,4 +461,45 @@ test('a port a program holds is not free, and a port nobody holds is', async () 
     });
   });
   assert.equal(await jobs.portIsFree(address.port), true);
+});
+
+test('Docker data is on the drive of its default folder unless its settings name a moved one', () => {
+  const local = 'C:\\Users\\Friend\\AppData\\Local';
+  assert.equal(dockerDataFolder({ settingsText: null, localAppDataDir: local }), `${local}\\Docker`);
+  assert.equal(dockerDataFolder({ settingsText: 'not json', localAppDataDir: local }), `${local}\\Docker`);
+  assert.equal(dockerDataFolder({ settingsText: '{}', localAppDataDir: local }), `${local}\\Docker`);
+  assert.equal(
+    dockerDataFolder({ settingsText: '{"CustomWslDistroDir":"D:\\\\Docker"}', localAppDataDir: local }),
+    'D:\\Docker',
+  );
+  assert.equal(
+    dockerDataFolder({
+      settingsText: '{"customWslDistroDir":"E:\\\\wsl","dataFolder":"F:\\\\vm"}',
+      localAppDataDir: local,
+    }),
+    'E:\\wsl',
+  );
+  // The older Hyper-V engine keeps its disk in the data folder instead.
+  assert.equal(
+    dockerDataFolder({
+      settingsText: '{"WslEngineEnabled":false,"CustomWslDistroDir":"E:\\\\wsl","DataFolder":"F:\\\\vm"}',
+      localAppDataDir: local,
+    }),
+    'F:\\vm',
+  );
+  assert.equal(
+    dockerDataFolder({ settingsText: '{"CustomWslDistroDir":"  "}', localAppDataDir: local }),
+    `${local}\\Docker`,
+  );
+});
+
+test('a folder is named by its drive the way File Explorer names it', () => {
+  assert.equal(driveOf('c:\\Users\\Friend'), 'C:');
+  assert.equal(driveOf('D:\\Docker'), 'D:');
+  assert.equal(driveOf('\\\\server\\share\\Docker'), '');
+});
+
+test('a free space Windows does not answer with a number cannot be read', async () => {
+  const failing = new StubProcessRunner(new Map<string, ProcessResult>());
+  assert.deepEqual(await jobsWith(failing).dockerDataDriveSpace(), { status: 'unreadable', drive: 'C:' });
 });

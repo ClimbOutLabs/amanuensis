@@ -6,7 +6,9 @@ import { test } from 'node:test';
 
 import { runDoctor, type DoctorDeps } from '../../src/doctor/doctor.ts';
 import { FakeHost } from '../../src/host/fakeHost.ts';
+import { FakeWindowsJobs } from '../../src/host/fakeWindowsJobs.ts';
 import type { SystemKind } from '../../src/host/host.ts';
+import type { DriveSpace } from '../../src/host/windowsJobs.ts';
 import { DOCKER_NOT_ANSWERING, DOCTOR_STATE_UNREADABLE, problemText } from '../../src/messages.ts';
 import {
   commandLine,
@@ -666,6 +668,57 @@ async function diskWorld(availKb: number | null): Promise<World> {
   }
   return makeWorld({ answers });
 }
+
+async function windowsDiskRecord(
+  space: DriveSpace,
+  answers: Map<string, ProcessResult> = readyAnswers(),
+): Promise<JsonRecord> {
+  const world = await makeWorld({ kind: 'windows', answers });
+  world.deps.windowsJobs = new FakeWindowsJobs({
+    localAppDataDir: 'C:\\Users\\Friend\\AppData\\Local',
+    selfExePath: 'C:\\Users\\Friend\\AppData\\Local\\Programs\\Amanuensis\\aman.exe',
+    startMenuProgramsDir: 'C:\\Users\\Friend\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs',
+    driveSpace: space,
+  });
+  return recordById((await runJson(world)).doc.machine, 'disk');
+}
+
+test('disk on Windows: the drive Docker Desktop keeps its data on is judged against about 20 GB', async () => {
+  const fix =
+    'Free up space on drive C:, for example by emptying the Recycle Bin or removing programs you no longer use.';
+  assert.deepEqual(await windowsDiskRecord({ status: 'read', drive: 'C:', freeBytes: GIB }), {
+    id: 'disk',
+    state: 'fail',
+    detail: 'Only 1.0 GB is free on drive C:, where Docker keeps Aman; updates will fail.',
+    fix,
+  });
+  assert.deepEqual(await windowsDiskRecord({ status: 'read', drive: 'C:', freeBytes: 12 * GIB }), {
+    id: 'disk',
+    state: 'warn',
+    detail: '12.0 GB is free on drive C:, where Docker keeps Aman; about 20 GB is recommended.',
+    fix,
+  });
+  assert.deepEqual(await windowsDiskRecord({ status: 'read', drive: 'C:', freeBytes: 20 * GIB }), {
+    id: 'disk',
+    state: 'ok',
+    detail: '20.0 GB is free on drive C:, where Docker keeps Aman.',
+    fix: '',
+  });
+  assert.deepEqual(await windowsDiskRecord({ status: 'unreadable', drive: 'D:' }), {
+    id: 'disk',
+    state: 'warn',
+    detail: 'The free space on drive D: could not be read. Aman needs about 20 GB free there.',
+    fix: 'Make sure drive D: has about 20 GB free.',
+  });
+});
+
+test('disk on Windows is read from Windows, so it is judged while Docker is down', async () => {
+  const record = await windowsDiskRecord(
+    { status: 'read', drive: 'C:', freeBytes: 12 * GIB },
+    withAnswer(readyAnswers(), INFO_LINE, NOT_RUNNING),
+  );
+  assert.equal(record.state, 'warn');
+});
 
 test('disk: under 2 GB fails, under 10 GB warns, an unreadable answer warns', async () => {
   const low = await diskWorld(1048576);

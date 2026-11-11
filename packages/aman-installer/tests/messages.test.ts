@@ -49,6 +49,7 @@ import {
   INSTALL_RESUME_FAILED,
   INSTALL_SOURCE_FAILED,
   INSTALL_SOURCE_MISSING,
+  installLowDiskProblem,
   installUsageProblem,
   LOW_MEMORY,
   MEMORY_NOT_REPORTED,
@@ -235,6 +236,7 @@ function allProblems(): Problem[] {
     INSTALL_PAGE_FAILED,
     INSTALL_KEY_ON_COMMAND_LINE,
     installUsageProblem('--force'),
+    installLowDiskProblem({ drive: 'C:', freeText: '12.3 GB' }),
   ];
   for (const record of [
     DOCKER_NOT_INSTALLED,

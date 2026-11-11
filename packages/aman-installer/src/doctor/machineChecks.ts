@@ -9,6 +9,7 @@ import {
   type InstanceRecord,
   type StateSummary,
 } from '../state/state.ts';
+import { MIN_DOCKER_DATA_FREE_BYTES } from './dockerDoctor.ts';
 import type { CheckList, DoctorDeps, MachineContext } from './doctor.ts';
 
 // The machine checks of installer/doctor/aman, in the shell's order, with
@@ -89,7 +90,7 @@ function normalizeArch(arch: string): string {
   return arch;
 }
 
-function formatGb(kb: number): string {
+export function formatGb(kb: number): string {
   return `${(kb / 1048576).toFixed(1)} GB`;
 }
 
@@ -426,7 +427,63 @@ async function checkImages(
   }
 }
 
+// On Windows, Docker Desktop keeps its data in a virtual disk that grows
+// on a drive of the PC itself, and that drive is what fills up; the
+// shell doctor never runs on the PC, so this is the one place the
+// check is made there. It is read from Windows, without Docker, and
+// judged against the figure the first install needs.
+async function checkWindowsDisk(deps: DoctorDeps, list: CheckList): Promise<boolean> {
+  const jobs = deps.windowsJobs;
+  if (deps.host.kind !== 'windows' || jobs === undefined) {
+    return false;
+  }
+  const space = await jobs.dockerDataDriveSpace().catch(() => null);
+  const drive =
+    space === null || space.drive === '' ? 'the drive Docker Desktop keeps its data on' : `drive ${space.drive}`;
+  const fix = `Free up space on ${drive}, for example by emptying the Recycle Bin or removing programs you no longer use.`;
+  if (space === null || space.status === 'unreadable') {
+    list.record({
+      scope: 'machine',
+      id: 'disk',
+      state: 'warn',
+      detail: `The free space on ${drive} could not be read. Aman needs about 20 GB free there.`,
+      fix: `Make sure ${drive} has about 20 GB free.`,
+    });
+    return true;
+  }
+  const kb = Math.floor(space.freeBytes / 1024);
+  if (space.freeBytes < 2 * GIB) {
+    list.record({
+      scope: 'machine',
+      id: 'disk',
+      state: 'fail',
+      detail: `Only ${formatGb(kb)} is free on ${drive}, where Docker keeps Aman; updates will fail.`,
+      fix,
+    });
+  } else if (space.freeBytes < MIN_DOCKER_DATA_FREE_BYTES) {
+    list.record({
+      scope: 'machine',
+      id: 'disk',
+      state: 'warn',
+      detail: `${formatGb(kb)} is free on ${drive}, where Docker keeps Aman; about 20 GB is recommended.`,
+      fix,
+    });
+  } else {
+    list.record({
+      scope: 'machine',
+      id: 'disk',
+      state: 'ok',
+      detail: `${formatGb(kb)} is free on ${drive}, where Docker keeps Aman.`,
+      fix: '',
+    });
+  }
+  return true;
+}
+
 async function checkDisk(deps: DoctorDeps, list: CheckList, ctx: MachineContext): Promise<void> {
+  if (await checkWindowsDisk(deps, list)) {
+    return;
+  }
   if (!ctx.dockerOk) {
     list.record({ scope: 'machine', id: 'disk', state: 'off', detail: 'Skipped: Docker is not reachable.', fix: '' });
     return;

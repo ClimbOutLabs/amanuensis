@@ -18,6 +18,12 @@ import type { ProcessRunner } from '../runner/processRunner.ts';
 
 export const MIN_MEMORY_BYTES = 6 * 1024 * 1024 * 1024;
 
+// The free space a first install needs on the drive Docker Desktop
+// keeps its data on: Docker Desktop itself, the images Aman builds, and
+// room for the build to work in. The Windows guide gives the same
+// figure as about 20 GB.
+export const MIN_DOCKER_DATA_FREE_BYTES = 20 * 1024 * 1024 * 1024;
+
 // The oldest Engine that can mount one folder inside a volume, which is
 // how the https folders are mounted on a Windows PC, where the state
 // lives in a volume: mounting a folder inside a volume arrived in

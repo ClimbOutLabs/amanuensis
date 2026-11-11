@@ -1,4 +1,4 @@
-import { access, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { win32 } from 'node:path';
 
@@ -172,6 +172,66 @@ export function userPathHasFolder(options: { pathValue: string; folder: string }
     .some(entry => entry === wanted);
 }
 
+// What reading the free space on the drive Docker Desktop keeps its
+// data on found. The drive is named the way the person sees it in File
+// Explorer (C:), and is empty when the folder names no drive letter.
+export type DriveSpace = { status: 'read'; drive: string; freeBytes: number } | { status: 'unreadable'; drive: string };
+
+// Docker Desktop's settings files under the per-user roaming folder
+// (APPDATA), the current name first and the older name after it.
+const DOCKER_DESKTOP_SETTINGS_FILE_NAMES: readonly string[] = ['settings-store.json', 'settings.json'];
+
+function settingText(settings: object, names: readonly string[]): string | null {
+  for (const name of names) {
+    if (name in settings) {
+      const value: unknown = Reflect.get(settings, name);
+      if (typeof value === 'string' && value.trim() !== '') {
+        return value.trim();
+      }
+    }
+  }
+  return null;
+}
+
+// The folder Docker Desktop keeps its virtual disk in, which is where
+// the images Aman builds take up room: the folder the person moved it
+// to in Docker Desktop's settings, else Docker Desktop's own default
+// under LOCALAPPDATA. The WSL engine (the default) and the older
+// Hyper-V engine name the moved folder under different settings, and
+// the two current spellings of each are read.
+export function dockerDataFolder(options: { settingsText: string | null; localAppDataDir: string }): string {
+  const fallback = win32.join(options.localAppDataDir, 'Docker');
+  if (options.settingsText === null) {
+    return fallback;
+  }
+  let settings: unknown;
+  try {
+    settings = JSON.parse(options.settingsText);
+  } catch {
+    return fallback;
+  }
+  if (typeof settings !== 'object' || settings === null) {
+    return fallback;
+  }
+  const wslEngine = ['wslEngineEnabled', 'WslEngineEnabled']
+    .filter(name => name in settings)
+    .map((name): unknown => Reflect.get(settings, name));
+  const hyperV = wslEngine.some(value => value === false);
+  const moved = hyperV
+    ? settingText(settings, ['dataFolder', 'DataFolder'])
+    : settingText(settings, ['customWslDistroDir', 'CustomWslDistroDir']);
+  return moved ?? fallback;
+}
+
+// The drive a Windows folder is on, as File Explorer names it (C:), or
+// an empty string for a folder with no drive letter, such as a network
+// share.
+export function driveOf(folder: string): string {
+  const match = /^([A-Za-z]):/.exec(folder);
+  const letter = match?.[1];
+  return letter === undefined ? '' : `${letter.toUpperCase()}:`;
+}
+
 // The host jobs only a Windows PC has: putting the aman command in place,
 // the shortcuts, starting Docker Desktop and opening the browser. Each
 // one runs through the process runner (or, for the forwarder file, a
@@ -274,6 +334,9 @@ export interface WindowsJobs {
   // and only their own account keeps full control, which the folders
   // and files later made inside it inherit.
   makeFolderPrivate: (path: string) => Promise<void>;
+  // Reads the free space on the drive Docker Desktop keeps its data
+  // on, which is what the images Aman builds fill up. Only reads.
+  dockerDataDriveSpace: () => Promise<DriveSpace>;
   // Reads a folder's access list back, for the doctor to judge.
   readFolderAcl: (path: string) => Promise<AclRead>;
   // True when the port can be bound on loopback and on any-address: the
@@ -338,6 +401,9 @@ function bindWorks(host: string, port: number): Promise<boolean> {
 export function systemWindowsJobs(options: {
   runner: ProcessRunner;
   localAppDataDir: string;
+  // The per-user roaming folder (APPDATA), where Docker Desktop keeps
+  // its settings file.
+  appDataDir: string;
   selfExePath: string;
   // This program's process id, which the folder removal waits on.
   selfPid: number;
@@ -832,6 +898,31 @@ export function systemWindowsJobs(options: {
       if (!result.started || result.exitCode !== 0) {
         throw new WindowsJobError(`the folder could not be made private: ${path}`);
       }
+    },
+
+    async dockerDataDriveSpace() {
+      let settingsText: string | null = null;
+      for (const name of DOCKER_DESKTOP_SETTINGS_FILE_NAMES) {
+        settingsText = await readFile(win32.join(options.appDataDir, 'Docker', name), 'utf8').catch(() => null);
+        if (settingsText !== null) {
+          break;
+        }
+      }
+      const drive = driveOf(dockerDataFolder({ settingsText, localAppDataDir: options.localAppDataDir }));
+      if (drive === '') {
+        return { status: 'unreadable', drive };
+      }
+      const result = await runner.run('powershell', [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        `[System.IO.DriveInfo]::new(${psQuote(`${drive}\\`)}).AvailableFreeSpace`,
+      ]);
+      const text = result.stdout.trim();
+      if (!result.started || result.exitCode !== 0 || !/^\d+$/.test(text)) {
+        return { status: 'unreadable', drive };
+      }
+      return { status: 'read', drive, freeBytes: Number.parseInt(text, 10) };
     },
 
     async readFolderAcl(path: string) {

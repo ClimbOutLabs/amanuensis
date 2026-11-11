@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import { runInstall, type InstallDeps } from '../../src/commands/install.ts';
 import { FakeHost } from '../../src/host/fakeHost.ts';
 import { FakeWindowsJobs, type FakeWindowsJobStep } from '../../src/host/fakeWindowsJobs.ts';
-import { DOCKER_DESKTOP_DOWNLOAD_URL } from '../../src/host/windowsJobs.ts';
+import { DOCKER_DESKTOP_DOWNLOAD_URL, type DriveSpace } from '../../src/host/windowsJobs.ts';
 import {
   ADOPTED_LINE,
   FILES_MADE_PRIVATE_LINE,
@@ -28,6 +28,8 @@ import {
   NETWORK_OPEN_LINE,
   UPGRADE_UP_TO_DATE_LINE,
   VERIFY_SIGNATURE_BAD,
+  installDiskUnreadLine,
+  installLowDiskProblem,
   installPasswordProblem,
   openReadyLine,
   problemText,
@@ -176,6 +178,7 @@ interface WorldOptions {
   containerExit?: number;
   tamperManifest?: boolean;
   noDockerDownload?: boolean;
+  driveSpace?: DriveSpace;
 }
 
 // The computer the flow runs on: Docker in the state the test asks
@@ -282,6 +285,7 @@ async function makeWorld(options: WorldOptions = {}): Promise<World> {
     ...(options.runOncePending === undefined ? {} : { runOncePending: options.runOncePending }),
     ...(options.runOnceValueName === undefined ? {} : { runOnceValueName: options.runOnceValueName }),
     ...(options.failRunOnceSet === true ? { failSteps: new Set<FakeWindowsJobStep>(['runOnceSet']) } : {}),
+    ...(options.driveSpace === undefined ? {} : { driveSpace: options.driveSpace }),
   });
   const store = new WorldStore();
   store.installed = options.storeInstalled ?? false;
@@ -836,6 +840,63 @@ test('the memory check runs before the first question and stops a small computer
   assert.equal(code, 1);
   assert.equal(world.printed.at(-1), problemText(LOW_MEMORY.windows));
   assert.deepEqual(world.asked, []);
+});
+
+const SMALL_DRIVE: DriveSpace = { status: 'read', drive: 'C:', freeBytes: 12 * GIB };
+const SMALL_DRIVE_PROBLEM = problemText(installLowDiskProblem({ drive: 'C:', freeText: '12.0 GB' }));
+
+test('a drive under about 20 GB free stops the setup before Docker Desktop is downloaded', async () => {
+  const world = await makeWorld({ dockerInstalled: false, dockerRunning: false, driveSpace: SMALL_DRIVE });
+  const code = await runInstall(world.deps, { dryRun: false });
+  assert.equal(code, 1);
+  assert.deepEqual(world.printed, [SMALL_DRIVE_PROBLEM]);
+  assert.equal(world.jobs.installerBytes, null);
+  assert.deepEqual(world.runner.installerRuns, []);
+  assert.equal(world.jobs.runOncePending, false);
+  assert.deepEqual(world.asked, []);
+});
+
+test('with Docker already there, a drive under about 20 GB free stops the setup before the first question', async () => {
+  const world = await makeWorld({ driveSpace: SMALL_DRIVE });
+  const code = await runInstall(world.deps, { dryRun: false });
+  assert.equal(code, 1);
+  assert.equal(world.printed.at(-1), SMALL_DRIVE_PROBLEM);
+  assert.deepEqual(world.asked, []);
+  assert.deepEqual(world.runner.installRuns, []);
+});
+
+test('a drive with exactly 20 GB free is enough', async () => {
+  const world = await makeWorld({ driveSpace: { status: 'read', drive: 'C:', freeBytes: 20 * GIB } });
+  const code = await runInstall(world.deps, { dryRun: false });
+  assert.equal(code, 0);
+  assert.ok(!world.printed.includes(SMALL_DRIVE_PROBLEM));
+});
+
+test('a run the restart reopened is not stopped by the room Docker Desktop has since taken', async () => {
+  // The free space was checked before Docker Desktop was downloaded;
+  // what Docker Desktop then used is part of the figure.
+  const world = await makeWorld({ runOncePending: true, driveSpace: SMALL_DRIVE });
+  world.jobs.launchFromRunOnce();
+  const code = await runInstall(world.deps, { dryRun: false });
+  assert.equal(code, 0);
+  assert.ok(!world.printed.includes(SMALL_DRIVE_PROBLEM));
+});
+
+test('a free space that cannot be read is named, and the setup carries on', async () => {
+  const world = await makeWorld({
+    dockerInstalled: false,
+    dockerRunning: false,
+    driveSpace: { status: 'unreadable', drive: 'D:' },
+  });
+  const code = await runInstall(world.deps, { dryRun: false });
+  assert.equal(code, 0);
+  assert.equal(world.printed[0], installDiskUnreadLine('D:'));
+});
+
+test('an already installed Aman is not stopped by a small drive', async () => {
+  const world = await makeWorld({ storeInstalled: true, driveSpace: SMALL_DRIVE });
+  await runInstall(world.deps, { dryRun: false });
+  assert.ok(!world.printed.includes(SMALL_DRIVE_PROBLEM));
 });
 
 test('a busy container install stops the flow before any later step', async () => {

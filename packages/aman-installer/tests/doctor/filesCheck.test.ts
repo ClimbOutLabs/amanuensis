@@ -129,6 +129,7 @@ test('a folder whose listing joins read rights with commas is judged open', asyn
   world.deps.windowsJobs = systemWindowsJobs({
     runner,
     localAppDataDir: LOCAL_APP_DATA,
+    appDataDir: 'C:\\Users\\Friend\\AppData\\Roaming',
     selfExePath: 'C:\\Users\\Friend\\Downloads\\aman-windows-x64.exe',
     selfPid: 4242,
   });

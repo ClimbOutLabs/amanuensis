@@ -1,8 +1,9 @@
 import type { NetworkInterfaceInfo } from 'node:os';
 import { win32 } from 'node:path';
 
-import { checkDocker } from '../doctor/dockerDoctor.ts';
+import { checkDocker, MIN_DOCKER_DATA_FREE_BYTES } from '../doctor/dockerDoctor.ts';
 import type { DoctorDeps } from '../doctor/doctor.ts';
+import { formatGb } from '../doctor/machineChecks.ts';
 import { gettingStartedPage } from '../gettingStarted.ts';
 import type { Host } from '../host/host.ts';
 import { firstInstallArgs, NoFreePortError, pickInstallPorts } from '../host/windowsInstall.ts';
@@ -40,6 +41,8 @@ import {
   INSTALL_SOURCE_FAILED,
   INSTALL_SOURCE_MISSING,
   INSTALL_YES_OR_NO_LINE,
+  installDiskUnreadLine,
+  installLowDiskProblem,
   installPasswordProblem,
   problemText,
 } from '../messages.ts';
@@ -104,6 +107,25 @@ async function dockerAnswers(runner: ProcessRunner): Promise<boolean> {
   return result.started && result.exitCode === 0;
 }
 
+// The free space check, made before anything is downloaded: the drive
+// Docker Desktop keeps its data on must have about 20 GB free, so a
+// small drive stops the setup here instead of filling up part way
+// through the build. A reading that cannot be made does not stop the
+// setup; it says what to make sure of.
+async function enoughDiskSpace(deps: InstallDeps): Promise<boolean> {
+  const space = await deps.jobs.dockerDataDriveSpace().catch(() => null);
+  if (space === null || space.status === 'unreadable') {
+    deps.print(installDiskUnreadLine(space?.drive ?? ''));
+    return true;
+  }
+  if (space.freeBytes < MIN_DOCKER_DATA_FREE_BYTES) {
+    const freeText = formatGb(Math.floor(space.freeBytes / 1024));
+    deps.print(problemText(installLowDiskProblem({ drive: space.drive, freeText })));
+    return false;
+  }
+  return true;
+}
+
 // Whether the signer's subject names Docker Inc, read strictly: the
 // subject is a list of named parts, and the company name (CN) or the
 // organisation (O) must be Docker Inc exactly, not a longer name that
@@ -143,6 +165,9 @@ interface DockerInstallOutcome {
 // Docker answers afterwards is the test, as everywhere else.
 async function installDockerDesktop(deps: InstallDeps): Promise<DockerInstallOutcome> {
   const { jobs, print } = deps;
+  if (!(await enoughDiskSpace(deps))) {
+    return { ok: false, resumeFailed: false };
+  }
   const download = await deps.fetchBytes(DOCKER_DESKTOP_DOWNLOAD_URL);
   if (!('data' in download)) {
     print(problemText(INSTALL_DOWNLOAD_FAILED));
@@ -181,8 +206,12 @@ async function installDockerDesktop(deps: InstallDeps): Promise<DockerInstallOut
 // Docker ready to work: installed (installing it first when it is
 // missing), started, and answering. A run opened by the resume entry
 // says so, and the entry is taken down once Docker answers, whichever
-// run set it.
-async function ensureDockerReady(deps: InstallDeps, options: { resumed: boolean }): Promise<boolean> {
+// run set it. 'installed' when this run installed Docker Desktop, so
+// the free space check has already been made.
+async function ensureDockerReady(
+  deps: InstallDeps,
+  options: { resumed: boolean },
+): Promise<'failed' | 'found' | 'installed'> {
   const { jobs, runner, print } = deps;
   let installedByUs = false;
   let resumeFailed = false;
@@ -190,7 +219,7 @@ async function ensureDockerReady(deps: InstallDeps, options: { resumed: boolean 
   if (!version.started || version.exitCode !== 0) {
     const outcome = await installDockerDesktop(deps);
     if (!outcome.ok) {
-      return false;
+      return 'failed';
     }
     installedByUs = true;
     resumeFailed = outcome.resumeFailed;
@@ -204,7 +233,7 @@ async function ensureDockerReady(deps: InstallDeps, options: { resumed: boolean 
     } catch (error) {
       if (error instanceof WindowsJobError) {
         print(problemText(installedByUs ? restartProblem : INSTALL_DOCKER_DID_NOT_START));
-        return false;
+        return 'failed';
       }
       throw error;
     }
@@ -222,13 +251,13 @@ async function ensureDockerReady(deps: InstallDeps, options: { resumed: boolean 
     }
     if (!answered) {
       print(problemText(installedByUs ? restartProblem : INSTALL_DOCKER_DID_NOT_START));
-      return false;
+      return 'failed';
     }
   }
   if (options.resumed || installedByUs) {
     await jobs.clearRunOnceResume().catch(() => undefined);
   }
-  return true;
+  return installedByUs ? 'installed' : 'found';
 }
 
 interface Answers {
@@ -569,7 +598,8 @@ export async function runInstall(deps: InstallDeps, options: { dryRun: boolean }
   if (resumed) {
     print(INSTALL_CONTINUING_LINE);
   }
-  if (!(await ensureDockerReady(deps, { resumed }))) {
+  const docker = await ensureDockerReady(deps, { resumed });
+  if (docker === 'failed') {
     return 1;
   }
   if ((await checkDocker(deps)) !== 0) {
@@ -589,6 +619,12 @@ export async function runInstall(deps: InstallDeps, options: { dryRun: boolean }
   }
   if (summary !== null && !summary.releaseUnreadable && (summary.release !== null || summary.instances.length > 0)) {
     return finishInstall(deps, { phone: false, page: false });
+  }
+  // A run that installed Docker Desktop, or that a restart reopened
+  // after installing it, checked the free space before the download;
+  // Docker Desktop has used some of it since, by design.
+  if (docker === 'found' && !resumed && !(await enoughDiskSpace(deps))) {
+    return 1;
   }
   const answers = await askQuestions(deps);
   if (answers === null) {
