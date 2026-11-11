@@ -20,6 +20,7 @@ import type {
   RetainOutcome,
   RetryOperationOutcome,
 } from './hindsightClient';
+import type { MeaningGate } from './meaningGate';
 import type { LoadedPage, PageLoadStats } from './memoryPageLoader';
 
 export interface MemoryClient {
@@ -31,6 +32,8 @@ export interface MemoryClient {
     timeoutMs: number;
     /** The chat being answered: notes retained from it are never returned (its history is already in the conversation). */
     currentSessionId?: string | undefined;
+    /** The meaning gate of this message, worked out once by `meaningGate`; left out, recall works it out itself. */
+    gate?: MeaningGate | undefined;
   }): Promise<RecallOutcome>;
 
   retain(params: { items: RetainItem[]; operationId: string; timeoutMs: number }): Promise<RetainOutcome>;
@@ -117,7 +120,16 @@ export interface MemoryClient {
     today: string;
     maxPages: number;
     maxTokens: number;
+    /** The meaning gate of this message, worked out once by `meaningGate`; left out, it is worked out here. */
+    gate?: MeaningGate | undefined;
   }): Promise<PageLoadResult>;
+
+  /**
+   * Optional: whether the message is clearly about something remembered, and which page statements and log
+   * notes it is about. Worked out once per message and handed to both `recall` and `loadPages`, so the
+   * page path and the log path never disagree. Only the markdown client implements it. Never throws.
+   */
+  meaningGate?(params: { message: string; currentSessionId?: string | undefined }): Promise<MeaningGate>;
 
   /**
    * Optional: the folder of the one vault this client's chat writes pages to (its persona's vault, else the

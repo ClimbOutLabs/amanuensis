@@ -6,6 +6,7 @@
 import type { MemoryPagesStats } from '../../schemas/memoryEvents';
 import { loadAliasIndex, matchAliases, type AliasMatch } from './aliasIndex';
 import { estimateTokens } from './markdownMemoryFiles';
+import type { MeaningGate } from './meaningGate';
 import type { FactMarker, FactSource } from './memoryNotes';
 import {
   listSkippedPageFiles,
@@ -19,7 +20,7 @@ import {
 } from './memoryPages';
 import { foldName } from './pageSlug';
 import { endedBefore } from './statementDates';
-import { findStatements, type StatementHit, type StatementIndex } from './statementIndex';
+import { statementHits, type StatementHit } from './statementIndex';
 
 /** Why a page was loaded: its name was in the message (`direct`, or `possessive` for "Wendy's"), or one of its statements was found by meaning. */
 type PageLoadReason = 'direct' | 'possessive' | 'meaning';
@@ -477,8 +478,8 @@ export async function loadPagesForMessage(input: {
   message: string;
   /** The person's earlier messages of this chat, oldest first. */
   earlierMessages?: readonly string[] | undefined;
-  /** The statement index of each vault folder that has one; none finds nothing by meaning. */
-  indexes?: readonly StatementIndex[] | undefined;
+  /** The message's meaning gate; without one nothing is found by meaning. */
+  gate?: MeaningGate | undefined;
   /** The calendar day `YYYY-MM-DD` in the person's time zone; without it no statement counts as ended and none is found by meaning. */
   today?: string | undefined;
   maxPages: number;
@@ -578,10 +579,10 @@ export async function loadPagesForMessage(input: {
 
   // Statements of pages shown whole are not repeated. Each group goes through the page renderer with only its chosen lines.
   const hits =
-    input.today === undefined
+    input.today === undefined || input.gate === undefined
       ? []
-      : await findStatements({
-          indexes: input.indexes ?? [],
+      : statementHits({
+          gate: input.gate,
           message: input.message,
           today: input.today,
           skip: new Set(pages.map(page => `${page.kind}/${page.slug}`)),

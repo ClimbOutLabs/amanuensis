@@ -23,6 +23,7 @@ import {
   ASSISTANT_RESPONSE_SOURCE,
   formatMarker,
   isMemoryNoteSource,
+  isNoteTooOld,
   NOTE_DATE_METADATA_KEY,
   NOTE_SOURCE_METADATA_KEY,
   noteProvenanceFromMetadata,
@@ -262,6 +263,34 @@ export function entryMetadata(text: string): Record<string, string> | undefined 
  */
 export function recallMetadata(text: string): Record<string, string> {
   return { [MEMORY_ORIGIN_METADATA_KEY]: USER_STATED_ORIGIN, ...splitEntryTrailers(text).metadata };
+}
+
+/**
+ * The entries recall leaves out: those saved in the chat being answered (their history is already in the
+ * conversation), and read content past its freshness limit, which would use up the budget and then be dropped.
+ */
+export function recallExcludedIds({
+  entries,
+  sessionId,
+  now,
+}: {
+  entries: readonly ScannedMemoryEntry[];
+  sessionId: string | undefined;
+  now: Date;
+}): Set<string> {
+  const excluded = new Set<string>();
+  for (const entry of entries) {
+    const metadata = entryMetadata(entry.text);
+    if (
+      isFromSession({ metadata, sessionId }) ||
+      // A stored note always carries its source in a trailer, so every other entry skips the age check.
+      (noteProvenanceFromMetadata(metadata) !== undefined &&
+        isNoteTooOld({ metadata, text: entryRecallText(entry.text), now }))
+    ) {
+      excluded.add(entry.id);
+    }
+  }
+  return excluded;
 }
 
 /**

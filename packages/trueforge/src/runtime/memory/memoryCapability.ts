@@ -49,6 +49,7 @@ import type {
   RetryOperationOutcome,
 } from './hindsightClient';
 import { localDay } from './localDay';
+import type { MeaningGate } from './meaningGate';
 import type { MemoryClient } from './memoryClient';
 import type {
   MemoryCuratedStats,
@@ -1679,11 +1680,17 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
 
     // The three provider reads are independent, so they run concurrently. Each degrades on its
     // own and none can fail the turn (design invariant 1).
+    // The gate says whether the message is clearly about something remembered. It is worked out once and
+    // both the log and the pages use that one answer.
+    const gate = this.client.meaningGate?.({
+      message: parts[parts.length - 1] ?? '',
+      currentSessionId: this.sessionId,
+    });
     const [recall, curated, reflection, pages] = await Promise.all([
-      this.timedRecall(query, recallBudgetTokens, recallEntityTokens),
+      this.timedRecall(query, recallBudgetTokens, recallEntityTokens, gate),
       this.fetchCurated(query),
       this.fetchReflection(query, decision),
-      this.fetchPages(parts),
+      this.fetchPages(parts, gate),
     ]);
     const curatedLines = [...(curated.profileLine !== undefined ? [curated.profileLine] : []), ...curated.modelLines];
 
@@ -1851,6 +1858,7 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
    */
   private async fetchPages(
     parts: readonly string[],
+    gate: Promise<MeaningGate> | undefined,
   ): Promise<{ entries: PageEntry[]; stats: MemoryPagesStats | undefined }> {
     const message = parts[parts.length - 1] ?? '';
     if (this.client.loadPages === undefined || message === '') {
@@ -1863,6 +1871,7 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
         today: localDay({ instant: new Date(), timeZone: this.timeZone }).date,
         maxPages: this.config.pages.maxCount,
         maxTokens: this.config.pages.maxTokens,
+        gate: await gate,
       });
       if (loaded.skippedFiles.length > 0) {
         this.logger.warn(
@@ -1895,9 +1904,10 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
     query: string,
     maxTokens: number,
     entityTokens: number,
+    gate: Promise<MeaningGate> | undefined,
   ): Promise<{ outcome: RecallOutcome; recallMs: number }> {
     const startedAt = this.now();
-    const outcome = await this.guarded('recall', () =>
+    const outcome = await this.guarded('recall', async () =>
       this.client.recall({
         query,
         maxTokens,
@@ -1905,6 +1915,7 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
         queryTimestamp: new Date().toISOString(),
         timeoutMs: this.config.recallTimeoutMs,
         currentSessionId: this.sessionId,
+        gate: await gate,
       }),
     );
     return { outcome, recallMs: this.now() - startedAt };

@@ -2,12 +2,9 @@
  * Finds single page statements by meaning. Each vault folder keeps one vector per statement; a statement
  * is shown only when a message comes clearly closer to it than ordinary, unrelated messages do.
  */
-import { withTimeout } from '@truefoundry/trueforge-core/core';
-
-import { COMPARISON_MESSAGES } from './comparisonMessages';
 import { EMBEDDING_DIMENSIONS, type EmbeddingModel } from './embeddingModel';
-import { cosineSimilarity } from './embeddingRetrieval';
 import { EmbeddingStore, hashEntryText } from './embeddingStore';
+import type { MeaningGate } from './meaningGate';
 import {
   listMemoryPages,
   pageSummary,
@@ -17,22 +14,21 @@ import {
   type PageKind,
   type PageSection,
 } from './memoryPages';
+import {
+  closenessOf,
+  comparisonVectors,
+  emptyBest,
+  itemNumbers,
+  raiseBest,
+  STANDING_ABOVE,
+  standingOf,
+  unitVector,
+  type ItemNumbers,
+} from './standing';
 import { asksAboutPast, endedBefore, endedRecently } from './statementDates';
 
-/** Higher shows fewer statements: how many spreads above its usual closeness to ordinary messages a statement must score. */
-const STANDING_ABOVE = 3;
-/** Higher shows memory for fewer messages: the share of ordinary messages whose best statement a message must beat. */
-const MESSAGE_PERCENTILE = 0.95;
-/** How many ordinary messages every statement is measured against. */
-const COMPARISON_COUNT = 460;
-/** With fewer statements than this, the numbers say too little to trust, so nothing is found by meaning. */
-const MIN_STATEMENTS = 5;
 /** The most statements one message is shown. */
 const MAX_FOUND = 6;
-/** Keeps a statement that sits at the same closeness to every ordinary message from dividing by zero. */
-const MIN_SPREAD = 1e-6;
-/** The longest a reply waits for the index and the query vector; the work carries on for the next message. */
-const SEARCH_TIMEOUT_MS = 10_000;
 const EMBED_BATCH = 16;
 
 /** The statement vectors sit beside the daily log's, in their own file. */
@@ -45,29 +41,6 @@ const INDEXED_SECTIONS: ReadonlySet<PageSection> = new Set<PageSection>([
   'Unconfirmed',
   'Earlier',
 ]);
-
-const comparisonByModel = new WeakMap<EmbeddingModel, Promise<Float32Array[]>>();
-
-/** The comparison messages as query vectors, worked out once per model for the whole process. */
-function comparisonVectors(model: EmbeddingModel): Promise<Float32Array[]> {
-  const cached = comparisonByModel.get(model);
-  if (cached !== undefined) {
-    return cached;
-  }
-  const work = (async (): Promise<Float32Array[]> => {
-    const vectors: Float32Array[] = [];
-    for (let i = 0; i < COMPARISON_MESSAGES.length; i += EMBED_BATCH) {
-      const rows = await model.embedQueries(COMPARISON_MESSAGES.slice(i, i + EMBED_BATCH));
-      vectors.push(...rows.map(row => Float32Array.from(row)));
-      // Yield between batches so the first search never starves the event loop.
-      await new Promise(resolve => setImmediate(resolve));
-    }
-    return vectors;
-  })();
-  comparisonByModel.set(model, work);
-  work.catch(() => comparisonByModel.delete(model));
-  return work;
-}
 
 /** One statement that may be found, as read from a page. */
 interface StatementLine {
@@ -82,17 +55,14 @@ interface StatementLine {
   inEarlier: boolean;
 }
 
-interface IndexedStatement extends StatementLine {
+export interface IndexedStatement extends StatementLine, ItemNumbers {
   hash: string;
-  vector: Float32Array;
-  /** Closeness to each comparison message. */
-  sims: Float32Array;
-  mean: number;
-  spread: number;
+  /** The vector scaled to length one. */
+  unit: Float32Array;
   pageKey: string;
 }
 
-interface IndexedPage {
+export interface IndexedPage {
   kind: PageKind;
   slug: string;
   title: string;
@@ -155,21 +125,11 @@ function statementLines({ key, page }: { key: string; page: MemoryPage }): State
   return lines;
 }
 
-function closenessStats(sims: Float32Array): { mean: number; spread: number } {
-  const mean = sims.reduce((sum, value) => sum + value, 0) / sims.length;
-  const variance = sims.reduce((sum, value) => sum + (value - mean) ** 2, 0) / sims.length;
-  return { mean, spread: Math.max(Math.sqrt(variance), MIN_SPREAD) };
-}
-
-function standingOf({ closeness, statement }: { closeness: number; statement: IndexedStatement }): number {
-  return (closeness - statement.mean) / statement.spread;
-}
-
 /** One vault folder's statements by meaning. Never throws; answers "not ready" instead. */
 export class StatementIndex {
   private statements = new Map<string, IndexedStatement>();
   private pages = new Map<string, IndexedPage>();
-  private bestStandings = new Float64Array(COMPARISON_COUNT).fill(-Infinity);
+  private bestStandings = emptyBest();
   private store: EmbeddingStore | undefined;
   private running: Promise<boolean> | undefined;
 
@@ -246,20 +206,18 @@ export class StatementIndex {
           next.set(line.id, {
             ...line,
             hash: stored.hash,
-            vector: before.vector,
+            unit: before.unit,
             sims: before.sims,
             mean: before.mean,
             spread: before.spread,
           });
           continue;
         }
-        const sims = Float32Array.from(comparison.map(query => cosineSimilarity({ a: query, b: stored.vector })));
         const fresh: IndexedStatement = {
           ...line,
           hash: stored.hash,
-          vector: stored.vector,
-          sims,
-          ...closenessStats(sims),
+          unit: unitVector(stored.vector),
+          ...itemNumbers({ vector: stored.vector, comparison }),
         };
         next.set(line.id, fresh);
         added.push(fresh);
@@ -269,10 +227,10 @@ export class StatementIndex {
       this.statements = next;
       this.pages = pages;
       if (changed) {
-        this.bestStandings.fill(-Infinity);
-        this.raiseBest([...next.values()]);
+        this.bestStandings = emptyBest();
+        raiseBest({ best: this.bestStandings, items: next.values() });
       } else {
-        this.raiseBest(added);
+        raiseBest({ best: this.bestStandings, items: added });
       }
       return true;
     } catch {
@@ -280,36 +238,23 @@ export class StatementIndex {
     }
   }
 
-  private raiseBest(statements: readonly IndexedStatement[]): void {
-    for (const statement of statements) {
-      for (let m = 0; m < COMPARISON_COUNT; m += 1) {
-        const standing = standingOf({ closeness: statement.sims[m] ?? 0, statement });
-        if (standing > (this.bestStandings[m] ?? -Infinity)) {
-          this.bestStandings[m] = standing;
-        }
-      }
-    }
-  }
-
-  async embedQuery(message: string): Promise<number[] | undefined> {
-    const [row] = await this.model.embedQueries([message]);
-    return row;
-  }
-
-  /** Every statement's standing for a query vector. */
-  standings(query: ArrayLike<number>): {
-    vaultDir: string;
-    statement: IndexedStatement;
-    page: IndexedPage | undefined;
-    standing: number;
-  }[] {
+  /** Every statement's standing for a message vector of length one. */
+  standings(query: Float32Array): StatementStanding[] {
     return [...this.statements.values()].map(statement => ({
       vaultDir: this.vaultDir,
       statement,
       page: this.pages.get(statement.pageKey),
-      standing: standingOf({ closeness: cosineSimilarity({ a: query, b: statement.vector }), statement }),
+      standing: standingOf({ closeness: closenessOf({ a: query, b: statement.unit }), item: statement }),
     }));
   }
+}
+
+/** One statement's standing for a message, with the page it sits on. */
+export interface StatementStanding {
+  vaultDir: string;
+  statement: IndexedStatement;
+  page: IndexedPage | undefined;
+  standing: number;
 }
 
 const indexesByModel = new WeakMap<EmbeddingModel, Map<string, StatementIndex>>();
@@ -346,13 +291,6 @@ function sameStatement(a: StatementHit, b: StatementHit): boolean {
   return a.vaultDir === b.vaultDir && a.kind === b.kind && a.slug === b.slug && a.text === b.text;
 }
 
-/** The value a message's best standing must beat: the 95th percentile of the comparison messages' own best standings. */
-function percentileBar(best: Float64Array): number {
-  const sorted = Float64Array.from(best).sort();
-  // The small allowance keeps 460 x 0.95 from rounding up to the next position.
-  return sorted[Math.ceil(sorted.length * MESSAGE_PERCENTILE - 1e-9) - 1] ?? Infinity;
-}
-
 function mayShow({ statement, today, past }: { statement: IndexedStatement; today: string; past: boolean }): boolean {
   const { until } = statement;
   const ended = statement.inEarlier || (until !== undefined && endedBefore({ until, today }));
@@ -362,49 +300,26 @@ function mayShow({ statement, today, past }: { statement: IndexedStatement; toda
   return until !== undefined && endedRecently({ until, today });
 }
 
-async function search({
-  indexes,
-  message,
+/**
+ * The statements the message is about, best first, at most six. Empty unless the gate judged the message and
+ * found it clearly about something remembered. `skip` holds `kind/slug` of pages already shown whole.
+ */
+export function statementHits({
+  gate,
   today,
+  message,
   skip,
 }: {
-  indexes: readonly StatementIndex[];
-  message: string;
+  gate: MeaningGate;
   today: string;
+  message: string;
   skip: ReadonlySet<string>;
-}): Promise<StatementHit[]> {
-  const ready: StatementIndex[] = [];
-  for (const index of indexes) {
-    if (await index.refresh()) {
-      ready.push(index);
-    }
-  }
-  const [first] = ready;
-  if (
-    first === undefined ||
-    message.trim() === '' ||
-    ready.reduce((sum, index) => sum + index.size, 0) < MIN_STATEMENTS
-  ) {
-    return [];
-  }
-  const query = await first.embedQuery(message);
-  if (query?.length !== EMBEDDING_DIMENSIONS) {
-    return [];
-  }
-  const scored = ready.flatMap(index => index.standings(query));
-  // Rule 2: the message must stand out against the best the ordinary messages reach over every vault.
-  const comparisonBest = new Float64Array(COMPARISON_COUNT).fill(-Infinity);
-  for (const index of ready) {
-    index.comparisonBest.forEach((standing, m) => {
-      comparisonBest[m] = Math.max(comparisonBest[m] ?? -Infinity, standing);
-    });
-  }
-  const messageBest = scored.reduce((best, { standing }) => Math.max(best, standing), -Infinity);
-  if (!(messageBest > percentileBar(comparisonBest))) {
+}): StatementHit[] {
+  if (gate.state !== 'judged' || !gate.open) {
     return [];
   }
   const past = asksAboutPast(message);
-  return scored
+  return gate.statements
     .flatMap(({ vaultDir, statement, page, standing }): StatementHit[] =>
       page !== undefined &&
       standing > STANDING_ABOVE &&
@@ -428,22 +343,4 @@ async function search({
     .sort((a, b) => b.standing - a.standing)
     .filter((hit, i, all) => all.findIndex(other => sameStatement(other, hit)) === i)
     .slice(0, MAX_FOUND);
-}
-
-/**
- * The statements the message is about, best first, at most six. Empty when the model is not ready, when the
- * index is too small, when the message is not clearly about anything remembered, when it takes too long, and on any
- * failure. `skip` holds `kind/slug` of pages already shown whole.
- */
-export async function findStatements(input: {
-  indexes: readonly StatementIndex[];
-  message: string;
-  today: string;
-  skip: ReadonlySet<string>;
-}): Promise<StatementHit[]> {
-  try {
-    return await withTimeout(search(input), SEARCH_TIMEOUT_MS, 'memory statement search');
-  } catch {
-    return [];
-  }
 }

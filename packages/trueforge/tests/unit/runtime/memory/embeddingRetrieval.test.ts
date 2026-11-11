@@ -34,6 +34,8 @@ class FakeEmbeddingModel extends EmbeddingModel {
   blockEnsureReady = false;
   embedGate: (() => Promise<void>) | undefined;
   queryVector: number[] = oneHot(0);
+  /** A query vector for particular texts; any other text gets `queryVector`. */
+  queryVectorFor: (text: string) => number[] | undefined = () => undefined;
   vectorForText: (text: string) => number[] = () => oneHot(1);
   embeddedPassageTexts: string[][] = [];
 
@@ -57,7 +59,7 @@ class FakeEmbeddingModel extends EmbeddingModel {
   }
 
   override async embedQueries(texts: string[]): Promise<number[][]> {
-    return texts.map(() => [...this.queryVector]);
+    return texts.map(text => [...(this.queryVectorFor(text) ?? this.queryVector)]);
   }
 
   override async embedPassages(texts: string[]): Promise<number[][]> {
@@ -807,7 +809,9 @@ describe('EmbeddingSubsystem', () => {
         await retainTexts(fixture, ['Lexie went to the park'], `2026-09-${String(day).padStart(2, '0')}`);
       }
       fixture.model.vectorForText = text => (text.includes('hotel') ? oneHot(0) : oneHot(1));
-      fixture.model.queryVector = oneHot(0);
+      // With 21 notes the log is judged by meaning: ordinary messages must sit away from the note.
+      fixture.model.queryVector = oneHot(2);
+      fixture.model.queryVectorFor = text => (text === 'accommodation in Spain' ? oneHot(0) : undefined);
       fixture.subsystem.ensureWarmed();
       await waitForState(fixture.subsystem, 'ready');
 

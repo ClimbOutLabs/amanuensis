@@ -1,7 +1,6 @@
 import { loadPagesForMessage, renderPageForModel } from '../../../../src/runtime/memory/memoryPageLoader';
 import { parseMemoryPage } from '../../../../src/runtime/memory/memoryPages';
-import { StatementIndex } from '../../../../src/runtime/memory/statementIndex';
-import { askAbout, HandChosenModel, makeVault, ownBullet, writeStatementPage } from './statementTestKit';
+import { askAbout, gateFor, HandChosenModel, makeVault, ownBullet, writeStatementPage } from './statementTestKit';
 
 const TODAY = '2026-11-10';
 const ASK = askAbout({ topic: 2, closeness: 0.5 });
@@ -35,7 +34,7 @@ async function load({
     writeVaultDir: vaultDir,
     message,
     earlierMessages,
-    indexes: [new StatementIndex(vaultDir, new HandChosenModel())],
+    gate: await gateFor({ vaultDir, model: new HandChosenModel(), message }),
     today: TODAY,
     maxPages: 3,
     maxTokens: 10_000,

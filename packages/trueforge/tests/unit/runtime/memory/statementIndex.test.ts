@@ -1,6 +1,7 @@
+import type { EmbeddingModel } from '../../../../src/runtime/memory/embeddingModel';
 import { EmbeddingStore } from '../../../../src/runtime/memory/embeddingStore';
-import { findStatements, statementEmbedText, StatementIndex } from '../../../../src/runtime/memory/statementIndex';
-import { askAbout, HandChosenModel, makeVault, ownBullet, writeStatementPage } from './statementTestKit';
+import { statementEmbedText, statementHits, StatementIndex } from '../../../../src/runtime/memory/statementIndex';
+import { askAbout, gateFor, HandChosenModel, makeVault, ownBullet, writeStatementPage } from './statementTestKit';
 
 const TODAY = '2026-11-10';
 
@@ -16,8 +17,14 @@ async function writeTopics({ vaultDir, topics }: { vaultDir: string; topics: num
   });
 }
 
-async function find({ index, message }: { index: StatementIndex; message: string }) {
-  return findStatements({ indexes: [index], message, today: TODAY, skip: new Set() });
+interface Searched {
+  vaultDir: string;
+  model: EmbeddingModel;
+  index: StatementIndex;
+}
+
+async function find({ vaultDir, model, message }: Searched & { message: string }) {
+  return statementHits({ gate: await gateFor({ vaultDir, model, message }), message, today: TODAY, skip: new Set() });
 }
 
 describe('statement index', () => {
@@ -111,7 +118,7 @@ describe('statement index', () => {
     const index = new StatementIndex(vaultDir, model);
 
     expect(await index.refresh()).toBe(false);
-    expect(await find({ index, message: askAbout({ topic: 2, closeness: 1 }) })).toEqual([]);
+    expect(await find({ vaultDir, model, index, message: askAbout({ topic: 2, closeness: 1 }) })).toEqual([]);
     expect(model.passages).toEqual([]);
   });
 
@@ -129,35 +136,36 @@ describe('statement index', () => {
 });
 
 describe('the two rules', () => {
-  async function indexOf({ hot, topics }: { hot: number; topics: number[] }): Promise<StatementIndex> {
+  async function indexOf({ hot, topics }: { hot: number; topics: number[] }): Promise<Searched> {
     const vaultDir = await makeVault();
     await writeTopics({ vaultDir, topics });
-    return new StatementIndex(vaultDir, new HandChosenModel(hot));
+    const model = new HandChosenModel(hot);
+    return { vaultDir, model, index: new StatementIndex(vaultDir, model) };
   }
 
   it('finds a statement whose standing is above 3 and not one below it', async () => {
-    const index = await indexOf({ hot: 0, topics: [0, 1, 2, 3, 4, 5] });
+    const searched = await indexOf({ hot: 0, topics: [0, 1, 2, 3, 4, 5] });
 
-    const found = await find({ index, message: askAbout({ topic: 2, closeness: 0.5 }) });
+    const found = await find({ ...searched, message: askAbout({ topic: 2, closeness: 0.5 }) });
     expect(found.map(hit => hit.text)).toEqual(['Likes topic2 a lot.']);
     expect(found[0]?.standing).toBeGreaterThan(3);
 
     // Standing 2.3 stands out from ordinary messages as a whole but is not above 3.
-    expect(await find({ index, message: askAbout({ topic: 2, closeness: 0.3 }) })).toEqual([]);
+    expect(await find({ ...searched, message: askAbout({ topic: 2, closeness: 0.3 }) })).toEqual([]);
   });
 
   it('finds nothing for a message that does not beat the 95th percentile, even above 3', async () => {
-    const index = await indexOf({ hot: 46, topics: [0, 1, 2, 3, 4, 5] });
+    const searched = await indexOf({ hot: 46, topics: [0, 1, 2, 3, 4, 5] });
 
     // Standing 4.9 is above 3, but 46 ordinary messages come as close, so the bar is about 6.
-    expect(await find({ index, message: askAbout({ topic: 2, closeness: 0.7 }) })).toEqual([]);
-    expect(await find({ index, message: askAbout({ topic: 2, closeness: 1 }) })).toHaveLength(1);
+    expect(await find({ ...searched, message: askAbout({ topic: 2, closeness: 0.7 }) })).toEqual([]);
+    expect(await find({ ...searched, message: askAbout({ topic: 2, closeness: 1 }) })).toHaveLength(1);
   });
 
   it('finds nothing with fewer than 5 statements', async () => {
-    const index = await indexOf({ hot: 0, topics: [0, 1, 2, 3] });
+    const searched = await indexOf({ hot: 0, topics: [0, 1, 2, 3] });
 
-    expect(await find({ index, message: askAbout({ topic: 2, closeness: 1 }) })).toEqual([]);
+    expect(await find({ ...searched, message: askAbout({ topic: 2, closeness: 1 }) })).toEqual([]);
   });
 
   it('keeps the comparison numbers right after a statement is added and after one is removed', async () => {

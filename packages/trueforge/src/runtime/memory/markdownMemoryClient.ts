@@ -56,7 +56,6 @@ import {
   entryRecallText,
   estimateTokens,
   formatRetainEntry,
-  isFromSession,
   isLegacyDocumentCopy,
   latestTombstonesByEntry,
   markSummaryFailed,
@@ -66,6 +65,7 @@ import {
   personaForVaultNamespace,
   readSummaryPending,
   readVaultTombstones,
+  recallExcludedIds,
   recallMetadata,
   sanitizeNamespace,
   scanNamespaceEntries,
@@ -79,6 +79,7 @@ import {
   type VaultScope,
   type VaultTombstone,
 } from './markdownMemoryFiles';
+import { computeMeaningGate, type GateVault, type MeaningGate } from './meaningGate';
 import type {
   DeleteMemoryVaultEntryOutcome,
   ListMemoryVaultEntriesOutcome,
@@ -89,10 +90,8 @@ import type {
   SummaryOutcomeNote,
   UpdateMemoryVaultEntryOutcome,
 } from './memoryClient';
-import { isNoteTooOld, noteProvenanceFromMetadata } from './memoryNotes';
 import { loadPagesForMessage } from './memoryPageLoader';
 import { rankNamedPeopleFirst } from './recallNameBoost';
-import { statementIndexFor, type StatementIndex } from './statementIndex';
 import { VaultEraseError, eraseMarkedEntries } from './vaultErase';
 import { VaultBusyError, VaultLockLostError, withVaultLock } from './vaultLock';
 
@@ -232,6 +231,7 @@ export class MarkdownMemoryClient implements MemoryClient {
     entityTokens: number;
     timeoutMs: number;
     currentSessionId?: string | undefined;
+    gate?: MeaningGate | undefined;
   }): Promise<RecallOutcome> {
     try {
       const budget = Math.max(params.maxTokens, 0);
@@ -278,6 +278,14 @@ export class MarkdownMemoryClient implements MemoryClient {
       // Each vault ranks on its own corpus and index; the lists then interleave.
       const asked = new Date(params.queryTimestamp);
       const now = Number.isNaN(asked.getTime()) ? new Date() : asked;
+      const gate =
+        params.gate ??
+        (await computeMeaningGate({
+          message: params.query,
+          vaults: vaults.map(({ namespace, scan }) => this.gateVault({ namespace, scan })),
+          currentSessionId: params.currentSessionId,
+          now,
+        }));
       const rankedLists = await Promise.all(
         vaults.map(({ namespace, scan }) =>
           this.rankVault({
@@ -287,6 +295,7 @@ export class MarkdownMemoryClient implements MemoryClient {
             timeoutMs: params.timeoutMs,
             currentSessionId: params.currentSessionId,
             now,
+            gate,
           }),
         ),
       );
@@ -319,9 +328,11 @@ export class MarkdownMemoryClient implements MemoryClient {
   }
 
   /**
-   * One vault's entries best-first: keyword overlap, fused with its own meaning index when ready, then
-   * notes naming a person the query asks about moved to the front. The chat being answered is left out.
-   * So is read content past its freshness limit: left in, it would use up the budget and then be dropped.
+   * One vault's entries best-first. When the meaning gate judged the message, only the notes it chose are
+   * shown, best standing first. Otherwise: keyword overlap, fused with the vault's own meaning index when
+   * ready. Either way notes naming a person the query asks about move to the front, and the chat being
+   * answered is left out, as is read content past its freshness limit: left in, it would use up the budget
+   * and then be dropped.
    */
   private async rankVault(input: {
     namespace: string;
@@ -330,19 +341,22 @@ export class MarkdownMemoryClient implements MemoryClient {
     timeoutMs: number;
     currentSessionId: string | undefined;
     now: Date;
+    gate: MeaningGate;
   }): Promise<RankedMemory[]> {
-    const excludeIds = new Set<string>();
-    for (const entry of input.scan.entries) {
-      const metadata = entryMetadata(entry.text);
-      if (
-        isFromSession({ metadata, sessionId: input.currentSessionId }) ||
-        // A stored note always carries its source in a trailer, so every other entry skips the age check.
-        (noteProvenanceFromMetadata(metadata) !== undefined &&
-          isNoteTooOld({ metadata, text: entryRecallText(entry.text), now: input.now }))
-      ) {
-        excludeIds.add(entry.id);
-      }
+    const { gate } = input;
+    if (gate.state === 'judged' && gate.judgedNamespaces.has(input.namespace)) {
+      const texts = new Map(input.scan.entries.map(entry => [entry.id, entry.text]));
+      const chosen = gate.notes.flatMap(({ id }): RankedMemory[] => {
+        const text = texts.get(id);
+        return text === undefined ? [] : [{ id, text }];
+      });
+      return rankNamedPeopleFirst({ candidates: chosen, message: input.query });
     }
+    const excludeIds = recallExcludedIds({
+      entries: input.scan.entries,
+      sessionId: input.currentSessionId,
+      now: input.now,
+    });
     const entries = input.scan.entries.filter(entry => !excludeIds.has(entry.id));
     const words = queryWords(input.query);
     const scored = entries
@@ -604,17 +618,35 @@ export class MarkdownMemoryClient implements MemoryClient {
     return readable.map(namespace => ({ namespace, dir: namespaceDirFor(this.baseDir, namespace) }));
   }
 
-  /** The statement index of each readable vault, sharing the model the log search uses. Empty without meaning search. */
-  private statementIndexes(vaults: readonly { namespace: string; dir: string }[]): StatementIndex[] {
-    return vaults.flatMap(({ namespace, dir }) => {
-      const embeddings = this.embeddings?.(sanitizeNamespace(namespace));
-      if (embeddings === undefined) {
-        return [];
-      }
-      // Starts the model load when it has not run; the search itself never waits for a download.
-      embeddings.ensureWarmed();
-      return [statementIndexFor({ vaultDir: dir, model: embeddings.embeddingModel })];
-    });
+  /** A vault as the meaning gate looks into it. Starts the model load when it has not run; the gate never waits for a download. */
+  private gateVault({ namespace, scan }: { namespace: string; scan: NamespaceScan }): GateVault {
+    const embeddings = this.embeddings?.(sanitizeNamespace(namespace));
+    embeddings?.ensureWarmed();
+    return { namespace: sanitizeNamespace(namespace), dir: namespaceDirFor(this.baseDir, namespace), scan, embeddings };
+  }
+
+  async meaningGate(params: { message: string; currentSessionId?: string | undefined }): Promise<MeaningGate> {
+    try {
+      const vaults = await Promise.all(
+        (await this.readVaults()).map(async ({ namespace }) => ({
+          namespace,
+          scan: await scanNamespaceEntries({
+            baseDir: this.baseDir,
+            namespace,
+            maxDailyFiles: Number.POSITIVE_INFINITY,
+            resolveTombstones: true,
+          }),
+        })),
+      );
+      return await computeMeaningGate({
+        message: params.message,
+        vaults: vaults.map(vault => this.gateVault(vault)),
+        currentSessionId: params.currentSessionId,
+        now: new Date(),
+      });
+    } catch {
+      return { state: 'unavailable' };
+    }
   }
 
   pagesWriteDir(): string {
@@ -627,6 +659,7 @@ export class MarkdownMemoryClient implements MemoryClient {
     today: string;
     maxPages: number;
     maxTokens: number;
+    gate?: MeaningGate | undefined;
   }): Promise<PageLoadResult> {
     let vaults: { namespace: string; dir: string }[];
     try {
@@ -638,11 +671,12 @@ export class MarkdownMemoryClient implements MemoryClient {
         skippedFiles: [],
       };
     }
+    const { gate, ...rest } = params;
     return loadPagesForMessage({
       vaultDirs: vaults.map(vault => vault.dir),
       writeVaultDir: this.namespaceDir(),
-      indexes: this.statementIndexes(vaults),
-      ...params,
+      gate: gate ?? (await this.meaningGate({ message: params.message })),
+      ...rest,
     });
   }
 

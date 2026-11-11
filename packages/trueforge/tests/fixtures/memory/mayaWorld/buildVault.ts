@@ -1,9 +1,10 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
+import { appendHandledNotes, readHandledNotes } from '../../../../src/runtime/memory/handledNotes';
 import type { RetainItem } from '../../../../src/runtime/memory/hindsightClient';
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
-import { namespaceDirFor } from '../../../../src/runtime/memory/markdownMemoryFiles';
+import { namespaceDirFor, scanNamespaceEntries } from '../../../../src/runtime/memory/markdownMemoryFiles';
 import { labeledNoteText, noteLabel } from '../../../../src/runtime/memory/memoryNotes';
 import { USER_STATED_ORIGIN } from '../../../../src/runtime/memory/memoryOrigin';
 import { pagePath } from '../../../../src/runtime/memory/memoryPages';
@@ -82,11 +83,31 @@ async function applyHandEdit({ vaultDir, event }: { vaultDir: string; event: May
 }
 
 /**
+ * The sorter runs one day behind: every note saved before `throughDay` is on pages by then, and the notes of
+ * `throughDay` itself are not yet.
+ */
+async function markEarlierNotesHandled({ dir, throughDay }: { dir: string; throughDay: number }): Promise<void> {
+  const vaultDir = namespaceDirFor(dir, MAYA_NAMESPACE);
+  const { entries } = await scanNamespaceEntries({
+    baseDir: dir,
+    namespace: MAYA_NAMESPACE,
+    maxDailyFiles: Number.POSITIVE_INFINITY,
+  });
+  const handled = await readHandledNotes(vaultDir);
+  const today = `${mayaDate(throughDay)}.md`;
+  await appendHandledNotes({
+    vaultDir,
+    ids: entries.filter(entry => entry.file < today && !handled.has(entry.id)).map(entry => entry.id),
+  });
+}
+
+/**
  * Writes days `fromDay` to `throughDay` of Maya's world into the vault under `dir`, through the same
  * writers the product uses. Call it again with the next range to move the world forward.
  *
  * With `sorted` false the only page is the one the person typed by hand. With `sorted` true the vault
- * instead holds the pages a perfect sorter would have written by the end of `throughDay`.
+ * instead holds the pages a perfect sorter would have written by the end of `throughDay`, and a list of the
+ * notes it has handled: those saved before `throughDay`.
  */
 export async function buildMayaVault({
   dir,
@@ -114,5 +135,6 @@ export async function buildMayaVault({
   }
   if (sorted) {
     await writeMayaSortedPages({ vaultDir: namespaceDirFor(dir, MAYA_NAMESPACE), throughDay });
+    await markEarlierNotesHandled({ dir, throughDay });
   }
 }

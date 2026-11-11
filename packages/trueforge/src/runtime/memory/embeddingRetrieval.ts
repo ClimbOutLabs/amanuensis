@@ -220,6 +220,13 @@ export class EmbeddingSubsystem {
     return this.model;
   }
 
+  /** The log's vectors once the model is ready and every saved note has one; undefined before that. */
+  get readyStore(): EmbeddingStore | undefined {
+    return this.model.currentPhase === 'ready' && this.store?.isBackfilled === true && !this.backfillRunning
+      ? this.store
+      : undefined;
+  }
+
   getStatus(): EmbeddingStatus {
     const indexedEntries = this.store?.size ?? 0;
     const phase = this.model.currentPhase;
