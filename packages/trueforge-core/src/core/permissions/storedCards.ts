@@ -94,7 +94,12 @@ function archivedToolCall(call: unknown): unknown {
     return call;
   }
   const card = call['tier3_card'];
-  return isRecord(card['email']) ? { ...call, tier3_card: { ...card, email: archivedCard(card['email']) } } : call;
+  // Archives written before cards carried their rendered copy hold no copy key. The strict read requires
+  // the key, so it is filled with null, the value a card still carries until a later step fills its wording.
+  const withCopy: Record<string, unknown> = { ...card, copy: card['copy'] ?? null };
+  return isRecord(card['email'])
+    ? { ...call, tier3_card: { ...withCopy, email: archivedCard(card['email']) } }
+    : { ...call, tier3_card: withCopy };
 }
 
 /** An archived event with its approval cards upgraded; any other value is returned as it is. */
