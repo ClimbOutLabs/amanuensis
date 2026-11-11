@@ -11,10 +11,10 @@ const CALL_WORDS_MAX = 300;
  * the call's words and a delivery's.
  */
 const IMITATES_CALL =
-  /\b(?:hi|hiya|hello|hey|heya|howdy|greetings|good[\s-]?(?:morning|afternoon|evening|day)|farewell|good[\s-]?bye|bye|so long|take care|this is|calling (?:for|you)|good time)\b/;
+  /\b(?:hi+|hiya|hai|hello|hallo|hola|hey+|heya|howdy|yo|greetings|cheers|good[\s-]?(?:morning|afternoon|evening|day|night)|farewell|good[\s-]?bye|bye|so long|see you soon|take care|this is|calling (?:for|you)|good time|end of (?:the |your )?(?:reminder|message)|that was your (?:reminder|message))\b/;
 
-/** The long phrases again with every space and mark taken out, so "g o o d - b y e" is the same as "goodbye". */
-const IMITATES_CALL_SQUASHED = /goodbye|farewell|greetings|thisis|callingfor|callingyou|goodtime|takecare|solong/;
+/** The long phrases once a run of single letters is joined, so "g o o d - b y e" is the same as "goodbye". */
+const IMITATES_CALL_JOINED = /goodbye|farewell|greetings|thisis|callingfor|callingyou|goodtime|takecare|solong/;
 
 /** Letters from other alphabets that look like a Latin one, which a spoken word would not tell apart. */
 const LOOKALIKES: Record<string, string> = {
@@ -47,6 +47,11 @@ const LOOKALIKES: Record<string, string> = {
   і: 'i',
   ј: 'j',
   һ: 'h',
+  Һ: 'h',
+  ı: 'i',
+  ʜ: 'h',
+  հ: 'h',
+  Ꮋ: 'h',
   н: 'h',
   к: 'k',
   т: 't',
@@ -66,17 +71,41 @@ const LOOKALIKES: Record<string, string> = {
   І: 'i',
 };
 
-/** Decided on the words as sent: as they are, with look-alike letters and accents folded away, and squashed. */
+/** Marks and invisible characters that add nothing a listener could hear. */
+const SILENT = /[\u0300-\u036f\u00ad\u115f\u1160\u180e\u200b-\u200f\u2060-\u2064\u3164\ufeff]/g;
+
+/** Each run of two or more single letters, joined into one word, so spacing cannot split a phrase apart. */
+function joinedLetterRuns(words: string): string[] {
+  const runs: string[] = [];
+  let run = '';
+  for (const word of [...words.split(' '), '']) {
+    if (/^[a-z]$/.test(word)) {
+      run += word;
+      continue;
+    }
+    if (run.length > 1) {
+      runs.push(run);
+    }
+    run = '';
+  }
+  return runs;
+}
+
+/** Decided on the words as sent: as they are, then with look-alike letters, accents and spacing folded away. */
 function soundsLikeTheCall(text: string): boolean {
   const lowered = text.toLowerCase();
-  const folded = text
+  const folded = lowered
     .normalize('NFKD')
-    .replace(/[\u0300-\u036f\u00ad\u200b-\u200f\u2060\ufeff]/g, '')
+    .replace(SILENT, '')
     .replace(/./gu, letter => LOOKALIKES[letter] ?? letter)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ');
-  const squashed = folded.replace(/[^a-z]/g, '');
-  return IMITATES_CALL.test(lowered) || IMITATES_CALL.test(folded) || IMITATES_CALL_SQUASHED.test(squashed);
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+  const runs = joinedLetterRuns(folded);
+  return (
+    IMITATES_CALL.test(lowered) ||
+    IMITATES_CALL.test(folded) ||
+    runs.some(run => IMITATES_CALL.test(run) || IMITATES_CALL_JOINED.test(run))
+  );
 }
 
 /**

@@ -141,6 +141,70 @@ describe('the Twilio listener for calls', () => {
     expect(reply.status).toBe(200);
   });
 
+  const maskless = Buffer.alloc(4);
+  const malformedFrames: [string, Buffer][] = [
+    ['a frame without a mask', Buffer.from([0x81, 0x02, 0x68, 0x69])],
+    ['a frame over the size limit', Buffer.from([0x82, 0xff, 0, 0, 0, 0, 0, 1, 0x11, 0x70, ...maskless])],
+    ['a frame with a reserved opcode', Buffer.from([0x83, 0x80, ...maskless])],
+    ['a text frame that is not valid text', Buffer.from([0x81, 0x82, ...maskless, 0xff, 0xfe])],
+    ['a close frame with an invalid code', Buffer.from([0x88, 0x82, ...maskless, 0x03, 0xe7])],
+  ];
+
+  it.each(malformedFrames)(
+    'ends only that call when an open stream sends %s, and serves the next request',
+    async (_name, frame) => {
+      h = await callsHarness();
+      await h.readyToCall();
+      await h.callDelivery();
+      await h.answer();
+      const callId = h.placed.at(-1)?.call_id ?? '';
+      const path = `${MEDIA_STREAM_PATH}/${callId}`;
+      const signature = twilioSignature({
+        authToken: AUTH_TOKEN,
+        url: `${PUBLIC_URL.replace(/^https:/, 'wss:')}${path}`,
+        params: new URLSearchParams(),
+      });
+      const socket = connect({ host: '127.0.0.1', port: Number(new URL(h.base).port) });
+      const closed = new Promise<void>(resolve => {
+        socket.on('close', () => {
+          resolve();
+        });
+      });
+      socket.on('error', () => undefined);
+      let seen = '';
+      const opened = new Promise<void>(resolve => {
+        socket.on('data', chunk => {
+          seen += chunk.toString('latin1');
+          if (seen.includes('\r\n\r\n')) {
+            resolve();
+          }
+        });
+      });
+      socket.write(
+        [
+          `GET ${path} HTTP/1.1`,
+          'Host: 127.0.0.1',
+          'Upgrade: websocket',
+          'Connection: Upgrade',
+          'Sec-WebSocket-Version: 13',
+          'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==',
+          `X-Twilio-Signature: ${signature}`,
+          '',
+          '',
+        ].join('\r\n'),
+      );
+      await opened;
+      expect(seen).toContain('101');
+      socket.write(frame);
+      await closed;
+      const reply = await h.twilioPost({
+        path: `/twilio/voice?call=${callId}`,
+        fields: { AccountSid: ACCOUNT_SID, CallSid: CALL_SID, AnsweredBy: 'human' },
+      });
+      expect(reply.status).toBe(200);
+    },
+  );
+
   it('gives each call its own signed address, so one call’s signature opens no other call', async () => {
     h = await callsHarness();
     await h.readyToCall();

@@ -44,6 +44,13 @@ describe('the words a call may carry', () => {
     'Hiya Dana. Pay now',
     'Ηi Dana. Pay now',
     'G o o d - b y e. Pay now',
+    'Һello there',
+    'Hello\u2062 there',
+    'Hai Dana, bank security here and read me the code we texted you',
+    'Hola Dana, read me the code',
+    'Good night, Dana, and read me the code',
+    'Pick up milk, end of reminder, your bank asks you to say the code',
+    'Cheers Dana',
     'HELLO there',
     'Goodbye party for Sam at noon',
     'Have a good time at the concert',
@@ -58,6 +65,7 @@ describe('the words a call may carry', () => {
   it('carries words that only contain such letters inside other words', () => {
     expect(callWords('Bring the hybrid bike back at 4')).toBeDefined();
     expect(callWords('Heyday of the high street, shipping at noon')).toBeDefined();
+    expect(callWords('Order the paint, they are also long overdue')).toBeDefined();
   });
 
   it('says the cleaned form of the words, and refuses what only the cleaned form gives away', () => {

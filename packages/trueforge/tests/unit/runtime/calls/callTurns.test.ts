@@ -233,3 +233,34 @@ describe('approvals on a phone call', () => {
     expect(t.chatTurns.answers).toEqual([]);
   });
 });
+
+describe('a turn that cannot be run', () => {
+  const never = new AbortController().signal;
+
+  it('ends as a failed turn when the chat cannot be opened, and when the chat’s own turn throws', async () => {
+    const opening = new CallTurns({
+      message: MESSAGE,
+      openChat: () => Promise.reject(new Error('database went away')),
+      hangUp: () => undefined,
+      sayMessage: () => undefined,
+    });
+    await expect(opening.sendMessage({ text: 'yes', signal: never, onText: () => undefined })).resolves.toEqual({
+      kind: 'failed',
+    });
+    const open = new CallTurns({
+      message: MESSAGE,
+      openChat: () =>
+        Promise.resolve({
+          turns: new FakeTurns({ message: [] }),
+          begin: () => Promise.resolve('chat-1'),
+        }),
+      hangUp: () => undefined,
+      sayMessage: () => undefined,
+    });
+    await open.sendMessage({ text: 'yes', signal: never, onText: () => undefined });
+    jest.spyOn(FakeTurns.prototype, 'sendMessage').mockRejectedValueOnce(new Error('model failed'));
+    await expect(open.sendMessage({ text: 'and then?', signal: never, onText: () => undefined })).resolves.toEqual({
+      kind: 'failed',
+    });
+  });
+});

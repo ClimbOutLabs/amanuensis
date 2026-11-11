@@ -152,7 +152,21 @@ export class CallTurns implements VoiceTurnRunner {
     return { line: CALL_LINES.askAgain, end: false };
   }
 
-  async sendMessage({
+  /** A turn that cannot be run ends as a failed turn, never as an error the call does not expect. */
+  async sendMessage(input: {
+    text: string;
+    startedOverHeldLine?: boolean;
+    signal: AbortSignal;
+    onText: (delta: string) => void;
+  }): Promise<TurnOutcome> {
+    try {
+      return await this.#answer(input);
+    } catch {
+      return { kind: 'failed' };
+    }
+  }
+
+  async #answer({
     text,
     startedOverHeldLine = false,
     signal,

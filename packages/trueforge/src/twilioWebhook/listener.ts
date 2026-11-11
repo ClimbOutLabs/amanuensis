@@ -159,6 +159,10 @@ function attachSocketRoutes({
           return;
         }
         upgrades.handleUpgrade(request, socket, head, ws => {
+          // A bad frame or a broken connection ends this socket only. It goes before the route sees the socket.
+          ws.on('error', () => {
+            ws.terminate();
+          });
           route.open(ws, id);
         });
       } catch (error) {

@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 
 import type { Logger } from 'winston';
-import type { WebSocket } from 'ws';
+import type { RawData, WebSocket } from 'ws';
 
 import type { IDeliveryStore } from '../../db/deliveryStore';
 import type { IPersonalizationStore } from '../../db/personalizationStore';
@@ -535,6 +535,14 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
       timers.push(setTimeout(run, ms));
     };
 
+    /** Work that runs on its own. If it fails, this call ends and nothing else is touched. */
+    const alone = (work: Promise<unknown>): void => {
+      work.catch((error: unknown) => {
+        logger.warn('A phone call step failed', { call_id: call.id, error: errorName(error) });
+        socket.terminate();
+      });
+    };
+
     async function begin(): Promise<void> {
       const loading = deps.listening();
       const release = (): Promise<void> =>
@@ -556,11 +564,13 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
       }
       const name = spokenName(names);
       const hangUp = (): void => {
-        void (async () => {
-          await talking?.session.settled();
-          await transport.whenPlayed();
-          transport.close();
-        })();
+        alone(
+          (async () => {
+            await talking?.session.settled();
+            await transport.whenPlayed();
+            transport.close();
+          })(),
+        );
       };
       /** Waits for the person to answer the question; silence counts as an answer that was not caught. */
       const listenForAnswer = (): void => {
@@ -578,19 +588,21 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
           if (next === undefined) {
             return;
           }
-          void session
-            .say(next.line)
-            .then(() => transport.whenPlayed())
-            .then(() => {
-              if (ended) {
-                return;
-              }
-              if (next.end) {
-                transport.close();
-              } else {
-                listenForAnswer();
-              }
-            });
+          alone(
+            session
+              .say(next.line)
+              .then(() => transport.whenPlayed())
+              .then(() => {
+                if (ended) {
+                  return;
+                }
+                if (next.end) {
+                  transport.close();
+                } else {
+                  listenForAnswer();
+                }
+              }),
+          );
         }, limits.silenceMs);
       };
       /** The person heard nothing of why they were called, so a text and a push tell them instead. */
@@ -599,9 +611,11 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
           return;
         }
         unheard = words;
-        void transport.whenPlayed().then(() => {
-          transport.close();
-        });
+        alone(
+          transport.whenPlayed().then(() => {
+            transport.close();
+          }),
+        );
       };
       const turns = new CallTurns({
         message: delivery === undefined ? 'It is in the app for you to see.' : messageLine(delivery),
@@ -623,22 +637,26 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
         // Said in the voice's own reading, like every reply after it: a reminder is written for the screen, and a
         // check that it reads word for word would refuse many of them while protecting nothing on an answered call.
         sayMessage: line => {
-          void session.say(line).then(said => {
-            if (!said) {
-              notHeard(ENDED_WORDS.messageNotSaid);
-              return;
-            }
-            // A line that was hung up on while it spoke was already written down without a chat.
-            if (!ended) {
-              written ??= writeChat();
-            }
-          });
+          alone(
+            session.say(line).then(said => {
+              if (!said) {
+                notHeard(ENDED_WORDS.messageNotSaid);
+                return;
+              }
+              // A line that was hung up on while it spoke was already written down without a chat.
+              if (!ended) {
+                written ??= writeChat();
+              }
+            }),
+          );
         },
         askedAgain: () => {
-          void session
-            .settled()
-            .then(() => transport.whenPlayed())
-            .then(listenForAnswer);
+          alone(
+            session
+              .settled()
+              .then(() => transport.whenPlayed())
+              .then(listenForAnswer),
+          );
         },
       });
       const session = new VoiceSession({
@@ -668,16 +686,18 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
         kind: delivery === undefined ? 'something needs you' : privatePhrase(delivery.kind),
       });
       // The opening plays to the end, and only as written. A reply that starts over it is not an answer.
-      void session.say(opening, { interruptible: false, exact: true }).then(async said => {
-        if (!said) {
-          notHeard(ENDED_WORDS.lineNotOpened);
-          return;
-        }
-        await transport.whenPlayed();
-        listenForAnswer();
-      });
+      alone(
+        session.say(opening, { interruptible: false, exact: true }).then(async said => {
+          if (!said) {
+            notHeard(ENDED_WORDS.lineNotOpened);
+            return;
+          }
+          await transport.whenPlayed();
+          listenForAnswer();
+        }),
+      );
       later(limits.talkMs, () => {
-        void session.say(CALL_LINES.timeUp).then(hangUp);
+        alone(session.say(CALL_LINES.timeUp).then(hangUp));
       });
       // The line closes whatever is still running, so a stuck reply cannot hold the call open.
       later(limits.talkMs + limits.hangUpGraceMs, () => {
@@ -781,7 +801,7 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
         writeDown(line);
       }
     });
-    socket.on('message', data => {
+    const onFrame = (data: RawData): void => {
       const frame = readPhoneFrame(data);
       if (frame.kind === 'audio') {
         line?.run.audio(frame.bytes);
@@ -827,6 +847,14 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
         logger.warn('A phone call could not start', { error: errorName(error) });
         socket.close(1011, 'could not start');
       });
+    };
+    socket.on('message', data => {
+      try {
+        onFrame(data);
+      } catch (error) {
+        logger.warn('A phone call frame could not be handled', { call_id, error: errorName(error) });
+        socket.terminate();
+      }
     });
   }
 
