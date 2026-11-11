@@ -35,7 +35,7 @@ Every release page also prints the release key and these steps. `SHA256SUMS` on 
 
 > Docker Desktop needs your computer to restart before it can run. Restart your computer, and Aman Setup will open again by itself and carry on.
 
-Restart. After you sign back in, Aman Setup opens again by itself and says **Continuing where it left off.** If it does not, double-click `Aman-Setup.exe` in your Downloads folder again. If Docker Desktop shows its own welcome or terms window the first time it starts, accept it so Docker can finish starting.
+Restart. After you sign back in, Aman Setup opens again by itself and says **Continuing where it left off.** If it does not, Aman Setup says so before the restart; then open the Aman Setup download again from where you saved it, usually your Downloads folder. If Docker Desktop shows its own welcome or terms window the first time it starts, accept it so Docker can finish starting.
 
 **4. Answer four questions.** Aman Setup checks that Docker has enough memory, then asks, one at a time:
 
@@ -51,15 +51,15 @@ Near the end, Windows asks two things in its own boxes. Choose **Yes** both time
 - whether to trust Aman's certificate, so your browser opens Aman at its secure address without a warning;
 - if you answered yes to the phone question, whether to let devices on your home network through the firewall. Aman Setup then prints the address and a code to scan with your phone.
 
-**5. Open Aman.** When it finishes, Aman opens in your browser and a short **Getting started** page opens beside it. Aman Setup says `Aman is installed, and the getting started page is open in your browser.` Sign in with the email and password from step 4.
+**5. Open Aman.** When it finishes, Aman opens in your browser and a short **Getting started** page opens beside it. Aman Setup says `Aman is installed, and the getting started page is open in your browser.` Sign in with the email and password from step 4. The Aman Setup window then says `Press Enter to close this window.`; press Enter when you have read it.
 
-Your Start menu now has **Check Aman**, **Update Aman** and **Backups**, and **Use Aman on my phone** if you answered yes to the phone question.
+Your Start menu now has **Aman**, **Check Aman**, **Update Aman**, **Backups** and **Remove Aman**, and **Use Aman on my phone** if you answered yes to the phone question.
 
 Then follow [After you install](../README.md#after-you-install) to name your assistant, add a model key if you skipped it, and connect your email and calendar.
 
 ## Using Aman day to day
 
-- **Opening Aman:** open the address from the **Getting started** page, and bookmark it. The page is saved in your `AppData\Local\Amanuensis` folder. Docker Desktop has to be running for Aman to answer.
+- **Opening Aman:** choose **Aman** in the Start menu. It starts Docker Desktop if it needs to, waits for Aman to answer, and opens it in your browser.
 - **On your phone:** if you said yes in step 4, **Use Aman on my phone** in the Start menu prints the address and a code to scan. Your phone must be on the same Wi-Fi. If you said no, open **PowerShell** from the Start menu and run `aman network open`. To close Aman to your home network again, run `aman network close`.
 - **Updating:** run **Update Aman** from the Start menu. It asks once before it downloads anything, and it keeps your data.
 - **Backups:** Aman makes a backup every day at 03:30 while you are signed in to Windows, and keeps the last seven. **Backups** in the Start menu opens the folder. [What a backup holds](backup.md) says what is in it.
@@ -78,6 +78,19 @@ Every message Aman Setup prints says what happened and the one thing to do next.
 Aman Setup never asks for your Windows password itself. The only boxes Windows shows during the install are its own requests for permission: to install Docker Desktop, to trust Aman's certificate, and to change the firewall for your phone. If anything asks for a password or account you did not expect, close the window and [tell us](https://github.com/ClimbOutLabs/amanuensis/issues).
 
 If a step still does not work the way this page says, [open an issue](https://github.com/ClimbOutLabs/amanuensis/issues) and say which step it was.
+
+## Removing Aman
+
+Choose **Remove Aman** in the Start menu. It first says what it removes: your instances and everything they keep (chats, memory, files and settings), the Aman images in Docker Desktop, the aman command, the Start menu entries, the daily backup task, the home network rule and the certificate Aman added. Then it asks two questions:
+
+1. `Remove Aman and delete all of its data?` Type `yes` to go ahead. Anything else removes nothing.
+2. `Delete your backups folder … too? A last backup is made in it first unless you say yes.` Type `yes` to delete the backups as well. Anything else keeps them, with one last backup made first.
+
+If Windows asks for permission to change the firewall, choose **Yes**. At the end it says `Aman is removed from this computer.`, and where your backups are if you kept them.
+
+Docker Desktop stays installed, because other programs may use it. If nothing else uses it, remove it in Windows **Settings**, under **Apps**.
+
+If the removal stops part way, it says why. Do what it says, then choose **Remove Aman** again; it carries on from where it stopped.
 
 ## Installing from the source code instead
 

@@ -115,7 +115,7 @@ It backs up your data first, builds the new version (about 15 minutes), and swit
 
 ## Removing Aman
 
-These steps are for a Mac or Linux. To remove everything, including your chats and memory:
+On Windows, choose **Remove Aman** in the Start menu; the [Windows guide](install-windows.md#removing-aman) walks through its two questions. On a Mac or Linux, to remove everything, including your chats and memory:
 
 ```
 cd amanuensis
