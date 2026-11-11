@@ -1464,16 +1464,23 @@ describe('mail from a mailbox that numbers its messages', () => {
       received_at: later(minutes),
     });
 
-  /** An IMAP mailbox as the account agent lists it: by UID after a cursor, or by arrival after a renumbering. */
+  /**
+   * An IMAP mailbox as the account agent lists it: by UID after a cursor, or by arrival after a renumbering. A message
+   * shows up in the mailbox at `shown_at`, which may differ from its arrival time, as with a server clock that is off
+   * or mail moved into the inbox. Each message carries its Message-ID as its key.
+   */
   async function numbered({ page = 500 }: { page?: number } = {}) {
     const built = await setup();
-    const box = { uidvalidity: 1, entries: [] as { message: MailMessage; uid: number }[] };
+    const entries: { message: MailMessage; uid: number; shown_at?: Date | undefined }[] = [];
+    const box = { uidvalidity: 1, entries };
     const asked: { cursor: MailCursor | undefined; since: Date }[] = [];
     const source: CursorMailSource = {
       listAfter: ({ cursor, since, limit }) => {
         asked.push({ cursor, since });
         const after = cursor?.uidvalidity === box.uidvalidity ? cursor.last_uid : undefined;
-        const arrived = box.entries.filter(entry => entry.message.received_at.getTime() <= built.clock.now.getTime());
+        const arrived = box.entries.filter(
+          entry => (entry.shown_at ?? entry.message.received_at).getTime() <= built.clock.now.getTime(),
+        );
         const wanted = arrived.filter(entry =>
           after === undefined ? entry.message.received_at.getTime() >= since.getTime() : entry.uid > after,
         );
@@ -1484,6 +1491,7 @@ describe('mail from a mailbox that numbers its messages', () => {
             ...entry.message,
             id: imapMessageId({ uidvalidity: box.uidvalidity, uid: entry.uid }),
             uid: entry.uid,
+            key: `mid:${entry.message.id}`,
           })),
           skipped: 0,
           cursor: { uidvalidity: box.uidvalidity, last_uid: taken.at(-1)?.uid ?? after ?? top },
@@ -1501,16 +1509,28 @@ describe('mail from a mailbox that numbers its messages', () => {
       recorded.push(...input.events);
       return await real(input);
     });
-    const add = (message: MailMessage) => {
-      box.entries.push({ message, uid: Math.max(0, ...box.entries.map(entry => entry.uid)) + 1 });
+    const add = (message: MailMessage, shown_at?: Date) => {
+      box.entries.push({ message, uid: Math.max(0, ...box.entries.map(entry => entry.uid)) + 1, shown_at });
+    };
+    /** The mailbox is rebuilt: every message it still holds is numbered again from 1, in the same order. */
+    const renumber = () => {
+      box.uidvalidity += 1;
+      box.entries = box.entries.map((entry, index) => ({ ...entry, uid: index + 1 }));
     };
     /** Raised bills by their subject, so the same mail under two ids shows as two. */
     const raised = () => recorded.filter(event => event.id.startsWith('bill_due:')).map(event => event.summary);
-    return { ...built, box, asked, add, recorded, raised };
+    /** The ids a bill was raised under, so the same mail raised twice shows as two. */
+    const billIds = (name: string) =>
+      new Set(
+        recorded
+          .filter(event => event.id.startsWith('bill_due:') && event.summary.includes(`Invoice ${name}:`))
+          .map(event => event.id),
+      );
+    return { ...built, box, asked, add, renumber, recorded, raised, billIds };
   }
 
   it('tells about each bill once when the mailbox is renumbered, though UIDs restart and the times overlap', async () => {
-    const { service, clock, box, add, recorded } = await numbered();
+    const { service, clock, box, add, recorded, billIds } = await numbered();
     await service.run({ watcher: 'mail' });
     add(bill('A', 5));
     add(bill('B', 15));
@@ -1523,7 +1543,39 @@ describe('mail from a mailbox that numbers its messages', () => {
     clock.now = later(30);
     await service.run({ watcher: 'mail' });
     const bills = recorded.filter(event => event.id.startsWith('bill_due:'));
-    expect(bills.map(event => event.id)).toEqual(['bill_due:imap:1:1', 'bill_due:imap:1:2', 'bill_due:imap:2:2']);
+    expect(new Set(bills.map(event => event.id))).toEqual(
+      new Set(['bill_due:mid:A', 'bill_due:mid:B', 'bill_due:mid:C']),
+    );
+    expect(billIds('B').size).toBe(1);
+  });
+
+  it('lists mail that came in dated a little before the last pass when the mailbox is then renumbered', async () => {
+    const { service, clock, add, renumber, billIds } = await numbered();
+    await service.run({ watcher: 'mail' });
+    clock.now = later(20);
+    await service.run({ watcher: 'mail' });
+    // Moved into the inbox after that pass, but dated 30 seconds before it.
+    add(bill('D', 19.5), later(25));
+    renumber();
+    clock.now = later(30);
+    await service.run({ watcher: 'mail' });
+    expect(billIds('D').size).toBe(1);
+  });
+
+  it('does not tell again about mail dated after the pass that read it when the mailbox is renumbered', async () => {
+    const { service, clock, add, renumber, billIds } = await numbered();
+    await service.run({ watcher: 'mail' });
+    // A server clock a little ahead dates the bill just after the pass that reads it.
+    add(bill('E', 20.5), later(20));
+    clock.now = later(20);
+    await service.run({ watcher: 'mail' });
+    renumber();
+    clock.now = later(30);
+    await service.run({ watcher: 'mail' });
+    renumber();
+    clock.now = later(40);
+    await service.run({ watcher: 'mail' });
+    expect(billIds('E').size).toBe(1);
   });
 
   it('saves where it got to, and the next pass lists from there', async () => {

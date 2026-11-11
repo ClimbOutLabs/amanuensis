@@ -330,4 +330,17 @@ export function runNoticingStoreContractSuite(getStore: () => INoticingStore): v
     });
     expect(cleared?.cursor).toBeUndefined();
   });
+
+  it('keeps the part of the mailbox still to be dated with the cursor, so the next pass holds it to the same time', async () => {
+    const store = getStore();
+    const dated = {
+      checked_at: new Date('2026-11-05T10:00:00.000Z'),
+      failure: undefined,
+      stuck: undefined,
+      cursor: { uidvalidity: 4, last_uid: 400, dated: { to_uid: 912, since: new Date('2026-11-05T09:50:00.000Z') } },
+      source: 'email_connector' as const,
+    };
+    await store.setCheckpoint({ ...ALICE, watcher: 'mail', ...dated });
+    await expect(store.getCheckpoint({ ...ALICE, watcher: 'mail' })).resolves.toEqual(dated);
+  });
 }

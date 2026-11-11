@@ -738,7 +738,7 @@ export async function watchMail({
         ? undefined
         : open === undefined || !isCursorMessage(open)
           ? window.cursor
-          : { uidvalidity: window.cursor.uidvalidity, last_uid: open.uid - 1 },
+          : { ...window.cursor, last_uid: open.uid - 1 },
   };
 }
 
@@ -790,6 +790,11 @@ function localWhen({ at, timezone, day = true }: { at: Date; timezone: string; d
   } catch {
     return at.toISOString();
   }
+}
+
+/** What events about a message are named by. */
+function eventKeyOf(message: MailMessage): string {
+  return message.key ?? message.id;
 }
 
 /**
@@ -847,7 +852,7 @@ function unreadNote({
   const when = localWhen({ at: message.received_at, timezone: settings.timezone });
   const from = clip(message.from_address, 80);
   return {
-    id: `${kind}:${message.id}`,
+    id: `${kind}:${eventKeyOf(message)}`,
     kind,
     evidence: 'content',
     summary: `A message from ${from} that arrived ${when} could not be read, and it may matter. Open your mail to check it.`,
@@ -911,7 +916,7 @@ async function findInMessage({
     const text = clip(await readText(message), READ_CHARACTERS);
     const who = listed.name ?? message.from_name ?? message.from_address;
     found.raise.push({
-      id: `mail_always:${message.id}`,
+      id: `mail_always:${eventKeyOf(message)}`,
       kind: 'mail_always',
       evidence: 'verified_sender',
       summary: clip(`New mail from ${who}: ${message.subject}`, 300),
@@ -989,7 +994,7 @@ async function billFrom({
   }
   const subject = clip(message.subject, 120);
   return {
-    id: `bill_due:${message.id}`,
+    id: `bill_due:${eventKeyOf(message)}`,
     kind: 'bill_due',
     evidence: verified ? 'verified_sender' : 'content',
     summary: clip(`A bill or deadline is due ${localDate({ at: due, timezone: settings.timezone })}: ${subject}`, 300),
