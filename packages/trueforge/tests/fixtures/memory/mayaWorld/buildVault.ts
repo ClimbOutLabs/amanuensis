@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { appendHandledNotes, readHandledNotes } from '../../../../src/runtime/memory/handledNotes';
+import { appendHandledNote, readHandledNotes } from '../../../../src/runtime/memory/handledNotes';
 import type { RetainItem } from '../../../../src/runtime/memory/hindsightClient';
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
 import { namespaceDirFor, scanNamespaceEntries } from '../../../../src/runtime/memory/markdownMemoryFiles';
@@ -83,8 +83,9 @@ async function applyHandEdit({ vaultDir, event }: { vaultDir: string; event: May
 }
 
 /**
- * The sorter runs one day behind: every note saved before `throughDay` is on pages by then, and the notes of
- * `throughDay` itself are not yet.
+ * The sorter runs one day behind: every note saved before `throughDay` has been handled by then, and the notes of
+ * `throughDay` itself have not. A note whose expected decision puts something on a page is recorded as `page`; one
+ * the pages take nothing from (`ignore`) is recorded as `none`.
  */
 async function markEarlierNotesHandled({ dir, throughDay }: { dir: string; throughDay: number }): Promise<void> {
   const vaultDir = namespaceDirFor(dir, MAYA_NAMESPACE);
@@ -93,12 +94,20 @@ async function markEarlierNotesHandled({ dir, throughDay }: { dir: string; throu
     namespace: MAYA_NAMESPACE,
     maxDailyFiles: Number.POSITIVE_INFINITY,
   });
+  const texts = new Map(entries.map(entry => [entry.id, entry.text]));
   const handled = await readHandledNotes(vaultDir);
-  const today = `${mayaDate(throughDay)}.md`;
-  await appendHandledNotes({
-    vaultDir,
-    ids: entries.filter(entry => entry.file < today && !handled.has(entry.id)).map(entry => entry.id),
-  });
+  for (let day = 1; day < throughDay; day += 1) {
+    for (const [position, entry] of MAYA_ENTRIES.filter(candidate => candidate.day === day).entries()) {
+      const noteId = `md:${MAYA_NAMESPACE}:${mayaDate(day)}.md#${String(position)}`;
+      if (texts.get(noteId)?.includes(entry.content) !== true) {
+        throw new Error(`Entry ${entry.id} is not where the vault keeps note ${noteId}.`);
+      }
+      if (!handled.has(noteId)) {
+        const outcome = entry.expected.some(decision => decision.decision !== 'ignore') ? 'page' : 'none';
+        await appendHandledNote({ vaultDir, noteId, outcome });
+      }
+    }
+  }
 }
 
 /**
@@ -107,7 +116,7 @@ async function markEarlierNotesHandled({ dir, throughDay }: { dir: string; throu
  *
  * With `sorted` false the only page is the one the person typed by hand. With `sorted` true the vault
  * instead holds the pages a perfect sorter would have written by the end of `throughDay`, and a list of the
- * notes it has handled: those saved before `throughDay`.
+ * notes it has handled, with what it did with each: those saved before `throughDay`.
  */
 export async function buildMayaVault({
   dir,

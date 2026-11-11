@@ -7,7 +7,7 @@ import { withTimeout } from '@truefoundry/trueforge-core/core';
 
 import { EMBEDDING_DIMENSIONS, type EmbeddingModel } from './embeddingModel';
 import type { EmbeddingSubsystem } from './embeddingRetrieval';
-import { readHandledNotes } from './handledNotes';
+import { readHandledNotes, type HandledOutcome } from './handledNotes';
 import { recallExcludedIds, recallMetadata, type NamespaceScan } from './markdownMemoryFiles';
 import { MEMORY_ORIGIN_METADATA_KEY, USER_STATED_ORIGIN } from './memoryOrigin';
 import { noteIndexFor, type NoteIndex } from './noteIndex';
@@ -71,6 +71,11 @@ function isPersonsOwn(text: string): boolean {
   return recallMetadata(text)[MEMORY_ORIGIN_METADATA_KEY] === USER_STATED_ORIGIN;
 }
 
+/** Not sorted yet; or sorted onto no page and the person's own words. A note whose facts are on a page is spoken for by its statements. */
+function isEligible({ outcome, text }: { outcome: HandledOutcome | undefined; text: string }): boolean {
+  return outcome === undefined || (outcome === 'none' && isPersonsOwn(text));
+}
+
 async function eligibleNotes({
   vault,
   index,
@@ -87,7 +92,10 @@ async function eligibleNotes({
   const indexed = new Set(index.numbersFor(vault.scan.entries.map(entry => entry.id)).map(({ id }) => id));
   return vault.scan.entries
     .filter(
-      entry => indexed.has(entry.id) && !excluded.has(entry.id) && (!handled.has(entry.id) || isPersonsOwn(entry.text)),
+      entry =>
+        indexed.has(entry.id) &&
+        !excluded.has(entry.id) &&
+        isEligible({ outcome: handled.get(entry.id), text: entry.text }),
     )
     .map(entry => entry.id);
 }

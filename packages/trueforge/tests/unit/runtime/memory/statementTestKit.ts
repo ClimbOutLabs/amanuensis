@@ -9,6 +9,7 @@ import {
   type EmbeddingModelPhase,
 } from '../../../../src/runtime/memory/embeddingModel';
 import { EmbeddingSubsystem } from '../../../../src/runtime/memory/embeddingRetrieval';
+import { appendHandledNote, type HandledOutcome } from '../../../../src/runtime/memory/handledNotes';
 import { formatRetainEntry, scanNamespaceEntries } from '../../../../src/runtime/memory/markdownMemoryFiles';
 import { computeMeaningGate, type MeaningGate } from '../../../../src/runtime/memory/meaningGate';
 import {
@@ -260,4 +261,19 @@ export async function gateFor({
     currentSessionId,
     now: new Date(),
   });
+}
+
+/** Records the same outcome in the vault's list of handled notes for each of the notes. */
+export async function markHandled({
+  vaultDir,
+  ids,
+  outcome,
+}: {
+  vaultDir: string;
+  ids: readonly string[];
+  outcome: HandledOutcome;
+}): Promise<void> {
+  for (const noteId of ids) {
+    await appendHandledNote({ vaultDir, noteId, outcome });
+  }
 }

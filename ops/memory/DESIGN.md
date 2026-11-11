@@ -204,7 +204,7 @@ read anything from outside the chat, so only the person's own words in the curre
     matters/<slug>.md     one page per matter (a trip, a purchase, a project)
     .memory-state/        notes Aman keeps for itself, and the lock
     .memory-history/      a git history of the two page folders
-    .handled-notes        ids of daily-log notes the sorter has put on pages, one per line, only added to
+    .handled-notes        daily-log notes the sorter handled: note id, tab, then page or none; only added to
 
 The slug comes from the title: lowercase, accents dropped from Latin and Greek letters (and Cyrillic `ё` read as `е`), other characters that
 are not letters or digits turned into dashes, cut at 64 characters (and at 200 bytes, so the file name
@@ -410,11 +410,13 @@ it can be found. Shared words alone never show a note while the rules can judge.
   and model and measures again only the notes that were added or changed; removed notes are dropped. The
   first search of a log with 5,000 notes takes about two seconds; the next about 0.1 seconds on the test
   machine. No file format changed.
-- **Which notes are eligible.** A note the sorter has put on pages is covered by its statements, so it is
-  not shown from the log, unless it is the person's own words (`user_stated`; `recallMetadata` in
-  `markdownMemoryFiles.ts` reads a note's origin). A note the sorter has not handled is eligible. Notes from
-  the chat being answered and read content past its freshness limit are never eligible. The sorter records what it handled in
-  `.handled-notes` (see `handledNotes.ts` and `specs/memory-pages.md`, section 4).
+- **Which notes are eligible.** A note the sorter has not handled yet is eligible. A note the sorter put
+  on a page (`page` in `.handled-notes`) is not, whoever wrote it: its statements speak for it, with their
+  end dates. A note the sorter handled and put on no page (`none`) is eligible only when it is the person's
+  own words (`user_stated`; `recallMetadata` in `markdownMemoryFiles.ts` reads a note's origin). Notes from
+  the chat being answered and read content past its freshness limit are never eligible. `handledNotes.ts`
+  owns the file: each line is the note id, a tab and the outcome, and a later line for a note wins; a line
+  with no outcome, an unknown outcome or a bad id is skipped (see `specs/memory-pages.md`, section 4).
 - **What is shown.** Notes with a standing above 3, best first, at most 4, or at most 6 when no vault has a
   page statement. A note that names a person the message asks about moves to the front of those (the name
   boost); it never adds a note. The token budget, the freshness limit, the recall screen and the rule that

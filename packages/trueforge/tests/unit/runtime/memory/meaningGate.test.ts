@@ -1,7 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { appendHandledNotes } from '../../../../src/runtime/memory/handledNotes';
 import { ERASED_ENTRY } from '../../../../src/runtime/memory/markdownMemoryFiles';
 import type { MeaningGate } from '../../../../src/runtime/memory/meaningGate';
 import { statementHits } from '../../../../src/runtime/memory/statementIndex';
@@ -11,6 +10,7 @@ import {
   gateFor,
   HandChosenModel,
   makeVault,
+  markHandled,
   ownBullet,
   writeKitNotes,
   writeStatementPage,
@@ -148,24 +148,36 @@ describe('the meaning gate', () => {
       expect(gate.notes.map(note => note.id).sort()).toEqual([...ids].sort());
     });
 
-    it('leaves out a note that is in the list of handled notes', async () => {
+    it('leaves out a note the sorter put on a page, whoever wrote it', async () => {
       const { vaultDir, ids, model } = await vaultWith([
         { day: daysAgo(2), text: 'Mail says topic2.', source: 'email' },
+        ownNote({ topic: 2, age: 1 }),
       ]);
-      await appendHandledNotes({ vaultDir, ids });
+      await markHandled({ vaultDir, ids, outcome: 'page' });
 
       const gate = judged(await gateFor({ vaultDir, model, message: ask }));
 
       expect(gate.notes).toEqual([]);
     });
 
-    it("still shows a handled note that is the person's own words", async () => {
+    it("shows a note the sorter put on no page when it is the person's own words", async () => {
       const { vaultDir, ids, model } = await vaultWith([ownNote({ topic: 2, age: 1 })]);
-      await appendHandledNotes({ vaultDir, ids });
+      await markHandled({ vaultDir, ids, outcome: 'none' });
 
       const gate = judged(await gateFor({ vaultDir, model, message: ask }));
 
       expect(gate.notes.map(note => note.id)).toEqual(ids);
+    });
+
+    it('leaves out a note the sorter put on no page when it is read content', async () => {
+      const { vaultDir, ids, model } = await vaultWith([
+        { day: daysAgo(2), text: 'Mail says topic2.', source: 'email' },
+      ]);
+      await markHandled({ vaultDir, ids, outcome: 'none' });
+
+      const gate = judged(await gateFor({ vaultDir, model, message: ask }));
+
+      expect(gate.notes).toEqual([]);
     });
 
     it('does not let a handled read note open the gate or count toward the five', async () => {
@@ -178,7 +190,7 @@ describe('the meaning gate', () => {
           source: 'email',
         })),
       });
-      await appendHandledNotes({ vaultDir, ids: ids.slice(0, 2) });
+      await markHandled({ vaultDir, ids: ids.slice(0, 2), outcome: 'page' });
 
       const gate = await gateFor({ vaultDir, model: new HandChosenModel(), message: ask });
 

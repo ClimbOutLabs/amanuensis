@@ -2,9 +2,16 @@ import { readdir, utimes } from 'node:fs/promises';
 import path from 'node:path';
 
 import { EmbeddingStore, LOG_VECTORS_FILE } from '../../../../src/runtime/memory/embeddingStore';
-import { appendHandledNotes } from '../../../../src/runtime/memory/handledNotes';
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
-import { askAbout, HandChosenModel, makeVault, warmLog, writeKitNotes, type KitNote } from './statementTestKit';
+import {
+  askAbout,
+  HandChosenModel,
+  makeVault,
+  markHandled,
+  warmLog,
+  writeKitNotes,
+  type KitNote,
+} from './statementTestKit';
 
 const TIMEOUT_MS = 5000;
 
@@ -123,9 +130,9 @@ describe('the daily log, searched by meaning', () => {
   });
 
   describe('a note the sorter handled', () => {
-    it("is left out of the log unless it is the person's own words", async () => {
+    it("is left out of the log when its facts are on a page, and kept only when it is the person's own words and on no page", async () => {
       const notes: KitNote[] = [
-        ...[0, 1, 3, 4].map(topic => note({ topic, age: topic + 20 })),
+        ...[0, 1, 3, 4, 5].map(topic => note({ topic, age: topic + 20 })),
         { day: daysAgo(1), text: 'Mail says topic2 mail', source: 'email' },
         { day: daysAgo(2), text: 'Remember topic2 own' },
       ];
@@ -133,8 +140,10 @@ describe('the daily log, searched by meaning', () => {
       const query = askAbout({ topic: 2, closeness: 1 });
       expect((await recallTexts({ client, query })).sort()).toEqual(['Mail says topic2 mail', 'Remember topic2 own']);
 
-      await appendHandledNotes({ vaultDir, ids: ids.slice(4) });
+      await markHandled({ vaultDir, ids: ids.slice(5), outcome: 'page' });
+      expect(await recallTexts({ client, query })).toEqual([]);
 
+      await markHandled({ vaultDir, ids: ids.slice(5), outcome: 'none' });
       expect(await recallTexts({ client, query })).toEqual(['Remember topic2 own']);
     });
   });
