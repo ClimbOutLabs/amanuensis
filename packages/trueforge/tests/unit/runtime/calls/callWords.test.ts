@@ -16,6 +16,7 @@ describe('the words a call may carry', () => {
     'Call 1-800-555-0100',
     'eighteen hundred five fifty-five oh one hundred',
     'Pay at paypal-secure d o t help',
+    'Visit evil dot help today',
     'Write to dana@example.com',
     'See https://evil.example now',
   ])('carries none of "%s", and says so instead', text => {
