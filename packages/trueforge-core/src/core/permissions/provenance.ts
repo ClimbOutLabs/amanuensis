@@ -115,7 +115,15 @@ function hostKey(host: string): string {
   return host.toLowerCase().replace(/^www\./, '');
 }
 
-/** One page however it is spelled: http or https, host case, `www.`, one trailing slash, and the fragment fold away. */
+/** Whether a link carries a sign-in name or password before its site. Both are sent to the site when it is opened. */
+function carriesSignIn(url: URL): boolean {
+  return url.username !== '' || url.password !== '';
+}
+
+/**
+ * One page however it is spelled: http or https, host case, `www.`, one trailing slash, and the fragment fold away.
+ * A sign-in name or password before the site stays in the key, so a link that adds one never matches a recorded link.
+ */
 function urlKey(value: string): string | undefined {
   const url = parsedUrl(value);
   if (url === undefined || url.hostname === '') {
@@ -123,7 +131,8 @@ function urlKey(value: string): string | undefined {
   }
   const path = url.pathname.length > 1 && url.pathname.endsWith('/') ? url.pathname.slice(0, -1) : url.pathname;
   const port = url.port === '' ? '' : `:${url.port}`;
-  return `${hostKey(url.hostname)}${port}${path === '/' ? '' : path}${url.search}`;
+  const signIn = carriesSignIn(url) ? `${url.username}:${url.password}@` : '';
+  return `${signIn}${hostKey(url.hostname)}${port}${path === '/' ? '' : path}${url.search}`;
 }
 
 function add(input: { side: ProvenanceValues; kind: 'urls' | 'hosts' | 'addresses'; value: string }): void {
@@ -144,16 +153,21 @@ function untrustedHas(input: { provenance: ChatProvenance; kind: 'urls' | 'hosts
   return side.overflowed || side[input.kind].has(input.value);
 }
 
-/** Records one link; returns its site, or undefined when it is not a link. */
+/**
+ * Records one link; returns its site, or undefined when it is not a link. A link with a sign-in name or password
+ * before its site is never recorded as a link, whoever wrote it: only its site is noted.
+ */
 function recordUrl(side: ProvenanceValues, value: string): string | undefined {
   const key = urlKey(value);
-  const host = parsedUrl(value)?.hostname;
-  if (key === undefined || host === undefined) {
+  const url = parsedUrl(value);
+  if (key === undefined || url === undefined) {
     return undefined;
   }
-  add({ side, kind: 'urls', value: key });
-  add({ side, kind: 'hosts', value: hostKey(host) });
-  return hostKey(host);
+  if (!carriesSignIn(url)) {
+    add({ side, kind: 'urls', value: key });
+  }
+  add({ side, kind: 'hosts', value: hostKey(url.hostname) });
+  return hostKey(url.hostname);
 }
 
 /** Records the links, sites and addresses in a text; returns the `site:` and `address:` keys it found. */
@@ -465,16 +479,22 @@ export function recordSearchResults(input: { provenance: ChatProvenance; texts: 
 export function recordPageImageUrls(input: { provenance: ChatProvenance; urls: readonly string[] }): void {
   for (const url of input.urls) {
     const key = urlKey(url);
-    if (key !== undefined) {
+    const parsed = parsedUrl(url);
+    if (key !== undefined && parsed !== undefined && !carriesSignIn(parsed)) {
       add({ side: input.provenance.page_pictures, kind: 'urls', value: key });
     }
   }
 }
 
-/** Whether a link names only a site, with no path or query: it adds nothing to the site, so the site's trust holds. */
+/** Whether a link names only a site, with no path, query or sign-in: it adds nothing, so the site's trust holds. */
 function isBareSite(url: string): boolean {
   const parsed = parsedUrl(url);
-  return parsed !== undefined && (parsed.pathname === '' || parsed.pathname === '/') && parsed.search === '';
+  return (
+    parsed !== undefined &&
+    (parsed.pathname === '' || parsed.pathname === '/') &&
+    parsed.search === '' &&
+    !carriesSignIn(parsed)
+  );
 }
 
 /**

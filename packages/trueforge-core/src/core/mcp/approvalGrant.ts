@@ -4,6 +4,7 @@ import {
   CHAT_GRANTABLE_CONSEQUENCE_REASONS,
   GRANT_BARRED_TIER_REASONS,
   OWN_CALENDAR_CHANGE_REASONS,
+  OWN_DRIVE_WRITE_REASONS,
 } from '../permissions/tier';
 import {
   SANDBOX_APPLY_PATCH_TOOL_NAME,
@@ -91,6 +92,9 @@ export function allowsChatApproval(info: InternalToolCallInfo): boolean {
   if (isOwnCalendarChange(info)) {
     return true;
   }
+  if (isOwnDriveWrite(info)) {
+    return true;
+  }
   if (info.tier_reason !== undefined && CHAT_GRANTABLE_CONSEQUENCE_REASONS.has(info.tier_reason)) {
     return true;
   }
@@ -100,6 +104,11 @@ export function allowsChatApproval(info: InternalToolCallInfo): boolean {
 /** A change to the person's own calendar with no guests; a guest change never qualifies, whatever its effect. */
 function isOwnCalendarChange(info: InternalToolCallInfo): boolean {
   return info.tier_reason !== undefined && OWN_CALENDAR_CHANGE_REASONS.has(info.tier_reason);
+}
+
+/** A Drive write to the person's own files; it sends nothing to anyone, so it qualifies like an own-calendar change. */
+function isOwnDriveWrite(info: InternalToolCallInfo): boolean {
+  return info.tier_reason !== undefined && OWN_DRIVE_WRITE_REASONS.has(info.tier_reason);
 }
 
 /** A send, destructive, install or hint-escalated call is never covered by an argument-blind grant. */
@@ -133,7 +142,7 @@ export function allowsToolGrant(info: InternalToolCallInfo): boolean {
   ) {
     return false;
   }
-  return isOwnCalendarChange(info) || (info.type === 'mcp' && info.effect === 'inspect');
+  return isOwnCalendarChange(info) || isOwnDriveWrite(info) || (info.type === 'mcp' && info.effect === 'inspect');
 }
 
 /**

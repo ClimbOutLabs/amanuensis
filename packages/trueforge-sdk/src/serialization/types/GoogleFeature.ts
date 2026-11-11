@@ -5,8 +5,8 @@ import * as core from "../../core/index.js";
 import type * as serializers from "../index.js";
 
 export const GoogleFeature: core.serialization.Schema<serializers.GoogleFeature.Raw, TrueForge.GoogleFeature> =
-    core.serialization.enum_(["gmail_read", "gmail_compose", "calendar_read", "calendar_write"]);
+    core.serialization.enum_(["gmail_read", "gmail_compose", "calendar_read", "calendar_write", "drive_files"]);
 
 export declare namespace GoogleFeature {
-    export type Raw = "gmail_read" | "gmail_compose" | "calendar_read" | "calendar_write";
+    export type Raw = "gmail_read" | "gmail_compose" | "calendar_read" | "calendar_write" | "drive_files";
 }
