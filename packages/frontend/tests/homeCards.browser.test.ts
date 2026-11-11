@@ -102,29 +102,28 @@ function keyOf(card: TourCard): CardKey {
   return key;
 }
 
-/** Answers the Google status read as an account with mail and calendar granted; nothing leaves this machine. */
-async function asGoogleConnected(page: Page): Promise<void> {
+/**
+ * Answers the Google status read as an account with mail and calendar granted; nothing leaves this machine.
+ * The real answer is read once up front, because a read made inside the route is lost when the page reloads.
+ */
+async function asGoogleConnected({ page, origin }: { page: Page; origin: string }): Promise<void> {
+  const response = await page.request.get(`${origin}/api/v1/user/settings/google/status`);
+  const body: unknown = await response.json();
+  const data = typeof body === 'object' && body !== null && 'data' in body ? body.data : undefined;
+  if (typeof data !== 'object' || data === null || !('features' in data) || !Array.isArray(data.features)) {
+    throw new Error('the Google status answer has no list of features');
+  }
+  const features: unknown[] = data.features;
+  const connected = {
+    ...body,
+    data: {
+      ...data,
+      state: 'connected',
+      features: features.map(item => (typeof item === 'object' && item !== null ? { ...item, granted: true } : item)),
+    },
+  };
   await page.route('**/api/v1/user/settings/google/status', async route => {
-    const response = await route.fetch();
-    const body: unknown = await response.json();
-    const data = typeof body === 'object' && body !== null && 'data' in body ? body.data : undefined;
-    if (typeof data !== 'object' || data === null || !('features' in data) || !Array.isArray(data.features)) {
-      throw new Error('the Google status answer has no list of features');
-    }
-    const features: unknown[] = data.features;
-    await route.fulfill({
-      response,
-      json: {
-        ...body,
-        data: {
-          ...data,
-          state: 'connected',
-          features: features.map(item =>
-            typeof item === 'object' && item !== null ? { ...item, granted: true } : item,
-          ),
-        },
-      },
-    });
+    await route.fulfill({ json: connected });
   });
 }
 
@@ -198,7 +197,7 @@ test(
       for (const home of HOMES) {
         const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
         const page = await context.newPage();
-        if (home.google) await asGoogleConnected(page);
+        if (home.google) await asGoogleConnected({ page, origin });
         const shotStep = home.google ? 'cards-with-google' : 'cards';
 
         for (const topic of [null, ...HOME_TOPIC_IDS]) {
