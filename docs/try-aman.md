@@ -8,7 +8,7 @@ Setting it up takes about 45 minutes. Most of that is waiting while things downl
 
 - A computer with 16 GB of memory (8 GB is the bare minimum, and the first install is slow there) and free disk space: about 20 GB on a Mac, about 45 GB on Linux. It stays on while you use Aman.
 - **Mac:** [Docker Desktop](https://www.docker.com/products/docker-desktop/). After installing it, open Docker Desktop, go to Settings, Resources, and set Memory to 8 GB or more. Then click Apply.
-- **Windows:** Windows 11 (or Windows 10 with the latest updates). You will install Ubuntu inside Windows (called WSL) and Docker Desktop; the steps are below.
+- **Windows:** this page is not for you. Follow the [Windows guide](install-windows.md) instead: one download, Aman Setup, does the install. Once you have signed in, come back to [Step 4](#step-4-add-your-ai-model).
 - **Linux (Ubuntu or Debian):** nothing extra. The installer offers to install Docker for you. Your user must be allowed to use `sudo`.
 - An API key for an AI model (Together AI, OpenAI, Anthropic or Google Gemini). You create it on that company's website; it is pasted into Aman after the install. This is the only part that costs money, and it is billed by that company, not by Aman.
 
@@ -17,7 +17,6 @@ Setting it up takes about 45 minutes. Most of that is waiting while things downl
 Open a terminal.
 
 - Mac: open the **Terminal** app (press Command+Space and type "Terminal").
-- Windows: first install Ubuntu. Open **PowerShell as administrator** and run `wsl --install`, then restart the computer and open the **Ubuntu** app once so it asks you for a username and password. Then install Docker Desktop, open it, go to Settings, Resources, WSL integration, and turn on the switch for Ubuntu. From now on, do everything in the **Ubuntu** app, never in PowerShell.
 - Linux: open your terminal.
 
 Then run these three lines, one at a time. Replace `vX.Y.Z` with the version the person who sent you this told you to use.
@@ -29,8 +28,6 @@ git checkout vX.Y.Z
 ```
 
 On a Mac, the first `git` command may show a window offering to install "command line developer tools". Click Install and wait, then run the line again.
-
-On Windows, keep the code inside Ubuntu (just run the lines as they are; do not go to a folder like `/mnt/c`).
 
 ## Step 2: run the installer
 
@@ -87,7 +84,7 @@ Aman keeps running in the background, also after you restart the computer (Docke
 
 ## If something goes wrong
 
-Open a new terminal window and run:
+On Windows, run **Check Aman** from the Start menu. On a Mac or Linux, open a new terminal window and run:
 
 ```
 aman doctor
@@ -105,7 +102,7 @@ A few common ones:
 
 ## Updating
 
-When a new version comes out, run (replace the version):
+On Windows, run **Update Aman** from the Start menu. On a Mac or Linux, when a new version comes out, run (replace the version):
 
 ```
 cd amanuensis
@@ -118,7 +115,7 @@ It backs up your data first, builds the new version (about 15 minutes), and swit
 
 ## Removing Aman
 
-To remove everything, including your chats and memory:
+On Windows, choose **Remove Aman** in the Start menu; the [Windows guide](install-windows.md#removing-aman) walks through its two questions. On a Mac or Linux, to remove everything, including your chats and memory:
 
 ```
 cd amanuensis
@@ -132,6 +129,22 @@ docker image prune -a
 ```
 
 Your backups stay in `~/.amanuensis/backups`; delete that folder too if you do not want them. You can also uninstall Docker Desktop (Mac, Windows) if you do not use it for anything else.
+
+## Go back to an earlier backup
+
+If chats or settings were lost or changed by mistake, run:
+
+```
+aman restore
+```
+
+It shows your backups, newest first, and asks:
+
+```
+Restore which backup (number):
+```
+
+Type a number. It tells you what will be replaced and asks you to type `yes`. The password goes back to the one you had when the backup was made. Before it changes anything it saves a copy of what you have now and shows you where that copy is. If something goes wrong it puts everything back and says so. To use the newest backup without the list, run `aman restore --latest`.
 
 ## Good to know
 
