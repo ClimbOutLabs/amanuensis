@@ -24,17 +24,13 @@ import { z } from 'zod';
 
 import { loadAliasIndex, pagesNamed } from './aliasIndex';
 import { localDay } from './localDay';
-import { FactMarkerSchema } from './memoryNotes';
-import { neutralizeReservedText, singleLine } from './memoryPageLoader';
 import { commitPageChange } from './memoryPageWriter';
 import {
   addFact,
   freePageSlug,
-  hasLineBreak,
   kindHasSection,
   moveFactToEarlier,
   newMemoryPage,
-  pageFacts,
   PageKindSchema,
   readMemoryPage,
   writeMemoryPage,
@@ -43,13 +39,18 @@ import {
   type PageKind,
   type PageSection,
 } from './memoryPages';
-import { foldName } from './pageSlug';
+import {
+  cleanLine,
+  currentFactsSaying,
+  MAX_FACT_CHARS,
+  MAX_NAME_CHARS,
+  sameText,
+  sectionAfterChange,
+  statementWith,
+  uniqueFactId,
+} from './pageStatements';
 import { TurnReadWatch } from './turnReadWatch';
 import { VaultBusyError, VaultLockLostError } from './vaultLock';
-
-/** The longest fact or name a tool accepts, in characters. A page line is one short thought. */
-const MAX_FACT_CHARS = 500;
-const MAX_NAME_CHARS = 120;
 
 const AboutSchema = z
   .string()
@@ -102,7 +103,6 @@ interface Refusal {
   ok: false;
   message: string;
 }
-type Cleaned = { ok: true; text: string } | Refusal;
 
 function refusal(message: string): Refusal {
   return { ok: false, message };
@@ -119,38 +119,6 @@ const READ_OUTSIDE_TEXT_MESSAGE =
 /** The sentence the model gets when the memory shown to it holds text from outside the chat. */
 const MEMORY_HOLDS_OUTSIDE_TEXT_MESSAGE =
   'Nothing was saved, because the memory shown with this message holds text that came from mail, the web, a file or a guess, and that text could have steered what you wrote. Tell the user in one plain line that you did not save it, and that they can open the page and add the line by hand.';
-
-/**
- * One line of plain text that can stand as a fact or a name. Line breaks and hidden-comment marks are refused,
- * invisible characters are dropped, and the host's reserved drafting lines are refused rather than changed, so
- * a saved line is exactly what the person said.
- */
-function cleanLine({ raw, what, limit }: { raw: string; what: string; limit: number }): Cleaned {
-  if (hasLineBreak(raw)) {
-    return refusal(`Nothing was saved. The ${what} must be one line. Remove the line breaks and try again.`);
-  }
-  const text = singleLine(raw.replace(/\t/g, ' ')).replace(/ {2,}/g, ' ');
-  if (text === '') {
-    return refusal(`Nothing was saved. The ${what} was empty. Write a few words and try again.`);
-  }
-  if (text.includes('<!--') || text.includes('-->')) {
-    return refusal(`Nothing was saved. The ${what} cannot contain "<!--" or "-->". Remove them and try again.`);
-  }
-  if (neutralizeReservedText(text) !== text) {
-    return refusal(
-      `Nothing was saved. The ${what} contains words the host keeps for itself. Say it in other words and try again.`,
-    );
-  }
-  if (text.length > limit) {
-    return refusal(`Nothing was saved. The ${what} is too long. Shorten it to one short line and try again.`);
-  }
-  return { ok: true, text };
-}
-
-/** Two lines of text are the same fact when only case, accents and spacing differ. */
-function sameText(a: string, b: string): boolean {
-  return foldName(a).replace(/\s+/g, ' ').trim() === foldName(b).replace(/\s+/g, ' ').trim();
-}
 
 interface PageRef {
   kind: PageKind;
@@ -187,28 +155,8 @@ async function locatePage({
   return { ok: true, found: page === undefined ? undefined : { kind: only.kind, slug: only.slug, page } };
 }
 
-/** The current facts on a page (anything not already under Earlier) whose text is this text. */
-function currentFactsSaying({ page, text }: { page: MemoryPage; text: string }): FactLocation[] {
-  return pageFacts(page).filter(at => at.section.name !== 'Earlier' && sameText(at.fact.text, text));
-}
-
-function uniqueId({ page, newId }: { page: MemoryPage; newId: () => string }): string {
-  const taken = new Set(pageFacts(page).map(({ fact }) => fact.marker.id));
-  let id = newId();
-  while (taken.has(id)) {
-    id = newId();
-  }
-  return id;
-}
-
 function saidFact({ text, id, today }: { text: string; id: string; today: string }) {
-  return { text, marker: FactMarkerSchema.parse({ kind: 'fact', id, src: 'you_said', since: today }) };
-}
-
-/** The section a fact that is being replaced goes back to: its own, except where a confirmed fact does not belong. */
-function sectionAfterChange(at: FactLocation): PageSection {
-  const { name } = at.section;
-  return name === undefined || name === 'Unconfirmed' ? 'Now' : name;
+  return statementWith({ text, id, src: 'you_said', since: today });
 }
 
 function clip(text: string): string {
@@ -408,7 +356,7 @@ export class MemoryPagesToolSet extends LocalToolMCP {
         const slug = found?.slug ?? (await freePageSlug({ vaultDir: this.#options.vaultDir, kind, title }));
         const withFact = addFact(page, {
           section,
-          fact: saidFact({ text: text.text, id: uniqueId({ page, newId }), today }),
+          fact: saidFact({ text: text.text, id: uniqueFactId({ page, newId }), today }),
         });
         await write({ kind, slug, page: withFact });
         return { saved: true, activity: `Noted about ${title}: ${text.text}` };
@@ -425,7 +373,7 @@ export class MemoryPagesToolSet extends LocalToolMCP {
     if (!after.ok) {
       return { saved: false, message: after.message };
     }
-    if (sameText(before.text, after.text)) {
+    if (sameText({ a: before.text, b: after.text })) {
       return {
         saved: false,
         unchanged: true,
@@ -445,7 +393,7 @@ export class MemoryPagesToolSet extends LocalToolMCP {
         const moved = moveFactToEarlier(ref.page, { at, until: today });
         const replaced = addFact(moved, {
           section: sectionAfterChange(at),
-          fact: saidFact({ text: after.text, id: uniqueId({ page: moved, newId }), today }),
+          fact: saidFact({ text: after.text, id: uniqueFactId({ page: moved, newId }), today }),
         });
         await write({ kind: ref.kind, slug: ref.slug, page: replaced });
         return { saved: true, activity: `Changed a note about ${title}: ${after.text}` };
