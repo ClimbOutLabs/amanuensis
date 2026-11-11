@@ -22,7 +22,7 @@ Inside Aman, click **Help, I'm stuck** at the top of the screen. The guide check
 
 **"Docker is installed but not running."** Open Docker Desktop and wait until it says it is running. Then try again.
 
-**Docker has too little memory.** Aman needs Docker to have at least 6 GB. In Docker Desktop, open Settings, then Resources, set Memory to 8 GB, and click Apply. On Linux, close other programs or add swap space.
+**Docker has too little memory.** Aman needs Docker to have at least 6 GB. In Docker Desktop, open Settings, then Resources, set Memory to 8 GB, and click Apply. On Linux, close other programs.
 
 **Permission denied on the Docker socket (Linux).** After a fresh Docker install, your user joins the `docker` group, but open terminals do not know yet. Sign out and back in, or restart the computer.
 
@@ -44,13 +44,13 @@ Inside Aman, click **Help, I'm stuck** at the top of the screen. The guide check
 
 **Signing in says the email is not allowed.** Use exactly the email you typed during the install, in lowercase.
 
-**Sign-in or certificate checks fail after the computer slept.** Check that the computer's clock is right. Turn on automatic time in its settings, then run `aman doctor` again.
+**Sign-in or certificate checks fail after the computer slept.** Check that the computer's clock shows the right time, then run `aman doctor` again.
 
 **You forgot your password.** On the computer where Aman is installed, run `aman password`. It asks for a new password twice and signs you out everywhere. To change a password you still know, see [Your sign-in and password](../packages/trueforge/guide/topics/account.md).
 
 ## Using Aman from a phone or another computer
 
-**The page says the connection is not private.** That device does not trust your computer yet. On the computer itself, use the `http://localhost` address instead. On a phone or another computer, do the trust step once: the install printed a line like "Trust this computer on each device", with an address that ends in `/trust`. Open that address on the device and follow the steps for it. [Try Aman](try-aman.md) has the details.
+**The page says the connection is not private.** That device does not trust your computer yet. On the computer itself, use the `http://localhost` address instead. On a phone or another computer, do the trust step once: the install printed a line that starts "Instead, open this page once on that device", with an address that ends in `/trust`. Open that address on the device and follow the steps for it. On a Mac, Aman opens on that Mac only, so other devices cannot reach it. [Try Aman](try-aman.md) has the details.
 
 **The phone cannot reach Aman at all.** The phone must be on the same Wi-Fi as the computer. Run `aman doctor network`. If it says this computer's address changed, run `aman doctor network --fix` to add the new address. On Windows with Aman Setup, run `aman network open` in PowerShell. [Using Aman from your phone](../packages/trueforge/guide/topics/phone.md) covers the rest.
 

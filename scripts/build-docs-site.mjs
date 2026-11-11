@@ -211,25 +211,19 @@ export function siteFrontMatter(markdown) {
 }
 
 /** Parts of the docs home for people working on Aman's code. GitHub shows them; the website does not. */
-export const SITE_LEAVES_OUT = ['The agent harness (TrueForge)', 'Measuring changes', 'Project'];
+export const SITE_LEAVES_OUT = ['Developer guide', 'Reference', 'Project'];
 
 /**
- * The docs home as the website shows it: without the sections and subsections in SITE_LEAVES_OUT,
- * and without their rows in the table of guides. Their pages are still built, so links to them work.
+ * The docs home as the website shows it: without the sections in SITE_LEAVES_OUT, and without their
+ * rows in the table of guides. Their pages are still built, so links to them work.
  */
 export function siteDocsHome(markdown) {
   const out = [];
   let skipping = false;
-  let skipLevel;
   for (const line of markdown.split('\n')) {
     const heading = /^## (.+)$/.exec(line);
-    const bold = /^\*\*(.+)\*\*$/.exec(line.trim());
     if (heading) {
       skipping = SITE_LEAVES_OUT.includes(heading[1].trim());
-      skipLevel = skipping ? 'section' : undefined;
-    } else if (bold && skipLevel !== 'section') {
-      skipping = SITE_LEAVES_OUT.includes(bold[1]);
-      skipLevel = skipping ? 'group' : undefined;
     }
     const guideRow = /^(?:\|\s*|-\s+)\[([^\]]+)\]\(#[^)]*\)/.exec(line);
     if (skipping || (guideRow && SITE_LEAVES_OUT.includes(guideRow[1]))) {

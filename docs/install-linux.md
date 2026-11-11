@@ -1,6 +1,6 @@
 # Install Aman on Linux
 
-This page installs Aman on Ubuntu or Debian, from the latest release. It takes about 45 minutes. Most of that is waiting while things download and build. You answer a few questions at the start and type your password a few times.
+This page installs Aman on Ubuntu or Debian, from the latest release. It takes about 45 minutes. Most of that is waiting while things download and build. You answer a few questions and choose a password at the start. Later you type your computer password when a step needs it.
 
 On a Mac, follow [Install on a Mac](install-mac.md). On Windows, follow [Install on Windows](install-windows.md).
 
@@ -32,7 +32,7 @@ VERSION=${VERSION##*/}
 echo "Installing Aman $VERSION"
 ```
 
-It prints the version, such as `Installing Aman v0.2.0`. If it prints `Installing Aman releases` instead, there is no release yet; ask the person who sent you this guide which version to use.
+It prints the version, such as `Installing Aman v0.2.0`. If it prints `Installing Aman releases` instead, there is no release yet. Stop here: Aman cannot be installed until the first release is out. Check the [releases page](https://github.com/ClimbOutLabs/amanuensis/releases) later, then start this step again.
 
 Then get that version of the code:
 
@@ -49,21 +49,24 @@ Git may say "You are in 'detached HEAD' state". That is expected: you have one f
 ./installer/install.sh
 ```
 
-It first checks your computer. If Docker is missing, it offers to install it; type `y` and your password. Then it asks:
+It first checks your computer, then asks:
 
 1. **Name for this instance [main]:** press Enter to name it main.
 2. **Your email, used to sign in:** type your email in lowercase. It is only your sign-in name; nothing is sent to it.
 3. **What should Aman call you?** Type your name, or press Enter to use the part of your email before the @.
-4. **Back up automatically every day? [Y/n]** Press Enter.
-5. It shows the plan: what it will download and build. **Go ahead? [Y/n]** Press Enter.
-6. **Password:** choose a password of at least 8 characters, with a number and a symbol such as @ or #. Type it twice. Nothing shows while you type.
+4. **Connect a calendar? [y/N]** Press Enter. You can connect one later in Aman.
+5. **Connect an email account? (optional) [y/N]** Press Enter. You can do this later too.
+6. **Back up automatically every day? [Y/n]** Press Enter.
+7. It shows the plan: what it will download and build. **Go ahead? [Y/n]** Press Enter.
+8. If Docker is missing: **Install Docker Engine now? [y/N]** Type `y`, then your computer password.
+9. **Enter a password for** your email: choose a password for Aman of at least 8 characters, with a number and a symbol such as @ or #. Type it, then type it again. Nothing shows while you type.
 
 Then it works on its own for 20 to 40 minutes. You see one line per step, with the time it has taken. "Building the Aman app" is the longest step; 15 minutes is normal.
 
-Near the end it asks two more questions. Type `y` for both, then your computer password when it asks:
+Near the end it asks one or two more questions. Type `y` each time, then your computer password when it asks:
 
 - **Set up the sandbox now? [y/N]** Type `y`. This gives Aman a safe place to run code. If you press Enter here, the install stops; run the installer again and type `y`.
-- **Make Docker start with this computer? [y/N]** Type `y`.
+- **Make Docker start with this computer? [y/N]** It asks this only if Docker does not start on its own yet. Type `y`.
 
 When it is done, it prints a box that starts with **Ready. Instance main is running.** and lists the addresses to open.
 
@@ -79,7 +82,7 @@ Open a browser on this computer and go to:
 http://localhost:8791
 ```
 
-Click **Let's Get Started**, then type the email and password you chose.
+Click **Sign in**, then type the email and password you chose.
 
 To use Aman from your phone, see [Step 3 of Try Aman](try-aman.md#step-3-open-aman-and-sign-in).
 

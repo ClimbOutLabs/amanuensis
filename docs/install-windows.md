@@ -14,7 +14,7 @@ On a Mac, follow [Install on a Mac](install-mac.md). On Linux, follow [Install o
 
 ## Install
 
-**1. Download Aman Setup.** Get `Aman-Setup.exe` from the [latest release](https://github.com/ClimbOutLabs/amanuensis/releases/latest).
+**1. Download Aman Setup.** Get `Aman-Setup.exe` from the [latest release](https://github.com/ClimbOutLabs/amanuensis/releases/latest). If that page lists no release, Aman Setup is not out yet; check again later.
 
 **2. Run it.** Double-click `Aman-Setup.exe`. A window opens where Aman Setup shows what it is doing and asks its questions.
 
@@ -57,7 +57,7 @@ Near the end, Windows asks two things in its own boxes. Choose **Yes** both time
 
 Your Start menu now has **Aman**, **Check Aman**, **Update Aman**, **Backups** and **Remove Aman**, and **Use Aman on my phone** if you answered yes to the phone question.
 
-Then follow [After you install](../README.md#after-you-install) to name your assistant, add a model key if you skipped it, and connect your email and calendar.
+Then [add your AI model](try-aman.md#step-4-add-your-ai-model) if you skipped the key, and try your first chat.
 
 ## Using Aman day to day
 

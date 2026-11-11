@@ -1,6 +1,6 @@
 # Install Aman on a Mac
 
-This page installs Aman on a Mac, from the latest release. It takes about 45 minutes. Most of that is waiting while things download and build. You answer a few questions at the start and type your password once near the end.
+This page installs Aman on a Mac, from the latest release. It takes about 45 minutes. Most of that is waiting while things download and build. You answer a few questions and choose a password at the start. Then it runs on its own.
 
 On Linux, follow [Install on Linux](install-linux.md). On Windows, follow [Install on Windows](install-windows.md).
 
@@ -27,7 +27,7 @@ VERSION=${VERSION##*/}
 echo "Installing Aman $VERSION"
 ```
 
-It prints the version, such as `Installing Aman v0.2.0`. If it prints `Installing Aman releases` instead, there is no release yet; ask the person who sent you this guide which version to use.
+It prints the version, such as `Installing Aman v0.2.0`. If it prints `Installing Aman releases` instead, there is no release yet. Stop here: Aman cannot be installed until the first release is out. Check the [releases page](https://github.com/ClimbOutLabs/amanuensis/releases) later, then start this step again.
 
 Then get that version of the code:
 
@@ -51,9 +51,11 @@ It first checks your Mac, then asks:
 1. **Name for this instance [main]:** press Return to name it main.
 2. **Your email, used to sign in:** type your email in lowercase. It is only your sign-in name; nothing is sent to it.
 3. **What should Aman call you?** Type your name, or press Return to use the part of your email before the @.
-4. **Back up automatically every day? [Y/n]** Press Return.
-5. It shows the plan: what it will download and build. **Go ahead? [Y/n]** Press Return.
-6. **Password:** choose a password of at least 8 characters, with a number and a symbol such as @ or #. Type it twice. Nothing shows while you type.
+4. **Connect a calendar? [y/N]** Press Return. You can connect one later in Aman.
+5. **Connect an email account? (optional) [y/N]** Press Return. You can do this later too.
+6. **Back up automatically every day? [Y/n]** Press Return.
+7. It shows the plan: what it will download and build. **Go ahead? [Y/n]** Press Return.
+8. **Enter a password for** your email: choose a password of at least 8 characters, with a number and a symbol such as @ or #. Type it, then type it again. Nothing shows while you type.
 
 Then it works on its own for 20 to 40 minutes. You see one line per step, with the time it has taken. "Building the Aman app" is the longest step; 15 minutes is normal.
 
@@ -69,9 +71,9 @@ Open a browser on the Mac and go to:
 http://localhost:8791
 ```
 
-Click **Let's Get Started**, then type the email and password you chose.
+Click **Sign in**, then type the email and password you chose.
 
-To use Aman from your phone, see [Step 3 of Try Aman](try-aman.md#step-3-open-aman-and-sign-in).
+On a Mac, Aman opens on this Mac only. Phones and other computers cannot reach it.
 
 ## Next
 

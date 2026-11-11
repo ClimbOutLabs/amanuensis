@@ -80,7 +80,7 @@ git checkout "$VERSION"
 aman upgrade
 ```
 
-The second and third lines ask GitHub which release is the newest. Always update to a release, not to the code that is still being worked on.
+The second and third lines ask GitHub which release is the newest. Always update to a release, not to the code that is still being worked on. If the `git checkout` line fails, there is no newer release, and nothing was changed.
 
 | Command                | What it does                                                                                              |
 | ---------------------- | --------------------------------------------------------------------------------------------------------- |
@@ -169,7 +169,7 @@ On a PC set up with Aman Setup, type these in **PowerShell**. The Start menu ent
 | `aman upgrade`       | Update Aman to the newest version                                                                                      |
 | `aman verify FILE`   | Check a downloaded file against its signed release record                                                              |
 | `aman install`       | Set Aman up on this computer for the first time                                                                        |
-| `aman adopt`         | Move a PC set up with Aman Setup onto the `aman` command                                                               |
+| `aman adopt`         | Let the `aman` command manage an Aman that Aman Setup installed                                                        |
 | `aman uninstall`     | Remove Aman from this computer. It asks before it deletes your data and keeps your backups unless you say otherwise    |
 
 The [Windows guide](install-windows.md) walks through Aman Setup.

@@ -2,7 +2,7 @@
 
 Aman is a private assistant that runs on your own computer. Your chats, files and memory stay on your machine. What leaves it is what you send to the AI model you choose, and the words of any web search, which go to the Parallel search service.
 
-Setting it up takes about 45 minutes. Most of that is waiting while things download and build; you answer five questions at the start and type your password once near the end.
+Setting it up takes about 45 minutes. Most of that is waiting while things download and build; you answer a few questions and choose a password at the start. Then it runs on its own.
 
 ## What you need
 
@@ -30,17 +30,19 @@ On the computer you installed it on, open a browser and go to:
 http://localhost:8791
 ```
 
-Click **Let's Get Started**, then enter the email and the password you chose. You land in Settings, Models.
+Click **Sign in**, then enter the email and the password you chose.
 
-**From your phone or another computer in your home:** the install printed a line like "Trust this computer on each device: http://…/trust". Open that address on the phone (or scan the square code that was printed). The page explains, for iPhone, Android, Mac and Windows, how to make that device trust your computer. You do this once per device. After that, open the https address from the "Open" list (the one that starts with `https://` and ends in `:8443`). An iPhone says the profile is "Not Signed"; that is expected for a profile you made yourself.
+**On a Mac,** Aman opens on that Mac only. Phones and other computers cannot reach it.
+
+**On Linux, from your phone or another computer in your home:** the install printed a line that starts "Instead, open this page once on that device and follow its steps", with an address that ends in `/trust`. Open that address on the phone (or scan the square code that was printed). The page explains, for iPhone, Android, Mac and Windows, how to make that device trust your computer. You do this once per device. After that, open the https address from the "Open" list (the one that starts with `https://` and ends in `:8443`). An iPhone says the profile is "Not Signed"; that is expected for a profile you made yourself.
 
 ## Step 4: add your AI model
 
-Aman does not come with a model. In **Settings, Models**, find the company you have a key for (Together AI, OpenAI, Anthropic, Google Gemini), click **Configure**, paste the key, and save. Its models now appear in the model picker at the bottom of the chat screen.
+Aman does not come with a model. In **Settings, Models**, find the company you have a key for (Together AI, OpenAI, Anthropic, Google Gemini), click **Configure**, paste the key, and click **Create**. Its models now appear in the model picker at the bottom of the chat screen.
 
 ## Step 5: first things to try
 
-Click **New Chat**, pick a model in the picker, and try:
+Click **New chat**, pick a model in the picker, and try:
 
 - **A chat.** "Help me plan a week of dinners for two people, one vegetarian."
 - **Running code.** "Write a small Python program that prints the first 20 prime numbers, run it, and show me the output." Aman runs it in a sealed-off area on your computer; it cannot reach the internet or your files.
@@ -57,7 +59,7 @@ On Windows, run **Check Aman** from the Start menu. On a Mac or Linux, open a ne
 aman doctor
 ```
 
-It checks everything and prints one **Next:** line per problem, with the command that fixes it. If that does not help, copy the whole output of `aman doctor` and send it to the person who gave you this guide, together with the log file named in the red line, if there was one. The output contains no passwords or chats.
+It checks everything and prints one **Next:** line per problem, with the command that fixes it. If that does not help, follow the **Still stuck** steps in [Troubleshooting](troubleshooting.md).
 
 A few common ones:
 
@@ -72,13 +74,15 @@ A few common ones:
 On Windows, run **Update Aman** from the Start menu. On a Mac or Linux, run these lines in the folder you installed from. They find the newest release, get its code, and update Aman to it:
 
 ```
-cd amanuensis
+cd ~/amanuensis
 VERSION=$(curl -fsSL -o /dev/null -w '%{url_effective}' https://github.com/ClimbOutLabs/amanuensis/releases/latest)
 VERSION=${VERSION##*/}
 git fetch --tags
 git checkout "$VERSION"
 aman upgrade
 ```
+
+Here the folder is `~/amanuensis`; use your own folder. If the `git checkout` line fails, there is no newer release, and nothing was changed.
 
 It backs up your data first, builds the new version (about 15 minutes), and switches over. If anything fails, it puts the old version back on its own.
 
@@ -87,17 +91,11 @@ It backs up your data first, builds the new version (about 15 minutes), and swit
 On Windows, choose **Remove Aman** in the Start menu; the [Windows guide](install-windows.md#removing-aman) walks through its two questions. On a Mac or Linux, to remove everything, including your chats and memory:
 
 ```
-cd amanuensis
+cd ~/amanuensis
 ./installer/install.sh instance remove main --purge-data
 ```
 
-It asks you to type `main` to confirm. Then, to free the disk space Aman's downloads used:
-
-```
-docker image prune -a
-```
-
-Your backups stay in `~/.amanuensis/backups`; delete that folder too if you do not want them. You can also uninstall Docker Desktop (Mac, Windows) if you do not use it for anything else.
+It asks you to type `main` to confirm. Your backups stay in `~/.amanuensis/backups`; delete that folder too if you do not want them. You can also uninstall Docker Desktop (Mac, Windows) if you do not use it for anything else.
 
 ## Go back to an earlier backup
 
@@ -119,4 +117,4 @@ Type a number. It tells you what will be replaced and asks you to type `yes`. Th
 
 - Nothing is sent anywhere except to the model company you chose, and to Parallel (the search service Aman uses by default) when Aman searches the web. Parallel sees the search words and your internet address. To stop it, remove the `parallel-web` connector in Settings, or turn on Offline mode.
 - Backups are made every night at 03:30 into `~/.amanuensis/backups` on your computer, keeping the last 7.
-- Each person gets a new instance.
+- Each person gets their own Aman, called an instance. See [Adding people](install.mdx#adding-people).
