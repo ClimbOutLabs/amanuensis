@@ -216,7 +216,7 @@ Options
   --home-network        on a cloud server, still open Aman at its private addresses (other customers share them, so the default there is this computer only)
   --port N              the port for the app on this computer
   --login-port N        the port for the sign-in service on this computer
-  --tls local|off|caddy  https on your network with a certificate made on this computer (default), plain http, or
+  --tls local|caddy     https on your network with a certificate made on this computer (default), or
                         https at --public-url and --login-url with Caddy on this computer (the system's Caddy package, Let's Encrypt)
   --public-ip ADDRESS   this computer's public address, for the --tls caddy check (default: ask a lookup service)
   --confirm-name NAME   with --purge-data, the instance name typed in advance
@@ -377,6 +377,14 @@ print_signout_note() {
 }
 
 # --demo belongs to install and instance add; --reset and --fresh only to instance demo-seed.
+# An instance opened on the network is always served over https, so sign-in is never sent unprotected: --tls off is not
+# a choice anymore. An instance from before this change that still says plain http moves to https on the next run.
+check_tls_options() {
+  if [ "$(lowercase "$OPT_TLS")" = off ]; then
+    usage_die "--tls off is not a choice anymore: an instance opened on your network is served over https with a certificate Aman makes on this computer, so sign-in stays protected. Run again without --tls off."
+  fi
+}
+
 check_demo_options() {
   local seeding=0
   if [ "$COMMAND:$SUBCOMMAND" = instance:demo-seed ]; then seeding=1; fi
@@ -452,6 +460,7 @@ main() {
   parse_args "$@"
   set_paths
   trap on_exit EXIT
+  check_tls_options
   check_demo_options
   check_import_options
   check_migrate_options

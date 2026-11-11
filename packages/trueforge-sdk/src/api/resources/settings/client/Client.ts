@@ -11,6 +11,7 @@ import { MemoryRecallsClient } from "../resources/memoryRecalls/client/Client.js
 import { MemoryScreensClient } from "../resources/memoryScreens/client/Client.js";
 import { MemorySummarizeClient } from "../resources/memorySummarize/client/Client.js";
 import { ModelProvidersClient } from "../resources/modelProviders/client/Client.js";
+import { NotesClient } from "../resources/notes/client/Client.js";
 import { RunCodeClient } from "../resources/runCode/client/Client.js";
 import { SandboxProvidersClient } from "../resources/sandboxProviders/client/Client.js";
 import { SkillsClient } from "../resources/skills/client/Client.js";
@@ -37,6 +38,7 @@ export class SettingsClient {
     protected _calendar: CalendarClient | undefined;
     protected _email: EmailClient | undefined;
     protected _google: GoogleClient | undefined;
+    protected _notes: NotesClient | undefined;
 
     constructor(options: SettingsClient.Options) {
         this._options = normalizeClientOptionsWithAuth(options);
@@ -96,5 +98,9 @@ export class SettingsClient {
 
     public get google(): GoogleClient {
         return (this._google ??= new GoogleClient(this._options));
+    }
+
+    public get notes(): NotesClient {
+        return (this._notes ??= new NotesClient(this._options));
     }
 }
