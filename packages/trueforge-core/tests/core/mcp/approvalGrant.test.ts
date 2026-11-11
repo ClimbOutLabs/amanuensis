@@ -329,7 +329,6 @@ describe('a chat grant is tied to the target the card names', () => {
   it.each([
     ['a destination', { destination: 'Team notes' }],
     ['a recipient', { recipient: 'ana@example.com' }],
-    ['a site', { destination_host: 'tracker.example.com' }],
   ])('offers chat scope for a consequential action whose card names %s', (_label, target) => {
     expect(allowsChatApproval({ ...consequence('destructive_action'), tier3_card: card(target) })).toBe(true);
   });
@@ -342,6 +341,27 @@ describe('a chat grant is tied to the target the card names', () => {
       expect(allowsChatApproval(consequence(reason))).toBe(false);
     },
   );
+
+  it.each(['connector_outbound', 'destructive_action', 'mcp_destructive_hint', 'mcp_open_world_hint'])(
+    "offers no chat scope for a %s action whose card names only the connector's own address",
+    reason => {
+      const onConnector = card({ destination_host: 'tracker.example.com' });
+      expect(allowsChatApproval({ ...consequence(reason), tier3_card: onConnector })).toBe(false);
+    },
+  );
+
+  it('asks again for a second delete through the same connector when neither card names what is deleted', () => {
+    const onConnector = card({ destination_host: 'tracker.example.com' });
+    const first = { ...consequence('mcp_destructive_hint'), tier3_card: onConnector };
+    const second = { ...consequence('mcp_destructive_hint'), tier3_card: onConnector };
+    const effective = effectiveToolAdmissions({
+      calls: [toolCall('second', second)],
+      decisions: new Map(),
+      chatApprovalGrants: new Set([approvalGrantKey(first)]),
+      implementationPlanGrants: new Set(),
+    });
+    expect(effective.get('second')).toEqual({ decision: undefined, admission_provenance: { source: 'automatic' } });
+  });
 
   it.each(['schedule_write', 'persona_write'])('offers no chat scope for a %s card', reason => {
     expect(allowsChatApproval({ ...consequence(reason), tier3_card: card({}) })).toBe(false);

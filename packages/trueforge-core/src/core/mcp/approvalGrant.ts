@@ -99,9 +99,10 @@ export function allowsChatApproval(info: InternalToolCallInfo): boolean {
 }
 
 /**
- * Whether the card names who or where the action goes: a destination, a recipient, a site, or the people a
- * mail draft is addressed to. An action whose card names none has nothing for a chat grant to be tied to: the
- * grant would cover any later call of the tool, whatever it carries.
+ * Whether the card names who or where the action goes: a destination, a recipient, or the people a mail draft
+ * is addressed to. An action whose card names none has nothing for a chat grant to be tied to: the grant would
+ * cover any later call of the tool, whatever it carries. The connector's own address does not count: it is the
+ * same on every call to that connector, so it tells one action from another no better than the tool name.
  */
 function cardNamesTarget(info: InternalToolCallInfo): boolean {
   const card = info.tier3_card ?? null;
@@ -109,9 +110,7 @@ function cardNamesTarget(info: InternalToolCallInfo): boolean {
   const mailRecipients = mail === null ? 0 : mail.to.length + mail.cc.length + mail.bcc.length;
   return (
     mailRecipients > 0 ||
-    [card?.destination, card?.recipient, card?.destination_host].some(
-      target => typeof target === 'string' && target.trim() !== '',
-    )
+    [card?.destination, card?.recipient].some(target => typeof target === 'string' && target.trim() !== '')
   );
 }
 
