@@ -14,13 +14,15 @@ import { authLoginRoute, authLogoutRoute, meRoute, oAuthCallbackRoute } from '..
 import type { GetMeResponse } from '../schemas/auth';
 import { buildTrueFoundryExternalLoginHref, resolveTrueFoundryLoginReturnTo } from '../truefoundry/externalLogin';
 
-/** Login / OIDC failures land on the public UI home with `?error=<reason>`. */
-function oauthErrorRedirect(reason: string): string {
-  return `${getPublicUiBasePath()}?error=${encodeURIComponent(reason)}`;
+/** The only reasons a failed sign-in is given. The sign-in page holds the wording, so text from outside never shows there. */
+type LoginErrorCode = 'login_failed' | 'owner_only';
+
+/** Login / OIDC failures land on the public UI home with `?error=<code>`. */
+function oauthErrorRedirect(code: LoginErrorCode): string {
+  return `${getPublicUiBasePath()}?error=${code}`;
 }
 
 const LOGIN_RETRY_SECONDS = 5;
-const OWNER_ONLY_MESSAGE = 'Only the owner can sign in to this instance.';
 
 /** Plain page (no script) shown while the identity provider is unreachable; it refreshes itself. */
 const LOGIN_UNAVAILABLE_PAGE = `<!doctype html>
@@ -137,12 +139,8 @@ export function createAuthRouter(params: {
       if (soft) {
         return soft;
       }
-      // Only reflect a non-empty IdP `error_description` when the IdP returned an error.
-      // No fallback to the `error` code — blank/missing descriptions use the default.
-      // Our own validation failures (state mismatch / missing code) stay generic too.
-      const description = query.error_description?.trim();
-      const reason = query.error && description ? description : 'login_failed';
-      return c.redirect(oauthErrorRedirect(reason), 302);
+      // The provider's own error text is never passed on: anyone can put words in a link to this address.
+      return c.redirect(oauthErrorRedirect('login_failed'), 302);
     }
 
     try {
@@ -165,9 +163,8 @@ export function createAuthRouter(params: {
       }
       // Standalone has one account, so a refused person is told why; a shared allowlist stays undisclosed.
       // Other exchange errors can carry the provider response and address, so they stay in the log above.
-      const reason =
-        error instanceof EmailNotAllowedError && configuration.STANDALONE ? OWNER_ONLY_MESSAGE : 'login_failed';
-      return c.redirect(oauthErrorRedirect(reason), 302);
+      const code = error instanceof EmailNotAllowedError && configuration.STANDALONE ? 'owner_only' : 'login_failed';
+      return c.redirect(oauthErrorRedirect(code), 302);
     }
   });
 
