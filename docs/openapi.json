@@ -1956,6 +1956,21 @@
         ],
         "type": "object"
       },
+      "ConfirmMemoryPageLineRequest": {
+        "properties": {
+          "section": {
+            "description": "Where the line goes. Defaults to Now.",
+            "enum": [
+              "How you write to them",
+              "Now",
+              "Decided",
+              "Open"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "ConfirmVerifyCommandProposalRequest": {
         "additionalProperties": false,
         "properties": {
@@ -2599,6 +2614,10 @@
         "type": "object"
       },
       "DeleteMCPToolGrantResponse": {
+        "properties": {},
+        "type": "object"
+      },
+      "DeleteMemoryPageResponse": {
         "properties": {},
         "type": "object"
       },
@@ -3453,6 +3472,17 @@
           "id",
           "type",
           "display_name"
+        ],
+        "type": "object"
+      },
+      "GetMemoryPageResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MemoryPage"
+          }
+        },
+        "required": [
+          "data"
         ],
         "type": "object"
       },
@@ -5569,6 +5599,28 @@
         ],
         "type": "object"
       },
+      "ListMemoryPageChangesResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MemoryPageChanges"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "ListMemoryPagesResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MemoryPageListing"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "ListMemoryVaultEntriesResponse": {
         "properties": {
           "data": {
@@ -6709,6 +6761,318 @@
           "state",
           "detail",
           "indexed_entries"
+        ],
+        "type": "object"
+      },
+      "MemoryPage": {
+        "properties": {
+          "confirmable_sections": {
+            "description": "The sections an unconfirmed line on this page can move to.",
+            "items": {
+              "enum": [
+                "How you write to them",
+                "Now",
+                "Decided",
+                "Open"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "kind": {
+            "enum": [
+              "person",
+              "matter"
+            ],
+            "type": "string"
+          },
+          "markdown": {
+            "type": "string"
+          },
+          "other_names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "sections": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryPageSection"
+            },
+            "type": "array"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "summary": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "version": {
+            "description": "Send this back with an edit. It says which text the edit started from.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "slug",
+          "title",
+          "other_names",
+          "summary",
+          "sections",
+          "markdown",
+          "confirmable_sections",
+          "version"
+        ],
+        "type": "object"
+      },
+      "MemoryPageChange": {
+        "properties": {
+          "changed_at": {
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^[0-9a-f]{40}$",
+            "type": "string"
+          },
+          "message": {
+            "description": "What changed, in plain words.",
+            "type": "string"
+          },
+          "pages": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryPageRef"
+            },
+            "type": "array"
+          },
+          "undo_blocked_by": {
+            "description": "The message of a later change to the same pages that must be undone first, or null.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "changed_at",
+          "message",
+          "pages",
+          "undo_blocked_by"
+        ],
+        "type": "object"
+      },
+      "MemoryPageChanges": {
+        "properties": {
+          "available": {
+            "description": "False when the server keeps no page history.",
+            "type": "boolean"
+          },
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryPageChange"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "available",
+          "changes"
+        ],
+        "type": "object"
+      },
+      "MemoryPageLine": {
+        "properties": {
+          "id": {
+            "description": "The line id, or null for a line typed by hand that has none yet.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "own": {
+            "description": "True when the line is the person’s own words.",
+            "type": "boolean"
+          },
+          "seen": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "since": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source": {
+            "enum": [
+              "you_said",
+              "you_edited",
+              "sent_mail",
+              "mail",
+              "calendar",
+              "read_content",
+              "inferred",
+              "unreadable"
+            ],
+            "type": "string"
+          },
+          "source_label": {
+            "description": "Where the line came from, in plain words.",
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "until": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "text",
+          "source",
+          "source_label",
+          "own",
+          "since",
+          "until",
+          "seen"
+        ],
+        "type": "object"
+      },
+      "MemoryPageListing": {
+        "properties": {
+          "pages": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryPageSummary"
+            },
+            "type": "array"
+          },
+          "skipped_files": {
+            "description": "Files in the page folders whose names are not page names.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "pages",
+          "skipped_files"
+        ],
+        "type": "object"
+      },
+      "MemoryPageRef": {
+        "properties": {
+          "kind": {
+            "enum": [
+              "person",
+              "matter"
+            ],
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "slug"
+        ],
+        "type": "object"
+      },
+      "MemoryPageSection": {
+        "properties": {
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryPageLine"
+            },
+            "type": "array"
+          },
+          "name": {
+            "description": "The section heading as written.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "lines"
+        ],
+        "type": "object"
+      },
+      "MemoryPageSummary": {
+        "properties": {
+          "changed_on": {
+            "description": "The day the page file last changed, as `YYYY-MM-DD` in UTC.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "enum": [
+              "person",
+              "matter"
+            ],
+            "type": "string"
+          },
+          "other_names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "summary": {
+            "description": "The line under the title, or null when the page has none.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "unconfirmed_count": {
+            "description": "Lines waiting under Unconfirmed.",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "slug",
+          "title",
+          "other_names",
+          "summary",
+          "changed_on",
+          "unconfirmed_count"
+        ],
+        "type": "object"
+      },
+      "MemoryPageUndoResult": {
+        "properties": {
+          "pages": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryPageRef"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "pages"
         ],
         "type": "object"
       },
@@ -14113,6 +14477,17 @@
           }
         ]
       },
+      "UndoMemoryPageChangeResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MemoryPageUndoResult"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "UpdateAgentRequest": {
         "additionalProperties": false,
         "properties": {
@@ -14155,6 +14530,25 @@
         },
         "required": [
           "manifest"
+        ],
+        "type": "object"
+      },
+      "UpdateMemoryPageRequest": {
+        "properties": {
+          "markdown": {
+            "maxLength": 60000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "version": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "markdown",
+          "version"
         ],
         "type": "object"
       },
@@ -17215,6 +17609,953 @@
           "mcpServers"
         ],
         "x-fern-sdk-method-name": "list_tools"
+      }
+    },
+    "/api/v1/memory/pages": {
+      "get": {
+        "description": "List the pages for people and matters, with the files that could not be read as pages.",
+        "parameters": [
+          {
+            "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault.",
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault.",
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListMemoryPagesResponse"
+                }
+              }
+            },
+            "description": "The pages."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The request cannot be done as asked. The message says what to change."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No such page, line or change."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The page changed after it was opened, a later change must be undone first, or no history is kept."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The page operation failed."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The server does not keep memory pages."
+          }
+        },
+        "summary": "List memory pages",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "memory",
+          "pages"
+        ],
+        "x-fern-sdk-method-name": "list"
+      }
+    },
+    "/api/v1/memory/pages/changes": {
+      "get": {
+        "description": "List the last changes to pages, newest first, and whether each can be undone.",
+        "parameters": [
+          {
+            "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault.",
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault.",
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListMemoryPageChangesResponse"
+                }
+              }
+            },
+            "description": "The recent changes."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The request cannot be done as asked. The message says what to change."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No such page, line or change."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The page changed after it was opened, a later change must be undone first, or no history is kept."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The page operation failed."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The server does not keep memory pages."
+          }
+        },
+        "summary": "List recent page changes",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "memory",
+          "pages"
+        ],
+        "x-fern-sdk-method-name": "list_changes"
+      }
+    },
+    "/api/v1/memory/pages/changes/{change_id}/undo": {
+      "post": {
+        "description": "Put the pages a change touched back as they were before it, as a new change. Refused while a later change left those pages different.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "change_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{40}$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault.",
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault.",
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UndoMemoryPageChangeResponse"
+                }
+              }
+            },
+            "description": "The change was undone."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The request cannot be done as asked. The message says what to change."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No such page, line or change."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The page changed after it was opened, a later change must be undone first, or no history is kept."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The page operation failed."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The server does not keep memory pages."
+          }
+        },
+        "summary": "Undo a page change",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "memory",
+          "pages"
+        ],
+        "x-fern-sdk-method-name": "undo_change"
+      }
+    },
+    "/api/v1/memory/pages/{kind}/{slug}": {
+      "delete": {
+        "description": "Delete a page file. The history keeps it, so the delete can be undone.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "enum": [
+                "person",
+                "matter"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault.",
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault.",
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteMemoryPageResponse"
+                }
+              }
+            },
+            "description": "Page deleted."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The request cannot be done as asked. The message says what to change."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No such page, line or change."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The page changed after it was opened, a later change must be undone first, or no history is kept."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The page operation failed."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The server does not keep memory pages."
+          }
+        },
+        "summary": "Delete a memory page",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "memory",
+          "pages"
+        ],
+        "x-fern-sdk-method-name": "delete"
+      },
+      "get": {
+        "description": "Get one page: its sections in order, where each line came from, and its Markdown text.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "enum": [
+                "person",
+                "matter"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault.",
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault.",
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetMemoryPageResponse"
+                }
+              }
+            },
+            "description": "The page."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The request cannot be done as asked. The message says what to change."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No such page, line or change."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The page changed after it was opened, a later change must be undone first, or no history is kept."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The page operation failed."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The server does not keep memory pages."
+          }
+        },
+        "summary": "Get a memory page",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "memory",
+          "pages"
+        ],
+        "x-fern-sdk-method-name": "get"
+      },
+      "put": {
+        "description": "Replace a page with the person’s Markdown. New or changed lines become their own. Refused when the page changed since the version sent, or the text is not a page.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "enum": [
+                "person",
+                "matter"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault.",
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault.",
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMemoryPageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetMemoryPageResponse"
+                }
+              }
+            },
+            "description": "The saved page."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The request cannot be done as asked. The message says what to change."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No such page, line or change."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The page changed after it was opened, a later change must be undone first, or no history is kept."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The page operation failed."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The server does not keep memory pages."
+          }
+        },
+        "summary": "Save a page edit",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "memory",
+          "pages"
+        ],
+        "x-fern-sdk-method-name": "update"
+      }
+    },
+    "/api/v1/memory/pages/{kind}/{slug}/lines/{fact_id}/confirm": {
+      "post": {
+        "description": "Move a line from Unconfirmed to a section of the page as the person’s own words.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "enum": [
+                "person",
+                "matter"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "fact_id",
+            "required": true,
+            "schema": {
+              "maxLength": 32,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault.",
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault.",
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmMemoryPageLineRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetMemoryPageResponse"
+                }
+              }
+            },
+            "description": "The page after the line moved."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The request cannot be done as asked. The message says what to change."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No such page, line or change."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The page changed after it was opened, a later change must be undone first, or no history is kept."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The page operation failed."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The server does not keep memory pages."
+          }
+        },
+        "summary": "Confirm an unconfirmed line",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "memory",
+          "pages"
+        ],
+        "x-fern-sdk-method-name": "confirm_line"
+      }
+    },
+    "/api/v1/memory/pages/{kind}/{slug}/lines/{fact_id}/dismiss": {
+      "post": {
+        "description": "Remove a line from Unconfirmed.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "enum": [
+                "person",
+                "matter"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "fact_id",
+            "required": true,
+            "schema": {
+              "maxLength": 32,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault.",
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault.",
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetMemoryPageResponse"
+                }
+              }
+            },
+            "description": "The page after the line was removed."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The request cannot be done as asked. The message says what to change."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No such page, line or change."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The page changed after it was opened, a later change must be undone first, or no history is kept."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The page operation failed."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The server does not keep memory pages."
+          }
+        },
+        "summary": "Dismiss an unconfirmed line",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "memory",
+          "pages"
+        ],
+        "x-fern-sdk-method-name": "dismiss_line"
       }
     },
     "/api/v1/memory/vault": {

@@ -25,6 +25,7 @@ import {
   listMemoryPages,
   listSkippedPageFiles,
   pageFacts,
+  pageFolder,
   pagePath,
   pageSummary,
   parseMemoryPage,
@@ -283,7 +284,7 @@ export async function savePageEdit({
       const edited = parseMemoryPage({ content: markdown, fallback: { kind, title: slug } });
       const marked = await markEditedPage({
         history: { vaultDir, runner },
-        relativePath: `${kind === 'person' ? 'people' : 'matters'}/${slug}.md`,
+        relativePath: `${pageFolder(kind)}/${slug}.md`,
         page: edited,
         today: options.today,
         newId,
