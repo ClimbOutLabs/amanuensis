@@ -1,6 +1,7 @@
 // The multiplexer in front of the per-account tool servers: routing by the account an id names,
 // fan-out reads that say which account each answer belongs to, and refusals that change nothing.
 import assert from 'node:assert/strict';
+import { Buffer } from 'node:buffer';
 import { createServer } from 'node:http';
 import { after, before, describe, it } from 'node:test';
 
