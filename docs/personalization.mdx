@@ -41,7 +41,7 @@ DELETE /api/v1/personalization/profile
 GET    /api/v1/personalization/context
 ```
 
-`PUT` replaces the complete profile. Use `DELETE` to remove it. The authenticated identity determines profile ownership; callers cannot select another user's profile.
+`PUT` replaces the complete profile. Send `expected_revision` beside `profile` with the revision you read: if the profile has changed since, for example because the assistant learned something, the save is refused with `409` and nothing is written. Settings does this for you and saves your edits on top of the newest profile, so text learned while the page was open is kept. Use `DELETE` to remove it. The authenticated identity determines profile ownership; callers cannot select another user's profile.
 
 A `PUT` whose body carries nothing at all is rejected, because removing a profile is what `DELETE` is for. `learning_enabled` counts as content in either position, so a profile holding only the switch is legitimate whether it is on or off; that is the state a user lands in by trying profile learning and then turning it back off. Omitting the field entirely is what reads as no content, and it also reads as learning off.
 
