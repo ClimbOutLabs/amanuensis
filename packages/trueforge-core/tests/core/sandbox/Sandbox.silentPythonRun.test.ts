@@ -81,9 +81,19 @@ function makeProvider(input: {
 /**
  * A sandbox bound to a repository that allows downloads, over a real workspace whose host has the switch on or off.
  * Installs are refused in a chat whose repository does not allow downloads, so the bound repository is required.
- * By default the provider says its sandbox has no network, as the installed one does.
+ * By default the provider says its sandbox has no network, as the installed one does, and downloads are allowed.
  */
-function setUp({ sandboxWithoutAsking, noNetwork = true }: { sandboxWithoutAsking: boolean; noNetwork?: boolean }): {
+function setUp({
+  sandboxWithoutAsking,
+  noNetwork = true,
+  downloadsAllowed = true,
+  skillSites = [],
+}: {
+  sandboxWithoutAsking: boolean;
+  noNetwork?: boolean;
+  downloadsAllowed?: boolean;
+  skillSites?: readonly string[];
+}): {
   sandbox: Sandbox;
   execCalls: SandboxExecParams[];
   cleanup: () => void;
@@ -105,8 +115,10 @@ function setUp({ sandboxWithoutAsking, noNetwork = true }: { sandboxWithoutAskin
     loadBoundRepository: async () => boundRepository,
     workspaceVerificationCoordinator: new TestDurableWorkspaceCoordinator(),
     workspaceLeaseOwnerId: 'test-replica',
-    loadPackageMirrorToken: async () => 'mirror-token',
-    loadPackageDownloadsAllowed: async () => true,
+    loadPackageMirrorToken: async () => (downloadsAllowed ? 'mirror-token' : undefined),
+    loadPackageDownloadsAllowed: async () => downloadsAllowed,
+    loadSkillNetworkGrant: async () =>
+      skillSites.length === 0 ? undefined : { token: 'skill-token', hosts: skillSites },
     runCodeService: PACKAGE_GATEWAY_RUN_CODE_SERVICE,
     allowPackageDownloads: async () => undefined,
     blockDestructiveToolsInCodeMode: true,
@@ -175,14 +187,14 @@ describe('a package install asks before it reaches the provider', () => {
   });
 });
 
-describe('a new file is placed without a card only where the provider says the sandbox has no network', () => {
+describe('a new file is placed without a card only where nothing run in the sandbox can reach a network', () => {
   const WRITE_CALL = {
     name: SANDBOX_WRITE_FILE_TOOL_NAME,
     arguments: { intent: 'Save the notes', path: 'notes.txt', content: 'hello\n' },
   };
 
-  it('is placed without a card with the switch on, in a sandbox with no network', async () => {
-    const { sandbox, cleanup } = setUp({ sandboxWithoutAsking: true });
+  it('is placed without a card with the switch on, in a sandbox with no network and no downloads allowed', async () => {
+    const { sandbox, cleanup } = setUp({ sandboxWithoutAsking: true, downloadsAllowed: false });
     try {
       const info = await sandbox.toolCallInfo(WRITE_CALL);
       expect(info).toMatchObject({ tier: 1, tier_reason: 'sandbox_file_write', tier3_card: null });
@@ -192,8 +204,19 @@ describe('a new file is placed without a card only where the provider says the s
   });
 
   it.each([
-    ['the switch on, in a sandbox that may reach a network', { sandboxWithoutAsking: true, noNetwork: false }],
-    ['the switch off, in a sandbox with no network', { sandboxWithoutAsking: false, noNetwork: true }],
+    [
+      'the switch on, in a sandbox that may reach a network',
+      { sandboxWithoutAsking: true, noNetwork: false, downloadsAllowed: false },
+    ],
+    [
+      'the switch on, where package downloads are allowed for the repository',
+      { sandboxWithoutAsking: true, downloadsAllowed: true },
+    ],
+    [
+      'the switch on, where a skill may reach the sites approved for it',
+      { sandboxWithoutAsking: true, downloadsAllowed: false, skillSites: ['api.example.com'] },
+    ],
+    ['the switch off, in a sandbox with no network', { sandboxWithoutAsking: false, downloadsAllowed: false }],
   ])('gets a card with %s', async (_label, options) => {
     const { sandbox, cleanup } = setUp(options);
     try {
