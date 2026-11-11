@@ -23,6 +23,7 @@ import type {
   CreateTurnInput,
   DeleteSessionFolderInput,
   DeleteSessionInput,
+  ExpiredPrivateSession,
   FreezeAndGetTurnInput,
   GetCommandExecutionInput,
   GetOwnedIdsInput,
@@ -34,6 +35,7 @@ import type {
   ISessionStore,
   IndexChatMessagesInput,
   ListApprovalDismissalsInput,
+  ListExpiredPrivateSessionsInput,
   ListImplementationPlanGrantsInput,
   ListSessionEventsInput,
   ListSessionFoldersInput,
@@ -54,6 +56,7 @@ import type {
   RevokeImplementationPlanGrantInput,
   RevokeImplementationPlanGrantResult,
   SearchChatHistoryInput,
+  SetPrivateExpiryInput,
   SetSessionFolderInput,
   StampImportedSessionInput,
   TurnRecordWithoutSnapshot,
@@ -115,8 +118,10 @@ import {
   getOwnedIds as getOwnedIdsQuery,
   getSessionByExternalId as getSessionByExternalIdQuery,
   getSession as getSessionQuery,
+  listExpiredPrivateSessions as listExpiredPrivateSessionsQuery,
   listSessions as listSessionsQuery,
   replaceSessionTitleIfCurrent as replaceSessionTitleIfCurrentQuery,
+  setPrivateExpiry as setPrivateExpiryQuery,
   stampImportedSession as stampImportedSessionQuery,
   updateSession as updateSessionQuery,
 } from './queries/sessions';
@@ -177,6 +182,14 @@ export class SqliteSessionStore implements ISessionStore<SessionCustom, TurnCust
 
   deleteSession(input: DeleteSessionInput): Promise<void> {
     return deleteSessionQuery(this.db, input);
+  }
+
+  setPrivateExpiry(input: SetPrivateExpiryInput): Promise<void> {
+    return setPrivateExpiryQuery(this.db, input);
+  }
+
+  listExpiredPrivateSessions(input: ListExpiredPrivateSessionsInput): Promise<ExpiredPrivateSession[]> {
+    return listExpiredPrivateSessionsQuery(this.db, input);
   }
 
   listImplementationPlanGrants(input: ListImplementationPlanGrantsInput): Promise<ImplementationPlanGrant[]> {

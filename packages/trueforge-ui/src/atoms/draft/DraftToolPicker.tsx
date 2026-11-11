@@ -400,7 +400,7 @@ export function DraftToolPicker({
   };
 
   const sandboxDescription = !sandboxAvailable
-    ? SANDBOX_UNAVAILABLE_REASON
+    ? (capabilities?.sandbox.reason ?? SANDBOX_UNAVAILABLE_REASON)
     : selectedSkills.length > 0
       ? `${SANDBOX_DESCRIPTION} Turning this off clears attached skills.`
       : SANDBOX_DESCRIPTION;
