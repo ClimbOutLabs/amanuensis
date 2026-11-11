@@ -24,9 +24,9 @@ export class TelegramClient {
     }
 
     /**
-     * The address Telegram posts updates to when a public https address is configured. The secret Telegram was given at setup must ride the call, or it is refused.
+     * The address Telegram posts updates to when a public https address is configured. The secret Telegram was given at setup must ride the call, or it is refused. An update in a shape this build cannot read is dropped with the same success answer, so Telegram does not keep retrying it.
      *
-     * @param {TrueForge.TelegramUpdate} request
+     * @param {TrueForge.TelegramWebhookUpdate} request
      * @param {TelegramClient.RequestOptions} requestOptions - Request-specific configuration.
      *
      * @throws {@link TrueForge.UnauthorizedError}
@@ -39,14 +39,14 @@ export class TelegramClient {
      *     })
      */
     public webhook(
-        request: TrueForge.TelegramUpdate,
+        request: TrueForge.TelegramWebhookUpdate,
         requestOptions?: TelegramClient.RequestOptions,
     ): core.HttpResponsePromise<void> {
         return core.HttpResponsePromise.fromPromise(this.__webhook(request, requestOptions));
     }
 
     private async __webhook(
-        request: TrueForge.TelegramUpdate,
+        request: TrueForge.TelegramWebhookUpdate,
         requestOptions?: TelegramClient.RequestOptions,
     ): Promise<core.WithRawResponse<void>> {
         const _authRequest: core.AuthRequest = await this._options.authProvider.getAuthRequest();
@@ -67,7 +67,7 @@ export class TelegramClient {
             queryString: core.url.queryBuilder().mergeAdditional(requestOptions?.queryParams).build(),
             requestType: "json",
             body: mergeAdditionalBodyParameters(
-                serializers.TelegramUpdate.jsonOrThrow(request, {
+                serializers.TelegramWebhookUpdate.jsonOrThrow(request, {
                     unrecognizedObjectKeys: "passthrough",
                     allowUnrecognizedUnionMembers: true,
                     allowUnrecognizedEnumValues: true,

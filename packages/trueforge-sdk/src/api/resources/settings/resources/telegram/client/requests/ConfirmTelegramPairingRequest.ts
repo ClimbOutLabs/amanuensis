@@ -7,6 +7,6 @@
  *     }
  */
 export interface ConfirmTelegramPairingRequest {
-    /** The six-digit code the bot sent after /start, typed to confirm the pairing. */
+    /** The six-digit code the bot sent in Telegram after /start, typed to confirm the pairing. */
     code: string;
 }

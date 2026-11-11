@@ -14,7 +14,7 @@ describe("TelegramClient", () => {
                 available: true,
                 bot_name: "bot_name",
                 bot_username: "bot_username",
-                pairing_code: "pairing_code",
+                pairing_name: "pairing_name",
                 state: "not_connected",
             },
         };
@@ -36,7 +36,7 @@ describe("TelegramClient", () => {
                 available: true,
                 botName: "bot_name",
                 botUsername: "bot_username",
-                pairingCode: "pairing_code",
+                pairingName: "pairing_name",
                 state: "not_connected",
             },
         });
@@ -139,7 +139,7 @@ describe("TelegramClient", () => {
                 available: true,
                 bot_name: "bot_name",
                 bot_username: "bot_username",
-                pairing_code: "pairing_code",
+                pairing_name: "pairing_name",
                 state: "not_connected",
             },
         };
@@ -158,7 +158,7 @@ describe("TelegramClient", () => {
                 available: true,
                 botName: "bot_name",
                 botUsername: "bot_username",
-                pairingCode: "pairing_code",
+                pairingName: "pairing_name",
                 state: "not_connected",
             },
         });
@@ -202,6 +202,97 @@ describe("TelegramClient", () => {
         }).rejects.toThrow(TrueForgeTypes.ForbiddenError);
     });
 
+    test("cancel_pairing (1)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = {
+            data: {
+                available: true,
+                bot_name: "bot_name",
+                bot_username: "bot_username",
+                pairing_name: "pairing_name",
+                state: "not_connected",
+            },
+        };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/user/settings/telegram/cancel-pairing")
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        const response = await client.settings.telegram.cancelPairing();
+        expect(response).toEqual({
+            data: {
+                available: true,
+                botName: "bot_name",
+                botUsername: "bot_username",
+                pairingName: "pairing_name",
+                state: "not_connected",
+            },
+        });
+    });
+
+    test("cancel_pairing (2)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/user/settings/telegram/cancel-pairing")
+            .respondWith()
+            .statusCode(400)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.settings.telegram.cancelPairing();
+        }).rejects.toThrow(TrueForgeTypes.BadRequestError);
+    });
+
+    test("cancel_pairing (3)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/user/settings/telegram/cancel-pairing")
+            .respondWith()
+            .statusCode(401)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.settings.telegram.cancelPairing();
+        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+    });
+
+    test("cancel_pairing (4)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/user/settings/telegram/cancel-pairing")
+            .respondWith()
+            .statusCode(403)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.settings.telegram.cancelPairing();
+        }).rejects.toThrow(TrueForgeTypes.ForbiddenError);
+    });
+
     test("confirm_pairing (1)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
@@ -211,7 +302,7 @@ describe("TelegramClient", () => {
                 available: true,
                 bot_name: "bot_name",
                 bot_username: "bot_username",
-                pairing_code: "pairing_code",
+                pairing_name: "pairing_name",
                 state: "not_connected",
             },
         };
@@ -233,7 +324,7 @@ describe("TelegramClient", () => {
                 available: true,
                 botName: "bot_name",
                 botUsername: "bot_username",
-                pairingCode: "pairing_code",
+                pairingName: "pairing_name",
                 state: "not_connected",
             },
         });
@@ -314,7 +405,7 @@ describe("TelegramClient", () => {
                 available: true,
                 bot_name: "bot_name",
                 bot_username: "bot_username",
-                pairing_code: "pairing_code",
+                pairing_name: "pairing_name",
                 state: "not_connected",
             },
         };
@@ -333,7 +424,7 @@ describe("TelegramClient", () => {
                 available: true,
                 botName: "bot_name",
                 botUsername: "bot_username",
-                pairingCode: "pairing_code",
+                pairingName: "pairing_name",
                 state: "not_connected",
             },
         });

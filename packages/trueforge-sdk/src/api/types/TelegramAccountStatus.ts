@@ -9,7 +9,7 @@ export interface TelegramAccountStatus {
     botName: string | null;
     /** The bot username, without the @; null when no bot is connected. */
     botUsername: string | null;
-    /** The six-digit code the bot sent after /start, shown so it can be checked; null when none waits. */
-    pairingCode: string | null;
+    /** The name Telegram shows for the person waiting to pair, so they can be checked before pairing; null when nobody waits. The pairing code itself is never returned: the bot shows it only in Telegram. */
+    pairingName: string | null;
     state: TrueForge.TelegramConnectionState;
 }

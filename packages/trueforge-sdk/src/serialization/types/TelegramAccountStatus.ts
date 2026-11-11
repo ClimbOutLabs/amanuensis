@@ -12,7 +12,7 @@ export const TelegramAccountStatus: core.serialization.ObjectSchema<
     available: core.serialization.boolean(),
     botName: core.serialization.property("bot_name", core.serialization.string().nullable()),
     botUsername: core.serialization.property("bot_username", core.serialization.string().nullable()),
-    pairingCode: core.serialization.property("pairing_code", core.serialization.string().nullable()),
+    pairingName: core.serialization.property("pairing_name", core.serialization.string().nullable()),
     state: TelegramConnectionState,
 });
 
@@ -21,7 +21,7 @@ export declare namespace TelegramAccountStatus {
         available: boolean;
         bot_name?: string | null;
         bot_username?: string | null;
-        pairing_code?: string | null;
+        pairing_name?: string | null;
         state: TelegramConnectionState.Raw;
     }
 }
