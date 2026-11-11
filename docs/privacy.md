@@ -44,6 +44,8 @@ A line above the message box says where your words go. With a local model it rea
 
 **Close and delete** removes the chat for good: its messages, pictures and saved files. If you leave it open, or close the tab, Aman deletes it 24 hours after its last reply. A reload of the page also forgets it in that tab, and the 24-hour deletion still happens. Nightly backups leave out incognito chats, and exports skip them.
 
+Deleting a memory on the Memories page removes its text from your disk, and editing one replaces the old wording. A backup or an export you made earlier still holds what it held.
+
 Some things stay on purpose, because they are the record of what Aman did:
 
 - The approval records of actions you approved, such as an email Aman sent.

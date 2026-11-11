@@ -8,7 +8,7 @@ Aman remembers things between conversations so you don't have to repeat yourself
 
 **After each chat, only the lasting facts are saved.** Instead of keeping every turn word for word, the assistant picks out facts about you, plans, preferences, decisions, and anything you asked it to remember, and saves those. A turn with nothing lasting saves nothing. If a summary can't be made for a turn, nothing is saved for that turn, and the Memories page tells you. If you'd rather keep every turn word for word, turn the **Turn summaries** switch off in **Settings → Memory**; new turns are then saved word for word.
 
-**What Aman learns about you is not kept in memory.** The learned profile lives in **Settings → Personalization** and is added to every reply from there. Earlier versions also saved a copy of it as a note in memory. When you clear the learned profile or delete your profile, Aman stops using that copy at once and it no longer shows in your memories. Like any memory you delete, its old text stays in the dated file in your memory folder until you remove the line there yourself.
+**What Aman learns about you is not kept in memory.** The learned profile lives in **Settings → Personalization** and is added to every reply from there. Earlier versions also saved a copy of it as a note in memory. When you clear the learned profile or delete your profile, Aman stops using that copy at once, it no longer shows in your memories, and its text is removed from your disk like any memory you delete.
 
 **Aman finds memories by meaning, not just words.** When you ask something, Aman searches your memories for meaning — so "where did we stay in Paris" finds the hotel note even though it says "Hotel Lumiere" and never mentions Paris. To do that, the first time Aman runs it downloads a small helper model once (about 120 MB), automatically in the background: the download starts when the server starts, so it's usually finished before you need it. There is nothing to install and nothing to click. After that one download, memory search works fully offline, and everything stays on this server. If the download can't finish, Aman just keeps finding memories with keywords, and keeps retrying in the background.
 
@@ -27,6 +27,8 @@ Memory is on by default. Amanuensis recalls from local Markdown files before eve
 An incognito chat reads memory but never writes to it. Aman recalls from the vaults as usual, but saves nothing from the chat, in any persona, and the chat never joins past-chat search. See [Privacy](/privacy#incognito-chats).
 
 Memories are scoped by persona. While a persona is active, what it learns is kept in that persona's own vault and is private to it until you share the vault. With no persona active, memories go to the shared vault, which every persona can read. A persona recalls from its own vault, the shared vault, and any vault shared with it. Renaming or deleting a persona never deletes its vault.
+
+When you delete a memory on the Memories page, Aman removes its text from your disk. When you edit one, the old wording is replaced by the new wording. A backup or an export you made earlier still holds what it held, so delete those too if you want the words gone from them.
 
 ## Searching past chats
 

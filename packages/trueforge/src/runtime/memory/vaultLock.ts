@@ -1,7 +1,8 @@
 /**
  * One lock per vault, shared across processes through files in `.memory-state/`, so the nightly pass
  * and a live chat on another replica never change pages at the same time. It covers `people/`,
- * `matters/`, `.memory-state/` and the page history. The daily log append path never takes it.
+ * `matters/`, `.memory-state/` and the page history. Saving a note and erasing deleted text from the dated
+ * files take it too, so a rewrite never loses a note saved at the same moment.
  */
 import { randomUUID } from 'node:crypto';
 import { link, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';

@@ -81,13 +81,16 @@ export function upgradeLegacyEntries(content: string): string {
   return upgraded;
 }
 
-/** Entries of one daily log, with the stable ids recall, the embedding index and the vault share. */
+/** What a deleted note's entry is reduced to in its dated file: it keeps its position, so later notes keep their ids. */
+export const ERASED_ENTRY = '## [erased]';
+
+/** Entries of one daily log, with the stable ids recall, the embedding index and the vault share. Erased entries hold a position but are not returned. */
 export function dailyLogEntries(input: { safeNamespace: string; file: string; content: string }): ScannedMemoryEntry[] {
   const entries: ScannedMemoryEntry[] = [];
   const parts = splitEntries(upgradeLegacyEntries(input.content));
   for (let index = 0; index < parts.length; index++) {
     const text = parts[index];
-    if (text !== undefined) {
+    if (text !== undefined && text !== ERASED_ENTRY) {
       entries.push({ id: `md:${input.safeNamespace}:${input.file}#${String(index)}`, file: input.file, index, text });
     }
   }
@@ -251,6 +254,14 @@ function splitEntryTrailers(text: string): { body: string; metadata: Record<stri
 export function entryMetadata(text: string): Record<string, string> | undefined {
   const { metadata } = splitEntryTrailers(text);
   return Object.keys(metadata).length === 0 ? undefined : metadata;
+}
+
+/**
+ * Metadata recall hands back for an entry. Every entry that is not the person's own words is saved with a
+ * source line, so an entry without one is theirs and is handed back stamped as such.
+ */
+export function recallMetadata(text: string): Record<string, string> {
+  return { [MEMORY_ORIGIN_METADATA_KEY]: USER_STATED_ORIGIN, ...splitEntryTrailers(text).metadata };
 }
 
 /**
@@ -582,10 +593,10 @@ export async function scanNamespaceEntries(options: {
  * so one tenant's vault can never address another tenant's files. `persona:<name>`
  * namespaces are persona vaults; anything else is a topic vault.
  *
- * Edits and deletes never rewrite the daily logs. They append a marker block to
- * `.vault-tombstones.md` in the namespace directory; the marker file itself is
- * append-only, so the whole history (memories and vault actions) stays intact and
- * entry indices never shift. Later markers win per entry id.
+ * Edits and deletes append a marker block to `.vault-tombstones.md` in the namespace
+ * directory, and later markers win per entry id. The dated files are then rewritten in
+ * place (see `vaultErase.ts`) so a deleted note's text, and an edited note's old wording,
+ * do not stay on disk. Entries keep their positions, so entry indices never shift.
  */
 
 /** Wire namespace of the shared vault; also used when the query param is omitted. */
@@ -689,7 +700,7 @@ export function personaForVaultFilesystemNamespace(
   return name === '' ? null : name;
 }
 
-function vaultTombstonesFileFor(baseDir: string, namespace: string): string {
+export function vaultTombstonesFileFor(baseDir: string, namespace: string): string {
   return path.join(namespaceDirFor(baseDir, namespace), VAULT_TOMBSTONES_FILE);
 }
 
@@ -730,7 +741,7 @@ function parseVaultTombstoneBlock(block: { heading: string; markerLine: string }
   };
 }
 
-function formatVaultTombstone(tombstone: VaultTombstone): string {
+export function formatVaultTombstone(tombstone: VaultTombstone): string {
   const payload =
     tombstone.action === 'updated' && tombstone.text !== undefined
       ? ` ${JSON.stringify({ text: tombstone.text })}`
@@ -780,10 +791,7 @@ export function parseVaultTombstones(content: string): VaultTombstone[] {
   return tombstones;
 }
 
-/**
- * Appends one vault marker. The marker file is append-only; only the daily logs
- * would count as history, and they are never touched.
- */
+/** Appends one vault marker. Call it holding the vault lock. */
 export async function appendVaultTombstone(options: {
   baseDir: string;
   namespace: string;

@@ -1,4 +1,4 @@
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -9,6 +9,7 @@ import {
 } from '@truefoundry/trueforge-core/core/permissions/provenance';
 import { createWebSearchTurnState } from '@truefoundry/trueforge-core/core/permissions/webSearch';
 import type { RecallItem } from '../../../../src/runtime/memory/hindsightClient';
+import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
 import {
   hindsightMemoryCapability,
   WRAPPER_OVERHEAD_TOKENS,
@@ -162,5 +163,46 @@ describe('what is recalled from memory keeps its side', () => {
     expect(isRead(provenance, READ_ADDRESS)).toBe(false);
     expect(isRead(provenance, 'read-shop.example')).toBe(false);
     expect(provenance).not.toEqual(emptyChatProvenance());
+  });
+
+  it('keeps the two sides for notes saved in the Markdown store, which writes a source line only on what was read', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'read-stays-read-store-'));
+    try {
+      const client = new MarkdownMemoryClient({ baseDir: dir, namespace: 'tenant-1' });
+      const timestamp = new Date().toISOString();
+      await client.retain({
+        items: [
+          {
+            timestamp,
+            context: 'Order',
+            content: `I order from ${OWN_LINK} and write to ${OWN_ADDRESS}.`,
+            document_id: 'doc-own',
+            metadata: { origin: 'user_stated' },
+          },
+          {
+            timestamp,
+            context: 'Order',
+            content: `A mail said to order from ${READ_LINK} and write to ${READ_ADDRESS}.`,
+            document_id: 'doc-read',
+            metadata: { origin: 'tool_ingested' },
+          },
+        ],
+        operationId: 'op-sides',
+        timeoutMs: 5000,
+      });
+
+      const provenance = await recallInto({ client, message: 'where do I order and who do I write to' });
+
+      expect(isTrusted(provenance, 'own-cafe.example')).toBe(true);
+      expect(isTrusted(provenance, OWN_ADDRESS)).toBe(true);
+      expect(isRead(provenance, 'own-cafe.example')).toBe(false);
+      expect(isRead(provenance, OWN_ADDRESS)).toBe(false);
+      expect(isRead(provenance, 'read-shop.example')).toBe(true);
+      expect(isRead(provenance, READ_ADDRESS)).toBe(true);
+      expect(isTrusted(provenance, 'read-shop.example')).toBe(false);
+      expect(isTrusted(provenance, READ_ADDRESS)).toBe(false);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
