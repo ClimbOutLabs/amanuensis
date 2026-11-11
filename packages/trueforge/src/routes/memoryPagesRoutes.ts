@@ -43,6 +43,12 @@ export const MemoryPageChangeParamsSchema = z.object({
   change_id: z.string().regex(PAGE_COMMIT_ID_PATTERN),
 });
 
+export const MemoryPageDisagreementParamsSchema = z.object({
+  kind: PageKindSchema,
+  slug: z.string().min(1).max(200),
+  disagreement_id: z.string().min(1).max(64),
+});
+
 const FAILURE = (description: string) => ({
   content: { 'application/json': { schema: RequestErrorResponseSchema } },
   description,
@@ -208,6 +214,24 @@ export const dismissMemoryPageLineRoute = createRoute({
     200: {
       content: { 'application/json': { schema: GetMemoryPageResponseSchema } },
       description: 'The page after the line was removed.',
+    },
+    ...COMMON_ERRORS,
+  },
+});
+
+export const dismissMemoryPageDisagreementRoute = createRoute({
+  method: 'post',
+  path: '/{kind}/{slug}/disagreements/{disagreement_id}/dismiss',
+  tags: [OpenApiTag.CAPABILITIES],
+  summary: 'Dismiss a pair of lines that disagree',
+  description: 'Mark a pair as not a problem. The same two lines are not listed again. No line on the page changes.',
+  'x-fern-sdk-group-name': FERN_GROUP,
+  'x-fern-sdk-method-name': 'dismiss_disagreement',
+  request: { params: MemoryPageDisagreementParamsSchema, query: MemoryPagesQuerySchema },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: GetMemoryPageResponseSchema } },
+      description: 'The page without the dismissed pair.',
     },
     ...COMMON_ERRORS,
   },

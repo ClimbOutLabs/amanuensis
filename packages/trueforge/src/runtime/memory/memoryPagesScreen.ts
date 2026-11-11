@@ -9,6 +9,7 @@ import { stat } from 'node:fs/promises';
 import {
   ConfirmableMemoryPageSectionSchema,
   type MemoryPageChange,
+  type MemoryPageDisagreement,
   type MemoryPageLine,
   type MemoryPageLineSource,
   type MemoryPageListing,
@@ -18,7 +19,6 @@ import {
 } from '../../schemas/memoryPages';
 import { FactMarkerSchema } from './memoryNotes';
 import { COMMENT_PATTERN, lineSide, singleLine } from './memoryPageLoader';
-import { commitPageChange, markEditedPage, type PageChangeOptions } from './memoryPageWriter';
 import {
   addFact,
   kindHasSection,
@@ -42,6 +42,8 @@ import {
   type PageSection,
   type PageSectionBlock,
 } from './memoryPages';
+import { commitPageChange, markEditedPage, type PageChangeOptions } from './memoryPageWriter';
+import { dismissDisagreement, readDisagreementsForScreen, type LiveDisagreement } from './pageDisagreements';
 import { isPageSlug } from './pageSlug';
 import {
   GitMissingError,
@@ -148,6 +150,10 @@ function unconfirmedCount(page: MemoryPage): number {
   return section === undefined ? 0 : sectionLines(section).length;
 }
 
+function disagreementView(pair: LiveDisagreement): MemoryPageDisagreement {
+  return { id: pair.id, first: pair.first, second: pair.second, reason: pair.reason, found_on: pair.foundOn };
+}
+
 function dayOf(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
@@ -155,6 +161,7 @@ function dayOf(date: Date): string {
 /** Every page with its summary line, the day it last changed and how many lines wait to be confirmed. */
 export async function listPagesForScreen(vaultDir: string): Promise<MemoryPageListing> {
   const pages: MemoryPageSummary[] = [];
+  const disagreementsOf = await readDisagreementsForScreen(vaultDir);
   for (const { kind, slug } of await listMemoryPages(vaultDir)) {
     const page = await readMemoryPage({ vaultDir, kind, slug });
     if (page === undefined) {
@@ -172,13 +179,25 @@ export async function listPagesForScreen(vaultDir: string): Promise<MemoryPageLi
       summary: pageSummary(page) ?? null,
       changed_on: changed,
       unconfirmed_count: unconfirmedCount(page),
+      disagreement_count: disagreementsOf({ kind, slug, page }).length,
     });
   }
   return { pages, skipped_files: await listSkippedPageFiles(vaultDir) };
 }
 
-function pageView({ kind, slug, page }: { kind: PageKind; slug: string; page: MemoryPage }): WirePage {
+async function pageView({
+  vaultDir,
+  kind,
+  slug,
+  page,
+}: {
+  vaultDir: string;
+  kind: PageKind;
+  slug: string;
+  page: MemoryPage;
+}): Promise<WirePage> {
   const markdown = renderMemoryPage(page);
+  const disagreementsOf = await readDisagreementsForScreen(vaultDir);
   return {
     kind,
     slug,
@@ -191,6 +210,7 @@ function pageView({ kind, slug, page }: { kind: PageKind; slug: string; page: Me
       kindHasSection({ kind, section }),
     ),
     version: pageVersion(markdown),
+    disagreements: disagreementsOf({ kind, slug, page }).map(disagreementView),
   };
 }
 
@@ -204,7 +224,9 @@ export async function readPageForScreen(input: {
     return undefined;
   }
   const page = await readMemoryPage(input);
-  return page === undefined ? undefined : pageView({ kind: input.kind, slug: input.slug, page });
+  return page === undefined
+    ? undefined
+    : pageView({ vaultDir: input.vaultDir, kind: input.kind, slug: input.slug, page });
 }
 
 const MISSING_PAGE = 'There is no page with that name. Reload the list.';
@@ -290,7 +312,7 @@ export async function savePageEdit({
         newId,
       });
       await writeMemoryPage({ vaultDir, kind, slug, page: marked });
-      return { ok: true, value: pageView({ kind, slug, page: marked }) };
+      return { ok: true, value: await pageView({ vaultDir, kind, slug, page: marked }) };
     },
   });
 }
@@ -337,7 +359,7 @@ async function changeUnconfirmedLine({
       }
       const changed = apply({ page, at });
       await writeMemoryPage({ vaultDir, kind, slug, page: changed });
-      return { ok: true, value: pageView({ kind, slug, page: changed }) };
+      return { ok: true, value: await pageView({ vaultDir, kind, slug, page: changed }) };
     },
   });
 }
@@ -388,6 +410,30 @@ export async function dismissPageLine(input: {
   factId: string;
 }): Promise<ScreenOutcome<WirePage>> {
   return changeUnconfirmedLine({ ...input, verb: 'dismissed', apply: ({ page, at }) => removeFact(page, { at }) });
+}
+
+const NOT_LISTED = 'That pair is not listed any more. Reload the page to see what is there now.';
+
+/** Marks a pair of lines as not a problem. No line on the page changes and no history entry is made. */
+export async function dismissPageDisagreement({
+  vaultDir,
+  kind,
+  slug,
+  disagreementId,
+}: {
+  vaultDir: string;
+  kind: PageKind;
+  slug: string;
+  disagreementId: string;
+}): Promise<ScreenOutcome<WirePage>> {
+  const page = isPageSlug(slug) ? await readMemoryPage({ vaultDir, kind, slug }) : undefined;
+  if (page === undefined) {
+    return refused('not_found', MISSING_PAGE);
+  }
+  if (!(await dismissDisagreement({ vaultDir, kind, slug, id: disagreementId }))) {
+    return refused('not_found', NOT_LISTED);
+  }
+  return { ok: true, value: await pageView({ vaultDir, kind, slug, page }) };
 }
 
 /** Deletes a page file. The history keeps it, so the delete can be undone. */

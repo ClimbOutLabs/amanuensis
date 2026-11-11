@@ -21,6 +21,7 @@ export const MemoryPageSummarySchema = z
     summary: z.string().nullable().describe('The line under the title, or null when the page has none.'),
     changed_on: z.string().nullable().describe('The day the page file last changed, as `YYYY-MM-DD` in UTC.'),
     unconfirmed_count: z.number().int().min(0).describe('Lines waiting under Unconfirmed.'),
+    disagreement_count: z.number().int().min(0).describe('Pairs of lines the nightly check found that disagree.'),
   })
   .openapi('MemoryPageSummary');
 
@@ -63,6 +64,24 @@ export const MemoryPageSectionSchema = z
   })
   .openapi('MemoryPageSection');
 
+/** One of the two lines in a pair that disagree. */
+export const MemoryPageDisagreementLineSchema = z
+  .object({ id: z.string(), text: z.string() })
+  .openapi('MemoryPageDisagreementLine');
+
+/** Two lines of a page that cannot both be true now. Nothing on the page changed. */
+export const MemoryPageDisagreementSchema = z
+  .object({
+    id: z.string().describe('Name the pair with this id when dismissing it.'),
+    first: MemoryPageDisagreementLineSchema,
+    second: MemoryPageDisagreementLineSchema,
+    reason: z.string().describe('Why they disagree, in one short line.'),
+    found_on: z.string().describe('The day the pair was found, as `YYYY-MM-DD`.'),
+  })
+  .openapi('MemoryPageDisagreement');
+
+export type MemoryPageDisagreement = z.infer<typeof MemoryPageDisagreementSchema>;
+
 /** The section a confirmed line moves to. */
 export const ConfirmableMemoryPageSectionSchema = PageSectionSchema.exclude(['Unconfirmed', 'Earlier']);
 
@@ -80,6 +99,9 @@ export const MemoryPageSchema = z
       .array(ConfirmableMemoryPageSectionSchema)
       .describe('The sections an unconfirmed line on this page can move to.'),
     version: z.string().describe('Send this back with an edit. It says which text the edit started from.'),
+    disagreements: z
+      .array(MemoryPageDisagreementSchema)
+      .describe('Pairs of lines that disagree and are not dismissed.'),
   })
   .openapi('MemoryPage');
 

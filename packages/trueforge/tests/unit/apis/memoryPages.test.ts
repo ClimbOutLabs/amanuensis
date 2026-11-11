@@ -13,6 +13,8 @@ import {
   vaultFilesystemNamespace,
 } from '../../../src/runtime/memory/markdownMemoryFiles';
 import { pagePath } from '../../../src/runtime/memory/memoryPages';
+import { listDisagreements } from '../../../src/runtime/memory/pageDisagreements';
+import { modelAnswering, silentLogger } from '../runtime/memory/nightlyTestKit';
 import { MADRID, WENDY, writePageFile } from '../runtime/memory/pageFixtures';
 
 function contextFor(tenant: string): RequestContext {
@@ -315,6 +317,64 @@ describe('memory pages API', () => {
     expect(other.data.pages).toEqual([]);
     expect((await call('/person/wendy')).status).toBe(404);
     expect((await changes()).changes).toEqual([]);
+  });
+
+  describe('lines that disagree', () => {
+    const DisagreementsSchema = z.object({
+      data: z.object({
+        disagreements: z.array(
+          z.object({
+            id: z.string(),
+            first: z.object({ id: z.string(), text: z.string() }),
+            second: z.object({ id: z.string(), text: z.string() }),
+            reason: z.string(),
+            found_on: z.string(),
+          }),
+        ),
+      }),
+    });
+
+    async function findPair() {
+      await seed();
+      await listDisagreements({
+        vaultDir: vault(),
+        today: '2026-11-11',
+        askModel: modelAnswering(() => ({ pairs: [{ a: 'f_02', b: 'f_03', reason: 'Two plans for one night.' }] })),
+        logger: silentLogger,
+      });
+    }
+
+    it('counts the pairs in the list and shows them with both lines on the page', async () => {
+      await findPair();
+      const list = (await (await call('')).json()) as { data: { pages: Record<string, unknown>[] } };
+      expect(list.data.pages.map(page => [page['slug'], page['disagreement_count']])).toEqual([
+        ['wendy', 1],
+        ['the-madrid-move', 0],
+      ]);
+      const [pair] = DisagreementsSchema.parse(await (await call('/person/wendy')).json()).data.disagreements;
+      expect(pair).toMatchObject({
+        first: { id: 'f_02', text: 'Booked the movie for Saturday 7 PM.' },
+        second: { id: 'f_03', text: 'Might be travelling the week of Nov 16.' },
+        reason: 'Two plans for one night.',
+        found_on: '2026-11-11',
+      });
+    });
+
+    it('drops a pair on “Not a problem”, changes no line and makes no history entry', async () => {
+      await findPair();
+      const before = await readFile(pagePath({ vaultDir: vault(), kind: 'person', slug: 'wendy' }), 'utf8');
+      const [pair] = DisagreementsSchema.parse(await (await call('/person/wendy')).json()).data.disagreements;
+
+      const response = await call(`/person/wendy/disagreements/${pair?.id ?? ''}/dismiss`, json('POST', {}));
+
+      expect(response.status).toBe(200);
+      expect(DisagreementsSchema.parse(await response.json()).data.disagreements).toEqual([]);
+      expect(await readFile(pagePath({ vaultDir: vault(), kind: 'person', slug: 'wendy' }), 'utf8')).toBe(before);
+      expect((await changes()).changes).toEqual([]);
+      const again = await call(`/person/wendy/disagreements/${pair?.id ?? ''}/dismiss`, json('POST', {}));
+      expect(again.status).toBe(404);
+      expect(ErrorSchema.parse(await again.json()).error.message).toContain('Reload the page');
+    });
   });
 
   it('answers not available when the store keeps no pages', async () => {

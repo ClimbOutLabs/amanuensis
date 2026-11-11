@@ -13,6 +13,7 @@ import configuration from '../config';
 import {
   confirmMemoryPageLineRoute,
   deleteMemoryPageRoute,
+  dismissMemoryPageDisagreementRoute,
   dismissMemoryPageLineRoute,
   getMemoryPageRoute,
   listMemoryPageChangesRoute,
@@ -26,6 +27,7 @@ import type { PageChangeOptions } from '../runtime/memory/memoryPageWriter';
 import {
   confirmPageLine,
   deletePageFile,
+  dismissPageDisagreement,
   dismissPageLine,
   listPageChanges,
   listPagesForScreen,
@@ -161,6 +163,16 @@ export function createMemoryPagesRouter(deps: MemoryPagesRouterDeps) {
     return outcome.ok ? c.json({ data: outcome.value }, 200) : refusal(c, outcome);
   };
 
+  const dismissDisagreementHandler: RouteHandler<typeof dismissMemoryPageDisagreementRoute> = async c => {
+    const { kind, slug, disagreement_id: disagreementId } = c.req.valid('param');
+    const options = scope(c, c.req.valid('query').namespace);
+    if (options === undefined) {
+      return pagesNotAvailable(c);
+    }
+    const outcome = await dismissPageDisagreement({ vaultDir: options.vaultDir, kind, slug, disagreementId });
+    return outcome.ok ? c.json({ data: outcome.value }, 200) : refusal(c, outcome);
+  };
+
   const router = new OpenAPIHono();
   router.openapi(listMemoryPagesRoute, listHandler);
   router.openapi(listMemoryPageChangesRoute, changesHandler);
@@ -170,5 +182,6 @@ export function createMemoryPagesRouter(deps: MemoryPagesRouterDeps) {
   router.openapi(deleteMemoryPageRoute, deleteHandler);
   router.openapi(confirmMemoryPageLineRoute, confirmHandler);
   router.openapi(dismissMemoryPageLineRoute, dismissHandler);
+  router.openapi(dismissMemoryPageDisagreementRoute, dismissDisagreementHandler);
   return router;
 }
