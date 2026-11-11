@@ -2929,10 +2929,10 @@ async function classifyScheduleTool(action: SentinelAction, ctx: ClassifyContext
   return failClosedDecision({ reason_detail: 'Unknown schedule tool.' });
 }
 
-/** The longest note a reminder can hold, so a cancel card shows the whole of it. */
+/** The longest note a reminder set in a chat can hold; a cancel card shows that much and marks a longer one as cut. */
 const REMINDER_CARD_MAX_CHARS = 300;
 
-/** A reminder's words for a cancel card: one line, in quotes, in full. Null when there are none to show. */
+/** A reminder's words for a cancel card: one line, in quotes. Null when there are none to show. */
 function reminderCardWords(what: string | null): string | null {
   const oneLine = (what ?? '').replace(/\s+/g, ' ').trim();
   if (oneLine === '') {

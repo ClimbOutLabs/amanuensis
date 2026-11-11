@@ -39,11 +39,12 @@ In a scheduled run a held call is skipped, and the run tells you in one line.
 
 You can choose to let file writes run without a card. That is the only kind of action you can relax this way.
 
-## Scheduled runs never act on their own
+## Scheduled runs hold actions for you
 
-A scheduled run has nobody watching it, so it never sends or changes anything by itself.
+A scheduled run has nobody watching it, so it never sends anything by itself. The one thing of yours it changes by itself is a space.
 
 - It can read and search, the same as a chat.
+- It can make and change any space without asking, so a list it keeps for you stays up to date. Every change keeps a version you can ask Aman to bring back, and is written to the activity log. Aman cannot delete a space. A space only keeps a clickable link that you gave or that a search returned. A link that only an email or a web page supplied is kept as plain text.
 - Any action that would show a card in a chat is held instead. It is not run, and the model is told it was saved for you.
 - If you let file writes run without a card in chat, a scheduled run ignores that choice and holds them too.
 - If you let Aman run code in the sandbox without asking, a scheduled run ignores that choice as well. It holds code, new files and package installs.
