@@ -1,13 +1,18 @@
 import type { PersonaApi } from '@/components/PersonaContext.js';
 
 /**
- * Safe defaults for the persona-knowledge methods of PersonaApi, so tests that
- * do not exercise the knowledge library compile without implementing them.
+ * Safe defaults for the persona-knowledge and turn-lookup methods of PersonaApi, so tests that
+ * do not exercise them compile without implementing them.
  */
-export const personaKnowledgeApiStubs: Pick<
+export const personaApiStubs: Pick<
   PersonaApi,
-  'listPersonaKnowledge' | 'createPersonaKnowledge' | 'deletePersonaKnowledge' | 'getPersonaKnowledgeEmbeddingModel'
+  | 'getTurnPersona'
+  | 'listPersonaKnowledge'
+  | 'createPersonaKnowledge'
+  | 'deletePersonaKnowledge'
+  | 'getPersonaKnowledgeEmbeddingModel'
 > = {
+  getTurnPersona: async () => ({ persona_id: null }),
   listPersonaKnowledge: async () => [],
   createPersonaKnowledge: async () => {
     throw new Error('Unexpected knowledge API call');

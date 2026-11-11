@@ -492,7 +492,12 @@ export const ImportAgentsFileSchema = z.array(ImportAgentRecordSchema);
 
 /** Persona text is rendered into every prompt, so a record carries the same content checks as one typed in the app. */
 export const ImportPersonaRecordSchema = z
-  .object({ tenant_id: z.string(), ...PersonaSchema.shape })
+  .object({
+    tenant_id: z.string(),
+    ...PersonaSchema.shape,
+    /** Absent from exports made before personas kept a reading voice. */
+    voice: PersonaSchema.shape.voice.default(null),
+  })
   .superRefine(validatePersonaContentNames);
 export type ImportPersonaRecord = z.infer<typeof ImportPersonaRecordSchema>;
 

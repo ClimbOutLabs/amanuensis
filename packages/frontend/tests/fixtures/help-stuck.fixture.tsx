@@ -45,7 +45,9 @@ const helpApi = createHelpApi({
   listPersonas: () => {
     if (iris === 'fail') return Promise.reject(new Error('Iris could not be installed.'));
     if (iris === 'missing') return Promise.resolve([]);
-    return Promise.resolve([{ id: 'iris', display_name: 'Iris', aliases: [], instructions: '', model_name: '' }]);
+    return Promise.resolve([
+      { id: 'iris', display_name: 'Iris', aliases: [], instructions: '', model_name: '', voice: null },
+    ]);
   },
 });
 

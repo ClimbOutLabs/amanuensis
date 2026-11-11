@@ -175,6 +175,7 @@ function persona(id: string, name: string): Persona {
     aliases: [],
     instructions: '',
     model_name: 'test/model',
+    voice: null,
   };
 }
 

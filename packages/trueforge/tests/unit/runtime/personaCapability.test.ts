@@ -74,6 +74,7 @@ async function setup(input: { existing?: string[]; defaultAssistantName?: string
       aliases: [],
       instructions: 'Be brief.',
       model_name: CHAT_MODEL,
+      voice: null,
     });
   }
   const runner: ChatRunner = { kind: 'plain', spec: CHAT_SPEC };

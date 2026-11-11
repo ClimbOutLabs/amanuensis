@@ -81,7 +81,8 @@ export function VoiceReplySettings() {
             ))}
           </select>
           <p id="voice-reply-server-voice-hint" className="mt-1 text-xs leading-snug text-text-secondary">
-            This voice runs on your own computer. Pick one to hear a short sample. Saved in this browser only.
+            This voice runs on your own computer. Pick one to hear a short sample. Saved in this browser only. A persona
+            can have its own voice, set in Roles and Personas.
           </p>
         </div>
       )}

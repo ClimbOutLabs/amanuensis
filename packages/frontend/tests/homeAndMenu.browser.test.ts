@@ -230,7 +230,13 @@ test(
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          persona: { display_name: 'Nova', aliases: [], instructions: 'Answer briefly.', model_name: MODEL_FQN },
+          persona: {
+            display_name: 'Nova',
+            aliases: [],
+            instructions: 'Answer briefly.',
+            model_name: MODEL_FQN,
+            voice: null,
+          },
         }),
       });
       assert.ok(created.ok, `the agent was created (${String(created.status)})`);

@@ -9,4 +9,6 @@ export interface PersonaContent {
     instructions: string;
     /** Fully qualified model name (`provider/model`) selected when this persona is active. */
     modelName: string;
+    /** Voice id used to read this persona’s replies aloud, e.g. `af_bella`. Null uses the person’s own voice choice. */
+    voice: string | null;
 }

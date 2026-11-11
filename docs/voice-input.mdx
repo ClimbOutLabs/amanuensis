@@ -63,6 +63,8 @@ The reply to a message you spoke is read aloud by itself when it is done, unless
 
 **Choosing the voice.** Pick one of six voices in Settings, Themes, under "Voice replies". Heart is the default. Picking a voice plays a short sample. The choice is saved in this browser only.
 
+**A voice for each persona.** A persona can have its own voice. Pick it under **Voice** when you add or edit the persona. Its replies are then read in that voice, including in hands-free mode. A persona left on "Same as my voice setting", and the main assistant, use the voice above. See [Roles and Personas](/model-roles).
+
 **What it is.** A small container called `aman-tts`. It runs the Kokoro voice model (Apache-2.0) on the computer's processor and turns reply text into audio. The model and its voices are built into the container, so it never goes online.
 
 **Nothing leaves your computer.** The browser sends the reply text to the server, which passes it to `aman-tts` and sends the audio back. The text and the audio stay on your computer, and neither is saved or written to the logs.

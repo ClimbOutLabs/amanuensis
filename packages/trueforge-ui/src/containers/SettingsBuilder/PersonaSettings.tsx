@@ -6,8 +6,10 @@ import { useDraftCatalog } from '@/atoms/draft/DraftCatalogProvider.js';
 import { displayModelLabel } from '@/atoms/draft/DraftModelCatalogPanel.js';
 import { Button } from '@/atoms/primitives/Button.js';
 import { EMPTY_PERSONA_DRAFT, usePersonas, type Persona, type PersonaDraft } from '@/components/PersonaContext.js';
+import { useSpokenReply } from '@/components/SpokenReplyContext.js';
 import { Icon } from '@/icons/Icon.js';
 import { getErrorMessage } from '@/utils/getErrorMessage.js';
+import { isServerVoiceId, SERVER_VOICES } from '@/utils/speechReplyPreferences.js';
 import { PersonaKnowledgeSection } from './PersonaKnowledge.js';
 
 const inputClassName =
@@ -19,8 +21,16 @@ function toDraft(persona: Persona): PersonaDraft {
     aliases: persona.aliases,
     instructions: persona.instructions,
     model_name: persona.model_name,
+    voice: persona.voice,
   };
 }
+
+/** The label of a persona's own voice, or undefined when it reads in the person's voice choice. */
+function personaVoiceLabel(voice: string | null): string | undefined {
+  return SERVER_VOICES.find(option => option.id === voice)?.label.replace(/ \(default\)$/, '');
+}
+
+const PERSONA_VOICE_SAMPLE = 'Hi, this is how I will sound when I read my answers to you.';
 
 /** Aliases are edited as one comma-separated line; the server owns uniqueness. */
 function parseAliases(value: string): string[] {
@@ -53,6 +63,7 @@ const PersonaForm: FC<PersonaFormProps> = ({
   onSubmit,
   onCancel,
 }) => {
+  const spokenReply = useSpokenReply();
   const modelNames =
     draft.model_name && !models.some(model => model.name === draft.model_name)
       ? [...models.map(model => model.name), draft.model_name]
@@ -108,6 +119,41 @@ const PersonaForm: FC<PersonaFormProps> = ({
           ))}
         </select>
       </div>
+
+      {spokenReply.hasServerVoice() && (
+        <div>
+          <label htmlFor="persona-voice" className="mb-1.5 block text-sm font-medium text-text-primary">
+            Voice
+          </label>
+          <select
+            id="persona-voice"
+            aria-describedby="persona-voice-hint"
+            className={inputClassName}
+            value={draft.voice !== null && isServerVoiceId(draft.voice) ? draft.voice : ''}
+            onChange={event => {
+              const picked = event.target.value;
+              if (picked === '') {
+                onChange({ ...draft, voice: null });
+                return;
+              }
+              if (!isServerVoiceId(picked)) return;
+              onChange({ ...draft, voice: picked });
+              // A short sample, so the person hears the voice they picked.
+              void spokenReply.speak(PERSONA_VOICE_SAMPLE, { voice: picked });
+            }}
+          >
+            <option value="">Same as my voice setting</option>
+            {SERVER_VOICES.map(voice => (
+              <option key={voice.id} value={voice.id}>
+                {voice.label}
+              </option>
+            ))}
+          </select>
+          <p id="persona-voice-hint" className="mt-1 text-xs text-text-secondary">
+            Reads this persona’s replies aloud when you talk instead of type. Pick one to hear a short sample.
+          </p>
+        </div>
+      )}
 
       <div>
         <label htmlFor="persona-instructions" className="mb-1.5 block text-sm font-medium text-text-primary">
@@ -243,6 +289,7 @@ const PersonaSettings = () => {
 
         {personas.map(persona => {
           const known = models.some(model => model.name === persona.model_name);
+          const voiceLabel = personaVoiceLabel(persona.voice);
           return (
             <article key={persona.id} className="border-b border-border last:border-b-0">
               <div className="flex flex-col gap-3 p-3 sm:flex-row sm:items-start sm:justify-between">
@@ -254,6 +301,7 @@ const PersonaSettings = () => {
                       {displayModelLabel(persona.model_name)}
                       {known ? '' : ' — not in the current model catalog'}
                     </span>
+                    {voiceLabel === undefined ? '' : ` · Voice: ${voiceLabel}`}
                   </p>
                 </div>
                 <div className="flex shrink-0 gap-2">

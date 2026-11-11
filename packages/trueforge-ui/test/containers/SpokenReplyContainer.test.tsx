@@ -3,8 +3,11 @@ import type { RespondToToolApprovalOptions, ThreadMessageLike } from '@assistant
 import { act, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { PersonaProvider, type Persona, type PersonaApi } from '@/components/PersonaContext.js';
+import { SpokenReplyProvider } from '@/components/SpokenReplyContext.js';
 import { SpokenReplyContainer } from '@/containers/SpokenReplyContainer.js';
-import { SPEAK_VOICE_REPLIES_STORAGE_KEY } from '@/utils/speechReplyPreferences.js';
+import { SERVER_VOICE_STORAGE_KEY, SPEAK_VOICE_REPLIES_STORAGE_KEY } from '@/utils/speechReplyPreferences.js';
+import type { ServerVoiceApi } from '@/utils/spokenReplyPlayer.js';
 import {
   armSpokenReply,
   clearDraftFromVoice,
@@ -14,6 +17,7 @@ import {
   setHandsFree,
   takeDraftFromVoice,
 } from '@/utils/voiceTurn.js';
+import { personaApiStubs } from '../personaApiStubs.js';
 import {
   installSpeechSynthesis,
   removeSpeechSynthesis,
@@ -340,4 +344,116 @@ describe('SpokenReplyContainer', () => {
     rerender(thread({ messages: [...prompt, assistantMessage(reply)], running: false }));
     await settle();
   }
+});
+
+describe('SpokenReplyContainer with personas', () => {
+  const PERSONA: Persona = {
+    id: 'p-zara',
+    display_name: 'Zara',
+    aliases: [],
+    instructions: 'Answer plainly.',
+    model_name: 'scripted/model',
+    voice: 'af_bella',
+  };
+
+  function voiceServer(): ServerVoiceApi & { voices: string[] } {
+    const voices: string[] = [];
+    return {
+      voices,
+      speak: ({ voice }) => {
+        voices.push(voice);
+        return Promise.resolve(new Blob(['clip'], { type: 'audio/wav' }));
+      },
+    };
+  }
+
+  function personaApi(answeredBy: string | null): PersonaApi & { turnLookups: string[] } {
+    const turnLookups: string[] = [];
+    const unused = () => Promise.reject(new Error('not used in this test'));
+    return {
+      ...personaApiStubs,
+      turnLookups,
+      listPersonas: () => Promise.resolve([PERSONA]),
+      createPersona: unused,
+      updatePersona: unused,
+      deletePersona: unused,
+      getSessionPersona: () => Promise.resolve(null),
+      setSessionPersona: unused,
+      getTurnPersona: ({ sessionId, turnId }) => {
+        turnLookups.push(`${sessionId}/${turnId}`);
+        return Promise.resolve({ persona_id: answeredBy });
+      },
+    };
+  }
+
+  const reply = (turnId: string): ThreadMessageLike => ({
+    ...assistantMessage([{ type: 'text', text: 'Here is the answer.' }]),
+    metadata: { custom: { turnId } },
+  });
+
+  async function voiceTurn({ api, server }: { api: PersonaApi; server: ServerVoiceApi }) {
+    const view = (messages: ThreadMessageLike[], running: boolean) => {
+      threadRunning.value = running;
+      return (
+        <PersonaProvider api={api}>
+          <SpokenReplyProvider serverVoice={server}>
+            <RuntimeHarness messages={messages} isRunning={running} threadId="chat-a" remoteId="session-a">
+              <SpokenReplyContainer />
+            </RuntimeHarness>
+          </SpokenReplyProvider>
+        </PersonaProvider>
+      );
+    };
+    const { rerender } = render(view([], false));
+    await settle();
+    armSpokenReply({ fromVoice: true, text: PROMPT });
+    const prompt = [userMessage(PROMPT)];
+    rerender(view(prompt, true));
+    await settle();
+    rerender(view([...prompt, reply('turn-1')], false));
+    await settle();
+    await settle();
+  }
+
+  beforeEach(() => {
+    // jsdom cannot play audio; only which voice was asked for matters here.
+    vi.spyOn(HTMLMediaElement.prototype, 'play').mockRejectedValue(new Error('no audio in tests'));
+    vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    stopSpokenReply();
+    window.localStorage.clear();
+    threadRunning.value = false;
+  });
+
+  it('reads a reply in the voice picked for the persona that wrote it', async () => {
+    const api = personaApi('p-zara');
+    const server = voiceServer();
+    window.localStorage.setItem(SERVER_VOICE_STORAGE_KEY, 'am_fenrir');
+
+    await voiceTurn({ api, server });
+
+    expect(api.turnLookups).toEqual(['session-a/turn-1']);
+    expect(server.voices[0]).toBe('af_bella');
+  });
+
+  it('reads a reply from the main assistant in the person’s own voice choice', async () => {
+    const server = voiceServer();
+    window.localStorage.setItem(SERVER_VOICE_STORAGE_KEY, 'am_fenrir');
+
+    await voiceTurn({ api: personaApi(null), server });
+
+    expect(server.voices[0]).toBe('am_fenrir');
+  });
+
+  it('still reads the reply, in the person’s own voice, when the persona lookup fails', async () => {
+    const api: PersonaApi = { ...personaApi('p-zara'), getTurnPersona: () => Promise.reject(new Error('offline')) };
+    const server = voiceServer();
+
+    await voiceTurn({ api, server });
+
+    expect(server.voices[0]).toBe('af_heart');
+  });
 });

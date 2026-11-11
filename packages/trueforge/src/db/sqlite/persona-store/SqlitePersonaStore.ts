@@ -36,6 +36,7 @@ function personaColumns(eb: ExpressionBuilder<Database, 'persona'>) {
     jsonText<string[]>(eb.ref('aliases')).as('aliases'),
     'instructions' as const,
     'model_name' as const,
+    'voice' as const,
     'created_at' as const,
     'updated_at' as const,
     'updated_by' as const,
@@ -134,6 +135,7 @@ export class SqlitePersonaStore implements IPersonaStore<Transaction<Database>> 
           aliases: jsonbBind(content.aliases),
           instructions: content.instructions,
           model_name: content.model_name,
+          voice: content.voice,
           created_at: timestamp,
           updated_at: timestamp,
           updated_by: input.updated_by,
@@ -160,6 +162,7 @@ export class SqlitePersonaStore implements IPersonaStore<Transaction<Database>> 
           aliases: jsonbBind(content.aliases),
           instructions: content.instructions,
           model_name: content.model_name,
+          voice: content.voice,
           updated_at: nowIso(),
           updated_by: input.updated_by,
         })

@@ -6,10 +6,11 @@ import type * as TrueForge from "../../../../index.js";
  * @example
  *     {
  *         persona: {
- *             aliases: ["aliases"],
+ *             aliases: ["Z"],
  *             displayName: "Zara",
- *             instructions: "instructions",
- *             modelName: "model_name"
+ *             instructions: "Answer as a careful archivist.",
+ *             modelName: "openai/gpt-4.1",
+ *             voice: "af_bella"
  *         }
  *     }
  */

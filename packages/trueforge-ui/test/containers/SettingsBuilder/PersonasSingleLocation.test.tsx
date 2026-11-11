@@ -13,7 +13,7 @@ import { PersonaProvider, type Persona, type PersonaApi } from '@/components/Per
 import TruefoundrySettingsBuilder from '@/containers/SettingsBuilder/index.js';
 import { ServerProvider } from '@/server/ServerContext.js';
 import { ShellModeProvider, useShellMode } from '@/server/ShellModeContext.js';
-import { personaKnowledgeApiStubs } from '../../personaApiStubs.js';
+import { personaApiStubs } from '../../personaApiStubs.js';
 import { createMockAgentUIServer, createMockCatalog } from '../../server/mockServer.js';
 
 vi.mock('@truefoundry/assistant-ui-runtime', () => ({
@@ -22,12 +22,12 @@ vi.mock('@truefoundry/assistant-ui-runtime', () => ({
 }));
 
 const personas: Persona[] = [
-  { id: 'p1', display_name: 'Zara', aliases: [], instructions: 'Be Zara.', model_name: 'openai/gpt-4.1' },
+  { id: 'p1', display_name: 'Zara', aliases: [], instructions: 'Be Zara.', model_name: 'openai/gpt-4.1', voice: null },
 ];
 
 function TestShell() {
   const personaApi: PersonaApi = {
-    ...personaKnowledgeApiStubs,
+    ...personaApiStubs,
     listPersonas: async () => personas,
     createPersona: async persona => ({ ...persona, id: 'new' }),
     updatePersona: async (_id, persona) => ({ ...persona, id: 'p1' }),

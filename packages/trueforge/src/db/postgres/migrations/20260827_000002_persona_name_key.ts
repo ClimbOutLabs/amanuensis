@@ -37,8 +37,6 @@ function buildReservations(rows: PersonaRow[]): NameReservation[] {
       personaNameKeys({
         display_name: row.display_name,
         aliases: parseAliases(row.aliases),
-        instructions: '',
-        model_name: '',
       }),
     );
     if (keys.size === 0) {

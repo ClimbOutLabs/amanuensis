@@ -651,6 +651,8 @@ export interface PersonaTable {
   aliases: JsonbColumn<string[]>;
   instructions: string;
   model_name: string;
+  /** Reading voice for the persona's spoken replies; null uses the person's own choice. */
+  voice: string | null;
   created_at: string;
   updated_at: string;
   updated_by: string;

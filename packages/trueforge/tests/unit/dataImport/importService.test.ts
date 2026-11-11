@@ -1121,6 +1121,37 @@ describe('runDataImport reads schedules from before one-time schedules', () => {
   });
 });
 
+describe('runDataImport reads personas from before personas kept a voice', () => {
+  /** An export made before persona voices: the same personas, with no `voice` key. */
+  async function olderFormat(archive: Buffer): Promise<Buffer> {
+    return repack(archive, entries => {
+      const personas = listAt(parseJson(entries.get('personas.json'), 'personas.json'), 'personas.json');
+      for (const item of personas) {
+        Reflect.deleteProperty(recordAt(recordAt(item, 'persona entry')['persona'], 'persona'), 'voice');
+      }
+      entries.set('personas.json', Buffer.from(JSON.stringify(personas)));
+    });
+  }
+
+  it('carries a persona voice across, and reads an older export as the person’s own voice', async () => {
+    const { source, archive } = await seededArchive();
+    const current = await makeInstance('target-persona-voice');
+    const older = await makeInstance('target-older-persona-voice');
+    try {
+      await runDataImport(importDeps(current), importRequest(archive));
+      const key = { tenant_id: TENANT, created_by: 'bob', id: SEED_IDS.personaResearcher };
+      expect((await current.stores.personaStore.getPersona(key))?.voice).toBe('af_bella');
+
+      await runDataImport(importDeps(older), importRequest(await olderFormat(archive)));
+      expect((await older.stores.personaStore.getPersona(key))?.voice).toBeNull();
+    } finally {
+      await source.close();
+      await current.close();
+      await older.close();
+    }
+  });
+});
+
 describe('runDataImport reads spaces from before spaces had folders', () => {
   /** An export made before space folders: no space_folders.json, and no folder on any space entry. */
   async function olderFormat(archive: Buffer): Promise<Buffer> {

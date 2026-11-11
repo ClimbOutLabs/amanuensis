@@ -1768,10 +1768,11 @@ Creates a persona bound to a fully qualified model name. Names and aliases must 
 ```typescript
 await client.personas.create({
     persona: {
-        aliases: ["aliases"],
+        aliases: ["Z"],
         displayName: "Zara",
-        instructions: "instructions",
-        modelName: "model_name"
+        instructions: "Answer as a careful archivist.",
+        modelName: "openai/gpt-4.1",
+        voice: "af_bella"
     }
 });
 
@@ -1838,10 +1839,11 @@ Replaces a persona’s identity, role, and model binding.
 ```typescript
 await client.personas.update("persona_id", {
     persona: {
-        aliases: ["aliases"],
+        aliases: ["Z"],
         displayName: "Zara",
-        instructions: "instructions",
-        modelName: "model_name"
+        instructions: "Answer as a careful archivist.",
+        modelName: "openai/gpt-4.1",
+        voice: "af_bella"
     }
 });
 
@@ -5548,6 +5550,77 @@ await client.sessionPersonas.listActivations("session_id");
 <dd>
 
 **session_id:** `string` — Session identifier.
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `SessionPersonasClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.sessionPersonas.<a href="/src/api/resources/sessionPersonas/client/Client.ts">getTurn</a>(session_id, turn_id) -> TrueForge.GetTurnPersonaResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Returns which persona answered this turn, or null when the default assistant did. Later persona switches do not change it.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.sessionPersonas.getTurn("session_id", "turn_id");
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**session_id:** `string` — Session identifier.
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**turn_id:** `string` — Turn identifier.
 
 </dd>
 </dl>

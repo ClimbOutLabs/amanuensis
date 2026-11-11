@@ -803,6 +803,8 @@ export interface PersonaTable {
   aliases: JSONColumnType<string[], string[] | string, string[] | string>;
   instructions: string;
   model_name: string;
+  /** Reading voice for the persona's spoken replies; null uses the person's own choice. */
+  voice: string | null;
   created_at: Date;
   updated_at: Date;
   updated_by: string;

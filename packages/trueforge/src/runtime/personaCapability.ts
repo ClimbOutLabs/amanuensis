@@ -76,6 +76,8 @@ export function personaContentFor(input: {
     aliases: [],
     instructions: `${input.description}\n\n${input.instructions}`,
     model_name: input.model_name,
+    // A new persona reads aloud in the person's own voice until they pick one for it.
+    voice: null,
   };
 }
 
