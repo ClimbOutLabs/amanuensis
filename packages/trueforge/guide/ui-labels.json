@@ -1,6 +1,7 @@
 {
   "Settings": "packages/trueforge-ui/src/atoms/ShellActions.tsx",
   "Roles and Personas": "packages/trueforge-ui/src/containers/SettingsBuilder/index.tsx",
+  "Add": "packages/trueforge-ui/src/containers/SettingsBuilder/ConnectorSettings.tsx",
   "Add persona": "packages/trueforge-ui/src/containers/SettingsBuilder/PersonaSettings.tsx",
   "Name": "packages/trueforge-ui/src/containers/SettingsBuilder/PersonaSettings.tsx",
   "Also answers to": "packages/trueforge-ui/src/containers/SettingsBuilder/PersonaSettings.tsx",
@@ -111,5 +112,10 @@
   "Delete for good": "packages/trueforge-ui/src/atoms/privateChat/PrivateChatBanner.tsx",
   "Take over": "packages/frontend/src/BrowserLivePage.tsx",
   "Hand back": "packages/frontend/src/BrowserLivePage.tsx",
-  "Done": "packages/frontend/src/BrowserLivePage.tsx"
+  "Done": "packages/frontend/src/BrowserLivePage.tsx",
+  "Audit": "packages/trueforge-ui/src/containers/SettingsBuilder/index.tsx",
+  "Show": "packages/trueforge-ui/src/sentinel/AuditLogSettings.tsx",
+  "From": "packages/trueforge-ui/src/sentinel/AuditLogSettings.tsx",
+  "To": "packages/trueforge-ui/src/sentinel/AuditLogSettings.tsx",
+  "Clear dates": "packages/trueforge-ui/src/sentinel/AuditLogSettings.tsx"
 }

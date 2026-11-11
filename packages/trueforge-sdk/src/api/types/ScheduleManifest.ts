@@ -5,6 +5,8 @@ import type * as TrueForge from "../index.js";
 export interface ScheduleManifest {
     cron?: TrueForge.CronExpression | null;
     kind?: TrueForge.ScheduleKind;
+    /** The chat a reminder was set in, so its line lands in that chat when it fires. Null for tasks, for reminders set outside a chat, and for reminders saved before this was recorded. */
+    originSessionId?: string | null;
     runAt?: TrueForge.RunAt | null;
     status?: TrueForge.ScheduleStatus;
     /** First user message sent to the agent on every run. */

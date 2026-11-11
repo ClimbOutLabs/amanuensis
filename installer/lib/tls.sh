@@ -38,17 +38,10 @@ tls_home_in_volume() {
 # form, reading the record with reg_get.
 tls_active() { serves_https "$(reg_get "$1" tls)" "$(reg_get "$1" tls_port)" "$(reg_get "$1" origins)"; }
 
-# What a re-run wants for an instance opened on the network: the flag, else what it has, else https.
-tls_target() { # name; prints local or off
-  case "${OPT_TLS:-}" in
-    local | off) printf '%s' "$OPT_TLS" ;;
-    *)
-      case "$(reg_get "$1" tls)" in
-        local | off) reg_get "$1" tls ;;
-        *) printf local ;;
-      esac
-      ;;
-  esac
+# What a re-run wants for an instance opened on the network: always https, so an instance recorded with plain http
+# from before moves to https on the next run and one already on https stays there.
+tls_target() { # name; prints local
+  printf local
 }
 
 # Every host of an origin list, one per line, each once: the names the certificate must carry.
@@ -93,9 +86,15 @@ tls_issue() { # name app_image
   ensure_private_dir "$(tls_dir)"
   ensure_private_dir "$(tls_dir)/leaf"
   ensure_private_dir "$(tls_leaf_dir "$name")"
+  # An instance already served over https is fixed by the doctor. One still being moved to https is finished by
+  # running the installer again, which its caller says next, so no fix is named here for it.
   # shellcheck disable=SC2086 # the names are checked hosts without spaces
-  out=$(tls_node "$2" "node /pki.mjs ensure-ca /tls/ca $all && node /pki.mjs issue /tls/ca /tls/leaf/$name $names") ||
-    die "The certificate for instance $name could not be made. Run: aman doctor tls --fix"
+  if ! out=$(tls_node "$2" "node /pki.mjs ensure-ca /tls/ca $all && node /pki.mjs issue /tls/ca /tls/leaf/$name $names"); then
+    if tls_active "$name"; then
+      die "The certificate for instance $name could not be made. Run: aman doctor tls --fix"
+    fi
+    die "The certificate for instance $name could not be made."
+  fi
   case "$out" in
     *'"rotated":true'*)
       TLS_AUTHORITY_REPLACED=1
