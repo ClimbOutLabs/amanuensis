@@ -7,6 +7,7 @@
  * resubmission for a vanished operation) is a no-op on the memory provider's side.
  */
 import type { SessionRecord } from '@truefoundry/trueforge-core/agent-session';
+import type { ILLM } from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
 import configuration from '../../config';
 import type { IModelProviderStore } from '../../db/modelProviderStore';
@@ -14,7 +15,7 @@ import type { TurnModelUsage } from '../modelUsage';
 import { sessionKeepsNothing } from '../privateChat';
 import type { TokenFactoryBudget } from '../tokenFactoryBudget';
 import { stripAssistantAbilityNotes, withoutAbilityNotes } from './assistantAbilityNotes';
-import type { RetainItem } from './hindsightClient';
+import type { RetainItem, WrittenEntry } from './hindsightClient';
 import { isOperationCompletedStatus, isOperationFailedStatus } from './hindsightClient';
 import { localDay } from './localDay';
 import { normalizedEntryBody, SESSION_ID_METADATA_KEY } from './markdownMemoryFiles';
@@ -35,6 +36,7 @@ import {
   type AmanMemoryOrigin,
 } from './memoryOrigin';
 import { summarizeTurnContent, usablePersonName, type SummaryFallbackReason } from './memorySummarize';
+import { sortWrittenNotes } from './pageSortRun';
 import { uuidv5 } from './uuidv5';
 
 /** Fixed namespace for every operation id this host mints, in the style of RFC 4122's example namespaces. */
@@ -122,6 +124,8 @@ export interface SummarizeTurnContext {
    * not saved, so the profile is never copied into memory turn after turn.
    */
   profileLines?: readonly string[] | undefined;
+  /** Test seam; production leaves it unset and resolves a model client over the configured provider. */
+  resolveLlm?: ((modelFqn: string) => Promise<ILLM>) | undefined;
 }
 
 /** A line as compared for the profile guard: case, surrounding space, and a leading bullet do not count. */
@@ -300,6 +304,7 @@ async function decidePersonFacts(params: SubmitRetainParams): Promise<TurnMemory
       tokenFactoryBudget: summarize.tokenFactoryBudget,
       modelUsage: summarize.modelUsage,
       logger: params.logger,
+      resolveLlm: summarize.resolveLlm,
     });
     switch (result.status) {
       case 'summarized': {
@@ -487,6 +492,29 @@ async function withoutStoredCopies({
   return items.filter(item => !readContent(item) || !stored.has(normalizedEntryBody(item.content)));
 }
 
+/**
+ * Starts sorting the notes a save has just written, without waiting for it: the reply and the save never depend
+ * on it. The work is bounded by the summarizer's limit on calls at once.
+ */
+export function startPageSorting({
+  client,
+  written,
+  summarize,
+  timeZone,
+  logger,
+}: {
+  client: MemoryClient;
+  written: readonly WrittenEntry[] | undefined;
+  summarize: SummarizeTurnContext | undefined;
+  timeZone: string | undefined;
+  logger: Logger;
+}): void {
+  if (written === undefined || written.length === 0) {
+    return;
+  }
+  void sortWrittenNotes({ mode: configuration.MEMORY_PAGE_SORTING, client, written, summarize, timeZone, logger });
+}
+
 async function attemptRetainSubmission(
   params: SubmitRetainParams,
   /**
@@ -548,6 +576,13 @@ async function attemptRetainSubmission(
       });
       return 'failed';
     }
+    startPageSorting({
+      client: params.client,
+      written: outcome.written,
+      summarize: params.summarize,
+      timeZone: params.timeZone,
+      logger: params.logger,
+    });
     return 'submitted';
   } catch (error) {
     params.logger.warn('Memory retain submission threw unexpectedly', {

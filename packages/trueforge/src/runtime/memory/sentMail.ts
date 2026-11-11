@@ -27,7 +27,7 @@ import { localDay } from './localDay';
 import { REPLACE_DOCUMENT_METADATA_KEY } from './markdownMemoryFiles';
 import type { MemoryClient } from './memoryClient';
 import { labeledNoteText, noteLabel, SENT_MAIL_SOURCE } from './memoryNotes';
-import { noteRetainItem, retainOperationId } from './memoryRetain';
+import { noteRetainItem, retainOperationId, startPageSorting, type SummarizeTurnContext } from './memoryRetain';
 
 export interface SentMail {
   kind: 'send' | 'forward';
@@ -186,6 +186,7 @@ export async function saveSentMail({
   mail,
   sentAt,
   timeZone,
+  summarize,
   logger,
 }: {
   client: MemoryClient;
@@ -198,6 +199,8 @@ export async function saveSentMail({
   mail: SentMail;
   sentAt: string;
   timeZone: string | undefined;
+  /** The model to sort the saved note with; without it the note is saved and left unsorted. */
+  summarize?: SummarizeTurnContext | undefined;
   logger: Logger;
 }): Promise<void> {
   if (sessionKeepsNothing({ session })) {
@@ -231,10 +234,13 @@ export async function saveSentMail({
       timeoutMs: configuration.MEMORY_RETAIN_TIMEOUT_MS,
     };
     // One retry, since nothing else will save this note if the first attempt does not land.
-    const outcome = await client.retain(request);
-    if (!outcome.ok && !(await client.retain(request)).ok) {
-      logger.warn('A sent message could not be saved to memory', { sessionId, turnId, reason: outcome.reason });
+    const first = await client.retain(request);
+    const outcome = first.ok ? first : await client.retain(request);
+    if (!outcome.ok) {
+      logger.warn('A sent message could not be saved to memory', { sessionId, turnId, reason: first.reason });
+      return;
     }
+    startPageSorting({ client, written: outcome.written, summarize, timeZone, logger });
   } catch (error) {
     logger.warn('A sent message could not be saved to memory', { sessionId, turnId, ...extractErrorLogFields(error) });
   }

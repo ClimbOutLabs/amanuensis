@@ -91,7 +91,9 @@ import type {
   UpdateMemoryVaultEntryOutcome,
 } from './memoryClient';
 import { loadPagesForMessage } from './memoryPageLoader';
+import type { PageListing } from './memoryPages';
 import { rankNamedPeopleFirst } from './recallNameBoost';
+import { pagesNearText, statementIndexFor } from './statementIndex';
 import { VaultEraseError, eraseMarkedEntries } from './vaultErase';
 import { VaultBusyError, VaultLockLostError, withVaultLock } from './vaultLock';
 
@@ -485,7 +487,7 @@ export class MarkdownMemoryClient implements MemoryClient {
       const embeddings = this.embeddings?.(this.writeNamespace);
       embeddings?.ensureWarmed();
       embeddings?.indexNewEntries(indexed);
-      return { ok: true };
+      return { ok: true, written: indexed };
     } catch (error) {
       return { ok: false, reason: failureReason('markdown retain failed', error) };
     }
@@ -651,6 +653,19 @@ export class MarkdownMemoryClient implements MemoryClient {
 
   pagesWriteDir(): string {
     return this.namespaceDir();
+  }
+
+  async pagesByMeaning({ text, limit }: { text: string; limit: number }): Promise<PageListing[]> {
+    try {
+      const model = this.embeddings?.(this.writeNamespace).embeddingModel;
+      if (model === undefined) {
+        return [];
+      }
+      const index = statementIndexFor({ vaultDir: this.namespaceDir(), model });
+      return await pagesNearText({ index, model, text, limit });
+    } catch {
+      return [];
+    }
   }
 
   async loadPages(params: {

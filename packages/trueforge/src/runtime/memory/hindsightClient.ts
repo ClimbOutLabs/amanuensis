@@ -203,9 +203,19 @@ export interface RetainItem {
   metadata?: Record<string, string>;
 }
 
+/** One entry a retain added to the daily log, as the log keeps it. */
+export interface WrittenEntry {
+  /** Stable id `md:{namespace}:{file}#{index}`. */
+  id: string;
+  /** The whole entry: heading, text and hidden trailer lines. */
+  text: string;
+}
+
 export interface RetainOutcome {
   ok: boolean;
   reason?: string;
+  /** The entries this call added, when the store keeps entries it can name. Absent when the call added none. */
+  written?: readonly WrittenEntry[];
 }
 
 export type GetOperationOutcome = { ok: true; status: string } | MemoryFailure;

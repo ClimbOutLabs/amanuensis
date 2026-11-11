@@ -47,6 +47,7 @@ import { normalizedOrigin } from './mcp/firstParty';
 import { PACKAGE_VERSION } from './packageVersion';
 import { defaultEmbeddingModelDir } from './runtime/memory/embeddingRetrieval';
 import type { ReflectBudget } from './runtime/memory/hindsightClient';
+import { PageSortModeSchema, type PageSortMode } from './runtime/memory/pageSortMode';
 import { parseModelPrices, type ModelPrices } from './runtime/modelPricing';
 import { DEFAULT_TOKEN_FACTORY_MODEL } from './runtime/tokenFactoryDefaults';
 import { MAX_CODE_MODE_SOCKET_PARENT_BYTES } from './sandbox/local/core/CodeModeUdsTransport';
@@ -659,6 +660,22 @@ function parseMemoryBackend(options: {
     return value;
   }
   throw new Error(`${options.envKey} must be one of markdown, hindsight; got ${JSON.stringify(options.raw)}`);
+}
+
+/** Parses `MEMORY_PAGE_SORTING`. Unset/blank → default. */
+export function parsePageSortMode(options: {
+  envKey: string;
+  raw: string | undefined;
+  defaultValue: PageSortMode;
+}): PageSortMode {
+  if (options.raw === undefined || options.raw.trim() === '') {
+    return options.defaultValue;
+  }
+  const parsed = PageSortModeSchema.safeParse(options.raw.trim().toLowerCase());
+  if (parsed.success) {
+    return parsed.data;
+  }
+  throw new Error(`${options.envKey} must be one of off, report, on; got ${JSON.stringify(options.raw)}`);
 }
 
 /** How turns may route to Nebius Token Factory. */
@@ -2025,6 +2042,13 @@ export interface SharedServerConfiguration {
    */
   MEMORY_SUMMARIZE: boolean;
   /**
+   * Whether each note saved to the daily log is sorted onto the people and matter pages: `off` does nothing,
+   * `report` asks the model and only records what it would have done in the vault's `.sorter-report.jsonl`,
+   * `on` writes the pages. Only consulted when `MEMORY_BACKEND` is `markdown`.
+   * Env: `MEMORY_PAGE_SORTING`. Default `report`.
+   */
+  MEMORY_PAGE_SORTING: PageSortMode;
+  /**
    * Nebius Token Factory API key. Populated from the Secure Vault into the deployment
    * environment; never committed or logged. With a key set, startup also writes a read-only
    * `tokenfactory` provider and makes its default model the chat default.
@@ -2906,6 +2930,11 @@ const shared: SharedServerConfiguration = {
     envKey: 'MEMORY_SUMMARIZE',
     raw: getEnv('MEMORY_SUMMARIZE'),
     defaultValue: true,
+  }),
+  MEMORY_PAGE_SORTING: parsePageSortMode({
+    envKey: 'MEMORY_PAGE_SORTING',
+    raw: getEnv('MEMORY_PAGE_SORTING'),
+    defaultValue: 'report',
   }),
   NEBIUS_API_KEY: getEnv('NEBIUS_API_KEY'),
   SEARCH_PROVIDER: parseSearchProviderChoice({ envKey: 'SEARCH_PROVIDER', raw: getEnv('SEARCH_PROVIDER') }),

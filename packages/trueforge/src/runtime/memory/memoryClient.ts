@@ -22,6 +22,7 @@ import type {
 } from './hindsightClient';
 import type { MeaningGate } from './meaningGate';
 import type { LoadedPage, PageLoadStats } from './memoryPageLoader';
+import type { PageListing } from './memoryPages';
 
 export interface MemoryClient {
   recall(params: {
@@ -136,6 +137,12 @@ export interface MemoryClient {
    * shared vault). Only the markdown client implements it, so only it offers the memory page tools.
    */
   pagesWriteDir?(): string;
+
+  /**
+   * Optional: the pages in this client's write vault whose statements are closest in meaning to a text, nearest
+   * first. Empty until the meaning search is ready. Only the markdown client implements it. Never throws.
+   */
+  pagesByMeaning?(params: { text: string; limit: number }): Promise<PageListing[]>;
 }
 
 /** What `loadPages` hands back: the pages the model sees and the counts the memory event records. */

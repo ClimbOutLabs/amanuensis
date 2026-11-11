@@ -1417,6 +1417,7 @@ async function runTurnEventDrain(params: {
               mail,
               sentAt: event.created_at,
               timeZone: memory.timeZone,
+              summarize: memory.summarize,
               logger,
             }),
           );
