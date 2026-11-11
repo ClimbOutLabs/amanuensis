@@ -245,7 +245,10 @@ def remove_account():
 
 
 MOST_LISTED_PER_CALL = 500
-IMAP_TIMEOUT_SECONDS = 30
+# The app gives up on a list after 75 seconds. Work stops starting new round trips after this long, and one round trip
+# can take up to the IMAP timeout, so an answer always comes before the app gives up.
+LIST_WORK_SECONDS = float(os.environ.get("AMAN_MAIL_LIST_SECONDS", "35"))
+IMAP_TIMEOUT_SECONDS = 20
 CANDIDATES_PER_FETCH = 200
 MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 INTERNAL_DATE = re.compile(rb'INTERNALDATE "([^"]+)"')
@@ -303,10 +306,14 @@ def arrival_of(raw):
     return (local - offset if sign == "+" else local + offset).replace(tzinfo=timezone.utc)
 
 
-def internal_dates(conn, uids):
-    """INTERNALDATE of each UID that the server still has."""
+def internal_dates(conn, uids, out_of_time):
+    """INTERNALDATE of each UID the server still has, and how many of `uids` were looked at. It stops between
+    chunks once the time is up, but always looks at the first chunk, so every call gets somewhere."""
     found = {}
+    looked = 0
     for start in range(0, len(uids), CANDIDATES_PER_FETCH):
+        if start > 0 and out_of_time():
+            break
         chunk = uids[start : start + CANDIDATES_PER_FETCH]
         kind, data = conn.uid("FETCH", ",".join(str(uid) for uid in chunk), "(INTERNALDATE)")
         if kind != "OK":
@@ -317,13 +324,15 @@ def internal_dates(conn, uids):
             arrived = arrival_of(raw) if uid else None
             if uid and arrived:
                 found[int(uid.group(1))] = arrived
-    return found
+        looked = start + len(chunk)
+    return found, looked
 
 
-def list_after(conn, payload):
+def list_after(conn, payload, out_of_time=lambda: False):
     """Mail after a cursor, in UID order, read-only. With no cursor, or a cursor from another UIDVALIDITY, it starts
-    at the first message that arrived at or after `since`. A message whose headers cannot be parsed is counted in
-    `skipped` and the cursor moves past it, so one bad message never holds up the others."""
+    at the first message that arrived at or after `since`. A message whose headers cannot be read is counted in
+    `skipped` and the cursor moves past it, so one bad message never holds up the others. A message deleted while it
+    was being listed is simply gone, not skipped. Once the time is up it answers with what it got through and `more`."""
     kind, _ = conn.select("INBOX", readonly=True)
     if kind != "OK":
         raise imaplib.IMAP4.error("select")
@@ -332,9 +341,12 @@ def list_after(conn, payload):
     next_uid = int(next_data[0]) if next_data and next_data[0] else 1
     limit = max(1, min(int(payload["limit"]), MOST_LISTED_PER_CALL))
     cursor_valid = payload.get("last_uid") is not None and payload.get("uidvalidity") == validity
+    # How far the UIDs were looked at when the listing itself stopped early, so the older ones are not asked again.
+    looked_to = None
     if cursor_valid:
         last = int(payload["last_uid"])
-        kind, data = conn.uid("SEARCH", None, "%d:*" % (last + 1))
+        # A bare set in SEARCH is message sequence numbers, so the UID key is what names UIDs after the cursor.
+        kind, data = conn.uid("SEARCH", None, "UID", "%d:*" % (last + 1))
         if kind != "OK":
             raise imaplib.IMAP4.error("search")
         candidates = sorted(uid for uid in (int(part) for part in (data[0] or b"").split()) if uid > last)
@@ -349,24 +361,42 @@ def list_after(conn, payload):
         if kind != "OK":
             raise imaplib.IMAP4.error("search")
         listed = sorted(int(part) for part in (data[0] or b"").split())
-        dates = internal_dates(conn, listed)
+        dates, looked = internal_dates(conn, listed, out_of_time)
+        if looked < len(listed):
+            looked_to = listed[looked - 1]
+            listed = listed[:looked]
         candidates = [uid for uid in listed if uid in dates and dates[uid] >= since]
     batch = candidates[:limit]
-    more = len(candidates) > limit
+    more = len(candidates) > limit or looked_to is not None
+    items, refused, handled = fetch_headers(conn, batch, out_of_time)
+    if handled < len(batch):
+        batch = batch[:handled]
+        more = True
     wanted = set(batch)
     found = {}
-    for item in fetch_headers(conn, batch):
+    unreadable = set(uid for uid in refused if uid in wanted)
+    for item in items:
         message = message_of(item)
-        if message is not None and message["uid"] in wanted and message["uid"] not in found:
-            found[message["uid"]] = message
+        uid = uid_of(item)
+        if uid is None or uid not in wanted or uid in found:
+            continue
+        if message is None:
+            unreadable.add(uid)
+        else:
+            found[uid] = message
     messages = [found[uid] for uid in batch if uid in found]
-    last_uid = batch[-1] if batch else (int(payload["last_uid"]) if cursor_valid else max(next_uid - 1, 0))
+    every_candidate_read = len(batch) == len(candidates)
+    if every_candidate_read and looked_to is not None:
+        last_uid = max([looked_to] + batch)
+    elif batch:
+        last_uid = batch[-1]
+    else:
+        last_uid = int(payload["last_uid"]) if cursor_valid else max(next_uid - 1, 0)
     return {
         "uidvalidity": validity,
         "last_uid": last_uid,
         "more": more,
-        # Every listed UID the server did not answer for, or answered with headers that do not read, is one skipped message.
-        "skipped": len(batch) - len(messages),
+        "skipped": len(unreadable - set(found)),
         "messages": messages,
     }
 
@@ -374,20 +404,42 @@ def list_after(conn, payload):
 HEADER_ITEMS = "(INTERNALDATE BODY.PEEK[HEADER.FIELDS (FROM SUBJECT)])"
 
 
-def fetch_headers(conn, uids):
-    """The FETCH items for `uids`. A server that refuses the whole batch is asked for each UID alone, so one message it
-    cannot give costs only that message."""
+def uid_of(item):
+    """The UID a FETCH item is for, or None."""
+    raw = item[0] if isinstance(item, tuple) else item
+    found = FETCHED_UID.search(raw) if isinstance(raw, bytes) else None
+    return int(found.group(1)) if found else None
+
+
+def fetch_headers(conn, uids, out_of_time):
+    """The FETCH items for `uids`, the UIDs the server refused alone, and how many of `uids` (from the start) were
+    dealt with. A server that refuses a batch may still answer for some of it: those items are kept and only the
+    missing UIDs are asked for one by one, so one message it cannot give costs only that message. The one-by-one
+    asks stop once the time is up, after at least one, so every call gets somewhere."""
     if not uids:
-        return []
+        return [], set(), 0
     kind, data = conn.uid("FETCH", ",".join(str(uid) for uid in uids), HEADER_ITEMS)
     if kind == "OK":
-        return fetched_items(data)
-    items = []
-    for uid in uids:
+        return fetched_items(data), set(), len(uids)
+    # imaplib leaves the FETCH lines of a refused command among the untagged responses.
+    items = fetched_items(conn.response("FETCH")[1] or [])
+    answered = set(uid_of(item) for item in items)
+    refused = set()
+    asked = 0
+    for index, uid in enumerate(uids):
+        if uid in answered:
+            continue
+        if asked > 0 and out_of_time():
+            return items, refused, index
+        asked += 1
         kind, data = conn.uid("FETCH", str(uid), HEADER_ITEMS)
         if kind == "OK":
+            # An OK with nothing in it is a message deleted meanwhile.
             items.extend(fetched_items(data))
-    return items
+        else:
+            conn.response("FETCH")
+            refused.add(uid)
+    return items, refused, len(uids)
 
 
 def message_of(item):
@@ -415,7 +467,13 @@ def message_of(item):
 
 
 def handle_list_after(payload):
-    """A list-after request: (HTTP status, body). Fixed words for every failure; the mail server's text can echo credentials."""
+    """A list-after request: (HTTP status, body). Fixed words for every failure; the mail server's text can echo credentials.
+    The work is bounded so the answer comes inside the app's own limit for the call, and no IMAP session outlives it."""
+    deadline = time.monotonic() + LIST_WORK_SECONDS
+
+    def out_of_time():
+        return time.monotonic() >= deadline
+
     account = read_account()
     if account is None:
         return 409, {"error": "no_account"}
@@ -423,7 +481,7 @@ def handle_list_after(payload):
     if conn is None:
         return 502, {"error": word}
     try:
-        return 200, list_after(conn, payload)
+        return 200, list_after(conn, payload, out_of_time)
     except (imaplib.IMAP4.error, OSError, ssl.SSLError):
         return 502, {"error": "unavailable"}
     except (KeyError, TypeError, ValueError):

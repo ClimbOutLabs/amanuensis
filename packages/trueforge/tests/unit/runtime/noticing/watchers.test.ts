@@ -227,6 +227,49 @@ describe('readMailWindow when the rest of the window runs out of time', () => {
   });
 });
 
+describe('readMailWindow when the rest of the window fails after the stretch that failed alone', () => {
+  it('keeps the mail read before and in that stretch, and starts the next pass after it', async () => {
+    const bad = new Date('2026-11-05T14:30:01.000Z');
+    const early = message({ id: 'early', at: new Date('2026-11-05T14:05:00.000Z') });
+    const inside = message({ id: 'inside', at: bad });
+    const late = message({ id: 'late', at: new Date('2026-11-05T14:50:00.000Z') });
+    const failedOnce = new Set<number>();
+    const source: TimedMailSource = {
+      listNewMessages: ({ since, before }) => {
+        const covers = since.getTime() <= bad.getTime() && before.getTime() > bad.getTime();
+        const wide = before.getTime() - since.getTime() > SHORTEST_WINDOW_MS;
+        // The bad stretch fails once on its own and then reads, and everything after it fails, as when the server
+        // goes away.
+        const firstAlone = covers && !wide && !failedOnce.has(since.getTime());
+        if (firstAlone) {
+          failedOnce.add(since.getTime());
+        }
+        if ((covers && wide) || firstAlone || since.getTime() > bad.getTime()) {
+          return Promise.reject(new Error('cannot list'));
+        }
+        const found = [early, inside, late].filter(item => item.received_at >= since && item.received_at < before);
+        return Promise.resolve({ read: 'all', messages: found });
+      },
+      readText: () => Promise.resolve(''),
+      laterInThread: () => Promise.resolve([]),
+      trustedAuthenticationServers: [],
+    };
+    const read = await readMailWindow({
+      source,
+      since: SINCE,
+      now: NOW,
+      limit: 10,
+      keep_from: [],
+      logger: logger(),
+      out_of_time: () => false,
+    });
+    expect(read.status).toBe('read');
+    expect(read.status === 'read' ? readMessages(read).map(item => item.id) : []).toEqual(['early', 'inside']);
+    expect(read.resume_from?.getTime()).toBeGreaterThan(bad.getTime());
+    expect(read.resume_from?.getTime()).toBeLessThanOrEqual(late.received_at.getTime());
+  });
+});
+
 describe('watchMail when a message cannot be read', () => {
   const bill = (id: string, minute: number): MailMessage => ({
     ...message({ id, at: new Date(SINCE.getTime() + minute * 60_000) }),

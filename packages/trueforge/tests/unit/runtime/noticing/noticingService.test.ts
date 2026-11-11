@@ -3,9 +3,10 @@ import winston from 'winston';
 
 import { DeliveryStore } from '../../../../src/db/deliveryStore';
 import { migrateSqliteToLatest } from '../../../../src/db/migrateSqlite';
-import { NoticingStore } from '../../../../src/db/noticingStore';
+import { NoticingStore, type MailCursor } from '../../../../src/db/noticingStore';
 import { ReachSettingsStore } from '../../../../src/db/reachSettingsStore';
 import { createSqliteDb } from '../../../../src/db/sqlite/client';
+import { UNNAMED_ASSISTANT } from '../../../../src/runtime/chatAssistant';
 import { createDeliveryService } from '../../../../src/runtime/delivery/deliveryService';
 import type { NoticingJudge } from '../../../../src/runtime/noticing/judge';
 import {
@@ -13,6 +14,7 @@ import {
   createNoticingService,
   mailProblemOf,
 } from '../../../../src/runtime/noticing/noticingService';
+import { imapMessageId } from '../../../../src/runtime/noticing/sidecarSources';
 import {
   MailLoginFailedError,
   MailSourceBusyError,
@@ -97,6 +99,7 @@ async function setup({
   mailReadsInTime,
   saved = true,
   unreadable = {},
+  assistantNameFor = () => Promise.resolve('Mira'),
 }: {
   settings?: Partial<ReachSettings>;
   messages?: MailMessage[];
@@ -117,6 +120,7 @@ async function setup({
   saved?: boolean;
   /** Messages whose text the source fails to read every time. */
   unreadable?: Record<string, true>;
+  assistantNameFor?: () => Promise<string>;
 } = {}) {
   const clock = { now: NOW };
   const channelState = { current: channels };
@@ -212,7 +216,7 @@ async function setup({
       now: () => clock.now,
       sleep: () => new Promise(resolve => setTimeout(resolve, 5)),
       timezoneFor: () => Promise.resolve('Pacific/Auckland'),
-      assistantNameFor: () => Promise.resolve('Mira'),
+      assistantNameFor,
     });
   const service = makeService();
   const feed = async () => (await deliveryStore.list({ ...OWNER, limit: 50 })).deliveries;
@@ -1441,6 +1445,188 @@ describe('mail passes that keep failing', () => {
     sources.mail = { status: 'none' };
     await service.run({ watcher: 'mail' });
     expect((await checkpoint(store))?.failure).toBeUndefined();
+  });
+});
+
+describe('mail from a mailbox that numbers its messages', () => {
+  const MINUTE = 60_000;
+  const later = (minutes: number) => new Date(NOW.getTime() + minutes * MINUTE);
+  const checkpoint = async (store: NoticingStore) => await store.getCheckpoint({ ...OWNER, watcher: 'mail' });
+  const bill = (name: string, minutes: number): MailMessage =>
+    mail({
+      id: name,
+      thread_id: null,
+      from_address: 'billing@shop.test',
+      from_name: null,
+      subject: `Invoice ${name}: amount due by November 7`,
+      snippet: 'Amount due by November 7',
+      authentication_results: [],
+      received_at: later(minutes),
+    });
+
+  /** An IMAP mailbox as the account agent lists it: by UID after a cursor, or by arrival after a renumbering. */
+  async function numbered({ page = 500 }: { page?: number } = {}) {
+    const built = await setup();
+    const box = { uidvalidity: 1, entries: [] as { message: MailMessage; uid: number }[] };
+    const asked: { cursor: MailCursor | undefined; since: Date }[] = [];
+    const source: CursorMailSource = {
+      listAfter: ({ cursor, since, limit }) => {
+        asked.push({ cursor, since });
+        const after = cursor?.uidvalidity === box.uidvalidity ? cursor.last_uid : undefined;
+        const arrived = box.entries.filter(entry => entry.message.received_at.getTime() <= built.clock.now.getTime());
+        const wanted = arrived.filter(entry =>
+          after === undefined ? entry.message.received_at.getTime() >= since.getTime() : entry.uid > after,
+        );
+        const taken = wanted.slice(0, Math.min(limit, page));
+        const top = Math.max(0, ...arrived.map(entry => entry.uid));
+        return Promise.resolve({
+          messages: taken.map(entry => ({
+            ...entry.message,
+            id: imapMessageId({ uidvalidity: box.uidvalidity, uid: entry.uid }),
+            uid: entry.uid,
+          })),
+          skipped: 0,
+          cursor: { uidvalidity: box.uidvalidity, last_uid: taken.at(-1)?.uid ?? after ?? top },
+          more: wanted.length > taken.length,
+        });
+      },
+      readText: message => Promise.resolve(message.snippet),
+      laterInThread: () => Promise.resolve([]),
+      trustedAuthenticationServers: [],
+    };
+    built.sources.mail = { status: 'ready', source, kind: 'email_connector' };
+    const recorded: NoticingEvent[] = [];
+    const real = built.store.recordAll.bind(built.store);
+    jest.spyOn(built.store, 'recordAll').mockImplementation(async input => {
+      recorded.push(...input.events);
+      return await real(input);
+    });
+    const add = (message: MailMessage) => {
+      box.entries.push({ message, uid: Math.max(0, ...box.entries.map(entry => entry.uid)) + 1 });
+    };
+    /** Raised bills by their subject, so the same mail under two ids shows as two. */
+    const raised = () => recorded.filter(event => event.id.startsWith('bill_due:')).map(event => event.summary);
+    return { ...built, box, asked, add, recorded, raised };
+  }
+
+  it('tells about each bill once when the mailbox is renumbered, though UIDs restart and the times overlap', async () => {
+    const { service, clock, box, add, recorded } = await numbered();
+    await service.run({ watcher: 'mail' });
+    add(bill('A', 5));
+    add(bill('B', 15));
+    clock.now = later(20);
+    await service.run({ watcher: 'mail' });
+    // The mailbox is rebuilt: A is gone, B is now UID 1, and a new bill C gets UID 2, which was B's.
+    box.uidvalidity = 2;
+    box.entries = [{ message: bill('B', 15), uid: 1 }];
+    add(bill('C', 25));
+    clock.now = later(30);
+    await service.run({ watcher: 'mail' });
+    const bills = recorded.filter(event => event.id.startsWith('bill_due:'));
+    expect(bills.map(event => event.id)).toEqual(['bill_due:imap:1:1', 'bill_due:imap:1:2', 'bill_due:imap:2:2']);
+  });
+
+  it('saves where it got to, and the next pass lists from there', async () => {
+    const { service, clock, store, add, asked } = await numbered();
+    add(bill('A', -5));
+    await service.run({ watcher: 'mail' });
+    expect((await checkpoint(store))?.cursor).toEqual({ uidvalidity: 1, last_uid: 1 });
+    add(bill('B', 5));
+    clock.now = later(10);
+    await service.run({ watcher: 'mail' });
+    expect(asked.at(-1)?.cursor).toEqual({ uidvalidity: 1, last_uid: 1 });
+    expect((await checkpoint(store))?.cursor).toEqual({ uidvalidity: 1, last_uid: 2 });
+  });
+
+  it('lists more than once in a pass while the agent says more is waiting', async () => {
+    const { service, clock, add, asked, raised } = await numbered({ page: 2 });
+    await service.run({ watcher: 'mail' });
+    for (const name of ['A', 'B', 'C', 'D', 'E']) add(bill(name, 5));
+    clock.now = later(10);
+    const before = asked.length;
+    await service.run({ watcher: 'mail' });
+    expect(asked.length - before).toBe(3);
+    expect(raised()).toHaveLength(5);
+  });
+
+  it('drops a cursor from before the day limit and lists from the limit instead', async () => {
+    const { service, clock, store, add, asked } = await numbered();
+    await service.run({ watcher: 'mail' });
+    expect((await checkpoint(store))?.cursor).toBeDefined();
+    add(bill('old', 60));
+    add(bill('new', 47 * 60));
+    clock.now = later(48 * 60);
+    await service.run({ watcher: 'mail' });
+    expect(asked.at(-1)?.cursor).toBeUndefined();
+    expect(asked.at(-1)?.since).toEqual(later(24 * 60));
+  });
+});
+
+describe('mail left unread in a stretch of trouble', () => {
+  const HOUR = 3_600_000;
+  const hoursAgo = (hours: number) => new Date(NOW.getTime() - hours * HOUR);
+  const began = hoursAgo(29);
+
+  /** Mail last read `read_to` hours ago, with trouble that began 29 hours ago, so the pass passes some mail over. */
+  async function behind({ read_to, ...options }: { read_to: number } & Parameters<typeof setup>[0]) {
+    const built = await setup(options);
+    await built.store.setCheckpoint({
+      ...OWNER,
+      watcher: 'mail',
+      checked_at: hoursAgo(read_to),
+      failure: { kind: 'other', since: began },
+      stuck: undefined,
+      source: 'google',
+    });
+    return built;
+  }
+  const notesOf = (built: Awaited<ReturnType<typeof setup>>) => {
+    const notes: NoticingEvent[] = [];
+    const real = built.store.recordAll.bind(built.store);
+    jest.spyOn(built.store, 'recordAll').mockImplementation(async input => {
+      notes.push(...input.events.filter(event => event.id.startsWith('mail_gap:')));
+      return await real(input);
+    });
+    return notes;
+  };
+
+  it('names the note by when the trouble began, so passes that leave different mail unread make one note', async () => {
+    const first = await behind({ read_to: 30 });
+    const firstNotes = notesOf(first);
+    await first.service.run({ watcher: 'mail' });
+    const second = await behind({ read_to: 27 });
+    const secondNotes = notesOf(second);
+    await second.service.run({ watcher: 'mail' });
+    expect(firstNotes.map(note => note.occurred_at)).not.toEqual(secondNotes.map(note => note.occurred_at));
+    expect([...firstNotes, ...secondNotes].map(note => note.id)).toEqual([
+      `mail_gap:${began.toISOString()}`,
+      `mail_gap:${began.toISOString()}`,
+    ]);
+  });
+
+  it('uses a plain name for the assistant when its name cannot be looked up, and still reads the mail', async () => {
+    const built = await behind({
+      read_to: 30,
+      assistantNameFor: () => Promise.reject(new Error('settings could not be read')),
+    });
+    const notes = notesOf(built);
+    await built.service.run({ watcher: 'mail' });
+    expect(notes.map(note => note.summary.startsWith(`${UNNAMED_ASSISTANT} could not read`))).toEqual([true]);
+    expect((await built.store.getCheckpoint({ ...OWNER, watcher: 'mail' }))?.checked_at).toEqual(
+      new Date(NOW.getTime() - 10 * 60_000),
+    );
+  });
+
+  it('says mail is slow when the mail server is busy', async () => {
+    const { service, store, mailSource } = await setup({});
+    jest
+      .mocked(mailSource.listNewMessages)
+      .mockRejectedValue(new MailSourceBusyError({ cause: new Error('Too many requests.') }));
+    await service.run({ watcher: 'mail' });
+    expect((await store.getCheckpoint({ ...OWNER, watcher: 'mail' }))?.failure).toEqual({
+      kind: 'too_slow',
+      since: NOW,
+    });
   });
 });
 

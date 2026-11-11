@@ -176,6 +176,19 @@ function toMailMessage({
   };
 }
 
+/**
+ * The id of an IMAP message in the app: its UID with the mailbox's UIDVALIDITY, since a renumbered mailbox gives the
+ * same UID to another message. Events are keyed on it, so new mail is never mistaken for old.
+ */
+export function imapMessageId({ uidvalidity, uid }: { uidvalidity: number; uid: number }): string {
+  return `imap:${String(uidvalidity)}:${String(uid)}`;
+}
+
+/** The UID the Email connector's tools take for a message id. */
+function connectorIdOf(id: string): string {
+  return /^imap:\d+:(\d+)$/.exec(id)?.[1] ?? id;
+}
+
 /** One request to the mail sidecar's account agent for the mail after a cursor, answered as the app reads it. */
 export type ListAfterAgent = (request: {
   uidvalidity: number | null;
@@ -246,7 +259,7 @@ export function imapAgent({ url, fetchImpl }: { url: string; fetchImpl: typeof f
       const { uid, from_address, from_name, subject } = message.data;
       const bare = bareSubject(subject);
       messages.push({
-        id: String(uid),
+        id: imapMessageId({ uidvalidity: reply.uidvalidity, uid }),
         uid,
         // The mail has no thread, so the subject stands in for one when a later reply is looked for.
         thread_id: bare === '' ? null : bare,
@@ -328,7 +341,7 @@ export function sidecarMailSource({
       return reply;
     },
     async readText(message) {
-      const [found] = await bodiesOf([message.id]).catch((error: unknown) => {
+      const [found] = await bodiesOf([connectorIdOf(message.id)]).catch((error: unknown) => {
         // The connector refuses a body over its size limit the same way every time.
         throw error instanceof SidecarToolError && /limit_exceeded/i.test(error.reply)
           ? new MessageUnreadableError({ cause: error })
@@ -356,7 +369,7 @@ export function sidecarMailSource({
       });
       const ids = emailsOfResult(result)
         .map(email => toMailMessage({ email, arrived: { from: ref.received_at, to: new Date() } }))
-        .filter((message): message is MailMessage => message !== undefined && message.id !== ref.id)
+        .filter((message): message is MailMessage => message !== undefined && message.id !== connectorIdOf(ref.id))
         .map(message => message.id);
       // A reply the connector cannot fetch is left out, so a stranger who joins a thread cannot hide a payment.
       return ids.length === 0 ? [] : (await bodiesOf(ids)).map(item => item.body);
