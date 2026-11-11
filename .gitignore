@@ -112,3 +112,7 @@ scripts/private-data-patterns.local.txt
 
 # Token eval output folders (scripts/eval-tokens).
 eval-results/
+
+# Python writes these when the tests run.
+__pycache__/
+*.pyc
