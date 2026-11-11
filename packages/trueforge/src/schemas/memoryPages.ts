@@ -63,6 +63,9 @@ export const MemoryPageSectionSchema = z
   })
   .openapi('MemoryPageSection');
 
+/** The section a confirmed line moves to. */
+export const ConfirmableMemoryPageSectionSchema = PageSectionSchema.exclude(['Unconfirmed', 'Earlier']);
+
 /** One page: its sections in order, and its Markdown for the editor. */
 export const MemoryPageSchema = z
   .object({
@@ -73,6 +76,9 @@ export const MemoryPageSchema = z
     summary: z.string().nullable(),
     sections: z.array(MemoryPageSectionSchema),
     markdown: z.string(),
+    confirmable_sections: z
+      .array(ConfirmableMemoryPageSectionSchema)
+      .describe('The sections an unconfirmed line on this page can move to.'),
     version: z.string().describe('Send this back with an edit. It says which text the edit started from.'),
   })
   .openapi('MemoryPage');
@@ -88,9 +94,6 @@ export const UpdateMemoryPageRequestSchema = z
     version: z.string().min(1).max(128),
   })
   .openapi('UpdateMemoryPageRequest');
-
-/** The section a confirmed line moves to. */
-export const ConfirmableMemoryPageSectionSchema = PageSectionSchema.exclude(['Unconfirmed', 'Earlier']);
 
 export const ConfirmMemoryPageLineRequestSchema = z
   .object({

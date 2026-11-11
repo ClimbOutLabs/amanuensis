@@ -34,6 +34,7 @@ const PageSchema = z.object({
   title: z.string(),
   summary: z.string().nullable(),
   markdown: z.string(),
+  confirmable_sections: z.array(z.string()),
   version: z.string(),
   sections: z.array(z.object({ name: z.string(), lines: z.array(LineSchema) })),
 });
@@ -142,6 +143,7 @@ describe('memory pages API', () => {
     expect(lines.get('Worked at Acme.')).toMatchObject({ source: 'you_said', own: true });
     expect(lines.get('Typed by hand')).toMatchObject({ id: null, source: 'you_edited', own: true });
     expect(page.markdown).toContain('## Unconfirmed');
+    expect(page.confirmable_sections).toEqual(['How you write to them', 'Now']);
     expect((await call('/person/nobody')).status).toBe(404);
     expect((await call('/person/..%2Fx')).status).toBe(404);
   });

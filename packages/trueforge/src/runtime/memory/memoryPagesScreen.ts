@@ -6,14 +6,15 @@
 import { createHash } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 
-import type {
-  MemoryPageChange,
-  MemoryPageLine,
-  MemoryPageLineSource,
-  MemoryPageListing,
-  MemoryPageRef,
-  MemoryPageSummary,
-  MemoryPage as WirePage,
+import {
+  ConfirmableMemoryPageSectionSchema,
+  type MemoryPageChange,
+  type MemoryPageLine,
+  type MemoryPageLineSource,
+  type MemoryPageListing,
+  type MemoryPageRef,
+  type MemoryPageSummary,
+  type MemoryPage as WirePage,
 } from '../../schemas/memoryPages';
 import { FactMarkerSchema } from './memoryNotes';
 import { COMMENT_PATTERN, lineSide, singleLine } from './memoryPageLoader';
@@ -185,6 +186,9 @@ function pageView({ kind, slug, page }: { kind: PageKind; slug: string; page: Me
     summary: pageSummary(page) ?? null,
     sections: page.sections.map(section => ({ name: section.heading, lines: sectionLines(section) })),
     markdown,
+    confirmable_sections: ConfirmableMemoryPageSectionSchema.options.filter(section =>
+      kindHasSection({ kind, section }),
+    ),
     version: pageVersion(markdown),
   };
 }
