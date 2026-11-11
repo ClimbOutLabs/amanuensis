@@ -501,7 +501,7 @@ describe('a call that ends while its line opens', () => {
     });
     const media = await h.openMedia({ token: (await h.answer()).token });
     await sayYes(media);
-    await h.waitFor(() => h.tts.sentences.join(' ').includes('so I will not read it out'));
+    await h.waitFor(() => h.tts.sentences.join(' ').includes('is not something I read out on the phone'));
     expect(h.tts.sentences.join(' ')).not.toContain('five five five');
     expect(h.opened.map(open => open.opening).join(' ')).not.toContain('five five five');
     media.socket.close();
