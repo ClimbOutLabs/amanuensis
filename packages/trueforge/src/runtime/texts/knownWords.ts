@@ -120,7 +120,7 @@ export function customWordProblem(word: string): string | undefined {
     return 'Use letters only, with no spaces, digits or signs.';
   }
   if (folded.length < 2 || folded.length > CUSTOM_WORD_MAX) {
-    return `Use 2 to ${CUSTOM_WORD_MAX} letters.`;
+    return `Use 2 to ${String(CUSTOM_WORD_MAX)} letters.`;
   }
   if (isEndingOrNumber(folded)) {
     return 'A web ending or a number cannot be added. A text could use it to spell a link or a phone number.';
