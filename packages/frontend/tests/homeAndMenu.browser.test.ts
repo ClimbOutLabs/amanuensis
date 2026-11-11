@@ -256,7 +256,8 @@ test(
       if (!(await chatList.isVisible())) {
         await pickPage.getByRole('navigation', { name: 'Sidebar' }).getByRole('button', { name: 'Chats' }).click();
       }
-      await chatList.getByRole('button', { name: 'New chat' }).click();
+      // A chat with no title yet is listed as New Chat, so the button is matched by its exact name.
+      await chatList.getByRole('button', { name: 'New chat', exact: true }).click();
       await pickPage.getByTitle('Choose a persona').waitFor({ timeout: RENDER_TIMEOUT_MS });
       await pickContext.close();
     } catch (error) {

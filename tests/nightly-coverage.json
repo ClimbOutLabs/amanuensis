@@ -320,7 +320,7 @@
       "tests": ["packages/frontend/tests/journeys/signedIn.journey.ts"]
     },
     "route:notesFolder": {
-      "set": "memory",
+      "set": "connectors",
       "tests": []
     },
     "route:permission": {
