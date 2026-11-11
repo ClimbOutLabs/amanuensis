@@ -5,8 +5,8 @@
 Host-enforced long-term memory. Exactly one MCP connector carries
 `memory_provider: true` in its manifest; the host recalls from it before
 every model call and retains every completed turn to it. The model is never
-responsible for remembering to use it. The one exception is the three page
-tools described under [Writing pages](#writing-pages), which keep short facts
+responsible for remembering to use it. The one exception is the page
+tools described under [Writing pages](#writing-pages), three of which keep short facts
 the person asked for on a page and are not a way to write to the provider.
 Hindsight is the recommended provider: a self-hosted,
 long-term memory bank, run as its own service, with one bank per user.
@@ -193,7 +193,7 @@ vault and hold what stays true, so it does not have to be dug out of old entries
 Markdown memory backend only. Hindsight does not use them.
 
 Pages can be written by hand, and in a chat Aman can add, change and forget single facts with three
-tools (see [Writing pages](#writing-pages)). Every change Aman makes is a commit in a history that sits
+tools, and look pages up with two more (see [Writing pages](#writing-pages)). Every change Aman makes is a commit in a history that sits
 beside the pages, so a page can always be put back. This reverses the earlier rule that no memory-write
 tool is exposed to the model. It is safe because of the taint rule: the tools refuse once the turn has
 read anything from outside the chat, so only the person's own words in the current message can reach a page.
@@ -508,6 +508,8 @@ old line to `Earlier` with `until` set to today and adds the new text as a new `
 line's section (a line that was unconfirmed goes to `Now`). `forget_fact` moves the line to `Earlier` with
 `until` set to today. Nothing is ever deleted, so the old text and its id stay on the page.
 
+**Reading pages.** Two more tools only read, from the same vault and with the same lookup. They are offered in the same chats as the writing tools, except that a private chat gets neither, so no call has to be refused. `list_pages({kind?, search?})` answers with `pages`, each `{kind, title, summary?}`, the most recently changed first (by file time), at most 50 a call; past that it adds `left_out` and says `search` narrows the list. `search` is matched with the alias index (`matchAliases`), so a page is found by its title or another name. The answer holds titles and summary lines only, never a line that is not the person's own, a path or a slug. `read_page({about, kind?})` finds the page with the writing tools' lookup. Two matches give a plain answer naming them so the model can ask. One match is shown by `renderPageForModel` and nothing else, so the person's "How you write to them" lines are not shown (they reach the model only through the closed drafting section) and lines that are not confirmed carry the same labels as in the memory block. It is cut by the memory block's limit for one page (`MEMORY_PAGES_MAX_TOKENS`): a longer page is not shown. Both tools pass every title, summary and page line through `sanitizeMemoryText`, the one function that also cleans the memory block. A page's name counts as the person's own (`pageNameIsOwn`) only when the page holds a line in their own words, a hand-typed bullet included. A page without one was made by the sorter from something read, and its title comes from a slug a model chose. Such pages are listed apart under a plain label, and their header in the memory block and in `read_page` says "name not confirmed by you". `read_page` tells the turn watch what it showed: a page that holds outside text (`pageHoldsOutsideText`) has the same effect as when the loader shows it, so the writing tools then refuse. The two tools are host-only by name, so a call to them does not count as reading outside text, and the turn's saved note is labelled as it is when the loader shows the same page. They run without an approval card and write no activity-log line.
+
 **The text.** A fact or a name is one line of at most 500 and 120 characters. A line break, `<!--` or `-->` is
 refused. Control and invisible characters are removed. A fact that holds the drafting heading or the
 drafting end line is refused, using the same match as the loader, instead of being rewritten. A tool answer
@@ -519,7 +521,7 @@ things count, and they are checked in the host, not left to the model.
 - _Read in this turn._ Before every model step the host checks whether the turn, from the person's latest
   message on, has read text from outside the chat: any tool result other than a host-only one, an attached
   file or image, or a summary of earlier chat. Memory tool results and task-state results are host-only and
-  do not count; a connector tool that merely has the same name, or the same name reached through
+  do not count (`read_page` reports what it showed to the watch itself, see Reading pages); a connector tool that merely has the same name, or the same name reached through
   `call_tool`, does count. A tool call is judged on what the model had seen when it wrote the call, so a call
   written in the same step as a mail read is judged on the step before it.
 - _Recalled into the memory block._ When the memory block built for the turn holds a recalled note whose origin

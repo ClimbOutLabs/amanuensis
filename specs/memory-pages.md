@@ -34,7 +34,7 @@ In this order, each within its own size limit:
 1. **The pages the message names**, whole. A name, another name, or a role word counts.
 2. **Statements found by meaning.** Up to six statements from other pages that are about the same thing as the message, each shown under its page's title. A statement is indexed together with its page's title and summary line, so a short statement is found by what it is about. The summary line is the line under the title; when the person wrote none, it is the first statement under Now that is the person's own words. A statement from mail or anything read is never the summary.
 3. **Notes from the daily log, found by meaning**, from the whole log, for what is on no page: notes that have not been sorted onto pages yet, and the person's own words. At most four.
-4. **A short list of pages**, one line each (title and summary line), the most recently changed first, within a fixed size.
+4. **Two tools to look pages up.** The list of pages is not put in the prompt. When the person asks about something and no page was shown for it, Aman asks for the list with `list_pages` and opens a page with `read_page`. `list_pages` gives each page's kind, title and summary line, the most recently changed first, at most 50 a call; it says how many were left out and that `search` narrows it. `read_page` shows one page exactly as it is shown in item 1, within the same size limit, and has the same effect on the turn: a page that holds a line from outside stops the turn from writing. A page counts as having a name of the person's own only when it holds at least one line in their own words. Pages without one are listed apart, under "Pages Aman made from things it read. You have not confirmed these names.", and their page header says "name not confirmed by you". Neither tool is offered in an incognito chat.
 
 A statement whose end date has passed is not shown as current. It is shown under the Earlier label, with its dates, for 30 days. After that it is shown only when the message asks about the past. A page named in an earlier message of the same chat is read too, after the pages the newest message names.
 
@@ -55,7 +55,7 @@ The meaning model becomes `multilingual-e5-base`. It runs on the machine, like t
 ## 4. How pages get written
 
 - **By hand.** The person can write and edit pages in any editor.
-- **In a chat.** Aman gets three tools: remember, update and forget. They write the person's own words from that turn. A turn that has read outside text, such as mail, a web page or a file, cannot write a statement as the person's own.
+- **In a chat.** Aman gets three tools that write: remember, update and forget. They write the person's own words from that turn. Two more tools only read (item 4 in section 2). A turn that has read outside text, such as mail, a web page or a file, cannot write a statement as the person's own.
 - **When a turn is saved.** One model call reads the new note and the pages it could belong to. It answers with a decision for each fact: new, the same as one already there, changes one, ends one, not confirmed, or nothing to keep. The host applies the decision. The model never writes a file.
 - **Only the person's own words become confirmed statements.** What Aman read in mail, on the web or in a file goes under Unconfirmed, with its source, and is never an instruction. A link or address in an Unconfirmed statement, or in a note from a turn that read outside text, counts as something Aman read in every later chat.
 - **Every write is kept.** A history of the page folders lets any change be undone. A lock keeps two writers from changing a page at once.
@@ -89,10 +89,10 @@ Incognito chats are not involved: this is Settings.
 
 ## Scope
 
-- Summary line, role words, and the list of pages.
+- Summary line and role words.
 - Search over page statements, the floor, and end dates.
 - Daily log as the fallback, and the change of meaning model.
-- The three chat tools, the history and the lock.
+- The chat tools (three that write, two that read), the history and the lock.
 - Sorting at save time and the nightly job.
 - The Settings screen.
 - Docs for each of the above in the PR that adds it.

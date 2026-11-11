@@ -20,6 +20,8 @@ Aman keeps a short page for each person and each matter in your life, such as yo
 
 Pages are in two groups, People and Matters. Each row shows the name and one line about it. A small count says how many lines wait for you to confirm. Type in the search box to find a page by its name or another name it goes by.
 
+Aman does not list your pages in every reply. When you ask about something and no page was shown for it, it can look at the list and open a page that looks relevant. A page with no line of your own is listed apart, and its name is marked "not confirmed by you", because Aman made it from something it read.
+
 Open a page to read it in order. A line you said or wrote yourself looks plain. A line Aman read in mail, the calendar or elsewhere says where it came from. Lines under Unconfirmed say "Not confirmed". Aman never treats them as your words until you decide.
 
 - Choose **Confirm** to keep an unconfirmed line as yours. You can pick which section it goes to. The default is Now.
