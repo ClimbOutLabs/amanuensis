@@ -1941,8 +1941,10 @@ async function beginAcceptedTurnExecution(
   // A first turn that set a working title also carries the context for the
   // subject-title step its follow-up starts. Resolved here, after the turn exists,
   // and never allowed to fail the turn (the resolver returns undefined instead).
+  // An incognito chat skips the step: its first exchange never goes to a model
+  // to be named.
   const chatTitle =
-    derivedTitle === undefined
+    derivedTitle === undefined || sessionKeepsNothing({ session: session.record })
       ? undefined
       : await resolveChatTitleContext({
           tenantId: tenant_id,
@@ -3158,9 +3160,10 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
         );
         // A first turn that set a working title also carries the context for the
         // subject-title step its follow-up starts. The resolver never throws, so
-        // this cannot fail a turn that has already been created.
+        // this cannot fail a turn that has already been created. An incognito
+        // chat skips the step: its first exchange never goes to a model to be named.
         const chatTitle =
-          title === undefined
+          title === undefined || sessionKeepsNothing({ session: session.record })
             ? undefined
             : await resolveChatTitleContext({
                 tenantId: requestContext.tenant_id,

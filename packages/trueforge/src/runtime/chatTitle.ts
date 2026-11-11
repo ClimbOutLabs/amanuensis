@@ -141,11 +141,22 @@ const QUOTE_PAIRS: readonly (readonly [string, string])[] = [
   ['\u2018', '\u2019'],
 ];
 
+/** A label some models put in front of the title they were asked for. */
+const TITLE_PREFIX = /^title\s*:\s*/i;
+
+/**
+ * Characters a stored title never carries: control characters, the bidi controls
+ * that can reorder or hide text, and the characters that give markdown its
+ * meaning. The model's answer is untrusted, so they are removed, not escaped.
+ */
+const TITLE_STRIPPED_CHARS = /[\p{Cc}\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069#*`_[\]~>]/gu;
+
 /**
  * Cleans a model's answer into a title candidate: the first non-empty line, with
- * one pair of surrounding quotes and a trailing full stop removed and runs of
- * whitespace collapsed. Returns undefined when what remains is empty or reads as
- * a sentence rather than a title.
+ * a leading "Title:" label, one pair of surrounding quotes, control, bidi and
+ * markdown characters and a trailing full stop removed and runs of whitespace
+ * collapsed. Returns undefined when what remains is empty or reads as a sentence
+ * rather than a title.
  */
 export function cleanChatTitleCandidate(raw: string): string | undefined {
   const firstLine = raw
@@ -155,13 +166,14 @@ export function cleanChatTitleCandidate(raw: string): string | undefined {
   if (firstLine === undefined) {
     return undefined;
   }
-  let title = firstLine.replace(/\s+/g, ' ');
+  let title = firstLine.replace(/\s+/g, ' ').replace(TITLE_PREFIX, '');
   for (const [open, close] of QUOTE_PAIRS) {
     if (title.length >= open.length + close.length && title.startsWith(open) && title.endsWith(close)) {
       title = title.slice(open.length, title.length - close.length).trim();
       break;
     }
   }
+  title = title.replace(TITLE_PREFIX, '').replace(TITLE_STRIPPED_CHARS, '').replace(/\s+/g, ' ').trim();
   title = title.replace(/\.+$/, '').trim();
   if (title === '' || title.length > CHAT_TITLE_MAX_CANDIDATE_CHARS) {
     return undefined;

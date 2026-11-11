@@ -42,6 +42,28 @@ describe('cleanChatTitleCandidate', () => {
     expect(cleanChatTitleCandidate('""')).toBeUndefined();
   });
 
+  it('drops a "Title:" label the model puts in front of its answer', () => {
+    expect(cleanChatTitleCandidate('Title: Email check')).toBe('Email check');
+    expect(cleanChatTitleCandidate('"Title: Email check"')).toBe('Email check');
+    expect(cleanChatTitleCandidate('Title: "Email check"')).toBe('Email check');
+  });
+
+  it('strips markdown characters', () => {
+    expect(cleanChatTitleCandidate('**Email** check')).toBe('Email check');
+    expect(cleanChatTitleCandidate('# Email check')).toBe('Email check');
+    expect(cleanChatTitleCandidate('`Email` check')).toBe('Email check');
+  });
+
+  it('strips control and bidi characters that could hide or reorder text', () => {
+    expect(cleanChatTitleCandidate('Email\u0007 check')).toBe('Email check');
+    expect(cleanChatTitleCandidate('Email\u202Echeck')).toBe('Emailcheck');
+  });
+
+  it('rejects an answer that is only a label or markdown', () => {
+    expect(cleanChatTitleCandidate('Title:')).toBeUndefined();
+    expect(cleanChatTitleCandidate('###')).toBeUndefined();
+  });
+
   it('rejects a sentence instead of cutting it down to a title', () => {
     expect(
       cleanChatTitleCandidate('This chat is about comparing three laptops for photo editing on a budget'),

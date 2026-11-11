@@ -4,15 +4,15 @@ With `NEBIUS_API_KEY` set, the server connects a read-only `tokenfactory` provid
 
 **Which role uses which model.** Every job the server does with a model is a role, and each role can have its own model under **Settings, Roles and Personas**. A role left unset uses the main chat model, and that includes the helper jobs below.
 
-| Role                | What it does                                            | Where the model comes from                                  |
-| ------------------- | ------------------------------------------------------- | ----------------------------------------------------------- |
-| Main chat           | Answers you, including requests for a briefing          | Main chat model                                             |
-| Coding / sub-agent  | Work the assistant hands to sub-agents                  | Coding / subagent model, else the main chat model           |
-| Compaction          | Summarizes old context in long conversations            | Compaction model, else the main chat model                  |
-| Summarization       | Condenses each turn before it is written to memory      | Summarization model, else the main chat model               |
-| Profile learning    | Rewrites the learned profile after a turn, when enabled | `PROFILE_LEARNING_MODEL`, else the main chat model          |
-| Knowledge relevance | Checks which library passages help answer a question    | The persona's model                                         |
-| Persona             | Answers as that persona                                 | The model bound to the persona under **Roles and Personas** |
+| Role                | What it does                                                                                   | Where the model comes from                                  |
+| ------------------- | ---------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| Main chat           | Answers you, including requests for a briefing                                                 | Main chat model                                             |
+| Coding / sub-agent  | Work the assistant hands to sub-agents                                                         | Coding / subagent model, else the main chat model           |
+| Compaction          | Summarizes old context in long conversations                                                   | Compaction model, else the main chat model                  |
+| Summarization       | Condenses each turn before it is written to memory, and names a new chat after its first reply | Summarization model, else the main chat model               |
+| Profile learning    | Rewrites the learned profile after a turn, when enabled                                        | `PROFILE_LEARNING_MODEL`, else the main chat model          |
+| Knowledge relevance | Checks which library passages help answer a question                                           | The persona's model                                         |
+| Persona             | Answers as that persona                                                                        | The model bound to the persona under **Roles and Personas** |
 
 **Why tier them.** Helper jobs are short and structured: a few hundred tokens in, a short summary or a yes/no list out. They run on every turn, so their price and latency add up. A small model is cheaper, but it can write poor memories, so pick one under **Settings, Roles and Personas** only if you trust it. A weak compaction summary degrades every later turn of a conversation, so keep that role on a model you trust.
 

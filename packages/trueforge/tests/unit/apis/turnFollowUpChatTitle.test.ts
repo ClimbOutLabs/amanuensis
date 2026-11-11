@@ -27,6 +27,7 @@ import { SqliteSpaceStore } from '../../../src/db/sqlite/space-store/SqliteSpace
 import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { ActiveTurnRegistry } from '../../../src/runtime/activeTurns';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription/index.js';
+import { privateChatExpiry } from '../../../src/runtime/privateChat';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import { TENANT_ID } from '../../../src/tenancy';
 import { FakeTurnArtifactStore } from '../../fixtures/fakeTurnArtifactStore';
@@ -96,7 +97,7 @@ function helperAnswer(content: string): RawAssistantMessageWithUsage {
 }
 
 /** One interactive chat on a model that resolves, so any helper call after the reply could run. */
-async function createChat() {
+async function createChat(options?: { incognito?: boolean }) {
   const logger = createLogger({ silent: true });
   const db = createSqliteDb(':memory:');
   await migrateSqliteToLatest(db);
@@ -126,8 +127,8 @@ async function createChat() {
     metadata: {},
     external_id: null,
     source: null,
-    is_incognito: false,
-    private_expires_at: null,
+    is_incognito: options?.incognito ?? false,
+    private_expires_at: options?.incognito === true ? privateChatExpiry({ from: new Date() }) : null,
   });
   const turnDrains = new TurnDrainRegistry();
   const deps = {
@@ -343,6 +344,23 @@ describe('a finished first turn gives the chat a subject title', () => {
     await new Promise(resolve => setTimeout(resolve, 300));
     expect(mockHelperCall).toHaveBeenCalledTimes(1);
     expect(replaceSpy).not.toHaveBeenCalled();
+    expect(await chat.readTitle()).toBe(firstMessage.slice(0, 50));
+  });
+});
+
+describe('an incognito chat never sends its first exchange to the title model', () => {
+  it('makes no title call and keeps the working title', async () => {
+    mockHelperCall.mockResolvedValue(helperAnswer('Laptop comparison'));
+    chat = await createChat({ incognito: true });
+    const firstMessage = 'Help me compare three laptops for photo editing under a budget of 1500 euros';
+
+    const { drainInput } = await chat.beginTurn({ turnId: 'turn-1', text: firstMessage });
+    await withinBound(drainTurnEvents(drainInput), "the first turn's follow-up");
+
+    // The title step starts detached when it runs at all; give it its chance,
+    // then check it never ran: no helper call, and the working title stands.
+    await new Promise(resolve => setTimeout(resolve, 300));
+    expect(mockHelperCall).not.toHaveBeenCalled();
     expect(await chat.readTitle()).toBe(firstMessage.slice(0, 50));
   });
 });
