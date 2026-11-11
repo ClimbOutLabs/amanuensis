@@ -1,5 +1,4 @@
 /** The API: resource routers, the OpenAPI document and Swagger UI, all under /api/v1. */
-import { swaggerUI } from '@hono/swagger-ui';
 import { OpenAPIHono, z } from '@hono/zod-openapi';
 import type { ISessionStore, Sessions, TurnStreamingEvent } from '@truefoundry/trueforge-core/agent-session';
 import {
@@ -20,6 +19,7 @@ import { createAgentsRouter } from './apis/agents';
 import { createAuditLogRouter } from './apis/auditLog';
 import { createAuthRouter } from './apis/auth';
 import { createBriefItemsRouter } from './apis/briefItems';
+import { createBrowserLiveRouter } from './apis/browserLive';
 import { createBugReportRouter } from './apis/bugReport';
 import { createAppBugReportRouter } from './apis/bugReportApp';
 import { CALENDAR_SETTINGS_BASE_PATH, createCalendarAccountRouter } from './apis/calendarAccount';
@@ -39,10 +39,12 @@ import { createMcpOAuthRouter } from './apis/mcpOAuth';
 import { createMcpServersRouter } from './apis/mcpServers';
 import { createMemoryVaultRouter } from './apis/memoryVault';
 import { createModelsRouter } from './apis/models';
+import { createNotesFolderRouter, NOTES_FOLDER_SETTINGS_BASE_PATH } from './apis/notesFolder';
 import { createPermissionsRouter } from './apis/permissions';
 import { createPersonaKnowledgeRouter } from './apis/personaKnowledge';
 import { createPersonalizationRouter } from './apis/personalization';
 import { createPersonasRouter, createSessionPersonasRouter } from './apis/personas';
+import { createChatPrivacyRouter, createPrivateChatSweepRouter } from './apis/privateChats';
 import { createRepositoriesRouter, createSessionRepositoryRouter } from './apis/repositories';
 import { createScheduleExecutionRouter, createSchedulesRouter } from './apis/schedules';
 import { createSentinelSettingsRouter } from './apis/sentinelSettings';
@@ -85,6 +87,7 @@ import configuration, {
 } from './config';
 import type { AgentRecord, IAgentStore } from './db/agentStore';
 import type { IBriefItemCompletionStore } from './db/briefItemCompletionStore';
+import type { IChatDeletionStore } from './db/chatDeletionStore';
 import type { ICompletedTurnEventStore } from './db/completedTurnEvents';
 import type { IDeliveryStore } from './db/deliveryStore';
 import type { IGlobalSettingsStore } from './db/globalSettingsStore';
@@ -107,6 +110,7 @@ import type { ISpaceStore } from './db/spaceStore';
 import type { WithTransaction } from './db/transaction';
 import type { ITurnArtifactStore } from './db/turnArtifactStore';
 import type { SchedulerProbe } from './help/healthCheck';
+import { mountApiDocs } from './http/apiDocs';
 import { mountCatalogLogos } from './http/catalogLogos';
 import { createClientCertificateMiddleware } from './http/tls';
 import type { IOAuthTokenStore } from './mcp/auth/types';
@@ -312,6 +316,8 @@ export interface ServerDeps<TTransaction> {
   /** The public key a browser needs to turn push on; undefined while push is off. */
   webPushPublicKey: string | undefined;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
+  /** Deletes a chat and everything it owns in one go; keeps its token counts. */
+  chatDeletionStore: IChatDeletionStore;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
   /** Whether the in-process schedule loop is running; the help check reads it. */
@@ -519,6 +525,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     sandboxProviderResolver: deps.sandboxProviderResolver,
     globalSettingsStore: deps.globalSettingsStore,
     tokenFactoryBudget: deps.tokenFactoryBudget,
+    chatDeletionStore: deps.chatDeletionStore,
     chatSearchIndexer: deps.chatSearchIndexer,
     audit: deps.sentinelAuditStore,
   };
@@ -624,6 +631,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         tokenStore: deps.tokenStore,
         globalSettingsStore: deps.globalSettingsStore,
         googleConnectionStore: deps.googleConnectionStore,
+        personalizationStore: deps.personalizationStore,
         hostReportPath: configuration.HOST_REPORT_PATH,
         schedulerStatus: deps.schedulerStatus,
         logger: deps.logger,
@@ -712,6 +720,21 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
   app.route(
     '/api/internal/schedules',
     withAuth(createScheduleExecutionRouter(scheduleTurnDeps), scheduleExecutionAuthMiddleware),
+  );
+  app.route(
+    '/api/internal/private-chats',
+    withAuth(
+      createPrivateChatSweepRouter({
+        sessions: deps.sessions,
+        sessionStore: deps.sessionStore,
+        chatDeletionStore: deps.chatDeletionStore,
+        activeTurns: deps.activeTurns,
+        turnDrains: deps.turnDrains,
+        redis: deps.redis,
+        logger: deps.logger,
+      }),
+      scheduleExecutionAuthMiddleware,
+    ),
   );
   app.route(
     '/api/v1/schedules',
@@ -973,6 +996,21 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       createUiSessionAuthMiddleware(deps.authenticator),
     ),
   );
+  // Same guard as the accounts: the notes folder belongs to the whole instance. It holds no
+  // secret; the path and the inbox file name are all that is saved.
+  app.route(
+    NOTES_FOLDER_SETTINGS_BASE_PATH,
+    withAuth(
+      withAdminAuth(
+        createNotesFolderRouter({
+          logger: deps.logger,
+          settingsStore: deps.globalSettingsStore,
+        }),
+        adminAuthMiddleware,
+      ),
+      createUiSessionAuthMiddleware(deps.authenticator),
+    ),
+  );
   // Same-origin tile proxy for embedded maps. Browser session only: bearer
   // credentials (agents, sandboxes, API clients) are refused.
   app.route(
@@ -993,6 +1031,18 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       createChatImagesRouter({
         sessions: deps.sessions,
         chatImages: deps.chatImages,
+        resolveRequestContext,
+        logger: deps.logger,
+      }),
+      createUiSessionAuthMiddleware(deps.authenticator),
+    ),
+  );
+  // Live view of Aman's browser, browser session only: the signed-in person watches and drives the
+  // tabs of their own browser profile, and no agent or API token can see or steer it for them.
+  app.route(
+    '/api/browser/live',
+    withAuth(
+      createBrowserLiveRouter({
         resolveRequestContext,
         logger: deps.logger,
       }),
@@ -1115,8 +1165,10 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         sessions: deps.sessions,
         mcpCatalog: deps.mcpCatalog,
         sessionStore: deps.sessionStore,
+        chatDeletionStore: deps.chatDeletionStore,
         sentinelAuditStore: deps.sentinelAuditStore,
         activeTurns: deps.activeTurns,
+        turnDrains: deps.turnDrains,
         resolveModelProviderStore: deps.resolveModelProviderStore,
         resolveMcpServerStore: deps.resolveMcpServerStore,
         resolveSkillStore: deps.resolveSkillStore,
@@ -1193,6 +1245,19 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
   app.route(
     '/api/v1/sessions',
     withAuth(
+      createChatPrivacyRouter({
+        sessionStore: deps.sessionStore,
+        personaStore: deps.personaStore,
+        resolveAgentStore: deps.resolveAgentStore,
+        resolveModelProviderStore: deps.resolveModelProviderStore,
+        resolveRequestContext,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
+    '/api/v1/sessions',
+    withAuth(
       createSessionRepositoryRouter({
         repositoryStore: deps.repositoryStore,
         sessionStore: deps.sessionStore,
@@ -1249,6 +1314,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         sentinelSettingsStore: deps.sentinelSettingsStore,
         chatSearchIndexer: deps.chatSearchIndexer,
         tokenFactoryBudget: deps.tokenFactoryBudget,
+        chatDeletionStore: deps.chatDeletionStore,
         eventSubscriptions: deps.eventSubscriptions,
         resolveSandboxProviderStore: deps.resolveSandboxProviderStore,
         sandboxProviderResolver: deps.sandboxProviderResolver,
@@ -1266,8 +1332,8 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
   const uiBasePath = getPublicUiBasePath();
   const openApiSpecPath = `${uiBasePath}api/v1/openapi.json`;
   const openApiServerUrl = uiBasePath === '/' ? undefined : uiBasePath.replace(/\/$/, '');
-  app.get('/api/v1/docs', swaggerUI({ url: openApiSpecPath }));
-  app.get('/api/v1/openapi.json', c =>
+  mountApiDocs(app, { uiBasePath, openApiSpecPath, authMiddleware });
+  app.get('/api/v1/openapi.json', authMiddleware, c =>
     c.json(
       buildOpenApiDocument(app, {
         authEnabled,

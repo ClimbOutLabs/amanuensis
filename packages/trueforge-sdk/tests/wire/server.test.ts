@@ -31,7 +31,7 @@ describe("ServerClient", () => {
                 },
                 memory_embeddings: { detail: "detail", enabled: true, indexed_entries: 1, state: "starting" },
                 memory_screen: { configured: true, enabled: true, reason: "reason", threshold: 1.1 },
-                sandbox: { enabled: true },
+                sandbox: { enabled: true, reason: "reason" },
                 sandbox_isolation: {
                     cosign_key_configured: true,
                     default_timeout_seconds: 1,
@@ -103,6 +103,7 @@ describe("ServerClient", () => {
                 },
                 sandbox: {
                     enabled: true,
+                    reason: "reason",
                 },
                 sandboxIsolation: {
                     cosignKeyConfigured: true,
