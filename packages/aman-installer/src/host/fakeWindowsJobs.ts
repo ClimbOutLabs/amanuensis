@@ -95,7 +95,7 @@ export class FakeWindowsJobs implements WindowsJobs {
   firewallOpen = false;
   firewallPorts: readonly number[] = [];
   readonly ops: string[] = [];
-  private readonly fromExplorer: boolean;
+  private readonly ownsConsole: boolean;
   // What the removal did, as a test reads it back.
   firewallRule = false;
   caCertInStore = false;
@@ -129,9 +129,9 @@ export class FakeWindowsJobs implements WindowsJobs {
     // one (an entry written without the leading "!", say).
     runOncePending?: boolean;
     runOnceValueName?: string;
-    // Whether the program was started by Windows Explorer, as a test
-    // scripts it.
-    startedFromExplorer?: boolean;
+    // Whether the program is the only one using its console window, as
+    // a test scripts it.
+    ownsItsConsole?: boolean;
     // Whether an earlier removal left its note that Docker is cleared.
     dockerRemovedMark?: boolean;
   }) {
@@ -159,7 +159,7 @@ export class FakeWindowsJobs implements WindowsJobs {
     this.acls = new Map(options.acls ?? []);
     this.backupTask = options.backupTask ?? false;
     this.backupNames = [...(options.backups ?? [])];
-    this.fromExplorer = options.startedFromExplorer ?? false;
+    this.ownsConsole = options.ownsItsConsole ?? false;
     this.dockerRemovedMark = options.dockerRemovedMark ?? false;
   }
 
@@ -414,8 +414,8 @@ export class FakeWindowsJobs implements WindowsJobs {
     return Promise.resolve(!this.heldPorts.has(port));
   }
 
-  startedFromExplorer(): Promise<boolean> {
-    return Promise.resolve(this.fromExplorer);
+  ownsItsConsole(): Promise<boolean> {
+    return Promise.resolve(this.ownsConsole);
   }
 
   dockerSideRemoved(): Promise<boolean> {

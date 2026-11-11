@@ -154,7 +154,7 @@ async function holdWindowIfNeeded(exitCode: number): Promise<void> {
     interactive: process.stdin.isTTY,
     command: args[0],
     exitCode,
-    parentPid: process.ppid,
+    selfPid: process.pid,
     jobs: windowsJobs,
   });
   if (hold) {

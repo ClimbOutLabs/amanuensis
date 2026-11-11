@@ -26,6 +26,7 @@ reg query HKCU\Software\Microsoft\Windows\CurrentVersion\RunOnce /v "!Amanuensis
 reg delete HKCU\Software\Microsoft\Windows\CurrentVersion\RunOnce /v "!Amanuensis Setup" /f
 reg query HKCU\Software\Microsoft\Windows\CurrentVersion\RunOnce /v "!Amanuensis Setup"
 powershell -NoProfile -NonInteractive -Command "Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList '-NoProfile', '-Command', 'Add-Type -Name ''AmanAwake'' -Namespace ''Aman'' -MemberDefinition ''[DllImport(\"kernel32.dll\")] public static extern uint SetThreadExecutionState(uint esFlags);''; [void][Aman.AmanAwake]::SetThreadExecutionState([uint32]0x80000001); Start-Sleep -Seconds 7200'"
+powershell -NoProfile -NonInteractive -Command "Add-Type -Name 'AmanConsole' -Namespace 'Aman' -MemberDefinition '[DllImport(\"kernel32.dll\")] public static extern uint GetConsoleProcessList(uint[] lpdwProcessList, uint dwProcessCount);'; $list = New-Object 'uint32[]' 16; $count = [Aman.AmanConsole]::GetConsoleProcessList($list, 16); if ($count -gt 16) { $count = 16 }; for ($i = 0; $i -lt $count; $i++) { if ($list[$i] -ne $PID) { Write-Output $list[$i] } }"
 powershell -NoProfile -NonInteractive -Command "Remove-Item -LiteralPath 'C:\Users\Friend\Desktop\Aman.lnk' -Force -ErrorAction SilentlyContinue"
 schtasks /Query /TN "Amanuensis\Daily backup"
 schtasks /Delete /TN "Amanuensis\Daily backup" /F

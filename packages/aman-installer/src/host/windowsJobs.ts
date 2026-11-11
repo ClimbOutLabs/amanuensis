@@ -279,10 +279,13 @@ export interface WindowsJobs {
   // True when the port can be bound on loopback and on any-address: the
   // bind is the real test, as the shell's port check does it.
   portIsFree: (port: number) => Promise<boolean>;
-  // True when the given process is Windows Explorer: this program was
-  // started by a double-click or a Start menu entry, in a window of its
-  // own that closes the moment it ends, and not from a terminal.
-  startedFromExplorer: (parentPid: number) => Promise<boolean>;
+  // True when this program is the only one using its console window, so
+  // Windows closes the window the moment the program ends. That is what
+  // a double-click in Explorer or in a browser's download list, a Start
+  // menu entry and Windows Search all give. A terminal's shell shares
+  // the console and keeps it open, so a run typed there is false. When
+  // the console cannot be read, the answer is false, so nothing waits.
+  ownsItsConsole: (selfPid: number) => Promise<boolean>;
   // Whether an earlier removal already cleared Docker, the mark that
   // says so, and taking it away again when an install starts, since
   // the install puts Aman back in Docker.
@@ -604,11 +607,27 @@ export function systemWindowsJobs(options: {
       }
     },
 
-    async startedFromExplorer(parentPid: number) {
-      const name = await runPowerShell(
-        `(Get-Process -Id ${String(Math.trunc(parentPid))} -ErrorAction SilentlyContinue).ProcessName`,
+    async ownsItsConsole(selfPid: number) {
+      // GetConsoleProcessList names every process using this console.
+      // The probe is one of them, so it leaves itself out. What is left
+      // is this program alone when no shell or other program shares
+      // the window. A list longer than the buffer means others share it.
+      // This relies on the PowerShell child sharing this program's
+      // console: started hidden or detached, it would see no console and
+      // no window would ever wait.
+      const stdout = await runPowerShell(
+        `Add-Type -Name 'AmanConsole' -Namespace 'Aman' -MemberDefinition ` +
+          `'[DllImport("kernel32.dll")] public static extern uint GetConsoleProcessList(uint[] lpdwProcessList, uint dwProcessCount);'; ` +
+          `$list = New-Object 'uint32[]' 16; ` +
+          `$count = [Aman.AmanConsole]::GetConsoleProcessList($list, 16); ` +
+          `if ($count -gt 16) { $count = 16 }; ` +
+          `for ($i = 0; $i -lt $count; $i++) { if ($list[$i] -ne $PID) { Write-Output $list[$i] } }`,
       ).catch(() => '');
-      return name.trim().toLowerCase() === 'explorer';
+      const others = stdout
+        .split('\n')
+        .map(line => line.trim())
+        .filter(line => line !== '');
+      return others.length === 1 && others[0] === String(Math.trunc(selfPid));
     },
 
     async dockerSideRemoved() {
