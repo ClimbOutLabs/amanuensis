@@ -92,6 +92,9 @@ const pagesCatalog: MemoryPagesCatalog = {
   dismissLine: async () => {
     throw new Error('not used in these tests');
   },
+  dismissDisagreement: async () => {
+    throw new Error('not used');
+  },
   deletePage: async () => {},
   listChanges: async () => ({ available: true, changes: [] }),
   undoChange: async () => {},

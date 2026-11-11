@@ -7,6 +7,7 @@ import { FORGET_UNDO_MS } from '@/atoms/memory/useForgetWithUndo.js';
 import type {
   MemoryPageChanges,
   MemoryPageDetail,
+  MemoryPageDisagreement,
   MemoryPageLine,
   MemoryPagesCatalog,
 } from '@/plugins/trueforge-agent-server-adapter/catalogs/memoryPagesCatalog.js';
@@ -35,6 +36,7 @@ const WENDY: MemoryPageDetail = {
   confirmableSections: ['How you write to them', 'Now'],
   markdown: '---\ntitle: Wendy\n---\n',
   version: 'v1',
+  disagreements: [],
   sections: [
     { name: 'Now', lines: [line({ id: 'f_01', text: 'Plays tennis on Fridays.' })] },
     {
@@ -63,6 +65,14 @@ const MADRID: MemoryPageDetail = {
   sections: [{ name: 'Now', lines: [line({ text: 'Lease signed.' })] }],
 };
 
+const PAIR: MemoryPageDisagreement = {
+  id: 'p1',
+  first: { id: 'f_01', text: 'Plays tennis on Fridays.' },
+  second: { id: 'f_03', text: 'Never plays sport.' },
+  reason: 'One says she plays, the other says she does not.',
+  foundOn: '2026-11-11',
+};
+
 function summaryOf(page: MemoryPageDetail, unconfirmedCount: number) {
   return {
     kind: page.kind,
@@ -72,6 +82,7 @@ function summaryOf(page: MemoryPageDetail, unconfirmedCount: number) {
     summary: page.summary,
     changedOn: '2026-11-01',
     unconfirmedCount,
+    disagreementCount: page.disagreements.length,
   };
 }
 
@@ -86,6 +97,7 @@ function createCatalog({
   const calls = {
     confirm: vi.fn(),
     dismiss: vi.fn(),
+    notAProblem: vi.fn(),
     save: vi.fn(),
     remove: vi.fn(),
     undo: vi.fn(),
@@ -124,6 +136,12 @@ function createCatalog({
       stored = stored.map(item => (item.slug === page.slug ? page : item));
       return page;
     },
+    dismissDisagreement: async options => {
+      calls.notAProblem(options);
+      const page: MemoryPageDetail = { ...find(options.slug), disagreements: [] };
+      stored = stored.map(item => (item.slug === page.slug ? page : item));
+      return page;
+    },
     deletePage: async target => {
       calls.remove(target);
       stored = stored.filter(page => page.slug !== target.slug);
@@ -155,6 +173,30 @@ afterEach(() => {
 });
 
 describe('MemoryPagesPanel', () => {
+  it('shows a block of lines that disagree, with both lines and the reason, and drops the pair on Not a problem', async () => {
+    const { catalog, calls } = createCatalog({ pages: [{ ...WENDY, disagreements: [PAIR] }, MADRID] });
+    renderPanel(catalog);
+    expect(await screen.findByText('1 pair disagrees')).toBeInTheDocument();
+    await openWendy();
+
+    const block = screen.getByRole('region', { name: 'These lines disagree' });
+    expect(within(block).getByText('Plays tennis on Fridays.')).toBeInTheDocument();
+    expect(within(block).getByText('Never plays sport.')).toBeInTheDocument();
+    expect(within(block).getByText(PAIR.reason)).toBeInTheDocument();
+
+    fireEvent.click(within(block).getByRole('button', { name: /^Not a problem/ }));
+    await waitFor(() =>
+      expect(calls.notAProblem).toHaveBeenCalledWith(expect.objectContaining({ disagreementId: 'p1', slug: 'wendy' })),
+    );
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'These lines disagree' })).not.toBeInTheDocument());
+  });
+
+  it('shows no block when no lines disagree', async () => {
+    renderPanel(createCatalog({}).catalog);
+    await openWendy();
+    expect(screen.queryByRole('region', { name: 'These lines disagree' })).not.toBeInTheDocument();
+  });
+
   it('says what pages are when there are none', async () => {
     renderPanel(createCatalog({ pages: [] }).catalog);
     expect(await screen.findByText(/A page is a short note about one person or one matter/)).toBeInTheDocument();

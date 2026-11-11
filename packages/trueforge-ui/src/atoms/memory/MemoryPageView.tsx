@@ -6,6 +6,7 @@ import { auiButtonClass } from '@/atoms/lib/buttonClasses.js';
 import { cn } from '@/atoms/lib/cn.js';
 import type {
   MemoryPageDetail,
+  MemoryPageDisagreement,
   MemoryPageLine,
 } from '@/plugins/trueforge-agent-server-adapter/catalogs/memoryPagesCatalog.js';
 import type { MemoryPagesState } from './useMemoryPagesState.js';
@@ -82,6 +83,38 @@ function PageLineRow({
         )
       ) : null}
     </li>
+  );
+}
+
+/** Two lines the nightly check found that cannot both be true. Nothing on the page changed; the person settles it by editing. */
+function DisagreementBlock({ pairs, state }: { pairs: MemoryPageDisagreement[]; state: MemoryPagesState }) {
+  if (pairs.length === 0) return null;
+  return (
+    <section aria-label="These lines disagree" className="flex flex-col gap-2">
+      <h4 className="text-xs font-semibold text-text-secondary">These lines disagree</h4>
+      <p className="text-xs text-text-secondary">
+        Aman changed nothing. Edit the page to fix the line that is wrong, or choose Not a problem.
+      </p>
+      <ul className="m-0 flex list-none flex-col gap-2 p-0">
+        {pairs.map(pair => (
+          <li key={pair.id} className="flex flex-col gap-1 rounded-md border border-border bg-card-bg px-3 py-2">
+            <span className="whitespace-pre-wrap break-words text-sm text-text-primary">{pair.first.text}</span>
+            <span className="whitespace-pre-wrap break-words text-sm text-text-primary">{pair.second.text}</span>
+            <span className="text-xs text-text-secondary">{pair.reason}</span>
+            <span>
+              <button
+                type="button"
+                aria-label={`Not a problem: ${pair.first.text} and ${pair.second.text}`}
+                onClick={() => void state.dismissDisagreement(pair.id)}
+                className={auiButtonClass({ variant: 'ghost', size: 'small' })}
+              >
+                Not a problem
+              </button>
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -232,7 +265,10 @@ export function MemoryPageView({ page, state }: { page: MemoryPageDetail; state:
       {editing ? (
         <PageEditor key={page.version} page={page} state={state} onDone={() => setEditing(false)} />
       ) : (
-        <PageSections page={page} state={state} />
+        <>
+          <DisagreementBlock pairs={page.disagreements} state={state} />
+          <PageSections page={page} state={state} />
+        </>
       )}
     </div>
   );

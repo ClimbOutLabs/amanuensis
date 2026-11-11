@@ -16,6 +16,8 @@ const PageSummarySchema = z
     summary: z.string().nullable(),
     changed_on: z.string().nullable(),
     unconfirmed_count: z.number(),
+    // Absent from a server that predates the nightly check.
+    disagreement_count: z.number().default(0),
   })
   .transform(page => ({
     kind: page.kind,
@@ -25,6 +27,7 @@ const PageSummarySchema = z
     summary: page.summary,
     changedOn: page.changed_on,
     unconfirmedCount: page.unconfirmed_count,
+    disagreementCount: page.disagreement_count,
   }));
 
 const PageLineSchema = z
@@ -49,6 +52,24 @@ const PageLineSchema = z
     seen: line.seen,
   }));
 
+const DisagreementLineSchema = z.object({ id: z.string(), text: z.string() });
+
+const DisagreementSchema = z
+  .object({
+    id: z.string(),
+    first: DisagreementLineSchema,
+    second: DisagreementLineSchema,
+    reason: z.string(),
+    found_on: z.string(),
+  })
+  .transform(pair => ({
+    id: pair.id,
+    first: pair.first,
+    second: pair.second,
+    reason: pair.reason,
+    foundOn: pair.found_on,
+  }));
+
 const PageSchema = z
   .object({
     kind: PageKindSchema,
@@ -60,6 +81,7 @@ const PageSchema = z
     markdown: z.string(),
     confirmable_sections: z.array(z.string()),
     version: z.string(),
+    disagreements: z.array(DisagreementSchema).default([]),
   })
   .transform(page => ({
     kind: page.kind,
@@ -71,6 +93,7 @@ const PageSchema = z
     markdown: page.markdown,
     confirmableSections: page.confirmable_sections,
     version: page.version,
+    disagreements: page.disagreements,
   }));
 
 const ChangesSchema = z
@@ -103,6 +126,7 @@ const ListingSchema = z
 
 export type MemoryPageSummary = z.output<typeof PageSummarySchema>;
 export type MemoryPageLine = z.output<typeof PageLineSchema>;
+export type MemoryPageDisagreement = z.output<typeof DisagreementSchema>;
 export type MemoryPageDetail = z.output<typeof PageSchema>;
 export type MemoryPageChanges = z.output<typeof ChangesSchema>;
 export type MemoryPageListing = z.output<typeof ListingSchema>;
@@ -120,6 +144,7 @@ export interface MemoryPagesCatalog {
   savePage(options: MemoryPageTarget & { markdown: string; version: string }): Promise<MemoryPageDetail>;
   confirmLine(options: MemoryPageTarget & { factId: string; section?: string | undefined }): Promise<MemoryPageDetail>;
   dismissLine(options: MemoryPageTarget & { factId: string }): Promise<MemoryPageDetail>;
+  dismissDisagreement(options: MemoryPageTarget & { disagreementId: string }): Promise<MemoryPageDetail>;
   deletePage(target: MemoryPageTarget): Promise<void>;
   listChanges(namespace?: string): Promise<MemoryPageChanges>;
   undoChange(options: { changeId: string; namespace?: string | undefined }): Promise<void>;
@@ -162,6 +187,13 @@ export function createMemoryPagesCatalog(options: CreateTrueForgeClientOptions =
       ),
     dismissLine: ({ factId, ...target }) =>
       request('POST', linePath({ target, factId, action: 'dismiss' }), {}, parseData(PageSchema)),
+    dismissDisagreement: ({ disagreementId, ...target }) =>
+      request(
+        'POST',
+        `${BASE}/${target.kind}/${encodeURIComponent(target.slug)}/disagreements/${encodeURIComponent(disagreementId)}/dismiss${namespaceQuery(target.namespace)}`,
+        {},
+        parseData(PageSchema),
+      ),
     deletePage: async target => {
       await request('DELETE', pagePath(target), undefined, () => undefined);
     },

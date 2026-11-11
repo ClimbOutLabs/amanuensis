@@ -156,6 +156,13 @@ export function useMemoryPagesState() {
     });
   }
 
+  function dismissDisagreement(disagreementId: string) {
+    if (pagesPort === null || open === null) return Promise.resolve();
+    return act(async () => {
+      setPage(await pagesPort.dismissDisagreement({ ...target(open), disagreementId }));
+    });
+  }
+
   /** Saves the editor's text. A refusal throws so the editor can show it beside the text. */
   async function savePage({ markdown, version }: { markdown: string; version: string }) {
     if (pagesPort === null || open === null) return;
@@ -223,6 +230,7 @@ export function useMemoryPagesState() {
     closePage,
     confirmLine: (options: { factId: string; section?: string }) => settleLine({ ...options, confirm: true }),
     dismissLine: (factId: string) => settleLine({ factId, confirm: false }),
+    dismissDisagreement,
     savePage,
     deletePage,
     deleteHeld: deleteWithUndo.heldCount > 0,

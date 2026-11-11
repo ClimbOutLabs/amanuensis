@@ -35,6 +35,11 @@ function PageRow({ page, state }: { page: MemoryPageSummary; state: MemoryPagesS
               {String(page.unconfirmedCount)} to confirm
             </span>
           ) : null}
+          {page.disagreementCount > 0 ? (
+            <span className="rounded-full border border-border px-2 text-xs font-normal text-text-secondary">
+              {String(page.disagreementCount)} {page.disagreementCount === 1 ? 'pair disagrees' : 'pairs disagree'}
+            </span>
+          ) : null}
         </span>
         {page.summary === null ? null : <span className="text-sm text-text-secondary">{page.summary}</span>}
       </button>

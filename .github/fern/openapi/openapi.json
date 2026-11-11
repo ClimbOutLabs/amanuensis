@@ -6779,6 +6779,13 @@
             },
             "type": "array"
           },
+          "disagreements": {
+            "description": "Pairs of lines that disagree and are not dismissed.",
+            "items": {
+              "$ref": "#/components/schemas/MemoryPageDisagreement"
+            },
+            "type": "array"
+          },
           "kind": {
             "enum": [
               "person",
@@ -6827,7 +6834,8 @@
           "sections",
           "markdown",
           "confirmable_sections",
-          "version"
+          "version",
+          "disagreements"
         ],
         "type": "object"
       },
@@ -6883,6 +6891,51 @@
         "required": [
           "available",
           "changes"
+        ],
+        "type": "object"
+      },
+      "MemoryPageDisagreement": {
+        "properties": {
+          "first": {
+            "$ref": "#/components/schemas/MemoryPageDisagreementLine"
+          },
+          "found_on": {
+            "description": "The day the pair was found, as `YYYY-MM-DD`.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Name the pair with this id when dismissing it.",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Why they disagree, in one short line.",
+            "type": "string"
+          },
+          "second": {
+            "$ref": "#/components/schemas/MemoryPageDisagreementLine"
+          }
+        },
+        "required": [
+          "id",
+          "first",
+          "second",
+          "reason",
+          "found_on"
+        ],
+        "type": "object"
+      },
+      "MemoryPageDisagreementLine": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "text"
         ],
         "type": "object"
       },
@@ -7019,6 +7072,11 @@
               "null"
             ]
           },
+          "disagreement_count": {
+            "description": "Pairs of lines the nightly check found that disagree.",
+            "minimum": 0,
+            "type": "integer"
+          },
           "kind": {
             "enum": [
               "person",
@@ -7058,7 +7116,8 @@
           "other_names",
           "summary",
           "changed_on",
-          "unconfirmed_count"
+          "unconfirmed_count",
+          "disagreement_count"
         ],
         "type": "object"
       },
@@ -18284,6 +18343,137 @@
           "pages"
         ],
         "x-fern-sdk-method-name": "update"
+      }
+    },
+    "/api/v1/memory/pages/{kind}/{slug}/disagreements/{disagreement_id}/dismiss": {
+      "post": {
+        "description": "Mark a pair as not a problem. The same two lines are not listed again. No line on the page changes.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "enum": [
+                "person",
+                "matter"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "disagreement_id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault.",
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "description": "Vault namespace: omit for the shared vault, `persona:<name>` for a persona vault.",
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetMemoryPageResponse"
+                }
+              }
+            },
+            "description": "The page without the dismissed pair."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The request cannot be done as asked. The message says what to change."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No such page, line or change."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The page changed after it was opened, a later change must be undone first, or no history is kept."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The page operation failed."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The server does not keep memory pages."
+          }
+        },
+        "summary": "Dismiss a pair of lines that disagree",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "memory",
+          "pages"
+        ],
+        "x-fern-sdk-method-name": "dismiss_disagreement"
       }
     },
     "/api/v1/memory/pages/{kind}/{slug}/lines/{fact_id}/confirm": {

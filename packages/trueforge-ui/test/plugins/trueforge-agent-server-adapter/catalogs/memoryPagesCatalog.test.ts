@@ -29,6 +29,15 @@ const PAGE = {
   markdown: '---\n---\n',
   confirmable_sections: ['Now'],
   version: 'v1',
+  disagreements: [
+    {
+      id: 'p1',
+      first: { id: 'f_01', text: 'Plays tennis.' },
+      second: { id: 'f_03', text: 'Never plays sport.' },
+      reason: 'One says she plays.',
+      found_on: '2026-11-11',
+    },
+  ],
 };
 
 describe('createMemoryPagesCatalog', () => {
@@ -62,6 +71,7 @@ describe('createMemoryPagesCatalog', () => {
                 summary: null,
                 changed_on: '2026-11-01',
                 unconfirmed_count: 2,
+                disagreement_count: 1,
               },
             ],
             skipped_files: ['people/Bob.md'],
@@ -74,13 +84,16 @@ describe('createMemoryPagesCatalog', () => {
 
     const listing = await catalog.listPages('persona:Ada');
     assert.equal(listing.pages[0]?.unconfirmedCount, 2);
+    assert.equal(listing.pages[0]?.disagreementCount, 1);
     assert.deepEqual(listing.skippedFiles, ['people/Bob.md']);
     const page = await catalog.getPage({ kind: 'person', slug: 'wendy' });
     assert.equal(page.sections[0]?.lines[0]?.sourceLabel, 'Something Aman read');
     assert.deepEqual(page.confirmableSections, ['Now']);
+    assert.equal(page.disagreements[0]?.foundOn, '2026-11-11');
     await catalog.savePage({ kind: 'person', slug: 'wendy', markdown: 'x', version: 'v1' });
     await catalog.confirmLine({ kind: 'person', slug: 'wendy', factId: 'f_03', section: 'Now' });
     await catalog.dismissLine({ kind: 'person', slug: 'wendy', factId: 'f_03', namespace: 'persona:Ada' });
+    await catalog.dismissDisagreement({ kind: 'person', slug: 'wendy', disagreementId: 'p1' });
     await catalog.deletePage({ kind: 'person', slug: 'wendy' });
     const changes = await catalog.listChanges();
     assert.equal(changes.changes[0]?.undoBlockedBy, 'x');
@@ -96,6 +109,7 @@ describe('createMemoryPagesCatalog', () => {
         method: 'POST',
         body: {},
       },
+      { path: '/api/v1/memory/pages/person/wendy/disagreements/p1/dismiss', method: 'POST', body: {} },
       { path: '/api/v1/memory/pages/person/wendy', method: 'DELETE', body: undefined },
       { path: '/api/v1/memory/pages/changes', method: 'GET', body: undefined },
       { path: `/api/v1/memory/pages/changes/${'a'.repeat(40)}/undo`, method: 'POST', body: {} },
