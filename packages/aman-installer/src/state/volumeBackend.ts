@@ -41,18 +41,24 @@ function shellQuote(text: string): string {
 // its pid means nothing to this one, and a long install keeps the lock far
 // longer than any fixed age.
 //
-// A takeover goes through a second folder, state/takeover, made with mkdir
-// like the lock: only the run holding it may move a lock folder aside, so two
-// runs that both find a dead lock cannot both move it. Under it the run
-// judges the lock again, reads its owner, moves the folder aside with one
-// rename, and checks that what it moved still has that owner and a stopped
-// beat; if not, it is a live lock another run made a moment ago, and it goes
-// back. A guard left by a crashed run is judged by its own timestamp. Every
-// way out of a takeover that does not leave this run holding the lock is exit
-// 3, "another install is running". After writing its owner the run reads it
-// back, and waits a second once in case the folder is being put back; the
-// exit cleanup removes the lock only while the owner is still this run's.
-// The script uses no GNU-only tool, so it runs the same on a Mac.
+// A lock or takeover folder is never seen half made: the run fills
+// state/<name>.new-<token> with its owner, its time and its pid, then
+// publishes it with one rename. A rename onto a folder that is already there
+// fails or lands inside it, so the run holds the folder only when state/<name>
+// then names its own owner; otherwise it clears what it made and counts as
+// busy. A run that stalls while making its lock can therefore never write into
+// a lock another run made in the meantime.
+//
+// A takeover goes through a second folder, state/takeover, published the same
+// way: only the run holding it may move a lock folder aside, so two runs that
+// both find a dead lock cannot both move it. Under it the run judges the lock
+// again, reads its owner, moves the folder aside with one rename, and checks
+// that what it moved still has that owner and a stopped beat; if not, it is a
+// live lock another run made a moment ago, and it goes back. A guard left by a
+// crashed run is judged by its own timestamp. Every way out of a takeover that
+// does not leave this run holding the lock is exit 3, "another install is
+// running"; the exit cleanup removes the lock only while the owner is still
+// this run's. The script uses no GNU-only tool, so it runs the same on a Mac.
 export function volumeLockedScript(options: { home: string; command: string; timing?: LockTiming }): string {
   const timing = options.timing ?? LOCK_TIMING;
   const dead = String(timing.deadSeconds);
@@ -65,15 +71,16 @@ export function volumeLockedScript(options: { home: string; command: string; tim
     // A folder with no timestamp yet belongs to a run between mkdir and its first write, so it is given a moment.
     `is_live() { [ -d "$1" ] || return 1; n=0; while [ "$n" -lt 3 ]; do if a=$(age_of "$1/$2"); then [ "$a" -lt ${dead} ]; return; fi; n=$((n + 1)); sleep 1; done; return 1; };`,
     'token="$$-$(date +%s)";',
-    'if ! mkdir state/lock 2>/dev/null; then',
+    // A rename onto a folder that is already there lands inside it, so that copy is cleared too.
+    'publish() { new="state/$1.new-$token"; mkdir "$new" 2>/dev/null || return 1; printf \'%s\\n\' "$token" > "$new/owner"; date +%s > "$new/$2"; printf \'%s\\n\' "$$" > "$new/pid"; mv "$new" "state/$1" 2>/dev/null; [ "$(cat "state/$1/owner" 2>/dev/null)" = "$token" ] && return 0; rm -rf "$new" "state/$1/$1.new-$token"; return 1; };',
+    'if ! publish lock beat; then',
     'is_live state/lock beat && exit 3;',
-    'if ! mkdir state/takeover 2>/dev/null; then',
+    'if ! publish takeover since; then',
     'is_live state/takeover since && exit 3;',
     'mv state/takeover "state/takeover.stale-$token" 2>/dev/null || exit 3;',
-    'mkdir state/takeover 2>/dev/null || exit 3;',
+    'publish takeover since || exit 3;',
     'rm -rf "state/takeover.stale-$token";',
     'fi;',
-    'date +%s > state/takeover/since;',
     'if is_live state/lock beat; then rm -rf state/takeover; exit 3; fi;',
     'old_owner=$(cat state/lock/owner 2>/dev/null);',
     'if [ -d state/lock ]; then',
@@ -86,14 +93,10 @@ export function volumeLockedScript(options: { home: string; command: string; tim
     'fi;',
     'rm -rf "$aside";',
     'fi;',
-    'if ! mkdir state/lock 2>/dev/null; then rm -rf state/takeover; exit 3; fi;',
+    'if ! publish lock beat; then rm -rf state/takeover; exit 3; fi;',
     'rm -rf state/takeover;',
     'fi;',
-    'printf \'%s\\n\' "$token" > state/lock/owner;',
     'beat() { date +%s > "state/lock/beat.$$" && mv -f "state/lock/beat.$$" state/lock/beat; };',
-    'beat;',
-    'printf \'%s\\n\' "$$" > state/lock/pid;',
-    'if [ "$(cat state/lock/owner 2>/dev/null)" != "$token" ]; then sleep 1; if [ "$(cat state/lock/owner 2>/dev/null)" != "$token" ]; then exit 3; fi; fi;',
     // The beat stops with the holder, and never touches a lock another run took over.
     `( while sleep ${String(timing.beatSeconds)}; do kill -0 "$$" 2>/dev/null || exit 0; [ "$(cat state/lock/owner 2>/dev/null)" = "$token" ] || exit 0; beat; done ) </dev/null >/dev/null 2>&1 &`,
     'beater=$!;',

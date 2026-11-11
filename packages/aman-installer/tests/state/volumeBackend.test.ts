@@ -576,3 +576,46 @@ for (const [label, owner] of [
     }
   });
 }
+
+// A run can stall for seconds right after its lock appears, longer than the
+// moment a lock with no time yet is given. The lock then already holds its
+// owner and beat, so a run that comes along meanwhile is told another install
+// is running, and the stalled run still holds the lock alone when it goes on.
+test('a run that stalls right after its lock appears keeps it, and a run arriving meanwhile is told it is busy', async () => {
+  const home = await freshHome();
+  await leaveLock({ home, owner: 'other-run', beatAgeSeconds: 3600 });
+  // A stand-in rm that, the first time the takeover guard is removed, stalls the run for eight seconds.
+  const bin = await mkdtemp(join(tmpdir(), 'aman-volume-bin-'));
+  const realRm = spawnSync('sh', ['-c', 'command -v rm']).stdout.toString().trim();
+  const marker = join(bin, 'stalled');
+  await writeFile(
+    join(bin, 'rm'),
+    [
+      '#!/bin/sh',
+      `'${realRm}' "$@"`,
+      'status=$?',
+      `case "$*" in *state/takeover) if mkdir '${marker}' 2>/dev/null; then sleep 8; fi ;; esac`,
+      'exit "$status"',
+      '',
+    ].join('\n'),
+  );
+  await chmod(join(bin, 'rm'), 0o755);
+  const start = (options: { mark: string; env: NodeJS.ProcessEnv }) => {
+    const command = `: > ${options.mark}; cat >/dev/null`;
+    const child = spawn('sh', ['-c', volumeLockedScript({ home, command })], { env: options.env });
+    const done = new Promise<number | null>(resolve => {
+      child.on('close', resolve);
+    });
+    return { child, done };
+  };
+  const stalled = start({ mark: 'held-first', env: { ...process.env, PATH: `${bin}:${process.env['PATH'] ?? ''}` } });
+  await pause(1000);
+  const later = start({ mark: 'held-second', env: process.env });
+  const laterStatus = await Promise.race([later.done, pause(15000).then(() => 'still running' as const)]);
+  later.child.kill();
+  stalled.child.stdin.end();
+  assert.equal(laterStatus, 3, 'the run that came along meanwhile also took the lock');
+  assert.equal(await stalled.done, 0);
+  await access(join(home, 'held-first'));
+  await assert.rejects(access(join(home, 'held-second')));
+});

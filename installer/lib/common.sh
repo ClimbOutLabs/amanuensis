@@ -232,8 +232,8 @@ ensure_private_dir() {
   chmod 700 "$1"
 }
 
-# The run lock, as installer/STATE.md ("The lock") writes it down. state/lock is a folder made with mkdir,
-# which is atomic everywhere. The holder refreshes state/lock/beat every LOCK_BEAT_SECONDS for as long as it
+# The run lock, as installer/STATE.md ("The lock") writes it down. state/lock is a folder that appears whole, with
+# one rename. The holder refreshes state/lock/beat every LOCK_BEAT_SECONDS for as long as it
 # runs, so a long image build never looks stopped; a lock whose beat is older than LOCK_DEAD_SECONDS belongs to a
 # holder that stopped without cleaning up. The pid file is for people: when the home is a Docker volume the holder
 # ran in its own container, so its pid means nothing to the next run. The TypeScript installer and the volume
@@ -269,22 +269,37 @@ lock_write_beat() {
   date +%s >"$1/beat.$$" && mv -f "$1/beat.$$" "$1/beat"
 }
 
-# A takeover goes through a second folder, state/takeover, made with mkdir like the lock: only the run holding it
+# Makes the folder $1 (the lock or the takeover guard) with this run's owner, its time in file $2 and its pid
+# already inside, so no run ever sees it half made: the files go into a folder of this run's own, which is then
+# renamed into place. A rename onto a folder that is already there fails or lands inside it, so the run holds $1
+# only when $1 then names its own owner; otherwise it clears what it made. A run that stalls while making its lock
+# can therefore never write into a lock another run made in the meantime.
+lock_publish() {
+  local target=$1 new="$1.new-$LOCK_TOKEN"
+  mkdir "$new" 2>/dev/null || return 1
+  printf '%s\n' "$LOCK_TOKEN" >"$new/owner"
+  date +%s >"$new/$2"
+  printf '%s\n' "$$" >"$new/pid"
+  mv "$new" "$target" 2>/dev/null || true
+  if [ "$(cat "$target/owner" 2>/dev/null || true)" = "$LOCK_TOKEN" ]; then return 0; fi
+  rm -rf "$new" "${target:?}/${new##*/}"
+  return 1
+}
+
+# A takeover goes through a second folder, state/takeover, published like the lock: only the run holding it
 # may move a lock folder aside, so two runs that both find a dead lock cannot both move it. Under it the run
 # judges the lock again, reads its owner, moves the folder aside with one rename, and checks that what it moved
 # still has that owner and a stopped beat; if not, it is a live lock another run made a moment ago, and it goes
-# back. A guard left by a crashed run is judged by its own timestamp. After writing its owner the run reads it
-# back, and waits a second once in case the folder is being put back.
+# back. A guard left by a crashed run is judged by its own timestamp.
 lock_take_over() {
   local lock=$1 guard="$STATE_DIR/takeover" aside="$STATE_DIR/lock.stale-$LOCK_TOKEN" old_owner age
   lock_is_live "$lock" beat && lock_busy
-  if ! mkdir "$guard" 2>/dev/null; then
+  if ! lock_publish "$guard" since; then
     lock_is_live "$guard" since && lock_busy
     mv "$guard" "$STATE_DIR/takeover.stale-$LOCK_TOKEN" 2>/dev/null || lock_busy
-    mkdir "$guard" 2>/dev/null || lock_busy
+    lock_publish "$guard" since || lock_busy
     rm -rf "$STATE_DIR/takeover.stale-$LOCK_TOKEN"
   fi
-  date +%s >"$guard/since"
   if lock_is_live "$lock" beat; then rm -rf "$guard"; lock_busy; fi
   old_owner=$(cat "$lock/owner" 2>/dev/null || true)
   if [ -d "$lock" ]; then
@@ -297,7 +312,7 @@ lock_take_over() {
     fi
     rm -rf "$aside"
   fi
-  if ! mkdir "$lock" 2>/dev/null; then rm -rf "$guard"; lock_busy; fi
+  if ! lock_publish "$lock" beat; then rm -rf "$guard"; lock_busy; fi
   rm -rf "$guard"
 }
 
@@ -305,14 +320,7 @@ lock_acquire() {
   local lock="$STATE_DIR/lock"
   ensure_private_dir "$STATE_DIR"
   LOCK_TOKEN="$$-$(date +%s)"
-  if ! mkdir "$lock" 2>/dev/null; then lock_take_over "$lock"; fi
-  printf '%s\n' "$LOCK_TOKEN" >"$lock/owner"
-  lock_write_beat "$lock"
-  printf '%s\n' "$$" >"$lock/pid"
-  if [ "$(cat "$lock/owner" 2>/dev/null || true)" != "$LOCK_TOKEN" ]; then
-    sleep 1
-    [ "$(cat "$lock/owner" 2>/dev/null || true)" = "$LOCK_TOKEN" ] || lock_busy
-  fi
+  if ! lock_publish "$lock" beat; then lock_take_over "$lock"; fi
   LOCK_HELD=1
   lock_beat_start "$lock"
 }

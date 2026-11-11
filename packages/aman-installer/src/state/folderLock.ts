@@ -69,16 +69,37 @@ async function writeBeat(lockDir: string): Promise<void> {
 
 const BUSY = 'another install is running right now';
 
-async function makeFolder(path: string): Promise<boolean> {
+// Makes the lock or the takeover guard with this run's owner, its time and
+// its pid already inside, so no run ever sees it half made: the files go into
+// a folder of this run's own, which is then renamed into place. A rename onto
+// a folder full of files fails, so the run holds the folder only when
+// it then names this run's owner; otherwise it clears what it made. A run
+// that stalls while making its lock can therefore never write into a lock
+// another run made in the meantime.
+async function publishFolder(options: { target: string; token: string; timeFile: string }): Promise<boolean> {
+  const { target, token, timeFile } = options;
+  const fresh = `${target}.new-${token}`;
   try {
-    await mkdir(path);
-    return true;
+    await mkdir(fresh);
   } catch (error) {
     if (errorCode(error) === 'EEXIST') {
       return false;
     }
     throw new StateStoreError('the state lock folder could not be made', { cause: error });
   }
+  await writeFile(join(fresh, 'owner'), `${token}\n`, { mode: 0o600 });
+  await writeFile(join(fresh, timeFile), `${String(nowSeconds())}\n`, { mode: 0o600 });
+  await writeFile(join(fresh, 'pid'), `${String(process.pid)}\n`, { mode: 0o600 });
+  // A rename onto an empty folder replaces it, so a folder already there is
+  // left to the takeover, which judges it first.
+  if (!(await folderExists(target))) {
+    await rename(fresh, target).catch(() => undefined);
+  }
+  if ((await readLine(join(target, 'owner'))) === token) {
+    return true;
+  }
+  await rm(fresh, { recursive: true, force: true });
+  return false;
 }
 
 // Takes the lock over from a stopped holder, as the shell does (installer/STATE.md,
@@ -98,7 +119,7 @@ async function takeOver(options: { stateDir: string; token: string; timing: Lock
   if (await isLive({ dir: lockDir, file: 'beat', timing })) {
     throw new StateBusyError(BUSY);
   }
-  if (!(await makeFolder(guard))) {
+  if (!(await publishFolder({ target: guard, token, timeFile: 'since' }))) {
     if (await isLive({ dir: guard, file: 'since', timing })) {
       throw new StateBusyError(BUSY);
     }
@@ -109,12 +130,11 @@ async function takeOver(options: { stateDir: string; token: string; timing: Lock
     } catch {
       throw new StateBusyError(BUSY);
     }
-    if (!(await makeFolder(guard))) {
+    if (!(await publishFolder({ target: guard, token, timeFile: 'since' }))) {
       throw new StateBusyError(BUSY);
     }
     await rm(stale, { recursive: true, force: true });
   }
-  await writeFile(join(guard, 'since'), `${String(nowSeconds())}\n`);
   if (await isLive({ dir: lockDir, file: 'beat', timing })) {
     return leave();
   }
@@ -135,14 +155,14 @@ async function takeOver(options: { stateDir: string; token: string; timing: Lock
     }
     await rm(aside, { recursive: true, force: true });
   }
-  if (!(await makeFolder(lockDir))) {
+  if (!(await publishFolder({ target: lockDir, token, timeFile: 'beat' }))) {
     return leave();
   }
   await rm(guard, { recursive: true, force: true });
 }
 
 // The shell's lock, as common.sh takes it and installer/STATE.md writes it
-// down: state/lock is a folder made with mkdir. The holder refreshes
+// down: state/lock is a folder that appears whole, with one rename. The holder refreshes
 // state/lock/beat while it runs, and a lock whose beats stopped is taken over.
 export async function withFolderLock(options: {
   home: string;
@@ -154,7 +174,7 @@ export async function withFolderLock(options: {
   await mkdir(stateDir, { recursive: true, mode: 0o700 });
   const lockDir = join(stateDir, 'lock');
   const token = `${String(process.pid)}-${String(Date.now())}`;
-  if (!(await makeFolder(lockDir))) {
+  if (!(await publishFolder({ target: lockDir, token, timeFile: 'beat' }))) {
     await takeOver({ stateDir, token, timing });
   }
   const beat = setInterval(() => {
@@ -165,16 +185,6 @@ export async function withFolderLock(options: {
   }, timing.beatSeconds * 1000);
   beat.unref();
   try {
-    await writeFile(join(lockDir, 'owner'), `${token}\n`, { mode: 0o600 });
-    await writeBeat(lockDir);
-    await writeFile(join(lockDir, 'pid'), `${String(process.pid)}\n`, { mode: 0o600 });
-    // A folder being put back by a run that moved it by mistake may not hold the owner for a moment.
-    if ((await readLine(join(lockDir, 'owner'))) !== token) {
-      await pause(1000);
-      if ((await readLine(join(lockDir, 'owner'))) !== token) {
-        throw new StateBusyError(BUSY);
-      }
-    }
     await options.run();
   } finally {
     clearInterval(beat);
