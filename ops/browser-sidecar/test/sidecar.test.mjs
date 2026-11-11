@@ -200,7 +200,11 @@ async function withWorld(run) {
       <input name="token" value="long-session-token-shown" />
       <label>PIN code <input name="f7" value="560004" /></label>
       <label>PIN <input name="pincode" value="560005" /></label>
-      <label>Drop pin <input name="f8" value="Lalbagh Gate" /></label>`),
+      <label>Drop pin <input name="f8" value="Lalbagh Gate" /></label>
+      <label>Frying pan quantity <input name="f9" type="number" value="31" /></label>
+      <label>PAN card number <input name="f10" value="ABCDE1234F" /></label>
+      <label>Promo token <input name="f11" maxlength="8" value="SAVE20" /></label>
+      <form><label>City <input name="f12" value="Bengaluru" /></label><label>PIN <input name="f13" inputmode="numeric" maxlength="6" value="560006" /></label></form>`),
     '/code-boxes': html(`<h1>Enter the code</h1>
       ${[1, 2, 3].map(() => '<input maxlength="1" inputmode="numeric" value="7" style="width:60px;height:60px;background:#00ff00;color:#00ff00;border:0" />').join('')}`),
     // A page that watches for anything added to it and says so in its title.
@@ -871,8 +875,15 @@ test('card and code fields are found by what the page calls them', { skip: !brow
     for (const shown of ['Ada Lovelace', 'Happy birthday', 'long-session-token-shown']) {
       assert.match(opened.text, new RegExp(shown), 'a field that only mentions a card or a token is not a secret');
     }
-    for (const shown of ['560004', '560005', 'Lalbagh Gate']) {
+    for (const shown of ['560004', '560005', '560006', 'Lalbagh Gate']) {
       assert.match(opened.text, new RegExp(shown), 'a postal PIN code or a map pin is not a secret');
+    }
+    for (const shown of [': 31$', 'ABCDE1234F', 'SAVE20']) {
+      assert.match(
+        opened.text,
+        new RegExp(shown, 'm'),
+        'a pan count, a tax ID and a promo token are not payment secrets',
+      );
     }
     const shot = await sidecar.screenshot({ owner: 'owner-1', tab: 'chat-1' });
     assert.ok(pixelsOf(shot.png_base64, [0, 0xff, 0]) > 1000, "the person's picture shows the fields");
