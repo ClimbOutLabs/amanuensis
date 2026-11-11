@@ -17,7 +17,7 @@ const PAGE = {
           id: 'f_03',
           text: 'Might travel.',
           source: 'read_content',
-          source_label: 'Something Aman read',
+          source_label: 'External source: read content',
           own: false,
           since: null,
           until: null,
@@ -87,7 +87,7 @@ describe('createMemoryPagesCatalog', () => {
     assert.equal(listing.pages[0]?.disagreementCount, 1);
     assert.deepEqual(listing.skippedFiles, ['people/Bob.md']);
     const page = await catalog.getPage({ kind: 'person', slug: 'wendy' });
-    assert.equal(page.sections[0]?.lines[0]?.sourceLabel, 'Something Aman read');
+    assert.equal(page.sections[0]?.lines[0]?.sourceLabel, 'External source: read content');
     assert.deepEqual(page.confirmableSections, ['Now']);
     assert.equal(page.disagreements[0]?.foundOn, '2026-11-11');
     await catalog.savePage({ kind: 'person', slug: 'wendy', markdown: 'x', version: 'v1' });

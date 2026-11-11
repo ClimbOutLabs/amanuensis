@@ -78,13 +78,13 @@ function refused<T>(code: RefusalCode, message: string): ScreenOutcome<T> {
 }
 
 const SOURCE_LABELS: Readonly<Record<MemoryPageLineSource, string>> = {
-  you_said: 'You said it',
-  you_edited: 'You edited it',
-  sent_mail: 'A message you sent',
-  mail: 'Mail',
-  calendar: 'Calendar',
-  read_content: 'Something Aman read',
-  inferred: 'Aman’s guess',
+  you_said: 'From you',
+  you_edited: 'From you',
+  sent_mail: 'External source: a message you sent',
+  mail: 'External source: email',
+  calendar: 'External source: calendar',
+  read_content: 'External source: read content',
+  inferred: 'External source: Aman’s guess',
   unreadable: 'Aman could not read where this came from',
 };
 

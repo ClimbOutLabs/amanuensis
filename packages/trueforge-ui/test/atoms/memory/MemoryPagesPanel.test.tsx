@@ -18,7 +18,7 @@ function line(over: Partial<MemoryPageLine> & { text: string }): MemoryPageLine 
   return {
     id: null,
     source: 'you_said',
-    sourceLabel: 'You said it',
+    sourceLabel: 'From you',
     own: true,
     since: null,
     until: null,
@@ -46,7 +46,7 @@ const WENDY: MemoryPageDetail = {
           id: 'f_03',
           text: 'Might travel in November.',
           source: 'read_content',
-          sourceLabel: 'Something Aman read',
+          sourceLabel: 'External source: read content',
           own: false,
         }),
       ],
@@ -222,10 +222,10 @@ describe('MemoryPagesPanel', () => {
     await openWendy();
     const unconfirmed = screen.getByRole('region', { name: 'Unconfirmed' });
     expect(within(unconfirmed).getByText('Not confirmed')).toBeInTheDocument();
-    expect(within(unconfirmed).getByText('Something Aman read')).toBeInTheDocument();
+    expect(within(unconfirmed).getByText('External source: read content')).toBeInTheDocument();
     const now = screen.getByRole('region', { name: 'Now' });
     expect(within(now).queryByText('Not confirmed')).not.toBeInTheDocument();
-    expect(within(now).queryByText('You said it')).not.toBeInTheDocument();
+    expect(within(now).queryByText('From you')).not.toBeInTheDocument();
     const earlier = screen.getByText(/^Earlier/).closest('details');
     expect(earlier).not.toHaveAttribute('open');
   });

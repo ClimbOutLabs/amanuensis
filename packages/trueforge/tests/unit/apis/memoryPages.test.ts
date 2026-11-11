@@ -30,6 +30,7 @@ const LineSchema = z.object({
   id: z.string().nullable(),
   text: z.string(),
   source: z.string(),
+  source_label: z.string(),
   own: z.boolean(),
 });
 const PageSchema = z.object({
@@ -139,15 +140,45 @@ describe('memory pages API', () => {
         section.lines.map(line => [line.text, { ...line, section: section.name }] as const),
       ),
     );
-    expect(lines.get('Short and casual. No sign-off.')).toMatchObject({ source: 'sent_mail', own: true });
-    expect(lines.get('Booked the movie for Saturday 7 PM.')).toMatchObject({ source: 'mail', own: false });
-    expect(lines.get('Might be travelling the week of Nov 16.')).toMatchObject({ section: 'Unconfirmed', own: false });
-    expect(lines.get('Worked at Acme.')).toMatchObject({ source: 'you_said', own: true });
-    expect(lines.get('Typed by hand')).toMatchObject({ id: null, source: 'you_edited', own: true });
+    expect(lines.get('Short and casual. No sign-off.')).toMatchObject({
+      source: 'sent_mail',
+      source_label: 'External source: a message you sent',
+      own: true,
+    });
+    expect(lines.get('Booked the movie for Saturday 7 PM.')).toMatchObject({
+      source: 'mail',
+      source_label: 'External source: email',
+      own: false,
+    });
+    expect(lines.get('Might be travelling the week of Nov 16.')).toMatchObject({
+      section: 'Unconfirmed',
+      source_label: 'External source: read content',
+      own: false,
+    });
+    expect(lines.get('Worked at Acme.')).toMatchObject({ source: 'you_said', source_label: 'From you', own: true });
+    expect(lines.get('Typed by hand')).toMatchObject({
+      id: null,
+      source: 'you_edited',
+      source_label: 'From you',
+      own: true,
+    });
     expect(page.markdown).toContain('## Unconfirmed');
     expect(page.confirmable_sections).toEqual(['How you write to them', 'Now']);
     expect((await call('/person/nobody')).status).toBe(404);
     expect((await call('/person/..%2Fx')).status).toBe(404);
+  });
+
+  it('labels a line the way a note names its source: "From you" or "External source: ..."', async () => {
+    await seed();
+    await writeFile(
+      pagePath({ vaultDir: vault(), kind: 'person', slug: 'wendy' }),
+      `${WENDY}\n## Open\n- Guessed. <!-- fact: id=f_20 src=inferred seen=2026-10-29 -->\n- On the calendar. <!-- fact: id=f_21 src=calendar since=2026-10-29 -->\n- Edited by you. <!-- fact: id=f_22 src=you_edited since=2026-10-29 -->\n`,
+    );
+    const page = await readPage();
+    const labels = new Map(page.sections.flatMap(section => section.lines.map(line => [line.text, line.source_label])));
+    expect(labels.get('Guessed.')).toBe('External source: Aman’s guess');
+    expect(labels.get('On the calendar.')).toBe('External source: calendar');
+    expect(labels.get('Edited by you.')).toBe('From you');
   });
 
   it('saves an edit as one history entry and makes the new lines the person’s own', async () => {
