@@ -5,7 +5,8 @@
  * the memory folder is unchanged, and the chat list and the brief know nothing of it.
  */
 import { createHash } from 'node:crypto';
-import { readdir, readFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { z } from '@hono/zod-openapi';
@@ -110,8 +111,13 @@ async function folderFingerprint(dir: string): Promise<string> {
 
 describe('a private chat from start to Close and delete', () => {
   let server: ApprovalTestServer;
+  let memoryDir: string;
+  const sharedMemoryDir = configuration.MEMORY_MARKDOWN_DIR;
 
   beforeAll(async () => {
+    // A memory folder of its own, so only this chat could change it.
+    memoryDir = await mkdtemp(path.join(tmpdir(), 'tfy-private-chat-memory-'));
+    configuration.MEMORY_MARKDOWN_DIR = memoryDir;
     server = await startApprovalTestServer();
     // The invented inbox stands in for the person's own mail.
     server.setEvalMode(true);
@@ -119,6 +125,8 @@ describe('a private chat from start to Close and delete', () => {
 
   afterAll(async () => {
     await server.close();
+    configuration.MEMORY_MARKDOWN_DIR = sharedMemoryDir;
+    await rm(memoryDir, { recursive: true, force: true });
   });
 
   async function count(query: ReturnType<typeof sql<{ n: number }>>): Promise<number> {
