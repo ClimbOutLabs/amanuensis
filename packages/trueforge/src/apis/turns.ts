@@ -123,6 +123,7 @@ import {
   type ModelUsageDrainMember,
   type TurnModelUsage,
 } from '../runtime/modelUsage';
+import { notesFolderServiceDeps, sharedNotesFolderService } from '../runtime/notesFolder/notesFolderRuntime';
 import { mintPeeredTurnId } from '../runtime/peeringIds';
 import type { PersonaTurnContext } from '../runtime/personaCapability';
 import type { PersonaSwitchNotice } from '../runtime/PersonaTurnResourceResolver';
@@ -434,6 +435,8 @@ function createTurnResolver(deps: {
   spaceStore: ISpaceStore;
   /** Per-user Google logins; absent, no Gmail tools mount. */
   googleConnectionStore?: IGoogleConnectionStore | undefined;
+  /** The instance's global settings, where the notes folder choice lives; absent, no notes tools mount. */
+  globalSettingsStore?: IGlobalSettingsStore | undefined;
   /** From CreateTurnRequest.client_timezone. See ITurnResourceResolver.clientTimezone. */
   clientTimezone?: string | undefined;
   /** From CreateTurnRequest.spoken_reply. See ITurnResourceResolver.spokenReply. */
@@ -979,6 +982,12 @@ function createTurnResolver(deps: {
     {
       store: spaceStore,
       googleConnections: googleConnectionStore,
+      notesFolder:
+        deps.globalSettingsStore === undefined
+          ? undefined
+          : {
+              service: sharedNotesFolderService(notesFolderServiceDeps({ settings: deps.globalSettingsStore, logger })),
+            },
       authority: { tenantId: tenant_id, userRef },
       sessionId,
       schedules,
@@ -1860,6 +1869,7 @@ async function beginAcceptedTurnExecution(
         spaceStore: deps.spaceStore,
         googleConnectionStore: deps.googleConnectionStore,
         recallExclusionStore: deps.recallExclusionStore,
+        globalSettingsStore: deps.globalSettingsStore,
         logger: deps.logger,
         signal: abortController.signal,
         userRef,
@@ -2437,13 +2447,18 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       return c.json({ error: { message: FORBIDDEN_CREATE_TURN } }, 403);
     }
 
+    // The turn this one follows: the chat's last turn unless the caller named one or asked for none.
+    const requestedParent = submitted.previous_turn_id;
+    const previousTurnId =
+      requestedParent === 'none' ? null : requestedParent === 'auto' ? session.record.last_turn_id : requestedParent;
+
     // Eval instances approve only their fixture-backed tools; any other approval is declined here, whatever the runner sent.
     const body = configuration.AMAN_EVAL_MODE
       ? {
           ...submitted,
           input: await gateEvalApprovals({
             session,
-            previous_turn_id: submitted.previous_turn_id,
+            previous_turn_id: previousTurnId,
             input: submitted.input,
           }),
         }
@@ -2512,9 +2527,6 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       throw error;
     }
 
-    const requestedParent = body.previous_turn_id;
-    const previousTurnId =
-      requestedParent === 'none' ? null : requestedParent === 'auto' ? session.record.last_turn_id : requestedParent;
     const previousTurn = previousTurnId === null ? undefined : await session.getTurn(previousTurnId);
     if (previousTurnId !== null && previousTurn === undefined) {
       return c.json({ error: { message: `Turn not found: ${previousTurnId}` } }, 404);
@@ -2776,6 +2788,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       personaStore: deps.personaStore,
       spaceStore: deps.spaceStore,
       googleConnectionStore: deps.googleConnectionStore,
+      globalSettingsStore: deps.globalSettingsStore,
       clientTimezone: body.client_timezone,
       spokenReply: body.spoken_reply,
       toolOutputScreenEnabled,
@@ -2818,6 +2831,8 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
                 personalizationStore: deps.personalizationStore,
               }),
               logger: deps.logger,
+              // A reminder set in this chat fires back into this chat.
+              session_id: session.session_id,
             },
     });
 
