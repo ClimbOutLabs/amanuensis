@@ -28,7 +28,6 @@ import {
 import {
   AgentHarnessError,
   callResultSource,
-  callReturnsOutsideContent,
   existingSandboxIdForProvider,
   extractErrorLogFields,
   HeldActionRefusedError,
@@ -110,6 +109,7 @@ import {
   type SummarizeTurnContext,
 } from '../runtime/memory/memoryRetain';
 import { applyMemorySettings } from '../runtime/memory/memorySettings';
+import { createOutsideInputTracker, inputAttachesFiles } from '../runtime/memory/turnOutsideInput';
 import { readMemoryRecallSetting } from '../runtime/memoryRecallSettings';
 import { applyMemoryScreenOverride, readMemoryScreenSetting } from '../runtime/memoryScreenSettings';
 import { resolveTurnSummarizeContext } from '../runtime/memorySummarizeSettings';
@@ -1064,13 +1064,6 @@ export function deriveSessionTitle(input: TurnInputItem[] | undefined): string |
   return title;
 }
 
-/** True when any user message in a create-turn input carries an attached file. */
-function inputAttachesFiles(input: TurnInputItem[]): boolean {
-  return input
-    .filter(isAgentInputUserMessage)
-    .some(message => typeof message.content !== 'string' && message.content.some(isFileContentPart));
-}
-
 /**
  * Full (uncapped) text of every user message in a create-turn input, concatenated in order and
  * joined with a blank line, or `''` when there is none. A turn's input can carry several user
@@ -1385,11 +1378,6 @@ async function renewPrivateChatExpiry(input: {
 const TURN_TOOL_RESULTS_KEPT = 20;
 const TURN_TOOL_RESULT_CHARACTERS_KEPT = 30_000;
 
-/** A refused or unrun call returned no content, so it cannot have brought anything in. */
-function toolRanOrMayHave(disposition: string): boolean {
-  return disposition !== 'denied' && disposition !== 'policy_blocked' && disposition !== 'never_ran';
-}
-
 async function runTurnEventDrain(params: {
   input: DrainTurnEventsInput;
   markArtifactsCaptured: () => void;
@@ -1403,8 +1391,7 @@ async function runTurnEventDrain(params: {
   // the recall screen's stricter posture. Only host tools known to return nothing from outside
   // (spaces, task state, schedules) leave a turn unmarked. Text extracted from an attached file is just as untrusted, so a turn that
   // attached one starts out tainted. A turn with neither is the user's own voice: `user_stated`.
-  let ingestedToolOutput = memory?.attachedFiles === true;
-  const callReturnsOutside = new Map<string, boolean>();
+  const outsideInput = createOutsideInputTracker({ attachedFiles: memory?.attachedFiles === true });
   const callSources = new Map<string, ToolResultSource>();
   const toolResults: TurnToolResult[] = [];
   let followUp: Promise<void> | undefined;
@@ -1415,16 +1402,13 @@ async function runTurnEventDrain(params: {
       }
       if (event.type === EventType.MODEL_MESSAGE) {
         for (const call of event.tool_calls ?? []) {
-          callReturnsOutside.set(call.id, callReturnsOutsideContent(call));
           callSources.set(call.id, callResultSource(call));
         }
       }
       if (
-        (event.type === EventType.TOOL_RESPONSE ||
-          (event.type === EventType.TOOL_RESPONSE_V2 && toolRanOrMayHave(event.disposition))) &&
-        (callReturnsOutside.get(event.tool_call_id) ?? true)
+        outsideInput.observe(event) &&
+        (event.type === EventType.TOOL_RESPONSE || event.type === EventType.TOOL_RESPONSE_V2)
       ) {
-        ingestedToolOutput = true;
         // Kept for the note pass; a result that did not run cleanly holds no finding.
         if (
           (event.type === EventType.TOOL_RESPONSE || event.disposition === 'executed_ok') &&
@@ -1450,7 +1434,7 @@ async function runTurnEventDrain(params: {
         followUp = runTurnFollowUp({
           input,
           state: event.state,
-          ingestedToolOutput,
+          ingestedToolOutput: outsideInput.ingested,
           toolResults,
           markArtifactsCaptured,
         });
