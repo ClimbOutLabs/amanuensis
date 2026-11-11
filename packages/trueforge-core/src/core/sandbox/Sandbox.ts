@@ -2526,6 +2526,7 @@ export class Sandbox extends LocalToolMCP {
         // cannot follow its symlinks; the slot agent's O_NOFOLLOW walk and the guest's own view contain those.
         path_resolution: this.provider.filesystem,
         ...(this.provider.filesystem === 'remote' ? { file_digest: (path: string) => this.fileDigest(path) } : {}),
+        sandbox_network: this.provider.network,
         action: {
           tool_name: params.name,
           canonical_params: effectiveArguments ?? {},
