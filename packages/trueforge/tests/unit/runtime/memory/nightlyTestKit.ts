@@ -1,13 +1,18 @@
-import { execFileRunner } from '@truefoundry/trueforge-core/core';
+import { execFileRunner, type ILLM } from '@truefoundry/trueforge-core/core';
 import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createLogger } from 'winston';
 
+import type { IModelProviderStore } from '../../../../src/db/modelProviderStore';
+import type { SummarizeTurnContext } from '../../../../src/runtime/memory/memoryRetain';
+import { discardedModelUsage } from '../../../fixtures/discardedModelUsage';
+import { uncappedTokenFactoryBudget } from '../../../fixtures/uncappedTokenFactoryBudget';
+
 import { namespaceDirFor } from '../../../../src/runtime/memory/markdownMemoryFiles';
 import type { PageChangeOptions } from '../../../../src/runtime/memory/memoryPageWriter';
-import { pagePath, type PageKind } from '../../../../src/runtime/memory/memoryPages';
+import { pagePath, readMemoryPage, type MemoryPage, type PageKind } from '../../../../src/runtime/memory/memoryPages';
 import type { SortModel } from '../../../../src/runtime/memory/pageSorter';
 import { VAULT_HISTORY_DIR } from '../../../../src/runtime/memory/vaultGit';
 import { writePageFile } from './pageFixtures';
@@ -121,3 +126,52 @@ export function modelAnswering(answer: (prompt: string) => unknown): SortModel &
 }
 
 export const IGNORE_ALL = { decisions: [{ decision: 'ignore', reason: 'Nothing.' }] };
+
+/** The page as the code reads it; the test fails when there is no such page. */
+export async function readPageForTest(vaultDir: string, kind: PageKind, slug: string): Promise<MemoryPage> {
+  const page = await readMemoryPage({ vaultDir, kind, slug });
+  if (page === undefined) {
+    throw new Error(`No page ${kind}/${slug}`);
+  }
+  return page;
+}
+
+/**
+ * What the summary model needs, with a fake model that answers every question with what `answer` gives for the
+ * question's text. Nothing here reaches a real model.
+ */
+export function fakeSummarize(answer: (prompt: string) => Promise<unknown> | unknown): SummarizeTurnContext {
+  const store: IModelProviderStore = {
+    listProviders: jest.fn(),
+    getProvider: jest.fn(),
+    getProviderForUpdate: jest.fn(),
+    createProvider: jest.fn(),
+    upsertProvider: jest.fn(),
+    listModels: jest.fn(),
+    deleteProvider: jest.fn(),
+  };
+  const llm: ILLM = {
+    create(): ReturnType<ILLM['create']> {
+      throw new Error('streaming is not used');
+    },
+    createNonStream: async body => {
+      const prompt = body.messages
+        .map(message => (typeof message.content === 'string' ? message.content : ''))
+        .join('\n');
+      const reply = await answer(prompt);
+      return {
+        output: { role: 'assistant', content: typeof reply === 'string' ? reply : JSON.stringify(reply) },
+        usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+        finish_reason: 'stop',
+      };
+    },
+  };
+  return {
+    tenantId: 't',
+    modelProviderStore: store,
+    summarizationModelFqn: 'test/model',
+    tokenFactoryBudget: uncappedTokenFactoryBudget,
+    modelUsage: discardedModelUsage,
+    resolveLlm: () => Promise.resolve(llm),
+  };
+}

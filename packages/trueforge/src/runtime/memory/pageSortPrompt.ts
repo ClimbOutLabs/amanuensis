@@ -106,7 +106,8 @@ function renderStatement(statement: ShownStatement): string {
     : `- [${statement.id}] ${statement.text} (${label})`;
 }
 
-function renderPage(page: ShownPage): string {
+/** A page's statements as the prompts show them: the section names, and an id beside each statement the model may name. */
+export function renderPage(page: ShownPage): string {
   const lines = [`<page slug="${page.slug}" kind="${page.kind}" title="${singleLine(page.title)}">`];
   let section: PageSection | undefined;
   for (const statement of page.statements) {
