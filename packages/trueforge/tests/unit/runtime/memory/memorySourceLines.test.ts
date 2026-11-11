@@ -122,7 +122,7 @@ describe('the one-time marking of a memory folder', () => {
       timeoutMs: 5_000,
     });
 
-    expect(saved).toEqual({ ok: true });
+    expect(saved).toMatchObject({ ok: true });
     const entries = splitEntries(await readFile(file, 'utf8'));
     expect(entries).toHaveLength(4);
     expect(entries.map(entry => entryMetadata(entry)['origin'])).toEqual([

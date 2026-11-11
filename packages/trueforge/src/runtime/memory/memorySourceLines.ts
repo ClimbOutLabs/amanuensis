@@ -195,10 +195,11 @@ export async function markReviewedNotesFromYou({
       entriesByFile.set(file, entries);
     }
     const text = entries.get(entryId);
-    if (text === undefined) {
-      skip(entryId, 'not_found');
-    } else if (touched.has(entryId)) {
+    // A deleted note is gone from its file, so the markers are asked first to say it was deleted.
+    if (touched.has(entryId)) {
       skip(entryId, 'edited_or_deleted');
+    } else if (text === undefined) {
+      skip(entryId, 'not_found');
     } else if (reviewableNoRecordChatId(text) === undefined) {
       skip(entryId, 'not_reviewable');
     } else if (reviewed.get(entryId) === reviewedEntryHash(text)) {

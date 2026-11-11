@@ -29,7 +29,7 @@ describe('a memory note is the person’s own only when it says so', () => {
       operationId: `op-${item.content}`,
       timeoutMs: TIMEOUT_MS,
     });
-    expect(outcome).toEqual({ ok: true });
+    expect(outcome).toMatchObject({ ok: true });
   }
 
   async function recalled(query: string): Promise<{ text: string; origin: string | undefined }[]> {

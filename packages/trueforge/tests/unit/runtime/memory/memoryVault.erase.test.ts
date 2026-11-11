@@ -135,14 +135,16 @@ describe('memory vault erase', () => {
       expect(await filesHolding(vault, 'quokkas')).toEqual([]);
       const after = await listed(client);
       expect(after.map(entry => entry.id)).toContain(id);
-      expect(after.find(entry => entry.id === id)?.text).toBe('Bravo now prefers wombats');
+      expect(after.find(entry => entry.id === id)?.text).toBe('Bravo now prefers wombats\n\n> From you');
       expect(await recallIds(client, 'wombats')).toContain(id);
       expect(await filesHolding(vault, 'wombats')).toContain(path.join('memory', `${DAY}.md`));
 
       // A second edit leaves no trace of the first edit's wording either, including in the marker file.
       await client.updateEntry({ entryId: id, text: 'Bravo now prefers lemurs', timeoutMs: TIMEOUT_MS });
       expect(await filesHolding(vault, 'wombats')).toEqual([]);
-      expect((await listed(client)).find(entry => entry.id === id)?.text).toBe('Bravo now prefers lemurs');
+      expect((await listed(client)).find(entry => entry.id === id)?.text).toBe(
+        'Bravo now prefers lemurs\n\n> From you',
+      );
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -187,7 +189,7 @@ describe('memory vault erase', () => {
       expect(await filesHolding(vault, 'narwhals')).toEqual([]);
       const listing = await listed(client);
       expect(listing.map(entry => entry.id)).toEqual([ids[0], ids[2], `md:tenant-1:${DAY}.md#3`]);
-      expect(listing[0]?.text).toBe('Alpha now likes okapis');
+      expect(listing[0]?.text).toBe('Alpha now likes okapis\n\n> From you');
 
       const snapshot = await filesUnder(vault);
       await retainOne(client, 'Echo sings', 13, 'op-e');

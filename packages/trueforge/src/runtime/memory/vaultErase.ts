@@ -14,11 +14,13 @@ import {
   latestTombstonesByEntry,
   namespaceDirFor,
   parseVaultTombstones,
+  readReviewedMarks,
   sanitizeNamespace,
   splitEntries,
   upgradeLegacyEntries,
   vaultTombstonesFileFor,
   withOriginalHiddenMarkers,
+  type ReviewedMarks,
   type VaultTombstone,
 } from './markdownMemoryFiles';
 
@@ -64,11 +66,13 @@ function rewriteDailyLog({
   file,
   content,
   markers,
+  reviewed,
 }: {
   safeNamespace: string;
   file: string;
   content: string;
   markers: ReadonlyMap<string, VaultTombstone>;
+  reviewed: ReviewedMarks;
 }): string | undefined {
   const parts = content.split(ENTRY_SEPARATOR);
   const entryParts = parts.flatMap((part, position) => (part.trim() === '' ? [] : [position]));
@@ -76,7 +80,8 @@ function rewriteDailyLog({
     throw new Error(`Entries of ${file} could not be matched to their positions.`);
   }
   let changed = false;
-  for (const entry of dailyLogEntries({ safeNamespace, file, content })) {
+  // An edit keeps the source the note had for readers, so a note reviewed as the person's own stays theirs.
+  for (const entry of dailyLogEntries({ safeNamespace, file, content, reviewed })) {
     const marker = markers.get(entry.id);
     const position = entryParts[entry.index];
     const part = position === undefined ? undefined : parts[position];
@@ -147,6 +152,7 @@ export async function eraseMarkedEntries(options: {
   try {
     const content = await readFile(markerFile, 'utf8');
     const safeNamespace = sanitizeNamespace(options.namespace);
+    const reviewed = await readReviewedMarks({ baseDir: options.baseDir, namespace: options.namespace });
     const byFile = new Map<string, Map<string, VaultTombstone>>();
     for (const [entryId, marker] of latestTombstonesByEntry(parseVaultTombstones(content))) {
       const match = ENTRY_ID_PATTERN.exec(entryId);
@@ -164,7 +170,7 @@ export async function eraseMarkedEntries(options: {
       } catch {
         continue;
       }
-      const rewritten = rewriteDailyLog({ safeNamespace, file, content: text, markers });
+      const rewritten = rewriteDailyLog({ safeNamespace, file, content: text, markers, reviewed });
       if (rewritten !== undefined) {
         await replaceFile({ file: target, content: rewritten });
       }
