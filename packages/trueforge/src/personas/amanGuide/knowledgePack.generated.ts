@@ -6,7 +6,7 @@ export const AMAN_GUIDE_TOPICS: readonly AmanGuideTopic[] = [
     id: 'appearance',
     title: 'Changing how Aman looks',
     covers: ['settings:themes'],
-    body: '## Switch between light and dark quickly\n\nTap the button at the top of the chat. In light mode it shows a moon. Tap it to switch to dark. In dark mode it shows a sun. Tap it to switch back to light.\n\n## Choose a colour theme\n\n1. Click **More** in the left bar, then click **Settings**.\n2. Click **Appearance**.\n3. Under Color mode, click **Light**, **Dark** or **System**. **System** follows your computer.\n4. Under Theme, click **Paper**, **Forest**, **Midnight** or **High contrast**.\n\n**High contrast** gives the clearest text. Your choice stays until you change it.',
+    body: '## Switch between light and dark quickly\n\nTap the button at the top of the chat. In light mode it shows a moon. Tap it to switch to dark. In dark mode it shows a sun. Tap it to switch back to light. On a narrow phone the button is not shown, so the chat actions keep their room. Switch on the Appearance page instead.\n\n## Choose a colour theme\n\n1. Click **More** in the left bar, then click **Settings**.\n2. Click **Appearance**.\n3. Under Color mode, click **Light**, **Dark** or **System**. **System** follows your computer.\n4. Under Theme, click **Paper**, **Forest**, **Midnight** or **High contrast**.\n\n**High contrast** gives the clearest text. Your choice stays until you change it.',
   },
   {
     id: 'approvals',

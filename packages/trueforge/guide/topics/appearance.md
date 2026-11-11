@@ -6,7 +6,7 @@ covers: settings:themes
 
 ## Switch between light and dark quickly
 
-Tap the button at the top of the chat. In light mode it shows a moon. Tap it to switch to dark. In dark mode it shows a sun. Tap it to switch back to light.
+Tap the button at the top of the chat. In light mode it shows a moon. Tap it to switch to dark. In dark mode it shows a sun. Tap it to switch back to light. On a narrow phone the button is not shown, so the chat actions keep their room. Switch on the Appearance page instead.
 
 ## Choose a colour theme
 
