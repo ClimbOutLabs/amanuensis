@@ -12,6 +12,7 @@ import {
   unmarkedBulletText,
   type MemoryPage,
   type PageKind,
+  type PageListing,
   type PageSection,
 } from './memoryPages';
 import {
@@ -343,4 +344,42 @@ export function statementHits({
     .sort((a, b) => b.standing - a.standing)
     .filter((hit, i, all) => all.findIndex(other => sameStatement(other, hit)) === i)
     .slice(0, MAX_FOUND);
+}
+
+/**
+ * The pages whose statements are closest in meaning to a text, nearest first, each once. Empty when the meaning
+ * search is not ready.
+ */
+export async function pagesNearText({
+  index,
+  model,
+  text,
+  limit,
+}: {
+  index: StatementIndex;
+  model: EmbeddingModel;
+  text: string;
+  limit: number;
+}): Promise<PageListing[]> {
+  if (!(await index.refresh())) {
+    return [];
+  }
+  const [row] = await model.embedQueries([text]);
+  if (row?.length !== EMBEDDING_DIMENSIONS) {
+    return [];
+  }
+  const nearest = index
+    .standings(unitVector(row))
+    .sort((a, b) => b.standing - a.standing)
+    .flatMap(({ page }) => (page === undefined ? [] : [{ kind: page.kind, slug: page.slug }]));
+  const seen = new Set<string>();
+  const pages: PageListing[] = [];
+  for (const listing of nearest) {
+    const key = pageKeyOf(listing);
+    if (!seen.has(key) && pages.length < limit) {
+      seen.add(key);
+      pages.push(listing);
+    }
+  }
+  return pages;
 }

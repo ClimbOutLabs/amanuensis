@@ -1,0 +1,68 @@
+/**
+ * The sorter's report mode leaves one JSON line per note in the vault folder: what it would have done, or why it
+ * could not decide. It holds no text of the note. The file stays under a size cap by dropping its oldest lines.
+ */
+import { appendFile, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { z } from 'zod';
+
+import { SortDecisionSchema } from './pageSortDecisions';
+
+export const SORT_REPORT_FILE = '.sorter-report.jsonl';
+
+/** Largest the report may grow before its oldest lines are dropped. */
+export const SORT_REPORT_MAX_BYTES = 256 * 1024;
+
+export const SortReportLineSchema = z.strictObject({
+  note_id: z.string(),
+  day: z.string(),
+  outcome: z.enum(['sorted', 'refused', 'failed']),
+  /** The decisions after the host's rules; empty when the reply was refused or the call failed. */
+  decisions: z.array(SortDecisionSchema),
+  /** Why the reply was refused or the call failed. */
+  reason: z.string().optional(),
+});
+export type SortReportLine = z.infer<typeof SortReportLineSchema>;
+
+/** One writer at a time per file, so a trim never loses a line another note is adding. */
+const writers = new Map<string, Promise<void>>();
+
+async function trimToCap(file: string): Promise<void> {
+  if ((await stat(file)).size <= SORT_REPORT_MAX_BYTES) {
+    return;
+  }
+  const lines = (await readFile(file, 'utf8')).split('\n').filter(line => line !== '');
+  let size = lines.reduce((sum, line) => sum + Buffer.byteLength(line) + 1, 0);
+  while (size > SORT_REPORT_MAX_BYTES && lines.length > 1) {
+    const dropped = lines.shift();
+    size -= Buffer.byteLength(dropped ?? '') + 1;
+  }
+  const temp = `${file}.tmp`;
+  try {
+    await writeFile(temp, `${lines.join('\n')}\n`, { encoding: 'utf8', mode: 0o600 });
+    await rename(temp, file);
+  } catch (error) {
+    await rm(temp, { force: true });
+    throw error;
+  }
+}
+
+/** Adds one line to the vault's report. */
+export async function appendSortReport({ vaultDir, line }: { vaultDir: string; line: SortReportLine }): Promise<void> {
+  const file = path.join(vaultDir, SORT_REPORT_FILE);
+  const previous = writers.get(file) ?? Promise.resolve();
+  const next = previous
+    .catch(() => undefined)
+    .then(async () => {
+      await appendFile(file, `${JSON.stringify(line)}\n`, { encoding: 'utf8', mode: 0o600 });
+      await trimToCap(file);
+    });
+  writers.set(file, next);
+  try {
+    await next;
+  } finally {
+    if (writers.get(file) === next) {
+      writers.delete(file);
+    }
+  }
+}

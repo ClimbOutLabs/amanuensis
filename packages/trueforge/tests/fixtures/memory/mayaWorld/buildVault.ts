@@ -21,7 +21,7 @@ export const MAYA_NAMESPACE = 'maya';
 /** The name notes about the assistant's replies carry in this world. */
 export const MAYA_ASSISTANT_NAME = 'Aman';
 
-function retainItemOf(entry: MayaEntry): RetainItem {
+export function retainItemOf(entry: MayaEntry): RetainItem {
   const turnId = `turn-${entry.id}`;
   if (entry.origin === USER_STATED_ORIGIN) {
     const item = buildRetainItem({
