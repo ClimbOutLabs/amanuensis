@@ -204,7 +204,8 @@ async function withWorld(run) {
       <label>Frying pan quantity <input name="f9" type="number" value="31" /></label>
       <label>PAN card number <input name="f10" value="ABCDE1234F" /></label>
       <label>Promo token <input name="f11" maxlength="8" value="SAVE20" /></label>
-      <form><label>City <input name="f12" value="Bengaluru" /></label><label>PIN <input name="f13" inputmode="numeric" maxlength="6" value="560006" /></label></form>`),
+      <form><label>City <input name="f12" value="Bengaluru" /></label><label>PIN <input name="f13" inputmode="numeric" maxlength="6" value="560006" /></label></form>
+      <form><label>Billing address <input name="f14" value="12 Lake Road" /></label><label>PIN <input name="f15" inputmode="numeric" maxlength="4" value="7391" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" /></label></form>`),
     '/code-boxes': html(`<h1>Enter the code</h1>
       ${[1, 2, 3].map(() => '<input maxlength="1" inputmode="numeric" value="7" style="width:60px;height:60px;background:#00ff00;color:#00ff00;border:0" />').join('')}`),
     // A page that watches for anything added to it and says so in its title.
@@ -869,6 +870,7 @@ test('card and code fields are found by what the page calls them', { skip: !brow
       '918273',
       '64738291',
       '4826',
+      '7391',
     ]) {
       assert.doesNotMatch(opened.text, new RegExp(secret), 'a card number or a code is a secret');
     }

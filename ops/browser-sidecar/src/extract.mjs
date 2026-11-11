@@ -78,8 +78,18 @@ function holdsFewCharacters(element) {
   return Number.isInteger(maxLength) && maxLength >= 1 && maxLength <= SHORT_CODE_MAX_LENGTH;
 }
 
-/** Whether another field of the same form asks for part of an address. A field outside any form has no such neighbours. */
+/** India's postal code has six digits, so a box that holds fewer is not one. */
+const POSTAL_PIN_DIGITS = 6;
+
+/**
+ * Whether the field can hold a postal code and another field of the same form asks for part of an
+ * address. A field outside any form has no such neighbours.
+ */
 function sitsInAddressForm(element) {
+  const maxLength = element.getAttribute('maxlength');
+  if (maxLength !== null && Number(maxLength) < POSTAL_PIN_DIGITS) {
+    return false;
+  }
   if (element.form === null || element.form === undefined) {
     return false;
   }
