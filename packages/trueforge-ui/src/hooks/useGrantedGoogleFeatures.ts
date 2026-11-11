@@ -10,13 +10,13 @@ import { hasGoogleSetup, type GoogleFeature } from '../server/googleSetup.js';
  * flight or when the host has no Google port, so callers can keep prompts that need Google hidden.
  */
 export function useGrantedGoogleFeatures(): readonly GoogleFeature[] | null {
-  const catalog = useOptionalCatalogServer();
+  const connectors = useOptionalCatalogServer()?.connectorCatalog ?? null;
   const [granted, setGranted] = useState<readonly GoogleFeature[] | null>(null);
 
   useEffect(() => {
-    if (catalog === null || !hasGoogleSetup(catalog)) return;
+    if (connectors === null || !hasGoogleSetup(connectors)) return;
     const state = { cancelled: false };
-    catalog
+    connectors
       .getGoogleStatus()
       .then(status => {
         if (!state.cancelled) setGranted(status.features.filter(item => item.granted).map(item => item.feature));
@@ -28,7 +28,7 @@ export function useGrantedGoogleFeatures(): readonly GoogleFeature[] | null {
     return () => {
       state.cancelled = true;
     };
-  }, [catalog]);
+  }, [connectors]);
 
   return granted;
 }
