@@ -26,7 +26,6 @@
     "dev": "cross-env STANDALONE=false NODE_ENV=development pnpm --parallel --filter @truefoundry/trueforge-core --filter @truefoundry/trueforge --filter frontend dev",
     "guide:build": "node scripts/build-aman-guide.mjs",
     "guide:check": "node scripts/check-aman-guide-fresh.mjs",
-    "docs:site:prepare": "node scripts/build-docs-site.mjs",
     "docs:site:build": "node scripts/build-docs-site.mjs && mkdocs build -f docs-site/build.yml",
     "help:pr-check": "node scripts/check-help-pr.mjs",
     "format:check": "prettier --check \"**/*.{js,jsx,ts,tsx,json,md}\" --cache --cache-location .prettiercache --cache-strategy content --error-on-unmatched-pattern --config .prettierrc",

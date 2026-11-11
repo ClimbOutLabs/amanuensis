@@ -10,6 +10,8 @@ site_dir: site
 
 theme:
   name: material
+  # Use the system fonts, so the site loads nothing from Google.
+  font: false
   features:
     - navigation.sections
     - navigation.top

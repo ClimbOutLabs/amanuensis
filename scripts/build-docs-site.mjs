@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Lays out the docs website's source pages from docs/ and the in-app help topics, so the pages
 // people read on GitHub stay the only copy. MkDocs then builds the site from the folder this writes.
-// Run by `pnpm docs:site:prepare`.
+// Run by `pnpm docs:site:build`, before MkDocs builds the site.
 
 import { cp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
