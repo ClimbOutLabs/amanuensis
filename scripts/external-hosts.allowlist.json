@@ -406,6 +406,11 @@
       "reason": "Library documentation named in a code comment."
     },
     {
+      "host": "challenges.cloudflare.com",
+      "category": "identifier",
+      "reason": "Matched against frame URLs to name a human check, never contacted."
+    },
+    {
       "host": "json-schema.org",
       "category": "identifier",
       "reason": "JSON Schema version name in the release record schema."
