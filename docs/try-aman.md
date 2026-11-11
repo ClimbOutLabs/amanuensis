@@ -12,59 +12,15 @@ Setting it up takes about 45 minutes. Most of that is waiting while things downl
 - **Linux (Ubuntu or Debian):** nothing extra. The installer offers to install Docker for you. Your user must be allowed to use `sudo`.
 - An API key for an AI model (Together AI, OpenAI, Anthropic or Google Gemini). You create it on that company's website; it is pasted into Aman after the install. This is the only part that costs money, and it is billed by that company, not by Aman.
 
-## Step 1: get the code
+## Steps 1 and 2: install Aman
 
-Open a terminal.
+Follow the guide for your computer. Each one installs the latest release and ends with Aman running:
 
-- Mac: open the **Terminal** app (press Command+Space and type "Terminal").
-- Linux: open your terminal.
+- [Install on a Mac](install-mac.md)
+- [Install on Linux](install-linux.md)
+- [Install on Windows](install-windows.md)
 
-Aman is installed from its latest release, never from the code that is still being worked on. Run these lines one at a time. The first two ask GitHub which release is the newest, and the third shows it:
-
-```
-VERSION=$(curl -fsSL -o /dev/null -w '%{url_effective}' https://github.com/ClimbOutLabs/amanuensis/releases/latest)
-VERSION=${VERSION##*/}
-echo "Installing Aman $VERSION"
-```
-
-It prints the version, such as `Installing Aman v0.2.0`. If it prints `Installing Aman releases` instead, there is no release yet; ask the person who sent you this guide which version to use. Then get that version of the code:
-
-```
-git clone --branch "$VERSION" https://github.com/ClimbOutLabs/amanuensis
-cd amanuensis
-```
-
-Git may say "You are in 'detached HEAD' state". That is expected: it means you have one fixed version, not the code that changes every day.
-
-On Linux, if a line says `curl: command not found` or `git: command not found`, run `sudo apt install -y curl git` and try again.
-
-On a Mac, the first `git` command may show a window offering to install "command line developer tools". Click Install and wait, then run the line again.
-
-## Step 2: run the installer
-
-```
-./installer/install.sh
-```
-
-It first checks your computer, then asks:
-
-1. **Name for this instance [main]:** press Enter to name it main, or type another name, such as `work`.
-2. **Your email, used to sign in**: type your email in lowercase. This is only your sign-in name; nothing is sent to it.
-3. **What should Aman call you?**: type your name, or press Enter to use the part of your email before the @.
-4. **Back up automatically every day? [Y/n]**: press Enter.
-5. It shows the plan: what it will download and build. **Go ahead? [Y/n]**: press Enter.
-6. **Password**: choose a password of at least 8 characters with a number and a symbol, such as @ or #, and type it twice. Nothing shows while you type. Remember it; you need it to sign in.
-
-Then it works on its own for 20 to 40 minutes. You see one line per step with a spinner and the time it has taken. "Building the Aman app (this might take a while)" is the longest step; 15 minutes is normal.
-
-On **Linux** it asks two more questions near the end. Type `y` for both, then your computer password when it asks:
-
-- **Set up the sandbox now? [y/N]**: type `y`. (This gives Aman a safe place to run code. If you press Enter here, the install stops; just run the installer again and type `y`.)
-- **Make Docker start with this computer? [y/N]**: type `y`.
-
-When it is done, it prints a box that starts with **Ready. Instance main is running.** and lists the addresses to open. Below that: "Open a new terminal window to use the aman command."
-
-If it stops with a red line instead, read the **Next:** line under it. It names the one thing to fix or the one command to run. Then run `./installer/install.sh` again; it continues where it stopped.
+Then come back here.
 
 ## Step 3: open Aman and sign in
 

@@ -14,8 +14,10 @@ Amanuensis (Aman for short) is a private assistant that runs on your own compute
 ## Getting started
 
 - [Try Aman](try-aman.md): What you need, then install and first chat, step by step.
-- [Install](install.mdx): The one-command installer in full: what it asks, first login, extra instances.
-- [Install on Windows](install-windows.md): The Windows steps.
+- [Install on a Mac](install-mac.md): Install the latest release on a Mac.
+- [Install on Linux](install-linux.md): Install the latest release on Ubuntu or Debian.
+- [Install on Windows](install-windows.md): Install with Aman Setup, one download.
+- [Installer reference](install.mdx): Everything the installer does and asks: first login, extra instances, other devices.
 - [First steps](../packages/trueforge/guide/topics/first-steps.md): What to try in your first few minutes.
 - [What Aman is](../packages/trueforge/guide/topics/what-is-aman.md): What Aman does and does not do.
 - [Connect a model](models.mdx): Add a model provider or your own endpoint.
