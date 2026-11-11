@@ -1638,6 +1638,13 @@ export interface SharedServerConfiguration {
    * Required when SANDBOX_BACKEND=slots.
    */
   SANDBOX_SLOTS_DIR: string;
+  /**
+   * Root the slot workspace disks live under, one folder per installer instance (`<root>/<instance>`).
+   * The slot tooling creates them there; the server only needs the root to know the place is its own.
+   * Env: `AMAN_SLOT_DISK_ROOT` (the override the installer's own checks use). Default '/var/lib/aman-slots',
+   * the root the installer always uses.
+   */
+  SANDBOX_SLOTS_DISK_ROOT: string;
   /** Disk quota of one chat's sandbox workspace on a slot, MiB. Env: `SANDBOX_SESSION_DISK_MB`. Default 2048. */
   SANDBOX_SESSION_DISK_MB: number;
   /**
@@ -1646,6 +1653,12 @@ export interface SharedServerConfiguration {
    * only thing that lives here.
    */
   SANDBOX_MIRROR_CACHE_DIR: string;
+  /**
+   * The app data folder itself: the root the database, the sandbox workspaces and the notes
+   * folder index live under. Env: `APP_DATA_DIR` (optional absolute path). Default: the
+   * env-paths data dir, which sits under the home directory.
+   */
+  APP_DATA_DIR: string;
   /** Largest single package file the mirrors will fetch, bytes. Env: `SANDBOX_MIRROR_DOWNLOAD_MAX_BYTES`. Default 1 GiB. */
   SANDBOX_MIRROR_DOWNLOAD_MAX_BYTES: number;
   /** Largest total mirror cache, bytes. Env: `SANDBOX_MIRROR_CACHE_MAX_BYTES`. Default 10 GiB. */
@@ -2661,12 +2674,15 @@ const shared: SharedServerConfiguration = {
     defaultValue: SANDBOX_MAX_SLOTS,
   }),
   SANDBOX_SLOTS_DIR: getEnv('SANDBOX_SLOTS_DIR', { defaultValue: '' }) ?? '',
+  SANDBOX_SLOTS_DISK_ROOT:
+    getEnv('AMAN_SLOT_DISK_ROOT', { defaultValue: '/var/lib/aman-slots' }) ?? '/var/lib/aman-slots',
   SANDBOX_SESSION_DISK_MB: parsePositiveInt({
     envKey: 'SANDBOX_SESSION_DISK_MB',
     raw: getEnv('SANDBOX_SESSION_DISK_MB'),
     defaultValue: DEFAULT_SESSION_DISK_MB,
   }),
   SANDBOX_MIRROR_CACHE_DIR: path.join(appDataDir, 'package-mirror-cache'),
+  APP_DATA_DIR: appDataDir,
   SANDBOX_MIRROR_DOWNLOAD_MAX_BYTES: parsePositiveInt({
     envKey: 'SANDBOX_MIRROR_DOWNLOAD_MAX_BYTES',
     raw: getEnv('SANDBOX_MIRROR_DOWNLOAD_MAX_BYTES'),

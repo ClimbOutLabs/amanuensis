@@ -371,6 +371,8 @@ describe('runDataExport on a large instance', () => {
         metadata: {},
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
       await sessionStore.createTurn(
         makeCreateTurnInput({

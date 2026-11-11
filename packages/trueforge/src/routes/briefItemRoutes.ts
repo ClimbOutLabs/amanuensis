@@ -41,6 +41,10 @@ export const markBriefItemDoneRoute = createRoute({
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
       description: 'The chat was not found.',
     },
+    422: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'The chat is private, so it has no brief items.',
+    },
   },
 });
 

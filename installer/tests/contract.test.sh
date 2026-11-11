@@ -43,6 +43,16 @@ test_installer_calls_the_shim_as_documented() {
   sandbox_drop
 }
 
+# The installer is run directly as ./installer/install.sh, and aman upgrade, aman backup and the
+# Windows starter run the script directly too, so the files they start from must carry the
+# executable bit in the checkout itself. The suites run scripts through bash, which cannot see a
+# missing bit, so the checkout is checked here instead.
+test_shipped_scripts_are_executable() {
+  t_begin "install.sh and the network suite carry the executable bit"
+  assert_eq "$([ -x "$INSTALLER_DIR/install.sh" ] && echo yes)" yes "install.sh is executable in the checkout"
+  assert_eq "$([ -x "$INSTALLER_DIR/tests/lib/network.test.sh" ] && echo yes)" yes "the network suite is executable in the checkout"
+}
+
 test_doctor_sandbox_reads_what_the_installer_wrote() {
   t_begin "the real 'doctor sandbox' finds the setup copy, the checkout and the wired instance the installer left"
   sandbox_new
@@ -216,6 +226,7 @@ test_slot_image_creates_the_mirror_dir
 test_in_image_check_ids_match
 test_doctor_reads_what_the_installer_wrote
 test_installer_calls_the_shim_as_documented
+test_shipped_scripts_are_executable
 test_doctor_sandbox_reads_what_the_installer_wrote
 test_doctor_sandbox_fix_uses_the_same_entry
 test_layout_and_release_record

@@ -8,7 +8,15 @@ import { EMPTY_PERSONALIZATION_PROFILE, PersonalizationProvider } from '@/compon
 import { CARDS } from '@/components/tourPrompts.js';
 
 const { composer, server, schedules, shell, permissionsServer } = vi.hoisted(() => {
-  const server: { grantedFeatures: string[]; hasCatalog: boolean } = { grantedFeatures: [], hasCatalog: true };
+  type AccountState = 'connected' | 'not_connected' | 'sign_in_stopped' | 'not_working';
+  const server: {
+    grantedFeatures: string[];
+    hasCatalog: boolean;
+    /** The account saved in Settings, Connectors, Email; null means this host has no email port. */
+    email: AccountState | null;
+    calendar: AccountState | null;
+    emailReadFails: boolean;
+  } = { grantedFeatures: [], hasCatalog: true, email: null, calendar: null, emailReadFails: false };
   const schedules: {
     list: { id: string; name: string; task: string; status: 'active' | 'paused' }[];
     enabled: boolean;
@@ -59,13 +67,27 @@ vi.mock('@/server/ServerContext.js', async importOriginal => ({
   useOptionalCatalogServer: () =>
     server.hasCatalog
       ? {
-          getGoogleStatus: async () => ({
-            features: ['gmail_read', 'calendar_read'].map(feature => ({
-              feature,
-              granted: server.grantedFeatures.includes(feature),
-              label: feature,
-            })),
-          }),
+          // The Google port sits on the connector catalog, as it does in the app.
+          connectorCatalog: {
+            getGoogleStatus: async () => ({
+              features: ['gmail_read', 'calendar_read'].map(feature => ({
+                feature,
+                granted: server.grantedFeatures.includes(feature),
+                label: feature,
+              })),
+            }),
+            ...(server.email === null
+              ? {}
+              : {
+                  getEmailStatus: async () => {
+                    if (server.emailReadFails) throw new Error('The email status could not be read.');
+                    return { available: true, state: server.email };
+                  },
+                }),
+            ...(server.calendar === null
+              ? {}
+              : { getCalendarStatus: async () => ({ available: true, state: server.calendar }) }),
+          },
         }
       : null,
   useServerCapabilities: () => ({ sandbox: { enabled: false } }),
@@ -122,6 +144,9 @@ beforeEach(() => {
   composer.send.mockClear();
   server.grantedFeatures = [];
   server.hasCatalog = true;
+  server.email = null;
+  server.calendar = null;
+  server.emailReadFails = false;
   schedules.list = [];
   schedules.enabled = false;
   schedules.permissions = null;
@@ -198,6 +223,86 @@ describe('AmanWelcome on an ordinary new chat', () => {
     expect(await screen.findByRole('button', { name: "I'm behind" })).toBeInTheDocument();
     expect(screen.queryByTestId('aman-setup-ticket')).not.toBeInTheDocument();
     expect(screen.queryByText(/What would help you most\? Pick one/)).not.toBeInTheDocument();
+  });
+});
+
+describe('the mail and calendar cards', () => {
+  const PLAN_PILL = "Something's coming up";
+  const chatted: AmanSetupState = { ...firstRun, hasChatted: true };
+
+  async function openPills() {
+    fireEvent.click(await screen.findByRole('button', { name: "I'm behind" }));
+    const mail = screen.queryByRole('button', { name: /What am I dropping\?/ });
+    fireEvent.click(screen.getByRole('button', { name: PLAN_PILL }));
+    const calendar = screen.queryByRole('button', { name: /Get me ready for the next one/ });
+    return { mail, calendar };
+  }
+
+  it('hides both when nothing is connected', async () => {
+    server.email = 'not_connected';
+    server.calendar = 'not_connected';
+    renderWelcome({ setup: chatted });
+
+    const cards = await openPills();
+    expect(cards.mail).toBeNull();
+    expect(cards.calendar).toBeNull();
+  });
+
+  it('shows the mail cards when an email account is connected in Settings, with no Google sign-in', async () => {
+    server.email = 'connected';
+    server.calendar = 'not_connected';
+    renderWelcome({ setup: chatted });
+
+    fireEvent.click(await screen.findByRole('button', { name: "I'm behind" }));
+    expect(await screen.findByRole('button', { name: /What am I dropping\?/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: PLAN_PILL }));
+    expect(screen.queryByRole('button', { name: /Get me ready for the next one/ })).not.toBeInTheDocument();
+  });
+
+  it('shows the calendar cards when a calendar account is connected in Settings, with no Google sign-in', async () => {
+    server.email = 'not_connected';
+    server.calendar = 'connected';
+    renderWelcome({ setup: chatted });
+
+    fireEvent.click(await screen.findByRole('button', { name: PLAN_PILL }));
+    expect(await screen.findByRole('button', { name: /Get me ready for the next one/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: "I'm behind" }));
+    expect(screen.queryByRole('button', { name: /What am I dropping\?/ })).not.toBeInTheDocument();
+  });
+
+  it('still shows the calendar cards when the email read fails', async () => {
+    server.email = 'connected';
+    server.emailReadFails = true;
+    server.calendar = 'connected';
+    renderWelcome({ setup: chatted });
+
+    fireEvent.click(await screen.findByRole('button', { name: PLAN_PILL }));
+    expect(await screen.findByRole('button', { name: /Get me ready for the next one/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: "I'm behind" }));
+    expect(screen.queryByRole('button', { name: /What am I dropping\?/ })).not.toBeInTheDocument();
+  });
+
+  it.each(['sign_in_stopped', 'not_working'] as const)(
+    'hides the cards for a saved account that is %s',
+    async accountState => {
+      server.email = accountState;
+      server.calendar = accountState;
+      renderWelcome({ setup: chatted });
+
+      const cards = await openPills();
+      expect(cards.mail).toBeNull();
+      expect(cards.calendar).toBeNull();
+    },
+  );
+
+  it('shows both through Google alone, as before', async () => {
+    server.grantedFeatures = ['gmail_read', 'calendar_read'];
+    renderWelcome({ setup: chatted });
+
+    fireEvent.click(await screen.findByRole('button', { name: "I'm behind" }));
+    expect(await screen.findByRole('button', { name: /What am I dropping\?/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: PLAN_PILL }));
+    expect(screen.getByRole('button', { name: /Get me ready for the next one/ })).toBeInTheDocument();
   });
 });
 

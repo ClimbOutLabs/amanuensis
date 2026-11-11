@@ -218,6 +218,7 @@ async function chatWithTwoTurns() {
         return Promise.resolve();
       },
       memory: {
+        session: { is_incognito: false },
         client: memoryClient,
         userText: input.text,
         attachedFiles: false,

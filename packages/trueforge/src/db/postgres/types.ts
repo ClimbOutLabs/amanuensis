@@ -125,6 +125,10 @@ export interface SessionTable {
    * partial WHERE external_id IS NOT NULL).
    */
   external_id: string | null;
+  /** A private chat, fixed at create. */
+  is_incognito: boolean;
+  /** When a private chat is deleted; null exactly when `is_incognito` is false (`session_private_expiry_check`). */
+  private_expires_at: Date | null;
   /** top: caller-owned opaque extension; never mixed with store state */
   custom: JSONColumnType<Record<string, unknown>, Record<string, unknown>, Record<string, unknown>> | null;
   /** Caller-owned metadata; always present (DEFAULT '{}'). */
@@ -371,6 +375,19 @@ export interface TokenFactoryUsageTable {
   usage_date: string;
   used_tokens: number;
   updated_at: Date;
+}
+
+/** Token counts of a deleted chat's model calls; no session id, no words. PRIMARY KEY (tenant_id, event_id). */
+export interface DeletedChatModelUsageTable {
+  tenant_id: string;
+  event_id: string;
+  created_by_subject_id: string;
+  model_id: string;
+  display_name: string;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number | null;
+  created_at: Date;
 }
 
 /** One row per UTC day and upstream model id; not tenant-scoped. */
@@ -1033,4 +1050,5 @@ export interface Database {
   global_settings: GlobalSettingsTable;
   token_factory_usage: TokenFactoryUsageTable;
   token_factory_model_usage: TokenFactoryModelUsageTable;
+  deleted_chat_model_usage: DeletedChatModelUsageTable;
 }

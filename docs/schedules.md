@@ -17,9 +17,19 @@ A schedule asks Aman to do the same job again and again, for example every weekd
 - Each run is saved as a chat, so you can open it and see what Aman found.
 - After you save a schedule, you can give it a test run.
 
-## Aman does not interrupt you
+## Reminders
 
-A scheduled run's results wait in its chat until you open it. Reminders are the exception: a reminder you set reaches you the way you chose in Settings, Reach me (the bell, push notices and, if you set them up, [texts](/text-messages)), and always shows under the bell with the reason you got it. To mark a reminder urgent, say so when you ask, such as "Remind me at 5 pm to call the pharmacy, it's urgent". An urgent reminder can call you once phone calls are set up and you allow it.
+A reminder is for something that should happen once. In any chat, ask with a time, such as "Remind me at 5 pm to call the pharmacy".
+
+When it is due, the reminder shows in the bell with the reason you got it. It also reaches you the way you chose in Settings, Reach me, such as a notice on your devices or, if you set them up, [texts](/text-messages). Its line also appears at the end of the chat you set it in. If Aman is still answering in that chat, the line waits until the answer ends. A reminder whose chat was deleted still shows in the bell.
+
+To mark a reminder urgent, say so when you ask, such as "Remind me at 5 pm to call the pharmacy, it's urgent". An urgent reminder can call you once phone calls are set up and you allow it.
+
+Reminders do not show on the Schedules page. To see or cancel them, ask in a chat, such as "What reminders do I have?".
+
+## Scheduled runs do not interrupt you
+
+A scheduled run sends no notice. Its results wait in its chat until you open it.
 
 ## Nothing is sent or changed without you
 

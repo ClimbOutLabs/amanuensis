@@ -1829,6 +1829,26 @@
         ],
         "type": "object"
       },
+      "ChatPrivacy": {
+        "properties": {
+          "hosted_providers": {
+            "description": "Providers off this machine that may answer this chat; empty when it stays here.",
+            "items": {
+              "$ref": "#/components/schemas/HostedModelProvider"
+            },
+            "type": "array"
+          },
+          "leaves_machine": {
+            "description": "True when a model that may answer this chat runs off this machine.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "leaves_machine",
+          "hosted_providers"
+        ],
+        "type": "object"
+      },
       "CheckGoogleClientRequest": {
         "properties": {
           "client": {
@@ -2354,7 +2374,7 @@
             "$ref": "#/components/schemas/ResourceName"
           },
           "manifest": {
-            "$ref": "#/components/schemas/ScheduleManifest"
+            "$ref": "#/components/schemas/ScheduleManifestInput"
           },
           "name": {
             "$ref": "#/components/schemas/ResourceName"
@@ -2449,6 +2469,10 @@
         "properties": {
           "agent": {
             "$ref": "#/components/schemas/CreateSessionAgent"
+          },
+          "is_incognito": {
+            "description": "True starts a private chat: nothing from it is remembered, and it is deleted when closed.",
+            "type": "boolean"
           },
           "metadata": {
             "$ref": "#/components/schemas/SessionMetadata"
@@ -3344,6 +3368,17 @@
         ],
         "type": "object"
       },
+      "GetChatPrivacyResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ChatPrivacy"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "GetDeliveryResponse": {
         "properties": {
           "data": {
@@ -3586,6 +3621,17 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/ConfiguredModelProvider"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "GetNotesFolderResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/NotesFolderStatus"
           }
         },
         "required": [
@@ -4642,6 +4688,23 @@
           "sandbox_ready",
           "app_version",
           "build_ref"
+        ],
+        "type": "object"
+      },
+      "HostedModelProvider": {
+        "properties": {
+          "name": {
+            "description": "The provider name as configured.",
+            "type": "string"
+          },
+          "type": {
+            "description": "Provider type, for example `anthropic` or `custom`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "name"
         ],
         "type": "object"
       },
@@ -8129,6 +8192,45 @@
         ],
         "type": "object"
       },
+      "NotesFolderStatus": {
+        "properties": {
+          "folder_path": {
+            "description": "The folder of notes the person connected; null when no folder is connected.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "inbox_file": {
+            "description": "The file inside the folder that inbox entries are added to; the default name until one is picked.",
+            "type": "string"
+          },
+          "note_count": {
+            "description": "How many notes the folder holds; null when no folder is connected or it cannot be read right now.",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "state": {
+            "description": "Connected, not connected, connected but the saved sign-in no longer works, or saved but the server cannot be reached right now.",
+            "enum": [
+              "connected",
+              "not_connected",
+              "sign_in_stopped",
+              "not_working"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "folder_path",
+          "inbox_file",
+          "note_count"
+        ],
+        "type": "object"
+      },
       "NoticingKind": {
         "description": "A kind of event the assistant watches for.",
         "enum": [
@@ -9540,6 +9642,17 @@
         ],
         "type": "object"
       },
+      "RemoveNotesFolderResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/NotesFolderStatus"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "ReplyResultsByKind": {
         "description": "Tool call results in this reply: ok, refused, unavailable, or error.",
         "properties": {
@@ -9949,6 +10062,10 @@
           "enabled": {
             "description": "Whether a sandbox provider is configured for this tenant.",
             "type": "boolean"
+          },
+          "reason": {
+            "description": "Why the sandbox is off, in plain words; present only when it is off and a reason is known.",
+            "type": "string"
           }
         },
         "required": [
@@ -10225,6 +10342,33 @@
         ],
         "type": "object"
       },
+      "SaveNotesFolderRequest": {
+        "properties": {
+          "folder_path": {
+            "description": "The path of the folder of Markdown notes, on the computer Aman runs on.",
+            "type": "string"
+          },
+          "inbox_file": {
+            "description": "The file in the folder that inbox entries are added to; the default name when left out.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "folder_path"
+        ],
+        "type": "object"
+      },
+      "SaveNotesFolderResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/NotesFolderStatus"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "Schedule": {
         "additionalProperties": false,
         "properties": {
@@ -10277,6 +10421,48 @@
         "type": "string"
       },
       "ScheduleManifest": {
+        "additionalProperties": false,
+        "properties": {
+          "cron": {
+            "$ref": "#/components/schemas/CronExpression"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ScheduleKind"
+          },
+          "origin_session_id": {
+            "default": null,
+            "description": "The chat a reminder was set in, so its line lands in that chat when it fires. Null for tasks, for reminders set outside a chat, and for reminders saved before this was recorded.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "run_at": {
+            "$ref": "#/components/schemas/RunAt"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ScheduleStatus"
+          },
+          "task": {
+            "description": "First user message sent to the agent on every run.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "timezone": {
+            "$ref": "#/components/schemas/Timezone"
+          },
+          "urgent": {
+            "default": false,
+            "description": "For a reminder: the person marked it urgent, so it may call if they allowed that.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "task"
+        ],
+        "type": "object"
+      },
+      "ScheduleManifestInput": {
         "additionalProperties": false,
         "properties": {
           "cron": {
@@ -10604,11 +10790,22 @@
             "description": "Unique session id.",
             "type": "string"
           },
+          "is_incognito": {
+            "description": "True for a private chat: nothing from it is remembered, and it is deleted when it is closed.",
+            "type": "boolean"
+          },
           "metadata": {
             "$ref": "#/components/schemas/SessionMetadata"
           },
           "metrics": {
             "$ref": "#/components/schemas/SessionMetrics"
+          },
+          "private_expires_at": {
+            "description": "ISO 8601 time a private chat is deleted if it is not closed first; null for other chats.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "source": {
             "$ref": "#/components/schemas/SessionSource"
@@ -10636,7 +10833,9 @@
           "approval_grants",
           "metrics",
           "metadata",
-          "source"
+          "source",
+          "is_incognito",
+          "private_expires_at"
         ],
         "type": "object"
       },
@@ -11858,6 +12057,19 @@
         },
         "required": [
           "data"
+        ],
+        "type": "object"
+      },
+      "SweepPrivateChatsResponse": {
+        "properties": {
+          "deleted": {
+            "description": "Private chats deleted because they expired.",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "deleted"
         ],
         "type": "object"
       },
@@ -14783,7 +14995,7 @@
         "additionalProperties": false,
         "properties": {
           "manifest": {
-            "$ref": "#/components/schemas/ScheduleManifest"
+            "$ref": "#/components/schemas/ScheduleManifestInput"
           },
           "name": {
             "$ref": "#/components/schemas/ResourceName"
@@ -14887,6 +15099,10 @@
         "properties": {
           "agent": {
             "$ref": "#/components/schemas/SessionAgentSpecBody"
+          },
+          "is_incognito": {
+            "description": "Set only when a chat is created. A value that differs from the chat is refused.",
+            "type": "boolean"
           },
           "metadata": {
             "$ref": "#/components/schemas/SessionMetadata"
@@ -15988,6 +16204,42 @@
           "noticing"
         ],
         "x-fern-sdk-method-name": "run"
+      }
+    },
+    "/api/internal/private-chats/sweep": {
+      "post": {
+        "description": "Delete private chats whose expiry time has passed. Safe to call any time.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SweepPrivateChatsResponse"
+                }
+              }
+            },
+            "description": "Sweep finished."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid service credential."
+          }
+        },
+        "summary": "Delete expired private chats",
+        "tags": [
+          "Internal"
+        ],
+        "x-fern-sdk-group-name": [
+          "internal",
+          "private_chats"
+        ],
+        "x-fern-sdk-method-name": "sweep"
       }
     },
     "/api/internal/schedules/runs/execute": {
@@ -20897,6 +21149,16 @@
             }
           },
           {
+            "description": "When true, your own open private chats are included. They are left out by default.",
+            "in": "query",
+            "name": "include_private",
+            "required": false,
+            "schema": {
+              "description": "When true, your own open private chats are included. They are left out by default.",
+              "type": "boolean"
+            }
+          },
+          {
             "description": "When true, only sessions created by the authenticated subject.",
             "in": "query",
             "name": "created_by_me",
@@ -21374,6 +21636,16 @@
               }
             },
             "description": "Session not found."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The chat is private, so no report is made from it."
           }
         },
         "summary": "Generate a redacted bug-report bundle for a session",
@@ -21711,6 +21983,16 @@
               }
             },
             "description": "Session or owner-scoped folder not found."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Private chats cannot be filed in a folder."
           }
         },
         "summary": "Assign a session to a folder",
@@ -22076,6 +22358,65 @@
           "session-personas"
         ],
         "x-fern-sdk-method-name": "list_activations"
+      }
+    },
+    "/api/v1/sessions/{session_id}/privacy": {
+      "get": {
+        "description": "Whether the models that may answer this chat run on this machine, and which providers run elsewhere.",
+        "parameters": [
+          {
+            "description": "Session identifier.",
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "description": "Session identifier.",
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetChatPrivacyResponse"
+                }
+              }
+            },
+            "description": "Where the chat is answered."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Caller is not the session creator."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Session not found."
+          }
+        },
+        "summary": "Where a chat is answered",
+        "tags": [
+          "Agent Sessions"
+        ],
+        "x-fern-sdk-group-name": [
+          "sessions"
+        ],
+        "x-fern-sdk-method-name": "get_privacy"
       }
     },
     "/api/v1/sessions/{session_id}/repository": {
@@ -25943,7 +26284,7 @@
     },
     "/api/v1/user/audit-log": {
       "get": {
-        "description": "Lists the authenticated user’s Sentinel audit entries from every chat, newest first, including chats that were deleted. Read-only and paged.",
+        "description": "Lists the authenticated user’s Sentinel audit entries from every chat, newest first, including chats that were deleted. Can be narrowed by outcome and by a from and to time. Read-only and paged.",
         "parameters": [
           {
             "in": "query",
@@ -25980,6 +26321,28 @@
                 "denied",
                 "auto_denied"
               ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only entries at or after this time. The caller sends the start of a day in its own timezone.",
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "description": "Only entries at or after this time. The caller sends the start of a day in its own timezone.",
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only entries before this time. The caller sends the start of the day after its last shown day.",
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "description": "Only entries before this time. The caller sends the start of the day after its last shown day.",
+              "format": "date-time",
               "type": "string"
             }
           }
@@ -26142,6 +26505,16 @@
               }
             },
             "description": "The chat was not found."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The chat is private, so it has no brief items."
           }
         },
         "summary": "Mark a morning brief item done",
@@ -27987,6 +28360,162 @@
           "google"
         ],
         "x-fern-sdk-method-name": "test_connection"
+      }
+    },
+    "/api/v1/user/settings/notes-folder": {
+      "delete": {
+        "description": "Forgets the folder. Nothing inside the folder is changed or removed.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemoveNotesFolderResponse"
+                }
+              }
+            },
+            "description": "The folder is disconnected."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
+          }
+        },
+        "summary": "Remove the notes folder",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "notes"
+        ],
+        "x-fern-sdk-method-name": "remove_folder"
+      },
+      "post": {
+        "description": "Checks the folder first and saves it only when it can be used: it must be there, be a folder, and not be where Aman keeps its own memory.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveNotesFolderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SaveNotesFolderResponse"
+                }
+              }
+            },
+            "description": "The folder is connected."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The folder could not be used, and the message says what to pick instead."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
+          }
+        },
+        "summary": "Connect a notes folder",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "notes"
+        ],
+        "x-fern-sdk-method-name": "save_folder"
+      }
+    },
+    "/api/v1/user/settings/notes-folder/status": {
+      "get": {
+        "description": "Returns whether a notes folder is connected, the folder, the inbox file name, and how many notes the folder holds.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetNotesFolderResponse"
+                }
+              }
+            },
+            "description": "The notes folder status."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
+          }
+        },
+        "summary": "Get the notes folder status",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "notes"
+        ],
+        "x-fern-sdk-method-name": "get_status"
       }
     },
     "/api/v1/user/settings/sentinel": {

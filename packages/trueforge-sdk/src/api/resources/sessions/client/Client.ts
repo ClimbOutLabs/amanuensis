@@ -53,6 +53,7 @@ export class SessionsClient {
                     agentId,
                     folderId,
                     noFolder,
+                    includePrivate,
                     createdByMe,
                     metadata,
                     sourceType,
@@ -75,6 +76,7 @@ export class SessionsClient {
                     agent_id: agentId,
                     folder_id: folderId,
                     no_folder: noFolder,
+                    include_private: includePrivate,
                     created_by_me: createdByMe,
                     metadata,
                     source_type:
@@ -727,6 +729,7 @@ export class SessionsClient {
      *
      * @throws {@link TrueForge.ForbiddenError}
      * @throws {@link TrueForge.NotFoundError}
+     * @throws {@link TrueForge.UnprocessableEntityError}
      * @throws {@link errors.TrueForgeError}
      * @throws {@link errors.TrueForgeTimeoutError}
      *
@@ -806,6 +809,17 @@ export class SessionsClient {
                     );
                 case 404:
                     throw new TrueForge.NotFoundError(
+                        serializers.RequestErrorResponse.parseOrThrow(_response.error.body, {
+                            unrecognizedObjectKeys: "passthrough",
+                            allowUnrecognizedUnionMembers: true,
+                            allowUnrecognizedEnumValues: true,
+                            skipValidation: true,
+                            breadcrumbsPrefix: ["response"],
+                        }),
+                        _response.rawResponse,
+                    );
+                case 422:
+                    throw new TrueForge.UnprocessableEntityError(
                         serializers.RequestErrorResponse.parseOrThrow(_response.error.body, {
                             unrecognizedObjectKeys: "passthrough",
                             allowUnrecognizedUnionMembers: true,
@@ -1116,6 +1130,7 @@ export class SessionsClient {
      *
      * @throws {@link TrueForge.ForbiddenError}
      * @throws {@link TrueForge.NotFoundError}
+     * @throws {@link TrueForge.UnprocessableEntityError}
      * @throws {@link errors.TrueForgeError}
      * @throws {@link errors.TrueForgeTimeoutError}
      *
@@ -1197,6 +1212,17 @@ export class SessionsClient {
                     );
                 case 404:
                     throw new TrueForge.NotFoundError(
+                        serializers.RequestErrorResponse.parseOrThrow(_response.error.body, {
+                            unrecognizedObjectKeys: "passthrough",
+                            allowUnrecognizedUnionMembers: true,
+                            allowUnrecognizedEnumValues: true,
+                            skipValidation: true,
+                            breadcrumbsPrefix: ["response"],
+                        }),
+                        _response.rawResponse,
+                    );
+                case 422:
+                    throw new TrueForge.UnprocessableEntityError(
                         serializers.RequestErrorResponse.parseOrThrow(_response.error.body, {
                             unrecognizedObjectKeys: "passthrough",
                             allowUnrecognizedUnionMembers: true,
@@ -1535,6 +1561,106 @@ export class SessionsClient {
             _response.rawResponse,
             "DELETE",
             "/api/v1/sessions/{session_id}/implementation-plan-grants/{grant_id}",
+        );
+    }
+
+    /**
+     * Whether the models that may answer this chat run on this machine, and which providers run elsewhere.
+     *
+     * @param {string} session_id - Session identifier.
+     * @param {SessionsClient.RequestOptions} requestOptions - Request-specific configuration.
+     *
+     * @throws {@link TrueForge.ForbiddenError}
+     * @throws {@link TrueForge.NotFoundError}
+     * @throws {@link errors.TrueForgeError}
+     * @throws {@link errors.TrueForgeTimeoutError}
+     *
+     * @example
+     *     await client.sessions.getPrivacy("session_id")
+     */
+    public getPrivacy(
+        session_id: string,
+        requestOptions?: SessionsClient.RequestOptions,
+    ): core.HttpResponsePromise<TrueForge.GetChatPrivacyResponse> {
+        return core.HttpResponsePromise.fromPromise(this.__getPrivacy(session_id, requestOptions));
+    }
+
+    private async __getPrivacy(
+        session_id: string,
+        requestOptions?: SessionsClient.RequestOptions,
+    ): Promise<core.WithRawResponse<TrueForge.GetChatPrivacyResponse>> {
+        const _authRequest: core.AuthRequest = await this._options.authProvider.getAuthRequest();
+        const _headers: core.Fetcher.Args["headers"] = mergeHeaders(
+            _authRequest.headers,
+            this._options?.headers,
+            requestOptions?.headers,
+        );
+        const _response = await (this._options.fetcher ?? core.fetcher)({
+            url: core.url.join(
+                (await core.Supplier.get(this._options.baseUrl)) ??
+                    (await core.Supplier.get(this._options.environment)),
+                `api/v1/sessions/${core.url.encodePathParam(session_id)}/privacy`,
+            ),
+            method: "GET",
+            headers: _headers,
+            queryString: core.url.queryBuilder().mergeAdditional(requestOptions?.queryParams).build(),
+            timeoutMs: (requestOptions?.timeoutInSeconds ?? this._options?.timeoutInSeconds ?? 60) * 1000,
+            maxRetries: requestOptions?.maxRetries ?? this._options?.maxRetries,
+            abortSignal: requestOptions?.abortSignal,
+            fetchFn: this._options?.fetch,
+            logging: this._options.logging,
+        });
+        if (_response.ok) {
+            return {
+                data: serializers.GetChatPrivacyResponse.parseOrThrow(_response.body, {
+                    unrecognizedObjectKeys: "passthrough",
+                    allowUnrecognizedUnionMembers: true,
+                    allowUnrecognizedEnumValues: true,
+                    skipValidation: true,
+                    breadcrumbsPrefix: ["response"],
+                }),
+                rawResponse: _response.rawResponse,
+            };
+        }
+
+        if (_response.error.reason === "status-code") {
+            switch (_response.error.statusCode) {
+                case 403:
+                    throw new TrueForge.ForbiddenError(
+                        serializers.RequestErrorResponse.parseOrThrow(_response.error.body, {
+                            unrecognizedObjectKeys: "passthrough",
+                            allowUnrecognizedUnionMembers: true,
+                            allowUnrecognizedEnumValues: true,
+                            skipValidation: true,
+                            breadcrumbsPrefix: ["response"],
+                        }),
+                        _response.rawResponse,
+                    );
+                case 404:
+                    throw new TrueForge.NotFoundError(
+                        serializers.RequestErrorResponse.parseOrThrow(_response.error.body, {
+                            unrecognizedObjectKeys: "passthrough",
+                            allowUnrecognizedUnionMembers: true,
+                            allowUnrecognizedEnumValues: true,
+                            skipValidation: true,
+                            breadcrumbsPrefix: ["response"],
+                        }),
+                        _response.rawResponse,
+                    );
+                default:
+                    throw new errors.TrueForgeError({
+                        statusCode: _response.error.statusCode,
+                        body: _response.error.body,
+                        rawResponse: _response.rawResponse,
+                    });
+            }
+        }
+
+        return handleNonStatusCodeError(
+            _response.error,
+            _response.rawResponse,
+            "GET",
+            "/api/v1/sessions/{session_id}/privacy",
         );
     }
 

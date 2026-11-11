@@ -410,6 +410,9 @@ export const ImportSessionRecordSchema = z.object({
   created_at: ArchivedInstantSchema,
   updated_at: ArchivedInstantSchema,
   last_activity_timestamp_ms: internal(z.number(), { label: LEFT_OUT.chatDetail }),
+  // Exports made before private chats lack both fields; such a chat was an ordinary one.
+  is_incognito: z.boolean().default(false),
+  private_expires_at: ArchivedInstantSchema.nullable().default(null),
 });
 export type ImportSessionRecord = z.infer<typeof ImportSessionRecordSchema>;
 
