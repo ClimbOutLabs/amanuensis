@@ -53,6 +53,7 @@ async function formPost(pathname, fields, cookie) {
     redirect: 'manual',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
+      Origin: origin,
       ...(cookie === undefined ? {} : { Cookie: cookie }),
     },
     body: new globalThis.URLSearchParams(fields).toString(),
@@ -82,7 +83,7 @@ async function checkLocalSignIn() {
   const logout = await globalThis.fetch(`${origin}/api/v1/auth/logout`, {
     method: 'POST',
     redirect: 'manual',
-    headers: { Cookie: cookie },
+    headers: { Cookie: cookie, Origin: origin },
   });
   await logout.text();
   check(logout.status === 204, `logout answered ${String(logout.status)}`);

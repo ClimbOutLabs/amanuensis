@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
-import { createServer, type Server } from 'node:http';
+import { createServer, request, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -26,6 +26,47 @@ async function freePort(): Promise<number> {
 
 function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+interface FormResponse {
+  status: number;
+  setCookie: string;
+  body: string;
+}
+
+/**
+ * A form post over raw http, so the test controls every header: fetch would speak for the
+ * caller, and this test exists to prove what the server does with no Origin at all.
+ */
+function formPost(url: string, fields: Record<string, string>, headers: Record<string, string>): Promise<FormResponse> {
+  const body = new URLSearchParams(fields).toString();
+  return new Promise((resolve, reject) => {
+    const req = request(
+      url,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Content-Length': String(Buffer.byteLength(body)),
+          ...headers,
+        },
+      },
+      res => {
+        let collected = '';
+        res.on('data', (chunk: Buffer) => (collected += chunk.toString()));
+        res.on('end', () => {
+          const setCookie = res.headers['set-cookie'];
+          resolve({
+            status: res.statusCode ?? 0,
+            setCookie: Array.isArray(setCookie) ? setCookie.join('\n') : '',
+            body: collected,
+          });
+        });
+      },
+    );
+    req.on('error', reject);
+    req.end(body);
+  });
 }
 
 interface Booted {
@@ -120,5 +161,31 @@ describe('local sign-in startup', () => {
     const login = await fetch(`${base}/api/v1/auth/login`);
     expect(login.status).toBe(200);
     expect(await login.text()).toContain('Create your sign-in');
+  }, 180_000);
+
+  it('refuses a create with no Origin, and lets the same create through with the page own Origin', async () => {
+    const port = await freePort();
+    const base = `http://localhost:${String(port)}`;
+    const booted = boot({ PORT: String(port), TRUEFORGE_AUTH_MODE: 'local' }, dataDir);
+    running.push(booted);
+
+    await waitFor(async () => (await fetch(`${base}/healthz`)).status === 200);
+
+    const fields = {
+      email: 'owner@example.com',
+      password: 'a long enough password',
+      password_confirm: 'a long enough password',
+    };
+    const refused = await formPost(`${base}/api/v1/auth/create-account`, fields, {});
+    expect(refused.status).toBe(403);
+
+    // The refused create stored nothing: the create form is still on offer.
+    const login = await fetch(`${base}/api/v1/auth/login`);
+    expect(login.status).toBe(200);
+    expect(await login.text()).toContain('Create your sign-in');
+
+    const created = await formPost(`${base}/api/v1/auth/create-account`, fields, { Origin: base });
+    expect(created.status).toBe(302);
+    expect(created.setCookie).toContain('id_token=');
   }, 180_000);
 });
