@@ -9,7 +9,7 @@ import {
   McpServerDescriptionSchema,
   McpServerManifestAuthSchema,
   McpServerTypeSchema,
-} from './mcpServer';
+} from './mcpServerCommon';
 
 /**
  * Catalog presets are user-savable `remote` entries only.
