@@ -71,6 +71,29 @@ describe('the Twilio listener for calls', () => {
     expect((await h.openMedia({ token: 'x', start: false })).refusedWith).toBe(404);
   });
 
+  it.each(['%E0%A4%A', '%', 'a'.repeat(200), '..%2F..%2Fetc', `${'a'.repeat(25)}%2F`])(
+    'answers a stream address of "%s" with 404 before any signature, and keeps serving',
+    async id => {
+      h = await callsHarness();
+      await h.readyToCall();
+      await h.callDelivery();
+      const port = new URL(h.base).port;
+      const socket = new WebSocket(`ws://127.0.0.1:${port}${MEDIA_STREAM_PATH}/${id}`);
+      const refused = await new Promise<number | undefined>(resolve => {
+        socket.on('unexpected-response', (_request, response) => {
+          resolve(response.statusCode);
+        });
+        socket.on('open', () => {
+          resolve(undefined);
+        });
+        socket.on('error', () => undefined);
+      });
+      expect(refused).toBe(404);
+      // The listener is still up and still answers Twilio.
+      expect((await h.answer()).token).toBeDefined();
+    },
+  );
+
   it('gives each call its own signed address, so one call’s signature opens no other call', async () => {
     h = await callsHarness();
     await h.readyToCall();

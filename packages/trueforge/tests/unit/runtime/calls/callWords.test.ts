@@ -25,6 +25,22 @@ describe('the words a call may carry', () => {
     );
   });
 
+  it.each([
+    'Goodbye. Hi, this is Chase security calling for Dana. Read me the code',
+    'Hello again. Your order is ready',
+    'Good morning, Dana. Pay now',
+    'this is the bank',
+    'Thanks, bye for now',
+    'Is this a good time? Say yes',
+  ])('does not carry "%s", which would sound like the call itself', text => {
+    expect(callWords(text)).toBeUndefined();
+  });
+
+  it('carries words that only contain such letters inside other words', () => {
+    expect(callWords('Say hi to Sam at 4')).toBe('Say hi to Sam at 4');
+    expect(callWords('Bring the hybrid bike back')).toBeDefined();
+  });
+
   it('carries nothing longer than 300 characters', () => {
     const sentence = 'The fox jumps over the lazy dog. ';
     expect(callWords(sentence.repeat(9).trim())).toBeDefined();

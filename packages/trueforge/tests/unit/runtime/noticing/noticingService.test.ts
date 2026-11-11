@@ -708,7 +708,7 @@ describe('what the model can and cannot do', () => {
     });
     await service.run({ watcher: 'calendar' });
     const [item] = await feed();
-    expect(item).toMatchObject({ kind: 'nudge', level: 'call' });
+    expect(item).toMatchObject({ kind: 'nudge', level: 'call', text: 'Two things overlap.' });
   });
 
   it('stops after the daily nudge limit and writes notes instead', async () => {

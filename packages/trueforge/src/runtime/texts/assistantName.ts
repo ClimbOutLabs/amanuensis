@@ -29,10 +29,18 @@ const SPELLED_LETTERS: Record<string, string> = {
   æ: 'ae',
   Æ: 'Ae',
   ß: 'ss',
+  Þ: 'Th',
+  þ: 'th',
+  Œ: 'Oe',
+  œ: 'oe',
+  Ħ: 'H',
+  ħ: 'h',
+  Ð: 'D',
+  ð: 'd',
 };
 
 function spellOut(name: string): string {
-  return name.replace(/[øØłŁđĐæÆß]/g, letter => SPELLED_LETTERS[letter] ?? letter);
+  return name.replace(/[øØłŁđĐæÆßÞþŒœĦħÐð]/g, letter => SPELLED_LETTERS[letter] ?? letter);
 }
 
 /**

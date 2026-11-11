@@ -38,13 +38,10 @@ export async function readTtsHealth(): Promise<TtsHealth> {
   }
 }
 
-/**
- * True when the voice service answers and has its model loaded. With `exact`, it must also say it checks exact speech:
- * an older service ignores `exact` and would speak anything.
- */
-export async function probeTtsHealth({ exact = false }: { exact?: boolean } = {}): Promise<boolean> {
+/** True when the voice service answers and has its model loaded. */
+export async function probeTtsHealth(): Promise<boolean> {
   const health = await readTtsHealth();
-  return health === 'ready' || (!exact && health === 'no_exact');
+  return health === 'ready' || health === 'no_exact';
 }
 
 /** The service marks a 400 that is no fault with a header, not wording. */
@@ -87,15 +84,15 @@ function retryAfterMs(response: Response): number | undefined {
 
 function sleep({ ms, signal }: { ms: number; signal: AbortSignal }): Promise<void> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(resolve, ms);
-    signal.addEventListener(
-      'abort',
-      () => {
-        clearTimeout(timer);
-        reject(signal.reason instanceof Error ? signal.reason : new Error('stopped waiting'));
-      },
-      { once: true },
-    );
+    const stop = (): void => {
+      clearTimeout(timer);
+      reject(signal.reason instanceof Error ? signal.reason : new Error('stopped waiting'));
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', stop);
+      resolve();
+    }, ms);
+    signal.addEventListener('abort', stop, { once: true });
   });
 }
 

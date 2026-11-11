@@ -249,17 +249,6 @@ describe('the voice service health check', () => {
     await expect(probeTtsHealth()).resolves.toBe(true);
   });
 
-  it('needs the service to say it checks exact speech, when exact speech is needed', async () => {
-    answering({ status: 'ok', model_loaded: true });
-    await expect(probeTtsHealth({ exact: true })).resolves.toBe(false);
-    jest.restoreAllMocks();
-    answering({ status: 'ok', model_loaded: true, exact: true });
-    await expect(probeTtsHealth({ exact: true })).resolves.toBe(true);
-    jest.restoreAllMocks();
-    answering({ status: 'ok', model_loaded: false, exact: true });
-    await expect(probeTtsHealth({ exact: true })).resolves.toBe(false);
-  });
-
   it('tells down, too old to check exact speech, and ready apart', async () => {
     answering({ status: 'ok', model_loaded: false });
     await expect(readTtsHealth()).resolves.toBe('down');

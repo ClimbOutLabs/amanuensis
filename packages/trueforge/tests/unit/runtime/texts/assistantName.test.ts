@@ -48,6 +48,8 @@ describe('a name from the person’s settings, said on a call', () => {
     expect(plainName('Łukasz')).toBe('Lukasz');
     expect(plainName('Đặng')).toBe('Dang');
     expect(plainName('Æsop Straße')).toBe('Aesop Strasse');
+    expect(plainName('Þór')).toBe('Thor');
+    expect(plainName('Œuvre Ħamid')).toBe('Oeuvre Hamid');
   });
 
   it('drops a dash or an apostrophe that is not between two letters, also where the name was cut', () => {

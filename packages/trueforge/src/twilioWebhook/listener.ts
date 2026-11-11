@@ -31,12 +31,14 @@ export interface TwilioWebhookRoute {
 }
 
 /**
- * One WebSocket address on the listener, such as a call's media stream. It opens only after the handshake's signature
- * has been checked; what the socket then carries is the route's to check.
+ * One WebSocket address on the listener, such as a call's media stream, of the form `<path>/<id>`. Twilio forbids a
+ * query string on one, but not a path. It opens only after the handshake's signature has been checked; what the socket
+ * then carries is the route's to check.
  */
-/** A WebSocket address of the form `<path>/<id>`. Twilio forbids a query string on one, but not a path. */
 export interface TwilioSocketRoute {
   path: string;
+  /** The shape an id must have, matched against the address as sent. Anything else is refused before the signature. */
+  idShape: RegExp;
   /** Whether the id names something that may open a socket; an id that does not is refused before the upgrade. */
   admits(id: string): Promise<boolean>;
   open(socket: WebSocket, id: string): void;
@@ -121,7 +123,7 @@ function attachSocketRoutes({
   logger: Logger;
 }): void {
   const upgrades = new WebSocketServer({ noServer: true, maxPayload: MAX_SOCKET_FRAME_BYTES });
-  server.on('upgrade', (request: IncomingMessage, socket: Duplex, head: Buffer) => {
+  const handleUpgrade = (request: IncomingMessage, socket: Duplex, head: Buffer): void => {
     const url = new URL(request.url ?? '/', 'http://localhost');
     const match = socketRouteFor({ sockets, pathname: url.pathname });
     if (match === undefined) {
@@ -161,10 +163,21 @@ function attachSocketRoutes({
         },
         () => undefined,
       );
+  };
+  // Nothing on this port is trusted, so an upgrade that fails in any way is refused and the server carries on.
+  server.on('upgrade', (request: IncomingMessage, socket: Duplex, head: Buffer) => {
+    try {
+      handleUpgrade(request, socket, head);
+    } catch (error) {
+      logger.warn('A Twilio socket was refused because its request could not be read', {
+        error_class: error instanceof Error ? error.name : typeof error,
+      });
+      refuseUpgrade(socket, '404 Not Found');
+    }
   });
 }
 
-/** The socket route a path belongs to, and the one id after its prefix. */
+/** The socket route a path belongs to, and the one id after its prefix. The id is never decoded. */
 function socketRouteFor({
   sockets,
   pathname,
@@ -175,8 +188,8 @@ function socketRouteFor({
   for (const route of sockets) {
     const prefix = `${route.path}/`;
     if (pathname.startsWith(prefix)) {
-      const id = decodeURIComponent(pathname.slice(prefix.length));
-      return id === '' || id.includes('/') ? undefined : { route, id };
+      const id = pathname.slice(prefix.length);
+      return route.idShape.test(id) ? { route, id } : undefined;
     }
   }
   return undefined;

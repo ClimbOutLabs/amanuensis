@@ -123,6 +123,7 @@ import { ActiveTurnRegistry } from './runtime/activeTurns';
 import { registerCalendarConnectorForBoot } from './runtime/calendarAccount';
 import { createCallAnswerer } from './runtime/calls/callAnswerer';
 import { createCallChats } from './runtime/calls/callChats';
+import { callSpeaking } from './runtime/calls/callSpeaking';
 import { callVoiceReady, createCallReadiness } from './runtime/calls/callVoiceReady';
 import { createPhoneCallService } from './runtime/calls/phoneCalls';
 import { createTwilioCallProvider } from './runtime/calls/twilioCalls';
@@ -183,10 +184,9 @@ import { INBOUND_SMS_PATH, inboundSmsRoute } from './twilioWebhook/inboundSms';
 import { twilioListenerFor } from './twilioWebhook/listener';
 import { phoneCallRoutes } from './twilioWebhook/voiceCall';
 import { ensureWritableDataDir } from './utils/dataDir';
-import { speechLimiter, speechPersonKey } from './voice/speechRateLimit';
 import { isVoiceAvailable, startSttAvailabilityWatcher } from './voice/sttAvailability';
 import { SidecarSpeechToText } from './voice/sttClient';
-import { readTtsHealth, SidecarSpeechSynthesizer } from './voice/ttsClient';
+import { readTtsHealth } from './voice/ttsClient';
 import { SileroSpeechProbability } from './voice/vad/sileroVad';
 import { attachVoiceSocket, readyVadModel } from './voice/voiceSocket';
 
@@ -921,15 +921,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
           logger,
         }),
     }),
-    // Shares the person's place at the voice service with voice mode and read-aloud, so a call waits its turn
-    // instead of being turned away. The voice the person picked is kept in their browser, so calls use the default.
-    speaking: owner =>
-      new SidecarSpeechSynthesizer({
-        share: {
-          limiter: speechLimiter,
-          person: speechPersonKey({ tenantId: owner.tenant_id, personId: owner.created_by }),
-        },
-      }),
+    speaking: callSpeaking,
     listening: async () => ({
       vad: await SileroSpeechProbability.load({ model: await readyVadModel() }),
       stt: new SidecarSpeechToText(),

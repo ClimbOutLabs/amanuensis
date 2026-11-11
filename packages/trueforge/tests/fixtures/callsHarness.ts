@@ -242,7 +242,7 @@ export async function callsHarness({
   async function openMedia({
     token,
     callSid = CALL_SID,
-    callId = placed.at(-1)?.call_id ?? 'none',
+    callId = placed.at(-1)?.call_id ?? '0'.repeat(26),
     sign = true,
     start = true,
   }: {

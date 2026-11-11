@@ -40,8 +40,22 @@ const INVALID_NUMBER_CODES = new Set([13223, 13224, 21211, 21214, 21215, 21216, 
 
 const CreatedCallSchema = z.object({ sid: CallSidSchema });
 
-/** Connection errors that mean the request never left this machine, so no call can have started. */
-const NOT_SENT_CODES = new Set(['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'EHOSTUNREACH', 'ENETUNREACH']);
+/**
+ * Connection errors that mean the request never left this machine, so no call can have started. A certificate that
+ * does not check out stops the connection before anything is sent.
+ */
+const NOT_SENT_CODES = new Set([
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'ECONNREFUSED',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+  'UNABLE_TO_GET_ISSUER_CERT',
+  'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
+  'DEPTH_ZERO_SELF_SIGNED_CERT',
+  'SELF_SIGNED_CERT_IN_CHAIN',
+]);
 
 /**
  * Whether a failed request may still have reached Twilio. Only an address refused up front, or a connection that

@@ -86,15 +86,20 @@ describe('starting a call through Twilio', () => {
   const failing = (error: unknown) => createTwilioCallProvider({ settings, fetchTwilio: () => Promise.reject(error) });
   const withCode = (code: string) => new TypeError('fetch failed', { cause: Object.assign(new Error(code), { code }) });
 
-  it.each(['ENOTFOUND', 'ECONNREFUSED', 'EHOSTUNREACH', 'ENETUNREACH', 'CERT_HAS_EXPIRED'])(
-    'knows no call started when the request never reached Twilio (%s)',
-    async code => {
-      expect(await failing(withCode(code)).place({ to: '+1', call_id: 'c' })).toEqual({
-        outcome: 'failed',
-        failure: 'unreachable',
-      });
-    },
-  );
+  it.each([
+    'ENOTFOUND',
+    'ECONNREFUSED',
+    'EHOSTUNREACH',
+    'ENETUNREACH',
+    'CERT_HAS_EXPIRED',
+    'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+    'SELF_SIGNED_CERT_IN_CHAIN',
+  ])('knows no call started when the request never reached Twilio (%s)', async code => {
+    expect(await failing(withCode(code)).place({ to: '+1', call_id: 'c' })).toEqual({
+      outcome: 'failed',
+      failure: 'unreachable',
+    });
+  });
 
   it('knows no call started when the address was refused before any request', async () => {
     const error = new PublicFetchError({

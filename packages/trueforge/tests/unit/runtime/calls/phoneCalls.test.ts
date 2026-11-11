@@ -365,6 +365,28 @@ describe('a call whose Twilio id was not saved', () => {
     expect(await response.text()).toContain('<Hangup/>');
     expect((await h.calls.get(callId))?.call_sid).toBe(CALL_SID);
   });
+
+  it('refuses another call’s valid key sent on this call’s address', async () => {
+    h = await callsHarness();
+    await h.readyToCall();
+    await h.callDelivery();
+    await h.answer();
+    // A second call of the same person, with its own Twilio id and a key that is good for it.
+    const { call: other } = await callWithoutSid(h);
+    await h.calls.attachSid({ id: other.id, call_sid: OTHER_SID });
+    const otherKey = 'key-for-the-other-call';
+    await h.db.updateTable('phone_call').set({ status: 'ringing' }).where('id', '=', other.id).execute();
+    await h.calls.issueToken({
+      call_sid: OTHER_SID,
+      token_hash: createHash('sha256').update(otherKey, 'utf8').digest('hex'),
+      token_expires_at: new Date(h.clock.now.getTime() + 30_000),
+      mode: 'talk',
+      now: h.clock.now,
+    });
+    const media = await h.openMedia({ token: otherKey, callSid: OTHER_SID });
+    expect(await media.closed).toBe(1008);
+    expect(h.tts.sentences).toEqual([]);
+  });
 });
 
 describe('a call that ends while its line opens', () => {
@@ -931,6 +953,17 @@ describe('a conversation on the phone', () => {
     loaded();
     await h.waitFor(() => released === 1);
     expect(h.tts.sentences).toEqual([]);
+  });
+
+  it('says goodbye at the time limit without mentioning a chat, then hangs up', async () => {
+    h = await callsHarness({ limits: { talkMs: 80, hangUpGraceMs: 400 } });
+    await h.readyToCall();
+    await h.callDelivery();
+    const media = await h.openMedia({ token: (await h.answer()).token });
+    await h.waitFor(() => h.tts.sentences.join(' ').endsWith(CALL_LINES.timeUp));
+    expect(CALL_LINES.timeUp).toBe('I need to go now. Please open the app. Goodbye.');
+    expect(CALL_LINES.timeUp).not.toMatch(/chat/i);
+    await media.closed;
   });
 
   it('closes the line at the time limit even when the assistant is stuck mid-sentence', async () => {

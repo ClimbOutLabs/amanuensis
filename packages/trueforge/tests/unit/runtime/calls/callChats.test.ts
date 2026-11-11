@@ -346,7 +346,7 @@ describe('what the assistant can do on a call', () => {
       expect(line).not.toContain('bank emails');
       expect(line).not.toContain('Done.');
     });
-    expect(lines[0]).toContain('you, or whoever answered');
+    expect(lines[0]).toContain('You, or someone else, answered the phone.');
     expect(lines.filter(line => line.includes('A record of a phone call'))).toHaveLength(1);
     expect(lines[2]).toContain("The phone helper (it could see and do nothing else): `«Done. '");
   });
