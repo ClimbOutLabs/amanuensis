@@ -46,7 +46,7 @@ function note({
     content,
     timestamp,
     document_id: `doc-${timestamp}`,
-    ...(sessionId === undefined ? {} : { metadata: { session_id: sessionId } }),
+    metadata: { origin: 'user_stated', ...(sessionId === undefined ? {} : { session_id: sessionId }) },
   };
 }
 
@@ -164,7 +164,7 @@ describe('MarkdownMemoryClient recall scope', () => {
       const items = await recallItems({ client, query: 'who is the dentist', currentSessionId: 'chat-now' });
       expect(items).toHaveLength(1);
       expect(items[0]?.text).toContain('Dr Rivera');
-      expect(items[0]?.metadata).toEqual({ origin: 'user_stated' });
+      expect(items[0]?.metadata).toEqual({ origin: 'tool_ingested' });
       expect(items[0]?.occurred_start).toBe('2026-09-19T12:00:00.000Z');
     } finally {
       await rm(dir, { recursive: true, force: true });

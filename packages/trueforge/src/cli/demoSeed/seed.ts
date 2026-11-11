@@ -24,7 +24,9 @@ import type { WithTransaction } from '../../db/transaction';
 import type { ITurnArtifactStore } from '../../db/turnArtifactStore';
 import { seedDefaultSearchProvider, type DefaultSearchProviderOutcome } from '../../runtime/defaultSearchProvider';
 import { registerMailConnector } from '../../runtime/mailConnector';
+import { withoutSourceLines } from '../../runtime/memory/markdownMemoryFiles';
 import type { MemoryClient, MemoryVaultEntry } from '../../runtime/memory/memoryClient';
+import { MEMORY_ORIGIN_METADATA_KEY, USER_STATED_ORIGIN } from '../../runtime/memory/memoryOrigin';
 import type { SkillManifest } from '../../schemas/skill';
 import { SPACE_LIST_LIMIT } from '../../schemas/space';
 import { knowledgeDocumentId, type DemoKnowledgeLibrary } from './knowledgeLibrary';
@@ -143,7 +145,8 @@ function parseStoredNote({ id, text, context }: MemoryVaultEntry): StoredNote | 
   if (key === undefined) {
     return undefined;
   }
-  return { entryId: id, key, body: text.trim(), current: marker?.[1] === DEMO_MARKER };
+  // A listed note closes with the line that says where it came from, which is not part of its body.
+  return { entryId: id, key, body: withoutSourceLines(text).trim(), current: marker?.[1] === DEMO_MARKER };
 }
 
 async function listStoredNotes(memory: MemoryClient): Promise<StoredNote[]> {
@@ -204,6 +207,8 @@ async function seedMemory({
           timestamp: now.toISOString(),
           context: `${DEMO_MARKER}:${note.key}`,
           document_id: `${DEMO_ID_PREFIX}-${note.key}`,
+          // Demo notes stand in for things the demo person said.
+          metadata: { [MEMORY_ORIGIN_METADATA_KEY]: USER_STATED_ORIGIN },
         },
       ],
       operationId: ulid(),

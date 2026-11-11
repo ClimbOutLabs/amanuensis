@@ -17,9 +17,11 @@ import type {
   AgentCapability,
   AgentContextProcessorOutput,
   AgentThreadExecutionContext,
+  ChatProvenance,
   ContextMessage,
   JsonValue,
   PreLLMEphemeralAgentContextProcessor,
+  ReadSource,
 } from '@truefoundry/trueforge-core/core';
 import {
   contextHasOutsideToolResult,
@@ -68,7 +70,7 @@ import {
   withoutNoteTrailer,
   type MemoryNoteSource,
 } from './memoryNotes';
-import { MEMORY_ORIGIN_METADATA_KEY, USER_STATED_ORIGIN, type AmanMemoryOrigin } from './memoryOrigin';
+import { isPersonOrigin, MEMORY_ORIGIN_METADATA_KEY, USER_STATED_ORIGIN, type AmanMemoryOrigin } from './memoryOrigin';
 import {
   DRAFTING_END,
   DRAFTING_FRAME_TOKENS,
@@ -551,26 +553,77 @@ function noteLabelFor(source: MemoryNoteSource): string {
   return source === SENT_MAIL_SOURCE ? SENT_MAIL_LABEL : FINDING_LABEL;
 }
 
-/** The fixed phrase an item's line carries when it is not the person's own words, or undefined when it is theirs. */
-function itemSourceLabel(item: RecallItem): string | undefined {
-  const origin = item.metadata?.[MEMORY_ORIGIN_METADATA_KEY];
-  const note = noteProvenance({ metadata: item.metadata, text: item.text });
-  // Only a fixed phrase is emitted for the origin, never the provider's own value.
-  if (note !== undefined) {
-    return noteLabelFor(note.source);
-  }
-  return origin === undefined || origin === USER_STATED_ORIGIN ? undefined : READ_CONTENT_LABEL;
-}
-
-/** Whether the host stamped the note as the person's own words; no stamp, or any other, is read content. */
-function isUserStated(item: RecallItem): boolean {
-  return item.metadata?.[MEMORY_ORIGIN_METADATA_KEY] === USER_STATED_ORIGIN;
-}
-
 function formatItemLine(item: RecallItem): string {
   const date = item.occurred_start ? sanitizeMemoryLine(item.occurred_start.slice(0, 10)) : 'undated';
-  const label = itemSourceLabel(item);
-  return `[${date}${label === undefined ? '' : `, ${label}`}] ${sanitizeMemoryLine(withoutNoteTrailer(item.text))}`;
+  const from = recalledItemSource(item);
+  // Only a fixed phrase is emitted for the origin, never the provider's own value.
+  const source =
+    from.kind === 'note' ? `, ${noteLabelFor(from.source)}` : from.kind === 'person' ? '' : `, ${READ_CONTENT_LABEL}`;
+  return `[${date}${source}] ${sanitizeMemoryLine(withoutNoteTrailer(item.text))}`;
+}
+
+/** Whose words a recalled item is: the person's own, a note the assistant kept, or something it read. */
+type RecalledItemSource =
+  { kind: 'person' } | { kind: 'note'; source: MemoryNoteSource } | { kind: 'read'; origin: string | undefined };
+
+/** The one verdict on a recalled item's source, shared by the label the model sees and the chat's record of links. */
+function recalledItemSource(item: RecallItem): RecalledItemSource {
+  const note = noteProvenance({ metadata: item.metadata, text: item.text });
+  if (note !== undefined) {
+    return { kind: 'note', source: note.source };
+  }
+  // Only a memory that says it is the person's own counts as theirs; one with no origin is something read.
+  return isPersonOrigin(item.metadata)
+    ? { kind: 'person' }
+    : { kind: 'read', origin: item.metadata?.[MEMORY_ORIGIN_METADATA_KEY] };
+}
+
+const READ_SOURCE_OF_NOTE: Record<MemoryNoteSource, ReadSource> = {
+  email: 'email',
+  calendar: 'event',
+  web: 'page',
+  attachment: 'file',
+  other: 'tool_result',
+  [ASSISTANT_RESPONSE_SOURCE]: 'tool_result',
+  // A sent message can quote mail, so its links and addresses count as read from mail.
+  [SENT_MAIL_SOURCE]: 'email',
+};
+
+/** Where a recalled item was read, or undefined when it is the person's own words. */
+function recalledReadSource(item: RecallItem): ReadSource | undefined {
+  const from = recalledItemSource(item);
+  if (from.kind === 'person') {
+    return undefined;
+  }
+  if (from.kind === 'note') {
+    return READ_SOURCE_OF_NOTE[from.source];
+  }
+  return from.origin === 'email' ? 'email' : 'tool_result';
+}
+
+/**
+ * Records where the links and addresses of an injected block came from. Only what the person said is
+ * theirs to use. An item the assistant read keeps that mark here as it does in the text, and the
+ * summary lines (profile, mental models, people, reflection) have no single source, so they count as read.
+ */
+function recordRecallProvenance(input: {
+  provenance: ChatProvenance;
+  items: readonly RecallItem[];
+  summaryLines: readonly string[];
+}): void {
+  const { provenance } = input;
+  for (const item of input.items) {
+    const text = formatItemLine(item);
+    const source = recalledReadSource(item);
+    if (source === undefined) {
+      recordPersonText({ provenance, text });
+    } else {
+      recordUntrustedText({ provenance, text, source });
+    }
+  }
+  for (const text of input.summaryLines) {
+    recordUntrustedText({ provenance, text, source: 'other' });
+  }
 }
 
 /**
@@ -636,13 +689,10 @@ export interface FormattedMemoryBlock {
   includedReflection: boolean;
   /** Pages that made it into the block, in priority order. */
   includedPages: number;
-  /**
-   * What the block carries that is the person's own: notes stamped `user_stated`, and the own lines and drafting
-   * lines of the pages that made it in. The block's frame is on neither side.
-   */
-  personText: string[];
-  /** Everything else the block carries: it is read content, whatever it was recalled as. */
-  readText: string[];
+  /** The person's own lines and drafting lines of the pages that made it in. */
+  pagePersonText: string[];
+  /** The lines of those pages that Aman read; they stay read content. */
+  pageReadText: string[];
 }
 
 // A stats line sized with placeholder digits larger than any realistic real one, so the
@@ -835,8 +885,8 @@ export function formatMemoryBlock(params: {
   // Pages have their own budget on top of the recall budget; the first page that would overflow
   // it, and every page after, is dropped so the model sees them in priority order.
   const pageTexts: string[] = [];
-  const personText: string[] = [];
-  const readText: string[] = [];
+  const pagePersonText: string[] = [];
+  const pageReadText: string[] = [];
   const draftingBlock: string[] = [];
   let pageTokens = 0;
   let pagesDropped = 0;
@@ -848,8 +898,8 @@ export function formatMemoryBlock(params: {
       continue;
     }
     pageTexts.push(entry.text);
-    personText.push(...entry.ownLines, ...entry.drafting);
-    readText.push(...entry.readLines);
+    pagePersonText.push(...entry.ownLines, ...entry.drafting);
+    pageReadText.push(...entry.readLines);
     pageTokens += tokens + frameTokens;
     draftingBlock.push(...entry.drafting);
   }
@@ -884,7 +934,6 @@ export function formatMemoryBlock(params: {
     }
     const fittedTokens = estimateTokens(fitted);
     curatedLines.push(fitted);
-    readText.push(fitted);
     curatedTokens += fittedTokens;
     remaining -= fittedTokens;
   }
@@ -927,7 +976,6 @@ export function formatMemoryBlock(params: {
       continue;
     }
     lines.push(line);
-    (isUserStated(item) ? personText : readText).push(line);
     usedTokens += lineTokens;
   }
 
@@ -965,9 +1013,6 @@ export function formatMemoryBlock(params: {
   }
   const statsLine = `(${clauses.join('; ')})`;
 
-  // Entity summaries and the reflection are put together by the store and carry no origin of their own.
-  readText.push(...(entitiesLine ? [entitiesLine] : []), ...(reflectionLine !== undefined ? [reflectionLine] : []));
-
   const body = [
     MEMORY_FRAMING_SENTENCE,
     ...pageTexts,
@@ -990,8 +1035,8 @@ export function formatMemoryBlock(params: {
     curatedLines,
     includedReflection: reflectionLine !== undefined,
     includedPages: pageTexts.length,
-    personText,
-    readText,
+    pagePersonText,
+    pageReadText,
   };
 }
 
@@ -1781,19 +1826,32 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
     this.cachedBlock = formatted.block;
     this.blockWatch?.noteBlock({
       holdsOutsideText:
-        screening.injectedItems.some(item => itemSourceLabel(item) !== undefined) ||
+        screening.injectedItems.some(item => recalledItemSource(item).kind !== 'person') ||
         screening.injectedEntities.length > 0 ||
         screening.injectedCurated.length > 0 ||
         screening.injectedReflection !== undefined ||
         screening.injectedPages.some(page => page.holdsOutsideText),
     });
     if (this.webSearch !== undefined) {
-      // Only the person's own words make a link or address theirs to use. What was read from mail, a page or a
-      // file stays read content when it is recalled, in this chat and every later one.
-      recordPersonText({ provenance: this.webSearch.provenance, text: formatted.personText.join('\n') });
+      // The block holds a leading run of what the screen let through, so the same runs are recorded.
+      const entitiesLine = formatEntitiesLine(screening.injectedEntities.slice(0, formatted.includedEntities));
+      recordRecallProvenance({
+        provenance: this.webSearch.provenance,
+        items: screening.injectedItems.slice(0, formatted.includedItems),
+        summaryLines: [
+          ...formatted.curatedLines,
+          ...(entitiesLine === undefined ? [] : [entitiesLine]),
+          ...(formatted.includedReflection && screening.injectedReflection !== undefined
+            ? [screening.injectedReflection]
+            : []),
+        ],
+      });
+      // On a page only the person's own lines make a link or address theirs to use. A line Aman read stays
+      // read content, in this chat and every later one.
+      recordPersonText({ provenance: this.webSearch.provenance, text: formatted.pagePersonText.join('\n') });
       recordUntrustedText({
         provenance: this.webSearch.provenance,
-        text: formatted.readText.join('\n'),
+        text: formatted.pageReadText.join('\n'),
         source: 'memory',
       });
     }

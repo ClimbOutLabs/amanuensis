@@ -40,6 +40,7 @@ async function retainMany(client: MarkdownMemoryClient, contents: string[], oper
       content,
       timestamp: `2026-09-26T10:0${String(index)}:00.000Z`,
       document_id: `doc-${String(operationCounter)}-${String(index)}`,
+      metadata: { origin: 'user_stated' },
     })),
     operationId: operationId ?? `op-${String(operationCounter)}`,
     timeoutMs: TIMEOUT_MS,
@@ -59,7 +60,7 @@ async function retainFromChat(client: MarkdownMemoryClient, content: string, ses
         content,
         timestamp: '2026-09-26T10:00:00.000Z',
         document_id: `doc-${String(operationCounter)}`,
-        metadata: { session_id: sessionId },
+        metadata: { origin: 'user_stated', session_id: sessionId },
       },
     ],
     operationId: `op-${String(operationCounter)}`,
@@ -571,7 +572,7 @@ describe('MarkdownMemoryClient persona vault scope with embeddings', () => {
     await alpha.updateEntry({ entryId: entry.id, text: edited, timeoutMs: TIMEOUT_MS });
 
     expect([...requested]).toEqual(['tenant-1__persona_Alpha']);
-    // The index keeps the entry's time heading with the fact, as it does for a newly retained entry.
+    // The index keeps the entry's time heading with the fact, as it does for a newly retained entry, and leaves the source line out.
     await waitFor(async () => {
       const store = await EmbeddingStore.load({
         namespaceDir: path.join(baseDir, 'tenant-1__persona_Alpha'),

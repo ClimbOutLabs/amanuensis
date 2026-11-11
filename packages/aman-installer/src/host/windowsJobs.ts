@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { access, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { win32 } from 'node:path';
 
@@ -15,6 +15,13 @@ export const SETUP_CMD_FILE_NAME = 'Aman-Setup.cmd';
 // The name the authority's certificate is downloaded under on the trust
 // page, and the name it is kept under in the Amanuensis folder here.
 export const CA_CERT_FILE_NAME = 'ca.crt';
+// Left beside the aman command once a removal has cleared Docker, so a
+// run that finishes the Windows side does not need Docker running.
+export const DOCKER_REMOVED_MARK_FILE_NAME = 'docker-removed';
+// The Start menu entry that opens Aman, running aman open.
+export const OPEN_AMAN_SHORTCUT_NAME = 'Aman';
+// The Start menu entry that removes Aman, running aman uninstall.
+export const REMOVE_AMAN_SHORTCUT_NAME = 'Remove Aman';
 // The Start menu entry the plan names, running aman doctor.
 export const CHECK_AMAN_SHORTCUT_NAME = 'Check Aman';
 // The Start menu entry the upgrade keeps, running aman upgrade.
@@ -70,6 +77,7 @@ export const SETUP_CMD_FORWARDER = [
 export interface WindowsPaths {
   programsDir: string;
   programsExePath: string;
+  dockerRemovedMarkPath: string;
   dataDir: string;
   setupCmdCopyPath: string;
   backupsDir: string;
@@ -84,6 +92,7 @@ export function windowsPaths(localAppDataDir: string): WindowsPaths {
   return {
     programsDir,
     programsExePath: win32.join(programsDir, EXE_FILE_NAME),
+    dockerRemovedMarkPath: win32.join(programsDir, DOCKER_REMOVED_MARK_FILE_NAME),
     dataDir,
     setupCmdCopyPath: win32.join(dataDir, SETUP_CMD_FILE_NAME),
     backupsDir: win32.join(dataDir, BACKUPS_FOLDER_NAME),
@@ -192,6 +201,12 @@ export interface WindowsJobs {
   listShortcuts: () => Promise<readonly ShortcutFacts[]>;
   // Points one shortcut at the aman command, opening Aman.
   pointShortcutAtOpen: (shortcutPath: string) => Promise<void>;
+  // Makes the "Aman" Start menu entry, or points the existing one at
+  // the aman command, opening Aman.
+  ensureOpenAmanShortcut: () => Promise<void>;
+  // Makes the "Remove Aman" Start menu entry, or points the existing
+  // one at the aman command, running aman uninstall.
+  ensureRemoveAmanShortcut: () => Promise<void>;
   // Makes the "Check Aman" Start menu entry, or points the existing one
   // at the aman command, running aman doctor.
   ensureCheckAmanShortcut: () => Promise<void>;
@@ -208,8 +223,9 @@ export interface WindowsJobs {
   // True when the daily backup task is there.
   dailyBackupTaskPresent: () => Promise<boolean>;
   // The names in the backups folder, as they stand. A folder that is
-  // not there yet lists as empty.
-  listBackups: () => Promise<readonly string[]>;
+  // not there yet lists as empty. With holding, only the backups that
+  // have a folder for that instance.
+  listBackups: (options?: { holding?: string }) => Promise<readonly string[]>;
   // Makes the "Use Aman on my phone" Start menu entry, or points the
   // existing one at the aman command, running aman network open.
   ensurePhoneShortcut: () => Promise<void>;
@@ -264,6 +280,38 @@ export interface WindowsJobs {
   // True when the port can be bound on loopback and on any-address: the
   // bind is the real test, as the shell's port check does it.
   portIsFree: (port: number) => Promise<boolean>;
+  // True when the given process is Windows Explorer: this program was
+  // started by a double-click or a Start menu entry, in a window of its
+  // own that closes the moment it ends, and not from a terminal.
+  startedFromExplorer: (parentPid: number) => Promise<boolean>;
+  // Whether an earlier removal already cleared Docker, the mark that
+  // says so, and taking it away again when an install starts, since
+  // the install puts Aman back in Docker.
+  dockerSideRemoved: () => Promise<boolean>;
+  markDockerSideRemoved: () => Promise<void>;
+  clearDockerSideRemoved: () => Promise<void>;
+  // The removal's Windows steps, each a no-op when there is nothing to
+  // take away, so a removal that stopped part way can run again.
+  // Deletes one shortcut file.
+  removeShortcut: (shortcutPath: string) => Promise<void>;
+  // Deletes the daily backup task.
+  removeDailyBackupTask: () => Promise<void>;
+  // Deletes the firewall rule, through the same one Windows prompt the
+  // rule was made with; no prompt when there is no rule.
+  removeFirewallRule: () => Promise<void>;
+  // Takes the Programs folder back off the user PATH.
+  removeProgramsFolderFromUserPath: () => Promise<void>;
+  // Takes the local authority's certificate back out of the person's
+  // own Root store; Windows asks once with a Yes/No dialog. Fails when
+  // the certificate is still there afterwards, a No included.
+  removeCaCertificateFromUserStore: () => Promise<void>;
+  // Deletes the Amanuensis folder on this PC, or everything in it but
+  // the backups folder.
+  removeDataFolder: (options: { keepBackups: boolean }) => Promise<void>;
+  // Deletes the folder the aman command lives in, a few seconds after
+  // this program has ended: Windows does not let a running program
+  // delete itself.
+  removeProgramsFolderAfterExit: () => Promise<void>;
 }
 
 // A PowerShell string literal: single-quoted, with its quotes doubled.
@@ -292,6 +340,8 @@ export function systemWindowsJobs(options: {
   runner: ProcessRunner;
   localAppDataDir: string;
   selfExePath: string;
+  // This program's process id, which the folder removal waits on.
+  selfPid: number;
 }): WindowsJobs {
   const { runner } = options;
   const paths = windowsPaths(options.localAppDataDir);
@@ -303,6 +353,16 @@ export function systemWindowsJobs(options: {
     }
     return result.stdout;
   };
+
+  // Read as UTF-8: Windows PowerShell otherwise prints in the console's
+  // old code page, which turns a name like José into other letters, and
+  // the PATH written back would carry them.
+  const readUserPath = async (): Promise<string> =>
+    (
+      await runPowerShell(
+        "[Console]::OutputEncoding = [Text.Encoding]::UTF8; [Environment]::GetEnvironmentVariable('Path', 'User')",
+      )
+    ).replace(/\r?\n$/, '');
 
   // The person's own account name, the way the access list prints it,
   // asked for once: the folder access jobs need it to grant access and
@@ -359,10 +419,7 @@ export function systemWindowsJobs(options: {
     },
 
     async ensureProgramsFolderOnUserPath() {
-      const current = (await runPowerShell("[Environment]::GetEnvironmentVariable('Path', 'User')")).replace(
-        /\r?\n$/,
-        '',
-      );
+      const current = await readUserPath();
       if (userPathHasFolder({ pathValue: current, folder: paths.programsDir })) {
         return 'present';
       }
@@ -409,6 +466,26 @@ export function systemWindowsJobs(options: {
           `$shortcut = $shell.CreateShortcut(${psQuote(shortcutPath)}); ` +
           `$shortcut.TargetPath = ${psQuote(paths.programsExePath)}; ` +
           `$shortcut.Arguments = 'open'; $shortcut.Save()`,
+      );
+    },
+
+    async ensureOpenAmanShortcut() {
+      await runPowerShell(
+        `$shell = New-Object -ComObject WScript.Shell; ` +
+          `$path = Join-Path ([Environment]::GetFolderPath('Programs')) ${psQuote(`${OPEN_AMAN_SHORTCUT_NAME}.lnk`)}; ` +
+          `$shortcut = $shell.CreateShortcut($path); ` +
+          `$shortcut.TargetPath = ${psQuote(paths.programsExePath)}; ` +
+          `$shortcut.Arguments = 'open'; $shortcut.Save()`,
+      );
+    },
+
+    async ensureRemoveAmanShortcut() {
+      await runPowerShell(
+        `$shell = New-Object -ComObject WScript.Shell; ` +
+          `$path = Join-Path ([Environment]::GetFolderPath('Programs')) ${psQuote(`${REMOVE_AMAN_SHORTCUT_NAME}.lnk`)}; ` +
+          `$shortcut = $shell.CreateShortcut($path); ` +
+          `$shortcut.TargetPath = ${psQuote(paths.programsExePath)}; ` +
+          `$shortcut.Arguments = 'uninstall'; $shortcut.Save()`,
       );
     },
 
@@ -471,11 +548,15 @@ export function systemWindowsJobs(options: {
       return result.started && result.exitCode === 0;
     },
 
-    async listBackups() {
+    async listBackups(options) {
+      const holding =
+        options?.holding === undefined
+          ? ''
+          : `| Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName ${psQuote(options.holding)}) -PathType Container } `;
       const stdout = await runPowerShell(
         `[Console]::OutputEncoding = [Text.Encoding]::UTF8; ` +
           `if (Test-Path -LiteralPath ${psQuote(paths.backupsDir)}) { ` +
-          `Get-ChildItem -LiteralPath ${psQuote(paths.backupsDir)} -Directory | ForEach-Object { $_.Name } }`,
+          `Get-ChildItem -LiteralPath ${psQuote(paths.backupsDir)} -Directory ${holding}| ForEach-Object { $_.Name } }`,
       );
       return stdout
         .split('\n')
@@ -526,6 +607,127 @@ export function systemWindowsJobs(options: {
       if (shown.started && shown.exitCode === 0) {
         throw new WindowsJobError('the firewall rule could not be turned off');
       }
+    },
+
+    async startedFromExplorer(parentPid: number) {
+      const name = await runPowerShell(
+        `(Get-Process -Id ${String(Math.trunc(parentPid))} -ErrorAction SilentlyContinue).ProcessName`,
+      ).catch(() => '');
+      return name.trim().toLowerCase() === 'explorer';
+    },
+
+    async dockerSideRemoved() {
+      return access(paths.dockerRemovedMarkPath).then(
+        () => true,
+        () => false,
+      );
+    },
+
+    async markDockerSideRemoved() {
+      try {
+        await writeFile(paths.dockerRemovedMarkPath, '', 'utf8');
+      } catch (error) {
+        throw new WindowsJobError('the note that Docker is cleared could not be written', { cause: error });
+      }
+    },
+
+    async clearDockerSideRemoved() {
+      try {
+        await rm(paths.dockerRemovedMarkPath, { force: true });
+      } catch (error) {
+        throw new WindowsJobError('the note from an earlier removal could not be deleted', { cause: error });
+      }
+    },
+
+    async removeShortcut(shortcutPath: string) {
+      await runPowerShell(`Remove-Item -LiteralPath ${psQuote(shortcutPath)} -Force -ErrorAction SilentlyContinue`);
+    },
+
+    async removeDailyBackupTask() {
+      const present = await runner.run('schtasks', ['/Query', '/TN', BACKUP_TASK_NAME]);
+      if (!present.started || present.exitCode !== 0) {
+        return;
+      }
+      const result = await runner.run('schtasks', ['/Delete', '/TN', BACKUP_TASK_NAME, '/F']);
+      if (!result.started || result.exitCode !== 0) {
+        throw new WindowsJobError('the daily backup task could not be deleted');
+      }
+    },
+
+    async removeFirewallRule() {
+      const shown = await runner.run('netsh', [
+        'advfirewall',
+        'firewall',
+        'show',
+        'rule',
+        `name=${FIREWALL_RULE_NAME}`,
+      ]);
+      if (!shown.started || shown.exitCode !== 0) {
+        return;
+      }
+      const exitCode = await runElevatedNetsh(`/c netsh advfirewall firewall delete rule name="${FIREWALL_RULE_NAME}"`);
+      if (exitCode !== 0) {
+        throw new WindowsJobError('the firewall rule could not be deleted');
+      }
+    },
+
+    async removeProgramsFolderFromUserPath() {
+      const current = await readUserPath();
+      if (!userPathHasFolder({ pathValue: current, folder: paths.programsDir })) {
+        return;
+      }
+      const wanted = paths.programsDir.toLowerCase();
+      const next = current
+        .split(';')
+        .filter(entry => entry.trim() !== '' && entry.trim().replace(/\\+$/, '').toLowerCase() !== wanted)
+        .join(';');
+      await runPowerShell(`[Environment]::SetEnvironmentVariable('Path', ${psQuote(next)}, 'User')`);
+    },
+
+    async removeCaCertificateFromUserStore() {
+      // The certificate is found by the file the install kept, so only
+      // Aman's own authority is ever taken out of the store. A No to the
+      // Windows dialog does not stop the script by itself, so the store
+      // is read again and a certificate still there fails the step.
+      await runPowerShell(
+        `$ErrorActionPreference = 'Stop'; ` +
+          `if (Test-Path -LiteralPath ${psQuote(paths.caCertPath)}) { ` +
+          `$cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2(${psQuote(paths.caCertPath)}); ` +
+          `$store = New-Object System.Security.Cryptography.X509Certificates.X509Store('Root', 'CurrentUser'); ` +
+          `$store.Open('ReadWrite'); try { $store.Remove($cert) } catch { } ; $store.Close(); ` +
+          `$check = New-Object System.Security.Cryptography.X509Certificates.X509Store('Root', 'CurrentUser'); ` +
+          `$check.Open('ReadOnly'); ` +
+          `$left = $check.Certificates.Find('FindByThumbprint', $cert.Thumbprint, $false).Count; $check.Close(); ` +
+          `if ($left -gt 0) { exit 1 } }`,
+      );
+    },
+
+    async removeDataFolder({ keepBackups }: { keepBackups: boolean }) {
+      try {
+        if (!keepBackups) {
+          await rm(paths.dataDir, { recursive: true, force: true });
+          return;
+        }
+        const names = await readdir(paths.dataDir).catch(() => []);
+        for (const name of names) {
+          if (name.toLowerCase() !== BACKUPS_FOLDER_NAME) {
+            await rm(win32.join(paths.dataDir, name), { recursive: true, force: true });
+          }
+        }
+      } catch (error) {
+        throw new WindowsJobError('the Amanuensis folder could not be deleted', { cause: error });
+      }
+    },
+
+    async removeProgramsFolderAfterExit() {
+      // A hidden helper waits for this program to end (the window may
+      // still be waiting for Enter), then deletes the folder.
+      const inner =
+        `Wait-Process -Id ${String(options.selfPid)} -ErrorAction SilentlyContinue; Start-Sleep -Seconds 1; ` +
+        `Remove-Item -LiteralPath ${psQuote(paths.programsDir)} -Recurse -Force -ErrorAction SilentlyContinue`;
+      await runPowerShell(
+        `Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList '-NoProfile', '-Command', ${psQuote(inner)}`,
+      );
     },
 
     async replaceSetupCmdCopyWithForwarder() {

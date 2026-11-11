@@ -1,11 +1,14 @@
 /**
- * Copies the assets the bundled server loads from disk at runtime, then checks that every
- * package the bundle still imports is declared.
+ * Copies the UI the bundled server loads from disk at runtime, checks that every server
+ * migration was re-bundled into this package, then checks that every package the bundles
+ * still import is declared.
  *
  * `dist/_frontend` is where the server looks for the UI when it runs from a package root
  * rather than the monorepo, and `dist/{sqlite,postgres}/migrations` is resolved next to the
  * server module. A tarball missing either installs and starts but cannot serve or migrate,
- * so both are hard failures here rather than warnings.
+ * so both are hard failures here rather than warnings. Migrations are tsup entries, not
+ * copies: a copied server migration imports @truefoundry/trueforge-core, which the tarball
+ * does not ship, and the server stops at startup.
  *
  * The dependency check reads tsup's metafile rather than scanning the bundle for import
  * statements, which cannot tell an import apart from a string that looks like one.
@@ -26,15 +29,9 @@ if (!existsSync(path.join(frontendSource, 'index.html'))) {
   );
 }
 
-for (const asset of ['_frontend', 'sqlite', 'postgres']) {
-  const source = path.join(serverDist, asset);
-  if (!existsSync(source)) {
-    throw new Error(`Missing ${source}; @truefoundry/trueforge has not been built.`);
-  }
-  const destination = path.join(dist, asset);
-  rmSync(destination, { recursive: true, force: true });
-  cpSync(source, destination, { recursive: true });
-}
+const frontendDestination = path.join(dist, '_frontend');
+rmSync(frontendDestination, { recursive: true, force: true });
+cpSync(frontendSource, frontendDestination, { recursive: true });
 
 /** `@scope/name/sub` and `name/sub` both reduce to the installable package name. */
 function packageNameOf(specifier) {
@@ -48,6 +45,22 @@ if (!existsSync(metafilePath)) {
 }
 
 const metafile = JSON.parse(readFileSync(metafilePath, 'utf8'));
+
+const bundledOutputs = new Set(
+  Object.keys(metafile.outputs).map(output => path.relative(packageRoot, path.resolve(packageRoot, output))),
+);
+const unbundled = ['sqlite', 'postgres'].flatMap(engine =>
+  readdirSync(path.join(serverDist, engine, 'migrations'))
+    .filter(name => name.endsWith('.js'))
+    .map(name => path.join('dist', engine, 'migrations', name))
+    .filter(output => !bundledOutputs.has(output)),
+);
+if (unbundled.length > 0) {
+  throw new Error(
+    `These server migrations were not bundled into this package: ${unbundled.join(', ')}. ` +
+      'Rebuild with `pnpm --filter amanuensis build` so tsup.config.ts picks them up.',
+  );
+}
 const manifest = JSON.parse(readFileSync(path.join(packageRoot, 'package.json'), 'utf8'));
 const declared = new Set(Object.keys(manifest.dependencies ?? {}));
 const builtins = new Set(builtinModules);

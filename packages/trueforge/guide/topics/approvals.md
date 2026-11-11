@@ -12,7 +12,7 @@ Reading is free. Aman does not ask before it reads. It asks before it sends, sav
 
 - **Allow** lets this one thing happen.
 - **Always allow this here** stops the questions for this kind of action in this chat. Only some cards show it.
-- **Always allow this tool** lets Aman use one tool of a connector without asking, in every chat. Only some cards show it. You confirm once.
+- **Always allow this tool** lets Aman use one tool of a connector without asking, in every chat. Only some cards show it. You confirm once. Aman still asks when a call would send something that looks like a password, a key or a card number, or a lot of text.
 - **Change it** asks Aman to change the request first. Nothing runs now.
 - **Not now** does not run it.
 
@@ -32,3 +32,10 @@ If the mail goes to an address that is not on your Email list, the buttons are *
 To take back an always allowed tool, click **More**, then **Settings**, then **Connectors**. Open the connector and stop allowing the tool.
 
 Some cards say "Part of this is not shown in full. Check it before you approve." Open the card to read all of it.
+
+## See what Aman did
+
+1. Click **More** in the left bar, click **Settings**, then click **Audit**.
+2. The list shows every action Aman took or asked about, newest first, with what you decided.
+3. To narrow it, pick what to **Show**, or pick a **From** and **To** day. Days follow your own clock, and both days are included.
+4. Click **Clear dates** to see everything again.

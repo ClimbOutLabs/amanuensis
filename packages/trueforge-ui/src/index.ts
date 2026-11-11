@@ -253,6 +253,8 @@ export type {
   ImplementationPlanGrant,
   ImplementationPlanGrantApi,
 } from './components/ImplementationPlanGrantContext.js';
+export { LocalAccountProvider, useOptionalLocalAccount } from './components/LocalAccountContext.js';
+export type { LocalAccountApi } from './components/LocalAccountContext.js';
 export { MemoryRecallProvider, useOptionalMemoryRecall } from './components/MemoryRecallContext.js';
 export type { MemoryRecallApi, MemoryTurnContext } from './components/MemoryRecallContext.js';
 export { ModelUsageProvider, useOptionalModelUsage } from './components/ModelUsageContext.js';
@@ -478,6 +480,7 @@ export type {
 export { AgentDetailsToggleButton } from './atoms/AgentDetailsToggleButton.js';
 export { ClearChatButton } from './atoms/ClearChatButton.js';
 export { railMenuRowClassName } from './atoms/lib/buttonClasses.js';
+export { menuTriggerFor } from './atoms/lib/menuTriggerFor.js';
 export {
   IS_CREATE_AGENT_METADATA_KEY,
   isCreateAgentMetadataValue,

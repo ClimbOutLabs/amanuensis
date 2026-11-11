@@ -8,6 +8,7 @@ import { createServer } from 'vite';
 import { MODEL_FQN, startApprovalTestServer } from '../../trueforge/tests/fixtures/approvalTestServer.ts';
 import { FINAL_TEXT } from '../../trueforge/tests/fixtures/scriptedModelServer.ts';
 import { inProcessApi } from './support/approvalChat.ts';
+import { featureShotPath, saveFailureShots } from './support/featureShots.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
 import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
 import { privateViteCache } from './support/viteCache.ts';
@@ -113,6 +114,7 @@ test(
       const page = await context.newPage();
       await page.goto(`${origin}/`, { waitUntil: 'domcontentloaded', timeout: RENDER_TIMEOUT_MS });
       assertFits(await homeFit(page), 'after a first chat');
+      await page.screenshot({ path: await featureShotPath({ surface: 'screen:home', step: 'after-a-first-chat' }) });
       await context.close();
 
       for (const theme of THEMES) {
@@ -128,6 +130,9 @@ test(
         const menu = menuPage.getByRole('menu');
         await menu.getByRole('button', { name: 'Sign out', exact: true }).waitFor({ timeout: RENDER_TIMEOUT_MS });
         const label = `${theme.preset} ${theme.mode}`;
+        await menuPage.screenshot({
+          path: await featureShotPath({ surface: 'screen:home', step: `more-menu-${theme.preset}-${theme.mode}` }),
+        });
 
         const look = await menu.evaluate(el => {
           const root = el.closest('.aui-theme-root');
@@ -142,22 +147,19 @@ test(
           };
           probe.remove();
           const style = getComputedStyle(el);
-          // The sign-out confirmation is a closed dialog inside the menu, not a menu item.
-          const rows = Array.from(el.querySelectorAll('button, [role="group"] > p'))
-            .filter(row => row.closest('dialog') === null)
-            .map(row => {
-              const rowStyle = getComputedStyle(row);
-              const icon = row.querySelector('svg');
-              return {
-                text: (row.textContent ?? '').trim(),
-                visible: row.getBoundingClientRect().width > 0 && rowStyle.visibility !== 'hidden',
-                height: Math.round(row.getBoundingClientRect().height),
-                size: rowStyle.fontSize,
-                family: rowStyle.fontFamily,
-                color: rowStyle.color,
-                icon: icon === null ? null : Math.round(icon.getBoundingClientRect().width),
-              };
-            });
+          const rows = Array.from(el.querySelectorAll('button, [role="group"] > p')).map(row => {
+            const rowStyle = getComputedStyle(row);
+            const icon = row.querySelector('svg');
+            return {
+              text: (row.textContent ?? '').trim(),
+              visible: row.getBoundingClientRect().width > 0 && rowStyle.visibility !== 'hidden',
+              height: Math.round(row.getBoundingClientRect().height),
+              size: rowStyle.fontSize,
+              family: rowStyle.fontFamily,
+              color: rowStyle.color,
+              icon: icon === null ? null : Math.round(icon.getBoundingClientRect().width),
+            };
+          });
           return { surface: style.backgroundColor, border: style.borderTopColor, tokens, rows };
         });
 
@@ -190,6 +192,39 @@ test(
         await themed.close();
       }
 
+      // Sign out in the menu asks first, and the question outlives the menu that closes behind it.
+      const signOutContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+      const signOutPage = await signOutContext.newPage();
+      await asConnectedAccount(signOutPage);
+      let signOutRequests = 0;
+      await signOutPage.route('**/api/v1/auth/logout', async route => {
+        signOutRequests += 1;
+        await route.fulfill({ status: 204 });
+      });
+      await signOutPage.goto(`${origin}/`, { waitUntil: 'domcontentloaded', timeout: RENDER_TIMEOUT_MS });
+      const more = signOutPage.getByRole('button', { name: 'More', exact: true });
+      const signOutRow = signOutPage.getByRole('menu').getByRole('button', { name: 'Sign out', exact: true });
+      const question = signOutPage.getByRole('dialog', { name: 'Sign out?' });
+      await more.click({ timeout: RENDER_TIMEOUT_MS });
+      await signOutRow.click({ timeout: RENDER_TIMEOUT_MS });
+      await question.getByRole('button', { name: 'Stay' }).click({ timeout: RENDER_TIMEOUT_MS });
+      await question.waitFor({ state: 'hidden', timeout: RENDER_TIMEOUT_MS });
+      assert.equal(signOutRequests, 0, 'Stay signs nobody out');
+      assert.equal(
+        await more.evaluate(el => el === document.activeElement),
+        true,
+        'after Stay, the keyboard is back on More',
+      );
+      await more.click({ timeout: RENDER_TIMEOUT_MS });
+      await signOutRow.click({ timeout: RENDER_TIMEOUT_MS });
+      const leaves = signOutPage.waitForRequest(request => request.isNavigationRequest(), {
+        timeout: RENDER_TIMEOUT_MS,
+      });
+      await question.getByRole('button', { name: 'Sign out' }).click({ timeout: RENDER_TIMEOUT_MS });
+      await leaves;
+      assert.equal(signOutRequests, 1, 'Sign out asks the server once');
+      await signOutContext.close();
+
       // Once an agent exists, the picker is on every new chat, and a pick there answers the first message.
       const created = await api.request('/api/v1/personas', {
         method: 'POST',
@@ -221,9 +256,13 @@ test(
       if (!(await chatList.isVisible())) {
         await pickPage.getByRole('navigation', { name: 'Sidebar' }).getByRole('button', { name: 'Chats' }).click();
       }
-      await chatList.getByRole('button', { name: 'New chat' }).click();
+      // A chat with no title yet is listed as New Chat, so the button is matched by its exact name.
+      await chatList.getByRole('button', { name: 'New chat', exact: true }).click();
       await pickPage.getByTitle('Choose a persona').waitFor({ timeout: RENDER_TIMEOUT_MS });
       await pickContext.close();
+    } catch (error) {
+      await saveFailureShots({ browser, surface: 'screen:home' });
+      throw error;
     } finally {
       await browser?.close();
       await vite.close();

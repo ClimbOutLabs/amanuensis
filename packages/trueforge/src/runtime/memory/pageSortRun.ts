@@ -7,7 +7,7 @@ import type { Logger } from 'winston';
 
 import type { WrittenEntry } from './hindsightClient';
 import { localDay } from './localDay';
-import { entryRecallText, recallMetadata } from './markdownMemoryFiles';
+import { entryRecallText, entryMetadata } from './markdownMemoryFiles';
 import type { MemoryClient } from './memoryClient';
 import type { PageListing } from './memoryPages';
 import type { SummarizeTurnContext } from './memoryRetain';
@@ -90,7 +90,7 @@ export function noteOf({ entry, today }: { entry: WrittenEntry; today: string })
     id: entry.id,
     text: entryRecallText(entry.text),
     day: NOTE_DAY_PATTERN.exec(entry.id)?.[1] ?? today,
-    metadata: recallMetadata(entry.text),
+    metadata: entryMetadata(entry.text),
   };
 }
 

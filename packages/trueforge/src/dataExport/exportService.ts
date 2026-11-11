@@ -46,6 +46,7 @@ import type { Persona } from '../personas/persona';
 import {
   CURATED_MEMORY_FILE,
   DAILY_LOG_FILE_PATTERN,
+  REVIEWED_FROM_YOU_FILE,
   VAULT_TOMBSTONES_FILE,
   personaForVaultFilesystemNamespace,
   personaVaultNamespace,
@@ -72,7 +73,8 @@ import { ZipEntrySizeCapExceededError, ZipStreamWriter } from './zipStreamWriter
 export const EXPORT_FORMAT = 'aman-export';
 /**
  * 2: chats moved from one sessions.json to numbered sessions/ files of chat and turn records.
- * 3: memory vaults carry their `people/` and `matters/` pages.
+ * 3: every memory note closes with a line that says where it came from, and memory vaults carry their
+ *    `people/` and `matters/` pages.
  */
 export const EXPORT_SCHEMA_VERSION = 3;
 
@@ -661,7 +663,7 @@ async function writeUploadedFiles<TTransaction>(
   return stored;
 }
 
-const MARKDOWN_MEMORY_FILES = [CURATED_MEMORY_FILE, VAULT_TOMBSTONES_FILE] as const;
+const MARKDOWN_MEMORY_FILES = [CURATED_MEMORY_FILE, VAULT_TOMBSTONES_FILE, REVIEWED_FROM_YOU_FILE] as const;
 
 /** Persona names held by everyone else who has chats on this instance. */
 async function personaNamesOfOthers<TTransaction>(
@@ -829,7 +831,7 @@ async function writeMarkdownPages<TTransaction>(
   }
 }
 
-/** Verbatim Markdown-backend files: MEMORY.md, daily logs, tombstones, pages. Derived caches and sharing config stay behind. */
+/** Verbatim Markdown-backend files: MEMORY.md, daily logs, tombstones, reviewed notes, pages. Derived caches and sharing config stay behind. */
 async function writeMarkdownMemoryFiles<TTransaction>(
   context: ExportContext<TTransaction>,
   input: { markdownDir: string; personas: readonly Persona[] },

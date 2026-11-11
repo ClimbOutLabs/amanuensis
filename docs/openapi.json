@@ -1362,6 +1362,9 @@
           "settings": {
             "$ref": "#/components/schemas/SettingsCapability"
           },
+          "sign_in": {
+            "$ref": "#/components/schemas/SignInCapability"
+          },
           "skill": {
             "$ref": "#/components/schemas/SkillCapability"
           },
@@ -1381,6 +1384,7 @@
           "memory_defaults",
           "memory_embeddings",
           "sandbox_isolation",
+          "sign_in",
           "build"
         ],
         "type": "object"
@@ -2313,7 +2317,7 @@
             "$ref": "#/components/schemas/ResourceName"
           },
           "manifest": {
-            "$ref": "#/components/schemas/ScheduleManifest"
+            "$ref": "#/components/schemas/ScheduleManifestInput"
           },
           "name": {
             "$ref": "#/components/schemas/ResourceName"
@@ -3599,6 +3603,17 @@
         ],
         "type": "object"
       },
+      "GetNotesFolderResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/NotesFolderStatus"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "GetOrCreateSessionByExternalIdRequest": {
         "additionalProperties": false,
         "properties": {
@@ -4313,7 +4328,8 @@
           "gmail_read",
           "gmail_compose",
           "calendar_read",
-          "calendar_write"
+          "calendar_write",
+          "drive_files"
         ],
         "type": "string"
       },
@@ -5657,6 +5673,17 @@
         ],
         "type": "object"
       },
+      "ListMemoryVaultReviewNotesResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MemoryVaultReviewList"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "ListModelProvidersResponse": {
         "properties": {
           "data": {
@@ -6613,6 +6640,40 @@
         ],
         "type": "object"
       },
+      "MarkMemoryVaultReviewNotesRequest": {
+        "properties": {
+          "entry_ids": {
+            "items": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "type": "array"
+          },
+          "namespace": {
+            "description": "Vault namespace: omit for the shared vault.",
+            "maxLength": 128,
+            "type": "string"
+          }
+        },
+        "required": [
+          "entry_ids"
+        ],
+        "type": "object"
+      },
+      "MarkMemoryVaultReviewNotesResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MemoryVaultReviewResult"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "Me": {
         "properties": {
           "roles": {
@@ -6642,10 +6703,11 @@
         "type": "object"
       },
       "MeSessionType": {
-        "description": "`oidc-connected` when the process is running with browser OIDC login; `default` for standalone or TrueFoundry token auth.",
+        "description": "`oidc-connected` when the process is running with browser OIDC login; `local-connected` for local sign-in (`TRUEFORGE_AUTH_MODE=local`); `default` for standalone or TrueFoundry token auth.",
         "enum": [
           "default",
-          "oidc-connected"
+          "oidc-connected",
+          "local-connected"
         ],
         "type": "string"
       },
@@ -7921,6 +7983,103 @@
         ],
         "type": "object"
       },
+      "MemoryVaultReviewList": {
+        "properties": {
+          "next_cursor": {
+            "description": "Send as `cursor` to look at the next older notes; null when every older note has been looked at.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "note_count": {
+            "description": "Notes found in this request.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "notes": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryVaultReviewNote"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "notes",
+          "note_count",
+          "next_cursor"
+        ],
+        "type": "object"
+      },
+      "MemoryVaultReviewNote": {
+        "properties": {
+          "chat_title": {
+            "description": "Title of the chat the note came from, when the chat has one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "day": {
+            "description": "Day the note was saved, `YYYY-MM-DD`.",
+            "type": "string"
+          },
+          "entry_id": {
+            "description": "Vault entry id; send it back to mark the note.",
+            "type": "string"
+          },
+          "text": {
+            "description": "The note as the Memories page shows it.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entry_id",
+          "day",
+          "text",
+          "chat_title"
+        ],
+        "type": "object"
+      },
+      "MemoryVaultReviewResult": {
+        "properties": {
+          "marked_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "marked_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "refused": {
+            "items": {
+              "properties": {
+                "entry_id": {
+                  "type": "string"
+                },
+                "reason": {
+                  "description": "Plain words saying why.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "entry_id",
+                "reason"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "marked_count",
+          "marked_ids",
+          "refused"
+        ],
+        "type": "object"
+      },
       "MemoryVaultSharing": {
         "properties": {
           "shares": {
@@ -8571,6 +8730,45 @@
           "created_at",
           "seen_at",
           "attempts"
+        ],
+        "type": "object"
+      },
+      "NotesFolderStatus": {
+        "properties": {
+          "folder_path": {
+            "description": "The folder of notes the person connected; null when no folder is connected.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "inbox_file": {
+            "description": "The file inside the folder that inbox entries are added to; the default name until one is picked.",
+            "type": "string"
+          },
+          "note_count": {
+            "description": "How many notes the folder holds; null when no folder is connected or it cannot be read right now.",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "state": {
+            "description": "Connected, not connected, connected but the saved sign-in no longer works, or saved but the server cannot be reached right now.",
+            "enum": [
+              "connected",
+              "not_connected",
+              "sign_in_stopped",
+              "not_working"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "folder_path",
+          "inbox_file",
+          "note_count"
         ],
         "type": "object"
       },
@@ -9705,6 +9903,17 @@
         ],
         "type": "object"
       },
+      "RemoveNotesFolderResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/NotesFolderStatus"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "ReplyResultsByKind": {
         "description": "Tool call results in this reply: ok, refused, unavailable, or error.",
         "properties": {
@@ -10073,6 +10282,10 @@
           "enabled": {
             "description": "Whether a sandbox provider is configured for this tenant.",
             "type": "boolean"
+          },
+          "reason": {
+            "description": "Why the sandbox is off, in plain words; present only when it is off and a reason is known.",
+            "type": "string"
           }
         },
         "required": [
@@ -10349,6 +10562,33 @@
         ],
         "type": "object"
       },
+      "SaveNotesFolderRequest": {
+        "properties": {
+          "folder_path": {
+            "description": "The path of the folder of Markdown notes, on the computer Aman runs on.",
+            "type": "string"
+          },
+          "inbox_file": {
+            "description": "The file in the folder that inbox entries are added to; the default name when left out.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "folder_path"
+        ],
+        "type": "object"
+      },
+      "SaveNotesFolderResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/NotesFolderStatus"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "Schedule": {
         "additionalProperties": false,
         "properties": {
@@ -10401,6 +10641,43 @@
         "type": "string"
       },
       "ScheduleManifest": {
+        "additionalProperties": false,
+        "properties": {
+          "cron": {
+            "$ref": "#/components/schemas/CronExpression"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ScheduleKind"
+          },
+          "origin_session_id": {
+            "default": null,
+            "description": "The chat a reminder was set in, so its line lands in that chat when it fires. Null for tasks, for reminders set outside a chat, and for reminders saved before this was recorded.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "run_at": {
+            "$ref": "#/components/schemas/RunAt"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ScheduleStatus"
+          },
+          "task": {
+            "description": "First user message sent to the agent on every run.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "timezone": {
+            "$ref": "#/components/schemas/Timezone"
+          }
+        },
+        "required": [
+          "task"
+        ],
+        "type": "object"
+      },
+      "ScheduleManifestInput": {
         "additionalProperties": false,
         "properties": {
           "cron": {
@@ -11549,6 +11826,24 @@
         },
         "required": [
           "enabled"
+        ],
+        "type": "object"
+      },
+      "SignInCapability": {
+        "properties": {
+          "mode": {
+            "description": "How this instance signs people in. `local` means Aman keeps one email and password itself.",
+            "enum": [
+              "local",
+              "oidc",
+              "standalone",
+              "truefoundry"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode"
         ],
         "type": "object"
       },
@@ -14898,7 +15193,7 @@
         "additionalProperties": false,
         "properties": {
           "manifest": {
-            "$ref": "#/components/schemas/ScheduleManifest"
+            "$ref": "#/components/schemas/ScheduleManifestInput"
           },
           "name": {
             "$ref": "#/components/schemas/ResourceName"
@@ -16723,7 +17018,7 @@
     },
     "/api/v1/auth/me": {
       "get": {
-        "description": "Returns the authenticated caller identity (`type`, `tenant_id`, `subject`, `roles`) wrapped as `{ data }`. `type` is `oidc-connected` when browser OIDC is enabled, otherwise `default`. When auth is enabled this requires a valid `id_token` cookie or `Authorization: Bearer` token (401 otherwise). When auth is disabled, returns the standalone default identity.",
+        "description": "Returns the authenticated caller identity (`type`, `tenant_id`, `subject`, `roles`) wrapped as `{ data }`. `type` is `oidc-connected` when browser OIDC is enabled, `local-connected` for local sign-in, otherwise `default`. When auth is enabled this requires a valid `id_token` cookie or `Authorization: Bearer` token (401 otherwise). When auth is disabled, returns the standalone default identity.",
         "responses": {
           "200": {
             "content": {
@@ -19113,6 +19408,170 @@
           "vault"
         ],
         "x-fern-sdk-method-name": "import_entries"
+      }
+    },
+    "/api/v1/memory/vault/review": {
+      "get": {
+        "description": "List older notes with no record of their source that were saved in a chat where Aman read nothing from outside. Nothing changes. Each request looks at a limited number of notes; send `next_cursor` to continue.",
+        "parameters": [
+          {
+            "description": "Vault namespace: omit for the shared vault.",
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "description": "Vault namespace: omit for the shared vault.",
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "description": "`next_cursor` of the previous answer.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "description": "`next_cursor` of the previous answer.",
+              "pattern": "^\\d{1,6}$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListMemoryVaultReviewNotesResponse"
+                }
+              }
+            },
+            "description": "Older notes that may be marked as the person's own."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid namespace or cursor."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The vault operation failed."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The server does not run the markdown memory backend."
+          }
+        },
+        "summary": "List older notes to review",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "memory",
+          "vault"
+        ],
+        "x-fern-sdk-method-name": "list_review_notes"
+      },
+      "post": {
+        "description": "Mark the named older notes as the person's own words. Each is checked again and refused unless it still qualifies. At most 200 ids per call.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkMemoryVaultReviewNotesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarkMemoryVaultReviewNotesResponse"
+                }
+              }
+            },
+            "description": "How many notes were marked, and which were refused and why."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The vault operation failed."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The server does not run the markdown memory backend."
+          }
+        },
+        "summary": "Mark older notes as from you",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "memory",
+          "vault"
+        ],
+        "x-fern-sdk-method-name": "mark_review_notes"
       }
     },
     "/api/v1/memory/vault/sharing": {
@@ -27418,7 +27877,7 @@
     },
     "/api/v1/user/audit-log": {
       "get": {
-        "description": "Lists the authenticated user’s Sentinel audit entries from every chat, newest first, including chats that were deleted. Read-only and paged.",
+        "description": "Lists the authenticated user’s Sentinel audit entries from every chat, newest first, including chats that were deleted. Can be narrowed by outcome and by a from and to time. Read-only and paged.",
         "parameters": [
           {
             "in": "query",
@@ -27455,6 +27914,28 @@
                 "denied",
                 "auto_denied"
               ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only entries at or after this time. The caller sends the start of a day in its own timezone.",
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "description": "Only entries at or after this time. The caller sends the start of a day in its own timezone.",
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only entries before this time. The caller sends the start of the day after its last shown day.",
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "description": "Only entries before this time. The caller sends the start of the day after its last shown day.",
+              "format": "date-time",
               "type": "string"
             }
           }
@@ -28988,6 +29469,162 @@
           "google"
         ],
         "x-fern-sdk-method-name": "test_connection"
+      }
+    },
+    "/api/v1/user/settings/notes-folder": {
+      "delete": {
+        "description": "Forgets the folder. Nothing inside the folder is changed or removed.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemoveNotesFolderResponse"
+                }
+              }
+            },
+            "description": "The folder is disconnected."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
+          }
+        },
+        "summary": "Remove the notes folder",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "notes"
+        ],
+        "x-fern-sdk-method-name": "remove_folder"
+      },
+      "post": {
+        "description": "Checks the folder first and saves it only when it can be used: it must be there, be a folder, and not be where Aman keeps its own memory.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveNotesFolderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SaveNotesFolderResponse"
+                }
+              }
+            },
+            "description": "The folder is connected."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The folder could not be used, and the message says what to pick instead."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
+          }
+        },
+        "summary": "Connect a notes folder",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "notes"
+        ],
+        "x-fern-sdk-method-name": "save_folder"
+      }
+    },
+    "/api/v1/user/settings/notes-folder/status": {
+      "get": {
+        "description": "Returns whether a notes folder is connected, the folder, the inbox file name, and how many notes the folder holds.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetNotesFolderResponse"
+                }
+              }
+            },
+            "description": "The notes folder status."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
+          }
+        },
+        "summary": "Get the notes folder status",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "notes"
+        ],
+        "x-fern-sdk-method-name": "get_status"
       }
     },
     "/api/v1/user/settings/sentinel": {

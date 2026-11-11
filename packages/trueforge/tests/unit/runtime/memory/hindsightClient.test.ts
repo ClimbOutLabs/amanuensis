@@ -651,7 +651,14 @@ describe('HindsightClient', () => {
       });
 
       const outcome = await client.retain({
-        items: [{ content: 'hi', timestamp: '2026-08-30T00:00:00Z', document_id: 'doc-1' }],
+        items: [
+          {
+            metadata: { origin: 'user_stated' },
+            content: 'hi',
+            timestamp: '2026-08-30T00:00:00Z',
+            document_id: 'doc-1',
+          },
+        ],
         operationId: 'op-1',
         timeoutMs: 10_000,
       });
@@ -669,7 +676,14 @@ describe('HindsightClient', () => {
       });
 
       const outcome = await client.retain({
-        items: [{ content: 'hi', timestamp: '2026-08-30T00:00:00Z', document_id: 'doc-1' }],
+        items: [
+          {
+            metadata: { origin: 'user_stated' },
+            content: 'hi',
+            timestamp: '2026-08-30T00:00:00Z',
+            document_id: 'doc-1',
+          },
+        ],
         operationId: 'op-1',
         timeoutMs: 10_000,
       });
@@ -689,7 +703,14 @@ describe('HindsightClient', () => {
       });
 
       const outcome = await client.retain({
-        items: [{ content: 'hi', timestamp: '2026-08-30T00:00:00Z', document_id: 'doc-1' }],
+        items: [
+          {
+            metadata: { origin: 'user_stated' },
+            content: 'hi',
+            timestamp: '2026-08-30T00:00:00Z',
+            document_id: 'doc-1',
+          },
+        ],
         operationId: 'op-1',
         timeoutMs: 10_000,
       });

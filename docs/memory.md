@@ -37,6 +37,23 @@ An incognito chat reads memory but never writes to it. Aman recalls from the vau
 Memories are scoped by persona. While a persona is active, what it learns is kept in that persona's own vault and is private to it until you share the vault. With no persona active, memories go to the shared vault, which every persona can read. A persona recalls from its own vault, the shared vault, and any vault shared with it. Renaming or deleting a persona never deletes its vault.
 
 When you delete a memory on the Memories page, Aman removes its text from your disk. When you edit one, the old wording is replaced by the new wording. A backup or an export you made earlier still holds what it held, so delete those too if you want the words gone from them.
+### Where each note came from
+
+Every note ends with one line that says where it came from.
+
+- `> From you` means you said it in a chat.
+- `> External source: ...` means it came from somewhere else. The line names the source: `email`, `calendar`, `web page`, `attachment`, `tool result`, `assistant reply`, `read content` or `imported file`.
+
+Aman treats a note as your own words only when it ends with `> From you`. Everything else counts as something Aman read. Aman still remembers it, but it asks you before it uses a link or an address from it. See [Safety](/safety).
+
+Aman never guesses a source. A note that would be saved without one is not saved at all. A note with no source line counts as external.
+
+- **Notes saved before this.** The first time this version starts, Aman adds a line to every older note that has none. The line is `> External source: no record`, because nothing shows where those notes came from. Each daily file is copied to a `.before-source-lines` folder in its vault before it is changed. To make a fact your own again, say it to Aman in a chat, or review your older notes once (see below).
+- **Reviewing older notes.** Some older notes were saved in a chat where Aman had read nothing from outside and you had attached no file. The Memories page shows a notice for these, with a **Review older notes** button. The list shows each note with its day, its text and the title of its chat. Nothing is ticked at the start. Tick the notes that are your own words, then click **Mark the ticked notes as from me**. Aman treats those notes as your own words from then on, and acts on them without asking, as it does for things it read. A note is left out of the list when its chat read something from outside, when you attached a file in that chat, when its chat is gone, or when you edited or forgot the note. A note you mark is not rewritten. Aman records your choice in a `.reviewed-from-you` file in the vault and shows the note as `> From you` while its text stays the same. If you edit the note later, it still counts as from you. A full export carries that file, so a restore keeps your review.
+- **Imports.** Notes you bring in with the Memories import are saved as `> External source: imported file`. When you import a full export made by an older version, its notes get the same line as older notes. You can review them too, if their chats came over in the same import.
+- **`MEMORY.md`.** A `MEMORY.md` file you write by hand counts as external unless its last line is `> From you`.
+- **Editing.** Changing a note on the Memories page changes what it says. It never changes where it came from.
+- **Other memory services.** With a memory service other than Markdown files, a memory with no recorded source counts as external too.
 
 ## Searching past chats
 

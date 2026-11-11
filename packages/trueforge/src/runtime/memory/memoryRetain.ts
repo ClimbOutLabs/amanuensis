@@ -31,12 +31,7 @@ import {
   type MemoryNoteSource,
 } from './memoryNotes';
 import { summarizeTurnNotes, type TurnToolResult } from './memoryNotesSummarize';
-import {
-  MEMORY_ORIGIN_METADATA_KEY,
-  TOOL_INGESTED_ORIGIN,
-  USER_STATED_ORIGIN,
-  type AmanMemoryOrigin,
-} from './memoryOrigin';
+import { MEMORY_ORIGIN_METADATA_KEY, TOOL_INGESTED_ORIGIN, type AmanMemoryOrigin } from './memoryOrigin';
 import { summarizeTurnContent, usablePersonName, type SummaryFallbackReason } from './memorySummarize';
 import { sortWrittenNotes } from './pageSortRun';
 import { uuidv5 } from './uuidv5';
@@ -55,8 +50,8 @@ export interface BuildRetainItemParams {
   userText: string;
   assistantText: string;
   completedAt: string;
-  /** Provenance for the screening posture at recall. Defaults to `user_stated`. */
-  origin?: AmanMemoryOrigin | undefined;
+  /** Where the turn's text came from. The caller always says; nothing is assumed. */
+  origin: AmanMemoryOrigin;
   /**
    * The text to store in place of the verbatim `User:`/`Assistant:` transcript: the durable
    * facts, or the person's own words. Set only when `MEMORY_SUMMARIZE` is on for this turn.
@@ -93,7 +88,7 @@ export function buildRetainItem(params: BuildRetainItemParams): RetainItem | und
       [SESSION_ID_METADATA_KEY]: params.sessionId,
       turn_id: params.turnId,
       source: 'aman-chat',
-      [MEMORY_ORIGIN_METADATA_KEY]: params.origin ?? USER_STATED_ORIGIN,
+      [MEMORY_ORIGIN_METADATA_KEY]: params.origin,
     },
   };
   return item;
@@ -176,8 +171,8 @@ export interface SubmitRetainParams {
   completedAt: string;
   /** The person's IANA time zone, so a summary writes dates as the day they lived. */
   timeZone?: string | undefined;
-  /** Provenance for the screening posture at recall. Defaults to `user_stated`. */
-  origin?: AmanMemoryOrigin | undefined;
+  /** Where the turn's text came from. The caller always says; nothing is assumed. */
+  origin: AmanMemoryOrigin;
   logger: Logger;
   outcomeLog?: RetainOutcomeLog | undefined;
   /** What the turn's tools returned, so concrete findings can be saved as labeled notes. */
@@ -466,8 +461,7 @@ async function withoutStoredCopies({
   params: SubmitRetainParams;
   items: readonly RetainItem[];
 }): Promise<RetainItem[]> {
-  const readContent = (item: RetainItem): boolean =>
-    item.metadata?.[MEMORY_ORIGIN_METADATA_KEY] === TOOL_INGESTED_ORIGIN;
+  const readContent = (item: RetainItem): boolean => item.metadata[MEMORY_ORIGIN_METADATA_KEY] === TOOL_INGESTED_ORIGIN;
   if (!items.some(readContent)) {
     return [...items];
   }

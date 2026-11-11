@@ -8,6 +8,7 @@ import { createLogger } from 'winston';
 import {
   createCapabilitiesRouter,
   MEMORY_SCREEN_NOT_CONFIGURED_REASON,
+  SANDBOX_UNAVAILABLE_FOR_MEMBER,
   toBuildIdentity,
 } from '../../../src/apis/capabilities';
 import { TENANT_ID } from '../../../src/apis/sessions';
@@ -183,6 +184,7 @@ describe('capabilities routers', () => {
         sandbox_isolation: expectedSandboxIsolation,
         voice: { enabled: false },
         memory_embeddings: memoryEmbeddingsStarting,
+        sign_in: { mode: 'standalone' },
         build: expectedBuild,
       },
     });
@@ -212,6 +214,7 @@ describe('capabilities routers', () => {
         sandbox_isolation: expectedSandboxIsolation,
         voice: { enabled: false },
         memory_embeddings: memoryEmbeddingsStarting,
+        sign_in: { mode: 'standalone' },
         build: expectedBuild,
       },
     });
@@ -235,6 +238,7 @@ describe('capabilities routers', () => {
         sandbox_isolation: expectedSandboxIsolation,
         voice: { enabled: false },
         memory_embeddings: memoryEmbeddingsStarting,
+        sign_in: { mode: 'standalone' },
         build: expectedBuild,
       },
     });
@@ -258,9 +262,24 @@ describe('capabilities routers', () => {
     });
   });
 
-  it('reports "not configured" skill reason when the image build failed', async () => {
+  it('reports the stored build reason on the sandbox and skill entries when the image build failed', async () => {
     disableOidcAuth();
     mockStatus.mockResolvedValue(buildWithStatus('failed'));
+    const { router } = await makeRouter();
+
+    const response = await router.request('/');
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: {
+        sandbox: { enabled: false, reason: 'Sandbox image build failed (build_failed).' },
+        skill: { enabled: false, reason: 'Sandbox image build failed (build_failed).' },
+      },
+    });
+  });
+
+  it('reports no sandbox reason and the "not configured" skill reason when the failed build stored none', async () => {
+    disableOidcAuth();
+    mockStatus.mockResolvedValue({ status: 'failed', status_reason: null, build_metadata: null });
     const { router } = await makeRouter();
 
     const response = await router.request('/');
@@ -364,6 +383,49 @@ describe('capabilities routers', () => {
         .sign(privateKey);
     }
 
+    it("tells an admin the failed build's own reason and everyone else only who can fix it", async () => {
+      mockStatus.mockResolvedValue({
+        status: 'failed',
+        status_reason: 'image pull failed: registry.internal.example/sandbox:7f3a unauthorized',
+        build_metadata: null,
+      });
+      const db = createSqliteDb(':memory:');
+      await migrateSqliteToLatest(db);
+      const router = withAuth(
+        createCapabilitiesRouter({
+          resolveSandboxProviderStore: () => new SqliteSandboxProviderStore(db),
+          mcpServerStore: new SqliteMcpServerStore(db),
+          globalSettingsStore: new SqliteGlobalSettingsStore(db),
+          withTransaction: callback => db.transaction().execute(callback),
+          logger: silentLogger,
+          resolveRequestContext,
+        }),
+        new OidcAuthenticator(),
+      );
+
+      const adminRes = await router.request('/', {
+        headers: { Cookie: `id_token=${await createIdToken(['admin'])}` },
+      });
+      expect(await adminRes.json()).toMatchObject({
+        data: {
+          sandbox: { enabled: false, reason: 'image pull failed: registry.internal.example/sandbox:7f3a unauthorized' },
+          skill: { enabled: false, reason: 'image pull failed: registry.internal.example/sandbox:7f3a unauthorized' },
+        },
+      });
+
+      const userRes = await router.request('/', {
+        headers: { Cookie: `id_token=${await createIdToken(['everyone'])}` },
+      });
+      const userBody = await userRes.json();
+      expect(userBody).toMatchObject({
+        data: {
+          sandbox: { enabled: false, reason: SANDBOX_UNAVAILABLE_FOR_MEMBER },
+          skill: { enabled: false, reason: SANDBOX_UNAVAILABLE_FOR_MEMBER },
+        },
+      });
+      expect(JSON.stringify(userBody)).not.toContain('registry.internal.example');
+    });
+
     it('marks settings enabled for admin callers and disabled for non-admin callers', async () => {
       const db = createSqliteDb(':memory:');
       await migrateSqliteToLatest(db);
@@ -397,6 +459,7 @@ describe('capabilities routers', () => {
           sandbox_isolation: expectedSandboxIsolation,
           voice: { enabled: false },
           memory_embeddings: memoryEmbeddingsStarting,
+          sign_in: { mode: 'standalone' },
           build: expectedBuild,
         },
       });
@@ -435,6 +498,7 @@ describe('capabilities routers', () => {
           sandbox_isolation: expectedSandboxIsolation,
           voice: { enabled: false },
           memory_embeddings: memoryEmbeddingsStarting,
+          sign_in: { mode: 'standalone' },
           build: expectedBuild,
         },
       });

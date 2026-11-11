@@ -133,6 +133,7 @@ describe('withoutAbilityNotes and stripAssistantAbilityNotes', () => {
 
   it("keeps the person's own future tense statement in a verbatim turn", () => {
     const item = buildRetainItem({
+      origin: 'user_stated',
       sessionId: 's1',
       turnId: 't3',
       userText: "I won't be able to check email on Friday.",
@@ -181,6 +182,7 @@ describe('withoutAbilityNotes and stripAssistantAbilityNotes', () => {
 
   it('never filters what the person said in a verbatim turn, and filters only the assistant side', () => {
     const item = buildRetainItem({
+      origin: 'user_stated',
       sessionId: 's1',
       turnId: 't1',
       userText: "Please check my email. Also note I can't read my email at work, the firewall blocks it.",
@@ -199,6 +201,7 @@ describe('withoutAbilityNotes and stripAssistantAbilityNotes', () => {
 
   it('keeps the person side when the whole assistant side is an ability note', () => {
     const item = buildRetainItem({
+      origin: 'user_stated',
       sessionId: 's1',
       turnId: 't2',
       userText: 'Please read my new email.',
@@ -230,7 +233,14 @@ describe('memory write path: MarkdownMemoryClient.retain', () => {
     try {
       const client = new MarkdownMemoryClient({ baseDir: dir, namespace: 'tenant-1' });
       const outcome = await client.retain({
-        items: [{ content: "I can't swim.", timestamp: '2026-09-19T12:00:00.000Z', document_id: 'doc-3' }],
+        items: [
+          {
+            metadata: { origin: 'user_stated' },
+            content: "I can't swim.",
+            timestamp: '2026-09-19T12:00:00.000Z',
+            document_id: 'doc-3',
+          },
+        ],
         operationId: 'op-plain',
         timeoutMs: 5000,
       });
@@ -249,6 +259,7 @@ describe('memory write path: MarkdownMemoryClient.retain', () => {
       const outcome = await client.retain({
         items: [
           {
+            metadata: { origin: 'user_stated' },
             content: "User: \n\nAssistant: I can't read email.",
             timestamp: '2026-09-19T12:00:00.000Z',
             document_id: 'doc-2',
@@ -286,6 +297,7 @@ describe('memory write path: HindsightClient.retain', () => {
     const outcome = await client.retain({
       items: [
         {
+          metadata: { origin: 'user_stated' },
           content: "User: \n\nAssistant: I can't read email.",
           timestamp: '2026-09-19T12:00:00.000Z',
           document_id: 'doc-2',

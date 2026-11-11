@@ -89,6 +89,7 @@ const TURN = {
   sessionId: 's1',
   turnId: 't1',
   completedAt: '2026-09-19T12:00:00.000Z',
+  origin: 'user_stated' as const,
 };
 
 describe('submitRetain with MEMORY_SUMMARIZE=true', () => {
@@ -460,7 +461,7 @@ describe('markdown round trip (synthetic end-to-end)', () => {
       const content = fs.readFileSync(path.join(memoryDir, files[0] ?? ''), 'utf8');
       // The entry format recall relies on: heading with the time, the fact text, a hidden chat id.
       expect(content).toBe(
-        '## 2026-09-21T12:00:00.000Z\n\nThe person has a houseplant, a cactus named Gerald.\n\n<!-- session_id: s1 -->\n\n',
+        '## 2026-09-21T12:00:00.000Z\n\nThe person has a houseplant, a cactus named Gerald.\n\n<!-- session_id: s1 -->\n\n> From you\n\n',
       );
       expect(content).not.toContain('Turn summary');
       expect(content).not.toContain('Chat title');

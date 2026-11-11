@@ -46,7 +46,7 @@ export interface SortNote {
   text: string;
   /** The day the note was saved, `YYYY-MM-DD`. */
   day: string;
-  /** What `recallMetadata` says about the note: its origin and source. */
+  /** What `entryMetadata` says about the note: its origin and source. */
   metadata: Readonly<Record<string, string>>;
 }
 

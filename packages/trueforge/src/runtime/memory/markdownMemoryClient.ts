@@ -51,6 +51,7 @@ import {
   REPLACE_DOCUMENT_METADATA_KEY,
   appendVaultTombstone,
   clearSummaryPending,
+  entryKeywordText,
   entryMetadata,
   entryOccurredAt,
   entryRecallText,
@@ -66,7 +67,6 @@ import {
   readSummaryPending,
   readVaultTombstones,
   recallExcludedIds,
-  recallMetadata,
   sanitizeNamespace,
   scanNamespaceEntries,
   scanVaultEntries,
@@ -75,6 +75,8 @@ import {
   vaultReadNamespaces,
   vaultWriteNamespace,
   withOriginalHiddenMarkers,
+  withoutHiddenMarkers,
+  withoutSourceLines,
   type NamespaceScan,
   type VaultScope,
   type VaultTombstone,
@@ -90,8 +92,10 @@ import type {
   SummaryOutcomeNote,
   UpdateMemoryVaultEntryOutcome,
 } from './memoryClient';
+import { MISSING_ORIGIN_REASON, everyItemNamesOrigin } from './memoryOrigin';
 import { loadPagesForMessage } from './memoryPageLoader';
 import type { PageListing } from './memoryPages';
+import { ensureMemorySourceLines } from './memorySourceLines';
 import { forgetSortReport } from './pageSortReport';
 import { rankNamedPeopleFirst } from './recallNameBoost';
 import { pagesNearText, statementIndexFor } from './statementIndex';
@@ -274,7 +278,12 @@ export class MarkdownMemoryClient implements MemoryClient {
       // Curated memory first: it is the model's own long-term store.
       for (const { namespace, scan } of vaults) {
         if (scan.curated !== undefined) {
-          take({ id: `md:${namespace}:MEMORY.md`, text: scan.curated });
+          // The file is read like any entry: it is the person's own only when it closes with the line that says so.
+          take({
+            id: `md:${namespace}:MEMORY.md`,
+            text: withoutSourceLines(scan.curated).trim(),
+            metadata: entryMetadata(scan.curated),
+          });
         }
       }
 
@@ -310,14 +319,13 @@ export class MarkdownMemoryClient implements MemoryClient {
           continue;
         }
         shown.add(body);
-        const metadata = recallMetadata(item.text);
         const occurredAt = entryOccurredAt(item);
         // The time and the chat id travel as fields: recall shows the date, and can skip notes from the current chat.
         const ok = take({
           id: item.id,
           text: entryRecallText(item.text),
           ...(occurredAt !== undefined && { occurred_start: occurredAt }),
-          metadata,
+          metadata: entryMetadata(item.text),
         });
         if (!ok) {
           break;
@@ -363,7 +371,7 @@ export class MarkdownMemoryClient implements MemoryClient {
     const entries = input.scan.entries.filter(entry => !excludeIds.has(entry.id));
     const words = queryWords(input.query);
     const scored = entries
-      .map(entry => ({ entry, score: scoreEntry(words, entry.text) }))
+      .map(entry => ({ entry, score: scoreEntry(words, entryKeywordText(entry.text)) }))
       .filter(candidate => candidate.score > 0)
       .sort((a, b) => b.score - a.score || b.entry.file.localeCompare(a.entry.file));
     const keywordRanked = scored.map(candidate => ({ id: candidate.entry.id, text: candidate.entry.text }));
@@ -411,6 +419,9 @@ export class MarkdownMemoryClient implements MemoryClient {
       if (params.items.length === 0) {
         return { ok: true };
       }
+      if (!everyItemNamesOrigin(params.items)) {
+        return failure(MISSING_ORIGIN_REASON);
+      }
       // Ability notes about Aman never reach the log (see assistantAbilityNotes).
       const items = params.items
         .map(item => ({ ...item, content: stripAssistantAbilityNotes(item.content) }))
@@ -418,6 +429,8 @@ export class MarkdownMemoryClient implements MemoryClient {
       // Names MEMORY_MARKDOWN_DIR in the error instead of a bare EACCES; the
       // caller's catch converts it into a failed outcome, never a throw.
       await ensureWritableDataDir({ dir: this.dailyDir(), envVar: 'MEMORY_MARKDOWN_DIR' });
+      // Older notes are marked first, so a "From you" line on disk is always one a save wrote.
+      await ensureMemorySourceLines({ baseDir: this.baseDir });
 
       const seen = await this.readOperationIds();
       if (seen.has(params.operationId)) {
@@ -446,7 +459,7 @@ export class MarkdownMemoryClient implements MemoryClient {
       // copy that attempt wrote as well as the original: one entry remains.
       const replaced = await this.liveDocumentEntryIds(
         items.flatMap(item =>
-          item.metadata?.[REPLACE_DOCUMENT_METADATA_KEY] === 'true'
+          item.metadata[REPLACE_DOCUMENT_METADATA_KEY] === 'true'
             ? [{ documentId: item.document_id, context: item.context?.trim() }]
             : [],
         ),
@@ -813,14 +826,14 @@ export class MarkdownMemoryClient implements MemoryClient {
       // The edit re-indexes in the vault that owns the entry, never in another vault's store.
       const embeddings = this.embeddings?.(target.filesystemNamespace);
       embeddings?.ensureWarmed();
-      embeddings?.indexNewEntries([
-        { id: params.entryId, text: withOriginalHiddenMarkers({ original: target.text, edited: clean }) },
-      ]);
+      const stored = withOriginalHiddenMarkers({ original: target.text, edited: clean });
+      embeddings?.indexNewEntries([{ id: params.entryId, text: stored }]);
       return {
         ok: true,
         entry: {
           id: params.entryId,
-          text: clean,
+          // The same text a listing shows: the edit, closed by the line that says where the entry came from.
+          text: withoutHiddenMarkers(stored),
           timestamp,
           persona: personaForVaultFilesystemNamespace(this.namespace, target.filesystemNamespace),
         },
@@ -909,7 +922,7 @@ export class MarkdownMemoryClient implements MemoryClient {
     );
     return scan.entries
       .filter(entry => {
-        const documentId = entryMetadata(entry.text)?.[DOCUMENT_ID_METADATA_KEY];
+        const documentId = entryMetadata(entry.text)[DOCUMENT_ID_METADATA_KEY];
         if (documentId !== undefined) {
           return documentIds.has(documentId);
         }

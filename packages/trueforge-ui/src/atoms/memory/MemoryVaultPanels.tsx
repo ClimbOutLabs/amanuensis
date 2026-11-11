@@ -8,6 +8,7 @@ import { Spinner } from '@/atoms/primitives/Spinner.js';
 import { Icon } from '@/icons/Icon.js';
 import { useAssistantDisplayName } from '../../components/PersonalizationContext.js';
 import { MemoryExplorerFilters } from './MemoryExplorerFilters.js';
+import { MemoryReviewNotice, MemoryReviewPanel } from './MemoryReviewPanel.js';
 import { MemorySharing } from './MemorySharing.js';
 import { MemoryVaultEntryRow } from './MemoryVaultEntry.js';
 import {
@@ -311,7 +312,14 @@ export function MemoryVaultFactsPanel({
             </div>
           ))
         : null}
-      {body}
+      {state.reviewOpen ? (
+        <MemoryReviewPanel review={state.review} onClose={state.closeReview} />
+      ) : (
+        <>
+          {state.review.notes.length > 0 ? <MemoryReviewNotice onReview={state.openReview} /> : null}
+          {body}
+        </>
+      )}
       <ManageCollections state={state} />
     </div>
   );

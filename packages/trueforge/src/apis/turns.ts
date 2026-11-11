@@ -28,7 +28,6 @@ import {
 import {
   AgentHarnessError,
   callResultSource,
-  callReturnsOutsideContent,
   existingSandboxIdForProvider,
   extractErrorLogFields,
   HeldActionRefusedError,
@@ -112,6 +111,7 @@ import {
 } from '../runtime/memory/memoryRetain';
 import { applyMemorySettings, serverMemoryConfig } from '../runtime/memory/memorySettings';
 import { saveSentMail, sentMailFromCall, sentMailWentThrough } from '../runtime/memory/sentMail';
+import { createOutsideInputTracker, inputAttachesFiles } from '../runtime/memory/turnOutsideInput';
 import { readMemoryRecallSetting } from '../runtime/memoryRecallSettings';
 import { applyMemoryScreenOverride, readMemoryScreenSetting } from '../runtime/memoryScreenSettings';
 import { resolveTurnSummarizeContext } from '../runtime/memorySummarizeSettings';
@@ -124,6 +124,7 @@ import {
   type ModelUsageDrainMember,
   type TurnModelUsage,
 } from '../runtime/modelUsage';
+import { notesFolderServiceDeps, sharedNotesFolderService } from '../runtime/notesFolder/notesFolderRuntime';
 import { mintPeeredTurnId } from '../runtime/peeringIds';
 import type { PersonaTurnContext } from '../runtime/personaCapability';
 import type { PersonaSwitchNotice } from '../runtime/PersonaTurnResourceResolver';
@@ -430,6 +431,8 @@ function createTurnResolver(deps: {
   spaceStore: ISpaceStore;
   /** Per-user Google logins; absent, no Gmail tools mount. */
   googleConnectionStore?: IGoogleConnectionStore | undefined;
+  /** The instance's global settings, where the notes folder choice lives; absent, no notes tools mount. */
+  globalSettingsStore?: IGlobalSettingsStore | undefined;
   /** From CreateTurnRequest.client_timezone. See ITurnResourceResolver.clientTimezone. */
   clientTimezone?: string | undefined;
   /** From CreateTurnRequest.spoken_reply. See ITurnResourceResolver.spokenReply. */
@@ -940,6 +943,12 @@ function createTurnResolver(deps: {
     {
       store: spaceStore,
       googleConnections: googleConnectionStore,
+      notesFolder:
+        deps.globalSettingsStore === undefined
+          ? undefined
+          : {
+              service: sharedNotesFolderService(notesFolderServiceDeps({ settings: deps.globalSettingsStore, logger })),
+            },
       authority: { tenantId: tenant_id, userRef },
       sessionId,
       schedules,
@@ -1026,13 +1035,6 @@ export function deriveSessionTitle(input: TurnInputItem[] | undefined): string |
     return undefined;
   }
   return title;
-}
-
-/** True when any user message in a create-turn input carries an attached file. */
-function inputAttachesFiles(input: TurnInputItem[]): boolean {
-  return input
-    .filter(isAgentInputUserMessage)
-    .some(message => typeof message.content !== 'string' && message.content.some(isFileContentPart));
 }
 
 /**
@@ -1354,11 +1356,6 @@ async function renewPrivateChatExpiry(input: {
 const TURN_TOOL_RESULTS_KEPT = 20;
 const TURN_TOOL_RESULT_CHARACTERS_KEPT = 30_000;
 
-/** A refused or unrun call returned no content, so it cannot have brought anything in. */
-function toolRanOrMayHave(disposition: string): boolean {
-  return disposition !== 'denied' && disposition !== 'policy_blocked' && disposition !== 'never_ran';
-}
-
 async function runTurnEventDrain(params: {
   input: DrainTurnEventsInput;
   markArtifactsCaptured: () => void;
@@ -1382,8 +1379,7 @@ async function runTurnEventDrain(params: {
   // the recall screen's stricter posture. Only host tools known to return nothing from outside
   // (spaces, task state, schedules) leave a turn unmarked. Text extracted from an attached file is just as untrusted, so a turn that
   // attached one starts out tainted. A turn with neither is the user's own voice: `user_stated`.
-  let ingestedToolOutput = memory?.attachedFiles === true;
-  const callReturnsOutside = new Map<string, boolean>();
+  const outsideInput = createOutsideInputTracker({ attachedFiles: memory?.attachedFiles === true });
   const callSources = new Map<string, ToolResultSource>();
   const toolResults: TurnToolResult[] = [];
   // A send is read from its call and saved as soon as its result says it went through, whichever turn ran it.
@@ -1397,7 +1393,6 @@ async function runTurnEventDrain(params: {
       }
       if (event.type === EventType.MODEL_MESSAGE) {
         for (const call of event.tool_calls ?? []) {
-          callReturnsOutside.set(call.id, callReturnsOutsideContent(call));
           callSources.set(call.id, callResultSource(call));
           callsByKey.set(toolCallKey({ threadId: event.thread_id, callId: call.id }), call);
         }
@@ -1424,11 +1419,9 @@ async function runTurnEventDrain(params: {
         }
       }
       if (
-        (event.type === EventType.TOOL_RESPONSE ||
-          (event.type === EventType.TOOL_RESPONSE_V2 && toolRanOrMayHave(event.disposition))) &&
-        (callReturnsOutside.get(event.tool_call_id) ?? true)
+        outsideInput.observe(event) &&
+        (event.type === EventType.TOOL_RESPONSE || event.type === EventType.TOOL_RESPONSE_V2)
       ) {
-        ingestedToolOutput = true;
         // Kept for the note pass; a result that did not run cleanly holds no finding.
         if (
           (event.type === EventType.TOOL_RESPONSE || event.disposition === 'executed_ok') &&
@@ -1454,7 +1447,7 @@ async function runTurnEventDrain(params: {
         followUp = runTurnFollowUp({
           input,
           state: event.state,
-          ingestedToolOutput,
+          ingestedToolOutput: outsideInput.ingested,
           toolResults,
           markArtifactsCaptured,
         });
@@ -1862,6 +1855,7 @@ async function beginAcceptedTurnExecution(
         sessionStore: deps.sessionStore,
         spaceStore: deps.spaceStore,
         googleConnectionStore: deps.googleConnectionStore,
+        globalSettingsStore: deps.globalSettingsStore,
         logger: deps.logger,
         signal: abortController.signal,
         userRef,
@@ -2439,13 +2433,18 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       return c.json({ error: { message: FORBIDDEN_CREATE_TURN } }, 403);
     }
 
+    // The turn this one follows: the chat's last turn unless the caller named one or asked for none.
+    const requestedParent = submitted.previous_turn_id;
+    const previousTurnId =
+      requestedParent === 'none' ? null : requestedParent === 'auto' ? session.record.last_turn_id : requestedParent;
+
     // Eval instances approve only their fixture-backed tools; any other approval is declined here, whatever the runner sent.
     const body = configuration.AMAN_EVAL_MODE
       ? {
           ...submitted,
           input: await gateEvalApprovals({
             session,
-            previous_turn_id: submitted.previous_turn_id,
+            previous_turn_id: previousTurnId,
             input: submitted.input,
           }),
         }
@@ -2514,9 +2513,6 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       throw error;
     }
 
-    const requestedParent = body.previous_turn_id;
-    const previousTurnId =
-      requestedParent === 'none' ? null : requestedParent === 'auto' ? session.record.last_turn_id : requestedParent;
     const previousTurn = previousTurnId === null ? undefined : await session.getTurn(previousTurnId);
     if (previousTurnId !== null && previousTurn === undefined) {
       return c.json({ error: { message: `Turn not found: ${previousTurnId}` } }, 404);
@@ -2777,6 +2773,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       personaStore: deps.personaStore,
       spaceStore: deps.spaceStore,
       googleConnectionStore: deps.googleConnectionStore,
+      globalSettingsStore: deps.globalSettingsStore,
       clientTimezone: body.client_timezone,
       spokenReply: body.spoken_reply,
       toolOutputScreenEnabled,
@@ -2819,6 +2816,8 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
                 personalizationStore: deps.personalizationStore,
               }),
               logger: deps.logger,
+              // A reminder set in this chat fires back into this chat.
+              session_id: session.session_id,
             },
     });
 

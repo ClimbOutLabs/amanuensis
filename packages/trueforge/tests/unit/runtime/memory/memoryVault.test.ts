@@ -25,8 +25,18 @@ async function cleanup(dir: string): Promise<void> {
 async function retainTwo(client: MarkdownMemoryClient): Promise<void> {
   const outcome = await client.retain({
     items: [
-      { content: 'Prefers morning meetings', timestamp: '2026-09-26T10:00:00.000Z', document_id: 'doc-1' },
-      { content: 'Uses metric units', timestamp: '2026-09-26T11:00:00.000Z', document_id: 'doc-2' },
+      {
+        metadata: { origin: 'user_stated' },
+        content: 'Prefers morning meetings',
+        timestamp: '2026-09-26T10:00:00.000Z',
+        document_id: 'doc-1',
+      },
+      {
+        metadata: { origin: 'user_stated' },
+        content: 'Uses metric units',
+        timestamp: '2026-09-26T11:00:00.000Z',
+        document_id: 'doc-2',
+      },
     ],
     operationId: 'op-vault-1',
     timeoutMs: TIMEOUT_MS,
@@ -119,7 +129,7 @@ describe('memory vault', () => {
         expect(updated.ok).toBe(true);
         if (updated.ok) {
           expect(updated.entry.id).toBe(id);
-          expect(updated.entry.text).toBe('Lives in Barcelona');
+          expect(updated.entry.text).toBe('Lives in Barcelona\n\n> From you');
         }
 
         // The old wording is gone from the daily log, and no marker is written inside it.
@@ -134,7 +144,7 @@ describe('memory vault', () => {
 
         const after = entriesOf(await client.listEntries({ namespace: '', timeoutMs: TIMEOUT_MS }));
         expect(after).toHaveLength(2);
-        expect(after.find(entry => entry.id === id)?.text).toBe('Lives in Barcelona');
+        expect(after.find(entry => entry.id === id)?.text).toBe('Lives in Barcelona\n\n> From you');
         // The untouched entry keeps its original text and timestamp.
         expect(after.find(entry => entry.id !== id)?.text).toContain('Uses metric units');
       } finally {
@@ -149,7 +159,14 @@ describe('memory vault', () => {
         const before = entriesOf(await client.listEntries({ namespace: '', timeoutMs: TIMEOUT_MS }));
         await client.updateEntry({ entryId: before[0]?.id ?? '', text: 'edited', timeoutMs: TIMEOUT_MS });
         await client.retain({
-          items: [{ content: 'Third fact', timestamp: '2026-09-26T12:00:00.000Z', document_id: 'doc-3' }],
+          items: [
+            {
+              metadata: { origin: 'user_stated' },
+              content: 'Third fact',
+              timestamp: '2026-09-26T12:00:00.000Z',
+              document_id: 'doc-3',
+            },
+          ],
           operationId: 'op-vault-2',
           timeoutMs: TIMEOUT_MS,
         });
@@ -174,7 +191,7 @@ describe('memory vault', () => {
         const updated = await client.updateEntry({ entryId: id, text: tricky, timeoutMs: TIMEOUT_MS });
         expect(updated.ok).toBe(true);
         const after = entriesOf(await client.listEntries({ namespace: '', timeoutMs: TIMEOUT_MS }));
-        expect(after.find(entry => entry.id === id)?.text).toBe(tricky);
+        expect(after.find(entry => entry.id === id)?.text).toBe(`${tricky}\n\n> From you`);
       } finally {
         await cleanup(dir);
       }
@@ -191,7 +208,7 @@ describe('memory vault', () => {
         const updated = await client.updateEntry({ entryId: id, text: hostile, timeoutMs: TIMEOUT_MS });
         expect(updated.ok).toBe(true);
         const after = entriesOf(await client.listEntries({ namespace: '', timeoutMs: TIMEOUT_MS }));
-        expect(after.find(entry => entry.id === id)?.text).toBe(hostile);
+        expect(after.find(entry => entry.id === id)?.text).toBe(`${hostile}\n\n> From you`);
       } finally {
         await cleanup(dir);
       }

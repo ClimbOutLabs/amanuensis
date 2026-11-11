@@ -16,6 +16,7 @@ import {
 describe('buildRetainItem', () => {
   it('builds the expected item shape', () => {
     const item = buildRetainItem({
+      origin: 'user_stated',
       sessionId: 's1',
       turnId: 't1',
       userText: 'What is my wife’s name?',
@@ -27,13 +28,14 @@ describe('buildRetainItem', () => {
       content: 'User: What is my wife’s name?\n\nAssistant: Your wife’s name is Robin.',
       timestamp: '2026-08-30T12:00:00.000Z',
       document_id: 'aman-s1-t1',
-      // Default provenance for a turn with no untrusted tool output: the user's own voice.
+      // The origin the caller gives is the one stamped.
       metadata: { session_id: 's1', turn_id: 't1', source: 'aman-chat', origin: 'user_stated' },
     });
   });
 
-  it('defaults origin to user_stated and stamps tool_ingested when told the turn ingested tool output', () => {
+  it('stamps the origin it is given, whether user_stated or tool_ingested', () => {
     const clean = buildRetainItem({
+      origin: 'user_stated',
       sessionId: 's1',
       turnId: 't1',
       userText: 'hi',
@@ -55,6 +57,7 @@ describe('buildRetainItem', () => {
 
   it('skips (returns undefined) when both sides are empty', () => {
     const item = buildRetainItem({
+      origin: 'user_stated',
       sessionId: 's1',
       turnId: 't1',
       userText: '   ',
@@ -67,6 +70,7 @@ describe('buildRetainItem', () => {
   it('keeps an item when only one side has text', () => {
     expect(
       buildRetainItem({
+        origin: 'user_stated',
         sessionId: 's1',
         turnId: 't1',
         userText: 'hi',
@@ -127,6 +131,7 @@ describe('submitRetain', () => {
     retain.mockResolvedValue({ ok: true });
 
     await submitRetain({
+      origin: 'user_stated',
       session: { is_incognito: false },
       client,
       sessionId: 's1',
@@ -175,6 +180,7 @@ describe('submitRetain', () => {
 
     await expect(
       submitRetain({
+        origin: 'user_stated',
         session: { is_incognito: false },
         client,
         sessionId: 's1',
@@ -194,6 +200,7 @@ describe('submitRetain', () => {
 
     await expect(
       submitRetain({
+        origin: 'user_stated',
         session: { is_incognito: false },
         client,
         sessionId: 's1',
@@ -245,6 +252,7 @@ describe('submitRetainWithVerification', () => {
 
   function submitParams(client: HindsightClient): SubmitRetainParams {
     return {
+      origin: 'user_stated',
       session: { is_incognito: false },
       client,
       sessionId: 's1',
@@ -360,6 +368,7 @@ describe('submitRetainWithVerification', () => {
 describe('buildRetainItem with memoryText', () => {
   it('stores the text as it is, without a prefix and without the transcript', () => {
     const item = buildRetainItem({
+      origin: 'user_stated',
       sessionId: 's1',
       turnId: 't1',
       userText: 'Please remember that my synthetic test robot is named Bleep-Bloop.',
@@ -375,6 +384,7 @@ describe('buildRetainItem with memoryText', () => {
 
   it('stores nothing when memoryText is blank, never the transcript', () => {
     const item = buildRetainItem({
+      origin: 'user_stated',
       sessionId: 's1',
       turnId: 't1',
       userText: 'hi',
@@ -388,6 +398,7 @@ describe('buildRetainItem with memoryText', () => {
 
   it('uses the exchange when memoryText is absent (summarization off)', () => {
     const item = buildRetainItem({
+      origin: 'user_stated',
       sessionId: 's1',
       turnId: 't1',
       userText: 'hi',
@@ -415,6 +426,7 @@ describe('buildRetainItem with memoryText', () => {
 
   it('names the chat in metadata so recall can tell which chat a fact came from', () => {
     const item = buildRetainItem({
+      origin: 'user_stated',
       sessionId: 's1',
       turnId: 't1',
       userText: 'a',

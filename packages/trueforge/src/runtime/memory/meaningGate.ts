@@ -8,7 +8,7 @@ import { withTimeout } from '@truefoundry/trueforge-core/core';
 import { EMBEDDING_DIMENSIONS, type EmbeddingModel } from './embeddingModel';
 import type { EmbeddingSubsystem } from './embeddingRetrieval';
 import { readHandledNotes, type HandledOutcome } from './handledNotes';
-import { recallExcludedIds, recallMetadata, type NamespaceScan } from './markdownMemoryFiles';
+import { recallExcludedIds, entryMetadata, type NamespaceScan } from './markdownMemoryFiles';
 import { MEMORY_ORIGIN_METADATA_KEY, USER_STATED_ORIGIN } from './memoryOrigin';
 import { noteIndexFor, type NoteIndex } from './noteIndex';
 import { emptyBest, percentileBar, raiseBest, STANDING_ABOVE, unitVector, type ItemNumbers } from './standing';
@@ -68,7 +68,7 @@ interface NoteVault {
 }
 
 function isPersonsOwn(text: string): boolean {
-  return recallMetadata(text)[MEMORY_ORIGIN_METADATA_KEY] === USER_STATED_ORIGIN;
+  return entryMetadata(text)[MEMORY_ORIGIN_METADATA_KEY] === USER_STATED_ORIGIN;
 }
 
 /** Not sorted yet; or sorted onto no page and the person's own words. A note whose facts are on a page is spoken for by its statements. */

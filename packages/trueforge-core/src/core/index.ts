@@ -431,7 +431,7 @@ export {
   slotSocketPathsIn,
 } from './sandbox/slots/slotContract';
 export { SLOT_FIX_COMMAND, SLOT_NOT_READY_MESSAGE, SlotDriver } from './sandbox/slots/SlotDriver';
-export { SlotSandboxProvider } from './sandbox/slots/SlotSandboxProvider';
+export { SlotFullStateLog, SlotSandboxProvider } from './sandbox/slots/SlotSandboxProvider';
 export { extractStructuredEditPaths, repositoryRootsMatch } from './sandbox/structuredEditPaths';
 export type { StructuredEditPathRequest, StructuredEditPathResolution } from './sandbox/structuredEditPaths';
 
@@ -546,7 +546,7 @@ export {
   recordUntrustedText,
   searchResultUrls,
 } from './permissions/provenance';
-export type { SearchResultUrls } from './permissions/provenance';
+export type { ChatProvenance, ReadSource, SearchResultUrls } from './permissions/provenance';
 export {
   AUTO_DENY_REASONS,
   TIER2_ACTION_KINDS,

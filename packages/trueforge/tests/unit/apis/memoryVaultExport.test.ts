@@ -51,6 +51,7 @@ describe('memory vault export keeps the internal id an entry was filed under', (
     const retained = await client.retain({
       items: [
         {
+          metadata: { origin: 'user_stated' },
           content: 'Lives in Lisbon with a cat.',
           timestamp: '2026-10-02T10:00:00.000Z',
           document_id: 'maya-identity',
@@ -63,10 +64,12 @@ describe('memory vault export keeps the internal id an entry was filed under', (
     expect(retained.ok).toBe(true);
 
     const listed = ListResponseSchema.parse(await (await app.request('/api/v1/memory/vault')).json());
-    expect(listed.data.map(entry => entry.text)).toEqual(['Lives in Lisbon with a cat.']);
+    expect(listed.data.map(entry => entry.text)).toEqual(['Lives in Lisbon with a cat.\n\n> From you']);
 
     const exported = ExportResponseSchema.parse(await (await app.request('/api/v1/memory/vault/export')).json());
-    expect(exported.data.entries.map(entry => entry.text)).toEqual(['Lives in Lisbon with a cat.\n\n> maya:identity']);
+    expect(exported.data.entries.map(entry => entry.text)).toEqual([
+      'Lives in Lisbon with a cat.\n\n> maya:identity\n\n> From you',
+    ]);
 
     const imported = await app.request('/api/v1/memory/vault/import', {
       method: 'POST',
@@ -79,7 +82,7 @@ describe('memory vault export keeps the internal id an entry was filed under', (
       throw new Error('expected a vault listing');
     }
     expect(again.entries.map(entry => ({ text: entry.text, context: entry.context }))).toEqual([
-      { text: 'Lives in Lisbon with a cat.', context: 'maya:identity' },
+      { text: 'Lives in Lisbon with a cat.\n\n> External source: imported file', context: 'maya:identity' },
     ]);
   });
 });

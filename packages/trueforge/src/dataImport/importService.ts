@@ -58,14 +58,18 @@ import {
   entryMetadata,
   hiddenContext,
   latestTombstonesByEntry,
+  parseReviewedMarks,
   parseVaultTombstones,
   personaVaultNamespace,
+  REVIEWED_FROM_YOU_FILE,
   SESSION_ID_METADATA_KEY,
   upgradeLegacyEntries,
   VAULT_TOMBSTONES_FILE,
   vaultEntryTimestamp,
   vaultFilesystemNamespace,
   withoutHiddenMarkers,
+  withoutSourceLines,
+  withSourceLines,
 } from '../runtime/memory/markdownMemoryFiles';
 import {
   isMemoryNoteSource,
@@ -76,6 +80,14 @@ import {
 import { isInPageFolder, pageFolder, parsePageFilePath } from '../runtime/memory/memoryPages';
 import { MEMORY_NIGHTLY_SETTING_KEY } from '../runtime/memoryNightlySettings';
 import { MEMORY_PAGE_SORTING_SETTING_KEY } from '../runtime/memoryPageSortingSettings';
+import {
+  isPersonOrigin,
+  MEMORY_ORIGIN_METADATA_KEY,
+  TOOL_INGESTED_ORIGIN,
+  USER_STATED_ORIGIN,
+  type AmanMemoryOrigin,
+} from '../runtime/memory/memoryOrigin';
+import { ensureMemorySourceLines } from '../runtime/memory/memorySourceLines';
 import { MEMORY_RECALL_ENABLED_SETTING_KEY } from '../runtime/memoryRecallSettings';
 import { MEMORY_SCREEN_ENABLED_SETTING_KEY } from '../runtime/memoryScreenSettings';
 import { MEMORY_SUMMARIZE_SETTING_KEY } from '../runtime/memorySummarizeSettings';
@@ -758,7 +770,7 @@ function loadArchive(input: {
     deliveries: files.has('deliveries.json')
       ? section('deliveries.json', ImportDeliveriesFileSchema, upgradeArchivedDeliveries)
       : [],
-    files,
+    files: manifest.schema_version < MEMORY_SOURCE_LINES_SCHEMA_VERSION ? memoryFilesWithSourceLines(files) : files,
     sourceTenantId: manifest.tenant_id,
     leftOutReport: leftOut,
     personaRepairLines,
@@ -888,6 +900,21 @@ function validateCrossReferences(contents: ArchiveContents): void {
   }
 }
 
+/** The first export format version whose memory notes each close with a line that says where they came from. */
+const MEMORY_SOURCE_LINES_SCHEMA_VERSION = 3;
+
+/** The archive's files with every daily memory file from an older export marked the way a stored one is. */
+function memoryFilesWithSourceLines(files: ReadonlyMap<string, Buffer>): ReadonlyMap<string, Buffer> {
+  const upgraded = new Map(files);
+  for (const [name, data] of files) {
+    const [section, , ...inner] = name.split('/');
+    if (section === 'memory' && dailyLogFileAt(inner.join('/')) !== undefined) {
+      upgraded.set(name, Buffer.from(withSourceLines(data.toString('utf8')).content, 'utf8'));
+    }
+  }
+  return upgraded;
+}
+
 interface ParsedMemoryNamespace {
   seg: string;
   curated: string | undefined;
@@ -896,7 +923,10 @@ interface ParsedMemoryNamespace {
 
 /** Groups the archive's memory/ files by namespace segment and resolves them the way the vault reads them. */
 function parseMemoryNamespaces(files: ReadonlyMap<string, Buffer>): ParsedMemoryNamespace[] {
-  const bySeg = new Map<string, { curated?: string; tombstones?: string; daily: Map<string, string> }>();
+  const bySeg = new Map<
+    string,
+    { curated?: string; tombstones?: string; reviewed?: string; daily: Map<string, string> }
+  >();
   for (const [name, data] of files) {
     if (!name.startsWith('memory/')) {
       continue;
@@ -918,6 +948,8 @@ function parseMemoryNamespaces(files: ReadonlyMap<string, Buffer>): ParsedMemory
       bucket.curated = data.toString('utf8');
     } else if (inner === VAULT_TOMBSTONES_FILE) {
       bucket.tombstones = data.toString('utf8');
+    } else if (inner === REVIEWED_FROM_YOU_FILE) {
+      bucket.reviewed = data.toString('utf8');
     } else if (dailyFile !== undefined) {
       bucket.daily.set(dailyFile, data.toString('utf8'));
     }
@@ -927,9 +959,10 @@ function parseMemoryNamespaces(files: ReadonlyMap<string, Buffer>): ParsedMemory
   for (const [seg, bucket] of bySeg) {
     const tombstones = bucket.tombstones === undefined ? [] : parseVaultTombstones(bucket.tombstones);
     const latest = latestTombstonesByEntry(tombstones);
+    const reviewed = parseReviewedMarks(bucket.reviewed ?? '');
     const scanned = [...bucket.daily.keys()]
       .sort()
-      .flatMap(file => dailyLogEntries({ safeNamespace: seg, file, content: bucket.daily.get(file) ?? '' }));
+      .flatMap(file => dailyLogEntries({ safeNamespace: seg, file, content: bucket.daily.get(file) ?? '', reviewed }));
     const entries = applyVaultTombstones(scanned, tombstones).map(entry => {
       const tombstone = latest.get(entry.id);
       return {
@@ -974,6 +1007,11 @@ function countMemories(namespaces: readonly ParsedMemoryNamespace[]): number {
   );
 }
 
+/** The origin an archived note is restored with: the person's own only when its closing line says so. */
+function archivedOrigin(metadata: Readonly<Record<string, string>>): AmanMemoryOrigin {
+  return isPersonOrigin(metadata) ? USER_STATED_ORIGIN : TOOL_INGESTED_ORIGIN;
+}
+
 /** Builds retain items for a client (non-Markdown) memory backend from the parsed namespaces. */
 function buildRetainItems(
   namespaces: readonly ParsedMemoryNamespace[],
@@ -992,6 +1030,7 @@ function buildRetainItems(
         timestamp: input.exportedAt,
         document_id: documentIdFor(`curated:${namespace.seg}`),
         ...(vaultContext === undefined ? {} : { context: vaultContext }),
+        metadata: { [MEMORY_ORIGIN_METADATA_KEY]: archivedOrigin(entryMetadata(namespace.curated)) },
       });
     }
     for (const entry of namespace.entries) {
@@ -1002,12 +1041,13 @@ function buildRetainItems(
         body = newline < 0 ? '' : body.slice(newline + 1).replace(/^\n+/, '');
       }
       const trailers = entryMetadata(body);
-      const sessionId = trailers?.[SESSION_ID_METADATA_KEY];
-      const noteSource = trailers?.[NOTE_SOURCE_METADATA_KEY];
-      const noteDate = trailers?.[NOTE_DATE_METADATA_KEY];
+      const sessionId = trailers[SESSION_ID_METADATA_KEY];
+      const noteSource = trailers[NOTE_SOURCE_METADATA_KEY];
+      const noteDate = trailers[NOTE_DATE_METADATA_KEY];
       // The page text drops an id-shaped context line, so it is read before the body is cleaned.
       entryContext = hiddenContext(body);
-      body = withoutHiddenMarkers(body);
+      // The source travels as the item's origin, so its line is not part of the text.
+      body = withoutSourceLines(withoutHiddenMarkers(body));
       const contextMatch = /\n\n> ([^\n]*)$/.exec(body);
       if (contextMatch !== null) {
         const contextValue = contextMatch[1];
@@ -1025,18 +1065,15 @@ function buildRetainItems(
             : body,
         timestamp: entry.timestamp,
         // A replaceable entry keeps its document id, so a later update replaces it instead of adding a copy.
-        document_id: trailers?.[DOCUMENT_ID_METADATA_KEY] ?? documentIdFor(entry.id),
+        document_id: trailers[DOCUMENT_ID_METADATA_KEY] ?? documentIdFor(entry.id),
         ...(itemContext === undefined ? {} : { context: itemContext }),
-        ...(sessionId === undefined && noteSource === undefined
-          ? {}
-          : {
-              metadata: {
-                ...(sessionId === undefined ? {} : { [SESSION_ID_METADATA_KEY]: sessionId }),
-                ...(noteSource === undefined || noteDate === undefined
-                  ? {}
-                  : { [NOTE_SOURCE_METADATA_KEY]: noteSource, [NOTE_DATE_METADATA_KEY]: noteDate }),
-              },
-            }),
+        metadata: {
+          [MEMORY_ORIGIN_METADATA_KEY]: archivedOrigin(trailers),
+          ...(sessionId === undefined ? {} : { [SESSION_ID_METADATA_KEY]: sessionId }),
+          ...(noteSource === undefined || noteDate === undefined
+            ? {}
+            : { [NOTE_SOURCE_METADATA_KEY]: noteSource, [NOTE_DATE_METADATA_KEY]: noteDate }),
+        },
       });
     }
   }
@@ -1266,7 +1303,7 @@ function planMarkdownMemory(
   const targets = new Set<string>();
   let unusablePages = 0;
   let unreadableNames = 0;
-  const knownFiles = new Set([CURATED_MEMORY_FILE, VAULT_TOMBSTONES_FILE]);
+  const knownFiles = new Set([CURATED_MEMORY_FILE, VAULT_TOMBSTONES_FILE, REVIEWED_FROM_YOU_FILE]);
   for (const [name, data] of contents.files) {
     const file = memoryFileAt(name);
     if (file === undefined) {
@@ -1294,9 +1331,9 @@ function planMarkdownMemory(
       throw new DataImportError('The memory section of this export belongs to a different account.', 400);
     }
     let bytes = data;
-    if (inner === '.vault-tombstones.md' && targetSeg !== sourceSeg) {
-      // Tombstone entry ids embed the vault namespace segment; retarget them
-      // so edits and deletes still apply under the new tenant.
+    if ((inner === VAULT_TOMBSTONES_FILE || inner === REVIEWED_FROM_YOU_FILE) && targetSeg !== sourceSeg) {
+      // Marker entry ids embed the vault namespace segment; retarget them
+      // so edits, deletes and reviews still apply under the new tenant.
       const text = data.toString('utf8').split(`md:${sourceSeg}:`).join(`md:${targetSeg}:`);
       bytes = Buffer.from(text, 'utf8');
     }
@@ -1778,6 +1815,8 @@ async function importArchive<TTransaction>(
     }
 
     if (deps.memoryTarget.kind === 'markdown') {
+      // The folder's own older notes are marked first, so the imported ones are never taken for older notes.
+      await ensureMemorySourceLines({ baseDir: deps.memoryTarget.markdownDir });
       await writeMarkdownMemory(plannedMemoryFiles);
     } else if (memoryNamespaces.length > 0) {
       const items = buildRetainItems(memoryNamespaces, {

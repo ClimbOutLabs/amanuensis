@@ -206,6 +206,7 @@ function scheduleContext(logger: Logger): NonNullable<SpaceTurnContext['schedule
     chatAssistant: assistant,
     runsAs: () => Promise.resolve('you'),
     logger,
+    session_id: null,
   };
 }
 
