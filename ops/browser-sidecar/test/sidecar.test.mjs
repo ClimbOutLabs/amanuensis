@@ -25,10 +25,12 @@ let BrowserSidecar;
 let createHttpServer;
 let failureReason;
 let launchPersistentChromium;
+let pointerSteps;
 let browsersAvailable = true;
 const executablePath = process.env.BROWSER_CHROMIUM_PATH || undefined;
 try {
-  ({ BrowserSidecar, createHttpServer, failureReason, launchPersistentChromium } = await import('../src/server.mjs'));
+  ({ BrowserSidecar, createHttpServer, failureReason, launchPersistentChromium, pointerSteps } =
+    await import('../src/server.mjs'));
   const { chromium } = await import('playwright-core');
   const probe = await chromium.launch({ headless: false, chromiumSandbox: true, executablePath });
   await probe.close();
@@ -1115,11 +1117,14 @@ async function fakeSidecar() {
   let fileFields = 0;
   let launches = 0;
   let shotsToFail = 0;
+  let pageTitle = 'Account';
+  let frameUrls = ['https://site-a.test/account'];
   const mainFrame = { name: 'main' };
   const page = {
     mainFrame: () => mainFrame,
     url: () => 'https://site-a.test/account',
-    title: async () => 'Account',
+    title: async () => pageTitle,
+    frames: () => frameUrls.map(url => ({ url: () => url })),
     goto: async () => undefined,
     evaluate: async () => [],
     screenshot: async options => {
@@ -1134,6 +1139,15 @@ async function fakeSidecar() {
     mouse: {
       click: async (x, y) => {
         acts.push({ click: [x, y] });
+      },
+      move: async (x, y, options) => {
+        acts.push({ move: [x, y], steps: options?.steps });
+      },
+      down: async () => {
+        acts.push({ down: true });
+      },
+      up: async () => {
+        acts.push({ up: true });
       },
       wheel: async (dx, dy) => {
         acts.push({ wheel: [dx, dy] });
@@ -1224,6 +1238,14 @@ async function fakeSidecar() {
     failShots: count => {
       shotsToFail = count;
     },
+    /** A human check appears on the page: its widget frame, served from the check's own host. */
+    showChallenge: () => {
+      frameUrls = [...frameUrls, 'https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/g/widget'];
+    },
+    /** The page itself becomes the full-page human check, which carries its own title. */
+    showChallengePage: () => {
+      pageTitle = 'Just a moment...';
+    },
   };
 }
 
@@ -1249,6 +1271,8 @@ test('the live view lists, frames and drives a tab through a stand-in page', asy
       jpeg_base64: Buffer.from('frame-bytes').toString('base64'),
       width: 1280,
       height: 800,
+      takeover: false,
+      challenge: false,
     });
     assert.deepEqual(acts.at(-1), { screenshot: { type: 'jpeg', quality: 60 } });
 
@@ -1282,6 +1306,117 @@ test('the live view lists, frames and drives a tab through a stand-in page', asy
   }
 });
 
+test('pointer steps keep a streamed move to short hops, and cap a long one', () => {
+  if (pointerSteps === undefined) {
+    return;
+  }
+  assert.equal(pointerSteps(0), 1);
+  assert.equal(pointerSteps(40), 4);
+  assert.equal(pointerSteps(10_000), 50);
+});
+
+test('takeover streams the pointer in steps, holds the model out, and hands the tab back', async () => {
+  if (BrowserSidecar === undefined) {
+    return;
+  }
+  const { sidecar, acts, gateway } = await fakeSidecar();
+  try {
+    await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'https://site-a.test/account' });
+
+    // A chat with no tab cannot be taken over.
+    assert.deepEqual(await sidecar.liveTakeover({ owner: 'owner-1', tab: 'chat-9', on: true }), { status: 'closed' });
+
+    assert.deepEqual(await sidecar.liveTakeover({ owner: 'owner-1', tab: 'chat-1', on: true }), {
+      status: 'ok',
+      takeover: true,
+    });
+    assert.equal((await sidecar.liveFrame({ owner: 'owner-1', tab: 'chat-1' })).takeover, true);
+
+    // While the person holds the tab, the model's own steps on it are refused.
+    for (const step of [
+      () => sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'https://site-a.test/account' }),
+      () => sidecar.scroll({ owner: 'owner-1', tab: 'chat-1', direction: 'down' }),
+      () => sidecar.back({ owner: 'owner-1', tab: 'chat-1' }),
+    ]) {
+      assert.deepEqual(await step(), { status: 'refused', reason: 'takeover' });
+    }
+
+    // The person's press travels instead of landing from nowhere: a press where their hand came
+    // down, a long move applied in steps, and a release where it ended. Points read from a frame
+    // half the viewport's size land at twice the point, like a click.
+    acts.length = 0;
+    const send = input => sidecar.liveInput({ owner: 'owner-1', tab: 'chat-1', input });
+    await send({ kind: 'down', x: 100, y: 50, imageWidth: 640, imageHeight: 400 });
+    await send({ kind: 'move', x: 420, y: 250, imageWidth: 640, imageHeight: 400 });
+    await send({ kind: 'up', x: 420, y: 250, imageWidth: 640, imageHeight: 400 });
+    assert.deepEqual(acts, [
+      { move: [200, 100], steps: 1 },
+      { down: true },
+      { move: [840, 500], steps: 50 },
+      { move: [840, 500], steps: 1 },
+      { up: true },
+    ]);
+
+    // Handback releases the tab: the model can open it again.
+    assert.deepEqual(await sidecar.liveTakeover({ owner: 'owner-1', tab: 'chat-1', on: false }), {
+      status: 'ok',
+      takeover: false,
+    });
+    const reopened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'https://site-a.test/account' });
+    assert.equal(reopened.status, 'ok');
+  } finally {
+    gateway.close();
+    await sidecar.close();
+  }
+});
+
+test('under takeover the model cannot click, type or select, and can again after handback', async () => {
+  await withFakeSidecar(async ({ sidecar }) => {
+    await sidecar.liveTakeover({ owner: 'owner-1', tab: 'chat-1', on: true });
+    for (const step of [
+      () => sidecar.click({ owner: 'owner-1', tab: 'chat-1', ref: 'e1' }),
+      () => sidecar.type({ owner: 'owner-1', tab: 'chat-1', ref: 'e1', text: 'hello' }),
+      () => sidecar.select({ owner: 'owner-1', tab: 'chat-1', ref: 'e1', option: 'x' }),
+    ]) {
+      assert.deepEqual(await step(), { status: 'refused', reason: 'takeover' });
+    }
+    await sidecar.liveTakeover({ owner: 'owner-1', tab: 'chat-1', on: false });
+    const typed = await sidecar.type({ owner: 'owner-1', tab: 'chat-1', ref: 'e1', text: 'hello' });
+    assert.equal(typed.status, 'ok');
+  });
+});
+
+test('a frame says when the tab is showing a human check', async () => {
+  if (BrowserSidecar === undefined) {
+    return;
+  }
+  const { sidecar, gateway, showChallenge } = await fakeSidecar();
+  try {
+    await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'https://site-a.test/account' });
+    assert.equal((await sidecar.liveFrame({ owner: 'owner-1', tab: 'chat-1' })).challenge, false);
+    showChallenge();
+    assert.equal((await sidecar.liveFrame({ owner: 'owner-1', tab: 'chat-1' })).challenge, true);
+  } finally {
+    gateway.close();
+    await sidecar.close();
+  }
+});
+
+test('the full-page human check is reported too, by its title', async () => {
+  if (BrowserSidecar === undefined) {
+    return;
+  }
+  const { sidecar, gateway, showChallengePage } = await fakeSidecar();
+  try {
+    await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'https://site-a.test/account' });
+    showChallengePage();
+    assert.equal((await sidecar.liveFrame({ owner: 'owner-1', tab: 'chat-1' })).challenge, true);
+  } finally {
+    gateway.close();
+    await sidecar.close();
+  }
+});
+
 test('the live routes answer over HTTP, and listing them needs no tab', async () => {
   if (BrowserSidecar === undefined || createHttpServer === undefined) {
     return;
@@ -1307,6 +1442,14 @@ test('the live routes answer over HTTP, and listing them needs no tab', async ()
     const badInput = await post('/live/input', { owner: 'owner-1', tab: 'chat-1', kind: 'dance' });
     assert.equal(badInput.status, 200);
     assert.deepEqual(await badInput.json(), { status: 'bad_input' });
+
+    const badTakeover = await post('/live/takeover', { owner: 'owner-1', tab: 'chat-1', on: 'yes' });
+    assert.equal(badTakeover.status, 200);
+    assert.deepEqual(await badTakeover.json(), { status: 'bad_input' });
+
+    const takeoverWithNoTab = await post('/live/takeover', { owner: 'owner-1', tab: 'chat-1', on: true });
+    assert.equal(takeoverWithNoTab.status, 200);
+    assert.deepEqual(await takeoverWithNoTab.json(), { status: 'closed' });
   } finally {
     server.close();
     gateway.close();
