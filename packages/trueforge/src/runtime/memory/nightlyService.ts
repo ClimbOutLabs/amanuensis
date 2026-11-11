@@ -3,7 +3,7 @@
  * model for a persona's vault, otherwise the model new chats start on, behind the same switch and the same token
  * budget that turns use.
  */
-import { execFileRunner } from '@truefoundry/trueforge-core/core';
+import { execFileRunner, extractErrorLogFields } from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
 
 import configuration from '../../config';
@@ -12,6 +12,8 @@ import type { IModelProviderStore } from '../../db/modelProviderStore';
 import type { IPersonaStore } from '../../db/personaStore';
 import { TENANT_ID } from '../../tenancy';
 import { resolveDefaultChatModel } from '../defaultChatModel';
+import { readMemoryNightlySetting } from '../memoryNightlySettings';
+import { readMemoryPageSortingSetting } from '../memoryPageSortingSettings';
 import { readMemorySummarizeSetting } from '../memorySummarizeSettings';
 import type { TurnModelUsage } from '../modelUsage';
 import type { TokenFactoryBudget } from '../tokenFactoryBudget';
@@ -42,7 +44,10 @@ async function personaVaults(personaStore: PersonaLister): Promise<NightlyVault[
   return vaults;
 }
 
-/** Starts the once-a-day job. Does nothing unless this server keeps Markdown memory and the job is on. */
+/**
+ * Starts the once-a-day timer on a Markdown server. The tidy-up setting and the sorting setting are read each time
+ * the timer looks at the clock, so a change in Settings applies without a restart.
+ */
 export function startNightlyMemoryJob({
   personaStore,
   modelProviderStore,
@@ -56,12 +61,11 @@ export function startNightlyMemoryJob({
   tokenFactoryBudget: TokenFactoryBudget;
   logger: Logger;
 }): void {
-  if (configuration.MEMORY_BACKEND !== 'markdown' || !configuration.MEMORY_NIGHTLY_JOB) {
+  if (configuration.MEMORY_BACKEND !== 'markdown') {
     return;
   }
-  const deps: NightlyDeps = {
+  const deps: Omit<NightlyDeps, 'mode'> = {
     baseDir: configuration.MEMORY_MARKDOWN_DIR,
-    mode: configuration.MEMORY_PAGE_SORTING,
     now: () => new Date(),
     vaults: async () => [{ namespace: sanitizeNamespace(TENANT_ID) }, ...(await personaVaults(personaStore))],
     summarizeFor: async (vault): Promise<SummarizeTurnContext | undefined> => {
@@ -75,6 +79,7 @@ export function startNightlyMemoryJob({
       return {
         tenantId: TENANT_ID,
         modelProviderStore,
+        globalSettingsStore,
         summarizationModelFqn,
         tokenFactoryBudget,
         modelUsage: unrecordedModelUsage,
@@ -108,9 +113,20 @@ export function startNightlyMemoryJob({
       return;
     }
     running = true;
-    void runNightlyJob(deps).finally(() => {
-      running = false;
-    });
+    void (async () => {
+      const nightly = await readMemoryNightlySetting({ globalSettingsStore, logger });
+      if (!nightly.effectiveEnabled) {
+        return;
+      }
+      const sorting = await readMemoryPageSortingSetting({ globalSettingsStore, logger });
+      await runNightlyJob({ ...deps, mode: sorting.effectiveMode });
+    })()
+      .catch((error: unknown) => {
+        logger.warn('The nightly memory job could not start.', extractErrorLogFields(error));
+      })
+      .finally(() => {
+        running = false;
+      });
   };
   setInterval(look, LOOK_INTERVAL_MS).unref();
 }

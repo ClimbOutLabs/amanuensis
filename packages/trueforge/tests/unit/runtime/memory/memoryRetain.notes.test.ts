@@ -13,6 +13,7 @@ import { formatMemoryBlock } from '../../../../src/runtime/memory/memoryCapabili
 import type { TurnToolResult } from '../../../../src/runtime/memory/memoryNotesSummarize';
 import { submitRetain } from '../../../../src/runtime/memory/memoryRetain';
 import { discardedModelUsage } from '../../../fixtures/discardedModelUsage';
+import { inMemoryGlobalSettingsStore } from '../../../fixtures/inMemoryGlobalSettingsStore';
 import { uncappedTokenFactoryBudget } from '../../../fixtures/uncappedTokenFactoryBudget';
 
 /** The next scripted answer for each of the two model calls a turn can make. */
@@ -112,6 +113,7 @@ describe('turn memory with findings and reply notes', () => {
         modelProviderStore: unusedStore,
         summarizationModelFqn: 'provider/model',
         tokenFactoryBudget: uncappedTokenFactoryBudget,
+        globalSettingsStore: inMemoryGlobalSettingsStore(),
         modelUsage: discardedModelUsage,
         assistantName: turn.assistantName,
       },
@@ -173,6 +175,7 @@ describe('turn memory with findings and reply notes', () => {
         modelProviderStore: unusedStore,
         summarizationModelFqn: 'provider/model',
         tokenFactoryBudget: uncappedTokenFactoryBudget,
+        globalSettingsStore: inMemoryGlobalSettingsStore(),
         modelUsage: discardedModelUsage,
       },
     });
@@ -300,6 +303,7 @@ describe('turn memory with findings and reply notes', () => {
           modelProviderStore: unusedStore,
           summarizationModelFqn: 'provider/model',
           tokenFactoryBudget: uncappedTokenFactoryBudget,
+          globalSettingsStore: inMemoryGlobalSettingsStore(),
           modelUsage: discardedModelUsage,
         },
       });

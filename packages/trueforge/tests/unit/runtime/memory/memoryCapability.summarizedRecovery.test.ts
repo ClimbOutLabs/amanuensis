@@ -11,6 +11,7 @@ import * as os from 'os';
 import * as path from 'path';
 import winston from 'winston';
 import { discardedModelUsage } from '../../../fixtures/discardedModelUsage';
+import { inMemoryGlobalSettingsStore } from '../../../fixtures/inMemoryGlobalSettingsStore';
 import { uncappedTokenFactoryBudget } from '../../../fixtures/uncappedTokenFactoryBudget';
 
 jest.mock('../../../../src/config', () => {
@@ -71,6 +72,7 @@ function summarizeContext(): SummarizeTurnContext {
     modelProviderStore: store,
     summarizationModelFqn: 'openai/gpt-4o',
     tokenFactoryBudget: uncappedTokenFactoryBudget,
+    globalSettingsStore: inMemoryGlobalSettingsStore(),
     modelUsage: discardedModelUsage,
   };
 }

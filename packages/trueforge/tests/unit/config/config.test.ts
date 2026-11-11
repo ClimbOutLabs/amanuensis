@@ -561,11 +561,11 @@ describe('parseDemoGoogleAccount', () => {
 
 describe('parsePageSortMode', () => {
   const parse = (raw: string | undefined) =>
-    parsePageSortMode({ envKey: 'MEMORY_PAGE_SORTING', raw, defaultValue: 'report' });
+    parsePageSortMode({ envKey: 'MEMORY_PAGE_SORTING', raw, defaultValue: 'off' });
 
-  it('defaults to report when unset or blank', () => {
-    expect(parse(undefined)).toBe('report');
-    expect(parse('  ')).toBe('report');
+  it('defaults to the given default when unset or blank', () => {
+    expect(parse(undefined)).toBe('off');
+    expect(parse('  ')).toBe('off');
   });
 
   it('parses off, report and on case-insensitively', () => {

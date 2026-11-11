@@ -56,6 +56,8 @@ import {
 } from '../runtime/memory/markdownMemoryFiles';
 import type { MemoryClient } from '../runtime/memory/memoryClient';
 import { listPageFiles, pageFolder, parsePageFilePath } from '../runtime/memory/memoryPages';
+import { MEMORY_NIGHTLY_SETTING_KEY } from '../runtime/memoryNightlySettings';
+import { MEMORY_PAGE_SORTING_SETTING_KEY } from '../runtime/memoryPageSortingSettings';
 import { MEMORY_RECALL_ENABLED_SETTING_KEY } from '../runtime/memoryRecallSettings';
 import { MEMORY_SCREEN_ENABLED_SETTING_KEY } from '../runtime/memoryScreenSettings';
 import { MEMORY_SUMMARIZE_SETTING_KEY } from '../runtime/memorySummarizeSettings';
@@ -89,6 +91,8 @@ const MEMORY_LIST_TIMEOUT_MS = 10_000;
 export const EXPORTED_GLOBAL_SETTING_KEYS = [
   DEFAULT_CHAT_MODEL_SETTING_KEY,
   MEMORY_RECALL_ENABLED_SETTING_KEY,
+  MEMORY_NIGHTLY_SETTING_KEY,
+  MEMORY_PAGE_SORTING_SETTING_KEY,
   MEMORY_SCREEN_ENABLED_SETTING_KEY,
   MEMORY_SUMMARIZE_SETTING_KEY,
   TOOL_OUTPUT_SCREEN_ENABLED_SETTING_KEY,

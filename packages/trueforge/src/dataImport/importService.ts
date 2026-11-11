@@ -74,6 +74,8 @@ import {
   noteRetainContent,
 } from '../runtime/memory/memoryNotes';
 import { isInPageFolder, pageFolder, parsePageFilePath } from '../runtime/memory/memoryPages';
+import { MEMORY_NIGHTLY_SETTING_KEY } from '../runtime/memoryNightlySettings';
+import { MEMORY_PAGE_SORTING_SETTING_KEY } from '../runtime/memoryPageSortingSettings';
 import { MEMORY_RECALL_ENABLED_SETTING_KEY } from '../runtime/memoryRecallSettings';
 import { MEMORY_SCREEN_ENABLED_SETTING_KEY } from '../runtime/memoryScreenSettings';
 import { MEMORY_SUMMARIZE_SETTING_KEY } from '../runtime/memorySummarizeSettings';
@@ -238,6 +240,8 @@ function leftOutName(name: string): string {
 const IMPORTABLE_GLOBAL_SETTING_KEYS: ReadonlySet<string> = new Set<string>([
   DEFAULT_CHAT_MODEL_SETTING_KEY,
   MEMORY_RECALL_ENABLED_SETTING_KEY,
+  MEMORY_NIGHTLY_SETTING_KEY,
+  MEMORY_PAGE_SORTING_SETTING_KEY,
   MEMORY_SCREEN_ENABLED_SETTING_KEY,
   MEMORY_SUMMARIZE_SETTING_KEY,
   TOOL_OUTPUT_SCREEN_ENABLED_SETTING_KEY,

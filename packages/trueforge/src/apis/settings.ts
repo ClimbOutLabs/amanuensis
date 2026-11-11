@@ -21,6 +21,8 @@ import type { TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
 import { sandboxDisabledByInstaller } from '../sandbox/slotBackend';
 import { createFirstRunGuideRouter } from './firstRunGuide';
 import { createSettingsMcpServersRouter } from './mcpServers';
+import { createMemoryNightlyRouter } from './memoryNightly';
+import { createMemoryPageSortingRouter } from './memoryPageSorting';
 import { createMemoryRecallRouter } from './memoryRecall';
 import { createMemoryScreensRouter } from './memoryScreens';
 import { createMemorySummarizeRouter } from './memorySummarize';
@@ -121,6 +123,20 @@ export function createSettingsRouter<TTransaction>(deps: SettingsRouterDeps<TTra
   router.route(
     '/memory-summarize',
     createMemorySummarizeRouter({
+      globalSettingsStore: deps.globalSettingsStore,
+      logger: deps.logger,
+    }),
+  );
+  router.route(
+    '/memory-page-sorting',
+    createMemoryPageSortingRouter({
+      globalSettingsStore: deps.globalSettingsStore,
+      logger: deps.logger,
+    }),
+  );
+  router.route(
+    '/memory-nightly',
+    createMemoryNightlyRouter({
       globalSettingsStore: deps.globalSettingsStore,
       logger: deps.logger,
     }),

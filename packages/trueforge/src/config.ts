@@ -2045,14 +2045,16 @@ export interface SharedServerConfiguration {
    * Whether each note saved to the daily log is sorted onto the people and matter pages: `off` does nothing,
    * `report` asks the model and only records what it would have done in the vault's `.sorter-report.jsonl`,
    * `on` writes the pages. Only consulted when `MEMORY_BACKEND` is `markdown`.
-   * Env: `MEMORY_PAGE_SORTING`. Default `report`.
+   * Settings can store an override that wins over this default, so a change needs no restart.
+   * Env: `MEMORY_PAGE_SORTING`. Default `off`.
    */
   MEMORY_PAGE_SORTING: PageSortMode;
   /**
    * Whether the nightly job tidies pages once a day for each vault, in the server's quiet hours: it moves ended
    * lines to Earlier, sorts notes the sorter missed (as `MEMORY_PAGE_SORTING` allows) and lists lines that
    * disagree. It never edits a line's words. Only consulted when `MEMORY_BACKEND` is `markdown`.
-   * Env: `MEMORY_NIGHTLY_JOB`. Default `true`.
+   * Settings can store an override that wins over this default, so a change needs no restart.
+   * Env: `MEMORY_NIGHTLY_JOB`. Default `false`.
    */
   MEMORY_NIGHTLY_JOB: boolean;
   /**
@@ -2941,12 +2943,12 @@ const shared: SharedServerConfiguration = {
   MEMORY_PAGE_SORTING: parsePageSortMode({
     envKey: 'MEMORY_PAGE_SORTING',
     raw: getEnv('MEMORY_PAGE_SORTING'),
-    defaultValue: 'report',
+    defaultValue: 'off',
   }),
   MEMORY_NIGHTLY_JOB: parseBoolean({
     envKey: 'MEMORY_NIGHTLY_JOB',
     raw: getEnv('MEMORY_NIGHTLY_JOB'),
-    defaultValue: true,
+    defaultValue: false,
   }),
   NEBIUS_API_KEY: getEnv('NEBIUS_API_KEY'),
   SEARCH_PROVIDER: parseSearchProviderChoice({ envKey: 'SEARCH_PROVIDER', raw: getEnv('SEARCH_PROVIDER') }),

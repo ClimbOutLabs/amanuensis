@@ -24,11 +24,11 @@ describe('MEMORY_NIGHTLY_JOB', () => {
     expect(saved).toBe('false');
   });
 
-  it('defaults to on', async () => {
-    expect(await load(undefined)).toBe(true);
+  it('defaults to off', async () => {
+    expect(await load(undefined)).toBe(false);
   });
 
-  it('turns off with false', async () => {
-    expect(await load('false')).toBe(false);
+  it('turns on with true', async () => {
+    expect(await load('true')).toBe(true);
   });
 });

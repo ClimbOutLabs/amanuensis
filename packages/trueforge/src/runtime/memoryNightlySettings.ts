@@ -1,0 +1,67 @@
+import { extractErrorLogFields } from '@truefoundry/trueforge-core/core';
+import type { Logger } from 'winston';
+
+import configuration from '../config';
+import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
+
+/** Global-settings key for the stored nightly-job override. Values are `'true'` / `'false'`; anything else reads as unset. */
+export const MEMORY_NIGHTLY_SETTING_KEY = 'memory_nightly_job_enabled';
+
+export interface MemoryNightlySetting {
+  /** The stored setting: the persisted override when present, else the env default. */
+  enabled: boolean;
+  /** Whether a persisted override is currently stored. */
+  overridden: boolean;
+  /** The `MEMORY_NIGHTLY_JOB` env default used when no override is stored. */
+  defaultEnabled: boolean;
+  /** What the server will do: the stored setting, and only when memory is kept as Markdown files. */
+  effectiveEnabled: boolean;
+}
+
+export interface ReadMemoryNightlySettingDeps {
+  globalSettingsStore: IGlobalSettingsStore;
+  logger: Logger;
+}
+
+/** The Markdown-only gate, owned here so Settings and the nightly timer cannot disagree. */
+export function isMemoryNightlyEffective(enabled: boolean): boolean {
+  return enabled && configuration.MEMORY_BACKEND === 'markdown';
+}
+
+/**
+ * The nightly-job setting, read each time the timer looks at the clock so a change in Settings applies
+ * without a restart. A failed read falls back to the env default rather than switching the job on.
+ */
+export async function readMemoryNightlySetting(deps: ReadMemoryNightlySettingDeps): Promise<MemoryNightlySetting> {
+  const defaultEnabled = configuration.MEMORY_NIGHTLY_JOB;
+  const unset: MemoryNightlySetting = {
+    enabled: defaultEnabled,
+    overridden: false,
+    defaultEnabled,
+    effectiveEnabled: isMemoryNightlyEffective(defaultEnabled),
+  };
+  let record;
+  try {
+    record = await deps.globalSettingsStore.getSetting({ key: MEMORY_NIGHTLY_SETTING_KEY });
+  } catch (error) {
+    deps.logger.warn(
+      'Global setting read failed; using the env default for the nightly job',
+      extractErrorLogFields(error),
+    );
+    return unset;
+  }
+  if (record === undefined) {
+    return unset;
+  }
+  if (record.value !== 'true' && record.value !== 'false') {
+    deps.logger.warn('Ignoring malformed nightly-job override; using the env default', { value: record.value });
+    return unset;
+  }
+  const override = record.value === 'true';
+  return {
+    enabled: override,
+    overridden: true,
+    defaultEnabled,
+    effectiveEnabled: isMemoryNightlyEffective(override),
+  };
+}

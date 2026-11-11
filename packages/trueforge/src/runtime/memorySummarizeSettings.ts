@@ -217,6 +217,7 @@ export async function resolveTurnSummarizeContext(
       return {
         tenantId,
         modelProviderStore,
+        globalSettingsStore,
         summarizationModelFqn: undefined,
         tokenFactoryBudget,
         modelUsage,
@@ -229,6 +230,7 @@ export async function resolveTurnSummarizeContext(
     return {
       tenantId,
       modelProviderStore,
+      globalSettingsStore,
       summarizationModelFqn,
       tokenFactoryBudget,
       modelUsage,
@@ -244,6 +246,7 @@ export async function resolveTurnSummarizeContext(
     return {
       tenantId,
       modelProviderStore,
+      globalSettingsStore,
       summarizationModelFqn: undefined,
       tokenFactoryBudget,
       modelUsage,

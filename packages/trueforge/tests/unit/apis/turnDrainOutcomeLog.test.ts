@@ -12,6 +12,7 @@ import { summarizeTurnContent } from '../../../src/runtime/memory/memorySummariz
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import { TurnExecutionDeadline } from '../../../src/runtime/turnExecutionDeadline';
 import { discardedModelUsage } from '../../fixtures/discardedModelUsage';
+import { inMemoryGlobalSettingsStore } from '../../fixtures/inMemoryGlobalSettingsStore';
 import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
 jest.mock('../../../src/runtime/memory/memorySummarize', () => {
@@ -44,6 +45,7 @@ function summarizeContext() {
     modelProviderStore,
     summarizationModelFqn: 'openai/gpt-4o',
     tokenFactoryBudget: uncappedTokenFactoryBudget,
+    globalSettingsStore: inMemoryGlobalSettingsStore(),
     modelUsage: discardedModelUsage,
   };
 }

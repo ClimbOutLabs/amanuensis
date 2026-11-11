@@ -267,14 +267,17 @@ describe('resolveTurnSummarizeContext', () => {
   it('returns the context with the resolved model FQN when summarization is on', async () => {
     const { logger, lines } = capturingLogger();
     const modelProviderStore = fakeModelProviderStore();
+    const globalSettingsStore = emptyStore();
     const context = await resolveTurnSummarizeContext({
       ...baseParams({ logger }),
+      globalSettingsStore,
       modelProviderStore,
     });
 
-    expect(context).toEqual({
+    expect(context).toMatchObject({
       tenantId: 'tenant-1',
       modelProviderStore,
+      globalSettingsStore,
       summarizationModelFqn: 'openai/gpt-4o',
       tokenFactoryBudget: uncappedTokenFactoryBudget,
       modelUsage: discardedModelUsage,

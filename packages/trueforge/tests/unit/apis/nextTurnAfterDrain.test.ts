@@ -22,6 +22,7 @@ import { TurnExecutionDeadline } from '../../../src/runtime/turnExecutionDeadlin
 import { discardedModelUsage } from '../../fixtures/discardedModelUsage';
 import { FakeSandboxProvider } from '../../fixtures/fakeSandboxProvider';
 import { FakeTurnArtifactStore } from '../../fixtures/fakeTurnArtifactStore';
+import { inMemoryGlobalSettingsStore } from '../../fixtures/inMemoryGlobalSettingsStore';
 import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
 jest.mock('../../../src/runtime/memory/memorySummarize', () => {
@@ -76,6 +77,7 @@ function summarizeContext() {
     modelProviderStore,
     summarizationModelFqn: 'openai/gpt-4o',
     tokenFactoryBudget: uncappedTokenFactoryBudget,
+    globalSettingsStore: inMemoryGlobalSettingsStore(),
     modelUsage: discardedModelUsage,
   };
 }

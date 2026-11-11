@@ -5,6 +5,7 @@ import type { IModelProviderStore } from '../../../../src/db/modelProviderStore'
 import type { SummarizeTurnContext } from '../../../../src/runtime/memory/memoryRetain';
 import { summaryModelForSorting } from '../../../../src/runtime/memory/pageSortRun';
 import { discardedModelUsage } from '../../../fixtures/discardedModelUsage';
+import { inMemoryGlobalSettingsStore } from '../../../fixtures/inMemoryGlobalSettingsStore';
 import { uncappedTokenFactoryBudget } from '../../../fixtures/uncappedTokenFactoryBudget';
 
 const logger = winston.createLogger({ silent: true });
@@ -52,6 +53,7 @@ function context(overrides: Partial<SummarizeTurnContext>): SummarizeTurnContext
     summarizationModelFqn: 'test/model',
     tokenFactoryBudget: uncappedTokenFactoryBudget,
     modelUsage: discardedModelUsage,
+    globalSettingsStore: inMemoryGlobalSettingsStore(),
     ...overrides,
   };
 }

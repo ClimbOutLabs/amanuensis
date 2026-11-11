@@ -10,7 +10,9 @@ import type { SessionRecord } from '@truefoundry/trueforge-core/agent-session';
 import type { ILLM } from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
 import configuration from '../../config';
+import type { IGlobalSettingsStore } from '../../db/globalSettingsStore';
 import type { IModelProviderStore } from '../../db/modelProviderStore';
+import { readMemoryPageSortingSetting } from '../memoryPageSortingSettings';
 import type { TurnModelUsage } from '../modelUsage';
 import { sessionKeepsNothing } from '../privateChat';
 import type { TokenFactoryBudget } from '../tokenFactoryBudget';
@@ -108,6 +110,8 @@ export interface SummarizeTurnContext {
   summarizationModelFqn: string | undefined;
   tokenFactoryBudget: TokenFactoryBudget;
   modelUsage: TurnModelUsage;
+  /** Read after a save to learn whether notes are sorted onto pages. */
+  globalSettingsStore: IGlobalSettingsStore;
   /**
    * The person's name from their personalization profile, so saved facts are written in their
    * name. Undefined when the profile holds no name; the summarizer then writes its facts about
@@ -509,10 +513,13 @@ export function startPageSorting({
   timeZone: string | undefined;
   logger: Logger;
 }): void {
-  if (written === undefined || written.length === 0) {
+  if (written === undefined || written.length === 0 || summarize === undefined) {
     return;
   }
-  void sortWrittenNotes({ mode: configuration.MEMORY_PAGE_SORTING, client, written, summarize, timeZone, logger });
+  // The setting is read now, after the save, so a change in Settings applies to the very next save.
+  void readMemoryPageSortingSetting({ globalSettingsStore: summarize.globalSettingsStore, logger }).then(setting =>
+    sortWrittenNotes({ mode: setting.effectiveMode, client, written, summarize, timeZone, logger }),
+  );
 }
 
 async function attemptRetainSubmission(

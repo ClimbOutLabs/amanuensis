@@ -14,7 +14,9 @@ import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMem
 import { submitRetain, type SummarizeTurnContext } from '../../../../src/runtime/memory/memoryRetain';
 import { SORT_REPORT_FILE } from '../../../../src/runtime/memory/pageSortReport';
 import { saveSentMail } from '../../../../src/runtime/memory/sentMail';
+import { MEMORY_PAGE_SORTING_SETTING_KEY } from '../../../../src/runtime/memoryPageSortingSettings';
 import { discardedModelUsage } from '../../../fixtures/discardedModelUsage';
+import { inMemoryGlobalSettingsStore } from '../../../fixtures/inMemoryGlobalSettingsStore';
 import { uncappedTokenFactoryBudget } from '../../../fixtures/uncappedTokenFactoryBudget';
 
 let sortingMode: 'off' | 'report' | 'on' = 'on';
@@ -67,7 +69,7 @@ function fakeModel({ sortAnswer }: { sortAnswer: () => Promise<string> }): Model
   return model;
 }
 
-function summarizeContext(model: Model): SummarizeTurnContext {
+function summarizeContext(model: Model, globalSettingsStore = inMemoryGlobalSettingsStore()): SummarizeTurnContext {
   const store: IModelProviderStore = {
     listProviders: jest.fn(),
     getProvider: jest.fn(),
@@ -82,6 +84,7 @@ function summarizeContext(model: Model): SummarizeTurnContext {
     modelProviderStore: store,
     summarizationModelFqn: 'test/model',
     tokenFactoryBudget: uncappedTokenFactoryBudget,
+    globalSettingsStore,
     modelUsage: discardedModelUsage,
     resolveLlm: () => Promise.resolve(model.llm),
   };
@@ -201,6 +204,58 @@ describe('sorting after a save', () => {
     await new Promise(resolve => setTimeout(resolve, 100));
 
     expect(model.sortCalls).toBe(0);
+  });
+
+  it('asks the model nothing when nothing is stored and the default is off', async () => {
+    sortingMode = 'off';
+    const { client } = await openClient();
+    const model = fakeModel({ sortAnswer: newFactAnswer });
+
+    await submitRetain({
+      client,
+      session: { is_incognito: false },
+      ...TURN,
+      userText: SHELLFISH,
+      assistantText: 'Noted.',
+      logger,
+      summarize: summarizeContext(model),
+    });
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    expect(model.sortCalls).toBe(0);
+  });
+
+  it('follows the stored setting over the default, on the very next save, without a restart', async () => {
+    sortingMode = 'off';
+    const settings = inMemoryGlobalSettingsStore();
+    const { client, vaultDir } = await openClient();
+    const model = fakeModel({ sortAnswer: newFactAnswer });
+    const submit = (turnId: string) =>
+      submitRetain({
+        client,
+        session: { is_incognito: false },
+        ...TURN,
+        turnId,
+        userText: `${SHELLFISH} (${turnId})`,
+        assistantText: 'Noted.',
+        logger,
+        summarize: summarizeContext(model, settings),
+      });
+
+    await submit('t1');
+    await new Promise(resolve => setTimeout(resolve, 100));
+    expect(model.sortCalls).toBe(0);
+
+    await settings.setSetting({ key: MEMORY_PAGE_SORTING_SETTING_KEY, value: 'on' });
+    await submit('t2');
+    await waitFor(async () => (await handledCount(vaultDir)) >= 1);
+    expect(model.sortCalls).toBe(1);
+
+    sortingMode = 'on';
+    await settings.setSetting({ key: MEMORY_PAGE_SORTING_SETTING_KEY, value: 'off' });
+    await submit('t3');
+    await new Promise(resolve => setTimeout(resolve, 100));
+    expect(model.sortCalls).toBe(1);
   });
 
   it('sorts nothing from a private chat, which saves nothing', async () => {

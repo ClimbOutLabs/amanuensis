@@ -8,6 +8,7 @@ import { createLogger } from 'winston';
 import type { IModelProviderStore } from '../../../../src/db/modelProviderStore';
 import type { SummarizeTurnContext } from '../../../../src/runtime/memory/memoryRetain';
 import { discardedModelUsage } from '../../../fixtures/discardedModelUsage';
+import { inMemoryGlobalSettingsStore } from '../../../fixtures/inMemoryGlobalSettingsStore';
 import { uncappedTokenFactoryBudget } from '../../../fixtures/uncappedTokenFactoryBudget';
 
 import { namespaceDirFor } from '../../../../src/runtime/memory/markdownMemoryFiles';
@@ -171,6 +172,7 @@ export function fakeSummarize(answer: (prompt: string) => unknown): SummarizeTur
     modelProviderStore: store,
     summarizationModelFqn: 'test/model',
     tokenFactoryBudget: uncappedTokenFactoryBudget,
+    globalSettingsStore: inMemoryGlobalSettingsStore(),
     modelUsage: discardedModelUsage,
     resolveLlm: () => Promise.resolve(llm),
   };

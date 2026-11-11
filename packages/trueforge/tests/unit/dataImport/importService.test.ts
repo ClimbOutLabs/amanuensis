@@ -1001,7 +1001,7 @@ describe('runDataImport keeps what the archive recorded', () => {
     }
   });
 
-  it('fills the default model and the memory summary switch only when the target has none', async () => {
+  it('fills the default model and the memory switches only when the target has none', async () => {
     const { source, archive } = await seededArchive();
     const fresh = await makeInstance('target-defaults-fresh');
     const configured = await makeInstance('target-defaults-set');
@@ -1013,9 +1013,19 @@ describe('runDataImport keeps what the archive recorded', () => {
       expect((await fresh.stores.globalSettingsStore.getSetting({ key: 'memory_summarize_enabled' }))?.value).toBe(
         'true',
       );
+      expect((await fresh.stores.globalSettingsStore.getSetting({ key: 'memory_page_sorting_mode' }))?.value).toBe(
+        'report',
+      );
+      expect((await fresh.stores.globalSettingsStore.getSetting({ key: 'memory_nightly_job_enabled' }))?.value).toBe(
+        'true',
+      );
 
       await configured.stores.globalSettingsStore.setSetting({ key: 'default_chat_model', value: 'new-host/model' });
+      await configured.stores.globalSettingsStore.setSetting({ key: 'memory_page_sorting_mode', value: 'off' });
       await runDataImport(importDeps(configured), importRequest(archive));
+      expect((await configured.stores.globalSettingsStore.getSetting({ key: 'memory_page_sorting_mode' }))?.value).toBe(
+        'off',
+      );
       expect((await configured.stores.globalSettingsStore.getSetting({ key: 'default_chat_model' }))?.value).toBe(
         'new-host/model',
       );
