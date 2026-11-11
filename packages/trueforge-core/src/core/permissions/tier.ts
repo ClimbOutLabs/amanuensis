@@ -81,6 +81,13 @@ export const CHAT_GRANTABLE_CONSEQUENCE_REASONS: ReadonlySet<string> = new Set([
  */
 export const OWN_CALENDAR_CHANGE_REASONS: ReadonlySet<string> = new Set(['calendar_write', 'caldav_calendar_change']);
 
+/**
+ * Drive writes touch only the person's own files: a new Doc, or rows added to their own Sheet. Nothing is
+ * sent to anyone and nothing is shared, so only these may get an "Always allow" or chat grant, as an
+ * own-calendar change may.
+ */
+export const OWN_DRIVE_WRITE_REASONS: ReadonlySet<string> = new Set(['google_drive_write']);
+
 /** Tier 2 action kinds the user may relax to run without asking. Pinned to the Tier 2 member list. */
 export const TIER2_ACTION_KINDS = ['file_write'] as const;
 export type Tier2ActionKind = (typeof TIER2_ACTION_KINDS)[number];

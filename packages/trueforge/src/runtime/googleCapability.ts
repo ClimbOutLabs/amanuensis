@@ -1,7 +1,8 @@
 /**
- * Google for one user's turn: the Gmail and Calendar tools, mounted only when that user has a working Google
- * login that granted them. The login is read once and shares one token cache, so a turn using mail and calendar
- * refreshes the OAuth token once. Without a login nothing mounts, and the chat simply has no Google tools.
+ * Google for one user's turn: the Gmail, Calendar and Drive tools, mounted only when that user has a working
+ * Google login that granted them. The login is read once and shares one token cache, so a turn using mail,
+ * calendar and Drive refreshes the OAuth token once. Without a login nothing mounts, and the chat simply
+ * has no Google tools.
  */
 import {
   stageAttachment,
@@ -12,6 +13,8 @@ import {
 } from '@truefoundry/trueforge-core/core';
 import { CalendarApi, type CalendarApiPort } from '@truefoundry/trueforge-core/core/calendar/CalendarApi';
 import { CalendarToolSet } from '@truefoundry/trueforge-core/core/calendar/CalendarToolSet';
+import { DriveApi, type DriveApiPort } from '@truefoundry/trueforge-core/core/drive/driveApi';
+import { DriveToolSet } from '@truefoundry/trueforge-core/core/drive/DriveToolSet';
 import { GmailApi, LIST_DEADLINE_MS, type GmailApiPort } from '@truefoundry/trueforge-core/core/email/gmail/gmailApi';
 import { GmailToolSet, type AttachmentStager } from '@truefoundry/trueforge-core/core/email/gmail/GmailToolSet';
 import type { GoogleConnectionStore, GoogleOwner } from '@truefoundry/trueforge-core/core/google/connection';
@@ -52,12 +55,14 @@ interface GoogleCapabilityOptions {
   logger: Logger;
 }
 
-/** What the Gmail and Calendar tools are built on: the grants, the account name, and the two API sources. */
+/** What the Google tools are built on: the grants, the account name, and the API sources. */
 interface GoogleSource {
   features: GoogleFeature[];
   account: string;
   gmail: GmailApiPort;
   calendar: CalendarApiPort;
+  /** Absent in eval mode, where no Drive fixture exists; the Drive tools then do not mount. */
+  drive: DriveApiPort | undefined;
 }
 
 /** Every feature is granted in eval mode so the fixture tools mount the same way a fully connected login would. */
@@ -71,7 +76,7 @@ async function liveSource(
     return undefined;
   }
   const features = grantedFeatures(record.granted_scopes);
-  if (!features.includes('gmail_read') && !features.includes('calendar_read')) {
+  if (!features.includes('gmail_read') && !features.includes('calendar_read') && !features.includes('drive_files')) {
     return undefined;
   }
   const tokens = new GoogleAccessTokens({
@@ -85,6 +90,7 @@ async function liveSource(
     account: record.account_email ?? 'your Google account',
     gmail: new GmailApi({ sleep: undefined, tokens, fetchImpl: options.fetchImpl }),
     calendar: new CalendarApi({ sleep: undefined, tokens, fetchImpl: options.fetchImpl }),
+    drive: new DriveApi({ sleep: undefined, tokens, fetchImpl: options.fetchImpl }),
   };
 }
 
@@ -96,6 +102,7 @@ export async function googleCapability(options: GoogleCapabilityOptions): Promis
       account: options.evalSources.mailOwner,
       gmail: options.evalSources.gmail,
       calendar: options.evalSources.calendar,
+      drive: undefined,
     };
   } else if (options.connections !== undefined) {
     source = await liveSource({ ...options, connections: options.connections });
@@ -106,7 +113,8 @@ export async function googleCapability(options: GoogleCapabilityOptions): Promis
   const { features, account } = source;
   const hasMail = features.includes('gmail_read');
   const hasCalendar = features.includes('calendar_read');
-  if (!hasMail && !hasCalendar) {
+  const hasDrive = features.includes('drive_files') && source.drive !== undefined;
+  if (!hasMail && !hasCalendar && !hasDrive) {
     return undefined;
   }
   return {
@@ -134,6 +142,17 @@ export async function googleCapability(options: GoogleCapabilityOptions): Promis
               timeZone: options.timeZone,
               sentinel: options.sentinel,
               logger: options.logger,
+            }),
+          ]
+        : []),
+      ...(hasDrive && source.drive !== undefined
+        ? [
+            new DriveToolSet({
+              tracing: options.tracing,
+              api: source.drive,
+              account,
+              features,
+              sentinel: options.sentinel,
             }),
           ]
         : []),
