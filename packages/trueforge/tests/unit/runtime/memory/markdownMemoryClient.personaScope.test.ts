@@ -572,10 +572,10 @@ describe('MarkdownMemoryClient persona vault scope with embeddings', () => {
     await alpha.updateEntry({ entryId: entry.id, text: edited, timeoutMs: TIMEOUT_MS });
 
     expect([...requested]).toEqual(['tenant-1__persona_Alpha']);
-    // The index keeps the entry's time heading and source line with the fact, as it does for a newly retained entry.
+    // The index keeps the entry's time heading with the fact, as it does for a newly retained entry, and leaves the source line out.
     await waitFor(async () => {
       const store = await EmbeddingStore.load({ namespaceDir: path.join(baseDir, 'tenant-1__persona_Alpha') });
-      return store.get(entry.id)?.hash === hashEntryText(`## ${entry.timestamp}\n\n${edited}\n\n> From you`);
+      return store.get(entry.id)?.hash === hashEntryText(`## ${entry.timestamp}\n\n${edited}`);
     }, 'the edited fact to be re-indexed');
     expect(await storedIds(TENANT)).toEqual([]);
   });

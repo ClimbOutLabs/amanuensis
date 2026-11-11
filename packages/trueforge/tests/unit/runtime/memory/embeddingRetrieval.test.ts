@@ -316,6 +316,32 @@ describe('getSharedEmbeddingModel', () => {
 });
 
 describe('EmbeddingSubsystem', () => {
+  it('embeds a memory without the line that says where it came from, and does not embed it again', async () => {
+    const fixture = await makeFixture();
+    try {
+      await retainTexts(fixture, ['Maya lives in Lisbon.']);
+      fixture.subsystem.ensureWarmed();
+      await waitForState(fixture.subsystem, 'ready');
+      expect(fixture.model.embeddedPassageTexts.flat()).toEqual([
+        '## 2026-09-19T10:00:00.000Z\n\nMaya lives in Lisbon.',
+      ]);
+
+      // A second index over the same folder finds the memory unchanged.
+      const again = new EmbeddingSubsystem({
+        baseDir: fixture.baseDir,
+        namespace: fixture.namespace,
+        modelDir: fixture.modelDir,
+        batchSize: 2,
+        model: fixture.model,
+      });
+      again.ensureWarmed();
+      await waitForState(again, 'ready');
+      expect(fixture.model.embeddedPassageTexts.flat()).toHaveLength(1);
+    } finally {
+      await cleanup(fixture);
+    }
+  });
+
   it('reports unavailable when the model cannot load', async () => {
     const fixture = await makeFixture();
     try {
