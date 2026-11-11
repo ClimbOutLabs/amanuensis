@@ -94,6 +94,7 @@ async function retainTexts(fixture: Fixture, texts: string[], day = '2026-09-19'
       content,
       timestamp: `${day}T10:0${String(i)}:00.000Z`,
       document_id: `doc-${String(i)}`,
+      metadata: { origin: 'user_stated' },
     })),
     operationId: `op-${day}-${String(texts.length)}`,
     timeoutMs: 5000,
@@ -577,7 +578,14 @@ describe('EmbeddingSubsystem', () => {
         embeddings: () => fixture.subsystem,
       });
       await client.retain({
-        items: [{ content: 'gamma entry', timestamp: '2026-09-19T12:00:00.000Z', document_id: 'doc-g' }],
+        items: [
+          {
+            metadata: { origin: 'user_stated' },
+            content: 'gamma entry',
+            timestamp: '2026-09-19T12:00:00.000Z',
+            document_id: 'doc-g',
+          },
+        ],
         operationId: 'op-gamma',
         timeoutMs: 5000,
       });
@@ -752,19 +760,19 @@ describe('EmbeddingSubsystem', () => {
             content: 'Turn summary: hotel in Madrid is Petit Palace',
             timestamp: '2026-09-19T10:00:00.000Z',
             document_id: 'd1',
-            metadata: { session_id: 'chat-other' },
+            metadata: { origin: 'user_stated', session_id: 'chat-other' },
           },
           {
             content: 'Turn summary: hotel plan is still undecided',
             timestamp: '2026-09-19T10:01:00.000Z',
             document_id: 'd2',
-            metadata: { session_id: 'chat-now' },
+            metadata: { origin: 'user_stated', session_id: 'chat-now' },
           },
           {
             content: 'Turn summary: Lexie is a Bernese Mountain Dog',
             timestamp: '2026-09-19T10:02:00.000Z',
             document_id: 'd3',
-            metadata: { session_id: 'chat-other' },
+            metadata: { origin: 'user_stated', session_id: 'chat-other' },
           },
         ],
         operationId: 'op-scope',
@@ -845,7 +853,14 @@ describe('EmbeddingSubsystem', () => {
         embeddings: () => fixture.subsystem,
       });
       await client.retain({
-        items: [{ content: 'second memory', timestamp: '2026-09-19T12:00:00.000Z', document_id: 'doc-9' }],
+        items: [
+          {
+            metadata: { origin: 'user_stated' },
+            content: 'second memory',
+            timestamp: '2026-09-19T12:00:00.000Z',
+            document_id: 'doc-9',
+          },
+        ],
         operationId: 'op-second',
         timeoutMs: 5000,
       });

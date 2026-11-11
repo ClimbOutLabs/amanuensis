@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import type { RetainItem } from '../../../../src/runtime/memory/hindsightClient';
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
 
 const MESSAGE =
@@ -33,15 +34,17 @@ describe('MarkdownMemoryClient recall ranks notes naming the person asked about 
       const client = new MarkdownMemoryClient({ baseDir: dir, namespace: 'tenant-1' });
       await client.retain({
         items: [
-          ...BACKGROUND_NOTES.map((content, index) => ({
+          ...BACKGROUND_NOTES.map((content, index): RetainItem => ({
             content,
             timestamp: `2026-10-${String(10 + index).padStart(2, '0')}T09:00:00Z`,
             document_id: `bg-${String(index)}`,
+            metadata: { origin: 'user_stated' },
           })),
-          ...WENDY_NOTES.map((content, index) => ({
+          ...WENDY_NOTES.map((content, index): RetainItem => ({
             content,
             timestamp: `2026-10-28T1${String(index)}:00:00Z`,
             document_id: `wendy-${String(index)}`,
+            metadata: { origin: 'user_stated' },
           })),
         ],
         operationId: 'op-1',

@@ -22,6 +22,7 @@ describe('MarkdownMemoryClient', () => {
         const first = await client.retain({
           items: [
             {
+              metadata: { origin: 'user_stated' },
               content: 'Alex booked SFO→ORD→MAD for Sep 22',
               timestamp: '2026-09-19T12:00:00.000Z',
               document_id: 'doc-1',
@@ -36,6 +37,7 @@ describe('MarkdownMemoryClient', () => {
         const second = await client.retain({
           items: [
             {
+              metadata: { origin: 'user_stated' },
               content: 'Alex booked SFO→ORD→MAD for Sep 22',
               timestamp: '2026-09-19T12:00:00.000Z',
               document_id: 'doc-1',
@@ -59,7 +61,14 @@ describe('MarkdownMemoryClient', () => {
       const { client, dir } = await makeClient('tenant-a');
       try {
         await client.retain({
-          items: [{ content: 'tenant a secret', timestamp: '2026-09-19T12:00:00.000Z', document_id: 'd1' }],
+          items: [
+            {
+              metadata: { origin: 'user_stated' },
+              content: 'tenant a secret',
+              timestamp: '2026-09-19T12:00:00.000Z',
+              document_id: 'd1',
+            },
+          ],
           operationId: 'op-a',
           timeoutMs: 5000,
         });
@@ -84,7 +93,14 @@ describe('MarkdownMemoryClient', () => {
       const { client, dir } = await makeClient('../../evil');
       try {
         const outcome = await client.retain({
-          items: [{ content: 'x', timestamp: '2026-09-19T12:00:00.000Z', document_id: 'd1' }],
+          items: [
+            {
+              metadata: { origin: 'user_stated' },
+              content: 'x',
+              timestamp: '2026-09-19T12:00:00.000Z',
+              document_id: 'd1',
+            },
+          ],
           operationId: 'op-evil',
           timeoutMs: 5000,
         });
@@ -106,7 +122,14 @@ describe('MarkdownMemoryClient', () => {
         await writeFile(blocker, 'x', 'utf8');
         const client = new MarkdownMemoryClient({ baseDir: blocker, namespace: 't1' });
         const outcome = await client.retain({
-          items: [{ content: 'x', timestamp: '2026-09-19T12:00:00.000Z', document_id: 'd1' }],
+          items: [
+            {
+              metadata: { origin: 'user_stated' },
+              content: 'x',
+              timestamp: '2026-09-19T12:00:00.000Z',
+              document_id: 'd1',
+            },
+          ],
           operationId: 'op-blocked',
           timeoutMs: 5000,
         });
@@ -180,7 +203,7 @@ describe('MarkdownMemoryClient', () => {
           const read = outcome.results.find(item => item.text.includes('PIN is 0000'));
           const own = outcome.results.find(item => item.text.includes('Dr Rivera'));
           expect(read?.metadata).toEqual({ origin: 'tool_ingested' });
-          expect(own?.metadata).toBeUndefined();
+          expect(own?.metadata).toEqual({ origin: 'user_stated' });
         }
       } finally {
         await cleanup(dir);
@@ -196,7 +219,7 @@ describe('MarkdownMemoryClient', () => {
               content: 'The person has a dog named Rex.',
               timestamp: '2026-09-19T12:00:00.000Z',
               document_id: 'doc-dog',
-              metadata: { session_id: 'chat-4' },
+              metadata: { origin: 'user_stated', session_id: 'chat-4' },
             },
           ],
           operationId: 'op-fields',
@@ -215,7 +238,7 @@ describe('MarkdownMemoryClient', () => {
           expect(outcome.results[0]?.text).toContain('The person has a dog named Rex.');
           expect(outcome.results[0]?.text).not.toContain('session_id');
           expect(outcome.results[0]?.occurred_start).toBe('2026-09-19T12:00:00.000Z');
-          expect(outcome.results[0]?.metadata).toEqual({ session_id: 'chat-4' });
+          expect(outcome.results[0]?.metadata).toEqual({ origin: 'user_stated', session_id: 'chat-4' });
         }
       } finally {
         await cleanup(dir);
@@ -294,7 +317,7 @@ describe('MarkdownMemoryClient', () => {
       }
     });
 
-    it('keeps a user memory unlabelled when its text ends with the source line', async () => {
+    it("keeps a user memory as the person's own when its text ends with a source-like line", async () => {
       const { client, dir } = await makeClient();
       try {
         await client.retain({
@@ -319,7 +342,7 @@ describe('MarkdownMemoryClient', () => {
         expect(outcome.ok).toBe(true);
         if (outcome.ok) {
           expect(outcome.results).toHaveLength(1);
-          expect(outcome.results[0]?.metadata).toBeUndefined();
+          expect(outcome.results[0]?.metadata).toEqual({ origin: 'user_stated' });
         }
       } finally {
         await cleanup(dir);
@@ -331,8 +354,18 @@ describe('MarkdownMemoryClient', () => {
       try {
         await client.retain({
           items: [
-            { content: 'Bought milk and eggs', timestamp: '2026-09-19T10:00:00.000Z', document_id: 'd1' },
-            { content: 'Booked Madrid hotel for September', timestamp: '2026-09-19T11:00:00.000Z', document_id: 'd2' },
+            {
+              metadata: { origin: 'user_stated' },
+              content: 'Bought milk and eggs',
+              timestamp: '2026-09-19T10:00:00.000Z',
+              document_id: 'd1',
+            },
+            {
+              metadata: { origin: 'user_stated' },
+              content: 'Booked Madrid hotel for September',
+              timestamp: '2026-09-19T11:00:00.000Z',
+              document_id: 'd2',
+            },
           ],
           operationId: 'op-rank',
           timeoutMs: 5000,
@@ -376,7 +409,14 @@ describe('MarkdownMemoryClient', () => {
       const { client, dir } = await makeClient();
       try {
         await client.retain({
-          items: [{ content: 'x', timestamp: '2026-09-19T12:00:00.000Z', document_id: 'd1' }],
+          items: [
+            {
+              metadata: { origin: 'user_stated' },
+              content: 'x',
+              timestamp: '2026-09-19T12:00:00.000Z',
+              document_id: 'd1',
+            },
+          ],
           operationId: 'op-99',
           timeoutMs: 5000,
         });

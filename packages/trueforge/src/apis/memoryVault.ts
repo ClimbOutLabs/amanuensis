@@ -24,16 +24,19 @@ import {
   updateMemoryVaultEntryRoute,
 } from '../routes/memoryVaultRoutes';
 import { getEmbeddingSubsystem } from '../runtime/memory/embeddingRetrieval';
+import type { RetainItem } from '../runtime/memory/hindsightClient';
 import { MarkdownMemoryClient } from '../runtime/memory/markdownMemoryClient';
 import {
   readVaultSharing,
   sanitizeNamespace,
   vaultFilesystemNamespace,
   withHiddenContext,
+  withoutSourceLines,
   writeVaultSharing,
   type VaultSharing,
 } from '../runtime/memory/markdownMemoryFiles';
 import type { MemoryVaultEntry as VaultEntry } from '../runtime/memory/memoryClient';
+import { IMPORTED_ORIGIN, MEMORY_ORIGIN_METADATA_KEY } from '../runtime/memory/memoryOrigin';
 import type { MemoryVaultEntry } from '../schemas/memoryVault';
 
 export interface MemoryVaultRouterDeps {
@@ -216,7 +219,7 @@ export function createMemoryVaultRouter(deps: MemoryVaultRouterDeps) {
       namespace: filesystemNamespace,
     });
     const now = new Date().toISOString();
-    const items = body.entries.map(entry => {
+    const items = body.entries.map((entry): RetainItem => {
       let timestamp = now;
       if (entry.timestamp !== undefined) {
         const parsed = new Date(entry.timestamp);
@@ -224,7 +227,13 @@ export function createMemoryVaultRouter(deps: MemoryVaultRouterDeps) {
           timestamp = parsed.toISOString();
         }
       }
-      return { content: entry.text, timestamp, document_id: randomUUID() };
+      // An imported note is never taken as the person's own words, whatever the file says about itself.
+      return {
+        content: withoutSourceLines(entry.text),
+        timestamp,
+        document_id: randomUUID(),
+        metadata: { [MEMORY_ORIGIN_METADATA_KEY]: IMPORTED_ORIGIN },
+      };
     });
     const outcome = await importClient.retain({
       items,

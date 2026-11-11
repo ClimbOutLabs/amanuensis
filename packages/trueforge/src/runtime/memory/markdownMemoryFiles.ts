@@ -19,7 +19,6 @@ import {
 } from '../../utils/dataDir';
 import type { RetainItem } from './hindsightClient';
 import {
-  ASSISTANT_RESPONSE_SOURCE,
   formatNoteMarker,
   isMemoryNoteSource,
   NOTE_DATE_METADATA_KEY,
@@ -27,8 +26,15 @@ import {
   noteProvenanceFromMetadata,
   parseNoteMarker,
   withoutNoteTrailer,
+  type MemoryNoteSource,
 } from './memoryNotes';
-import { MEMORY_ORIGIN_METADATA_KEY, TOOL_INGESTED_ORIGIN, USER_STATED_ORIGIN } from './memoryOrigin';
+import {
+  IMPORTED_ORIGIN,
+  isPersonOrigin,
+  MEMORY_ORIGIN_METADATA_KEY,
+  TOOL_INGESTED_ORIGIN,
+  USER_STATED_ORIGIN,
+} from './memoryOrigin';
 
 /** Longest namespace directory name; longer names are cut. */
 const NAMESPACE_MAX_LENGTH = 64;
@@ -70,7 +76,8 @@ export function splitEntries(content: string): string[] {
  */
 export function upgradeLegacyEntries(content: string): string {
   const prefix = /(^|\n)(## [^\n]*\n\n)(?:Turn summary: ?)+/g;
-  const trailingTitle = /\n\n> Chat title: [^\n]*(?=(?:\n\n> Source: read content)?(?:\n*$|\n+## ))/g;
+  const trailingTitle =
+    /\n\n> Chat title: [^\n]*(?=(?:\n\n> (?:Source: read content|From you|External source: [^\n]*))?(?:\n*$|\n+## ))/g;
   let upgraded = content;
   for (let previous = ''; previous !== upgraded;) {
     previous = upgraded;
@@ -131,11 +138,59 @@ export const REPLACE_DOCUMENT_METADATA_KEY = 'replace_document';
 /** Hidden trailer carrying the document id. Ids are the host's own (hashes and prefixes), never free text. */
 const DOCUMENT_MARKER_PATTERN = /^<!-- document_id: ([A-Za-z0-9_.-]{1,128}) -->$/;
 
-/** Closing line marking an entry written after the assistant read an email, document, or web page. */
-const READ_CONTENT_SOURCE_LINE = '> Source: read content';
+/** Closing line of an entry that holds the person's own words. */
+const FROM_YOU_SOURCE_LINE = '> From you';
 
-/** What the Memories page shows in place of that line for a note about the assistant's own reply. */
-const ASSISTANT_REPLY_SOURCE_LINE = '> Source: assistant reply';
+/** Start of the closing line of every other entry; what follows names where it came from. */
+const EXTERNAL_SOURCE_LINE_PREFIX = '> External source: ';
+
+/** Closing lines older versions wrote on an entry that is not the person's own. They stay understood. */
+const LEGACY_EXTERNAL_SOURCE_LINES: readonly string[] = ['> Source: read content', '> Source: assistant reply'];
+
+/** How each kind of note names its source on the closing line. */
+const NOTE_SOURCE_NAMES: Record<MemoryNoteSource, string> = {
+  email: 'email',
+  calendar: 'calendar',
+  web: 'web page',
+  attachment: 'attachment',
+  other: 'tool result',
+  assistant_response: 'assistant reply',
+};
+
+/** The source named for text from a turn that read an email, a page, a document or a tool result. */
+const READ_CONTENT_SOURCE_NAME = 'read content';
+
+/** The source named for text that came in through the Memories import. */
+const IMPORTED_SOURCE_NAME = 'imported file';
+
+/** The source named for an entry that carries no source line at all. */
+const NO_RECORD_SOURCE_NAME = 'no record';
+
+function isExternalSourceLine(line: string): boolean {
+  return line.startsWith(EXTERNAL_SOURCE_LINE_PREFIX) || LEGACY_EXTERNAL_SOURCE_LINES.includes(line);
+}
+
+/** Whether a line is one that says where an entry came from. */
+function isSourceLine(line: string): boolean {
+  return line === FROM_YOU_SOURCE_LINE || isExternalSourceLine(line);
+}
+
+/**
+ * The closing line for an entry with this metadata. Only an entry whose origin says the person said it
+ * closes with "From you"; a note, any other origin and a missing origin are named as an external source.
+ */
+function sourceLineFor(metadata: Readonly<Record<string, string>>): string {
+  const note = noteProvenanceFromMetadata(metadata);
+  if (note !== undefined) {
+    return `${EXTERNAL_SOURCE_LINE_PREFIX}${NOTE_SOURCE_NAMES[note.source]}`;
+  }
+  if (isPersonOrigin(metadata)) {
+    return FROM_YOU_SOURCE_LINE;
+  }
+  const name =
+    metadata[MEMORY_ORIGIN_METADATA_KEY] === IMPORTED_ORIGIN ? IMPORTED_SOURCE_NAME : READ_CONTENT_SOURCE_NAME;
+  return `${EXTERNAL_SOURCE_LINE_PREFIX}${name}`;
+}
 
 /**
  * The exact on-disk text of one retained entry, trimmed. `retain()` appends one
@@ -144,8 +199,8 @@ const ASSISTANT_REPLY_SOURCE_LINE = '> Source: assistant reply';
  * the embedding indexer hashes this text, and a mismatch would re-embed entries
  * on every pass.
  *
- * Layout: heading, the text with its optional `> context` line, then optional trailer lines (the
- * hidden chat id, the hidden document id, then the read-content marker).
+ * Layout: heading, the text with its optional `> context` line, then the trailer lines: the optional
+ * hidden chat id, document id and note lines, and always, last, the line that says where the entry came from.
  */
 export function formatRetainEntry(item: RetainItem): string {
   const context = item.context?.trim();
@@ -159,14 +214,14 @@ export function formatRetainEntry(item: RetainItem): string {
       : item.content;
   const text = context !== undefined && context.length > 0 ? `${content}\n\n> ${context}` : content;
   const parts = [`## ${item.timestamp}`, escapeEntryStructure(text)];
-  const sessionId = item.metadata?.[SESSION_ID_METADATA_KEY];
+  const sessionId = item.metadata[SESSION_ID_METADATA_KEY];
   if (sessionId !== undefined) {
     const marker = `<!-- session_id: ${sessionId} -->`;
     if (SESSION_MARKER_PATTERN.test(marker)) {
       parts.push(marker);
     }
   }
-  if (item.metadata?.[REPLACE_DOCUMENT_METADATA_KEY] === 'true') {
+  if (item.metadata[REPLACE_DOCUMENT_METADATA_KEY] === 'true') {
     const marker = `<!-- document_id: ${item.document_id} -->`;
     if (DOCUMENT_MARKER_PATTERN.test(marker)) {
       parts.push(marker);
@@ -175,10 +230,7 @@ export function formatRetainEntry(item: RetainItem): string {
   if (marker !== undefined && parseNoteMarker(marker) !== undefined) {
     parts.push(marker);
   }
-  const origin = item.metadata?.[MEMORY_ORIGIN_METADATA_KEY];
-  if (origin !== undefined && origin !== USER_STATED_ORIGIN) {
-    parts.push(READ_CONTENT_SOURCE_LINE);
-  }
+  parts.push(sourceLineFor(item.metadata));
   return parts.join('\n\n');
 }
 
@@ -193,8 +245,7 @@ function escapeEntryStructure(text: string): string {
     .map(line => {
       const trimmed = line.trimEnd();
       return line.startsWith('## ') ||
-        trimmed === READ_CONTENT_SOURCE_LINE ||
-        trimmed === ASSISTANT_REPLY_SOURCE_LINE ||
+        isSourceLine(trimmed) ||
         SESSION_MARKER_PATTERN.test(trimmed) ||
         DOCUMENT_MARKER_PATTERN.test(trimmed) ||
         parseNoteMarker(trimmed) !== undefined
@@ -204,10 +255,31 @@ function escapeEntryStructure(text: string): string {
     .join('\n');
 }
 
-/** An entry's text split into its body and the metadata its trailer lines carry. */
-function splitEntryTrailers(text: string): { body: string; metadata: Record<string, string> } {
+/** What an entry's closing lines say about it. */
+interface EntryTrailers {
+  /** The entry without its closing lines. */
+  body: string;
+  /** What the hidden lines carry, and the origin when a source line is present. */
+  metadata: Record<string, string>;
+  /** The hidden chat id, document id and note lines, in the order they sit on disk. */
+  hiddenLines: string[];
+  /** The external source line nearest the end, as written. */
+  externalLine: string | undefined;
+  /** Whether a "From you" line is among the closing lines. */
+  fromYou: boolean;
+}
+
+/**
+ * An entry's text split into its body and what its closing lines carry. The origin is the person's
+ * only when the entry closes with "From you" and with no external source line; both lines together
+ * read as external, so text that reached an entry's end can never raise it.
+ */
+function splitEntryTrailers(text: string): EntryTrailers {
   const lines = text.split('\n');
   const metadata: Record<string, string> = {};
+  const hiddenLines: string[] = [];
+  let externalLine: string | undefined;
+  let fromYou = false;
   while (lines.length > 0) {
     const line = (lines[lines.length - 1] ?? '').trimEnd();
     const sessionId = SESSION_MARKER_PATTERN.exec(line)?.[1];
@@ -215,42 +287,117 @@ function splitEntryTrailers(text: string): { body: string; metadata: Record<stri
     const note = parseNoteMarker(line);
     if (line === '') {
       lines.pop();
-    } else if (line === READ_CONTENT_SOURCE_LINE || line === ASSISTANT_REPLY_SOURCE_LINE) {
-      metadata[MEMORY_ORIGIN_METADATA_KEY] = TOOL_INGESTED_ORIGIN;
+    } else if (line === FROM_YOU_SOURCE_LINE) {
+      fromYou = true;
+      lines.pop();
+    } else if (isExternalSourceLine(line)) {
+      externalLine ??= line;
       lines.pop();
     } else if (sessionId !== undefined) {
       // Every closing marker is dropped; the one nearest the end is the one that counts.
       metadata[SESSION_ID_METADATA_KEY] ??= sessionId;
+      hiddenLines.unshift(line);
       lines.pop();
     } else if (documentId !== undefined) {
       metadata[DOCUMENT_ID_METADATA_KEY] ??= documentId;
+      hiddenLines.unshift(line);
       lines.pop();
     } else if (note !== undefined) {
       metadata[NOTE_SOURCE_METADATA_KEY] ??= note.source;
       metadata[NOTE_DATE_METADATA_KEY] ??= note.date;
+      hiddenLines.unshift(line);
       lines.pop();
     } else {
       break;
     }
   }
-  return { body: lines.join('\n').trim(), metadata };
+  if (externalLine !== undefined) {
+    metadata[MEMORY_ORIGIN_METADATA_KEY] = TOOL_INGESTED_ORIGIN;
+  } else if (fromYou) {
+    metadata[MEMORY_ORIGIN_METADATA_KEY] = USER_STATED_ORIGIN;
+  }
+  return { body: lines.join('\n').trim(), metadata, hiddenLines, externalLine, fromYou };
 }
 
-/** Metadata recall hands back for an entry, read from the trailer lines `formatRetainEntry` wrote. */
-export function entryMetadata(text: string): Record<string, string> | undefined {
+/**
+ * Metadata recall hands back for an entry, read from the closing lines `formatRetainEntry` wrote.
+ * It always names an origin: an entry with no source line is handed back as read content, because
+ * only a written "From you" makes an entry the person's own.
+ */
+export function entryMetadata(text: string): Record<string, string> {
   const { metadata } = splitEntryTrailers(text);
-  return Object.keys(metadata).length === 0 ? undefined : metadata;
+  return { ...metadata, [MEMORY_ORIGIN_METADATA_KEY]: metadata[MEMORY_ORIGIN_METADATA_KEY] ?? TOOL_INGESTED_ORIGIN };
+}
+
+/** The line the Memories page shows for where an entry came from. Old source lines are shown in today's words. */
+function readableSourceLine({ metadata, externalLine, fromYou }: EntryTrailers): string {
+  if (externalLine === undefined) {
+    return fromYou ? FROM_YOU_SOURCE_LINE : `${EXTERNAL_SOURCE_LINE_PREFIX}${NO_RECORD_SOURCE_NAME}`;
+  }
+  return externalLine.startsWith(EXTERNAL_SOURCE_LINE_PREFIX) ? externalLine : sourceLineFor(metadata);
+}
+
+/** Text as the Memories page or an export holds it, without the closing line that says where it came from. */
+export function withoutSourceLines(text: string): string {
+  const lines = text.split('\n');
+  while (lines.length > 0) {
+    const line = (lines[lines.length - 1] ?? '').trimEnd();
+    if (line !== '' && !isSourceLine(line)) {
+      break;
+    }
+    lines.pop();
+  }
+  return lines.join('\n');
+}
+
+/**
+ * An entry's text for matching words. The line that says where it came from is left out, so a
+ * question with "you" or "email" in it does not match every note that closes with those words.
+ */
+export function entryKeywordText(text: string): string {
+  return text
+    .split('\n')
+    .filter(line => {
+      const trimmed = line.trimEnd();
+      return trimmed !== FROM_YOU_SOURCE_LINE && !trimmed.startsWith(EXTERNAL_SOURCE_LINE_PREFIX);
+    })
+    .join('\n');
+}
+
+/**
+ * One daily log written before every entry said where it came from, with a closing source line on each
+ * entry. An entry that already names an external source is kept as written. Every other entry has no
+ * record of where it came from and is marked that way: a closing "From you" in it was saved as text
+ * before that line meant anything, so it stays text. No entry is added, dropped or moved, so every
+ * entry id stays the same.
+ */
+export function withSourceLines(content: string): { content: string; marked: number } {
+  let marked = 0;
+  const entries = splitEntries(upgradeLegacyEntries(content)).map(entry => {
+    const { body, hiddenLines, externalLine, fromYou } = splitEntryTrailers(entry);
+    if (externalLine !== undefined) {
+      return entry;
+    }
+    marked += 1;
+    const text = fromYou ? `${body}\n\n\\${FROM_YOU_SOURCE_LINE}` : body;
+    return [text, ...hiddenLines, `${EXTERNAL_SOURCE_LINE_PREFIX}${NO_RECORD_SOURCE_NAME}`].join('\n\n');
+  });
+  return { content: entries.map(entry => `${entry}\n\n`).join(''), marked };
 }
 
 /**
  * True for an entry stored as a copy of a replaced document before entries recorded a document id.
- * Such a copy carries no trailer at all (a document mirror never recorded a chat or a source), and
- * its body closes with the document's own `> context` line. An entry with any trailer is a chat note
- * or an imported note that merely quotes the line, never a copy.
+ * Such a copy carries no hidden line and no source of its own (a document mirror never recorded a chat
+ * or a source; at most it was later marked as having no record), and its body closes with the document's
+ * own `> context` line. Any other entry is a chat note or an imported note that merely quotes the line,
+ * never a copy.
  */
 export function isLegacyDocumentCopy({ text, context }: { text: string; context: string }): boolean {
-  const { body, metadata } = splitEntryTrailers(text);
-  if (Object.keys(metadata).length > 0) {
+  const { body, hiddenLines, externalLine, fromYou } = splitEntryTrailers(text);
+  const sourceLess =
+    !fromYou &&
+    (externalLine === undefined || externalLine === `${EXTERNAL_SOURCE_LINE_PREFIX}${NO_RECORD_SOURCE_NAME}`);
+  if (hiddenLines.length > 0 || !sourceLess) {
     return false;
   }
   const lines = body.split('\n');
@@ -283,20 +430,13 @@ function withoutHeading(body: string): string {
 
 /**
  * The entry text the Memories page shows and edits: the timestamp heading, the hidden chat id, document id
- * and note lines, and an id-shaped context line are dropped. The page shows the time on its own, and a
- * readable `> Source: …` line stays.
+ * and note lines, and an id-shaped context line are dropped. The page shows the time on its own. The text
+ * always closes with one readable line that says where the entry came from.
  */
 export function withoutHiddenMarkers(text: string): string {
-  const { body, metadata } = splitEntryTrailers(text);
-  const readable = splitHiddenContext(withoutHeading(body)).body;
-  if (metadata[MEMORY_ORIGIN_METADATA_KEY] === undefined) {
-    return readable;
-  }
-  const sourceLine =
-    metadata[NOTE_SOURCE_METADATA_KEY] === ASSISTANT_RESPONSE_SOURCE
-      ? ASSISTANT_REPLY_SOURCE_LINE
-      : READ_CONTENT_SOURCE_LINE;
-  return `${readable}\n\n${sourceLine}`;
+  const trailers = splitEntryTrailers(text);
+  const readable = splitHiddenContext(withoutHeading(trailers.body)).body;
+  return `${readable}\n\n${readableSourceLine(trailers)}`;
 }
 
 /** The internal id an entry was filed under (its id-shaped `> ` context line), which the page never shows. */
@@ -304,9 +444,16 @@ export function hiddenContext(text: string): string | undefined {
   return splitHiddenContext(splitEntryTrailers(text).body).context;
 }
 
-/** An entry's text with its internal id put back as the closing `> ` line, the shape the daily logs hold. */
+/**
+ * An entry's page text with its internal id put back as a `> ` line, the shape the daily logs hold:
+ * the id line closes the text, and the line that says where the entry came from stays last.
+ */
 export function withHiddenContext({ text, context }: { text: string; context: string | undefined }): string {
-  return context === undefined ? text : `${text}\n\n> ${context}`;
+  if (context === undefined) {
+    return text;
+  }
+  const readable = withoutSourceLines(text);
+  return `${readable.trimEnd()}\n\n> ${context}${text.slice(readable.length)}`;
 }
 
 /** The instant in an entry's `## ` heading, when the heading is a readable timestamp. */
@@ -319,11 +466,12 @@ function headingInstant(text: string): string | undefined {
 
 /**
  * An edited entry's text with the lines the Memories page left out of the original put back: the timestamp
- * heading, the id-shaped context line, and the hidden chat id, document id and note lines. The readable
- * `> Source: …` line is part of the page text, so an edit that removes it is kept as written.
+ * heading, the id-shaped context line, and the hidden chat id, document id and note lines. Where the entry
+ * came from is always the original's: an edit changes what a note says, never whose words it is.
  */
 export function withOriginalHiddenMarkers({ original, edited }: { original: string; edited: string }): string {
-  const { body: originalBody, metadata: kept } = splitEntryTrailers(original);
+  const originalTrailers = splitEntryTrailers(original);
+  const { body: originalBody, metadata: kept } = originalTrailers;
   const { body: editedBody, metadata } = splitEntryTrailers(edited);
   const heading =
     headingInstant(originalBody) !== undefined && headingInstant(editedBody) === undefined
@@ -350,8 +498,10 @@ export function withOriginalHiddenMarkers({ original, edited }: { original: stri
   if (noteSource !== undefined && isMemoryNoteSource(noteSource) && noteDate !== undefined) {
     trailers.push(formatNoteMarker({ source: noteSource, date: noteDate }));
   }
-  if (metadata[MEMORY_ORIGIN_METADATA_KEY] !== undefined) {
-    trailers.push(READ_CONTENT_SOURCE_LINE);
+  if (originalTrailers.externalLine !== undefined) {
+    trailers.push(originalTrailers.externalLine);
+  } else if (originalTrailers.fromYou) {
+    trailers.push(FROM_YOU_SOURCE_LINE);
   }
   return [...heading, body, ...trailers].join('\n\n');
 }

@@ -130,7 +130,8 @@ describe('turn memory with findings and reply notes', () => {
     const file = await dayFile();
     expect(file).toContain('My dentist is Dr Okafor.');
     expect(file).not.toContain('note:');
-    expect(file).not.toContain('> Source: read content');
+    expect(file).not.toContain('External source');
+    expect(file).toContain('> From you');
     expect(file.match(/^## /gm)).toHaveLength(1);
   });
 
@@ -231,7 +232,7 @@ describe('turn memory with findings and reply notes', () => {
     if (!listed.ok) {
       throw new Error('expected a listing');
     }
-    expect(listed.entries[0]?.text).toContain('> Source: assistant reply');
+    expect(listed.entries[0]?.text).toContain('> External source: assistant reply');
     expect(listed.entries[0]?.text).not.toContain('read content');
   });
 
@@ -250,7 +251,7 @@ describe('turn memory with findings and reply notes', () => {
       throw new Error('expected a listing');
     }
     expect(listed.entries.map(entry => entry.text.includes('12 Elm Street'))).toEqual([true]);
-    expect(listed.entries[0]?.text).toContain('> Source: read content');
+    expect(listed.entries[0]?.text).toContain('> External source: read content');
   });
 
   it('stores the same finding once across turns, and keeps a different one', async () => {

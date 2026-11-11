@@ -197,6 +197,7 @@ describe('scheduled run memory wiring', () => {
     const retained = await memoryClient.retain({
       items: [
         {
+          metadata: { origin: 'user_stated' },
           content: 'The scheduled report run finished.',
           timestamp: '2026-10-20T13:00:00.000Z',
           document_id: 'schedule-run-1',
@@ -226,6 +227,7 @@ describe('scheduled run memory wiring', () => {
     const retained = await memoryClient.retain({
       items: [
         {
+          metadata: { origin: 'user_stated' },
           content: 'Zara’s scheduled archive check finished.',
           timestamp: '2026-10-20T13:00:00.000Z',
           document_id: 'schedule-run-2',

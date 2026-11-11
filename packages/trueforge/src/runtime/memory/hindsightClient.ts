@@ -24,6 +24,7 @@ import type {
   MemoryVaultFailure,
   UpdateMemoryVaultEntryOutcome,
 } from './memoryClient';
+import { everyItemNamesOrigin, MISSING_ORIGIN_REASON, type RetainMetadata } from './memoryOrigin';
 
 /** Upper bound on the upstream error text carried into a reason line, a log field, or the UI. */
 const ERROR_DETAIL_MAX_CHARS = 200;
@@ -200,7 +201,8 @@ export interface RetainItem {
   timestamp: string;
   context?: string;
   document_id: string;
-  metadata?: Record<string, string>;
+  /** Always names where the memory came from; a save without it is refused. */
+  metadata: RetainMetadata;
 }
 
 export interface RetainOutcome {
@@ -493,6 +495,9 @@ export class HindsightClient implements MemoryClient {
   }
 
   async retain(params: { items: RetainItem[]; operationId: string; timeoutMs: number }): Promise<RetainOutcome> {
+    if (!everyItemNamesOrigin(params.items)) {
+      return { ok: false, reason: MISSING_ORIGIN_REASON };
+    }
     // Ability notes about Aman never reach the provider (see assistantAbilityNotes).
     const items = params.items
       .map(item => ({ ...item, content: stripAssistantAbilityNotes(item.content) }))

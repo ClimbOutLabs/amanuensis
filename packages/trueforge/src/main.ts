@@ -141,6 +141,7 @@ import { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { registerMailConnectorFromSavedAccountInBackground } from './runtime/mailAccount';
 import { prepareMailPolicyAtBoot, registerMailConnectorAtBoot } from './runtime/mailConnector';
 import { warmEmbeddingsAtBoot } from './runtime/memory/embeddingRetrieval';
+import { ensureMemorySourceLines } from './runtime/memory/memorySourceLines';
 import { startNotesFolderIndexing } from './runtime/notesFolder/notesFolderRuntime';
 import { createOutboundSecretSource } from './runtime/outboundSecrets';
 import { seedOwnerNameAtBoot } from './runtime/ownerName';
@@ -1051,6 +1052,13 @@ try {
       dir: configuration.MEMORY_MARKDOWN_DIR,
       envVar: 'MEMORY_MARKDOWN_DIR',
     });
+    const marked = await ensureMemorySourceLines({ baseDir: configuration.MEMORY_MARKDOWN_DIR });
+    if (marked !== undefined && marked.notesMarked > 0) {
+      logger.info('Older memory notes were marked as having no record of where they came from', {
+        files_changed: marked.filesChanged,
+        notes_marked: marked.notesMarked,
+      });
+    }
   }
 
   if (configuration.STANDALONE) {

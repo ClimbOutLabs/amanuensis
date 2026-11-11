@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import type { RetainItem } from '../../../../src/runtime/memory/hindsightClient';
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
 import { VAULT_TOMBSTONES_FILE } from '../../../../src/runtime/memory/markdownMemoryFiles';
 
@@ -13,13 +14,13 @@ async function withClient(run: (client: MarkdownMemoryClient, dir: string) => Pr
   }
 }
 
-function profileItem(content: string) {
+function profileItem(content: string): RetainItem {
   return {
     content,
     timestamp: '2026-10-28T12:00:00.000Z',
     document_id: 'learned-profile',
     context: 'Learned user profile',
-    metadata: { replace_document: 'true' },
+    metadata: { origin: 'user_stated', replace_document: 'true' },
   };
 }
 
@@ -86,10 +87,11 @@ describe('MarkdownMemoryClient documents', () => {
 
   it('leaves entries without the replace flag alone', async () => {
     await withClient(async client => {
-      const turn = (content: string) => ({
+      const turn = (content: string): RetainItem => ({
         content,
         timestamp: '2026-10-28T12:00:00.000Z',
         document_id: 'same-id',
+        metadata: { origin: 'user_stated' },
       });
       await client.retain({ items: [turn('profile tea one')], operationId: 'op-1', timeoutMs: 1000 });
       await client.retain({ items: [turn('profile tea two')], operationId: 'op-2', timeoutMs: 1000 });

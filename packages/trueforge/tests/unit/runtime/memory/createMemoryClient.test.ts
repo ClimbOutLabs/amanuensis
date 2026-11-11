@@ -31,7 +31,9 @@ function markdownClient(vaultScope: VaultScope | undefined): MemoryClient {
 
 async function retainOne(client: MemoryClient, content: string): Promise<void> {
   const outcome = await client.retain({
-    items: [{ content, timestamp: '2026-09-26T10:00:00.000Z', document_id: 'doc-1' }],
+    items: [
+      { metadata: { origin: 'user_stated' }, content, timestamp: '2026-09-26T10:00:00.000Z', document_id: 'doc-1' },
+    ],
     operationId: 'op-1',
     timeoutMs: 5000,
   });

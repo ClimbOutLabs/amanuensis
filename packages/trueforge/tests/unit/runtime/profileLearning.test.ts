@@ -299,7 +299,7 @@ describe('mirrorLearnedProfile', () => {
         timestamp: '2026-09-01T12:00:00.000Z',
         document_id: learnedProfileDocumentId('user-a'),
         context: 'Learned user profile',
-        metadata: { source: 'aman-profile-learning', replace_document: 'true' },
+        metadata: { origin: 'user_stated', source: 'aman-profile-learning', replace_document: 'true' },
       },
     ]);
   });

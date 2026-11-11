@@ -67,8 +67,11 @@ import { exportableEvents, exportedThreads, sessionPartName, withoutDeploymentBo
 import { ZipEntrySizeCapExceededError, ZipStreamWriter } from './zipStreamWriter';
 
 export const EXPORT_FORMAT = 'aman-export';
-/** 2: chats moved from one sessions.json to numbered sessions/ files of chat and turn records. */
-export const EXPORT_SCHEMA_VERSION = 2;
+/**
+ * 2: chats moved from one sessions.json to numbered sessions/ files of chat and turn records.
+ * 3: every memory note closes with a line that says where it came from.
+ */
+export const EXPORT_SCHEMA_VERSION = 3;
 
 const PAGE_LIMIT = 200;
 

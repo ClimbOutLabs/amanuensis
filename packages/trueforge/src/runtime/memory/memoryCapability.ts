@@ -67,7 +67,7 @@ import {
   withoutNoteTrailer,
   type MemoryNoteSource,
 } from './memoryNotes';
-import { MEMORY_ORIGIN_METADATA_KEY, USER_STATED_ORIGIN, type AmanMemoryOrigin } from './memoryOrigin';
+import { isPersonOrigin, MEMORY_ORIGIN_METADATA_KEY, USER_STATED_ORIGIN, type AmanMemoryOrigin } from './memoryOrigin';
 import { retainOperationId, submitRetain } from './memoryRetain';
 import { decideMemoryRoute } from './memoryRouting';
 import { rankNamedPeopleFirst } from './recallNameBoost';
@@ -557,7 +557,7 @@ function formatItemLine(item: RecallItem): string {
 
 /** Whose words a recalled item is: the person's own, a note the assistant kept, or something it read. */
 type RecalledItemSource =
-  { kind: 'person' } | { kind: 'note'; source: MemoryNoteSource } | { kind: 'read'; origin: string };
+  { kind: 'person' } | { kind: 'note'; source: MemoryNoteSource } | { kind: 'read'; origin: string | undefined };
 
 /** The one verdict on a recalled item's source, shared by the label the model sees and the chat's record of links. */
 function recalledItemSource(item: RecallItem): RecalledItemSource {
@@ -565,8 +565,10 @@ function recalledItemSource(item: RecallItem): RecalledItemSource {
   if (note !== undefined) {
     return { kind: 'note', source: note.source };
   }
-  const origin = item.metadata?.[MEMORY_ORIGIN_METADATA_KEY];
-  return origin === undefined || origin === USER_STATED_ORIGIN ? { kind: 'person' } : { kind: 'read', origin };
+  // Only a memory that says it is the person's own counts as theirs; one with no origin is something read.
+  return isPersonOrigin(item.metadata)
+    ? { kind: 'person' }
+    : { kind: 'read', origin: item.metadata?.[MEMORY_ORIGIN_METADATA_KEY] };
 }
 
 const READ_SOURCE_OF_NOTE: Record<MemoryNoteSource, ReadSource> = {

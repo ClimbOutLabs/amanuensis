@@ -20,6 +20,23 @@ An incognito chat reads memory but never writes to it. Aman recalls from the vau
 
 Memories are scoped by persona. While a persona is active, what it learns is kept in that persona's own vault and is private to it until you share the vault. With no persona active, memories go to the shared vault, which every persona can read. A persona recalls from its own vault, the shared vault, and any vault shared with it. Renaming or deleting a persona never deletes its vault.
 
+### Where each note came from
+
+Every note ends with one line that says where it came from.
+
+- `> From you` means you said it in a chat.
+- `> External source: ...` means it came from somewhere else. The line names the source: `email`, `calendar`, `web page`, `attachment`, `tool result`, `assistant reply`, `read content` or `imported file`.
+
+Aman treats a note as your own words only when it ends with `> From you`. Everything else counts as something Aman read. Aman still remembers it, but it asks you before it uses a link or an address from it. See [Safety](/safety).
+
+Aman never guesses a source. A note that would be saved without one is not saved at all. A note with no source line counts as external.
+
+- **Notes saved before this.** The first time this version starts, Aman adds a line to every older note that has none. The line is `> External source: no record`, because nothing shows where those notes came from. Each daily file is copied to a `.before-source-lines` folder in its vault before it is changed. To make a fact your own again, say it to Aman in a chat.
+- **Imports.** Notes you bring in with the Memories import are saved as `> External source: imported file`. When you import a full export made by an older version, its notes get the same line as older notes.
+- **`MEMORY.md`.** A `MEMORY.md` file you write by hand counts as external unless its last line is `> From you`.
+- **Editing.** Changing a note on the Memories page changes what it says. It never changes where it came from.
+- **Other memory services.** With a memory service other than Markdown files, a memory with no recorded source counts as external too.
+
 ## Searching past chats
 
 Aman can also look through your earlier chats when you ask, for example "what did we decide about the trip?". This is off until you turn on past-chat search in Settings. While it is off, nothing from your chats is added to the search. When you turn it on, Aman adds your earlier chats in the background, then adds each new chat as it finishes. When you turn it off, everything it added is removed.

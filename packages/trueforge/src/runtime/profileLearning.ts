@@ -55,6 +55,7 @@ import { ProfileLearnedEventSchema, type ProfileLearnedEvent } from '../schemas/
 import type { EventSubscription } from './event-subscription';
 import { REPLACE_DOCUMENT_METADATA_KEY } from './memory/markdownMemoryFiles';
 import type { MemoryClient } from './memory/memoryClient';
+import { MEMORY_ORIGIN_METADATA_KEY, USER_STATED_ORIGIN } from './memory/memoryOrigin';
 import { AMAN_MEMORY_NAMESPACE } from './memory/memoryRetain';
 import { uuidv5 } from './memory/uuidv5';
 import { modelIdentity, type TurnModelUsage } from './modelUsage';
@@ -310,7 +311,12 @@ export async function mirrorLearnedProfile(params: {
                 timestamp,
                 document_id: learnedProfileDocumentId(userRef),
                 context: LEARNED_PROFILE_CONTEXT,
-                metadata: { source: 'aman-profile-learning', [REPLACE_DOCUMENT_METADATA_KEY]: 'true' },
+                // The learned profile is drawn only from what the person wrote, so its copy is theirs too.
+                metadata: {
+                  source: 'aman-profile-learning',
+                  [REPLACE_DOCUMENT_METADATA_KEY]: 'true',
+                  [MEMORY_ORIGIN_METADATA_KEY]: USER_STATED_ORIGIN,
+                },
               },
             ],
             operationId: learnedProfileOperationId({ userRef, document, profileRevision }),
