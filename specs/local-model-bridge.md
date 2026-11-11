@@ -19,9 +19,9 @@ When the connection was refused, the chat said the model's reply broke off. No r
    - The two sides meet through socket files in a volume of their own. Nothing is published on any of the computer's addresses. Only the ports the owner named are carried.
    - The model's address in Settings becomes `http://aman-local-model:PORT/v1`. A loopback-only model works.
 2. **Steering in Settings.** The installer tells the app this computer's own addresses and names (loopback, LAN, Tailscale address and name, host name). Saving a model whose address is one of them, or a name that resolves to one, is refused with code `model_on_this_computer`. The message says the model is on this computer and gives the bridge address to use instead, or the `aman local-model` command when no port is carried yet.
-3. **Honest failure wording.** A model call whose connection never started (refused, unreachable, name not found, closed before any answer) is reported as "could not connect, so no reply was started", never as a reply that broke off. It is not retried and does not compact the chat. The words depend on the address:
+3. **Honest failure wording.** A model call whose connection never started (refused, unreachable, name not found, closed before any answer) is reported as "could not connect, so no reply was started", never as a reply that broke off. It is retried once with the same history, since a short network blip can cause it, and never compacts the chat. The words depend on the address:
    - the bridge: nothing answered at that port, so start the model server
-   - this computer's own address: save the model again to switch it to the bridge
+   - this computer's own address: save the model again, and Settings shows the bridge address to change it to
    - another machine: check that the model server is running and can be reached
 
 ## Design decisions

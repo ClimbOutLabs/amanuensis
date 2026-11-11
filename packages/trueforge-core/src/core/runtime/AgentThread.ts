@@ -3809,6 +3809,9 @@ export class AgentThread {
     // behind it stay in the history the retry sends, and a partial tool call never runs because
     // calls only execute from a completed step. Only a second silence ends the step.
     let silenceRetried = false;
+    // A connection that never started is retried once with the same history, since a short network blip can cause
+    // one. A second one ends the step with words that say no reply was started, never that a reply broke off.
+    let unreachableRetried = false;
     // Retries of the forced answer after the provider said to try again later (see
     // FORCED_ANSWER_RETRY_BACKOFF_MS); never counts toward the stream-fault attempts.
     let providerRetries = 0;
@@ -3982,6 +3985,15 @@ export class AgentThread {
           }
           if (signal?.aborted) {
             throw error;
+          }
+          if (error instanceof ModelUnreachableError && !unreachableRetried) {
+            unreachableRetried = true;
+            this.logger.warn('Model connection never started; retrying the call once with the same history', {
+              ...extractErrorLogFields(error),
+              place: error.place,
+              attempt,
+            });
+            continue;
           }
           if (!(error instanceof ModelStreamFault)) {
             // A definite "try again later" from the provider (5xx, 429) on the forced answer is

@@ -467,9 +467,9 @@ describe('ModelStreamFault retry', () => {
         }
       }
 
-      // Not a stream fault: no shortening, no stream-fault retry.
-      expect(create).toHaveBeenCalledTimes(1);
-      expect(compaction.forcedFlags).toEqual([false]);
+      // Not a stream fault: retried once with the same history, never shortened, and never called a broken reply.
+      expect(create).toHaveBeenCalledTimes(2);
+      expect(compaction.forcedFlags.every(forced => !forced)).toBe(true);
       expect(doneEvent?.status).toBe('error');
       expect(doneEvent?.handoff_cause).not.toBe('model_stream_fault');
       if (doneEvent?.status !== 'error') {
@@ -480,6 +480,35 @@ describe('ModelStreamFault retry', () => {
       expect(doneEvent.error).not.toContain('broke off');
     },
   );
+
+  it('retries a connection that never started once, so a short network blip to a cloud model still gets an answer', async () => {
+    async function* resetParts(): AsyncGenerator<TextStreamPart<ToolSet>> {
+      await Promise.resolve();
+      const socket = Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' });
+      yield {
+        type: 'error',
+        error: new APICallError({
+          message: `Cannot connect to API: ${socket.message}`,
+          url: 'https://api.example.com/v1/chat/completions',
+          requestBodyValues: {},
+          cause: socket,
+          isRetryable: true,
+        }),
+      };
+    }
+    const run = await runShortChatWithOneFault({
+      firstAttempt: () =>
+        mapStreamToChunks({
+          stream: resetParts(),
+          chunkMeta: { id: 'test-id', created: 0, model: 'test-model' },
+          placeOfModelHost: () => 'elsewhere',
+        }),
+      contextLength: undefined,
+    });
+    expect(run.calls).toBe(2);
+    expect(run.forcedFlags.every(forced => !forced)).toBe(true);
+    expect(run.doneEvent?.status).not.toBe('error');
+  });
 
   it('still calls a reply that broke off after it began a stream fault', async () => {
     // A socket reset while reading a response that had begun is not the SDK's call error.

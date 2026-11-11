@@ -81,7 +81,7 @@ describe('modelUnreachableMessage', () => {
     const message = modelUnreachableMessage({ url: MODEL_URL, place: 'this_computer' });
     expect(message).toContain('the model on this computer at spark.example.ts.net');
     expect(message).toContain('This computer did not accept the connection at that address.');
-    expect(message).toContain("save this model again to switch it to Aman's own local link");
+    expect(message).toContain('Aman then shows the local link address to change it to.');
     expect(message).not.toMatch(forbidden);
   });
 

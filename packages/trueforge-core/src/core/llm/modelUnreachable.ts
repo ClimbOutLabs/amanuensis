@@ -79,7 +79,7 @@ export function modelUnreachableMessage({ url, place }: { url: string; place: Mo
         `Aman could not connect to the model on this computer at ${host}, so no reply was started. ` +
         'This computer did not accept the connection at that address. ' +
         'That can happen after a network change on this computer, such as a software update, even while the model is running. ' +
-        "Open Settings, then Models, and save this model again to switch it to Aman's own local link."
+        'Open Settings, then Models, and save this model again. Aman then shows the local link address to change it to.'
       );
     case 'elsewhere':
       return (
