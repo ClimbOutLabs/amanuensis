@@ -123,6 +123,12 @@ const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const SLASHED_DATE = /^(\d{1,2})\/(\d{1,2})(?:\/(\d{2}|\d{4}))?$/;
 /** Words that only ever start a site. */
 const SITE_WORDS = new Set(['www', 'http', 'https']);
+/** Words that read out the dot of a site when said between two words, such as evil dot com. */
+const DOT_WORDS = new Set(['dot', 'point', 'period']);
+/** A lone written dot, bare or in brackets or quotes, between spaces, such as evil . com or evil [.] com. */
+const LONE_DOT = /^[("']*\.[)"']*$/;
+/** A toll-free number whose rest is spelled as a capitalised word, such as 1 800 FLOWERS or 1 800 Flowers. */
+const VANITY_NUMBER = /(?<![\d$.,/-])(?:[01][\s-]*)?\(?(?:800|833|844|855|866|877|888)\)?[\s-]+[A-Z][A-Za-z]{3,}/;
 /** Currency signs plainText writes as letters; any other one is dropped, and would change the amount's meaning. */
 const KNOWN_CURRENCY = /[$€£¥]/g;
 
@@ -185,8 +191,9 @@ export function isPlainWords(text: string): boolean {
   if (/\p{Sc}/u.test(text.replace(KNOWN_CURRENCY, ''))) {
     return false;
   }
-  const plain = plainText(text).toLowerCase();
-  if (/\(\s*at\s*\)/.test(plain)) {
+  const asWritten = plainText(text);
+  const plain = asWritten.toLowerCase();
+  if (/\(\s*at\s*\)/.test(plain) || VANITY_NUMBER.test(asWritten)) {
     return false;
   }
   const words = plain
@@ -194,8 +201,13 @@ export function isPlainWords(text: string): boolean {
     .replace(RANGE, '$1 to ')
     .split(/\s+/)
     .filter(token => token !== '' && !JOINS.has(token))
-    .map(token => token.replace(EDGES, ''))
+    .map(token => (LONE_DOT.test(token) ? 'dot' : token.replace(EDGES, '')))
     .filter(word => word !== '');
+  // Read part by part, so dashes or apostrophes cannot hide a spoken dot, a spelled number or single letters.
+  const parts = words.flatMap(word => (WORD.test(word) ? word.split(/['-]/) : [word]));
+  if (parts.some((part, at) => DOT_WORDS.has(part) && at > 0 && at < parts.length - 1)) {
+    return false;
+  }
   let digits = 0;
   let numberRun = 0;
   let letterRun = 0;
@@ -207,7 +219,7 @@ export function isPlainWords(text: string): boolean {
     if (!isWord && !ABBREVIATION.test(word) && word !== 'w/' && counted === undefined) {
       return false;
     }
-    if (SITE_WORDS.has(word) || (word === 'dot' && previous !== undefined && next !== undefined)) {
+    if (SITE_WORDS.has(word)) {
       return false;
     }
     if (
@@ -217,7 +229,6 @@ export function isPlainWords(text: string): boolean {
       return false;
     }
     digits += counted?.digits ?? 0;
-    // A word joined by dashes or apostrophes is read part by part, so joining cannot hide a spelled number or letters.
     let bare = counted?.bare === true;
     for (const part of isWord ? word.split(/['-]/) : [word]) {
       const spoken = NUMBER_WORDS.get(part);

@@ -5,8 +5,12 @@ It accepts one sign-in for USER with PASSWORD exactly as given, writes the passw
 and writes its port to PORT_FILE once it listens. It serves connections until it is stopped.
 With MAILBOX_FILE (JSON, read again at every EXAMINE so a test can change it) it also serves a read-only INBOX:
 {"uidvalidity": 1, "messages": [{"uid": 1, "internal_date": "05-Nov-2026 14:55:00 +0000", "header": "From: ...",
-"refuse": false}]}. A message with "refuse" fails any FETCH of headers that includes it, as a server that cannot parse
-it would. Every command after sign-in is appended to PORT_FILE.commands.
+"refuse": false, "gone": false}], "fetch_delay_ms": 0}. A message with "refuse" fails any FETCH of headers that includes
+it with NO, as a server that cannot parse it would, while the reply still carries the other messages. A message with
+"gone" is found by SEARCH but has no FETCH reply, as one deleted in between. A message with "batch_refuse" is left out of
+a FETCH of headers for several messages, which then ends with NO, but is given when asked for alone. Like a real server, a bare set in SEARCH is
+message sequence numbers and only the UID key names UIDs; any other SEARCH is refused with BAD. Every command after
+sign-in is appended to PORT_FILE.commands.
 """
 
 import json
@@ -14,6 +18,7 @@ import os
 import socket
 import ssl
 import sys
+import time
 
 mode, cert, key, want_user, want_password, port_file = sys.argv[1:7]
 mailbox_file = sys.argv[7] if len(sys.argv) > 7 else None
@@ -60,7 +65,7 @@ def day_of(internal_date):
 
 
 def uid_set(text, uids):
-    """The UIDs in an IMAP set such as 3,5:7 or 9:*, where * is the highest UID (or 0 in an empty mailbox)."""
+    """The numbers of `uids` in an IMAP set such as 3,5:7 or 9:*, where * is the highest of them (or 0 when empty)."""
     top = max(uids, default=0)
     chosen = set()
     for part in text.split(","):
@@ -90,23 +95,33 @@ def mailbox_command(conn, tag, command, argtext):
     sub = sub.upper()
     if command == "UID" and sub == "SEARCH":
         words = rest.split()
-        if words[0].upper() == "SINCE":
+        if len(words) == 2 and words[0].upper() == "SINCE":
             day, month, year = words[1].split("-")
             floor = (int(year), MONTHS.index(month) + 1, int(day))
             found = [item["uid"] for item in messages if day_of(item["internal_date"]) >= floor]
+        elif len(words) == 2 and words[0].upper() == "UID":
+            found = uid_set(words[1], uids)
+        elif len(words) == 1 and words[0][:1].isdigit():
+            # A bare set is message sequence numbers, even under UID SEARCH.
+            sequence = uid_set(words[0], list(range(1, len(messages) + 1)))
+            found = [messages[number - 1]["uid"] for number in sequence]
         else:
-            found = uid_set(words[0], uids)
+            conn.sendall((tag + " BAD unsupported search\r\n").encode())
+            return
         conn.sendall(("* SEARCH %s\r\n%s OK done\r\n" % (" ".join(map(str, found)), tag)).encode())
         return
     if command == "UID" and sub == "FETCH":
         wanted, _, items = rest.partition(" ")
-        chosen = [item for item in messages if item["uid"] in uid_set(wanted, uids)]
+        chosen = [item for item in messages if item["uid"] in uid_set(wanted, uids) and not item.get("gone")]
         headers = "HEADER.FIELDS" in items.upper()
-        if headers and any(item.get("refuse") for item in chosen):
-            conn.sendall((tag + " NO cannot parse a message\r\n").encode())
-            return
+        time.sleep(box.get("fetch_delay_ms", 0) / 1000)
+        several = len(chosen) > 1
+        left_out = [item for item in chosen if item.get("refuse") or (several and item.get("batch_refuse"))]
+        refused = headers and len(left_out) > 0
         out = b""
         for item in chosen:
+            if headers and item in left_out:
+                continue
             seq = uids.index(item["uid"]) + 1
             line = '* %d FETCH (UID %d INTERNALDATE "%s"' % (seq, item["uid"], item["internal_date"])
             if headers:
@@ -114,7 +129,8 @@ def mailbox_command(conn, tag, command, argtext):
                 out += (line + " BODY[HEADER.FIELDS (FROM SUBJECT)] {%d}\r\n" % len(body)).encode() + body + b")\r\n"
             else:
                 out += (line + ")\r\n").encode()
-        conn.sendall(out + (tag + " OK done\r\n").encode())
+        ending = " NO some messages could not be fetched\r\n" if refused else " OK done\r\n"
+        conn.sendall(out + (tag + ending).encode())
         return
     conn.sendall((tag + " NO read-only\r\n").encode())
 
