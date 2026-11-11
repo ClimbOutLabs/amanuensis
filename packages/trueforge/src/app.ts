@@ -43,6 +43,7 @@ import { createPermissionsRouter } from './apis/permissions';
 import { createPersonaKnowledgeRouter } from './apis/personaKnowledge';
 import { createPersonalizationRouter } from './apis/personalization';
 import { createPersonasRouter, createSessionPersonasRouter } from './apis/personas';
+import { createChatPrivacyRouter, createPrivateChatSweepRouter } from './apis/privateChats';
 import { createRepositoriesRouter, createSessionRepositoryRouter } from './apis/repositories';
 import { createScheduleExecutionRouter, createSchedulesRouter } from './apis/schedules';
 import { createSentinelSettingsRouter } from './apis/sentinelSettings';
@@ -85,6 +86,7 @@ import configuration, {
 } from './config';
 import type { AgentRecord, IAgentStore } from './db/agentStore';
 import type { IBriefItemCompletionStore } from './db/briefItemCompletionStore';
+import type { IChatDeletionStore } from './db/chatDeletionStore';
 import type { ICompletedTurnEventStore } from './db/completedTurnEvents';
 import type { IDeliveryStore } from './db/deliveryStore';
 import type { IGlobalSettingsStore } from './db/globalSettingsStore';
@@ -314,6 +316,8 @@ export interface ServerDeps<TTransaction> {
   /** The public key a browser needs to turn push on; undefined while push is off. */
   webPushPublicKey: string | undefined;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
+  /** Deletes a chat and everything it owns in one go; keeps its token counts. */
+  chatDeletionStore: IChatDeletionStore;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
   /** Whether the in-process schedule loop is running; the help check reads it. */
@@ -521,6 +525,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     sandboxProviderResolver: deps.sandboxProviderResolver,
     globalSettingsStore: deps.globalSettingsStore,
     tokenFactoryBudget: deps.tokenFactoryBudget,
+    chatDeletionStore: deps.chatDeletionStore,
     chatSearchIndexer: deps.chatSearchIndexer,
     audit: deps.sentinelAuditStore,
   };
@@ -715,6 +720,21 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
   app.route(
     '/api/internal/schedules',
     withAuth(createScheduleExecutionRouter(scheduleTurnDeps), scheduleExecutionAuthMiddleware),
+  );
+  app.route(
+    '/api/internal/private-chats',
+    withAuth(
+      createPrivateChatSweepRouter({
+        sessions: deps.sessions,
+        sessionStore: deps.sessionStore,
+        chatDeletionStore: deps.chatDeletionStore,
+        activeTurns: deps.activeTurns,
+        turnDrains: deps.turnDrains,
+        redis: deps.redis,
+        logger: deps.logger,
+      }),
+      scheduleExecutionAuthMiddleware,
+    ),
   );
   app.route(
     '/api/v1/schedules',
@@ -1131,8 +1151,10 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         sessions: deps.sessions,
         mcpCatalog: deps.mcpCatalog,
         sessionStore: deps.sessionStore,
+        chatDeletionStore: deps.chatDeletionStore,
         sentinelAuditStore: deps.sentinelAuditStore,
         activeTurns: deps.activeTurns,
+        turnDrains: deps.turnDrains,
         resolveModelProviderStore: deps.resolveModelProviderStore,
         resolveMcpServerStore: deps.resolveMcpServerStore,
         resolveSkillStore: deps.resolveSkillStore,
@@ -1209,6 +1231,19 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
   app.route(
     '/api/v1/sessions',
     withAuth(
+      createChatPrivacyRouter({
+        sessionStore: deps.sessionStore,
+        personaStore: deps.personaStore,
+        resolveAgentStore: deps.resolveAgentStore,
+        resolveModelProviderStore: deps.resolveModelProviderStore,
+        resolveRequestContext,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
+    '/api/v1/sessions',
+    withAuth(
       createSessionRepositoryRouter({
         repositoryStore: deps.repositoryStore,
         sessionStore: deps.sessionStore,
@@ -1265,6 +1300,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         sentinelSettingsStore: deps.sentinelSettingsStore,
         chatSearchIndexer: deps.chatSearchIndexer,
         tokenFactoryBudget: deps.tokenFactoryBudget,
+        chatDeletionStore: deps.chatDeletionStore,
         eventSubscriptions: deps.eventSubscriptions,
         resolveSandboxProviderStore: deps.resolveSandboxProviderStore,
         sandboxProviderResolver: deps.sandboxProviderResolver,
@@ -1282,8 +1318,8 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
   const uiBasePath = getPublicUiBasePath();
   const openApiSpecPath = `${uiBasePath}api/v1/openapi.json`;
   const openApiServerUrl = uiBasePath === '/' ? undefined : uiBasePath.replace(/\/$/, '');
-  mountApiDocs(app, { uiBasePath, openApiSpecPath });
-  app.get('/api/v1/openapi.json', c =>
+  mountApiDocs(app, { uiBasePath, openApiSpecPath, authMiddleware });
+  app.get('/api/v1/openapi.json', authMiddleware, c =>
     c.json(
       buildOpenApiDocument(app, {
         authEnabled,
