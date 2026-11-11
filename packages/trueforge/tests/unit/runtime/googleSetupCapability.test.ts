@@ -11,6 +11,7 @@ const READ = 'https://www.googleapis.com/auth/gmail.readonly';
 const COMPOSE = 'https://www.googleapis.com/auth/gmail.compose';
 const CALENDAR_READ = 'https://www.googleapis.com/auth/calendar.events.readonly';
 const CALENDAR_WRITE = 'https://www.googleapis.com/auth/calendar.events';
+const DRIVE = 'https://www.googleapis.com/auth/drive.file';
 
 function record(overrides: Partial<GoogleConnectionRecord> = {}): GoogleConnectionRecord {
   return {
@@ -116,6 +117,11 @@ describe('googleSetupCapability', () => {
   });
 
   it('mounts nothing once the login is connected with everything allowed', async () => {
+    await store.save(record({ granted_scopes: [READ, COMPOSE, CALENDAR_READ, CALENDAR_WRITE, DRIVE] }));
+    expect(await mount()).toBeUndefined();
+  });
+
+  it('mounts nothing once mail and calendar are allowed, even with Drive still off: Drive is optional', async () => {
     await store.save(record({ granted_scopes: [READ, COMPOSE, CALENDAR_READ, CALENDAR_WRITE] }));
     expect(await mount()).toBeUndefined();
   });
@@ -156,6 +162,19 @@ describe('googleSetupCapability', () => {
     expect(GOOGLE_SETUP_INSTRUCTION).toContain('after 7 days');
     expect(GOOGLE_SETUP_INSTRUCTION).toContain('Publish app');
     expect(GOOGLE_SETUP_INSTRUCTION).toContain('has not verified this app');
+  });
+
+  it('names the Drive, Docs and Sheets APIs, because reading a Doc or a Sheet needs its own API', () => {
+    expect(GOOGLE_SETUP_INSTRUCTION).toContain(
+      'the Drive API at https://console.cloud.google.com/apis/library/drive.googleapis.com',
+    );
+    expect(GOOGLE_SETUP_INSTRUCTION).toContain(
+      'the Docs API at https://console.cloud.google.com/apis/library/docs.googleapis.com',
+    );
+    expect(GOOGLE_SETUP_INSTRUCTION).toContain(
+      'the Sheets API at https://console.cloud.google.com/apis/library/sheets.googleapis.com',
+    );
+    expect(GOOGLE_SETUP_INSTRUCTION).toContain('which still asks before creating a Doc or adding rows to a Sheet');
   });
 
   it('pins that secrets live only in the Settings form, never in chat', () => {

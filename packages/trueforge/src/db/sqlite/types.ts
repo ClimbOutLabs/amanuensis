@@ -45,6 +45,7 @@ import type { SkillManifest } from '../../schemas/skill';
 import type { BriefItemCompletionTable } from '../briefItemCompletionStore';
 import type { ChatImageOrigin } from '../chatImageStore';
 import type { DeliveryAttemptTable, DeliveryTable } from '../deliveryStore';
+import type { LocalUserTable } from '../localUserStore';
 import type { OAuthClient, OAuthPendingAuthorizationData, OAuthServer, OAuthToken } from '../mcpServerStore';
 import type { NoticingCheckpointTable, NoticingEventTable, ReachLeaseTable } from '../noticingStore';
 import type { PushSubscriptionTable } from '../pushSubscriptionStore';
@@ -834,6 +835,7 @@ export interface Database {
   noticing_checkpoint: NoticingCheckpointTable;
   reach_lease: ReachLeaseTable;
   push_subscription: PushSubscriptionTable;
+  local_user: LocalUserTable;
   approval_token: ApprovalTokenTable;
   sentinel_user_settings: SentinelUserSettingsTable;
   implementation_plan_grant: ImplementationPlanGrantTable;

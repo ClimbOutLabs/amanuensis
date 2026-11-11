@@ -266,9 +266,19 @@
       "reason": "Default map tiles for the maps card; can be changed in settings."
     },
     {
+      "host": "docs.googleapis.com",
+      "category": "connector",
+      "reason": "Google Docs API for the Google connector the person sets up: reading and creating Docs."
+    },
+    {
+      "host": "sheets.googleapis.com",
+      "category": "connector",
+      "reason": "Google Sheets API for the Google connector the person sets up: reading Sheets and adding rows to them."
+    },
+    {
       "host": "www.googleapis.com",
       "category": "connector",
-      "reason": "Google Calendar and Gmail scopes and API for the Google connector the person sets up."
+      "reason": "Google Calendar, Gmail and Drive scopes and API for the Google connector the person sets up."
     },
     {
       "host": "ai-sdk.dev",
@@ -399,6 +409,11 @@
       "host": "zod.dev",
       "category": "docs_link",
       "reason": "Library documentation named in a code comment."
+    },
+    {
+      "host": "challenges.cloudflare.com",
+      "category": "identifier",
+      "reason": "Matched against frame URLs to name a human check, never contacted."
     },
     {
       "host": "json-schema.org",

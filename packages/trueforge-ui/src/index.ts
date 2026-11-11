@@ -253,6 +253,8 @@ export type {
   ImplementationPlanGrant,
   ImplementationPlanGrantApi,
 } from './components/ImplementationPlanGrantContext.js';
+export { LocalAccountProvider, useOptionalLocalAccount } from './components/LocalAccountContext.js';
+export type { LocalAccountApi } from './components/LocalAccountContext.js';
 export { MemoryRecallProvider, useOptionalMemoryRecall } from './components/MemoryRecallContext.js';
 export type { MemoryRecallApi, MemoryTurnContext } from './components/MemoryRecallContext.js';
 export { ModelUsageProvider, useOptionalModelUsage } from './components/ModelUsageContext.js';
