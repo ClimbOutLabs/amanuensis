@@ -18,12 +18,15 @@ import {
 import { startApprovalTestServer } from '../../trueforge/tests/fixtures/approvalTestServer.ts';
 import { FINAL_TEXT } from '../../trueforge/tests/fixtures/scriptedModelServer.ts';
 import { inProcessApi } from './support/approvalChat.ts';
+import { withinDeadline } from './support/deadline.ts';
 import { featureShotPath, saveFailureShots } from './support/featureShots.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
 import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
 import { privateViteCache } from './support/viteCache.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
+// Shorter than the test's own limit, so a stuck test ends itself and cleans up.
+const DEADLINE_MS = 780_000;
 
 /** The two homes a person can have: nothing connected, and Google mail and calendar connected. */
 const HOMES: readonly { name: string; google: boolean; capabilities: TourCapabilities }[] = [
@@ -188,67 +191,78 @@ test(
     let current = 'screen:home';
     const pressedCards = new Set<CardKey>();
     try {
-      await vite.listen();
-      const address = vite.httpServer?.address();
-      if (address == null || typeof address === 'string') throw new Error('Vite did not bind a TCP port');
-      const origin = `http://127.0.0.1:${address.port}`;
-      browser = await chromium.launch({ executablePath: findChromiumExecutable(chromium.executablePath()) });
+      await withinDeadline({
+        ms: DEADLINE_MS,
+        where: () => current,
+        run: async () => {
+          await vite.listen();
+          const address = vite.httpServer?.address();
+          if (address == null || typeof address === 'string') throw new Error('Vite did not bind a TCP port');
+          const origin = `http://127.0.0.1:${address.port}`;
+          browser = await chromium.launch({ executablePath: findChromiumExecutable(chromium.executablePath()) });
 
-      for (const home of HOMES) {
-        const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-        const page = await context.newPage();
-        if (home.google) await asGoogleConnected({ page, origin });
-        const shotStep = home.google ? 'cards-with-google' : 'cards';
+          for (const home of HOMES) {
+            const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+            const page = await context.newPage();
+            if (home.google) await asGoogleConnected({ page, origin });
+            const shotStep = home.google ? 'cards-with-google' : 'cards';
 
-        for (const topic of [null, ...HOME_TOPIC_IDS]) {
-          const cards = homeCardsFor({ topic, capabilities: home.capabilities });
-          const titles = cards.map(card => card.title);
-          current = topic === null ? 'screen:home' : `pill:${topic}`;
-          await openHome({ page, origin, topic, titles });
-          await page.screenshot({
-            path: await featureShotPath({ surface: current, step: topic === null ? `no-pill-${shotStep}` : shotStep }),
-          });
+            for (const topic of [null, ...HOME_TOPIC_IDS]) {
+              const cards = homeCardsFor({ topic, capabilities: home.capabilities });
+              const titles = cards.map(card => card.title);
+              current = topic === null ? 'screen:home' : `pill:${topic}`;
+              await openHome({ page, origin, topic, titles });
+              await page.screenshot({
+                path: await featureShotPath({
+                  surface: current,
+                  step: topic === null ? `no-pill-${shotStep}` : shotStep,
+                }),
+              });
 
-          if (topic !== null) {
-            // The chosen pill is still chosen after the app loads again.
-            await page.reload({ waitUntil: 'domcontentloaded', timeout: RENDER_TIMEOUT_MS });
-            await page
-              .getByRole('button', { name: HOME_TOPICS[topic].label, exact: true })
-              .and(page.locator('[aria-pressed="true"]'))
-              .waitFor({ timeout: RENDER_TIMEOUT_MS });
+              if (topic !== null) {
+                // The chosen pill is still chosen after the app loads again.
+                await page.reload({ waitUntil: 'domcontentloaded', timeout: RENDER_TIMEOUT_MS });
+                await page
+                  .getByRole('button', { name: HOME_TOPICS[topic].label, exact: true })
+                  .and(page.locator('[aria-pressed="true"]'))
+                  .waitFor({ timeout: RENDER_TIMEOUT_MS });
+              }
+
+              for (const card of cards) {
+                const key = keyOf(card);
+                if (pressedCards.has(key)) continue;
+                current = `tour:${key}`;
+                await openHome({ page, origin, topic, titles });
+                // The brief chat does not show its opening message, so the check is what the app sends.
+                const sent = page.waitForRequest(
+                  request =>
+                    request.method() === 'POST' && (request.postData() ?? '').includes(JSON.stringify(card.prompt)),
+                  { timeout: RENDER_TIMEOUT_MS },
+                );
+                await cardList(page).getByRole('button', { name: card.title }).click();
+                await sent;
+                await page.locator('main').getByText(FINAL_TEXT).first().waitFor({ timeout: RENDER_TIMEOUT_MS });
+                await page.screenshot({
+                  path: await featureShotPath({ surface: current, step: 'sent-as-first-message' }),
+                });
+                pressedCards.add(key);
+              }
+            }
+            await context.close();
           }
 
-          for (const card of cards) {
-            const key = keyOf(card);
-            if (pressedCards.has(key)) continue;
-            current = `tour:${key}`;
-            await openHome({ page, origin, topic, titles });
-            // The brief chat does not show its opening message, so the check is what the app sends.
-            const sent = page.waitForRequest(
-              request =>
-                request.method() === 'POST' && (request.postData() ?? '').includes(JSON.stringify(card.prompt)),
-              { timeout: RENDER_TIMEOUT_MS },
-            );
-            await cardList(page).getByRole('button', { name: card.title }).click();
-            await sent;
-            await page.locator('main').getByText(FINAL_TEXT).first().waitFor({ timeout: RENDER_TIMEOUT_MS });
-            await page.screenshot({ path: await featureShotPath({ surface: current, step: 'sent-as-first-message' }) });
-            pressedCards.add(key);
-          }
-        }
-        await context.close();
-      }
-
-      assert.deepEqual(
-        HOME_TOPIC_IDS.map(id => `pill:${id}`).sort(),
-        [...PILLS_CHOSEN],
-        'every pill the home has was chosen',
-      );
-      assert.deepEqual(
-        [...pressedCards].map(key => `tour:${key}`).sort(),
-        [...CARDS_PRESSED],
-        'the cards a home can show are the cards this test lists; update CARDS_PRESSED and tests/nightly-coverage.json together',
-      );
+          assert.deepEqual(
+            HOME_TOPIC_IDS.map(id => `pill:${id}`).sort(),
+            [...PILLS_CHOSEN],
+            'every pill the home has was chosen',
+          );
+          assert.deepEqual(
+            [...pressedCards].map(key => `tour:${key}`).sort(),
+            [...CARDS_PRESSED],
+            'the cards a home can show are the cards this test lists; update CARDS_PRESSED and tests/nightly-coverage.json together',
+          );
+        },
+      });
     } catch (error) {
       await saveFailureShots({ browser, surface: current });
       throw error;

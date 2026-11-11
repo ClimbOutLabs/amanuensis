@@ -25,7 +25,13 @@ Aman sorts every action before it runs.
 
 The card shows what will happen, including what will be sent, before anything leaves. In a chat, the card offers **Approve** and **Deny**. Sending mail or a message, and a calendar change that invites or emails guests, asks every time: those cards offer only **Approve** and **Deny**. Deletes and other actions with real effects also offer **Always allow this here** when the card names who or where the action goes: Aman stops asking for that kind of action to that same place for the rest of this chat, and asks again in any other chat. A card that names no such place offers only **Approve** and **Deny**, because there is nothing to tie the answer to. Creating a schedule or a persona asks every time for the same reason. Saving a mail draft that is addressed to someone, and a change to your own calendar that reaches no guests, also offer **Always allow this here**. For those two, the answer covers every later draft, or every later change to your own calendar, in that chat. **Always allow**, which covers every chat, is never offered for sends, deletes, installs or outside services. The connector tools you always allow are listed in that connector's settings, where **Revoke** turns each one off.
 
-In the sandbox, a command that only reads inside the workspace runs without asking, also when several reads are joined, as in `cd repo && git status`. Reads are listing files, reading a file or part of one, searching files, and looking at git history. Every other command asks first. Answering **Always allow this here** on a command covers running that same command again in this chat, and nothing else.
+In the sandbox, a command that only reads inside the workspace runs without asking, also when several reads are joined, as in `cd repo && git status`. Reads are listing files, reading a file or part of one, searching files, and looking at git history. Every other command asks first, unless the Sandbox switch described below covers it. Answering **Always allow this here** on a command covers running that same command again in this chat, and nothing else.
+
+Installing a package asks first on every sandbox. The Sandbox switch never covers it.
+
+In Settings, under Permissions, the **Sandbox** switch lets Aman make new files and run the scripts it wrote in the same chat without asking. The switch only applies where the sandbox has no network. That is the sandbox the installer sets up, which runs in Docker. A sandbox that can reach the internet always asks before it runs code or makes a file, whatever the switch says. That is the case when Aman is started with npx or from source, where the sandbox can reach PyPI and GitHub. The installer's sandbox also asks in two places where what it runs can reach a site. One is a project, or your chats without a project, where you allowed package downloads: code there can reach the package sites. The other is a chat that uses a skill you let reach its own sites. With the switch on, changing a file that already exists, running a script from your repository and running tests still ask.
+
+The sandbox is what keeps this work contained. Aman also looks at a script before it runs it without asking, but that look only decides when to ask. It is not what keeps you safe.
 
 ### When Aman holds something it would normally do
 
@@ -37,7 +43,7 @@ Pages, emails from other people, files and tool results are things Aman reads. T
 
 In a scheduled run a held call is skipped, and the run tells you in one line. A held connector read waits for you in the run's **Needs your OK** list.
 
-You can choose to let file writes run without a card. That is the only kind of action you can relax this way.
+You can choose to let file writes run without a card, and to let work in the sandbox run without one as described above. No setting covers a send, a delete or a package install.
 
 ## Scheduled runs never act on their own
 
