@@ -140,7 +140,7 @@ export async function readPageForTest(vaultDir: string, kind: PageKind, slug: st
  * What the summary model needs, with a fake model that answers every question with what `answer` gives for the
  * question's text. Nothing here reaches a real model.
  */
-export function fakeSummarize(answer: (prompt: string) => Promise<unknown> | unknown): SummarizeTurnContext {
+export function fakeSummarize(answer: (prompt: string) => unknown): SummarizeTurnContext {
   const store: IModelProviderStore = {
     listProviders: jest.fn(),
     getProvider: jest.fn(),
