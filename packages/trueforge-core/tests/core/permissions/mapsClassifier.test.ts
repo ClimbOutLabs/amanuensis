@@ -14,7 +14,11 @@ import {
 import { verifyPreDispatch } from '../../../src/core/permissions/dispatch';
 import { isMapsToolName, MAPS_SILENT_REASON } from '../../../src/core/permissions/mapsToolNames';
 import { recordPersonText } from '../../../src/core/permissions/provenance';
-import { createWebSearchTurnState, recordToolResultProvenance } from '../../../src/core/permissions/webSearch';
+import {
+  createWebSearchTurnState,
+  NO_HOST_STAMP,
+  recordToolResultProvenance,
+} from '../../../src/core/permissions/webSearch';
 
 function makeCtx(services?: SentinelServices): ClassifyContext {
   return {
@@ -398,6 +402,7 @@ describe('maps without asking', () => {
     recordToolResultProvenance({
       state: ctx.web_search,
       tool_name: 'read_email',
+      stamp: NO_HOST_STAMP,
       argument_values: ['m1'],
       texts: ['From: Dana Wolfe <dana@example.org>\nLunch at 12 Harbour Street, Lisbon on Friday.'],
     });
