@@ -27,6 +27,7 @@
     "prepack": "node ../../scripts/copy-license-files.mjs",
     "build:clean": "node ../../scripts/rm-path.mjs dist",
     "build:deps": "node scripts/sync-dependencies.mjs",
+    "check:deps": "node scripts/sync-dependencies.mjs --check",
     "build:server": "pnpm --filter @truefoundry/trueforge build",
     "build": "pnpm run build:server && pnpm run build:deps && pnpm run build:clean && tsup && node ../../scripts/chmod-path.mjs dist/cli.js 755 && node scripts/vendor-server.mjs",
     "pack:dry": "pnpm pack --dry-run",

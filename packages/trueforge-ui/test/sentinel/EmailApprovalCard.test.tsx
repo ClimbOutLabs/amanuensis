@@ -180,6 +180,12 @@ describe('EmailApprovalCard fields', () => {
     expect(screen.getByText('Message body')).toBeInTheDocument();
   });
 
+  it('says what will be saved, not sent, on a draft card', () => {
+    renderEmail({ action: 'save' });
+    expect(screen.getByText('What will be saved')).toBeInTheDocument();
+    expect(screen.queryByText('What will be sent')).not.toBeInTheDocument();
+  });
+
   it('shows the full recipient list, not a count', () => {
     renderEmail({ to: [bare('grace@example.com'), bare('lin@example.com'), bare('sam@example.com')] });
     expect(screen.getByText('grace@example.com, lin@example.com, sam@example.com')).toBeInTheDocument();

@@ -12,7 +12,7 @@ A schedule repeats. For something that should happen once, ask for a reminder in
 
 1. In any chat, ask with a time, such as "Remind me at 5 pm to call the pharmacy".
 2. Aman sets it without an approval card. A reminder only ever reaches you.
-3. When it is due, the reminder shows under the bell, with the reason you got it. It also reaches you the way you chose in **Settings**, then **Reach me**, such as a notice on your phone.
+3. When it is due, the reminder shows under the bell with the reason you got it, and appears at the end of this same chat, under your earlier messages. If Aman is still answering in that chat, the reminder line waits until the answer ends. It also reaches you the way you chose in **Settings**, then **Reach me**, such as a notice on your phone. While Aman is open in a browser tab, this chat shows an unread mark.
 4. To mark a reminder urgent, say so when you ask, such as "Remind me at 5 pm to call the pharmacy, it's urgent". An urgent reminder can call you once phone calls are set up and you tick **Call me for reminders I mark urgent**.
 5. To see or cancel reminders, ask, such as "What reminders do I have?" or "Cancel the pharmacy reminder".
 

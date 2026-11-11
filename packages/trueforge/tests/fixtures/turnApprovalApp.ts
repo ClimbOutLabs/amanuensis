@@ -258,6 +258,7 @@ export async function buildApp(
   app.route(
     '/',
     createTurnsRouter({
+      chatDeletionStore: { listDeletedChatModelUsage: () => Promise.resolve([]) },
       mcpCatalog: McpCatalog.loadShipped(),
       globalSettingsStore: new SqliteGlobalSettingsStore(db),
       tokenFactoryBudget: uncappedTokenFactoryBudget,

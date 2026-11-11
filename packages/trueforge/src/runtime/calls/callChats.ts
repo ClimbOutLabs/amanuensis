@@ -210,6 +210,7 @@ export function createCallChats({
             agent_id: undefined,
             folder_id: undefined,
             no_folder: false,
+            include_private: false,
             created_by_or_agent_ids: { created_by_subject_id: owner.created_by, agent_ids: [] },
             metadata: undefined,
             source_type: undefined,

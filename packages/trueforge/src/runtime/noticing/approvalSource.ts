@@ -39,6 +39,7 @@ export function sessionApprovalSource({
           agent_id: undefined,
           folder_id: undefined,
           no_folder: false,
+          include_private: false,
           created_by_or_agent_ids: undefined,
           metadata: undefined,
           source_type: undefined,

@@ -433,7 +433,7 @@ plan_aman_command() {
 }
 
 # An instance from before addresses were listed is opened on the network like a new one, unless --local-only says not to.
-# One already open on the network changes between https and plain http when --tls says so, or moves to https by default.
+# One already open on the network is served over https; an older record that still says plain http moves to https.
 plan_existing_addresses() { # name
   local name=$1 hosts port
   port=$(reg_get "$name" app_port)
@@ -448,15 +448,9 @@ plan_existing_addresses() { # name
   fi
   # shellcheck disable=SC2086 # the extra hosts are checked hosts without spaces
   hosts=$(network_origin_list "$port" '' ${OPT_ADDRESSES:-$(reg_get "$name" extra_hosts)} | sed "s|http://||g; s|:$port||g; s|,|, |g")
-  if [ "$(tls_target "$name")" = local ]; then
-    plan_add todo "Serve instance $name over https on your network" \
-      "It will open at: $hosts, with a certificate Aman makes on this computer. The old plain http address sends devices to https." \
-      "Each device trusts that certificate once. Its data and sign-in stay as they are."
-    return 0
-  fi
-  plan_add todo "Open instance $name on your network" \
-    "It will open at: $hosts. Sign-in works from each. Only devices on your private network can reach it." \
-    "Its data and sign-in stay as they are."
+  plan_add todo "Serve instance $name over https on your network" \
+    "It will open at: $hosts, with a certificate Aman makes on this computer. The old plain http address sends devices to https." \
+    "Each device trusts that certificate once. Its data and sign-in stay as they are."
 }
 
 # The https front end and the local authority, when an instance is about to be served over https.
@@ -465,7 +459,7 @@ plan_tls() {
   if need_new_instance && [ -n "${I_TLS_PORT:-}" ]; then need=1; fi
   for name in $(reg_names); do
     change=$(instance_address_change "$name")
-    if tls_active "$name" || { [ -n "$change" ] && [ "$change" != close ] && [ "$(tls_target "$name")" = local ]; }; then need=1; fi
+    if tls_active "$name" || { [ -n "$change" ] && [ "$change" != close ]; }; then need=1; fi
   done
   if tls_authority_needs_replacing && [ -n "$(tls_instances)" ]; then
     plan_add todo "Make this computer's root certificate again" \
@@ -628,7 +622,7 @@ install_execute() {
   for name in $(reg_names); do
     change=$(instance_address_change "$name")
     if [ -n "$change" ]; then
-      instance_apply_addresses "$name" "$change"
+      instance_apply_addresses "$name" "$change" "$REL_APP_TAG"
       ADDRESS_CHANGED="$ADDRESS_CHANGED $name "
     fi
   done
