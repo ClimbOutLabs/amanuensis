@@ -229,6 +229,23 @@ test_cgroup_and_low_disk() {
   sandbox_drop
 }
 
+test_rerun_counts_only_the_disks_still_to_be_made() {
+  t_begin "a rerun asks for room only for the sandbox disks it still has to make"
+  sandbox_new
+  install_machine
+  assert_rc 0
+  assert_file "$SB/aman-slots/main/ws-1.img"
+  STUB_DF_KB=$((15 * 1024 * 1024))
+  run_install --dry-run
+  assert_rc 0
+  assert_not_contains "$OUT$ERR" "free for the sandbox disks"
+  rm -f "$SB/aman-slots/main/ws-2.img"
+  run_install --dry-run
+  assert_rc 1
+  assert_flat_contains "$OUT$ERR" "Less than 16 GB free for the sandbox disks under $SB/aman-slots"
+  sandbox_drop
+}
+
 test_install_builds_then_starts_slots_then_the_instance() {
   t_begin "install builds the slot image with the setup from the app image, starts the slots, then the instance with the wiring"
   sandbox_new
@@ -286,8 +303,8 @@ test_install_without_sandbox() {
   INSTALL_EXTRA=(--no-sandbox)
   install_machine
   assert_eq "$RC" 0
-  # The host's Node.js logs lines that start with "node "; the app image's own node (the push keys step) is not it.
-  if grep -q '^node ' "$STUB_LOG"; then t_fail "host Node.js ran: $(grep '^node ' "$STUB_LOG" | head -n 1)"; else t_pass; fi
+  # Node.js on this computer never runs; the app image's own Node.js still makes the push keys.
+  assert_eq "$(grep -c '^node ' "$STUB_LOG" || true)" 0 "no Node.js on this computer runs"
   assert_log_lacks "--entrypoint cat"
   assert_log_lacks "https://nodejs.org" "no runtime is downloaded for an install without the sandbox"
   assert_no_path "$AMAN_HOME/runtime"
@@ -836,6 +853,7 @@ test_download_failure_is_explained
 test_host_node_only_by_opt_in
 test_host_node_opt_in_needs_a_new_enough_node
 test_cgroup_and_low_disk
+test_rerun_counts_only_the_disks_still_to_be_made
 test_install_builds_then_starts_slots_then_the_instance
 test_rendered_compose_wires_the_app_to_the_slots
 test_install_without_sandbox
