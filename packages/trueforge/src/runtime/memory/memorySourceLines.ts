@@ -2,7 +2,22 @@ import { constants } from 'node:fs';
 import { copyFile, mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
-import { DAILY_LOG_FILE_PATTERN, splitEntries, upgradeLegacyEntries, withSourceLines } from './markdownMemoryFiles';
+import {
+  DAILY_LOG_FILE_PATTERN,
+  dailyLogEntries,
+  formatReviewedMark,
+  latestTombstonesByEntry,
+  namespaceDirFor,
+  readReviewedMarks,
+  readVaultTombstones,
+  reviewableNoRecordChatId,
+  REVIEWED_FROM_YOU_FILE,
+  reviewedEntryHash,
+  sanitizeNamespace,
+  splitEntries,
+  upgradeLegacyEntries,
+  withSourceLines,
+} from './markdownMemoryFiles';
 
 /** Records, in the memory folder, that the notes saved before entries named their source were marked. */
 const STATE_FILE = '.source-lines.json';
@@ -121,4 +136,81 @@ export function ensureMemorySourceLines({ baseDir }: { baseDir: string }): Promi
   });
   runs.set(key, run);
   return run;
+}
+
+/** Why a note was left as it is when its review was recorded. */
+export type ReviewSkipReason = 'not_found' | 'not_reviewable' | 'edited_or_deleted' | 'already_reviewed';
+
+export interface ReviewedNotesOutcome {
+  recorded: string[];
+  skipped: { entryId: string; reason: ReviewSkipReason }[];
+}
+
+const ENTRY_ID_PATTERN = /^md:([^:]+):(\d{4}-\d{2}-\d{2}\.md)#(\d+)$/;
+
+/**
+ * Records that the person reviewed these older notes and says they are their own. Nothing is rewritten:
+ * one line per note is appended to the vault's reviewed-notes file, holding the note's id and the hash of
+ * its text as stored. Readers hand a note on as "From you" only while its text still has that hash and
+ * still closes with "External source: no record". A note that fails any check is skipped.
+ * Only the review route calls this; the Memories edit path never does.
+ */
+export async function markReviewedNotesFromYou({
+  baseDir,
+  namespace,
+  entryIds,
+}: {
+  baseDir: string;
+  namespace: string;
+  entryIds: readonly string[];
+}): Promise<ReviewedNotesOutcome> {
+  const safeNamespace = sanitizeNamespace(namespace);
+  const dir = namespaceDirFor(baseDir, safeNamespace);
+  const outcome: ReviewedNotesOutcome = { recorded: [], skipped: [] };
+  const skip = (entryId: string, reason: ReviewSkipReason): void => {
+    outcome.skipped.push({ entryId, reason });
+  };
+  const touched = latestTombstonesByEntry(await readVaultTombstones({ baseDir, namespace: safeNamespace }));
+  const reviewed = await readReviewedMarks({ baseDir, namespace: safeNamespace });
+  const entriesByFile = new Map<string, Map<string, string>>();
+  const lines: string[] = [];
+  for (const entryId of new Set(entryIds)) {
+    const match = ENTRY_ID_PATTERN.exec(entryId);
+    if (match?.[1] !== safeNamespace || match[2] === undefined) {
+      skip(entryId, 'not_found');
+      continue;
+    }
+    const file = match[2];
+    let entries = entriesByFile.get(file);
+    if (entries === undefined) {
+      entries = new Map();
+      try {
+        const content = await readFile(path.join(dir, 'memory', file), 'utf8');
+        for (const entry of dailyLogEntries({ safeNamespace, file, content })) {
+          entries.set(entry.id, entry.text);
+        }
+      } catch {
+        // A day file that cannot be read holds no note to review.
+      }
+      entriesByFile.set(file, entries);
+    }
+    const text = entries.get(entryId);
+    if (text === undefined) {
+      skip(entryId, 'not_found');
+    } else if (touched.has(entryId)) {
+      skip(entryId, 'edited_or_deleted');
+    } else if (reviewableNoRecordChatId(text) === undefined) {
+      skip(entryId, 'not_reviewable');
+    } else if (reviewed.get(entryId) === reviewedEntryHash(text)) {
+      skip(entryId, 'already_reviewed');
+    } else {
+      lines.push(formatReviewedMark({ entryId, text }));
+      outcome.recorded.push(entryId);
+    }
+  }
+  if (lines.length > 0) {
+    // One append, as the daily logs are written: it never rewrites what is there.
+    await writeFile(path.join(dir, REVIEWED_FROM_YOU_FILE), `${lines.join('\n')}\n`, { flag: 'a', encoding: 'utf8' });
+  }
+  return outcome;
 }

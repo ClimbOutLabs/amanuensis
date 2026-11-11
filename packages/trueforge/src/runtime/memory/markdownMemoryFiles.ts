@@ -87,13 +87,20 @@ export function upgradeLegacyEntries(content: string): string {
 }
 
 /** Entries of one daily log, with the stable ids recall, the embedding index and the vault share. */
-export function dailyLogEntries(input: { safeNamespace: string; file: string; content: string }): ScannedMemoryEntry[] {
+export function dailyLogEntries(input: {
+  safeNamespace: string;
+  file: string;
+  content: string;
+  /** Notes the person reviewed as their own; they are handed on closing with "From you". */
+  reviewed?: ReviewedMarks;
+}): ScannedMemoryEntry[] {
   const entries: ScannedMemoryEntry[] = [];
   const parts = splitEntries(upgradeLegacyEntries(input.content));
   for (let index = 0; index < parts.length; index++) {
     const text = parts[index];
     if (text !== undefined) {
-      entries.push({ id: `md:${input.safeNamespace}:${input.file}#${String(index)}`, file: input.file, index, text });
+      const entry = { id: `md:${input.safeNamespace}:${input.file}#${String(index)}`, file: input.file, index, text };
+      entries.push(input.reviewed === undefined ? entry : withReviewedSource(entry, input.reviewed));
     }
   }
   return entries;
@@ -165,6 +172,9 @@ const IMPORTED_SOURCE_NAME = 'imported file';
 
 /** The source named for an entry that carries no source line at all. */
 const NO_RECORD_SOURCE_NAME = 'no record';
+
+/** The closing line of an older note that has no record of where it came from. */
+const NO_RECORD_SOURCE_LINE = `${EXTERNAL_SOURCE_LINE_PREFIX}${NO_RECORD_SOURCE_NAME}`;
 
 function isExternalSourceLine(line: string): boolean {
   return line.startsWith(EXTERNAL_SOURCE_LINE_PREFIX) || LEGACY_EXTERNAL_SOURCE_LINES.includes(line);
@@ -332,7 +342,7 @@ export function entryMetadata(text: string): Record<string, string> {
 /** The line the Memories page shows for where an entry came from. Old source lines are shown in today's words. */
 function readableSourceLine({ metadata, externalLine, fromYou }: EntryTrailers): string {
   if (externalLine === undefined) {
-    return fromYou ? FROM_YOU_SOURCE_LINE : `${EXTERNAL_SOURCE_LINE_PREFIX}${NO_RECORD_SOURCE_NAME}`;
+    return fromYou ? FROM_YOU_SOURCE_LINE : NO_RECORD_SOURCE_LINE;
   }
   return externalLine.startsWith(EXTERNAL_SOURCE_LINE_PREFIX) ? externalLine : sourceLineFor(metadata);
 }
@@ -380,7 +390,7 @@ export function withSourceLines(content: string): { content: string; marked: num
     }
     marked += 1;
     const text = fromYou ? `${body}\n\n\\${FROM_YOU_SOURCE_LINE}` : body;
-    return [text, ...hiddenLines, `${EXTERNAL_SOURCE_LINE_PREFIX}${NO_RECORD_SOURCE_NAME}`].join('\n\n');
+    return [text, ...hiddenLines, NO_RECORD_SOURCE_LINE].join('\n\n');
   });
   return { content: entries.map(entry => `${entry}\n\n`).join(''), marked };
 }
@@ -394,9 +404,7 @@ export function withSourceLines(content: string): { content: string; marked: num
  */
 export function isLegacyDocumentCopy({ text, context }: { text: string; context: string }): boolean {
   const { body, hiddenLines, externalLine, fromYou } = splitEntryTrailers(text);
-  const sourceLess =
-    !fromYou &&
-    (externalLine === undefined || externalLine === `${EXTERNAL_SOURCE_LINE_PREFIX}${NO_RECORD_SOURCE_NAME}`);
+  const sourceLess = !fromYou && (externalLine === undefined || externalLine === NO_RECORD_SOURCE_LINE);
   if (hiddenLines.length > 0 || !sourceLess) {
     return false;
   }
@@ -587,6 +595,7 @@ export async function scanNamespaceEntries(options: {
   }
 
   const entries: ScannedMemoryEntry[] = [];
+  const reviewed = await readReviewedMarks({ baseDir: options.baseDir, namespace: options.namespace });
   let files: string[] = [];
   try {
     files = (await readdir(path.join(dir, 'memory')))
@@ -604,7 +613,7 @@ export async function scanNamespaceEntries(options: {
     } catch {
       continue;
     }
-    entries.push(...dailyLogEntries({ safeNamespace, file, content }));
+    entries.push(...dailyLogEntries({ safeNamespace, file, content, reviewed }));
   }
   if (options.resolveTombstones === true) {
     const tombstones = await readVaultTombstones({ baseDir: options.baseDir, namespace: options.namespace });
@@ -845,6 +854,86 @@ export async function appendVaultTombstone(options: {
     }
     throw error;
   }
+}
+
+/** Append-only file in a vault folder that records which older notes the person reviewed as their own. */
+export const REVIEWED_FROM_YOU_FILE = '.reviewed-from-you';
+
+/** Reviewed notes: entry id to the hash of the entry text the person reviewed. */
+export type ReviewedMarks = ReadonlyMap<string, string>;
+
+/** The hash a review records for an entry: SHA-256 of its whole text as the dated file holds it. */
+export function reviewedEntryHash(text: string): string {
+  return createHash('sha256').update(text, 'utf8').digest('hex');
+}
+
+/** One line of `.reviewed-from-you`: the entry id, a tab, and the hash of the entry as reviewed. */
+export function formatReviewedMark({ entryId, text }: { entryId: string; text: string }): string {
+  return `${entryId}\t${reviewedEntryHash(text)}`;
+}
+
+/** Parses the text of `.reviewed-from-you`; a line that is not an id, a tab and a hash is ignored, and the latest line per id wins. */
+export function parseReviewedMarks(content: string): ReviewedMarks {
+  const marks = new Map<string, string>();
+  for (const line of content.split('\n')) {
+    const match = /^(md:[^:\t]+:[^#\t]+#\d+)\t([0-9a-f]{64})$/.exec(line.trimEnd());
+    if (match?.[1] !== undefined && match[2] !== undefined) {
+      marks.set(match[1], match[2]);
+    }
+  }
+  return marks;
+}
+
+/** A namespace's reviewed notes. A missing file reads as none. */
+export async function readReviewedMarks(options: { baseDir: string; namespace: string }): Promise<ReviewedMarks> {
+  try {
+    return parseReviewedMarks(
+      await readFile(path.join(namespaceDirFor(options.baseDir, options.namespace), REVIEWED_FROM_YOU_FILE), 'utf8'),
+    );
+  } catch {
+    return new Map();
+  }
+}
+
+/** The entry's last non-empty line, which closes every entry written since entries name their source. */
+function closingLine(text: string): { lines: string[]; index: number } {
+  const lines = text.split('\n');
+  let index = lines.length - 1;
+  while (index >= 0 && (lines[index] ?? '').trim() === '') {
+    index -= 1;
+  }
+  return { lines, index };
+}
+
+/**
+ * The chat id of an older note that is open to review: it closes with exactly "External source: no record",
+ * names a chat, and is not a note from a document or email. Undefined for any other entry.
+ */
+export function reviewableNoRecordChatId(text: string): string | undefined {
+  const { lines, index } = closingLine(text);
+  if ((lines[index] ?? '').trimEnd() !== NO_RECORD_SOURCE_LINE) {
+    return undefined;
+  }
+  const metadata = splitEntryTrailers(text).metadata;
+  return metadata[NOTE_SOURCE_METADATA_KEY] === undefined ? metadata[SESSION_ID_METADATA_KEY] : undefined;
+}
+
+/**
+ * Hands an entry on as the person's own words when they reviewed it: its id is recorded with the hash of
+ * this very text and it still closes with exactly "External source: no record". Only that line changes.
+ * A hash that no longer matches, or any other closing line, leaves the entry as it is. Applied when entries
+ * are scanned, before vault markers, so every reader and a later edit see the reviewed source.
+ */
+function withReviewedSource(entry: ScannedMemoryEntry, reviewed: ReviewedMarks): ScannedMemoryEntry {
+  if (reviewed.get(entry.id) !== reviewedEntryHash(entry.text)) {
+    return entry;
+  }
+  const { lines, index } = closingLine(entry.text);
+  if ((lines[index] ?? '').trimEnd() !== NO_RECORD_SOURCE_LINE) {
+    return entry;
+  }
+  lines[index] = FROM_YOU_SOURCE_LINE;
+  return { ...entry, text: lines.join('\n') };
 }
 
 /**
