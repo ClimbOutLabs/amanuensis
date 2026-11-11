@@ -167,6 +167,7 @@ Workspace tasks go through `package.json` scripts - if a repeatable workflow is 
 | `pnpm lint` / `pnpm format`                          | ESLint (with fixes) / Prettier                        |
 | `pnpm smoke` / `pnpm smoke:down`                     | Full Docker Compose stack + health check              |
 | `pnpm smoke:npx`                                     | Pack the published CLI and boot it like `npx`         |
+| `pnpm smoke:npx:amanuensis`                          | Pack `amanuensis` and start it with `npx`; CI runs it |
 | `pnpm chart:lint` / `pnpm chart:template`            | Validate the Helm chart                               |
 | `pnpm clean` / `pnpm clean:all`                      | Remove build outputs (+ `node_modules` for `:all`)    |
 
@@ -236,6 +237,48 @@ Prettier and ESLint run as pre-commit hooks via husky + lint-staged.
 5. Keep PRs focused and reasonably small; describe **what** changed and **why** in the description.
 6. Open the PR. The maintainer will review it; squash-merge is the norm.
 7. **Please avoid rebasing or force-pushing once a maintainer has started reviewing.** It can make iterative reviewing harder. To update your branch, merge `main` instead. We squash-merge at the end, so messy in-PR history is fine.
+
+## Nightly run
+
+A pull request runs only the test suites its changed files select. The **Nightly** workflow ([`.github/workflows/nightly.yml`](.github/workflows/nightly.yml)) runs every suite on `main` each night, including all the browser tests, whatever changed that day. It reuses the CI workflow, so a suite added to CI is in the nightly run too.
+
+- When a nightly run fails, it opens an issue titled **Nightly tests failed** that lists the failed jobs and links the run. Later failures are added to the same issue. The next run that passes closes it. A cancelled run changes nothing.
+- To start a run by hand, open the **Actions** tab, pick **Nightly**, and choose **Run workflow**. A run started on a branch other than `main` does not open or close the issue.
+- The run uses a scripted model and needs no keys or accounts.
+
+### Every feature names its test
+
+[`tests/nightly-coverage.json`](tests/nightly-coverage.json) lists every feature: the Settings panels, approval cards, email and calendar presets, Home cards, installer commands and server route groups read from the code, plus the screens listed by hand under `screens`. Each row gives the feature's feature set (Chat, Memory, Reminders and so on) and the tests that exercise it. `pnpm nightly:coverage` prints how many features have a test and fails when:
+
+- a feature has no row, or a row names a feature that is gone;
+- a named test does not exist, or never mentions the feature's id;
+- a feature with no test is missing from `not_yet`.
+
+When you add a feature, add its row and its test in the same PR. Add it to `not_yet` only when the test truly cannot land yet, and say why in the PR.
+
+### Screenshots
+
+Browser tests save a picture at each named step with `featureShotPath({ surface, step })` from [`packages/frontend/tests/support/featureShots.ts`](packages/frontend/tests/support/featureShots.ts). The feature's id picks the folder, so pictures land in one folder per feature set. A failing test saves a picture of every open page with `FAILED` in its name.
+
+In CI the pictures go in a folder named for the run's date and time in UTC, such as `2026/11/10/0917/chat/`. The folder gets an `index.html` contact sheet and a `results.json`, and the run keeps it for 30 days as the **screenshots** download on the run's page. To see the same on your machine:
+
+```bash
+AMAN_SCREENSHOT_DIR=/tmp/aman-shots pnpm test:frontend
+pnpm nightly:gallery /tmp/aman-shots
+```
+
+### The signed-in journey
+
+`pnpm test:journey` runs one person's first hour on the built app, the way an installed Aman runs: sign in through the real sign-in service (Dex), land on first run, add a model in Settings, chat, come back to the chat, and sign out. The test is [`packages/frontend/tests/journeys/signedIn.journey.ts`](packages/frontend/tests/journeys/signedIn.journey.ts). CI runs it on every pull request and every night, right after the build, and its pictures join the same **screenshots** download.
+
+To run it on your machine, build first. It needs Docker for the sign-in service and reaches no outside host.
+
+```bash
+pnpm build
+pnpm test:journey
+```
+
+On a machine with no Docker, set `AMAN_DEX_DIR` to a folder that holds the `dex` program and its `web` folder.
 
 ## Releases
 

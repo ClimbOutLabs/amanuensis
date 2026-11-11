@@ -435,6 +435,7 @@ export {
   shouldDownscaleImage,
   withImageDownscaling,
 } from './server/imageAttachmentAdapter.js';
+export { useIsPrivateChat } from './server/privateChatStore.js';
 export { ServerVoiceRefusal } from './utils/spokenReplyPlayer.js';
 export type {
   ServerVoiceApi,
@@ -477,6 +478,7 @@ export type {
 export { AgentDetailsToggleButton } from './atoms/AgentDetailsToggleButton.js';
 export { ClearChatButton } from './atoms/ClearChatButton.js';
 export { railMenuRowClassName } from './atoms/lib/buttonClasses.js';
+export { menuTriggerFor } from './atoms/lib/menuTriggerFor.js';
 export {
   IS_CREATE_AGENT_METADATA_KEY,
   isCreateAgentMetadataValue,
