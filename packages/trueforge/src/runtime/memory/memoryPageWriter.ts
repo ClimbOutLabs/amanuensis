@@ -192,7 +192,8 @@ export async function commitPageChange<T>({
   change,
 }: {
   options: PageChangeOptions;
-  message: string;
+  /** A function is called with what `change` returned, for a message that counts what the change did. */
+  message: string | ((result: T) => string);
   change: (context: { newId: () => string }) => Promise<T>;
 }): Promise<T> {
   const newId = options.newId ?? newFactId;
@@ -210,7 +211,7 @@ export async function commitPageChange<T>({
     if (history !== undefined) {
       try {
         await lock.assertHeld();
-        await commitPages({ ...history, message });
+        await commitPages({ ...history, message: typeof message === 'function' ? message(result) : message });
       } catch (error) {
         if (!(error instanceof VaultGitError)) {
           throw error;
