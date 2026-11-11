@@ -1503,7 +1503,7 @@ describe('mail from a mailbox that numbers its messages', () => {
    * shows up in the mailbox at `shown_at`, which may differ from its arrival time, as with a server clock that is off
    * or mail moved into the inbox. Each message carries its Message-ID as its key.
    */
-  async function numbered({ page = 500 }: { page?: number } = {}) {
+  async function numbered({ page = 500, unreadable = [] }: { page?: number; unreadable?: string[] } = {}) {
     const built = await setup();
     const entries: { message: MailMessage; uid: number; shown_at?: Date | undefined }[] = [];
     const box = { uidvalidity: 1, entries };
@@ -1532,7 +1532,10 @@ describe('mail from a mailbox that numbers its messages', () => {
           more: wanted.length > taken.length,
         });
       },
-      readText: message => Promise.resolve(message.snippet),
+      readText: message =>
+        unreadable.some(name => message.key === `mid:${name}`)
+          ? Promise.reject(new MessageUnreadableError({ cause: new Error('too large') }))
+          : Promise.resolve(message.snippet),
       laterInThread: () => Promise.resolve([]),
       trustedAuthenticationServers: [],
     };
@@ -1610,6 +1613,22 @@ describe('mail from a mailbox that numbers its messages', () => {
     clock.now = later(40);
     await service.run({ watcher: 'mail' });
     expect(billIds('E').size).toBe(1);
+  });
+
+  it('tells once about a bill it cannot read, though a renumbering lists it again', async () => {
+    const { service, clock, add, renumber, recorded } = await numbered({ unreadable: ['U'] });
+    await service.run({ watcher: 'mail' });
+    add(bill('U', 15));
+    clock.now = later(20);
+    await service.run({ watcher: 'mail' });
+    renumber();
+    clock.now = later(30);
+    await service.run({ watcher: 'mail' });
+    const notes = recorded.filter(
+      event => event.id.startsWith('bill_due:') && event.summary.includes('could not be read'),
+    );
+    expect(notes.length).toBeGreaterThan(1);
+    expect(new Set(notes.map(event => event.id)).size).toBe(1);
   });
 
   it('saves where it got to, and the next pass lists from there', async () => {

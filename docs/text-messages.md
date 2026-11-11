@@ -10,7 +10,16 @@ Texts go through Twilio, a service you sign up for. You pay Twilio for each text
 ## What a text says
 
 - **Private (the default).** The text says only the kind of thing, such as "Mannie: a reminder is due. Open the app to see it." It holds no names, amounts or message content. Your assistant's name is the one you chose in Personalization. A text uses at most 20 letters of it.
-- **Full.** A reminder's text holds the reminder, cut to fit two texts. It can show on a locked screen, and Twilio and the phone company can read it. Something your assistant noticed still gets the Private words, because its wording comes from the model and stays in the app. A link or a number to call in a text is a common trick, so a reminder goes out in Full only when it is plain words. It can hold times, dates, amounts such as $20 or 50%, and short codes such as Q3, with at most 6 digits in all, fewer than a phone number with its area code. It cannot hold a sign inside a word, such as a slash, an at sign or a dot, a website, the word "dot", "point" or "period" between two words, a dot sign or a run of dots between two words, with or without spaces (so a sentence that ends and goes on, such as "Dr. Lee at 3pm" or "Done. Next, call Sam", also goes out in Private words, since "evil. com" cannot be told from a sentence end), the word "point" or "period" between two words (as in "make a point of calling" or "grace period ends"), a toll-free number with letters spelling the rest (such as "1 800 Flowers"; an address such as "800 Market Street" also counts), or a number read out in words. Any other reminder goes out in Private words, and Activity says why. A short code of 5 or 6 digits still fits.
+- **Full.** A reminder's text holds the reminder, cut to fit two texts. It can show on a locked screen, and Twilio and the phone company can read it. Something your assistant noticed still gets the Private words, because its wording comes from the model and stays in the app.
+
+  A link or a number to call in a text is a common trick, so a reminder goes out in Full only when it is plain words. The check runs on the words as written and again on the exact words that would be sent. If either fails, the text goes out in Private words, and Activity says why.
+
+  - It can hold times, dates, amounts such as $20 or 50%, and short codes such as Q3. It holds at most 6 digits in all, fewer than a phone number with its area code.
+  - It cannot hold a website, a number read out in words, or a sign inside a word, such as a slash or an at sign.
+  - It cannot hold a dot, or a run of dots, between two words, with or without spaces. The word "dot", "point" or "period" between two words fails too.
+  - A sentence that ends and goes on, such as "Dr. Lee at 3pm" or "Done. Next, call Sam", goes out in Private words, because "evil. com" cannot be told from a sentence end. Words such as "make a point of calling" and "grace period ends" fail for the same reason. Write one sentence to keep the words.
+  - It cannot hold a toll-free number with letters spelling the rest, such as "1 800 Flowers". An address such as "800 Market Street" counts too.
+  - A short code of 5 or 6 digits still fits.
 
 The text with your confirmation code holds only the code. It does not name your assistant.
 

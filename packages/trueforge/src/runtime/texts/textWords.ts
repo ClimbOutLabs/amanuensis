@@ -128,32 +128,36 @@ const DOT_WORDS = new Set(['dot', 'point', 'period']);
 /** A lone written dot, bare or in brackets or quotes, between spaces, such as evil . com or evil [.] com. */
 const LONE_DOT = /^[("']*\.[)"']*$/;
 /** A toll-free number whose rest is spelled as a capitalised word, such as 1 800 FLOWERS or 1 800 (Flowers). */
-const VANITY_NUMBER = /(?<![\d$.,/-])(?:[01][\s-]*)?\(?(?:800|833|844|855|866|877|888)\)?[\s\-("',:]+[A-Z][A-Za-z]{3,}/;
+const VANITY_NUMBER =
+  /(?<![\d$.,/-])(?:[01][\s-]*)?\(?(?:800|833|844|855|866|877|888)\)?[^\p{L}\p{N}]+[A-Z][A-Za-z]{3,}/u;
 /** Every sign that can stand for a dot, as typed or as another script writes it, including an ellipsis. */
-const DOT_SIGN = '[.．｡。·•‧∙⋅・…․﹒]';
+const DOT_SIGN = '[.．｡。·•‧∙⋅・…․﹒‥︙︰]';
 /**
- * A word, then a dot sign or a run of them, with spaces anywhere, then another word, such as evil. com, evil .. com or
- * evil … com. Read on the text as written, before any sign is stripped or the words are cleaned.
+ * A word or number, with its closing brackets or quotes, then a dot sign or a run of them, with spaces anywhere, then
+ * another word or number, such as evil. com, (evil). com, evil .. com or evil … com.
  */
 const DOT_BETWEEN_WORDS = new RegExp(
-  `(?<before>\\S*\\p{L})(?<dots>(?:\\s*${DOT_SIGN})+)(?<gap>\\s*)(?=[("'\\[]*\\p{L})`,
+  `(?<before>\\S*[\\p{L}\\p{N}][)"'\\]]*)(?<dots>(?:\\s*${DOT_SIGN})+)(?<gap>[)"'\\]]*\\s*)(?=[("'\\[]*(?<next>[\\p{L}\\p{N}]+))`,
   'gu',
 );
 /** A dotted abbreviation of single letters, such as e.g. or U.S., the only word a sentence's dot may follow. */
 const DOTTED_ABBREVIATION = /^(?:\p{L}\.)+\p{L}$/u;
+/** Site endings that a dotted abbreviation must not be followed by, since U.S. com would read out u.s.com. */
+const SITE_ENDINGS = new Set(['com', 'co', 'net', 'org', 'io', 'uk', 'us', 'info']);
 
 /**
  * Whether a dot sits between two words with a space on one side, which reads out a site (evil. com) and cannot be told
  * from a sentence end, since a capital after it proves nothing (Evil. Com). The text's last dot is no joiner. A dot
  * with no space around it is judged by the shapes later.
  */
-function dotJoinsWords(raw: string): boolean {
-  for (const match of raw.matchAll(DOT_BETWEEN_WORDS)) {
-    const { before, dots, gap } = match.groups ?? {};
+function dotJoinsWords(text: string): boolean {
+  for (const match of text.matchAll(DOT_BETWEEN_WORDS)) {
+    const { before, dots, gap, next } = match.groups ?? {};
     if (before === undefined || dots === undefined || gap === undefined || !/\s/.test(dots + gap)) {
       continue;
     }
-    const abbreviation = DOTTED_ABBREVIATION.test(before) && dots === '.' && gap !== '';
+    const abbreviation =
+      DOTTED_ABBREVIATION.test(before) && dots === '.' && gap !== '' && !SITE_ENDINGS.has((next ?? '').toLowerCase());
     if (!abbreviation) {
       return true;
     }
@@ -212,13 +216,18 @@ function impossibleDay({ month, day }: { month: string | undefined; day: string 
 }
 
 /**
- * Whether a Full text may carry these words. Every word must have a known shape: a word of letters, an amount or a
+ * Whether a Full text may carry these words, as written and as it will be sent. Every word must have a known shape: a word of letters, an amount or a
  * count, an ordinal, a short code of letters and digits, or a time or a date in range. The digits in all of them,
  * and in number words, come to at most 6, so the words cannot hold a phone number with its area code. A site's
  * shape, three single letters in a row, or three numbers in a row also fail. A false alarm only costs the item's own
  * words, which stay in the app. This is the one check for words a text carries.
  */
 export function isPlainWords(text: string): boolean {
+  return plainAsGiven(text) && plainAsGiven(plainText(text));
+}
+
+/** The whole check on one string, as it is. */
+function plainAsGiven(text: string): boolean {
   if (/\p{Sc}/u.test(text.replace(KNOWN_CURRENCY, ''))) {
     return false;
   }
@@ -287,6 +296,18 @@ export function isPlainWords(text: string): boolean {
   return digits <= MAX_DIGITS;
 }
 
+/**
+ * The words a Full text may carry, in the exact form they are sent, or undefined. The only way to get words for a Full
+ * text, so none goes out that was not checked as sent: the text as given passes, and so do the cleaned and cut words.
+ */
+export function checkedWords({ text, room }: { text: string; room: number }): string | undefined {
+  if (!isPlainWords(text)) {
+    return undefined;
+  }
+  const sent = cut({ text: plainText(text), room });
+  return isPlainWords(sent) ? sent : undefined;
+}
+
 /** Why a Full text went out in Private words instead, or null when it carried the item's own words. */
 export type FullWithheld = 'noticed' | 'not_plain_words' | null;
 
@@ -319,12 +340,12 @@ export function textBody({
   if (!test && !OWN_WORDS_KINDS.has(delivery.kind)) {
     return { body: privateBody, withheld: 'noticed' };
   }
-  if (!isPlainWords(delivery.text)) {
+  const prefix = `${name}: `;
+  const words = checkedWords({ text: delivery.text, room: TEXT_MAX - prefix.length });
+  if (words === undefined) {
     return { body: privateBody, withheld: 'not_plain_words' };
   }
-  const plain = plainText(delivery.text);
-  const prefix = `${name}: `;
-  return { body: `${prefix}${cut({ text: plain, room: TEXT_MAX - prefix.length })}`, withheld: null };
+  return { body: `${prefix}${words}`, withheld: null };
 }
 
 /** The code text. It carries no name the person chose, because it goes to a number nobody has proved yet. */

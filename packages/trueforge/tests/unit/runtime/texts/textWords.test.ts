@@ -1,4 +1,4 @@
-import { plainText, privateText, textBody } from '../../../../src/runtime/texts/textWords';
+import { checkedWords, isPlainWords, plainText, privateText, textBody } from '../../../../src/runtime/texts/textWords';
 import type { Delivery, DeliveryKind } from '../../../../src/schemas/deliveries';
 
 function delivery(text: string, kind: DeliveryKind = 'reminder'): Delivery {
@@ -40,10 +40,10 @@ describe('the words of a text', () => {
     const { body } = textBody({
       test: false,
       name: 'Mannie',
-      delivery: delivery('Café “bill” — due… {soon} 🎉 naïve'),
+      delivery: delivery('Café “bill” — due {soon} 🎉 naïve'),
       mode: 'full',
     });
-    expect(body).toBe('Mannie: Cafe "bill" - due... (soon) naive');
+    expect(body).toBe('Mannie: Cafe "bill" - due (soon) naive');
     expect(body).toMatch(ONE_PLACE);
   });
 
@@ -90,6 +90,30 @@ describe('the words of a text', () => {
       'Visit evil [.] com',
       // A dot at the end of a word, or a run of dots, between two words, whatever case the next word has.
       'Visit evil. com today',
+      // The dot beside a bracket, a quote or a digit, or a sign or invisible character that cleaning turns into a dot.
+      'Visit evil). com',
+      'Visit (evil). com',
+      'Visit "evil". com',
+      "Visit 'evil'. com",
+      'Visit [evil]. com',
+      'Visit evil.) com',
+      'Visit evi1. com',
+      'Visit q3. com',
+      'Visit ab1. co',
+      'Visit evil. 1com',
+      'Visit evil ⒈ com',
+      'Visit evil‥ com',
+      'Visit evil ︙ com',
+      'Visit evil︰ com',
+      'Visit evil.\u200B com',
+      'Visit evil.\u200Bcom',
+      'Visit evil.\u200Ccom',
+      'Visit evil.\u2060com',
+      'Visit evil.\u00ADcom',
+      // A dotted abbreviation followed by a site ending.
+      'Visit a.b. com',
+      'Visit x.y. co today',
+      'Visit U.S. com',
       'Visit evil. Com today',
       'Visit evil .. com',
       'Visit evil ... com',
@@ -125,6 +149,8 @@ describe('the words of a text', () => {
       "call 1 800 'FLOWERS'",
       'call 1 800, FLOWERS',
       'call 1 800: FLOWERS',
+      'call 1 800; FLOWERS',
+      'call 1 800. FLOWERS',
       'dial 1800 Flowers',
       'Visit evil dot museum',
       'Visit evil dot ly slash abc',
@@ -324,3 +350,126 @@ describe('the words of a text', () => {
     }
   });
 });
+
+describe('the words a Full text sends', () => {
+  const PIECES = [
+    'evil',
+    'com',
+    'Evil',
+    'Com',
+    'io',
+    'help',
+    'dot',
+    'point',
+    'Sam',
+    'call',
+    'pay',
+    'the',
+    'bill',
+    'q3',
+    'evi1',
+    '1',
+    '800',
+    'FLOWERS',
+    'five',
+    'two',
+    '3pm',
+    '7:30',
+    'e.g.',
+    'U.S.',
+    'a',
+    'b',
+    'c',
+    '.',
+    '..',
+    '...',
+    ',',
+    ';',
+    ':',
+    '(',
+    ')',
+    '[',
+    ']',
+    '"',
+    "'",
+    '-',
+    '_',
+    '@',
+    '/',
+    '$',
+    '€',
+    '%',
+    '…',
+    '‥',
+    '︙',
+    '︰',
+    '⒈',
+    '。',
+    '·',
+    '\u200B',
+    '\u200C',
+    '\u2060',
+    '\u00AD',
+    '\uFEFF',
+    '\u0301',
+    '🎉',
+    '\n',
+    '\t',
+    ' ',
+    ' ',
+    ' ',
+    ' ',
+  ];
+
+  /** Texts made from risky pieces by a fixed pseudo-random walk, so a failure can be replayed. */
+  function texts(count: number): string[] {
+    let seed = 20261107;
+    const next = (limit: number) => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return seed % limit;
+    };
+    return Array.from({ length: count }, () => {
+      const length = 2 + next(9);
+      return Array.from({ length }, () => PIECES[next(PIECES.length)] ?? '').join(next(3) === 0 ? '' : ' ');
+    });
+  }
+
+  it('are exactly the words that pass the check on themselves, whatever text they were made from', () => {
+    let sentInFull = 0;
+    for (const text of [...texts(20000), ...EVIL_SHAPES]) {
+      const out = textBody({ test: false, name: 'Mannie', delivery: delivery(text), mode: 'full' });
+      if (out.withheld === null) {
+        sentInFull += 1;
+        const sent = out.body.slice('Mannie: '.length);
+        expect([text, isPlainWords(sent)]).toEqual([text, true]);
+        expect([text, checkedWords({ text: sent, room: 306 })]).toEqual([text, sent]);
+      }
+    }
+    // The walk must send some words in Full, or the property would hold for nothing.
+    expect(sentInFull).toBeGreaterThan(500);
+  });
+
+  it('are refused by the check itself, not only by the sender, when only the cleaned text spells a site', () => {
+    for (const text of ['Visit evil.\u200B com', 'Visit evil‥ com', 'Visit evil ⒈ com', 'Visit evil︙ com']) {
+      expect([text, isPlainWords(text)]).toEqual([text, false]);
+    }
+  });
+
+  it('are never made from a text that passes only as written', () => {
+    // These pass as written but read out a site once cleaned, so they must go out Private.
+    for (const text of ['Visit evil.\u200B com', 'Visit evil‥ com', 'Visit [evil]. com']) {
+      expect([
+        text,
+        textBody({ test: false, name: 'Mannie', delivery: delivery(text), mode: 'full' }).withheld,
+      ]).toEqual([text, 'not_plain_words']);
+    }
+  });
+});
+
+const EVIL_SHAPES = [
+  'Visit evil. com',
+  'Visit evil.\u200B com',
+  'Visit [evil]. com',
+  'Visit evi1. com',
+  'Visit evil‥ com',
+];

@@ -20,8 +20,8 @@ export interface MailMessage {
   /** Every Authentication-Results header, topmost first. Empty when the mail server added none. */
   authentication_results: string[];
   /**
-   * What events about the message are named by, when its id can change: on IMAP, its Message-ID, so a renumbered
-   * mailbox listing it again raises nothing new. Events use the id when there is none.
+   * What events about the message are named by, when its id can change: on IMAP, its Message-ID with its sender, date
+   * and subject, so a renumbered mailbox listing it again raises nothing new. Events use the id when there is none.
    */
   key?: string | undefined;
 }
