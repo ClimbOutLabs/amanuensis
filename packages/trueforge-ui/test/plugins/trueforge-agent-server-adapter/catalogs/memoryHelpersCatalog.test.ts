@@ -1,0 +1,89 @@
+import { describe, expect, it, vi } from 'vitest';
+
+import {
+  createMemoryNightlyCatalog,
+  createMemoryPageSortingCatalog,
+} from '@/plugins/trueforge-agent-server-adapter/catalogs/memoryHelpersCatalog.js';
+
+function okJson(body: unknown) {
+  return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+}
+
+describe('createMemoryPageSortingCatalog', () => {
+  const wire = { data: { mode: 'report', overridden: true, default_mode: 'off', effective_mode: 'report' } };
+
+  it('GETs through the supplied base URL, token and fetch, mapping snake_case fields', async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(input)).toBe('https://aman.example/api/v1/settings/memory-page-sorting');
+      expect(init?.method).toBe('GET');
+      expect(init?.headers).toMatchObject({ Authorization: 'Bearer secret' });
+      return okJson(wire);
+    });
+    const catalog = createMemoryPageSortingCatalog({
+      baseUrl: 'https://aman.example/',
+      token: 'secret',
+      fetch: fetchImpl,
+    });
+    await expect(catalog.getMemoryPageSorting()).resolves.toEqual({
+      mode: 'report',
+      overridden: true,
+      defaultMode: 'off',
+      effectiveMode: 'report',
+    });
+  });
+
+  it('PUTs the chosen mode', async () => {
+    const bodies: string[] = [];
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      expect(init?.method).toBe('PUT');
+      bodies.push(String(init?.body));
+      return okJson(wire);
+    });
+    await createMemoryPageSortingCatalog({ fetch: fetchImpl }).setMemoryPageSortingMode('on');
+    expect(bodies).toEqual([JSON.stringify({ mode: 'on' })]);
+  });
+
+  it('shows the server message when the save is refused', async () => {
+    const fetchImpl = vi.fn(
+      async () => new Response(JSON.stringify({ error: { message: 'Send off, report or on.' } }), { status: 400 }),
+    );
+    await expect(createMemoryPageSortingCatalog({ fetch: fetchImpl }).setMemoryPageSortingMode('on')).rejects.toThrow(
+      'Send off, report or on.',
+    );
+  });
+
+  it('refuses an unexpected payload', async () => {
+    const fetchImpl = vi.fn(async () => okJson({ data: { mode: 'sometimes' } }));
+    await expect(createMemoryPageSortingCatalog({ fetch: fetchImpl }).getMemoryPageSorting()).rejects.toThrow(
+      'unexpected',
+    );
+  });
+});
+
+describe('createMemoryNightlyCatalog', () => {
+  const wire = { data: { enabled: true, overridden: true, default_enabled: false, effective_enabled: true } };
+
+  it('GETs and PUTs the nightly setting', async () => {
+    const seen: Array<{ url: string; method?: string; body?: string }> = [];
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      seen.push({
+        url: String(input),
+        method: init?.method,
+        body: init?.body === undefined ? undefined : String(init.body),
+      });
+      return okJson(wire);
+    });
+    const catalog = createMemoryNightlyCatalog({ fetch: fetchImpl });
+    await expect(catalog.getMemoryNightly()).resolves.toEqual({
+      enabled: true,
+      overridden: true,
+      defaultEnabled: false,
+      effectiveEnabled: true,
+    });
+    await catalog.setMemoryNightlyEnabled(false);
+    expect(seen).toEqual([
+      { url: '/api/v1/settings/memory-nightly', method: 'GET', body: undefined },
+      { url: '/api/v1/settings/memory-nightly', method: 'PUT', body: JSON.stringify({ enabled: false }) },
+    ]);
+  });
+});

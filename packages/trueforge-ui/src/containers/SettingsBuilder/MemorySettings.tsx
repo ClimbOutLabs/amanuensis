@@ -14,6 +14,7 @@ import {
 } from '@/server/ServerContext.js';
 import { useAssistantDisplayName } from '../../components/PersonalizationContext.js';
 import { useToasterOptional } from '../ToasterContainer.js';
+import { MemoryHelpersCard } from './MemoryHelpersCard.js';
 import { useChatSearchSetting } from './chatSearchSetting.js';
 import { readMemoryEmbeddingsStatus, type MemoryEmbeddingsStatus } from './memoryEmbeddingsCapability.js';
 import { useMemoryRecallSetting } from './memoryRecallSetting.js';
@@ -588,6 +589,8 @@ const MemorySettings = () => {
       <MemoryStatusCard />
 
       <MemorySummarizeCard />
+
+      <MemoryHelpersCard markdown={confirmedMarkdown} />
 
       <MemoryEmbeddingsCard />
 
