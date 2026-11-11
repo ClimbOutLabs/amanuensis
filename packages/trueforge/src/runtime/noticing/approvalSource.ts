@@ -45,7 +45,6 @@ export function sessionApprovalSource({
           source_type: undefined,
           source_id: undefined,
           // An incognito chat leaves no trace outside itself, so its waiting approvals are never raised.
-          include_private: false,
         });
         let older = false;
         for (const session of listed.data) {
