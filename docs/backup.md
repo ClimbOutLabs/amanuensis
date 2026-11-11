@@ -1,13 +1,13 @@
 ---
 title: 'Backups'
-description: 'How Aman backs up your data and how to copy a backup off your computer.'
+description: 'How Aman backs up your data, how to put a backup back, and how to copy a backup off your computer.'
 ---
 
 ## How backups work
 
 When you install Aman, it asks "Back up automatically every day?". If you keep the answer yes, Aman backs up every instance on this computer by itself, every night at 03:30. You do not need to do anything.
 
-Each backup is a new folder inside the hidden `.amanuensis` folder in your home folder, in a folder called `backups`. A backup's name starts with its date, year first, so 17 October 2026 reads `20261017`. For each instance it holds:
+Each backup is a new folder inside the hidden `.amanuensis` folder in your home folder, in a folder called `backups`. On a Windows PC set up with Aman Setup, the `backups` folder is in `%LOCALAPPDATA%\Amanuensis` instead, and the **Backups** entry in the Start menu opens it. A backup's name starts with its date, year first, so 17 October 2026 reads `20261017`. For each instance it holds:
 
 - the database with your chats, personas and settings, checked after copying;
 - your memory files and persona knowledge files;
@@ -42,10 +42,23 @@ A restore does not change the certificates of this computer. Devices that trust 
 ### On another computer
 
 1. Install Aman on the new computer first, with the same instance name. That is `main` unless you chose another.
-2. Copy the backup folder, for example `20261017T031500Z`, into the `.amanuensis/backups` folder in your home folder there.
+2. Copy the backup folder, for example `20261017T031500Z`, into the `.amanuensis/backups` folder in your home folder there. On Windows, copy it into `%LOCALAPPDATA%\Amanuensis\backups`, so that folder holds `20261017T031500Z` itself.
 3. Run `aman restore --latest`.
 
 The instance keeps the addresses and the sign-in setup of the new computer, so signing in keeps working. It takes back the chats, memory, settings and password of the backup, and the email the backup was made with. If that email is not the one you used on the new computer, the restore says which one to sign in with. Each device has to trust the new computer once, as on a first install.
+
+On Windows, `aman restore` works the same way in a Command Prompt or PowerShell window. It reads the backups in the Backups folder on the PC. Before anything changes it tells you which backup it will use and, when Aman is running, that Aman stops while the backup goes back. Type `yes` to go ahead. To pick a backup without the list, name it: `aman restore 20261017T033000Z`.
+
+## Restore by hand
+
+Use this only when the `aman` command itself is gone or will not start. On a Mac or Linux, run the installer's own restore from the folder Aman was installed from:
+
+```bash
+cd amanuensis
+./installer/install.sh restore
+```
+
+On Windows, run Aman Setup again. It brings the `aman` command back and keeps your instance, and then `aman restore` works as above.
 
 ## Copy a backup off this computer
 

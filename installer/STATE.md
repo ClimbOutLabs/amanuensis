@@ -113,6 +113,12 @@ so `.env` and `dex.yaml` always name the same client. The owner goes the
 other way: the registry's `owner_email` and `owner_name` are taken from the
 backup, and `OIDC_ADMIN_ROLE_VALUE`, `OIDC_ALLOWED_EMAILS` and `OWNER_NAME`
 are written from them. A restore with no answer on its input exits 1.
+On Windows the backups are kept on the PC itself, in
+`%LOCALAPPDATA%\Amanuensis\backups`, not in the `aman_home` volume. The
+TypeScript installer's `aman backup` and `aman restore` run the shell's
+`backup` and `restore` in the setup container with that folder mounted at
+`/root/.amanuensis/backups`, so the shell reads and writes it as its own
+`backups/`.
 
 ## The lock
 
