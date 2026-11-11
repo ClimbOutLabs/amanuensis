@@ -34,6 +34,8 @@ Alongside these, a **live view** lets the person finish a step only they can do.
   - Aman asks first when only content it read named the link
   - Aman asks first when the link carries a private detail
   - Aman asks first, after reading other people's content, when the person did not give the address
+  - an address with a sign-in name or password in front of the site (`https://name@site/`) is never an address the person gave, a search returned or a page listed, whoever wrote it
+  - the browser itself never opens an address with a sign-in name or password in front of the site, because it would hand them to the site; Aman says to ask for the address without that part
   - in scheduled runs, these cases are skipped instead of asked
 - **Browser pages are the person's.** A page read in the signed-in browser is treated like the person's mail: their details in it count as private.
 - **Screenshots go to the person, and to a model that reads images.** The person gets the plain picture in the chat. The model gets a copy with a red box and its ref on each control in view, so it can act on what it sees by ref instead of guessing a position.

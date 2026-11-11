@@ -10,6 +10,7 @@ export interface CapabilitiesData {
     sandbox: TrueForge.SandboxCapability;
     sandboxIsolation: TrueForge.SandboxIsolationCapability;
     settings: TrueForge.SettingsCapability;
+    signIn: TrueForge.SignInCapability;
     skill: TrueForge.SkillCapability;
     toolOutputScreen?: TrueForge.ToolOutputScreenCapability;
     voice: TrueForge.VoiceCapability;
