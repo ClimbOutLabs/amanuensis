@@ -627,6 +627,17 @@
             },
             "default": "./dist/cjs/api/resources/settings/resources/google/exports.js"
         },
+        "./settings/notes": {
+            "import": {
+                "types": "./dist/esm/api/resources/settings/resources/notes/exports.d.mts",
+                "default": "./dist/esm/api/resources/settings/resources/notes/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/settings/resources/notes/exports.d.ts",
+                "default": "./dist/cjs/api/resources/settings/resources/notes/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/settings/resources/notes/exports.js"
+        },
         "./package.json": "./package.json"
     },
     "files": [
