@@ -9,6 +9,7 @@ import type { WrittenEntry } from './hindsightClient';
 import { localDay } from './localDay';
 import { entryRecallText, recallMetadata } from './markdownMemoryFiles';
 import type { MemoryClient } from './memoryClient';
+import type { PageListing } from './memoryPages';
 import type { SummarizeTurnContext } from './memoryRetain';
 import { askSummaryModel, extractReplyJson, summaryLlmResolver } from './memorySummarize';
 import { SortReplySchema } from './pageSortDecisions';
@@ -24,13 +25,18 @@ const SIMILAR_PAGES_TIMEOUT_MS = 10_000;
 
 const NOTE_DAY_PATTERN = /:(\d{4}-\d{2}-\d{2})\.md#\d+$/;
 
-/** The model the sorter asks: the summarizer's client, limits, time budget and light-reasoning request. */
-export function summaryModelForSorting({
+/** The model a helper job asks: the summarizer's client, limits, time budget and light-reasoning request. */
+export function summaryModelFor({
   summarize,
   logger,
+  isReadable,
+  maxOutputTokens,
 }: {
   summarize: SummarizeTurnContext;
   logger: Logger;
+  /** Says whether a reply holds an answer; a cut-off reply that does not is asked again with more room. */
+  isReadable: (reply: string) => boolean;
+  maxOutputTokens: number;
 }): SortModel | undefined {
   const modelFqn = summarize.summarizationModelFqn;
   if (modelFqn === undefined || modelFqn.trim() === '') {
@@ -38,14 +44,7 @@ export function summaryModelForSorting({
   }
   const resolveLlm = summarize.resolveLlm ?? summaryLlmResolver({ ...summarize, logger });
   return async messages => {
-    const answer = await askSummaryModel({
-      messages,
-      modelFqn,
-      resolveLlm,
-      isReadable: reply => SortReplySchema.safeParse(extractReplyJson(reply)).success,
-      maxOutputTokens: SORT_MAX_OUTPUT_TOKENS,
-      logger,
-    });
+    const answer = await askSummaryModel({ messages, modelFqn, resolveLlm, isReadable, maxOutputTokens, logger });
     if (answer.status === 'failed') {
       return { ok: false, reason: answer.reason };
     }
@@ -56,7 +55,37 @@ export function summaryModelForSorting({
   };
 }
 
-function noteOf({ entry, today }: { entry: WrittenEntry; today: string }): SortNote {
+/** The model the sorter asks. */
+export function summaryModelForSorting({
+  summarize,
+  logger,
+}: {
+  summarize: SummarizeTurnContext;
+  logger: Logger;
+}): SortModel | undefined {
+  return summaryModelFor({
+    summarize,
+    logger,
+    isReadable: reply => SortReplySchema.safeParse(extractReplyJson(reply)).success,
+    maxOutputTokens: SORT_MAX_OUTPUT_TOKENS,
+  });
+}
+
+/** Finds the pages whose statements are closest in meaning to a text; undefined for a client with no meaning search. */
+export function similarPagesFinder(client: MemoryClient): ((text: string) => Promise<PageListing[]>) | undefined {
+  const pagesByMeaning = client.pagesByMeaning?.bind(client);
+  return pagesByMeaning === undefined
+    ? undefined
+    : text =>
+        withTimeout(
+          pagesByMeaning({ text, limit: SORT_MAX_SHOWN_PAGES }),
+          SIMILAR_PAGES_TIMEOUT_MS,
+          'finding pages by meaning',
+        );
+}
+
+/** A daily-log entry as the sorter reads it; the day comes from the entry id, else `today`. */
+export function noteOf({ entry, today }: { entry: WrittenEntry; today: string }): SortNote {
   return {
     id: entry.id,
     text: entryRecallText(entry.text),
@@ -91,22 +120,14 @@ export async function sortWrittenNotes({
       return;
     }
     const today = localDay({ instant: new Date(), timeZone }).date;
-    const pagesByMeaning = client.pagesByMeaning?.bind(client);
+    const similarPages = similarPagesFinder(client);
     for (const entry of written) {
       await sortNote({
         mode,
         note: noteOf({ entry, today }),
         askModel,
         options: { vaultDir, runner: execFileRunner, today, logger },
-        similarPages:
-          pagesByMeaning === undefined
-            ? undefined
-            : text =>
-                withTimeout(
-                  pagesByMeaning({ text, limit: SORT_MAX_SHOWN_PAGES }),
-                  SIMILAR_PAGES_TIMEOUT_MS,
-                  'finding pages by meaning',
-                ),
+        similarPages,
       });
     }
   } catch (error) {

@@ -86,6 +86,24 @@ function noteIdOf(line: string): string | undefined {
   }
 }
 
+/** The ids of the notes the report has a line for, whatever the line says. */
+export async function readReportedNoteIds(vaultDir: string): Promise<Set<string>> {
+  let text: string;
+  try {
+    text = await readFile(path.join(vaultDir, SORT_REPORT_FILE), 'utf8');
+  } catch {
+    return new Set();
+  }
+  const ids = new Set<string>();
+  for (const line of text.split('\n')) {
+    const id = noteIdOf(line);
+    if (id !== undefined) {
+      ids.add(id);
+    }
+  }
+  return ids;
+}
+
 /**
  * Drops the report's lines about these notes. A decision can repeat a fact from its note, so a note the person
  * deletes or rewrites must not live on here.

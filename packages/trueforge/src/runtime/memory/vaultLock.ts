@@ -15,6 +15,11 @@ import { z } from 'zod';
 /** The folder the lock files live in, beside the other notes Aman keeps for itself. */
 const LOCK_DIR = '.memory-state';
 
+/** The vault's state folder, where the lock and Aman's own small notes about the vault live. */
+export function vaultStateDir(vaultDir: string): string {
+  return path.join(vaultDir, LOCK_DIR);
+}
+
 /** A lock whose holder has shown no sign of life for this long, as the waiter measured it, is taken over. */
 export const VAULT_LOCK_STALE_AFTER_MS = 30_000;
 
@@ -112,7 +117,7 @@ export async function withVaultLock<T>(
   options: VaultLockOptions,
   work: (lock: VaultLockHandle) => Promise<T>,
 ): Promise<T> {
-  const stateDir = path.join(options.vaultDir, LOCK_DIR);
+  const stateDir = vaultStateDir(options.vaultDir);
   const staleAfterMs = options.staleAfterMs ?? VAULT_LOCK_STALE_AFTER_MS;
   const waitMs = options.waitMs ?? VAULT_LOCK_WAIT_MS;
   const now = options.now ?? (() => performance.now());
