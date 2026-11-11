@@ -77,6 +77,11 @@ describe('the words of a text', () => {
       'e! v! i! l! c! o! m!',
       // A site read out in words.
       'Pay at evil dot com',
+      'Visit evil dot help today',
+      'Visit evil dot xyz',
+      'Visit evil dot museum',
+      'Visit evil dot ly slash abc',
+      'Pay bank dot example',
       'Visit www evil',
       'Open https evil',
       // A number read out in a row, in words or digits, whatever joins them.
@@ -190,9 +195,9 @@ describe('the words of a text', () => {
       'Bring snacks, e.g. fruit',
       'Plan the U.S. trip',
       'Lunch w/ Sam',
-      'Wear the polka dot dress',
       'Rom com night with Sam',
       'Call Aunt Dot',
+      'Dot called about the meeting',
       'Send the slides to Marketing 40 minutes early',
     ]) {
       expect([text, textBody({ test: false, name: 'Mannie', delivery: delivery(text), mode: 'full' })]).toEqual([

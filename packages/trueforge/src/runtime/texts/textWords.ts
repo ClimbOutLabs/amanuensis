@@ -121,8 +121,6 @@ const AM_PM_TIME = /^(\d{1,2})(?:[:.](\d{2}))?([ap])\.?m$/;
 const CLOCK_TIME = /^(\d{1,2}):(\d{2})$/;
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const SLASHED_DATE = /^(\d{1,2})\/(\d{1,2})(?:\/(\d{2}|\d{4}))?$/;
-/** Endings that make a spoken dot read out a site, such as evil dot com. */
-const SITE_ENDINGS = new Set(['com', 'net', 'org', 'io', 'co', 'uk', 'us', 'info', 'biz', 'app', 'dev', 'me', 'ai']);
 /** Words that only ever start a site. */
 const SITE_WORDS = new Set(['www', 'http', 'https']);
 /** Currency signs plainText writes as letters; any other one is dropped, and would change the amount's meaning. */
@@ -209,7 +207,7 @@ export function isPlainWords(text: string): boolean {
     if (!isWord && !ABBREVIATION.test(word) && word !== 'w/' && counted === undefined) {
       return false;
     }
-    if (SITE_WORDS.has(word) || (word === 'dot' && SITE_ENDINGS.has(next ?? ''))) {
+    if (SITE_WORDS.has(word) || (word === 'dot' && previous !== undefined && next !== undefined)) {
       return false;
     }
     if (
