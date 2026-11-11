@@ -12,7 +12,7 @@ This page says, in plain words, what Aman does on its own and what waits for you
 Aman reads mail, web pages, files, and whatever a connector sends back. All of that is treated as information to report on, never as orders to follow.
 
 - Every chat tells the model that content from tools, files, web pages and repositories is data, not instructions. If that content asks Aman to do something, Aman is told to tell you instead of doing it.
-- Memories Aman recalls are marked the same way: they are notes about you, not commands.
+- Memories Aman recalls are marked the same way: they are notes about you, not commands. A memory of something Aman read is marked as that. The summaries Aman keeps of what it knows are marked as summaries, because a summary can repeat something it read.
 - What Aman learns about you from chats is kept as information about you, not as instructions.
 
 ## Reading is free, doing needs your OK
