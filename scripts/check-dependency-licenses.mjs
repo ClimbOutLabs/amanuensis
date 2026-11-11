@@ -3,7 +3,9 @@
  * Fails when any third-party dependency lacks a license on the accepted list
  * in scripts/dependency-license-policy.mjs. Reads every way the repo pulls in
  * dependencies:
- * - the pnpm workspace, from the installed tree (run `pnpm install` first)
+ * - the pnpm workspace, from the installed tree (run `pnpm install` first),
+ *   plus the other platforms' native packages in pnpm-lock.yaml, from the npm
+ *   registry
  * - standalone npm projects, from each tracked package-lock.json
  * - Python, from each tracked requirements*.txt / requirements*.lock, which
  *   must pin every package exactly; license data comes from PyPI for that
@@ -31,6 +33,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '..');
 const REVIEWED_PATH = join(here, 'dependency-licenses-reviewed.txt');
 const PYPI = 'https://pypi.org/pypi';
+const NPM_REGISTRY = 'https://registry.npmjs.org';
 
 class CheckError extends Error {}
 
@@ -83,11 +86,39 @@ function pnpmPackages() {
     .flat()
     .flatMap(pkg =>
       pkg.versions.map(version => ({
-        key: `npm:${pkg.name}@${version}`,
+        key: `npm:${pkg.name}@${version ?? 'local'}`,
         source: 'pnpm workspace',
         statements: pkg.license && pkg.license !== 'Unknown' ? [pkg.license] : [],
       })),
     );
+}
+
+/**
+ * Platform-specific packages in pnpm-lock.yaml (an `os`, `cpu` or `libc`
+ * field) that this machine did not install, so `pnpm licenses` never saw them.
+ * The macOS and Windows builds ship them, so their licenses come from the npm
+ * registry instead.
+ */
+async function lockedPlatformPackages(installedKeys) {
+  const lock = readFileSync(join(root, 'pnpm-lock.yaml'), 'utf8');
+  const section = lock.slice(lock.indexOf('\npackages:\n'), lock.indexOf('\nsnapshots:\n'));
+  const missing = [...section.matchAll(/^ {2}'?((?:@[^/\s]+\/)?[^@\s']+)@([^('\s:]+)[^\n]*\n((?: {4}[^\n]*\n)*)/gm)]
+    .filter(([, , , body]) => /^ {4}(?:os|cpu|libc):/m.test(body))
+    .map(([, name, version]) => ({ name, version, key: `npm:${name}@${version}` }))
+    .filter(({ key }) => !installedKeys.has(key));
+  return Promise.all(
+    missing.map(async ({ name, version, key }) => {
+      const response = await fetch(`${NPM_REGISTRY}/${name.replace('/', '%2F')}/${encodeURIComponent(version)}`);
+      if (!response.ok) {
+        throw new CheckError(
+          `Could not read ${name} ${version} from the npm registry (HTTP ${response.status}). Check the network, then run this check again.`,
+        );
+      }
+      const manifest = await response.json();
+      const license = typeof manifest.license === 'string' ? manifest.license : manifest.license?.type;
+      return { key, source: 'pnpm-lock.yaml (other platforms)', statements: license ? [license] : [] };
+    }),
+  );
 }
 
 function npmLockPackages(lockPath) {
@@ -263,8 +294,10 @@ async function main() {
   }
   const reviewed = readReviewed();
   const problems = [...namedInstalls(), ...packagingManifests()];
+  const workspacePackages = pnpmPackages();
   const packages = [
-    ...pnpmPackages(),
+    ...workspacePackages,
+    ...(await lockedPlatformPackages(new Set(workspacePackages.map(pkg => pkg.key)))),
     ...trackedFiles('*package-lock.json').flatMap(npmLockPackages),
     ...(await pythonPackages({
       requirementsPaths: trackedFiles('*requirements*.txt', '*requirements*.lock'),

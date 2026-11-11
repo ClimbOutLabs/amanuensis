@@ -35,9 +35,3 @@ export function isReminderToolName(tool_name: string): boolean {
     tool_name === CANCEL_REMINDER_TOOL_NAME
   );
 }
-
-/** The Reminders chat's fixed name. */
-export const REMINDERS_CHAT_TITLE = 'Reminders';
-
-/** Session metadata that marks the Reminders chat, so the chat list can tell it from the others. */
-export const REMINDERS_METADATA_KEY = 'is_reminders';

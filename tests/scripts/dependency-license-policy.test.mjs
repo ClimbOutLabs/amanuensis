@@ -52,6 +52,13 @@ test('copyleft, source-available, proprietary and unknown licenses fail', () => 
   }
 });
 
+test('a deprecated X+ id is read as X-or-later', () => {
+  assert.equal(licenseProblem(['LGPL-2.1+']), null);
+  assert.equal(expressionAccepted('MIT AND LGPL-3.0+'), true);
+  assert.match(licenseProblem(['GPL-2.0+']) ?? '', /not on the accepted list/);
+  assert.match(licenseProblem(['MIT+']) ?? '', /not on the accepted list/);
+});
+
 test('a package with no license fails', () => {
   assert.equal(licenseProblem([]), 'declares no license');
   assert.equal(licenseProblem(['  ']), 'declares no license');

@@ -118,7 +118,9 @@ function withoutTrovePrefix(statement) {
 /** The accepted SPDX id or family a single license term stands for, or null. */
 export function acceptedLicense(term) {
   const trimmed = withoutTrovePrefix(term.trim());
-  const id = ALIASES.get(trimmed.toLowerCase()) ?? trimmed;
+  const alias = ALIASES.get(trimmed.toLowerCase()) ?? trimmed;
+  // Deprecated SPDX `X+` means "X or any later version".
+  const id = alias.endsWith('+') ? `${alias.slice(0, -1)}-or-later` : alias;
   return ACCEPTED_LICENSES.has(id) || ACCEPTED_FAMILIES.has(id) ? id : null;
 }
 

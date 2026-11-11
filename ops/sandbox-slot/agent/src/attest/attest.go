@@ -66,6 +66,9 @@ type Facts struct {
 	DiskMode string `json:"disk_mode"`
 	// WorkspaceBytes is the size of the filesystem the workspace is on; for "hard" it is the slot's whole disk.
 	WorkspaceBytes int64 `json:"workspace_bytes"`
+	// StoreFreeBytes is the free space on the filesystem the workspace is on: the room a new or
+	// growing workspace tree can still take.
+	StoreFreeBytes int64 `json:"store_free_bytes"`
 }
 
 // Report is the agent's attestation.
@@ -106,6 +109,8 @@ type Collector struct {
 	ConfiguredDiskMode string
 	// Statfs returns the filesystem type and size in bytes of a path; nil reads them from the kernel.
 	Statfs func(path string) (fsType int64, sizeBytes int64, err error)
+	// StatfsFree returns the free bytes on the filesystem holding a path; nil reads them from the kernel.
+	StatfsFree func(path string) (freeBytes int64, err error)
 	// InterfaceInfo reports whether a named interface is up and how many addresses it holds; nil reads the kernel.
 	InterfaceInfo func(name string) (NetIface, error)
 	// Canary starts a real guest running a trivial program.
@@ -175,7 +180,7 @@ func (c *Collector) Collect() Report {
 		Facts: Facts{
 			Kernel: kernel, Arch: runtime.GOARCH, PageSize: os.Getpagesize(),
 			Cgroup: cg, AppArmor: aa, RunscVersion: version, Platform: c.Platform,
-			DiskMode: c.diskMode(), WorkspaceBytes: c.workspaceBytes(),
+			DiskMode: c.diskMode(), WorkspaceBytes: c.workspaceBytes(), StoreFreeBytes: c.storeFreeBytes(),
 		},
 	}
 }
@@ -565,4 +570,22 @@ func (c *Collector) workspaceBytes() int64 {
 		return 0
 	}
 	return size
+}
+
+func (c *Collector) storeFreeBytes() int64 {
+	if c.Workspace == "" {
+		return 0
+	}
+	if c.StatfsFree != nil {
+		free, err := c.StatfsFree(c.Workspace)
+		if err != nil {
+			return 0
+		}
+		return free
+	}
+	var st syscall.Statfs_t
+	if err := syscall.Statfs(c.Workspace, &st); err != nil {
+		return 0
+	}
+	return int64(st.Bavail) * int64(st.Bsize)
 }
