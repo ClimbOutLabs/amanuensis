@@ -8,6 +8,7 @@ import { createServer } from 'vite';
 import { MODEL_FQN, startApprovalTestServer } from '../../trueforge/tests/fixtures/approvalTestServer.ts';
 import { FINAL_TEXT } from '../../trueforge/tests/fixtures/scriptedModelServer.ts';
 import { inProcessApi } from './support/approvalChat.ts';
+import { featureShotPath, saveFailureShots } from './support/featureShots.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
 import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
 import { privateViteCache } from './support/viteCache.ts';
@@ -113,6 +114,7 @@ test(
       const page = await context.newPage();
       await page.goto(`${origin}/`, { waitUntil: 'domcontentloaded', timeout: RENDER_TIMEOUT_MS });
       assertFits(await homeFit(page), 'after a first chat');
+      await page.screenshot({ path: await featureShotPath({ surface: 'screen:home', step: 'after-a-first-chat' }) });
       await context.close();
 
       for (const theme of THEMES) {
@@ -128,6 +130,9 @@ test(
         const menu = menuPage.getByRole('menu');
         await menu.getByRole('button', { name: 'Sign out', exact: true }).waitFor({ timeout: RENDER_TIMEOUT_MS });
         const label = `${theme.preset} ${theme.mode}`;
+        await menuPage.screenshot({
+          path: await featureShotPath({ surface: 'screen:home', step: `more-menu-${theme.preset}-${theme.mode}` }),
+        });
 
         const look = await menu.evaluate(el => {
           const root = el.closest('.aui-theme-root');
@@ -254,6 +259,9 @@ test(
       await chatList.getByRole('button', { name: 'New chat' }).click();
       await pickPage.getByTitle('Choose a persona').waitFor({ timeout: RENDER_TIMEOUT_MS });
       await pickContext.close();
+    } catch (error) {
+      await saveFailureShots({ browser, surface: 'screen:home' });
+      throw error;
     } finally {
       await browser?.close();
       await vite.close();
