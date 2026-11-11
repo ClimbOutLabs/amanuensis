@@ -1,7 +1,8 @@
-import { createRoute } from '@hono/zod-openapi';
+import { createRoute, z } from '@hono/zod-openapi';
 
 import { RequestErrorResponseSchema } from '../schemas/errors';
 import {
+  AddTextWordRequestSchema,
   ConfirmTextCodeRequestSchema,
   DeleteTextNumberResponseSchema,
   GetTextStatusResponseSchema,
@@ -115,6 +116,48 @@ export const deleteTextNumberRoute = createRoute({
     200: {
       content: { 'application/json': { schema: DeleteTextNumberResponseSchema } },
       description: 'The number is gone.',
+    },
+    401: unauthorizedResponse,
+  },
+});
+
+export const addTextWordRoute = createRoute({
+  method: 'post',
+  path: '/words',
+  tags: [OpenApiTag.DELIVERIES],
+  summary: 'Add a word Aman may text',
+  description:
+    'Lets a Full text carry a name or word that is not a common word. Letters only. A web ending or a number word is refused.',
+  'x-fern-sdk-group-name': ['reach', 'texts'],
+  'x-fern-sdk-method-name': 'add_word',
+  request: { body: { content: { 'application/json': { schema: AddTextWordRequestSchema } }, required: true } },
+  responses: {
+    201: {
+      content: { 'application/json': { schema: GetTextStatusResponseSchema } },
+      description: 'The word is added.',
+    },
+    400: invalidRequestResponse,
+    401: unauthorizedResponse,
+    409: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'The person has as many words as are allowed.',
+    },
+  },
+});
+
+export const removeTextWordRoute = createRoute({
+  method: 'delete',
+  path: '/words/{word}',
+  tags: [OpenApiTag.DELIVERIES],
+  summary: 'Remove a word Aman may text',
+  description: 'Takes a word off the person’s list. A word that is not on it changes nothing.',
+  'x-fern-sdk-group-name': ['reach', 'texts'],
+  'x-fern-sdk-method-name': 'remove_word',
+  request: { params: z.object({ word: z.string().min(1).max(60).describe('The word to remove.') }) },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: GetTextStatusResponseSchema } },
+      description: 'The status without the word.',
     },
     401: unauthorizedResponse,
   },

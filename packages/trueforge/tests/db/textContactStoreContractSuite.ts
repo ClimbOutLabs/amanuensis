@@ -179,12 +179,42 @@ export function runTextContactStoreContractSuite(getStore: () => ITextContactSto
 
   it('imports a number unconfirmed, and only when the person has none', async () => {
     const store = getStore();
-    await expect(store.importContact({ ...ALICE, contact: { phone: '+15550100', mode: 'full' } })).resolves.toBe(true);
+    await expect(
+      store.importContact({ ...ALICE, contact: { phone: '+15550100', mode: 'full', words: [] } }),
+    ).resolves.toBe(true);
     await expect(store.get(ALICE)).resolves.toEqual(contact({ mode: 'full' }));
-    await expect(store.importContact({ ...ALICE, contact: { phone: '+15550199', mode: 'private' } })).resolves.toBe(
-      false,
-    );
+    await expect(
+      store.importContact({ ...ALICE, contact: { phone: '+15550199', mode: 'private', words: [] } }),
+    ).resolves.toBe(false);
     await expect(store.get(ALICE)).resolves.toEqual(contact({ mode: 'full' }));
+  });
+
+  it('keeps the words a person lets Aman text, each person apart, up to a limit, with no word twice', async () => {
+    const store = getStore();
+    const add = (owner: typeof ALICE, word: string, max = 3) => store.addWord({ ...owner, word, max, now: AT });
+    await expect(add(ALICE, 'patel')).resolves.toBe('added');
+    await expect(add(ALICE, 'patel')).resolves.toBe('exists');
+    await expect(add(ALICE, 'lopez')).resolves.toBe('added');
+    await expect(add(BOB, 'zed')).resolves.toBe('added');
+    await expect(add(ALICE, 'kim')).resolves.toBe('added');
+    await expect(add(ALICE, 'extra')).resolves.toBe('full');
+    await expect(store.listWords(ALICE)).resolves.toEqual(['kim', 'lopez', 'patel']);
+    await expect(store.listWords(BOB)).resolves.toEqual(['zed']);
+    await expect(store.removeWord({ ...ALICE, word: 'lopez' })).resolves.toBe(true);
+    await expect(store.removeWord({ ...ALICE, word: 'lopez' })).resolves.toBe(false);
+    await expect(store.listWords(ALICE)).resolves.toEqual(['kim', 'patel']);
+  });
+
+  it('keeps the words when the number is removed, and imports exported words without passing the limit', async () => {
+    const store = getStore();
+    await store.addWord({ ...ALICE, word: 'patel', max: 3, now: AT });
+    await store.startCode({ ...ALICE, phone: '+15550100', as: 'number', code: code(), now: AT });
+    await store.remove(ALICE);
+    await expect(store.listWords(ALICE)).resolves.toEqual(['patel']);
+    await store.importWords({ ...BOB, words: ['a', 'b', 'a', 'c', 'd'], max: 3, now: AT });
+    await expect(store.listWords(BOB)).resolves.toEqual(['a', 'b', 'c']);
+    await store.importWords({ ...BOB, words: ['b', 'z'], max: 3, now: AT });
+    await expect(store.listWords(BOB)).resolves.toEqual(['a', 'b', 'c']);
   });
 
   it('claims code sends up to the limit in a window, then frees up when the window is over', async () => {

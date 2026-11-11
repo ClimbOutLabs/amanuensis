@@ -22,7 +22,7 @@ describePg('TextContactStore on Postgres (contract)', () => {
 
   beforeEach(async () => {
     if (env !== undefined) {
-      await sql`TRUNCATE TABLE text_contact, text_send_count`.execute(env.db);
+      await sql`TRUNCATE TABLE text_contact, text_send_count, text_word`.execute(env.db);
     }
   });
 

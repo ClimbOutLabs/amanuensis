@@ -16,3 +16,5 @@ pnpm-lock.yaml
 *.tsbuildinfo
 # Vendored Gmail MCP server (fork of @george43g/gmail-mcp); not ours to reformat.
 mcp/
+packages/trueforge/src/runtime/texts/wordList.json
+packages/trueforge/src/runtime/texts/webEndings.json

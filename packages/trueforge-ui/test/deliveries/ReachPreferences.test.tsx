@@ -323,6 +323,7 @@ describe('Settings, Reach me preferences', () => {
         codePending: false,
         pendingPhone: null,
         privatePreview: 'Mannie: a reminder is due. Open the app to see it.',
+        words: [],
       };
       render(<ReachPreferences reach={server.api.reach} />);
       expect(await screen.findByText(words)).toBeTruthy();
@@ -344,6 +345,7 @@ describe('Settings, Reach me preferences', () => {
         codePending: false,
         pendingPhone: null,
         privatePreview: 'Mannie: a reminder is due. Open the app to see it.',
+        words: [],
       };
       render(<ReachPreferences reach={server.api.reach} />);
       expect(await screen.findByRole('checkbox', { name: /Send me texts/ })).toHaveProperty('checked', true);
@@ -370,6 +372,7 @@ describe('Settings, Reach me preferences', () => {
         codePending: false,
         pendingPhone: null,
         privatePreview: 'Mannie: a reminder is due. Open the app to see it.',
+        words: [],
       };
       render(<ReachPreferences reach={server.api.reach} />);
       fireEvent.click(await screen.findByRole('button', { name: 'Change number' }));
@@ -396,6 +399,7 @@ describe('Settings, Reach me preferences', () => {
         codePending: false,
         pendingPhone: null,
         privatePreview: 'Mannie: a reminder is due. Open the app to see it.',
+        words: [],
       };
       render(<ReachPreferences reach={server.api.reach} />);
       expect(

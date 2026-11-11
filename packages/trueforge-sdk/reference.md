@@ -9577,6 +9577,134 @@ await client.reach.texts.confirm({
 </dl>
 </details>
 
+<details><summary><code>client.reach.texts.<a href="/src/api/resources/reach/resources/texts/client/Client.ts">addWord</a>({ ...params }) -> TrueForge.GetTextStatusResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Lets a Full text carry a name or word that is not a common word. Letters only. A web ending or a number word is refused.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.reach.texts.addWord({
+    word: "word"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.reach.AddTextWordRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `TextsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.reach.texts.<a href="/src/api/resources/reach/resources/texts/client/Client.ts">removeWord</a>(word) -> TrueForge.GetTextStatusResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Takes a word off the person’s list. A word that is not on it changes nothing.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.reach.texts.removeWord("word");
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**word:** `string` — The word to remove.
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `TextsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 ## Settings FirstRunGuide
 <details><summary><code>client.settings.firstRunGuide.<a href="/src/api/resources/settings/resources/firstRunGuide/client/Client.ts">get</a>() -> TrueForge.GetFirstRunGuideResponse</code></summary>
 <dl>

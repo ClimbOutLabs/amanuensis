@@ -22,7 +22,7 @@ describe('the assistant name in a text', () => {
   it('checks the name again as it will be sent, so leaving out signs or cutting it cannot make a site or a spelling', () => {
     expect(textName('w 1 w 2 w')).toBe('Your assistant');
     expect(textName('c 1 o 2 m')).toBe('Your assistant');
-    expect(textName('Visit evilxx xyz comet')).toBe('Visit evilxx xyz');
+    expect(textName('Visit evilxx xyz comet')).toBe('Your assistant');
     expect(textName('Bob 2015-12-31')).toBe('Your assistant');
     expect(textName('Bob 3 - 4')).toBe('Bob');
   });

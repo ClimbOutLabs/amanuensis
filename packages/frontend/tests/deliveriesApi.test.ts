@@ -298,6 +298,7 @@ test('walks the text number flow over the texts routes and reads the status in p
     code_pending: true,
     pending_phone: '+15550122',
     private_preview: 'Mannie: a reminder is due. Open the app to see it.',
+    words: ['patel', 7],
   };
   const { fetcher, calls } = recordingFetch(() => Response.json({ data: wire }));
   const texts = createDeliveriesApi(fetcher).reach.texts;
@@ -309,10 +310,13 @@ test('walks the text number flow over the texts routes and reads the status in p
     codePending: true,
     pendingPhone: '+15550122',
     privatePreview: 'Mannie: a reminder is due. Open the app to see it.',
+    words: ['patel'],
   });
   await texts.sendCode('+15550111');
   await texts.confirm('123456');
   await texts.setMode('full');
+  await texts.addWord('Lopez');
+  await texts.removeWord('lopez');
   await texts.remove();
   assert.deepEqual(
     calls.map(call => [call.method, new URL(call.url).pathname, call.body]),
@@ -321,6 +325,8 @@ test('walks the text number flow over the texts routes and reads the status in p
       ['POST', '/api/v1/user/reach/texts/code', { phone: '+15550111' }],
       ['POST', '/api/v1/user/reach/texts/confirm', { code: '123456' }],
       ['PUT', '/api/v1/user/reach/texts', { mode: 'full' }],
+      ['POST', '/api/v1/user/reach/texts/words', { word: 'Lopez' }],
+      ['DELETE', '/api/v1/user/reach/texts/words/lopez', {}],
       ['DELETE', '/api/v1/user/reach/texts', {}],
     ],
   );

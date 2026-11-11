@@ -248,6 +248,7 @@ function parseTextStatus(body: unknown): TextStatus {
     codePending: data.code_pending === true,
     pendingPhone: typeof data.pending_phone === 'string' ? data.pending_phone : null,
     privatePreview: typeof data.private_preview === 'string' ? data.private_preview : '',
+    words: Array.isArray(data.words) ? data.words.filter((word): word is string => typeof word === 'string') : [],
   };
 }
 
@@ -270,6 +271,14 @@ function createTextsApi(fetcher: typeof fetch): TextsApi {
         body: JSON.stringify({ mode }),
       });
       return parseTextStatus(await readBody(response));
+    },
+    async addWord(word) {
+      return parseTextStatus(await readBody(await fetcher(`${url()}/words`, json({ word }))));
+    },
+    async removeWord(word) {
+      return parseTextStatus(
+        await readBody(await fetcher(`${url()}/words/${encodeURIComponent(word)}`, json({}, 'DELETE'))),
+      );
     },
     async remove() {
       await readBody(await fetcher(url(), json({}, 'DELETE')));

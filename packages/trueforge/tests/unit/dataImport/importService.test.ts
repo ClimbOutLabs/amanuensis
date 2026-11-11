@@ -3046,7 +3046,7 @@ describe('runDataImport keeps permission history and persona choices', () => {
     try {
       const entries = new Map(readZipEntries(archive).map(entry => [entry.name, entry.data]));
       const rows = listAt(parseJson(entries.get('texts.json'), 'texts.json'), 'texts.json');
-      expect(rows).toEqual([{ phone: '+15550111', mode: 'full' }]);
+      expect(rows).toEqual([{ phone: '+15550111', mode: 'full', words: [] }]);
       expect(entries.get('texts.json')?.toString('utf8')).not.toMatch(/code|confirmed|pending|0122|a{20}/);
 
       await runDataImport(importDeps(target), importRequest(archive));
@@ -3067,6 +3067,33 @@ describe('runDataImport keeps permission history and persona choices', () => {
     } finally {
       await source.close();
       await target.close();
+    }
+  });
+
+  it('imports the words a person let Aman text, and an export from before those words has none', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-text-words');
+    const older = await makeInstance('target-text-words-older');
+    const owner = { tenant_id: TENANT, created_by: 'bob' };
+    try {
+      const withWords = await repack(archive, entries => {
+        entries.set(
+          'texts.json',
+          Buffer.from(JSON.stringify([{ phone: '+15550111', mode: 'full', words: ['patel', 'lopez'] }])),
+        );
+      });
+      await runDataImport(importDeps(target), importRequest(withWords));
+      await expect(target.stores.textContactStore.listWords(owner)).resolves.toEqual(['lopez', 'patel']);
+      // The format before the words existed: a number and a choice, and nothing else.
+      const before = await repack(archive, entries => {
+        entries.set('texts.json', Buffer.from(JSON.stringify([{ phone: '+15550111', mode: 'full' }])));
+      });
+      await runDataImport(importDeps(older), importRequest(before));
+      await expect(older.stores.textContactStore.listWords(owner)).resolves.toEqual([]);
+    } finally {
+      await source.close();
+      await target.close();
+      await older.close();
     }
   });
 

@@ -126,7 +126,7 @@ export interface DataExportDeps<TTransaction> {
   auditStore: Pick<ISentinelAuditStore, 'listOwned'>;
   deliveryStore: Pick<IDeliveryStore, 'listForExport'>;
   reachSettingsStore: Pick<IReachSettingsStore, 'get'>;
-  textContactStore: Pick<ITextContactStore, 'get'>;
+  textContactStore: Pick<ITextContactStore, 'get' | 'listWords'>;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   mcpServerStore: IMcpServerStore<TTransaction>;
   /** The agents the user may manage; the entry point resolves them because access rules differ per deployment. */
@@ -559,13 +559,17 @@ export async function runDataExport<TTransaction>(
   const reachSettings = await deps.reachSettingsStore.get({ tenant_id: tenantId, created_by: subjectId });
   await writeJsonArrayEntry(context, 'reach.json', reachSettings === undefined ? [] : [reachSettings]);
 
-  // texts.json: the person's number and Private or Full, as a list of none or one. Whether the number was confirmed
-  // and any pending code stay behind: an import brings the number in unconfirmed, to be confirmed again by text.
-  const textContact = await deps.textContactStore.get({ tenant_id: tenantId, created_by: subjectId });
+  // texts.json: the person's number, Private or Full, and the words they let Aman text, as a list of none or one.
+  // Whether the number was confirmed and any pending code stay behind: an import brings the number in unconfirmed,
+  // to be confirmed again by text.
+  const textOwner = { tenant_id: tenantId, created_by: subjectId };
+  const textContact = await deps.textContactStore.get(textOwner);
   await writeJsonArrayEntry(
     context,
     'texts.json',
-    textContact === undefined ? [] : [{ phone: textContact.phone, mode: textContact.mode }],
+    textContact === undefined
+      ? []
+      : [{ phone: textContact.phone, mode: textContact.mode, words: await deps.textContactStore.listWords(textOwner) }],
   );
 
   // A persona vault is keyed by the persona's name, so another person's persona with the same name writes into it too.

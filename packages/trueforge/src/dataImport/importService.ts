@@ -82,7 +82,7 @@ import { DEFAULT_CHAT_MODEL_SETTING_KEY } from '../runtime/tokenFactoryProvider'
 import { TOOL_OUTPUT_SCREEN_ENABLED_SETTING_KEY } from '../runtime/toolOutputScreenSettings';
 import type { ImportDataResult } from '../schemas/dataImport';
 import type { ReachSettings } from '../schemas/reach';
-import type { TextContactExport } from '../schemas/textMessages';
+import { TEXT_WORDS_MAX, type TextContactExport } from '../schemas/textMessages';
 import { newId } from '../utils/id';
 import { detachConnectors, normalizeImportedConnectors, withoutKeptConnector } from './connectorImport';
 import { upgradeArchivedDeliveries } from './deliveryUpgrade';
@@ -160,7 +160,7 @@ export interface DataImportDeps<TTransaction> extends PreflightDeps<TTransaction
   deliveryStore: Pick<IDeliveryStore, 'importDeliveries'>;
   /** Reach me settings and the number for texts come along with the same commit: texts and calls off, the number unconfirmed. */
   reachSettingsStore: Pick<IReachSettingsStore, 'importSettings'>;
-  textContactStore: Pick<ITextContactStore, 'importContact'>;
+  textContactStore: Pick<ITextContactStore, 'importContact' | 'importWords'>;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   withTransaction: WithTransaction<TTransaction>;
   personaKnowledgeDir: string;
@@ -1757,7 +1757,9 @@ async function importArchive<TTransaction>(
         await deps.reachSettingsStore.importSettings({ tenant_id: tenantId, created_by: subjectId, settings }, tx);
       }
       for (const contact of texts) {
-        await deps.textContactStore.importContact({ tenant_id: tenantId, created_by: subjectId, contact }, tx);
+        const owner = { tenant_id: tenantId, created_by: subjectId };
+        await deps.textContactStore.importContact({ ...owner, contact }, tx);
+        await deps.textContactStore.importWords({ ...owner, words: contact.words, max: TEXT_WORDS_MAX }, tx);
       }
 
       if (personalization !== null) {

@@ -35,6 +35,7 @@ export function TextsSettings({
   const [changing, setChanging] = useState(false);
   // Set when the person keeps their number after a code went to a new one, so the code entry is put away.
   const [kept, setKept] = useState(false);
+  const [word, setWord] = useState('');
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<Note | null>(null);
 
@@ -101,6 +102,15 @@ export function TextsSettings({
 
   const setMode = (mode: TextMode) => {
     void run(() => texts.setMode(mode), mode === 'private' ? 'Texts are Private.' : 'Texts are Full.');
+  };
+
+  const addWord = async () => {
+    const added = await run(() => texts.addWord(word), 'Added. Aman may text that word.');
+    if (added) setWord('');
+  };
+
+  const removeWord = (listed: string) => {
+    void run(() => texts.removeWord(listed), 'Removed.');
   };
 
   const remove = async () => {
@@ -244,12 +254,56 @@ export function TextsSettings({
                 Full
                 <span className="text-text-secondary block">
                   A reminder’s own words, cut to fit two texts. Anything your assistant noticed still says only its
-                  kind. A reminder with a link, a long number or signs is sent as Private. It can show on a locked
-                  screen and is seen by Twilio and the phone company.
+                  kind. A reminder with a word Aman does not know, a link, a long number or signs is sent as Private. It
+                  can show on a locked screen and is seen by Twilio and the phone company.
                 </span>
               </span>
             </label>
           </fieldset>
+          <div data-role="text-words" className="flex flex-col gap-2">
+            <span className="text-text-primary text-sm">Words Aman may text</span>
+            <p className="text-text-secondary text-sm">
+              Full texts carry common words, times, dates and amounts. Add a name, such as a doctor or a friend, to let
+              it through. Letters only.
+            </p>
+            <label className="text-text-primary flex flex-wrap items-center gap-2 text-sm">
+              <span className="w-40 max-w-full">A name or word</span>
+              <input
+                type="text"
+                aria-label="A name or word"
+                className={`${INPUT} w-40`}
+                maxLength={60}
+                value={word}
+                onChange={event => setWord(event.target.value)}
+              />
+              <button
+                type="button"
+                className={BUTTON}
+                disabled={busy || word.trim() === ''}
+                onClick={() => void addWord()}
+              >
+                Add word
+              </button>
+            </label>
+            {status.words.length === 0 ? null : (
+              <ul className="flex flex-wrap gap-2">
+                {status.words.map(listed => (
+                  <li key={listed} className="text-text-primary flex items-center gap-1 text-sm">
+                    <span>{listed}</span>
+                    <button
+                      type="button"
+                      className={BUTTON}
+                      aria-label={`Remove ${listed}`}
+                      disabled={busy}
+                      onClick={() => removeWord(listed)}
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
           <div className="flex flex-wrap items-start justify-between gap-2">
             <Check
               label="Send me texts"

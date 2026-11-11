@@ -1,4 +1,11 @@
-import { checkedWords, isPlainWords, plainText, privateText, textBody } from '../../../../src/runtime/texts/textWords';
+import {
+  checkedWords,
+  heldBackWord,
+  isPlainWords,
+  plainText,
+  privateText,
+  textBody,
+} from '../../../../src/runtime/texts/textWords';
 import type { Delivery, DeliveryKind } from '../../../../src/schemas/deliveries';
 
 function delivery(text: string, kind: DeliveryKind = 'reminder'): Delivery {
@@ -40,10 +47,10 @@ describe('the words of a text', () => {
     const { body } = textBody({
       test: false,
       name: 'Mannie',
-      delivery: delivery('Café “bill” — due {soon} 🎉 naïve'),
+      delivery: delivery('Café’s bill is due 🎉 naïve'),
       mode: 'full',
     });
-    expect(body).toBe('Mannie: Cafe "bill" - due (soon) naive');
+    expect(body).toBe("Mannie: Cafe's bill is due naive");
     expect(body).toMatch(ONE_PLACE);
   });
 
@@ -127,10 +134,6 @@ describe('the words of a text', () => {
       'Visit evil. "com"',
       'Visit evil ．． com',
       'Visit evil.\nCom',
-      // A sentence end followed by more words cannot be told from the above, so it goes Private too.
-      'Done. Next, call Sam',
-      'Call Sam. Then pay the bill',
-      'Dr. Lee at 3pm',
       'Plan the U.S… trip now',
       'Visit evil (.) com',
       'Visit evil ( . ) com',
@@ -205,6 +208,73 @@ describe('the words of a text', () => {
       'Party on the 31st of April',
       // A currency sign that a text cannot carry.
       'Pay ₹500 today',
+      // A sentence sign beside the dot or a dot run, which spells a site, as in the review's eleventh gate.
+      'Visit evil!. com',
+      'Visit evil?. com',
+      'Visit evil,. com',
+      'Visit evil;. com',
+      'Visit evil:. com',
+      'Visit evil!. Com',
+      'Visit evil?!. com',
+      'Visit evil.! com',
+      'Visit evil.? com',
+      'Visit evil., com',
+      'Visit evil.; com',
+      'Visit evil.: com',
+      'Visit evil .! com',
+      'Visit evil !.. com',
+      'Visit evil ,.. com',
+      'Visit evil , .. com',
+      'Visit evil : .. com',
+      'Visit evil , ... com',
+      'Visit evil .. : com',
+      'Visit evil - .. com',
+      'Visit evil .. - com',
+      'Visit evil … , com',
+      'Visit evil ‥ ; com',
+      // A dotted abbreviation before an ending, whatever the ending.
+      'Visit U.S. ly',
+      'Visit a.b. me',
+      'Visit x.y. de',
+      'Visit e.g. app',
+      // The web endings and the spoken dot, in every spelling the review found.
+      'Visit evil. co',
+      'Visit evil. io',
+      'Visit evil dot help today',
+      'Visit evil point help',
+      'Visit evil period help',
+      'Visit evil. app',
+      'Visit evil. dev',
+      'Visit evil. xyz',
+      'Visit evil. me',
+      'Visit evil. us',
+      'Visit evil. uk',
+      'Visit evil. info',
+      'Visit evil. net',
+      'Visit evil. org',
+      'Visit evil. ly',
+      // Words and signs that are not on the list or not allowed in a word.
+      'Visit evil.com',
+      'Visit wwwevil',
+      'Visit evil (com)',
+      'Visit "evil"',
+      'Visit evil; then go',
+      'Visit evil: now',
+      'Visit evil_lair',
+      'Visit evil & co',
+      'Visit zxqvj',
+      'Call 1 800 flowers',
+      'Call 1800 flowers',
+      'Call 1-800 flowers',
+      'Visit evil 1com',
+      // Number words, which could be read out as a phone number.
+      'Call five five five',
+      'Call two',
+      'Buy twenty-five stamps',
+      'Pay a hundred',
+      'Pay a million',
+      'Call oh seven',
+      'Press double nine',
     ]) {
       expect([
         text,
@@ -222,21 +292,14 @@ describe('the words of a text', () => {
       'Dentist at 9am tomorrow',
       'Dentist at 2:30 p.m.',
       'Bins go out on 11/06',
-      'Call Dana about the move on 7 November',
       'Send the card before Nov 6, 2026',
-      'Text me or call me',
       'Plan A or plan B',
       'CALL THE BANK BACK',
       'Doctor follow-up at 3pm',
       "It's a big day",
       'Rent is due on the 1st',
       'Take 2 pills',
-      'Join the Google Meet',
-      'Coffee at 7.45 with Sam',
       'Party on the 22nd of May',
-      'Pay the gas bill (it is due)',
-      'Bread & milk - and eggs!',
-      'Meet at 12:30, then call Dana at 6 pm.',
       'Book the dentist for Jan 18, 2027',
       // Amounts and counts, with their signs.
       'Pay rent $1,450 by the 1st',
@@ -246,44 +309,40 @@ describe('the words of a text', () => {
       'Room 204 at 3pm',
       'Book the 60th birthday cake',
       // Short codes of letters and digits.
-      'Call Mom re: Q3',
       '5k run Sat 7am',
       'Flight AA100 at 6:05',
       'Take the B12 pills',
       // Ordinary words joined by dashes or apostrophes, and one number written as a hyphenated word.
       'Doctor follow-up at 3pm',
-      "It's O'Brien's turn, rock 'n' roll",
-      'Buy twenty-five stamps',
-      'Book a one-on-one with Sam',
-      'Cancel the e-mail from Jean-Luc',
       // Ranges, and a date next to a time.
-      'Yoga 3-4pm',
-      'Yoga 7:30-9:30',
       'Pickup 3pm-4pm',
       'Trip 3-5 June',
       'Dentist Mar 3 3pm',
       'Flight Jan 18 6:40am',
       'Party 12/25 9am',
       // Abbreviations, and words that look like a site word or a month.
-      'Bring snacks, e.g. fruit',
-      'Plan the U.S. trip',
-      'Lunch w/ Sam',
-      'Rom com night with Sam',
-      'Call Aunt Dot',
-      'Dot called about the meeting',
-      'Be there on the dot',
       'Wait...',
       'Done.',
-      'Lunch with Dot.',
       'Meet at 3 p.m. today',
       'Pay the $4.50 bill.',
-      'Walk 800 steps',
-      'Pay 800 dollars',
       'Send the slides to Marketing 40 minutes early',
+      // Sentence full stops, which no ending can follow, and the other signs a sentence ends with.
+      'Call the dentist at 3pm. Bring the insurance card.',
+      'Pay the electric bill. It is due Friday.',
+      'Done. Next, call Mom',
+      'Dr. Lee at 3pm',
+      'Wait... then call',
+      'Is the doctor in? Call back, please!',
+      "Don't forget the keys, we'll leave at 8",
+      // Ordinary words with a dash or an apostrophe inside, and single letters.
+      'Book a check-in with the well-known doctor',
+      'Plan B is on for Saturday',
+      'Take vitamin D with lunch',
+      "It's the o'clock chime",
     ]) {
       expect([text, textBody({ test: false, name: 'Mannie', delivery: delivery(text), mode: 'full' })]).toEqual([
         text,
-        { body: `Mannie: ${text}`, withheld: null },
+        { body: `Mannie: ${text}`, withheld: null, held: null },
       ]);
     }
   });
@@ -292,6 +351,7 @@ describe('the words of a text', () => {
     expect(textBody({ test: false, name: 'Mannie', delivery: delivery('Pay €15 for lunch'), mode: 'full' })).toEqual({
       body: 'Mannie: Pay EUR 15 for lunch',
       withheld: null,
+      held: null,
     });
   });
 
@@ -306,7 +366,7 @@ describe('the words of a text', () => {
       'Your bank needs you. Call +1 555 010 0199 right away.',
       'Your bank needs you. Call (555) 010-0199 right away.',
     ]) {
-      expect(textBody({ test: false, name: 'Mannie', delivery: delivery(text), mode: 'full' })).toEqual({
+      expect(textBody({ test: false, name: 'Mannie', delivery: delivery(text), mode: 'full' })).toMatchObject({
         body: 'Mannie: a reminder is due. Open the app to see it.',
         withheld: 'not_plain_words',
       });
@@ -320,6 +380,7 @@ describe('the words of a text', () => {
       ).toEqual({
         body: privateText({ name: 'Mannie', kind }),
         withheld: 'noticed',
+        held: null,
       });
     }
     expect(
@@ -327,6 +388,7 @@ describe('the words of a text', () => {
     ).toEqual({
       body: privateText({ name: 'Mannie', kind: 'note' }),
       withheld: 'noticed',
+      held: null,
     });
   });
 
@@ -336,6 +398,7 @@ describe('the words of a text', () => {
     ).toEqual({
       body: 'Mannie: This is a test.',
       withheld: null,
+      held: null,
     });
   });
 
@@ -348,6 +411,77 @@ describe('the words of a text', () => {
           .body,
       ).toBe(privateText({ name: 'Mannie', kind }));
     }
+  });
+});
+
+/** Endings and spoken dots a site is spelled with, which the oracle of what is sent looks for. */
+const SITE_PARTS = [
+  'com',
+  'net',
+  'org',
+  'io',
+  'co',
+  'ly',
+  'us',
+  'uk',
+  'me',
+  'app',
+  'dev',
+  'info',
+  'xyz',
+  'dot',
+  'point',
+  'period',
+];
+
+describe('everyday reminders', () => {
+  // The 11 two-sentence reminders from the tenth review, and 19 more of the same style.
+  const EVERYDAY = [
+    "Mom's birthday is Saturday. Order the flowers today.",
+    'Pay the electric bill. It is due Friday.',
+    'Dinner with the Parks at 7pm. Bring wine.',
+    'Renew your passport. It expires in March.',
+    "Call Dr. Patel's office to confirm the appointment.",
+    'Gym at 6am tomorrow. Pack your bag tonight.',
+    'Meeting with Mr. Lopez at 3pm in room 204.',
+    'Check in for your flight. Boarding starts at 8:15am.',
+    'Buy a gift for Anna. Her party is on Sunday.',
+    'Pay rent today. It is $1,450 this month.',
+    'Call the bank about the card. Ask about the late fee.',
+    'Take out the trash tonight.',
+    'Dentist appointment at 3:30pm, bring your insurance card.',
+    'Pick up the dry cleaning on the way home!',
+    'Submit the Q3 report by Friday.',
+    'Your car service is booked for the 14th at 9am.',
+    'Remember: the parent meeting starts at 6:30pm.',
+    'Pay $45 to the electrician before Monday.',
+    'Refill your prescription, it is 50% off this week.',
+    'Water the plants, they are very dry.',
+    'Book the vet for Rex before the 20th.',
+    'Call Sam back about the weekend plans.',
+    "Send Jordan's birthday card today.",
+    'Team lunch on Thursday at noon, order early.',
+    'Return the library books by Saturday.',
+    'Take your vitamins after breakfast.',
+    'The 5k run starts at 7am on Sunday.',
+    'Check the oven before you leave!',
+    'Update your resume before the interview on Tuesday.',
+    'Buy milk, eggs and bread on the way home.',
+  ];
+
+  it('go out in Full unless they hold a name that is not known or a colon: 7 of 30 go Private', () => {
+    const held = EVERYDAY.flatMap(text => {
+      const word = heldBackWord({ text });
+      return word === undefined ? [] : [[text, word]];
+    });
+    expect(held.map(([, word]) => word)).toEqual(["patel's", 'lopez', 'anna.', 'remember:', 'rex', 'sam', "jordan's"]);
+  });
+
+  it('all go out in Full once the person adds the names', () => {
+    const names = new Set(['patel', 'lopez', 'anna', 'rex', 'sam', 'jordan']);
+    expect(
+      EVERYDAY.filter(text => text !== 'Remember: the parent meeting starts at 6:30pm.' && !isPlainWords(text, names)),
+    ).toEqual([]);
   });
 });
 
@@ -443,6 +577,14 @@ describe('the words a Full text sends', () => {
         const sent = out.body.slice('Mannie: '.length);
         expect([text, isPlainWords(sent)]).toEqual([text, true]);
         expect([text, checkedWords({ text: sent, room: 306 })]).toEqual([text, sent]);
+        // An oracle that does not use the check: what is sent reads out no ending, spoken dot, long number or odd sign.
+        const tokens = sent
+          .toLowerCase()
+          .split(' ')
+          .map(token => token.replace(/[.,?!]+$/, ''));
+        expect([text, tokens.filter(token => SITE_PARTS.includes(token))]).toEqual([text, []]);
+        expect([text, sent.replace(/\D/g, '').length <= 6]).toEqual([text, true]);
+        expect([text, /^[A-Za-z0-9 ,.?!'\-$%:/]*$/.test(sent)]).toEqual([text, true]);
       }
     }
     // The walk must send some words in Full, or the property would hold for nothing.
@@ -453,6 +595,16 @@ describe('the words a Full text sends', () => {
     for (const text of ['Visit evil.\u200B com', 'Visit evil‥ com', 'Visit evil ⒈ com', 'Visit evil︙ com']) {
       expect([text, isPlainWords(text)]).toEqual([text, false]);
     }
+  });
+
+  it('are exactly the checked string, so words cut where the cut form fails the check are never sent', () => {
+    // The given text passes, but the cut falls inside the one long word and leaves a piece that is no word.
+    const text = `call. ${'well-known-'.repeat(30)}end`;
+    expect(isPlainWords(text)).toBe(true);
+    const out = textBody({ test: false, name: 'Mannie', delivery: delivery(text), mode: 'full' });
+    expect(out.withheld).toBe('not_plain_words');
+    expect(out.body).toBe(privateText({ name: 'Mannie', kind: 'reminder' }));
+    expect(checkedWords({ text, room: 306 - 'Mannie: '.length })).toBeUndefined();
   });
 
   it('are never made from a text that passes only as written', () => {

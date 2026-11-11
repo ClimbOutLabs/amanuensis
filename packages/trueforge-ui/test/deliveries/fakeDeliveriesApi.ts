@@ -47,6 +47,7 @@ const NO_NUMBER: TextStatus = {
   codePending: false,
   pendingPhone: null,
   privatePreview: 'Mannie: a reminder is due. Open the app to see it.',
+  words: [],
 };
 
 /** A server that holds the feed once, the way the real one does, so two "devices" can share it. */
@@ -146,6 +147,16 @@ export function fakeServer(initial: DeliveryItem[]) {
         }),
         setMode: vi.fn((mode: TextStatus['mode']) => {
           state.texts = { ...state.texts, mode };
+          return Promise.resolve(state.texts);
+        }),
+        addWord: vi.fn((word: string) => {
+          if (!/^[A-Za-z]{2,24}$/.test(word))
+            return Promise.reject(new Error('Use letters only, with no spaces, digits or signs.'));
+          state.texts = { ...state.texts, words: [...state.texts.words, word.toLowerCase()].sort() };
+          return Promise.resolve(state.texts);
+        }),
+        removeWord: vi.fn((word: string) => {
+          state.texts = { ...state.texts, words: state.texts.words.filter(listed => listed !== word) };
           return Promise.resolve(state.texts);
         }),
         remove: vi.fn(() => {

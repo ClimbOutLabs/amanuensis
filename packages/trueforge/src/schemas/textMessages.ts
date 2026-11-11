@@ -34,8 +34,21 @@ export const TextContactSchema = z.object({
 
 export type TextContact = z.infer<typeof TextContactSchema>;
 
-/** What an export carries: the number and the choice of words. Nothing about confirming it travels. */
-export const TextContactExportSchema = z.object({ phone: z.string().regex(E164_PATTERN), mode: TextModeSchema });
+/** The most words a person can let Aman text besides the common words. */
+export const TEXT_WORDS_MAX = 200;
+
+/** A word the person lets Aman text: letters only, as the word list holds them. */
+const TextWordSchema = z.string().regex(/^[a-z]{2,24}$/);
+
+/**
+ * What an export carries: the number, the choice of words, and the words the person added. Nothing about confirming
+ * the number travels. An export from before the added words has none.
+ */
+export const TextContactExportSchema = z.object({
+  phone: z.string().regex(E164_PATTERN),
+  mode: TextModeSchema,
+  words: z.array(TextWordSchema).max(TEXT_WORDS_MAX).default([]),
+});
 
 export type TextContactExport = z.infer<typeof TextContactExportSchema>;
 
@@ -51,6 +64,9 @@ export const TextStatusSchema = z
       .describe('A new number waiting for its code. Texts keep going to the confirmed number until then.'),
     code_pending: z.boolean().describe('Whether a code was sent and can still be entered.'),
     private_preview: z.string().describe('What a Private text says, word for word, for a reminder.'),
+    words: z
+      .array(z.string())
+      .describe('The words the person lets Aman text besides the common words, such as a name.'),
   })
   .openapi('TextStatus');
 
@@ -72,6 +88,17 @@ export const SendTextCodeRequestSchema = z
 export const ConfirmTextCodeRequestSchema = z
   .object({ code: z.string().trim().min(1).max(12).describe('The code that was texted.') })
   .openapi('ConfirmTextCodeRequest');
+
+export const AddTextWordRequestSchema = z
+  .object({
+    word: z
+      .string()
+      .trim()
+      .min(1)
+      .max(60)
+      .describe('A name or word Aman may text, in letters only. A web ending or a number word is refused.'),
+  })
+  .openapi('AddTextWordRequest');
 
 export const UpdateTextModeRequestSchema = z.object({ mode: TextModeSchema }).openapi('UpdateTextModeRequest');
 

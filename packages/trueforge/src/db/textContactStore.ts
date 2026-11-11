@@ -27,9 +27,18 @@ export interface TextSendCountTable {
   sends: number;
 }
 
+/** One word a person lets Aman text besides the common words. */
+export interface TextWordTable {
+  tenant_id: string;
+  created_by: string;
+  word: string;
+  created_at: string | Date;
+}
+
 export interface TextContactDatabase {
   text_contact: TextContactTable;
   text_send_count: TextSendCountTable;
+  text_word: TextWordTable;
 }
 
 /** A one-time code as stored: its keyed hash, the salt it was hashed with, which key hashed it, and when it runs out. */
@@ -109,6 +118,17 @@ export interface ITextContactStore {
   claimTextSends(input: { limits: readonly TextSendLimit[]; now: Date }): Promise<TextSendsClaim>;
   /** Forgets counts whose window started before this time. */
   forgetTextSends(input: { before: Date }): Promise<void>;
+  /** The words the person lets Aman text, in order of the letters. */
+  listWords(owner: PersonOwner): Promise<string[]>;
+  /** Adds a word, or says it is already there or that the person has `max` words already. */
+  addWord(input: PersonOwner & { word: string; max: number; now: Date }): Promise<'added' | 'exists' | 'full'>;
+  /** Resolves to whether the word was there. */
+  removeWord(input: PersonOwner & { word: string }): Promise<boolean>;
+  /** Adds exported words the person does not have yet, up to `max` in all. */
+  importWords(
+    input: PersonOwner & { words: readonly string[]; max: number; now?: Date },
+    transaction?: Kysely<TextContactDatabase>,
+  ): Promise<void>;
 }
 
 function isoTime(value: string | Date): string {
@@ -402,5 +422,78 @@ export class TextContactStore implements ITextContactStore {
 
   async forgetTextSends(input: { before: Date }): Promise<void> {
     await this.#db.deleteFrom('text_send_count').where('window_started_at', '<', input.before.toISOString()).execute();
+  }
+
+  async listWords(owner: PersonOwner): Promise<string[]> {
+    const rows = await this.#db
+      .selectFrom('text_word')
+      .select('word')
+      .where('tenant_id', '=', owner.tenant_id)
+      .where('created_by', '=', owner.created_by)
+      .orderBy('word')
+      .execute();
+    return rows.map(row => row.word);
+  }
+
+  async addWord(input: PersonOwner & { word: string; max: number; now: Date }): Promise<'added' | 'exists' | 'full'> {
+    return await this.#db.transaction().execute(async trx => {
+      const owner = ownerOf(input);
+      const there = await trx
+        .selectFrom('text_word')
+        .select('word')
+        .where('tenant_id', '=', owner.tenant_id)
+        .where('created_by', '=', owner.created_by)
+        .execute();
+      if (there.some(row => row.word === input.word)) {
+        return 'exists';
+      }
+      if (there.length >= input.max) {
+        return 'full';
+      }
+      await trx
+        .insertInto('text_word')
+        .values({ ...owner, word: input.word, created_at: input.now.toISOString() })
+        .onConflict(conflict => conflict.columns(['tenant_id', 'created_by', 'word']).doNothing())
+        .execute();
+      return 'added';
+    });
+  }
+
+  async removeWord(input: PersonOwner & { word: string }): Promise<boolean> {
+    const removed = await this.#db
+      .deleteFrom('text_word')
+      .where('tenant_id', '=', input.tenant_id)
+      .where('created_by', '=', input.created_by)
+      .where('word', '=', input.word)
+      .returning('word')
+      .execute();
+    return removed.length > 0;
+  }
+
+  async importWords(
+    input: PersonOwner & { words: readonly string[]; max: number; now?: Date },
+    transaction?: Kysely<TextContactDatabase>,
+  ): Promise<void> {
+    const db = transaction ?? this.#db;
+    const owner = ownerOf(input);
+    const there = await db
+      .selectFrom('text_word')
+      .select('word')
+      .where('tenant_id', '=', owner.tenant_id)
+      .where('created_by', '=', owner.created_by)
+      .execute();
+    const have = new Set(there.map(row => row.word));
+    const fresh = [...new Set(input.words)]
+      .filter(word => !have.has(word))
+      .slice(0, Math.max(0, input.max - have.size));
+    if (fresh.length === 0) {
+      return;
+    }
+    const at = (input.now ?? new Date()).toISOString();
+    await db
+      .insertInto('text_word')
+      .values(fresh.map(word => ({ ...owner, word, created_at: at })))
+      .onConflict(conflict => conflict.columns(['tenant_id', 'created_by', 'word']).doNothing())
+      .execute();
   }
 }

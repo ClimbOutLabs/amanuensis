@@ -105,7 +105,44 @@ describe('text number routes', () => {
       pending_phone: null,
       private_preview: 'Mannie: a reminder is due. Open the app to see it.',
       code_pending: false,
+      words: [],
     });
+  });
+
+  it('adds a word Aman may text, folds it, lists it, and takes it off again', async () => {
+    const { call } = await build();
+    const added = await call('/texts/words', { method: 'POST', body: { word: ' Patel ' } });
+    expect(added.status).toBe(201);
+    expect(await statusOf(added)).toMatchObject({ words: ['patel'] });
+    expect(await statusOf(await call('/texts/words', { method: 'POST', body: { word: 'PATEL' } }))).toMatchObject({
+      words: ['patel'],
+    });
+    const removed = await call('/texts/words/Patel', { method: 'DELETE' });
+    expect(removed.status).toBe(200);
+    expect(await statusOf(removed)).toMatchObject({ words: [] });
+  });
+
+  it('refuses a word that is a web ending, a number word or not letters, and says what to do', async () => {
+    const { call } = await build();
+    for (const word of ['com', 'five', 'evil.com', 'a1', 'x'.repeat(30)]) {
+      const refused = await call('/texts/words', { method: 'POST', body: { word } });
+      expect([word, refused.status]).toEqual([word, 400]);
+      expect(await message(refused)).toMatch(/letters|web ending|2 to 24/);
+    }
+  });
+
+  it('stops at 200 words', async () => {
+    const { h, call } = await build();
+    for (let index = 0; index < 200; index += 1) {
+      await h.contacts.addWord({
+        ...ALICE,
+        word: `w${'a'.repeat(1 + (index % 20))}${'b'.repeat(Math.floor(index / 20))}`,
+        max: 200,
+        now: new Date(),
+      });
+    }
+    const full = await call('/texts/words', { method: 'POST', body: { word: 'extra' } });
+    expect(full.status).toBe(409);
   });
 
   it('walks enter number, receive code, confirm, choose Full, then switch texts on', async () => {

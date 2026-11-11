@@ -108,8 +108,27 @@ describe('texts as a channel of the delivery layer', () => {
     );
     expect(h.sent[0]?.body).toBe('Mannie: a reminder is due. Open the app to see it.');
     expect(delivery.attempts.find(row => row.channel === 'sms')?.detail).toBe(
-      'Private text: a Full text carries only plain words, with at most 6 digits in all. This message had more digits, a dot or sign between or inside words, or something that could spell a link or a number, so only the kind of thing was sent. To get its words by text, write one sentence and leave out links and long numbers. The whole message is in the app.',
+      'Private text: "https://parcel.example.invalid" is not a word a text may carry, so only the kind of thing was sent. A Full text carries common words, times, dates, amounts, short codes and the words you add, with at most 6 digits in all. To get this message by text, add the word under Words Aman may text in Settings, Reach me, or write it in common words. The whole message is in the app.',
     );
+  });
+
+  it('names the first word that held a Full text back, and sends it in Full once the person adds that word', async () => {
+    const h = await textsHarness({ assistantName: 'Mannie' });
+    await h.readyToText({ mode: 'full' });
+    const first = await h.deliveries.deliver(nudge('Call Patel at 3pm. Bring the card.', 'reminder'));
+    expect(h.sent[0]?.body).toBe('Mannie: a reminder is due. Open the app to see it.');
+    expect(first.attempts.find(row => row.channel === 'sms')?.detail).toMatch(/^Private text: "patel" is not a word/);
+    await h.contacts.addWord({ ...ALICE, word: 'patel', max: 200, now: new Date() });
+    await h.deliveries.deliver(nudge('Call Patel at 3pm. Bring the card.', 'reminder'));
+    expect(h.sent[1]?.body).toBe('Mannie: Call Patel at 3pm. Bring the card.');
+  });
+
+  it('ignores a stored word that is a web ending, so a stored list can never let one through', async () => {
+    const h = await textsHarness({ assistantName: 'Mannie' });
+    await h.readyToText({ mode: 'full' });
+    await h.contacts.addWord({ ...ALICE, word: 'com', max: 200, now: new Date() });
+    await h.deliveries.deliver(nudge('Visit evil. com', 'reminder'));
+    expect(h.sent[0]?.body).toBe('Mannie: a reminder is due. Open the app to see it.');
   });
 
   it('sends only the fixed test words in Full for a test, never other words a test delivery carries', async () => {
@@ -340,6 +359,7 @@ describe('which limit refused a text', () => {
     const at = new Date('2026-11-06T10:00:00.000Z');
     const sender = createSmsSender({
       contacts: {
+        listWords: () => Promise.resolve([]),
         get: () =>
           Promise.resolve({
             phone: PHONE,

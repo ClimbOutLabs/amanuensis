@@ -23,6 +23,20 @@
           }
         ]
       },
+      "AddTextWordRequest": {
+        "properties": {
+          "word": {
+            "description": "A name or word Aman may text, in letters only. A web ending or a number word is refused.",
+            "maxLength": 60,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "word"
+        ],
+        "type": "object"
+      },
       "Agent": {
         "additionalProperties": false,
         "properties": {
@@ -12217,6 +12231,13 @@
           "private_preview": {
             "description": "What a Private text says, word for word, for a reminder.",
             "type": "string"
+          },
+          "words": {
+            "description": "The words the person lets Aman text besides the common words, such as a name.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           }
         },
         "required": [
@@ -12226,7 +12247,8 @@
           "opted_out",
           "pending_phone",
           "code_pending",
-          "private_preview"
+          "private_preview",
+          "words"
         ],
         "type": "object"
       },
@@ -27607,6 +27629,122 @@
           "texts"
         ],
         "x-fern-sdk-method-name": "confirm"
+      }
+    },
+    "/api/v1/user/reach/texts/words": {
+      "post": {
+        "description": "Lets a Full text carry a name or word that is not a common word. Letters only. A web ending or a number word is refused.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddTextWordRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetTextStatusResponse"
+                }
+              }
+            },
+            "description": "The word is added."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The person has as many words as are allowed."
+          }
+        },
+        "summary": "Add a word Aman may text",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "reach",
+          "texts"
+        ],
+        "x-fern-sdk-method-name": "add_word"
+      }
+    },
+    "/api/v1/user/reach/texts/words/{word}": {
+      "delete": {
+        "description": "Takes a word off the person’s list. A word that is not on it changes nothing.",
+        "parameters": [
+          {
+            "description": "The word to remove.",
+            "in": "path",
+            "name": "word",
+            "required": true,
+            "schema": {
+              "description": "The word to remove.",
+              "maxLength": 60,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetTextStatusResponse"
+                }
+              }
+            },
+            "description": "The status without the word."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "Remove a word Aman may text",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "reach",
+          "texts"
+        ],
+        "x-fern-sdk-method-name": "remove_word"
       }
     },
     "/api/v1/user/settings/calendar": {
