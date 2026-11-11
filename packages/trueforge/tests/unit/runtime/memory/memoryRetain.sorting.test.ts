@@ -11,7 +11,12 @@ import winston from 'winston';
 import type { IModelProviderStore } from '../../../../src/db/modelProviderStore';
 import { readHandledNotes } from '../../../../src/runtime/memory/handledNotes';
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
-import { submitRetain, type SummarizeTurnContext } from '../../../../src/runtime/memory/memoryRetain';
+import { USER_STATED_ORIGIN } from '../../../../src/runtime/memory/memoryOrigin';
+import {
+  submitRetain,
+  type SubmitRetainParams,
+  type SummarizeTurnContext,
+} from '../../../../src/runtime/memory/memoryRetain';
 import { SORT_REPORT_FILE } from '../../../../src/runtime/memory/pageSortReport';
 import { saveSentMail } from '../../../../src/runtime/memory/sentMail';
 import { MEMORY_PAGE_SORTING_SETTING_KEY } from '../../../../src/runtime/memoryPageSortingSettings';
@@ -96,7 +101,13 @@ async function openClient(): Promise<{ client: MarkdownMemoryClient; vaultDir: s
   return { client, vaultDir: client.pagesWriteDir() };
 }
 
-const TURN = { sessionId: 's1', turnId: 't1', completedAt: '2026-11-06T12:00:00.000Z' };
+// Every chat here is the person speaking.
+const TURN: Pick<SubmitRetainParams, 'sessionId' | 'turnId' | 'completedAt' | 'origin'> = {
+  sessionId: 's1',
+  turnId: 't1',
+  completedAt: '2026-11-06T12:00:00.000Z',
+  origin: USER_STATED_ORIGIN,
+};
 const logger = winston.createLogger({ silent: true });
 
 async function waitFor(check: () => Promise<boolean>): Promise<void> {

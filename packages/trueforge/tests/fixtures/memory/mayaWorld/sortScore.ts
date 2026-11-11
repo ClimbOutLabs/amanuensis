@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { entryRecallText, formatRetainEntry, recallMetadata } from '../../../../src/runtime/memory/markdownMemoryFiles';
+import { entryMetadata, entryRecallText, formatRetainEntry } from '../../../../src/runtime/memory/markdownMemoryFiles';
 import { pagePath, readMemoryPage, type PageListing } from '../../../../src/runtime/memory/memoryPages';
 import type { SortDecision } from '../../../../src/runtime/memory/pageSortDecisions';
 import { shownStatements } from '../../../../src/runtime/memory/pageSortPrompt';
@@ -160,7 +160,7 @@ function noteOf(entry: MayaEntry): SortNote {
     id: `md:maya:${mayaDate(entry.day)}.md#${String(position)}`,
     text: entryRecallText(stored),
     day: mayaDate(entry.day),
-    metadata: recallMetadata(stored),
+    metadata: entryMetadata(stored),
   };
 }
 

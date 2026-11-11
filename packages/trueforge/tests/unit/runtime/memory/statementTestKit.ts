@@ -10,6 +10,7 @@ import {
 } from '../../../../src/runtime/memory/embeddingModel';
 import { EmbeddingSubsystem } from '../../../../src/runtime/memory/embeddingRetrieval';
 import { appendHandledNote, type HandledOutcome } from '../../../../src/runtime/memory/handledNotes';
+import type { RetainItem } from '../../../../src/runtime/memory/hindsightClient';
 import { formatRetainEntry, scanNamespaceEntries } from '../../../../src/runtime/memory/markdownMemoryFiles';
 import { computeMeaningGate, type MeaningGate } from '../../../../src/runtime/memory/meaningGate';
 import {
@@ -17,7 +18,11 @@ import {
   NOTE_SOURCE_METADATA_KEY,
   noteRetainContent,
 } from '../../../../src/runtime/memory/memoryNotes';
-import { MEMORY_ORIGIN_METADATA_KEY, TOOL_INGESTED_ORIGIN } from '../../../../src/runtime/memory/memoryOrigin';
+import {
+  MEMORY_ORIGIN_METADATA_KEY,
+  TOOL_INGESTED_ORIGIN,
+  USER_STATED_ORIGIN,
+} from '../../../../src/runtime/memory/memoryOrigin';
 import type { PageKind } from '../../../../src/runtime/memory/memoryPages';
 import { writePageFile } from './pageFixtures';
 
@@ -177,20 +182,19 @@ export async function writeKitNotes({
   for (const note of notes) {
     const before = counts.get(note.day) ?? 0;
     const date = note.day;
-    const item = {
+    const item: RetainItem = {
       content:
         note.source === undefined ? note.text : noteRetainContent({ text: note.text, source: note.source, date }),
       timestamp: `${date}T09:00:00.000Z`,
       document_id: `kit-${date}-${String(before)}`,
-      ...(note.source === undefined
-        ? {}
-        : {
-            metadata: {
+      metadata:
+        note.source === undefined
+          ? { [MEMORY_ORIGIN_METADATA_KEY]: USER_STATED_ORIGIN }
+          : {
               [MEMORY_ORIGIN_METADATA_KEY]: TOOL_INGESTED_ORIGIN,
               [NOTE_SOURCE_METADATA_KEY]: note.source,
               [NOTE_DATE_METADATA_KEY]: date,
             },
-          }),
     };
     await appendFile(path.join(vaultDir, 'memory', `${date}.md`), `${formatRetainEntry(item)}\n\n`, 'utf8');
     ids.push(`md:${namespace}:${date}.md#${String(before)}`);

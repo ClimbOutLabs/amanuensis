@@ -3,8 +3,8 @@ import path from 'node:path';
 import { createLogger } from 'winston';
 
 import {
+  entryMetadata,
   entryRecallText,
-  recallMetadata,
   scanNamespaceEntries,
 } from '../../../../src/runtime/memory/markdownMemoryFiles';
 import { sortNote, type SortModel } from '../../../../src/runtime/memory/pageSorter';
@@ -43,7 +43,7 @@ describe('recall after the sorter has handled a note', () => {
       }
       await sortNote({
         mode: 'on',
-        note: { id, text: entryRecallText(entry.text), day: DAY, metadata: recallMetadata(entry.text) },
+        note: { id, text: entryRecallText(entry.text), day: DAY, metadata: entryMetadata(entry.text) },
         askModel: model,
         options: { vaultDir, runner: execFileRunner, today: DAY, logger: createLogger({ silent: true }) },
       });

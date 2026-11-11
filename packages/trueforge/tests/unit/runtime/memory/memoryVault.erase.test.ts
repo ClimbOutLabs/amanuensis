@@ -5,6 +5,11 @@ import path from 'node:path';
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
 import { readVaultTombstones, VAULT_TOMBSTONES_FILE } from '../../../../src/runtime/memory/markdownMemoryFiles';
 import type { MemoryVaultEntry } from '../../../../src/runtime/memory/memoryClient';
+import {
+  MEMORY_ORIGIN_METADATA_KEY,
+  USER_STATED_ORIGIN,
+  type RetainMetadata,
+} from '../../../../src/runtime/memory/memoryOrigin';
 import { appendSortReport, SORT_REPORT_FILE } from '../../../../src/runtime/memory/pageSortReport';
 import { eraseMarkedEntries } from '../../../../src/runtime/memory/vaultErase';
 import { withVaultLock } from '../../../../src/runtime/memory/vaultLock';
@@ -16,6 +21,8 @@ jest.mock('node:fs/promises', () => {
 
 const TIMEOUT_MS = 5000;
 const DAY = '2026-09-26';
+// The notes here are the person's own words.
+const PERSON: RetainMetadata = { [MEMORY_ORIGIN_METADATA_KEY]: USER_STATED_ORIGIN };
 
 async function makeClient(): Promise<{ client: MarkdownMemoryClient; dir: string; vault: string }> {
   const dir = await mkdtemp(path.join(tmpdir(), 'vault-erase-'));
@@ -28,7 +35,14 @@ async function makeClient(): Promise<{ client: MarkdownMemoryClient; dir: string
 
 async function retainOne(client: MarkdownMemoryClient, content: string, hour: number, op: string): Promise<void> {
   const outcome = await client.retain({
-    items: [{ content, timestamp: `${DAY}T${String(hour).padStart(2, '0')}:00:00.000Z`, document_id: `doc-${op}` }],
+    items: [
+      {
+        content,
+        timestamp: `${DAY}T${String(hour).padStart(2, '0')}:00:00.000Z`,
+        document_id: `doc-${op}`,
+        metadata: PERSON,
+      },
+    ],
     operationId: op,
     timeoutMs: TIMEOUT_MS,
   });
@@ -211,7 +225,9 @@ describe('memory vault erase', () => {
       await hasLock;
       const deleting = client.deleteEntry({ entryId: id, timeoutMs: TIMEOUT_MS });
       const saving = client.retain({
-        items: [{ content: 'Foxtrot keeps bees', timestamp: `${DAY}T14:00:00.000Z`, document_id: 'doc-f' }],
+        items: [
+          { content: 'Foxtrot keeps bees', timestamp: `${DAY}T14:00:00.000Z`, document_id: 'doc-f', metadata: PERSON },
+        ],
         operationId: 'op-f',
         timeoutMs: TIMEOUT_MS,
       });
@@ -245,6 +261,7 @@ describe('memory vault erase', () => {
                 content: `Saved ${word}`,
                 timestamp: `${DAY}T1${String(index)}:30:00.000Z`,
                 document_id: `doc-${word}`,
+                metadata: PERSON,
               },
             ],
             operationId: `op-${word}`,

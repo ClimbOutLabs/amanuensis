@@ -31,6 +31,7 @@ export function retainItemOf(entry: MayaEntry): RetainItem {
       assistantText: 'Noted.',
       completedAt: entry.timestamp,
       memoryText: entry.content,
+      origin: USER_STATED_ORIGIN,
     });
     if (item === undefined) {
       throw new Error(`Entry ${entry.id} has nothing to save.`);

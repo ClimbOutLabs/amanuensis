@@ -8,7 +8,11 @@ import {
   NOTE_SOURCE_METADATA_KEY,
   noteRetainContent,
 } from '../../../../src/runtime/memory/memoryNotes';
-import { MEMORY_ORIGIN_METADATA_KEY, TOOL_INGESTED_ORIGIN } from '../../../../src/runtime/memory/memoryOrigin';
+import {
+  MEMORY_ORIGIN_METADATA_KEY,
+  TOOL_INGESTED_ORIGIN,
+  USER_STATED_ORIGIN,
+} from '../../../../src/runtime/memory/memoryOrigin';
 
 const DAY_MS = 86_400_000;
 const NOW = Date.parse('2026-11-10T12:00:00.000Z');
@@ -18,7 +22,12 @@ function daysAgo(days: number): string {
 }
 
 function personFact({ text, age }: { text: string; age: number }): RetainItem {
-  return { content: text, timestamp: daysAgo(age), document_id: `fact-${String(age)}-${text.length.toString()}` };
+  return {
+    content: text,
+    timestamp: daysAgo(age),
+    document_id: `fact-${String(age)}-${text.length.toString()}`,
+    metadata: { [MEMORY_ORIGIN_METADATA_KEY]: USER_STATED_ORIGIN },
+  };
 }
 
 function emailFinding({ text, age }: { text: string; age: number }): RetainItem {
