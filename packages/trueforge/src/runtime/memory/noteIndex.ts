@@ -4,6 +4,7 @@
  * again only for notes that were added or changed.
  */
 import { EMBEDDING_DIMENSIONS, type EmbeddingModel } from './embeddingModel';
+import { indexedText, type RankedMemory } from './embeddingRetrieval';
 import type { EmbeddingStore } from './embeddingStore';
 import { hashEntryText } from './embeddingStore';
 import { closenessOf, comparisonVectors, itemNumbers, standingOf, unitVector, type ItemNumbers } from './standing';
@@ -26,19 +27,13 @@ export class NoteIndex {
    * Brings the numbers up to date with the notes on disk: new and changed notes are measured, removed ones
    * are dropped. A note with no vector in the store yet, or a vector for older text, is left out.
    */
-  async update({
-    entries,
-    store,
-  }: {
-    entries: readonly { id: string; text: string }[];
-    store: EmbeddingStore;
-  }): Promise<void> {
+  async update({ entries, store }: { entries: readonly RankedMemory[]; store: EmbeddingStore }): Promise<void> {
     const comparison = await comparisonVectors(this.model);
     const next = new Map<string, IndexedNote>();
     let measured = 0;
     for (const entry of entries) {
       const stored = store.get(entry.id);
-      if (stored?.vector.length !== EMBEDDING_DIMENSIONS || stored.hash !== hashEntryText(entry.text)) {
+      if (stored?.vector.length !== EMBEDDING_DIMENSIONS || stored.hash !== hashEntryText(indexedText(entry))) {
         continue;
       }
       const before = this.notes.get(entry.id);

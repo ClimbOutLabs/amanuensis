@@ -178,7 +178,7 @@ export interface RankedMemory {
  * left out: the same words on many notes would pull them toward each other and toward any question
  * that uses those words.
  */
-function indexedText(entry: RankedMemory): string {
+export function indexedText(entry: RankedMemory): string {
   return withoutSourceLines(entry.text);
 }
 
