@@ -73,6 +73,7 @@ import {
   NOTE_SOURCE_METADATA_KEY,
   noteRetainContent,
 } from '../runtime/memory/memoryNotes';
+import { MEMORY_ORIGIN_METADATA_KEY } from '../runtime/memory/memoryOrigin';
 import { MEMORY_RECALL_ENABLED_SETTING_KEY } from '../runtime/memoryRecallSettings';
 import { MEMORY_SCREEN_ENABLED_SETTING_KEY } from '../runtime/memoryScreenSettings';
 import { MEMORY_SUMMARIZE_SETTING_KEY } from '../runtime/memorySummarizeSettings';
@@ -1000,6 +1001,8 @@ function buildRetainItems(
       const sessionId = trailers?.[SESSION_ID_METADATA_KEY];
       const noteSource = trailers?.[NOTE_SOURCE_METADATA_KEY];
       const noteDate = trailers?.[NOTE_DATE_METADATA_KEY];
+      // The mark that says the entry is something Aman read, so recall on the new backend still treats it as that.
+      const origin = trailers?.[MEMORY_ORIGIN_METADATA_KEY];
       // The page text drops an id-shaped context line, so it is read before the body is cleaned.
       entryContext = hiddenContext(body);
       body = withoutHiddenMarkers(body);
@@ -1022,11 +1025,12 @@ function buildRetainItems(
         // A replaceable entry keeps its document id, so a later update replaces it instead of adding a copy.
         document_id: trailers?.[DOCUMENT_ID_METADATA_KEY] ?? documentIdFor(entry.id),
         ...(itemContext === undefined ? {} : { context: itemContext }),
-        ...(sessionId === undefined && noteSource === undefined
+        ...(sessionId === undefined && noteSource === undefined && origin === undefined
           ? {}
           : {
               metadata: {
                 ...(sessionId === undefined ? {} : { [SESSION_ID_METADATA_KEY]: sessionId }),
+                ...(origin === undefined ? {} : { [MEMORY_ORIGIN_METADATA_KEY]: origin }),
                 ...(noteSource === undefined || noteDate === undefined
                   ? {}
                   : { [NOTE_SOURCE_METADATA_KEY]: noteSource, [NOTE_DATE_METADATA_KEY]: noteDate }),

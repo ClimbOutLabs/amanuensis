@@ -2206,6 +2206,83 @@ describe('runDataImport reads memory written before facts-only memory', () => {
   });
 });
 
+describe('runDataImport keeps the mark of something Aman read', () => {
+  const READ_FILE = `memory/${TENANT}/memory/2026-10-03.md`;
+  const READ_LOG = [
+    '## 2026-10-03T09:00:00.000Z',
+    '',
+    'The plumber invoice says to pay billing@pipes.example.',
+    '',
+    '<!-- session_id: chat-4 -->',
+    '',
+    '> Source: read content',
+    '',
+    '## 2026-10-03T10:00:00.000Z',
+    '',
+    'Prefers invoices by email.',
+    '',
+    '<!-- session_id: chat-4 -->',
+    '',
+  ].join('\n');
+
+  async function readArchive(): Promise<{ source: Instance; archive: Buffer }> {
+    const { source, archive } = await seededArchive();
+    return {
+      source,
+      archive: await repack(archive, entries => {
+        entries.set(READ_FILE, Buffer.from(READ_LOG, 'utf8'));
+      }),
+    };
+  }
+
+  async function retainedByClient(name: string): Promise<{ content: string; metadata?: Record<string, string> }[]> {
+    const { source, archive } = await readArchive();
+    const target = await makeInstance(name);
+    try {
+      const retained: { content: string; metadata?: Record<string, string> }[] = [];
+      const client: Pick<MemoryClient, 'listEntries' | 'retain'> = {
+        listEntries: () => Promise.resolve({ ok: true, entries: [] }),
+        retain: ({ items }) => {
+          retained.push(...items);
+          return Promise.resolve({ ok: true });
+        },
+      };
+      await runDataImport(importDeps(target, { kind: 'client', client }), importRequest(archive));
+      return retained;
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  }
+
+  it('sends an entry Aman read to a client backend with its read-content mark', async () => {
+    const retained = await retainedByClient('target-read-client');
+    const read = retained.find(item => item.content.includes('plumber'));
+    expect(read?.content).toBe('The plumber invoice says to pay billing@pipes.example.');
+    expect(read?.metadata).toEqual({ session_id: 'chat-4', origin: 'tool_ingested' });
+  });
+
+  it('sends an entry the person stated to a client backend without the mark', async () => {
+    const retained = await retainedByClient('target-own-client');
+    const own = retained.find(item => item.content.includes('Prefers invoices'));
+    expect(own?.content).toBe('Prefers invoices by email.');
+    expect(own?.metadata).toEqual({ session_id: 'chat-4' });
+  });
+
+  it('keeps the mark in a Markdown target', async () => {
+    const { source, archive } = await readArchive();
+    const target = await makeInstance('target-read-markdown');
+    try {
+      await runDataImport(importDeps(target), importRequest(archive));
+      const written = await readFile(join(target.memoryDir, TENANT, 'memory', '2026-10-03.md'), 'utf8');
+      expect(written).toBe(READ_LOG);
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+});
+
 describe('runDataImport at scale', () => {
   it('imports a 2,000 chat, 50,000 event archive within a bounded memory growth', async () => {
     const source = await makeInstance('source-large');
@@ -4880,7 +4957,7 @@ describe('runDataImport keeps the source label of saved findings', () => {
     }
   });
 
-  it('sends the source and day to a client backend as the note metadata', async () => {
+  it('sends the source, the day and the read mark to a client backend as the note metadata', async () => {
     const { source, archive } = await noteArchive();
     const target = await makeInstance('target-note-client');
     try {
@@ -4898,6 +4975,7 @@ describe('runDataImport keeps the source label of saved findings', () => {
         session_id: 'chat-9',
         note_source: 'email',
         note_date: '2026-10-20',
+        origin: 'tool_ingested',
       });
     } finally {
       await source.close();
