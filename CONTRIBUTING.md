@@ -282,7 +282,7 @@ On a machine with no Docker, set `AMAN_DEX_DIR` to a folder that holds the `dex`
 
 ## Docs website
 
-The docs website is built from the pages in `docs/` and the help topics in `packages/trueforge/guide/topics/`. Those files are the only copy: edit them, never the site. [`docs/README.md`](docs/README.md) is the docs home, and the website's menu follows its sections, so a new page goes in that table too.
+The docs website is built from the pages in `docs/` and the help topics in `packages/trueforge/guide/topics/`. Those files are the only copy: edit them, never the site. [`docs/README.md`](docs/README.md) is the docs home, and the website's menu follows its sections, so a new page goes in that table too. The website leaves out the parts for people working on the code (the agent harness, measuring changes, and the project pages); `SITE_LEAVES_OUT` in `scripts/build-docs-site.mjs` names them. Their pages are still built, so links to them keep working.
 
 The "Docs site" workflow builds the website on every pull request that touches these pages and publishes it to GitHub Pages when the change reaches `main`. To build it on your own machine, install Python 3, then run:
 

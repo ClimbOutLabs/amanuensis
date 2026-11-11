@@ -210,6 +210,36 @@ export function siteFrontMatter(markdown) {
   return `---\n${keep.join('\n')}\n---\n${markdown.slice(match[0].length)}`;
 }
 
+/** Parts of the docs home for people working on Aman's code. GitHub shows them; the website does not. */
+export const SITE_LEAVES_OUT = ['The agent harness (TrueForge)', 'Measuring changes', 'Project'];
+
+/**
+ * The docs home as the website shows it: without the sections and subsections in SITE_LEAVES_OUT,
+ * and without their rows in the table of guides. Their pages are still built, so links to them work.
+ */
+export function siteDocsHome(markdown) {
+  const out = [];
+  let skipping = false;
+  let skipLevel;
+  for (const line of markdown.split('\n')) {
+    const heading = /^## (.+)$/.exec(line);
+    const bold = /^\*\*(.+)\*\*$/.exec(line.trim());
+    if (heading) {
+      skipping = SITE_LEAVES_OUT.includes(heading[1].trim());
+      skipLevel = skipping ? 'section' : undefined;
+    } else if (bold && skipLevel !== 'section') {
+      skipping = SITE_LEAVES_OUT.includes(bold[1]);
+      skipLevel = skipping ? 'group' : undefined;
+    }
+    const guideRow = /^\|\s*\[([^\]]+)\]\(#[^)]*\)/.exec(line);
+    if (skipping || (guideRow && SITE_LEAVES_OUT.includes(guideRow[1]))) {
+      continue;
+    }
+    out.push(line);
+  }
+  return out.join('\n');
+}
+
 /**
  * Builds the site menu from the docs home: each "## Guide" is a section, each bold line inside
  * it a subsection, and the first link in each table row a page. Links to a heading or another
@@ -290,6 +320,9 @@ export async function buildDocsSite({
       text = convertMintlify(text);
     }
     const target = file === 'README.md' ? 'index.md' : file.replace(/\.mdx$/, '.md');
+    if (file === 'README.md') {
+      text = siteDocsHome(text);
+    }
     await mkdir(path.dirname(path.join(outDir, target)), { recursive: true });
     await writeFile(path.join(outDir, target), rewriteLinks(text, { fromHelp: false, fromFile: target, pages }));
   }
@@ -300,7 +333,7 @@ export async function buildDocsSite({
     await writeFile(path.join(outDir, HELP_DIR, name), rewriteLinks(siteFrontMatter(text), { fromHelp: true }));
   }
   // The settings live in docs-site/mkdocs.yml; this file adds the menu built from the docs home.
-  const nav = navFromDocsHome(await readFile(path.join(docsDir, 'README.md'), 'utf8'));
+  const nav = navFromDocsHome(siteDocsHome(await readFile(path.join(docsDir, 'README.md'), 'utf8')));
   const config = {
     INHERIT: path.relative(path.dirname(configPath), path.join(repoRoot, 'docs-site/mkdocs.yml')),
     docs_dir: path.relative(path.dirname(configPath), outDir),
