@@ -73,20 +73,21 @@ These are the same pages Aman's **Help, I'm stuck** answers from.
 
 ## Running your instance
 
-| Page                                                                       | What it covers                                     |
-| -------------------------------------------------------------------------- | -------------------------------------------------- |
-| [Adding people](install.mdx#adding-people)                                 | Giving someone else their own Aman                 |
-| [Using it from other devices](install.mdx#using-it-from-other-devices)     | Reaching Aman from your phone or laptop            |
-| [Doctor](install.mdx#doctor)                                               | `aman doctor` and what each check means            |
-| [Backup and upgrade](install.mdx#backup-and-upgrade)                       | Upgrading and the backup commands                  |
-| [Backups](backup.md)                                                       | How backups work and copying one off your computer |
-| [Forgot your password](install.mdx#forgot-your-password)                   | Getting back in                                    |
-| [Your sign-in and password](../packages/trueforge/guide/topics/account.md) | Changing your password and sign-in                 |
-| [Sign-in](authentication/overview.mdx)                                     | How Aman signs people in                           |
-| [Sandbox](sandbox.mdx)                                                     | Where Aman runs code, and how to set it up         |
-| [Aman's browser](browser.md)                                               | Aman's own browser and the live view               |
-| [Nemotron on Nebius Token Factory](token-factory.md)                       | Using the Token Factory model provider             |
-| [Move from the old compose stacks](migrate-from-compose.md)                | Moving an older install to the installer           |
+| Page                                                                       | What it covers                                                      |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| [The aman command](commands.md)                                            | Every command for checking, backing up, updating and repairing Aman |
+| [Adding people](install.mdx#adding-people)                                 | Giving someone else their own Aman                                  |
+| [Using it from other devices](install.mdx#using-it-from-other-devices)     | Reaching Aman from your phone or laptop                             |
+| [Doctor](install.mdx#doctor)                                               | `aman doctor` and what each check means                             |
+| [Backup and upgrade](install.mdx#backup-and-upgrade)                       | Upgrading and the backup commands                                   |
+| [Backups](backup.md)                                                       | How backups work and copying one off your computer                  |
+| [Forgot your password](install.mdx#forgot-your-password)                   | Getting back in                                                     |
+| [Your sign-in and password](../packages/trueforge/guide/topics/account.md) | Changing your password and sign-in                                  |
+| [Sign-in](authentication/overview.mdx)                                     | How Aman signs people in                                            |
+| [Sandbox](sandbox.mdx)                                                     | Where Aman runs code, and how to set it up                          |
+| [Aman's browser](browser.md)                                               | Aman's own browser and the live view                                |
+| [Nemotron on Nebius Token Factory](token-factory.md)                       | Using the Token Factory model provider                              |
+| [Move from the old compose stacks](migrate-from-compose.md)                | Moving an older install to the installer                            |
 
 ## Security and privacy
 
@@ -104,6 +105,7 @@ These are the same pages Aman's **Help, I'm stuck** answers from.
 
 | Page                                                                                   | What it covers                                          |
 | -------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| [Troubleshooting](troubleshooting.md)                                                  | Common problems, what they mean and the one thing to do |
 | [Install troubleshooting](install.mdx#troubleshooting)                                 | Docker group, ports in use, credentials, clock, sign-in |
 | [Doctor](install.mdx#doctor)                                                           | Running `aman doctor` and following its fixes           |
 | [Getting help and reporting a bug](../packages/trueforge/guide/topics/getting-help.md) | Asking Aman for help and telling us about a bug         |
