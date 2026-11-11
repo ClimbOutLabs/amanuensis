@@ -260,7 +260,7 @@ export function runNoticingStoreContractSuite(getStore: () => INoticingStore): v
 
   it('keeps a checkpoint per watcher and person', async () => {
     const store = getStore();
-    const clear = { failure: undefined, stuck: undefined, window_ms: undefined, source: undefined };
+    const clear = { failure: undefined, stuck: undefined, cursor: undefined, source: undefined };
     await expect(store.getCheckpoint({ ...ALICE, watcher: 'mail' })).resolves.toBeUndefined();
     await store.setCheckpoint({
       ...ALICE,
@@ -284,7 +284,7 @@ export function runNoticingStoreContractSuite(getStore: () => INoticingStore): v
 
   it('lists everyone with a checkpoint for a watcher', async () => {
     const store = getStore();
-    const clear = { failure: undefined, stuck: undefined, window_ms: undefined, source: undefined };
+    const clear = { failure: undefined, stuck: undefined, cursor: undefined, source: undefined };
     await store.setCheckpoint({
       ...ALICE,
       watcher: 'mail',
@@ -307,8 +307,7 @@ export function runNoticingStoreContractSuite(getStore: () => INoticingStore): v
       checked_at: new Date('2026-11-05T10:00:00.000Z'),
       failure: { kind: 'too_slow' as const, since: new Date('2026-11-05T09:00:00.000Z') },
       stuck: { message_id: 'm7', passes: 2, since: new Date('2026-11-05T09:00:00.000Z') },
-      handled: ['m1', 'm2'],
-      window_ms: 30_000,
+      cursor: { uidvalidity: 4, last_uid: 912 },
       source: 'email_connector' as const,
     };
     await store.setCheckpoint({ ...ALICE, watcher: 'mail', ...trouble });
@@ -320,15 +319,15 @@ export function runNoticingStoreContractSuite(getStore: () => INoticingStore): v
       checked_at: new Date('2026-11-05T10:10:00.000Z'),
       failure: undefined,
       stuck: undefined,
-      window_ms: undefined,
       source: 'google',
     });
-    await expect(store.getCheckpoint({ ...ALICE, watcher: 'mail' })).resolves.toEqual({
+    const cleared = await store.getCheckpoint({ ...ALICE, watcher: 'mail' });
+    expect(cleared).toEqual({
       checked_at: new Date('2026-11-05T10:10:00.000Z'),
       failure: undefined,
       stuck: undefined,
-      window_ms: undefined,
       source: 'google',
     });
+    expect(cleared?.cursor).toBeUndefined();
   });
 }

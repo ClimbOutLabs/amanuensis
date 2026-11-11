@@ -1,25 +1,28 @@
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import winston from 'winston';
 
+import type { MailCursor } from '../../../../src/db/noticingStore';
 import {
   bareSubject,
   createSidecarNoticingSources,
+  imapAgent,
   sidecarCalendarSource,
   sidecarMailSource,
   SidecarToolError,
   toolResultOf,
   type CallSidecarTool,
+  type ListAfterAgent,
 } from '../../../../src/runtime/noticing/sidecarSources';
 import {
+  MailLoginFailedError,
   MailSourceBusyError,
   MailTooSlowError,
   MessageUnreadableError,
   type NoticingSourceProvider,
   type NoticingSources,
 } from '../../../../src/runtime/noticing/sources';
-import { readMailWindow, watchCalendar, watchMail } from '../../../../src/runtime/noticing/watchers';
+import { watchCalendar, watchMail } from '../../../../src/runtime/noticing/watchers';
 import { defaultReachSettings } from '../../../../src/schemas/reach';
-import { readMessages } from './mailWindowSupport';
 
 const NOW = new Date('2026-11-05T15:00:00.000Z');
 const OWNER = { tenant_id: 'default', created_by: 'owner-1' };
@@ -59,163 +62,137 @@ const EMAIL = {
   attachments: [],
 };
 
-describe('sidecar mail source (IMAP)', () => {
-  it('says its dates are the sender’s, not when the mail arrived', () => {
-    expect(sidecarMailSource({ call: mailTool([]).call, account: 'default' }).datesAreArrival).toBe(false);
-  });
+const noAgent: ListAfterAgent = () => Promise.reject(new Error('This source does not list mail.'));
 
-  it('reads new inbox mail without marking it read, and never vouches for a sender', async () => {
-    const { call, calls } = mailTool([EMAIL], { '7': 'Amount due by November 7' });
-    const source = sidecarMailSource({ call, account: 'default' });
-    const read = await source.listNewMessages({
-      since: new Date('2026-11-05T14:00:00.000Z'),
-      before: NOW,
+const mailSource = (call: CallSidecarTool, agent: ListAfterAgent = noAgent) =>
+  sidecarMailSource({ call, account: 'default', agent });
+
+interface Arrival {
+  uid: number;
+  at: string;
+  subject: string;
+  bad: boolean;
+}
+
+function arrival({
+  uid,
+  at,
+  subject = 'Invoice',
+  bad = false,
+}: {
+  uid: number;
+  at: string;
+  subject?: string;
+  bad?: boolean;
+}): Arrival {
+  return { uid, at, subject, bad };
+}
+
+/** A mailbox as the account agent lists it: by number after a cursor, a header that does not parse counted as skipped. */
+function mailboxAgent(
+  mail: Arrival[],
+  uidvalidity = 1,
+): { agent: ListAfterAgent; asked: Parameters<ListAfterAgent>[0][] } {
+  const asked: Parameters<ListAfterAgent>[0][] = [];
+  const agent: ListAfterAgent = request => {
+    asked.push(request);
+    const after = request.uidvalidity === uidvalidity ? request.last_uid : null;
+    const since = Date.parse(request.since);
+    const wanted = mail
+      .filter(item => (after === null ? Date.parse(item.at) >= since : item.uid > after))
+      .sort((a, b) => a.uid - b.uid);
+    const taken = wanted.slice(0, request.limit);
+    const last = taken.at(-1)?.uid ?? after ?? Math.max(0, ...mail.map(item => item.uid));
+    return Promise.resolve({
+      messages: taken
+        .filter(item => !item.bad)
+        .map(item => ({
+          id: String(item.uid),
+          uid: item.uid,
+          thread_id: bareSubject(item.subject),
+          from_address: 'billing@power.test',
+          from_name: 'Power Co',
+          subject: item.subject,
+          snippet: '',
+          received_at: new Date(item.at),
+          authentication_results: [],
+        })),
+      skipped: taken.filter(item => item.bad).length,
+      cursor: { uidvalidity, last_uid: last },
+      more: wanted.length > taken.length,
+    });
+  };
+  return { agent, asked };
+}
+
+/** The connector for bodies and thread checks: every body is bill-like, and no later reply exists. */
+function billsTool(): CallSidecarTool {
+  return (name, args) => {
+    if (name === 'get_emails_content') {
+      const ids = Array.isArray(args['email_ids']) ? args['email_ids'] : [];
+      return Promise.resolve({
+        structuredContent: {
+          emails: ids.map(id => ({ email_id: id, body: '' })),
+          requested_count: ids.length,
+          retrieved_count: ids.length,
+          failed_ids: [],
+        },
+      });
+    }
+    return Promise.resolve({ structuredContent: { emails: [] } });
+  };
+}
+
+describe('sidecar mail source (IMAP)', () => {
+  const SINCE = new Date('2026-11-05T14:00:00.000Z');
+
+  it('asks the account agent for the mail after the cursor, and never vouches for a sender', async () => {
+    const { call, calls } = mailTool([], { '7': 'Amount due by November 7' });
+    const { agent, asked } = mailboxAgent([arrival({ uid: 7, at: '2026-11-05T14:55:00.000Z' })]);
+    const source = mailSource(call, agent);
+    const read = await source.listAfter({
+      cursor: { uidvalidity: 1, last_uid: 6 },
+      since: SINCE,
       limit: 50,
       out_of_time: () => false,
     });
-    const messages = read.read === 'all' ? read.messages : [];
-    expect(messages).toHaveLength(1);
-    expect(messages[0]).toMatchObject({
+    expect(asked).toEqual([{ uidvalidity: 1, last_uid: 6, since: SINCE.toISOString(), limit: 50 }]);
+    expect(read.cursor).toEqual({ uidvalidity: 1, last_uid: 7 });
+    expect(read.messages[0]).toMatchObject({
       id: '7',
+      uid: 7,
+      thread_id: 'Invoice',
       from_address: 'billing@power.test',
       from_name: 'Power Co',
       authentication_results: [],
+      received_at: new Date('2026-11-05T14:55:00.000Z'),
     });
-    expect(await source.readText(messages[0] ?? EMAIL_MESSAGE)).toBe('Amount due by November 7');
+    expect(await source.readText(read.messages[0] ?? EMAIL_MESSAGE)).toBe('Amount due by November 7');
     expect(calls.at(-1)?.[1]).toMatchObject({ mark_as_read: false });
     expect(source.trustedAuthenticationServers).toEqual([]);
   });
 
-  /** The sidecar picks mail by the server's arrival time, which a sender cannot set, and lists it oldest first. */
-  function inbox(mail: { email: typeof EMAIL; arrived: string }[]): CallSidecarTool {
-    return (_name, args) => {
-      const since = new Date(String(args['since'])).getTime();
-      const before = new Date(String(args['before'])).getTime();
-      const page = Number(args['page']);
-      const size = Number(args['page_size']);
-      const emails = mail
-        .filter(item => new Date(item.arrived).getTime() >= since && new Date(item.arrived).getTime() < before)
-        .sort((a, b) => new Date(a.arrived).getTime() - new Date(b.arrived).getTime())
-        .map(item => item.email)
-        .slice((page - 1) * size, page * size);
-      return Promise.resolve({ structuredContent: { emails } });
-    };
-  }
-
-  it('keeps mail the server got late, whatever Date its sender wrote, in the order the server got it', async () => {
-    const delayed = { ...EMAIL, email_id: '8', date: '2026-11-05T10:00:00+00:00' };
-    const garbled = { ...EMAIL, email_id: '9', date: 'yesterday-ish' };
-    const call = inbox([
-      { email: EMAIL, arrived: '2026-11-05T14:55:00Z' },
-      { email: delayed, arrived: '2026-11-05T14:56:00Z' },
-      { email: garbled, arrived: '2026-11-05T14:57:00Z' },
-    ]);
-    const read = await sidecarMailSource({ call, account: 'default' }).listNewMessages({
-      since: new Date('2026-11-05T14:13:00.000Z'),
-      before: NOW,
-      limit: 50,
+  it('sends no cursor on the first look, and the start time to list from', async () => {
+    const { agent, asked } = mailboxAgent([]);
+    await mailSource(mailTool([]).call, agent).listAfter({
+      cursor: undefined,
+      since: SINCE,
+      limit: 10,
       out_of_time: () => false,
     });
-    expect(read.read === 'all' ? read.messages.map(message => message.id) : read.read).toEqual(['7', '8', '9']);
+    expect(asked).toEqual([{ uidvalidity: null, last_uid: null, since: SINCE.toISOString(), limit: 10 }]);
   });
 
-  it('reads a window in one call, and says when the window holds more than that call can list', async () => {
-    const mail = Array.from({ length: 150 }, (_, n) => ({
-      email: { ...EMAIL, email_id: String(n) },
-      arrived: new Date(Date.UTC(2026, 10, 5, 12, 0, n)).toISOString(),
-    }));
-    const calls: Record<string, unknown>[] = [];
-    const listing = inbox(mail);
-    const source = sidecarMailSource({
-      call: (name, args) => {
-        calls.push(args);
-        return listing(name, args);
-      },
-      account: 'default',
-    });
-    const some = await source.listNewMessages({
-      since: new Date('2026-11-05T12:00:00Z'),
-      before: new Date('2026-11-05T12:00:50Z'),
-      limit: 100,
-      out_of_time: () => false,
-    });
-    expect(some.read === 'all' ? some.messages.length : some.read).toBe(50);
-    await expect(
-      source.listNewMessages({
-        since: new Date('2026-11-05T12:00:00Z'),
-        before: NOW,
-        limit: 200,
-        out_of_time: () => false,
-      }),
-    ).resolves.toEqual({ read: 'too_many' });
-    await expect(
-      source.listNewMessages({
-        since: new Date('2026-11-05T12:00:00Z'),
-        before: NOW,
-        limit: 20,
-        out_of_time: () => false,
-      }),
-    ).resolves.toEqual({ read: 'too_many' });
-    expect(calls.map(args => [args['page'], args['page_size']])).toEqual([
-      [1, 100],
-      [1, 100],
-      [1, 21],
-    ]);
-  });
-
-  it('moves a Date its sender wrote outside the window to the window’s edge', async () => {
-    const early = { ...EMAIL, email_id: '8', date: '2026-11-05T10:00:00+00:00' };
-    const late = { ...EMAIL, email_id: '9', date: '2026-11-09T10:00:00+00:00' };
-    const garbled = { ...EMAIL, email_id: '10', date: 'yesterday-ish' };
-    const call = inbox([
-      { email: EMAIL, arrived: '2026-11-05T14:55:00Z' },
-      { email: early, arrived: '2026-11-05T14:56:00Z' },
-      { email: late, arrived: '2026-11-05T14:57:00Z' },
-      { email: garbled, arrived: '2026-11-05T14:58:00Z' },
-    ]);
-    const since = new Date('2026-11-05T14:13:00.000Z');
-    const read = await sidecarMailSource({ call, account: 'default' }).listNewMessages({
-      since,
-      before: NOW,
-      limit: 50,
-      out_of_time: () => false,
-    });
-    const latest = new Date(NOW.getTime() - 1);
-    expect(read.read === 'all' ? read.messages.map(message => [message.id, message.received_at]) : read.read).toEqual([
-      ['7', new Date('2026-11-05T14:55:00.000Z')],
-      ['8', since],
-      ['9', latest],
-      ['10', latest],
-    ]);
-  });
-
-  it('lists mail from given senders only, one call each', async () => {
-    const { call, calls } = mailTool([EMAIL]);
-    const read = await sidecarMailSource({ call, account: 'default' }).listNewMessages({
-      since: new Date('2026-11-05T14:00:00.000Z'),
-      before: NOW,
-      limit: 50,
-      from: ['dana@example.com', 'billing@power.test'],
-      out_of_time: () => false,
-    });
-    expect(read.read === 'all' ? read.messages.length : read.read).toBe(2);
-    expect(calls.map(([, args]) => args['from_address'])).toEqual(['dana@example.com', 'billing@power.test']);
-  });
-
-  it('fails the list on the first call that runs out of time, without trying a shorter window', async () => {
-    const calls: unknown[] = [];
-    const call: CallSidecarTool = (_name, args) => {
-      calls.push(args);
-      return Promise.reject(new McpError(ErrorCode.RequestTimeout, 'Request timed out'));
-    };
-    const read = sidecarMailSource({ call, account: 'default' }).listNewMessages({
-      since: new Date('2026-11-05T14:00:00.000Z'),
-      before: NOW,
-      limit: 50,
-      out_of_time: () => false,
+  it('fails the list without asking when the pass is already out of time', async () => {
+    const { agent, asked } = mailboxAgent([]);
+    const read = mailSource(mailTool([]).call, agent).listAfter({
+      cursor: undefined,
+      since: SINCE,
+      limit: 10,
+      out_of_time: () => true,
     });
     await expect(read).rejects.toBeInstanceOf(MailTooSlowError);
-    expect(calls).toHaveLength(1);
+    expect(asked).toEqual([]);
   });
 
   describe('when the connector cannot give a message', () => {
@@ -242,7 +219,7 @@ describe('sidecar mail source (IMAP)', () => {
 
     it('treats a message it lists in failed_ids as a failure that may clear, not as a message that is gone', async () => {
       const { call } = mailTool([], {}, ['7']);
-      const failure = sidecarMailSource({ call, account: 'default' }).readText(asMail);
+      const failure = mailSource(call).readText(asMail);
       await expect(failure).rejects.toThrow('could not fetch');
       await expect(failure).rejects.not.toBeInstanceOf(MessageUnreadableError);
       await expect(failure).rejects.not.toBeInstanceOf(MailSourceBusyError);
@@ -252,9 +229,7 @@ describe('sidecar mail source (IMAP)', () => {
       const paid = { ...EMAIL, email_id: '8', subject: 'Re: Your invoice', date: '2026-11-05T14:58:00+00:00' };
       const stranger = { ...EMAIL, email_id: '9', subject: 'Re: Your invoice', date: '2026-11-05T14:59:00+00:00' };
       const { call } = mailTool([paid, stranger], { '8': 'Paid, thanks' }, ['9']);
-      await expect(sidecarMailSource({ call, account: 'default' }).laterInThread(MAIL_REF)).resolves.toEqual([
-        'Paid, thanks',
-      ]);
+      await expect(mailSource(call).laterInThread(MAIL_REF)).resolves.toEqual(['Paid, thanks']);
     });
 
     it('tracks a bill, and does not stop the pass, when the connector refuses the thread check', async () => {
@@ -277,9 +252,18 @@ describe('sidecar mail source (IMAP)', () => {
           },
         });
       };
-      const source = sidecarMailSource({ call, account: 'default' });
+      const source = mailSource(call);
       const found = await watchMail({
-        source: { ...source, listNewMessages: () => Promise.resolve({ read: 'all', messages: [bill] }) },
+        source: {
+          ...source,
+          listAfter: () =>
+            Promise.resolve({
+              messages: [{ ...bill, uid: 7 }],
+              skipped: 0,
+              cursor: { uidvalidity: 1, last_uid: 7 },
+              more: false,
+            }),
+        },
         settings: defaultReachSettings('UTC'),
         since: new Date('2026-11-05T14:00:00.000Z'),
         now: NOW,
@@ -287,15 +271,13 @@ describe('sidecar mail source (IMAP)', () => {
         stuck: undefined,
         out_of_time: () => false,
         assistant: 'Mira',
-        handled: undefined,
-        max_width: undefined,
       });
       expect(found.track.map(event => event.id)).toEqual(['bill_due:7']);
       expect(found.stopped_by).toBeUndefined();
     });
 
     it('does not read "Account not found" as a message that is gone, so no bill is raised as unpaid', async () => {
-      const source = sidecarMailSource({ call: failing('Account Home was not found'), account: 'default' });
+      const source = mailSource(failing('Account Home was not found'));
       await expect(source.readText(asMail)).rejects.toBeInstanceOf(SidecarToolError);
       await expect(source.laterInThread(MAIL_REF)).rejects.toBeInstanceOf(SidecarToolError);
     });
@@ -304,17 +286,14 @@ describe('sidecar mail source (IMAP)', () => {
       const dropped: CallSidecarTool = () => Promise.reject(new Error('connection refused'));
       const gaveUp: CallSidecarTool = () => Promise.reject(new McpError(ErrorCode.RequestTimeout, 'Request timed out'));
       for (const call of [dropped, gaveUp]) {
-        const source = sidecarMailSource({ call, account: 'default' });
+        const source = mailSource(call);
         await expect(source.readText(asMail)).rejects.toBeInstanceOf(MailSourceBusyError);
         await expect(source.laterInThread(MAIL_REF)).rejects.toBeInstanceOf(MailSourceBusyError);
       }
     });
 
     it('marks a content or thread read the connector timed out on as a busy server', async () => {
-      const source = sidecarMailSource({
-        call: failing('Error calling tool: provider request timed out after 60 seconds'),
-        account: 'default',
-      });
+      const source = mailSource(failing('Error calling tool: provider request timed out after 60 seconds'));
       await expect(source.readText(asMail)).rejects.toBeInstanceOf(MailSourceBusyError);
       await expect(source.laterInThread(MAIL_REF)).rejects.toBeInstanceOf(MailSourceBusyError);
       await expect(source.readText(asMail)).rejects.not.toBeInstanceOf(MailTooSlowError);
@@ -322,311 +301,192 @@ describe('sidecar mail source (IMAP)', () => {
 
     it('marks the session ending mid-pass as a busy server', async () => {
       const ended: CallSidecarTool = () => Promise.reject(new DOMException('The operation timed out.', 'TimeoutError'));
-      const source = sidecarMailSource({ call: ended, account: 'default' });
+      const source = mailSource(ended);
       await expect(source.readText(asMail)).rejects.toBeInstanceOf(MailSourceBusyError);
       await expect(source.laterInThread(MAIL_REF)).rejects.toBeInstanceOf(MailSourceBusyError);
     });
 
     it('marks a connector reply that names a lost connection, a missing connection or a failed login as a busy server', async () => {
       for (const reply of ['Error: TRANSPORT failure', 'IMAP client is not connected', 'IMAP login failed (NO)']) {
-        const source = sidecarMailSource({ call: failing(reply), account: 'default' });
+        const source = mailSource(failing(reply));
         await expect(source.readText(asMail)).rejects.toBeInstanceOf(MailSourceBusyError);
-        await expect(
-          source.listNewMessages({
-            since: new Date('2026-11-05T14:00:00.000Z'),
-            before: NOW,
-            limit: 50,
-            out_of_time: () => false,
-          }),
-        ).rejects.toBeInstanceOf(MailSourceBusyError);
       }
     });
 
     it('skips at once a message whose body is over the connector’s limit', async () => {
-      const source = sidecarMailSource({
-        call: failing('limit_exceeded: an email body exceeds the size limit'),
-        account: 'default',
-      });
+      const source = mailSource(failing('limit_exceeded: an email body exceeds the size limit'));
       await expect(source.readText(asMail)).rejects.toBeInstanceOf(MessageUnreadableError);
-    });
-
-    it('says too slow when the connector gave up on a list by its own limit', async () => {
-      const call = failing('Error calling tool: provider request timed out after 60 seconds');
-      const read = sidecarMailSource({ call, account: 'default' }).listNewMessages({
-        since: new Date('2026-11-05T14:00:00.000Z'),
-        before: NOW,
-        limit: 50,
-        out_of_time: () => false,
-      });
-      await expect(read).rejects.toBeInstanceOf(MailTooSlowError);
     });
   });
 
-  it('passes on other failures as a busy server', async () => {
-    const call: CallSidecarTool = () => Promise.reject(new Error('connection refused'));
-    const read = sidecarMailSource({ call, account: 'default' }).listNewMessages({
-      since: new Date('2026-11-05T14:00:00.000Z'),
-      before: NOW,
-      limit: 50,
-      out_of_time: () => false,
+  describe('the account agent', () => {
+    const reply = (status: number, body: unknown): typeof fetch =>
+      jest.fn(() =>
+        Promise.resolve(
+          new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } }),
+        ),
+      );
+    const ask = (fetchImpl: typeof fetch) =>
+      imapAgent({ url: 'http://agent.invalid', fetchImpl })({
+        uidvalidity: null,
+        last_uid: null,
+        since: SINCE.toISOString(),
+        limit: 10,
+      });
+
+    it('posts the request to the list route and reads the reply', async () => {
+      const fetchImpl = reply(200, {
+        uidvalidity: 3,
+        last_uid: 9,
+        more: true,
+        skipped: 0,
+        messages: [
+          {
+            uid: 9,
+            internal_date: '2026-11-05T14:55:00+00:00',
+            from_address: 'A@B.test',
+            from_name: null,
+            subject: 'Re: Hi',
+          },
+        ],
+      });
+      const read = await ask(fetchImpl);
+      expect(fetchImpl).toHaveBeenCalledWith(
+        'http://agent.invalid/list_after',
+        expect.objectContaining({ method: 'POST' }),
+      );
+      expect(read.cursor).toEqual({ uidvalidity: 3, last_uid: 9 });
+      expect(read.more).toBe(true);
+      expect(read.messages).toMatchObject([{ id: '9', thread_id: 'Hi', from_address: 'a@b.test', from_name: null }]);
     });
-    await expect(read).rejects.toBeInstanceOf(MailSourceBusyError);
-    await expect(read).rejects.toHaveProperty('cause', expect.objectContaining({ message: 'connection refused' }));
+
+    it('counts a message it cannot read as skipped, and keeps the rest', async () => {
+      const read = await ask(
+        reply(200, {
+          uidvalidity: 3,
+          last_uid: 11,
+          more: false,
+          skipped: 1,
+          messages: [
+            { uid: 10, internal_date: 'not a date', from_address: 'a@b.test', from_name: null, subject: 'x' },
+            { uid: 11, internal_date: '2026-11-05T14:55:00+00:00', from_address: '', from_name: null, subject: 'x' },
+            {
+              uid: 12,
+              internal_date: '2026-11-05T14:55:00+00:00',
+              from_address: 'a@b.test',
+              from_name: null,
+              subject: 'y',
+            },
+          ],
+        }),
+      );
+      expect(read.skipped).toBe(3);
+      expect(read.messages.map(message => message.id)).toEqual(['12']);
+    });
+
+    it('says a failed login is a login that must be redone, and an unreachable server is a busy one', async () => {
+      await expect(ask(reply(502, { error: 'login_failed' }))).rejects.toBeInstanceOf(MailLoginFailedError);
+      const busy = ask(reply(502, { error: 'unavailable' }));
+      await expect(busy).rejects.toBeInstanceOf(MailSourceBusyError);
+      await expect(busy).rejects.not.toBeInstanceOf(MailLoginFailedError);
+    });
+
+    it('says a dropped connection is a busy server and a slow answer is too slow', async () => {
+      const dropped: typeof fetch = () => Promise.reject(new TypeError('fetch failed'));
+      const slow: typeof fetch = () =>
+        Promise.reject(Object.assign(new Error('The operation timed out.'), { name: 'TimeoutError' }));
+      await expect(ask(dropped)).rejects.toBeInstanceOf(MailSourceBusyError);
+      await expect(ask(slow)).rejects.toBeInstanceOf(MailTooSlowError);
+    });
+
+    it('passes on any other word as a plain error, which is not a busy server', async () => {
+      const failure = ask(reply(409, { error: 'no_account' }));
+      await expect(failure).rejects.toThrow('no_account');
+      await expect(failure).rejects.not.toBeInstanceOf(MailSourceBusyError);
+    });
   });
 
   describe('a crafted header next to a real bill', () => {
-    const BILL = { ...EMAIL, email_id: '7', subject: 'Invoice: amount due by November 7' };
-    const BAD = { ...EMAIL, email_id: '8', subject: 'Crafted', sender: 'x <x@example.com>' };
-    // The connector fetches headers only for the page it lists, and fails the whole page when one message does not parse.
-    const connector = (): { call: CallSidecarTool; pageSizes: number[] } => {
-      const pageSizes: number[] = [];
-      const mail = [
-        { email: BILL, arrived: '2026-11-05T14:55:00.000Z' },
-        { email: BAD, arrived: '2026-11-05T14:55:01.000Z' },
-      ];
-      const listing = inbox(mail);
-      const call: CallSidecarTool = (name, args) => {
-        if (name === 'get_emails_content') {
-          return Promise.resolve({
-            structuredContent: { emails: [{ email_id: '7', body: 'Amount due by November 7' }], failed_ids: [] },
-          });
-        }
-        pageSizes.push(Number(args['page_size']));
-        const page = Number(args['page']);
-        const size = Number(args['page_size']);
-        const since = new Date(String(args['since'])).getTime();
-        const before = new Date(String(args['before'])).getTime();
-        const inWindow = mail.filter(item => {
-          const arrived = new Date(item.arrived).getTime();
-          return arrived >= since && arrived < before;
-        });
-        if (inWindow.slice((page - 1) * size, page * size).some(item => item.email.email_id === '8')) {
-          return Promise.reject(
-            new SidecarToolError({ server: 'Email', tool: name, reply: 'Error: incomplete metadata page' }),
-          );
-        }
-        return listing(name, args);
-      };
-      return { call, pageSizes };
-    };
-
-    it('stops paging one by one as soon as the pass is out of time, before it asks for the next page', async () => {
-      const { call } = connector();
-      let singles = 0;
-      const source = sidecarMailSource({
-        call: (name, args) => {
-          singles += Number(args['page_size']) === 1 ? 1 : 0;
-          return call(name, args);
-        },
-        account: 'default',
-      });
-      const read = source.listNewMessages({
-        since: new Date('2026-11-05T14:55:00.000Z'),
-        before: new Date('2026-11-05T14:55:04.000Z'),
-        limit: 50,
-        out_of_time: () => singles >= 1,
-      });
-      await expect(read).rejects.toBeInstanceOf(MailTooSlowError);
-      expect(singles).toBe(1);
-    });
-
-    it('finds the one bad message by paging, and reads the bill beside it in the same pass', async () => {
-      const { call, pageSizes } = connector();
-      const warnings = { warn: jest.fn() };
-      const found = await watchMail({
-        source: sidecarMailSource({ call, account: 'default' }),
+    const pass = (agent: ListAfterAgent, input: { cursor: MailCursor | undefined; out_of_time?: () => boolean }) =>
+      watchMail({
+        source: mailSource(billsTool(), agent),
         settings: defaultReachSettings('UTC'),
-        since: new Date('2026-11-05T14:00:00.000Z'),
-        now: NOW,
-        logger: warnings,
-        stuck: undefined,
-        out_of_time: () => false,
-        assistant: 'Mira',
-        handled: undefined,
-        max_width: undefined,
-      });
-      // The one message the connector cannot list is told about in a fixed note.
-      expect(found.raise.map(event => event.id)).toEqual(['bill_due:7']);
-      expect(found.gaps).toEqual([
-        { from: new Date('2026-11-05T14:55:00.000Z'), to: new Date('2026-11-05T14:55:04.000Z') },
-      ]);
-      expect(found.resume_from).toBeUndefined();
-      expect(found.stopped_by).toBeUndefined();
-      expect(pageSizes).toContain(1);
-      expect(warnings.warn).toHaveBeenCalledWith(
-        'Left out mail the mail server could not list one by one',
-        expect.objectContaining({ skipped: 1 }),
-      );
-    });
-
-    it('reads the bill beside three crafted headers in the same few seconds, and tells of the three', async () => {
-      const bad = (id: string, second: number) => ({
-        email: { ...EMAIL, email_id: id, subject: 'Crafted' },
-        arrived: `2026-11-05T14:55:0${String(second)}.000Z`,
-      });
-      const mail = [
-        bad('8', 0),
-        bad('9', 1),
-        bad('10', 2),
-        {
-          email: { ...EMAIL, email_id: '7', subject: 'Invoice: amount due by November 7' },
-          arrived: '2026-11-05T14:55:03.000Z',
-        },
-      ];
-      const listing = inbox(mail);
-      const call: CallSidecarTool = (name, args) => {
-        if (name === 'get_emails_content') {
-          return Promise.resolve({
-            structuredContent: { emails: [{ email_id: '7', body: 'Amount due by November 7' }], failed_ids: [] },
-          });
-        }
-        const page = Number(args['page']);
-        const size = Number(args['page_size']);
-        const since = new Date(String(args['since'])).getTime();
-        const before = new Date(String(args['before'])).getTime();
-        const ahead = mail
-          .filter(item => {
-            const arrived = new Date(item.arrived).getTime();
-            return arrived >= since && arrived < before;
-          })
-          .slice((page - 1) * size, page * size);
-        return ahead.some(item => item.email.subject === 'Crafted')
-          ? Promise.reject(new SidecarToolError({ server: 'Email', tool: name, reply: 'incomplete metadata page' }))
-          : listing(name, args);
-      };
-      const found = await watchMail({
-        source: sidecarMailSource({ call, account: 'default' }),
-        settings: defaultReachSettings('UTC'),
-        since: new Date('2026-11-05T14:00:00.000Z'),
+        since: SINCE,
         now: NOW,
         logger: { warn: jest.fn() },
+        cursor: input.cursor,
         stuck: undefined,
-        out_of_time: () => false,
+        out_of_time: input.out_of_time ?? (() => false),
         assistant: 'Mira',
-        handled: undefined,
-        max_width: undefined,
       });
-      expect(found.raise.map(event => event.id)).toEqual(['bill_due:7']);
-      expect(found.gaps).toEqual([
-        { from: new Date('2026-11-05T14:55:00.000Z'), to: new Date('2026-11-05T14:55:04.000Z') },
+
+    it('reads the bill beside a header that does not parse, and tells of the one it could not list', async () => {
+      const { agent } = mailboxAgent([
+        arrival({ uid: 7, at: '2026-11-05T14:55:00.000Z', subject: 'Invoice: amount due by November 7' }),
+        arrival({ uid: 8, at: '2026-11-05T14:55:01.000Z', bad: true }),
       ]);
+      const found = await pass(agent, { cursor: undefined });
+      expect(found.raise.map(event => event.id)).toEqual(['bill_due:7']);
+      expect(found.gaps).toHaveLength(1);
       expect(found.stopped_by).toBeUndefined();
       expect(found.resume_from).toBeUndefined();
+      expect(found.cursor).toEqual({ uidvalidity: 1, last_uid: 8 });
     });
 
-    it('tries a failing page once more before it leaves the message out', async () => {
-      let tries = 0;
-      const listing = inbox([{ email: BILL, arrived: '2026-11-05T14:55:00.000Z' }]);
-      const call: CallSidecarTool = (name, args) => {
-        if (Number(args['page_size']) === 1) {
-          tries += 1;
-          if (tries === 1) {
-            return Promise.reject(new SidecarToolError({ server: 'Email', tool: name, reply: 'incomplete page' }));
-          }
-        } else {
-          return Promise.reject(new SidecarToolError({ server: 'Email', tool: name, reply: 'incomplete page' }));
-        }
-        return listing(name, args);
-      };
-      const read = await sidecarMailSource({ call, account: 'default' }).listNewMessages({
-        since: new Date('2026-11-05T14:55:00.000Z'),
-        before: new Date('2026-11-05T14:55:02.000Z'),
-        limit: 50,
-        out_of_time: () => false,
-      });
-      expect(read).toMatchObject({ read: 'all', messages: [{ id: '7' }] });
-      expect(read).not.toHaveProperty('skipped');
-    });
-
-    it('stops searching one message at a time when the pass has run out of time', async () => {
-      const calls: number[] = [];
-      const call: CallSidecarTool = (_name, args) => {
-        calls.push(Number(args['page']));
-        return Promise.reject(new SidecarToolError({ server: 'Email', tool: 'x', reply: 'incomplete page' }));
-      };
-      let looks = 0;
-      const read = sidecarMailSource({ call, account: 'default' }).listNewMessages({
-        since: new Date('2026-11-05T14:55:00.000Z'),
-        before: new Date('2026-11-05T14:55:02.000Z'),
-        limit: 500,
-        out_of_time: () => (looks += 1) > 2,
-      });
-      await expect(read).rejects.toBeInstanceOf(MailTooSlowError);
-      expect(calls.length).toBeLessThan(8);
-    });
-
-    it('does not search one message at a time when the list is only a check on the account', async () => {
-      const call = jest.fn<ReturnType<CallSidecarTool>, Parameters<CallSidecarTool>>(() =>
-        Promise.reject(new SidecarToolError({ server: 'Email', tool: 'x', reply: 'incomplete page' })),
+    it('does not stall on a flood of mail in a few seconds with a bad header in it (the probe that stalled the old path)', async () => {
+      const flood = Array.from({ length: 120 }, (_, n) =>
+        arrival({ uid: n + 1, at: `2026-11-05T14:55:0${String(n % 4)}.000Z`, subject: 'Newsletter' }),
       );
-      const read = sidecarMailSource({ call, account: 'default' }).listNewMessages({
-        since: new Date('2026-11-05T14:55:00.000Z'),
-        before: new Date('2026-11-05T14:55:02.000Z'),
-        limit: 500,
-        out_of_time: () => false,
-        whole: true,
-      });
-      await expect(read).rejects.toBeInstanceOf(SidecarToolError);
-      expect(call).toHaveBeenCalledTimes(1);
+      const { agent } = mailboxAgent([
+        ...flood,
+        arrival({ uid: 121, at: '2026-11-05T14:55:03.000Z', bad: true }),
+        arrival({ uid: 122, at: '2026-11-05T14:55:03.500Z', subject: 'Invoice: amount due by November 7' }),
+      ]);
+      let cursor: MailCursor | undefined;
+      const raised: string[] = [];
+      let passes = 0;
+      for (; passes < 10; passes += 1) {
+        let looks = 0;
+        // Each pass has time for one list and about fifty messages.
+        const found = await pass(agent, { cursor, out_of_time: () => (looks += 1) > 60 });
+        raised.push(...found.raise.map(event => event.id));
+        expect(found.stopped_by).toBeUndefined();
+        cursor = found.cursor;
+        if (found.resume_from === undefined) break;
+      }
+      expect(passes).toBeLessThan(10);
+      expect(raised).toEqual(['bill_due:122']);
+      expect(cursor).toEqual({ uidvalidity: 1, last_uid: 122 });
     });
 
-    it('reads a few seconds that hold more than one page of mail whole', async () => {
-      const mail = Array.from({ length: 250 }, (_, n) => ({
-        email: { ...EMAIL, email_id: String(n) },
-        arrived: new Date(Date.UTC(2026, 10, 5, 14, 55, 0, n * 10)).toISOString(),
-      }));
-      const read = await sidecarMailSource({ call: inbox(mail), account: 'default' }).listNewMessages({
-        since: new Date('2026-11-05T14:55:00.000Z'),
-        before: new Date('2026-11-05T14:55:04.000Z'),
-        limit: 500,
-        out_of_time: () => false,
-      });
-      expect(read.read === 'all' ? read.messages : []).toHaveLength(250);
+    it('handles 450 bill-like messages that arrived in one four second stretch, with no cap on how many', async () => {
+      const bills = Array.from({ length: 450 }, (_, n) =>
+        arrival({
+          uid: n + 1,
+          at: '2026-11-05T14:55:00.000Z',
+          subject: `Invoice ${String(n)}: amount due by November 20`,
+        }),
+      );
+      const { agent } = mailboxAgent(bills);
+      let cursor: MailCursor | undefined;
+      const tracked: string[] = [];
+      for (let passes = 0; passes < 30; passes += 1) {
+        let looks = 0;
+        const found = await pass(agent, { cursor, out_of_time: () => (looks += 1) > 100 });
+        tracked.push(...found.track.map(event => event.id));
+        cursor = found.cursor;
+        if (found.resume_from === undefined) break;
+      }
+      expect(tracked).toHaveLength(450);
+      expect(new Set(tracked).size).toBe(450);
     });
-
-    it('leaves a list that fails for every page to the caller, since that is the account and not a message', async () => {
-      const call: CallSidecarTool = () =>
-        Promise.reject(
-          new SidecarToolError({ server: 'Email', tool: 'list_emails_metadata', reply: 'Account X was not found' }),
-        );
-      const read = sidecarMailSource({ call, account: 'default' }).listNewMessages({
-        since: new Date('2026-11-05T14:55:00.000Z'),
-        before: new Date('2026-11-05T14:55:02.000Z'),
-        limit: 50,
-        out_of_time: () => false,
-      });
-      await expect(read).rejects.toBeInstanceOf(SidecarToolError);
-    });
-  });
-
-  it('reads a backlog bigger than one pass over several passes, skipping nothing', async () => {
-    const mail = Array.from({ length: 250 }, (_, n) => ({
-      email: { ...EMAIL, email_id: String(n) },
-      arrived: new Date(Date.UTC(2026, 10, 5, 12, 0, 0, n * 997)).toISOString(),
-    }));
-    const source = sidecarMailSource({ call: inbox(mail), account: 'default' });
-    const seen = new Set<string>();
-    let since = new Date('2026-11-05T12:00:00Z');
-    for (let pass = 0; pass < 20; pass += 1) {
-      const read = await readMailWindow({
-        source,
-        since,
-        now: NOW,
-        limit: 100,
-        keep_from: [],
-        logger: { warn: jest.fn() },
-        out_of_time: () => false,
-      });
-      readMessages(read).forEach(message => seen.add(message.id));
-      if (read.resume_from === undefined) break;
-      expect(read.resume_from.getTime()).toBeGreaterThan(since.getTime());
-      since = read.resume_from;
-    }
-    expect(seen.size).toBe(250);
   });
 
   it('treats an always-important sender as ordinary mail, so only a bill note can come of it', async () => {
     const { call } = mailTool([EMAIL], { '7': 'Amount due by November 7' });
+    const { agent } = mailboxAgent([
+      arrival({ uid: 7, at: '2026-11-05T14:55:00.000Z', subject: 'Your invoice: amount due by November 7' }),
+    ]);
     const settings = {
       ...defaultReachSettings('UTC'),
       always_important: [
@@ -634,7 +494,7 @@ describe('sidecar mail source (IMAP)', () => {
       ],
     };
     const found = await watchMail({
-      source: sidecarMailSource({ call, account: 'default' }),
+      source: mailSource(call, agent),
       settings,
       since: new Date('2026-11-05T14:00:00.000Z'),
       now: NOW,
@@ -642,8 +502,6 @@ describe('sidecar mail source (IMAP)', () => {
       stuck: undefined,
       out_of_time: () => false,
       assistant: 'Mira',
-      handled: undefined,
-      max_width: undefined,
     });
     expect(found.raise.map(event => [event.kind, event.evidence])).toEqual([['bill_due', 'content']]);
   });
@@ -651,7 +509,7 @@ describe('sidecar mail source (IMAP)', () => {
   it('finds a later reply by the bare subject', async () => {
     const reply = { ...EMAIL, email_id: '8', subject: 'Re: Your invoice', date: '2026-11-05T14:58:00+00:00' };
     const { call, calls } = mailTool([reply], { '8': 'Thank you for your payment' });
-    const later = await sidecarMailSource({ call, account: 'default' }).laterInThread({
+    const later = await mailSource(call).laterInThread({
       id: '7',
       thread_id: bareSubject('Re: Your invoice'),
       received_at: new Date('2026-11-05T14:55:00.000Z'),
@@ -791,6 +649,7 @@ describe('createSidecarNoticingSources', () => {
   it('offers nothing when no sidecar is set up', async () => {
     const provider = createSidecarNoticingSources({
       mailUrl: undefined,
+      mailAgentUrl: undefined,
       calendarUrl: undefined,
       primary: none,
       instanceOwner: OWNER,
@@ -807,13 +666,14 @@ describe('createSidecarNoticingSources', () => {
     const own: NoticingSources = {
       mail: {
         status: 'ready',
-        source: sidecarMailSource({ call: mailTool([]).call, account: 'a' }),
+        source: mailSource(mailTool([]).call),
         kind: 'google',
       },
       calendar: { status: 'none' },
     };
     const provider = createSidecarNoticingSources({
       mailUrl: 'http://mail.invalid/mcp',
+      mailAgentUrl: 'http://agent.invalid',
       calendarUrl: undefined,
       primary: { ...none, sourcesFor: () => Promise.resolve(own) },
       instanceOwner: OWNER,
@@ -825,6 +685,7 @@ describe('createSidecarNoticingSources', () => {
   it('gives the shared connectors to the instance owner only', async () => {
     const provider = createSidecarNoticingSources({
       mailUrl: undefined,
+      mailAgentUrl: undefined,
       calendarUrl: 'http://calendar.invalid/mcp',
       primary: none,
       instanceOwner: OWNER,
@@ -842,6 +703,7 @@ describe('createSidecarNoticingSources', () => {
     const second = { tenant_id: 'default', created_by: 'owner-2' };
     const provider = createSidecarNoticingSources({
       mailUrl: 'http://mail.invalid/mcp',
+      mailAgentUrl: 'http://agent.invalid',
       calendarUrl: undefined,
       primary: { ...none, listOwners: () => Promise.resolve([second]) },
       instanceOwner: OWNER,
@@ -853,6 +715,7 @@ describe('createSidecarNoticingSources', () => {
   it('gives the shared connectors to no one when the instance names no owner', async () => {
     const provider = createSidecarNoticingSources({
       mailUrl: 'http://mail.invalid/mcp',
+      mailAgentUrl: 'http://agent.invalid',
       calendarUrl: 'http://calendar.invalid/mcp',
       primary: none,
       instanceOwner: undefined,
@@ -872,6 +735,7 @@ describe('createSidecarNoticingSources', () => {
     };
     const provider = createSidecarNoticingSources({
       mailUrl: 'http://mail.invalid/mcp',
+      mailAgentUrl: 'http://agent.invalid',
       calendarUrl: undefined,
       primary: { ...none, sourcesFor: () => Promise.resolve(reconnect) },
       instanceOwner: OWNER,
@@ -883,6 +747,7 @@ describe('createSidecarNoticingSources', () => {
   it('says a mail connector that is set up but cannot be reached is unreachable, not missing', async () => {
     const provider = createSidecarNoticingSources({
       mailUrl: 'http://127.0.0.1:1/mcp',
+      mailAgentUrl: 'http://agent.invalid',
       calendarUrl: undefined,
       primary: none,
       instanceOwner: OWNER,
@@ -893,9 +758,22 @@ describe('createSidecarNoticingSources', () => {
     expect(sources.mail.status === 'unreachable' ? sources.mail.error : undefined).toBeInstanceOf(Error);
   });
 
+  it('leaves the shared mailbox unwatched when the account agent is not set up', async () => {
+    const provider = createSidecarNoticingSources({
+      mailUrl: 'http://mail.invalid/mcp',
+      mailAgentUrl: undefined,
+      calendarUrl: undefined,
+      primary: none,
+      instanceOwner: OWNER,
+      logger: winston.createLogger({ silent: true }),
+    });
+    expect((await provider.sourcesFor(OWNER)).mail).toEqual({ status: 'none' });
+  });
+
   it('says nothing is unreachable when no mail connector is set up', async () => {
     const provider = createSidecarNoticingSources({
       mailUrl: undefined,
+      mailAgentUrl: undefined,
       calendarUrl: undefined,
       primary: none,
       instanceOwner: OWNER,

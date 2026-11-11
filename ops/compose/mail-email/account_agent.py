@@ -14,18 +14,27 @@ Security rules, enforced here:
   words only, so a mail server's error text (which can echo credentials) never reaches the app.
 - Nothing is logged at all: the HTTP server's request log is silenced, and unexpected failures
   print only the exception's type name to stderr, never its text.
+- The same port lists new mail for the app's noticing, by UIDVALIDITY and UID: read-only (the mailbox is opened
+  read-only and bodies are never fetched), headers From and Subject only, with the same fixed result words.
 - The sign-in check is the installer's own (email_check.py beside this file, run isolated the
   same way), so both paths give the same answer for the same account.
 """
 
+import email.parser
+import email.policy
+import email.utils
 import hashlib
+import imaplib
 import json
 import os
+import re
+import ssl
 import shlex
 import subprocess
 import sys
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ACCOUNT_FILE = os.environ.get("AMAN_MAIL_ACCOUNT_FILE", "/account/.env.mail-email")
@@ -235,6 +244,197 @@ def remove_account():
     return 200, {"connected": False}
 
 
+MOST_LISTED_PER_CALL = 500
+IMAP_TIMEOUT_SECONDS = 30
+CANDIDATES_PER_FETCH = 200
+MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+INTERNAL_DATE = re.compile(rb'INTERNALDATE "([^"]+)"')
+INTERNAL_DATE_PARTS = re.compile(r"(\d{1,2})-([A-Za-z]{3})-(\d{4}) (\d{2}):(\d{2}):(\d{2}) ([+-])(\d{2})(\d{2})$")
+FETCHED_UID = re.compile(rb"\bUID (\d+)")
+
+
+def open_imap(account):
+    """A logged-in IMAP connection to the saved account, or the word for why it could not be made."""
+    context = ssl.create_default_context()
+    try:
+        if account["imap_mode"] == "ssl":
+            conn = imaplib.IMAP4_SSL(account["imap_host"], account["imap_port"], ssl_context=context, timeout=IMAP_TIMEOUT_SECONDS)
+        else:
+            conn = imaplib.IMAP4(account["imap_host"], account["imap_port"], timeout=IMAP_TIMEOUT_SECONDS)
+            conn.starttls(ssl_context=context)
+    except (OSError, ssl.SSLError, imaplib.IMAP4.error, ValueError):
+        return None, "unavailable"
+    try:
+        conn.login(account["address"], account["password"])
+    except imaplib.IMAP4.error:
+        return None, "login_failed"
+    return conn, None
+
+
+def parse_instant(text):
+    """An ISO 8601 time as a UTC datetime, or None."""
+    try:
+        value = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return None
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
+def fetched_items(data):
+    """The (metadata, header bytes) pairs of a FETCH reply. Anything else in the reply is not a message."""
+    return [item for item in data if isinstance(item, tuple) and len(item) >= 2]
+
+
+def arrival_of(raw):
+    """INTERNALDATE of a FETCH reply's metadata line as a UTC datetime, or None. It is read here rather than with
+    imaplib's helper, which gives local time."""
+    date = INTERNAL_DATE.search(raw)
+    if date is None:
+        return None
+    parts = INTERNAL_DATE_PARTS.match(date.group(1).decode("ascii", "replace").strip())
+    if parts is None or parts.group(2).title() not in MONTHS:
+        return None
+    day, month, year, hour, minute, second, sign, zone_hours, zone_minutes = parts.groups()
+    try:
+        local = datetime(int(year), MONTHS.index(month.title()) + 1, int(day), int(hour), int(minute), int(second))
+    except ValueError:
+        return None
+    offset = timedelta(hours=int(zone_hours), minutes=int(zone_minutes))
+    return (local - offset if sign == "+" else local + offset).replace(tzinfo=timezone.utc)
+
+
+def internal_dates(conn, uids):
+    """INTERNALDATE of each UID that the server still has."""
+    found = {}
+    for start in range(0, len(uids), CANDIDATES_PER_FETCH):
+        chunk = uids[start : start + CANDIDATES_PER_FETCH]
+        kind, data = conn.uid("FETCH", ",".join(str(uid) for uid in chunk), "(INTERNALDATE)")
+        if kind != "OK":
+            raise imaplib.IMAP4.error("fetch")
+        for item in data:
+            raw = item[0] if isinstance(item, tuple) else item
+            uid = FETCHED_UID.search(raw) if isinstance(raw, bytes) else None
+            arrived = arrival_of(raw) if uid else None
+            if uid and arrived:
+                found[int(uid.group(1))] = arrived
+    return found
+
+
+def list_after(conn, payload):
+    """Mail after a cursor, in UID order, read-only. With no cursor, or a cursor from another UIDVALIDITY, it starts
+    at the first message that arrived at or after `since`. A message whose headers cannot be parsed is counted in
+    `skipped` and the cursor moves past it, so one bad message never holds up the others."""
+    kind, _ = conn.select("INBOX", readonly=True)
+    if kind != "OK":
+        raise imaplib.IMAP4.error("select")
+    validity = int(conn.response("UIDVALIDITY")[1][0])
+    next_data = conn.response("UIDNEXT")[1]
+    next_uid = int(next_data[0]) if next_data and next_data[0] else 1
+    limit = max(1, min(int(payload["limit"]), MOST_LISTED_PER_CALL))
+    cursor_valid = payload.get("last_uid") is not None and payload.get("uidvalidity") == validity
+    if cursor_valid:
+        last = int(payload["last_uid"])
+        kind, data = conn.uid("SEARCH", None, "%d:*" % (last + 1))
+        if kind != "OK":
+            raise imaplib.IMAP4.error("search")
+        candidates = sorted(uid for uid in (int(part) for part in (data[0] or b"").split()) if uid > last)
+    else:
+        since = parse_instant(payload["since"])
+        if since is None:
+            raise ValueError("since")
+        start = since - timedelta(days=1)
+        # IMAP dates name the month in English whatever the locale, and SINCE goes by whole days, so a day earlier is asked.
+        day = "%d-%s-%d" % (start.day, MONTHS[start.month - 1], start.year)
+        kind, data = conn.uid("SEARCH", None, "SINCE", day)
+        if kind != "OK":
+            raise imaplib.IMAP4.error("search")
+        listed = sorted(int(part) for part in (data[0] or b"").split())
+        dates = internal_dates(conn, listed)
+        candidates = [uid for uid in listed if uid in dates and dates[uid] >= since]
+    batch = candidates[:limit]
+    more = len(candidates) > limit
+    wanted = set(batch)
+    found = {}
+    for item in fetch_headers(conn, batch):
+        message = message_of(item)
+        if message is not None and message["uid"] in wanted and message["uid"] not in found:
+            found[message["uid"]] = message
+    messages = [found[uid] for uid in batch if uid in found]
+    last_uid = batch[-1] if batch else (int(payload["last_uid"]) if cursor_valid else max(next_uid - 1, 0))
+    return {
+        "uidvalidity": validity,
+        "last_uid": last_uid,
+        "more": more,
+        # Every listed UID the server did not answer for, or answered with headers that do not read, is one skipped message.
+        "skipped": len(batch) - len(messages),
+        "messages": messages,
+    }
+
+
+HEADER_ITEMS = "(INTERNALDATE BODY.PEEK[HEADER.FIELDS (FROM SUBJECT)])"
+
+
+def fetch_headers(conn, uids):
+    """The FETCH items for `uids`. A server that refuses the whole batch is asked for each UID alone, so one message it
+    cannot give costs only that message."""
+    if not uids:
+        return []
+    kind, data = conn.uid("FETCH", ",".join(str(uid) for uid in uids), HEADER_ITEMS)
+    if kind == "OK":
+        return fetched_items(data)
+    items = []
+    for uid in uids:
+        kind, data = conn.uid("FETCH", str(uid), HEADER_ITEMS)
+        if kind == "OK":
+            items.extend(fetched_items(data))
+    return items
+
+
+def message_of(item):
+    """One listed message from a FETCH item, or None when its UID, arrival or sender does not read."""
+    parser = email.parser.BytesHeaderParser(policy=email.policy.default)
+    try:
+        raw = item[0]
+        uid = int(FETCHED_UID.search(raw).group(1))
+        arrived = arrival_of(raw)
+        if arrived is None:
+            return None
+        headers = parser.parsebytes(item[1])
+        name, address = email.utils.parseaddr(str(headers["From"] or ""))
+        if not address or "@" not in address:
+            return None
+        return {
+            "uid": uid,
+            "internal_date": arrived.isoformat().replace("+00:00", "Z"),
+            "from_address": address,
+            "from_name": name or None,
+            "subject": str(headers["Subject"] or ""),
+        }
+    except Exception:
+        return None
+
+
+def handle_list_after(payload):
+    """A list-after request: (HTTP status, body). Fixed words for every failure; the mail server's text can echo credentials."""
+    account = read_account()
+    if account is None:
+        return 409, {"error": "no_account"}
+    conn, word = open_imap(account)
+    if conn is None:
+        return 502, {"error": word}
+    try:
+        return 200, list_after(conn, payload)
+    except (imaplib.IMAP4.error, OSError, ssl.SSLError):
+        return 502, {"error": "unavailable"}
+    except (KeyError, TypeError, ValueError):
+        return 400, {"error": "invalid"}
+    finally:
+        try:
+            conn.logout()
+        except Exception:
+            pass
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -258,6 +458,19 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if not self._host_allowed():
                 self._send(403, {"error": "forbidden_host"})
+                return
+            if self.path == "/list_after" and method == "POST":
+                length = int(self.headers.get("Content-Length", "0"))
+                if length <= 0 or length > MAX_BODY_BYTES:
+                    self._send(400, {"error": "invalid"})
+                    return
+                try:
+                    payload = json.loads(self.rfile.read(length).decode("utf-8"))
+                except (ValueError, UnicodeDecodeError):
+                    self._send(400, {"error": "invalid"})
+                    return
+                status, body = handle_list_after(payload)
+                self._send(status, body)
                 return
             if self.path != "/account":
                 self._send(404, {"error": "not_found"})

@@ -1,5 +1,4 @@
 import type { ExpressionBuilder, Kysely } from 'kysely';
-import { z } from 'zod';
 
 import {
   MailProblemKindSchema,
@@ -43,26 +42,18 @@ export interface NoticingEventTable {
   attempts: number;
 }
 
-const IdsSchema = z.array(z.string());
-
-function parseIds(stored: string | null): string[] | undefined {
-  if (stored === null) {
-    return undefined;
-  }
-  try {
-    const parsed = IdsSchema.safeParse(JSON.parse(stored));
-    return parsed.success ? parsed.data : undefined;
-  } catch {
-    return undefined;
-  }
+/** The IMAP cursor is kept as `<uidvalidity>:<last_uid>`; anything else reads as no cursor. */
+function parseCursor(stored: string | null): MailCursor | undefined {
+  const match = /^(\d+):(\d+)$/.exec(stored ?? '');
+  return match === null ? undefined : { uidvalidity: Number(match[1]), last_uid: Number(match[2]) };
 }
 
 /**
  * When a watcher last looked for one person, and how it is doing. `failing_since` and `failure_kind` are set while
  * passes keep failing and cleared by a pass that works. `stuck_*` name the one message a pass keeps failing on and how
- * many passes failed on it and since when, so a message that never reads can be passed over. `handled_ids` are the
- * messages of the window the next pass starts at again that were already read or passed over. `window_ms` caps how wide
- * a window the next pass lists, after a pass ran out of time. `source` is where mail was read from.
+ * many passes failed on it and since when, so a message that never reads can be passed over. `imap_cursor` is the last
+ * message of an IMAP mailbox that was read or passed over, with the mailbox's UIDVALIDITY. `source` is where mail was
+ * read from.
  */
 export interface NoticingCheckpointTable {
   tenant_id: string;
@@ -74,8 +65,7 @@ export interface NoticingCheckpointTable {
   stuck_message_id: string | null;
   stuck_passes: number;
   stuck_since: string | Date | null;
-  handled_ids: string | null;
-  window_ms: number | null;
+  imap_cursor: string | null;
   source: string | null;
 }
 
@@ -128,18 +118,19 @@ export interface StuckMessage {
   since: Date;
 }
 
+/** A mailbox's UIDVALIDITY and the highest message UID that was read or passed over. */
+export interface MailCursor {
+  uidvalidity: number;
+  last_uid: number;
+}
+
 /** Where a watcher reads from next, and its trouble if passes keep failing. */
 export interface WatcherCheckpoint {
   checked_at: Date;
   failure: { kind: MailProblemKind; since: Date } | undefined;
   stuck: StuckMessage | undefined;
-  /**
-   * Messages of the window the next pass starts at again that were already read or passed over. Only a source that
-   * cannot resume at a message (IMAP) keeps them, so a pass skips what it handled.
-   */
-  handled?: readonly string[] | undefined;
-  /** The widest window the next pass lists, in milliseconds, while a pass that ran out of time is being caught up on. */
-  window_ms: number | undefined;
+  /** Where IMAP mail was read to, so the next pass starts at the next message. */
+  cursor?: MailCursor | undefined;
   source: MailSourceKind | undefined;
 }
 
@@ -490,8 +481,7 @@ export class NoticingStore implements INoticingStore {
               passes: row.stuck_passes,
               since: new Date(row.stuck_since ?? row.checked_at),
             },
-      handled: parseIds(row.handled_ids),
-      window_ms: row.window_ms ?? undefined,
+      cursor: parseCursor(row.imap_cursor),
       source: source.success ? source.data : undefined,
     };
   }
@@ -512,8 +502,8 @@ export class NoticingStore implements INoticingStore {
       stuck_message_id: input.stuck?.message_id ?? null,
       stuck_passes: input.stuck?.passes ?? 0,
       stuck_since: input.stuck?.since.toISOString() ?? null,
-      handled_ids: input.handled === undefined || input.handled.length === 0 ? null : JSON.stringify(input.handled),
-      window_ms: input.window_ms ?? null,
+      imap_cursor:
+        input.cursor === undefined ? null : `${String(input.cursor.uidvalidity)}:${String(input.cursor.last_uid)}`,
       source: input.source ?? null,
     };
     await this.#db

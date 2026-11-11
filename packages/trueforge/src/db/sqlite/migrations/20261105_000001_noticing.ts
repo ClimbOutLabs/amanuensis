@@ -54,8 +54,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
         stuck_message_id TEXT,
         stuck_passes INTEGER NOT NULL DEFAULT 0,
         stuck_since TEXT,
-        handled_ids TEXT,
-        window_ms INTEGER,
+        imap_cursor TEXT,
         source TEXT,
         PRIMARY KEY (tenant_id, created_by, watcher)
       ) STRICT

@@ -33,6 +33,8 @@ import {
   MessageUnreadableError,
   type ApprovalSource,
   type CalendarSource,
+  type MailMessage,
+  type MailRef,
   type MailSource,
   type NoticingSourceProvider,
   type WaitingApproval,
@@ -428,32 +430,47 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
     return {
       spent,
       promotionSpent: () => spent() || now().getTime() - started > TRACKED_BILLS_MS || calls >= TRACKED_BILLS_CALLS,
-      counted: source => ({
-        ...source,
-        listNewMessages: async input => {
-          calls += 1;
-          const read = await source.listNewMessages(input);
-          if (source.fetchesEachListed === true && read.read !== 'too_many') {
-            calls += read.messages.length;
-          }
-          return read;
-        },
-        readText: message => {
-          calls += 1;
-          return source.readText(message);
-        },
-        // A thread check lists the thread and then fetches its messages.
-        laterInThread: ref => {
-          calls += 2;
-          return source.laterInThread(ref);
-        },
-      }),
+      counted: (source: MailSource): MailSource => {
+        const counting = {
+          readText: (message: MailMessage) => {
+            calls += 1;
+            return source.readText(message);
+          },
+          // A thread check lists the thread and then fetches its messages.
+          laterInThread: (ref: MailRef) => {
+            calls += 2;
+            return source.laterInThread(ref);
+          },
+        };
+        if ('listAfter' in source) {
+          return {
+            ...source,
+            ...counting,
+            listAfter: input => {
+              calls += 1;
+              return source.listAfter(input);
+            },
+          };
+        }
+        return {
+          ...source,
+          ...counting,
+          listNewMessages: async input => {
+            calls += 1;
+            const read = await source.listNewMessages(input);
+            if (source.fetchesEachListed === true && read.read !== 'too_many') {
+              calls += read.messages.length;
+            }
+            return read;
+          },
+        };
+      },
     };
   }
 
   /**
    * The mail checkpoint. When it was written for another source, how far mail was read and the trouble since carry
-   * over, so a switch never hides mail left unread; its counts, window and handled ids mean nothing to this source.
+   * over, so a switch never hides mail left unread; its counts and cursor mean nothing to this source.
    */
   async function checkpointFor({
     owner,
@@ -465,7 +482,7 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
     const stored = await store.getCheckpoint({ ...owner, watcher: 'mail' });
     return stored?.source === undefined || stored.source === kind
       ? stored
-      : { ...stored, stuck: undefined, handled: undefined, window_ms: undefined, source: kind };
+      : { ...stored, stuck: undefined, cursor: undefined, source: kind };
   }
 
   /** The name to put in a note; a lookup that fails never stops mail from being read. */
@@ -542,9 +559,12 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
         now: at,
         logger,
         stuck: checkpoint?.stuck,
-        handled: checkpoint?.handled,
+        // A cursor left from before the day limit would read the older mail too, so the read starts again at the limit.
+        cursor:
+          checkpoint !== undefined && checkpoint.checked_at.getTime() >= oldest.getTime()
+            ? checkpoint.cursor
+            : undefined,
         out_of_time: budget.spent,
-        max_width: checkpoint?.window_ms,
         assistant,
       });
     } catch (error) {
@@ -586,8 +606,7 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
             : (checkpoint?.checked_at ?? since),
       failure,
       stuck: findings.stuck,
-      handled: findings.handled,
-      window_ms: findings.window_ms === undefined ? undefined : Math.min(findings.window_ms, MAX_LOOKBACK_MS),
+      cursor: findings.cursor,
       source: kind,
     });
     if (findings.stopped_by !== undefined) {
@@ -647,8 +666,7 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
       checked_at: checkpoint?.checked_at ?? fallback,
       failure: mailFailure({ checkpoint, error, timed_out: false, at }),
       stuck: checkpoint?.stuck,
-      handled: checkpoint?.handled,
-      window_ms: checkpoint?.window_ms,
+      cursor: checkpoint?.cursor,
       source,
     });
   }
@@ -687,8 +705,7 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
       checked_at: at,
       failure: undefined,
       stuck: undefined,
-      handled: undefined,
-      window_ms: undefined,
+      cursor: undefined,
       source: undefined,
     });
   }
@@ -765,7 +782,6 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
       checked_at: at,
       failure: undefined,
       stuck: undefined,
-      window_ms: undefined,
       source: undefined,
     });
   }
@@ -786,7 +802,6 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
       checked_at: checkpoint?.checked_at ?? at,
       failure: { kind, since: checkpoint?.failure?.since ?? at },
       stuck: undefined,
-      window_ms: undefined,
       source: undefined,
     });
   }
