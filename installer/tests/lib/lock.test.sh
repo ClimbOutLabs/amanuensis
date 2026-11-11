@@ -101,10 +101,62 @@ lock_acquire'
   rm -rf "$state"
 }
 
+test_a_holder_that_stalls_as_its_lock_appears_keeps_it() {
+  t_begin "a holder that stalls right as its lock appears keeps it, and a run arriving meanwhile is busy"
+  local state holder i
+  state=$(mktemp -d)
+  # The stall comes right after the lock folder appears, before the holder starts beating: the lock must already
+  # hold an owner and a beat by then, or the other run would count it as dead and take it.
+  bash -c '. "$1"; STATE_DIR=$2; LOCK_BEAT_SECONDS=1; LOCK_DEAD_SECONDS=3
+stall() { if [ -z "${stalled:-}" ] && [ -d "$STATE_DIR/lock" ]; then stalled=1; sleep 5; fi; }
+mkdir() { command mkdir "$@" || return; stall; }
+mv() { command mv "$@" || return; stall; }
+lock_acquire; touch "$STATE_DIR/held-first"; lock_release' _ "$INSTALLER_DIR/lib/common.sh" "$state" >/dev/null 2>&1 &
+  holder=$!
+  for i in 1 2 3 4 5 6 7 8 9 10; do [ -d "$state/lock" ] && break; sleep 0.2; done
+  sleep 1
+  lock_run "$state" 'lock_acquire; touch "$STATE_DIR/held-second"; lock_release'
+  assert_eq "$LOCK_RC" 1 "the run arriving during the stall is busy"
+  wait "$holder"
+  assert_file "$state/held-first"
+  assert_no_path "$state/held-second"
+  rm -rf "$state"
+}
+
+test_a_folder_that_lands_inside_a_lock_is_not_held() {
+  t_begin "a run whose folder lands inside a lock already there does not hold it, even with the same token"
+  local state
+  state=$(mktemp -d)
+  make_lock "$state" "$(date +%s)"
+  lock_run "$state" 'LOCK_TOKEN=other-run; if lock_publish "$STATE_DIR/lock" beat; then echo held; else echo not-held; fi'
+  assert_eq "$LOCK_OUT" not-held
+  assert_eq "$(dir_names "$state/lock")" "beat owner " "nothing is left inside the other run's lock"
+  assert_eq "$(dir_names "$state")" "lock " "nothing else is left"
+  rm -rf "$state"
+}
+
+test_unfinished_folders_are_swept_once_dead() {
+  t_begin "the holder clears folders left unfinished by runs that stopped, and leaves fresh ones alone"
+  local state now
+  state=$(mktemp -d)
+  now=$(date +%s)
+  mkdir -p "$state/lock.new-gone" "$state/takeover.new-gone" "$state/lock.new-filling"
+  printf '%s\n' $((now - 60)) >"$state/lock.new-gone/beat"
+  printf '%s\n' $((now - 60)) >"$state/takeover.new-gone/since"
+  printf '%s\n' "$now" >"$state/lock.new-filling/beat"
+  lock_run "$state" 'lock_acquire; lock_release'
+  assert_eq "$LOCK_RC" 0
+  assert_eq "$(dir_names "$state")" "lock.new-filling " "only the fresh unfinished folder is left"
+  rm -rf "$state"
+}
+
 test_a_fresh_beat_blocks
 test_a_stopped_beat_is_taken_over
 test_a_long_run_is_never_taken_over
 test_a_killed_holder_is_taken_over_when_its_beat_stops
 test_a_taken_over_holder_leaves_the_new_lock
 test_a_live_lock_moved_by_mistake_is_put_back
+test_a_holder_that_stalls_as_its_lock_appears_keeps_it
+test_a_folder_that_lands_inside_a_lock_is_not_held
+test_unfinished_folders_are_swept_once_dead
 tests_finish

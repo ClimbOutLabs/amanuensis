@@ -28,7 +28,7 @@ Paths below are relative to the home.
 | `state/source`                         | One line: the checkout folder the install came from. Written by `instance.sh`.                                       |
 | `state/installed`                      | One line: the UTC time of the install or upgrade, then the app image it left running. Written by `plan.sh`.          |
 | `state/backups`                        | One word, `daily` or `off`: whether daily backups are on. Written by `schedule.sh`.                                  |
-| `state/lock/`                          | The run lock: a folder taken with `mkdir`, holding `owner`, `beat` and `pid`. See "The lock".                        |
+| `state/lock/`                          | The run lock: a folder that appears whole, holding `owner`, `beat` and `pid`. See "The lock".                        |
 | `state/logs/`                          | One log file per install step, written by `common.sh`.                                                               |
 | `release/release.json`                 | The record of what is installed. Written by `release.sh` on install and upgrade.                                     |
 | `release/previous.release.json`        | The release record from before the last upgrade, kept so an upgrade can roll back.                                   |
@@ -103,9 +103,22 @@ copy is checked, so an incognito chat open at backup time is not kept.
 
 ## The lock
 
-Only one run works on a home at a time. The lock is the folder `state/lock`,
-taken with `mkdir`, which is atomic everywhere. Three programs follow this
-contract: the shell installer (`lock_acquire` in `lib/common.sh`), the
+Only one run works on a home at a time. The lock is the folder `state/lock`.
+A run makes it whole: it fills a folder of its own (`lock.new-<token>`) with
+`owner`, `beat` and `pid`, then renames that folder to `state/lock` in one
+step. If `state/lock` is already there the rename fails or lands inside it. A
+folder that landed inside never counts as holding the lock; otherwise the run
+holds it only when `state/lock/owner` then holds its token, and if not it
+removes what it made. No run ever sees a lock half made, so a run that stalls
+while taking the lock cannot be mistaken for a dead one, and can never write
+into a lock another run made meanwhile. The token must differ between any two
+runs: in the volume each run's shell is process 1 of its own container, so the
+script adds the container's name and a random number to the pid and the time.
+A run that stops before its rename leaves its `*.new-<token>` folder behind;
+the next holder removes those once their time is past the dead limit, and
+leaves a fresh one alone because another run may be filling it.
+
+Three programs follow this contract: the shell installer (`lock_acquire` in `lib/common.sh`), the
 TypeScript installer's folder lock, and the script the TypeScript installer
 runs against the `aman_home` volume. Each run, shell or TypeScript, uses the
 same rules, so a lock taken by one is honoured by the others.
@@ -132,24 +145,22 @@ The rules:
   own container, whose shell is process 1, so a pid there names that
   container's processes. The wait after a crash is therefore up to two
   minutes, and the busy message says so.
-- **A lock with no beat yet gets a moment.** A holder is between `mkdir` and
-  its first beat for a few milliseconds. A run that finds a lock with no
-  readable `beat` looks again, up to three times a second apart, before it
+- **A lock with no beat gets a moment.** Runs from older installers made the
+  lock with `mkdir` and wrote `beat` just after. A run that finds a lock with
+  no readable `beat` looks again, up to three times a second apart, before it
   counts as dead.
 - **Taking a dead lock is atomic.** A takeover goes through a second folder,
-  `state/takeover`, made with `mkdir` like the lock itself, and only the run
+  `state/takeover`, made whole like the lock itself, and only the run
   holding it may move a lock folder aside. So two runs that both find a dead
   lock cannot both move it. Under that folder the run judges the lock again,
   reads its `owner`, moves the folder aside with one `mv` to a name of its own
   (`lock.stale-<token>`), and checks that what it moved still has that
   `owner` and a stopped `beat`. If not, it moved a live lock another run had
   just made, so it puts the folder back. Otherwise it removes the moved
-  folder, makes the lock with `mkdir`, and removes `state/takeover`. A
+  folder, makes the lock the same whole way, and removes `state/takeover`. A
   `state/takeover` left by a crashed run holds a `since` time and is judged
   by the same dead limit. Every way out of a takeover that does not leave the
-  run holding the lock counts as busy. After writing its `owner`, the run
-  reads it back and, if it is not its own, waits a second once (the folder
-  may be on its way back) before giving up as busy.
+  run holding the lock counts as busy.
 - **Only the owner removes the lock.** At the end of a run, the holder removes
   `state/lock` only if `owner` still holds its token. A holder whose lock was
   taken over leaves the new holder's lock alone.
