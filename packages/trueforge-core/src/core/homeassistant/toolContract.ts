@@ -194,7 +194,30 @@ export function isHomeAssistantRefusedTarget(target: HomeAssistantTarget): boole
   if (target.domains.some(domain => (HOME_ASSISTANT_REFUSED_DOMAINS as readonly string[]).includes(domain))) {
     return true;
   }
-  if (target.domains.includes('cover') && coverLeadsOutside(target)) {
+  // An outside device class refuses whatever domains the call names, even none: a filter
+  // asking for garage covers acts on garage covers, domain argument or not.
+  if (
+    target.device_classes.some(device_class =>
+      (HOME_ASSISTANT_REFUSED_COVER_DEVICE_CLASSES as readonly string[]).includes(device_class),
+    )
+  ) {
+    return true;
+  }
+  if (target.domains.includes('cover') && coverNamedOutside(target)) {
+    return true;
+  }
+  // A call scoped to an area or a floor names no one device: it reaches whatever that place
+  // holds, covers included, so it is refused unless something narrows it to what stays
+  // inside: an inside device class, or a domain other than cover. Naming no domain at all
+  // narrows nothing, so the rule holds for those calls too.
+  if (
+    (target.area !== null || target.floor !== null) &&
+    target.entity_ids.length === 0 &&
+    !target.device_classes.some(device_class =>
+      (HOME_ASSISTANT_INSIDE_COVER_DEVICE_CLASSES as readonly string[]).includes(device_class),
+    ) &&
+    !target.domains.some(domain => domain !== 'cover')
+  ) {
     return true;
   }
   // With no entity id and no domain to judge by, a name that says lock, alarm or garage is enough.
@@ -205,34 +228,16 @@ export function isHomeAssistantRefusedTarget(target: HomeAssistantTarget): boole
 }
 
 /**
- * Whether a cover leads outside the home. Any device class the call names says so when it is
- * one of the outside classes, even when an inside class is named alongside it. When no class
- * says so, the cover's own name or entity id says so instead, so a garage door is refused
- * whatever shape the call arrives in. A call scoped to an area or a floor names no one cover:
- * it reaches whatever covers that place holds, so it is refused unless it names a device class
- * that stays inside the home.
+ * Whether a cover the call names leads outside the home, judged by the cover itself: its name,
+ * or its entity id with its underscores read as words, says garage, gate or door. The outside
+ * device classes are judged in the refusal itself, since they refuse whatever the domain is.
  */
-function coverLeadsOutside(target: HomeAssistantTarget): boolean {
-  if (
-    target.device_classes.some(device_class =>
-      (HOME_ASSISTANT_REFUSED_COVER_DEVICE_CLASSES as readonly string[]).includes(device_class),
-    )
-  ) {
-    return true;
-  }
+function coverNamedOutside(target: HomeAssistantTarget): boolean {
   if (target.name !== null && REFUSED_COVER_PATTERN.test(target.name)) {
     return true;
   }
   // Entity ids join their words with underscores (`cover.garage_door`); read them as words.
   if (target.entity_ids.some(id => REFUSED_COVER_PATTERN.test(id.replace(/_/g, ' ')))) {
-    return true;
-  }
-  if (
-    (target.area !== null || target.floor !== null) &&
-    !target.device_classes.some(device_class =>
-      (HOME_ASSISTANT_INSIDE_COVER_DEVICE_CLASSES as readonly string[]).includes(device_class),
-    )
-  ) {
     return true;
   }
   return false;
@@ -296,15 +301,53 @@ export function homeAssistantEntityLabel(entity_id: string): string {
   return object === '' ? entity_id : object.charAt(0).toUpperCase() + object.slice(1);
 }
 
-/** The name the card shows for a target: the call's own name, else its entity in plain words. */
+/**
+ * The names the card shows for a call that names several entities: the call's own name when
+ * it gives one, else every entity in plain words, shortened to the first two and a count of
+ * the rest when it names more than three.
+ */
 export function homeAssistantTargetLabel(target: HomeAssistantTarget): string | null {
   if (target.name !== null) {
     return target.name;
+  }
+  if (target.entity_ids.length > 1) {
+    const labels = target.entity_ids.map(id => homeAssistantEntityLabel(id));
+    if (labels.length > 3) {
+      const [first, second] = labels;
+      return `${first}, ${second} and ${String(labels.length - 2)} more`;
+    }
+    const last = labels[labels.length - 1];
+    return `${labels.slice(0, -1).join(', ')} and ${last}`;
   }
   if (target.entity_id !== null) {
     return homeAssistantEntityLabel(target.entity_id);
   }
   return null;
+}
+
+/**
+ * The phrase for a call that names several domains: the first two domains in plain words and
+ * a count of the rest when it names more than two. Null when it names fewer than two, or when
+ * a domain has no plain name.
+ */
+export function homeAssistantDomainsLabel(domains: string[]): string | null {
+  if (domains.length < 2) {
+    return null;
+  }
+  const labels: string[] = [];
+  for (const domain of domains) {
+    const label = homeAssistantDomainLabel(domain);
+    if (label === null) {
+      return null;
+    }
+    labels.push(label.charAt(0).toLowerCase() + label.slice(1));
+  }
+  if (labels.length > 2) {
+    const [first, second] = labels;
+    return `the ${first} and ${second} and ${String(labels.length - 2)} more`;
+  }
+  const [first, second] = labels;
+  return `the ${first} and ${second}`;
 }
 
 /** Domain names as a person says them, for the Settings list of standing grants. */

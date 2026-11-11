@@ -132,6 +132,38 @@ describe('Home Assistant refusals', () => {
     expect(decision.grant_tool_name).toBeNull();
   });
 
+  it('refuses a garage device class that names no domain, instead of carding the whole area', async () => {
+    const decision = await classifyTier(
+      haAction('HassTurnOn', { area: 'Garage', device_class: ['garage'] }),
+      makeCtx(),
+    );
+    expect(decision.tier).toBe(3);
+    expect(decision.auto_deny).toBe('home_assistant_refused');
+    expect(decision.owner_message).toBe(HOME_ASSISTANT_REFUSAL);
+    expect(decision.card).toBeNull();
+  });
+
+  it('refuses an area call that names no domain at all', async () => {
+    const decision = await classifyTier(haAction('HassTurnOn', { area: 'Garage' }), makeCtx());
+    expect(decision.auto_deny).toBe('home_assistant_refused');
+    expect(decision.owner_message).toBe(HOME_ASSISTANT_REFUSAL);
+    expect(decision.card).toBeNull();
+  });
+
+  it('names every entity on the card when a call names several', async () => {
+    const decision = await classifyTier(haAction('HassTurnOn', { entity_id: ['light.a', 'light.b'] }), makeCtx());
+    expect(decision.tier).toBe(3);
+    expect(decision.auto_deny).toBeNull();
+    expect(decision.card?.plain_what).toBe('Turn on A and B');
+  });
+
+  it('names every domain on the card when a call names several', async () => {
+    const decision = await classifyTier(haAction('HassTurnOff', { domain: ['light', 'switch'] }), makeCtx());
+    expect(decision.tier).toBe(3);
+    expect(decision.auto_deny).toBeNull();
+    expect(decision.card?.plain_what).toBe('Turn off the lights and switches');
+  });
+
   it('still asks for a cover inside the home', async () => {
     const decision = await classifyTier(
       haAction('HassSetPosition', { entity_id: 'cover.living_room_blinds', device_class: 'blind', position: 40 }),

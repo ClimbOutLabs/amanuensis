@@ -2,6 +2,7 @@ import {
   HOME_ASSISTANT_REFUSAL,
   HOME_ASSISTANT_SERVER_NAME,
   homeAssistantDomainLabel,
+  homeAssistantDomainsLabel,
   homeAssistantGrantCoverage,
   homeAssistantGrantScopeKey,
   homeAssistantTarget,
@@ -234,18 +235,27 @@ function headlineFor({
  * What a call acts on when it names no device: the domain in plain words, with the area or
  * floor it is scoped to (`the covers in the Garage`). Null when it names none of those either.
  */
+/**
+ * What a call acts on when it names no device: the domains in plain words, with the area or
+ * floor it is scoped to (`the covers in the Garage`), or every domain when it names several.
+ * Null when it names none of those either.
+ */
 function areaTargetPhrase(target: HomeAssistantTarget): string | null {
+  const where =
+    target.area !== null
+      ? ` in the ${escapeDisplayText(target.area)}`
+      : target.floor !== null
+        ? ` on the ${escapeDisplayText(target.floor)}`
+        : '';
+  // A call that names several domains says them all, not only the first.
+  const many = homeAssistantDomainsLabel(target.domains);
+  if (many !== null) {
+    return `${many}${where}`;
+  }
   const label = target.domain === null ? null : homeAssistantDomainLabel(target.domain);
   const words = label === null ? null : label.charAt(0).toLowerCase() + label.slice(1);
-  if (target.area !== null) {
-    return words === null
-      ? `everything in the ${escapeDisplayText(target.area)}`
-      : `the ${words} in the ${escapeDisplayText(target.area)}`;
-  }
-  if (target.floor !== null) {
-    return words === null
-      ? `everything on the ${escapeDisplayText(target.floor)}`
-      : `the ${words} on the ${escapeDisplayText(target.floor)}`;
+  if (where !== '') {
+    return words === null ? `everything${where}` : `the ${words}${where}`;
   }
   return words === null ? null : `the ${words}`;
 }

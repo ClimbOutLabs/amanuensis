@@ -1,11 +1,13 @@
 import {
   HOME_ASSISTANT_REFUSAL,
   homeAssistantDomainOfEntity,
+  homeAssistantDomainsLabel,
   homeAssistantEntityLabel,
   homeAssistantGrantCoverage,
   homeAssistantGrantLabel,
   homeAssistantGrantScopeKey,
   homeAssistantTarget,
+  homeAssistantTargetLabel,
   homeAssistantToolBase,
   homeAssistantToolPrefix,
   isHomeAssistantLiveContextTool,
@@ -243,6 +245,48 @@ describe('Home Assistant refused targets', () => {
     ).toBe(false);
   });
 
+  it('refuses an outside device class whatever domains the call names, even none', () => {
+    expect(
+      isHomeAssistantRefusedTarget(
+        homeAssistantTarget({ tool_name: 'HassTurnOn', params: { area: 'Garage', device_class: ['garage'] } }),
+      ),
+    ).toBe(true);
+    expect(
+      isHomeAssistantRefusedTarget(homeAssistantTarget({ tool_name: 'HassTurnOn', params: { device_class: ['gate'] } })),
+    ).toBe(true);
+    expect(
+      isHomeAssistantRefusedTarget(
+        homeAssistantTarget({ tool_name: 'HassTurnOn', params: { domain: ['light'], device_class: ['door'] } }),
+      ),
+    ).toBe(true);
+  });
+
+  it('refuses an area or floor call that names no domain, and still asks when it names another domain', () => {
+    expect(
+      isHomeAssistantRefusedTarget(homeAssistantTarget({ tool_name: 'HassTurnOn', params: { area: 'Garage' } })),
+    ).toBe(true);
+    expect(
+      isHomeAssistantRefusedTarget(
+        homeAssistantTarget({ tool_name: 'HassTurnOn', params: { floor: 'Ground floor' } }),
+      ),
+    ).toBe(true);
+    expect(
+      isHomeAssistantRefusedTarget(
+        homeAssistantTarget({ tool_name: 'HassTurnOn', params: { area: 'Garage', domain: ['light'] } }),
+      ),
+    ).toBe(false);
+    expect(
+      isHomeAssistantRefusedTarget(
+        homeAssistantTarget({ tool_name: 'HassTurnOn', params: { area: 'Garage', device_class: ['curtain'] } }),
+      ),
+    ).toBe(false);
+    expect(
+      isHomeAssistantRefusedTarget(
+        homeAssistantTarget({ tool_name: 'HassTurnOn', params: { area: 'Garage', entity_id: 'light.kitchen' } }),
+      ),
+    ).toBe(false);
+  });
+
   it('keeps the refusal line the brief fixes', () => {
     expect(HOME_ASSISTANT_REFUSAL).toBe(
       'Aman does not control locks, alarms or garage doors. Do that in Home Assistant.',
@@ -294,5 +338,37 @@ describe('Home Assistant grant scopes and labels', () => {
     expect(homeAssistantGrantLabel('ha:domain:media_player')).toBe('All Media players');
     expect(homeAssistantGrantLabel('ha:entity:light.living_room_lamp')).toBe('Living room lamp');
     expect(homeAssistantGrantLabel('HassTurnOn')).toBeNull();
+  });
+
+  it('names every entity a call names in its card label, counting the rest past three', () => {
+    expect(
+      homeAssistantTargetLabel(
+        homeAssistantTarget({ tool_name: 'HassTurnOn', params: { entity_id: ['light.a', 'light.b'] } }),
+      ),
+    ).toBe('A and B');
+    expect(
+      homeAssistantTargetLabel(
+        homeAssistantTarget({
+          tool_name: 'HassTurnOn',
+          params: { entity_id: ['light.kitchen', 'light.porch', 'light.hallway'] },
+        }),
+      ),
+    ).toBe('Kitchen, Porch and Hallway');
+    expect(
+      homeAssistantTargetLabel(
+        homeAssistantTarget({
+          tool_name: 'HassTurnOn',
+          params: { entity_id: ['light.kitchen', 'light.porch', 'light.hallway', 'switch.den'] },
+        }),
+      ),
+    ).toBe('Kitchen, Porch and 2 more');
+  });
+
+  it('says several domains in plain words, and one domain not at all', () => {
+    expect(homeAssistantDomainsLabel(['light'])).toBeNull();
+    expect(homeAssistantDomainsLabel(['light', 'switch'])).toBe('the lights and switches');
+    expect(homeAssistantDomainsLabel(['light', 'switch', 'fan', 'cover'])).toBe(
+      'the lights and switches and 2 more',
+    );
   });
 });
