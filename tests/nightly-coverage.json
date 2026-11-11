@@ -315,6 +315,10 @@
       "set": "models",
       "tests": ["packages/frontend/tests/journeys/signedIn.journey.ts"]
     },
+    "route:notesFolder": {
+      "set": "connectors",
+      "tests": []
+    },
     "route:permission": {
       "set": "safety",
       "tests": []
@@ -763,6 +767,7 @@
     "route:memorySummarize",
     "route:memoryVault",
     "route:model",
+    "route:notesFolder",
     "route:permission",
     "route:persona",
     "route:personaKnowledge",
