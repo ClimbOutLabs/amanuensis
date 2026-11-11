@@ -87,7 +87,12 @@ function approvalAction(card: Card | null): ActionRequiredEvent {
 }
 
 function doneTurnWith(action: ActionRequiredEvent): TurnRecord<TurnCustom> {
-  return turnWith({ status: 'done', output: null, required_actions: [action], completed_at: '2026-11-06T00:01:00.000Z' });
+  return turnWith({
+    status: 'done',
+    output: null,
+    required_actions: [action],
+    completed_at: '2026-11-06T00:01:00.000Z',
+  });
 }
 
 function harness(turn: TurnRecord<TurnCustom> | undefined) {

@@ -5,8 +5,8 @@ import type { TelegramConnection, TelegramPendingApproval } from '../../../../sr
 import {
   createTelegramRefusalThrottle,
   processTelegramUpdate,
-  telegramCallbackData,
   TELEGRAM_REFUSAL_COOLDOWN_MS,
+  telegramCallbackData,
   type TelegramTurnPort,
 } from '../../../../src/runtime/telegram/telegramChannel';
 import { createTelegramService } from '../../../../src/runtime/telegram/telegramService';
