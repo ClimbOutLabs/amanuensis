@@ -208,6 +208,7 @@ async function startTelegramTurn<TTransaction>(params: {
       sandboxProviderResolver: deps.sandboxProviderResolver,
       globalSettingsStore: deps.globalSettingsStore,
       tokenFactoryBudget: deps.tokenFactoryBudget,
+      chatDeletionStore: deps.chatDeletionStore,
       chatSearchIndexer: deps.chatSearchIndexer,
       personalizationProfile,
       personaContext: undefined,

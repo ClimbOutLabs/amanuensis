@@ -549,6 +549,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
   };
   const telegramTurnDeps: TelegramTurnExecutionDeps<TTransaction> = {
     mcpCatalog: deps.mcpCatalog,
+    chatDeletionStore: deps.chatDeletionStore,
     sessions: deps.sessions,
     agentStore: deps.agentStore,
     personaStore: deps.personaStore,

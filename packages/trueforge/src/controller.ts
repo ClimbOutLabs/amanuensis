@@ -50,10 +50,15 @@ export function createController<TTransaction>(params: {
         ...(params.telegram.executeUpdate === undefined ? {} : { executeUpdate: params.telegram.executeUpdate }),
         logger: params.logger,
       }),
-      privateChatSweepLoop({ logger: params.logger }),
-    ],
-    logger: params.logger,
-  });
+      telegramReplyLoop({
+        store: params.telegram.store,
+        service,
+        sessionStore: params.telegram.sessionStore,
+        logger: params.logger,
+      }),
+    );
+  }
+  return new Controller({ loops, logger: params.logger });
 }
 
 /**
