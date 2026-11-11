@@ -6,6 +6,7 @@ import { chromium, type Browser } from 'playwright-core';
 import { createServer, defaultClientConditions } from 'vite';
 
 import { DEV_OPTIMIZE_DEPS } from '../src/devPrebundle.ts';
+import { featureShotPath, saveFailureShots } from './support/featureShots.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
 import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
 import { privateViteCache } from './support/viteCache.ts';
@@ -81,9 +82,13 @@ test('320px composer keeps a touch-usable Send control inside the viewport', { t
     assert.ok(stopBox.width >= 44, `Stop width is below touch target: ${stopBox.width}`);
     assert.ok(stopBox.height >= 44, `Stop height is below touch target: ${stopBox.height}`);
 
+    await page.screenshot({ path: await featureShotPath({ surface: 'screen:chat-layout', step: 'phone-composer' }) });
     await stop.tap();
     assert.equal(await page.locator('body').getAttribute('data-cancelled'), 'true');
     await page.getByRole('button', { name: 'Send message' }).waitFor({ state: 'visible', timeout: RENDER_TIMEOUT_MS });
+  } catch (error) {
+    await saveFailureShots({ browser, surface: 'screen:chat-layout' });
+    throw error;
   } finally {
     await browser?.close();
     await server.close();
