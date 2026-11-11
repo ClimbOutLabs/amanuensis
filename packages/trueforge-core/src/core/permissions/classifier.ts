@@ -3694,16 +3694,17 @@ async function classifyNotesFolderToolCall(action: SentinelAction, ctx: Classify
     `${assistant} has read things written by other people in this chat, so this write may have been ` +
     `asked for by something it read, not by you.`;
   const outbound = renderOutboundArguments(action.canonical_params);
+  const question =
+    action.tool_name === APPEND_TO_INBOX_TOOL_NAME
+      ? 'Add this entry to your notes inbox file?'
+      : 'Make this new note in your notes folder?';
+  const undo = 'The added words stay in your notes until you take them out.';
   return tier3Decision({
     card: {
-      plain_what: withHoldSay(
-        action.tool_name === APPEND_TO_INBOX_TOOL_NAME
-          ? 'Add this entry to your notes inbox file?'
-          : 'Make this new note in your notes folder?',
-        say,
-      ),
+      plain_what: withHoldSay(question, say),
+      copy: simpleCardCopy({ headline: question, undo, reason: say }),
       plain_why: plainWhy(ctx.agent_intent),
-      cannot_be_undone: 'The added words stay in your notes until you take them out.',
+      cannot_be_undone: undo,
       why_asked_again: null,
       destination: null,
       recipient: null,
