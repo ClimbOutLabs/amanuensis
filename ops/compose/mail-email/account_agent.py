@@ -15,8 +15,8 @@ Security rules, enforced here:
 - Nothing is logged at all: the HTTP server's request log is silenced, and unexpected failures
   print only the exception's type name to stderr, never its text.
 - The same port lists new mail for the app's noticing, by UIDVALIDITY and UID, and says the inbox's UIDVALIDITY:
-  read-only (the mailbox is opened read-only and bodies are never fetched), headers From and Subject only, with the
-  same fixed result words.
+  read-only (the mailbox is opened read-only and bodies are never fetched), headers From, Subject, Date and
+  Message-ID only, with the same fixed result words.
 - The sign-in check is the installer's own (email_check.py beside this file, run isolated the
   same way), so both paths give the same answer for the same account.
 """
@@ -341,8 +341,8 @@ def search_uids(conn, *criteria):
 def list_after(conn, payload, out_of_time=lambda: False):
     """Mail after a cursor, in UID order, read-only. With no cursor, or a cursor from another UIDVALIDITY, it starts
     at the first message that arrived at or after `since`: every message already in the mailbox is dated, and the
-    rest are new. A listing by time that stops early says so in `dated_to_uid` and `dated_since`, which the next call
-    passes back, so the mail still to be dated is held to the same time. A message whose headers cannot be read is
+    rest are new. Those dated UIDs and their time come back in `dated_to_uid` and `dated_since`, which the next call
+    passes back, so mail still to be dated is held to the same time. A message whose headers cannot be read is
     counted in `skipped` and the cursor moves past it, so one bad message never holds up the others. A message
     deleted while it was being listed is simply gone, not skipped. Once the time is up it answers with what it got
     through and `more`."""
@@ -419,19 +419,20 @@ def list_after(conn, payload, out_of_time=lambda: False):
     else:
         # Every candidate was read, so the dated UIDs with none left are behind the cursor too.
         last_uid = max([last, dated_to or 0] + batch)
-    still_dated = dated_to is not None and last_uid < dated_to
+    # The dated UIDs are given back even once all are behind the cursor, since a pass that stops at an earlier
+    # message moves the cursor back below them.
     return {
         "uidvalidity": validity,
         "last_uid": last_uid,
-        "dated_to_uid": dated_to if still_dated else None,
-        "dated_since": dated_since.isoformat().replace("+00:00", "Z") if still_dated else None,
+        "dated_to_uid": dated_to,
+        "dated_since": dated_since.isoformat().replace("+00:00", "Z") if dated_to is not None else None,
         "more": more,
         "skipped": len(unreadable - set(found)),
         "messages": messages,
     }
 
 
-HEADER_ITEMS = "(INTERNALDATE BODY.PEEK[HEADER.FIELDS (FROM SUBJECT MESSAGE-ID)])"
+HEADER_ITEMS = "(INTERNALDATE BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE MESSAGE-ID)])"
 
 
 def uid_of(item):
@@ -472,6 +473,17 @@ def fetch_headers(conn, uids, out_of_time):
     return items, refused, len(uids)
 
 
+def raw_header(block, name):
+    """A header's value as sent, unfolded and stripped, or None. The first header of that name wins. Parsing would
+    cut down odd values, and two different values must not read as one."""
+    text = re.sub(r"\r?\n[ \t]+", " ", block.decode("utf-8", "replace"))
+    prefix = name.lower() + ":"
+    for line in text.splitlines():
+        if line.lower().startswith(prefix):
+            return line[len(prefix) :].strip() or None
+    return None
+
+
 def message_of(item):
     """One listed message from a FETCH item, or None when its UID, arrival or sender does not read."""
     parser = email.parser.BytesHeaderParser(policy=email.policy.default)
@@ -491,7 +503,8 @@ def message_of(item):
             "from_address": address,
             "from_name": name or None,
             "subject": str(headers["Subject"] or ""),
-            "message_id": str(headers["Message-ID"] or "").strip() or None,
+            "message_id": raw_header(item[1], "Message-ID"),
+            "date": raw_header(item[1], "Date"),
         }
     except Exception:
         return None

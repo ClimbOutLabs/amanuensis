@@ -446,7 +446,10 @@ async function readAfterCursor({
       const read = await source.listAfter({ cursor: position, since, limit: MOST_LISTED_PER_CALL, out_of_time });
       messages.push(...read.messages);
       skipped += read.skipped;
-      position = read.cursor;
+      // A call made after the dating was done says nothing of it, but a pass that stops at an earlier message
+      // moves the cursor back below the dated UIDs, so they keep their time for the whole pass.
+      const kept = position?.uidvalidity === read.cursor.uidvalidity ? position.dated : undefined;
+      position = { ...read.cursor, dated: read.cursor.dated ?? kept };
       more = read.more;
       listedOnce = true;
     } catch (error) {
@@ -736,10 +739,15 @@ export async function watchMail({
     cursor:
       window.cursor === undefined
         ? undefined
-        : open === undefined || !isCursorMessage(open)
-          ? window.cursor
-          : { ...window.cursor, last_uid: open.uid - 1 },
+        : settled(
+            open === undefined || !isCursorMessage(open) ? window.cursor : { ...window.cursor, last_uid: open.uid - 1 },
+          ),
   };
+}
+
+/** A cursor as it is kept: the dated UIDs only while some are still ahead of it. */
+function settled(cursor: MailCursor): MailCursor {
+  return cursor.dated !== undefined && cursor.last_uid < cursor.dated.to_uid ? cursor : { ...cursor, dated: undefined };
 }
 
 /** A stretch of mail that cannot be listed is counted like a message, and passed over after the same passes. */
