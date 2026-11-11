@@ -200,6 +200,34 @@ describe('telegram pending replies', () => {
     expect(store.pendingApprovals[0]?.prompt).toBe(sent?.text);
   });
 
+  it('says Add and send on the button of a card with new email addresses', async () => {
+    const card = cardWith({
+      plain_what:
+        'New recipient. You have never emailed new@example.com. Approving adds them to your send list and sends.',
+      mail_new_recipients: ['new@example.com'],
+    });
+    const { store, client, deps } = harness(doneTurnWith(approvalAction(card)));
+    await deliverPendingTelegramReplies(deps);
+    expect(client.sent).toHaveLength(1);
+    expect(client.sent[0]?.text).toContain('New email addresses: new@example.com');
+    expect(client.sent[0]?.inline_buttons?.[0]?.map(button => button.text)).toEqual(['Add and send', 'Deny']);
+    expect(store.pendingApprovals).toHaveLength(1);
+  });
+
+  it('says Add and save draft on the button of a draft card with new email addresses', async () => {
+    const card = cardWith({
+      plain_what:
+        'New recipient. You have never emailed new@example.com. Approving adds them to your send list and saves this draft.',
+      mail_new_recipients: ['new@example.com'],
+      mail_draft: true,
+    });
+    const { store, client, deps } = harness(doneTurnWith(approvalAction(card)));
+    await deliverPendingTelegramReplies(deps);
+    expect(client.sent).toHaveLength(1);
+    expect(client.sent[0]?.inline_buttons?.[0]?.map(button => button.text)).toEqual(['Add and save draft', 'Deny']);
+    expect(store.pendingApprovals).toHaveLength(1);
+  });
+
   it('sends a shell approval with the command itself, and a schedule with its whole task', async () => {
     const shell = cardWith({ plain_what: 'Run a command.', parsed_command: 'rm -rf /tmp/old-backups' });
     const first = harness(doneTurnWith(approvalAction(shell)));

@@ -220,6 +220,24 @@ export interface TelegramApprovalPrompt {
    * carries no buttons and the person answers in the app.
    */
   complete: boolean;
+  /**
+   * The words on the allow button. "Approve" on most cards. On a card for email addresses that
+   * are not on the person's send list yet, approving adds those addresses, so the button says
+   * so instead. Only read when complete is true: an incomplete prompt carries no buttons.
+   */
+  approve_label: string;
+}
+
+/**
+ * The allow button's words for one card, the same words the card in the app uses. A card for
+ * new email addresses adds them when it is approved: "Add and send", or "Add and save draft"
+ * when the card approves saving a draft and nothing is sent.
+ */
+function approveLabel(card: Tier3Card): string {
+  if ((card.mail_new_recipients ?? []).length === 0) {
+    return 'Approve';
+  }
+  return card.mail_draft === true ? 'Add and save draft' : 'Add and send';
 }
 
 /** The Telegram form of one approval ask: the whole card, and whether buttons may ride it. */
@@ -233,14 +251,14 @@ export function approvalPrompt(action: ActionRequiredEvent, toolCallId: string):
   }
   const card = call.tier3_card ?? null;
   if (card === null) {
-    return { text: APP_ONLY_APPROVAL_LINE, complete: false };
+    return { text: APP_ONLY_APPROVAL_LINE, complete: false, approve_label: 'Approve' };
   }
   const lines = approvalCardLines(card);
   if (card.outbound_truncated) {
     lines.push(TRUNCATED_APPROVAL_LINE);
-    return { text: lines.join('\n'), complete: false };
+    return { text: lines.join('\n'), complete: false, approve_label: approveLabel(card) };
   }
-  return { text: lines.join('\n'), complete: true };
+  return { text: lines.join('\n'), complete: true, approve_label: approveLabel(card) };
 }
 
 async function deliverOne(deps: TelegramReplyDeps, reply: TelegramPendingReply): Promise<void> {
@@ -310,7 +328,10 @@ async function deliverOne(deps: TelegramReplyDeps, reply: TelegramPendingReply):
         });
         await send(prompt.text, [
           [
-            { text: 'Approve', callback_data: telegramCallbackData({ decision: 'allow', approval_id: pending.id }) },
+            {
+              text: prompt.approve_label,
+              callback_data: telegramCallbackData({ decision: 'allow', approval_id: pending.id }),
+            },
             { text: 'Deny', callback_data: telegramCallbackData({ decision: 'deny', approval_id: pending.id }) },
           ],
         ]);

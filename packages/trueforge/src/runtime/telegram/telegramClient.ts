@@ -267,9 +267,11 @@ export function createTelegramClient({
     },
 
     async setWebhook({ url, secret_token }) {
+      // One connection is enough: this instance is the only reader of its webhook, and a
+      // single connection keeps updates arriving one at a time instead of in parallel.
       await call({
         method: 'setWebhook',
-        body: { url, secret_token, allowed_updates: ['message', 'callback_query'] },
+        body: { url, secret_token, max_connections: 1, allowed_updates: ['message', 'callback_query'] },
         result: z.boolean(),
       });
     },

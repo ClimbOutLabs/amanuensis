@@ -47,6 +47,18 @@ describe('telegram client', () => {
     expect(seen[0]?.body).toEqual({ offset: 9, timeout: 25, allowed_updates: ['message', 'callback_query'] });
   });
 
+  it('sets the webhook with a single connection', async () => {
+    const { client, seen } = clientWith(async () => ok(true));
+    await client.setWebhook({ url: 'https://aman.example.com/api/telegram/webhook', secret_token: 'test-secret' });
+    expect(seen[0]?.url).toBe('https://api.telegram.org/bot123:secret-token/setWebhook');
+    expect(seen[0]?.body).toEqual({
+      url: 'https://aman.example.com/api/telegram/webhook',
+      secret_token: 'test-secret',
+      max_connections: 1,
+      allowed_updates: ['message', 'callback_query'],
+    });
+  });
+
   it('skips one update in a shape it cannot read and keeps the rest of the batch', async () => {
     const good = (update_id: number) => ({
       update_id,
