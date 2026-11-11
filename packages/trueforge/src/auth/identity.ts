@@ -57,6 +57,7 @@ export function resolveRequestContext(c: Context): RequestContext {
  * Whether the caller is treated as admin for settings, capabilities, and schedule bypass.
  * Mode and OIDC admin claim value come from process config ({@link getTrueForgeAuthMode}).
  * - Standalone: `roles` includes `admin`
+ * - Local: the one local user carries `admin`
  * - OIDC: `roles` includes configured `OIDC_ADMIN_ROLE_VALUE`
  * - TrueFoundry: no tenant-wide TrueForge admin
  */
@@ -72,6 +73,7 @@ export function hasAdminRole(requestContext: Pick<RequestContext, 'roles'>): boo
       }
       return requestContext.roles.includes(configuration.OIDC.OIDC_ADMIN_ROLE_VALUE);
     }
+    case TrueForgeAuthMode.Local:
     case TrueForgeAuthMode.Standalone:
       return requestContext.roles.includes(STANDALONE_ADMIN_ROLE);
   }
