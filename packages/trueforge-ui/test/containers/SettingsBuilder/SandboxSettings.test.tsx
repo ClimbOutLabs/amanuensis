@@ -420,7 +420,7 @@ describe('Chat workspaces card', () => {
     expect(card.getByText(/Slot 2 · 1 KB · Last used/)).toBeInTheDocument();
   });
 
-  it('shows your private chat as a private chat, without its title', async () => {
+  it('shows your incognito chat as an incognito chat, without its title', async () => {
     renderPage({
       getRunCodeStatus: slotsReady,
       listSandboxWorkspaces: async () => ({
@@ -443,7 +443,7 @@ describe('Chat workspaces card', () => {
 
     await screen.findByRole('heading', { name: 'Chat workspaces' });
     const card = cardOf('Chat workspaces');
-    expect(await card.findByText('A private chat')).toBeInTheDocument();
+    expect(await card.findByText('Incognito chat')).toBeInTheDocument();
     expect(card.queryByText('Untitled chat')).not.toBeInTheDocument();
   });
 
