@@ -4,7 +4,8 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
-import { imapAgent, imapMailboxValidity } from '../../../src/runtime/noticing/sidecarSources';
+import type { MailCursor } from '../../../src/db/noticingStore';
+import { imapAgent, imapMailboxValidity, type ListAfterAgent } from '../../../src/runtime/noticing/sidecarSources';
 import { MailLoginFailedError } from '../../../src/runtime/noticing/sources';
 
 const REPO_ROOT = resolve(__dirname, '..', '..', '..', '..', '..');
@@ -53,7 +54,17 @@ describe('the mail account agent lists new mail by number', () => {
   let imap: ChildProcess | undefined;
   let agent: ChildProcess | undefined;
   let agentOutput = '';
-  const list = imapAgent({ url: URL, fetchImpl: undefined });
+  const ask = imapAgent({ url: URL, fetchImpl: undefined });
+  /** A list request with no part of the mailbox still to be dated, unless the test says otherwise. */
+  const list = (request: Omit<Parameters<ListAfterAgent>[0], 'dated_to_uid' | 'dated_since'>) =>
+    ask({ dated_to_uid: null, dated_since: null, ...request });
+  /** The request that goes on from a cursor, as the mail source makes it. */
+  const after = (cursor: MailCursor) => ({
+    uidvalidity: cursor.uidvalidity,
+    last_uid: cursor.last_uid,
+    dated_to_uid: cursor.dated?.to_uid ?? null,
+    dated_since: cursor.dated?.since.toISOString() ?? null,
+  });
   const validity = imapMailboxValidity({ url: URL, fetchImpl: undefined });
 
   function setMailbox({
@@ -266,7 +277,7 @@ describe('the mail account agent lists new mail by number', () => {
       .slice(before)
       .split('\n')
       .filter(line => /^UID FETCH \d+ /.test(line));
-    expect(alone).toEqual(['UID FETCH 2 (INTERNALDATE BODY.PEEK[HEADER.FIELDS (FROM SUBJECT)])']);
+    expect(alone).toEqual(['UID FETCH 2 (INTERNALDATE BODY.PEEK[HEADER.FIELDS (FROM SUBJECT MESSAGE-ID)])']);
   }, 30_000);
 
   it('does not count a message deleted between the search and the fetch as one it could not read', async () => {
@@ -301,13 +312,13 @@ describe('the mail account agent lists new mail by number', () => {
       batch_refuse: true,
     }));
     setMailbox({ uidvalidity: 16, messages, fetch_delay_ms: 400 });
-    let cursor = { uidvalidity: 16, last_uid: 0 };
+    let cursor: MailCursor = { uidvalidity: 16, last_uid: 0 };
     const seen: number[] = [];
     let calls = 0;
     let more = true;
     while (more && calls < 20) {
       const started = Date.now();
-      const read = await list({ ...cursor, since: '2026-11-05T14:00:00.000Z', limit: 12 });
+      const read = await ask({ ...after(cursor), since: '2026-11-05T14:00:00.000Z', limit: 12 });
       expect(Date.now() - started).toBeLessThan(6_000);
       seen.push(...read.messages.map(message => message.uid));
       cursor = read.cursor;
@@ -318,12 +329,46 @@ describe('the mail account agent lists new mail by number', () => {
     expect(seen).toEqual([2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
   }, 120_000);
 
+  it('asks for at least one message alone even when a refused batch used up the time, so every call moves on', async () => {
+    const messages = [1, 2, 3].map(uid => ({ ...stored({ uid, minute: uid }), batch_refuse: true }));
+    setMailbox({ uidvalidity: 18, messages, fetch_delay_ms: 2500 });
+    const read = await list({ uidvalidity: 18, last_uid: 0, since: '2026-11-05T14:00:00.000Z', limit: 10 });
+    expect(read.messages.map(message => message.uid)).toEqual([1]);
+    expect(read.cursor.last_uid).toBe(1);
+    expect(read.more).toBe(true);
+  }, 30_000);
+
+  it('holds the mail it had no time to date to the same start, so old mail is never listed as new', async () => {
+    // Old mail that takes more than one slow call to date, and a few new messages after it.
+    const old = Array.from({ length: 450 }, (_, n) => ({
+      ...stored({ uid: n + 1, minute: 0 }),
+      internal_date: '05-Nov-2026 10:00:00 +0000',
+    }));
+    const fresh = [451, 452, 453].map(uid => stored({ uid, minute: 30 }));
+    setMailbox({ uidvalidity: 17, messages: [...old, ...fresh], fetch_delay_ms: 1500 });
+    const since = '2026-11-05T14:10:00.000Z';
+    let read = await list({ uidvalidity: null, last_uid: null, since, limit: 500 });
+    expect(read.more).toBe(true);
+    expect(read.cursor.dated).toEqual({ to_uid: 453, since: new Date(since) });
+    const seen = read.messages.map(message => message.uid);
+    let calls = 1;
+    while (read.more && calls < 20) {
+      // Later calls give a later start, as the pass does after a message; the mail being dated keeps its own.
+      read = await ask({ ...after(read.cursor), since: '2026-11-05T14:40:00.000Z', limit: 500 });
+      seen.push(...read.messages.map(message => message.uid));
+      calls += 1;
+    }
+    expect(calls).toBeGreaterThan(1);
+    expect(seen).toEqual([451, 452, 453]);
+    expect(read.cursor).toEqual({ uidvalidity: 17, last_uid: 453, dated: undefined });
+  }, 120_000);
+
   it('opens the inbox read-only, fetches headers without marking mail read, and never fetches a body', () => {
     const sent = commands();
     expect(sent).toContain('EXAMINE INBOX');
     expect(sent).not.toMatch(/^SELECT /m);
     expect(sent).not.toMatch(/STORE|EXPUNGE/);
-    expect(sent).toContain('BODY.PEEK[HEADER.FIELDS (FROM SUBJECT)]');
+    expect(sent).toContain('BODY.PEEK[HEADER.FIELDS (FROM SUBJECT MESSAGE-ID)]');
     expect(sent).not.toMatch(/BODY\[(?!HEADER)/);
   });
 

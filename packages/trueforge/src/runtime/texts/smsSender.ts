@@ -41,7 +41,7 @@ function sentWords({ mode, withheld }: { mode: TextMode; withheld: FullWithheld 
     case 'noticed':
       return 'Private text: what your assistant noticed is shown only in the app, so only the kind of thing was sent.';
     case 'not_plain_words':
-      return 'Private text: a Full text carries only plain words, with at most 6 digits in all. This message had more digits, a sign inside a word, or something that could spell a link or a number, so only the kind of thing was sent. To get its words by text, leave out links and long numbers. The whole message is in the app.';
+      return 'Private text: a Full text carries only plain words, with at most 6 digits in all. This message had more digits, a dot or sign between or inside words, or something that could spell a link or a number, so only the kind of thing was sent. To get its words by text, write one sentence and leave out links and long numbers. The whole message is in the app.';
     case null:
       return mode === 'full' ? 'Full text.' : 'Private text: only the kind of thing was sent.';
   }

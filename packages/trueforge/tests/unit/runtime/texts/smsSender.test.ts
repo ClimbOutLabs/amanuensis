@@ -2,6 +2,7 @@ import winston from 'winston';
 
 import { TEST_WORDS } from '../../../../src/runtime/delivery/deliveryChannel';
 import { createDeliveryService } from '../../../../src/runtime/delivery/deliveryService';
+import { createSmsSender } from '../../../../src/runtime/texts/smsSender';
 import {
   deliveryTextLimits,
   MAX_TEST_TEXTS_PER_HOUR,
@@ -107,7 +108,7 @@ describe('texts as a channel of the delivery layer', () => {
     );
     expect(h.sent[0]?.body).toBe('Mannie: a reminder is due. Open the app to see it.');
     expect(delivery.attempts.find(row => row.channel === 'sms')?.detail).toBe(
-      'Private text: a Full text carries only plain words, with at most 6 digits in all. This message had more digits, a sign inside a word, or something that could spell a link or a number, so only the kind of thing was sent. To get its words by text, leave out links and long numbers. The whole message is in the app.',
+      'Private text: a Full text carries only plain words, with at most 6 digits in all. This message had more digits, a dot or sign between or inside words, or something that could spell a link or a number, so only the kind of thing was sent. To get its words by text, write one sentence and leave out links and long numbers. The whole message is in the app.',
     );
   });
 
@@ -331,5 +332,63 @@ describe('a sender that throws', () => {
       ['sms', 'failed'],
     ]);
     expect(JSON.stringify(delivery.attempts)).not.toContain('5550111');
+  });
+});
+
+describe('which limit refused a text', () => {
+  it('is told by the limit’s key, so a store that hands back a copy of the limit is read the same', async () => {
+    const at = new Date('2026-11-06T10:00:00.000Z');
+    const sender = createSmsSender({
+      contacts: {
+        get: () =>
+          Promise.resolve({
+            phone: PHONE,
+            mode: 'private',
+            confirmed_at: at.toISOString(),
+            opted_out_at: null,
+            pending_phone: null,
+            code_hash: null,
+            code_salt: null,
+            code_key_id: null,
+            code_expires_at: null,
+            code_attempts: 0,
+          }),
+        // The refusing limit comes back as a copy, as it would after a round trip through a database.
+        claimTextSends: ({ limits }) => {
+          const last = limits.at(-1);
+          return Promise.resolve(
+            last === undefined
+              ? { ok: true }
+              : { ok: false, refused: { ...last }, window_started_at: at.toISOString() },
+          );
+        },
+        forgetTextSends: () => Promise.resolve(),
+      },
+      reachSettings: {
+        get: () =>
+          Promise.resolve({
+            ...defaultReachSettings('UTC'),
+            channels: { ...defaultReachSettings('UTC').channels, texts: true },
+          }),
+      },
+      personalization: { getProfile: () => Promise.resolve(undefined) },
+      provider: { send: () => Promise.resolve({ outcome: 'sent' }) },
+      limits: { number_key: 'secret', max_texts_per_day: 500 },
+      textNumbers: { stopNumber: () => Promise.resolve(0) },
+      now: () => at,
+    });
+    const delivery = {
+      id: 'd1',
+      kind: 'note' as const,
+      level: 'nudge' as const,
+      text: 'A test.',
+      reason: 'A test.',
+      link: null,
+      created_at: at.toISOString(),
+      seen_at: null,
+      attempts: [],
+    };
+    const [tested] = await sender.send({ delivery, ...ALICE, test: true });
+    expect(tested?.detail).toBe('That was 3 test texts this hour. Wait 60 minutes, then try again.');
   });
 });

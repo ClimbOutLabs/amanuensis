@@ -9,7 +9,8 @@ With MAILBOX_FILE (JSON, read again at every EXAMINE so a test can change it) it
 it with NO, as a server that cannot parse it would, while the reply still carries the other messages. A message with
 "gone" is found by SEARCH but has no FETCH reply, as one deleted in between. A message with "batch_refuse" is left out of
 a FETCH of headers for several messages, which then ends with NO, but is given when asked for alone. Like a real server, a bare set in SEARCH is
-message sequence numbers and only the UID key names UIDs; any other SEARCH is refused with BAD. Every command after
+message sequence numbers and only the UID key names UIDs; SINCE and UID keys given together must all match, and any
+other SEARCH is refused with BAD. Every command after
 sign-in is appended to PORT_FILE.commands.
 """
 
@@ -95,19 +96,27 @@ def mailbox_command(conn, tag, command, argtext):
     sub = sub.upper()
     if command == "UID" and sub == "SEARCH":
         words = rest.split()
-        if len(words) == 2 and words[0].upper() == "SINCE":
-            day, month, year = words[1].split("-")
-            floor = (int(year), MONTHS.index(month) + 1, int(day))
-            found = [item["uid"] for item in messages if day_of(item["internal_date"]) >= floor]
-        elif len(words) == 2 and words[0].upper() == "UID":
-            found = uid_set(words[1], uids)
-        elif len(words) == 1 and words[0][:1].isdigit():
+        found = set(uids)
+        if len(words) == 1 and words[0][:1].isdigit():
             # A bare set is message sequence numbers, even under UID SEARCH.
             sequence = uid_set(words[0], list(range(1, len(messages) + 1)))
-            found = [messages[number - 1]["uid"] for number in sequence]
-        else:
+            found = set(messages[number - 1]["uid"] for number in sequence)
+            words = []
+        if len(words) % 2 != 0:
             conn.sendall((tag + " BAD unsupported search\r\n").encode())
             return
+        # Keys given together must all match, as IMAP ANDs them.
+        for key, value in zip(words[0::2], words[1::2]):
+            if key.upper() == "SINCE":
+                day, month, year = value.split("-")
+                floor = (int(year), MONTHS.index(month) + 1, int(day))
+                found &= set(item["uid"] for item in messages if day_of(item["internal_date"]) >= floor)
+            elif key.upper() == "UID":
+                found &= set(uid_set(value, uids))
+            else:
+                conn.sendall((tag + " BAD unsupported search\r\n").encode())
+                return
+        found = sorted(found)
         conn.sendall(("* SEARCH %s\r\n%s OK done\r\n" % (" ".join(map(str, found)), tag)).encode())
         return
     if command == "UID" and sub == "FETCH":

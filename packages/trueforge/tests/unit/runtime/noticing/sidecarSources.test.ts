@@ -161,7 +161,9 @@ describe('sidecar mail source (IMAP)', () => {
       limit: 50,
       out_of_time: () => false,
     });
-    expect(asked).toEqual([{ uidvalidity: 1, last_uid: 6, since: SINCE.toISOString(), limit: 50 }]);
+    expect(asked).toEqual([
+      { uidvalidity: 1, last_uid: 6, dated_to_uid: null, dated_since: null, since: SINCE.toISOString(), limit: 50 },
+    ]);
     expect(read.cursor).toEqual({ uidvalidity: 1, last_uid: 7 });
     expect(read.messages[0]).toMatchObject({
       id: 'imap:1:7',
@@ -186,7 +188,16 @@ describe('sidecar mail source (IMAP)', () => {
       limit: 10,
       out_of_time: () => false,
     });
-    expect(asked).toEqual([{ uidvalidity: null, last_uid: null, since: SINCE.toISOString(), limit: 10 }]);
+    expect(asked).toEqual([
+      {
+        uidvalidity: null,
+        last_uid: null,
+        dated_to_uid: null,
+        dated_since: null,
+        since: SINCE.toISOString(),
+        limit: 10,
+      },
+    ]);
   });
 
   it('fails the list without asking when the pass is already out of time', async () => {
@@ -236,6 +247,12 @@ describe('sidecar mail source (IMAP)', () => {
       const stranger = { ...EMAIL, email_id: '9', subject: 'Re: Your invoice', date: '2026-11-05T14:59:00+00:00' };
       const { call } = mailTool([paid, stranger], { '8': 'Paid, thanks' }, ['9']);
       await expect(mailSource(call).laterInThread(MAIL_REF)).resolves.toEqual(['Paid, thanks']);
+    });
+
+    it('does not count the bill itself as a later reply in its thread', async () => {
+      const reply = { ...EMAIL, email_id: '8', subject: 'Re: Your invoice', date: '2026-11-05T14:58:00+00:00' };
+      const { call } = mailTool([EMAIL, reply], { '7': 'Paid in advance by direct debit', '8': 'Thanks' });
+      await expect(mailSource(call).laterInThread(MAIL_REF)).resolves.toEqual(['Thanks']);
     });
 
     it('never checks a bill from before the mailbox was renumbered against the mail now there', async () => {
@@ -360,6 +377,8 @@ describe('sidecar mail source (IMAP)', () => {
       imapAgent({ url: 'http://agent.invalid', fetchImpl })({
         uidvalidity: null,
         last_uid: null,
+        dated_to_uid: null,
+        dated_since: null,
         since: SINCE.toISOString(),
         limit: 10,
       });
@@ -368,6 +387,8 @@ describe('sidecar mail source (IMAP)', () => {
       const fetchImpl = reply(200, {
         uidvalidity: 3,
         last_uid: 9,
+        dated_to_uid: null,
+        dated_since: null,
         more: true,
         skipped: 0,
         messages: [
@@ -392,11 +413,61 @@ describe('sidecar mail source (IMAP)', () => {
       ]);
     });
 
+    it('names a message by its Message-ID, which stays the same when the mailbox is renumbered', async () => {
+      const header = {
+        internal_date: '2026-11-05T14:55:00+00:00',
+        from_address: 'a@b.test',
+        from_name: null,
+        subject: 'Invoice',
+      };
+      const numbering = (uidvalidity: number, uid: number) =>
+        ask(
+          reply(200, {
+            uidvalidity,
+            last_uid: uid,
+            dated_to_uid: null,
+            dated_since: null,
+            more: false,
+            skipped: 0,
+            messages: [
+              { ...header, uid, message_id: '<bill-1@power.test>' },
+              { ...header, uid: uid + 1, message_id: null },
+            ],
+          }),
+        );
+      const [before, after] = await Promise.all([numbering(3, 9), numbering(4, 1)]);
+      expect(before.messages[0]?.key).toMatch(/^mid:[0-9a-f]{32}$/);
+      expect(after.messages[0]?.key).toBe(before.messages[0]?.key);
+      expect(after.messages[0]?.id).not.toBe(before.messages[0]?.id);
+      expect(before.messages[1]?.key).toBeUndefined();
+    });
+
+    it('carries the part of the mailbox still to be dated in the cursor', async () => {
+      const read = await ask(
+        reply(200, {
+          uidvalidity: 3,
+          last_uid: 200,
+          dated_to_uid: 912,
+          dated_since: '2026-11-05T14:00:00Z',
+          more: true,
+          skipped: 0,
+          messages: [],
+        }),
+      );
+      expect(read.cursor).toEqual({
+        uidvalidity: 3,
+        last_uid: 200,
+        dated: { to_uid: 912, since: new Date('2026-11-05T14:00:00.000Z') },
+      });
+    });
+
     it('counts a message it cannot read as skipped, and keeps the rest', async () => {
       const read = await ask(
         reply(200, {
           uidvalidity: 3,
           last_uid: 11,
+          dated_to_uid: null,
+          dated_since: null,
           more: false,
           skipped: 1,
           messages: [

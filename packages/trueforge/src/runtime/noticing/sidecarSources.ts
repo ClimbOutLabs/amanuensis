@@ -12,6 +12,7 @@ import {
   MAIL_LIST_TOOL_NAME,
 } from '@truefoundry/trueforge-core/core/email/mailConnector/toolContract';
 import { isRecord } from '@truefoundry/trueforge-core/core/util/records';
+import { createHash } from 'node:crypto';
 import type { Logger } from 'winston';
 import { z } from 'zod';
 
@@ -186,6 +187,14 @@ export function imapMessageId({ uidvalidity, uid }: { uidvalidity: number; uid: 
 
 const IMAP_MESSAGE_ID = /^imap:(\d+):(\d+)$/;
 
+/**
+ * What events about an IMAP message are named by: its Message-ID, which stays the same when the mailbox is renumbered.
+ * It is hashed, since the header is free text of any length.
+ */
+function messageIdKey(messageId: string): string {
+  return `mid:${createHash('sha256').update(messageId).digest('hex').slice(0, 32)}`;
+}
+
 /** The UID the Email connector's tools take for a message id. */
 function connectorIdOf(id: string): string {
   return IMAP_MESSAGE_ID.exec(id)?.[2] ?? id;
@@ -201,6 +210,8 @@ function uidvalidityOf(id: string): number | undefined {
 export type ListAfterAgent = (request: {
   uidvalidity: number | null;
   last_uid: number | null;
+  dated_to_uid: number | null;
+  dated_since: string | null;
   since: string;
   limit: number;
 }) => Promise<CursorRead>;
@@ -211,11 +222,14 @@ const AgentMessageSchema = z.object({
   from_address: z.string().min(1),
   from_name: z.string().nullable(),
   subject: z.string(),
+  message_id: z.string().nullish(),
 });
 
 const AgentReplySchema = z.object({
   uidvalidity: z.number().int().nonnegative(),
   last_uid: z.number().int().nonnegative(),
+  dated_to_uid: z.number().int().nonnegative().nullable(),
+  dated_since: z.string().nullable(),
   more: z.boolean(),
   skipped: z.number().int().nonnegative(),
   messages: z.array(z.unknown()),
@@ -295,11 +309,12 @@ export function imapAgent({ url, fetchImpl }: { url: string; fetchImpl: typeof f
         skipped += 1;
         continue;
       }
-      const { uid, from_address, from_name, subject } = message.data;
+      const { uid, from_address, from_name, subject, message_id } = message.data;
       const bare = bareSubject(subject);
       messages.push({
         id: imapMessageId({ uidvalidity: reply.uidvalidity, uid }),
         uid,
+        key: message_id === null || message_id === undefined ? undefined : messageIdKey(message_id),
         // The mail has no thread, so the subject stands in for one when a later reply is looked for.
         thread_id: bare === '' ? null : bare,
         from_address: from_address.toLowerCase(),
@@ -311,10 +326,18 @@ export function imapAgent({ url, fetchImpl }: { url: string; fetchImpl: typeof f
         authentication_results: [],
       });
     }
+    const datedSince = reply.dated_since === null ? undefined : new Date(reply.dated_since);
     return {
       messages,
       skipped,
-      cursor: { uidvalidity: reply.uidvalidity, last_uid: reply.last_uid },
+      cursor: {
+        uidvalidity: reply.uidvalidity,
+        last_uid: reply.last_uid,
+        dated:
+          reply.dated_to_uid === null || datedSince === undefined || Number.isNaN(datedSince.getTime())
+            ? undefined
+            : { to_uid: reply.dated_to_uid, since: datedSince },
+      },
       more: reply.more,
     };
   };
@@ -385,6 +408,8 @@ export function sidecarMailSource({
       const reply = await agent({
         uidvalidity: cursor?.uidvalidity ?? null,
         last_uid: cursor?.last_uid ?? null,
+        dated_to_uid: cursor?.dated?.to_uid ?? null,
+        dated_since: cursor?.dated?.since.toISOString() ?? null,
         since: since.toISOString(),
         limit,
       });

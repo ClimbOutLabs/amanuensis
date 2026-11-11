@@ -321,7 +321,7 @@ describe('the text test button', () => {
     const { h, call } = await build();
     await h.readyToText({ mode: 'full' });
     expect((await call('/reach/test', { method: 'POST', body: { channel: 'text' } })).status).toBe(201);
-    expect(h.sent.at(-1)?.body).toMatch(/: This is a test\. If you can read this, it works\.$/);
+    expect(h.sent.at(-1)?.body).toMatch(/: This is a test, and it works if you can read this\.$/);
   });
 
   it('says texts are not set up, with the one thing to do, when there is no provider', async () => {

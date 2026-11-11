@@ -593,16 +593,15 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
     await store.recordAll({ ...owner, events: findings.track, status: 'tracking', now: at });
     // Everything found is written down before the checkpoint moves, so a failed delivery is retried from the store.
     // A pass that read all mail up to now starts the next one a little earlier, for mail the server lists late. A
-    // source that numbers its mail lists by the cursor instead, so it keeps the time exactly: a renumbered mailbox
-    // then starts again from there, and the mail already told about is not listed again. Only such a pass clears
-    // the trouble. Any other leaves the mail read so far behind the clock, which Reach me shows
-    // once it is far enough behind.
+    // source that numbers its mail uses that time only after a renumbering, where its mail is named by Message-ID so
+    // the earlier start lists nothing twice. Only such a pass clears the trouble. Any other leaves the mail read so
+    // far behind the clock, which Reach me shows once it is far enough behind.
     await store.setCheckpoint({
       ...owner,
       watcher: 'mail',
       checked_at:
         findings.resume_from === undefined
-          ? new Date(at.getTime() - (findings.cursor === undefined ? CHECK_OVERLAP_MS : 0))
+          ? new Date(at.getTime() - CHECK_OVERLAP_MS)
           : moved
             ? findings.resume_from
             : (checkpoint?.checked_at ?? since),

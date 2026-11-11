@@ -127,8 +127,39 @@ const SITE_WORDS = new Set(['www', 'http', 'https']);
 const DOT_WORDS = new Set(['dot', 'point', 'period']);
 /** A lone written dot, bare or in brackets or quotes, between spaces, such as evil . com or evil [.] com. */
 const LONE_DOT = /^[("']*\.[)"']*$/;
-/** A toll-free number whose rest is spelled as a capitalised word, such as 1 800 FLOWERS or 1 800 Flowers. */
-const VANITY_NUMBER = /(?<![\d$.,/-])(?:[01][\s-]*)?\(?(?:800|833|844|855|866|877|888)\)?[\s-]+[A-Z][A-Za-z]{3,}/;
+/** A toll-free number whose rest is spelled as a capitalised word, such as 1 800 FLOWERS or 1 800 (Flowers). */
+const VANITY_NUMBER = /(?<![\d$.,/-])(?:[01][\s-]*)?\(?(?:800|833|844|855|866|877|888)\)?[\s\-("',:]+[A-Z][A-Za-z]{3,}/;
+/** Every sign that can stand for a dot, as typed or as another script writes it, including an ellipsis. */
+const DOT_SIGN = '[.．｡。·•‧∙⋅・…․﹒]';
+/**
+ * A word, then a dot sign or a run of them, with spaces anywhere, then another word, such as evil. com, evil .. com or
+ * evil … com. Read on the text as written, before any sign is stripped or the words are cleaned.
+ */
+const DOT_BETWEEN_WORDS = new RegExp(
+  `(?<before>\\S*\\p{L})(?<dots>(?:\\s*${DOT_SIGN})+)(?<gap>\\s*)(?=[("'\\[]*\\p{L})`,
+  'gu',
+);
+/** A dotted abbreviation of single letters, such as e.g. or U.S., the only word a sentence's dot may follow. */
+const DOTTED_ABBREVIATION = /^(?:\p{L}\.)+\p{L}$/u;
+
+/**
+ * Whether a dot sits between two words with a space on one side, which reads out a site (evil. com) and cannot be told
+ * from a sentence end, since a capital after it proves nothing (Evil. Com). The text's last dot is no joiner. A dot
+ * with no space around it is judged by the shapes later.
+ */
+function dotJoinsWords(raw: string): boolean {
+  for (const match of raw.matchAll(DOT_BETWEEN_WORDS)) {
+    const { before, dots, gap } = match.groups ?? {};
+    if (before === undefined || dots === undefined || gap === undefined || !/\s/.test(dots + gap)) {
+      continue;
+    }
+    const abbreviation = DOTTED_ABBREVIATION.test(before) && dots === '.' && gap !== '';
+    if (!abbreviation) {
+      return true;
+    }
+  }
+  return false;
+}
 /** Currency signs plainText writes as letters; any other one is dropped, and would change the amount's meaning. */
 const KNOWN_CURRENCY = /[$€£¥]/g;
 
@@ -189,6 +220,9 @@ function impossibleDay({ month, day }: { month: string | undefined; day: string 
  */
 export function isPlainWords(text: string): boolean {
   if (/\p{Sc}/u.test(text.replace(KNOWN_CURRENCY, ''))) {
+    return false;
+  }
+  if (dotJoinsWords(text)) {
     return false;
   }
   const asWritten = plainText(text);

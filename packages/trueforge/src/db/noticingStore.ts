@@ -42,10 +42,30 @@ export interface NoticingEventTable {
   attempts: number;
 }
 
-/** The IMAP cursor is kept as `<uidvalidity>:<last_uid>`; anything else reads as no cursor. */
+/**
+ * The IMAP cursor is kept as `<uidvalidity>:<last_uid>`, followed by `:<to_uid>:<since in ms>` while some of the mail
+ * is still to be dated; anything else reads as no cursor.
+ */
 function parseCursor(stored: string | null): MailCursor | undefined {
-  const match = /^(\d+):(\d+)$/.exec(stored ?? '');
-  return match === null ? undefined : { uidvalidity: Number(match[1]), last_uid: Number(match[2]) };
+  const match = /^(\d+):(\d+)(?::(\d+):(\d+))?$/.exec(stored ?? '');
+  if (match === null) {
+    return undefined;
+  }
+  const [, uidvalidity, last_uid, to_uid, since] = match;
+  return {
+    uidvalidity: Number(uidvalidity),
+    last_uid: Number(last_uid),
+    dated:
+      to_uid === undefined || since === undefined
+        ? undefined
+        : { to_uid: Number(to_uid), since: new Date(Number(since)) },
+  };
+}
+
+function storedCursor(cursor: MailCursor): string {
+  const dated =
+    cursor.dated === undefined ? '' : `:${String(cursor.dated.to_uid)}:${String(cursor.dated.since.getTime())}`;
+  return `${String(cursor.uidvalidity)}:${String(cursor.last_uid)}${dated}`;
 }
 
 /**
@@ -122,6 +142,11 @@ export interface StuckMessage {
 export interface MailCursor {
   uidvalidity: number;
   last_uid: number;
+  /**
+   * While a listing by time is not finished: the UIDs up to `to_uid` were in the mailbox when it began, so each one
+   * counts only if it arrived at or after `since`.
+   */
+  dated?: { to_uid: number; since: Date } | undefined;
 }
 
 /** Where a watcher reads from next, and its trouble if passes keep failing. */
@@ -502,8 +527,7 @@ export class NoticingStore implements INoticingStore {
       stuck_message_id: input.stuck?.message_id ?? null,
       stuck_passes: input.stuck?.passes ?? 0,
       stuck_since: input.stuck?.since.toISOString() ?? null,
-      imap_cursor:
-        input.cursor === undefined ? null : `${String(input.cursor.uidvalidity)}:${String(input.cursor.last_uid)}`,
+      imap_cursor: input.cursor === undefined ? null : storedCursor(input.cursor),
       source: input.source ?? null,
     };
     await this.#db
