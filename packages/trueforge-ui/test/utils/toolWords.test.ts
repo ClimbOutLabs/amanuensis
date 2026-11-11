@@ -22,6 +22,19 @@ describe('toolWords', () => {
     expect(toolDoneWords('google_setup_read')).toBe('Checked your Google connection');
   });
 
+  it('reads the notes folder tools in plain words', () => {
+    expect(toolDoingWords('search_notes')).toBe('Searching your notes');
+    expect(toolDoneWords('search_notes')).toBe('Searched your notes');
+    expect(toolDoingWords('read_note')).toBe('Reading a note');
+    expect(toolDoneWords('read_note')).toBe('Read note');
+    expect(toolDoingWords('append_to_inbox')).toBe('Adding to your notes inbox');
+    expect(toolDoneWords('append_to_inbox')).toBe('Added to your notes inbox');
+    expect(toolDoingWords('create_note')).toBe('Making a note');
+    expect(toolDoneWords('create_note')).toBe('Made a note');
+    expect(toolDoneWords('notes_read')).toBe('Searched your notes');
+    expect(toolDoneWords('notes_write')).toBe('Added to your notes inbox');
+  });
+
   it('reads the feed’s activity rows in plain words', () => {
     expect(toolDoneWords('delivery.created')).toBe('Sent you a notice');
     expect(toolDoneWords('delivery.web_push')).toBe('Sent a notice to your device');
