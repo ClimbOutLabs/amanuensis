@@ -70,3 +70,28 @@ The app stores the app password only on your computer, in the calendar connector
 - Click **Test connection** to check that it still works.
 - If Google signs you out, click **Reconnect**. A Google project in Testing mode signs you out every 7 days. To stop this, open Audience in Google Cloud and click Publish app. Then reconnect once.
 - Click **Disconnect**, then **Disconnect Google**, to turn off email, calendar and Google Drive.
+
+## Connect Notion
+
+You can connect Notion, so Aman can search and read your pages and databases, and make new ones.
+
+1. Click **More** in the left bar, click **Settings**, then click **Connectors**.
+2. Find notion in the list and click **Add**.
+3. Open the notion connector and click **Connect**.
+4. A Notion window opens. Sign in and pick your workspace.
+
+Signing in gives Aman the same access you have in Notion. Any page or database you can open, Aman can reach. Every Notion tool asks you first before it runs.
+
+## Connect GitHub
+
+You can connect GitHub, so Aman can work with your issues, pull requests, repository files and CI status.
+
+First, make a token in GitHub. Open your GitHub settings, then Developer settings, then Personal access tokens, and make a fine-grained token. Give it only the repositories and permissions Aman needs.
+
+To connect it in Aman:
+
+1. Click **More** in the left bar, click **Settings**, then click **Connectors**.
+2. Find github in the list and click **Connect**.
+3. Paste the token, then click **Connect**.
+
+Every GitHub tool asks you first before it runs.

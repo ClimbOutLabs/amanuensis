@@ -38,6 +38,7 @@ import {
 } from '../email/mailConnector/toolContract';
 import { GOOGLE_SETUP_SERVER_ID, GOOGLE_SETUP_STATUS_TOOL_NAME } from '../google/setupToolContract';
 import type { BrowserClickReview, DocumentScope, MapsHosts } from '../llm/LLMTypes';
+import { APPEND_TO_INBOX_TOOL_NAME, isNotesFolderWriteToolName, NOTES_FOLDER_SERVER_ID } from '../notes/toolContract';
 import {
   isPersonaWriteToolName,
   LIST_PERSONAS_TOOL_NAME,
@@ -104,6 +105,7 @@ import {
   RENDER_ROUTE_TOOL_NAME,
 } from './mapsToolNames';
 import { provenanceForToolType, requiresNetwork } from './networkRequirements';
+import { classifyNotesFolderTool } from './notesTier';
 import {
   appendOutboundTrace,
   checkOutboundStrings,
@@ -3598,6 +3600,56 @@ export function approvalCardForGatedCall(input: { action: SentinelAction; agent_
 }
 
 /**
+ * A notes folder call. Reads and the two add-only writes run without asking, the same way a
+ * reminder does, while the ask is the person's own. Once the chat has read content that is
+ * not the person's own words, a write may have been asked for by that content rather than by
+ * the person, so it asks first with a card, the same way a steered send does; on a run with
+ * nobody to answer, the write is skipped instead.
+ */
+async function classifyNotesFolderToolCall(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
+  const decision = classifyNotesFolderTool(action);
+  if (!isNotesFolderWriteToolName(action.tool_name) || !hasReadContent(ctx.web_search.provenance)) {
+    return decision;
+  }
+  if (ctx.services.unattended) {
+    return steeredSkipped(ctx);
+  }
+  const assistant = ctx.web_search.assistantName;
+  const say =
+    `${assistant} has read things written by other people in this chat, so this write may have been ` +
+    `asked for by something it read, not by you.`;
+  const outbound = renderOutboundArguments(action.canonical_params);
+  return tier3Decision({
+    card: {
+      plain_what: withHoldSay(
+        action.tool_name === APPEND_TO_INBOX_TOOL_NAME
+          ? 'Add this entry to your notes inbox file?'
+          : 'Make this new note in your notes folder?',
+        say,
+      ),
+      plain_why: plainWhy(ctx.agent_intent),
+      cannot_be_undone: 'The added words stay in your notes until you take them out.',
+      why_asked_again: null,
+      destination: null,
+      recipient: null,
+      amount: null,
+      parsed_command: null,
+      outbound_text: outbound.text,
+      destination_host: null,
+      outbound_truncated: outbound.truncated,
+    },
+    reason: CONTENT_STEERED_REASON,
+    reason_detail: say,
+    sensitive_read: false,
+    approval_token_id: await mintPlainToken({
+      ctx,
+      tool_name: action.tool_name,
+      params: action.canonical_params,
+    }),
+  });
+}
+
+/**
  * The single authoritative tier classifier. Fail-closed on anything
  * unrecognized; MCP hints escalate, and lower a connector tool only through
  * first-party trust or a standing grant.
@@ -3628,6 +3680,9 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
   }
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === SPACE_SERVER_ID) {
     return classifySpaceTool(action);
+  }
+  if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === NOTES_FOLDER_SERVER_ID) {
+    return classifyNotesFolderToolCall(action, ctx);
   }
   if (
     action.tool_type === 'truefoundry-system' &&

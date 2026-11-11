@@ -14,6 +14,7 @@ import { hasCalendarSetup, type CalendarAccountStatus } from '@/server/calendarS
 import { hasConnectorConnectionTest, type ConnectorConnectionFailureKind } from '@/server/connectorChecks.js';
 import { hasEmailSetup, type EmailAccountStatus } from '@/server/emailSetup.js';
 import { hasGoogleSetup, type GoogleConnectionStatus } from '@/server/googleSetup.js';
+import { hasNotesFolderSetup, type NotesFolderStatus } from '@/server/notesFolderSetup.js';
 import { isSearchProvider, type SearchProviderFields } from '@/server/searchProviderTypes.js';
 import { useCatalogServer } from '@/server/ServerContext.js';
 import { shellIsMutable, useShellMode } from '@/server/ShellModeContext.js';
@@ -29,6 +30,7 @@ import ConnectorDetails from './ConnectorDetails.js';
 import EmailSetupPanel from './EmailSetupPanel.js';
 import GoogleSetupPanel from './GoogleSetupPanel.js';
 import { isMemoryProvider, memoryProviderUpdateRequest, withRemediation } from './memoryProvider.js';
+import NotesFolderSetupPanel from './NotesFolderSetupPanel.js';
 import { searchProviderForNewConnector } from './searchProvider.js';
 
 type ConnectorListItem =
@@ -130,6 +132,10 @@ const ConnectorSettings = () => {
   const [calendarStatusFailed, setCalendarStatusFailed] = useState(false);
   const [calendarPanelOpen, setCalendarPanelOpen] = useState(false);
 
+  const [notesFolderStatus, setNotesFolderStatus] = useState<NotesFolderStatus | null>(null);
+  const [notesFolderStatusFailed, setNotesFolderStatusFailed] = useState(false);
+  const [notesFolderPanelOpen, setNotesFolderPanelOpen] = useState(false);
+
   const [catalog, setCatalog] = useState<ConnectorCatalogEntry[]>([]);
   const [addMcpServerFormOpen, setAddMcpServerFormOpen] = useState(false);
   const [editingConnector, setEditingConnector] = useState<ConnectorBase | null>(null);
@@ -192,6 +198,13 @@ const ConnectorSettings = () => {
         const next = await connectorCatalog.getCalendarStatus().catch(() => null);
         setCalendarStatus(next !== null && next.available ? next : null);
         setCalendarStatusFailed(next === null);
+      }
+      // The Notes folder card likewise, but it has no "available" state: the folder is a local
+      // path, so every instance offers it and only a failed read shows as a failure.
+      if (hasNotesFolderSetup(connectorCatalog)) {
+        const next = await connectorCatalog.getNotesFolderStatus().catch(() => null);
+        setNotesFolderStatus(next);
+        setNotesFolderStatusFailed(next === null);
       }
     } catch (err) {
       setError(getErrorMessage(err, 'Failed to load connectors'));
@@ -638,6 +651,8 @@ const ConnectorSettings = () => {
 
   const emailMatchesQuery = normalizedQuery === '' || 'email mail'.includes(normalizedQuery);
   const calendarMatchesQuery = normalizedQuery === '' || 'calendar caldav events'.includes(normalizedQuery);
+  const notesFolderMatchesQuery =
+    normalizedQuery === '' || 'notes folder obsidian markdown vault'.includes(normalizedQuery);
 
   const googleMatchesQuery = normalizedQuery === '' || 'google gmail email mail'.includes(normalizedQuery);
 
@@ -718,9 +733,7 @@ const ConnectorSettings = () => {
 
         <div className="min-w-0 flex-1">
           <h5 className="truncate text-sm font-medium text-text-primary">{entry.name}</h5>
-          <p className="mt-0.5 line-clamp-2 text-sm text-text-secondary sm:truncate">
-            {entry.description ?? entry.url}
-          </p>
+          <p className="mt-0.5 text-sm text-text-secondary">{entry.description ?? entry.url}</p>
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
@@ -808,8 +821,8 @@ const ConnectorSettings = () => {
           <h4 className="text-sm font-semibold text-text-primary">Get connected in three steps</h4>
           <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-text-secondary">
             <li>
-              Find a connector in <span className="font-medium text-text-primary">Available</span> below and choose
-              Connect. Most need an API key or token from that service.
+              Find a connector under <span className="font-medium text-text-primary">Add a connector</span> below and
+              choose Connect. Most need an API key or token from that service.
             </li>
             <li>Choose it in the message box so {assistant} can use its tools in that chat.</li>
             <li>
@@ -903,6 +916,26 @@ const ConnectorSettings = () => {
             ) : null}
 
             {!loading &&
+            (notesFolderStatus !== null || notesFolderStatusFailed) &&
+            notesFolderMatchesQuery &&
+            hasNotesFolderSetup(connectorCatalog) ? (
+              <AccountConnectorCard
+                id="notes-folder"
+                title="Notes folder"
+                glyph="N"
+                description="Search and read the Markdown notes in a folder on this computer, like an Obsidian vault, and add to them. Nothing you wrote is ever changed."
+                connectedLine={notesFolderStatus?.folderPath ? `Connected to ${notesFolderStatus.folderPath}.` : null}
+                stoppedLine="The folder could not be read. Open Manage and check the path."
+                notWorkingLine="Your notes folder could not be found just now. Check the folder is still there, then open Manage."
+                failedLabel="Couldn't check your notes folder right now"
+                state={notesFolderStatus?.state ?? 'not_connected'}
+                failed={notesFolderStatusFailed}
+                onOpen={() => setNotesFolderPanelOpen(true)}
+                onRetry={() => void refresh()}
+              />
+            ) : null}
+
+            {!loading &&
             (googleStatus !== null || googleStatusFailed) &&
             googleMatchesQuery &&
             hasGoogleSetup(connectorCatalog) ? (
@@ -923,7 +956,7 @@ const ConnectorSettings = () => {
                   id="available-connectors-heading"
                   className="mb-2 text-[0.8125rem] font-semibold uppercase text-text-secondary"
                 >
-                  Available · {availableConnectors.length}
+                  Add a connector · {availableConnectors.length}
                 </h4>
                 <div className="overflow-hidden rounded-xl border border-border bg-card-bg">
                   {availableConnectors.map(entry => renderCatalogEntry(entry))}
@@ -1023,6 +1056,17 @@ const ConnectorSettings = () => {
             <CalendarSetupPanel
               open={calendarPanelOpen}
               onOpenChange={setCalendarPanelOpen}
+              port={connectorCatalog}
+              onChanged={() => {
+                void refresh();
+              }}
+            />
+          ) : null}
+
+          {hasNotesFolderSetup(connectorCatalog) ? (
+            <NotesFolderSetupPanel
+              open={notesFolderPanelOpen}
+              onOpenChange={setNotesFolderPanelOpen}
               port={connectorCatalog}
               onChanged={() => {
                 void refresh();

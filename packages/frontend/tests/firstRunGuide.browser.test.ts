@@ -1,8 +1,5 @@
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -10,6 +7,7 @@ import { chromium, type Browser, type Page } from 'playwright-core';
 import { createServer, defaultClientConditions } from 'vite';
 
 import { DEV_OPTIMIZE_DEPS } from '../src/devPrebundle.ts';
+import { featureShotPath, saveFailureShots } from './support/featureShots.ts';
 import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
 import { privateViteCache } from './support/viteCache.ts';
 
@@ -53,15 +51,6 @@ const EXPECTED = {
   done: { ticket: null, firstRun: false },
   skipped: { ticket: null, firstRun: false },
 } as const;
-
-async function screenshotDir(): Promise<string> {
-  const configured = process.env.AMAN_SCREENSHOT_DIR;
-  if (configured != null && configured !== '') {
-    await mkdir(configured, { recursive: true });
-    return configured;
-  }
-  return await mkdtemp(join(tmpdir(), 'aman-first-run-'));
-}
 
 async function checkHome(page: Page, state: keyof typeof EXPECTED) {
   const expected = EXPECTED[state];
@@ -107,7 +96,6 @@ test('home screens render in light and dark at desktop and phone width', { timeo
     server: { host: '127.0.0.1', port: 0 },
   });
   let browser: Browser | undefined;
-  const outDir = await screenshotDir();
 
   try {
     await server.listen();
@@ -141,7 +129,10 @@ test('home screens render in light and dark at desktop and phone width', { timeo
             (await page.evaluate(() => document.documentElement.scrollWidth)) <= viewport.width,
             `${state} overflows horizontally at ${viewport.name}`,
           );
-          await page.screenshot({ path: join(outDir, `${state}-${viewport.name}-${theme}.png`), fullPage: true });
+          await page.screenshot({
+            path: await featureShotPath({ surface: 'screen:first-run', step: `${state}-${viewport.name}-${theme}` }),
+            fullPage: true,
+          });
         };
 
         for (const state of ['fresh', 'half', 'done', 'skipped'] as const) {
@@ -208,7 +199,9 @@ test('home screens render in light and dark at desktop and phone width', { timeo
       }
       await context.close();
     }
-    console.log(`home screenshots written to ${outDir}`);
+  } catch (error) {
+    await saveFailureShots({ browser, surface: 'screen:first-run' });
+    throw error;
   } finally {
     await browser?.close();
     await server.close();
