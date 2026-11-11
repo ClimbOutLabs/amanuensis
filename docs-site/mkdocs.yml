@@ -19,19 +19,28 @@ theme:
     - search.highlight
     - content.code.copy
     - content.tabs.link
+  logo: assets/aman/logo.svg
+  favicon: assets/aman/logo.svg
   palette:
     - media: '(prefers-color-scheme: light)'
       scheme: default
-      primary: indigo
+      primary: custom
+      accent: custom
       toggle:
         icon: material/weather-night
         name: Switch to dark mode
     - media: '(prefers-color-scheme: dark)'
       scheme: slate
-      primary: indigo
+      primary: custom
+      accent: custom
       toggle:
         icon: material/weather-sunny
         name: Switch to light mode
+
+# Aman's colours, font and menu style. The build copies these in from the app (see scripts/build-docs-site.mjs).
+extra_css:
+  - assets/aman/fonts.css
+  - assets/aman/aman.css
 
 markdown_extensions:
   - admonition

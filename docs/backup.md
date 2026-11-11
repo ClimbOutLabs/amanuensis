@@ -33,7 +33,7 @@ aman restore
 
 It lists the backups, newest first, and asks which number to use. `aman restore --latest` takes the newest one without the list. It says what will be replaced and waits for you to type `yes`. Before it changes anything it saves a copy of what you have now and prints where it is, so you can go back again. If anything fails, it puts that copy back and says so. With more than one instance, give the name: `aman restore <name>`. See [Install](/install) for the details.
 
-A restore puts back the password too. If you changed the password after the backup was made, the old one works again. If the old one is no longer safe, change it after the restore with `installer/install.sh instance password`. Devices that are signed in now may have to sign in again.
+A restore puts back the password too. If you changed the password after the backup was made, the old one works again. If the old one is no longer safe, change it after the restore with `aman password`. Devices that are signed in now may have to sign in again.
 
 If nothing answers the question, for example when `aman restore` runs from a script, it changes nothing and ends with an error.
 
@@ -66,16 +66,14 @@ A backup on the same disk does not help if that disk dies. Copy the newest backu
 
 On a Mac:
 
-1. Open Finder and choose **Go**, then **Home**.
-2. Press Command+Shift+full stop to show hidden folders.
-3. Open `.amanuensis`, then `backups`.
-4. Drag the backup with the newest date onto the other drive.
+1. Open Finder and choose **Go**, then **Go to Folder**.
+2. Type `~/.amanuensis/backups` and press Return.
+3. Drag the backup with the newest date onto the other drive.
 
 On Linux:
 
-1. Open **Files**. It starts in your home folder.
-2. Press Ctrl+H to show hidden folders.
-3. Open `.amanuensis`, then `backups`.
-4. Copy the backup with the newest date and paste it onto the other drive.
+1. Open **Files**.
+2. Press Ctrl+L, type `~/.amanuensis/backups` and press Enter.
+3. Copy the backup with the newest date and paste it onto the other drive.
 
 Because backups hold secrets, pick a drive only you can read, or use one that encrypts what it stores.
