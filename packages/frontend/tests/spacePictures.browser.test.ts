@@ -9,6 +9,7 @@ import { chromium, type Browser } from 'playwright-core';
 import { createServer, defaultClientConditions, type Plugin } from 'vite';
 
 import { DEV_OPTIMIZE_DEPS } from '../src/devPrebundle.ts';
+import { featureShotPath, saveFailureShots } from './support/featureShots.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.js';
 import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
 import { privateViteCache } from './support/viteCache.ts';
@@ -147,6 +148,7 @@ test(
       const result = await states.jsonValue();
       assert.ok(result !== null, 'both frame pictures should finish loading');
       assert.ok(result.proxyWidth > 0, 'the proxied picture in the space frame should load');
+      await page.screenshot({ path: await featureShotPath({ surface: 'screen:space-pictures', step: 'loaded' }) });
       assert.equal(result.directWidth, 0, 'the direct outside link in the same frame should stay blank');
       assert.equal(seen.length, 1, 'the frame should ask the proxy once');
       assert.ok(
@@ -154,6 +156,9 @@ test(
         'the proxy request should name the picture',
       );
       assert.equal(offOriginImages.length, 0, 'no image request should leave the page');
+    } catch (error) {
+      await saveFailureShots({ browser, surface: 'screen:space-pictures' });
+      throw error;
     } finally {
       await browser?.close();
       await server.close();

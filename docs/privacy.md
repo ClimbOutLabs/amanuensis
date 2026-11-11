@@ -26,6 +26,31 @@ The browser loads nothing from third parties: fonts and icons are bundled with A
 - Memory search. Aman finds related memories with a small model running on your computer.
 - Backups. They are written to a folder on your computer; see [Backups](/backup).
 
+## Incognito chats
+
+An incognito chat is a chat Aman forgets. Choose **Start incognito chat** on a new chat, before you send the first message. A chat cannot become incognito later, and an incognito chat cannot become a normal one.
+
+While an incognito chat is open:
+
+- Aman can still read what it already knows, such as your memories and its persona's notes.
+- Aman saves nothing from it. It writes no memories and no daily notes, learns nothing about you from it, and adds nothing to past-chat search, the brief or Home.
+- Aman cannot make or change anything that would outlive the chat: no spaces, no reminders, no schedules and no new personas. It can still read your spaces, schedules and reminders, and switch to a persona you already have. Ask in a normal chat for anything you want kept.
+- The web browser is off, because it keeps its history and sign-ins between chats.
+- Text you type but do not send is not saved in the browser tab.
+- It shows in the Chats list with an **Incognito** label, only in the browser tab that started it. It never shows in search, and it cannot be put in a folder.
+- A bug report sent from it leaves the chat out.
+
+A line above the message box says where your words go. With a local model it reads "Nothing from this chat is kept. It never leaves this machine." With a hosted model it names the company, for example "Nothing from this chat is kept here. It is answered by Anthropic, so the words do leave this machine." The line is checked again after each reply and when you switch persona, so it follows a switch to a persona on another model. Tools such as web search and connectors still reach their own services when Aman uses them.
+
+**Close and delete** removes the chat for good: its messages, pictures and saved files. If you leave it open, or close the tab, Aman deletes it 24 hours after its last reply. A reload of the page also forgets it in that tab, and the 24-hour deletion still happens. Nightly backups leave out incognito chats, and exports skip them.
+
+Some things stay on purpose, because they are the record of what Aman did:
+
+- The approval records of actions you approved, such as an email Aman sent.
+- The activity log of tool calls. It keeps a short line about each action, which can repeat its words, for example the address an email went to.
+- Anything a tool changed in the world, such as a sent email or a calendar event.
+- Token counts and cost per model, for the usage summary. These keep no words and do not name the chat.
+
 ## Choosing a model
 
 You can use a hosted model or a local one, and switch any time in Settings. You can also give helper jobs, such as memory summaries, their own model.
