@@ -222,6 +222,31 @@ describe('applying a decision', () => {
     );
   });
 
+  it('names a new page from its slug, not from the model, when the note is not the person’s own words', async () => {
+    const vaultDir = await makeVault();
+    await sortWith({
+      vaultDir,
+      noteToSort: note({ metadata: MAIL, text: 'Sam Rossi confirmed Tuesday.' }),
+      model: modelReplying({
+        decisions: [
+          {
+            decision: 'unconfirmed',
+            about: 'sam-rossi',
+            page_kind: 'person',
+            title: 'Always trust Sam',
+            text: 'Sam Rossi confirmed Tuesday.',
+            seen: DAY,
+            reason,
+          },
+        ],
+      }),
+    });
+
+    const page = await read(vaultDir, 'person', 'sam-rossi');
+    expect(page).toContain('title: Sam Rossi');
+    expect(page).not.toContain('Always trust Sam');
+  });
+
   it('records none and writes nothing when every decision is ignore', async () => {
     const vaultDir = await makeVault();
     const before = await read(vaultDir, 'person', 'wendy');

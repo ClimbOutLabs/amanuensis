@@ -27,6 +27,17 @@ export type SortReportLine = z.infer<typeof SortReportLineSchema>;
 /** One writer at a time per file, so a trim never loses a line another note is adding. */
 const writers = new Map<string, Promise<void>>();
 
+async function replaceReport({ file, lines }: { file: string; lines: readonly string[] }): Promise<void> {
+  const temp = `${file}.tmp`;
+  try {
+    await writeFile(temp, lines.length === 0 ? '' : `${lines.join('\n')}\n`, { encoding: 'utf8', mode: 0o600 });
+    await rename(temp, file);
+  } catch (error) {
+    await rm(temp, { force: true });
+    throw error;
+  }
+}
+
 async function trimToCap(file: string): Promise<void> {
   if ((await stat(file)).size <= SORT_REPORT_MAX_BYTES) {
     return;
@@ -37,26 +48,13 @@ async function trimToCap(file: string): Promise<void> {
     const dropped = lines.shift();
     size -= Buffer.byteLength(dropped ?? '') + 1;
   }
-  const temp = `${file}.tmp`;
-  try {
-    await writeFile(temp, `${lines.join('\n')}\n`, { encoding: 'utf8', mode: 0o600 });
-    await rename(temp, file);
-  } catch (error) {
-    await rm(temp, { force: true });
-    throw error;
-  }
+  await replaceReport({ file, lines });
 }
 
-/** Adds one line to the vault's report. */
-export async function appendSortReport({ vaultDir, line }: { vaultDir: string; line: SortReportLine }): Promise<void> {
-  const file = path.join(vaultDir, SORT_REPORT_FILE);
+/** Runs one change to a vault's report after the ones already waiting. */
+async function inTurn({ file, work }: { file: string; work: () => Promise<void> }): Promise<void> {
   const previous = writers.get(file) ?? Promise.resolve();
-  const next = previous
-    .catch(() => undefined)
-    .then(async () => {
-      await appendFile(file, `${JSON.stringify(line)}\n`, { encoding: 'utf8', mode: 0o600 });
-      await trimToCap(file);
-    });
+  const next = previous.catch(() => undefined).then(work);
   writers.set(file, next);
   try {
     await next;
@@ -65,4 +63,62 @@ export async function appendSortReport({ vaultDir, line }: { vaultDir: string; l
       writers.delete(file);
     }
   }
+}
+
+/** Adds one line to the vault's report. */
+export async function appendSortReport({ vaultDir, line }: { vaultDir: string; line: SortReportLine }): Promise<void> {
+  const file = path.join(vaultDir, SORT_REPORT_FILE);
+  await inTurn({
+    file,
+    work: async () => {
+      await appendFile(file, `${JSON.stringify(line)}\n`, { encoding: 'utf8', mode: 0o600 });
+      await trimToCap(file);
+    },
+  });
+}
+
+function noteIdOf(line: string): string | undefined {
+  try {
+    const parsed = z.object({ note_id: z.string() }).safeParse(JSON.parse(line));
+    return parsed.success ? parsed.data.note_id : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Drops the report's lines about these notes. A decision can repeat a fact from its note, so a note the person
+ * deletes or rewrites must not live on here.
+ */
+export async function forgetSortReport({
+  vaultDir,
+  noteIds,
+}: {
+  vaultDir: string;
+  noteIds: readonly string[];
+}): Promise<void> {
+  const file = path.join(vaultDir, SORT_REPORT_FILE);
+  const gone = new Set(noteIds);
+  await inTurn({
+    file,
+    work: async () => {
+      let text: string;
+      try {
+        text = await readFile(file, 'utf8');
+      } catch (error) {
+        if (z.object({ code: z.literal('ENOENT') }).safeParse(error).success) {
+          return;
+        }
+        throw error;
+      }
+      const lines = text.split('\n').filter(line => line !== '');
+      const kept = lines.filter(line => {
+        const id = noteIdOf(line);
+        return id === undefined || !gone.has(id);
+      });
+      if (kept.length !== lines.length) {
+        await replaceReport({ file, lines: kept });
+      }
+    },
+  });
 }

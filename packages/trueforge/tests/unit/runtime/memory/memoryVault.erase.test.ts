@@ -5,6 +5,7 @@ import path from 'node:path';
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
 import { readVaultTombstones, VAULT_TOMBSTONES_FILE } from '../../../../src/runtime/memory/markdownMemoryFiles';
 import type { MemoryVaultEntry } from '../../../../src/runtime/memory/memoryClient';
+import { appendSortReport, SORT_REPORT_FILE } from '../../../../src/runtime/memory/pageSortReport';
 import { eraseMarkedEntries } from '../../../../src/runtime/memory/vaultErase';
 import { withVaultLock } from '../../../../src/runtime/memory/vaultLock';
 
@@ -306,6 +307,50 @@ describe('memory vault erase', () => {
       expect(await listed(client)).toHaveLength(1);
       await retainOne(client, 'Charlie plays cello', 11, 'op-c');
       expect(await filesHolding(vault, 'quokkas')).toEqual([]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('the sorting report after a delete or an edit', () => {
+  const planned = (noteId: string) => ({
+    note_id: noteId,
+    day: DAY,
+    outcome: 'sorted' as const,
+    decisions: [
+      {
+        decision: 'unconfirmed' as const,
+        about: 'wendy',
+        page_kind: 'person' as const,
+        text: 'Wendy keeps the spare key.',
+        seen: DAY,
+        reason: 'A fact.',
+      },
+    ],
+  });
+
+  it('drops what the sorter planned for a deleted note and for an edited one', async () => {
+    const { client, dir, vault } = await makeClient();
+    try {
+      await retainOne(client, 'Wendy keeps the spare key.', 9, 'a');
+      await retainOne(client, 'Wendy moved to Porto.', 10, 'b');
+      await retainOne(client, 'The dentist is on Friday.', 11, 'c');
+      const [first, second, third] = (await listed(client)).map(entry => entry.id).sort();
+      if (first === undefined || second === undefined || third === undefined) {
+        throw new Error('expected three notes');
+      }
+      for (const id of [first, second, third]) {
+        await appendSortReport({ vaultDir: vault, line: planned(id) });
+      }
+
+      expect(await client.deleteEntry({ entryId: first, timeoutMs: TIMEOUT_MS })).toMatchObject({ ok: true });
+      expect(
+        await client.updateEntry({ entryId: second, text: 'Wendy moved to Lisbon.', timeoutMs: TIMEOUT_MS }),
+      ).toMatchObject({ ok: true });
+
+      const kept = (await readFile(path.join(vault, SORT_REPORT_FILE), 'utf8')).trim().split('\n');
+      expect(kept.map(text => JSON.parse(text))).toEqual([planned(third)]);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

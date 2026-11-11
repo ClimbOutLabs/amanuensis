@@ -92,6 +92,7 @@ import type {
 } from './memoryClient';
 import { loadPagesForMessage } from './memoryPageLoader';
 import type { PageListing } from './memoryPages';
+import { forgetSortReport } from './pageSortReport';
 import { rankNamedPeopleFirst } from './recallNameBoost';
 import { pagesNearText, statementIndexFor } from './statementIndex';
 import { VaultEraseError, eraseMarkedEntries } from './vaultErase';
@@ -932,6 +933,7 @@ export class MarkdownMemoryClient implements MemoryClient {
         });
       }
       await eraseMarkedEntries({ baseDir: this.baseDir, namespace: this.writeNamespace });
+      await forgetSortReport({ vaultDir: this.namespaceDir(), noteIds: entryIds });
     });
   }
 
@@ -950,6 +952,12 @@ export class MarkdownMemoryClient implements MemoryClient {
         await appendVaultTombstone({ baseDir: this.baseDir, namespace: input.namespace, tombstone: input.tombstone });
       }
       await eraseMarkedEntries({ baseDir: this.baseDir, namespace: input.namespace });
+      if (input.tombstone !== undefined) {
+        await forgetSortReport({
+          vaultDir: namespaceDirFor(this.baseDir, input.namespace),
+          noteIds: [input.tombstone.entryId],
+        });
+      }
     });
   }
 

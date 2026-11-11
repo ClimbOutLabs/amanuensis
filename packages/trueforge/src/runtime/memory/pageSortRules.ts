@@ -176,9 +176,11 @@ function ruleNew({
 }): Step {
   const { origin, day, shown, known } = context;
   const text = plain({ raw: decision.text, what: 'fact', limit: MAX_FACT_CHARS });
-  const title =
+  const givenTitle =
     decision.title === undefined ? undefined : plain({ raw: decision.title, what: 'name', limit: MAX_NAME_CHARS });
-  if (text === undefined || (decision.title !== undefined && title === undefined)) {
+  // A page's name is shown as the person's own, so only their own words may choose it; otherwise the slug names it.
+  const title = origin.kind === 'own_words' ? givenTitle : undefined;
+  if (text === undefined || (decision.title !== undefined && givenTitle === undefined)) {
     return refuse('a new statement or a page name is not a plain single line');
   }
   // A page already filed under the slug keeps its kind, whatever the model called it.

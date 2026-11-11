@@ -575,7 +575,9 @@ are sorted into that persona's own pages.
 `off` calls no model. `report` calls the model and checks the answer exactly as `on` does, but writes no page
 and no line in `.handled-notes`. It adds one JSON line to `.sorter-report.jsonl` in the vault folder: the note
 id, its day, the decisions after the host's rules, and why a reply was refused or a call failed. It never holds
-the note's text. The file is kept under 256 KiB by dropping its oldest lines. `on` writes pages and the list of
+the note's text, but a decision can repeat a fact from the note, so deleting or editing a note in the vault also
+drops that note's lines from the report. A new page made from a note that is not the person's own words is named
+from its slug, never by the model. The file is kept under 256 KiB by dropping its oldest lines. `on` writes pages and the list of
 handled notes. The default stays `report` until sorting gets at least 9 of 10 decision cases right with a hosted
 model and with a local one (see the memory recall test). There is no Settings control and no API field yet.
 

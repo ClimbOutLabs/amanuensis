@@ -193,7 +193,7 @@ export const HOUSEHOLD_LINE = 'Bookings and plans from this person are shared pl
 /**
  * The only sources whose lines may stand as drafting instructions: the person's own words and the
  * messages they sent. Mail, calendar, read content and inferred lines are never instructions. A
- * `sent_mail` line is written or confirmed by the person; no pass makes one from a note on its own.
+ * `sent_mail` line comes from a message the person approved and sent, written by them or by the sorter.
  */
 const INSTRUCTION_SOURCES: ReadonlySet<FactSource> = new Set<FactSource>(['you_said', 'you_edited', 'sent_mail']);
 
