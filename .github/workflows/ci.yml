@@ -5,6 +5,13 @@ on:
   # the same remote preflight when a branch needs validation before a PR exists,
   # without running the entire workflow twice for every PR commit.
   workflow_dispatch:
+  # The nightly run calls this workflow with every path filter switched off.
+  workflow_call:
+    inputs:
+      all_packages:
+        description: Run every suite, whatever changed.
+        type: boolean
+        default: false
   pull_request:
     types: [opened, synchronize, reopened]
   merge_group:
@@ -32,14 +39,15 @@ jobs:
       pull-requests: read
     outputs:
       packages: ${{ steps.packages.outputs.list }}
-      chart: ${{ steps.filter.outputs.chart }}
-      store: ${{ steps.filter.outputs.store }}
+      chart: ${{ inputs.all_packages || steps.filter.outputs.chart }}
+      store: ${{ inputs.all_packages || steps.filter.outputs.store }}
 
     steps:
       - name: Check out repository code
         uses: actions/checkout@v7
 
       - name: Detect path changes
+        if: ${{ !inputs.all_packages }}
         uses: dorny/paths-filter@v4.0.3
         id: filter
         with:
@@ -73,6 +81,10 @@ jobs:
               - '.github/workflows/ci.yml'
             frontend:
               - 'packages/frontend/**'
+              # The browser tests load the real server app and the chat UI, so changes there must run them too.
+              - 'packages/trueforge/**'
+              - 'packages/trueforge-core/**'
+              - 'packages/trueforge-ui/**'
               # trueforge-sdk is workspace:* (no version bump); SDK-only PRs must still run FE checks.
               - 'packages/trueforge-sdk/**'
               - 'package.json'
@@ -136,6 +148,7 @@ jobs:
       - name: Build package matrix
         id: packages
         env:
+          ALL_PACKAGES: ${{ inputs.all_packages }}
           TRUEFORGE_CORE: ${{ steps.filter.outputs['trueforge-core'] }}
           TRUEFORGE: ${{ steps.filter.outputs.trueforge }}
           TRUEFORGE_SDK: ${{ steps.filter.outputs['trueforge-sdk'] }}
@@ -148,15 +161,16 @@ jobs:
         run: |
           node <<'EOF' >> "$GITHUB_OUTPUT"
           const changedPackages = [];
-          if (process.env.TRUEFORGE_CORE === 'true') changedPackages.push('trueforge-core');
-          if (process.env.TRUEFORGE === 'true') changedPackages.push('trueforge');
-          if (process.env.TRUEFORGE_SDK === 'true') changedPackages.push('trueforge-sdk');
-          if (process.env.FRONTEND === 'true') changedPackages.push('frontend');
-          if (process.env.TRUEFORGE_UI === 'true') changedPackages.push('trueforge-ui');
-          if (process.env.AMAN_INSTALLER === 'true') changedPackages.push('aman-installer');
-          if (process.env.SANDBOX_SLOT_AGENT === 'true') changedPackages.push('sandbox-slot-agent');
-          if (process.env.AMAN_TTS === 'true') changedPackages.push('aman-tts');
-          if (process.env.BROWSER_SIDECAR === 'true') changedPackages.push('browser-sidecar');
+          const changed = name => process.env.ALL_PACKAGES === 'true' || process.env[name] === 'true';
+          if (changed('TRUEFORGE_CORE')) changedPackages.push('trueforge-core');
+          if (changed('TRUEFORGE')) changedPackages.push('trueforge');
+          if (changed('TRUEFORGE_SDK')) changedPackages.push('trueforge-sdk');
+          if (changed('FRONTEND')) changedPackages.push('frontend');
+          if (changed('TRUEFORGE_UI')) changedPackages.push('trueforge-ui');
+          if (changed('AMAN_INSTALLER')) changedPackages.push('aman-installer');
+          if (changed('SANDBOX_SLOT_AGENT')) changedPackages.push('sandbox-slot-agent');
+          if (changed('AMAN_TTS')) changedPackages.push('aman-tts');
+          if (changed('BROWSER_SIDECAR')) changedPackages.push('browser-sidecar');
           console.log(`list=${JSON.stringify(changedPackages)}`);
           EOF
 
@@ -256,14 +270,14 @@ jobs:
 
       - name: Setup Go
         if: matrix.package == 'sandbox-slot-agent'
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: ops/sandbox-slot/agent/go.mod
 
       # The chat image re-encode script runs in the sandbox guest on this Pillow pin; its tests run it on the host.
       - name: Setup Python
         if: matrix.package == 'trueforge' || matrix.package == 'aman-tts'
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
@@ -410,6 +424,7 @@ jobs:
         run: pnpm test:store:postgres
 
   # No dependency install: must run fast and stay green even when pnpm install fails.
+  # Also runs the outside-hosts check and the nightly report's test, which need nothing installed either.
   private-data-scan:
     name: Private data scan
     runs-on: ubuntu-latest
@@ -426,6 +441,48 @@ jobs:
 
       - name: Scan tracked files for private data
         run: node scripts/check-no-private-data.mjs
+
+      # Shipped code may name only the outside hosts reviewed in scripts/external-hosts.allowlist.json.
+      - name: Check shipped code for outside hosts
+        run: npm run test:external-hosts
+
+      - name: Test the outside-hosts check
+        run: npm run test:external-hosts-scanner
+
+      - name: Test the nightly report
+        run: npm run test:nightly-report
+
+  # The help behind "Help, I'm stuck": its pack is regenerated from its sources, every surface has a
+  # topic, and every label, path, command and link a topic names is real.
+  help-guide:
+    name: Help guide
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Help pack is up to date
+        run: pnpm guide:check
+
+      - name: Every surface has a help topic
+        run: pnpm test:help-coverage
+
+      - name: Guide tests
+        run: pnpm test:aman-guide
 
   generated-contract-drift:
     name: Generated contract drift
@@ -451,6 +508,10 @@ jobs:
       - name: Regenerate and check committed contracts
         run: pnpm sdk:check
 
+      # The build rewrites this list. A stale committed copy leaves the lockfile out of date after a build.
+      - name: The amanuensis package lists what it ships
+        run: pnpm check:amanuensis-deps
+
   # https://github.com/marketplace/actions/alls-green#why
   check:
     if: always()
@@ -463,6 +524,7 @@ jobs:
       - chart-checks
       - store-tests
       - private-data-scan
+      - help-guide
       - generated-contract-drift
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -477,10 +539,11 @@ jobs:
           CHART_CHECKS: ${{ needs.chart-checks.result }}
           STORE_TESTS: ${{ needs.store-tests.result }}
           PRIVATE_DATA_SCAN: ${{ needs.private-data-scan.result }}
+          HELP_GUIDE: ${{ needs.help-guide.result }}
           GENERATED_CONTRACT_DRIFT: ${{ needs.generated-contract-drift.result }}
         run: |
           ok() { [ "$1" = success ] || [ "$1" = skipped ]; }
-          echo "detect-changes=$DETECT_CHANGES migration-order=$MIGRATION_ORDER typecheck-and-build=$TYPECHECK_AND_BUILD package-checks=$PACKAGE_CHECKS chart-checks=$CHART_CHECKS store-tests=$STORE_TESTS private-data-scan=$PRIVATE_DATA_SCAN generated-contract-drift=$GENERATED_CONTRACT_DRIFT"
+          echo "detect-changes=$DETECT_CHANGES migration-order=$MIGRATION_ORDER typecheck-and-build=$TYPECHECK_AND_BUILD package-checks=$PACKAGE_CHECKS chart-checks=$CHART_CHECKS store-tests=$STORE_TESTS private-data-scan=$PRIVATE_DATA_SCAN help-guide=$HELP_GUIDE generated-contract-drift=$GENERATED_CONTRACT_DRIFT"
           [ "$DETECT_CHANGES" = success ] || exit 1
           [ "$MIGRATION_ORDER" = success ] || exit 1
           [ "$TYPECHECK_AND_BUILD" = success ] || exit 1
@@ -489,4 +552,5 @@ jobs:
           ok "$CHART_CHECKS" || exit 1
           ok "$STORE_TESTS" || exit 1
           [ "$PRIVATE_DATA_SCAN" = success ] || exit 1
+          [ "$HELP_GUIDE" = success ] || exit 1
           [ "$GENERATED_CONTRACT_DRIFT" = success ] || exit 1

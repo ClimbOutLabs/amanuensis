@@ -290,4 +290,30 @@ describe('connectRemoteMcp when every transport fails', () => {
     expect(failure).toBeInstanceOf(McpConnectionError);
     expect(transportFailureDetail(failure)).toBeUndefined();
   });
+
+  it.each(['ECONNREFUSED', 'ENOTFOUND', 'EHOSTUNREACH', 'UND_ERR_CONNECT_TIMEOUT'])(
+    'stops after one transport when the host cannot be reached (%s)',
+    async code => {
+      mockConnectImpl = () => {
+        throw new TypeError('fetch failed', { cause: Object.assign(new Error(`connect ${code}`), { code }) });
+      };
+
+      const failure: unknown = await connectRemoteMcp(baseParams()).catch((error: unknown) => error);
+
+      expect(mockConnectAttempts).toEqual(['streamable-http']);
+      expect(failure).toBeInstanceOf(McpConnectionError);
+      expect(failure instanceof Error ? failure.message : '').toContain('tried streamable-http)');
+    },
+  );
+
+  it('still tries the other transport when the host answered', async () => {
+    mockConnectImpl = () => {
+      throw new Error('Streamable HTTP error: Error POSTing to endpoint (HTTP 405)');
+    };
+
+    await connectRemoteMcp(baseParams()).catch(() => undefined);
+
+    expect(mockConnectAttempts).toEqual(['streamable-http', 'sse']);
+  });
 });
+

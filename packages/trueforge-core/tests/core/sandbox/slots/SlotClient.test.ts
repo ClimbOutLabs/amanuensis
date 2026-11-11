@@ -26,6 +26,43 @@ describe('SlotClient', () => {
     expect(result.ok && result.value.attestation.ok).toBe(true);
   });
 
+  test('health carries the store free space fact', async () => {
+    const client = await clientFor(() => ({
+      status: 200,
+      body: { busy: false, sessions: 0, attestation: attestation({ storeFreeBytes: 12345 }) },
+    }));
+    const result = await client.health({ signal: undefined, timeoutMs: 2000 });
+    expect(result.ok && result.value.attestation.facts.store_free_bytes).toBe(12345);
+  });
+
+  test('sessions parses a valid listing', async () => {
+    const client = await clientFor(() => ({
+      status: 200,
+      body: {
+        sessions: [
+          { session_id: 'a'.repeat(32), bytes: 4096, entries: 3, last_used: '2026-11-03T12:00:00Z' },
+          { session_id: 'b'.repeat(32), bytes: 0, entries: 1, last_used: '2026-10-01T08:30:00Z' },
+        ],
+      },
+    }));
+    const result = await client.sessions({ signal: undefined, timeoutMs: 2000 });
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.value.sessions.map(s => s.session_id)).toEqual(['a'.repeat(32), 'b'.repeat(32)]);
+    expect(agent?.requests.map(r => `${r.method} ${r.path}`)).toEqual(['GET /v1/sessions']);
+  });
+
+  test('a sessions reply that does not match the contract is a protocol error', async () => {
+    const client = await clientFor(() => ({
+      status: 200,
+      body: { sessions: [{ session_id: 'not-a-session-id', bytes: 0, entries: 0, last_used: '' }] },
+    }));
+    const result = await client.sessions({ signal: undefined, timeoutMs: 2000 });
+    expect(result).toEqual({
+      ok: false,
+      error: { kind: 'protocol', message: 'reply does not match the slot contract' },
+    });
+  });
+
   test('a reply that does not match the contract is a protocol error', async () => {
     const client = await clientFor(() => ({ status: 200, body: { busy: false } }));
     const result = await client.health({ signal: undefined, timeoutMs: 2000 });

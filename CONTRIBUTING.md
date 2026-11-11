@@ -203,6 +203,7 @@ Open [http://localhost:8791](http://localhost:8791). Credentials come from `pack
 
 - [`packages/trueforge-sdk`](packages/trueforge-sdk), [`.github/fern/openapi/openapi.json`](.github/fern/openapi/openapi.json), and [`docs/openapi.json`](docs/openapi.json) are generated and committed. Edit route handlers under `packages/trueforge/src/routes/` instead; CI regenerates the outputs. To regenerate locally (Docker required): `pnpm sdk:generate`.
 - Catalog YAML files under `packages/trueforge/catalog/` are inlined at build time by `build:gen` scripts.
+- The help pack behind **Help, I'm stuck** (`packages/trueforge/src/personas/amanGuide/knowledgePack.generated.ts`) is built from the guide topics, the public docs pages and the Tour cards. Run `pnpm guide:build` and commit the result; CI runs `pnpm guide:check` and fails when it is stale. See [`packages/trueforge/guide/README.md`](packages/trueforge/guide/README.md).
 
 ## Server entry points
 
@@ -231,9 +232,18 @@ Prettier and ESLint run as pre-commit hooks via husky + lint-staged.
 1. Fork (or branch) and create a topic branch: `git checkout -b my-fix`.
 2. Make your change, with tests where it makes sense. Do not commit generated OpenAPI/SDK output (forks: source only; `main` regenerates after merge).
 3. Make sure `pnpm build`, `pnpm test`, `pnpm typecheck`, `pnpm lint:ci`, and `pnpm format:check` pass - CI runs exactly these.
-4. Keep PRs focused and reasonably small; describe **what** changed and **why** in the description.
-5. Open the PR. The maintainer will review it; squash-merge is the norm.
-6. **Please avoid rebasing or force-pushing once a maintainer has started reviewing.** It can make iterative reviewing harder. To update your branch, merge `main` instead. We squash-merge at the end, so messy in-PR history is fine.
+4. If the PR changes a screen people see, update the help topic that covers it under `packages/trueforge/guide/topics`. When no topic needs to change, add the label `help: no change needed` and say why in the PR. The **Help changed with screens** check enforces this.
+5. Keep PRs focused and reasonably small; describe **what** changed and **why** in the description.
+6. Open the PR. The maintainer will review it; squash-merge is the norm.
+7. **Please avoid rebasing or force-pushing once a maintainer has started reviewing.** It can make iterative reviewing harder. To update your branch, merge `main` instead. We squash-merge at the end, so messy in-PR history is fine.
+
+## Nightly run
+
+A pull request runs only the test suites its changed files select. The **Nightly** workflow ([`.github/workflows/nightly.yml`](.github/workflows/nightly.yml)) runs every suite on `main` each night, including all the browser tests, whatever changed that day. It reuses the CI workflow, so a suite added to CI is in the nightly run too.
+
+- When a nightly run fails, it opens an issue titled **Nightly tests failed** that lists the failed jobs and links the run. Later failures are added to the same issue. The next run that passes closes it. A cancelled run changes nothing.
+- To start a run by hand, open the **Actions** tab, pick **Nightly**, and choose **Run workflow**. A run started on a branch other than `main` does not open or close the issue.
+- The run uses a scripted model and needs no keys or accounts.
 
 ## Releases
 

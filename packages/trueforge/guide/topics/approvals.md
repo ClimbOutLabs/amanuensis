@@ -1,7 +1,7 @@
 ---
 id: approvals
 title: Approval cards and permissions
-covers:
+covers: settings:permissions, approval:plain, approval:email, route:permission, route:sentinelSettings
 ---
 
 Aman shows an approval card before it does something that matters. Nothing happens until you answer.
@@ -32,3 +32,10 @@ If the mail goes to an address that is not on your Email list, the buttons are *
 To take back an always allowed tool, click **More**, then **Settings**, then **Connectors**. Open the connector and stop allowing the tool.
 
 Some cards say "Part of this is not shown in full. Check it before you approve." Open the card to read all of it.
+
+## See what Aman did
+
+1. Click **More** in the left bar, click **Settings**, then click **Audit**.
+2. The list shows every action Aman took or asked about, newest first, with what you decided.
+3. To narrow it, pick what to **Show**, or pick a **From** and **To** day. Days follow your own clock, and both days are included.
+4. Click **Clear dates** to see everything again.
