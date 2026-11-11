@@ -1,4 +1,5 @@
 import { backup } from './backup';
+import { backupCheck } from './backupCheck';
 import type { Command } from './command';
 import { demoSeed } from './demoSeed';
 import { doctor } from './doctor';
@@ -11,6 +12,7 @@ import { resetPassword } from './resetPassword';
 const COMMANDS: Readonly<Record<string, Command>> = {
   'hash-password': hashPassword,
   backup,
+  'backup-check': backupCheck,
   doctor,
   'export-data': exportData,
   'demo-seed': demoSeed,
@@ -23,6 +25,7 @@ const USAGE = `Usage: aman <command> [options]
 Commands:
   hash-password   Read a password on stdin, print {"hash": "<bcrypt>"}
   backup          Copy the database, memory and persona knowledge to --target
+  backup-check    Tell whether this version can open a backed-up database (--sqlite <file>)
   doctor          Check this instance and print the results
   export-data     Export one user's data to a zip (--list-users shows the user ids)
   demo-seed       Seed one synthetic demo world (needs DEMO_MODE=true); --reset removes it

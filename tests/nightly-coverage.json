@@ -127,6 +127,10 @@
       "set": "install",
       "tests": []
     },
+    "command:restore": {
+      "set": "install",
+      "tests": []
+    },
     "command:setup": {
       "set": "install",
       "tests": []
@@ -729,6 +733,7 @@
     "command:network",
     "command:open",
     "command:password",
+    "command:restore",
     "command:setup",
     "command:status",
     "command:uninstall",

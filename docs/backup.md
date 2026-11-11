@@ -12,14 +12,40 @@ Each backup is a new folder inside the hidden `.amanuensis` folder in your home 
 - the database with your chats, personas and settings, checked after copying;
 - your memory files and persona knowledge files;
 - the sign-in data and the instance settings, including its secrets;
-- the local certificate authority, so your devices keep trusting Aman after a restore;
+- the certificate of the local certificate authority, but never its private key;
 - a `SHA256SUMS` file to check every file in the folder.
 
 An incognito chat that is open when the backup runs is left out of it, because an incognito chat is gone when it closes. See [Privacy](/privacy#incognito-chats).
 
 If any part fails, the half-written folder is removed. The last 7 backups are kept and older ones are deleted.
 
+A backup made before an import or a restore has `-before-import` or `-before-restore` after its date. It does not count toward the 7 and stays until you delete it.
+
 Backups are not encrypted, and they contain secrets such as your model key. Treat them like a password file.
+
+## Go back to a backup
+
+To put an instance back the way a backup had it, run:
+
+```
+aman restore
+```
+
+It lists the backups, newest first, and asks which number to use. `aman restore --latest` takes the newest one without the list. It says what will be replaced and waits for you to type `yes`. Before it changes anything it saves a copy of what you have now and prints where it is, so you can go back again. If anything fails, it puts that copy back and says so. With more than one instance, give the name: `aman restore <name>`. See [Install](/install) for the details.
+
+A restore puts back the password too. If you changed the password after the backup was made, the old one works again. If the old one is no longer safe, change it after the restore with `installer/install.sh instance password`. Devices that are signed in now may have to sign in again.
+
+If nothing answers the question, for example when `aman restore` runs from a script, it changes nothing and ends with an error.
+
+A restore does not change the certificates of this computer. Devices that trust this computer keep trusting it.
+
+### On another computer
+
+1. Install Aman on the new computer first, with the same instance name. That is `main` unless you chose another.
+2. Copy the backup folder, for example `20261017T031500Z`, into the `.amanuensis/backups` folder in your home folder there.
+3. Run `aman restore --latest`.
+
+The instance keeps the addresses and the sign-in setup of the new computer, so signing in keeps working. It takes back the chats, memory, settings and password of the backup, and the email the backup was made with. If that email is not the one you used on the new computer, the restore says which one to sign in with. Each device has to trust the new computer once, as on a first install.
 
 ## Copy a backup off this computer
 
