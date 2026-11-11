@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
-import { imapAgent } from '../../../src/runtime/noticing/sidecarSources';
+import { imapAgent, imapMailboxValidity } from '../../../src/runtime/noticing/sidecarSources';
 import { MailLoginFailedError } from '../../../src/runtime/noticing/sources';
 
 const REPO_ROOT = resolve(__dirname, '..', '..', '..', '..', '..');
@@ -54,6 +54,7 @@ describe('the mail account agent lists new mail by number', () => {
   let agent: ChildProcess | undefined;
   let agentOutput = '';
   const list = imapAgent({ url: URL, fetchImpl: undefined });
+  const validity = imapMailboxValidity({ url: URL, fetchImpl: undefined });
 
   function setMailbox({
     uidvalidity,
@@ -186,6 +187,13 @@ describe('the mail account agent lists new mail by number', () => {
     expect(read.messages.map(message => message.uid)).toEqual([2]);
     expect(read.cursor).toEqual({ uidvalidity: 8, last_uid: 2 });
   }, 30_000);
+
+  it('says the inbox UIDVALIDITY now, so a UID kept from another numbering is not trusted', async () => {
+    setMailbox({ uidvalidity: 11, messages: [stored({ uid: 1, minute: 5 })] });
+    await expect(validity()).resolves.toBe(11);
+    setMailbox({ uidvalidity: 12, messages: [stored({ uid: 1, minute: 5 })] });
+    await expect(validity()).resolves.toBe(12);
+  });
 
   it('lists at most the limit, says more is waiting, and goes on from there', async () => {
     const messages = Array.from({ length: 5 }, (_, n) => stored({ uid: n + 1, minute: n }));

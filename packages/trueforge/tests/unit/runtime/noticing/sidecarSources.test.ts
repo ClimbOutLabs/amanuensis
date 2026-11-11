@@ -13,6 +13,7 @@ import {
   toolResultOf,
   type CallSidecarTool,
   type ListAfterAgent,
+  type MailboxValidity,
 } from '../../../../src/runtime/noticing/sidecarSources';
 import {
   MailLoginFailedError,
@@ -65,8 +66,11 @@ const EMAIL = {
 
 const noAgent: ListAfterAgent = () => Promise.reject(new Error('This source does not list mail.'));
 
-const mailSource = (call: CallSidecarTool, agent: ListAfterAgent = noAgent) =>
-  sidecarMailSource({ call, account: 'default', agent });
+const mailSource = (
+  call: CallSidecarTool,
+  agent: ListAfterAgent = noAgent,
+  validity: MailboxValidity = () => Promise.resolve(1),
+) => sidecarMailSource({ call, account: 'default', agent, validity });
 
 interface Arrival {
   uid: number;
@@ -232,6 +236,30 @@ describe('sidecar mail source (IMAP)', () => {
       const stranger = { ...EMAIL, email_id: '9', subject: 'Re: Your invoice', date: '2026-11-05T14:59:00+00:00' };
       const { call } = mailTool([paid, stranger], { '8': 'Paid, thanks' }, ['9']);
       await expect(mailSource(call).laterInThread(MAIL_REF)).resolves.toEqual(['Paid, thanks']);
+    });
+
+    it('never checks a bill from before the mailbox was renumbered against the mail now there', async () => {
+      // After renumbering, UID 8 is the bill itself and UID 7 a payment notice from another thread.
+      const sameBill = { ...EMAIL, email_id: '8', date: '2026-11-05T14:55:00+00:00' };
+      const { call, calls } = mailTool([sameBill], { '8': 'Amount due by November 7', '7': 'Paid, thanks' });
+      const asked: string[] = [];
+      const source = mailSource(call, noAgent, () => {
+        asked.push('validity');
+        return Promise.resolve(2);
+      });
+      const failure = source.laterInThread(MAIL_REF);
+      await expect(failure).rejects.toBeInstanceOf(MessageUnreadableError);
+      await expect(source.laterInThread(MAIL_REF)).rejects.toBeInstanceOf(MessageUnreadableError);
+      expect(calls).toEqual([]);
+      expect(asked).toEqual(['validity']);
+    });
+
+    it('checks the thread of a bill from the current numbering', async () => {
+      const paid = { ...EMAIL, email_id: '8', subject: 'Re: Your invoice', date: '2026-11-05T14:58:00+00:00' };
+      const { call } = mailTool([paid], { '8': 'Paid, thanks' });
+      await expect(mailSource(call, noAgent, () => Promise.resolve(1)).laterInThread(MAIL_REF)).resolves.toEqual([
+        'Paid, thanks',
+      ]);
     });
 
     it('tracks a bill, and does not stop the pass, when the connector refuses the thread check', async () => {
@@ -514,7 +542,7 @@ describe('sidecar mail source (IMAP)', () => {
     const reply = { ...EMAIL, email_id: '8', subject: 'Re: Your invoice', date: '2026-11-05T14:58:00+00:00' };
     const { call, calls } = mailTool([reply], { '8': 'Thank you for your payment' });
     const later = await mailSource(call).laterInThread({
-      id: '7',
+      id: 'imap:1:7',
       thread_id: bareSubject('Re: Your invoice'),
       received_at: new Date('2026-11-05T14:55:00.000Z'),
     });

@@ -184,9 +184,17 @@ export function imapMessageId({ uidvalidity, uid }: { uidvalidity: number; uid: 
   return `imap:${String(uidvalidity)}:${String(uid)}`;
 }
 
+const IMAP_MESSAGE_ID = /^imap:(\d+):(\d+)$/;
+
 /** The UID the Email connector's tools take for a message id. */
 function connectorIdOf(id: string): string {
-  return /^imap:\d+:(\d+)$/.exec(id)?.[1] ?? id;
+  return IMAP_MESSAGE_ID.exec(id)?.[2] ?? id;
+}
+
+/** The UIDVALIDITY a message id was numbered under, or undefined for an id that carries none. */
+function uidvalidityOf(id: string): number | undefined {
+  const found = IMAP_MESSAGE_ID.exec(id)?.[1];
+  return found === undefined ? undefined : Number(found);
 }
 
 /** One request to the mail sidecar's account agent for the mail after a cursor, answered as the app reads it. */
@@ -215,38 +223,69 @@ const AgentReplySchema = z.object({
 
 const AgentErrorSchema = z.object({ error: z.string() });
 
+const AgentMailboxSchema = z.object({ uidvalidity: z.number().int().nonnegative() });
+
+/** The inbox's UIDVALIDITY now, from the mail sidecar's account agent. */
+export type MailboxValidity = () => Promise<number>;
+
+/** One call to the account agent, its failures told apart in the same words as a mail source's. */
+async function askAgent({
+  url,
+  fetchImpl,
+  path,
+  request,
+}: {
+  url: string;
+  fetchImpl: typeof fetch | undefined;
+  path: '/list_after' | '/mailbox';
+  /** The JSON body to post; without one the call is a GET. */
+  request?: unknown;
+}): Promise<unknown> {
+  let response: Response;
+  try {
+    response = await (fetchImpl ?? fetch)(`${url}${path}`, {
+      ...(request === undefined
+        ? { method: 'GET' }
+        : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(request) }),
+      signal: AbortSignal.timeout(MAIL_CALL_MS),
+      redirect: 'error',
+    });
+  } catch (error) {
+    throw error instanceof Error && error.name === 'TimeoutError'
+      ? new MailTooSlowError({ cause: error })
+      : new MailSourceBusyError({ cause: error });
+  }
+  const body: unknown = await response.json().catch(() => undefined);
+  if (!response.ok) {
+    const failure = AgentErrorSchema.safeParse(body);
+    const word = failure.success ? failure.data.error : 'unknown';
+    if (word === 'login_failed') {
+      throw new MailLoginFailedError({ cause: new Error('The Email connector could not log in.') });
+    }
+    throw word === 'unavailable'
+      ? new MailSourceBusyError({ cause: new Error('The mail server could not be reached.') })
+      : new Error(`The mail agent could not read the mailbox (${word}).`);
+  }
+  return body;
+}
+
+export function imapMailboxValidity({
+  url,
+  fetchImpl,
+}: {
+  url: string;
+  fetchImpl: typeof fetch | undefined;
+}): MailboxValidity {
+  return async () => AgentMailboxSchema.parse(await askAgent({ url, fetchImpl, path: '/mailbox' })).uidvalidity;
+}
+
 /**
  * The account agent's list of mail after a cursor. A message the agent sent that does not read as a message is counted
  * as skipped, and the cursor is already past it.
  */
 export function imapAgent({ url, fetchImpl }: { url: string; fetchImpl: typeof fetch | undefined }): ListAfterAgent {
   return async request => {
-    let response: Response;
-    try {
-      response = await (fetchImpl ?? fetch)(`${url}/list_after`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(request),
-        signal: AbortSignal.timeout(MAIL_CALL_MS),
-        redirect: 'error',
-      });
-    } catch (error) {
-      throw error instanceof Error && error.name === 'TimeoutError'
-        ? new MailTooSlowError({ cause: error })
-        : new MailSourceBusyError({ cause: error });
-    }
-    const body: unknown = await response.json().catch(() => undefined);
-    if (!response.ok) {
-      const failure = AgentErrorSchema.safeParse(body);
-      const word = failure.success ? failure.data.error : 'unknown';
-      if (word === 'login_failed') {
-        throw new MailLoginFailedError({ cause: new Error('The Email connector could not log in.') });
-      }
-      throw word === 'unavailable'
-        ? new MailSourceBusyError({ cause: new Error('The mail server could not be reached.') })
-        : new Error(`The mail agent could not list mail (${word}).`);
-    }
-    const reply = AgentReplySchema.parse(body);
+    const reply = AgentReplySchema.parse(await askAgent({ url, fetchImpl, path: '/list_after', request }));
     let skipped = reply.skipped;
     const messages: CursorMessage[] = [];
     for (const raw of reply.messages) {
@@ -289,11 +328,22 @@ export function sidecarMailSource({
   call,
   account,
   agent,
+  validity,
 }: {
   call: CallSidecarTool;
   account: string;
   agent: ListAfterAgent;
+  validity: MailboxValidity;
 }): CursorMailSource {
+  /** The inbox's UIDVALIDITY, asked once per source and taken from every list, so many bills cost one call. */
+  let current: Promise<number> | undefined;
+  const currentValidity = (): Promise<number> => {
+    current ??= validity().catch((error: unknown) => {
+      current = undefined;
+      throw error;
+    });
+    return current;
+  };
   /**
    * Calls a tool. A dropped or abandoned call, the session ending, and a reply that says the connector ran out of time,
    * lost the connection or could not log in say the server is busy. The connector's other errors pass on as they are,
@@ -338,6 +388,7 @@ export function sidecarMailSource({
         since: since.toISOString(),
         limit,
       });
+      current = Promise.resolve(reply.cursor.uidvalidity);
       return reply;
     },
     async readText(message) {
@@ -357,6 +408,14 @@ export function sidecarMailSource({
     async laterInThread(ref: MailRef) {
       if (ref.thread_id === null) {
         return [];
+      }
+      // The bill is told apart from its replies by its UID, which names another message once the mailbox is
+      // renumbered, so a bill from another numbering is never checked against the mail now there.
+      const numbered = uidvalidityOf(ref.id);
+      if (numbered === undefined || numbered !== (await currentValidity())) {
+        throw new MessageUnreadableError({
+          cause: new Error('The mailbox was renumbered since this bill was seen, so its thread cannot be checked.'),
+        });
       }
       const result = await asked(MAIL_LIST_TOOL_NAME, {
         account_name: account,
@@ -469,7 +528,12 @@ export function createSidecarNoticingSources({
         ? { status: 'none' }
         : {
             status: 'ready',
-            source: sidecarMailSource({ call, account, agent: imapAgent({ url: agentUrl, fetchImpl: undefined }) }),
+            source: sidecarMailSource({
+              call,
+              account,
+              agent: imapAgent({ url: agentUrl, fetchImpl: undefined }),
+              validity: imapMailboxValidity({ url: agentUrl, fetchImpl: undefined }),
+            }),
             kind: 'email_connector',
           };
     } catch (error) {

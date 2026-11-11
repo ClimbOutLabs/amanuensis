@@ -14,8 +14,9 @@ Security rules, enforced here:
   words only, so a mail server's error text (which can echo credentials) never reaches the app.
 - Nothing is logged at all: the HTTP server's request log is silenced, and unexpected failures
   print only the exception's type name to stderr, never its text.
-- The same port lists new mail for the app's noticing, by UIDVALIDITY and UID: read-only (the mailbox is opened
-  read-only and bodies are never fetched), headers From and Subject only, with the same fixed result words.
+- The same port lists new mail for the app's noticing, by UIDVALIDITY and UID, and says the inbox's UIDVALIDITY:
+  read-only (the mailbox is opened read-only and bodies are never fetched), headers From and Subject only, with the
+  same fixed result words.
 - The sign-in check is the installer's own (email_check.py beside this file, run isolated the
   same way), so both paths give the same answer for the same account.
 """
@@ -466,14 +467,16 @@ def message_of(item):
         return None
 
 
-def handle_list_after(payload):
-    """A list-after request: (HTTP status, body). Fixed words for every failure; the mail server's text can echo credentials.
-    The work is bounded so the answer comes inside the app's own limit for the call, and no IMAP session outlives it."""
-    deadline = time.monotonic() + LIST_WORK_SECONDS
+def mailbox_validity(conn):
+    """The inbox's UIDVALIDITY now, read-only, so the app can tell whether a UID it kept still names the same message."""
+    kind, _ = conn.select("INBOX", readonly=True)
+    if kind != "OK":
+        raise imaplib.IMAP4.error("select")
+    return {"uidvalidity": int(conn.response("UIDVALIDITY")[1][0])}
 
-    def out_of_time():
-        return time.monotonic() >= deadline
 
+def with_imap(work):
+    """Runs `work` on a signed-in connection: (HTTP status, body), with fixed words for every failure."""
     account = read_account()
     if account is None:
         return 409, {"error": "no_account"}
@@ -481,7 +484,7 @@ def handle_list_after(payload):
     if conn is None:
         return 502, {"error": word}
     try:
-        return 200, list_after(conn, payload, out_of_time)
+        return 200, work(conn)
     except (imaplib.IMAP4.error, OSError, ssl.SSLError):
         return 502, {"error": "unavailable"}
     except (KeyError, TypeError, ValueError):
@@ -491,6 +494,17 @@ def handle_list_after(payload):
             conn.logout()
         except Exception:
             pass
+
+
+def handle_list_after(payload):
+    """A list-after request: (HTTP status, body). Fixed words for every failure; the mail server's text can echo credentials.
+    The work is bounded so the answer comes inside the app's own limit for the call, and no IMAP session outlives it."""
+    deadline = time.monotonic() + LIST_WORK_SECONDS
+
+    def out_of_time():
+        return time.monotonic() >= deadline
+
+    return with_imap(lambda conn: list_after(conn, payload, out_of_time))
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -528,6 +542,10 @@ class Handler(BaseHTTPRequestHandler):
                     self._send(400, {"error": "invalid"})
                     return
                 status, body = handle_list_after(payload)
+                self._send(status, body)
+                return
+            if self.path == "/mailbox" and method == "GET":
+                status, body = with_imap(mailbox_validity)
                 self._send(status, body)
                 return
             if self.path != "/account":
