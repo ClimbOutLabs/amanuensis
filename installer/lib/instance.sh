@@ -408,7 +408,7 @@ container_networks_sync() { # name
     done
   done
   [ -n "$ranges" ] || return 0
-  ranges=$(printf '%s' "$ranges" | tr ',' '\n' | sort -u | paste -sd, -)
+  ranges=$(printf '%s' "$ranges" | tr ',' '\n' | sort -u | tr '\n' ',' | sed 's/,$//')
   [ "$(env_get "$env" CONTAINER_NETWORK_RANGES)" != "$ranges" ] || return 0
   env_managed_set "$env" CONTAINER_NETWORK_RANGES "$ranges"
   dc "$name" up -d --force-recreate --no-deps --wait --wait-timeout 120 app >"$STEP_LOG" 2>&1 || warn "The app of instance $name did not start again. Run: aman doctor instance --fix"
