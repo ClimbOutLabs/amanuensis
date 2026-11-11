@@ -183,6 +183,24 @@ async function withWorld(run) {
       <input name="zip_code" value="94110" />
       <input name="pin_code" value="560001" /><input name="pincode" inputmode="numeric" maxlength="6" value="560002" />
       <input name="shippingPinCode" value="560003" /><input name="map_pin" value="Cubbon Park" />`),
+    // Card and code fields whose meaning is in what the page calls them, or in a short name sites use.
+    '/label-names': html(`<h1>Pay</h1>
+      <label for="f1">Card number</label><input id="f1" name="f1" value="4111111111111111" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" />
+      <input name="f2" aria-label="CVV" value="737" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" />
+      <input name="f3" placeholder="Security code" value="846" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" />
+      <span id="f4-label">One-time code</span><input name="f4" aria-labelledby="f4-label" value="551204" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" />
+      <label>Card <input name="f5" inputmode="numeric" value="5500005555555559" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" /></label>
+      <input name="pan" value="6011000990139424" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" />
+      <input name="card" type="tel" value="3530111333300000" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" />
+      <input name="token" maxlength="6" value="918273" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" />
+      <input name="authcode" maxlength="8" value="64738291" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" />
+      <label>PIN <input name="f6" value="4826" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" /></label>
+      <label for="holder">Name on card</label><input id="holder" name="holder" value="Ada Lovelace" />
+      <label>Gift card message <input name="note" value="Happy birthday" /></label>
+      <input name="token" value="long-session-token-shown" />
+      <label>PIN code <input name="f7" value="560004" /></label>
+      <label>PIN <input name="pincode" value="560005" /></label>
+      <label>Drop pin <input name="f8" value="Lalbagh Gate" /></label>`),
     '/code-boxes': html(`<h1>Enter the code</h1>
       ${[1, 2, 3].map(() => '<input maxlength="1" inputmode="numeric" value="7" style="width:60px;height:60px;background:#00ff00;color:#00ff00;border:0" />').join('')}`),
     // A page that watches for anything added to it and says so in its title.
@@ -830,6 +848,35 @@ test('code and card fields are found whatever naming style the site uses', { ski
     for (const shown of ['560001', '560002', '560003', '110001', 'Cubbon Park']) {
       assert.match(opened.text, new RegExp(shown), 'a postal PIN code or a map pin is not a secret');
     }
+  });
+});
+
+test('card and code fields are found by what the page calls them', { skip: !browsersAvailable }, async () => {
+  await withWorld(async ({ sidecar }) => {
+    const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/label-names' });
+    for (const secret of [
+      '4111111111111111',
+      '737',
+      '846',
+      '551204',
+      '5500005555555559',
+      '6011000990139424',
+      '3530111333300000',
+      '918273',
+      '64738291',
+      '4826',
+    ]) {
+      assert.doesNotMatch(opened.text, new RegExp(secret), 'a card number or a code is a secret');
+    }
+    for (const shown of ['Ada Lovelace', 'Happy birthday', 'long-session-token-shown']) {
+      assert.match(opened.text, new RegExp(shown), 'a field that only mentions a card or a token is not a secret');
+    }
+    for (const shown of ['560004', '560005', 'Lalbagh Gate']) {
+      assert.match(opened.text, new RegExp(shown), 'a postal PIN code or a map pin is not a secret');
+    }
+    const shot = await sidecar.screenshot({ owner: 'owner-1', tab: 'chat-1' });
+    assert.ok(pixelsOf(shot.png_base64, [0, 0xff, 0]) > 1000, "the person's picture shows the fields");
+    assert.equal(pixelsOf(shot.model_png_base64, [0, 0xff, 0]), 0, "none of them shows in the model's copy");
   });
 });
 
