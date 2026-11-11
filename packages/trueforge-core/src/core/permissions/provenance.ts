@@ -3,7 +3,8 @@
  * theirs to use; text the assistant read (pages, mail, files, tool output) is data. A call is steered when a
  * destination it names was put there by that data and nowhere else. The record also keeps the person's own
  * details, the addresses and phone numbers in their words, their mail and their events, so a lookup that would
- * send one can ask first once the chat has read other content.
+ * send one can ask first once the chat has read other content. It keeps the words of the person's own text and
+ * calendar as well, so a map can tell a place the person named from one that only other content named.
  */
 
 /** Links, sites and addresses from one side, each folded so two spellings of one value match. */
@@ -40,6 +41,13 @@ export interface ChatProvenance {
   own_details_overflowed: boolean;
   /** True once the chat has read content that is not the person's own words. */
   read_content: boolean;
+  /**
+   * The words of the person's own text and of their own calendar, folded, for telling whose a place is. Past its
+   * cap no new word is kept, so a place that uses one counts as not theirs: it fails toward asking.
+   */
+  own_words: Set<string>;
+  /** True once the chat has read content other than the person's own calendar: mail, a page, a file, tool output. */
+  read_beyond_calendar: boolean;
 }
 
 /**
@@ -47,6 +55,9 @@ export interface ChatProvenance {
  * and once the read side overflows every value the person did not give counts as read content: it fails toward asking.
  */
 const MAX_VALUES_PER_SET = 5_000;
+
+/** A long chat uses many more words than it names links, so the words set holds more before it stops. */
+const MAX_OWN_WORDS = 20_000;
 
 function emptyValues(): ProvenanceValues {
   return { urls: new Set(), hosts: new Set(), addresses: new Set(), overflowed: false };
@@ -61,6 +72,8 @@ export function emptyChatProvenance(): ChatProvenance {
     own_details: new Set(),
     own_details_overflowed: false,
     read_content: false,
+    own_words: new Set(),
+    read_beyond_calendar: false,
   };
 }
 
@@ -281,16 +294,42 @@ function noteOrigin(input: { provenance: ChatProvenance; key: string; origin: Re
   }
 }
 
+/** The words of a text, folded so two writings of one word match: plain characters, lower case, no punctuation. */
+function wordsOf(text: string): string[] {
+  return plainForm(text)
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(word => word !== '');
+}
+
+/** Keeps a text's words among the person's own, up to the cap. */
+function recordOwnWords(provenance: ChatProvenance, text: string): void {
+  for (const word of wordsOf(text)) {
+    if (provenance.own_words.size >= MAX_OWN_WORDS) {
+      return;
+    }
+    provenance.own_words.add(word);
+  }
+}
+
 /** Text the person wrote or that is theirs: their messages, their profile, what the assistant remembers of them. */
 export function recordPersonText(input: { provenance: ChatProvenance; text: string }): void {
   recordText(input.provenance.trusted, input.text);
   recordDetails(input.provenance, input.text);
+  recordOwnWords(input.provenance, input.text);
 }
 
 /** Text the assistant read: a page, a mail, a file, a tool's output. It is data, never the person's say. */
 export function recordUntrustedText(input: { provenance: ChatProvenance; text: string; source: ReadSource }): void {
   if (input.text.trim() !== '') {
     input.provenance.read_content = true;
+    if (input.source !== 'event') {
+      input.provenance.read_beyond_calendar = true;
+    }
+  }
+  if (input.source === 'event') {
+    // A place on the person's own calendar is theirs to look up, as if they had said it.
+    recordOwnWords(input.provenance, input.text);
   }
   if (
     input.source === 'event' ||
@@ -613,4 +652,18 @@ export function carriedPrivateDetails(input: { provenance: ChatProvenance; value
     }
   }
   return [...carried];
+}
+
+/**
+ * The places of a map call that are not the person's own, in a chat that has read other content. A place is the
+ * person's own when every word of it is in their own text or on their own calendar. Before the chat has read
+ * anything but the calendar, no place counts: nothing but the person could have named it. Once it has, a place
+ * with any other word may have come from that content, so the map asks first.
+ */
+export function placesNotFromPerson(input: { provenance: ChatProvenance; places: readonly string[] }): string[] {
+  const { provenance } = input;
+  if (!provenance.read_beyond_calendar) {
+    return [];
+  }
+  return input.places.filter(place => wordsOf(place).some(word => !provenance.own_words.has(word)));
 }

@@ -1,7 +1,8 @@
 /**
  * A scheduled brief over the real server path: no one is watching, so nothing may stop at a card. The
  * scripted model reads the inbox, searches the web, then maps the address the inbox names. A search that names
- * someone from the mail runs too: the person's own mail is theirs to use.
+ * someone from the mail runs too: the person's own mail is theirs to use. The map does not run: only someone
+ * else's mail named that address, so it waits for the owner even with maps set to run without asking.
  */
 import { z } from '@hono/zod-openapi';
 import { AgentSpecSchema, type Turn } from '@truefoundry/trueforge-core/agent-session';
@@ -254,7 +255,7 @@ describe('scheduled brief: search and map after reading the mail', () => {
   });
 
   it(
-    'reads the mail, searches with a clean query, and maps the inbox address, with no card left waiting',
+    'reads the mail, searches with a clean query, and holds the map of an address only the inbox named for the owner',
     async () => {
       const { sessionId, turn } = await runScheduledBrief({
         agent,
@@ -270,11 +271,14 @@ describe('scheduled brief: search and map after reading the mail', () => {
 
       const entries = await auditEntries(server, sessionId);
       const search = entries.find(e => e.tool_name === 'tavily_search' && e.description === `Searched: ${CLEAN_QUERY}`);
-      const map = entries.find(
-        e => e.tool_name === 'render_map' && e.description === `Maps ran without asking: ${HARBOUR_ADDRESS}`,
-      );
       expect(search).toMatchObject({ tier: 1, outcome: 'logged' });
-      expect(map).toMatchObject({ tier: 1, outcome: 'logged' });
+      // The place went nowhere: the only map entry is the one held for the owner, and the brief says so.
+      const maps = entries.filter(e => e.tool_name === 'render_map');
+      expect(maps).toHaveLength(1);
+      expect(maps[0]).toMatchObject({ tier: 3, outcome: 'logged', auto_deny_reason: null });
+      expect(maps[0]?.description).toContain('Held for the owner: ');
+      expect(maps[0]?.description).toContain(HARBOUR_ADDRESS);
+      expect(JSON.stringify(turn.state)).toContain('Needs your OK');
     },
     TURN_TIMEOUT_MS,
   );

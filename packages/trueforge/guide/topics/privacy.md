@@ -10,7 +10,7 @@ Some things leave your computer, and only when needed:
 
 - The model you chose. Each chat goes to that model. A local model keeps everything on your computer.
 - The web search service. The search words and the pages Aman opens.
-- The map service. Places and routes, after you approve the card.
+- The map service. Places and routes, after you approve the card, or without a card for places from your own words and calendar if you turned on the **Maps** switch.
 - Google. What a connected email or calendar action sends, after you approve it.
 
 Voice input runs on your computer. Memory search runs on your computer too.

@@ -118,6 +118,7 @@ import {
   hasReadContent,
   isPersonVouchedUrl,
   namesUrl,
+  placesNotFromPerson,
   steeredDestinations,
   steeredLinks,
   steeredUrl,
@@ -2260,19 +2261,41 @@ function steeringChecked(input: {
   };
 }
 
+/** The place strings a maps call sends to the map service: what it looks up, never a pin's own details. */
+function mapsPlaces(action: SentinelAction): string[] {
+  const params = action.canonical_params;
+  const sent: unknown[] =
+    action.tool_name === RENDER_ROUTE_TOOL_NAME
+      ? [params['from_place'], params['to_place']]
+      : action.tool_name === RENDER_PLACES_TOOL_NAME
+        ? Array.isArray(params['places'])
+          ? params['places'].map((place: unknown) =>
+              typeof place === 'object' && place !== null && 'address' in place ? place.address : undefined,
+            )
+          : []
+        : [params['place_name'], params['poi']];
+  return sent.filter((place): place is string => typeof place === 'string');
+}
+
 /**
  * An embedded maps call that runs without asking, once the person has let maps run without asking. The outbound
- * secret guard still reads its places. Returns the guard's rule when the call should show its card instead.
+ * secret guard still reads its places, and that choice covers only places from the person's own words and their
+ * own calendar: in a chat that has read other content, a place from anywhere else asks. Returns the sentence that
+ * says why when the call should show its card instead.
  */
 async function classifyMapsSilently(input: {
   action: SentinelAction;
   ctx: ClassifyContext;
-}): Promise<{ decision: TierDecision } | { held: OutboundGuardVerdict }> {
+}): Promise<{ decision: TierDecision } | { held: string }> {
   const { action, ctx } = input;
+  const assistant = ctx.web_search.assistantName;
   const strings = collectOutboundStrings(action.canonical_params);
   const { verdict } = await outboundGuard({ ctx, strings });
   if (!verdict.ok) {
-    return { held: verdict };
+    return { held: guardRuleSay({ rule: verdict.rule, assistant }) };
+  }
+  if (placesNotFromPerson({ provenance: ctx.web_search.provenance, places: mapsPlaces(action) }).length > 0) {
+    return { held: holdSay(assistant).maps_read_place };
   }
   // The text leaves with this call, so a later silent search or map sees a secret split across the two.
   if (strings !== undefined) {
@@ -3696,12 +3719,7 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
           outbound_truncated: outbound.truncated,
         },
         reason: MAPS_ASK_REASON,
-        reason_detail:
-          silent === undefined
-            ? holdSay(ctx.web_search.assistantName).maps_always
-            : silent.held.ok
-              ? null
-              : guardRuleSay({ rule: silent.held.rule, assistant: ctx.web_search.assistantName }),
+        reason_detail: silent === undefined ? holdSay(ctx.web_search.assistantName).maps_always : silent.held,
         sensitive_read: false,
         approval_token_id: await mintPlainToken({
           ctx,

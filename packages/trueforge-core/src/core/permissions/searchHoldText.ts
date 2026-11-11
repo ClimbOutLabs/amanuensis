@@ -63,6 +63,7 @@ export function holdSay(assistant: string) {
     unreadable: `This has more text than ${assistant} can check.`,
     generic: `${assistant} is checking with you first.`,
     maps_always: `Maps are set to ask, so ${assistant} is checking with you first.`,
+    maps_read_place: `This place is not from your own words or your calendar, so ${assistant} is checking with you first.`,
     maps_offline: `${assistant} is offline, so maps can't run.`,
   } as const;
 }

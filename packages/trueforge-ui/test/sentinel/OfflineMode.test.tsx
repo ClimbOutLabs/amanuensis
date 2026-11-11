@@ -203,7 +203,11 @@ describe('SentinelSettings', () => {
     );
     const toggle = await screen.findByRole('switch', { name: 'Show maps without asking' });
     expect(toggle).not.toBeChecked();
-    expect(screen.getByText('Maps ask before each one.')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Maps ask before each one. Turn this on to let maps of places from your own words and your own calendar run without asking.',
+      ),
+    ).toBeInTheDocument();
     fireEvent.click(toggle);
     await waitFor(() => {
       expect(updateUserSettings).toHaveBeenCalledWith({ maps_without_asking: true });
@@ -212,7 +216,9 @@ describe('SentinelSettings', () => {
       expect(screen.getByRole('switch', { name: 'Show maps without asking' })).toBeChecked();
     });
     expect(
-      screen.getByText('Maps run without asking. A map asks first only if it would send a password or key.'),
+      screen.getByText(
+        'A map runs without asking when its places come from your own words or your own calendar. Once a chat has read something else, such as an email or a web page, a map of any other place asks first. A map also asks if it would send a password or key.',
+      ),
     ).toBeInTheDocument();
   });
 

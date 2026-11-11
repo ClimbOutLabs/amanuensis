@@ -19,13 +19,21 @@ Aman reads mail, web pages, files, and whatever a connector sends back. All of t
 
 Aman sorts every action before it runs.
 
-- **Runs without asking:** lookups done for you. That means Aman's own read-only tools, reading your mail, calendar, spaces and files, web searches, opening a page, maps, and read-only tools from connectors that are trusted on this instance or that you set to "Always allow". What you say in the chat, and what Aman knows about you, is yours to use: asking for the weather where you live just runs.
-- **Shows a card and waits:** sending mail or messages, running code, writing or changing files, and any connector tool that could change something or reach outside your machine. A tool Aman cannot classify also shows a card.
+- **Runs without asking:** lookups done for you. That means Aman's own read-only tools, reading your mail, calendar, spaces and files, web searches, opening a page, and read-only tools from connectors that are trusted on this instance or that you set to "Always allow". What you say in the chat, and what Aman knows about you, is yours to use: asking for the weather where you live just runs.
+- **Shows a card and waits:** sending mail or messages, running code, writing or changing files, showing a map, and any connector tool that could change something or reach outside your machine. A tool Aman cannot classify also shows a card.
 - **Refused without a card:** a send whose destination cannot be checked, a send whose card would hide a recipient or cut off its content, and anything that needs the network while Aman is in offline mode. Nothing runs.
 
 The card shows what will happen, including what will be sent, before anything leaves. In a chat, the card offers **Approve** and **Deny**. Sending mail or a message, and a calendar change that invites or emails guests, asks every time: those cards offer only **Approve** and **Deny**. Deletes and other actions with real effects also offer **Always allow this here**: Aman stops asking for that kind of action for the rest of this chat, and asks again in any other chat. **Always allow**, which covers every chat, is never offered for sends, deletes, installs or outside services. The connector tools you always allow are listed in that connector's settings, where **Revoke** turns each one off.
 
 In the sandbox, a command that only reads inside the workspace runs without asking, also when several reads are joined, as in `cd repo && git status`. Reads are listing files, reading a file or part of one, searching files, and looking at git history. Every other command asks first. Answering **Always allow this here** on a command covers running that same command again in this chat, and nothing else.
+
+### Maps
+
+A map sends the places it looks up to the map service, so a map shows a card first. The card names the places and the map service they go to.
+
+In Settings, under Permissions, the **Maps** switch lets a map run without asking when its places come from your own words or your own calendar. Once a chat has read anything else, such as an email or a web page, a map of a place from anywhere else still shows its card. That way an address that only someone else's email or a web page named is not sent to the map service unless you say so. In a scheduled run, such a map waits for you in the run's **Needs your OK** list.
+
+The switch is off until you turn it on.
 
 ### When Aman holds something it would normally do
 

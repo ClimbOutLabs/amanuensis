@@ -700,12 +700,12 @@ describe('sentinelAuditLabel', () => {
 });
 
 describe('parseUserSettings', () => {
-  it('defaults to offline off, nothing relaxed, and searches and maps running without asking', () => {
+  it('defaults to offline off, nothing relaxed, searches running without asking and maps asking', () => {
     const defaults = {
       offline_mode: false,
       tier2_auto_allow: [],
       search_without_asking: true,
-      maps_without_asking: true,
+      maps_without_asking: false,
       sandbox_without_asking: true,
       chat_search_enabled: false,
       package_downloads_without_project_allowed: false,
@@ -727,7 +727,7 @@ describe('parseUserSettings', () => {
       offline_mode: true,
       tier2_auto_allow: ['file_write'],
       search_without_asking: true,
-      maps_without_asking: true,
+      maps_without_asking: false,
       sandbox_without_asking: true,
       chat_search_enabled: false,
       package_downloads_without_project_allowed: false,
@@ -739,9 +739,9 @@ describe('parseUserSettings', () => {
     expect(parseUserSettings({ data: { search_without_asking: 'no' } }).search_without_asking).toBe(true);
   });
 
-  it('reads the maps setting, and falls back to running without asking when it is not a boolean', () => {
-    expect(parseUserSettings({ data: { maps_without_asking: false } }).maps_without_asking).toBe(false);
-    expect(parseUserSettings({ data: { maps_without_asking: 'yes' } }).maps_without_asking).toBe(true);
+  it('reads the maps setting, and falls back to asking when it is not a boolean', () => {
+    expect(parseUserSettings({ data: { maps_without_asking: true } }).maps_without_asking).toBe(true);
+    expect(parseUserSettings({ data: { maps_without_asking: 'yes' } }).maps_without_asking).toBe(false);
   });
 
   it('reads the sandbox setting, and falls back to running without asking when it is not a boolean', () => {
@@ -767,7 +767,7 @@ describe('parseUserSettings', () => {
       offline_mode: false,
       tier2_auto_allow: [],
       search_without_asking: true,
-      maps_without_asking: true,
+      maps_without_asking: false,
       sandbox_without_asking: true,
       chat_search_enabled: false,
       package_downloads_without_project_allowed: false,
