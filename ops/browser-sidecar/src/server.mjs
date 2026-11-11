@@ -224,6 +224,11 @@ function createTab({ page }) {
     fileChooser: undefined,
     // The live view's acts, run one at a time in the order they arrived, so typed keys never swap.
     liveActs: Promise.resolve(),
+    // Whether the person has taken this tab over in the live view: while they have, the model's own
+    // steps on the tab are refused, and the person's hand alone drives it.
+    takeover: false,
+    // Where the live view's pointer last was on the page, so a streamed move walks from there.
+    pointer: undefined,
   };
 }
 
@@ -255,20 +260,58 @@ function inLiveOrder(tab, act) {
 }
 
 /**
- * One pointer or keyboard act from the live view. A click read from a frame of another size is
- * scaled to the viewport, so it lands where the person clicked on the picture.
+ * The steps a streamed pointer move is applied in: enough that no single step is a jump, so the
+ * page sees a hand travelling, and never so many that the move lags behind the person's own.
  */
-async function liveAct(page, input) {
+export function pointerSteps(distance) {
+  return Math.min(50, Math.max(1, Math.round(distance / 10)));
+}
+
+/**
+ * A point an act names, scaled from the frame it was read from to the page's viewport, so it lands
+ * where the person touched the picture.
+ */
+function scaledPoint(page, input) {
+  const viewport = page.viewportSize();
+  const scale =
+    viewport !== null && input.imageWidth !== undefined && input.imageHeight !== undefined
+      ? { x: viewport.width / input.imageWidth, y: viewport.height / input.imageHeight }
+      : { x: 1, y: 1 };
+  return { x: input.x * scale.x, y: input.y * scale.y };
+}
+
+/** Walks the tab's pointer to a point in steps from where it last was, and remembers it there. */
+async function movePointer(tab, point) {
+  const last = tab.pointer;
+  const distance = last === undefined ? 0 : Math.hypot(point.x - last.x, point.y - last.y);
+  await tab.page.mouse.move(point.x, point.y, { steps: pointerSteps(distance) });
+  tab.pointer = point;
+}
+
+/**
+ * One pointer or keyboard act from the live view. A click keeps its one-step shape; the takeover
+ * acts (move, down, up) are the person's own press, travelled to and let go where it happened.
+ */
+async function liveAct(tab, input) {
+  const page = tab.page;
   switch (input.kind) {
     case 'click': {
-      const viewport = page.viewportSize();
-      const scale =
-        viewport !== null && input.imageWidth !== undefined && input.imageHeight !== undefined
-          ? { x: viewport.width / input.imageWidth, y: viewport.height / input.imageHeight }
-          : { x: 1, y: 1 };
-      await page.mouse.click(input.x * scale.x, input.y * scale.y);
+      const point = scaledPoint(page, input);
+      await page.mouse.click(point.x, point.y);
+      tab.pointer = point;
       break;
     }
+    case 'move':
+      await movePointer(tab, scaledPoint(page, input));
+      break;
+    case 'down':
+      await movePointer(tab, scaledPoint(page, input));
+      await page.mouse.down();
+      break;
+    case 'up':
+      await movePointer(tab, scaledPoint(page, input));
+      await page.mouse.up();
+      break;
     case 'type':
       await page.keyboard.type(input.text);
       break;
@@ -304,6 +347,30 @@ async function putFile(tab, file) {
   }
   await field.setInputFiles(file);
   return { status: 'ok' };
+}
+
+/** The host a human check's widget is served from, whichever site asked for the check. */
+const CHALLENGE_HOST = 'challenges.cloudflare.com';
+
+/** The title of the full-page check a site shows before its own page loads. */
+const CHALLENGE_TITLE = 'Just a moment...';
+
+/**
+ * Whether the page is showing a human check: the check's own frame sits on the page, or the page
+ * is the check itself. Only the frames' addresses and the title are read; nothing is changed.
+ */
+async function challengeShowing(page) {
+  const title = await page.title().catch(() => '');
+  if (title === CHALLENGE_TITLE) {
+    return true;
+  }
+  return page.frames().some(frame => {
+    try {
+      return new URL(frame.url()).hostname === CHALLENGE_HOST;
+    } catch {
+      return false;
+    }
+  });
 }
 
 /**
@@ -523,6 +590,9 @@ export class BrowserSidecar {
       return { status: 'refused', reason: target.reason };
     }
     const tab = await this.#tabFor({ owner, tab: tabId, create: true });
+    if (tab.takeover) {
+      return { status: 'refused', reason: 'takeover' };
+    }
     tab.refs.reset();
     tab.opened = target.url.href;
     tab.refusedRedirect = undefined;
@@ -576,6 +646,9 @@ export class BrowserSidecar {
     if (tab === undefined) {
       return NO_TAB;
     }
+    if (tab.takeover) {
+      return { status: 'refused', reason: 'takeover' };
+    }
     // The wheel scrolls whatever is under the pointer, so it is turned over the middle of the view,
     // and the pointer goes back to the corner so nothing in the middle stays hovered for the read.
     const viewport = tab.page.viewportSize() ?? { width: 1280, height: 800 };
@@ -591,6 +664,9 @@ export class BrowserSidecar {
     const tab = await this.#tabFor({ owner, tab: tabId, create: false });
     if (tab === undefined) {
       return NO_TAB;
+    }
+    if (tab.takeover) {
+      return { status: 'refused', reason: 'takeover' };
     }
     tab.refs.reset();
     tab.goingBack = true;
@@ -724,6 +800,9 @@ export class BrowserSidecar {
     if (!found.ok) {
       return found.result;
     }
+    if (found.tab.takeover) {
+      return { status: 'refused', reason: 'takeover' };
+    }
     found.tab.refs.reset();
     await found.element.click({ timeout: this.#navTimeoutMs });
     return this.#read(found.tab);
@@ -734,6 +813,9 @@ export class BrowserSidecar {
     const found = await this.#elementFor({ owner, tab: tabId, ref });
     if (!found.ok) {
       return found.result;
+    }
+    if (found.tab.takeover) {
+      return { status: 'refused', reason: 'takeover' };
     }
     const info = await found.tab.page.evaluate(elementInfoScript(found.path));
     if (info === null) {
@@ -752,6 +834,9 @@ export class BrowserSidecar {
     const found = await this.#elementFor({ owner, tab: tabId, ref });
     if (!found.ok) {
       return found.result;
+    }
+    if (found.tab.takeover) {
+      return { status: 'refused', reason: 'takeover' };
     }
     try {
       await found.element.selectOption(option, { timeout: this.#navTimeoutMs });
@@ -802,7 +887,25 @@ export class BrowserSidecar {
       status: 'ok',
       jpeg_base64: buffer.toString('base64'),
       ...(viewport === null ? {} : { width: viewport.width, height: viewport.height }),
+      // Whose hand is on the tab, and whether the page is asking for a human check: the view says
+      // both plainly instead of leaving the person to guess at either.
+      takeover: tab.takeover,
+      challenge: await challengeShowing(tab.page),
     };
+  }
+
+  /**
+   * Hands the tab to the person, or back to the model. The tab never leaves the browser: only whose
+   * hand drives it changes, so what the person finishes stays in the page for the next read. While
+   * the tab is taken over, the model's own steps on it are refused (see `open` and the rest).
+   */
+  async liveTakeover({ owner, tab: tabId, on }) {
+    const tab = await this.#tabFor({ owner, tab: tabId, create: false });
+    if (tab === undefined) {
+      return NO_TAB;
+    }
+    tab.takeover = on;
+    return { status: 'ok', takeover: tab.takeover };
   }
 
   /**
@@ -815,7 +918,7 @@ export class BrowserSidecar {
     if (tab === undefined) {
       return NO_TAB;
     }
-    return inLiveOrder(tab, () => liveAct(tab.page, input));
+    return inLiveOrder(tab, () => liveAct(tab, input));
   }
 
   /**
@@ -908,25 +1011,36 @@ const MAX_LIVE_TEXT_LENGTH = 10000;
 const isFiniteNumber = value => typeof value === 'number' && Number.isFinite(value);
 
 /**
+ * The point a pointer act names, with the frame size the point was read from (when the caller
+ * measured one), or undefined when the point is not a point.
+ */
+function parsePoint(body) {
+  if (!isFiniteNumber(body.x) || !isFiniteNumber(body.y)) {
+    return undefined;
+  }
+  const imageWidth = isFiniteNumber(body.image_width) && body.image_width > 0 ? body.image_width : undefined;
+  const imageHeight = isFiniteNumber(body.image_height) && body.image_height > 0 ? body.image_height : undefined;
+  return {
+    x: body.x,
+    y: body.y,
+    ...(imageWidth === undefined ? {} : { imageWidth }),
+    ...(imageHeight === undefined ? {} : { imageHeight }),
+  };
+}
+
+/**
  * A live-view input from the request body, or undefined when it is not one the page can be given:
- * a click with its point (and the frame size the point was read from, when the caller measured one),
- * typed text, one named key, or a scroll step.
+ * a pointer act with its point (a click, or the takeover acts move, down and up), typed text, one
+ * named key, or a scroll step.
  */
 function parseLiveInput(body) {
   switch (body.kind) {
-    case 'click': {
-      if (!isFiniteNumber(body.x) || !isFiniteNumber(body.y)) {
-        return undefined;
-      }
-      const imageWidth = isFiniteNumber(body.image_width) && body.image_width > 0 ? body.image_width : undefined;
-      const imageHeight = isFiniteNumber(body.image_height) && body.image_height > 0 ? body.image_height : undefined;
-      return {
-        kind: 'click',
-        x: body.x,
-        y: body.y,
-        ...(imageWidth === undefined ? {} : { imageWidth }),
-        ...(imageHeight === undefined ? {} : { imageHeight }),
-      };
+    case 'click':
+    case 'move':
+    case 'down':
+    case 'up': {
+      const point = parsePoint(body);
+      return point === undefined ? undefined : { kind: body.kind, ...point };
     }
     case 'type':
       return typeof body.text === 'string' && body.text !== '' && body.text.length <= MAX_LIVE_TEXT_LENGTH
@@ -968,6 +1082,8 @@ const ROUTES = {
     const input = parseLiveInput(body);
     return input === undefined ? { status: 'bad_input' } : sidecar.liveInput({ ...where, input });
   },
+  'POST /live/takeover': (sidecar, where, body) =>
+    typeof body.on === 'boolean' ? sidecar.liveTakeover({ ...where, on: body.on }) : { status: 'bad_input' },
 };
 
 const MAX_ID_LENGTH = 256;
