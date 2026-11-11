@@ -78,6 +78,7 @@ describe('reach routes', () => {
     expect(data.saved).toBe(false);
     expect(data.settings.call_kinds).toEqual([]);
     expect(data.settings.channels).toEqual({ texts: false, calls: false });
+    expect(data.settings.noticing_on).toBe(false);
     expect(data.availability.calls).toEqual({ available: false, note: 'Phone calls are not set up yet.' });
     expect(data.max_levels.bill_due).toBe('nudge');
     expect(data.max_levels.calendar_clash).toBe('call');
@@ -92,23 +93,29 @@ describe('reach routes', () => {
       stuck: undefined,
       source: undefined,
     });
+    /** Someone who turned the background checks on, so their trouble is shown. */
+    const watching = async () => {
+      const built = await build();
+      await built.reachStore.put({ ...OWNER, settings: { ...defaultReachSettings('UTC'), noticing_on: true } });
+      return built;
+    };
 
     it('says where mail is read from once it has been checked', async () => {
-      const { call, noticingStore } = await build();
+      const { call, noticingStore } = await watching();
       expect(GetReachResponseSchema.parse(await (await call('')).json()).data.mail_source).toBeNull();
       await noticingStore.setCheckpoint({ ...OWNER, watcher: 'mail', ...failingSince(5), source: 'email_connector' });
       expect(GetReachResponseSchema.parse(await (await call('')).json()).data.mail_source).toBe('email_connector');
     });
 
     it('says nothing about mail that works, or that has failed for less than an hour', async () => {
-      const { call, noticingStore } = await build();
+      const { call, noticingStore } = await watching();
       expect(GetReachResponseSchema.parse(await (await call('')).json()).data.mail_problem).toBeNull();
       await noticingStore.setCheckpoint({ ...OWNER, watcher: 'mail', ...failingSince(59) });
       expect(GetReachResponseSchema.parse(await (await call('')).json()).data.mail_problem).toBeNull();
     });
 
     it('shows trouble when the mail read so far is an hour behind, even when no pass recorded a failure', async () => {
-      const { call, noticingStore } = await build();
+      const { call, noticingStore } = await watching();
       await noticingStore.setCheckpoint({
         ...OWNER,
         watcher: 'mail',
@@ -122,7 +129,7 @@ describe('reach routes', () => {
     });
 
     it('shows no trouble when an old failure is on record but mail has been read up to a few minutes ago', async () => {
-      const { call, noticingStore } = await build();
+      const { call, noticingStore } = await watching();
       await noticingStore.setCheckpoint({
         ...OWNER,
         watcher: 'mail',
@@ -133,7 +140,7 @@ describe('reach routes', () => {
     });
 
     it('says when the calendar has not been checked for about an hour', async () => {
-      const { call, noticingStore } = await build();
+      const { call, noticingStore } = await watching();
       const calendar = { ...failingSince(60), failure: { kind: 'other' as const, since: minutesAgo(60) } };
       await noticingStore.setCheckpoint({ ...OWNER, watcher: 'calendar', ...calendar });
       expect(GetReachResponseSchema.parse(await (await call('')).json()).data.calendar_problem).toEqual({
@@ -160,12 +167,26 @@ describe('reach routes', () => {
     });
 
     it('says when mail was last checked well and why not since, after about an hour', async () => {
-      const { call, noticingStore, as } = await build();
+      const { call, noticingStore, as } = await watching();
       await noticingStore.setCheckpoint({ ...OWNER, watcher: 'mail', ...failingSince(60) });
       const mine = GetReachResponseSchema.parse(await (await call('')).json()).data;
       expect(mine.mail_problem).toEqual({ since: minutesAgo(60).toISOString(), kind: 'too_slow' });
       as('bob');
       expect(GetReachResponseSchema.parse(await (await call('')).json()).data.mail_problem).toBeNull();
+    });
+
+    it('shows no trouble and no watched mailbox while the background checks are off', async () => {
+      const { call, noticingStore, reachStore } = await watching();
+      await noticingStore.setCheckpoint({ ...OWNER, watcher: 'mail', ...failingSince(90), source: 'google' });
+      await noticingStore.setCheckpoint({ ...OWNER, watcher: 'calendar', ...failingSince(90) });
+      const on = GetReachResponseSchema.parse(await (await call('')).json()).data;
+      expect(on.mail_problem).not.toBeNull();
+      expect(on.calendar_problem).not.toBeNull();
+      expect(on.mail_source).toBe('google');
+      await reachStore.put({ ...OWNER, settings: defaultReachSettings('UTC') });
+      const off = GetReachResponseSchema.parse(await (await call('')).json()).data;
+      expect(off.settings.noticing_on).toBe(false);
+      expect([off.mail_problem, off.calendar_problem, off.mail_source]).toEqual([null, null, null]);
     });
   });
 

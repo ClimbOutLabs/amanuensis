@@ -76,6 +76,11 @@ Reminders follow the same channels. A reminder is never quieter than a nudge. A 
 
 ## Reach me settings
 
+- **The switch for the background checks** (`noticing_on`), first on the page as "Let the assistant watch for things", with one line on what it checks and how often, and that reminders work either way. It saves on its own, at once, from the last saved settings, so other changes on the page still wait for Save. It is off for everyone, existing installs included, until the person turns it on; the default lives in one constant (`NOTICING_ON_BY_DEFAULT`). It is a field of the stored Reach me document with a default, so older rows read as the default with no migration. An import brings it in switched off, like texts and calls.
+  - Off: the service skips the person before anything is opened. No mail or calendar source is opened or listed, no approvals are looked at, no model is called and nothing is delivered. Tracked bills and checkpoints are kept untouched. Reach me shows no mail or calendar trouble and no watched mailbox, since nothing is checked. Reminders are not affected.
+  - Turned off mid-way: the next pass for that person does nothing.
+  - First turned on: with no checkpoint the first mail check looks back only the usual 10 minutes from the moment of that pass, with the date bound as now, so old mail never floods in.
+  - Turned on again after a gap: the checkpoint is where it was. Within a day the next pass reads on from it, so mail that came in while off is read then. After more than a day the usual one-day limit applies: older mail is not read, and the one fixed note about mail left unread is raised once.
 - Channels: in the app (always on), push for each device, texts and phone calls. Texts and calls show "not set up yet" and cannot be switched on until they exist.
 - Always-important senders, with suggestions found in memories. Nothing is added until the person accepts it.
 - Time zone, daily nudge limit, travel lead time and approval wait.
@@ -117,6 +122,7 @@ All tests use synthetic data, never a person's real data.
 - An always-important sender that fails the sender checks is treated as ordinary mail
 - At the token cap, only notes are produced
 - Reminders: urgent, tick and call gap
+- The switch for the background checks: while off, no source, model or delivery is reached; turned off, the next pass stops; first turned on, mail is read from that moment; on again within a day, mail goes on from the checkpoint
 - Shared store contract tests, route tests, and an export and import round trip with an older-format file
 
 ## Known limits

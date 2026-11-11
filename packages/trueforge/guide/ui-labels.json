@@ -109,6 +109,7 @@
   "Remove": "packages/trueforge-ui/src/containers/SettingsBuilder/AccountSetupPanel.tsx",
   "Cancel": "packages/trueforge-ui/src/containers/SettingsBuilder/AccountSetupPanel.tsx",
   "Reach me": "packages/trueforge-ui/src/containers/SettingsBuilder/index.tsx",
+  "Open Reach me": "packages/trueforge-ui/src/deliveries/WatchMailNote.tsx",
   "Try it": "packages/trueforge-ui/src/deliveries/ReachPreferences.tsx",
   "Call me for reminders I mark urgent": "packages/trueforge-ui/src/deliveries/ReachPreferences.tsx",
   "Notes folder": "packages/trueforge-ui/src/containers/SettingsBuilder/NotesFolderSetupPanel.tsx",

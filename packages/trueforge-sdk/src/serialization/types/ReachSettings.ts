@@ -25,6 +25,7 @@ export const ReachSettings: core.serialization.ObjectSchema<serializers.ReachSet
         ),
         maxNudgesPerDay: core.serialization.property("max_nudges_per_day", core.serialization.number()),
         minHoursBetweenCalls: core.serialization.property("min_hours_between_calls", core.serialization.number()),
+        noticingOn: core.serialization.property("noticing_on", core.serialization.boolean().optional()),
         quietHours: core.serialization.property("quiet_hours", QuietHours),
         timezone: Timezone,
         travelLeadMinutes: core.serialization.property("travel_lead_minutes", core.serialization.number()),
@@ -40,6 +41,7 @@ export declare namespace ReachSettings {
         dismissed_suggestions: string[];
         max_nudges_per_day: number;
         min_hours_between_calls: number;
+        noticing_on?: boolean | null;
         quiet_hours: QuietHours.Raw;
         timezone: Timezone.Raw;
         travel_lead_minutes: number;

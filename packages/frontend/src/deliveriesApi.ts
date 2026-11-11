@@ -127,6 +127,7 @@ function parseSettings(value: unknown): ReachSettings {
   const channels = required(raw.channels, isRecord);
   const quiet = required(raw.quiet_hours, isRecord);
   return {
+    noticingOn: required(raw.noticing_on, isBoolean),
     textsOn: required(channels.texts, isBoolean),
     callsOn: required(channels.calls, isBoolean),
     alwaysImportant: required(raw.always_important, isArray).map(parseSender),
@@ -207,6 +208,7 @@ function parseView(body: unknown): ReachView {
 
 function settingsBody(settings: ReachSettings): unknown {
   return {
+    noticing_on: settings.noticingOn,
     channels: { texts: settings.textsOn, calls: settings.callsOn },
     always_important: settings.alwaysImportant.map(sender => ({
       address: sender.address,

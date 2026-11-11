@@ -65,7 +65,11 @@ async function scenario(harness: MailAgentHarness, { delay_ms = 0 }: { delay_ms?
   const reachSettings = new ReachSettingsStore(db);
   await reachSettings.put({
     ...OWNER,
-    settings: { ...defaultReachSettings('UTC'), quiet_hours: { enabled: false, start: '21:00', end: '08:00' } },
+    settings: {
+      ...defaultReachSettings('UTC'),
+      noticing_on: true,
+      quiet_hours: { enabled: false, start: '21:00', end: '08:00' },
+    },
   });
   const store = new NoticingStore(db);
   const recorded: NoticingEvent[] = [];

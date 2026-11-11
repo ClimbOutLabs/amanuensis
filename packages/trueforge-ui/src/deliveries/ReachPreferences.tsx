@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 
+import { Switch } from '../atoms/primitives/Switch.js';
 import { useAssistantDisplayName } from '../components/PersonalizationContext.js';
 import {
   NOTICING_KINDS,
@@ -166,6 +167,47 @@ function Card({ title, children, intro }: { title: string; children: ReactNode; 
   );
 }
 
+/** The one switch for the background checks. It saves at once, so turning it off never waits on the Save button. */
+function NoticingSwitch({
+  on,
+  busy,
+  error,
+  onChange,
+}: {
+  on: boolean;
+  busy: boolean;
+  error: string | null;
+  onChange: (next: boolean) => void;
+}) {
+  const assistant = useAssistantDisplayName();
+  return (
+    <div data-role="noticing-switch" className={`${CARD} flex flex-col gap-2`}>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p id="noticing-switch-label" className="text-text-primary text-sm font-semibold">
+            {`Let ${assistant} watch for things`}
+          </p>
+          <p className="text-text-secondary mt-1 text-sm">
+            {`${assistant} checks your mail every 10 minutes, your calendar every 30 minutes and waiting approvals every 5 minutes. Reminders you set work either way.`}
+          </p>
+        </div>
+        <Switch
+          size="md"
+          aria-labelledby="noticing-switch-label"
+          checked={on}
+          disabled={busy}
+          onCheckedChange={onChange}
+        />
+      </div>
+      {error === null ? null : (
+        <p role="alert" className="text-failure-text text-sm">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
 /** Settings, Reach me: which channels may be used, whose mail matters, what may call, quiet hours and limits. */
 export function ReachPreferences({ reach }: { reach: ReachApi }) {
   const assistant = useAssistantDisplayName();
@@ -174,6 +216,8 @@ export function ReachPreferences({ reach }: { reach: ReachApi }) {
   const [suggestions, setSuggestions] = useState<ReachSuggestion[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [switching, setSwitching] = useState(false);
+  const [switchError, setSwitchError] = useState<string | null>(null);
   const [status, setStatus] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
   const [trial, setTrial] = useState<Partial<Record<ReachTestChannel, string>>>({});
   const [newAddress, setNewAddress] = useState('');
@@ -236,6 +280,22 @@ export function ReachPreferences({ reach }: { reach: ReachApi }) {
     }
   };
 
+  // Only the switch is saved: other changes on the page still wait for Save.
+  const switchNoticing = async (next: boolean) => {
+    setSwitching(true);
+    setSwitchError(null);
+    try {
+      const base = view.saved ? view.settings : { ...view.settings, timezone: draft.timezone };
+      const saved = await reach.save({ ...base, noticingOn: next });
+      setView(saved);
+      setDraft({ ...draft, noticingOn: saved.settings.noticingOn });
+    } catch (caught) {
+      setSwitchError(caught instanceof Error ? caught.message : 'Could not change this. Try again.');
+    } finally {
+      setSwitching(false);
+    }
+  };
+
   const tryChannel = async (channel: ReachTestChannel) => {
     setTrial(current => ({ ...current, [channel]: 'Sending.' }));
     try {
@@ -284,6 +344,12 @@ export function ReachPreferences({ reach }: { reach: ReachApi }) {
 
   return (
     <div data-role="reach-preferences" className="flex flex-col gap-4">
+      <NoticingSwitch
+        on={view.settings.noticingOn}
+        busy={switching}
+        error={switchError}
+        onChange={next => void switchNoticing(next)}
+      />
       {view.mailProblem === null ? null : <MailProblem problem={view.mailProblem} />}
       {view.calendarProblem === null ? null : <CalendarProblem problem={view.calendarProblem} />}
       {view.mailSource === null ? null : <MailSource source={view.mailSource} />}

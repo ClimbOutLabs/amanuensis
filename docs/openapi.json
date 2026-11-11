@@ -9287,6 +9287,11 @@
             "minimum": 1,
             "type": "integer"
           },
+          "noticing_on": {
+            "default": false,
+            "description": "Whether the assistant checks mail, the calendar and waiting approvals in the background. Reminders work either way.",
+            "type": "boolean"
+          },
           "quiet_hours": {
             "$ref": "#/components/schemas/QuietHours"
           },

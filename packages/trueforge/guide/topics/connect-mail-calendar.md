@@ -29,6 +29,12 @@ If Aman is in offline mode, turn it off first. Click **More**, click **Settings*
 
 The panel then says it is connected and shows your Google address.
 
+## Let Aman watch your mail
+
+Aman can watch your mail for you. It can tell you about bills that are due soon, and about mail from people you mark always important. This is off until you turn it on, in **Settings**, then **Reach me**.
+
+The Google panel and the Email panel both say this. Click **Open Reach me** in the panel to go straight there. Then turn on the switch called "Let Aman watch for things".
+
 ## Connect your calendar
 
 1. Click **More**, click **Settings**, click **Connectors**, find **Google**, and click **Manage**.

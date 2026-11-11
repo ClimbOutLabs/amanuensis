@@ -18,6 +18,7 @@ export function item(overrides: Partial<DeliveryItem> & { id: string }): Deliver
 export const SERVER_KEY = 'AAECAwQF';
 
 export const QUIET_SETTINGS: ReachSettings = {
+  noticingOn: false,
   textsOn: false,
   callsOn: false,
   alwaysImportant: [],

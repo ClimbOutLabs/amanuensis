@@ -6,6 +6,17 @@ covers: settings:reach-me, route:reach, route:delivery
 
 Aman can tell you about something without waiting for you to open a chat. You choose what may reach you, and how, in **Settings**, then **Reach me**.
 
+## Turn it on
+
+Aman watches for nothing until you turn it on.
+
+1. Click **Settings**, then click **Reach me**.
+2. At the top, turn on the switch called "Let Aman watch for things". It saves at once.
+
+When it is on, Aman checks your mail every 10 minutes, your calendar every 30 minutes, and waiting approvals every 5 minutes. When it is off, Aman does not open your mail or calendar and asks no model. Reminders you set reach you either way.
+
+The first time you turn it on, Aman starts from that moment, so old mail does not flood in. If you turn it off and on again within a day, Aman reads the mail that came in while it was off. After more than a day off, it skips mail older than a day and tells you once.
+
 ## What Aman watches for
 
 - Mail from people you marked always important. It counts only when your mail server confirms the sender. This needs a Google account. With the shared Email connector, senders cannot be confirmed yet, so their mail is treated as ordinary mail.

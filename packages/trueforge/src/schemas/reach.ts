@@ -65,8 +65,17 @@ export const ReachChannelsSchema = z
   })
   .openapi('ReachChannels');
 
+/** Whether the background checks run for someone who has not switched them on or off. */
+export const NOTICING_ON_BY_DEFAULT = false;
+
 export const ReachSettingsSchema = z
   .object({
+    noticing_on: z
+      .boolean()
+      .default(NOTICING_ON_BY_DEFAULT)
+      .describe(
+        'Whether the assistant checks mail, the calendar and waiting approvals in the background. Reminders work either way.',
+      ),
     channels: ReachChannelsSchema,
     always_important: z
       .array(AlwaysImportantSenderSchema)
@@ -112,6 +121,7 @@ export type AlwaysImportantSender = z.infer<typeof AlwaysImportantSenderSchema>;
 /** What a new install starts with: quiet. Nothing is ticked for calls and no text or call channel is on. */
 export function defaultReachSettings(timezone: string): ReachSettings {
   return {
+    noticing_on: NOTICING_ON_BY_DEFAULT,
     channels: { texts: false, calls: false },
     always_important: [],
     dismissed_suggestions: [],
