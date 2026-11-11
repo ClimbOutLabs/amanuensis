@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -49,6 +50,8 @@ import { amanGuidePersonaId, legacyAmanGuidePersonaId } from '../../../src/perso
 import { EMBEDDING_DIMENSIONS } from '../../../src/runtime/memory/embeddingModel';
 import { MarkdownMemoryClient } from '../../../src/runtime/memory/markdownMemoryClient';
 import type { MemoryClient } from '../../../src/runtime/memory/memoryClient';
+import { markReviewedNotesFromYou } from '../../../src/runtime/memory/memorySourceLines';
+import { findReviewCandidates } from '../../../src/runtime/memory/reviewOlderNotes';
 import { seedOwnerName } from '../../../src/runtime/ownerName';
 import { resolveMcpAuthStatus, type RemoteMcpServerManifest } from '../../../src/schemas/mcpServer';
 import { ScheduleManifestSchema } from '../../../src/schemas/schedule';
@@ -2348,6 +2351,152 @@ describe('runDataImport reads memory from an export made before notes said where
       await markdownTarget.close();
       await clientTarget.close();
     }
+  });
+});
+
+describe('runDataImport keeps a review of older notes', () => {
+  const NOTE_DAY = '2026-09-03';
+  const reviewedNote = (at: string) =>
+    [`## ${at}`, 'Likes tea.', `<!-- session_id: ${SEED_IDS.sessionMain} -->`, '> External source: no record'].join(
+      '\n\n',
+    );
+
+  async function restoredEntryText(target: Instance): Promise<string | undefined> {
+    const reader = new MarkdownMemoryClient({ baseDir: target.memoryDir, namespace: TENANT });
+    const listed = await reader.listEntries({ namespace: '', timeoutMs: 5_000 });
+    return listed.ok ? listed.entries.find(entry => entry.text.includes('Likes tea.'))?.text : undefined;
+  }
+
+  it('carries a reviewed note through an export and an import, still from the person', async () => {
+    const source = await makeInstance('source-reviewed');
+    const target = await makeInstance('target-reviewed');
+    try {
+      await seedRichInstance({
+        stores: source.stores,
+        tenantId: TENANT,
+        userId: 'alice',
+        memoryDir: source.memoryDir,
+        knowledgeDir: source.knowledgeDir,
+      });
+      const dayDir = join(source.memoryDir, TENANT, 'memory');
+      await mkdir(dayDir, { recursive: true });
+      await writeFile(join(dayDir, `${NOTE_DAY}.md`), `${reviewedNote(`${NOTE_DAY}T10:00:00.000Z`)}\n\n`, 'utf8');
+      await writeFile(join(source.memoryDir, '.source-lines.json'), '{"done":true}\n', 'utf8');
+      const marked = await markReviewedNotesFromYou({
+        baseDir: source.memoryDir,
+        namespace: TENANT,
+        entryIds: [`md:${TENANT}:${NOTE_DAY}.md#0`],
+      });
+      expect(marked.recorded).toHaveLength(1);
+      expect(await restoredEntryText(source)).toMatch(/> From you$/);
+
+      const archive = await exportArchive(source, false);
+      expect(readZipEntries(archive).map(entry => entry.name)).toContain(`memory/${TENANT}/.reviewed-from-you`);
+      await runDataImport(importDeps(target), importRequest(archive));
+      expect(await readFile(join(target.memoryDir, TENANT, '.reviewed-from-you'), 'utf8')).toMatch(
+        /^md:default:2026-09-03\.md#0\t[0-9a-f]{64}\n$/,
+      );
+      expect(await restoredEntryText(target)).toMatch(/> From you$/);
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('hands a reviewed note to a client backend as the person’s own', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-reviewed-client');
+    try {
+      const text = reviewedNote(`${NOTE_DAY}T10:00:00.000Z`);
+      const id = `md:${TENANT}:${NOTE_DAY}.md#0`;
+      const withReview = await repack(archive, entries => {
+        entries.set(`memory/${TENANT}/memory/${NOTE_DAY}.md`, Buffer.from(`${text}\n\n`, 'utf8'));
+        entries.set(
+          `memory/${TENANT}/.reviewed-from-you`,
+          Buffer.from(`${id}\t${createHash('sha256').update(text, 'utf8').digest('hex')}\n`, 'utf8'),
+        );
+      });
+      const retained: { content: string; metadata?: Record<string, string> }[] = [];
+      const client: Pick<MemoryClient, 'listEntries' | 'retain'> = {
+        listEntries: () => Promise.resolve({ ok: true, entries: [] }),
+        retain: ({ items }) => {
+          retained.push(...items);
+          return Promise.resolve({ ok: true });
+        },
+      };
+      await runDataImport(importDeps(target, { kind: 'client', client }), importRequest(withReview));
+      expect(retained.find(item => item.content.includes('Likes tea.'))?.metadata?.['origin']).toBe('user_stated');
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  describe('from an export made before notes said where they came from', () => {
+    async function importOlderExport(chatId: string): Promise<{ source: Instance; target: Instance; at: string }> {
+      const { source, archive } = await seededArchive();
+      const turn = await source.stores.sessionStore.getTurn({
+        session_id: SEED_IDS.sessionMain,
+        turn_id: 'session-1-turn-1',
+      });
+      if (turn?.state.status !== 'done') {
+        throw new Error('the seeded chat has no finished first turn');
+      }
+      const at = turn.state.completed_at;
+      const day = at.slice(0, 10);
+      const older = await repack(archive, entries => {
+        entries.set(
+          `memory/${TENANT}/memory/${day}.md`,
+          Buffer.from(`## ${at}\n\nLikes tea.\n\n<!-- session_id: ${chatId} -->\n\n`, 'utf8'),
+        );
+        const manifest = recordAt(parseJson(entries.get('manifest.json'), 'manifest.json'), 'manifest');
+        manifest['schema_version'] = 2;
+        entries.set('manifest.json', Buffer.from(JSON.stringify(manifest)));
+      });
+      const target = await makeInstance(`target-older-${chatId}`);
+      await runDataImport(importDeps(target), importRequest(older));
+      return { source, target, at };
+    }
+
+    const candidatesIn = async (target: Instance) =>
+      (
+        await findReviewCandidates({
+          scope: {
+            baseDir: target.memoryDir,
+            tenantNamespace: TENANT,
+            vaultNamespace: TENANT,
+            tenantId: TENANT,
+            subjectId: 'bob',
+            sessionStore: target.stores.sessionStore,
+          },
+          cursor: 0,
+          now: Date.now,
+        })
+      ).candidates;
+
+    it('can be reviewed in the importing install when the chat came over too', async () => {
+      const { source, target } = await importOlderExport(SEED_IDS.sessionMain);
+      try {
+        expect(await restoredEntryText(target)).toMatch(/> External source: no record$/);
+        expect((await candidatesIn(target)).map(note => note.text)).toEqual([
+          'Likes tea.\n\n> External source: no record',
+        ]);
+      } finally {
+        await source.close();
+        await target.close();
+      }
+    });
+
+    it('cannot be reviewed when its chat did not come over', async () => {
+      const { source, target } = await importOlderExport('chat-that-was-left-behind');
+      try {
+        expect(await restoredEntryText(target)).toMatch(/> External source: no record$/);
+        expect(await candidatesIn(target)).toEqual([]);
+      } finally {
+        await source.close();
+        await target.close();
+      }
+    });
   });
 });
 

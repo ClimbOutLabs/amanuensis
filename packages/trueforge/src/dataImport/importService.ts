@@ -58,8 +58,10 @@ import {
   entryMetadata,
   hiddenContext,
   latestTombstonesByEntry,
+  parseReviewedMarks,
   parseVaultTombstones,
   personaVaultNamespace,
+  REVIEWED_FROM_YOU_FILE,
   SESSION_ID_METADATA_KEY,
   upgradeLegacyEntries,
   VAULT_TOMBSTONES_FILE,
@@ -916,7 +918,10 @@ interface ParsedMemoryNamespace {
 
 /** Groups the archive's memory/ files by namespace segment and resolves them the way the vault reads them. */
 function parseMemoryNamespaces(files: ReadonlyMap<string, Buffer>): ParsedMemoryNamespace[] {
-  const bySeg = new Map<string, { curated?: string; tombstones?: string; daily: Map<string, string> }>();
+  const bySeg = new Map<
+    string,
+    { curated?: string; tombstones?: string; reviewed?: string; daily: Map<string, string> }
+  >();
   for (const [name, data] of files) {
     if (!name.startsWith('memory/')) {
       continue;
@@ -938,6 +943,8 @@ function parseMemoryNamespaces(files: ReadonlyMap<string, Buffer>): ParsedMemory
       bucket.curated = data.toString('utf8');
     } else if (inner === VAULT_TOMBSTONES_FILE) {
       bucket.tombstones = data.toString('utf8');
+    } else if (inner === REVIEWED_FROM_YOU_FILE) {
+      bucket.reviewed = data.toString('utf8');
     } else if (dailyFile !== undefined) {
       bucket.daily.set(dailyFile, data.toString('utf8'));
     }
@@ -947,9 +954,10 @@ function parseMemoryNamespaces(files: ReadonlyMap<string, Buffer>): ParsedMemory
   for (const [seg, bucket] of bySeg) {
     const tombstones = bucket.tombstones === undefined ? [] : parseVaultTombstones(bucket.tombstones);
     const latest = latestTombstonesByEntry(tombstones);
+    const reviewed = parseReviewedMarks(bucket.reviewed ?? '');
     const scanned = [...bucket.daily.keys()]
       .sort()
-      .flatMap(file => dailyLogEntries({ safeNamespace: seg, file, content: bucket.daily.get(file) ?? '' }));
+      .flatMap(file => dailyLogEntries({ safeNamespace: seg, file, content: bucket.daily.get(file) ?? '', reviewed }));
     const entries = applyVaultTombstones(scanned, tombstones).map(entry => {
       const tombstone = latest.get(entry.id);
       return {
@@ -1239,7 +1247,7 @@ function planMarkdownMemory(
   input: { targetTenantId: string; personaSegBySource: ReadonlyMap<string, string> },
 ): PlannedMemoryFile[] {
   const planned: PlannedMemoryFile[] = [];
-  const knownFiles = new Set([CURATED_MEMORY_FILE, VAULT_TOMBSTONES_FILE]);
+  const knownFiles = new Set([CURATED_MEMORY_FILE, VAULT_TOMBSTONES_FILE, REVIEWED_FROM_YOU_FILE]);
   for (const [name, data] of contents.files) {
     if (!name.startsWith('memory/')) {
       continue;
@@ -1264,9 +1272,9 @@ function planMarkdownMemory(
       throw new DataImportError('The memory section of this export belongs to a different account.', 400);
     }
     let bytes = data;
-    if (inner === '.vault-tombstones.md' && targetSeg !== sourceSeg) {
-      // Tombstone entry ids embed the vault namespace segment; retarget them
-      // so edits and deletes still apply under the new tenant.
+    if ((inner === VAULT_TOMBSTONES_FILE || inner === REVIEWED_FROM_YOU_FILE) && targetSeg !== sourceSeg) {
+      // Marker entry ids embed the vault namespace segment; retarget them
+      // so edits, deletes and reviews still apply under the new tenant.
       const text = data.toString('utf8').split(`md:${sourceSeg}:`).join(`md:${targetSeg}:`);
       bytes = Buffer.from(text, 'utf8');
     }

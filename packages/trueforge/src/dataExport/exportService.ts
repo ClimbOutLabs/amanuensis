@@ -46,6 +46,7 @@ import type { Persona } from '../personas/persona';
 import {
   CURATED_MEMORY_FILE,
   DAILY_LOG_FILE_PATTERN,
+  REVIEWED_FROM_YOU_FILE,
   VAULT_TOMBSTONES_FILE,
   personaForVaultFilesystemNamespace,
   personaVaultNamespace,
@@ -656,7 +657,7 @@ async function writeUploadedFiles<TTransaction>(
   return stored;
 }
 
-const MARKDOWN_MEMORY_FILES = [CURATED_MEMORY_FILE, VAULT_TOMBSTONES_FILE] as const;
+const MARKDOWN_MEMORY_FILES = [CURATED_MEMORY_FILE, VAULT_TOMBSTONES_FILE, REVIEWED_FROM_YOU_FILE] as const;
 
 /** Persona names held by everyone else who has chats on this instance. */
 async function personaNamesOfOthers<TTransaction>(
@@ -795,7 +796,7 @@ async function regularFileText(filePath: string): Promise<string | undefined> {
   }
 }
 
-/** Verbatim Markdown-backend files: MEMORY.md, daily logs, tombstones. Derived caches and sharing config stay behind. */
+/** Verbatim Markdown-backend files: MEMORY.md, daily logs, tombstones, reviewed notes. Derived caches and sharing config stay behind. */
 async function writeMarkdownMemoryFiles<TTransaction>(
   context: ExportContext<TTransaction>,
   input: { markdownDir: string; personas: readonly Persona[] },
