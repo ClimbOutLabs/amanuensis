@@ -4272,7 +4272,8 @@
           "gmail_read",
           "gmail_compose",
           "calendar_read",
-          "calendar_write"
+          "calendar_write",
+          "drive_files"
         ],
         "type": "string"
       },
