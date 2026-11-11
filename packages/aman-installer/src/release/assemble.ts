@@ -1,3 +1,4 @@
+import { RELEASE_SYSTEMS, SETUP_ASSET_NAME, WINDOWS_ASSET_PREFIX } from './assetNames.ts';
 import { sourceIdKeys, type ReleaseManifest, type SourceIds } from './manifest.ts';
 
 // The assembly of one release record from the per-system partial
@@ -6,13 +7,9 @@ import { sourceIdKeys, type ReleaseManifest, type SourceIds } from './manifest.t
 // one record a release is checked against as a whole. It refuses, with
 // the reason as a plain line for the release tool to print, whenever a
 // system's build is missing, two records disagree about a file, or a
-// record's image names are not this checkout's.
-
-const SYSTEMS: readonly { name: string; prefix: string }[] = [
-  { name: 'Windows', prefix: 'aman-windows-' },
-  { name: 'Mac', prefix: 'aman-darwin-' },
-  { name: 'Linux', prefix: 'aman-linux-' },
-];
+// record's image names are not this checkout's. The setup download
+// must be there too, and be the very same program as a Windows build,
+// so the file a person installs from is the file the update replaces.
 
 export function assembleManifests({
   parts,
@@ -47,10 +44,20 @@ export function assembleManifests({
       files[name] = hash;
     }
   }
-  for (const system of SYSTEMS) {
+  for (const system of RELEASE_SYSTEMS) {
     if (!Object.keys(files).some(name => name.startsWith(system.prefix))) {
       return { problem: `The ${system.name} build is missing from the partial records.` };
     }
+  }
+  const setupHash = files[SETUP_ASSET_NAME];
+  if (setupHash === undefined) {
+    return { problem: `${SETUP_ASSET_NAME} is missing from the partial records.` };
+  }
+  const windowsHashes = Object.entries(files)
+    .filter(([name]) => name.startsWith(WINDOWS_ASSET_PREFIX))
+    .map(([, hash]) => hash);
+  if (!windowsHashes.includes(setupHash)) {
+    return { problem: `${SETUP_ASSET_NAME} is not the same program as the Windows build.` };
   }
   const archives = Object.keys(files).filter(name => name.endsWith('.tar.gz'));
   if (archives.length === 0) {
