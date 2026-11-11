@@ -11,6 +11,7 @@
 #        install.sh instance password [<name>]
 #        install.sh backup [<name>]
 #        install.sh backups daily|off
+#        install.sh restore [<name>] [<time> | --latest]
 #        install.sh upgrade [--check] [--force]
 #        install.sh docker
 #        install.sh command
@@ -73,6 +74,8 @@ DOWNLOADS_FILE=$INSTALLER_DIR/downloads.txt
 . "$INSTALLER_DIR/lib/migrate.sh"
 # shellcheck source=lib/backup.sh
 . "$INSTALLER_DIR/lib/backup.sh"
+# shellcheck source=lib/restore.sh
+. "$INSTALLER_DIR/lib/restore.sh"
 # shellcheck source=lib/upgrade.sh
 . "$INSTALLER_DIR/lib/upgrade.sh"
 # shellcheck source=lib/plan.sh
@@ -169,6 +172,8 @@ Amanuensis installer
                                   set a new owner password and sign everyone out
   install.sh backup [<name>]      make a backup now
   install.sh backups daily|off    turn the daily backup on or off
+  install.sh restore [<name>] [<time> | --latest]
+                                  put an instance back from a backup; with no time it lists them and asks which
   install.sh upgrade [--check] [--force]
                                   update Aman to this copy of its code; --check only shows what would change
   install.sh docker               install or start Docker, or update it, asking before anything that needs admin rights
@@ -281,6 +286,7 @@ parse_args() {
       --check) OPT_CHECK=1 ;;
       --force) OPT_FORCE=1 ;;
       --purge-data) OPT_PURGE=1 ;;
+      --latest) OPT_LATEST=1 ;;
       --demo) OPT_DEMO=1 ;;
       --reset) OPT_RESET=1 ;;
       --fresh) OPT_FRESH=1 ;;
@@ -301,7 +307,7 @@ parse_args() {
         case "$positional:$COMMAND" in
           1:install)
             case "$arg" in
-              instance | backup | backups | upgrade | docker | command | tls | migrate) COMMAND=$arg ;;
+              instance | backup | backups | upgrade | docker | command | tls | migrate | restore) COMMAND=$arg ;;
               *) usage_die "unknown command $arg" ;;
             esac
             ;;
@@ -309,6 +315,7 @@ parse_args() {
           3:instance | 2:backup) OPT_NAME=$arg ;;
           4:instance) OPT_IMPORT_FILE=$arg ;;
           2:backups) OPT_BACKUPS_ARG=$arg ;;
+          2:restore | 3:restore) restore_take_arg "$arg" ;;
           *) usage_die "unexpected argument $arg" ;;
         esac
         ;;
@@ -402,6 +409,9 @@ check_demo_options() {
   if [ "$OPT_LOCAL_ONLY" = 1 ] && [ -n "$OPT_PUBLIC_URL" ]; then
     usage_die "--local-only and --public-url are opposites; pick one."
   fi
+  if [ "$OPT_LATEST" = 1 ] && [ "$COMMAND" != restore ]; then
+    usage_die "--latest applies to restore"
+  fi
   if [ "$OPT_LOCAL_ONLY" = 1 ] && [ "$OPT_HOME_NETWORK" = 1 ]; then
     usage_die "--local-only and --home-network are opposites; pick one."
   fi
@@ -438,6 +448,7 @@ on_exit() {
   upgrade_on_exit
   import_on_exit
   migrate_on_exit
+  restore_on_exit
   if [ "$rc" != 0 ]; then instance_pending_notice; fi
   lock_release
   exit "$rc"
@@ -486,6 +497,7 @@ main() {
     install) cmd_install ;;
     backup) cmd_backup ;;
     backups) cmd_backups ;;
+    restore) cmd_restore ;;
     docker) docker_fix ;;
     command) cmd_command ;;
     tls) cmd_tls ;;
