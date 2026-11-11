@@ -144,7 +144,7 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
       </header>
 
       <div className="border-t border-border px-4 py-3">
-        <p className="mb-2 text-text-secondary">What will be sent</p>
+        <p className="mb-2 text-text-secondary">{sending ? 'What will be sent' : 'What will be saved'}</p>
         {fromPick.choices.length > 1 && (
           <div className="mb-2">
             <MailFromPicker
