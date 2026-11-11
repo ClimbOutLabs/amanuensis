@@ -103,6 +103,11 @@ the recall screen is on they are classified like an untrusted-origin item (`cura
 `reflection:#0`): withheld when flagged or when the screen gave no verdict. The screen's time
 budget is charged for the recall call alone, not the parallel wall clock.
 
+The Markdown store writes a source line on every note that is not the person's own words, and nothing on
+their own. At recall it hands back each note with its origin: `tool_ingested` for a note with a source line,
+`user_stated` for one without. So the recall screen and the record of where links came from treat a person's
+own note the same way on both memory stores.
+
 The event's `layers` field records, per turn, whether a profile line and how many mental models
 were injected (and how many candidates the bank returned), the route and the pattern that selected
 it, and the reflect outcome with its wall clock and the number of memories the provider said the

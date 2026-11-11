@@ -64,6 +64,7 @@ import {
   personaForVaultNamespace,
   readSummaryPending,
   readVaultTombstones,
+  recallMetadata,
   sanitizeNamespace,
   scanNamespaceEntries,
   scanVaultEntries,
@@ -280,14 +281,14 @@ export class MarkdownMemoryClient implements MemoryClient {
         ),
       );
       for (const item of interleaveRanked(rankedLists)) {
-        const metadata = entryMetadata(item.text);
+        const metadata = recallMetadata(item.text);
         const occurredAt = entryOccurredAt(item);
         // The time and the chat id travel as fields: recall shows the date, and can skip notes from the current chat.
         const ok = take({
           id: item.id,
           text: entryRecallText(item.text),
           ...(occurredAt !== undefined && { occurred_start: occurredAt }),
-          ...(metadata && { metadata }),
+          metadata,
         });
         if (!ok) {
           break;
