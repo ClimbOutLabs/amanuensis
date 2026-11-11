@@ -111,6 +111,7 @@ import {
   type SummarizeTurnContext,
 } from '../runtime/memory/memoryRetain';
 import { applyMemorySettings, serverMemoryConfig } from '../runtime/memory/memorySettings';
+import { resolveSummarizationModelFqn, type ProfileLineSuggestion } from '../runtime/memory/memorySummarize';
 import { saveSentMail, sentMailFromCall, sentMailWentThrough } from '../runtime/memory/sentMail';
 import { readMemoryRecallSetting } from '../runtime/memoryRecallSettings';
 import { applyMemoryScreenOverride, readMemoryScreenSetting } from '../runtime/memoryScreenSettings';
@@ -129,8 +130,7 @@ import type { PersonaTurnContext } from '../runtime/personaCapability';
 import type { PersonaSwitchNotice } from '../runtime/PersonaTurnResourceResolver';
 import { privateChatExpiry, sessionKeepsNothing } from '../runtime/privateChat';
 import {
-  profileLearningPassConfig,
-  resolveTurnModelFqn,
+  learnedProfileLines,
   submitProfileLearning,
   type ProfileLearningDrainMember,
 } from '../runtime/profileLearning';
@@ -1525,6 +1525,9 @@ async function runTurnFollowUp(params: {
       }
     };
     await flushUsage();
+    const assistantText = formatAssistantMessageText(state.output?.content);
+    // Set by the turn's fact call when it runs, so profile learning costs no call of its own.
+    let profileSuggestions: readonly ProfileLineSuggestion[] | undefined;
     if (memory !== undefined) {
       // Awaited so the verification pass inside can retry a failed retain once.
       const stored = await submitRetainWithVerification({
@@ -1533,13 +1536,22 @@ async function runTurnFollowUp(params: {
         sessionId,
         turnId,
         userText: memory.userText,
-        assistantText: formatAssistantMessageText(state.output?.content),
+        assistantText,
         completedAt: state.completed_at,
         timeZone: memory.timeZone,
         origin: ingestedToolOutput ? 'tool_ingested' : 'user_stated',
         logger,
         toolResults,
         summarize: memory.summarize,
+        profileLearning:
+          profileLearning === undefined
+            ? undefined
+            : {
+                knownLines: profileLearning.knownLines,
+                onAnswered: lines => {
+                  profileSuggestions = lines;
+                },
+              },
         outcomeLog: memory.outcomeLog,
       });
       // Only a stored turn can have gone to the persona it started with; a skipped or failed
@@ -1549,15 +1561,16 @@ async function runTurnFollowUp(params: {
       }
     }
     if (profileLearning !== undefined) {
-      // The assistant's reply is deliberately not passed here: it is not a source of facts
-      // about the user, so the learning pass only ever sees the user's own turn text.
-      // The pass writes its audit event to the turnEventStream (how an open tab sees it
-      // without reloading the turn).
+      // The reply is read only for its last question, as the fact call reads it: it is never
+      // a source of facts about the user. The audit event goes to the turnEventStream (how an
+      // open tab sees it without reloading the turn).
       await submitProfileLearning({
         ...profileLearning,
         sessionId,
         turnId,
         completedAt: state.completed_at,
+        assistantText,
+        suggestions: profileSuggestions,
         turnEventStream,
         logger,
       });
@@ -2644,50 +2657,9 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
         : undefined,
     });
 
-    // Resolved before the turn exists, like the memory provider above: the pass itself runs
-    // after TURN_DONE (awaited by the tracked drain) and every failure inside it silently
-    // no-ops. Read off the
-    // profile already loaded for the personalization context, so learning left off (the default)
-    // costs nothing here, not even the model-FQN lookup. The pass re-reads the switch itself, so
-    // a user who turns it off mid-turn is still obeyed.
-    //
-    // This is the one part of the pass that runs on the create-turn path, so it is the one
-    // part that could fail a turn. It must not: an agent-store read that throws drops learning
-    // for this turn and nothing more.
-    let profileLearning: ProfileLearningDrainMember | undefined;
-    if (profile?.learning_enabled === true) {
-      try {
-        profileLearning = {
-          session: session.record,
-          config: profileLearningPassConfig(),
-          personalizationStore: deps.personalizationStore,
-          eventStore: deps.sessionStore,
-          modelProviderStore,
-          tokenFactoryBudget: deps.tokenFactoryBudget,
-          modelUsage,
-          memoryClient,
-          tenantId: requestContext.tenant_id,
-          createdBy: userRef,
-          userText: extractUserMessageText(body.input),
-          turnModelFqn: await resolveTurnModelFqn({
-            tenantId: requestContext.tenant_id,
-            personaModelName: persona?.kind === 'persona' ? persona.persona.model_name : undefined,
-            sessionAgent: session.record.agent,
-            agentStore,
-          }),
-        };
-      } catch (error) {
-        deps.logger.debug('Profile learning disabled for this turn: the model FQN did not resolve', {
-          sessionId,
-          ...extractErrorLogFields(error),
-        });
-        profileLearning = undefined;
-      }
-    }
-
     // One read per turn: the Settings toggle's persisted override wins when stored, otherwise
-    // the MEMORY_SUMMARIZE env default. Resolved before the turn exists, next to the profile
-    // learning lookup above, so the drain hook below can summarize without a store of its own.
+    // the MEMORY_SUMMARIZE env default. Resolved before the turn exists, so the drain hook below
+    // can summarize without a store of its own.
     const memorySummarize = await resolveTurnSummarizeContext({
       globalSettingsStore: deps.globalSettingsStore,
       logger: deps.logger,
@@ -2707,6 +2679,52 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
         profile?.assistant_name ??
         undefined,
     });
+
+    // Read off the profile already loaded for the personalization context, so learning left off
+    // (the default) costs nothing here. Learning rides the turn's fact call; the model named here
+    // is asked only when no fact call runs for the turn. The switch is read again after the turn,
+    // so a user who turns it off mid-turn is still obeyed.
+    //
+    // This runs on the create-turn path, so it must not fail a turn: an agent-store read that
+    // throws drops learning for this turn and nothing more.
+    let profileLearning: ProfileLearningDrainMember | undefined;
+    if (profile?.learning_enabled === true) {
+      try {
+        profileLearning = {
+          session: session.record,
+          personalizationStore: deps.personalizationStore,
+          eventStore: deps.sessionStore,
+          memoryClient,
+          retainTimeoutMs: configuration.MEMORY_RETAIN_TIMEOUT_MS,
+          tenantId: requestContext.tenant_id,
+          createdBy: userRef,
+          userText: extractUserMessageText(body.input),
+          knownLines: learnedProfileLines(profile.learned_profile),
+          factCall: {
+            modelProviderStore,
+            summarizationModelFqn:
+              memorySummarize === undefined
+                ? await resolveSummarizationModelFqn({
+                    tenantId: requestContext.tenant_id,
+                    personaModelName: persona?.kind === 'persona' ? persona.persona.model_name : undefined,
+                    sessionAgent: session.record.agent,
+                    agentStore,
+                  })
+                : memorySummarize.summarizationModelFqn,
+            tokenFactoryBudget: deps.tokenFactoryBudget,
+            modelUsage,
+            personName: profile.user_name ?? undefined,
+            timeZone: body.client_timezone,
+          },
+        };
+      } catch (error) {
+        deps.logger.debug('Profile learning disabled for this turn: the model FQN did not resolve', {
+          sessionId,
+          ...extractErrorLogFields(error),
+        });
+        profileLearning = undefined;
+      }
+    }
 
     const turnId = mintPeeredTurnId(configuration.EXECUTOR_ID);
     // One read per turn: the persisted override (or env default) applies to the whole turn.

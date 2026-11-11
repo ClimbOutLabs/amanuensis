@@ -2170,17 +2170,6 @@ export interface SharedServerConfiguration {
    */
   MEMORY_REFLECT_TIMEOUT_MS: number;
   /**
-   * Model FQN (`provider/model`) for the distillation pass. Empty means the
-   * turn's own model. Env: `PROFILE_LEARNING_MODEL`. Default empty.
-   * Whether the pass runs at all is the user's, on the personalization profile.
-   */
-  PROFILE_LEARNING_MODEL: string;
-  /**
-   * Min milliseconds between host-written learned-profile updates.
-   * Env: `PROFILE_LEARNING_MIN_INTERVAL_MS`. Default 3600000 (1 hour).
-   */
-  PROFILE_LEARNING_MIN_INTERVAL_MS: number;
-  /**
    * Space-separated Tesseract language codes OCR falls back to when a page's script cannot be detected; a page
    * whose script is detected is read with that script's languages instead. Languages the sandbox image lacks are
    * ignored. Default: English, Portuguese, Spanish, French, German, Italian and Dutch. Env: `DOCUMENT_OCR_LANGUAGES`.
@@ -2997,12 +2986,6 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('MEMORY_REFLECT_TIMEOUT_MS'),
     defaultValue: 8000,
     maxValue: MEMORY_PROVIDER_MAX_TIMEOUT_MS,
-  }),
-  PROFILE_LEARNING_MODEL: getEnv('PROFILE_LEARNING_MODEL', { defaultValue: '' }) ?? '',
-  PROFILE_LEARNING_MIN_INTERVAL_MS: parsePositiveInt({
-    envKey: 'PROFILE_LEARNING_MIN_INTERVAL_MS',
-    raw: getEnv('PROFILE_LEARNING_MIN_INTERVAL_MS'),
-    defaultValue: 3_600_000,
   }),
   DOCUMENT_OCR_LANGUAGES:
     getEnv('DOCUMENT_OCR_LANGUAGES', { defaultValue: DEFAULT_OCR_LANGUAGES }) ?? DEFAULT_OCR_LANGUAGES,

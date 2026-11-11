@@ -37,7 +37,12 @@ import {
   USER_STATED_ORIGIN,
   type AmanMemoryOrigin,
 } from './memoryOrigin';
-import { summarizeTurnContent, usablePersonName, type SummaryFallbackReason } from './memorySummarize';
+import {
+  summarizeTurnContent,
+  usablePersonName,
+  type ProfileLineSuggestion,
+  type SummaryFallbackReason,
+} from './memorySummarize';
 import { sortWrittenNotes } from './pageSortRun';
 import { uuidv5 } from './uuidv5';
 
@@ -165,6 +170,17 @@ export interface RetainOutcomeLog {
   personaName: string;
 }
 
+/**
+ * Rides the turn's fact call when the person has profile learning on, so learning costs no model
+ * call of its own: the call is shown the profile's lines and says which kept facts belong there.
+ */
+export interface TurnProfileLearning {
+  /** The learned profile's lines, in the order the model sees them numbered. */
+  knownLines: readonly string[];
+  /** Called once the fact call has run, with the lines it suggested; an empty list when it kept nothing or failed. */
+  onAnswered: (lines: readonly ProfileLineSuggestion[]) => void;
+}
+
 export interface SubmitRetainParams {
   client: MemoryClient;
   /** The chat the turn belongs to; a private chat keeps nothing, so nothing is decided or sent. */
@@ -190,6 +206,8 @@ export interface SubmitRetainParams {
    * never summarize (the full exchange is kept).
    */
   summarize?: SummarizeTurnContext | undefined;
+  /** Present only when profile learning is on for the person and this is the turn's first attempt. */
+  profileLearning?: TurnProfileLearning | undefined;
 }
 
 /**
@@ -308,8 +326,10 @@ async function decidePersonFacts(params: SubmitRetainParams): Promise<TurnMemory
       tokenFactoryBudget: summarize.tokenFactoryBudget,
       modelUsage: summarize.modelUsage,
       logger: params.logger,
+      profileLines: params.profileLearning?.knownLines,
       resolveLlm: summarize.resolveLlm,
     });
+    params.profileLearning?.onAnswered(result.status === 'summarized' ? (result.profileLines ?? []) : []);
     switch (result.status) {
       case 'summarized': {
         await recordSummaryOutcome(params, { outcome: 'summarized' });

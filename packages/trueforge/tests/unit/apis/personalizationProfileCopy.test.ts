@@ -1,4 +1,3 @@
-import type { ILLM } from '@truefoundry/trueforge-core/core';
 import { createHash } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -34,19 +33,6 @@ const emptyContent = {
   pinned_preferences: [],
   help_areas: [],
 };
-
-function llmAnswering(text: string): ILLM {
-  return {
-    create(): ReturnType<ILLM['create']> {
-      throw new Error('streaming is not used by the distillation pass');
-    },
-    createNonStream: async () => ({
-      output: { role: 'assistant', content: text },
-      usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
-      finish_reason: 'stop',
-    }),
-  };
-}
 
 /** The memory the vault still shows; deleted entries stay in the daily files but are hidden. */
 async function liveTextsHolding(client: MarkdownMemoryClient, needle: string): Promise<string[]> {
@@ -93,21 +79,25 @@ describe('learned profile copy in memory', () => {
     const learn = () =>
       submitProfileLearning({
         session: { is_incognito: false },
-        config: { modelFqn: '', minIntervalMs: 0, retainTimeoutMs: 1_000 },
         personalizationStore: store,
         eventStore: { appendEventsToDoneTurn: async () => undefined },
-        modelProviderStore: new SqliteModelProviderStore(db),
-        tokenFactoryBudget: uncappedTokenFactoryBudget,
-        modelUsage: discardedModelUsage,
         memoryClient: client,
+        retainTimeoutMs: 1_000,
         tenantId: 'default',
         createdBy: 'user-a',
         userText: 'I keep bees.',
-        turnModelFqn: 'p/m',
-        resolveLlm: async () => llmAnswering(JSON.stringify({ learned_profile: LEARNED_TEXT })),
+        knownLines: [],
+        factCall: {
+          modelProviderStore: new SqliteModelProviderStore(db),
+          summarizationModelFqn: 'p/m',
+          tokenFactoryBudget: uncappedTokenFactoryBudget,
+          modelUsage: discardedModelUsage,
+        },
         sessionId: 's1',
         turnId: 't1',
         completedAt: '2026-09-01T12:00:00.000Z',
+        assistantText: '',
+        suggestions: [{ text: LEARNED_TEXT, kind: 'fact' }],
         logger,
       });
     // The copy as an earlier version saved it.
@@ -208,7 +198,7 @@ describe('learned profile copy in memory', () => {
     await learn();
 
     const stored = await store.getProfile({ tenant_id: 'default', created_by: 'user-a' });
-    expect(stored?.learned_profile).toBe(LEARNED_TEXT);
+    expect(stored?.learned_profile).toBe(`## About me\n- ${LEARNED_TEXT}`);
     expect(await liveTextsHolding(client, LEARNED_TEXT)).toEqual([]);
     await db.destroy();
   });
