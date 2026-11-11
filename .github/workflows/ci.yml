@@ -240,6 +240,33 @@ jobs:
       - name: Build
         run: pnpm build
 
+  # The packed app, installed and started the way `npx amanuensis` does it, on a fresh data folder.
+  # Catches a file the package forgot to ship, which the workspace build and tests cannot see.
+  npx-smoke:
+    name: Packed app starts with npx
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The script builds first, so this job has no build step of its own.
+      - name: Pack, install with npx and start
+        run: pnpm smoke:npx:amanuensis
+
   # Path-gated tests only — format/lint are covered by the global job above.
   package-checks:
     name: Package (${{ matrix.package }})
@@ -526,6 +553,7 @@ jobs:
       - detect-changes
       - migration-order
       - typecheck-and-build
+      - npx-smoke
       - package-checks
       - aman-installer-exe
       - chart-checks
@@ -541,6 +569,7 @@ jobs:
           DETECT_CHANGES: ${{ needs.detect-changes.result }}
           MIGRATION_ORDER: ${{ needs.migration-order.result }}
           TYPECHECK_AND_BUILD: ${{ needs.typecheck-and-build.result }}
+          NPX_SMOKE: ${{ needs.npx-smoke.result }}
           PACKAGE_CHECKS: ${{ needs.package-checks.result }}
           AMAN_INSTALLER_EXE: ${{ needs.aman-installer-exe.result }}
           CHART_CHECKS: ${{ needs.chart-checks.result }}
@@ -550,10 +579,11 @@ jobs:
           GENERATED_CONTRACT_DRIFT: ${{ needs.generated-contract-drift.result }}
         run: |
           ok() { [ "$1" = success ] || [ "$1" = skipped ]; }
-          echo "detect-changes=$DETECT_CHANGES migration-order=$MIGRATION_ORDER typecheck-and-build=$TYPECHECK_AND_BUILD package-checks=$PACKAGE_CHECKS chart-checks=$CHART_CHECKS store-tests=$STORE_TESTS private-data-scan=$PRIVATE_DATA_SCAN help-guide=$HELP_GUIDE generated-contract-drift=$GENERATED_CONTRACT_DRIFT"
+          echo "detect-changes=$DETECT_CHANGES migration-order=$MIGRATION_ORDER typecheck-and-build=$TYPECHECK_AND_BUILD npx-smoke=$NPX_SMOKE package-checks=$PACKAGE_CHECKS chart-checks=$CHART_CHECKS store-tests=$STORE_TESTS private-data-scan=$PRIVATE_DATA_SCAN help-guide=$HELP_GUIDE generated-contract-drift=$GENERATED_CONTRACT_DRIFT"
           [ "$DETECT_CHANGES" = success ] || exit 1
           [ "$MIGRATION_ORDER" = success ] || exit 1
           [ "$TYPECHECK_AND_BUILD" = success ] || exit 1
+          [ "$NPX_SMOKE" = success ] || exit 1
           ok "$PACKAGE_CHECKS" || exit 1
           ok "$AMAN_INSTALLER_EXE" || exit 1
           ok "$CHART_CHECKS" || exit 1
