@@ -367,6 +367,245 @@ describe("VaultClient", () => {
         }).rejects.toThrow(TrueForgeTypes.NotImplementedError);
     });
 
+    test("list_review_notes (1)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = {
+            data: {
+                next_cursor: "next_cursor",
+                note_count: 1,
+                notes: [{ chat_title: null, day: "day", entry_id: "entry_id", text: "text" }],
+            },
+        };
+
+        server
+            .mockEndpoint()
+            .get("/api/v1/memory/vault/review")
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        const response = await client.memory.vault.listReviewNotes();
+        expect(response).toEqual({
+            data: {
+                nextCursor: "next_cursor",
+                noteCount: 1,
+                notes: [
+                    {
+                        chatTitle: null,
+                        day: "day",
+                        entryId: "entry_id",
+                        text: "text",
+                    },
+                ],
+            },
+        });
+    });
+
+    test("list_review_notes (2)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .get("/api/v1/memory/vault/review")
+            .respondWith()
+            .statusCode(400)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.memory.vault.listReviewNotes();
+        }).rejects.toThrow(TrueForgeTypes.BadRequestError);
+    });
+
+    test("list_review_notes (3)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .get("/api/v1/memory/vault/review")
+            .respondWith()
+            .statusCode(401)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.memory.vault.listReviewNotes();
+        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+    });
+
+    test("list_review_notes (4)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .get("/api/v1/memory/vault/review")
+            .respondWith()
+            .statusCode(500)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.memory.vault.listReviewNotes();
+        }).rejects.toThrow(TrueForgeTypes.InternalServerError);
+    });
+
+    test("list_review_notes (5)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .get("/api/v1/memory/vault/review")
+            .respondWith()
+            .statusCode(501)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.memory.vault.listReviewNotes();
+        }).rejects.toThrow(TrueForgeTypes.NotImplementedError);
+    });
+
+    test("mark_review_notes (1)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { entry_ids: ["entry_ids"] };
+        const rawResponseBody = {
+            data: {
+                marked_count: 1,
+                marked_ids: ["marked_ids"],
+                refused: [{ entry_id: "entry_id", reason: "reason" }],
+            },
+        };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/memory/vault/review")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        const response = await client.memory.vault.markReviewNotes({
+            entryIds: ["entry_ids"],
+        });
+        expect(response).toEqual({
+            data: {
+                markedCount: 1,
+                markedIds: ["marked_ids"],
+                refused: [
+                    {
+                        entryId: "entry_id",
+                        reason: "reason",
+                    },
+                ],
+            },
+        });
+    });
+
+    test("mark_review_notes (2)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { entry_ids: ["entry_ids", "entry_ids"] };
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/memory/vault/review")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(400)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.memory.vault.markReviewNotes({
+                entryIds: ["entry_ids", "entry_ids"],
+            });
+        }).rejects.toThrow(TrueForgeTypes.BadRequestError);
+    });
+
+    test("mark_review_notes (3)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { entry_ids: ["entry_ids", "entry_ids"] };
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/memory/vault/review")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(401)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.memory.vault.markReviewNotes({
+                entryIds: ["entry_ids", "entry_ids"],
+            });
+        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+    });
+
+    test("mark_review_notes (4)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { entry_ids: ["entry_ids", "entry_ids"] };
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/memory/vault/review")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(500)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.memory.vault.markReviewNotes({
+                entryIds: ["entry_ids", "entry_ids"],
+            });
+        }).rejects.toThrow(TrueForgeTypes.InternalServerError);
+    });
+
+    test("mark_review_notes (5)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { entry_ids: ["entry_ids", "entry_ids"] };
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/memory/vault/review")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(501)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.memory.vault.markReviewNotes({
+                entryIds: ["entry_ids", "entry_ids"],
+            });
+        }).rejects.toThrow(TrueForgeTypes.NotImplementedError);
+    });
+
     test("get_sharing (1)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });

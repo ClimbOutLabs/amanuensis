@@ -5599,6 +5599,17 @@
         ],
         "type": "object"
       },
+      "ListMemoryVaultReviewNotesResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MemoryVaultReviewList"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "ListModelProvidersResponse": {
         "properties": {
           "data": {
@@ -6555,6 +6566,40 @@
         ],
         "type": "object"
       },
+      "MarkMemoryVaultReviewNotesRequest": {
+        "properties": {
+          "entry_ids": {
+            "items": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "type": "array"
+          },
+          "namespace": {
+            "description": "Vault namespace: omit for the shared vault.",
+            "maxLength": 128,
+            "type": "string"
+          }
+        },
+        "required": [
+          "entry_ids"
+        ],
+        "type": "object"
+      },
+      "MarkMemoryVaultReviewNotesResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MemoryVaultReviewResult"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "Me": {
         "properties": {
           "roles": {
@@ -7381,6 +7426,103 @@
         "required": [
           "namespace",
           "imported"
+        ],
+        "type": "object"
+      },
+      "MemoryVaultReviewList": {
+        "properties": {
+          "next_cursor": {
+            "description": "Send as `cursor` to look at the next older notes; null when every older note has been looked at.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "note_count": {
+            "description": "Notes found in this request.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "notes": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryVaultReviewNote"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "notes",
+          "note_count",
+          "next_cursor"
+        ],
+        "type": "object"
+      },
+      "MemoryVaultReviewNote": {
+        "properties": {
+          "chat_title": {
+            "description": "Title of the chat the note came from, when the chat has one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "day": {
+            "description": "Day the note was saved, `YYYY-MM-DD`.",
+            "type": "string"
+          },
+          "entry_id": {
+            "description": "Vault entry id; send it back to mark the note.",
+            "type": "string"
+          },
+          "text": {
+            "description": "The note as the Memories page shows it.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entry_id",
+          "day",
+          "text",
+          "chat_title"
+        ],
+        "type": "object"
+      },
+      "MemoryVaultReviewResult": {
+        "properties": {
+          "marked_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "marked_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "refused": {
+            "items": {
+              "properties": {
+                "entry_id": {
+                  "type": "string"
+                },
+                "reason": {
+                  "description": "Plain words saying why.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "entry_id",
+                "reason"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "marked_count",
+          "marked_ids",
+          "refused"
         ],
         "type": "object"
       },
@@ -17562,6 +17704,170 @@
           "vault"
         ],
         "x-fern-sdk-method-name": "import_entries"
+      }
+    },
+    "/api/v1/memory/vault/review": {
+      "get": {
+        "description": "List older notes with no record of their source that were saved in a chat where Aman read nothing from outside. Nothing changes. Each request looks at a limited number of notes; send `next_cursor` to continue.",
+        "parameters": [
+          {
+            "description": "Vault namespace: omit for the shared vault.",
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "description": "Vault namespace: omit for the shared vault.",
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "description": "`next_cursor` of the previous answer.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "description": "`next_cursor` of the previous answer.",
+              "pattern": "^\\d{1,6}$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListMemoryVaultReviewNotesResponse"
+                }
+              }
+            },
+            "description": "Older notes that may be marked as the person's own."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid namespace or cursor."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The vault operation failed."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The server does not run the markdown memory backend."
+          }
+        },
+        "summary": "List older notes to review",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "memory",
+          "vault"
+        ],
+        "x-fern-sdk-method-name": "list_review_notes"
+      },
+      "post": {
+        "description": "Mark the named older notes as the person's own words. Each is checked again and refused unless it still qualifies. At most 200 ids per call.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkMemoryVaultReviewNotesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarkMemoryVaultReviewNotesResponse"
+                }
+              }
+            },
+            "description": "How many notes were marked, and which were refused and why."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The vault operation failed."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The server does not run the markdown memory backend."
+          }
+        },
+        "summary": "Mark older notes as from you",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "memory",
+          "vault"
+        ],
+        "x-fern-sdk-method-name": "mark_review_notes"
       }
     },
     "/api/v1/memory/vault/sharing": {

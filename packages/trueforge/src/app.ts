@@ -38,6 +38,7 @@ import { createMapsRouter } from './apis/maps';
 import { createMcpOAuthRouter } from './apis/mcpOAuth';
 import { createMcpServersRouter } from './apis/mcpServers';
 import { createMemoryVaultRouter } from './apis/memoryVault';
+import { createMemoryVaultReviewRouter } from './apis/memoryVaultReview';
 import { createModelsRouter } from './apis/models';
 import { createNotesFolderRouter, NOTES_FOLDER_SETTINGS_BASE_PATH } from './apis/notesFolder';
 import { createPermissionsRouter } from './apis/permissions';
@@ -756,6 +757,17 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         withTransaction: deps.withTransaction,
         resolveRequestContext,
         authorizer: deps.authorizer,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
+    '/api/v1/memory/vault',
+    withAuth(
+      createMemoryVaultReviewRouter({
+        resolveRequestContext,
+        logger: deps.logger,
+        sessionStore: deps.sessionStore,
       }),
       authMiddleware,
     ),

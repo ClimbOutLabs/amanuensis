@@ -13,6 +13,9 @@ import {
   ImportMemoryVaultRequestSchema,
   ImportMemoryVaultResponseSchema,
   ListMemoryVaultEntriesResponseSchema,
+  ListMemoryVaultReviewNotesResponseSchema,
+  MarkMemoryVaultReviewNotesRequestSchema,
+  MarkMemoryVaultReviewNotesResponseSchema,
   UpdateMemoryVaultEntryRequestSchema,
   UpdateMemoryVaultSharingRequestSchema,
 } from '../schemas/memoryVault';
@@ -38,6 +41,17 @@ export const ExportMemoryVaultQuerySchema = z
     namespace: z.string().trim().max(128).optional().describe('Vault namespace to export: omit for the shared vault.'),
   })
   .openapi('ExportMemoryVaultQuery');
+
+export const ListMemoryVaultReviewNotesQuerySchema = z
+  .object({
+    namespace: z.string().trim().max(128).optional().describe('Vault namespace: omit for the shared vault.'),
+    cursor: z
+      .string()
+      .regex(/^\d{1,6}$/)
+      .optional()
+      .describe('`next_cursor` of the previous answer.'),
+  })
+  .openapi('ListMemoryVaultReviewNotesQuery');
 
 const UNAUTHENTICATED = {
   401: {
@@ -291,6 +305,69 @@ export const deleteMemoryVaultEntryRoute = createRoute({
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
       description: 'No vault entry with that id.',
     },
+    501: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'The server does not run the markdown memory backend.',
+    },
+  },
+});
+
+export const listMemoryVaultReviewNotesRoute = createRoute({
+  method: 'get',
+  path: '/review',
+  tags: [OpenApiTag.CAPABILITIES],
+  summary: 'List older notes to review',
+  description:
+    'List older notes with no record of their source that were saved in a chat where Aman read nothing from outside. Nothing changes. Each request looks at a limited number of notes; send `next_cursor` to continue.',
+  'x-fern-sdk-group-name': ['memory', 'vault'],
+  'x-fern-sdk-method-name': 'list_review_notes',
+  request: {
+    query: ListMemoryVaultReviewNotesQuerySchema,
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: ListMemoryVaultReviewNotesResponseSchema } },
+      description: "Older notes that may be marked as the person's own.",
+    },
+    400: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Invalid namespace or cursor.',
+    },
+    ...UNAUTHENTICATED,
+    ...SERVER_ERROR,
+    501: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'The server does not run the markdown memory backend.',
+    },
+  },
+});
+
+export const markMemoryVaultReviewNotesRoute = createRoute({
+  method: 'post',
+  path: '/review',
+  tags: [OpenApiTag.CAPABILITIES],
+  summary: 'Mark older notes as from you',
+  description:
+    "Mark the named older notes as the person's own words. Each is checked again and refused unless it still qualifies. At most 200 ids per call.",
+  'x-fern-sdk-group-name': ['memory', 'vault'],
+  'x-fern-sdk-method-name': 'mark_review_notes',
+  request: {
+    body: {
+      content: { 'application/json': { schema: MarkMemoryVaultReviewNotesRequestSchema } },
+      required: true,
+    },
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: MarkMemoryVaultReviewNotesResponseSchema } },
+      description: 'How many notes were marked, and which were refused and why.',
+    },
+    400: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Invalid request.',
+    },
+    ...UNAUTHENTICATED,
+    ...SERVER_ERROR,
     501: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
       description: 'The server does not run the markdown memory backend.',
