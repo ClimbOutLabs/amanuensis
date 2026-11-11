@@ -299,6 +299,11 @@ export function withFactMarker(page: MemoryPage, input: { at: FactLocation; mark
   return replaceLine({ page, at: input.at, lines: [replaced] });
 }
 
+/** The page without this fact's line. */
+export function removeFact(page: MemoryPage, input: { at: FactLocation }): MemoryPage {
+  return replaceLine({ page, at: input.at, lines: [] });
+}
+
 /**
  * The page with a fact moved to the end of Earlier. Its marker gains `until` and loses `seen`; its text, id and
  * source stay. A fact that is in Earlier already is left where it is.
@@ -374,6 +379,11 @@ export async function writeMemoryPage(input: {
     await rm(temp, { force: true });
     throw error;
   }
+}
+
+/** Removes a page file. Callers hold the vault lock; the history keeps the page, so a delete can be undone. */
+export async function removeMemoryPage(input: { vaultDir: string; kind: PageKind; slug: string }): Promise<void> {
+  await rm(pagePath(input), { force: true });
 }
 
 function lineEndingOf(section: PageSectionBlock): boolean {

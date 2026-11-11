@@ -231,7 +231,7 @@ function instructionText(line: PageLine): string | undefined {
   return undefined;
 }
 
-const COMMENT_PATTERN = /<!--[\s\S]*?(?:-->|$)/g;
+export const COMMENT_PATTERN = /<!--[\s\S]*?(?:-->|$)/g;
 
 /** A rendered page line and whose words it holds. `frame` is the host's own label, recorded on neither side. */
 interface RenderedLine {
@@ -244,7 +244,7 @@ interface RenderedLine {
  * content until someone decides otherwise: a line they typed with no marker, or a confirmed statement from their
  * own words or a message they sent. Anything under Unconfirmed is read content whatever its marker says.
  */
-function lineSide({ line, unconfirmed }: { line: PageLine; unconfirmed: boolean }): 'own' | 'read' {
+export function lineSide({ line, unconfirmed }: { line: PageLine; unconfirmed: boolean }): 'own' | 'read' {
   if (unconfirmed) {
     return 'read';
   }

@@ -37,6 +37,7 @@ import { createHelpRouter } from './apis/help';
 import { createMapsRouter } from './apis/maps';
 import { createMcpOAuthRouter } from './apis/mcpOAuth';
 import { createMcpServersRouter } from './apis/mcpServers';
+import { createMemoryPagesRouter } from './apis/memoryPages';
 import { createMemoryVaultRouter } from './apis/memoryVault';
 import { createModelsRouter } from './apis/models';
 import { createPermissionsRouter } from './apis/permissions';
@@ -754,6 +755,16 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     '/api/v1/memory/vault',
     withAuth(
       createMemoryVaultRouter({
+        resolveRequestContext,
+        logger: deps.logger,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
+    '/api/v1/memory/pages',
+    withAuth(
+      createMemoryPagesRouter({
         resolveRequestContext,
         logger: deps.logger,
       }),

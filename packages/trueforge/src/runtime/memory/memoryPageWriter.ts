@@ -92,6 +92,40 @@ export function markHandEdits({
   });
 }
 
+/**
+ * A page the person wrote by hand, marked as theirs against the last committed copy of the same file. With no
+ * history (git missing) nothing is committed, so only bullets without a marker are stamped.
+ */
+export async function markEditedPage({
+  history,
+  relativePath,
+  page,
+  today,
+  newId,
+}: {
+  history: VaultGitOptions;
+  relativePath: string;
+  page: MemoryPage;
+  today: string;
+  newId: () => string;
+}): Promise<MemoryPage> {
+  const at = parsePageFilePath(relativePath);
+  if (at === undefined) {
+    return page;
+  }
+  let head: string | undefined;
+  try {
+    head = await pageAtLastCommit({ ...history, relativePath });
+  } catch (error) {
+    if (!(error instanceof GitMissingError)) {
+      throw error;
+    }
+  }
+  const committed =
+    head === undefined ? undefined : parseMemoryPage({ content: head, fallback: { kind: at.kind, title: at.stem } });
+  return markHandEdits({ page, committed, today, newId });
+}
+
 /** Takes in every page the person changed since the last commit and commits them as "Your edits". */
 async function absorbHandEdits({
   history,
@@ -112,10 +146,7 @@ async function absorbHandEdits({
     if (page === undefined) {
       continue;
     }
-    const head = await pageAtLastCommit({ ...history, relativePath });
-    const committed =
-      head === undefined ? undefined : parseMemoryPage({ content: head, fallback: { kind: at.kind, title: at.stem } });
-    const marked = markHandEdits({ page, committed, today, newId });
+    const marked = await markEditedPage({ history, relativePath, page, today, newId });
     if (renderMemoryPage(marked) !== renderMemoryPage(page)) {
       await writeMemoryPage({ vaultDir: history.vaultDir, kind: at.kind, slug: at.stem, page: marked });
     }

@@ -215,6 +215,123 @@ export async function pageAtLastCommit(
   return result.exitCode === 0 ? result.stdout : undefined;
 }
 
+/** One entry in the page history: a commit, when it was made, what it said, and the page files it touched. */
+export interface PageCommit {
+  sha: string;
+  committedAt: string;
+  message: string;
+  /** Vault-relative page paths such as `people/wendy.md`, sorted. */
+  paths: string[];
+}
+
+const COMMIT_SEPARATOR = '\u001e';
+const FIELD_SEPARATOR = '\u001f';
+const COMMIT_FORMAT = `--format=${COMMIT_SEPARATOR}%H${FIELD_SEPARATOR}%cI${FIELD_SEPARATOR}%s`;
+/** A history entry's id: the full commit id. */
+export const PAGE_COMMIT_ID_PATTERN = /^[0-9a-f]{40}$/;
+
+/** A history with no commits yet, or none at all, has nothing to list. */
+const EMPTY_HISTORY_PATTERN = /does not have any commits yet|not a git repository|bad default revision/;
+
+function parseCommits(stdout: string): PageCommit[] {
+  return stdout
+    .split(COMMIT_SEPARATOR)
+    .filter(block => block.trim() !== '')
+    .flatMap(block => {
+      const [header = '', ...rest] = block.split('\n');
+      const [sha, committedAt, ...subject] = header.split(FIELD_SEPARATOR);
+      if (sha === undefined || committedAt === undefined) {
+        return [];
+      }
+      const paths = rest.filter(line => line !== '').sort();
+      return [{ sha, committedAt, message: subject.join(FIELD_SEPARATOR), paths }];
+    });
+}
+
+async function readCommits({
+  options,
+  args,
+}: {
+  options: VaultGitOptions;
+  args: readonly string[];
+}): Promise<PageCommit[]> {
+  const result = await git({ options, args: ['log', '--no-renames', '--name-only', COMMIT_FORMAT, ...args] });
+  if (result.exitCode !== 0) {
+    if (EMPTY_HISTORY_PATTERN.test(result.stderr)) {
+      return [];
+    }
+    throw failure({ args: ['log'], result });
+  }
+  return parseCommits(result.stdout);
+}
+
+/** The newest history entries, newest first. Empty when the vault has no history yet. */
+export async function recentPageCommits(options: VaultGitOptions & { limit: number }): Promise<PageCommit[]> {
+  return readCommits({ options, args: [`--max-count=${String(options.limit)}`, '--'] });
+}
+
+/** One history entry by its full id, or undefined when the history has no such entry. */
+export async function pageCommit(options: VaultGitOptions & { sha: string }): Promise<PageCommit | undefined> {
+  if (!PAGE_COMMIT_ID_PATTERN.test(options.sha)) {
+    return undefined;
+  }
+  const result = await git({
+    options,
+    args: ['log', '--no-renames', '--name-only', COMMIT_FORMAT, '--max-count=1', options.sha, '--'],
+  });
+  return result.exitCode === 0 ? parseCommits(result.stdout)[0] : undefined;
+}
+
+/** The entries made after `sha` that touched any of `paths`, newest first. */
+export async function pageCommitsAfter(
+  options: VaultGitOptions & { sha: string; paths: readonly string[] },
+): Promise<PageCommit[]> {
+  if (!PAGE_COMMIT_ID_PATTERN.test(options.sha) || options.paths.length === 0) {
+    return [];
+  }
+  return readCommits({
+    options,
+    args: [`${options.sha}..HEAD`, '--', ...options.paths.map(relativePath => `:(literal)${relativePath}`)],
+  });
+}
+
+/** Which of `paths` differ between an entry and the newest entry. Empty when none do. */
+export async function pagePathsDiffering(
+  options: VaultGitOptions & { sha: string; paths: readonly string[] },
+): Promise<string[]> {
+  if (!PAGE_COMMIT_ID_PATTERN.test(options.sha) || options.paths.length === 0) {
+    return [];
+  }
+  const { stdout } = await gitOrThrow({
+    options,
+    args: [
+      'diff',
+      '--name-only',
+      '--no-renames',
+      '-z',
+      options.sha,
+      'HEAD',
+      '--',
+      ...options.paths.map(relativePath => `:(literal)${relativePath}`),
+    ],
+  });
+  return stdout
+    .split('\0')
+    .filter(entry => entry !== '')
+    .sort();
+}
+
+/** A page as it was just before an entry, or undefined when the page did not exist then. */
+export async function pageBeforeCommit(
+  options: VaultGitOptions & { sha: string; relativePath: string },
+): Promise<string | undefined> {
+  if (!PAGE_COMMIT_ID_PATTERN.test(options.sha)) {
+    return undefined;
+  }
+  const result = await git({ options, args: ['show', `${options.sha}^:${options.relativePath}`] });
+  return result.exitCode === 0 ? result.stdout : undefined;
+}
+
 /** Stages every page change, including a deleted page, and nothing else. */
 async function stagePages(options: VaultGitOptions): Promise<void> {
   await clearStaleIndexLock(options);
