@@ -163,7 +163,7 @@ export class InMemoryTelegramStore implements ITelegramStore {
   }
 
   claimUpdate(input: Parameters<ITelegramStore['claimUpdate']>[0]): Promise<boolean> {
-    if (this.connection === null || this.connection.id !== input.connection_id) {
+    if (this.connection?.id !== input.connection_id) {
       return Promise.resolve(false);
     }
     const last = this.connection.last_update_id;

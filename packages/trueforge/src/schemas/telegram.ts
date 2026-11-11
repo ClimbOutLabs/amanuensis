@@ -185,7 +185,7 @@ export const TelegramWebhookUpdateSchema = z
   .object({
     update_id: z.number().int().describe('Update id; the rest of the update is checked by the handler.'),
   })
-  .passthrough()
+  .loose()
   .openapi('TelegramWebhookUpdate');
 
 export type TelegramWebhookUpdate = z.infer<typeof TelegramWebhookUpdateSchema>;
