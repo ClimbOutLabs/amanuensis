@@ -2302,7 +2302,7 @@
             "$ref": "#/components/schemas/ResourceName"
           },
           "manifest": {
-            "$ref": "#/components/schemas/ScheduleManifest"
+            "$ref": "#/components/schemas/ScheduleManifestInput"
           },
           "name": {
             "$ref": "#/components/schemas/ResourceName"
@@ -3544,6 +3544,17 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/ConfiguredModelProvider"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "GetNotesFolderResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/NotesFolderStatus"
           }
         },
         "required": [
@@ -8025,6 +8036,45 @@
         ],
         "type": "object"
       },
+      "NotesFolderStatus": {
+        "properties": {
+          "folder_path": {
+            "description": "The folder of notes the person connected; null when no folder is connected.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "inbox_file": {
+            "description": "The file inside the folder that inbox entries are added to; the default name until one is picked.",
+            "type": "string"
+          },
+          "note_count": {
+            "description": "How many notes the folder holds; null when no folder is connected or it cannot be read right now.",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "state": {
+            "description": "Connected, not connected, connected but the saved sign-in no longer works, or saved but the server cannot be reached right now.",
+            "enum": [
+              "connected",
+              "not_connected",
+              "sign_in_stopped",
+              "not_working"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "folder_path",
+          "inbox_file",
+          "note_count"
+        ],
+        "type": "object"
+      },
       "NudgeDelivery": {
         "properties": {
           "attempts": {
@@ -9156,6 +9206,17 @@
         ],
         "type": "object"
       },
+      "RemoveNotesFolderResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/NotesFolderStatus"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "ReplyResultsByKind": {
         "description": "Tool call results in this reply: ok, refused, unavailable, or error.",
         "properties": {
@@ -9524,6 +9585,10 @@
           "enabled": {
             "description": "Whether a sandbox provider is configured for this tenant.",
             "type": "boolean"
+          },
+          "reason": {
+            "description": "Why the sandbox is off, in plain words; present only when it is off and a reason is known.",
+            "type": "string"
           }
         },
         "required": [
@@ -9800,6 +9865,33 @@
         ],
         "type": "object"
       },
+      "SaveNotesFolderRequest": {
+        "properties": {
+          "folder_path": {
+            "description": "The path of the folder of Markdown notes, on the computer Aman runs on.",
+            "type": "string"
+          },
+          "inbox_file": {
+            "description": "The file in the folder that inbox entries are added to; the default name when left out.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "folder_path"
+        ],
+        "type": "object"
+      },
+      "SaveNotesFolderResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/NotesFolderStatus"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "Schedule": {
         "additionalProperties": false,
         "properties": {
@@ -9852,6 +9944,43 @@
         "type": "string"
       },
       "ScheduleManifest": {
+        "additionalProperties": false,
+        "properties": {
+          "cron": {
+            "$ref": "#/components/schemas/CronExpression"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ScheduleKind"
+          },
+          "origin_session_id": {
+            "default": null,
+            "description": "The chat a reminder was set in, so its line lands in that chat when it fires. Null for tasks, for reminders set outside a chat, and for reminders saved before this was recorded.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "run_at": {
+            "$ref": "#/components/schemas/RunAt"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ScheduleStatus"
+          },
+          "task": {
+            "description": "First user message sent to the agent on every run.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "timezone": {
+            "$ref": "#/components/schemas/Timezone"
+          }
+        },
+        "required": [
+          "task"
+        ],
+        "type": "object"
+      },
+      "ScheduleManifestInput": {
         "additionalProperties": false,
         "properties": {
           "cron": {
@@ -14295,7 +14424,7 @@
         "additionalProperties": false,
         "properties": {
           "manifest": {
-            "$ref": "#/components/schemas/ScheduleManifest"
+            "$ref": "#/components/schemas/ScheduleManifestInput"
           },
           "name": {
             "$ref": "#/components/schemas/ResourceName"
@@ -25517,7 +25646,7 @@
     },
     "/api/v1/user/audit-log": {
       "get": {
-        "description": "Lists the authenticated user’s Sentinel audit entries from every chat, newest first, including chats that were deleted. Read-only and paged.",
+        "description": "Lists the authenticated user’s Sentinel audit entries from every chat, newest first, including chats that were deleted. Can be narrowed by outcome and by a from and to time. Read-only and paged.",
         "parameters": [
           {
             "in": "query",
@@ -25554,6 +25683,28 @@
                 "denied",
                 "auto_denied"
               ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only entries at or after this time. The caller sends the start of a day in its own timezone.",
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "description": "Only entries at or after this time. The caller sends the start of a day in its own timezone.",
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only entries before this time. The caller sends the start of the day after its last shown day.",
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "description": "Only entries before this time. The caller sends the start of the day after its last shown day.",
+              "format": "date-time",
               "type": "string"
             }
           }
@@ -27087,6 +27238,162 @@
           "google"
         ],
         "x-fern-sdk-method-name": "test_connection"
+      }
+    },
+    "/api/v1/user/settings/notes-folder": {
+      "delete": {
+        "description": "Forgets the folder. Nothing inside the folder is changed or removed.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemoveNotesFolderResponse"
+                }
+              }
+            },
+            "description": "The folder is disconnected."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
+          }
+        },
+        "summary": "Remove the notes folder",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "notes"
+        ],
+        "x-fern-sdk-method-name": "remove_folder"
+      },
+      "post": {
+        "description": "Checks the folder first and saves it only when it can be used: it must be there, be a folder, and not be where Aman keeps its own memory.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveNotesFolderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SaveNotesFolderResponse"
+                }
+              }
+            },
+            "description": "The folder is connected."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The folder could not be used, and the message says what to pick instead."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
+          }
+        },
+        "summary": "Connect a notes folder",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "notes"
+        ],
+        "x-fern-sdk-method-name": "save_folder"
+      }
+    },
+    "/api/v1/user/settings/notes-folder/status": {
+      "get": {
+        "description": "Returns whether a notes folder is connected, the folder, the inbox file name, and how many notes the folder holds.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetNotesFolderResponse"
+                }
+              }
+            },
+            "description": "The notes folder status."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
+          }
+        },
+        "summary": "Get the notes folder status",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "notes"
+        ],
+        "x-fern-sdk-method-name": "get_status"
       }
     },
     "/api/v1/user/settings/sentinel": {

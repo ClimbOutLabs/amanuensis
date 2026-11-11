@@ -141,6 +141,7 @@ import { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { registerMailConnectorFromSavedAccountInBackground } from './runtime/mailAccount';
 import { prepareMailPolicyAtBoot, registerMailConnectorAtBoot } from './runtime/mailConnector';
 import { warmEmbeddingsAtBoot } from './runtime/memory/embeddingRetrieval';
+import { startNotesFolderIndexing } from './runtime/notesFolder/notesFolderRuntime';
 import { createOutboundSecretSource } from './runtime/outboundSecrets';
 import { seedOwnerNameAtBoot } from './runtime/ownerName';
 import { createSentinelServices } from './runtime/sentinelServices';
@@ -983,6 +984,11 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
       return controller.isRunning() ? 'running' : 'stopped';
     },
   });
+
+  // The notes folder index warms in the background: rebuilt on its schedule and when files
+  // change, so a chat's first search does not pay for the build. With no folder connected the
+  // service sits idle.
+  startNotesFolderIndexing({ settings: globalSettingsStore, logger });
 
   // Private chats that expired while the server was down are deleted before it serves anyone.
   try {
