@@ -16,6 +16,7 @@ import {
 } from '../../../../src/runtime/memory/memoryPageLoader';
 import { PageSectionSchema } from '../../../../src/runtime/memory/memoryPages';
 import { serverMemoryConfig } from '../../../../src/runtime/memory/memorySettings';
+import { TurnReadWatch } from '../../../../src/runtime/memory/turnReadWatch';
 import { MAYA_NAMESPACE } from './buildVault';
 import { MAYA_ENTRIES } from './entries';
 import type { RecallQuestion } from './schema';
@@ -186,6 +187,7 @@ export async function memoryBlockFor({
   chatId,
   embeddings,
   webSearch,
+  watch,
 }: {
   dir: string;
   message: string;
@@ -195,6 +197,8 @@ export async function memoryBlockFor({
   embeddings?: EmbeddingSubsystem | undefined;
   /** The chat's search state, which keeps where each recalled link and address came from. */
   webSearch?: WebSearchTurnState | undefined;
+  /** The turn's watch for outside text, which the page tools consult before they write. */
+  watch?: TurnReadWatch | undefined;
 }): Promise<string> {
   const capability = hindsightMemoryCapability({
     client: new MarkdownMemoryClient({
@@ -208,6 +212,7 @@ export async function memoryBlockFor({
     previousTurnId: null,
     timeZone: 'UTC',
     webSearch,
+    pageToolsWatch: watch,
   });
   const processor = capability.preLLMProcessors?.[0];
   if (processor === undefined) {

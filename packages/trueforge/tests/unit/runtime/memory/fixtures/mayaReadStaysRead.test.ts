@@ -10,6 +10,7 @@ import {
 import { steeredDestinationSay } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { createWebSearchTurnState } from '@truefoundry/trueforge-core/core/permissions/webSearch';
 
+import { TurnReadWatch } from '../../../../../src/runtime/memory/turnReadWatch';
 import { memoryBlockFor } from '../../../../fixtures/memory/mayaWorld/askMemory';
 import { buildMayaVault } from '../../../../fixtures/memory/mayaWorld/buildVault';
 import { mayaDate } from '../../../../fixtures/memory/mayaWorld/pages';
@@ -35,12 +36,15 @@ describe("what Aman read stays read when Maya's memory recalls it", () => {
   });
 
   async function recall({ message, sorted }: { message: string; sorted: boolean }) {
+    const watch = new TurnReadWatch();
+    // The page tools see the person's message before the memory step runs, so only the block can turn writing off.
+    watch.observe([{ role: 'user', content: message }]);
     const dir = await mkdtemp(path.join(tmpdir(), 'maya-read-stays-read-'));
     dirs.push(dir);
     await buildMayaVault({ dir, throughDay: ASK_DAY, sorted });
     const webSearch = createWebSearchTurnState();
-    const block = await memoryBlockFor({ dir, message, earlierMessages: [], chatId: 'new-chat', webSearch });
-    return { block, provenance: webSearch.provenance };
+    const block = await memoryBlockFor({ dir, message, earlierMessages: [], chatId: 'new-chat', webSearch, watch });
+    return { block, provenance: webSearch.provenance, watch };
   }
 
   it('holds the link and the address a mail planted on day 10, on day 40 in a new chat', async () => {
@@ -71,5 +75,24 @@ describe("what Aman read stays read when Maya's memory recalls it", () => {
 
     expect(isPersonVouchedUrl({ provenance, url: OWN_LINK })).toBe(true);
     expect(steeredLinks({ provenance, values: [OWN_LINK, `${OWN_LINK}?email=${MAYA_ADDRESS}`] })).toEqual([]);
+  }, 60_000);
+
+  it('labels the mail from day 10 as read content on day 40 and turns the page write tools off in that turn', async () => {
+    const { block, provenance, watch } = await recall({
+      message: 'Which link do I use to confirm the booking with the dentist?',
+      sorted: true,
+    });
+    const line = block.split('\n').find(candidate => candidate.includes(MAIL_LINK));
+    expect(line).toContain('not confirmed');
+    expect(isPersonVouchedUrl({ provenance, url: MAIL_LINK })).toBe(false);
+    expect(watch.reason).toBe('memory_holds_outside_text');
+  }, 60_000);
+
+  it('does not show the mail from day 10 out of the daily log on day 40: read notes are recalled only while fresh', async () => {
+    const { block } = await recall({
+      message: "Dr Okafor's practice asked to confirm the booking. Which link do I use?",
+      sorted: false,
+    });
+    expect(block).not.toContain(MAIL_LINK);
   }, 60_000);
 });
