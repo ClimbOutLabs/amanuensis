@@ -253,6 +253,8 @@ const ALLOW_READ_BY_PLATFORM = {
     '/usr/lib',
     '/usr/lib64',
     '/usr/local',
+    // Debian and Ubuntu keep the pip their Python puts into a new environment here, not inside Python.
+    '/usr/share/python-wheels',
     '/etc',
     '/dev',
     '/proc',
