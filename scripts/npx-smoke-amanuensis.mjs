@@ -33,6 +33,65 @@ const EMAIL = 'owner@example.com';
 const PASSWORD = 'a long enough password';
 const WRONG_CREDENTIALS_LINE = 'That email or password is not right';
 
+/** True while any process of the app's group is still running. */
+function groupAlive(pid) {
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'EPERM') {
+      return true;
+    }
+    return false;
+  }
+}
+
+async function waitFor(condition, ms) {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    if (condition()) {
+      return true;
+    }
+    await delay(200);
+  }
+  return condition();
+}
+
+/** Stops npx and the app it started, and returns once none of them is running. */
+async function stopApp() {
+  const pid = child?.pid;
+  if (pid === undefined) {
+    return;
+  }
+  const exited = () => child.exitCode !== null || child.signalCode !== null;
+  if (win32) {
+    try {
+      // /T takes the whole tree and /F ends it at once; the call returns when they are gone.
+      execFileSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' });
+    } catch {
+      // Already gone.
+    }
+    await waitFor(exited, 30_000);
+    return;
+  }
+  const signalGroup = signal => {
+    try {
+      process.kill(-pid, signal);
+    } catch {
+      // Already gone.
+    }
+  };
+  signalGroup('SIGTERM');
+  if (await waitFor(() => exited() && !groupAlive(pid), 30_000)) {
+    return;
+  }
+  console.warn('The packed app did not stop within 30 seconds of SIGTERM; stopping it with SIGKILL.');
+  signalGroup('SIGKILL');
+  if (!(await waitFor(() => exited() && !groupAlive(pid), 10_000))) {
+    throw new Error(`The packed app (process group ${String(pid)}) is still running after SIGKILL.`);
+  }
+}
+
 function check(condition, message) {
   if (!condition) {
     throw new Error(message);
@@ -139,6 +198,8 @@ try {
       NODE_ENV: 'production',
     },
     stdio: 'inherit',
+    // Its own process group, so cleanup can stop npx and the app it starts together.
+    detached: !win32,
     ...shell,
   });
 
@@ -172,17 +233,9 @@ try {
   console.log('packed amanuensis CLI healthz and UI OK');
   await checkLocalSignIn();
 } finally {
-  if (child?.pid !== undefined) {
-    try {
-      if (win32) {
-        execFileSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
-      } else {
-        child.kill('SIGTERM');
-      }
-    } catch {
-      // Already gone.
-    }
-  }
+  // The app may still be writing into the data folder (the memory model download, for one), so the
+  // folders are only removed once every process it started has stopped.
+  await stopApp();
   await rm(packDir, { recursive: true, force: true });
   await rm(consumerDir, { recursive: true, force: true });
   await rm(dataDir, { recursive: true, force: true });
