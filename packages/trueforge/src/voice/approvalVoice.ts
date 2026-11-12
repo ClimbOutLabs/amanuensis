@@ -77,6 +77,8 @@ export const CARD_FIELD_RULES: Record<keyof Tier3Card, FieldRule> = {
   persona: 'empty',
   mail_new_recipients: 'empty',
   mail_draft: 'context',
+  mail_from: 'empty',
+  mail_from_choices: 'empty',
 };
 
 function isEmpty(value: unknown): boolean {
