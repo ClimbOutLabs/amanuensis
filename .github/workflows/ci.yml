@@ -615,8 +615,9 @@ jobs:
       - name: Check out repository code
         uses: actions/checkout@v7
 
+      # python3-venv: the sandbox makes a Python environment of its own, and Ubuntu ships that part apart.
       - name: Install the programs the sandbox is built from
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends bubblewrap socat ripgrep
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends bubblewrap socat ripgrep python3-venv
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
