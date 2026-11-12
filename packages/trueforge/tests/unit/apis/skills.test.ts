@@ -386,8 +386,7 @@ describe('skills routers', () => {
         },
       });
       const state = await failingRouter.request('/ten-x/network-approval');
-      const body = (await state.json()) as { data: { approved_hosts: string[] | null } };
-      expect(body.data.approved_hosts).toBeNull();
+      expect(await state.json()).toMatchObject({ data: { approved_hosts: null } });
     });
 
     it('PUT refuses a list that is not the declared list, with the next step in plain words', async () => {
