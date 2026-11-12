@@ -154,6 +154,7 @@ machine_running() {
 instance_render() {
   local name=$1 app_image=$2 dex_image=$3 dir login_bind=0.0.0.0 app_port login_port public_url login_url email client_id sandbox_on edge_on login_host origins redirects app_ports tls_on=0 tls_host=0 tls_volume=0 tls_port address
   dir=$(instance_dir "$name")
+  instance_tailscale_https_move "$name" "$app_image"
   owner_name_backfill "$name"
   web_push_backfill "$name" "$app_image"
   app_port=$(reg_get "$name" app_port)
@@ -356,9 +357,19 @@ instance_state() {
 }
 
 instance_up() {
-  local name=$1 rc=0 recreate=()
+  local name=$1 rc=0 recreate=() clash
   if [ "${2:-}" = recreate ]; then recreate=(--force-recreate); fi
   step_begin "start-$name" "Starting instance $name and waiting until it answers"
+  # Tailscale would take the port the moment the instance stops, so a start that would stop it is not begun.
+  clash=$(instance_tailscale_clash "$name")
+  if [ -n "$clash" ]; then
+    if [ "$clash" = "$(reg_get "$name" app_port)" ]; then
+      UI_FD=2 ui_step_end fail "Instance $name was not started. Tailscale serve on this computer is set up for port $clash, which the instance uses." "Turn that entry off, for example with: sudo tailscale serve --https=$clash off. Then run install.sh again."
+    else
+      UI_FD=2 ui_step_end fail "Instance $name was not started. Tailscale serve on this computer is set up for its https port $clash." "Run: install.sh instance refresh $name. It moves https to a free port."
+    fi
+    return 1
+  fi
   # A whole-project start removes the containers of services the compose file no longer lists (--remove-orphans),
   # so a service dropped from the file, like the https front end when an instance closes back to this computer,
   # does not linger as an orphan. Every whole-project start follows this rule.
@@ -655,7 +666,46 @@ instance_address_change() { # name; prints open, close, refresh or nothing
     if [ -n "$(reg_get "$name" origins)" ]; then printf 'close'; fi
   elif [ -n "$(reg_get "$name" origins)" ] && [ "$(tls_target "$name")" != "$(reg_get "$name" tls)" ]; then
     printf 'refresh'
+  elif [ -n "$(reg_get "$name" origins)" ] && tls_port_taken_by_tailscale "$name"; then
+    printf 'refresh'
   fi
+}
+
+# Moves the https port the installer picked off a port Tailscale serve was set up for since, so the compose file drawn
+# next never publishes it. Every start from a freshly drawn compose file goes through here.
+instance_tailscale_https_move() { # name app_image
+  [ -n "$(reg_get "$1" origins)" ] && tls_port_taken_by_tailscale "$1" || return 0
+  instance_apply_addresses "$1" refresh "$2"
+}
+
+# The first port of an instance that Tailscale serve is set up for, or nothing.
+instance_tailscale_clash() { # name
+  local port
+  [ -n "$(reg_get "$1" origins)" ] || return 0
+  for port in $(reg_get "$1" app_port) $(reg_get "$1" tls_port); do
+    if tailscale_serves_port "$port"; then
+      printf '%s' "$port"
+      return 0
+    fi
+  done
+}
+
+# True when the https port the installer picked for an instance is one Tailscale serve was set up for since.
+tls_port_taken_by_tailscale() { # name
+  local port
+  port=$(reg_get "$1" tls_port)
+  [ -n "$port" ] && tailscale_serves_port "$port"
+}
+
+# An instance opened on the network publishes its app port on this computer's Tailscale address too. When Tailscale
+# serve is set up for that port, Tailscale takes it while the instance restarts, so this stops before anything is
+# stopped. The app port is the one devices open, so it is never moved by itself.
+instance_tailscale_port_check() { # name
+  local name=$1 port
+  [ -n "$(reg_get "$name" origins)" ] || return 0
+  port=$(reg_get "$name" app_port)
+  [ -n "$port" ] && tailscale_serves_port "$port" || return 0
+  die "Tailscale serve on this computer is set up for port $port, which instance $name uses, so Tailscale would take the port while the instance restarts. Nothing was stopped. Turn that entry off, for example with: sudo tailscale serve --https=$port off (tailscale serve status lists the entries). Then run this again."
 }
 
 # Writes the list of addresses of an instance into its record and its settings: read again from this computer, plus
@@ -665,7 +715,7 @@ instance_address_change() { # name; prints open, close, refresh or nothing
 # fails, the record is put back as it was and the run stops, so the instance keeps serving plain http and the next
 # plain run tries the move again.
 instance_apply_addresses() { # name open|close|refresh app_image
-  local name=$1 mode=$2 app_image=$3 origins='' extras env tls='' tls_port='' app_port old_tls_port='' old_origins='' had_origins=0 fingerprint_before=''
+  local name=$1 mode=$2 app_image=$3 origins='' extras env tls='' tls_port='' app_port old_tls_port='' old_origins='' had_origins=0 fingerprint_before='' moved_from=
   env="$(instance_dir "$name")/.env"
   app_port=$(reg_get "$name" app_port)
   extras=${OPT_ADDRESSES:-$(reg_get "$name" extra_hosts)}
@@ -675,8 +725,18 @@ instance_apply_addresses() { # name open|close|refresh app_image
     origins=$(network_origin_list "$app_port" '' $extras)
     if [ "$tls" = local ] && origins_reach_the_network "$origins"; then
       tls_port=$(reg_get "$name" tls_port)
+      moved_from=
+      # The https port was picked by the installer, so one that Tailscale serve was set up for since is picked again
+      # before anything restarts; Tailscale answers on that port at this computer's Tailscale address in any case.
+      if [ -n "$tls_port" ] && tailscale_serves_port "$tls_port"; then
+        moved_from=$tls_port
+        tls_port=
+      fi
       if [ -z "$tls_port" ]; then
         tls_port=$(pick_port 8443 "$(reg_all app_port) $(reg_all login_port) $(reg_all tls_port)") || die "No free port was found on this computer for https near 8443."
+      fi
+      if [ -n "$moved_from" ]; then
+        say "Tailscale serve on this computer is set up for port $moved_from, so instance $name now opens over https on port $tls_port. On each device, open it with the new port."
       fi
       # shellcheck disable=SC2086
       origins=$(network_origin_list "$app_port" "$tls_port" $extras)
@@ -942,19 +1002,31 @@ gateway_flag() { # origins public_url
   if [ -z "$1" ] && ! is_loopback_origin "$2"; then printf 1; else printf 0; fi
 }
 
-# Puts back the settings an instance's .env lost, from its record and the template that wrote it. A setting that is
-# still there is never changed, so existing secrets stay; a lost secret gets a new value that the app and the sign-in
-# service both read from this file. The Token Factory key cannot be made again and is skipped.
-instance_env_repair() {
-  local name=$1 env network_on=0 tf_on=0 tf_cap_on=0 demo_on=0 line key value tf_cap fresh=0 restored=0
-  env="$(instance_dir "$name")/.env"
-  # The name is recorded first, so a lost OWNER_NAME is put back with it rather than empty.
-  owner_name_backfill "$name"
+# The settings the template gives an instance from its record: its addresses, its sign-in client and owner, and new
+# secrets. Prints them; writes nothing.
+instance_env_from_record() { # name
+  local name=$1 network_on=0 tf_on=0 tf_cap_on=0 demo_on=0 tf_cap
   if [ -n "$(reg_get "$name" origins)" ]; then network_on=1; fi
   tf_cap=$(reg_get "$name" tf_cap)
   if [ -n "$tf_cap" ]; then tf_cap_on=1; fi
   if [ "$(reg_get "$name" demo)" = 1 ]; then demo_on=1; fi
   if [ "$(reg_get "$name" token_factory)" = 1 ]; then tf_on=1; fi
+  render_template "$TEMPLATES_DIR/instance/env.tpl" \
+    "PUBLIC_URL=$(reg_get "$name" public_url)" "IF_NETWORK=$network_on" "ORIGINS=$(reg_get "$name" origins)" \
+    "COOKIE_SUFFIX=$(reg_get "$name" cookie_suffix)" "ISSUER=$(reg_get "$name" login_url)/dex" "CLIENT_ID=$(reg_get "$name" client_id)" \
+    "IF_GATEWAY=$(gateway_flag "$(reg_get "$name" origins)" "$(reg_get "$name" public_url)")" "LOGIN_PORT=$(reg_get "$name" login_port)" \
+    "CLIENT_SECRET=$(rand_hex 32)" "OWNER_EMAIL=$(reg_get "$name" owner_email)" "OWNER_NAME=$(reg_get "$name" owner_name)" "API_KEY=$(rand_hex 32)" \
+    "IF_TOKEN_FACTORY=$tf_on" "TF_KEY=unused" "TF_MODEL=$(reg_get "$name" tf_model)" "IF_TF_CAP=$tf_cap_on" "TF_CAP=$tf_cap" "IF_DEMO=$demo_on"
+}
+
+# Puts back the settings an instance's .env lost, from its record and the template that wrote it. A setting that is
+# still there is never changed, so existing secrets stay; a lost secret gets a new value that the app and the sign-in
+# service both read from this file. The Token Factory key cannot be made again and is skipped.
+instance_env_repair() {
+  local name=$1 env line key value fresh=0 restored=0
+  env="$(instance_dir "$name")/.env"
+  # The name is recorded first, so a lost OWNER_NAME is put back with it rather than empty.
+  owner_name_backfill "$name"
   if [ ! -f "$env" ]; then fresh=1; fi
   while IFS= read -r line; do
     case "$line" in '' | '#'*) continue ;; esac
@@ -970,12 +1042,7 @@ instance_env_repair() {
       env_managed_set "$env" "$key" "$value"
       restored=$((restored + 1))
     fi
-  done < <(render_template "$TEMPLATES_DIR/instance/env.tpl" \
-    "PUBLIC_URL=$(reg_get "$name" public_url)" "IF_NETWORK=$network_on" "ORIGINS=$(reg_get "$name" origins)" \
-    "COOKIE_SUFFIX=$(reg_get "$name" cookie_suffix)" "ISSUER=$(reg_get "$name" login_url)/dex" "CLIENT_ID=$(reg_get "$name" client_id)" \
-    "IF_GATEWAY=$(gateway_flag "$(reg_get "$name" origins)" "$(reg_get "$name" public_url)")" "LOGIN_PORT=$(reg_get "$name" login_port)" \
-    "CLIENT_SECRET=$(rand_hex 32)" "OWNER_EMAIL=$(reg_get "$name" owner_email)" "OWNER_NAME=$(reg_get "$name" owner_name)" "API_KEY=$(rand_hex 32)" \
-    "IF_TOKEN_FACTORY=$tf_on" "TF_KEY=unused" "TF_MODEL=$(reg_get "$name" tf_model)" "IF_TF_CAP=$tf_cap_on" "TF_CAP=$tf_cap" "IF_DEMO=$demo_on")
+  done < <(instance_env_from_record "$name")
   if [ "$restored" -gt 0 ]; then ui_ok "Put back $restored lost settings of instance $name"; fi
 }
 
@@ -1091,6 +1158,7 @@ cmd_instance_refresh() {
   lock_acquire
   load_installed_release
   warn_if_installed_older
+  instance_tailscale_port_check "$name"
   change=$(instance_address_change "$name")
   if [ -n "$change" ]; then
     instance_apply_addresses "$name" "$change" "$REL_APP_TAG"

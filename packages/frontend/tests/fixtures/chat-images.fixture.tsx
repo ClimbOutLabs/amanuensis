@@ -33,12 +33,12 @@ const port: ChatImagesCatalog = {
                 { status: 'shown', image_id: APPROVED_ID, width: 320, height: 200 },
               ],
             }
-          : { status: 'ask', count: 2, host: null },
+          : { status: 'ask', count: 2, host: null, url: null },
       );
     }
     if (source.kind === 'reply') {
       if (!approved) {
-        return Promise.resolve({ status: 'ask', count: 1, host: 'example.com' });
+        return Promise.resolve({ status: 'ask', count: 1, host: 'example.com', url: source.url });
       }
       if (source.url === 'https://example.com/photos/harbor.png') {
         return Promise.resolve({

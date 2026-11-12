@@ -37,6 +37,8 @@ async function askFromHome({ page, origin, ask }: { page: Page; origin: string; 
 /** Presses Allow on the one waiting card and waits for the turn to finish. */
 async function allow(page: Page): Promise<void> {
   const button = page.getByRole('button', { name: 'Allow', exact: true });
+  // The "Waiting for you" line can show before the card's buttons do.
+  await button.first().waitFor({ timeout: RENDER_TIMEOUT_MS });
   assert.equal(await button.count(), 1, 'one card is waiting');
   await button.click();
   await page.locator('main').getByText(FINAL_TEXT).first().waitFor({ timeout: RENDER_TIMEOUT_MS });

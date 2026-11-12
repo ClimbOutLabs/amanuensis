@@ -41,7 +41,7 @@ describe('voice HTTP endpoints', () => {
   const logger = createLogger({ transports: [new transports.Console({ silent: true })] });
   const infoSpy = jest.spyOn(logger, 'info');
   const warnSpy = jest.spyOn(logger, 'warn');
-  const router = createVoiceRouter({ logger, resolveRequestContext });
+  const router = createVoiceRouter({ logger, resolveRequestContext, app: { fetch: () => new Response('{}') } });
 
   beforeEach(() => {
     fetchMock.mockReset();

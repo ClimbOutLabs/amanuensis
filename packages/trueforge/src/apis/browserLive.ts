@@ -10,6 +10,7 @@ import {
   LiveFrameReplySchema,
   LiveInputReplySchema,
   LiveTabsReplySchema,
+  LiveTakeoverReplySchema,
   type BrowserProfileRef,
   type BrowserTabRef,
 } from '../runtime/browserCapability';
@@ -20,16 +21,18 @@ const TabIdSchema = z.string().min(1).max(256);
 
 const FrameRequestSchema = z.object({ tab: TabIdSchema }).strict();
 
-const LiveClickInputSchema = z
-  .object({
-    tab: TabIdSchema,
-    kind: z.literal('click'),
-    x: z.number(),
-    y: z.number(),
-    image_width: z.number().positive().optional(),
-    image_height: z.number().positive().optional(),
-  })
-  .strict();
+/** The point a pointer act names, and the frame size it was read from when the caller measured one. */
+const LivePointShape = {
+  x: z.number(),
+  y: z.number(),
+  image_width: z.number().positive().optional(),
+  image_height: z.number().positive().optional(),
+};
+
+const LiveClickInputSchema = z.object({ tab: TabIdSchema, kind: z.literal('click'), ...LivePointShape }).strict();
+const LiveMoveInputSchema = z.object({ tab: TabIdSchema, kind: z.literal('move'), ...LivePointShape }).strict();
+const LiveDownInputSchema = z.object({ tab: TabIdSchema, kind: z.literal('down'), ...LivePointShape }).strict();
+const LiveUpInputSchema = z.object({ tab: TabIdSchema, kind: z.literal('up'), ...LivePointShape }).strict();
 const LiveTypeInputSchema = z
   .object({ tab: TabIdSchema, kind: z.literal('type'), text: z.string().min(1).max(10000) })
   .strict();
@@ -38,13 +41,22 @@ const LiveKeyInputSchema = z
   .strict();
 const LiveWheelInputSchema = z.object({ tab: TabIdSchema, kind: z.literal('wheel'), dy: z.number() }).strict();
 
-/** One act the person does in the live view: a click, typed text, one named key, or a scroll step. */
+/**
+ * One act the person does in the live view: a click, the takeover pointer acts (move, down, up),
+ * typed text, one named key, or a scroll step.
+ */
 const LiveInputRequestSchema = z.discriminatedUnion('kind', [
   LiveClickInputSchema,
+  LiveMoveInputSchema,
+  LiveDownInputSchema,
+  LiveUpInputSchema,
   LiveTypeInputSchema,
   LiveKeyInputSchema,
   LiveWheelInputSchema,
 ]);
+
+/** Hands one tab to the person, or back to Aman; the tab itself stays where it is either way. */
+const TakeoverRequestSchema = z.object({ tab: TabIdSchema, on: z.boolean() }).strict();
 
 /** A file the person uploads into the page, as base64; at most 10 MiB once decoded. */
 const UploadRequestSchema = z
@@ -96,7 +108,7 @@ export function createBrowserLiveRouter(deps: BrowserLiveRouterDeps) {
   });
 
   // Every act below drives the person's own tab, so a form posted from another site must not reach it.
-  for (const path of ['/frame', '/input', '/upload']) {
+  for (const path of ['/frame', '/input', '/upload', '/takeover']) {
     app.use(path, requireJsonOrSameOrigin());
   }
 
@@ -130,6 +142,30 @@ export function createBrowserLiveRouter(deps: BrowserLiveRouterDeps) {
     }
     if (result.body.status === 'bad_input') {
       return c.json({ error: { message: 'That input was not understood. Try again.' } }, 400);
+    }
+    return c.json({ data: result.body }, 200);
+  });
+
+  app.post('/takeover', async c => {
+    const body: unknown = await c.req.json().catch(() => undefined);
+    const request = TakeoverRequestSchema.safeParse(body);
+    if (!request.success) {
+      return c.json({ error: { message: 'That takeover request was not understood. Try again.' } }, 400);
+    }
+    const { tab: tabId, on } = request.data;
+    const tab: BrowserTabRef = { ...profileOf(c), chat_id: tabId };
+    const result = await callBrowserSidecar({
+      path: '/live/takeover',
+      tab,
+      schema: LiveTakeoverReplySchema,
+      body: { on },
+    });
+    if (!result.ok) {
+      deps.logger.warn('browser live takeover failed', { message: result.message });
+      return c.json({ error: { message: result.message } }, 502);
+    }
+    if (result.body.status === 'bad_input') {
+      return c.json({ error: { message: 'That takeover request was not understood. Try again.' } }, 400);
     }
     return c.json({ data: result.body }, 200);
   });

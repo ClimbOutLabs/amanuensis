@@ -63,10 +63,18 @@ The live view, where the person drives their own tab by hand from the app's `/br
 
 - `POST /live/tabs { owner }` — the person's open tabs, most recent first, as chat id, title and
   address. It never starts a browser.
-- `POST /live/frame { owner, tab }` — one JPEG frame of the tab and the viewport size.
-- `POST /live/input { owner, tab, kind, ... }` — one act: `click` (x, y and the frame size it was read
-  from), `type` (text), `key` (one named key) or `wheel` (dy). A click uses the real mouse, so the same
+- `POST /live/frame { owner, tab }`: one JPEG frame of the tab and the viewport size, with
+  `takeover` (whether the person holds the tab) and `challenge` (whether the page is showing a
+  human check: the check's own frame is on the page, or the page is the full-page check).
+- `POST /live/input { owner, tab, kind, ... }`: one act: `click` (x, y and the frame size it was read
+  from), the takeover pointer acts `move`, `down` and `up` (a point, like a click), `type` (text),
+  `key` (one named key) or `wheel` (dy). A click uses the real mouse, so the same
   rules keep the tab on its site. Acts on one tab run one at a time, in the order they arrived.
+- `POST /live/takeover { owner, tab, on }`: hands the tab to the person, or back to the model. The
+  tab never leaves the browser; only whose hand drives it changes. While a tab is taken over, the
+  model's own steps on it (`/open`, `/scroll`, `/back`, `/click`, `/type`, `/select`) answer
+  `refused` with reason `takeover`, and a streamed `move` is applied in steps from where the
+  pointer last was, so the page sees a hand travelling rather than a pointer appearing.
 - `POST /live/upload { owner, tab, name, mime, data }` — a file, base64, at most 10 MB, put into the
   file picker the page opened (dropped once the page moves on), or else its first file field. The
   page itself sends it.
