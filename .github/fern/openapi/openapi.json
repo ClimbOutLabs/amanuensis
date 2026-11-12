@@ -386,6 +386,13 @@
       },
       "ApprovalToolCallRef": {
         "properties": {
+          "always_allow_covers": {
+            "description": "Set when the lasting answer lets maps run without asking, instead of allowing one tool.",
+            "enum": [
+              "maps"
+            ],
+            "type": "string"
+          },
           "can_always_allow": {
             "description": "Whether the owner may allow this tool for good.",
             "type": "boolean"
@@ -1330,8 +1337,13 @@
         "type": "object"
       },
       "CancelSessionRequest": {
-        "description": "Empty request body. Cancel identifies the session via the path only.",
-        "properties": {},
+        "description": "Optional request body. The session comes from the path.",
+        "properties": {
+          "turn_id": {
+            "description": "Cancel only this turn, and nothing else running in the session. Omit to cancel the last turn.",
+            "type": "string"
+          }
+        },
         "type": "object"
       },
       "CancelSessionResponse": {
@@ -1362,6 +1374,9 @@
           "settings": {
             "$ref": "#/components/schemas/SettingsCapability"
           },
+          "sign_in": {
+            "$ref": "#/components/schemas/SignInCapability"
+          },
           "skill": {
             "$ref": "#/components/schemas/SkillCapability"
           },
@@ -1381,6 +1396,7 @@
           "memory_defaults",
           "memory_embeddings",
           "sandbox_isolation",
+          "sign_in",
           "build"
         ],
         "type": "object"
@@ -1978,6 +1994,31 @@
         "required": [
           "command_id",
           "timeout_ms"
+        ],
+        "type": "object"
+      },
+      "ConnectVoiceRequest": {
+        "properties": {
+          "client_timezone": {
+            "description": "IANA time zone of the person talking.",
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string"
+          },
+          "session_id": {
+            "description": "The chat to talk in.",
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "voice": {
+            "description": "Voice id for spoken replies. Defaults to the server voice.",
+            "pattern": "^[a-z]{2}_[a-z]+$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id"
         ],
         "type": "object"
       },
@@ -4272,7 +4313,8 @@
           "gmail_read",
           "gmail_compose",
           "calendar_read",
-          "calendar_write"
+          "calendar_write",
+          "drive_files"
         ],
         "type": "string"
       },
@@ -4587,6 +4629,87 @@
           "build_ref"
         ],
         "type": "object"
+      },
+      "HomeAssistantCheckFailureCode": {
+        "description": "Why Home Assistant could not be connected: `unreachable` (nothing answered at the address), `token_refused` (Home Assistant refused the token), `integration_missing` (the Model Context Protocol Server integration is not installed), `certificate` (the address uses a certificate that cannot be checked), or `error` (anything else).",
+        "enum": [
+          "unreachable",
+          "token_refused",
+          "integration_missing",
+          "certificate",
+          "error"
+        ],
+        "type": "string"
+      },
+      "HomeAssistantCheckResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/HomeAssistantCheckResult"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "HomeAssistantCheckResult": {
+        "description": "Outcome of one Home Assistant connection check.",
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "entity_count": {
+                "description": "How many exposed entities the live-context tool named, or null when it is not offered.",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "status": {
+                "description": "Home Assistant answered the handshake and the live-context read.",
+                "enum": [
+                  "ok"
+                ],
+                "type": "string"
+              },
+              "tool_count": {
+                "description": "How many tools the server offers.",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "status",
+              "tool_count",
+              "entity_count"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/HomeAssistantCheckFailureCode"
+              },
+              "reason": {
+                "description": "One plain line saying what to fix.",
+                "type": "string"
+              },
+              "status": {
+                "description": "Home Assistant could not be connected.",
+                "enum": [
+                  "failed"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "code",
+              "reason"
+            ],
+            "type": "object"
+          }
+        ]
       },
       "HostedModelProvider": {
         "properties": {
@@ -6579,10 +6702,11 @@
         "type": "object"
       },
       "MeSessionType": {
-        "description": "`oidc-connected` when the process is running with browser OIDC login; `default` for standalone or TrueFoundry token auth.",
+        "description": "`oidc-connected` when the process is running with browser OIDC login; `local-connected` for local sign-in (`TRUEFORGE_AUTH_MODE=local`); `default` for standalone or TrueFoundry token auth.",
         "enum": [
           "default",
-          "oidc-connected"
+          "oidc-connected",
+          "local-connected"
         ],
         "type": "string"
       },
@@ -11127,6 +11251,24 @@
         ],
         "type": "object"
       },
+      "SignInCapability": {
+        "properties": {
+          "mode": {
+            "description": "How this instance signs people in. `local` means Aman keeps one email and password itself.",
+            "enum": [
+              "local",
+              "oidc",
+              "standalone",
+              "truefoundry"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "type": "object"
+      },
       "Skill": {
         "additionalProperties": false,
         "properties": {
@@ -11796,6 +11938,10 @@
             ],
             "type": "string"
           },
+          "already_created": {
+            "description": "True when the same event was already created in this chat a few minutes ago.",
+            "type": "boolean"
+          },
           "attendees": {
             "description": "Every guest on the event.",
             "items": {
@@ -11829,6 +11975,11 @@
           "one_of_repeating": {
             "description": "True when this changes one date of a repeating event.",
             "type": "boolean"
+          },
+          "span_days": {
+            "description": "How many days the event runs over; 1 for an ordinary event.",
+            "minimum": 1,
+            "type": "integer"
           },
           "time_zone": {
             "description": "IANA time zone the times are in.",
@@ -12044,6 +12195,17 @@
               "$ref": "#/components/schemas/Tier3Mailbox"
             },
             "type": "array"
+          },
+          "from_name": {
+            "description": "The display name the message is sent as, or null when none is set.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name_left_off": {
+            "description": "True when a name was left off an address because it looked like an address.",
+            "type": "boolean"
           },
           "replaces": {
             "description": "The saved draft a change replaces, or null.",
@@ -15059,6 +15221,44 @@
         ],
         "type": "object"
       },
+      "VoiceTicket": {
+        "properties": {
+          "expires_in_seconds": {
+            "description": "Seconds the ticket stays valid.",
+            "type": "integer"
+          },
+          "path": {
+            "description": "WebSocket path to open on this server.",
+            "type": "string"
+          },
+          "protocol": {
+            "description": "Sub-protocol name to ask for on the WebSocket.",
+            "type": "string"
+          },
+          "ticket": {
+            "description": "Single-use ticket to open the voice line. Send it as the `ticket.<id>` sub-protocol.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticket",
+          "expires_in_seconds",
+          "protocol",
+          "path"
+        ],
+        "type": "object"
+      },
+      "VoiceTicketResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/VoiceTicket"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "VoiceTranscription": {
         "properties": {
           "duration_ms": {
@@ -16226,7 +16426,7 @@
     },
     "/api/v1/auth/me": {
       "get": {
-        "description": "Returns the authenticated caller identity (`type`, `tenant_id`, `subject`, `roles`) wrapped as `{ data }`. `type` is `oidc-connected` when browser OIDC is enabled, otherwise `default`. When auth is enabled this requires a valid `id_token` cookie or `Authorization: Bearer` token (401 otherwise). When auth is disabled, returns the standalone default identity.",
+        "description": "Returns the authenticated caller identity (`type`, `tenant_id`, `subject`, `roles`) wrapped as `{ data }`. `type` is `oidc-connected` when browser OIDC is enabled, `local-connected` for local sign-in, otherwise `default`. When auth is enabled this requires a valid `id_token` cookie or `Authorization: Bearer` token (401 otherwise). When auth is disabled, returns the standalone default identity.",
         "responses": {
           "200": {
             "content": {
@@ -17051,6 +17251,54 @@
           "mcpServers"
         ],
         "x-fern-sdk-method-name": "authorize"
+      }
+    },
+    "/api/v1/mcp-servers/{name}/home-assistant-check": {
+      "post": {
+        "description": "Runs the MCP handshake against the saved connector, lists its tools, and reads the live-context tool once, so the answer says how many tools and exposed entities Aman can see, or the one thing to fix. Read-only: the connector is never modified, and a failed check is a 200 carrying the reason.",
+        "parameters": [
+          {
+            "description": "MCP server name.",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "MCP server name.",
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HomeAssistantCheckResponse"
+                }
+              }
+            },
+            "description": "The check ran; the result says whether Home Assistant answered and why not."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "MCP server not found."
+          }
+        },
+        "summary": "Check a Home Assistant connector",
+        "tags": [
+          "MCP Servers"
+        ],
+        "x-fern-sdk-group-name": [
+          "mcpServers"
+        ],
+        "x-fern-sdk-method-name": "home_assistant_check"
       }
     },
     "/api/v1/mcp-servers/{name}/memory-check": {
@@ -20999,7 +21247,7 @@
     },
     "/api/v1/sessions/{session_id}/cancel": {
       "post": {
-        "description": "Cancel the running last turn for a session. Only the session creator may cancel.",
+        "description": "Cancel the running last turn for a session, or only the turn named by `turn_id`. Only the session creator may cancel.",
         "parameters": [
           {
             "description": "Session identifier.",
@@ -27459,6 +27707,91 @@
           "personalization"
         ],
         "x-fern-sdk-method-name": "update_sentinel_settings"
+      }
+    },
+    "/api/v1/voice/connect": {
+      "post": {
+        "description": "Checks that the chat belongs to the caller and voice mode is ready, then returns a single-use ticket for the voice WebSocket. The WebSocket itself is not described here.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectVoiceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceTicketResponse"
+                }
+              }
+            },
+            "description": "A ticket and the path of the voice WebSocket."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The request is missing the chat."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The chat was not found."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Too many requests; wait for the Retry-After seconds."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Voice mode is off, or speech to text, the voice or the listening model is not ready."
+          }
+        },
+        "summary": "Open a live voice conversation",
+        "tags": [
+          "Agent Sessions"
+        ],
+        "x-fern-sdk-group-name": [
+          "voice"
+        ],
+        "x-fern-sdk-method-name": "connect"
       }
     },
     "/api/v1/voice/speak": {

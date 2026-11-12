@@ -15,8 +15,36 @@ function nameWords(element) {
     .trim();
 }
 
-/** Name words that mark a field as a password, a card number, or a one-time code. */
+/**
+ * What the page calls a field where its name and id say nothing: its label, its aria-label and its
+ * placeholder, as plain lowercase words. Many small shops and bank pages name a card field `f1`.
+ */
+function labelWords(element) {
+  const root = element.getRootNode();
+  const labelledBy = (element.getAttribute('aria-labelledby') ?? '')
+    .split(/\s+/)
+    .filter(id => id !== '')
+    .map(id => (typeof root.getElementById === 'function' ? root.getElementById(id)?.textContent : '') ?? '');
+  return [
+    element.getAttribute('aria-label') ?? '',
+    element.getAttribute('placeholder') ?? '',
+    ...[...(element.labels ?? [])].map(label => label.textContent ?? ''),
+    ...labelledBy,
+  ]
+    .join(' ')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+/** Words, in a name or a label, that mark a field as a password, a card number, or a one-time code. */
 const CARD_WORDS = /\b(card ?(number|no|num)|cc ?(num|number|no)|cvv|cvc|csc|security ?code)\b/;
+/** A card number's short name. Only a field's own name counts: in a label "pan" is an ordinary word. */
+const PAN_NAME = /\bpan\b/;
+/** India's tax ID is the "PAN card number": a label that says so does not name a payment card. */
+const TAX_ID_LABEL = /\bpan ?card\b/;
+/** "card" alone names a card number only where the field takes digits: "Name on card" is not one. */
+const BARE_CARD = /\bcard\b/;
 const CODE_WORDS =
   /\b(otp|totp|passcode|mpin|tpin|(one ?time|verification|mfa|2 ?fa|sms|otp) ?code|(atm|card|security|secret|upi|txn|transaction) ?pin)\b/;
 /**
@@ -24,7 +52,15 @@ const CODE_WORDS =
  * code in India, and a map pin is a place, so neither is hidden.
  */
 const BARE_PIN = /\bpin\b(?! ?code)/;
+const POSTAL_PIN = /\bpin ?code\b/;
 const PLACE_WORDS = /\b(map|location|place|drop|postal|post|zip|address|shipping|billing)\b/;
+/** "token" and "authcode" name many things; in a field that holds only a few characters they name a code. */
+const SHORT_CODE_WORDS = /\b(token|auth ?code)\b/;
+const SHORT_CODE_MAX_LENGTH = 10;
+/** A promo or gift token is typed from a voucher, not sent to the person as a secret. */
+const VOUCHER_WORDS = /\b(promo|coupon|voucher|discount|gift|referral)\b/;
+/** Words that mark a form as an address form, where a box labelled "PIN" is India's postal code. */
+const ADDRESS_WORDS = /\b(address|street|city|town|state|district|locality|landmark)\b/;
 
 /** Whether the field takes only digits, by its keyboard, its type or its pattern. */
 function takesDigits(element) {
@@ -34,6 +70,38 @@ function takesDigits(element) {
   return (
     inputMode === 'numeric' || type === 'tel' || type === 'number' || pattern.includes('0-9') || pattern.includes('\\d')
   );
+}
+
+/** Whether the field is limited to the few characters a code has. */
+function holdsFewCharacters(element) {
+  const maxLength = Number(element.getAttribute('maxlength') ?? '');
+  return Number.isInteger(maxLength) && maxLength >= 1 && maxLength <= SHORT_CODE_MAX_LENGTH;
+}
+
+/** India's postal code has six digits, so a box that holds fewer is not one. */
+const POSTAL_PIN_DIGITS = 6;
+
+/**
+ * Whether the field can hold a postal code and another field of the same form asks for part of an
+ * address. A field outside any form has no such neighbours.
+ */
+function sitsInAddressForm(element) {
+  const maxLength = element.getAttribute('maxlength');
+  if (maxLength !== null && Number(maxLength) < POSTAL_PIN_DIGITS) {
+    return false;
+  }
+  if (element.form === null || element.form === undefined) {
+    return false;
+  }
+  return [...element.form.querySelectorAll('input, select, textarea')].some(other => {
+    if (other === element) {
+      return false;
+    }
+    const autocomplete = (other.getAttribute('autocomplete') ?? '').toLowerCase();
+    return (
+      autocomplete.includes('address') || ADDRESS_WORDS.test(nameWords(other)) || ADDRESS_WORDS.test(labelWords(other))
+    );
+  });
 }
 
 /** How far up from a one-digit box to look for the others in its row. */
@@ -77,17 +145,35 @@ function fieldKind(element) {
   const type = (element.getAttribute('type') ?? '').toLowerCase();
   const autocomplete = (element.getAttribute('autocomplete') ?? '').toLowerCase();
   const words = nameWords(element);
+  const label = labelWords(element);
+  // The name and the label are tested apart, so words from one never join words from the other.
+  const says = pattern => pattern.test(words) || pattern.test(label);
   if (type === 'password') {
     return 'password';
   }
-  if (autocomplete.startsWith('cc-') || CARD_WORDS.test(words)) {
+  const taxIdLabel = TAX_ID_LABEL.test(label);
+  if (
+    autocomplete.startsWith('cc-') ||
+    CARD_WORDS.test(words) ||
+    PAN_NAME.test(words) ||
+    (CARD_WORDS.test(label) && !taxIdLabel) ||
+    (says(BARE_CARD) && !taxIdLabel && takesDigits(element))
+  ) {
     return 'card';
   }
-  if (autocomplete === 'one-time-code' || CODE_WORDS.test(words)) {
+  if (
+    autocomplete === 'one-time-code' ||
+    says(CODE_WORDS) ||
+    (says(SHORT_CODE_WORDS) && !says(VOUCHER_WORDS) && holdsFewCharacters(element))
+  ) {
     return 'otp';
   }
   const postal = autocomplete === 'postal-code' || autocomplete.startsWith('address');
   if (BARE_PIN.test(words) && !PLACE_WORDS.test(words) && !postal) {
+    return 'otp';
+  }
+  // A label that says "PIN" marks a secret too, unless the name, the label or the form says it is a place or a postal code.
+  if (BARE_PIN.test(label) && !says(PLACE_WORDS) && !POSTAL_PIN.test(words) && !postal && !sitsInAddressForm(element)) {
     return 'otp';
   }
   // Only the first box of a code typed one digit per box often says what it is.

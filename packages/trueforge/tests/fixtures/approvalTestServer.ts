@@ -201,6 +201,7 @@ function buildApp(input: {
     eventSubscriptions: new EventSubscriptionRegistry<TurnStreamingEvent>(undefined),
     logger: createLogger({ silent: true }),
     oidcDiscovery: undefined,
+    localUserStore: undefined,
     authenticator,
     authorizer: new TrueForgeAuthorizer(),
     outboundSecrets,
@@ -242,9 +243,17 @@ export async function startApprovalTestServer(options?: {
   authenticator?: Authenticator | undefined;
   /** Adds the inert connector's opt-in `web_search` tool. */
   inertWebSearch?: boolean | undefined;
+  /** Adds the inert connector's opt-in read of one page by its id. */
+  inertPageById?: boolean | undefined;
+  /** Adds the inert connector's opt-in `search_messages` lookup. */
+  inertMessageSearch?: boolean | undefined;
 }): Promise<ApprovalTestServer> {
   const authenticator = options?.authenticator ?? createAuthenticator({ mode: TrueForgeAuthMode.Standalone });
-  const mcp = await startInertMcpServer({ webSearch: options?.inertWebSearch === true });
+  const mcp = await startInertMcpServer({
+    webSearch: options?.inertWebSearch === true,
+    pageById: options?.inertPageById === true,
+    messageSearch: options?.inertMessageSearch === true,
+  });
   const model = await startScriptedModelServer();
   const directory = await mkdtemp(join(tmpdir(), 'tfy-approval-'));
   const databaseFile = join(directory, 'approvals.sqlite');
@@ -282,7 +291,13 @@ export async function startApprovalTestServer(options?: {
         {
           model_id: 'scripted-model',
           name: 'scripted-model',
-          properties: { context_length: 128000, max_output_tokens: 4096, reasoning_efforts: ['none'] },
+          // A custom model takes one request at a time by default; a test that holds two chats' turns open needs two.
+          properties: {
+            context_length: 128000,
+            max_output_tokens: 4096,
+            reasoning_efforts: ['none'],
+            max_concurrent_requests: 2,
+          },
         },
         {
           model_id: 'scripted-alt-model',

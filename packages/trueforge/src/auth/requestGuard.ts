@@ -14,6 +14,29 @@ function isPathExempt(path: string): boolean {
   return ORIGIN_EXEMPT_PATHS.some(exempt => path === exempt || path.startsWith(`${exempt}/`));
 }
 
+/** The origins a page of this app may be served from: the public address, listed addresses and loopback names. */
+export function pageOrigins({
+  port,
+  publicBaseUrl,
+  allowedOrigins,
+}: {
+  port: number;
+  publicBaseUrl: string;
+  allowedOrigins: readonly string[];
+}): Set<string> {
+  const publicUrl = new URL(publicBaseUrl);
+  return new Set([
+    publicUrl.origin,
+    ...allowedOrigins,
+    ...LOOPBACK_ORIGIN_HOSTS.map(host => `http://${host}:${String(port)}`),
+    ...(isLoopbackHost(publicUrl.hostname)
+      ? LOOPBACK_ORIGIN_HOSTS.map(
+          host => `${publicUrl.protocol}//${host}${publicUrl.port === '' ? '' : `:${publicUrl.port}`}`,
+        )
+      : []),
+  ]);
+}
+
 /**
  * Standalone request guard for cookie-authenticated sessions. Forwarded-* headers are never read.
  * - Host must be a loopback name on the instance port or the public URL's host, else 421
@@ -43,15 +66,8 @@ export function createRequestGuardMiddleware(options: {
   const gatewayPrefix = gatewayUrl?.pathname.replace(/\/$/, '') ?? '';
   const instanceUrl = new URL(`http://localhost:${String(options.port)}`);
   const allowedOriginSet = new Set([
-    publicUrl.origin,
+    ...pageOrigins({ port: options.port, publicBaseUrl: options.publicBaseUrl, allowedOrigins }),
     ...(gatewayUrl === undefined ? [] : [gatewayUrl.origin]),
-    ...allowedOrigins,
-    ...LOOPBACK_ORIGIN_HOSTS.map(host => `http://${host}:${String(options.port)}`),
-    ...(publicIsLoopback
-      ? LOOPBACK_ORIGIN_HOSTS.map(
-          host => `${publicUrl.protocol}//${host}${publicUrl.port === '' ? '' : `:${publicUrl.port}`}`,
-        )
-      : []),
   ]);
 
   const loginPrefix = options.loginPath ?? gatewayPrefix;
