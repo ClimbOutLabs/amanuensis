@@ -28,6 +28,7 @@ export function HelpStuckButton() {
               libraryOpen: shell.libraryOpen,
               sessionsOpen: shell.sessionsOpen,
               schedulesOpen: shell.schedulesOpen,
+              remindersOpen: shell.remindersOpen,
               spacesOpen: shell.spacesOpen,
             },
       ),

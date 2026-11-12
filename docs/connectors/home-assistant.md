@@ -1,76 +1,116 @@
-# Home Assistant
+---
+title: 'Home Assistant'
+description: 'Connect your Home Assistant so Aman can check on your home and, after you say yes, control the devices you choose to share.'
+---
 
-Aman can see and control the Home Assistant devices you choose to share, through Home Assistant's own MCP server. Reads run on their own. Anything that changes your home asks you first, unless you allow it for good. Locks, alarms and garage doors are never controlled.
+Connect your Home Assistant so Aman can tell you what's going on at home and, after you say yes, turn things on and off. Aman sees only the devices you choose to share. Locks, alarms and garage doors are never controlled.
 
-## Connect Home Assistant
+How to get there: Click **More** in the left bar, then **Settings**, then **Connectors**, then find **home-assistant**.
 
-You need a Home Assistant that you can open in a browser, and about two minutes.
+=== "Computer"
 
-### Step 1: Make a token in Home Assistant
+    ![The Connect Home Assistant box, with the address and token fields](../screenshots/app/home-assistant-connect-desktop.png)
+
+=== "Phone"
+
+    ![The Connect Home Assistant box, with the address and token fields](../screenshots/app/home-assistant-connect-phone.png)
+
+!!! note "Before you start"
+
+    You need a Home Assistant that you can open in a browser, and about five minutes. You do the first two steps in Home Assistant and the last one in Aman.
+
+## Step 1: Make a token in Home Assistant
+
+A token is a long code that lets Aman sign in to your Home Assistant without your password.
 
 1. Open your Home Assistant and click your profile picture.
 2. Click **Security**.
 3. Under **Long-lived access tokens**, click **Create token**. Name it Aman.
-4. Copy the token. Home Assistant shows it once.
+4. Copy the token. Home Assistant shows it only once.
 
-### Step 2: Add the MCP server in Home Assistant
+## Step 2: Add the MCP server in Home Assistant
+
+This built-in integration is how Home Assistant talks to assistants like Aman.
 
 1. In Home Assistant, click **Settings**, then **Devices and services**.
 2. Click **Add integration** and choose **Model Context Protocol Server**.
 3. Click **Submit**.
 
-### Step 3: Connect in Aman and choose what Aman can see
+## Step 3: Connect in Aman
 
-1. In Aman, click **More**, click **Settings**, then click **Connectors**.
+1. In Aman, click **More**, then **Settings**, then **Connectors**.
 2. Find **home-assistant** and click **Connect**.
-3. Type your Home Assistant address, like `https://homeassistant.local:8123`, and paste the token.
-4. Click **Connect**. Aman checks the connection and says how many tools and exposed entities it found, or the one thing to fix.
-5. In Home Assistant, click **Settings**, then **Voice assistants**, then **Expose**, and expose each entity Aman may see or control. Only exposed entities are visible to Aman.
+3. In **Home Assistant address**, type your Home Assistant address, such as `https://homeassistant.local:8123`.
+4. In **Long-lived access token**, paste the token.
+5. Click **Connect**.
 
-The address must use https, unless it is on your home network: an address on your own network may use http, because Home Assistant on a home network usually does. A Nabu Casa address or the https address Tailscale gives your Home Assistant both work.
+Aman checks the connection. It says how many tools and shared devices it found, or the one thing to fix.
 
-The token is stored with the connector and is never shown again. If you lose it, make a new one in Home Assistant and replace it in Aman.
+## Step 4: Choose what Aman can see
 
-## What Aman can and cannot do
+Aman sees only the devices you expose, which means share, in Home Assistant.
 
-Aman works only with the entities you exposed. It cannot see or touch anything else in your home, and it cannot change Home Assistant itself: no automations, no settings, no new entities.
+1. In Home Assistant, click **Settings**, then **Voice assistants**, then **Expose**.
+2. Expose each device Aman may see or control.
+
+!!! tip "Which address to use"
+
+    The address must start with https, unless it's on your home network. An address on your own network may use http, because Home Assistant at home usually does. A Nabu Casa address, or the https address Tailscale gives your Home Assistant, also works.
+
+## What Aman can and can't do
+
+Aman works only with the devices you exposed. It can't see or touch anything else in your home. It can't change Home Assistant itself: no automations, no settings and no new devices.
 
 | What Aman wants to do                                                                                             | What happens                                               |
 | ----------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| Read the state of your home (live context, one device's state, the list of exposed entities)                      | Runs without asking                                        |
-| Turn something on or off, set the temperature, brightness or position, run a script, start a scene, control media | Asks first, with a card naming the device                  |
+| Check on your home: what's on, one device's state, the list of shared devices                                     | Runs without asking                                        |
+| Turn something on or off, set the temperature, brightness or position, run a script, start a scene, control media | Asks first, with a card that names the device              |
 | The same change, for a device or a kind of device you allowed for good                                            | Runs without asking                                        |
 | Unlock or lock a door, arm or disarm an alarm, open a garage door or a cover that leads outside                   | Refused. Aman never does these, and no setting allows them |
 
-A refused call says: "Aman does not control locks, alarms or garage doors. Do that in Home Assistant."
+A refused request says: "Aman does not control locks, alarms or garage doors. Do that in Home Assistant."
 
-When a card asks about a change, **Always allow everywhere** remembers your answer for that kind of device (all lights, all switches, all heating, all media players) or for the one device, the way mail remembers an address. You can see what you allowed, and take it back, under **Settings**, **Connectors**, on the Home Assistant connector's page.
+If something Aman read, such as an email, asks for a change to your home, the change is refused. Only you can ask for a change.
 
-If something Aman read, like an email, asks for a change to your home, the change is refused. Only you can ask for a change.
+### Allow a kind of device for good
+
+When a card asks about a change, click **Always allow everywhere** to stop being asked. Aman then remembers your answer for that kind of device (all lights, all switches, all heating or all media players) or for that one device. It works the way mail remembers an address.
+
+To see what you allowed, or take it back:
+
+1. Click **More**, then **Settings**, then **Connectors**.
+2. Click the **home-assistant** connector.
+3. Under **Always allowed**, click **Revoke** next to the one you want to take back.
 
 ## Example
 
-You: Is the garage door closed?
+> **You:** Is the garage door closed?
+>
+> **Aman:** Yes. The garage door is closed, the front door is locked, and the heating is set to 22 degrees.
+>
+> **You:** Turn the heating down to 19 for the night.
 
-Aman: Yes. The garage door is closed, the front door is locked, and the heating is set to 22 degrees.
+Aman shows a card: "Set Hallway thermostat to 19 degrees", with **Allow**, **Always allow everywhere** and **Not now**. You click **Allow**.
 
-You: Turn the heating down to 19 for the night.
+> **Aman:** Done. The hallway thermostat is set to 19 degrees.
+>
+> **You:** Unlock the front door for the cleaner.
+>
+> **Aman:** Aman does not control locks, alarms or garage doors. Do that in Home Assistant.
 
-Aman shows a card: "Set Hallway thermostat to 19 degrees", with **Allow**, **Always allow everywhere**, and **Not now**. You click **Allow**.
+## If the check says it couldn't connect
 
-Aman: Done. The hallway thermostat is set to 19 degrees.
-
-You: Unlock the front door for the cleaner.
-
-Aman: Aman does not control locks, alarms or garage doors. Do that in Home Assistant.
-
-## If the check says it could not connect
-
-- **Nothing answered at that address.** Check the address and that Home Assistant is running.
+- **Nothing answered at that address.** Check the address, and check that Home Assistant is running.
 - **Home Assistant refused the token.** Make a new long-lived access token and paste it in again.
-- **The integration is not installed.** Add the Model Context Protocol Server integration in Home Assistant, under **Settings**, **Devices and services**.
-- **The certificate cannot be checked.** The address probably uses a self-signed certificate. Use the http address on your home network, or the https address Tailscale gives your Home Assistant.
+- **The integration isn't installed.** Add the Model Context Protocol Server integration in Home Assistant, under **Settings**, **Devices and services**.
+- **The certificate can't be checked.** The address probably uses a certificate Home Assistant made for itself. Use the http address on your home network, or the https address Tailscale gives your Home Assistant.
 
-## For r/selfhosted
+## Good to know
 
-Aman now connects to Home Assistant through Home Assistant's own Model Context Protocol Server integration: you paste your HA address and a long-lived access token, and Aman sees only the entities you expose to voice assistants. Reads are free, so it can answer "is the garage door closed?" or fold "the heating is set to 22 while you're out" into your morning brief. Changes ask first, with a card naming the device, and you can allow a whole kind of device (all lights, all heating) for good and take it back in Settings. Locks, alarms and garage doors are off limits by design: Aman refuses them outright, with no setting to allow them, because the thing that can unlock your house should not be the thing that reads your email.
+- The token is saved with the connector and never shown again. If you lose it, make a new one in Home Assistant, then click **Edit** on the connector in Aman and replace it.
+- Checking on your home is quiet, so Aman can fold "the heating is set to 22 while you're out" into your morning brief.
+
+## Related
+
+- [Other connectors](../mcp-servers.mdx): adding and testing any connector.
+- [Connect email and calendar](../../packages/trueforge/guide/topics/connect-mail-calendar.md)
