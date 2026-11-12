@@ -103,7 +103,7 @@ describe('the approval event says whether chat scope is offered', () => {
     },
   );
 
-  it.each(['schedule_write', 'persona_write'])('withholds it for a %s card', async reason => {
+  it.each(['schedule_write', 'persona_write', 'skill_install'])('withholds it for a %s card', async reason => {
     expect(await canChatAllow(reason, { tier3_card: cardTo(null) })).toBe(false);
   });
 

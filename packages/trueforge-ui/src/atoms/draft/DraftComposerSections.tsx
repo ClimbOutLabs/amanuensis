@@ -60,7 +60,7 @@ export function DraftComposerRightSection({ disabled, isRunning }: ComposerRight
   const isBuilder = shell != null && shellIsCreateAgent(shell.mode);
 
   return (
-    <div className="flex min-w-0 items-center gap-1">
+    <div className="aui-composer-right-group flex min-w-0 items-center gap-1">
       {!isBuilder && !isRunning ? <DraftModelSelector disabled={disabled} isRunning={isRunning} /> : null}
       <ComposerRightSection disabled={disabled} isRunning={isRunning} />
     </div>
