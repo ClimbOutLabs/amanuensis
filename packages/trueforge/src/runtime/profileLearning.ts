@@ -36,7 +36,7 @@
  * registry, the same way runtime/memory/memoryEvents.ts registers `aman.memory.recall`.
  */
 import type { SessionAgent, SessionRecord, TurnStreamingEvent } from '@truefoundry/trueforge-core/agent-session';
-import { newEventId, VercelAILLM, type ILLM } from '@truefoundry/trueforge-core/core';
+import { extractErrorLogFields, newEventId, VercelAILLM, type ILLM } from '@truefoundry/trueforge-core/core';
 import { createHash } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { Logger } from 'winston';
@@ -345,6 +345,61 @@ export interface ProfileLearningDrainMember {
   turnModelFqn: string | undefined;
   /** Test seam; production leaves it unset and resolves a VercelAILLM over the configured provider. */
   resolveLlm?: ((modelFqn: string) => Promise<ILLM>) | undefined;
+}
+
+/**
+ * The learning member for one turn the owner sends, or undefined when their learning is off (the default,
+ * which costs nothing, not even the model lookup). Resolved before the turn exists; the pass itself re-reads
+ * the switch, so turning learning off mid-turn is still obeyed. This is the one part of learning that runs
+ * while a turn starts, so it must never fail one: a model lookup that throws drops learning for this turn.
+ */
+export async function profileLearningForTurn(params: {
+  profile: Pick<PersonalizationProfile, 'learning_enabled'> | undefined;
+  session: Pick<SessionRecord, 'is_incognito' | 'agent'>;
+  sessionId: string;
+  personalizationStore: IPersonalizationStore;
+  eventStore: ICompletedTurnEventStore;
+  modelProviderStore: IModelProviderStore;
+  tokenFactoryBudget: TokenFactoryBudget;
+  modelUsage: TurnModelUsage;
+  memoryClient: MemoryClient | undefined;
+  agentStore: IAgentStore;
+  tenantId: string;
+  createdBy: string;
+  userText: string;
+  personaModelName: string | undefined;
+  logger: Logger;
+}): Promise<ProfileLearningDrainMember | undefined> {
+  if (params.profile?.learning_enabled !== true) {
+    return undefined;
+  }
+  try {
+    return {
+      session: params.session,
+      config: profileLearningPassConfig(),
+      personalizationStore: params.personalizationStore,
+      eventStore: params.eventStore,
+      modelProviderStore: params.modelProviderStore,
+      tokenFactoryBudget: params.tokenFactoryBudget,
+      modelUsage: params.modelUsage,
+      memoryClient: params.memoryClient,
+      tenantId: params.tenantId,
+      createdBy: params.createdBy,
+      userText: params.userText,
+      turnModelFqn: await resolveTurnModelFqn({
+        tenantId: params.tenantId,
+        personaModelName: params.personaModelName,
+        sessionAgent: params.session.agent,
+        agentStore: params.agentStore,
+      }),
+    };
+  } catch (error) {
+    params.logger.debug('Profile learning disabled for this turn: the model FQN did not resolve', {
+      sessionId: params.sessionId,
+      ...extractErrorLogFields(error),
+    });
+    return undefined;
+  }
 }
 
 export interface SubmitProfileLearningParams extends ProfileLearningDrainMember {

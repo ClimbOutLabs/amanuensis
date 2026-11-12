@@ -18,6 +18,7 @@ import {
 } from '../auth/identity';
 import configuration from '../config';
 import type { AgentRecord } from '../db/agentStore';
+import type { IPersonalizationStore } from '../db/personalizationStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { ITelegramStore, TelegramConnection } from '../db/telegramStore';
 import {
@@ -55,8 +56,10 @@ export const TELEGRAM_WEBHOOK_BASE_PATH = '/api/telegram';
 /** Runtime + store resolvers needed to run Telegram turns and move its updates, mirroring the schedule execution deps. */
 export interface TelegramTurnExecutionDeps<TTransaction> extends Omit<
   ScheduleTurnExecutionDeps<TTransaction>,
-  'scheduleStore' | 'briefItemStore' | 'deliveryService'
+  'scheduleStore' | 'briefItemStore' | 'deliveryService' | 'personalizationStore'
 > {
+  /** Read for the owner's profile, and written by profile learning after a message they sent. */
+  personalizationStore: IPersonalizationStore<TTransaction>;
   telegramStore: ITelegramStore;
   telegramService: TelegramService;
   telegramQueue: TelegramSendQueue;
@@ -188,6 +191,8 @@ async function startTelegramTurn<TTransaction>(params: {
     input,
     previous_turn_id,
     userRef,
+    // The person wrote this message, so their profile learns from it as it does from a chat here.
+    profileLearning: { personalizationStore: deps.personalizationStore },
     deps: {
       mcpCatalog: deps.mcpCatalog,
       activeTurns: deps.activeTurns,

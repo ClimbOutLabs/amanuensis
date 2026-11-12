@@ -135,8 +135,7 @@ import type { PersonaTurnContext } from '../runtime/personaCapability';
 import type { PersonaSwitchNotice } from '../runtime/PersonaTurnResourceResolver';
 import { privateChatExpiry, sessionKeepsNothing } from '../runtime/privateChat';
 import {
-  profileLearningPassConfig,
-  resolveTurnModelFqn,
+  profileLearningForTurn,
   submitProfileLearning,
   type ProfileLearningDrainMember,
 } from '../runtime/profileLearning';
@@ -1764,6 +1763,7 @@ export interface TurnEventDrainInput {
   chatSearch?: DrainTurnEventsInput['chatSearch'];
   chatTitle?: DrainTurnEventsInput['chatTitle'];
   privateChat?: DrainTurnEventsInput['privateChat'];
+  profileLearning?: DrainTurnEventsInput['profileLearning'];
 }
 
 /**
@@ -1780,6 +1780,11 @@ export async function beginTurnExecution(params: {
   unattended?: boolean | undefined;
   /** Built-in tool names this turn does not offer. */
   withheldTools?: readonly string[] | undefined;
+  /**
+   * Set when the person wrote this turn themselves (a Telegram message), so their profile may learn from it
+   * when they have learning on. A scheduled run leaves it unset: nobody wrote its input.
+   */
+  profileLearning?: { personalizationStore: IPersonalizationStore } | undefined;
 }): Promise<{ turn: TurnHandle<TurnCustom>; drainInput: TurnEventDrainInput }> {
   const clocks = startTurnClocks({ sessionId: params.session.session_id, logger: params.deps.logger });
   try {
@@ -1801,6 +1806,26 @@ async function beginAcceptedTurnExecution(
 
   const tenant_id = session.tenant_id;
   const modelUsage = new TurnModelUsageLedger({ prices: configuration.TOKEN_FACTORY_PRICES });
+  const profileLearning =
+    params.profileLearning === undefined
+      ? undefined
+      : await profileLearningForTurn({
+          profile: deps.personalizationProfile,
+          session: session.record,
+          sessionId,
+          personalizationStore: params.profileLearning.personalizationStore,
+          eventStore: deps.sessionStore,
+          modelProviderStore: deps.modelProviderStore,
+          tokenFactoryBudget: deps.tokenFactoryBudget,
+          modelUsage,
+          memoryClient: deps.memoryClient,
+          agentStore: deps.agentStore,
+          tenantId: tenant_id,
+          createdBy: userRef,
+          userText: extractUserMessageText(input ?? []),
+          personaModelName: deps.personaContext?.model_name,
+          logger: deps.logger,
+        });
   const setup = await raceTurnSetup({
     signal: abortController.signal,
     setup: async () => {
@@ -2001,6 +2026,7 @@ async function beginAcceptedTurnExecution(
       logger: deps.logger,
       turnDrains: deps.turnDrains,
       modelUsage: { ledger: modelUsage, eventStore: deps.sessionStore },
+      profileLearning,
       privateChat: privateChatDrainMember({ session, sessionStore: deps.sessionStore }),
       chatSearch:
         deps.chatSearchIndexer === undefined
@@ -2038,6 +2064,7 @@ export async function startTurnInProcess(params: {
   deps: BeginTurnExecutionDeps;
   unattended?: boolean | undefined;
   withheldTools?: readonly string[] | undefined;
+  profileLearning?: { personalizationStore: IPersonalizationStore } | undefined;
 }): Promise<TurnHandle<TurnCustom>> {
   const { turn, drainInput } = await beginTurnExecution(params);
 
@@ -2688,46 +2715,25 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
         : undefined,
     });
 
-    // Resolved before the turn exists, like the memory provider above: the pass itself runs
-    // after TURN_DONE (awaited by the tracked drain) and every failure inside it silently
-    // no-ops. Read off the
-    // profile already loaded for the personalization context, so learning left off (the default)
-    // costs nothing here, not even the model-FQN lookup. The pass re-reads the switch itself, so
-    // a user who turns it off mid-turn is still obeyed.
-    //
-    // This is the one part of the pass that runs on the create-turn path, so it is the one
-    // part that could fail a turn. It must not: an agent-store read that throws drops learning
-    // for this turn and nothing more.
-    let profileLearning: ProfileLearningDrainMember | undefined;
-    if (profile?.learning_enabled === true) {
-      try {
-        profileLearning = {
-          session: session.record,
-          config: profileLearningPassConfig(),
-          personalizationStore: deps.personalizationStore,
-          eventStore: deps.sessionStore,
-          modelProviderStore,
-          tokenFactoryBudget: deps.tokenFactoryBudget,
-          modelUsage,
-          memoryClient,
-          tenantId: requestContext.tenant_id,
-          createdBy: userRef,
-          userText: extractUserMessageText(body.input),
-          turnModelFqn: await resolveTurnModelFqn({
-            tenantId: requestContext.tenant_id,
-            personaModelName: persona?.kind === 'persona' ? persona.persona.model_name : undefined,
-            sessionAgent: session.record.agent,
-            agentStore,
-          }),
-        };
-      } catch (error) {
-        deps.logger.debug('Profile learning disabled for this turn: the model FQN did not resolve', {
-          sessionId,
-          ...extractErrorLogFields(error),
-        });
-        profileLearning = undefined;
-      }
-    }
+    // Resolved before the turn exists, like the memory provider above, from the profile already loaded
+    // for the personalization context. The pass runs after TURN_DONE and every failure inside it no-ops.
+    const profileLearning = await profileLearningForTurn({
+      profile,
+      session: session.record,
+      sessionId,
+      personalizationStore: deps.personalizationStore,
+      eventStore: deps.sessionStore,
+      modelProviderStore,
+      tokenFactoryBudget: deps.tokenFactoryBudget,
+      modelUsage,
+      memoryClient,
+      agentStore,
+      tenantId: requestContext.tenant_id,
+      createdBy: userRef,
+      userText: extractUserMessageText(body.input),
+      personaModelName: persona?.kind === 'persona' ? persona.persona.model_name : undefined,
+      logger: deps.logger,
+    });
 
     // One read per turn: the Settings toggle's persisted override wins when stored, otherwise
     // the MEMORY_SUMMARIZE env default. Resolved before the turn exists, next to the profile
