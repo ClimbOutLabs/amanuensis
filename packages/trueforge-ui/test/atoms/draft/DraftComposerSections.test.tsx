@@ -143,6 +143,14 @@ describe('draft composer sections', () => {
     });
   });
 
+  it('groups the model and voice controls so narrow screens can restack them', async () => {
+    render(<DraftSections />);
+
+    const model = await screen.findByTitle('Select model');
+    const selector = model.closest('.aui-composer-model-selector');
+    expect(selector?.parentElement).toHaveClass('aui-composer-right-group');
+  });
+
   it('leaves the model control out of the builder composer', () => {
     render(
       <ShellModeProvider agentConfig={{ mode: 'AgentComposer' }}>
