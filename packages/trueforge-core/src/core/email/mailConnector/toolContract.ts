@@ -52,6 +52,12 @@ export const MAIL_ACCOUNT_LIST_TOOL_NAME = 'list_available_accounts';
 /** The argument every Email tool takes to pick the mail account. */
 export const MAIL_ACCOUNT_ARGUMENT = 'account_name';
 
+/** The account's folder list. The host reads it to match a common folder name to the account's own. */
+export const MAIL_MAILBOX_LIST_TOOL_NAME = 'list_mailboxes';
+
+/** The arguments that name a folder in the account. */
+export const MAIL_MAILBOX_ARGUMENTS = ['mailbox', 'source_mailbox'] as const;
+
 /** Lists and searches messages; the host keeps it to a recent window when the call sets no date. */
 export const MAIL_LIST_TOOL_NAME = 'list_emails_metadata';
 

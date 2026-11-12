@@ -847,7 +847,7 @@ export class SessionsClient {
     }
 
     /**
-     * Cancel the running last turn for a session. Only the session creator may cancel.
+     * Cancel the running last turn for a session, or only the turn named by `turn_id`. Only the session creator may cancel.
      *
      * @param {string} session_id - Session identifier.
      * @param {TrueForge.CancelSessionRequest} request

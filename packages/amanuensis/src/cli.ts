@@ -23,18 +23,22 @@ function printUsage(): void {
   console.log(`Usage:
   npx amanuensis
   npx amanuensis --port <n>
+  npx amanuensis --reset-password
 
 Amanuensis v${PACKAGE_VERSION}. Start the agent server and chat UI.
 Runs in standalone mode (SQLite, no Redis), local use only, not production-safe.
-Login is required: set OIDC_ISSUER_URL, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET (an http issuer
-is accepted only on localhost) and OIDC_ALLOWED_EMAILS (exactly one email address). From a
-repository checkout, "pnpm dev:login" starts a local Dex and prints them. Optional: PUBLIC_BASE_URL
+Sign-in is a local email and password that Aman keeps itself: the first time you open
+Aman it asks you to create it, and there is only ever one. Setting the OIDC variables
+(OIDC_ISSUER_URL, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET, OIDC_ALLOWED_EMAILS with exactly
+one email address) uses your own sign-in service instead. Optional: PUBLIC_BASE_URL
 (origin, no path), AUTH_COOKIE_SUFFIX.
 Set STANDALONE=false with Postgres and Redis for multi-replica peering.
 
 Options:
-  --port <n>   HTTP port (default: ${String(DEFAULT_PORT)}, or PORT env)
-  -h, --help   Show this help
+  --port <n>         HTTP port (default: ${String(DEFAULT_PORT)}, or PORT env)
+  --reset-password   Set a new password for the local sign-in (Aman must be stopped).
+                     If you start Aman with --port, pass the same --port here too
+  -h, --help         Show this help
 
 Data:
   ${path.join(DEFAULT_DATA_DIR, 'db', 'db.sqlite')} (override with SQLITE_PATH)
@@ -56,6 +60,15 @@ function applyPort(raw: string | undefined): void {
 function applyDefaults(): void {
   process.env['STANDALONE'] ??= 'true';
   process.env['SQLITE_PATH'] ??= path.join(DEFAULT_DATA_DIR, 'db', 'db.sqlite');
+  // The npx install signs in locally unless the person set up their own sign-in
+  // service (OIDC variables present) or named a mode themselves.
+  if (
+    process.env['STANDALONE'] === 'true' &&
+    process.env['OIDC_ISSUER_URL'] === undefined &&
+    process.env['TRUEFORGE_AUTH_MODE'] === undefined
+  ) {
+    process.env['TRUEFORGE_AUTH_MODE'] = 'local';
+  }
 }
 
 function listeningUrl(): string {
@@ -69,6 +82,7 @@ try {
     args: process.argv.slice(2),
     options: {
       port: { type: 'string' },
+      'reset-password': { type: 'boolean', default: false },
       help: { type: 'boolean', short: 'h', default: false },
     },
     allowPositionals: false,
@@ -80,9 +94,16 @@ try {
   } else {
     applyPort(values.port);
     applyDefaults();
-    // Not a static specifier: `main.js` is vendored into dist/ at build time and has no src/ twin.
-    await import(new URL('./main.js', import.meta.url).href);
-    console.log(`Amanuensis is listening on ${listeningUrl()}`);
+    if (values['reset-password']) {
+      // The server's own command dispatcher does the work under its command name;
+      // it exits the process itself, so nothing after this import runs.
+      process.argv = [process.argv[0] ?? 'node', 'amanuensis', 'reset-password'];
+      await import(new URL('./aman.js', import.meta.url).href);
+    } else {
+      // Not a static specifier: `main.js` is vendored into dist/ at build time and has no src/ twin.
+      await import(new URL('./main.js', import.meta.url).href);
+      console.log(`Amanuensis is listening on ${listeningUrl()}`);
+    }
   }
 } catch (error) {
   console.error(error);

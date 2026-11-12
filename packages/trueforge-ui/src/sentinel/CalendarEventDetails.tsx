@@ -40,6 +40,12 @@ export const CalendarEventDetails: FC<{ event: SentinelApprovalCalendarEvent }> 
         <Line label="Time zone" value={event.time_zone} />
         <Line label="Length" value={event.duration} />
         {event.location !== '' && <Line label="Where" value={event.location} />}
+        {event.already_created === true && (
+          <p className="font-medium text-text-primary">You already have this event.</p>
+        )}
+        {event.span_days !== undefined && event.span_days > 1 && (
+          <p className="font-medium text-text-primary">This event runs over {event.span_days} days.</p>
+        )}
         {event.one_of_repeating && <Line label="Repeats" value="Only this one event of the series changes" />}
         <Line label="Guests" value={event.attendees.length === 0 ? 'None' : event.attendees.join(', ')} />
         {event.attendees.length > 0 && (
