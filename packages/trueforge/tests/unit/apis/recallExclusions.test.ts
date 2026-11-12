@@ -50,7 +50,7 @@ describe('POST /api/v1/sessions/{session_id}/recall-exclusions', () => {
       agent: { type: 'inline', spec: makeAgentSpec() },
       external_id: null,
       is_incognito: true,
-      private_expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      private_expires_at: new Date(Date.now() + 60 * 60 * 1000),
     });
   });
 

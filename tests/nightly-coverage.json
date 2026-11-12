@@ -343,6 +343,10 @@
       "set": "chat",
       "tests": []
     },
+    "route:recallExclusion": {
+      "set": "memory",
+      "tests": []
+    },
     "route:repository": {
       "set": "code",
       "tests": []
@@ -388,6 +392,10 @@
     },
     "route:spaceFolder": {
       "set": "spaces",
+      "tests": []
+    },
+    "route:today": {
+      "set": "home",
       "tests": []
     },
     "route:tokenFactoryUsage": {
@@ -778,6 +786,7 @@
     "route:personaKnowledge",
     "route:personalization",
     "route:privateChat",
+    "route:recallExclusion",
     "route:repository",
     "route:runCode",
     "route:sandboxProvider",
@@ -788,6 +797,7 @@
     "route:skill",
     "route:space",
     "route:spaceFolder",
+    "route:today",
     "route:tokenFactoryUsage",
     "route:toolOutputScreen",
     "route:voice",
