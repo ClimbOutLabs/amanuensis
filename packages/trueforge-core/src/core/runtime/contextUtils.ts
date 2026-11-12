@@ -89,7 +89,7 @@ Show a picture in a reply only when the person asked for one or the picture is t
  * per-tool special case.
  */
 export const NO_TASK_NO_TOOLS_PROMPT = dedent`
-When the user's message names no concrete task, such as a greeting, an announcement of intent ("ready to...", "let's..."), or small talk, reply in text and ask what they want done. In that case, do not call any tool, open or use a sandbox, or guess which tool they might mean. The one exception: if the message answers a question you just asked, take the answer and continue the task, using tools as the task needs.
+When the user's message names no concrete task, such as a greeting, an announcement of intent ("ready to...", "let's..."), or small talk, reply in text and ask what they want done, without calling any tool, opening or using a sandbox, or guessing which tool they mean. Exception: if it answers a question you just asked, continue the task with the tools it needs.
 `;
 
 /**
