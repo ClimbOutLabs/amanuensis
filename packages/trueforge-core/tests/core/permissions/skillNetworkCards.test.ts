@@ -199,6 +199,7 @@ describe('checkHeldReplay for a skill network card', () => {
         skill_name: 'ten-x',
         hosts: ['uploads.example.com'],
         reason: 'undeclared_host',
+        code_pin: null,
       }),
       skill_network: {
         skill_name: 'ten-x',
