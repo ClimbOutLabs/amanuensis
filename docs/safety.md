@@ -54,6 +54,7 @@ A scheduled run has nobody watching it, so it never sends or changes anything by
 - If you let file writes run without a card in chat, a scheduled run ignores that choice and holds them too.
 - When the run finishes, its chat ends with a **Needs your OK** list: "Aman held these for you. Nothing has been done yet." Each item shows what will happen, with **Approve** and **Deny**, and for some read-only connector tools also **Always allow**.
 - The list is built by the app from what was held, not from the model's words, so the model cannot hide an item or add a fake one.
+- When you approve a held action, Aman checks it again first. If anything the card showed has changed since it was held, such as the guests of an event or the text of a message, nothing is done and Aman says to ask again in chat.
 - Held actions expire after 24 hours. Up to 20 are kept per chat; if more were held, the list says how many were not saved so you can ask again in chat.
 - A helper job inside a scheduled run cannot hold actions. Its actions are refused.
 
