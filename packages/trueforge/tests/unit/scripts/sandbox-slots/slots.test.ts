@@ -87,6 +87,11 @@ const BASE_OPTIONS: Omit<SlotsOptions, 'run' | 'fix'> = {
   },
   addPacks: [],
   removePacks: [],
+  pythonPackagesPort: {
+    update: ({ add, remove }) => Promise.resolve(add.filter(name => !remove.includes(name))),
+  },
+  addPython: [],
+  removePython: [],
   confirm: () => Promise.resolve(true),
   onCheck: undefined,
   onStage: undefined,
@@ -154,7 +159,12 @@ describe('runSandboxSlots', () => {
     expect(compose.length).toBeGreaterThan(0);
     for (const entry of compose) {
       expect(entry.args).toEqual(expect.arrayContaining(['-p', 'lab-slots']));
-      expect(entry.env).toEqual({ AMAN_SLOTS_INSTANCE: 'lab', AMAN_SLOTS_PACKS: '', AMAN_SLOTS_DISK_MODE: 'vm' });
+      expect(entry.env).toEqual({
+        AMAN_SLOTS_INSTANCE: 'lab',
+        AMAN_SLOTS_PACKS: '',
+        AMAN_SLOTS_PYTHON: '',
+        AMAN_SLOTS_DISK_MODE: 'vm',
+      });
     }
   });
 
@@ -1149,5 +1159,58 @@ describe('the script that moves the chats of the extra slots', () => {
     expect(existsSync(join(root, 'cp-called'))).toBe(false);
     expect(existsSync(join(from, 'sessions', SESSION))).toBe(true);
     expect(existsSync(join(to, 'sessions', SESSION))).toBe(false);
+  });
+});
+
+describe('your own Python packages', () => {
+  test('the saved list reaches the image build and every later compose call, and is reported', async () => {
+    const asked: { add: string[]; remove: string[] }[] = [];
+    const checks: string[] = [];
+    const { result, calls } = await run(() => undefined, false, {
+      pythonPackagesPort: {
+        update: input => {
+          asked.push(input);
+          return Promise.resolve(['feedparser', 'arxiv==2.1.0']);
+        },
+      },
+      addPython: ['arxiv==2.1.0'],
+      removePython: ['lxml'],
+      onCheck: check => checks.push(check.message),
+    });
+    expect(result.ok).toBe(true);
+    expect(asked).toEqual([{ add: ['arxiv==2.1.0'], remove: ['lxml'] }]);
+    const compose = calls.filter(call => call.args[0] === 'compose' && call.args[1] !== 'version');
+    expect(compose.length).toBeGreaterThan(0);
+    for (const call of compose) {
+      expect(call.env['AMAN_SLOTS_PYTHON']).toBe('feedparser arxiv==2.1.0');
+    }
+    expect(checks).toContain('Your own Python packages in the sandbox: feedparser, arxiv==2.1.0');
+  });
+
+  test('a failed build with your own packages says how to take one out', async () => {
+    const { result } = await run(
+      call => (joined(call).includes(' build ') ? { exitCode: 1, stderr: 'no wheel' } : undefined),
+      false,
+      {
+        pythonPackagesPort: { update: () => Promise.resolve(['nosuchwheel']) },
+      },
+    );
+    expect(result).toMatchObject({ ok: false, step: 'build' });
+    expect(!result.ok && result.fix).toContain('--remove-python');
+    expect(!result.ok && result.fix).toContain('nosuchwheel');
+  });
+
+  test('a check reads nothing and changes nothing', async () => {
+    let updated = false;
+    await run(() => undefined, false, {
+      mode: 'check',
+      pythonPackagesPort: {
+        update: () => {
+          updated = true;
+          return Promise.resolve([]);
+        },
+      },
+    });
+    expect(updated).toBe(false);
   });
 });

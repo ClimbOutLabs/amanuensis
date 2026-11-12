@@ -5,7 +5,8 @@
  * Linux; the disks are only created after a yes, or with `--yes`), `--disk-gb <n>` (size of each slot's
  * disk, default 16), `--no-hard-disk-limit` (skip the per-slot disks), `--down` (stop the slots), `--purge`
  * (with `--down`, also delete their workspace volumes and disk files), `--add <packs>` / `--remove <packs>`
- * (toolchain packs `go`, `rust`, `java` in the image; they stay chosen until removed), `--instance <name>`
+ * (toolchain packs `go`, `rust`, `java` in the image; they stay chosen until removed), `--add-python <packages>` /
+ * `--remove-python <packages>` (your own Python packages in the image; they stay until removed), `--instance <name>`
  * (manage a second install's slots on the same Docker host; default `aman`), `--json`, `--check` (read only: verify
  * the image, profile, disks and every slot's attestation), `--build-only` (build the image and stop), `--restart`
  * (recreate running slots), `--repo-root <dir>` (where the compose files and `ops/sandbox-slot` are; default this
@@ -25,6 +26,7 @@ import { parseArgs } from 'node:util';
 
 import { createUi, type UiStream } from '../lib/ui.js';
 import { createPacksPort, parsePackList, type Download } from './packs.js';
+import { createPythonPackagesPort, parsePythonPackageList } from './pythonPackages.js';
 import { SlotsReporter } from './report.js';
 import {
   CommandNotFoundError,
@@ -186,6 +188,8 @@ async function main(): Promise<number> {
         yes: { type: 'boolean' },
         add: { type: 'string' },
         remove: { type: 'string' },
+        'add-python': { type: 'string' },
+        'remove-python': { type: 'string' },
         check: { type: 'boolean' },
         'build-only': { type: 'boolean' },
         restart: { type: 'boolean' },
@@ -199,7 +203,7 @@ async function main(): Promise<number> {
     }));
   } catch (error: unknown) {
     process.stderr.write(
-      `${error instanceof Error ? error.message : String(error)}\nUsage: pnpm sandbox:slots [--fix [--yes]] [--disk-gb <n>] [--no-hard-disk-limit] [--add go,rust,java] [--remove go,rust,java] [--json] [--instance <name>] [--check | --build-only | --restart] [--repo-root <dir>] [--log-file <path>] [--verbose] [--embedded] | --down [--purge] [--instance <name>]\n`,
+      `${error instanceof Error ? error.message : String(error)}\nUsage: pnpm sandbox:slots [--fix [--yes]] [--disk-gb <n>] [--no-hard-disk-limit] [--add go,rust,java] [--remove go,rust,java] [--add-python <packages>] [--remove-python <packages>] [--json] [--instance <name>] [--check | --build-only | --restart] [--repo-root <dir>] [--log-file <path>] [--verbose] [--embedded] | --down [--purge] [--instance <name>]\n`,
     );
     return 2;
   }
@@ -234,6 +238,19 @@ async function main(): Promise<number> {
   const unknownPacks = [...added.unknown, ...removed.unknown];
   if (unknownPacks.length > 0) {
     process.stderr.write(`Unknown pack: ${unknownPacks.join(', ')}. The packs are go, rust and java.\n`);
+    return 2;
+  }
+  const addedPython = parsePythonPackageList(values['add-python'] ?? '');
+  const removedPython = parsePythonPackageList(values['remove-python'] ?? '');
+  const invalidPython = [...addedPython.invalid, ...removedPython.invalid];
+  if (invalidPython.length > 0) {
+    process.stderr.write(
+      `Not a plain Python package name: ${invalidPython.join(', ')}. Give a name such as feedparser, or a name and version such as feedparser==6.0.11, separated by commas.\n`,
+    );
+    return 2;
+  }
+  if (values.check === true && (addedPython.packages.length > 0 || removedPython.packages.length > 0)) {
+    process.stderr.write('--add-python and --remove-python rebuild the sandbox, so they do not go with --check.\n');
     return 2;
   }
   if (values.purge === true && values.down !== true) {
@@ -287,6 +304,9 @@ async function main(): Promise<number> {
     packsPort: createPacksPort({ dir: resolve(repoRoot, 'ops', 'sandbox-slot', 'packs'), download }),
     addPacks: added.packs,
     removePacks: removed.packs,
+    pythonPackagesPort: createPythonPackagesPort({ dir: resolve(repoRoot, 'ops', 'sandbox-slot', 'packs') }),
+    addPython: addedPython.packages,
+    removePython: removedPython.packages,
     hardDiskLimit: values['no-hard-disk-limit'] !== true,
     confirm: async question => {
       reporter.explain(question);

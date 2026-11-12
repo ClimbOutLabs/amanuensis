@@ -4,6 +4,7 @@
  */
 import { join } from 'node:path';
 import { PackError, toPackArch, type PackName, type PacksPort } from './packs.js';
+import { type PythonPackagesPort } from './pythonPackages.js';
 
 export interface CommandResult {
   stdout: string;
@@ -180,6 +181,10 @@ export interface SlotsOptions {
   /** Packs to add to the image and packs to take out of it, from --add and --remove. */
   addPacks: PackName[];
   removePacks: PackName[];
+  /** Where the person's own Python packages are kept, and what --add-python and --remove-python change. */
+  pythonPackagesPort: PythonPackagesPort;
+  addPython: string[];
+  removePython: string[];
   /** Asks the person to agree before system files are touched; false when they decline or cannot be asked. */
   confirm: (question: string) => Promise<boolean>;
   onCheck: ((check: SlotsCheck) => void) | undefined;
@@ -251,6 +256,7 @@ class Slots {
   /** Set once the disks are mounted; from then on every compose call carries the disk file. */
   private disksReady = false;
   private packs: PackName[] = [];
+  private pythonPackages: string[] = [];
   /** True when the disks of the retired slots were left in place (no --fix, or the person said no). */
   private retiredDisksLeft = false;
   private rootAsked = false;
@@ -306,6 +312,7 @@ class Slots {
     const env: Record<string, string> = {
       [INSTANCE_ENV]: this.options.instance,
       AMAN_SLOTS_PACKS: this.packs.join(','),
+      AMAN_SLOTS_PYTHON: this.pythonPackages.join(' '),
       AMAN_SLOTS_DISK_MODE: this.diskMode === 'vm' ? 'vm' : 'none',
     };
     if (this.disksReady && this.diskBytes !== undefined) {
@@ -956,6 +963,17 @@ class Slots {
     if (this.packs.length > 0) {
       this.record({ step: 'packs', status: 'ok', message: `Toolchain packs in the sandbox: ${this.packs.join(', ')}` });
     }
+    this.pythonPackages = await this.options.pythonPackagesPort.update({
+      add: this.options.addPython,
+      remove: this.options.removePython,
+    });
+    if (this.pythonPackages.length > 0) {
+      this.record({
+        step: 'packs',
+        status: 'ok',
+        message: `Your own Python packages in the sandbox: ${this.pythonPackages.join(', ')}`,
+      });
+    }
   }
 
   private async build(): Promise<void> {
@@ -965,7 +983,9 @@ class Slots {
       throw new StepFailure(
         'build',
         failed.message,
-        'Check that this machine can reach Docker Hub and the Ubuntu package mirror (the build downloads packages once), then run this again. A Docker Hub rate-limit message means: run docker login first.',
+        this.pythonPackages.length > 0
+          ? `If the log names one of your own Python packages (${this.pythonPackages.join(', ')}), take it out with --remove-python and run this again: it may have no ready-made version for this machine, or need a different version of a package Aman ships. Otherwise check that this machine can reach Docker Hub and the Ubuntu package mirror, then run this again.`
+          : 'Check that this machine can reach Docker Hub and the Ubuntu package mirror (the build downloads packages once), then run this again. A Docker Hub rate-limit message means: run docker login first.',
         undefined,
         failed.detail,
       );
