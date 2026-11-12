@@ -6,6 +6,7 @@ import { chromium, type Browser } from 'playwright-core';
 import { createServer, defaultClientConditions } from 'vite';
 
 import { DEV_OPTIMIZE_DEPS } from '../src/devPrebundle.ts';
+import { featureShotPath, saveFailureShots } from './support/featureShots.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
 import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
 import { privateViteCache } from './support/viteCache.ts';
@@ -60,6 +61,9 @@ test(
         // Open every fold so all of the panel's text is rendered.
         for (const summary of await panel.locator('summary').all()) await summary.click();
         await panel.getByText('Sent an email').waitFor({ timeout: RENDER_TIMEOUT_MS });
+        await page.screenshot({
+          path: await featureShotPath({ surface: 'screen:chat-layout', step: `status-panel-${theme}` }),
+        });
         await page.waitForFunction(() => {
           const img = document.querySelector<HTMLImageElement>('.aman-runtime-rail__picture');
           return img?.complete === true && img.naturalWidth > 0;
@@ -157,6 +161,9 @@ test(
         await page.getByRole('button', { name: 'Show panel' }).click();
         await page.close();
       }
+    } catch (error) {
+      await saveFailureShots({ browser, surface: 'screen:chat-layout' });
+      throw error;
     } finally {
       await browser?.close();
       await server.close();

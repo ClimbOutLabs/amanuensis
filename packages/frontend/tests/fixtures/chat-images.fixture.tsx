@@ -33,12 +33,12 @@ const port: ChatImagesCatalog = {
                 { status: 'shown', image_id: APPROVED_ID, width: 320, height: 200 },
               ],
             }
-          : { status: 'ask', count: 2, host: null },
+          : { status: 'ask', count: 2, host: null, url: null },
       );
     }
     if (source.kind === 'reply') {
       if (!approved) {
-        return Promise.resolve({ status: 'ask', count: 1, host: 'example.com' });
+        return Promise.resolve({ status: 'ask', count: 1, host: 'example.com', url: source.url });
       }
       if (source.url === 'https://example.com/photos/harbor.png') {
         return Promise.resolve({
@@ -78,7 +78,7 @@ if (rootElement == null) throw new Error('Missing fixture root');
 
 createRoot(rootElement).render(
   // As in the app: the shell CSP keeps stylesheets and fonts on the app origin.
-  <SlotsProvider theme={{ webFonts: false }}>
+  <SlotsProvider>
     <main style={{ maxWidth: '48rem', margin: '0 auto', padding: '1rem' }}>
       <ChatImageScope port={port} sessionId="session-1" turnId="turn-1" settled>
         <Markdown content={REPLY} />

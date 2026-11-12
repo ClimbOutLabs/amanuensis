@@ -14,6 +14,8 @@ import {
 
 import { newId } from '../utils/id';
 
+import type { PersonOwner } from './personOwner';
+
 /** Attempts made in the same millisecond still read back in the order they were recorded. */
 const nextAttemptId = monotonicFactory();
 
@@ -50,12 +52,7 @@ export interface DeliveryDatabase {
   delivery_attempt: DeliveryAttemptTable;
 }
 
-export interface DeliveryOwner {
-  tenant_id: string;
-  created_by: string;
-}
-
-export interface CreateDeliveryInput extends DeliveryOwner {
+export interface CreateDeliveryInput extends PersonOwner {
   kind: Delivery['kind'];
   level: DeliveryLevel;
   text: string;
@@ -65,7 +62,7 @@ export interface CreateDeliveryInput extends DeliveryOwner {
   created_at?: Date;
 }
 
-export interface ListDeliveriesInput extends DeliveryOwner {
+export interface ListDeliveriesInput extends PersonOwner {
   limit: number;
   page_token?: string | undefined;
 }
@@ -75,12 +72,12 @@ export interface DeliveryPage {
   next_page_token: string | undefined;
 }
 
-export interface RecordDeliveryAttemptInput extends DeliveryOwner {
+export interface RecordDeliveryAttemptInput extends PersonOwner {
   delivery_id: string;
   attempt: DeliveryAttempt;
 }
 
-export interface ImportDeliveriesInput extends DeliveryOwner {
+export interface ImportDeliveriesInput extends PersonOwner {
   deliveries: readonly Delivery[];
 }
 
@@ -90,18 +87,29 @@ export const DELIVERY_EXPORT_LIMIT = 1000;
 export interface IDeliveryStore {
   /** Makes one delivery, unread. Throws when the fields do not make a valid delivery of that kind. */
   create(input: CreateDeliveryInput): Promise<Delivery>;
+  /**
+   * Makes the delivery with this id unless the owner made it already. Resolves to the delivery and whether this call
+   * made it, so whatever goes out with a delivery goes out once. Throws when the id is someone else's.
+   */
+  createOnce(input: CreateDeliveryInput & { id: string }): Promise<{ delivery: Delivery; created: boolean }>;
   /** Adds one channel attempt. A delivery that is not the owner's is left alone and reads as missing. */
   recordAttempt(input: RecordDeliveryAttemptInput): Promise<boolean>;
-  get(input: DeliveryOwner & { id: string }): Promise<Delivery | undefined>;
+  get(input: PersonOwner & { id: string }): Promise<Delivery | undefined>;
   /** The owner's deliveries, newest first. */
   list(input: ListDeliveriesInput): Promise<DeliveryPage>;
   /** Marks the owner's listed deliveries seen. Already seen ones keep their first time. Resolves to how many changed. */
-  markSeen(input: DeliveryOwner & { ids: readonly string[]; now?: Date }): Promise<number>;
+  markSeen(input: PersonOwner & { ids: readonly string[]; now?: Date }): Promise<number>;
   /** Marks every unread delivery of the owner seen, loaded on a page or not. Resolves to how many changed. */
-  markAllSeen(input: DeliveryOwner & { now?: Date }): Promise<number>;
-  countUnread(input: DeliveryOwner): Promise<number>;
+  markAllSeen(input: PersonOwner & { now?: Date }): Promise<number>;
+  countUnread(input: PersonOwner): Promise<number>;
+  /** How many of the owner's deliveries of these kinds went out at one of these levels at or after `since`. */
+  countSince(
+    input: PersonOwner & { since: Date; kinds: readonly Delivery['kind'][]; levels: readonly DeliveryLevel[] },
+  ): Promise<number>;
+  /** When the owner's newest delivery at one of these levels was made, or undefined when there is none. */
+  lastCreatedAt(input: PersonOwner & { levels: readonly DeliveryLevel[] }): Promise<Date | undefined>;
   /** The owner's newest deliveries for a data export. */
-  listForExport(input: DeliveryOwner): Promise<Delivery[]>;
+  listForExport(input: PersonOwner): Promise<Delivery[]>;
   /** Adds exported deliveries under the owner; pass the import transaction. One already there keeps its row. Resolves to how many were added. */
   importDeliveries(input: ImportDeliveriesInput, transaction?: Kysely<DeliveryDatabase>): Promise<number>;
 }
@@ -151,6 +159,21 @@ function toDelivery({ row, attempts }: { row: DeliveryTable; attempts: DeliveryA
   });
 }
 
+function rowOf(input: CreateDeliveryInput & { id: string }): DeliveryTable {
+  return {
+    id: input.id,
+    tenant_id: input.tenant_id,
+    created_by: input.created_by,
+    kind: input.kind,
+    level: input.level,
+    text: input.text,
+    reason: input.reason,
+    link: input.link === null ? null : JSON.stringify(input.link),
+    created_at: (input.created_at ?? new Date()).toISOString(),
+    seen_at: null,
+  };
+}
+
 /** The feed of things meant for a person. Owner-scoped: no read or write reaches another owner's rows. */
 export class DeliveryStore implements IDeliveryStore {
   readonly #db: Kysely<DeliveryDatabase>;
@@ -182,22 +205,30 @@ export class DeliveryStore implements IDeliveryStore {
   }
 
   async create(input: CreateDeliveryInput): Promise<Delivery> {
-    const row: DeliveryTable = {
-      id: newId(),
-      tenant_id: input.tenant_id,
-      created_by: input.created_by,
-      kind: input.kind,
-      level: input.level,
-      text: input.text,
-      reason: input.reason,
-      link: input.link === null ? null : JSON.stringify(input.link),
-      created_at: (input.created_at ?? new Date()).toISOString(),
-      seen_at: null,
-    };
+    const row = rowOf({ ...input, id: newId() });
     // Parsed before the write, so a delivery that could not be read back is never stored.
     const delivery = toDelivery({ row, attempts: [] });
     await this.#db.insertInto('delivery').values(row).execute();
     return delivery;
+  }
+
+  async createOnce(input: CreateDeliveryInput & { id: string }): Promise<{ delivery: Delivery; created: boolean }> {
+    const row = rowOf(input);
+    const delivery = toDelivery({ row, attempts: [] });
+    const inserted = await this.#db
+      .insertInto('delivery')
+      .values(row)
+      .onConflict(conflict => conflict.column('id').doNothing())
+      .returning('id')
+      .execute();
+    if (inserted.length > 0) {
+      return { delivery, created: true };
+    }
+    const made = await this.get({ tenant_id: input.tenant_id, created_by: input.created_by, id: input.id });
+    if (made === undefined) {
+      throw new Error('A delivery with this id belongs to someone else.');
+    }
+    return { delivery: made, created: false };
   }
 
   async recordAttempt(input: RecordDeliveryAttemptInput): Promise<boolean> {
@@ -228,7 +259,7 @@ export class DeliveryStore implements IDeliveryStore {
     return true;
   }
 
-  async get(input: DeliveryOwner & { id: string }): Promise<Delivery | undefined> {
+  async get(input: PersonOwner & { id: string }): Promise<Delivery | undefined> {
     const row = await this.#db
       .selectFrom('delivery')
       .selectAll()
@@ -275,7 +306,7 @@ export class DeliveryStore implements IDeliveryStore {
     };
   }
 
-  async markSeen(input: DeliveryOwner & { ids: readonly string[]; now?: Date }): Promise<number> {
+  async markSeen(input: PersonOwner & { ids: readonly string[]; now?: Date }): Promise<number> {
     if (input.ids.length === 0) {
       return 0;
     }
@@ -291,7 +322,7 @@ export class DeliveryStore implements IDeliveryStore {
     return rows.length;
   }
 
-  async markAllSeen(input: DeliveryOwner & { now?: Date }): Promise<number> {
+  async markAllSeen(input: PersonOwner & { now?: Date }): Promise<number> {
     const rows = await this.#db
       .updateTable('delivery')
       .set({ seen_at: (input.now ?? new Date()).toISOString() })
@@ -303,7 +334,7 @@ export class DeliveryStore implements IDeliveryStore {
     return rows.length;
   }
 
-  async countUnread(input: DeliveryOwner): Promise<number> {
+  async countUnread(input: PersonOwner): Promise<number> {
     const row = await this.#db
       .selectFrom('delivery')
       .select(eb => eb.fn.countAll<string | number>().as('unread'))
@@ -314,7 +345,41 @@ export class DeliveryStore implements IDeliveryStore {
     return Number(row?.unread ?? 0);
   }
 
-  async listForExport(input: DeliveryOwner): Promise<Delivery[]> {
+  async countSince(
+    input: PersonOwner & { since: Date; kinds: readonly Delivery['kind'][]; levels: readonly DeliveryLevel[] },
+  ): Promise<number> {
+    if (input.kinds.length === 0 || input.levels.length === 0) {
+      return 0;
+    }
+    const row = await this.#db
+      .selectFrom('delivery')
+      .select(eb => eb.fn.countAll<string | number>().as('total'))
+      .where('tenant_id', '=', input.tenant_id)
+      .where('created_by', '=', input.created_by)
+      .where('kind', 'in', [...input.kinds])
+      .where('level', 'in', [...input.levels])
+      .where('created_at', '>=', input.since.toISOString())
+      .executeTakeFirst();
+    return Number(row?.total ?? 0);
+  }
+
+  async lastCreatedAt(input: PersonOwner & { levels: readonly DeliveryLevel[] }): Promise<Date | undefined> {
+    if (input.levels.length === 0) {
+      return undefined;
+    }
+    const row = await this.#db
+      .selectFrom('delivery')
+      .select('created_at')
+      .where('tenant_id', '=', input.tenant_id)
+      .where('created_by', '=', input.created_by)
+      .where('level', 'in', [...input.levels])
+      .orderBy('created_at', 'desc')
+      .limit(1)
+      .executeTakeFirst();
+    return row === undefined ? undefined : new Date(row.created_at);
+  }
+
+  async listForExport(input: PersonOwner): Promise<Delivery[]> {
     const rows = await this.#db
       .selectFrom('delivery')
       .selectAll()

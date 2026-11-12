@@ -40,6 +40,8 @@ describePg('PostgresRepositoryStore', () => {
           session_id,
           created_by_subject: json({ subject_id: created_by, subject_type: 'user', subject_display_name: created_by }),
           source: null,
+          is_incognito: false,
+          private_expires_at: null,
           agent_id: null,
           agent_name: null,
           agent_spec: sql`'{"model":{"name":"local/test"},"instructions":"test"}'::jsonb`,

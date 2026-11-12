@@ -25,15 +25,34 @@ const CALENDAR_TOOLS = [
   'respond_to_event',
 ];
 
-function freePort() {
-  return new Promise((done, failed) => {
+// The sidecar binds these ports seconds after the test picks them, so they come from below the
+// systems' ephemeral ranges (Linux starts at 32768, macOS and Windows at 49152): a port the system
+// hands out on its own, to another test's listen(0) or an outgoing connection, can never land on
+// one. A port is never handed out twice in this file.
+const PORT_FLOOR = 20_000;
+const PORT_SPAN = 10_000;
+const handedOut = new Set();
+
+function isFree(port) {
+  return new Promise(done => {
     const probe = createServer();
-    probe.on('error', failed);
-    probe.listen(0, '127.0.0.1', () => {
-      const { port } = probe.address();
-      probe.close(() => done(port));
-    });
+    probe.once('error', () => done(false));
+    probe.listen(port, '0.0.0.0', () => probe.close(() => done(true)));
   });
+}
+
+async function freePort() {
+  const start = Math.floor(Math.random() * PORT_SPAN);
+  for (let step = 0; step < PORT_SPAN; step += 1) {
+    const port = PORT_FLOOR + ((start + step) % PORT_SPAN);
+    if (!handedOut.has(port) && (await isFree(port))) {
+      handedOut.add(port);
+      return port;
+    }
+  }
+  throw new Error(
+    `No free port between ${PORT_FLOOR} and ${PORT_FLOOR + PORT_SPAN - 1}. Stop what holds them and run again.`,
+  );
 }
 
 // The CMD from the Dockerfile must be the entrypoint this test starts.

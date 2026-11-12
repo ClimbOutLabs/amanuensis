@@ -43,6 +43,8 @@ async function seedChat(
     metadata: {},
     external_id: null,
     source: null,
+    is_incognito: false,
+    private_expires_at: null,
   });
   await store.indexChatMessages({
     tenant_id: TENANT,
