@@ -296,6 +296,18 @@
       "set": "connectors",
       "tests": []
     },
+    "route:memoryNightly": {
+      "set": "memory",
+      "tests": []
+    },
+    "route:memoryPageSorting": {
+      "set": "memory",
+      "tests": []
+    },
+    "route:memoryPages": {
+      "set": "memory",
+      "tests": []
+    },
     "route:memoryRecall": {
       "set": "memory",
       "tests": []
@@ -772,6 +784,9 @@
     "route:help",
     "route:mcpOAuth",
     "route:mcpServer",
+    "route:memoryNightly",
+    "route:memoryPageSorting",
+    "route:memoryPages",
     "route:memoryRecall",
     "route:memoryScreen",
     "route:memorySummarize",
