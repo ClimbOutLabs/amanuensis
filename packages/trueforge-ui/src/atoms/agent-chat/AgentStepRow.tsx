@@ -150,10 +150,12 @@ export function AgentStepRow({
             <span className="flex min-w-0 items-start gap-1">
               {isRunning && <StatusDot />}
               <span
+                // A long failure (an error page, a stack trace) stays a few lines here; the step's details hold all of it.
                 className={cn(
-                  'min-w-0 whitespace-normal break-words text-right font-sans text-xs font-medium leading-4',
+                  'line-clamp-3 min-w-0 whitespace-normal break-words text-right font-sans text-xs font-medium leading-4',
                   isWarning ? 'text-warning-bg' : isError ? 'text-failure-bg' : 'text-text-secondary',
                 )}
+                title={statusText}
                 data-testid={dataTestPrefix ? `${dataTestPrefix}-status-text` : undefined}
               >
                 {statusText}

@@ -48,6 +48,7 @@ import { createPersonasRouter, createSessionPersonasRouter } from './apis/person
 import { createChatPrivacyRouter, createPrivateChatSweepRouter } from './apis/privateChats';
 import { createReachRouter } from './apis/reach';
 import { createRecallExclusionsRouter } from './apis/recallExclusions';
+import { createRemindersRouter } from './apis/reminders';
 import { createRepositoriesRouter, createSessionRepositoryRouter } from './apis/repositories';
 import { createScheduleExecutionRouter, createSchedulesRouter } from './apis/schedules';
 import { createSentinelSettingsRouter } from './apis/sentinelSettings';
@@ -965,6 +966,20 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     ),
   );
   app.route(
+    '/api/v1/user/reminders',
+    withAuth(
+      createRemindersRouter({
+        scheduleStore: deps.scheduleStore,
+        sessionStore: deps.sessionStore,
+        agentStore: deps.agentStore,
+        personaStore: deps.personaStore,
+        personalizationStore: deps.personalizationStore,
+        resolveRequestContext,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
     '/api/v1/user/push',
     withAuth(
       createPushRouter({
@@ -1387,6 +1402,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     withAuth(
       createTurnsRouter({
         mcpCatalog: deps.mcpCatalog,
+        skillCatalog: deps.skillCatalog,
         sessions: deps.sessions,
         sessionStore: deps.sessionStore,
         activeTurns: deps.activeTurns,

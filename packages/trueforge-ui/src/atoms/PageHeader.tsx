@@ -2,7 +2,6 @@
 
 import type { ReactNode } from 'react';
 
-import { DeliveryBell } from '../deliveries/DeliveryBell.js';
 import { HelpStuckButton } from '../help/HelpStuckButton.js';
 import { cn } from './lib/cn.js';
 
@@ -16,7 +15,7 @@ export type PageHeaderProps = {
   start?: ReactNode;
   /** Trailing actions; pushed to the end. */
   end?: ReactNode;
-  /** Adds the notifications bell and the "Help, I'm stuck" button after the trailing actions. Set on the main screen headers only. */
+  /** Adds the "Help, I'm stuck" button after the trailing actions. Set on the main screen headers only. */
   helpAction?: boolean;
   /** A menu button placed last, after the help button. */
   menu?: ReactNode;
@@ -56,7 +55,6 @@ export function PageHeader({
           className={cn('ml-auto flex items-center gap-1', singleLine ? 'shrink-0 flex-nowrap' : 'min-w-0 flex-wrap')}
         >
           {end}
-          {helpAction ? <DeliveryBell /> : null}
           {helpAction ? <HelpStuckButton /> : null}
           {menu}
         </div>

@@ -308,6 +308,17 @@
             },
             "default": "./dist/cjs/api/resources/reach/exports.js"
         },
+        "./reminders": {
+            "import": {
+                "types": "./dist/esm/api/resources/reminders/exports.d.mts",
+                "default": "./dist/esm/api/resources/reminders/exports.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/api/resources/reminders/exports.d.ts",
+                "default": "./dist/cjs/api/resources/reminders/exports.js"
+            },
+            "default": "./dist/cjs/api/resources/reminders/exports.js"
+        },
         "./voice": {
             "import": {
                 "types": "./dist/esm/api/resources/voice/exports.d.mts",

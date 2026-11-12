@@ -187,6 +187,7 @@ function unusedScheduleStore(): IScheduleStore<unknown> {
     updateRunStatus: () => unused('updateRunStatus'),
     listScheduledRuns: () => unused('listScheduledRuns'),
     listRuns: () => unused('listRuns'),
+    listLatestRuns: () => unused('listLatestRuns'),
   };
 }
 

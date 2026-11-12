@@ -1005,6 +1005,63 @@ export function runScheduleStoreContractSuite(deps: {
     expect(page2.pagination.next_page_token).toBeUndefined();
   });
 
+  it('listLatestRuns reads the newest runs of several schedules at once, newest first, up to the cap each', async () => {
+    const store = deps.getScheduleStore();
+    const agentA = await seedAgent();
+    const agentB = await seedAgent();
+    const slot = (hour: number) => new Date(`2026-08-27T${String(hour).padStart(2, '0')}:00:00.000Z`);
+    const seedSchedule = async (agent: { id: string; name: string }, name: string) =>
+      (
+        await store.createScheduleAndRun({
+          tenant_id: TENANT,
+          agent_id: agent.id,
+          agent_name: agent.name,
+          persona_id: null,
+          name,
+          manifest: manifest({ status: 'paused' }),
+          created_by_subject: USER_SUBJECT,
+          runFrom: new Date(),
+        })
+      ).schedule;
+    const seedRun = (scheduleId: string, at: Date, status: 'scheduled' | 'triggered' | 'failed') =>
+      store.createRun({
+        tenant_id: TENANT,
+        schedule_id: scheduleId,
+        name: cronRunName(at),
+        scheduled_for: at,
+        status,
+        created_by_subject: USER_SUBJECT,
+      });
+
+    const scheduleA = await seedSchedule(agentA, 'latest-a');
+    const a9 = await seedRun(scheduleA.id, slot(9), 'triggered');
+    const a10 = await seedRun(scheduleA.id, slot(10), 'failed');
+    const a11 = await seedRun(scheduleA.id, slot(11), 'triggered');
+    const a12 = await seedRun(scheduleA.id, slot(12), 'scheduled');
+    const scheduleB = await seedSchedule(agentB, 'latest-b');
+    const b8 = await seedRun(scheduleB.id, slot(8), 'triggered');
+    const scheduleC = await seedSchedule(agentB, 'latest-c');
+    await seedRun(scheduleC.id, slot(7), 'triggered');
+
+    const runs = await store.listLatestRuns({
+      tenant_id: TENANT,
+      schedule_ids: [scheduleA.id, scheduleB.id],
+      per_schedule: 3,
+    });
+    const idsFor = (scheduleId: string) => runs.filter(run => run.schedule_id === scheduleId).map(run => run.id);
+    expect(idsFor(scheduleA.id)).toEqual([a12.id, a11.id, a10.id]);
+    expect(idsFor(scheduleB.id)).toEqual([b8.id]);
+    expect(idsFor(scheduleC.id)).toEqual([]);
+    expect(runs).toHaveLength(4);
+    expect(runs.find(run => run.id === a12.id)).toEqual(a12);
+    expect(runs.some(run => run.id === a9.id)).toBe(false);
+
+    expect(await store.listLatestRuns({ tenant_id: TENANT, schedule_ids: [], per_schedule: 3 })).toEqual([]);
+    expect(
+      await store.listLatestRuns({ tenant_id: 'another-tenant', schedule_ids: [scheduleA.id], per_schedule: 3 }),
+    ).toEqual([]);
+  });
+
   it('updateRunStatus stamps triggered_at only for triggered; returns undefined when gone', async () => {
     const store = deps.getScheduleStore();
     const agent = await seedAgent();
