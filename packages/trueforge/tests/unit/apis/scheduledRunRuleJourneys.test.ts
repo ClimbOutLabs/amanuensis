@@ -140,6 +140,33 @@ const HeldCardsSchema = z.object({
   ),
 });
 
+/** Types one message in a chat, as the person would, and returns what the cards of that turn ask. */
+async function typeInChat({
+  server,
+  chatId,
+  text,
+}: {
+  server: ApprovalTestServer;
+  chatId: string;
+  text: string;
+}): Promise<(string | undefined)[]> {
+  const input: TurnInputItem[] = [{ type: 'user.message', content: text }];
+  const response = await server.request(`/api/v1/sessions/${chatId}/turns`, jsonInit({ input, stream: true }));
+  const turnId = /"turn_id":"([^"]+)"/.exec(await response.text())?.[1];
+  if (response.status !== 200 || turnId === undefined) {
+    throw new Error(`the typed turn did not start (${String(response.status)})`);
+  }
+  const turn = GetTurnResponseSchema.parse(
+    await (await server.request(`/api/v1/sessions/${chatId}/turns/${turnId}`)).json(),
+  ).data;
+  if (turn.state.status !== 'done') {
+    throw new Error(`the typed turn is not done: ${JSON.stringify(turn.state)}`);
+  }
+  return turn.state.required_actions.flatMap(action =>
+    action.type === 'tool.approval_required' ? action.tool_calls.map(call => call.tier3_card?.plain_what) : [],
+  );
+}
+
 /** The cards a scheduled run saved for its owner, as the chat's "Needs your OK" list reads them. */
 async function heldCards({ server, chatId }: { server: ApprovalTestServer; chatId: string }) {
   const events = HeldCardsSchema.parse(await (await server.request(`/api/v1/sessions/${chatId}/events`)).json());
@@ -344,6 +371,12 @@ describe('scheduled runs', () => {
   );
 });
 
+const SANDBOX_AGENT_SPEC = AgentSpecSchema.parse({
+  ...AGENT_SPEC,
+  config: { ...AGENT_SPEC.config, sandbox: { enabled: true } },
+});
+const RUN_CODE_CARD = 'Run code the assistant wrote in the sandbox?';
+
 describe('a scheduled run that wants to run code', () => {
   let server: ApprovalTestServer;
   let memoryDir: string;
@@ -386,10 +419,7 @@ describe('a scheduled run that wants to run code', () => {
         created_by_subject: OWNER_SUBJECT,
         name: 'weekly-sums',
         description: 'Scheduled agent with a sandbox, used by the scheduled-run rule tests.',
-        manifest: AgentSpecSchema.parse({
-          ...AGENT_SPEC,
-          config: { ...AGENT_SPEC.config, sandbox: { enabled: true } },
-        }),
+        manifest: SANDBOX_AGENT_SPEC,
         external_id: 'weekly-sums-external-id',
       });
 
@@ -403,7 +433,37 @@ describe('a scheduled run that wants to run code', () => {
 
       expect(turn.state.status === 'done' && turn.state.required_actions).toEqual([]);
       const held = await heldCards({ server, chatId });
-      expect(held.map(card => card.tier3_card?.plain_what)).toEqual(['Run code the assistant wrote in the sandbox?']);
+      expect(held.map(card => card.tier3_card?.plain_what)).toEqual([RUN_CODE_CARD]);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    "asks before code when the person types in the run's chat, and an ordinary chat still runs it without a card",
+    async () => {
+      const agent = await new SqliteAgentStore(server.db()).createAgent({
+        host_managed: false,
+        tenant_id: 'default',
+        created_by_subject: OWNER_SUBJECT,
+        name: 'weekly-notes',
+        description: 'Scheduled agent with a sandbox, used by the scheduled-run rule tests.',
+        manifest: SANDBOX_AGENT_SPEC,
+        external_id: 'weekly-notes-external-id',
+      });
+      const { chatId } = await runScheduled({ server, agent, name: 'write-the-week-up', task: 'Write the week up.' });
+
+      server.model.next({ toolArguments: { code: 'print(1)', language: 'python' } });
+      expect(await typeInChat({ server, chatId, text: `${RUN_DIRECTIVE_PREFIX}run_code please` })).toEqual([
+        RUN_CODE_CARD,
+      ]);
+
+      const created = await server.request('/api/v1/sessions', jsonInit({ agent: { spec: SANDBOX_AGENT_SPEC } }));
+      expect(created.status).toBe(201);
+      const ordinary = z.object({ data: z.object({ id: z.string() }) }).parse(await created.json()).data.id;
+      server.model.next({ toolArguments: { code: 'print(1)', language: 'python' } });
+      expect(await typeInChat({ server, chatId: ordinary, text: `${RUN_DIRECTIVE_PREFIX}run_code please` })).toEqual(
+        [],
+      );
     },
     TURN_TIMEOUT_MS,
   );
