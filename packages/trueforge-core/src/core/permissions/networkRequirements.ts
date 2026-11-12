@@ -36,8 +36,11 @@ const FIRST_PARTY_REQUIRES_NETWORK: Record<string, boolean> = {
   get_openui_instructions: false,
   replace_task_checklist: false,
   load_bundle: false,
+  list_skills: false,
   // Networked builtins.
   web_search: true,
+  // Adding a skill reads it from the site it comes from.
+  install_skill: true,
   // Embedded maps: geocoding, routing, and tiles all leave the machine.
   render_map: true,
   render_route: true,

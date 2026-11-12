@@ -7,6 +7,7 @@ ARG POPPLER_UTILS_VERSION="22.12.0-2+deb12u3"
 ARG TESSERACT_OCR_VERSION="5.3.0-2"
 ARG TARGETARCH
 
+COPY requirements.txt /tmp/requirements.txt
 RUN apt-get update \
       && apt-get install -y --no-install-recommends \
         ca-certificates \
@@ -39,15 +40,8 @@ RUN apt-get update \
       && git config --global user.email "trueforge@example.org" \
       && git config --global user.name "TrueForge Agent" \
       && python -m pip install --no-cache-dir --upgrade pip \
-      && python -m pip install --no-cache-dir \
-        aiohttp==3.14.1 \
-        genson==1.3.0 \
-        mcp==1.29.0 \
-        nats-py==2.15.0 \
-        openpyxl==3.1.5 \
-        pandas==3.0.5 \
-        pydantic==2.12.5 \
-        requests==2.33.1 \
+      && python -m pip install --no-cache-dir -r /tmp/requirements.txt \
+      && rm /tmp/requirements.txt \
       && rm -rf /var/lib/apt/lists/*
 
 RUN command -v pdftoppm \

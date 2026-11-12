@@ -2,7 +2,7 @@
 
 **Status:** approved
 
-**Scope note:** This spec covers the delivery feed, reminders moved onto it, the in-app bell, Web Push, Activity records and data import. Text messages and phone calls are later work and use the same feed.
+**Scope note:** This spec covers the delivery feed, reminders moved onto it, the in-app bell, Web Push, Activity records and data import. Text messages and phone calls are later work and use the same feed. Quiet hours, the call rules and per-kind notice settings are covered by [Noticing](noticing.md).
 
 ## Problem
 
@@ -80,4 +80,4 @@ All tests use synthetic data, never a person's real data.
 
 - Text messages and phone calls
 - Pruning old deliveries
-- Quiet hours and per-kind notice settings
+- Quiet hours and per-kind notice settings (see [Noticing](noticing.md))
