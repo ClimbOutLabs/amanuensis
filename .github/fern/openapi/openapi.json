@@ -7886,6 +7886,7 @@
           "answered",
           "key_refused",
           "unreachable",
+          "timed_out",
           "server_error"
         ],
         "type": "string"

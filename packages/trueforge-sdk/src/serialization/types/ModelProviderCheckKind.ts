@@ -7,8 +7,8 @@ import type * as serializers from "../index.js";
 export const ModelProviderCheckKind: core.serialization.Schema<
     serializers.ModelProviderCheckKind.Raw,
     TrueForge.ModelProviderCheckKind
-> = core.serialization.enum_(["answered", "key_refused", "unreachable", "server_error"]);
+> = core.serialization.enum_(["answered", "key_refused", "unreachable", "timed_out", "server_error"]);
 
 export declare namespace ModelProviderCheckKind {
-    export type Raw = "answered" | "key_refused" | "unreachable" | "server_error";
+    export type Raw = "answered" | "key_refused" | "unreachable" | "timed_out" | "server_error";
 }

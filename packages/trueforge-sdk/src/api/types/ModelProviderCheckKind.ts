@@ -4,6 +4,7 @@ export const ModelProviderCheckKind = {
     Answered: "answered",
     KeyRefused: "key_refused",
     Unreachable: "unreachable",
+    TimedOut: "timed_out",
     ServerError: "server_error",
 } as const;
 export type ModelProviderCheckKind = (typeof ModelProviderCheckKind)[keyof typeof ModelProviderCheckKind];
