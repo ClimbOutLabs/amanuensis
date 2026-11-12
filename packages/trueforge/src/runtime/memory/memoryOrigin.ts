@@ -26,6 +26,9 @@ export const TOOL_INGESTED_ORIGIN = 'tool_ingested';
 /** The origin of a memory that came in through the Memories import. */
 export const IMPORTED_ORIGIN = 'imported';
 
+/** The `source` a memory carries when it is a line moved out of a full learned profile. */
+export const LEARNED_PROFILE_LINE_SOURCE = 'aman-profile-line';
+
 const HOST_WRITTEN_ORIGINS: readonly AmanMemoryOrigin[] = [USER_STATED_ORIGIN, TOOL_INGESTED_ORIGIN, IMPORTED_ORIGIN];
 
 /** Whether a value is one of the origins the host itself writes. */

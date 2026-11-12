@@ -45,7 +45,7 @@ import { ProfileLearnedEventSchema, type ProfileLearnedEvent } from '../schemas/
 import type { EventSubscription } from './event-subscription';
 import type { RetainItem } from './memory/hindsightClient';
 import type { MemoryClient } from './memory/memoryClient';
-import { MEMORY_ORIGIN_METADATA_KEY, TOOL_INGESTED_ORIGIN } from './memory/memoryOrigin';
+import { LEARNED_PROFILE_LINE_SOURCE, MEMORY_ORIGIN_METADATA_KEY, TOOL_INGESTED_ORIGIN } from './memory/memoryOrigin';
 import { summarizeTurnContent, type ProfileLineSuggestion } from './memory/memorySummarize';
 import { uuidv5 } from './memory/uuidv5';
 import type { TurnModelUsage } from './modelUsage';
@@ -426,7 +426,7 @@ async function keepMovedLines(params: SubmitProfileLearningParams, moved: readon
     content: line,
     timestamp: params.completedAt,
     document_id: `aman-profile-line-${sha256Hex(`${params.createdBy}\n${line}`).slice(0, 24)}`,
-    metadata: { source: 'aman-profile-line', [MEMORY_ORIGIN_METADATA_KEY]: TOOL_INGESTED_ORIGIN },
+    metadata: { source: LEARNED_PROFILE_LINE_SOURCE, [MEMORY_ORIGIN_METADATA_KEY]: TOOL_INGESTED_ORIGIN },
   }));
   try {
     const outcome = await client.retain({

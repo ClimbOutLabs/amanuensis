@@ -177,6 +177,9 @@ const NOTE_SOURCE_NAMES: Record<MemoryNoteSource, string> = {
 /** The source named for text from a turn that read an email, a page, a document or a tool result. */
 const READ_CONTENT_SOURCE_NAME = 'read content';
 
+/** The source named for a line moved out of a full learned profile. */
+const LEARNED_PROFILE_SOURCE_NAME = 'learned profile';
+
 /** The source named for text that came in through the Memories import. */
 const IMPORTED_SOURCE_NAME = 'imported file';
 
@@ -207,8 +210,11 @@ function sourceLineFor(metadata: Readonly<Record<string, string>>): string {
   if (isPersonOrigin(metadata)) {
     return FROM_YOU_SOURCE_LINE;
   }
+  if (metadata[MEMORY_ORIGIN_METADATA_KEY] === IMPORTED_ORIGIN) {
+    return `${EXTERNAL_SOURCE_LINE_PREFIX}${IMPORTED_SOURCE_NAME}`;
+  }
   const name =
-    metadata[MEMORY_ORIGIN_METADATA_KEY] === IMPORTED_ORIGIN ? IMPORTED_SOURCE_NAME : READ_CONTENT_SOURCE_NAME;
+    metadata['source'] === LEARNED_PROFILE_LINE_SOURCE ? LEARNED_PROFILE_SOURCE_NAME : READ_CONTENT_SOURCE_NAME;
   return `${EXTERNAL_SOURCE_LINE_PREFIX}${name}`;
 }
 

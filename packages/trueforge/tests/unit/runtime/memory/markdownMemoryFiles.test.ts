@@ -110,6 +110,17 @@ describe('markdownMemoryFiles', () => {
       });
       expect(text).toBe('## 2026-09-19T12:00:00.000Z\n\nhello\n\n> From you');
     });
+
+    it('names the learned profile as the source of a line moved out of it', () => {
+      const text = formatRetainEntry({
+        metadata: { source: 'aman-profile-line', origin: 'tool_ingested' },
+        content: 'Lives in Lisbon.',
+        timestamp: '2026-09-19T12:00:00.000Z',
+        document_id: 'd',
+      });
+      expect(text).toContain('\n\n> External source: learned profile');
+      expect(entryMetadata(text)['origin']).toBe('tool_ingested');
+    });
   });
 
   describe('the chat id of an entry', () => {
