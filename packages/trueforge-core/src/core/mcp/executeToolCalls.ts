@@ -43,7 +43,7 @@ import { heldCallAuditText, recordNotPreparedRefusals, recordUnattendedSpaceChan
 import type { SentinelDispatchContext } from '../permissions/context';
 import { HELD_REASON_CODE, HELD_RESULT_TEXT } from '../permissions/heldActions';
 import type { SkillNetworkCardRequest } from '../permissions/skillNetworkCards';
-import { MAPS_ASK_REASON } from '../permissions/mapsToolNames';
+import { isMapsCardReason } from '../permissions/mapsToolNames';
 import { collectOutboundStrings } from '../permissions/outboundGuard';
 import {
   hostToolStamp,
@@ -1065,7 +1065,7 @@ function isSearchProviderRead(info: Pick<InternalToolCallInfo, 'search_provider_
  * wrongly calls read-only still counts.
  */
 export function isHostVouchedRead(info: Pick<InternalToolCallInfo, 'search_provider_call' | 'tier_reason'>): boolean {
-  return isSearchProviderRead(info) || info.tier_reason === MAPS_ASK_REASON;
+  return isSearchProviderRead(info) || isMapsCardReason(info.tier_reason);
 }
 /** Tool calls written as text that the model is asked to redo in one turn; past this the turn ends. */
 export const MAX_TOOL_MARKUP_RETRIES_PER_TURN = 2;

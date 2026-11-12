@@ -4,37 +4,31 @@ import { useState, type FC } from 'react';
 
 import { Button } from '../atoms/primitives/Button.js';
 import { CenteredModal } from '../atoms/primitives/CenteredModal.js';
-import { APPROVAL_CHOICES } from './approvalChoices.js';
+import { APPROVAL_CHOICES, type AlwaysAllowConfirm } from './approvalChoices.js';
 
 export type AlwaysAllowToolControlProps = {
-  /** Says which call the standing grant covers, in the confirm step. */
-  description: string;
+  /** Says what the every-chat answer covers and where to undo it. */
+  confirm: AlwaysAllowConfirm;
   size: 'small' | 'large';
   className?: string;
   disabled?: boolean;
   /** Runs only after the owner confirms; a cancel never calls it. */
   onConfirm: () => void;
-  /** Button label; the tool wording by default, a skill network card names the skill instead. */
+  /** Button label; the every-chat wording by default, a skill network card names the skill instead. */
   label?: string;
-  /** Button hint; the tool wording by default. */
-  hint?: string;
-  /** Confirm step title; the tool wording by default. */
+  /** Confirm step title; the every-chat wording by default. */
   title?: string;
-  /** Where the standing grant can be removed; connector settings by default. */
-  removeWhere?: string;
 };
 
 /** "Always allow everywhere" and its confirm step, shared by every approval card that offers it. */
 export const AlwaysAllowToolControl: FC<AlwaysAllowToolControlProps> = ({
-  description,
+  confirm,
   size,
   className,
   disabled = false,
   onConfirm,
   label = APPROVAL_CHOICES.alwaysAllowTool.label,
-  hint = APPROVAL_CHOICES.alwaysAllowTool.hint,
   title = 'Always allow everywhere?',
-  removeWhere = 'connector settings',
 }) => {
   const [confirming, setConfirming] = useState(false);
   return (
@@ -42,7 +36,7 @@ export const AlwaysAllowToolControl: FC<AlwaysAllowToolControlProps> = ({
       <Button
         variant="secondary"
         size={size}
-        title={hint}
+        title={confirm.hint}
         onClick={() => {
           setConfirming(true);
         }}
@@ -57,14 +51,12 @@ export const AlwaysAllowToolControl: FC<AlwaysAllowToolControlProps> = ({
           if (!open) setConfirming(false);
         }}
         title={title}
-        description={description}
+        description={confirm.description}
         contentSized
-        aria-label="Confirm always allowing this tool"
+        aria-label="Confirm always allowing this"
       >
         <div className="flex flex-col gap-4 px-5 py-4">
-          <p className="font-sans text-sm leading-relaxed text-text-primary">
-            You can remove this later in {removeWhere}.
-          </p>
+          <p className="font-sans text-sm leading-relaxed text-text-primary">{confirm.undo}</p>
           <div className="flex items-center justify-end gap-2">
             <Button
               type="button"

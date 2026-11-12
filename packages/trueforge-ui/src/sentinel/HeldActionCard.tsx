@@ -7,6 +7,7 @@ import { useAssistantDisplayName } from '../components/PersonalizationContext.js
 import { Icon } from '../icons/Icon.js';
 import { AlwaysAllowToolControl } from './AlwaysAllowToolControl.js';
 import {
+  alwaysAllowConfirm,
   APPROVAL_CHOICES,
   isNewRecipientCard,
   isNewRecipientDraftCard,
@@ -231,10 +232,12 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
                 size="large"
                 disabled={disabled}
                 label={alwaysAllowChoice.label}
-                hint={alwaysAllowChoice.hint}
                 title={alwaysAllowChoice.title}
-                removeWhere="skill settings"
-                description={`${assistant} will let ${skillNetwork.skill_name} reach ${skillNetwork.hosts.join(', ')} without asking, in every chat.`}
+                confirm={{
+                  hint: alwaysAllowChoice.hint,
+                  description: `${assistant} will let ${skillNetwork.skill_name} reach ${skillNetwork.hosts.join(', ')} without asking, in every chat.`,
+                  undo: 'You can remove this later in skill settings.',
+                }}
                 onConfirm={onAlwaysAllow}
               />
             )}
@@ -242,7 +245,10 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
               <AlwaysAllowToolControl
                 size="large"
                 disabled={disabled}
-                description={`${assistant} will run this tool on this connector without asking, in every chat.`}
+                confirm={alwaysAllowConfirm({
+                  covers: undefined,
+                  toolSay: `${assistant} will run this tool on this connector without asking, in every chat.`,
+                })}
                 onConfirm={onAlwaysAllow}
               />
             )}

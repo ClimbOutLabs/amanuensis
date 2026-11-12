@@ -30,6 +30,8 @@ export interface SentinelServices {
   searchWithoutAsking: (input: { tenant_id: string; created_by: string }) => Promise<boolean>;
   /** Whether the user lets embedded maps run without asking, behind the outbound secret guard. Off unless the host says. */
   mapsWithoutAsking: (input: { tenant_id: string; created_by: string }) => Promise<boolean>;
+  /** Records that the user answered a maps card with "Always allow everywhere": maps run without asking from then on. */
+  allowMapsWithoutAsking: (input: { tenant_id: string; created_by: string }) => Promise<void>;
   /** Whether the user lets in-sandbox work (code, commands, workspace files, package installs) run without asking. Default off. */
   sandboxWithoutAsking: (input: { tenant_id: string; created_by: string }) => Promise<boolean>;
   /** Exact secret values the host holds for this user, for the outbound secret guard. */
@@ -96,6 +98,7 @@ export const DEFAULT_PINNED_PATH = '/usr/bin:/bin';
 
 /** Default services for tests and unconfigured servers. */
 export function defaultSentinelServices(input: { pinned_path: string }): SentinelServices {
+  let mapsAllowed = false;
   return {
     tracked_store: new InMemoryTrackedExecutableStore(),
     token_store: new InMemoryApprovalTokenStore(),
@@ -105,7 +108,11 @@ export function defaultSentinelServices(input: { pinned_path: string }): Sentine
     isOffline: () => Promise.resolve(false),
     tier2AutoAllow: () => Promise.resolve(new Set<Tier2ActionKind>()),
     searchWithoutAsking: () => Promise.resolve(true),
-    mapsWithoutAsking: () => Promise.resolve(false),
+    mapsWithoutAsking: () => Promise.resolve(mapsAllowed),
+    allowMapsWithoutAsking: () => {
+      mapsAllowed = true;
+      return Promise.resolve();
+    },
     sandboxWithoutAsking: () => Promise.resolve(false),
     outboundSecrets: () => Promise.resolve([]),
     unattended: false,
