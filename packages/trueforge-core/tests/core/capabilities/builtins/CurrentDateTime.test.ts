@@ -6,7 +6,7 @@ import { isCallToolResponseResult } from '../../../../src/core/mcp/IMCPServer';
 import { NOOP_AGENT_TRACING } from '../../../../src/core/tracing/NoopAgentTracing';
 
 interface DateTimePayload {
-  local: { date: string; time: string; zone: string; utcOffset: string; isFallback: boolean };
+  local: { date: string; weekday: string; time: string; zone: string; utcOffset: string; isFallback: boolean };
   utc: { iso: string; unixEpochMS: number };
 }
 
@@ -42,6 +42,18 @@ describe('CurrentDateTime', () => {
     expect(payload.local.utcOffset).toMatch(/^[+-]\d{2}:\d{2}$/);
     expect(payload.local.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(payload.local.time).toMatch(/^\d{2}:\d{2}:\d{2}$/);
+  });
+
+  it('names the local weekday of the local date', async () => {
+    jest.useFakeTimers({ now: new Date('2026-11-13T06:00:00Z') });
+    try {
+      // Friday in UTC, still Thursday evening in Los Angeles.
+      const payload = await callGetCurrentDateTime(new CurrentDateTime(NOOP_AGENT_TRACING, 'America/Los_Angeles'));
+      expect(payload.local.date).toBe('2026-11-12');
+      expect(payload.local.weekday).toBe('Thursday');
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('falls back to UTC for an unrecognized timezone name', async () => {
