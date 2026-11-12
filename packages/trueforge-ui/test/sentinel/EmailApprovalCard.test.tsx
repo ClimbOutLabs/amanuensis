@@ -67,6 +67,25 @@ function wordCount(text: string): number {
   return text.split(/\s+/).filter(word => word !== '').length;
 }
 
+describe('what the mail is sent as', () => {
+  it('shows the name the mail is sent as, so a borrowed name is seen before it is sent', () => {
+    renderEmail({ from_name: 'PayPal Security' });
+    expect(screen.getByText('Sent as')).toBeTruthy();
+    expect(screen.getByText('PayPal Security')).toBeTruthy();
+  });
+
+  it('says when a name was left off an address because it looked like an address', () => {
+    renderEmail({ name_left_off: true });
+    expect(screen.getByText(/name was left off an address because it looked like an address/i)).toBeTruthy();
+  });
+
+  it('shows neither when the card carries neither', () => {
+    renderEmail({ from_name: null, name_left_off: false });
+    expect(screen.queryByText('Sent as')).toBeNull();
+    expect(screen.queryByText(/name was left off/i)).toBeNull();
+  });
+});
+
 describe('EmailApprovalCard title and verb', () => {
   it('asks "Send this reply to grace@example.com?" with Allow on the button for a reply', () => {
     renderEmail({
@@ -159,6 +178,12 @@ describe('EmailApprovalCard fields', () => {
     renderEmail();
     expect(screen.getByText('What will be sent')).toBeInTheDocument();
     expect(screen.getByText('Message body')).toBeInTheDocument();
+  });
+
+  it('says what will be saved, not sent, on a draft card', () => {
+    renderEmail({ action: 'save' });
+    expect(screen.getByText('What will be saved')).toBeInTheDocument();
+    expect(screen.queryByText('What will be sent')).not.toBeInTheDocument();
   });
 
   it('shows the full recipient list, not a count', () => {
@@ -277,7 +302,7 @@ describe('EmailApprovalCard actions', () => {
   it('never offers Always allow on a mail card', () => {
     renderEmail();
     expect(screen.queryByText(/Always allow/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Always allow this here/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Always allow in this chat/)).not.toBeInTheDocument();
   });
 });
 

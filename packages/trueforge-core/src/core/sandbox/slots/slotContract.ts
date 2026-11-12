@@ -57,7 +57,7 @@ export function slotSkillNetworkSocketPathsIn({ dir, count }: { dir: string; cou
 export const DEFAULT_SESSION_DISK_MB = 2048;
 
 /** The agent build and gVisor release this server was written against; a slot reporting others is refused. */
-export const SLOT_AGENT_VERSION = '0.5.0';
+export const SLOT_AGENT_VERSION = '0.6.0';
 export const SLOT_RUNSC_VERSION = 'runsc version release-20260928.0';
 export const SLOT_PLATFORM = 'systrap';
 
@@ -116,6 +116,8 @@ export const SlotAttestationSchema = z.object({
     disk_mode: z.enum(['hard', 'vm', 'none']),
     /** Size of the filesystem the workspace is on, bytes. */
     workspace_bytes: z.number().int().nonnegative(),
+    /** Free bytes on the filesystem the workspaces are on: the room new or growing workspaces can still take. */
+    store_free_bytes: z.number().int().nonnegative(),
   }),
 });
 export type SlotAttestation = z.infer<typeof SlotAttestationSchema>;
@@ -127,6 +129,23 @@ export const SlotHealthResponseSchema = z.object({
   attestation: SlotAttestationSchema,
 });
 export type SlotHealthResponse = z.infer<typeof SlotHealthResponseSchema>;
+
+/** One session tree on a slot, as the sessions listing reports it. */
+export const SlotSessionSchema = z.object({
+  session_id: z.string().regex(/^[0-9a-f]{32}$/),
+  /** Space the tree's files occupy on disk, bytes. */
+  bytes: z.number().int().nonnegative(),
+  /** Files and folders in the tree, the tree's own root counted. */
+  entries: z.number().int().nonnegative(),
+  /** When the tree was last used, ISO 8601, as the agent reports it. */
+  last_used: z.string(),
+});
+export type SlotSession = z.infer<typeof SlotSessionSchema>;
+
+export const SlotSessionsResponseSchema = z.object({
+  sessions: z.array(SlotSessionSchema),
+});
+export type SlotSessionsResponse = z.infer<typeof SlotSessionsResponseSchema>;
 
 export const SLOT_TERMINATIONS = [
   'completed',

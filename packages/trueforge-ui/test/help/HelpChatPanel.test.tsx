@@ -46,6 +46,17 @@ const HEALTHY: HelpHealthCheck = {
     },
   ],
   host_report: { state: 'ok', checked_at: '2026-10-20T08:30:00Z', message: 'all good', next_step: null },
+  state: {
+    setup_steps: [
+      { id: 'model', done: true },
+      { id: 'about_you', done: false },
+    ],
+    connectors: [],
+    google_login: 'not_set_up',
+    sandbox_ready: true,
+    app_version: '1.4.0',
+    build_ref: null,
+  },
 };
 
 const NO_MODEL: HelpHealthCheck = {
@@ -72,6 +83,17 @@ const NO_MODEL: HelpHealthCheck = {
     checked_at: null,
     message: null,
     next_step: null,
+  },
+  state: {
+    setup_steps: [
+      { id: 'model', done: true },
+      { id: 'about_you', done: false },
+    ],
+    connectors: [],
+    google_login: 'not_set_up',
+    sandbox_ready: true,
+    app_version: '1.4.0',
+    build_ref: null,
   },
 };
 

@@ -20,6 +20,8 @@ export function createAuditLogRouter(deps: AuditLogRouterDeps) {
         tenant_id: requestContext.tenant_id,
         created_by: requestContext.subject.id,
         outcome: query.outcome,
+        from: query.from,
+        to: query.to,
         limit: query.limit,
         page_token: query.page_token,
       });
