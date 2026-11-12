@@ -24,6 +24,10 @@ export const SANDBOX_SILENT_REASONS: ReadonlySet<string> = new Set([
   SANDBOX_RUN_CODE_REASON,
 ]);
 
+/** Tier 3 reason codes for cancelling a reminder and for pausing or resuming a schedule. Each asks every time. */
+export const REMINDER_CANCEL_REASON = 'reminder_cancel';
+export const SCHEDULE_STATUS_REASON = 'schedule_status';
+
 /** Reason code for a consequential action whose recipient or site only content the assistant read named. */
 export const CONTENT_STEERED_REASON = 'content_steered';
 
@@ -54,6 +58,8 @@ export const GRANT_BARRED_TIER_REASONS: ReadonlySet<string> = new Set([
   'connector_calendar_write',
   'schedule_write',
   'persona_write',
+  REMINDER_CANCEL_REASON,
+  SCHEDULE_STATUS_REASON,
   CONTENT_STEERED_REASON,
   CONNECTOR_READ_GUARD_REASON,
 ]);
