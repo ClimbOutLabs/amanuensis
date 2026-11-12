@@ -373,6 +373,7 @@ describe('who a schedule runs as', () => {
         status: 'active',
         run_at: null,
         kind: 'task',
+        urgent: false,
         origin_session_id: null,
       },
       created_by_subject: alice,
@@ -603,6 +604,7 @@ describe('internal schedule execution', () => {
         status: 'active',
         run_at: null,
         kind: 'task',
+        urgent: false,
         origin_session_id: null,
       },
       created_by_subject: alice,
@@ -1132,6 +1134,7 @@ describe('audit rows for schedule firings', () => {
       sessionStore,
       audit,
       deliveryService: deliveryDeps(built.db, audit).deliveryService,
+      reminderReach: deliveryDeps(built.db, audit).reminderReach,
     });
 
     const response = await execution.request('/runs/execute', {
