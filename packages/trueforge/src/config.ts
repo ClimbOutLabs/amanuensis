@@ -1025,6 +1025,19 @@ function resolveSqlitePath(appDataDir: string): string {
   return path.join(appDataDir, 'db', 'db.sqlite');
 }
 
+/**
+ * Where the host puts the master key for saved secrets.
+ * Env: `SECRETS_KEY_FILE` (optional). Default: `{app data dir}/secrets/master.key`; the installer points
+ * it at the memory-only file its startup job fills.
+ */
+function resolveSecretsKeyFile(appDataDir: string): string {
+  const override = getEnv('SECRETS_KEY_FILE');
+  if (override !== undefined && override.trim() !== '') {
+    return path.resolve(override);
+  }
+  return path.join(appDataDir, 'secrets', 'master.key');
+}
+
 /** Parent for local sandbox roots. Same app data dir as SQLite. */
 function resolveLocalSandboxRootParent(appDataDir: string): string {
   return path.join(appDataDir, 'sandboxes');
@@ -2216,6 +2229,11 @@ export interface SharedServerConfiguration {
    * `TRUEFORGE_MTLS_ENABLED` is true. Env: `TRUEFORGE_MTLS_CERTS_DIR`. Default `/etc/tls`.
    */
   TRUEFORGE_MTLS_CERTS_DIR: string;
+  /**
+   * File the master key for saved secrets is read from; Aman waits for it and never creates it.
+   * Env: `SECRETS_KEY_FILE` (optional). Default: `{app data dir}/secrets/master.key`.
+   */
+  SECRETS_KEY_FILE: string;
 }
 
 export type StandaloneServerConfiguration = SharedServerConfiguration & {
@@ -3006,6 +3024,7 @@ const shared: SharedServerConfiguration = {
     defaultValue: false,
   }),
   TRUEFORGE_MTLS_CERTS_DIR: getEnv('TRUEFORGE_MTLS_CERTS_DIR', { defaultValue: '/etc/tls' }) ?? '/etc/tls',
+  SECRETS_KEY_FILE: resolveSecretsKeyFile(appDataDir),
 };
 
 const configuration: ServerConfiguration = standalone

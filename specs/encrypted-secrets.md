@@ -23,6 +23,15 @@ A small host job places the key in a memory-only file when the machine starts. A
 - **Fail closed.** While locked, Aman never reads or writes a secret, in plain text or otherwise. Only setup (or `aman secrets init`) creates a master key; starting Aman never does.
 - **The TPM is bound to the chip only, not to boot measurements,** so firmware and Secure Boot updates don't lock people out. Protection against a stolen whole machine comes from disk encryption, which setup checks.
 
+## How the key reaches Aman
+
+- Aman reads the master key from one file, set by `SECRETS_KEY_FILE`. The file holds the key as one line of base64 and must be readable only by its owner.
+- Aman never makes a key when it starts. If the file isn't there yet, it keeps checking: every 2 seconds for the first 10 minutes, then every 30 seconds. It unlocks by itself when the right key appears, with no restart.
+- A key that is missing, readable by other accounts, malformed or wrong for this database keeps secrets locked, and the log says which.
+- `aman secrets init` sets up one database: it uses the key file if it is there (so every instance on a machine shares one key) and makes it only if it is not. It saves the key check value and a recovery copy, then prints this database's own recovery key once. It refuses a database that is already set up, or one set up with a different key.
+- `aman secrets check-recovery` reads a recovery key on stdin and says whether it unlocks the database, so setup can make sure it was written down correctly.
+- Setup on each platform puts the key file in a memory-only place outside the data folder and mounts it into each instance; that wiring comes with the platform step.
+
 ## Scope
 
 Delivered in steps, each its own PR linking this spec:

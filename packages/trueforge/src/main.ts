@@ -163,6 +163,9 @@ import { ensureEnvManagedTokenFactoryProvider, seedEnvManagedDefaultChatModel } 
 import { TurnDrainRegistry } from './runtime/turnDrains';
 import { createPackageMirrorAllowanceCheck } from './sandbox/mirrors/packageMirrorAllowance';
 import { slotsBackendEnabled, startPackageMirrorGateway, startSkillNetworkGateway } from './sandbox/slotBackend';
+import { FileKeyProvider } from './secrets/fileKeyProvider';
+import { watchForKey } from './secrets/keyWatch';
+import { SecretVault } from './secrets/secretVault';
 import { printStandaloneStartupBanner } from './startupBanner';
 import { TENANT_ID } from './tenancy';
 import {
@@ -717,6 +720,23 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     serviceFoundryClient,
   } = persistence;
 
+  // Aman never makes a key here: it waits for the host to deliver the machine key and unlocks
+  // saved secrets once that key matches this instance's database.
+  const secretVault = new SecretVault({
+    provider: new FileKeyProvider(configuration.SECRETS_KEY_FILE),
+    settings: globalSettingsStore,
+  });
+  const stopKeyWatch = watchForKey({
+    vault: secretVault,
+    onChange: state => {
+      if (state.status === 'unlocked') {
+        logger.info('Saved secrets are unlocked');
+      } else {
+        logger.warn('Saved secrets are locked', { reason: state.reason, detail: state.detail });
+      }
+    },
+  });
+
   const modelCatalog = ModelCatalog.load();
   // The env-managed Token Factory provider and default model are written before the first request,
   // so no Settings step is needed. TrueFoundry mode lists providers from TrueFoundry instead.
@@ -1088,6 +1108,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     sentinelAuditStore,
     chatSearchIndexer,
     packageMirrorAllowanceHolds,
+    stopKeyWatch,
   };
 }
 
@@ -1168,6 +1189,7 @@ try {
     sentinelAuditStore,
     chatSearchIndexer,
     packageMirrorAllowanceHolds,
+    stopKeyWatch,
   } = configuration.STANDALONE
     ? await createServerRuntime(
         await createStandalonePersistence({ sqlitePath: configuration.SQLITE_PATH, logger }),
@@ -1437,6 +1459,7 @@ try {
       await closePersonaKnowledgeIndexers();
       clearInterval(commandExecutionRecoveryTimer);
       clearInterval(artifactRetentionTimer);
+      stopKeyWatch();
       oidcDiscovery?.stop();
       clearInterval(googlePendingPurgeTimer);
       // Stop serving peer requests (waits for in-flight replies), then close
