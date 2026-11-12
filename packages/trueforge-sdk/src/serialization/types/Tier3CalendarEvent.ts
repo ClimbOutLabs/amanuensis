@@ -11,6 +11,7 @@ export const Tier3CalendarEvent: core.serialization.ObjectSchema<
     TrueForge.Tier3CalendarEvent
 > = core.serialization.object({
     action: Tier3CalendarEventAction,
+    alreadyCreated: core.serialization.property("already_created", core.serialization.boolean().optional()),
     attendees: core.serialization.list(core.serialization.string()),
     before: Tier3CalendarEventBefore.nullable(),
     calendar: core.serialization.string(),
@@ -19,6 +20,7 @@ export const Tier3CalendarEvent: core.serialization.ObjectSchema<
     guestsEmailed: core.serialization.property("guests_emailed", core.serialization.boolean()),
     location: core.serialization.string(),
     oneOfRepeating: core.serialization.property("one_of_repeating", core.serialization.boolean()),
+    spanDays: core.serialization.property("span_days", core.serialization.number().optional()),
     timeZone: core.serialization.property("time_zone", core.serialization.string()),
     title: core.serialization.string(),
     when: core.serialization.string(),
@@ -27,6 +29,7 @@ export const Tier3CalendarEvent: core.serialization.ObjectSchema<
 export declare namespace Tier3CalendarEvent {
     export interface Raw {
         action: Tier3CalendarEventAction.Raw;
+        already_created?: boolean | null;
         attendees: string[];
         before?: Tier3CalendarEventBefore.Raw | null;
         calendar: string;
@@ -35,6 +38,7 @@ export declare namespace Tier3CalendarEvent {
         guests_emailed: boolean;
         location: string;
         one_of_repeating: boolean;
+        span_days?: number | null;
         time_zone: string;
         title: string;
         when: string;

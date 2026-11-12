@@ -271,7 +271,7 @@ describe('PermissionApprovalCard for a calendar event', () => {
 });
 
 describe('PermissionApprovalCard always allow this tool', () => {
-  const ALWAYS_ALLOW_TOOL = 'Always allow this tool';
+  const ALWAYS_ALLOW_TOOL = 'Always allow everywhere';
 
   it('offers the option only when an always-allow handler is passed', () => {
     renderCard({}, { onApproveAlways: vi.fn() });
@@ -292,7 +292,7 @@ describe('PermissionApprovalCard always allow this tool', () => {
     renderCard({}, { onApproveAlways });
     fireEvent.click(screen.getByRole('button', { name: ALWAYS_ALLOW_TOOL }));
 
-    expect(screen.getByRole('heading', { name: 'Always allow this tool?' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Always allow everywhere?' })).toBeInTheDocument();
     expect(screen.getByText(/You can remove this later in connector settings/)).toBeInTheDocument();
     expect(onApproveAlways).not.toHaveBeenCalled();
   });

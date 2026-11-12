@@ -48,7 +48,10 @@ export function isSilentSearchReason(reason: string): boolean {
   return reason === SEARCH_SILENT_REASON;
 }
 
-/** Reason code for a lookup held because read content chose its link and the link carries more than it gave. */
+/**
+ * Reason code for a lookup held because its link carries more than its source gave: read content chose the link, or
+ * only the assistant's own reply brought up the site.
+ */
 export const SEARCH_STEERED_REASON = 'mcp_search_steered';
 
 /** Reason code for a lookup held because it carries a private detail of the person's, in a chat that read other content. */

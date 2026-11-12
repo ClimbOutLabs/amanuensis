@@ -88,7 +88,10 @@ describe('POST /speak', () => {
   function appWith(speechLimiter = new SpeechRateLimiter()): OpenAPIHono {
     const app = new OpenAPIHono();
     app.use('*', createAuthMiddleware(headerAuthenticator));
-    app.route('/', createVoiceRouter({ logger, resolveRequestContext, speechLimiter }));
+    app.route(
+      '/',
+      createVoiceRouter({ logger, resolveRequestContext, speechLimiter, app: { fetch: () => new Response('{}') } }),
+    );
     return app;
   }
 
@@ -130,6 +133,19 @@ describe('POST /speak', () => {
 
     expect(res.status).toBe(200);
     expect(fakeTts.calls[0]?.body).toEqual({ text: 'Hi.' });
+  });
+
+  it('does not use the voice service when the local voice is turned off', async () => {
+    configuration.TTS_ENABLED = false;
+    try {
+      const res = await appWith().request('/speak', speakRequest({ text: 'Hi.' }));
+
+      expect(res.status).toBe(503);
+      expect(await res.json()).toMatchObject({ error: { code: 'tts_disabled' } });
+      expect(fakeTts.calls).toHaveLength(0);
+    } finally {
+      configuration.TTS_ENABLED = true;
+    }
   });
 
   it('refuses unauthenticated calls without reaching the voice service', async () => {
