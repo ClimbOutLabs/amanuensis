@@ -168,6 +168,7 @@ import {
 import { spaceClosingLine, spaceWriteSavedNothing, spaceWritesThisTurn } from '../spaces/turnSpaceWrites';
 import type { AgentTracing } from '../tracing/AgentTracing';
 import { awaitWithAbort, onSignalAbort, throwIfSignalAborted } from '../util/abort';
+import { weekdayNameOf } from '../util/calendarDay';
 import { resolveLocalTime } from '../util/clientTimezone';
 import { describeUnknownError, extractErrorLogFields } from '../util/errorLogFields';
 import type { AbnormalHandoff, AbnormalHandoffCause, AbnormalHandoffEvidence } from './AbnormalHandoff';
@@ -2095,10 +2096,11 @@ export class AgentThread {
     const local = resolveLocalTime(this.replyDate, this.definition.clientTimezone);
     const localDateClause = local.isFallback
       ? ''
-      : ` The user's local date is ${local.date} (${local.zone}, UTC${local.utcOffset}).`;
+      : ` The user's local date is ${local.date} (${weekdayNameOf(local.date)}, ${local.zone}, UTC${local.utcOffset}).`;
+    // The weekday is stated, not left to the model: models often name the wrong day for a date.
     builder.addSection(
       'current-date',
-      `Today's date is ${dateUtc} (UTC).${localDateClause} Reason about past and future relative to this date, not to your training data.`,
+      `Today's date is ${dateUtc} (${weekdayNameOf(dateUtc)}, UTC).${localDateClause} Reason about past and future relative to this date, not to your training data.`,
     );
     if (!this.parent && this.definition.spokenReply === true) {
       builder.addSection(
@@ -2337,7 +2339,7 @@ export class AgentThread {
               tenant_id: this.sentinel.tenant_id,
               created_by: this.sentinel.created_by,
               mcp_server_name: pending.tool_info.mcp_server_name,
-              tool_name: pending.tool_info.original_tool_name,
+              tool_name: pending.tool_info.grant_tool_name ?? pending.tool_info.original_tool_name,
               mcp_server_host: pending.tool_info.grant_host ?? null,
             });
           }

@@ -266,14 +266,29 @@
       "reason": "Default map tiles for the maps card; can be changed in settings."
     },
     {
+      "host": "docs.googleapis.com",
+      "category": "connector",
+      "reason": "Google Docs API for the Google connector the person sets up: reading and creating Docs."
+    },
+    {
+      "host": "sheets.googleapis.com",
+      "category": "connector",
+      "reason": "Google Sheets API for the Google connector the person sets up: reading Sheets and adding rows to them."
+    },
+    {
       "host": "www.googleapis.com",
       "category": "connector",
-      "reason": "Google Calendar and Gmail scopes and API for the Google connector the person sets up."
+      "reason": "Google Calendar, Gmail and Drive scopes and API for the Google connector the person sets up."
     },
     {
       "host": "ai-sdk.dev",
       "category": "docs_link",
       "reason": "Library documentation named in a code comment."
+    },
+    {
+      "host": "developer.1password.com",
+      "category": "docs_link",
+      "reason": "1Password command line install page, named in a message of the Gmail server."
     },
     {
       "host": "dexidp.io",
@@ -401,9 +416,19 @@
       "reason": "Library documentation named in a code comment."
     },
     {
+      "host": "challenges.cloudflare.com",
+      "category": "identifier",
+      "reason": "Matched against frame URLs to name a human check, never contacted."
+    },
+    {
       "host": "json-schema.org",
       "category": "identifier",
       "reason": "JSON Schema version name in the release record schema."
+    },
+    {
+      "host": "mail.google.com",
+      "category": "identifier",
+      "reason": "Name of Google's full mailbox permission in the Gmail server's list of permissions."
     },
     {
       "host": "schemas.openxmlformats.org",
@@ -429,6 +454,11 @@
       "host": "huggingface.co",
       "category": "model_download",
       "reason": "Memory search model files, downloaded once on first use and checked against pinned hashes."
+    },
+    {
+      "host": "raw.githubusercontent.com",
+      "category": "model_download",
+      "reason": "Voice mode's speech detection model (Silero VAD v5.1.2), fetched when the Aman image is built and when a source checkout is set up. Only the one pinned file path is used. It is checked against a pinned size and SHA-256, and the server never downloads it."
     },
     {
       "host": "desktop.docker.com",

@@ -48,6 +48,79 @@ function bufferToBase64Url(buffer: ArrayBuffer | null): string {
   return window.btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
+/**
+ * The name and message of a browser failure. The browser steps below throw DOMExceptions, which are not Error
+ * instances in every browser, so read the two fields off whatever was thrown.
+ */
+function failureShape(caught: unknown): { name: string; message: string } {
+  if (typeof caught !== 'object' || caught === null) return { name: '', message: '' };
+  const name = Reflect.get(caught, 'name');
+  const message = Reflect.get(caught, 'message');
+  return {
+    name: typeof name === 'string' ? name : '',
+    message: typeof message === 'string' ? message : '',
+  };
+}
+
+/**
+ * Plain words for a trust failure. The page itself can be opened past a certificate warning, but the browser fetches
+ * the notice program only over a connection it fully trusts, so a device that has not trusted this computer fails here
+ * and nowhere else. The one next step is the trust step on this device, the same one the phone help describes.
+ */
+function trustFailureWords({ assistant, turningOn }: { assistant: string; turningOn: boolean }): string {
+  const consequence = turningOn ? 'notices cannot be turned on here' : 'notices cannot be turned off here';
+  return `This device does not trust the computer that runs ${assistant} yet, so ${consequence}. On this device, open the "Trust this computer" link the installer printed, follow its steps, then try again.`;
+}
+
+/**
+ * Plain words for a failure the browser reported during a push step, matched to the kind of failure so the next
+ * step fits it. A certificate failure, and a SecurityError raised while subscribing, both mean the browser does
+ * not trust this address, so both get the trust words.
+ */
+function browserFailureWords({
+  caught,
+  assistant,
+  turningOn,
+}: {
+  caught: unknown;
+  assistant: string;
+  turningOn: boolean;
+}): string {
+  const { name, message } = failureShape(caught);
+  if (/certificate|ssl/i.test(message) || name === 'SecurityError') {
+    return trustFailureWords({ assistant, turningOn });
+  }
+  if (name === 'NotAllowedError') {
+    return 'This browser did not allow notices. Allow them for this site in the browser settings, then try again.';
+  }
+  if (name === 'AbortError') {
+    return "The notice service could not be reached. Check this device's connection, then try again.";
+  }
+  if (turningOn && /register|script/i.test(message)) {
+    return 'This browser could not load the small program notices need. Reload the page, then try again.';
+  }
+  return turningOn
+    ? 'Notices could not be turned on. Reload the page, then try again.'
+    : 'Notices could not be turned off. Reload the page, then try again.';
+}
+
+/** Runs one browser push step. A raw browser failure leaves as plain words, with the raw error kept as the cause. */
+async function browserStep<T>({
+  run,
+  assistant,
+  turningOn,
+}: {
+  run: () => Promise<T>;
+  assistant: string;
+  turningOn: boolean;
+}): Promise<T> {
+  try {
+    return await run();
+  } catch (caught) {
+    throw new Error(browserFailureWords({ caught, assistant, turningOn }), { cause: caught });
+  }
+}
+
 /** This device's push subscription, or null when it has none or cannot have one. */
 export async function currentPushSubscription(): Promise<PushSubscription | null> {
   if (!('serviceWorker' in navigator)) return null;
@@ -101,41 +174,64 @@ function deviceOf({ subscription, label }: { subscription: PushSubscription; lab
  * Turns notices on for this device. Call it from the person's click: the browser asks for permission here. A
  * subscription made with an older server key, or one whose address another account holds, is replaced.
  */
-export async function enablePush({ api, label }: { api: DeliveriesApi; label: string }): Promise<void> {
+export async function enablePush({
+  api,
+  label,
+  assistant,
+}: {
+  api: DeliveriesApi;
+  label: string;
+  assistant: string;
+}): Promise<void> {
   const publicKey = await api.pushPublicKey();
   if (publicKey === null) {
     throw new Error('Notices are not set up on this server. Ask the person who runs it to turn them on.');
   }
-  const permission = await Notification.requestPermission();
+  const permission = await browserStep({ run: () => Notification.requestPermission(), assistant, turningOn: true });
   if (permission !== 'granted') {
     throw new Error(
       'This browser did not allow notices. Allow them for this site in the browser settings, then try again.',
     );
   }
-  const registration = await navigator.serviceWorker.register(api.pushWorker.url, { scope: api.pushWorker.scope });
-  await navigator.serviceWorker.ready;
+  const registration = await browserStep({
+    run: () => navigator.serviceWorker.register(api.pushWorker.url, { scope: api.pushWorker.scope }),
+    assistant,
+    turningOn: true,
+  });
+  await browserStep({ run: () => navigator.serviceWorker.ready, assistant, turningOn: true });
   const subscribe = () =>
-    registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(publicKey) });
-  let subscription = await registration.pushManager.getSubscription();
+    browserStep({
+      run: () =>
+        registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(publicKey) }),
+      assistant,
+      turningOn: true,
+    });
+  let subscription = await browserStep({
+    run: () => registration.pushManager.getSubscription(),
+    assistant,
+    turningOn: true,
+  });
   if (subscription !== null && !subscribedWithKey({ subscription, publicKey })) {
-    await subscription.unsubscribe();
+    const stale = subscription;
+    await browserStep({ run: () => stale.unsubscribe(), assistant, turningOn: true });
     subscription = null;
   }
   subscription ??= await subscribe();
   if ((await api.savePushDevice(deviceOf({ subscription, label }))) === 'saved') return;
   // Another account on this server holds this address. A fresh subscription gets an address of its own.
-  await subscription.unsubscribe();
+  const held = subscription;
+  await browserStep({ run: () => held.unsubscribe(), assistant, turningOn: true });
   const fresh = await subscribe();
   if ((await api.savePushDevice(deviceOf({ subscription: fresh, label }))) === 'taken') {
-    await fresh.unsubscribe();
+    await browserStep({ run: () => fresh.unsubscribe(), assistant, turningOn: true });
     throw new Error('Notices could not be turned on for this browser. Reload the page, then try again.');
   }
 }
 
 /** Turns notices off for this device, here and on the server. */
-export async function disablePush({ api }: { api: DeliveriesApi }): Promise<void> {
-  const subscription = await currentPushSubscription();
+export async function disablePush({ api, assistant }: { api: DeliveriesApi; assistant: string }): Promise<void> {
+  const subscription = await browserStep({ run: () => currentPushSubscription(), assistant, turningOn: false });
   if (subscription === null) return;
   await api.removePushDevice(subscription.endpoint);
-  await subscription.unsubscribe();
+  await browserStep({ run: () => subscription.unsubscribe(), assistant, turningOn: false });
 }
