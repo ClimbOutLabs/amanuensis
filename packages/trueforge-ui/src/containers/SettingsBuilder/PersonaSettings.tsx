@@ -163,7 +163,7 @@ const PersonaForm: FC<PersonaFormProps> = ({
         </label>
         <input
           id="persona-calendar-accounts"
-          className={inputClassName}
+          className={auiSettingsInputClass()}
           value={calendarAccountsText}
           placeholder="Every connected account"
           onChange={event => onCalendarAccountsTextChange(event.target.value)}
