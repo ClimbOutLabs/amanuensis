@@ -48,8 +48,8 @@ describe('AgentThread no-task-no-tools instruction', () => {
     const systemMessage = request?.messages.find(m => m.role === 'system');
     expect(systemMessage?.content).toContain('<no-task-no-tools>');
     expect(systemMessage?.content).toContain(NO_TASK_NO_TOOLS_PROMPT.trim());
-    expect(NO_TASK_NO_TOOLS_PROMPT).toContain('In that case, do not call any tool');
-    expect(NO_TASK_NO_TOOLS_PROMPT.endsWith('using tools as the task needs.')).toBe(true);
-    expect(NO_TASK_NO_TOOLS_PROMPT).toContain('if the message answers a question you just asked');
+    expect(NO_TASK_NO_TOOLS_PROMPT).toContain('ask what they want done, without calling any tool');
+    expect(NO_TASK_NO_TOOLS_PROMPT.endsWith('continue the task with the tools it needs.')).toBe(true);
+    expect(NO_TASK_NO_TOOLS_PROMPT).toContain('Exception: if it answers a question you just asked');
   });
 });
