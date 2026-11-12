@@ -24,7 +24,13 @@ Reminders do not show on the Schedules page.
 1. Click **Chats**, then click **New chat**.
 2. Type what you want and how often, such as "Every weekday at 7:30, send me my morning brief". Aman asks if the time is unclear.
 3. A card shows when it runs and what it does. Check it.
-4. Click **Allow**. To stop, click **Not now**. To reword it first, click **Change it**.
+4. The card also lists what the schedule may use: your **Connectors**, your **Skills**, **Run code** and **Memory**. Aman ticks the ones it thinks the task needs. Tick or untick any of them. A skill needs **Run code**, so that box stays ticked while a skill is ticked.
+5. If you changed a tick, click **Update the card**. Aman shows the card again with your choices.
+6. Click **Allow**. To stop, click **Not now**. To reword it first, click **Change it**.
+
+Aman saves your choices as a new agent with the same name as the schedule. To change them later, click **Agents** in the left bar and open that agent. Deleting the schedule does not delete the agent.
+
+If you ask from a chat that already uses one of your agents, the schedule runs as that agent. The card then shows that agent's tools, with nothing to tick.
 
 ## Make a schedule on the Schedules page
 

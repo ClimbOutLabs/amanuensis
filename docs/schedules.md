@@ -8,7 +8,7 @@ A schedule asks Aman to do the same job again and again, for example every weekd
 ## Words we use
 
 - **Tasks** are things to do once. Ask for them in a chat.
-- **Schedules** are things that repeat. Set them up on the Schedules page.
+- **Schedules** are things that repeat. Set them up on the Schedules page, or ask for one in a chat.
 - **Skills** teach Aman how to do a kind of job. Add them under Settings, Skills.
 
 ## How a schedule runs
@@ -17,6 +17,17 @@ A schedule asks Aman to do the same job again and again, for example every weekd
 - Each run is saved as a chat, so you can open it and see what Aman found.
 - After you save a schedule, you can give it a test run.
 - You can pause or resume a schedule on the Schedules page, or by asking in a chat. In a chat, a card shows the schedule and when it runs, and waits for your OK every time.
+
+## A schedule made in a chat
+
+When you ask for a schedule in a chat, a card shows it before anything is saved. Creating a schedule asks every time.
+
+- The card lists what the schedule may use: your connectors, your skills, running code, and memory. Aman ticks the ones it thinks the task needs.
+- You can change any tick. A skill needs running code, so that box stays ticked while a skill is ticked. After a change, click **Update the card**. Aman shows the card again with your choices, and you approve that card. What you approve is exactly what the card shows.
+- Aman saves your choices as a new agent named after the schedule. If that name is taken, it adds a number, such as `morning-brief-2`. The agent is on the Agents page, where you can change its tools, instructions or model. Each schedule gets its own agent, so changing one never changes another.
+- Deleting the schedule leaves the agent in place. Delete it on the Agents page if you no longer want it.
+- If the chat already uses one of your agents, the schedule runs as that agent. The card shows that agent's tools, with nothing to tick.
+- An older schedule made in a chat keeps running as it did. Change its tools on the Schedules page.
 
 ## Reminders
 
