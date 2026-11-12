@@ -143,7 +143,7 @@ async function savedNames({ server, path }: { server: ApprovalTestServer; path: 
   return response.text();
 }
 
-describe('"Always allow this here" is offered only when the card names who or where the action goes', () => {
+describe('"Always allow in this chat" is offered only when the card names who or where the action goes', () => {
   let server: ApprovalTestServer;
 
   beforeAll(async () => {
