@@ -2604,6 +2604,29 @@ export function runStoreContractSuite<
       expect(mustGet(session).approval_grants).toEqual([firstGrant, secondGrant]);
     });
 
+    it('merges chat approval refusals instead of replacing existing refusals', async () => {
+      const store = createStore();
+      await seedSession(store);
+      const firstRefusal =
+        '["v4","truefoundry-system","browser","browser_open",null,null,"example.com","browser_open_unvouched"]';
+      const secondRefusal =
+        '["v4","truefoundry-system","browser","browser_open",null,null,"news.example.org","browser_open_unvouched"]';
+      await store.createTurn(makeCreateTurnInput({ sessionId, turnId: 'turn-1', approval_refusals: [firstRefusal] }));
+      await finishTurn(store, 'turn-1');
+      await store.createTurn(
+        makeCreateTurnInput({
+          sessionId,
+          turnId: 'turn-2',
+          previousTurnId: 'turn-1',
+          firstTurnId: 'turn-1',
+          approval_refusals: [secondRefusal],
+        }),
+      );
+
+      const session = await store.getSession({ tenant_id: tenant, session_id: sessionId });
+      expect(mustGet(session).approval_refusals).toEqual([firstRefusal, secondRefusal]);
+    });
+
     it('rejects a replayed approval continuation after the session tip advances', async () => {
       const store = createStore();
       await seedSession(store);

@@ -30,7 +30,6 @@ import type { SentinelServices } from '../../../src/core/permissions/context';
 import { recordUntrustedText } from '../../../src/core/permissions/provenance';
 import { tier1Decision, type TierDecision } from '../../../src/core/permissions/tier';
 import { createWebSearchTurnState, recordToolResultProvenance } from '../../../src/core/permissions/webSearch';
-import { tier1Decision } from '../../../src/core/permissions/tier';
 import { sandboxCommandApprovalIdentity } from '../../../src/core/sandbox/Sandbox';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 

@@ -607,11 +607,11 @@ function recordRecallProvenance(input: {
     if (source === undefined) {
       recordPersonText({ provenance, text });
     } else {
-      recordUntrustedText({ provenance, text, source });
+      recordUntrustedText({ provenance, text, source, page_site: null });
     }
   }
   for (const text of input.summaryLines) {
-    recordUntrustedText({ provenance, text, source: 'other' });
+    recordUntrustedText({ provenance, text, source: 'other', page_site: null });
   }
 }
 

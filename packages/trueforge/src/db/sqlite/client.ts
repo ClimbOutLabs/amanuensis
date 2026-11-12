@@ -158,6 +158,7 @@ const JSON_RESULT_COLUMNS = new Set([
   'tier2_auto_allow',
   'shell_binding',
   'approval_grants',
+  'approval_refusals',
   'task_checklist',
   'aliases',
   'implementation_plan_grant',

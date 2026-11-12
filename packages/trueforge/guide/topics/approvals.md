@@ -33,7 +33,7 @@ If you did not give the address, the card can offer **Always allow this site**. 
 
 Each page on an allowed site is still checked on its own. If a later page would carry one of your private details, or a page Aman read named its address, that page asks.
 
-If you click **Not now** on one of these cards, Aman does not ask again about the same kind of open on that site in this chat.
+If you click **Not now** on one of these cards, that no lasts for the rest of the chat. Aman does not ask again about the same kind of open on that site. It refuses the open instead. A no on a card for a click on a page lasts the same way. A new chat asks again.
 
 ## Choose what Aman may do without asking
 

@@ -81,6 +81,7 @@ function mapRowToSessionRecord(row: {
   workspace_cwd: string | null;
   last_turn_id: string | null;
   approval_grants: string[];
+  approval_refusals: string[];
   task_checklist: TaskChecklist;
   external_id: string | null;
   is_incognito: boolean;
@@ -109,6 +110,7 @@ function mapRowToSessionRecord(row: {
     workspace_cwd: row.workspace_cwd,
     last_turn_id: row.last_turn_id,
     approval_grants: row.approval_grants,
+    approval_refusals: row.approval_refusals,
     task_checklist: parseStoredTaskChecklist(row.task_checklist),
     external_id: row.external_id,
     is_incognito: row.is_incognito,
@@ -143,6 +145,7 @@ export async function createSession(db: Kysely<Database>, input: CreateSessionIn
         // Bind via json(): a bare [] is encoded by node-pg as the Postgres array
         // literal '{}', which then casts to jsonb as an empty OBJECT, not [].
         approval_grants: json([]),
+        approval_refusals: json([]),
         task_checklist: json(emptyTaskChecklist()),
         custom: input.custom !== null ? json(input.custom) : null,
         metadata: json(input.metadata),

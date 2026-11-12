@@ -1,6 +1,6 @@
 import type { ApprovalDecision } from '../events/schema';
 import type { InternalEnrichedToolCall, InternalToolCallInfo } from '../llm/LLMTypes';
-import { BROWSER_OPEN_TOOL_NAME, isAmanBrowserCall } from '../permissions/browserToolNames';
+import { BROWSER_CLICK_TOOL_NAME, BROWSER_OPEN_TOOL_NAME, isAmanBrowserCall } from '../permissions/browserToolNames';
 import {
   BROWSER_OPEN_SITE_GRANT_REASONS,
   CHAT_GRANTABLE_CONSEQUENCE_REASONS,
@@ -177,6 +177,23 @@ export function allowsToolGrant(info: InternalToolCallInfo): boolean {
     return false;
   }
   return isOwnCalendarChange(info) || isOwnDriveWrite(info) || (info.type === 'mcp' && info.effect === 'inspect');
+}
+
+/**
+ * The chat-scoped refusal key for a call, or null when a "no" to it lasts only the turn. Only a
+ * browser open or click records one: the person turned down a page, or a click on one, and the
+ * refusal is kept on the session so the rest of the chat refuses the same identity with no new
+ * card. The key is the approval grant key, so an open under the site scope is refused for the
+ * whole site, exactly as a grant on it would have covered the site.
+ */
+export function chatRefusalKey(info: InternalToolCallInfo): string | null {
+  if (!isAmanBrowserCall(info)) {
+    return null;
+  }
+  if (info.original_tool_name !== BROWSER_OPEN_TOOL_NAME && info.original_tool_name !== BROWSER_CLICK_TOOL_NAME) {
+    return null;
+  }
+  return approvalGrantKey(info);
 }
 
 /**
