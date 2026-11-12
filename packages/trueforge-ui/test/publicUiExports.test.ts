@@ -329,6 +329,14 @@ const expectedRuntimeExports: Array<keyof typeof sdk> = [
   'useTrueFoundryToolResponses',
   'useTrueFoundryTurnId',
   'useTrueFoundryUpdateAgentSpec',
+  'ReminderListProvider',
+  'RemindersButton',
+  'RemindersPage',
+  'groupReminders',
+  'reminderDetailLine',
+  'reminderWhenLine',
+  'useOptionalReminderList',
+  'useReminderList',
 ];
 
 describe('public runtime exports', () => {
