@@ -2,11 +2,12 @@
  * Streams one user's data export archive: one JSON file per section (chats
  * spread over numbered `sessions/` files), the memory tree as Markdown, and
  * uploaded files only when requested. Never
- * exported: model providers and their keys, OAuth tokens, registered OAuth
+ * exported: model provider keys, OAuth tokens, registered OAuth
  * clients, approval tokens, always-allow grants, skills and registered
  * repositories, sandbox state, schedule run history, and anything another
- * user owns. The owner's own permission history (audit rows) and each chat's
- * persona choices do travel.
+ * user owns. A model provider's setup (its type, address and models) does
+ * travel, so an import can put it back and ask only for the key. The owner's
+ * own permission history (audit rows) and each chat's persona choices travel.
  *
  * Every JSON value (except identity fields) and every memory file passes both
  * secret layers before it is written; uploaded files ship byte-exact.
@@ -32,8 +33,10 @@ import type { AgentRecord } from '../db/agentStore';
 import type { IDeliveryStore } from '../db/deliveryStore';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { IMcpServerStore } from '../db/mcpServerStore';
+import type { IModelProviderStore } from '../db/modelProviderStore';
 import type { IPersonalizationStore } from '../db/personalizationStore';
 import type { IPersonaStore } from '../db/personaStore';
+import type { IReachSettingsStore } from '../db/reachSettingsStore';
 import type { IScheduleStore } from '../db/scheduleStore';
 import type { ISentinelAuditStore } from '../db/sentinelAuditStore';
 import type { ISentinelSettingsStore } from '../db/sentinelSettingsStore';
@@ -62,6 +65,7 @@ import { DEFAULT_CHAT_MODEL_SETTING_KEY } from '../runtime/tokenFactoryProvider'
 import { TOOL_OUTPUT_SCREEN_ENABLED_SETTING_KEY } from '../runtime/toolOutputScreenSettings';
 import { sessionToCommonChat } from './chatMapping';
 import type { CommonChat } from './commonChatFormat';
+import { exportableModelProvider } from './modelProviders';
 import { createExportScrubber, type ExportScrubber } from './secretScrub';
 import { exportableEvents, exportedThreads, sessionPartName, withoutDeploymentBoundFields } from './sessionRecords';
 import { ZipEntrySizeCapExceededError, ZipStreamWriter } from './zipStreamWriter';
@@ -116,8 +120,11 @@ export interface DataExportDeps<TTransaction> {
   sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
   auditStore: Pick<ISentinelAuditStore, 'listOwned'>;
   deliveryStore: Pick<IDeliveryStore, 'listForExport'>;
+  reachSettingsStore: Pick<IReachSettingsStore, 'get'>;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   mcpServerStore: IMcpServerStore<TTransaction>;
+  /** Only the setups are read; a provider's key never leaves (see modelProviders.ts). */
+  modelProviderStore: Pick<IModelProviderStore<TTransaction>, 'listProviders'>;
   /** The agents the user may manage; the entry point resolves them because access rules differ per deployment. */
   listAgents: () => Promise<readonly AgentRecord[]>;
   /** Root dir of the Markdown memory files. */
@@ -504,6 +511,18 @@ export async function runDataExport<TTransaction>(
   }
   await writeJsonArrayEntry(context, 'connectors.json', connectorEntries());
 
+  // model_providers.json: each provider's setup (type, address, models), never its key.
+  async function* providerEntries(): AsyncIterable<unknown> {
+    const providers = await deps.modelProviderStore.listProviders({ tenant_id: tenantId });
+    for (const provider of providers) {
+      const entry = exportableModelProvider(provider, scrub);
+      if (entry !== null) {
+        yield entry;
+      }
+    }
+  }
+  await writeJsonArrayEntry(context, 'model_providers.json', providerEntries());
+
   // settings.json: the caller's own permission settings, plus instance toggles for administrators.
   const permissionSettings = await deps.sentinelSettingsStore.get({ tenant_id: tenantId, created_by: subjectId });
   const instanceSettings: { key: string; value: string }[] = [];
@@ -543,6 +562,11 @@ export async function runDataExport<TTransaction>(
     'deliveries.json',
     await deps.deliveryStore.listForExport({ tenant_id: tenantId, created_by: subjectId }),
   );
+
+  // reach.json: this person's Reach me settings, as a list of none or one. Channel switches travel as saved and are
+  // switched off again on import, so a new computer never texts or calls until its owner turns that on.
+  const reachSettings = await deps.reachSettingsStore.get({ tenant_id: tenantId, created_by: subjectId });
+  await writeJsonArrayEntry(context, 'reach.json', reachSettings === undefined ? [] : [reachSettings]);
 
   // A persona vault is keyed by the persona's name, so another person's persona with the same name writes into it too.
   const othersPersonaNames = await personaNamesOfOthers(deps, { tenantId, subjectId });

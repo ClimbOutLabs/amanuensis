@@ -1258,7 +1258,7 @@ describe('mcp-servers routers', () => {
     };
 
     function grantFor(input: { created_by: string; tool_name: string }) {
-      return { tenant_id: TENANT_ID, mcp_server_name: notesBody.name, mcp_server_host: 'notes.example.com', ...input };
+      return { tenant_id: TENANT_ID, mcp_server_name: notesBody.name, connector_binding: 'setup-of-notes', ...input };
     }
 
     async function listedGrants(): Promise<string[]> {
@@ -1322,6 +1322,17 @@ describe('mcp-servers routers', () => {
       expect(await toolGrantStore.hasToolGrant(grantFor({ created_by: OTHER_USER, tool_name: 'lookup_note' }))).toBe(
         false,
       );
+    });
+
+    it('drops the grants of every user when the connector signs in another way on the same URL', async () => {
+      const resigned = await settingsRouter.request(
+        '/',
+        putInit(
+          wrapManifest({ ...notesBody, auth: { type: 'header', headers: { 'X-Api-Key': 'another-key-value' } } }),
+        ),
+      );
+      expect(resigned.status).toBe(200);
+      expect(await listedGrants()).toEqual([]);
     });
 
     it('drops the grants of every user when the connector is deleted', async () => {

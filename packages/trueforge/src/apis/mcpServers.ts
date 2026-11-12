@@ -20,6 +20,7 @@ import type { WithTransaction } from '../db/transaction';
 import { createMcpOAuthClient } from '../mcp/auth/mcpDcr';
 import { mcpOAuthRedirectUris } from '../mcp/auth/mcpOAuthHelpers';
 import type { IOAuthTokenStore, OAuthClientRecord } from '../mcp/auth/types';
+import { connectorGrantBinding } from '../mcp/connectorGrantBinding';
 import { checkHomeAssistant, homeAssistantUrlProblem, type HomeAssistantProbeClient } from '../mcp/homeAssistant';
 import {
   authorizeMcpServerRoute,
@@ -454,8 +455,9 @@ export function createSettingsMcpServersRouter<TTransaction>(
           await deps.tokenStore.deleteTokensForServer({ id: saved.id }, transaction);
           await deps.tokenStore.deletePendingAuthorizationsForServer({ id: saved.id }, transaction);
         }
-        if (existing !== undefined && existing.manifest.url !== manifest.url) {
-          // A new URL is a different server: Always allow was granted to the old one's tools.
+        if (existing !== undefined && connectorGrantBinding(existing) !== connectorGrantBinding(saved)) {
+          // A new address or a new way to sign in is a different setup: Always allow was granted to the old one's
+          // tools, and those grants would never match again, so they go rather than stay listed.
           await deps.toolGrantStore.revokeServerToolGrants(
             { tenant_id: requestContext.tenant_id, mcp_server_name: manifest.name },
             transaction,

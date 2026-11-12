@@ -93,6 +93,8 @@ const expectedRuntimeExports: Array<keyof typeof sdk> = [
   'DocumentIngestionProvider',
   'useOptionalDocumentIngestion',
   'DeliveriesProvider',
+  'ChatAnswerMarksProvider',
+  'useOptionalChatAnswerMarks',
   'DraftCatalogProvider',
   'DraftComposerActionsMenu',
   'DraftComposerLeftSection',
@@ -135,6 +137,7 @@ const expectedRuntimeExports: Array<keyof typeof sdk> = [
   'MessageTimestamp',
   'ModelUsageProvider',
   'MonacoEditorCore',
+  'NOTICING_KINDS',
   'OfflineIndicator',
   'OpenUiFenceBlock',
   'PRESETS',
@@ -329,6 +332,14 @@ const expectedRuntimeExports: Array<keyof typeof sdk> = [
   'useTrueFoundryToolResponses',
   'useTrueFoundryTurnId',
   'useTrueFoundryUpdateAgentSpec',
+  'ReminderListProvider',
+  'RemindersButton',
+  'RemindersPage',
+  'groupReminders',
+  'reminderDetailLine',
+  'reminderWhenLine',
+  'useOptionalReminderList',
+  'useReminderList',
 ];
 
 describe('public runtime exports', () => {

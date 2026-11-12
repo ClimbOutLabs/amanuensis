@@ -51,6 +51,7 @@ export async function openImportDataSession(): Promise<ImportDataSession> {
     { getSharedEmbeddingModel, isEmbeddingModelCached },
     { SentinelAuditStore },
     { DeliveryStore },
+    { ReachSettingsStore },
     { McpCatalog },
   ] = await Promise.all([
     import('../../config'),
@@ -62,6 +63,7 @@ export async function openImportDataSession(): Promise<ImportDataSession> {
     import('../../runtime/memory/embeddingModel'),
     import('../../db/sentinelAuditStore'),
     import('../../db/deliveryStore'),
+    import('../../db/reachSettingsStore'),
     import('../../catalog/McpCatalog'),
   ]);
   if (!configuration.STANDALONE) {
@@ -95,6 +97,7 @@ export async function openImportDataSession(): Promise<ImportDataSession> {
     { SqliteAgentStore },
     { SqliteGlobalSettingsStore },
     { SqliteMcpServerStore },
+    { SqliteModelProviderStore },
     { SqlitePersonaStore },
     { SqlitePersonalizationStore },
     { SqliteScheduleStore },
@@ -105,6 +108,7 @@ export async function openImportDataSession(): Promise<ImportDataSession> {
     import('../../db/sqlite/agent-store/SqliteAgentStore'),
     import('../../db/sqlite/global-settings-store/SqliteGlobalSettingsStore'),
     import('../../db/sqlite/mcp-server-store/SqliteMcpServerStore'),
+    import('../../db/sqlite/model-provider-store/SqliteModelProviderStore'),
     import('../../db/sqlite/persona-store/SqlitePersonaStore'),
     import('../../db/sqlite/personalization-store/SqlitePersonalizationStore'),
     import('../../db/sqlite/schedule-store/SqliteScheduleStore'),
@@ -132,8 +136,10 @@ export async function openImportDataSession(): Promise<ImportDataSession> {
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           auditStore: audit,
           deliveryStore: new DeliveryStore(db),
+          reachSettingsStore: new ReachSettingsStore(db),
           turnArtifactStore: new SqliteTurnArtifactStore(db),
           mcpServerStore: new SqliteMcpServerStore(db),
+          modelProviderStore: new SqliteModelProviderStore(db),
           agentStore: new SqliteAgentStore(db),
           mcpCatalog,
           withTransaction: callback => db.transaction().execute(callback),

@@ -3,10 +3,13 @@
 /**
  * @example
  *     {
- *         enabled: true
+ *         enabled: true,
+ *         hour: 0
  *     }
  */
 export interface UpdateMemoryNightlyRequest {
-    /** Persisted override: `true` or `false`. `null` clears the override back to the env default. */
-    enabled: boolean | null;
+    /** Persisted override: `true` or `false`. `null` clears the override back to the env default. Left out, it stays as it is. */
+    enabled?: boolean | null;
+    /** The hour of the server's day the tidy-up starts at, `0` to `23`. Left out, it stays as it is. */
+    hour?: number;
 }

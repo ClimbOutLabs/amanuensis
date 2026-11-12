@@ -5,6 +5,8 @@ export interface MemoryNightly {
     defaultEnabled: boolean;
     /** The stored setting: the persisted override when set, else the `MEMORY_NIGHTLY_JOB` env default. */
     enabled: boolean;
+    /** The hour of the server's day the tidy-up starts at. `0` is midnight, the default. */
+    hour: number;
     /** Whether a persisted override is currently stored. */
     overridden: boolean;
 }

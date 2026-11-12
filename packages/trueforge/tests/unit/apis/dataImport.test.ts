@@ -11,10 +11,12 @@ import configuration from '../../../src/config';
 import { EXPORT_SCHEMA_VERSION } from '../../../src/dataExport/exportService';
 import { ZipStreamWriter } from '../../../src/dataExport/zipStreamWriter';
 import { DeliveryStore } from '../../../src/db/deliveryStore';
+import { ReachSettingsStore } from '../../../src/db/reachSettingsStore';
 import { SentinelAuditStore } from '../../../src/db/sentinelAuditStore';
 import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgentStore';
 import { SqliteGlobalSettingsStore } from '../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
 import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
+import { SqliteModelProviderStore } from '../../../src/db/sqlite/model-provider-store/SqliteModelProviderStore';
 import { SqlitePersonaStore } from '../../../src/db/sqlite/persona-store/SqlitePersonaStore';
 import { SqlitePersonalizationStore } from '../../../src/db/sqlite/personalization-store/SqlitePersonalizationStore';
 import { SqliteScheduleStore } from '../../../src/db/sqlite/schedule-store/SqliteScheduleStore';
@@ -103,8 +105,10 @@ describe('Data import route', () => {
       sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
       auditStore: new SentinelAuditStore(db),
       deliveryStore: new DeliveryStore(db),
+      reachSettingsStore: new ReachSettingsStore(db),
       turnArtifactStore: new SqliteTurnArtifactStore(db),
       mcpServerStore: new SqliteMcpServerStore(db),
+      modelProviderStore: new SqliteModelProviderStore(db),
     };
     await seedRichInstance({
       stores,
@@ -187,7 +191,9 @@ describe('Data import route', () => {
     expect(body.data.spaces).toBe(1);
     expect(body.data.schedules).toBe(2);
     expect(body.data.schedules_off).toBe(true);
-    expect(body.data.summary).toContain('Imported:\n  3 chats\n  3 memories\n  2 personas\n  1 space\n  1 agent');
+    expect(body.data.summary).toContain(
+      'Imported:\n  3 chats\n  3 memories\n  2 personas\n  1 model provider\n  1 space\n  1 agent',
+    );
     expect(body.data.summary).toContain('2 schedules (they will be off)');
     expect(body.data.summary).toContain('Permissions start fresh, so each tool will ask again.');
 

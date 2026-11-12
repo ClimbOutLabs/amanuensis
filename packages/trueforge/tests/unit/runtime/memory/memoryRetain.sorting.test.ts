@@ -83,6 +83,7 @@ function summarizeContext(model: Model, globalSettingsStore = inMemoryGlobalSett
     upsertProvider: jest.fn(),
     listModels: jest.fn(),
     deleteProvider: jest.fn(),
+    managedElsewhere: false,
   };
   return {
     tenantId: 'tenant-1',

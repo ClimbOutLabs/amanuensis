@@ -1,79 +1,205 @@
 ---
-title: 'Setup MCP Servers'
-sidebarTitle: 'MCP Servers'
-description: 'Connect remote MCP servers from the shipped catalog or your own URL — with header auth or OAuth.'
+title: 'Other connectors'
+sidebarTitle: 'Other connectors'
+description: 'Connect Aman to other apps and services, such as Notion, GitHub or Home Assistant, from the list or by address, then sign in and test the connection.'
 ---
 
-MCP servers are how your agent reaches real systems: SaaS apps, internal APIs, data platforms, ticketing tools, and infrastructure controls.
+A connector links Aman to another app or service, such as Notion, GitHub or your Home Assistant. Once it's connected, Aman can use that service's tools in your chats, like searching your Notion pages or checking a pull request.
 
-Register them once under **Settings → Connectors**. Agents attach servers by name. Credentials live in the connector configuration, never in agent definitions.
+How to get there: Click **More** in the left bar, then **Settings**, then **Connectors**.
 
-## Connecting a server
+=== "Computer"
 
-Open **Settings → Connectors**, pick a server from the catalog, complete auth if required, and save. The server is then available when you [create an agent](/create-agent/overview).
+    ![The Connectors page, with the list of connectors you can add](screenshots/app/mcp-servers-catalog-desktop.png)
 
+=== "Phone"
 
-You can also use **Add MCP Server** to register any remote URL that is not in the catalog.
+    ![The Connectors page, with the list of connectors you can add](screenshots/app/mcp-servers-catalog-phone.png)
 
+!!! note "Looking for email, calendar or notes?"
 
-The catalog entries under **Settings → Connectors** (Linear, Notion, GitHub, and others) come from the shipped MCP catalog — see [Initial Setup](/harness/initial-setup#what-is-supported-out-of-the-box) for how catalogs work and how to change what the UI offers.
+    Those have their own cards on the same page. See [Connect email and calendar](../packages/trueforge/guide/topics/connect-mail-calendar.md) and [Your notes folder](../packages/trueforge/guide/topics/notes-folder.md).
 
-One catalog entry is your own server rather than a hosted one: **home-assistant** connects Aman to your Home Assistant, asking only for its address and a long-lived access token. See [Home Assistant](/connectors/home-assistant) for the recipe and for what Aman may and may not do in your home.
+## What's on the Connectors page
 
-Two entries are worth knowing by name. **notion** signs you in with OAuth. Signing in gives it the same access you have, so it can reach any page or database you can open. **github** connects with a personal access token from your GitHub settings, sent as a header; give the token only the repositories and permissions it needs. There is no **slack** entry: Slack's MCP server cannot register an app by itself, so a preset cannot complete its sign-in. To use Slack, first register your own Slack app with MCP turned on, then use **Add MCP Server** with the server address from Slack's MCP guide and OAuth (manual), pasting your app's client ID and secret. Slack's tools read and post as you, through tool calls; connecting Slack does not make it a chat channel.
+- **Configured:** the connectors you already set up, with whether each one works.
+- **Add a connector:** a ready-made list of services. Next to each one, a small label says how it signs in: **None**, **API Key** or **OAuth2** (a sign-in window from the service).
+- **Search connectors:** a box to find a connector by name.
+- **Add MCP Server:** a button to add a service that isn't on the list, by its address.
 
-## Authentication options
+Some connectors are technically called MCP servers. MCP is the common language Aman uses to talk to these services.
 
-- **No auth** — public or network-trusted servers.
-- **Header auth** — static HTTP headers (API keys, bearer tokens) sent on every request.
-- **OAuth (Dynamic Client Registration)** — TrueForge registers as an OAuth client, runs the authorization-code flow, and stores and refreshes tokens. Users never paste tokens into the agent.
+## Add a connector from the list
 
-<Info>
-  For OAuth to work, the MCP server must redirect the user back to your TrueForge instance — so the server needs to
-  know its own public address. That is the `PUBLIC_BASE_URL` environment variable. It defaults to
-  `http://localhost:<port>`, which is fine on your own machine; set it whenever TrueForge is reached at a different
-  address (a domain, reverse proxy, or another host). Where to set it depends on how you run TrueForge — as an env var
-  for `npx`, in `packages/trueforge/.env` for Docker Compose, or `server.publicBaseUrl` for Helm. See the
-  [Quickstart FAQ](/quickstart#faq).
-</Info>
+1. Click **More** in the left bar, then **Settings**, then **Connectors**.
+2. Find the service under **Add a connector**, or type its name in **Search connectors**.
+3. Click **Connect** or **Add** next to it. What happens next depends on how the service signs in:
 
-## In-chat authentication
+=== "API key or token"
 
-If a server uses OAuth and the user has not yet authorized it, the turn pauses and the chat UI shows a **Connect** button. The user completes OAuth in a popup and continues the conversation — the agent does not fail.
+    The button says **Connect**. A box opens.
 
-Complete OAuth in the same browser session, signed in as the same person who started it. If that session is missing or belongs to someone else, the server refuses to save the OAuth tokens.
+    1. Make a key or token in the service's own settings. Give it only the access Aman needs.
+    2. Paste it in **API key / token**.
+    3. Click **Connect**.
 
+=== "Sign-in window"
+
+    The button says **Add**. The connector is added, but not signed in yet.
+
+    1. Click the connector under **Configured** to open it.
+    2. Click **Connect**.
+    3. Sign in to the service in the window that opens, and allow access.
+
+    <a id="in-chat-authentication"></a>You can also leave it for later. The first time a chat needs the connector, the chat pauses and shows a **Connect** button. Sign in, then click **Continue**, and the chat carries on.
+
+=== "No sign-in"
+
+    The button says **Connect**. The connector is added straight away.
+
+### Notion
+
+1. Find **notion** and click **Add**.
+2. Click the notion connector under **Configured**, then click **Connect**.
+3. Sign in to Notion in the window that opens, and pick your workspace.
+
+Signing in gives Aman the same access you have in Notion. Aman can then reach any page or database you can open, search and read them, and make new ones.
+
+### GitHub
+
+1. In GitHub, open your settings, then Developer settings, then Personal access tokens. Make a fine-grained token, with only the repositories and permissions Aman needs.
+2. In Aman, find **github** and click **Connect**.
+3. Paste the token and click **Connect**.
+
+Aman can then work with your issues, pull requests, repository files and CI status.
+
+### Home Assistant
+
+**home-assistant** connects to your own Home Assistant, with its address and a long-lived access token. See [Home Assistant](connectors/home-assistant.md) for the steps, and for what Aman may and may not do in your home.
+
+### Slack
+
+There's no Slack on the list, because Slack's server can't set up its own sign-in. To use Slack:
+
+1. Make your own Slack app with MCP turned on, following Slack's MCP guide.
+2. In Aman, click **Add MCP Server** and choose **OAuth (manual)**.
+3. Type the server address from Slack's guide, and paste your app's **Client ID** and **Client Secret**.
+
+Slack's tools read and post as you. Connecting Slack doesn't make Slack a way to chat with Aman.
+
+## Add a connector by its address
+
+Use this for a service that isn't on the list. The service gives you its address, which often ends in `/mcp`.
+
+1. Click **Add MCP Server**.
+2. Type a **Name** and a short **Description**.
+3. Paste the address in **URL**.
+4. Under **Auth type**, choose how the service signs in. The service's own help says which one to pick:
+    - **None:** the service needs no sign-in.
+    - **API key:** paste the key or token from the service. **Header name** is optional. Leave it empty unless the service names one.
+    - **OAuth (automatic):** you sign in through a window, and Aman sets up the rest.
+    - **OAuth (manual):** paste the **Client ID** and **Client Secret** from the service. **Scopes** are optional.
+5. Click **Add**.
+
+## Test a connector
+
+Click **Test connection** next to a connector under **Configured**. Aman checks that it can reach the service, then lists the tools it offers, or says the one thing to fix.
+
+The label next to each connector shows how it's doing:
+
+- **Connected:** the last test worked.
+- **Connection failed:** the last test didn't work. The message under it says what to do.
+- **Unverified:** it's signed in but hasn't been tested yet.
+- **Added:** it isn't signed in yet.
+
+## Use a connector in a chat
+
+Choose which connectors a chat uses from the message box. In a new chat, your choices are remembered for future new chats.
+
+## Change or remove a connector
+
+- **Change it:** click **Edit** next to the connector, change the address or key, and click **Save**. Leave the key empty to keep the current one.
+- **See its tools:** click the connector to open it. The page lists its tools, and the tools you allowed for good under **Always allowed**. Click **Revoke** to take one back.
+- **Sign out:** open a connector that uses a sign-in window and click **Disconnect**.
+- **Remove it:** click **Delete**, then **Delete** again. Chats that used it show it as unavailable until you remove it there.
 
 ## Which tools ask first
 
-A tool on a connector you add asks for approval before it runs, whatever the connector says about it. A tool that declares itself read-only or closed-world can only make a call ask, never skip asking.
+Every tool on a connector you add asks for your OK before it runs, whatever the connector says about itself. When a card asks, you can click **Allow** for this one time, or **Always allow everywhere** to stop being asked for that tool.
 
-The one exception is the app's own Email and Calendar connectors. They are first-party only at the exact address the server was set up with for that connector. The server adds that address's origin to the first-party list itself, so there is nothing to set. Nothing in Settings, the API, or a chat can make another connector first-party. A first-party connector does not follow redirects, and each run without a card is recorded in the audit log. A mark stored on the record neither grants nor removes this, and if the server is not set up with an address, neither connector is first-party. Reading mail and looking at the calendar then run without a card. Sending mail and changing the calendar still ask, and "Always allow everywhere" never covers a send or a calendar change. An import leaves out an Email or Calendar connector that is not at the address this server was set up with, and lists it in the import summary. Set those up from Settings. A connector that only has one of those names, at any other address, asks like any other.
+??? note "Advanced: the one exception"
 
-## Web search provider
+    A tool that says it is read-only or closed-world can only make a call ask, never skip asking. There is one exception.
 
-You can pick one connector as your web search provider, either from its details page or by adding the Parallel preset, which is free and needs no API key. Searches through it run without asking, in chats and in scheduled runs, and each one shows a **Searched** chip in the chat and a row in the audit log. Only a tool the connector declares read-only runs this way, or one that the shipped preset for a known provider (Parallel, Tavily, Exa) lists as a search tool. Every other tool on the connector, and the same tool on any other connector, still asks, so picking a connector that can write does not let its write tools run silently.
+    **The Email and Calendar connectors.** They are first-party only at the exact address the server was set up with for that connector. The server adds that address's origin to the first-party list itself, so there's nothing to set. Nothing in Settings, the API or a chat can make another connector first-party. A first-party connector doesn't follow redirects, and each run without a card is recorded in the audit log. A mark stored on the record neither grants nor removes this, and if the server isn't set up with an address, neither connector is first-party. Reading mail and looking at the calendar then run without a card. Sending mail and changing the calendar still ask, and **Always allow everywhere** never covers a send or a calendar change. An import leaves out an Email or Calendar connector that isn't at the address this server was set up with, and lists it in the import summary. Set those up from Settings. A connector that only has one of those names, at any other address, asks like any other.
 
-If you added Parallel before you could pick a search provider, it is now your search provider, unless you already picked one or turned it off. Its searches no longer ask each time.
+## Your web search provider
 
-To make Tavily your search provider instead, add the Tavily connector with your Tavily API key. The Tavily key is needed, and Tavily has a free allowance. An instance can also be set to Tavily at startup: set `SEARCH_PROVIDER=tavily` and `TAVILY_API_KEY` in the instance `.env` file, then restart. The installer does not ask for either value, so set them by hand. Startup then writes the Tavily connector and makes it the one search provider, replacing any other provider, so changes made in Settings are overwritten on each start.
+One connector can be your web search provider. Searches through it run without asking, in chats and in scheduled runs. Each one shows a **Searched** chip in the chat and a row in the audit log.
 
-A new install comes with the Parallel connector already added as your search provider, so the first search needs no setup. An existing install that has no search provider gets it once, the first time it starts after an update. It is added only once: if you remove the connector, it stays removed, and a provider you chose, or one you turned off, is never replaced.
+A new install comes with the Parallel connector already added as the search provider. It's free and needs no key, so the first search needs no setup.
 
-Searches go to the search provider the card names (Parallel by default, or Tavily), which sees the search words and this instance's internet address. To stop searching, remove the parallel-web connector or turn on Offline mode.
+To pick a different provider:
 
-Before a search leaves the server, a fixed check looks for secrets in the query: any key, token or password the server holds, private keys, API keys, long encoded strings, password labels and card numbers. Short extra details a known provider adds to each search, such as Parallel's session id and model name, are shown with the search. One longer than 40 characters asks first, and an unusual one is checked like your query. It reads the query after normalizing look-alike characters and decoding percent escapes, and it also reads the turn's earlier searches, so a secret split over two searches is still caught. A query that trips the check asks, with the exact query on the card. In a scheduled run it is held for you instead: the run carries on without it, and the search waits under **Needs your OK** with the exact query until you approve or deny it. What you tell Aman, and what it knows about you, is yours to search with: a search that names your city, a person from your mail or a link you pasted runs without asking. Opening a page runs too, whether you typed the link, a search returned it, or Aman chose it for your request. One kind of page is held: a link that only a page or someone else's email gave, when Aman would add anything to it, such as your email address. In a scheduled run that page is skipped instead, and the run tells you so. After 20 lookups in one reply, Aman stops looking things up and tells you in one line, with no card. To approve every search yourself, turn off **Settings → Permissions → Web searches**.
+1. Click the connector under **Configured** to open it.
+2. Turn on **Web search provider**.
 
-## Find places with Tavily
+Only one connector can be the search provider at a time.
 
-Pick the Tavily preset as your web search provider to let Aman find places for you, such as "Find me an English-speaking doctor near me". Aman runs one Tavily search, then one Tavily read of the two or three best pages, and drops a pin on the map for each place it finds. Each pin card shows only the details the page really states (name, address, languages, hours, price and phone), and "from <site>, <time>" with a link to the page. A detail a page does not state is left out, never guessed.
+To stop searching, remove the parallel-web connector or turn on **Offline mode**. To approve every search yourself, turn off **Web searches** under **Settings**, **Permissions**.
 
-A run uses about 3 Tavily credits: 2 for the search and 1 for reading up to 5 pages. Tavily needs a key. You can get one for free from Tavily, and it comes with 1,000 credits a month. To add it, go to **Settings → Connectors → Tavily**, choose **Connect**, paste your key, and choose **Connect** again.
+### Use Tavily to find places
 
-The same rules as every other search apply. Both Tavily calls go through the secret check, and they run without asking or ask first according to **Settings → Permissions → Web searches**. When one asks, the card shows the exact words or links, where they are sent (`api.tavily.com`), and how many credits it will use. Pages are treated as untrusted text: Aman reads them for facts and never follows instructions found inside them. Placing the pins is its own step and always asks, because the addresses are sent to the map search service. A place that is already in your calendar is marked "Already in your calendar", never left out.
+Tavily is another search provider. It also lets Aman find places for you, such as "Find me an English-speaking doctor near me". Tavily needs a key. You can get one for free from Tavily, with 1,000 credits a month.
 
-## Next steps
+1. Find **Tavily** under **Add a connector** and click **Connect**.
+2. Paste your key.
+3. Click **Connect** again.
+4. Open the Tavily connector and turn on **Web search provider**.
 
-- Attach MCP servers when you [create an agent](/create-agent/overview).
-- Configure which tools need [approval](/create-agent/overview#whats-in-an-agent) (API today).
-- Keep tool schemas lean with [deferred loading](/key-features/deferred-tool-loading) in Harness Capabilities.
+Aman then runs one Tavily search, then reads the two or three best pages, and drops a pin on the map for each place it finds. Each pin card shows only the details the page really states (name, address, languages, hours, price and phone), and "from <site>, <time>" with a link to the page. A detail a page doesn't state is left out, never guessed. A run uses about 3 Tavily credits: 2 for the search and 1 for reading up to 5 pages.
+
+Placing the pins is its own step and always asks, because the addresses are sent to the map search service. A place that's already in your calendar is marked "Already in your calendar", never left out.
+
+??? note "Advanced: how search providers work"
+
+    **Which tools run without asking.** Only a tool the connector declares read-only runs this way, or one that the shipped preset for a known provider (Parallel, Tavily, Exa) lists as a search tool. Every other tool on the connector, and the same tool on any other connector, still asks. So picking a connector that can write doesn't let its write tools run silently.
+
+    **Parallel by default.** An existing install that has no search provider gets Parallel once, the first time it starts after an update. It's added only once: if you remove the connector, it stays removed, and a provider you chose, or one you turned off, is never replaced. If you added Parallel before you could pick a search provider, it's now your search provider, unless you already picked one or turned it off.
+
+    **Tavily at startup.** An instance can be set to Tavily at startup: set `SEARCH_PROVIDER=tavily` and `TAVILY_API_KEY` in the instance `.env` file, then restart. The installer doesn't ask for either value, so set them by hand. Startup then writes the Tavily connector and makes it the one search provider, replacing any other provider, so changes made in Settings are overwritten on each start.
+
+    **What the provider sees.** Searches go to the search provider the card names (Parallel by default, or Tavily), which sees the search words and this instance's internet address. Tavily calls go to `api.tavily.com`. When one asks, the card shows the exact words or links, where they're sent and how many credits it will use. Pages are treated as untrusted text: Aman reads them for facts and never follows instructions found inside them.
+
+    **Checks before a search.** Before a search leaves the server, a fixed check looks for secrets in the query: any key, token or password the server holds, private keys, API keys, long encoded strings, password labels and card numbers. Short extra details a known provider adds to each search, such as Parallel's session id and model name, are shown with the search. One longer than 40 characters asks first, and an unusual one is checked like your query. The check reads the query after normalizing look-alike characters and decoding percent escapes, and it also reads the turn's earlier searches, so a secret split over two searches is still caught. A query that trips the check asks, with the exact query on the card. In a scheduled run it's held for you instead: the run carries on without it, and the search waits under **Needs your OK** with the exact query until you approve or deny it.
+
+    **What runs without asking.** What you tell Aman, and what it knows about you, is yours to search with: a search that names your city, a person from your mail or a link you pasted runs without asking. Opening a page runs too, whether you typed the link, a search returned it, or Aman chose it for your request. One kind of page is held: a link that only a page or someone else's email gave, when Aman would add anything to it, such as your email address. In a scheduled run that page is skipped instead, and the run tells you so. After 20 lookups in one reply, Aman stops looking things up and tells you in one line, with no card.
+
+## Advanced: for people who run Aman
+
+??? note "Sign-in windows and your public address"
+
+    For a sign-in window to work, the service must send you back to your Aman, so Aman needs to know its own public address. That is the `PUBLIC_BASE_URL` setting. It defaults to `http://localhost:<port>`, which is fine on your own computer. Set it whenever Aman is reached at a different address, such as a domain, a reverse proxy or another computer. Set it as an environment variable for `npx`, in `packages/trueforge/.env` for Docker Compose, or as `server.publicBaseUrl` for Helm. See the [Quickstart FAQ](quickstart.mdx#faq).
+
+    Finish signing in in the same browser session, signed in to Aman as the same person who started it. If that session is missing or belongs to someone else, the server refuses to save the sign-in.
+
+??? note "How sign-in types work"
+
+    - **None:** for public services, or services only your own network can reach.
+    - **API key (header):** a fixed key or token sent with every request, in the `Authorization` header unless you name another.
+    - **OAuth (automatic, Dynamic Client Registration):** Aman registers itself with the service, runs the sign-in, and stores and refreshes the tokens. Nobody pastes tokens into a chat.
+    - **OAuth (manual):** the same, with a client you registered with the service yourself.
+
+    Keys and sign-ins are stored with the connector, never in an agent. Agents attach connectors by name.
+
+??? note "Where the list of connectors comes from"
+
+    The list under **Add a connector** comes from the catalog that ships with Aman. See [Initial setup](harness/initial-setup.mdx#what-is-supported-out-of-the-box) for how the catalog works and how to change what the app offers.
+
+    A connector is then available when you [create an agent](create-agent/overview.mdx). You can choose which tools need approval through the API ([what's in an agent](create-agent/overview.mdx#whats-in-an-agent)), and keep tool lists lean with [deferred tool loading](key-features/deferred-tool-loading.mdx).
+
+## Related
+
+- [Connect email and calendar](../packages/trueforge/guide/topics/connect-mail-calendar.md)
+- [Home Assistant](connectors/home-assistant.md)
+- [Search the web](../packages/trueforge/guide/topics/web.md)

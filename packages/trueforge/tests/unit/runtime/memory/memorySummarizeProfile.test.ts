@@ -41,6 +41,7 @@ function fakeModelProviderStore(): IModelProviderStore {
     upsertProvider: jest.fn(),
     listModels: jest.fn(),
     deleteProvider: jest.fn(),
+    managedElsewhere: false,
   };
 }
 

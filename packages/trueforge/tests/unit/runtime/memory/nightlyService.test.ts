@@ -55,6 +55,7 @@ describe('the nightly timer', () => {
         upsertProvider: jest.fn(),
         listModels: jest.fn(),
         deleteProvider: jest.fn(),
+        managedElsewhere: false,
       },
       globalSettingsStore: settings,
       tokenFactoryBudget: uncappedTokenFactoryBudget,

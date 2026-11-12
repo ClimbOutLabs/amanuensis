@@ -23,6 +23,7 @@ import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { PostgresAgentStore } from '../../../src/db/postgres/agent-store/PostgresAgentStore';
 import { PostgresGlobalSettingsStore } from '../../../src/db/postgres/global-settings-store/PostgresGlobalSettingsStore';
 import { PostgresMcpServerStore } from '../../../src/db/postgres/mcp-server-store/PostgresMcpServerStore';
+import { PostgresModelProviderStore } from '../../../src/db/postgres/model-provider-store/PostgresModelProviderStore';
 import { PostgresPersonaStore } from '../../../src/db/postgres/persona-store/PostgresPersonaStore';
 import { PostgresPersonalizationStore } from '../../../src/db/postgres/personalization-store/PostgresPersonalizationStore';
 import { PostgresScheduleStore } from '../../../src/db/postgres/schedule-store/PostgresScheduleStore';
@@ -31,11 +32,13 @@ import { PostgresSessionStore } from '../../../src/db/postgres/session-store/Pos
 import { PostgresSpaceStore } from '../../../src/db/postgres/space-store/PostgresSpaceStore';
 import { PostgresTurnArtifactStore } from '../../../src/db/postgres/turn-artifact-store/PostgresTurnArtifactStore';
 import type { Database as PgDatabase } from '../../../src/db/postgres/types';
+import { ReachSettingsStore } from '../../../src/db/reachSettingsStore';
 import { SentinelAuditStore } from '../../../src/db/sentinelAuditStore';
 import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgentStore';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
 import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
+import { SqliteModelProviderStore } from '../../../src/db/sqlite/model-provider-store/SqliteModelProviderStore';
 import { SqlitePersonaStore } from '../../../src/db/sqlite/persona-store/SqlitePersonaStore';
 import { SqlitePersonalizationStore } from '../../../src/db/sqlite/personalization-store/SqlitePersonalizationStore';
 import { SqliteScheduleStore } from '../../../src/db/sqlite/schedule-store/SqliteScheduleStore';
@@ -82,8 +85,10 @@ async function makeSqliteInstance(label: string): Promise<Instance<SqliteTx>> {
     sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
     auditStore: new SentinelAuditStore(db),
     deliveryStore: new DeliveryStore(db),
+    reachSettingsStore: new ReachSettingsStore(db),
     turnArtifactStore: new SqliteTurnArtifactStore(db),
     mcpServerStore: new SqliteMcpServerStore(db),
+    modelProviderStore: new SqliteModelProviderStore(db),
   };
   const withTransaction: WithTransaction<SqliteTx> = callback => db.transaction().execute(callback);
   return {
@@ -116,8 +121,10 @@ async function makePostgresInstance(label: string): Promise<Instance<PgTx> | und
     sentinelSettingsStore: new PostgresSentinelSettingsStore(db),
     auditStore: new SentinelAuditStore(db),
     deliveryStore: new DeliveryStore(db),
+    reachSettingsStore: new ReachSettingsStore(db),
     turnArtifactStore: new PostgresTurnArtifactStore(db),
     mcpServerStore: new PostgresMcpServerStore(db),
+    modelProviderStore: new PostgresModelProviderStore(db),
   };
   const withTransaction: WithTransaction<PgTx> = callback => db.transaction().execute(callback);
   return {
@@ -146,8 +153,10 @@ async function importArchive<Tx>(instance: Instance<Tx>, archive: Buffer, userId
     globalSettingsStore: instance.stores.globalSettingsStore,
     auditStore: instance.stores.auditStore,
     deliveryStore: instance.stores.deliveryStore,
+    reachSettingsStore: instance.stores.reachSettingsStore,
     turnArtifactStore: instance.stores.turnArtifactStore,
     mcpServerStore: instance.stores.mcpServerStore,
+    modelProviderStore: instance.stores.modelProviderStore,
     agentStore: instance.stores.agentStore,
     mcpCatalog: McpCatalog.loadShipped(),
     withTransaction: instance.withTransaction,

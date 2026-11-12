@@ -21,7 +21,6 @@ import {
   putMemoryVaultSharingRoute,
   updateMemoryVaultEntryRoute,
 } from '../routes/memoryVaultRoutes';
-import { getEmbeddingSubsystem } from '../runtime/memory/embeddingRetrieval';
 import { MarkdownMemoryClient } from '../runtime/memory/markdownMemoryClient';
 import {
   readVaultSharing,
@@ -34,6 +33,7 @@ import {
 } from '../runtime/memory/markdownMemoryFiles';
 import type { RetainItem, MemoryVaultEntry as VaultEntry } from '../runtime/memory/memoryClient';
 import { IMPORTED_ORIGIN, MEMORY_ORIGIN_METADATA_KEY } from '../runtime/memory/memoryOrigin';
+import { createVaultClient } from '../runtime/memory/vaultClient';
 import type { MemoryVaultEntry } from '../schemas/memoryVault';
 
 export interface MemoryVaultRouterDeps {
@@ -55,23 +55,6 @@ function wireEntry({ id, text, timestamp, persona }: VaultEntry): MemoryVaultEnt
 /** An exported entry carries its internal id as the closing line, the same shape the daily logs hold. */
 function exportedEntry({ id, text, timestamp, persona, context }: VaultEntry): MemoryVaultEntry {
   return { id, text: withHiddenContext({ text, context }), timestamp, persona };
-}
-
-function vaultClient(deps: MemoryVaultRouterDeps, tenantId: string): MarkdownMemoryClient {
-  return new MarkdownMemoryClient({
-    baseDir: configuration.MEMORY_MARKDOWN_DIR,
-    namespace: tenantId,
-    embeddings: configuration.MEMORY_EMBEDDINGS_ENABLED
-      ? namespace =>
-          getEmbeddingSubsystem({
-            baseDir: configuration.MEMORY_MARKDOWN_DIR,
-            namespace,
-            modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR,
-            batchSize: configuration.MEMORY_EMBEDDINGS_BACKFILL_BATCH_SIZE,
-            log: (message: string) => deps.logger.info(message),
-          })
-      : undefined,
-  });
 }
 
 /** Wire label for a vault namespace query value: blank reads as the shared vault. */
@@ -119,7 +102,7 @@ export function createMemoryVaultRouter(deps: MemoryVaultRouterDeps) {
   const listHandler: RouteHandler<typeof listMemoryVaultEntriesRoute> = async c => {
     const { namespace } = c.req.valid('query');
     const requestContext = deps.resolveRequestContext(c);
-    const client = vaultClient(deps, requestContext.tenant_id);
+    const client = createVaultClient({ logger: deps.logger, tenantId: requestContext.tenant_id });
     const outcome = await client.listEntries({ namespace: namespace ?? '', timeoutMs: VAULT_TIMEOUT_MS });
     if (!outcome.ok) {
       return c.json({ error: { message: outcome.reason } }, 500);
@@ -131,7 +114,7 @@ export function createMemoryVaultRouter(deps: MemoryVaultRouterDeps) {
     const { entry_id: entryId } = c.req.valid('param');
     const body = c.req.valid('json');
     const requestContext = deps.resolveRequestContext(c);
-    const client = vaultClient(deps, requestContext.tenant_id);
+    const client = createVaultClient({ logger: deps.logger, tenantId: requestContext.tenant_id });
     const outcome = await client.updateEntry({ entryId, text: body.text, timeoutMs: VAULT_TIMEOUT_MS });
     if (!outcome.ok) {
       if (outcome.code === 'not_found') {
@@ -145,7 +128,7 @@ export function createMemoryVaultRouter(deps: MemoryVaultRouterDeps) {
   const deleteHandler: RouteHandler<typeof deleteMemoryVaultEntryRoute> = async c => {
     const { entry_id: entryId } = c.req.valid('param');
     const requestContext = deps.resolveRequestContext(c);
-    const client = vaultClient(deps, requestContext.tenant_id);
+    const client = createVaultClient({ logger: deps.logger, tenantId: requestContext.tenant_id });
     const outcome = await client.deleteEntry({ entryId, timeoutMs: VAULT_TIMEOUT_MS });
     if (!outcome.ok) {
       if (outcome.code === 'not_found') {
@@ -159,7 +142,7 @@ export function createMemoryVaultRouter(deps: MemoryVaultRouterDeps) {
   const exportHandler: RouteHandler<typeof exportMemoryVaultRoute> = async c => {
     const { namespace } = c.req.valid('query');
     const requestContext = deps.resolveRequestContext(c);
-    const client = vaultClient(deps, requestContext.tenant_id);
+    const client = createVaultClient({ logger: deps.logger, tenantId: requestContext.tenant_id });
     const outcome = await client.listEntries({ namespace: namespace ?? '', timeoutMs: VAULT_TIMEOUT_MS });
     if (!outcome.ok) {
       return c.json({ error: { message: outcome.reason } }, 500);
@@ -242,7 +225,7 @@ export function createMemoryVaultRouter(deps: MemoryVaultRouterDeps) {
   const summaryStatusHandler: RouteHandler<typeof getMemoryVaultSummaryStatusRoute> = async c => {
     const { namespace } = c.req.valid('query');
     const requestContext = deps.resolveRequestContext(c);
-    const client = vaultClient(deps, requestContext.tenant_id);
+    const client = createVaultClient({ logger: deps.logger, tenantId: requestContext.tenant_id });
     const summaryPending = await client.summaryPending({ namespace: namespace ?? '' });
     return c.json({ data: { summary_pending: summaryPending } }, 200);
   };

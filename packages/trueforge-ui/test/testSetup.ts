@@ -41,11 +41,31 @@ vi.mock('react-syntax-highlighter/dist/esm/styles/prism', () => ({
 vi.mock('@openuidev/react-lang', () => ({
   Renderer: ({ response, isStreaming }: { response?: string | null; isStreaming?: boolean }) =>
     createElement('div', { 'data-testid': 'aui-openui-renderer', 'data-streaming': String(!!isStreaming) }, response),
+  // Shape-true stand-ins for the library factory and hooks the gated fence library
+  // uses, so suites that render a fence under this stub keep working.
+  createLibrary: (input: { root?: string; componentGroups?: unknown; components: Array<{ name: string }> }) => ({
+    root: input.root,
+    componentGroups: input.componentGroups,
+    components: Object.fromEntries(input.components.map(component => [component.name, component])),
+  }),
+  useStateField: (name: string, value?: unknown) => ({ name, value, isReactive: false, setValue: () => {} }),
+  useTriggerAction: () => () => {},
 }));
 
 vi.mock('@openuidev/react-ui', () => ({
   ThemeProvider: ({ children }: { children?: ReactNode }) => children,
-  openuiLibrary: {},
+  Callout: () => null,
+  Steps: ({ children }: { children?: ReactNode }) => children,
+  StepsItem: () => null,
+  openuiLibrary: {
+    root: 'Stack',
+    componentGroups: [],
+    components: Object.fromEntries(
+      ['Stack', 'Image', 'ImageBlock', 'ImageGallery', 'MarkDownRenderer', 'TextContent', 'Callout', 'Steps'].map(
+        name => [name, { name, props: {}, description: '', component: () => null }],
+      ),
+    ),
+  },
 }));
 
 // jsdom does not implement ResizeObserver; assistant-ui's viewport/scroll

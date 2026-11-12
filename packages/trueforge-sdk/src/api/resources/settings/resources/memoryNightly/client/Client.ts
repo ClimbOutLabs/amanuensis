@@ -24,7 +24,7 @@ export class MemoryNightlyClient {
     }
 
     /**
-     * Whether the nightly tidy-up runs: the stored override, or the `MEMORY_NIGHTLY_JOB` env default when none is stored.
+     * Whether the nightly tidy-up runs and at which hour: the stored override, or the `MEMORY_NIGHTLY_JOB` env default when none is stored.
      *
      * @param {MemoryNightlyClient.RequestOptions} requestOptions - Request-specific configuration.
      *
@@ -121,7 +121,7 @@ export class MemoryNightlyClient {
     }
 
     /**
-     * Persists the nightly tidy-up override: `true` or `false` turns it on or off; `null` clears it back to the `MEMORY_NIGHTLY_JOB` env default.
+     * Persists the nightly tidy-up override and its hour: `true` or `false` turns it on or off; `null` clears it back to the `MEMORY_NIGHTLY_JOB` env default. A field left out stays as it is.
      *
      * @param {TrueForge.settings.UpdateMemoryNightlyRequest} request
      * @param {MemoryNightlyClient.RequestOptions} requestOptions - Request-specific configuration.
@@ -134,18 +134,19 @@ export class MemoryNightlyClient {
      *
      * @example
      *     await client.settings.memoryNightly.createOrUpdate({
-     *         enabled: true
+     *         enabled: true,
+     *         hour: 0
      *     })
      */
     public createOrUpdate(
-        request: TrueForge.settings.UpdateMemoryNightlyRequest,
+        request: TrueForge.settings.UpdateMemoryNightlyRequest = {},
         requestOptions?: MemoryNightlyClient.RequestOptions,
     ): core.HttpResponsePromise<TrueForge.GetMemoryNightlyResponse> {
         return core.HttpResponsePromise.fromPromise(this.__createOrUpdate(request, requestOptions));
     }
 
     private async __createOrUpdate(
-        request: TrueForge.settings.UpdateMemoryNightlyRequest,
+        request: TrueForge.settings.UpdateMemoryNightlyRequest = {},
         requestOptions?: MemoryNightlyClient.RequestOptions,
     ): Promise<core.WithRawResponse<TrueForge.GetMemoryNightlyResponse>> {
         const _authRequest: core.AuthRequest = await this._options.authProvider.getAuthRequest();
@@ -242,6 +243,103 @@ export class MemoryNightlyClient {
             _response.rawResponse,
             "PUT",
             "/api/v1/settings/memory-nightly",
+        );
+    }
+
+    /**
+     * Tidies the memory pages now, whatever the hour and whether or not the daily tidy-up is on. Answers when it has finished, with what it did.
+     *
+     * @param {MemoryNightlyClient.RequestOptions} requestOptions - Request-specific configuration.
+     *
+     * @throws {@link TrueForge.UnauthorizedError}
+     * @throws {@link TrueForge.ForbiddenError}
+     * @throws {@link errors.TrueForgeError}
+     * @throws {@link errors.TrueForgeTimeoutError}
+     *
+     * @example
+     *     await client.settings.memoryNightly.run()
+     */
+    public run(
+        requestOptions?: MemoryNightlyClient.RequestOptions,
+    ): core.HttpResponsePromise<TrueForge.RunMemoryNightlyResponse> {
+        return core.HttpResponsePromise.fromPromise(this.__run(requestOptions));
+    }
+
+    private async __run(
+        requestOptions?: MemoryNightlyClient.RequestOptions,
+    ): Promise<core.WithRawResponse<TrueForge.RunMemoryNightlyResponse>> {
+        const _authRequest: core.AuthRequest = await this._options.authProvider.getAuthRequest();
+        const _headers: core.Fetcher.Args["headers"] = mergeHeaders(
+            _authRequest.headers,
+            this._options?.headers,
+            requestOptions?.headers,
+        );
+        const _response = await (this._options.fetcher ?? core.fetcher)({
+            url: core.url.join(
+                (await core.Supplier.get(this._options.baseUrl)) ??
+                    (await core.Supplier.get(this._options.environment)),
+                "api/v1/settings/memory-nightly/run",
+            ),
+            method: "POST",
+            headers: _headers,
+            queryString: core.url.queryBuilder().mergeAdditional(requestOptions?.queryParams).build(),
+            timeoutMs: (requestOptions?.timeoutInSeconds ?? this._options?.timeoutInSeconds ?? 60) * 1000,
+            maxRetries: requestOptions?.maxRetries ?? this._options?.maxRetries,
+            abortSignal: requestOptions?.abortSignal,
+            fetchFn: this._options?.fetch,
+            logging: this._options.logging,
+        });
+        if (_response.ok) {
+            return {
+                data: serializers.RunMemoryNightlyResponse.parseOrThrow(_response.body, {
+                    unrecognizedObjectKeys: "passthrough",
+                    allowUnrecognizedUnionMembers: true,
+                    allowUnrecognizedEnumValues: true,
+                    skipValidation: true,
+                    breadcrumbsPrefix: ["response"],
+                }),
+                rawResponse: _response.rawResponse,
+            };
+        }
+
+        if (_response.error.reason === "status-code") {
+            switch (_response.error.statusCode) {
+                case 401:
+                    throw new TrueForge.UnauthorizedError(
+                        serializers.RequestErrorResponse.parseOrThrow(_response.error.body, {
+                            unrecognizedObjectKeys: "passthrough",
+                            allowUnrecognizedUnionMembers: true,
+                            allowUnrecognizedEnumValues: true,
+                            skipValidation: true,
+                            breadcrumbsPrefix: ["response"],
+                        }),
+                        _response.rawResponse,
+                    );
+                case 403:
+                    throw new TrueForge.ForbiddenError(
+                        serializers.RequestErrorResponse.parseOrThrow(_response.error.body, {
+                            unrecognizedObjectKeys: "passthrough",
+                            allowUnrecognizedUnionMembers: true,
+                            allowUnrecognizedEnumValues: true,
+                            skipValidation: true,
+                            breadcrumbsPrefix: ["response"],
+                        }),
+                        _response.rawResponse,
+                    );
+                default:
+                    throw new errors.TrueForgeError({
+                        statusCode: _response.error.statusCode,
+                        body: _response.error.body,
+                        rawResponse: _response.rawResponse,
+                    });
+            }
+        }
+
+        return handleNonStatusCodeError(
+            _response.error,
+            _response.rawResponse,
+            "POST",
+            "/api/v1/settings/memory-nightly/run",
         );
     }
 }

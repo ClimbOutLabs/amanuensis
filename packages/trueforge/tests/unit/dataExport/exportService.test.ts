@@ -10,11 +10,13 @@ import { makeCreateTurnInput, makeModelMessageEvent } from '../../../../trueforg
 import { runDataExport, type DataExportDeps } from '../../../src/dataExport/exportService';
 import { DeliveryStore } from '../../../src/db/deliveryStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
+import { ReachSettingsStore } from '../../../src/db/reachSettingsStore';
 import { SentinelAuditStore } from '../../../src/db/sentinelAuditStore';
 import type { SessionCustom, TurnCustom } from '../../../src/db/sessionCustom';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
 import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
+import { SqliteModelProviderStore } from '../../../src/db/sqlite/model-provider-store/SqliteModelProviderStore';
 import { SqlitePersonaStore } from '../../../src/db/sqlite/persona-store/SqlitePersonaStore';
 import { SqlitePersonalizationStore } from '../../../src/db/sqlite/personalization-store/SqlitePersonalizationStore';
 import { SqliteScheduleStore } from '../../../src/db/sqlite/schedule-store/SqliteScheduleStore';
@@ -24,7 +26,7 @@ import { SqliteSpaceStore } from '../../../src/db/sqlite/space-store/SqliteSpace
 import { SqliteTurnArtifactStore } from '../../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import { personaVaultNamespace, vaultFilesystemNamespace } from '../../../src/runtime/memory/markdownMemoryFiles';
 import { legacySessionsOf } from '../../fixtures/legacySessions';
-import { readZipEntries, zipEntryText } from '../../fixtures/zipReader';
+import { readZipEntries, zipEntryJson, zipEntryText } from '../../fixtures/zipReader';
 
 const TENANT_ID = 'default';
 
@@ -44,10 +46,11 @@ class CollectingWritable extends Writable {
 async function makeDeps(
   memoryMarkdownDir: string,
   overrides?: { sessionStore?: DataExportDeps<never>['sessionStore']; personaKnowledgeDir?: string },
-): Promise<{ deps: DataExportDeps<never>; close: () => Promise<void> }> {
+): Promise<{ deps: DataExportDeps<never>; modelProviderStore: SqliteModelProviderStore; close: () => Promise<void> }> {
   const dir = await mkdtemp(join(tmpdir(), 'tfy-export-service-'));
   const db = createSqliteDb(join(dir, 'test.sqlite'));
   await migrateSqliteToLatest(db);
+  const modelProviderStore = new SqliteModelProviderStore(db);
   const deps: DataExportDeps<never> = {
     sessionStore: overrides?.sessionStore ?? new SqliteSessionStore(db),
     personaStore: new SqlitePersonaStore(db),
@@ -58,14 +61,17 @@ async function makeDeps(
     sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
     auditStore: new SentinelAuditStore(db),
     deliveryStore: new DeliveryStore(db),
+    reachSettingsStore: new ReachSettingsStore(db),
     turnArtifactStore: new SqliteTurnArtifactStore(db),
     mcpServerStore: new SqliteMcpServerStore(db),
+    modelProviderStore,
     listAgents: () => Promise.resolve([]),
     memoryMarkdownDir,
     personaKnowledgeDir: overrides?.personaKnowledgeDir ?? join(dir, 'knowledge'),
   };
   return {
     deps,
+    modelProviderStore,
     close: async () => {
       await db.destroy();
       await rm(dir, { recursive: true, force: true });
@@ -310,6 +316,74 @@ describe('runDataExport memory', () => {
       const names = await exportedNames({});
       expect(names.filter(name => name.startsWith('memory/'))).toEqual([]);
     });
+  });
+});
+
+describe('runDataExport model providers', () => {
+  const PLANTED_KEY = 'FAKE-KEY-planted-in-the-export-test';
+
+  it('exports each provider setup without its key', async () => {
+    const { deps, modelProviderStore, close } = await makeDeps('/nonexistent');
+    try {
+      await modelProviderStore.upsertProvider({
+        tenant_id: TENANT_ID,
+        name: 'openai',
+        manifest: {
+          type: 'openai',
+          base_url: 'https://api.openai.com/v1',
+          auth: { api_key: PLANTED_KEY },
+          models: [{ model_id: 'gpt-test', name: 'gpt-test', properties: { context_length: 128000 } }],
+        },
+      });
+      await modelProviderStore.upsertProvider({
+        tenant_id: TENANT_ID,
+        name: 'lab-box',
+        manifest: {
+          type: 'custom',
+          name: 'lab-box',
+          base_url: 'https://llm.internal.example.com/v1',
+          models: [{ model_id: 'local-1', name: 'local-1', properties: {} }],
+        },
+      });
+      const sink = new CollectingWritable();
+      await runDataExport(deps, { ...exportRequest(), secrets: [PLANTED_KEY] }, sink);
+      const entries = readZipEntries(sink.buffer());
+      expect(zipEntryJson(entries, 'model_providers.json')).toEqual([
+        {
+          name: 'lab-box',
+          manifest: {
+            type: 'custom',
+            name: 'lab-box',
+            base_url: 'https://llm.internal.example.com/v1',
+            models: [{ model_id: 'local-1', name: 'local-1', properties: {} }],
+          },
+        },
+        {
+          name: 'openai',
+          manifest: {
+            type: 'openai',
+            base_url: 'https://api.openai.com/v1',
+            models: [{ model_id: 'gpt-test', name: 'gpt-test', properties: { context_length: 128000 } }],
+          },
+        },
+      ]);
+      for (const entry of entries) {
+        expect(entry.data.includes(Buffer.from(PLANTED_KEY))).toBe(false);
+      }
+    } finally {
+      await close();
+    }
+  });
+
+  it('writes an empty providers section when no provider is set up', async () => {
+    const { deps, close } = await makeDeps('/nonexistent');
+    try {
+      const sink = new CollectingWritable();
+      await runDataExport(deps, exportRequest(), sink);
+      expect(zipEntryJson(readZipEntries(sink.buffer()), 'model_providers.json')).toEqual([]);
+    } finally {
+      await close();
+    }
   });
 });
 

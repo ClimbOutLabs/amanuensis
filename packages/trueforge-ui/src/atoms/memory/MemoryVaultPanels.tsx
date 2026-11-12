@@ -171,16 +171,46 @@ function FirstRunNote({ onOpenSettings }: { onOpenSettings?: () => void }) {
 }
 
 /**
+ * Export, import, and topics as their own panel, for surfaces that give them a place of
+ * their own (Settings > Memory's Import and export sub-tab) instead of below the list.
+ * A failed export or import reports through the same error line the list uses, so it
+ * shows here beside the controls that caused it.
+ */
+export function MemoryVaultImportExportPanel({ state }: { state: MemoryVaultState }) {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
+      {state.error !== null ? (
+        <div className="rounded-xl border border-border bg-card-bg p-4" role="alert">
+          <p className="text-sm text-error-text">{state.error}</p>
+          <button
+            type="button"
+            onClick={() => void state.refresh()}
+            className={cn(auiButtonClass({ variant: 'secondary', size: 'small' }), 'mt-2')}
+          >
+            Try again
+          </button>
+        </div>
+      ) : null}
+      <ManageCollections state={state} />
+    </div>
+  );
+}
+
+/**
  * The memory explorer: one newest-first list grouped by day, with search, filters, selection,
- * edit, copy, and forget with undo. Export and import sit below the list.
+ * edit, copy, and forget with undo. Export and import sit below the list unless the surface
+ * gives them a panel of their own.
  */
 export function MemoryVaultFactsPanel({
   state,
   onOpenSettings,
+  showManageCollections = true,
 }: {
   state: MemoryVaultState;
   /** Opens the Settings sub-tab where memory is turned on and tuned. Omitted where no such tab exists. */
   onOpenSettings?: () => void;
+  /** False when the surface shows export, import, and topics in their own panel instead. */
+  showManageCollections?: boolean;
 }) {
   const assistant = useAssistantDisplayName();
   const shownCount = state.shownGroups.reduce((total, group) => total + group.memories.length, 0);
@@ -324,7 +354,7 @@ export function MemoryVaultFactsPanel({
           {body}
         </>
       )}
-      <ManageCollections state={state} />
+      {showManageCollections ? <ManageCollections state={state} /> : null}
     </div>
   );
 }

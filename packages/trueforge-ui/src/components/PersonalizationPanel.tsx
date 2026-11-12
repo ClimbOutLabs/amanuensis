@@ -2,9 +2,8 @@
 
 import { useEffect, useRef, useState, type FC, type FormEvent } from 'react';
 
-import { Markdown } from '../atoms/Markdown.js';
+import { auiSettingsInputClass } from '../atoms/lib/inputClasses.js';
 import { Button } from '../atoms/primitives/Button.js';
-import { Switch } from '../atoms/primitives/Switch.js';
 import { assistantDisplayName } from '../utils/assistantName.js';
 import {
   EMPTY_PERSONALIZATION_PROFILE,
@@ -14,9 +13,6 @@ import {
   type PersonalizationApi,
   type PersonalizationProfile,
 } from './PersonalizationContext.js';
-
-const inputClassName =
-  'w-full rounded-md border border-border/70 bg-input-box-bg px-3 py-2.5 text-sm text-text-primary outline-none transition-colors placeholder:text-text-muted focus-visible:border-focus-ring focus-visible:ring-2 focus-visible:ring-focus-ring/50';
 
 export type PersonalizationPanelProps = {
   /** Optional for standalone use; Settings inherits the host provider. */
@@ -29,7 +25,6 @@ const PersonalizationPanelContent: FC<Pick<PersonalizationPanelProps, 'onProfile
   const { profile, loading, loadError, updateProfile, deleteProfile } = usePersonalization();
   const [draft, setDraft] = useState<PersonalizationProfile>(profile ?? EMPTY_PERSONALIZATION_PROFILE);
   const [saving, setSaving] = useState(false);
-  const [editingLearned, setEditingLearned] = useState(false);
   const [feedback, setFeedback] = useState<{ tone: 'error' | 'success'; message: string } | null>(null);
 
   // Pinned preferences are plain strings on the wire, with no id of their own. React needs a key
@@ -86,12 +81,26 @@ const PersonalizationPanelContent: FC<Pick<PersonalizationPanelProps, 'onProfile
     }
   };
 
+  // Clear all empties what this page shows. The learned profile and its switch live on
+  // Settings > Memory > Learned profile, and the help areas come from the Tour; none of them is
+  // visible here, so clearing this page keeps them. Only when nothing would be left is the whole
+  // profile deleted (the host refuses an empty PUT; DELETE is how a profile goes away).
   const clear = async () => {
     setSaving(true);
     setFeedback(null);
     try {
-      await deleteProfile();
-      setDraft(EMPTY_PERSONALIZATION_PROFILE);
+      const kept: PersonalizationProfile = {
+        ...EMPTY_PERSONALIZATION_PROFILE,
+        help_areas: profile?.help_areas ?? [],
+        learned_profile: profile?.learned_profile ?? null,
+        ...(profile?.learning_enabled === undefined ? {} : { learning_enabled: profile.learning_enabled }),
+      };
+      if (kept.help_areas.length > 0 || kept.learned_profile !== null || kept.learning_enabled === true) {
+        setDraft(await updateProfile(kept));
+      } else {
+        await deleteProfile();
+        setDraft(EMPTY_PERSONALIZATION_PROFILE);
+      }
       setFeedback({ tone: 'success', message: 'Personalization cleared.' });
     } catch (error) {
       setFeedback({
@@ -145,7 +154,7 @@ const PersonalizationPanelContent: FC<Pick<PersonalizationPanelProps, 'onProfile
                   </label>
                   <input
                     id="personalization-user-name"
-                    className={inputClassName}
+                    className={auiSettingsInputClass()}
                     autoComplete="name"
                     value={draft.user_name ?? ''}
                     onChange={event => updateDraft('user_name', event.target.value)}
@@ -162,7 +171,7 @@ const PersonalizationPanelContent: FC<Pick<PersonalizationPanelProps, 'onProfile
                   </label>
                   <input
                     id="personalization-address-as"
-                    className={inputClassName}
+                    className={auiSettingsInputClass()}
                     value={draft.address_as ?? ''}
                     onChange={event => updateDraft('address_as', event.target.value)}
                     placeholder="For example, Sam, or Dr. Rivera"
@@ -182,7 +191,7 @@ const PersonalizationPanelContent: FC<Pick<PersonalizationPanelProps, 'onProfile
                 </label>
                 <textarea
                   id="personalization-user-profile"
-                  className={`${inputClassName} min-h-24 resize-y`}
+                  className={auiSettingsInputClass('min-h-24 resize-y')}
                   value={draft.user_profile ?? ''}
                   onChange={event => updateDraft('user_profile', event.target.value)}
                   placeholder="Where you live, what you work on, what you care about"
@@ -196,7 +205,7 @@ const PersonalizationPanelContent: FC<Pick<PersonalizationPanelProps, 'onProfile
                   {draft.pinned_preferences.map((preference, index) => (
                     <div className="flex flex-col gap-2 sm:flex-row" key={preferenceIds[index] ?? index}>
                       <input
-                        className={inputClassName}
+                        className={auiSettingsInputClass()}
                         aria-label={`Pinned preference ${index + 1}`}
                         value={preference}
                         onChange={event => {
@@ -266,7 +275,7 @@ const PersonalizationPanelContent: FC<Pick<PersonalizationPanelProps, 'onProfile
                   </label>
                   <input
                     id="personalization-assistant-name"
-                    className={inputClassName}
+                    className={auiSettingsInputClass()}
                     value={draft.assistant_name ?? ''}
                     onChange={event => updateDraft('assistant_name', event.target.value)}
                     placeholder={assistantDisplayName(null)}
@@ -278,7 +287,7 @@ const PersonalizationPanelContent: FC<Pick<PersonalizationPanelProps, 'onProfile
                   </label>
                   <input
                     id="personalization-voice"
-                    className={inputClassName}
+                    className={auiSettingsInputClass()}
                     value={draft.voice_guidance ?? ''}
                     onChange={event => updateDraft('voice_guidance', event.target.value)}
                     placeholder="Warm, direct, concise…"
@@ -295,84 +304,12 @@ const PersonalizationPanelContent: FC<Pick<PersonalizationPanelProps, 'onProfile
                 </label>
                 <textarea
                   id="personalization-identity"
-                  className={`${inputClassName} min-h-24 resize-y`}
+                  className={auiSettingsInputClass('min-h-24 resize-y')}
                   value={draft.assistant_identity ?? ''}
                   onChange={event => updateDraft('assistant_identity', event.target.value)}
                   placeholder="How should it understand its role?"
                 />
               </div>
-            </section>
-
-            <section
-              className="rounded-xl border border-border bg-card-bg p-4"
-              aria-labelledby="learned-profile-heading"
-            >
-              <h4 id="learned-profile-heading" className="text-sm font-semibold text-text-primary">
-                Learned profile
-              </h4>
-              <p className="mt-1 text-sm text-text-secondary">
-                {assistant} updates this from your conversations. Edit or clear it any time.
-              </p>
-
-              <div className="mt-3 flex items-start gap-3 rounded-lg border border-border/70 bg-input-box-bg px-3 py-3">
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-text-primary">Learn from conversations</p>
-                  <p className="mt-0.5 text-xs leading-snug text-text-secondary">
-                    When you tell {assistant} something lasting about yourself, it adds a line here. This uses the same
-                    model call that saves your memories, so it adds no call of its own. When this fills up, the oldest
-                    facts move to your memories and nothing is lost. You can edit or clear it any time.
-                  </p>
-                </div>
-                <Switch
-                  // A host that never sent the switch renders as off; it stays absent on the
-                  // wire until the user touches it, which is a choice worth sending.
-                  checked={draft.learning_enabled ?? false}
-                  aria-label="Learn from conversations"
-                  disabled={saving}
-                  className="mt-0.5"
-                  onCheckedChange={checked => setDraft(current => ({ ...current, learning_enabled: checked }))}
-                />
-              </div>
-
-              {draft.learned_profile === null ? (
-                <p className="mt-3 text-sm text-text-secondary">Nothing learned yet.</p>
-              ) : editingLearned ? (
-                <textarea
-                  id="personalization-learned-profile"
-                  aria-label="Learned profile document"
-                  className={`${inputClassName} mt-3 min-h-40 resize-y font-mono`}
-                  value={draft.learned_profile}
-                  onChange={event => setDraft(current => ({ ...current, learned_profile: event.target.value }))}
-                />
-              ) : (
-                <div className="mt-3 rounded-md border border-border/70 bg-input-box-bg px-3 py-2.5 text-sm">
-                  <Markdown content={draft.learned_profile} readOnly />
-                </div>
-              )}
-
-              {draft.learned_profile !== null ? (
-                <div className="mt-3 flex gap-2">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="small"
-                    onClick={() => setEditingLearned(current => !current)}
-                  >
-                    {editingLearned ? 'Preview' : 'Edit'}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="small"
-                    onClick={() => {
-                      setEditingLearned(false);
-                      setDraft(current => ({ ...current, learned_profile: null }));
-                    }}
-                  >
-                    Clear learned profile
-                  </Button>
-                </div>
-              ) : null}
             </section>
 
             {feedback ? (

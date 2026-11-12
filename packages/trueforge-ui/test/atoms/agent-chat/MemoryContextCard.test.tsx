@@ -28,17 +28,16 @@ describe('MemoryContextCard', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it('pluralizes the item count at one and at other counts', () => {
+  it('pluralizes counts correctly at one and at other counts, including an irregular plural', () => {
     const { rerender } = render(<MemoryContextCard recall={recallEvent} />);
-    // The collapsed status line shows the singular form.
-    expect(screen.getByText('1 item')).toBeInTheDocument();
+    expect(screen.getByText('1 memory')).toBeInTheDocument();
 
     rerender(<MemoryContextCard recall={{ ...recallEvent, stats: { ...recallEvent.stats, items: 2 } }} />);
-    expect(screen.getByText('2 items')).toBeInTheDocument();
+    expect(screen.getByText('2 memories')).toBeInTheDocument();
 
     // Expand to also check the same count rendered as its own row in the body.
     fireEvent.click(screen.getByRole('button', { name: 'Expand step' }));
-    expect(screen.getAllByText('2 items')).toHaveLength(2);
+    expect(screen.getByText('2 items')).toBeInTheDocument();
   });
 
   it('counts a page as recalled memory when no note was recalled', () => {
@@ -52,7 +51,7 @@ describe('MemoryContextCard', () => {
     expect(screen.queryByText('No memory recalled')).not.toBeInTheDocument();
 
     rerender(<MemoryContextCard recall={{ ...recallEvent, layers: { pages: { ...pages, loaded: 2 } } }} />);
-    expect(screen.getByText('1 item, 2 pages')).toBeInTheDocument();
+    expect(screen.getByText('1 memory, 2 pages')).toBeInTheDocument();
 
     rerender(
       <MemoryContextCard recall={{ ...recallEvent, stats: { ...recallEvent.stats, items: 0, outcome: 'empty' } }} />,

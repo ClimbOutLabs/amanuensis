@@ -54,6 +54,7 @@ import type {
   ListSessionsInput,
   ListTurnEventsInput,
   ListTurnsInput,
+  MergeSessionMetadataInput,
   NewThreadInit,
   OverwriteThreadContextInput,
   PatchMCPServersInput,
@@ -64,6 +65,7 @@ import type {
   RecoverRunningCommandExecutionsInput,
   RemoveThreadsInput,
   RenewCommandExecutionLeaseInput,
+  ReplaceSessionTitleIfCurrentInput,
   ReplaceTaskChecklistInput,
   RevokeImplementationPlanGrantInput,
   RevokeImplementationPlanGrantResult,
@@ -749,6 +751,32 @@ export class InMemorySessionStore<
     stored.record.updated_at = new Date(now);
     stored.record.last_activity_timestamp_ms = now;
     return;
+  }
+
+  async mergeSessionMetadata(input: MergeSessionMetadataInput): Promise<void> {
+    const key = sessionKey(input.session_id);
+    const stored = this.sessions.get(key);
+    if (stored?.record.tenant_id !== input.tenant_id) {
+      throw new SessionNotFoundError(input.session_id);
+    }
+    stored.record.metadata = { ...stored.record.metadata, [input.key]: input.value };
+    const now = Date.now();
+    stored.record.updated_at = new Date(now);
+    stored.record.last_activity_timestamp_ms = now;
+    return;
+  }
+
+  async replaceSessionTitleIfCurrent(input: ReplaceSessionTitleIfCurrentInput): Promise<boolean> {
+    const stored = this.sessions.get(sessionKey(input.session_id));
+    if (stored?.record.tenant_id !== input.tenant_id) {
+      return false;
+    }
+    if (stored.record.title !== input.current_title) {
+      return false;
+    }
+    stored.record.title = input.title;
+    stored.record.updated_at = new Date();
+    return true;
   }
 
   async createSessionFolder(input: CreateSessionFolderInput): Promise<SessionFolderRecord> {

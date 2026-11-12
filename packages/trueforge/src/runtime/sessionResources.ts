@@ -33,6 +33,7 @@ import type { ISkillStore } from '../db/skillStore';
 import type { ITurnArtifactStore } from '../db/turnArtifactStore';
 import { isMcpAuthRequired, resolveMcpAuth } from '../mcp/auth/mcpDcr';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
+import { connectorGrantBinding } from '../mcp/connectorGrantBinding';
 import { isFirstPartyOrigin } from '../mcp/firstParty';
 import { isHostOwnConnector } from '../mcp/hostConnectors';
 import { LocalSandboxProvider } from '../sandbox/local/provider/LocalSandboxProvider';
@@ -57,6 +58,8 @@ export interface McpConnection {
   first_party: boolean;
   /** Set when the user designated this connector as their search provider: the tools stored on its record, which the shipped catalog completes per turn. */
   search_provider: { tools: readonly string[] } | undefined;
+  /** What an "Always allow" grant on this connector binds to: its setup digest from `connectorGrantBinding`. */
+  grant_binding: string;
 }
 
 const GITHUB_MCP_SERVER_NAME = 'github';
@@ -504,6 +507,7 @@ export async function getMcpConnection({
     record.manifest.type === 'remote' && record.manifest.search_provider === true
       ? { tools: record.manifest.search_tools ?? [] }
       : undefined;
+  const grantBinding = connectorGrantBinding(record);
   const needsLiveAuth = record.manifest.auth?.type === 'dcr' || record.manifest.auth?.type === 'oauth_client';
   // Only the live-auth case delegates: a with-auth store's `resolveInvokeHeaders` may be
   // TrueFoundry-managed (mid-turn re-authorization through the gateway) rather than the generic
@@ -516,6 +520,7 @@ export async function getMcpConnection({
       headers: store.resolveInvokeHeaders({ record, userRef }),
       first_party: firstParty,
       search_provider: searchProvider,
+      grant_binding: grantBinding,
     };
   }
   if (needsLiveAuth && tokenStore !== undefined && clientName !== undefined) {
@@ -530,6 +535,7 @@ export async function getMcpConnection({
       }),
       first_party: firstParty,
       search_provider: searchProvider,
+      grant_binding: grantBinding,
     };
   }
   return {
@@ -537,6 +543,7 @@ export async function getMcpConnection({
     headers: resolveManifestRequestHeaders(record.manifest),
     first_party: firstParty,
     search_provider: searchProvider,
+    grant_binding: grantBinding,
   };
 }
 

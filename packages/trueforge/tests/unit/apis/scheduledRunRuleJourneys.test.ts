@@ -15,6 +15,7 @@ import { SqliteSessionStore } from '../../../src/db/sqlite/session-store/SqliteS
 import { ScheduleManifestSchema } from '../../../src/schemas/schedule';
 import { GetTurnResponseSchema, ListTurnsResponseSchema } from '../../../src/schemas/turn';
 import { MODEL_FQN, startApprovalTestServer, type ApprovalTestServer } from '../../fixtures/approvalTestServer';
+import { HARBOUR_ADDRESS, installRecordedTavily } from '../../fixtures/groundedFinderFixtures';
 import { INERT_SERVER_NAME, INERT_WRITE_TOOL, startInertMcpServer } from '../../fixtures/inertMcpServer';
 import { RUN_DIRECTIVE_PREFIX } from '../../fixtures/scriptedModelServer';
 import { StandInSandbox } from '../../fixtures/standInSandbox';
@@ -200,6 +201,16 @@ async function spaceActivity({ server, name }: { server: ApprovalTestServer; nam
     .filter(row => row.description.includes(`the space ${name}.`))
     .map(row => row.description)
     .reverse();
+}
+
+const RunLogSchema = z.object({
+  entries: z.array(z.object({ tool_name: z.string(), description: z.string(), outcome: z.string() }).loose()),
+});
+
+/** What one chat's own log says about its maps. */
+async function mapLines({ server, chatId }: { server: ApprovalTestServer; chatId: string }) {
+  const log = RunLogSchema.parse(await (await server.request(`/api/v1/sessions/${chatId}/audit-log`)).json());
+  return log.entries.filter(row => row.tool_name === 'render_map');
 }
 
 describe('scheduled runs', () => {
@@ -403,13 +414,59 @@ describe('scheduled runs', () => {
     },
     TURN_TIMEOUT_MS,
   );
+
+  describe('a map in a scheduled run', () => {
+    let recorded: ReturnType<typeof installRecordedTavily>;
+
+    beforeAll(() => {
+      recorded = installRecordedTavily();
+    });
+
+    afterAll(() => {
+      recorded.restore();
+    });
+
+    async function runThatMaps({ name, place }: { name: string; place: string }) {
+      server.model.next({ toolArguments: { place_name: place } });
+      return runScheduled({ server, agent, name, task: `Map the meeting place. ${RUN_DIRECTIVE_PREFIX}render_map` });
+    }
+
+    it(
+      'shows the map of an ordinary place without asking',
+      async () => {
+        const { chatId, turn } = await runThatMaps({ name: 'map-the-harbour', place: HARBOUR_ADDRESS });
+        expect(turn.state.status === 'done' && turn.state.required_actions).toEqual([]);
+        expect(await heldCards({ server, chatId })).toEqual([]);
+        expect(await mapLines({ server, chatId })).toEqual([
+          expect.objectContaining({ description: `Maps ran without asking: ${HARBOUR_ADDRESS}`, outcome: 'logged' }),
+        ]);
+      },
+      TURN_TIMEOUT_MS,
+    );
+
+    it(
+      'leaves out a map whose place text looks like a key, says so in one line, and leaves no card waiting',
+      async () => {
+        const { chatId, turn } = await runThatMaps({
+          name: 'map-a-key',
+          place: ['AKI', 'A', 'ABCDEFGH', 'IJKLMNOP'].join(''),
+        });
+        expect(turn.state.status === 'done' && turn.state.required_actions).toEqual([]);
+        expect(await heldCards({ server, chatId })).toEqual([]);
+        const lines = await mapLines({ server, chatId });
+        expect(lines.map(row => row.outcome)).not.toContain('logged');
+        expect(lines.filter(row => row.description.includes('One map was skipped'))).toHaveLength(1);
+      },
+      TURN_TIMEOUT_MS,
+    );
+  });
 });
 
 const SANDBOX_AGENT_SPEC = AgentSpecSchema.parse({
   ...AGENT_SPEC,
   config: { ...AGENT_SPEC.config, sandbox: { enabled: true } },
 });
-const RUN_CODE_CARD = 'Run code the assistant wrote in the sandbox?';
+const RUN_CODE_CARD = 'Run this Python code the assistant wrote?';
 
 describe('a scheduled run that wants to run code', () => {
   let server: ApprovalTestServer;

@@ -22,8 +22,10 @@ import type { IAgentStore } from '../../src/db/agentStore';
 import type { IDeliveryStore } from '../../src/db/deliveryStore';
 import type { IGlobalSettingsStore } from '../../src/db/globalSettingsStore';
 import type { IMcpServerStore } from '../../src/db/mcpServerStore';
+import type { IModelProviderStore } from '../../src/db/modelProviderStore';
 import type { IPersonaStore } from '../../src/db/personaStore';
 import type { IPersonalizationStore } from '../../src/db/personalizationStore';
+import type { IReachSettingsStore } from '../../src/db/reachSettingsStore';
 import type { IScheduleStore } from '../../src/db/scheduleStore';
 import type { ISentinelAuditStore } from '../../src/db/sentinelAuditStore';
 import type { ISentinelSettingsStore } from '../../src/db/sentinelSettingsStore';
@@ -34,6 +36,7 @@ import { personaKnowledgeLocation } from '../../src/personaKnowledge/knowledgePa
 import { openPersonaKnowledgeRepository } from '../../src/personaKnowledge/sqliteKnowledgeRepository';
 import { EMBEDDING_DIMENSIONS } from '../../src/runtime/memory/embeddingModel';
 import { McpServerManifestSchema } from '../../src/schemas/mcpServer';
+import { defaultReachSettings } from '../../src/schemas/reach';
 import { ScheduleManifestSchema } from '../../src/schemas/schedule';
 
 export const SEED_IDS = {
@@ -162,8 +165,10 @@ export interface DataTransferSeedStores<TTransaction> {
   sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
   auditStore: ISentinelAuditStore;
   deliveryStore: IDeliveryStore;
+  reachSettingsStore: IReachSettingsStore;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   mcpServerStore: IMcpServerStore<TTransaction>;
+  modelProviderStore: IModelProviderStore<TTransaction>;
 }
 
 export interface SeedRichInstanceInput<TTransaction> {
@@ -511,6 +516,16 @@ export async function seedRichInstance<TTransaction>(input: SeedRichInstanceInpu
     text: 'Call the dentist',
     reason: 'You asked to be reminded on Monday.',
     link: null,
+  });
+  await stores.reachSettingsStore.put({
+    tenant_id: tenantId,
+    created_by: userId,
+    settings: {
+      ...defaultReachSettings('Europe/Paris'),
+      channels: { texts: false, calls: true },
+      call_kinds: ['travel'],
+      max_nudges_per_day: 3,
+    },
   });
 
   const knowledgeDbPath = personaKnowledgeLocation({

@@ -246,9 +246,42 @@
           }
         },
         "required": [
-          "auth",
           "models",
           "type"
+        ],
+        "type": "object"
+      },
+      "AlwaysImportantSender": {
+        "properties": {
+          "added_at": {
+            "description": "When the person added this sender, ISO 8601 UTC.",
+            "type": "string"
+          },
+          "address": {
+            "description": "The sender address, lower case.",
+            "maxLength": 254,
+            "pattern": "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$",
+            "type": "string"
+          },
+          "name": {
+            "description": "What the person calls them. Left out when they gave no name.",
+            "maxLength": 120,
+            "minLength": 1,
+            "type": "string"
+          },
+          "source": {
+            "description": "Whether the person typed this sender or accepted it from a memory suggestion.",
+            "enum": [
+              "settings",
+              "memory"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "address",
+          "source",
+          "added_at"
         ],
         "type": "object"
       },
@@ -283,7 +316,6 @@
           }
         },
         "required": [
-          "auth",
           "models",
           "type"
         ],
@@ -386,6 +418,13 @@
       },
       "ApprovalToolCallRef": {
         "properties": {
+          "always_allow_covers": {
+            "description": "Set when the lasting answer lets maps run without asking, instead of allowing one tool.",
+            "enum": [
+              "maps"
+            ],
+            "type": "string"
+          },
           "can_always_allow": {
             "description": "Whether the owner may allow this tool for good.",
             "type": "boolean"
@@ -1274,6 +1313,34 @@
           "providers"
         ],
         "type": "object"
+      },
+      "CalendarProblem": {
+        "description": "Set when the calendar has not been checked for about an hour. Null when calendar checks work.",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/CalendarProblemKind"
+          },
+          "since": {
+            "description": "When calendar checks first failed, with none succeeding since, ISO 8601 UTC.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "since",
+          "kind"
+        ],
+        "type": [
+          "object",
+          "null"
+        ]
+      },
+      "CalendarProblemKind": {
+        "description": "Why the calendar could not be checked: Google needs signing in again, or something else went wrong.",
+        "enum": [
+          "google_sign_in",
+          "other"
+        ],
+        "type": "string"
       },
       "CalendarProvider": {
         "properties": {
@@ -3240,7 +3307,6 @@
           }
         },
         "required": [
-          "auth",
           "models",
           "type"
         ],
@@ -3725,6 +3791,17 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/PushSubscription"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "GetReachResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ReachView"
           }
         },
         "required": [
@@ -4415,7 +4492,6 @@
           }
         },
         "required": [
-          "auth",
           "models",
           "type"
         ],
@@ -5876,6 +5952,40 @@
         ],
         "type": "object"
       },
+      "ListReachSuggestionsResponse": {
+        "properties": {
+          "data": {
+            "description": "Senders memory suggests. Nothing is added until accepted.",
+            "items": {
+              "$ref": "#/components/schemas/ReachSuggestion"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "ListRemindersResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ReminderItem"
+            },
+            "type": "array"
+          },
+          "next_page_token": {
+            "description": "Pass as page_token to get more reminders; absent on the last page.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "ListRepositoriesResponse": {
         "properties": {
           "data": {
@@ -6686,6 +6796,48 @@
         ],
         "type": "object"
       },
+      "MailProblem": {
+        "description": "Set when mail has not been checked for about an hour. Null when mail checks work.",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/MailProblemKind"
+          },
+          "since": {
+            "description": "When mail checks first failed, with none succeeding since, ISO 8601 UTC.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "since",
+          "kind"
+        ],
+        "type": [
+          "object",
+          "null"
+        ]
+      },
+      "MailProblemKind": {
+        "description": "Why mail could not be checked: the mail server answered too slowly, Google needs signing in again, the shared Email connector could not log in, or something else went wrong.",
+        "enum": [
+          "too_slow",
+          "google_sign_in",
+          "email_password",
+          "other"
+        ],
+        "type": "string"
+      },
+      "MailSourceKind": {
+        "description": "Where mail is read from. Null until mail has been checked once.",
+        "enum": [
+          "google",
+          "email_connector",
+          null
+        ],
+        "type": [
+          "string",
+          "null"
+        ]
+      },
       "MarkBriefItemDoneRequest": {
         "properties": {
           "item_key": {
@@ -6915,6 +7067,12 @@
             "description": "The stored setting: the persisted override when set, else the `MEMORY_NIGHTLY_JOB` env default.",
             "type": "boolean"
           },
+          "hour": {
+            "description": "The hour of the server's day the tidy-up starts at. `0` is midnight, the default.",
+            "maximum": 23,
+            "minimum": 0,
+            "type": "integer"
+          },
           "overridden": {
             "description": "Whether a persisted override is currently stored.",
             "type": "boolean"
@@ -6923,7 +7081,8 @@
         "required": [
           "enabled",
           "overridden",
-          "default_enabled"
+          "default_enabled",
+          "hour"
         ],
         "type": "object"
       },
@@ -7660,6 +7819,40 @@
         ],
         "type": "object"
       },
+      "MemoryTidyRun": {
+        "properties": {
+          "moved_to_earlier": {
+            "description": "Lines that had ended and were moved to Earlier.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "notes_sorted": {
+            "description": "Missed notes that were sorted onto pages.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "pairs_listed": {
+            "description": "Pairs of lines newly listed as disagreeing.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "status": {
+            "description": "`ran`: the tidy-up finished. `busy`: one was already running, so nothing was started.",
+            "enum": [
+              "ran",
+              "busy"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "moved_to_earlier",
+          "notes_sorted",
+          "pairs_listed"
+        ],
+        "type": "object"
+      },
       "MemoryVaultEntry": {
         "properties": {
           "id": {
@@ -8350,14 +8543,15 @@
         "type": "object"
       },
       "ModelUsageRole": {
-        "description": "Job the model did: chat answers, sub-agent work, compaction, turn summarization, profile learning, or the knowledge relevance check.",
+        "description": "Job the model did: chat answers, sub-agent work, compaction, turn summarization, profile learning, the knowledge relevance check, or deciding how loudly to tell the person about something noticed.",
         "enum": [
           "chat",
           "delegation",
           "compaction",
           "summarization",
           "profile_learning",
-          "relevance_judge"
+          "relevance_judge",
+          "noticing"
         ],
         "type": "string"
       },
@@ -8422,7 +8616,6 @@
           }
         },
         "required": [
-          "auth",
           "models",
           "type"
         ],
@@ -8529,6 +8722,25 @@
         ],
         "type": "object"
       },
+      "NoticingKind": {
+        "description": "A kind of event the assistant watches for.",
+        "enum": [
+          "mail_always",
+          "calendar_clash",
+          "travel",
+          "bill_due",
+          "approval_waiting"
+        ],
+        "type": "string"
+      },
+      "NoticingWatcher": {
+        "enum": [
+          "mail",
+          "calendar",
+          "approvals"
+        ],
+        "type": "string"
+      },
       "NudgeDelivery": {
         "properties": {
           "attempts": {
@@ -8622,7 +8834,6 @@
           }
         },
         "required": [
-          "auth",
           "models",
           "type"
         ],
@@ -9454,6 +9665,30 @@
         ],
         "type": "object"
       },
+      "QuietHours": {
+        "properties": {
+          "enabled": {
+            "description": "Whether calls are held back during quiet hours.",
+            "type": "boolean"
+          },
+          "end": {
+            "description": "When quiet hours end, in the time zone below.",
+            "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+            "type": "string"
+          },
+          "start": {
+            "description": "When quiet hours start, in the time zone below.",
+            "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled",
+          "start",
+          "end"
+        ],
+        "type": "object"
+      },
       "RawToolCall": {
         "allOf": [
           {
@@ -9469,6 +9704,240 @@
             "type": "object"
           }
         ]
+      },
+      "ReachAvailability": {
+        "properties": {
+          "calls": {
+            "$ref": "#/components/schemas/ReachChannelAvailability"
+          },
+          "texts": {
+            "$ref": "#/components/schemas/ReachChannelAvailability"
+          }
+        },
+        "required": [
+          "texts",
+          "calls"
+        ],
+        "type": "object"
+      },
+      "ReachChannelAvailability": {
+        "properties": {
+          "available": {
+            "description": "Whether this channel can be used on this server now.",
+            "type": "boolean"
+          },
+          "note": {
+            "description": "A plain-words line about the channel, shown beside its switch.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "available",
+          "note"
+        ],
+        "type": "object"
+      },
+      "ReachChannels": {
+        "properties": {
+          "calls": {
+            "description": "Whether phone calls may be used. Off until phone calls are set up.",
+            "type": "boolean"
+          },
+          "texts": {
+            "description": "Whether texts may be used. Off until text messages are set up.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "texts",
+          "calls"
+        ],
+        "type": "object"
+      },
+      "ReachSettings": {
+        "description": "How the person wants to be reached. Quiet hours and \"today\" are read in `timezone`.",
+        "properties": {
+          "always_important": {
+            "description": "Senders whose mail the assistant tells the person about, once the mail server vouches for them.",
+            "items": {
+              "$ref": "#/components/schemas/AlwaysImportantSender"
+            },
+            "maxItems": 200,
+            "type": "array"
+          },
+          "approval_wait_minutes": {
+            "description": "How long an approval may wait before the assistant says so. A request expires after 30 minutes.",
+            "maximum": 20,
+            "minimum": 5,
+            "type": "integer"
+          },
+          "call_for_urgent_reminders": {
+            "description": "Whether a reminder marked urgent may call.",
+            "type": "boolean"
+          },
+          "call_kinds": {
+            "description": "The kinds of event the person allows a phone call for. Empty means none.",
+            "items": {
+              "$ref": "#/components/schemas/NoticingKind"
+            },
+            "maxItems": 5,
+            "type": "array"
+          },
+          "channels": {
+            "$ref": "#/components/schemas/ReachChannels"
+          },
+          "dismissed_suggestions": {
+            "description": "Addresses the person turned down as always-important, so they are not suggested again.",
+            "items": {
+              "maxLength": 254,
+              "type": "string"
+            },
+            "maxItems": 500,
+            "type": "array"
+          },
+          "max_nudges_per_day": {
+            "description": "Most nudges in one day. Past it, events become notes.",
+            "maximum": 50,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "min_hours_between_calls": {
+            "description": "Fewest hours between two calls.",
+            "maximum": 72,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "noticing_on": {
+            "default": false,
+            "description": "Whether the assistant checks mail, the calendar and waiting approvals in the background. Reminders work either way.",
+            "type": "boolean"
+          },
+          "quiet_hours": {
+            "$ref": "#/components/schemas/QuietHours"
+          },
+          "timezone": {
+            "$ref": "#/components/schemas/Timezone"
+          },
+          "travel_lead_minutes": {
+            "description": "How long before an event with a place the person wants to hear about leaving.",
+            "maximum": 1440,
+            "minimum": 15,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "channels",
+          "always_important",
+          "dismissed_suggestions",
+          "call_kinds",
+          "call_for_urgent_reminders",
+          "quiet_hours",
+          "timezone",
+          "max_nudges_per_day",
+          "min_hours_between_calls",
+          "travel_lead_minutes",
+          "approval_wait_minutes"
+        ],
+        "type": "object"
+      },
+      "ReachSuggestion": {
+        "properties": {
+          "address": {
+            "description": "A sender address found in a memory.",
+            "type": "string"
+          },
+          "memory": {
+            "description": "The memory it came from, so the person can judge it.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "address",
+          "memory"
+        ],
+        "type": "object"
+      },
+      "ReachTestChannel": {
+        "description": "The channel to try.",
+        "enum": [
+          "in_app",
+          "push",
+          "text",
+          "call"
+        ],
+        "type": "string"
+      },
+      "ReachTestResult": {
+        "properties": {
+          "delivery_id": {
+            "description": "The test item, now in the feed.",
+            "type": "string"
+          },
+          "devices_reached": {
+            "description": "Devices a push notice went to.",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "delivery_id",
+          "devices_reached"
+        ],
+        "type": "object"
+      },
+      "ReachView": {
+        "properties": {
+          "availability": {
+            "$ref": "#/components/schemas/ReachAvailability"
+          },
+          "calendar_problem": {
+            "$ref": "#/components/schemas/CalendarProblem"
+          },
+          "mail_problem": {
+            "$ref": "#/components/schemas/MailProblem"
+          },
+          "mail_source": {
+            "$ref": "#/components/schemas/MailSourceKind"
+          },
+          "max_levels": {
+            "description": "The highest level each kind of event can ever reach, whatever the model says.",
+            "properties": {
+              "approval_waiting": {
+                "$ref": "#/components/schemas/DeliveryLevel"
+              },
+              "bill_due": {
+                "$ref": "#/components/schemas/DeliveryLevel"
+              },
+              "calendar_clash": {
+                "$ref": "#/components/schemas/DeliveryLevel"
+              },
+              "mail_always": {
+                "$ref": "#/components/schemas/DeliveryLevel"
+              },
+              "travel": {
+                "$ref": "#/components/schemas/DeliveryLevel"
+              }
+            },
+            "type": "object"
+          },
+          "saved": {
+            "description": "False until the person saves once. While false, the settings are the quiet defaults.",
+            "type": "boolean"
+          },
+          "settings": {
+            "$ref": "#/components/schemas/ReachSettings"
+          }
+        },
+        "required": [
+          "settings",
+          "saved",
+          "availability",
+          "max_levels",
+          "mail_problem",
+          "calendar_problem",
+          "mail_source"
+        ],
+        "type": "object"
       },
       "ReasoningEffort": {
         "enum": [
@@ -9582,6 +10051,97 @@
           "attempts"
         ],
         "type": "object"
+      },
+      "ReminderItem": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "last_due_at": {
+            "description": "When its latest past time was due, or null if none has passed.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_reminded_at": {
+            "description": "When it last reached the person, or null if it never has.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "next_due_at": {
+            "description": "When it is next due, or null when nothing is queued.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "persona_name": {
+            "description": "The persona the reminder was set with.",
+            "type": "string"
+          },
+          "repeats": {
+            "description": "True when the reminder runs again on a repeating timing.",
+            "type": "boolean"
+          },
+          "session_id": {
+            "description": "The chat the reminder was set in, or null when it was set elsewhere or that chat is gone.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "set_at": {
+            "description": "When the reminder was set.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ReminderState"
+          },
+          "timezone": {
+            "description": "The IANA time zone the reminder times are read in.",
+            "type": "string"
+          },
+          "timing": {
+            "description": "When it runs, in plain words.",
+            "type": "string"
+          },
+          "what": {
+            "description": "What the reminder is for, in the words it was set with.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "what",
+          "timezone",
+          "repeats",
+          "timing",
+          "state",
+          "next_due_at",
+          "last_reminded_at",
+          "last_due_at",
+          "set_at",
+          "persona_name",
+          "session_id"
+        ],
+        "type": "object"
+      },
+      "ReminderState": {
+        "enum": [
+          "upcoming",
+          "paused",
+          "reminded",
+          "missed"
+        ],
+        "type": "string"
       },
       "RemoteMCPServerManifest": {
         "additionalProperties": false,
@@ -9955,6 +10515,58 @@
           "string",
           "null"
         ]
+      },
+      "RunMemoryNightlyResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MemoryTidyRun"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "RunNoticingRequest": {
+        "properties": {
+          "watcher": {
+            "$ref": "#/components/schemas/NoticingWatcher"
+          }
+        },
+        "required": [
+          "watcher"
+        ],
+        "type": "object"
+      },
+      "RunNoticingResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/RunNoticingResult"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "RunNoticingResult": {
+        "properties": {
+          "owners": {
+            "description": "People checked.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "raised": {
+            "description": "New events turned into notes or nudges.",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "owners",
+          "raised"
+        ],
+        "type": "object"
       },
       "RuntimeConfig": {
         "default": {
@@ -10420,6 +11032,11 @@
           },
           "timezone": {
             "$ref": "#/components/schemas/Timezone"
+          },
+          "urgent": {
+            "default": false,
+            "description": "For a reminder: the person marked it urgent, so it may call if they allowed that.",
+            "type": "boolean"
           }
         },
         "required": [
@@ -10449,6 +11066,11 @@
           },
           "timezone": {
             "$ref": "#/components/schemas/Timezone"
+          },
+          "urgent": {
+            "default": false,
+            "description": "For a reminder: the person marked it urgent, so it may call if they allowed that.",
+            "type": "boolean"
           }
         },
         "required": [
@@ -10712,7 +11334,7 @@
             "$ref": "#/components/schemas/SessionAgent"
           },
           "approval_grants": {
-            "description": "Server-derived grants created by \"Always allow this here\" for one kind of action in this chat.",
+            "description": "Server-derived grants created by \"Always allow in this chat\" for one kind of action in this chat.",
             "items": {
               "type": "string"
             },
@@ -12097,6 +12719,28 @@
         ],
         "type": "object"
       },
+      "TestReachChannelRequest": {
+        "properties": {
+          "channel": {
+            "$ref": "#/components/schemas/ReachTestChannel"
+          }
+        },
+        "required": [
+          "channel"
+        ],
+        "type": "object"
+      },
+      "TestReachChannelResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ReachTestResult"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "TextContent": {
         "properties": {
           "text": {
@@ -12471,6 +13115,9 @@
           "schedule": {
             "$ref": "#/components/schemas/Tier3Schedule"
           },
+          "skill": {
+            "$ref": "#/components/schemas/Tier3Skill"
+          },
           "why_asked_again": {
             "description": "Actual cause of re-escalation, or null on first ask.",
             "type": [
@@ -12698,6 +13345,53 @@
             "description": "IANA time zone the times are in.",
             "type": "string"
           },
+          "tools": {
+            "description": "What a new schedule runs with; absent for a delete and on an older card.",
+            "properties": {
+              "agent_name": {
+                "description": "The agent the schedule runs as.",
+                "type": "string"
+              },
+              "connectors": {
+                "description": "Connectors the person may pick from.",
+                "items": {
+                  "$ref": "#/components/schemas/Tier3ScheduleToolChoice"
+                },
+                "type": "array"
+              },
+              "editable": {
+                "description": "True when the person may ask for other choices before approving.",
+                "type": "boolean"
+              },
+              "memory": {
+                "description": "True when runs recall memories.",
+                "type": "boolean"
+              },
+              "run_code": {
+                "description": "True when runs may run code.",
+                "type": "boolean"
+              },
+              "skills": {
+                "description": "Skills the person may pick from.",
+                "items": {
+                  "$ref": "#/components/schemas/Tier3ScheduleToolChoice"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "editable",
+              "agent_name",
+              "connectors",
+              "skills",
+              "run_code",
+              "memory"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          },
           "when": {
             "description": "When it runs, in plain words.",
             "type": "string"
@@ -12711,6 +13405,67 @@
           "task",
           "runs_as",
           "next_runs"
+        ],
+        "type": [
+          "object",
+          "null"
+        ]
+      },
+      "Tier3ScheduleToolChoice": {
+        "properties": {
+          "name": {
+            "description": "Connector or skill name.",
+            "type": "string"
+          },
+          "on": {
+            "description": "True when the schedule runs with it.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "on"
+        ],
+        "type": "object"
+      },
+      "Tier3Skill": {
+        "description": "The skill a chat call adds, shown in full.",
+        "properties": {
+          "description": {
+            "description": "What the skill is for, as the skill itself says.",
+            "type": "string"
+          },
+          "instructions": {
+            "description": "The skill's own instruction file as the host read it, or null for a starter skill.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "description": "Skill name.",
+            "type": "string"
+          },
+          "source": {
+            "description": "The repository the skill comes from, and the folder in it when there is one.",
+            "type": "string"
+          },
+          "starter": {
+            "description": "True when this is one of the starter skills that come with the app.",
+            "type": "boolean"
+          },
+          "version": {
+            "description": "The exact commit that is added. A later change to the repository is not picked up.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "source",
+          "version",
+          "starter",
+          "instructions"
         ],
         "type": [
           "object",
@@ -12754,7 +13509,6 @@
           }
         },
         "required": [
-          "auth",
           "models",
           "type"
         ],
@@ -12791,7 +13545,6 @@
           }
         },
         "required": [
-          "auth",
           "models",
           "type"
         ],
@@ -14750,20 +15503,24 @@
       },
       "UpdateMemoryNightlyRequest": {
         "example": {
-          "enabled": true
+          "enabled": true,
+          "hour": 0
         },
         "properties": {
           "enabled": {
-            "description": "Persisted override: `true` or `false`. `null` clears the override back to the env default.",
+            "description": "Persisted override: `true` or `false`. `null` clears the override back to the env default. Left out, it stays as it is.",
             "type": [
               "boolean",
               "null"
             ]
+          },
+          "hour": {
+            "description": "The hour of the server's day the tidy-up starts at, `0` to `23`. Left out, it stays as it is.",
+            "maximum": 23,
+            "minimum": 0,
+            "type": "integer"
           }
         },
-        "required": [
-          "enabled"
-        ],
         "type": "object"
       },
       "UpdateMemoryPageRequest": {
@@ -14952,6 +15709,17 @@
         },
         "required": [
           "profile"
+        ],
+        "type": "object"
+      },
+      "UpdateReachRequest": {
+        "properties": {
+          "settings": {
+            "$ref": "#/components/schemas/ReachSettings"
+          }
+        },
+        "required": [
+          "settings"
         ],
         "type": "object"
       },
@@ -15737,7 +16505,6 @@
           }
         },
         "required": [
-          "auth",
           "models",
           "type"
         ],
@@ -16151,6 +16918,62 @@
           "metrics"
         ],
         "x-fern-sdk-method-name": "get_meters"
+      }
+    },
+    "/api/internal/noticing/run": {
+      "post": {
+        "description": "Runs one pass of one watcher for everyone it can watch.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunNoticingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunNoticingResponse"
+                }
+              }
+            },
+            "description": "The pass finished."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid service credential."
+          }
+        },
+        "summary": "Run a noticing pass",
+        "tags": [
+          "Internal"
+        ],
+        "x-fern-sdk-group-name": [
+          "internal",
+          "noticing"
+        ],
+        "x-fern-sdk-method-name": "run"
       }
     },
     "/api/internal/private-chats/sweep": {
@@ -25143,7 +25966,7 @@
     },
     "/api/v1/settings/memory-nightly": {
       "get": {
-        "description": "Whether the nightly tidy-up runs: the stored override, or the `MEMORY_NIGHTLY_JOB` env default when none is stored.",
+        "description": "Whether the nightly tidy-up runs and at which hour: the stored override, or the `MEMORY_NIGHTLY_JOB` env default when none is stored.",
         "responses": {
           "200": {
             "content": {
@@ -25187,7 +26010,7 @@
         "x-fern-sdk-method-name": "get"
       },
       "put": {
-        "description": "Persists the nightly tidy-up override: `true` or `false` turns it on or off; `null` clears it back to the `MEMORY_NIGHTLY_JOB` env default.",
+        "description": "Persists the nightly tidy-up override and its hour: `true` or `false` turns it on or off; `null` clears it back to the `MEMORY_NIGHTLY_JOB` env default. A field left out stays as it is.",
         "requestBody": {
           "content": {
             "application/json": {
@@ -25249,6 +26072,52 @@
           "memoryNightly"
         ],
         "x-fern-sdk-method-name": "create_or_update"
+      }
+    },
+    "/api/v1/settings/memory-nightly/run": {
+      "post": {
+        "description": "Tidies the memory pages now, whatever the hour and whether or not the daily tidy-up is on. Answers when it has finished, with what it did.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunMemoryNightlyResponse"
+                }
+              }
+            },
+            "description": "What the tidy-up did, or that one was already running."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Admin access required."
+          }
+        },
+        "summary": "Run the tidy-up now",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "memoryNightly"
+        ],
+        "x-fern-sdk-method-name": "run"
       }
     },
     "/api/v1/settings/memory-page-sorting": {
@@ -28354,6 +29223,264 @@
         "x-fern-sdk-method-name": "lookup_subscription"
       }
     },
+    "/api/v1/user/reach": {
+      "get": {
+        "description": "Reads how the signed-in person wants to be reached, with which channels are set up on this server.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetReachResponse"
+                }
+              }
+            },
+            "description": "The settings."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "Get Reach me settings",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "reach"
+        ],
+        "x-fern-sdk-method-name": "get"
+      },
+      "put": {
+        "description": "Replaces how the signed-in person wants to be reached. Texts and calls cannot be turned on until set up.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateReachRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetReachResponse"
+                }
+              }
+            },
+            "description": "The saved settings."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "Save Reach me settings",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "reach"
+        ],
+        "x-fern-sdk-method-name": "create_or_update"
+      }
+    },
+    "/api/v1/user/reach/suggestions": {
+      "get": {
+        "description": "Lists senders the memory suggests. Nothing is added until the person accepts it in a saved update.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListReachSuggestionsResponse"
+                }
+              }
+            },
+            "description": "The suggestions."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "List always-important suggestions",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "reach"
+        ],
+        "x-fern-sdk-method-name": "list_suggestions"
+      }
+    },
+    "/api/v1/user/reach/test": {
+      "post": {
+        "description": "Sends the signed-in person a test item on one channel. A channel that is not set up answers 409.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestReachChannelRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestReachChannelResponse"
+                }
+              }
+            },
+            "description": "The test item."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "That channel is not set up yet."
+          }
+        },
+        "summary": "Try a channel",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "reach"
+        ],
+        "x-fern-sdk-method-name": "test_channel"
+      }
+    },
+    "/api/v1/user/reminders": {
+      "get": {
+        "description": "Lists the reminders the signed-in person set, upcoming and past, a page at a time, each with the chat it was set in.",
+        "parameters": [
+          {
+            "description": "Most schedules to read for this page.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Most schedules to read for this page.",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Token from the previous page; omit for the first page.",
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "description": "Token from the previous page; omit for the first page.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListRemindersResponse"
+                }
+              }
+            },
+            "description": "One page of the reminders the signed-in person set."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "List reminders",
+        "tags": [
+          "Reminders"
+        ],
+        "x-fern-sdk-group-name": [
+          "reminders"
+        ],
+        "x-fern-sdk-method-name": "list"
+      }
+    },
     "/api/v1/user/settings/calendar": {
       "delete": {
         "description": "Deletes the saved account and its app password from the sidecar for good.",
@@ -29672,6 +30799,9 @@
     },
     {
       "name": "Deliveries"
+    },
+    {
+      "name": "Reminders"
     },
     {
       "name": "Personas"

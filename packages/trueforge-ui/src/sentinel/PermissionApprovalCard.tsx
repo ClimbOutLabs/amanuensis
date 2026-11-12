@@ -9,7 +9,7 @@ import { useAssistantDisplayName } from '../components/PersonalizationContext.js
 import { useRewardLedger } from '../hooks/useRewardLedger.js';
 import { Icon } from '../icons/Icon.js';
 import { AlwaysAllowToolControl } from './AlwaysAllowToolControl.js';
-import { APPROVAL_CHOICES, isNewRecipientCard } from './approvalChoices.js';
+import { alwaysAllowConfirm, APPROVAL_CHOICES, isNewRecipientCard } from './approvalChoices.js';
 import {
   approvalQuestion,
   approvalSentLine,
@@ -21,7 +21,8 @@ import {
 import { CalendarEventDetails } from './CalendarEventDetails.js';
 import { ChangeRequestBox } from './ChangeRequestBox.js';
 import { PersonaDetails } from './PersonaDetails.js';
-import { ScheduleDetails } from './ScheduleDetails.js';
+import { sameScheduleTools, ScheduleDetails, scheduleToolsRequest } from './ScheduleDetails.js';
+import { SkillDetails } from './SkillDetails.js';
 import { WAITING_FOR_YOU_LABEL, type SentinelApprovalCard } from './types.js';
 
 /** Characters shown before a long value is folded behind "Show all". */
@@ -43,6 +44,8 @@ export type PermissionApprovalCardProps = {
    * server says the owner may always allow this tool; the card asks for confirmation first.
    */
   onApproveAlways?: (() => void) | undefined;
+  /** Set when that answer lets maps run without asking, instead of allowing one tool. */
+  alwaysAllowCovers?: 'maps' | undefined;
   onDeny: () => void;
   /** Only passed for a card with editable content. Gets the text the person typed. */
   onChangeRequest?: ((text: string) => void) | undefined;
@@ -157,6 +160,7 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
   onApprove,
   onApproveForChat,
   onApproveAlways,
+  alwaysAllowCovers,
   onDeny,
   onChangeRequest,
   onApproveAll,
@@ -177,7 +181,12 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
     card.parsed_command !== null ||
     card.destination_host !== null;
 
-  const { calendar_event: calendarEvent, schedule, persona } = card;
+  const { calendar_event: calendarEvent, schedule, persona, skill } = card;
+  const cardTools = schedule?.tools;
+  const [pickedTools, setPickedTools] = useState(cardTools);
+  // Approving saves what the card shows, so other choices must come back on a new card first.
+  const toolsChanged =
+    cardTools !== undefined && pickedTools !== undefined && !sameScheduleTools(pickedTools, cardTools);
   // A new-recipient send never offers a standing grant or a chat-wide allow: approving it adds addresses.
   const newRecipients = isNewRecipientCard(card);
   const stub = approvalStub(card);
@@ -259,9 +268,27 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
 
         {calendarEvent !== null && <CalendarEventDetails event={calendarEvent} />}
 
-        {schedule !== null && <ScheduleDetails schedule={schedule} />}
+        {schedule !== null && (
+          <ScheduleDetails
+            schedule={schedule}
+            picker={
+              pickedTools === undefined || onChangeRequest === undefined
+                ? undefined
+                : {
+                    picked: pickedTools,
+                    onPick: setPickedTools,
+                    onUpdate: () => {
+                      onChangeRequest(scheduleToolsRequest(pickedTools));
+                    },
+                    disabled: disabled || sentAt !== null,
+                  }
+            }
+          />
+        )}
 
         {persona !== null && <PersonaDetails persona={persona} />}
+
+        {skill !== null && <SkillDetails skill={skill} />}
 
         {outboundOpen && outboundShown !== null && (
           <OutboundBlock text={outboundShown} truncated={card.outbound_truncated} />
@@ -280,7 +307,7 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
             data-approval-primary
             title={APPROVAL_CHOICES.approve.hint}
             onClick={markSent(onApprove)}
-            disabled={disabled || sentAt !== null}
+            disabled={disabled || sentAt !== null || toolsChanged}
             className="flex-1"
           >
             {approveVerb(card)}
@@ -356,7 +383,10 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
                 <AlwaysAllowToolControl
                   size="small"
                   disabled={disabled || sentAt !== null}
-                  description={`${assistant} will run this kind of action on this connector without asking, in every chat.`}
+                  confirm={alwaysAllowConfirm({
+                    covers: alwaysAllowCovers,
+                    toolSay: `${assistant} will run this kind of action on this connector without asking, in every chat.`,
+                  })}
                   onConfirm={markSent(onApproveAlways)}
                 />
               )}

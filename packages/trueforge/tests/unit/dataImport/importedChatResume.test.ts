@@ -15,10 +15,12 @@ import type { RequestContext } from '../../../src/auth/identity';
 import configuration from '../../../src/config';
 import { ZipStreamWriter } from '../../../src/dataExport/zipStreamWriter';
 import { DeliveryStore } from '../../../src/db/deliveryStore';
+import { ReachSettingsStore } from '../../../src/db/reachSettingsStore';
 import { SentinelAuditStore } from '../../../src/db/sentinelAuditStore';
 import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgentStore';
 import { SqliteGlobalSettingsStore } from '../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
 import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
+import { SqliteModelProviderStore } from '../../../src/db/sqlite/model-provider-store/SqliteModelProviderStore';
 import { SqlitePersonaStore } from '../../../src/db/sqlite/persona-store/SqlitePersonaStore';
 import { SqlitePersonalizationStore } from '../../../src/db/sqlite/personalization-store/SqlitePersonalizationStore';
 import { SqliteScheduleStore } from '../../../src/db/sqlite/schedule-store/SqliteScheduleStore';
@@ -234,8 +236,10 @@ describe('an imported chat never runs a tool without a fresh approval from the o
       sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
       auditStore: new SentinelAuditStore(db),
       deliveryStore: new DeliveryStore(db),
+      reachSettingsStore: new ReachSettingsStore(db),
       turnArtifactStore: new SqliteTurnArtifactStore(db),
       mcpServerStore: new SqliteMcpServerStore(db),
+      modelProviderStore: new SqliteModelProviderStore(db),
     };
     baseArchive = await exportInstanceArchive({
       instance: { stores, memoryDir: sourceMemory, knowledgeDir: sourceKnowledge },

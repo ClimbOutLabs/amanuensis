@@ -48,6 +48,7 @@ jest.mock('../../../../src/runtime/memory/memorySummarize', () => {
 });
 
 const unusedStore: IModelProviderStore = {
+  managedElsewhere: false,
   listProviders: jest.fn(),
   getProvider: jest.fn(),
   getProviderForUpdate: jest.fn(),

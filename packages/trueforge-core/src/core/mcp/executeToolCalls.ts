@@ -42,7 +42,7 @@ import { toJsonSafeParams } from '../permissions/approvalTokens';
 import { heldCallAuditText, recordNotPreparedRefusals, recordUnattendedSpaceChange } from '../permissions/audit';
 import type { SentinelDispatchContext } from '../permissions/context';
 import { HELD_REASON_CODE, HELD_RESULT_TEXT } from '../permissions/heldActions';
-import { MAPS_ASK_REASON } from '../permissions/mapsToolNames';
+import { isMapsCardReason } from '../permissions/mapsToolNames';
 import { collectOutboundStrings } from '../permissions/outboundGuard';
 import {
   hostToolStamp,
@@ -53,6 +53,7 @@ import {
 } from '../permissions/webSearch';
 import { identicalCallNudgeMessage } from '../runtime/contextUtils';
 import { CALL_TOOL_NAME, tryParseCallToolWrapper } from '../runtime/DeferredTool';
+import { REPLY_CALL_NOT_RUN_OWNER_MESSAGE } from '../runtime/modelReplyGuard';
 import { connectorUnreachableText, type ToolResultKind, type UnfinishedKind } from '../runtime/replyBudget';
 import type { SandboxInfo, WorkspaceVerificationReceiptCandidate } from '../sandbox/Sandbox';
 import { SPACE_WRITE_REASON } from '../spaces/toolContract';
@@ -1062,7 +1063,7 @@ function isSearchProviderRead(info: Pick<InternalToolCallInfo, 'search_provider_
  * wrongly calls read-only still counts.
  */
 export function isHostVouchedRead(info: Pick<InternalToolCallInfo, 'search_provider_call' | 'tier_reason'>): boolean {
-  return isSearchProviderRead(info) || info.tier_reason === MAPS_ASK_REASON;
+  return isSearchProviderRead(info) || isMapsCardReason(info.tier_reason);
 }
 /** Tool calls written as text that the model is asked to redo in one turn; past this the turn ends. */
 export const MAX_TOOL_MARKUP_RETRIES_PER_TURN = 2;
@@ -2014,6 +2015,9 @@ export async function executeToolCalls({
             ...(toolCall.tool_info.git_remote_precondition === undefined
               ? {}
               : { git_remote_precondition: toolCall.tool_info.git_remote_precondition }),
+            ...(toolCall.tool_info.browser_element === undefined
+              ? {}
+              : { browser_element_precondition: toolCall.tool_info.browser_element }),
           },
         );
       };
@@ -2340,7 +2344,7 @@ export async function executeToolCalls({
               {
                 toolName: toolCall.tool_info.original_tool_name,
                 tier: toolCall.tool_info.tier,
-                message: failure.owner_message ?? failure.message,
+                message: failure.owner_message ?? REPLY_CALL_NOT_RUN_OWNER_MESSAGE,
               },
             ];
       }),

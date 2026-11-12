@@ -1,19 +1,19 @@
 ---
-title: 'TrueForge UI SDK'
+title: 'Aman UI SDK'
 sidebarTitle: 'Overview'
-description: 'Use the bundled TrueForge chat experience — or embed the same UI in your app with the React UI SDK.'
+description: 'Use the bundled Aman chat experience — or embed the same UI in your app with the React UI SDK.'
 ---
 
-`@truefoundry/trueforge-ui` provides a production-ready agent chat experience as a single, reusable React component. TrueForge ships this full chat UI with the server — browse agents, stream responses, approve tools, connect MCP OAuth, and manage Settings — and publishes the same experience as `@truefoundry/trueforge-ui` so you can embed it in your own React app.
+`@truefoundry/trueforge-ui` provides a production-ready agent chat experience as a single, reusable React component. Aman ships this full chat UI with the server — browse agents, stream responses, approve tools, connect MCP OAuth, and manage Settings — and publishes the same experience as `@truefoundry/trueforge-ui` so you can embed it in your own React app.
 
 Key Features:
 
 - **Agent Modes** - Chat with a single agent, browse an agent library, or allow users to create and compose new agents.
 - **Chat** - Supports streaming responses, session history, tool calls with approval workflows, and file attachments.
-- **Themes** - Includes built-in themes for Claude, ChatGPT, Gemini, and TrueFoundry, with support for creating custom themes.
+- **Themes** - Includes built-in themes (Paper, Forest, Midnight and High contrast), with support for creating custom themes.
 - **Layouts** - Supports full-screen layouts with a sidebar or drawer, as well as embedded layouts with side-docked or floating widgets.
 - **Integration Settings** - Configure models, MCP servers, skills, and sandbox environments.
-- **Server Configuration** - Choose between TrueForge, a fully custom server, or TrueFoundry.
+- **Server Configuration** - Choose between Aman, a fully custom server, or TrueFoundry.
 
 ## Chat history and organization
 
@@ -21,7 +21,11 @@ The sidebar's chat history list supports renaming chats, filing them into folder
 
 **Rename a chat**: open a chat's **···** menu (the desktop dropdown, or the sheet on mobile/compact layouts) and choose **Rename**. Type the new title and press Enter, or click **Rename**, to save; Escape cancels without saving, and an empty title is rejected. Renaming updates the sidebar row immediately and persists to the session.
 
+**Chat titles**: a new chat is titled from the subject of its first exchange, in a few words, once the first reply finishes. While that first reply is being written, the chat carries the start of your first message as its title. A title you set by renaming is yours: Aman never replaces it.
+
 **Folders**: click **New folder** next to the chat history header to create a folder. Move an existing chat into one from its **···** menu (**Move to folder**), which also lets you create a folder on the spot. Folders render as collapsible sections above the unfiled chats; each folder's own **···** button opens a dialog to rename or delete it, deleting a folder keeps its chats, just unfiled.
+
+**Unseen answers**: a chat whose latest answer you have not opened yet shows a dot and a bold title in the list, the same mark a chat gets when a reminder lands in it. The mark clears when you open the chat. Aman stamps each chat with the time its latest answer landed, and your browser remembers when you last opened each chat, so the mark is kept per browser: reading a chat on your phone does not clear its mark on your laptop.
 
 **Agent details**: while a chat is open, the **Agent details** switch in the header turns the agent's internal steps on or off for that chat. On a phone narrower than 360px it is labelled **Details**. The switch shows whether they are on. With them on, each answer shows its steps, tool calls, sub-agents, the lines the model wrote between steps, and the model and cost line. With them off, you see only your message, the answer, and anything that needs you: approval cards, notices written for you, and one progress line while Aman works. If a step failed or was blocked, one plain line under the answer says so. A reply that could not finish says so in one plain line. The switch only appears once the chat has a persisted session, and is hidden while the chat is idle or on a fresh, unsaved chat.
 
@@ -61,7 +65,7 @@ A picture from another site outside a chat answer is not loaded until you choose
 {/* 
 ## Bundled UI
 
-When you run TrueForge ([Quickstart](/quickstart)), open the app URL (for example `http://localhost:8790`). You get:
+When you run Aman ([Quickstart](/quickstart)), open the app URL (for example `http://localhost:8790`). You get:
 
 - Agent composer and [Agent Library](/agent-library)
 - Streaming chat with tool calls, approvals, and ask-user-questions
@@ -75,8 +79,8 @@ When you run TrueForge ([Quickstart](/quickstart)), open the app URL (for exampl
 | --- | --- |
 | **Agent modes** | Chat with one agent, browse the library, or let users compose agents |
 | **Layouts** | `sidebar` (default), `drawer`, `dock`, `widget` |
-| **Themes** | Built-in Claude, ChatGPT, Gemini, TrueFoundry — or your own theme |
+| **Themes** | Built-in Paper, Forest, Midnight, High contrast — or your own theme |
 | **Slots** | Override individual UI regions without forking the whole app |
-| **Server** | TrueForge server, TrueFoundry-backed, or a custom server that implements the contract |
+| **Server** | Aman server, TrueFoundry-backed, or a custom server that implements the contract |
 
 */}

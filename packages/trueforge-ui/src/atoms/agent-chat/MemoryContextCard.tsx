@@ -27,8 +27,8 @@ function formatMs(ms: number): string {
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${String(ms)}ms`;
 }
 
-function plural(count: number, { singular }: { singular: string }): string {
-  return `${String(count)} ${count === 1 ? singular : `${singular}s`}`;
+function plural(count: number, { singular, pluralForm }: { singular: string; pluralForm?: string }): string {
+  return `${String(count)} ${count === 1 ? singular : (pluralForm ?? `${singular}s`)}`;
 }
 
 function RecallRow({ event }: { event: TrueForgeApi.MemoryRecallPersistedEvent }) {
@@ -37,7 +37,9 @@ function RecallRow({ event }: { event: TrueForgeApi.MemoryRecallPersistedEvent }
   // Pages reach the model even when no note was recalled, so they count as recalled memory too.
   const pagesLoaded = event.layers?.pages?.loaded ?? 0;
   const recalled = [
-    ...(stats.items > 0 || pagesLoaded === 0 ? [plural(stats.items, { singular: 'item' })] : []),
+    ...(stats.items > 0 || pagesLoaded === 0
+      ? [plural(stats.items, { singular: 'memory', pluralForm: 'memories' })]
+      : []),
     ...(pagesLoaded > 0 ? [plural(pagesLoaded, { singular: 'page' })] : []),
   ].join(', ');
 
@@ -66,7 +68,8 @@ function RecallRow({ event }: { event: TrueForgeApi.MemoryRecallPersistedEvent }
     >
       <div className="flex flex-col gap-2 pb-1 font-sans text-xs text-text-secondary">
         <div className="flex flex-wrap gap-x-3 gap-y-1">
-          <span>{recalled}</span>
+          <span>{plural(stats.items, { singular: 'item' })}</span>
+          {pagesLoaded > 0 && <span>{plural(pagesLoaded, { singular: 'page' })}</span>}
           <span>~{stats.estimatedTokens} tokens</span>
           <span>{formatMs(stats.recallMs)}</span>
           {stats.droppedOverBudget > 0 && (

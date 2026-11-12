@@ -8,11 +8,13 @@ export const UpdateMemoryNightlyRequest: core.serialization.Schema<
     serializers.settings.UpdateMemoryNightlyRequest.Raw,
     TrueForge.settings.UpdateMemoryNightlyRequest
 > = core.serialization.object({
-    enabled: core.serialization.boolean().nullable(),
+    enabled: core.serialization.boolean().optionalNullable(),
+    hour: core.serialization.number().optional(),
 });
 
 export declare namespace UpdateMemoryNightlyRequest {
     export interface Raw {
-        enabled?: boolean | null;
+        enabled?: (boolean | null | undefined) | null;
+        hour?: number | null;
     }
 }

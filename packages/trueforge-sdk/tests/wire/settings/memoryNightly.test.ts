@@ -9,7 +9,7 @@ describe("MemoryNightlyClient", () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
 
-        const rawResponseBody = { data: { default_enabled: true, enabled: true, overridden: true } };
+        const rawResponseBody = { data: { default_enabled: true, enabled: true, hour: 1, overridden: true } };
 
         server
             .mockEndpoint()
@@ -24,6 +24,7 @@ describe("MemoryNightlyClient", () => {
             data: {
                 defaultEnabled: true,
                 enabled: true,
+                hour: 1,
                 overridden: true,
             },
         });
@@ -70,8 +71,8 @@ describe("MemoryNightlyClient", () => {
     test("create_or_update (1)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = { enabled: true };
-        const rawResponseBody = { data: { default_enabled: true, enabled: true, overridden: true } };
+        const rawRequestBody = { enabled: true, hour: 0 };
+        const rawResponseBody = { data: { default_enabled: true, enabled: true, hour: 1, overridden: true } };
 
         server
             .mockEndpoint()
@@ -84,11 +85,13 @@ describe("MemoryNightlyClient", () => {
 
         const response = await client.settings.memoryNightly.createOrUpdate({
             enabled: true,
+            hour: 0,
         });
         expect(response).toEqual({
             data: {
                 defaultEnabled: true,
                 enabled: true,
+                hour: 1,
                 overridden: true,
             },
         });
@@ -97,7 +100,7 @@ describe("MemoryNightlyClient", () => {
     test("create_or_update (2)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = { enabled: null };
+        const rawRequestBody = {};
         const rawResponseBody = { error: { message: "message" } };
 
         server
@@ -110,16 +113,14 @@ describe("MemoryNightlyClient", () => {
             .build();
 
         await expect(async () => {
-            return await client.settings.memoryNightly.createOrUpdate({
-                enabled: null,
-            });
+            return await client.settings.memoryNightly.createOrUpdate();
         }).rejects.toThrow(TrueForgeTypes.BadRequestError);
     });
 
     test("create_or_update (3)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = { enabled: null };
+        const rawRequestBody = {};
         const rawResponseBody = { error: { message: "message" } };
 
         server
@@ -132,16 +133,14 @@ describe("MemoryNightlyClient", () => {
             .build();
 
         await expect(async () => {
-            return await client.settings.memoryNightly.createOrUpdate({
-                enabled: null,
-            });
+            return await client.settings.memoryNightly.createOrUpdate();
         }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
 
     test("create_or_update (4)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = { enabled: null };
+        const rawRequestBody = {};
         const rawResponseBody = { error: { message: "message" } };
 
         server
@@ -154,9 +153,70 @@ describe("MemoryNightlyClient", () => {
             .build();
 
         await expect(async () => {
-            return await client.settings.memoryNightly.createOrUpdate({
-                enabled: null,
-            });
+            return await client.settings.memoryNightly.createOrUpdate();
+        }).rejects.toThrow(TrueForgeTypes.ForbiddenError);
+    });
+
+    test("run (1)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { data: { moved_to_earlier: 1, notes_sorted: 1, pairs_listed: 1, status: "ran" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/settings/memory-nightly/run")
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        const response = await client.settings.memoryNightly.run();
+        expect(response).toEqual({
+            data: {
+                movedToEarlier: 1,
+                notesSorted: 1,
+                pairsListed: 1,
+                status: "ran",
+            },
+        });
+    });
+
+    test("run (2)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/settings/memory-nightly/run")
+            .respondWith()
+            .statusCode(401)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.settings.memoryNightly.run();
+        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+    });
+
+    test("run (3)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/settings/memory-nightly/run")
+            .respondWith()
+            .statusCode(403)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.settings.memoryNightly.run();
         }).rejects.toThrow(TrueForgeTypes.ForbiddenError);
     });
 });

@@ -46,6 +46,7 @@ function context(overrides: Partial<SummarizeTurnContext>): SummarizeTurnContext
     upsertProvider: jest.fn(),
     listModels: jest.fn(),
     deleteProvider: jest.fn(),
+    managedElsewhere: false,
   };
   return {
     tenantId: 't',

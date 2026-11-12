@@ -11,7 +11,7 @@ export const TogetherAiModelProvider: core.serialization.ObjectSchema<
     serializers.TogetherAiModelProvider.Raw,
     TrueForge.TogetherAiModelProvider
 > = core.serialization.object({
-    auth: ModelProviderAuth,
+    auth: ModelProviderAuth.optional(),
     baseUrl: core.serialization.property("base_url", core.serialization.string().optional()),
     models: core.serialization.list(ConfiguredModel),
     streamTimeout: core.serialization.property("stream_timeout", ModelProviderStreamTimeout.optional()),
@@ -20,7 +20,7 @@ export const TogetherAiModelProvider: core.serialization.ObjectSchema<
 
 export declare namespace TogetherAiModelProvider {
     export interface Raw {
-        auth: ModelProviderAuth.Raw;
+        auth?: ModelProviderAuth.Raw | null;
         base_url?: string | null;
         models: ConfiguredModel.Raw[];
         stream_timeout?: ModelProviderStreamTimeout.Raw | null;

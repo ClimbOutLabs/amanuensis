@@ -87,6 +87,7 @@ import { validateManifest } from '../runtime/cron';
 import type { DeliveryService } from '../runtime/delivery/deliveryService';
 import type { EventSubscriptionRegistry } from '../runtime/event-subscription';
 import { createMemoryClient } from '../runtime/memory/createMemoryClient';
+import type { ReminderReach } from '../runtime/noticing/reminderReach';
 import { deliverReminder } from '../runtime/reminderDelivery';
 import { scheduleToolsOf, specWithTools } from '../runtime/scheduleTools';
 import { resolveSandboxProvider, validateAgentSpec } from '../runtime/sessionResources';
@@ -105,6 +106,8 @@ export interface ScheduleTurnExecutionDeps<TTransaction> {
   briefItemStore: IBriefItemCompletionStore;
   /** A due reminder is also put in the person's feed, and pushed to their devices, through this. */
   deliveryService: DeliveryService;
+  /** Settles how loud a due reminder is, by the person's Reach me rules. */
+  reminderReach: ReminderReach;
   sessions: Sessions<SessionCustom, TurnCustom>;
   activeTurns: ActiveTurnRegistry;
   /** Tracks in-flight turn event drains so shutdown can wait for them. */
@@ -211,6 +214,7 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
       sessionStore: deps.sessionStore,
       now: new Date(),
       deliveries: deps.deliveryService,
+      reach: deps.reminderReach,
       logger: deps.logger,
       // A reminder line is a finished turn like any other, so it joins the past-chat search once it is written.
       onLineWritten: async line => {
