@@ -16,6 +16,7 @@ const SECRET = 'test-account-secret-0123456789abcdef0123';
 const WRONG = 'CANARY-WRONG-PASSWORD-9z';
 const HOST = 'caldav.example.invalid';
 const USERNAME = 'owner@example.invalid';
+const SECOND = 'second@example.invalid';
 const PUBLIC_ADDRESS = '93.184.216.34';
 const GOOGLE_USER = 'person@gmail.com';
 const GOOGLE_HOME = `/calendar/dav/${GOOGLE_USER.replace('@', '%40')}/`;
@@ -115,8 +116,9 @@ describe('the calendar account agent', () => {
         res.end();
         return;
       }
-      const expected = `Basic ${Buffer.from(`${USERNAME}:${CANARY}`).toString('base64')}`;
-      if (req.headers.authorization === expected) {
+      // Either account signs in, and only with the right password.
+      const accepted = [USERNAME, SECOND].map(user => `Basic ${Buffer.from(`${user}:${CANARY}`).toString('base64')}`);
+      if (accepted.includes(req.headers.authorization)) {
         res.writeHead(207, { 'Content-Type': 'application/xml' });
         res.end('<d:multistatus xmlns:d="DAV:"/>');
       } else {
@@ -312,7 +314,6 @@ describe('the calendar account agent', () => {
       });
       return { status: response.status, body: JSON.parse(await response.text()) };
     };
-    const SECOND = 'second@example.invalid';
     await call('POST', payload());
     const two = await call('POST', payload({ username: SECOND, email: SECOND }));
     assert.equal(two.status, 200);
