@@ -557,7 +557,7 @@ describe('submitProfileLearning', () => {
           content: food(1),
           timestamp: '2026-09-01T12:00:00.000Z',
           document_id: expect.stringMatching(/^aman-profile-line-[0-9a-f]{24}$/),
-          metadata: { source: 'aman-profile-line', origin: 'user_stated' },
+          metadata: { source: 'aman-profile-line', origin: 'tool_ingested' },
         },
       ]);
       await harness.db.destroy();
