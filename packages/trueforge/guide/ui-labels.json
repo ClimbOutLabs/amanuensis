@@ -278,9 +278,9 @@
   "Assistant profile": "packages/trueforge-ui/src/components/PersonalizationPanel.tsx",
   "Voice guidance": "packages/trueforge-ui/src/components/PersonalizationPanel.tsx",
   "Identity": "packages/trueforge-ui/src/components/PersonalizationPanel.tsx",
-  "Learned profile": "packages/trueforge-ui/src/components/PersonalizationPanel.tsx",
-  "Learn from conversations": "packages/trueforge-ui/src/components/PersonalizationPanel.tsx",
-  "Clear learned profile": "packages/trueforge-ui/src/components/PersonalizationPanel.tsx",
+  "Learned profile": "packages/trueforge-ui/src/containers/SettingsBuilder/MemorySection.tsx",
+  "Learn from conversations": "packages/trueforge-ui/src/containers/SettingsBuilder/LearnedProfilePanel.tsx",
+  "Clear learned profile": "packages/trueforge-ui/src/containers/SettingsBuilder/LearnedProfilePanel.tsx",
   "Clear all": "packages/trueforge-ui/src/components/PersonalizationPanel.tsx",
   "Create persona": "packages/trueforge-ui/src/containers/SettingsBuilder/PersonaSettings.tsx",
   "Choose a persona": "packages/trueforge-ui/src/atoms/ActivePersonaIndicator.tsx",
@@ -322,5 +322,12 @@
   "Try again": "packages/frontend/src/AuthErrorScreen.tsx",
   "Search provider": "packages/trueforge-ui/src/containers/SettingsBuilder/ConnectorSettings.tsx",
   "Web search provider": "packages/trueforge-ui/src/containers/SettingsBuilder/ConnectorDetails.tsx",
-  "Personas": "packages/trueforge-ui/src/containers/SettingsBuilder/ModelRoleSettings.tsx"
+  "Personas": "packages/trueforge-ui/src/containers/SettingsBuilder/ModelRoleSettings.tsx",
+  "Reminders": "packages/trueforge-ui/src/atoms/RemindersButton.tsx",
+  "Import and export": "packages/trueforge-ui/src/containers/SettingsBuilder/MemorySection.tsx",
+  "Chat text size": "packages/trueforge-ui/src/containers/SettingsBuilder/ThemeSettings.tsx",
+  "Smaller": "packages/trueforge-ui/src/utils/chatFontSizePreference.ts",
+  "Default": "packages/trueforge-ui/src/utils/chatFontSizePreference.ts",
+  "Larger": "packages/trueforge-ui/src/utils/chatFontSizePreference.ts",
+  "Largest": "packages/trueforge-ui/src/utils/chatFontSizePreference.ts"
 }

@@ -19,7 +19,7 @@ How to get there: Click **More** in the left bar, then **Settings**, then **Audi
 ## Look through the log
 
 1. Click **More** in the left bar, click **Settings**, then click **Audit**.
-2. Read the list. The newest action is at the top. Each line shows when it happened, what Aman did, and what came of it.
+2. Read the list. The newest action is at the top. Each line shows when it happened, what Aman did in plain words, such as "Sent an email", and what came of it.
 3. Click **Open chat** on a line to go to the chat it came from.
 4. Click **Load more** at the bottom to see older actions.
 

@@ -39,6 +39,13 @@ A check shows the one you use now. **Match my computer** follows your computer's
 
 Light and dark work with every theme. **High contrast** gives the clearest text.
 
+## Make the words in your chats bigger or smaller
+
+1. Click **More** in the left bar, then **Settings**, then **Themes**.
+2. Under **Chat text size**, click **Smaller**, **Default**, **Larger** or **Largest**.
+
+Only your chats and the message box change size. The rest of the app stays as it was. Your choice stays until you change it.
+
 ## Hide model and cost details
 
 Under **Answers**, turn off **Show model and cost in answer details** to hide which model answered and what it cost. Aman still keeps count; it only stops showing it.

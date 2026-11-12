@@ -1,7 +1,7 @@
 ---
 id: reminders
 title: Reminders
-covers: remember
+covers: remember, route:reminder
 ---
 
 A reminder is a short note Aman gives you at the time you ask, such as "Remind me at 5 pm to call the pharmacy". It only ever reaches you, so Aman sets it without asking.
@@ -50,7 +50,7 @@ Say so when you ask, such as "Remind me at 5 pm to call the pharmacy, it's urgen
 
 ## See or cancel reminders
 
-1. In any chat, ask, such as "What reminders do I have?"
+1. Click **Reminders** in the left panel. It lists what is coming up and what has already reminded you, with the persona that set each one. Click a reminder to open the chat you set it in. Or, in any chat, ask "What reminders do I have?"
 2. To cancel one, ask, such as "Cancel the pharmacy reminder".
 3. A card shows the reminder. Click **Allow** to cancel it, or **Not now** to keep it.
 
@@ -58,7 +58,7 @@ A canceled reminder is gone for good.
 
 ## Good to know
 
-- Reminders don't show on the Schedules page. Ask in a chat to see them.
+- Reminders don't show on the Schedules page. They have their own list under **Reminders** in the left panel.
 - An incognito chat can't set or cancel a reminder. Ask in a normal chat.
 - A scheduled run can't set a reminder by itself. It holds the reminder for your OK.
 - A reminder costs nothing when it fires. Aman doesn't use a model to deliver it.

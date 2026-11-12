@@ -39,10 +39,13 @@ How to get there: Click **More** in the left bar, then **Settings**, then **Pers
 
 Aman can keep a short profile of you that it updates from your chats. This is off until you turn it on.
 
-1. Under **Learned profile**, turn on **Learn from conversations**.
-2. Click **Save personalization**.
+1. Click **More** in the left bar, then **Settings**, then **Memory**.
+2. Click the **Learned profile** tab.
+3. Turn on **Learn from conversations**, then click **Save**.
 
-After a chat, Aman updates the profile, at most once an hour. The profile appears under **Learned profile**. Click **Edit** to change it, or **Clear learned profile** to empty it. Then click **Save personalization**.
+After a chat, Aman updates the profile, at most once an hour. The profile appears on the same tab. Click **Edit** to change it, or **Clear learned profile** to empty it. Then click **Save**.
+
+**Clear all** on the Personalization page empties only that page's boxes. It keeps the learned profile and its switch.
 
 ## Good to know
 

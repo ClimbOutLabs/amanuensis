@@ -24,6 +24,14 @@ The Memory page has three tabs:
 - **Sharing**: which persona can read which notes.
 - **Settings**: switch memory features on or off, and check that memory is working.
 
+## The tabs on the Memory page
+
+- **Memories**: read, change or delete what Aman remembers.
+- **Sharing**: choose which personas share which memories.
+- **Learned profile**: what Aman has learned about you from your chats, and the switch that lets it keep learning. See [Personalization](personalization.md).
+- **Import and export**: save your memories to a file, bring them back from one, and set up topics.
+- **Settings**: set up memory and change how it works.
+
 ## Change or forget a memory
 
 1. Open the **Memories** tab.
