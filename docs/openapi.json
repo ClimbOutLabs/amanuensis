@@ -2755,10 +2755,6 @@
         "properties": {},
         "type": "object"
       },
-      "DeleteSkillNetworkHostResponse": {
-        "properties": {},
-        "type": "object"
-      },
       "DeleteSkillResponse": {
         "properties": {},
         "type": "object"
@@ -5883,6 +5879,25 @@
               "$ref": "#/components/schemas/ReachSuggestion"
             },
             "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "ListRemindersResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ReminderItem"
+            },
+            "type": "array"
+          },
+          "next_page_token": {
+            "description": "Pass as page_token to get more reminders; absent on the last page.",
+            "type": "string"
           }
         },
         "required": [
@@ -9660,6 +9675,97 @@
         ],
         "type": "object"
       },
+      "ReminderItem": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "last_due_at": {
+            "description": "When its latest past time was due, or null if none has passed.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_reminded_at": {
+            "description": "When it last reached the person, or null if it never has.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "next_due_at": {
+            "description": "When it is next due, or null when nothing is queued.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "persona_name": {
+            "description": "The persona the reminder was set with.",
+            "type": "string"
+          },
+          "repeats": {
+            "description": "True when the reminder runs again on a repeating timing.",
+            "type": "boolean"
+          },
+          "session_id": {
+            "description": "The chat the reminder was set in, or null when it was set elsewhere or that chat is gone.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "set_at": {
+            "description": "When the reminder was set.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ReminderState"
+          },
+          "timezone": {
+            "description": "The IANA time zone the reminder times are read in.",
+            "type": "string"
+          },
+          "timing": {
+            "description": "When it runs, in plain words.",
+            "type": "string"
+          },
+          "what": {
+            "description": "What the reminder is for, in the words it was set with.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "what",
+          "timezone",
+          "repeats",
+          "timing",
+          "state",
+          "next_due_at",
+          "last_reminded_at",
+          "last_due_at",
+          "set_at",
+          "persona_name",
+          "session_id"
+        ],
+        "type": "object"
+      },
+      "ReminderState": {
+        "enum": [
+          "upcoming",
+          "paused",
+          "reminded",
+          "missed"
+        ],
+        "type": "string"
+      },
       "RemoteMCPServerManifest": {
         "additionalProperties": false,
         "properties": {
@@ -11788,15 +11894,6 @@
       "SkillNetworkApproval": {
         "additionalProperties": false,
         "properties": {
-          "allowed_hosts": {
-            "items": {
-              "description": "One exact site name the skill needs to reach.",
-              "maxLength": 253,
-              "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
-              "type": "string"
-            },
-            "type": "array"
-          },
           "approved_hosts": {
             "items": {
               "description": "One exact site name the skill needs to reach.",
@@ -11820,35 +11917,14 @@
             "maxItems": 20,
             "type": "array"
           },
-          "denied_hosts": {
-            "items": {
-              "description": "One exact site name the skill needs to reach.",
-              "maxLength": 253,
-              "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
-              "type": "string"
-            },
-            "type": "array"
-          },
           "send_capable": {
             "description": "True when a declared site can send mail or change a calendar.",
             "type": "boolean"
-          },
-          "session_hosts": {
-            "items": {
-              "description": "One exact site name the skill needs to reach.",
-              "maxLength": 253,
-              "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
-              "type": "string"
-            },
-            "type": "array"
           }
         },
         "required": [
           "declared_hosts",
           "approved_hosts",
-          "allowed_hosts",
-          "denied_hosts",
-          "session_hosts",
           "send_capable"
         ],
         "type": "object"
@@ -12658,41 +12734,8 @@
           "schedule": {
             "$ref": "#/components/schemas/Tier3Schedule"
           },
-          "skill_network": {
-            "description": "For a skill network card: the skill, the sites it asks for, and why. Otherwise null.",
-            "properties": {
-              "code_pin": {
-                "description": "The code version the approval is pinned to, or null when no pin is in force.",
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "hosts": {
-                "description": "The sites the skill asks to reach.",
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "reason": {
-                "$ref": "#/components/schemas/Tier3SkillNetworkReason"
-              },
-              "skill_name": {
-                "description": "Name of the skill asking for network access.",
-                "type": "string"
-              }
-            },
-            "required": [
-              "skill_name",
-              "hosts",
-              "reason",
-              "code_pin"
-            ],
-            "type": [
-              "object",
-              "null"
-            ]
+          "skill": {
+            "$ref": "#/components/schemas/Tier3Skill"
           },
           "why_asked_again": {
             "description": "Actual cause of re-escalation, or null on first ask.",
@@ -12940,14 +12983,49 @@
           "null"
         ]
       },
-      "Tier3SkillNetworkReason": {
-        "description": "Why the card is asked: the skill’s first use, a site it did not declare, or its code changed since it was approved.",
-        "enum": [
-          "first_use",
-          "undeclared_host",
-          "code_changed"
+      "Tier3Skill": {
+        "description": "The skill a chat call adds, shown in full.",
+        "properties": {
+          "description": {
+            "description": "What the skill is for, as the skill itself says.",
+            "type": "string"
+          },
+          "instructions": {
+            "description": "The skill's own instruction file as the host read it, or null for a starter skill.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "description": "Skill name.",
+            "type": "string"
+          },
+          "source": {
+            "description": "The repository the skill comes from, and the folder in it when there is one.",
+            "type": "string"
+          },
+          "starter": {
+            "description": "True when this is one of the starter skills that come with the app.",
+            "type": "boolean"
+          },
+          "version": {
+            "description": "The exact commit that is added. A later change to the repository is not picked up.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "source",
+          "version",
+          "starter",
+          "instructions"
         ],
-        "type": "string"
+        "type": [
+          "object",
+          "null"
+        ]
       },
       "Timezone": {
         "default": "UTC",
@@ -15276,32 +15354,6 @@
         "type": "object"
       },
       "UpdateSkillNetworkApprovalResponse": {
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/SkillNetworkApproval"
-          }
-        },
-        "required": [
-          "data"
-        ],
-        "type": "object"
-      },
-      "UpdateSkillNetworkHostRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "host": {
-            "description": "One exact site name the skill needs to reach.",
-            "maxLength": 253,
-            "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
-            "type": "string"
-          }
-        },
-        "required": [
-          "host"
-        ],
-        "type": "object"
-      },
-      "UpdateSkillNetworkHostResponse": {
         "properties": {
           "data": {
             "$ref": "#/components/schemas/SkillNetworkApproval"
@@ -25529,300 +25581,6 @@
         "x-fern-sdk-method-name": "create_or_update_network_approval"
       }
     },
-    "/api/v1/settings/skills/{name}/network-approval/allowed-host": {
-      "delete": {
-        "description": "Clears the one-site allowance. The skill cannot reach the site from the next run on.",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/ResourceName"
-            }
-          },
-          {
-            "description": "One exact site name the skill needs to reach.",
-            "in": "query",
-            "name": "host",
-            "required": true,
-            "schema": {
-              "description": "One exact site name the skill needs to reach.",
-              "maxLength": 253,
-              "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DeleteSkillNetworkHostResponse"
-                }
-              }
-            },
-            "description": "Allowance removed."
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestErrorResponse"
-                }
-              }
-            },
-            "description": "No skill with this name"
-          },
-          "424": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestErrorResponse"
-                }
-              }
-            },
-            "description": "Unsupported because skills are managed by an external system."
-          }
-        },
-        "summary": "Remove one allowed site for a skill",
-        "tags": [
-          "Skills"
-        ],
-        "x-fern-sdk-group-name": [
-          "settings",
-          "skills"
-        ],
-        "x-fern-sdk-method-name": "delete_network_allowed_host"
-      },
-      "put": {
-        "description": "Allows one site for the skill on its own, apart from the declared list approval. On a skill with no approval yet, the allowance is bound to the skill's code as it stands, and a code version that cannot be read refuses it.",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/ResourceName"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateSkillNetworkHostRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UpdateSkillNetworkHostResponse"
-                }
-              }
-            },
-            "description": "The stored approval state."
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestErrorResponse"
-                }
-              }
-            },
-            "description": "Invalid request body."
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestErrorResponse"
-                }
-              }
-            },
-            "description": "No skill with this name"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestErrorResponse"
-                }
-              }
-            },
-            "description": "The skill's code version could not be read, so nothing was stored."
-          },
-          "424": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestErrorResponse"
-                }
-              }
-            },
-            "description": "Unsupported because skills are managed by an external system."
-          }
-        },
-        "summary": "Allow one site for a skill",
-        "tags": [
-          "Skills"
-        ],
-        "x-fern-sdk-group-name": [
-          "settings",
-          "skills"
-        ],
-        "x-fern-sdk-method-name": "create_or_update_network_allowed_host"
-      }
-    },
-    "/api/v1/settings/skills/{name}/network-approval/denied-host": {
-      "delete": {
-        "description": "Clears the site being turned down, so a card can ask about it again.",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/ResourceName"
-            }
-          },
-          {
-            "description": "One exact site name the skill needs to reach.",
-            "in": "query",
-            "name": "host",
-            "required": true,
-            "schema": {
-              "description": "One exact site name the skill needs to reach.",
-              "maxLength": 253,
-              "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DeleteSkillNetworkHostResponse"
-                }
-              }
-            },
-            "description": "Decision cleared."
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestErrorResponse"
-                }
-              }
-            },
-            "description": "No skill with this name"
-          },
-          "424": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestErrorResponse"
-                }
-              }
-            },
-            "description": "Unsupported because skills are managed by an external system."
-          }
-        },
-        "summary": "Clear one turned-down site for a skill",
-        "tags": [
-          "Skills"
-        ],
-        "x-fern-sdk-group-name": [
-          "settings",
-          "skills"
-        ],
-        "x-fern-sdk-method-name": "delete_network_denied_host"
-      },
-      "put": {
-        "description": "Stores the site as turned down for the skill, so it is not granted and raises no card.",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/ResourceName"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateSkillNetworkHostRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UpdateSkillNetworkHostResponse"
-                }
-              }
-            },
-            "description": "The stored approval state."
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestErrorResponse"
-                }
-              }
-            },
-            "description": "Invalid request body."
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestErrorResponse"
-                }
-              }
-            },
-            "description": "No skill with this name"
-          },
-          "424": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestErrorResponse"
-                }
-              }
-            },
-            "description": "Unsupported because skills are managed by an external system."
-          }
-        },
-        "summary": "Turn down one site for a skill",
-        "tags": [
-          "Skills"
-        ],
-        "x-fern-sdk-group-name": [
-          "settings",
-          "skills"
-        ],
-        "x-fern-sdk-method-name": "create_or_update_network_denied_host"
-      }
-    },
     "/api/v1/settings/token-factory-usage": {
       "get": {
         "description": "Tokens and cost per model counted today (UTC), and the daily cap with what is left under it. Counts come from the usage the provider reported.",
@@ -27847,6 +27605,76 @@
         "x-fern-sdk-method-name": "test_channel"
       }
     },
+    "/api/v1/user/reminders": {
+      "get": {
+        "description": "Lists the reminders the signed-in person set, upcoming and past, a page at a time, each with the chat it was set in.",
+        "parameters": [
+          {
+            "description": "Most schedules to read for this page.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Most schedules to read for this page.",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Token from the previous page; omit for the first page.",
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "description": "Token from the previous page; omit for the first page.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListRemindersResponse"
+                }
+              }
+            },
+            "description": "One page of the reminders the signed-in person set."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "List reminders",
+        "tags": [
+          "Reminders"
+        ],
+        "x-fern-sdk-group-name": [
+          "reminders"
+        ],
+        "x-fern-sdk-method-name": "list"
+      }
+    },
     "/api/v1/user/settings/calendar": {
       "delete": {
         "description": "Deletes the saved account and its app password from the sidecar for good.",
@@ -29165,6 +28993,9 @@
     },
     {
       "name": "Deliveries"
+    },
+    {
+      "name": "Reminders"
     },
     {
       "name": "Personas"

@@ -82,10 +82,10 @@ function fakeApi(
   };
 }
 
-function renderBrief(brief: MorningBrief, api: SentinelApi = fakeApi()) {
+function renderBrief(brief: MorningBrief, api: SentinelApi = fakeApi(), omittedCount = 0) {
   return render(
     <SentinelApiProvider api={api}>
-      <AmanBrief brief={brief} briefId="brief-1" sessionId="chat-1" />
+      <AmanBrief brief={brief} omittedCount={omittedCount} briefId="brief-1" sessionId="chat-1" />
     </SentinelApiProvider>,
   );
 }
@@ -117,6 +117,23 @@ describe('AmanBrief', () => {
     expect(screen.getByRole('heading', { name: 'Check first' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Needs a decision · 2' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Coming up' })).toBeInTheDocument();
+  });
+
+  it('says in plain words how many items were left out, and draws the rest', () => {
+    renderBrief(BRIEF, fakeApi(), 1);
+    expect(screen.getByTestId('brief-omitted')).toHaveTextContent('1 item could not be shown.');
+    expect(screen.getAllByTestId('brief-row')).toHaveLength(4);
+  });
+
+  it('says nothing about left out items when none were', () => {
+    renderBrief(BRIEF);
+    expect(screen.queryByTestId('brief-omitted')).not.toBeInTheDocument();
+  });
+
+  it('does not claim nothing needs you when every item was left out', () => {
+    renderBrief({ digest: 'Two items.', items: [] }, fakeApi(), 2);
+    expect(screen.getByTestId('brief-omitted')).toHaveTextContent('2 items could not be shown.');
+    expect(screen.queryByText('Nothing needs you this morning.')).not.toBeInTheDocument();
   });
 
   it('gives the Check first label the accent and the dot the bright gold', () => {
@@ -155,9 +172,9 @@ describe('AmanBrief', () => {
         },
       ],
     };
-    const brief = parseMorningBrief(`\`\`\`json\n${JSON.stringify(payload)}\n\`\`\``);
-    if (brief === null) throw new Error('Expected the brief to parse');
-    renderBrief(brief);
+    const read = parseMorningBrief(`\`\`\`json\n${JSON.stringify(payload)}\n\`\`\``);
+    if (read === null) throw new Error('Expected the brief to parse');
+    renderBrief(read.brief);
     expect(screen.queryByRole('link')).toBeNull();
     expect(screen.queryByText('Pay invoice')).toBeNull();
     expect(screen.getByTestId('brief-link-site')).toHaveTextContent('pay-invoices.example.net');
@@ -197,9 +214,9 @@ describe('AmanBrief', () => {
         },
       ],
     };
-    const brief = parseMorningBrief(`Here it is.\n\n\`\`\`json\n${JSON.stringify(payload)}\n\`\`\``);
-    if (brief === null) throw new Error('Expected the brief to parse');
-    renderBrief(brief);
+    const read = parseMorningBrief(`Here it is.\n\n\`\`\`json\n${JSON.stringify(payload)}\n\`\`\``);
+    if (read === null) throw new Error('Expected the brief to parse');
+    renderBrief(read.brief);
     const card = screen.getByTestId('aman-brief');
     expect(card.textContent).not.toMatch(/[*_`#[\]]/);
     expect(screen.getByText('Fri 10/23, 10:00 AM Dentist')).toBeInTheDocument();

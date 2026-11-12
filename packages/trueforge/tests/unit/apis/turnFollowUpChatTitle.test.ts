@@ -5,7 +5,7 @@ import {
   type TurnDoneEvent,
   type TurnStreamingEvent,
 } from '@truefoundry/trueforge-core/agent-session';
-import type { ILLM } from '@truefoundry/trueforge-core/core';
+import type { ILLM, RawAssistantMessageWithUsage } from '@truefoundry/trueforge-core/core';
 import { createLogger } from 'winston';
 
 import { beginTurnExecution, drainTurnEvents } from '../../../src/apis/turns';
@@ -27,13 +27,14 @@ import { SqliteSpaceStore } from '../../../src/db/sqlite/space-store/SqliteSpace
 import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { ActiveTurnRegistry } from '../../../src/runtime/activeTurns';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription/index.js';
+import { privateChatExpiry } from '../../../src/runtime/privateChat';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import { TENANT_ID } from '../../../src/tenancy';
 import { FakeTurnArtifactStore } from '../../fixtures/fakeTurnArtifactStore';
 import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
 // Every helper model call (a summary, or a title) is built on VercelAILLM; recording it shows
-// whether the finished turn asked a model for anything after its reply.
+// what the finished turn asked a model for after its reply.
 const mockHelperCall = jest.fn<ReturnType<ILLM['createNonStream']>, Parameters<ILLM['createNonStream']>>();
 
 jest.mock('@truefoundry/trueforge-core/core', () => {
@@ -50,7 +51,7 @@ jest.mock('@truefoundry/trueforge-core/core', () => {
 
 const SESSION_ID = 's-follow-up-title';
 const MODEL_FQN = 'test-provider/test-model';
-/** How long the finished turn's follow-up may take when nothing in it calls a model. */
+/** How long the finished turn's follow-up may take; the title step is detached and never counts. */
 const FOLLOW_UP_BOUND_MS = 2_000;
 
 function doneEvent(turnId: string): TurnDoneEvent {
@@ -87,8 +88,16 @@ function withinBound<T>(promise: Promise<T>, label: string): Promise<T> {
   ]).finally(() => clearTimeout(timer));
 }
 
+function helperAnswer(content: string): RawAssistantMessageWithUsage {
+  return {
+    output: { role: 'assistant', content },
+    usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+    finish_reason: 'stop',
+  };
+}
+
 /** One interactive chat on a model that resolves, so any helper call after the reply could run. */
-async function createChat() {
+async function createChat(options?: { incognito?: boolean }) {
   const logger = createLogger({ silent: true });
   const db = createSqliteDb(':memory:');
   await migrateSqliteToLatest(db);
@@ -118,8 +127,8 @@ async function createChat() {
     metadata: {},
     external_id: null,
     source: null,
-    is_incognito: false,
-    private_expires_at: null,
+    is_incognito: options?.incognito ?? false,
+    private_expires_at: options?.incognito === true ? privateChatExpiry({ from: new Date() }) : null,
   });
   const turnDrains = new TurnDrainRegistry();
   const deps = {
@@ -149,6 +158,32 @@ async function createChat() {
 
   const readTitle = async (): Promise<string | null | undefined> =>
     (await sessionStore.getSession({ tenant_id: TENANT_ID, session_id: SESSION_ID }))?.title;
+
+  /** Polls the stored title until it matches, or the follow-up bound runs out. */
+  const waitForTitle = async (expected: string): Promise<void> => {
+    const deadline = Date.now() + FOLLOW_UP_BOUND_MS;
+    for (;;) {
+      const title = await readTitle();
+      if (title === expected) {
+        return;
+      }
+      if (Date.now() > deadline) {
+        throw new Error(`title never became "${expected}"; it is "${String(title)}"`);
+      }
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
+  };
+
+  /** Polls until the title step's model call is out; the step is detached, so it starts just after the drain. */
+  const waitForHelperCalls = async (count: number): Promise<void> => {
+    const deadline = Date.now() + FOLLOW_UP_BOUND_MS;
+    while (mockHelperCall.mock.calls.length < count) {
+      if (Date.now() > deadline) {
+        throw new Error(`the title call never started; saw ${String(mockHelperCall.mock.calls.length)} calls`);
+      }
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
+  };
 
   /** Begins a turn with the server's own wiring; the model's reply is a finished turn. */
   const beginTurn = async ({ turnId, text }: { turnId: string; text: string }) => {
@@ -182,7 +217,7 @@ async function createChat() {
     });
   };
 
-  return { db, turnDrains, readTitle, beginTurn };
+  return { db, turnDrains, sessionStore, readTitle, waitForTitle, waitForHelperCalls, beginTurn };
 }
 
 let chat: Awaited<ReturnType<typeof createChat>> | undefined;
@@ -196,24 +231,42 @@ afterEach(async () => {
   chat = undefined;
 });
 
-describe('a finished turn does no chat-title work', () => {
-  it('makes no model call for a title after the first reply', async () => {
-    mockHelperCall.mockResolvedValue({
-      output: { role: 'assistant', content: 'Readable generated title' },
-      usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
-      finish_reason: 'stop',
-    });
+describe('a finished first turn gives the chat a subject title', () => {
+  it('swaps the working title for the subject title the model returns', async () => {
+    mockHelperCall.mockResolvedValue(helperAnswer('Laptop comparison'));
     chat = await createChat();
+    const firstMessage = 'Help me compare three laptops for photo editing under a budget of 1500 euros';
 
-    const { drainInput } = await chat.beginTurn({ turnId: 'turn-1', text: 'Give me my morning brief' });
+    const { drainInput } = await chat.beginTurn({ turnId: 'turn-1', text: firstMessage });
     await withinBound(drainTurnEvents(drainInput), "the first turn's follow-up");
 
-    expect(mockHelperCall).not.toHaveBeenCalled();
-    expect(await chat.readTitle()).toBe('Give me my morning brief');
+    await chat.waitForTitle('Laptop comparison');
+    expect(mockHelperCall).toHaveBeenCalledTimes(1);
+    // The title is the subject, never the first prompt or its capped working title.
+    expect(await chat.readTitle()).not.toBe(firstMessage);
+    expect(await chat.readTitle()).not.toBe(firstMessage.slice(0, 50));
   });
 
-  it("finishes the turn's follow-up and leaves nothing pending when a helper model would never answer", async () => {
-    // A slow self-hosted model: any helper call hangs for good.
+  it('keeps the subject title on later turns and asks for no second title', async () => {
+    mockHelperCall.mockResolvedValue(helperAnswer('Laptop comparison'));
+    chat = await createChat();
+
+    const first = await chat.beginTurn({
+      turnId: 'turn-1',
+      text: 'Help me compare three laptops for photo editing under a budget of 1500 euros',
+    });
+    await withinBound(drainTurnEvents(first.drainInput), "the first turn's follow-up");
+    await chat.waitForTitle('Laptop comparison');
+
+    const second = await chat.beginTurn({ turnId: 'turn-2', text: 'Which one has the best screen?' });
+    await withinBound(drainTurnEvents(second.drainInput), "the second turn's follow-up");
+
+    expect(mockHelperCall).toHaveBeenCalledTimes(1);
+    expect(await chat.readTitle()).toBe('Laptop comparison');
+  });
+
+  it('never waits for the title call: a silent model leaves the follow-up and the next turn on time', async () => {
+    // A slow self-hosted model: the title call hangs for good.
     mockHelperCall.mockImplementation(() => new Promise(() => undefined));
     chat = await createChat();
 
@@ -224,20 +277,90 @@ describe('a finished turn does no chat-title work', () => {
     const second = await withinBound(chat.beginTurn({ turnId: 'turn-2', text: 'And next week?' }), 'the next turn');
     await withinBound(drainTurnEvents(second.drainInput), "the next turn's follow-up");
 
-    expect(mockHelperCall).not.toHaveBeenCalled();
+    // The one title call was started but never awaited; the working title stands.
+    await chat.waitForHelperCalls(1);
+    expect(mockHelperCall).toHaveBeenCalledTimes(1);
+    expect(await chat.readTitle()).toBe('Plan my week');
   });
 
-  it('titles the chat from its first message, as before, and later turns keep that title', async () => {
+  it('never overwrites a title the person set by renaming while the title call was out', async () => {
+    let answerTitle: ((value: ReturnType<typeof helperAnswer>) => void) | undefined;
+    mockHelperCall.mockImplementation(
+      () =>
+        new Promise(resolve => {
+          answerTitle = resolve;
+        }),
+    );
     chat = await createChat();
+    const replaceSpy = jest.spyOn(chat.sessionStore, 'replaceSessionTitleIfCurrent');
+
+    const { drainInput } = await chat.beginTurn({
+      turnId: 'turn-1',
+      text: 'Plan a long weekend in Lisbon with good food and no early mornings',
+    });
+    await withinBound(drainTurnEvents(drainInput), "the first turn's follow-up");
+    await chat.waitForHelperCalls(1);
+    if (answerTitle === undefined) {
+      throw new Error('the title call never started');
+    }
+
+    // The person renames the chat before the title model answers.
+    await chat.sessionStore.updateSession({
+      tenant_id: TENANT_ID,
+      session_id: SESSION_ID,
+      agent: undefined,
+      title: 'Lisbon trip',
+      metadata: undefined,
+    });
+    answerTitle(helperAnswer('Lisbon itinerary'));
+
+    // Wait until the title step has tried its swap, then read the title it left.
+    const deadline = Date.now() + FOLLOW_UP_BOUND_MS;
+    while (replaceSpy.mock.calls.length === 0) {
+      if (Date.now() > deadline) {
+        throw new Error('the title step never tried to store its title');
+      }
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
+    expect(replaceSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ current_title: expect.any(String), title: 'Lisbon itinerary' }),
+    );
+    expect(await chat.readTitle()).toBe('Lisbon trip');
+  });
+
+  it('keeps the working title when the model answers with a sentence, not a title', async () => {
+    mockHelperCall.mockResolvedValue(
+      helperAnswer('This chat is about comparing three laptops for photo editing on a budget'),
+    );
+    chat = await createChat();
+    const replaceSpy = jest.spyOn(chat.sessionStore, 'replaceSessionTitleIfCurrent');
     const firstMessage = 'Help me compare three laptops for photo editing under a budget of 1500 euros';
 
-    const first = await chat.beginTurn({ turnId: 'turn-1', text: firstMessage });
-    await withinBound(drainTurnEvents(first.drainInput), "the first turn's follow-up");
-    // The first message, capped at 50 characters.
-    expect(await chat.readTitle()).toBe(firstMessage.slice(0, 50));
+    const { drainInput } = await chat.beginTurn({ turnId: 'turn-1', text: firstMessage });
+    await withinBound(drainTurnEvents(drainInput), "the first turn's follow-up");
 
-    const second = await chat.beginTurn({ turnId: 'turn-2', text: 'Which one has the best screen?' });
-    await withinBound(drainTurnEvents(second.drainInput), "the next turn's follow-up");
+    // Give the detached step its chance to finish, then check nothing was swapped.
+    await chat.waitForHelperCalls(1);
+    await new Promise(resolve => setTimeout(resolve, 300));
+    expect(mockHelperCall).toHaveBeenCalledTimes(1);
+    expect(replaceSpy).not.toHaveBeenCalled();
+    expect(await chat.readTitle()).toBe(firstMessage.slice(0, 50));
+  });
+});
+
+describe('an incognito chat never sends its first exchange to the title model', () => {
+  it('makes no title call and keeps the working title', async () => {
+    mockHelperCall.mockResolvedValue(helperAnswer('Laptop comparison'));
+    chat = await createChat({ incognito: true });
+    const firstMessage = 'Help me compare three laptops for photo editing under a budget of 1500 euros';
+
+    const { drainInput } = await chat.beginTurn({ turnId: 'turn-1', text: firstMessage });
+    await withinBound(drainTurnEvents(drainInput), "the first turn's follow-up");
+
+    // The title step starts detached when it runs at all; give it its chance,
+    // then check it never ran: no helper call, and the working title stands.
+    await new Promise(resolve => setTimeout(resolve, 300));
+    expect(mockHelperCall).not.toHaveBeenCalled();
     expect(await chat.readTitle()).toBe(firstMessage.slice(0, 50));
   });
 });

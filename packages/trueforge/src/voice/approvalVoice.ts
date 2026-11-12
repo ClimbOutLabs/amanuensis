@@ -75,6 +75,7 @@ export const CARD_FIELD_RULES: Record<keyof Tier3Card, FieldRule> = {
   calendar_event: 'shape',
   schedule: 'shape',
   persona: 'empty',
+  skill: 'empty',
   mail_new_recipients: 'empty',
   mail_draft: 'context',
   skill_network: 'empty',

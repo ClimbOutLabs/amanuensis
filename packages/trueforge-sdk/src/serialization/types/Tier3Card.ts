@@ -4,10 +4,10 @@ import type * as TrueForge from "../../api/index.js";
 import * as core from "../../core/index.js";
 import type * as serializers from "../index.js";
 import { Tier3CalendarEvent } from "./Tier3CalendarEvent.js";
-import { Tier3CardSkillNetwork } from "./Tier3CardSkillNetwork.js";
 import { Tier3Email } from "./Tier3Email.js";
 import { Tier3Persona } from "./Tier3Persona.js";
 import { Tier3Schedule } from "./Tier3Schedule.js";
+import { Tier3Skill } from "./Tier3Skill.js";
 
 export const Tier3Card: core.serialization.ObjectSchema<serializers.Tier3Card.Raw, TrueForge.Tier3Card> =
     core.serialization.object({
@@ -34,7 +34,7 @@ export const Tier3Card: core.serialization.ObjectSchema<serializers.Tier3Card.Ra
         plainWhy: core.serialization.property("plain_why", core.serialization.string().nullable()),
         recipient: core.serialization.string().nullable(),
         schedule: Tier3Schedule.optionalNullable(),
-        skillNetwork: core.serialization.property("skill_network", Tier3CardSkillNetwork.optionalNullable()),
+        skill: Tier3Skill.optionalNullable(),
         whyAskedAgain: core.serialization.property("why_asked_again", core.serialization.string().nullable()),
     });
 
@@ -57,7 +57,7 @@ export declare namespace Tier3Card {
         plain_why?: string | null;
         recipient?: string | null;
         schedule?: (Tier3Schedule.Raw | null | undefined) | null;
-        skill_network?: (Tier3CardSkillNetwork.Raw | null | undefined) | null;
+        skill?: (Tier3Skill.Raw | null | undefined) | null;
         why_asked_again?: string | null;
     }
 }
