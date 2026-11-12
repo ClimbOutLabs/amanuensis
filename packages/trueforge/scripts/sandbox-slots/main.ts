@@ -174,6 +174,8 @@ async function main(): Promise<number> {
     'command-name'?: string | undefined;
     verbose?: boolean | undefined;
     embedded?: boolean | undefined;
+    'add-python'?: string | undefined;
+    'remove-python'?: string | undefined;
   };
   try {
     ({ values } = parseArgs({
