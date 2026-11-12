@@ -267,6 +267,14 @@ function argumentsJsonForTool({
   if (name === 'usage_summary') {
     return '{}';
   }
+  // Home Assistant's Assist tools name their target, never a free text field: the `text:`
+  // directive carries the entity id (it has a dot) or the entity's plain name instead.
+  if (name.includes('GetLiveContext')) {
+    return '{}';
+  }
+  if (name.includes('Hass')) {
+    return text.includes('.') ? JSON.stringify({ entity_id: text }) : JSON.stringify({ name: text });
+  }
   if (name.endsWith('create_persona')) {
     return JSON.stringify(SCRIPTED_PERSONA);
   }

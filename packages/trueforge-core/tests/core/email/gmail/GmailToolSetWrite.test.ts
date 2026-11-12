@@ -10,6 +10,7 @@ import { classifyUnstampedToolCall } from '../../../../src/core/runtime/AgentThr
 import { message, plainDraft } from './fixtures';
 import {
   approvalProblem,
+  APPROVED,
   approvedContext,
   build,
   json,
@@ -81,10 +82,13 @@ describe('draft_email', () => {
             : undefined,
       ],
     });
-    const response = await tools.callTool({
-      name: 'draft_email',
-      arguments: { to: ['grace@example.com'], subject: 'Lease', body: 'Thursday works.' },
-    });
+    const response = await tools.callTool(
+      {
+        name: 'draft_email',
+        arguments: { to: ['grace@example.com'], subject: 'Lease', body: 'Thursday works.' },
+      },
+      APPROVED,
+    );
     expect(JSON.parse(text(response))).toMatchObject({
       draft_id: 'd7',
       message_id: 'm7',
@@ -115,10 +119,18 @@ describe('draft_email', () => {
         features: [...COMPOSE],
         routes: [route('/messages/orig', original), created],
       });
-      await tools.callTool({
-        name: 'draft_email',
-        arguments: { to: ['grace@example.com'], subject: 'anything the model chose', body: 'ok', in_reply_to: 'orig' },
-      });
+      await tools.callTool(
+        {
+          name: 'draft_email',
+          arguments: {
+            to: ['grace@example.com'],
+            subject: 'anything the model chose',
+            body: 'ok',
+            in_reply_to: 'orig',
+          },
+        },
+        APPROVED,
+      );
       const { mime, threadId } = sentDraft(google.bodies[0]);
       expect(threadId).toBe('t5');
       expect(mime).toContain('Subject: Re: Lease renewal');
@@ -137,10 +149,13 @@ describe('draft_email', () => {
         features: [...COMPOSE],
         routes: [route('/messages/orig', answering), created],
       });
-      await tools.callTool({
-        name: 'draft_email',
-        arguments: { to: ['grace@example.com'], subject: 'x', body: 'ok', in_reply_to: 'orig' },
-      });
+      await tools.callTool(
+        {
+          name: 'draft_email',
+          arguments: { to: ['grace@example.com'], subject: 'x', body: 'ok', in_reply_to: 'orig' },
+        },
+        APPROVED,
+      );
       expect(sentDraft(google.bodies[0]).mime).toContain('Subject: Re: Lease renewal\r\n');
     });
 
@@ -156,10 +171,13 @@ describe('draft_email', () => {
 
   it('refuses a subject with a line break instead of sending a header the model smuggled in', async () => {
     const { tools, google } = await build({ features: [...COMPOSE], routes: [] });
-    const response = await tools.callTool({
-      name: 'draft_email',
-      arguments: { to: ['grace@example.com'], subject: 'Hi\r\nBcc: mallory@example.com', body: 'x' },
-    });
+    const response = await tools.callTool(
+      {
+        name: 'draft_email',
+        arguments: { to: ['grace@example.com'], subject: 'Hi\r\nBcc: mallory@example.com', body: 'x' },
+      },
+      APPROVED,
+    );
     expect(text(response)).toContain('line breaks');
     expect(google.urls).toHaveLength(0);
   });
@@ -244,10 +262,13 @@ describe('update_draft', () => {
             : undefined,
       ],
     });
-    await tools.callTool({
-      name: 'update_draft',
-      arguments: { draft_id: 'd1', to: ['grace@example.com'], subject: 'Re: Lease renewal', body: 'Friday instead.' },
-    });
+    await tools.callTool(
+      {
+        name: 'update_draft',
+        arguments: { draft_id: 'd1', to: ['grace@example.com'], subject: 'Re: Lease renewal', body: 'Friday instead.' },
+      },
+      APPROVED,
+    );
     const put = sentDraft(google.bodies.at(-1));
     expect(put.threadId).toBe('t9');
     expect(put.mime).toContain('In-Reply-To: <orig@mail.example.com>');
@@ -266,7 +287,7 @@ describe('update_draft', () => {
       const args = { draft_id: 'd1', to: ['grace@example.com'], subject: 'Lease', body: 'new' };
       const info = await tools.toolCallInfo({ name: 'update_draft', arguments: args });
       expect(info.pre_dispatch_failure?.message).toContain('cannot be changed here');
-      const response = await tools.callTool({ name: 'update_draft', arguments: args });
+      const response = await tools.callTool({ name: 'update_draft', arguments: args }, APPROVED);
       expect(text(response)).toContain('cannot be changed here');
       expect(google.urls.some(entry => entry.startsWith('PUT'))).toBe(false);
     }

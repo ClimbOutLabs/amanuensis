@@ -221,6 +221,20 @@ function resultText(result: Awaited<ReturnType<typeof dispatch>>['result']): str
 }
 
 describe('create_schedule', () => {
+  it('asks every time: its card never offers the chat-wide answer, for a create or a delete', async () => {
+    const built = await setup();
+    const create = await built.tools.toolCallInfo({ name: 'create_schedule', arguments: MORNING_BRIEF });
+    expect(create).toMatchObject({ tier_reason: 'schedule_write', is_approval_required: true });
+    expect(allowsChatApproval(create)).toBe(false);
+    await dispatch({ built, name: 'create_schedule', args: MORNING_BRIEF, decision: { status: 'allow' } });
+    const remove = await built.tools.toolCallInfo({
+      name: 'delete_schedule',
+      arguments: { schedule: 'morning-brief' },
+    });
+    expect(remove).toMatchObject({ tier_reason: 'schedule_write', is_approval_required: true });
+    expect(allowsChatApproval(remove)).toBe(false);
+  });
+
   it("shows a card first, then on approval saves an active schedule that runs as the plain chat's assistant", async () => {
     const built = await setup();
     const info = await built.tools.toolCallInfo({ name: 'create_schedule', arguments: MORNING_BRIEF });
