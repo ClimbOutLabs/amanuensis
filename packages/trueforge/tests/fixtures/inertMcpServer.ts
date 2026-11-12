@@ -60,7 +60,12 @@ export const INERT_WEB_FETCH_TOOL = 'web_fetch';
 /** Opt-in (`startInertMcpServer({ mail: true })`): the Email sidecar's tool names, unannotated, answering with no mail. */
 export const INERT_MAIL_TOOLS = ['list_emails_metadata', 'get_emails_content', 'list_mailboxes', 'send_email'] as const;
 
-/** Opt-in (`startInertMcpServer({ calendar: true })`): the Calendar sidecar's tool names, the reads annotated read-only, answering with nothing. */
+/**
+ * Opt-in (`startInertMcpServer({ calendar: true })`): the Calendar sidecar's tool names, the reads
+ * annotated read-only. Every tool answers with nothing except `get_event`, which answers with the
+ * one readable, guest-free event below: a change names that event first, and an empty answer
+ * would leave it undescribable, so the change would be refused instead of asked about.
+ */
 export const INERT_CALENDAR_TOOLS = CALDAV_TOOL_NAMES;
 
 /** One event in the Calendar sidecar's `list_events` answer shape, as the rail's CalDAV read parses it. */
@@ -77,6 +82,30 @@ export interface InertCalendarEventsResult {
   events: InertCalendarEvent[];
   [key: string]: unknown;
 }
+
+/**
+ * The structured `get_event` answer, in the shape the event review reads: a title, a start, and
+ * an explicit empty guest list (a missing guest list means the list cannot be read, which is a
+ * different answer). The index signature is what makes this assignable to the MCP SDK's
+ * `structuredContent` without an assertion escape. Invented: no real calendar stands behind it.
+ */
+export interface InertCalendarEventResult {
+  event: {
+    summary: string;
+    start: { value: string; tzid: string; all_day: boolean };
+    attendees: { name?: string; email?: string }[];
+  };
+  [key: string]: unknown;
+}
+
+/** The one event the calendar fixture can read. Exported so tests can name it without copying the wording. */
+export const INERT_CALENDAR_EVENT_RESULT: InertCalendarEventResult = {
+  event: {
+    summary: 'Dentist',
+    start: { value: '2026-10-22T14:00:00+02:00', tzid: 'Europe/Berlin', all_day: false },
+    attendees: [],
+  },
+};
 
 /** Bank in `memoryProviderUrl`; the fixture answers a recall for any bank, so a URL can move between them. */
 const INERT_MEMORY_BANK = 'aman';
@@ -256,6 +285,15 @@ function memoryResult(structuredContent: MemoryToolResult) {
 
 function calendarEventsResult(structuredContent: InertCalendarEventsResult) {
   return { content: [], structuredContent, isError: false };
+}
+
+/** The `get_event` answer: the one readable event, as structured content with its JSON text beside it. */
+function calendarEventResult() {
+  return {
+    content: [{ type: 'text' as const, text: JSON.stringify(INERT_CALENDAR_EVENT_RESULT) }],
+    structuredContent: INERT_CALENDAR_EVENT_RESULT,
+    isError: false,
+  };
 }
 
 /**
@@ -501,8 +539,12 @@ function buildMcpServer({
             : {}),
         },
         () => {
-          // Once a test sets events, `list_events` answers with them in the sidecar's shape;
-          // unset, every calendar tool keeps the default empty answer.
+          // A change reads its event first: `get_event` answers with the one readable event, so a
+          // change to it asks. Once a test sets events, `list_events` answers with them in the
+          // sidecar's shape. Every other tool answers with nothing.
+          if (name === 'get_event') {
+            return calendarEventResult();
+          }
           const events = name === 'list_events' ? calendarEvents.current : undefined;
           return events === undefined ? textResult('[]') : calendarEventsResult({ events: [...events] });
         },

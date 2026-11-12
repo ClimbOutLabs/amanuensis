@@ -3,6 +3,7 @@ import {
   AmanSetupProvider,
   AmanWelcome,
   BugReportProvider,
+  ChatAnswerMarksProvider,
   ComposerDraftScopeProvider,
   DEFAULT_AGENT_SPEC_SKILLS,
   DeliveriesProvider,
@@ -53,6 +54,7 @@ import { parseAuthErrorReason, shouldShowAuthErrorScreen, stripAuthErrorSearch }
 import { BrowserLivePage } from './BrowserLivePage';
 import { isBrowserLivePath } from './browserLivePath';
 import { createBugReportApi } from './bugReportApi';
+import { createChatAnswerMarksApi } from './chatAnswerMarksApi';
 import { createChatFolderStore } from './chatFolderStore';
 import { createDeliveriesApi } from './deliveriesApi';
 import { createFirstRunGuideApi } from './firstRunGuideApi';
@@ -484,6 +486,7 @@ export function App() {
   const localAccountApi = useMemo(() => createLocalAccountApi(authAwareFetch), []);
   const personaApi = useMemo(() => createPersonaApi(authAwareFetch), []);
   const deliveriesApi = useMemo(() => createDeliveriesApi(authAwareFetch), []);
+  const chatAnswerMarksApi = useMemo(() => createChatAnswerMarksApi(authAwareFetch), []);
   const remindersApi = useMemo(() => createRemindersApi(authAwareFetch), []);
   const helpApi = useMemo(
     () => createHelpApi({ fetcher: authAwareFetch, listPersonas: () => personaApi.listPersonas() }),
@@ -573,56 +576,58 @@ export function App() {
         <SentinelApiProvider api={sentinelApi}>
           <DeliveriesProvider api={deliveriesApi}>
             <LocalAccountProvider api={localAccountApi}>
-              <ReminderListProvider api={remindersApi}>
-                <PersonalizationProvider api={personalizationApi}>
-                  <ImplementationPlanGrantProvider api={implementationPlanGrantApi}>
-                    <RepositoryWorkProvider api={repositoryWorkApi}>
-                      <BugReportProvider api={bugReportApi}>
-                        <VoiceInputProvider api={voiceInputApi}>
-                          <SpokenReplyProvider serverVoice={serverVoiceApi}>
-                            <RunCodeStatusProvider api={runCodeStatusApi}>
-                              <MemoryRecallProvider api={memoryRecallApi}>
-                                <ModelUsageProvider api={modelUsageApi}>
-                                  <PersonaProvider api={personaApi}>
-                                    <HelpProvider api={helpApi}>
-                                      <AmanSetupProvider
-                                        value={{
-                                          modelName: setup?.modelName ?? (boot.defaultAgentSpec.model.name || null),
-                                          hasChatted: setup === null ? boot.hasChatted : setup.hasChatted,
-                                          firstRunGuide,
-                                          settingsHref: '/settings',
-                                        }}
-                                      >
-                                        <ComposerDraftScopeProvider scope={draftScope}>
-                                          <SignOutConfirmProvider>
-                                            <AmanShell
-                                              defaultAgentSpec={boot.defaultAgentSpec}
-                                              openSettings={boot.openSettings}
-                                              displayName={session.displayName}
-                                              overrides={overrides}
-                                              railDeskApi={railDeskApi}
-                                              modelName={
-                                                setup?.modelName ??
-                                                (boot.defaultAgentSpec.model.name || 'Choose a model')
-                                              }
-                                              version={boot.build?.version}
-                                              buildRef={boot.build?.ref}
-                                            />
-                                          </SignOutConfirmProvider>
-                                        </ComposerDraftScopeProvider>
-                                      </AmanSetupProvider>
-                                    </HelpProvider>
-                                  </PersonaProvider>
-                                </ModelUsageProvider>
-                              </MemoryRecallProvider>
-                            </RunCodeStatusProvider>
-                          </SpokenReplyProvider>
-                        </VoiceInputProvider>
-                      </BugReportProvider>
-                    </RepositoryWorkProvider>
-                  </ImplementationPlanGrantProvider>
-                </PersonalizationProvider>
-              </ReminderListProvider>
+              <ChatAnswerMarksProvider api={chatAnswerMarksApi}>
+                <ReminderListProvider api={remindersApi}>
+                  <PersonalizationProvider api={personalizationApi}>
+                    <ImplementationPlanGrantProvider api={implementationPlanGrantApi}>
+                      <RepositoryWorkProvider api={repositoryWorkApi}>
+                        <BugReportProvider api={bugReportApi}>
+                          <VoiceInputProvider api={voiceInputApi}>
+                            <SpokenReplyProvider serverVoice={serverVoiceApi}>
+                              <RunCodeStatusProvider api={runCodeStatusApi}>
+                                <MemoryRecallProvider api={memoryRecallApi}>
+                                  <ModelUsageProvider api={modelUsageApi}>
+                                    <PersonaProvider api={personaApi}>
+                                      <HelpProvider api={helpApi}>
+                                        <AmanSetupProvider
+                                          value={{
+                                            modelName: setup?.modelName ?? (boot.defaultAgentSpec.model.name || null),
+                                            hasChatted: setup === null ? boot.hasChatted : setup.hasChatted,
+                                            firstRunGuide,
+                                            settingsHref: '/settings',
+                                          }}
+                                        >
+                                          <ComposerDraftScopeProvider scope={draftScope}>
+                                            <SignOutConfirmProvider>
+                                              <AmanShell
+                                                defaultAgentSpec={boot.defaultAgentSpec}
+                                                openSettings={boot.openSettings}
+                                                displayName={session.displayName}
+                                                overrides={overrides}
+                                                railDeskApi={railDeskApi}
+                                                modelName={
+                                                  setup?.modelName ??
+                                                  (boot.defaultAgentSpec.model.name || 'Choose a model')
+                                                }
+                                                version={boot.build?.version}
+                                                buildRef={boot.build?.ref}
+                                              />
+                                            </SignOutConfirmProvider>
+                                          </ComposerDraftScopeProvider>
+                                        </AmanSetupProvider>
+                                      </HelpProvider>
+                                    </PersonaProvider>
+                                  </ModelUsageProvider>
+                                </MemoryRecallProvider>
+                              </RunCodeStatusProvider>
+                            </SpokenReplyProvider>
+                          </VoiceInputProvider>
+                        </BugReportProvider>
+                      </RepositoryWorkProvider>
+                    </ImplementationPlanGrantProvider>
+                  </PersonalizationProvider>
+                </ReminderListProvider>
+              </ChatAnswerMarksProvider>
             </LocalAccountProvider>
           </DeliveriesProvider>
         </SentinelApiProvider>

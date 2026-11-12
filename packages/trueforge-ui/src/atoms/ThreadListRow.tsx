@@ -86,7 +86,7 @@ export function ThreadListRow({
             {unread === true ? (
               <span
                 role="img"
-                aria-label="New reminder"
+                aria-label="New in this chat"
                 data-slot="aui_thread-list-item-unread"
                 className="bg-primary-button-bg size-2 shrink-0 rounded-full"
               />

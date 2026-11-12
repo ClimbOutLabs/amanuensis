@@ -1731,6 +1731,15 @@ button.aman-runtime-rail__desk-row:hover .aman-runtime-rail__desk-row-title {
   font-weight: 600;
   line-height: 1.35;
   letter-spacing: normal;
+  overflow-wrap: anywhere;
+}
+
+/* Every text block on a card wraps anywhere, so no word or string can push the card sideways. */
+.aui-approval-card p,
+.aui-approval-card dt,
+.aui-approval-card dd,
+.aui-approval-card li {
+  overflow-wrap: anywhere;
 }
 
 /* The badge and the stub's lines: plain body text, no capitals or spacing. */
@@ -1958,6 +1967,16 @@ button.aman-runtime-rail__desk-row:hover .aman-runtime-rail__desk-row-title {
   .aui-ticket__stub {
     border-left: 0;
     border-top: 0.125rem dashed var(--border);
+  }
+
+  /* On a phone the choices stack full width in a column, in the order the card puts them. */
+  .aui-approval-card__choices {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .aui-approval-card__choices > * {
+    width: 100%;
   }
 }
 

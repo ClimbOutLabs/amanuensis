@@ -5,6 +5,7 @@ import { useAuiState } from '@assistant-ui/react';
 import { useEffect, useRef } from 'react';
 
 import { useSpokenReply } from '../components/SpokenReplyContext.js';
+import { cardHeadline } from '../sentinel/approvalCopy.js';
 import { useOptionalSentinelState, type SentinelState } from '../sentinel/SentinelStateProvider.js';
 import { useSpeakVoiceReplies } from '../utils/speechReplyPreferences.js';
 import {
@@ -41,7 +42,7 @@ function approvalLine(content: readonly SpeechContentPart[], sentinel: SentinelS
   if (callIds.length === 0) return undefined;
   for (const callId of callIds) {
     const info = sentinel?.approvalFor(callId);
-    if (info !== undefined) return approvalSpeechLine(info.card.plain_what);
+    if (info !== undefined) return approvalSpeechLine(cardHeadline(info.card));
   }
   return approvalSpeechLine('');
 }

@@ -10492,9 +10492,6 @@ Creates a provider (models included). Fails if `name` is already taken. Well-kno
 ```typescript
 await client.settings.modelProviders.create({
     manifest: {
-        auth: {
-            apiKey: "api_key"
-        },
         models: [{
                 modelId: "model_id",
                 name: "name",
@@ -10567,9 +10564,6 @@ Create or replace a provider (models included). Well-known types use `type` as `
 ```typescript
 await client.settings.modelProviders.createOrUpdate({
     manifest: {
-        auth: {
-            apiKey: "api_key"
-        },
         models: [{
                 modelId: "model_id",
                 name: "name",

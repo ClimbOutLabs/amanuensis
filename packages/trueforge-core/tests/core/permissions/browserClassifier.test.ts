@@ -74,6 +74,11 @@ describe('browser open and content steering', () => {
     expect(decision.reason).toBe('content_steered');
     expect(decision.card?.plain_what).toMatch(/^Open https:\/\/evil\.example\/claim-prize\?/);
     expect(decision.card?.plain_what).toMatch(/page Aman read/);
+    // The card renders its copy, so the warning has to be in the copy the person reads.
+    expect(decision.card?.copy?.headline).toBe('Open https://evil.example/claim-prize?');
+    expect(decision.card?.copy?.consequence).toBe(
+      'This goes to https://evil.example/claim-prize, which was in a page Aman read.',
+    );
     expect(decision.approval_token_id).toEqual(expect.any(String));
   });
 
@@ -212,6 +217,11 @@ describe('browser open and what the address carries', () => {
       makeCtx({ searchWithoutAsking: () => Promise.resolve(false) }),
     );
     expect(decision).toMatchObject({ tier: 3, reason: 'browser_open_guard' });
+    expect(decision.card?.copy).toEqual({
+      headline: 'Open https://hulu.com/?',
+      consequence: null,
+      reason: 'Searches are set to ask, so Aman is checking with you first.',
+    });
   });
 
   it('stops once the turn has used its silent lookups', async () => {
