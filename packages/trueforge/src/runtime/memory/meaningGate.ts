@@ -8,7 +8,7 @@ import { withTimeout } from '@truefoundry/trueforge-core/core';
 import { EMBEDDING_DIMENSIONS, type EmbeddingModel } from './embeddingModel';
 import type { EmbeddingSubsystem } from './embeddingRetrieval';
 import { readHandledNotes, type HandledOutcome } from './handledNotes';
-import { recallExcludedIds, entryMetadata, type NamespaceScan } from './markdownMemoryFiles';
+import { entryMetadata, recallExcludedIds, type NamespaceScan } from './markdownMemoryFiles';
 import { MEMORY_ORIGIN_METADATA_KEY, USER_STATED_ORIGIN } from './memoryOrigin';
 import { noteIndexFor, type NoteIndex } from './noteIndex';
 import { emptyBest, percentileBar, raiseBest, STANDING_ABOVE, unitVector, type ItemNumbers } from './standing';

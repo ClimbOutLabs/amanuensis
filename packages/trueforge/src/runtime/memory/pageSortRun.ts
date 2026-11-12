@@ -7,7 +7,7 @@ import type { Logger } from 'winston';
 
 import type { WrittenEntry } from './hindsightClient';
 import { localDay } from './localDay';
-import { entryRecallText, entryMetadata } from './markdownMemoryFiles';
+import { entryMetadata, entryRecallText } from './markdownMemoryFiles';
 import type { MemoryClient } from './memoryClient';
 import type { PageListing } from './memoryPages';
 import type { SummarizeTurnContext } from './memoryRetain';
