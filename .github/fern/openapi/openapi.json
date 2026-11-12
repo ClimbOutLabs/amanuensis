@@ -10843,7 +10843,7 @@
             "$ref": "#/components/schemas/SessionAgent"
           },
           "approval_grants": {
-            "description": "Server-derived grants created by \"Always allow this here\" for one kind of action in this chat.",
+            "description": "Server-derived grants created by \"Always allow in this chat\" for one kind of action in this chat.",
             "items": {
               "type": "string"
             },
