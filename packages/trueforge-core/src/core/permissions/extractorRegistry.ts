@@ -181,6 +181,19 @@ function joinOrNull(values: string[]): string | null {
   return values.length === 0 ? null : values.join(', ');
 }
 
+/** The host of an http(s) address, or null when the text is not one. */
+function webSiteName(address: string | null): string | null {
+  if (address === null) {
+    return null;
+  }
+  try {
+    const url = new URL(address);
+    return (url.protocol === 'https:' || url.protocol === 'http:') && url.hostname !== '' ? url.hostname : null;
+  } catch {
+    return null;
+  }
+}
+
 function firstOrNull(values: string[]): string | null {
   const first = values[0];
   return first ?? null;
@@ -668,7 +681,25 @@ const CONNECTOR_FAMILIES: ConnectorFamily[] = [
         'tavily_extract',
         'extract_url',
       ),
-    describe: ({ where }) => `Fetch a web page${where}?`,
+    describe: ({ fields, params }) => {
+      // The site, never the tool or the connector; the full address stays on the card's destination row.
+      // Some fetch tools carry the pages in a `urls` list; the headline counts every site in it, not just the first.
+      const addresses = [
+        ...new Set([...(fields.destination === null ? [] : [fields.destination]), ...stringValues(params, ['urls'])]),
+      ];
+      const sites = [...new Set(addresses.map(webSiteName).filter(site => site !== null))];
+      const [first] = sites;
+      if (first === undefined) {
+        return addresses.length > 1 ? 'Fetch web pages?' : 'Fetch a web page?';
+      }
+      const others = sites.length - 1;
+      if (others > 0) {
+        return `Fetch pages from ${escapeDisplayText(first)} and ${String(others)} other ${others === 1 ? 'site' : 'sites'}?`;
+      }
+      return addresses.length > 1
+        ? `Fetch pages from ${escapeDisplayText(first)}?`
+        : `Fetch a web page from ${escapeDisplayText(first)}?`;
+    },
   },
   {
     match: words => hasPhrase(words, 'search'),

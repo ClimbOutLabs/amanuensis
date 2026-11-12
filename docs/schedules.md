@@ -37,7 +37,7 @@ When it is due, the reminder shows in the bell with the reason you got it. It al
 
 To mark a reminder urgent, say so when you ask, such as "Remind me at 5 pm to call the pharmacy, it's urgent". An urgent reminder can call you once phone calls are set up and you allow it.
 
-Reminders do not show on the Schedules page. To see or cancel them, ask in a chat, such as "What reminders do I have?". Before Aman cancels one, a card shows the reminder and waits for your OK. A cancelled reminder is gone for good.
+Reminders do not show on the Schedules page. To see them all, click Reminders in the left panel. It lists what is coming up and what has already reminded you, with the persona that set each one. Click a reminder to open the chat you set it in; a reminder set outside a chat, or whose chat was deleted, has no link. The list only shows reminders. To change or cancel one, ask in a chat, such as "What reminders do I have?". Before Aman cancels one, a card shows the reminder and waits for your OK. A cancelled reminder is gone for good.
 
 ## Scheduled runs do not interrupt you
 

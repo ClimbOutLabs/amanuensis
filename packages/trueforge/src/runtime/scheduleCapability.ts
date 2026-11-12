@@ -66,7 +66,7 @@ export const CreateScheduleToolSchema = z
     morning_brief: z
       .boolean()
       .optional()
-      .describe('True for a morning brief. The brief instructions are filled in for you, so leave task out.'),
+      .describe('True for a morning brief. Leave task out: it is filled in for you.'),
     repeat: z.enum(['daily', 'weekdays', 'weekly']).optional().describe('weekly needs days.'),
     days: z.array(WeekdaySchema).optional(),
     time: z.string().optional().describe('24-hour local time, like 08:00.'),
@@ -360,7 +360,7 @@ export class ScheduleToolSet extends LocalToolMCP {
       defineTool({
         name: CREATE_SCHEDULE_TOOL_NAME,
         description:
-          "The only way to make a recurring task. A schedule repeats a task for the person. It is not a calendar event. For a plain reminder use set_reminder instead. Never say it is scheduled unless this succeeded. Ask first if how often or when is unclear. Times use the user's time zone. The user approves a card first.",
+          "The only way to make a recurring task, not a calendar event. For a plain reminder use set_reminder. Never say it is scheduled unless this succeeded. Ask first if how often or when is unclear. Times use the user's time zone. Morning brief: set morning_brief, not task. The user approves a card first.",
         schema: CreateScheduleToolSchema,
         annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
         handler: (input, approval) => this.#create({ input, approval }),

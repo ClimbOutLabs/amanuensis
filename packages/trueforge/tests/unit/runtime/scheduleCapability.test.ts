@@ -520,7 +520,7 @@ describe('create_schedule', () => {
     const built = await setup();
     const { result } = await built.tools.listTools();
     const create = result.tools.find(tool => tool.name === 'create_schedule');
-    expect(create?.description).toContain('A schedule repeats a task for the person. It is not a calendar event.');
+    expect(create?.description).toContain('not a calendar event');
   });
 
   it('still reports other unknown details as a fixable error', async () => {
