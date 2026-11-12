@@ -161,6 +161,7 @@ import {
   HeldActionRefusedError,
   heldActionsNote,
   holdApprovalCalls,
+  isBrowserEdit,
   type NotSavedReason,
 } from '../permissions/heldActions';
 import type { Tier, Tier3Card } from '../permissions/tier';
@@ -209,6 +210,7 @@ import {
   CALENDAR_PASSWORD_PROMPT,
   CHECK_BEFORE_ASKING_PROMPT,
   createSourceDiscoveryContract,
+  createSourceOffPrompt,
   DEMO_EMAIL_PROMPT,
   EMAIL_PASSWORD_PROMPT,
   EMPTY_ANSWER_NUDGE_MESSAGE,
@@ -1606,7 +1608,7 @@ export async function classifyUnstampedToolCall(input: {
       },
       maps_hosts: info.maps_hosts,
       document_scope: info.document_scope,
-      browser_click: info.browser_click,
+      browser_element: info.browser_element,
     },
   });
   return { ...info, ...stampSentinelDecision({ decision }) };
@@ -2238,6 +2240,15 @@ export class AgentThread {
         capabilities.addSection('sandbox-off', SANDBOX_OFF_PROMPT);
       } else {
         capabilities.addSection('no-sandbox', NO_SANDBOX_PROMPT);
+      }
+    }
+    if (!this.definition.readOnly) {
+      const sourceOff = createSourceOffPrompt({
+        attachedConnectorNames: (this.definition.toolSets ?? []).map(toolSet => toolSet.name),
+        setUpConnectorNames: this.definition.setUpConnectorNames,
+      });
+      if (sourceOff !== undefined) {
+        capabilities.addSection('sources-off', sourceOff);
       }
     }
     this.toolBundles?.buildInstruction(capabilities);
@@ -4442,6 +4453,7 @@ export class AgentThread {
       const held = holdApprovalCalls({
         message: assistantMessage,
         alreadyHeld: findHeldToolCalls(this.context).length,
+        browserEditWaiting: findUndecidedHeldToolCalls(this.context).some(call => isBrowserEdit(call.tool_info)),
         isSubAgent: this.parent !== undefined,
       });
       assistantMessage = held.message;
