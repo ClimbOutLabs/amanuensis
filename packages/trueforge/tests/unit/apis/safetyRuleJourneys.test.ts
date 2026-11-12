@@ -9,7 +9,7 @@ import configuration from '../../../src/config';
 import { TurnStreamingEventSchema } from '../../../src/schemas/events';
 import { GetTurnResponseSchema } from '../../../src/schemas/turn';
 import { MODEL_FQN, startApprovalTestServer, type ApprovalTestServer } from '../../fixtures/approvalTestServer';
-import { INERT_SERVER_NAME, INERT_WRITE_TOOL } from '../../fixtures/inertMcpServer';
+import { INERT_GET_PAGE_TOOL, INERT_SERVER_NAME, INERT_WRITE_TOOL } from '../../fixtures/inertMcpServer';
 import {
   RUN_DIRECTIVE_PREFIX,
   SCRIPTED_EVENT,
@@ -446,6 +446,78 @@ describe("an event on the person's own calendar", () => {
       const refused = await sendTurn({ server, chatId, input: answer({ card: withGuest, scope: 'chat' }) });
       expect(refused.status).toBe(422);
       expect(await savedEvents()).toBe(before + 1);
+    },
+    TURN_TIMEOUT_MS,
+  );
+});
+
+describe('a connector read the person always allows', () => {
+  let server: ApprovalTestServer;
+  const PAGE_ID = '0f3a9c2e7b1d4e6f8a5b3c2d1e0f9a8b';
+  const OTHER_ID = '7c1e5a9d3b2f4086a1c3e5d7f9b0a2c4';
+
+  /** Asks for one page in a new chat, with these arguments, and returns the cards that came up. */
+  async function readPage(toolArguments: Record<string, string>) {
+    const chatId = await createChat(server);
+    server.model.next({ toolArguments });
+    return { chatId, cards: cards(await runTurn({ server, chatId, input: ask(INERT_GET_PAGE_TOOL) })) };
+  }
+
+  beforeAll(async () => {
+    server = await startApprovalTestServer({ inertPageById: true });
+    const first = await readPage({ page_id: 'welcome' });
+    const [card] = first.cards;
+    if (card === undefined) {
+      throw new Error('a new connector tool did not ask before its first run');
+    }
+    expect(card.can_always_allow).toBe(true);
+    const input: TurnInputItem[] = [
+      {
+        type: 'user.tool_approval',
+        thread_id: card.thread_id,
+        tool_call_id: card.id,
+        approval: { status: 'allow', scope: 'always' },
+      },
+    ];
+    await runTurn({ server, chatId: first.chatId, input });
+  }, TURN_TIMEOUT_MS);
+
+  afterAll(async () => {
+    await server.close();
+  });
+
+  it(
+    'runs without a card when it looks a page up by one short id',
+    async () => {
+      const before = server.mcp.getPageInvocations();
+      expect((await readPage({ page_id: PAGE_ID })).cards).toEqual([]);
+      expect(server.mcp.getPageInvocations()).toBe(before + 1);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'asks first when the id is longer than one short id',
+    async () => {
+      const before = server.mcp.getPageInvocations();
+      const held = (await readPage({ page_id: `${PAGE_ID}${PAGE_ID}` })).cards;
+      expect(held.map(card => card.tier3_card?.plain_what)).toEqual([
+        expect.stringContaining(`Look this up on ${INERT_SERVER_NAME}?`),
+      ]);
+      expect(server.mcp.getPageInvocations()).toBe(before);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'asks first when a second id field carries a short id too',
+    async () => {
+      const before = server.mcp.getPageInvocations();
+      const held = (await readPage({ page_id: PAGE_ID, parent_id: OTHER_ID })).cards;
+      expect(held.map(card => card.tier3_card?.plain_what)).toEqual([
+        expect.stringContaining(`Look this up on ${INERT_SERVER_NAME}?`),
+      ]);
+      expect(server.mcp.getPageInvocations()).toBe(before);
     },
     TURN_TIMEOUT_MS,
   );
