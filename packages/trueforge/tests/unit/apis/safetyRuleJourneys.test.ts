@@ -122,7 +122,13 @@ function onlyCard(turn: Turn) {
   return card;
 }
 
-function answer({ card, scope }: { card: { thread_id: string; id: string }; scope: 'once' | 'chat' }): TurnInputItem[] {
+function answer({
+  card,
+  scope,
+}: {
+  card: { thread_id: string; id: string };
+  scope: 'once' | 'chat' | 'always';
+}): TurnInputItem[] {
   return [
     {
       type: 'user.tool_approval',
@@ -503,12 +509,16 @@ describe("an event on the person's own calendar", () => {
   });
 
   it(
-    'with no guests offers "Always allow this here", and the answer covers the next one in that chat only',
+    'with no guests offers "Always allow in this chat" and never "Always allow everywhere", and the answer covers the next one in that chat only',
     async () => {
       const before = await savedEvents();
       const chatId = await createChat(server);
       const card = onlyCard(await runTurn({ server, chatId, input: ask('create_event') }));
       expect(card.can_chat_allow).toBe(true);
+      expect(card.can_always_allow).toBe(false);
+      const everywhere = await sendTurn({ server, chatId, input: answer({ card, scope: 'always' }) });
+      expect(everywhere.status).toBe(422);
+      expect(await savedEvents()).toBe(before);
 
       await runTurn({ server, chatId, input: answer({ card, scope: 'chat' }) });
       expect(cards(await runTurn({ server, chatId, input: ask('create_event') }))).toEqual([]);
