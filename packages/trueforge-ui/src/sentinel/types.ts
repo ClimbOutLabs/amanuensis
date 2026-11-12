@@ -13,6 +13,7 @@
  * UI rule for consumers: never infer a tier. Tier-specific UI renders only when the
  * server sent an explicit `tier`.
  */
+import { toolInvocationKey, toolInvocationRawId } from '@truefoundry/assistant-ui-runtime';
 import { changeRequestText } from '@truefoundry/trueforge-core/core/permissions/changeRequest';
 import { savedSearchHold, withHoldSay } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { readStoredMailbox, type Tier3Mailbox } from '@truefoundry/trueforge-core/core/permissions/tierMailbox';
@@ -211,6 +212,8 @@ export type SentinelApprovalInfo = {
   eventId: string | null;
   /** Thread that owns the call; a sub-agent's calls carry its own thread id. */
   threadId: string | null;
+  /** The model message event that requested the call; tells apart two calls that reuse one call id. */
+  sourceEventId?: string | undefined;
   /** False when the server refuses chat scope for this call; absent from servers that do not say. */
   chatAllowOffered?: boolean | undefined;
   /** True when the server lets the owner always allow this tool; the server refuses it for other tools. */
@@ -222,6 +225,31 @@ export type SentinelApprovalInfo = {
   /** Present only for an action a scheduled run could not save for the owner, and why. */
   notSaved?: NotSavedReason | undefined;
 };
+
+/**
+ * The key a card is filed under: the same key the runtime gives the chat part, so a call id the model reuses in a
+ * later message never lands on an earlier call's card. A card without its source event is filed by its call id.
+ */
+export function approvalKey(info: Pick<SentinelApprovalInfo, 'toolCallId' | 'sourceEventId'>): string {
+  return info.sourceEventId === undefined
+    ? info.toolCallId
+    : toolInvocationKey({ sourceEventId: info.sourceEventId, toolCallId: info.toolCallId });
+}
+
+/**
+ * The entry for a chat part, from a map filed by `approvalKey`. A part id that carries its source event matches
+ * exactly, or falls back to an entry filed by call id alone. A bare call id (the part's event is not known) takes
+ * the newest entry for that call id, since the newest call is the one a part without an event can be.
+ */
+export function entryForPart<T>(entries: ReadonlyMap<string, T>, partToolCallId: string): T | undefined {
+  const exact = entries.get(partToolCallId);
+  if (exact !== undefined) return exact;
+  const rawId = toolInvocationRawId(partToolCallId);
+  if (rawId !== partToolCallId) return entries.get(rawId);
+  let newest: T | undefined;
+  for (const [key, value] of entries) if (toolInvocationRawId(key) === rawId) newest = value;
+  return newest;
+}
 
 /** Why a scheduled run could not save an action that needed the owner's OK. */
 export type NotSavedReason = 'too_many' | 'helper_agent';
@@ -365,9 +393,9 @@ export type SentinelApi = {
 /** Durable per-tool-call Sentinel state for one session. */
 export type SentinelSessionContext = {
   approvals: SentinelApprovalInfo[];
-  /** Answers already given, by tool call id. Absent when the host reads none. */
+  /** Answers already given, by the key of the card they answered (`approvalKey`). Absent when the host reads none. */
   answers?: Record<string, ApprovalAnswer> | undefined;
-  /** The words the owner typed with a "Change it" answer, by tool call id. Absent when the host reads none. */
+  /** The words the owner typed with a "Change it" answer, by card key (`approvalKey`). Absent when the host reads none. */
   changeRequests?: Record<string, string> | undefined;
 };
 
@@ -686,12 +714,14 @@ function parseApprovalInfo(
   const notSaved = parseNotSaved(ref);
   const chatAllowOffered = ref.can_chat_allow ?? ref.canChatAllow;
   const alwaysAllowOffered = ref.can_always_allow ?? ref.canAlwaysAllow;
+  const sourceEventId = optionalString(ref, 'source_event_id') ?? optionalString(ref, 'sourceEventId');
   const alwaysAllowCovers = ref.always_allow_covers ?? ref.alwaysAllowCovers;
   return {
     toolCallId,
     tier,
     card,
     ...origin,
+    ...(sourceEventId === undefined ? {} : { sourceEventId }),
     ...(typeof chatAllowOffered === 'boolean' ? { chatAllowOffered } : {}),
     ...(typeof alwaysAllowOffered === 'boolean' ? { alwaysAllowOffered } : {}),
     ...(alwaysAllowCovers === 'maps' ? { alwaysAllowCovers } : {}),
@@ -758,15 +788,52 @@ function changeRequestsFromEvent(event: unknown): [string, string][] {
   return requests;
 }
 
+/**
+ * The call ids a model message asked for, with that message's event id: the same source event id the runtime
+ * gives the chat part of each call.
+ */
+function toolCallsAskedBy(event: unknown): { eventId: string; toolCallIds: string[] } | undefined {
+  if (!isRecord(event) || event.type !== 'model.message') return undefined;
+  const eventId = optionalString(event, 'id');
+  const calls = event.tool_calls ?? event.toolCalls;
+  if (eventId === undefined || !Array.isArray(calls)) return undefined;
+  const toolCallIds = calls.filter(isRecord).flatMap(call => {
+    const id = optionalString(call, 'id');
+    return id === undefined ? [] : [id];
+  });
+  return { eventId, toolCallIds };
+}
+
 /** Folds raw session events into per-tool-call Sentinel state (later events win). */
 export function extractSentinelSessionContext(events: unknown[]): SentinelSessionContext {
   const approvals = new Map<string, SentinelApprovalInfo>();
   const answers: Record<string, ApprovalAnswer> = {};
   const changeRequests: Record<string, string> = {};
+  // The model message that last asked for each call id. A card that does not name its source event takes this
+  // one, so every card and every answer is filed under the full key of the call it belongs to, and a later call
+  // that reuses the id never matches it.
+  const askedBy = new Map<string, string>();
+  // An answer names only the call id. It answers the newest call for that id asked before it, so it is filed
+  // under that call's key and never marks a later call that reuses the id as answered.
+  const latestKey = new Map<string, string>();
+  const keyFor = (toolCallId: string) => latestKey.get(toolCallId) ?? toolCallId;
   for (const event of events) {
-    for (const approval of extractSentinelFromEvent(event)) approvals.set(approval.toolCallId, approval);
-    for (const [toolCallId, answer] of answersFromEvent(event)) answers[toolCallId] = answer;
-    for (const [toolCallId, words] of changeRequestsFromEvent(event)) changeRequests[toolCallId] = words;
+    const asked = toolCallsAskedBy(event);
+    if (asked !== undefined) {
+      for (const toolCallId of asked.toolCallIds) {
+        askedBy.set(toolCallId, asked.eventId);
+        latestKey.set(toolCallId, toolInvocationKey({ sourceEventId: asked.eventId, toolCallId }));
+      }
+    }
+    for (const parsed of extractSentinelFromEvent(event)) {
+      const sourceEventId = parsed.sourceEventId ?? askedBy.get(parsed.toolCallId);
+      const approval = sourceEventId === undefined ? parsed : { ...parsed, sourceEventId };
+      const key = approvalKey(approval);
+      approvals.set(key, approval);
+      latestKey.set(approval.toolCallId, key);
+    }
+    for (const [toolCallId, answer] of answersFromEvent(event)) answers[keyFor(toolCallId)] = answer;
+    for (const [toolCallId, words] of changeRequestsFromEvent(event)) changeRequests[keyFor(toolCallId)] = words;
   }
   return { approvals: [...approvals.values()], answers, changeRequests };
 }
