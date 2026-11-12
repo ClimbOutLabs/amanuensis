@@ -267,6 +267,64 @@ describe('an email address the person never gave', () => {
   );
 });
 
+describe('something Aman read that the person asks it to save', () => {
+  let server: ApprovalTestServer;
+  const ADDRESS = 'lexie.marsh@portland.example';
+
+  beforeAll(async () => {
+    server = await startApprovalTestServer();
+    server.setEvalMode(true);
+  });
+
+  afterAll(async () => {
+    await server.close();
+  });
+
+  /** The saved page for Lexie, once it is on disk. */
+  async function lexiePage(): Promise<string | undefined> {
+    const files = await readdir(configuration.MEMORY_MARKDOWN_DIR, { recursive: true });
+    const file = files.find(name => name.endsWith(join('people', 'lexie.md')));
+    return file === undefined ? undefined : readFile(join(configuration.MEMORY_MARKDOWN_DIR, file), 'utf8');
+  }
+
+  it(
+    'is saved on the page at once as read content, and a later chat that sends to its address says the address was read',
+    async () => {
+      const chatId = await createChat(server);
+      server.model.next({ reply: `Lexie moved to Portland. Her new address is ${ADDRESS}.` });
+      await runTurn({ server, chatId, input: [{ type: 'user.message', content: 'What did Lexie write?' }] });
+
+      server.model.next({
+        toolArguments: { about: 'Lexie', text: `Moved to Portland. New address is ${ADDRESS}.`, kind: 'person' },
+      });
+      const saved = await runTurn({
+        server,
+        chatId,
+        input: [{ type: 'user.message', content: `${RUN_DIRECTIVE_PREFIX}remember_fact Save that.` }],
+      });
+      expect(cards(saved)).toEqual([]);
+      const page = await lexiePage();
+      expect(page).toMatch(/- Moved to Portland\. New address is \S+ <!-- fact: id=\S+ src=read_content since=\S+ -->/);
+      expect(page).not.toContain('you_said');
+
+      const laterChat = await createChat(server);
+      server.model.next({ toolArguments: { to: [ADDRESS], subject: 'Hello', body: 'Hi Lexie, how is Portland?' } });
+      const card = onlyCard(
+        await runTurn({
+          server,
+          chatId: laterChat,
+          input: [{ type: 'user.message', content: `${RUN_DIRECTIVE_PREFIX}draft_email to Lexie please` }],
+        }),
+      );
+      expect(card.tier3_card?.plain_what).toContain(
+        `This goes to ${ADDRESS}, whose address Aman read earlier and saved to memory.`,
+      );
+      expect(card.can_chat_allow).toBe(false);
+    },
+    TURN_TIMEOUT_MS,
+  );
+});
+
 describe('saving a mail draft', () => {
   let server: ApprovalTestServer;
 

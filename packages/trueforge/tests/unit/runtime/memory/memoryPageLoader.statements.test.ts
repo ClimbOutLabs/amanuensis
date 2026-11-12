@@ -89,6 +89,32 @@ describe('statements found by meaning', () => {
     expect(page?.holdsOutsideText).toBe(true);
   });
 
+  it('puts the header of a page whose name is not the persons own on the read side, and keeps their own name on theirs', async () => {
+    const vaultDir = await makeVault();
+    await writeFiller(vaultDir);
+    await writeStatementPage({
+      vaultDir,
+      slug: 'harbour-dental',
+      title: 'Harbour Dental',
+      sections: { Now: ['- Does topic2 checks. <!-- fact: id=f_30 src=read_content since=2026-10-01 -->'] },
+    });
+    await writeStatementPage({
+      vaultDir,
+      slug: 'sam',
+      title: 'Sam',
+      sections: { Now: [ownBullet({ text: 'Fixes topic2 pipes.', id: 'f_20' })] },
+    });
+
+    const { pages } = await load({ vaultDir });
+    const read = pages.find(page => page.text.includes('Harbour Dental'));
+    const own = pages.find(page => page.text.includes('Sam'));
+
+    expect(read?.readLines).toContain('[page: Harbour Dental — person, name not confirmed by you]');
+    expect(read?.ownLines).toEqual([]);
+    expect(own?.ownLines).toContain('[page: Sam — person]');
+    expect(own?.readLines).toEqual([]);
+  });
+
   it('does not repeat statements of a page shown whole', async () => {
     const vaultDir = await makeVault();
     await writeFiller(vaultDir);

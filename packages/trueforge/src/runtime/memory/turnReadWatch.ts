@@ -1,4 +1,4 @@
-import { turnReadOutsideText, type ContextMessage } from '@truefoundry/trueforge-core/core';
+import { personTypedText, turnReadOutsideText, type ContextMessage } from '@truefoundry/trueforge-core/core';
 
 /** Why the page tools must not write this turn. */
 export type TurnReadReason = 'read_outside_text' | 'memory_holds_outside_text';
@@ -14,11 +14,18 @@ export class TurnReadWatch {
   #seen = false;
   #read = true;
   #blockHoldsOutside = false;
+  #personText = '';
 
   observe(context: readonly ContextMessage[]): void {
     const read = turnReadOutsideText(context);
     this.#read = this.#seen ? this.#read || read : read;
     this.#seen = true;
+    this.#personText = personTypedText(context);
+  }
+
+  /** What the person typed in the message this turn answers; empty until the first look at the context. */
+  get personText(): string {
+    return this.#personText;
   }
 
   noteBlock({ holdsOutsideText }: { holdsOutsideText: boolean }): void {

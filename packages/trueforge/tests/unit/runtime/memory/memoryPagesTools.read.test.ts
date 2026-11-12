@@ -1,7 +1,7 @@
 import { createSentinelHostContext, defaultSentinelServices, execFileRunner } from '@truefoundry/trueforge-core/core';
 import { isCallToolResponseResult } from '@truefoundry/trueforge-core/core/mcp/IMCPServer';
 import { NOOP_AGENT_TRACING } from '@truefoundry/trueforge-core/core/tracing/NoopAgentTracing';
-import { mkdtemp, rm, stat, utimes } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createLogger } from 'winston';
@@ -54,6 +54,7 @@ function build({
     keepsNothing,
     maxPageTokens,
     watch,
+    personName: undefined,
   });
   return { tools, watch };
 }
@@ -362,7 +363,7 @@ describe('read_page', () => {
     expect(saved.text).toContain('"saved":true');
   });
 
-  it('sets the watch for a page that holds outside text, and a later remember call is refused with the usual message', async () => {
+  it('sets the watch for a page that holds outside text, and a later call to forget their own line is refused with the usual message', async () => {
     const { tools, watch } = build();
     await writePageFile({
       vaultDir,
@@ -372,10 +373,10 @@ describe('read_page', () => {
     });
     await call(tools, 'read_page', { about: 'Wendy' });
     expect(watch.reason).toBe('memory_holds_outside_text');
-    const refused = await call(tools, 'remember_fact', { about: 'Wendy', text: 'Likes tulips.' });
+    const refused = await call(tools, 'forget_fact', { about: 'Wendy', text: 'Plays tennis.' });
     expect(refused.isError).toBe(true);
     expect(refused.text).toContain('the memory shown with this message holds text that came from mail');
-    await expect(stat(path.join(vaultDir, VAULT_HISTORY_DIR))).rejects.toThrow();
+    expect(await readFile(pagePath({ vaultDir, kind: 'person', slug: 'wendy' }), 'utf8')).toContain(OWN_LINE);
   });
 
   it('shows nothing and leaves the turn alone when the page is too long', async () => {

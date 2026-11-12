@@ -361,14 +361,19 @@ function renderPageLines(input: {
   if (front.kind === 'matter') {
     flags.push(front.status);
   }
-  if (!(input.nameIsOwn ?? pageNameIsOwn(page))) {
+  const nameIsOwn = input.nameIsOwn ?? pageNameIsOwn(page);
+  if (!nameIsOwn) {
     flags.push(NAME_NOT_CONFIRMED_FLAG);
   }
   const title = singleLine(input.title);
   const names = front.aliases.map(singleLine).filter(alias => alias !== '' && alias !== title);
   const header = `${PAGE_HEADER_START}${title} — ${flags.join(', ')}${names.length > 0 ? `; also called: ${names.join(', ')}` : ''}]`;
   const summary = page.preamble.map(pageSafeLine).filter(line => line !== '' && !line.startsWith('# '));
-  const lines: RenderedLine[] = [header, ...summary].map(text => ({ text, side: 'own' }));
+  // A name the person did not give was chosen from something read, so its header is read content too.
+  const lines: RenderedLine[] = [
+    { text: header, side: nameIsOwn ? 'own' : 'read' },
+    ...summary.map((text): RenderedLine => ({ text, side: 'own' })),
+  ];
   const demoted = renderLines({
     lines: page.sections.flatMap(section =>
       section.name === 'Unconfirmed'

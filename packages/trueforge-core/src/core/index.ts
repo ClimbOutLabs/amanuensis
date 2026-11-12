@@ -455,6 +455,7 @@ export {
   callResultSource,
   callReturnsOutsideContent,
   contextHasOutsideToolResult,
+  personTypedText,
   turnReadOutsideText,
 } from './capabilities/builtins/ChatProvenance';
 export type { ToolResultSource } from './capabilities/builtins/ChatProvenance';

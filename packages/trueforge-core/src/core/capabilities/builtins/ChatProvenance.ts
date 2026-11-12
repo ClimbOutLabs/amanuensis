@@ -130,6 +130,21 @@ export function turnReadOutsideText(context: readonly ContextMessage[]): boolean
   return contextHasOutsideToolResult(turn) || turn.some(carriesOutsideInput) || turn.some(isHostSummary);
 }
 
+/**
+ * What the person typed in their latest message, without file text and host notes. Empty when their message
+ * cannot be found.
+ */
+export function personTypedText(context: readonly ContextMessage[]): string {
+  const messages = context.filter(isLLMContextMessage);
+  const message = messages[personMessageIndex(messages)];
+  if (message?.role !== 'user') {
+    return '';
+  }
+  return userTexts(message.content)
+    .filter(text => !isHostWrappedText(text))
+    .join('\n');
+}
+
 /** Each text of a user message, so the person's own words are told apart from file text and host notes. */
 function userTexts(content: LLMUserMessage['content']): string[] {
   if (typeof content === 'string') {

@@ -226,8 +226,9 @@ Markdown memory backend only. Hindsight does not use them.
 Pages can be written by hand, and in a chat Aman can add, change and forget single facts with three
 tools, and look pages up with two more (see [Writing pages](#writing-pages)). Every change Aman makes is a commit in a history that sits
 beside the pages, so a page can always be put back. This reverses the earlier rule that no memory-write
-tool is exposed to the model. It is safe because of the taint rule: the tools refuse once the turn has
-read anything from outside the chat, so only the person's own words in the current message can reach a page.
+tool is exposed to the model. It is safe because of two rules: a line counts as the person's own only when
+it is made of words they typed in the current message, and every other line is marked as read content and can
+never replace or remove a line of their own.
 
 ### Files in a vault
 
@@ -527,27 +528,42 @@ matter) are refused with a plain question for the model to put to the person.
 it the call is refused and the model asks the person. Aman never guesses the kind from the name. An
 existing page keeps its own kind.
 
-**Which section.** A new fact goes in `Now` as `src=you_said` with `since` set to today in the person's
-time zone. It goes under "How you write to them" only when `about_writing` is true, which the instruction
+**Whose words.** A fact is the person's own when `isPersonsOwnStatement` finds it in what they typed in the
+message the turn answers (`personTypedText`; text the host wrapped around the message does not count, text
+they pasted does). Every link, mail address and run of digits must be there, every name as the same word,
+in each clause most content words, and at most two content words in all may be missing. A page's name is
+theirs when a line of their own already stands under it or when it passes the same test now; under any other
+name the line is not theirs, so their words never confirm a name they did not give. A fact that fails is still saved when the person asked for it, as `src=read_content`: it loads
+and recalls as read content, is never an instruction and never a "How you write to them" line. A page made
+for such a fact has a name of at most 60 characters with no link or mail address, and one reply makes at
+most three of them. Its name is shown as not confirmed. A turn with no typed message saves nothing.
+
+**Which section.** A new fact goes in `Now` with `since` set to today in the person's time zone, as
+`src=you_said` or `src=read_content`. The person's own words are added as a new line even when a read line
+already says the same; a read line is never upgraded. It goes under "How you write to them" only when `about_writing` is true, which the instruction
 defines as how the person likes to write to this contact: tone, length, greeting, sign-off, language. A
 matter has no such section, so that call is refused. A fact that is already on the page (ignoring case,
 accents and spacing) is not added twice.
 
 **Update and forget.** The old line is found by its text among the page's current facts. A fact already under
 `Earlier` is not a target. A missing or repeated line is refused and nothing changes. `update_fact` moves the
-old line to `Earlier` with `until` set to today and adds the new text as a new `you_said` line in the old
-line's section (a line that was unconfirmed goes to `Now`). `forget_fact` moves the line to `Earlier` with
-`until` set to today. Nothing is ever deleted, so the old text and its id stay on the page.
+old line to `Earlier` with `until` set to today and adds the new text as a new line in the old line's
+section (a line that was unconfirmed goes to `Now`). Only words the person typed replace a line of their
+own: when the new text is not theirs, their line stays and the new text is added beside it as read content.
+`forget_fact` moves the line to `Earlier` with `until` set to today. Nothing is ever deleted, so the old
+text and its id stay on the page.
 
-**Reading pages.** Two more tools only read, from the same vault and with the same lookup. They are offered in the same chats as the writing tools, except that a private chat gets neither, so no call has to be refused. `list_pages({kind?, search?})` answers with `pages`, each `{kind, title, summary?}`, the most recently changed first (by file time), at most 50 a call; past that it adds `left_out` and says `search` narrows the list. `search` is matched with the alias index (`matchAliases`), so a page is found by its title or another name. The answer holds titles and summary lines only, never a line that is not the person's own, a path or a slug. `read_page({about, kind?})` finds the page with the writing tools' lookup. Two matches give a plain answer naming them so the model can ask. One match is shown by `renderPageForModel` and nothing else, so the person's "How you write to them" lines are not shown (they reach the model only through the closed drafting section) and lines that are not confirmed carry the same labels as in the memory block. It is cut by the memory block's limit for one page (`MEMORY_PAGES_MAX_TOKENS`): a longer page is not shown. Both tools pass every title, summary and page line through `sanitizeMemoryText`, the one function that also cleans the memory block. A page's name counts as the person's own (`pageNameIsOwn`) only when the page holds a line in their own words, a hand-typed bullet included. A page without one was made by the sorter from something read, and its title comes from a slug a model chose. Such pages are listed apart under a plain label, and their header in the memory block and in `read_page` says "name not confirmed by you". `read_page` tells the turn watch what it showed: a page that holds outside text (`pageHoldsOutsideText`) has the same effect as when the loader shows it, so the writing tools then refuse. The two tools are host-only by name, so a call to them does not count as reading outside text, and the turn's saved note is labelled as it is when the loader shows the same page. They run without an approval card and write no activity-log line.
+**Reading pages.** Two more tools only read, from the same vault and with the same lookup. They are offered in the same chats as the writing tools, except that a private chat gets neither, so no call has to be refused. `list_pages({kind?, search?})` answers with `pages`, each `{kind, title, summary?}`, the most recently changed first (by file time), at most 50 a call; past that it adds `left_out` and says `search` narrows the list. `search` is matched with the alias index (`matchAliases`), so a page is found by its title or another name. The answer holds titles and summary lines only, never a line that is not the person's own, a path or a slug. `read_page({about, kind?})` finds the page with the writing tools' lookup. Two matches give a plain answer naming them so the model can ask. One match is shown by `renderPageForModel` and nothing else, so the person's "How you write to them" lines are not shown (they reach the model only through the closed drafting section) and lines that are not confirmed carry the same labels as in the memory block. It is cut by the memory block's limit for one page (`MEMORY_PAGES_MAX_TOKENS`): a longer page is not shown. Both tools pass every title, summary and page line through `sanitizeMemoryText`, the one function that also cleans the memory block. A page's name counts as the person's own (`pageNameIsOwn`) only when the page holds a line in their own words, a hand-typed bullet included. A page without one was made by the sorter from something read, and its title comes from a slug a model chose. Such pages are listed apart under a plain label, and their header in the memory block and in `read_page` says "name not confirmed by you". That header counts as read content, like the page's read lines, so a link or address in such a name is never the person's. Other names for a page are only ever added by the person, by hand or on the Pages screen. `read_page` tells the turn watch what it showed: a page that holds outside text (`pageHoldsOutsideText`) has the same effect as when the loader shows it, so a line of the person's own is then not changed or forgotten in that reply. `list_pages` does the same when it shows a name that is not confirmed. The two tools are host-only by name, so a call to them does not count as reading outside text, and the turn's saved note is labelled as it is when the loader shows the same page. They run without an approval card and write no activity-log line.
 
 **The text.** A fact or a name is one line of at most 500 and 120 characters. A line break, `<!--` or `-->` is
 refused. Control and invisible characters are removed. A fact that holds the drafting heading or the
 drafting end line is refused, using the same match as the loader, instead of being rewritten. A tool answer
 never repeats text from a page, only a fixed sentence.
 
-**The taint rule.** The tools refuse when the turn holds anything that is not the person's own words. Two
-things count, and they are checked in the host, not left to the model.
+**The taint rule.** `update_fact` and `forget_fact` leave a line of the person's own alone when the turn
+holds anything that is not the person's own words, unless the person's message shares that line's words
+(`keepFactsFromPerson`, the looser match, because the line only moves to Earlier and can be undone). A line
+that is read content can be changed or forgotten in any turn. Two things count, and they are checked in the host, not left to the model.
 
 - _Read in this turn._ Before every model step the host checks whether the turn, from the person's latest
   message on, has read text from outside the chat: any tool result other than a host-only one, an attached
@@ -565,13 +581,13 @@ things count, and they are checked in the host, not left to the model.
   counts as outside text for notes (`itemSourceLabel`) and one for pages (`pageHoldsOutsideText`). A note that
   was withheld by the recall screen or left out of the block does not count.
 
-Once a turn is tainted it stays that way. Every tool then refuses, writes nothing, and tells the model what to
-say: that it did not save the line, and either to say it again in a new message (read in this turn) or that the
-person can open the page and add the line by hand (recalled into the block). That is what keeps mail, web
-pages and documents, now or recalled from months ago, from steering what is written to a page. The one limit
+Once a turn is tainted it stays that way. A change to a line of the person's own is then refused, nothing is
+written, and the model is told what to say: that it did not change the line, and to ask the person to say in their own
+words which line to change or forget. That is what keeps mail, web pages and documents, now or recalled from months ago, from removing
+the person's own words, and the own-words test keeps them from being saved as the person's. The one limit
 that remains is the person's own message: it can of course ask for something unwise. The tools need no
-approval card: what they write is the person's own words, it stays on their machine, and each write is a
-commit that can be undone.
+approval card: a line is either the person's own words or marked as read content, it stays on their machine,
+and each write is a commit that can be undone.
 
 **Every change is one commit.** Under the vault lock the host does these steps. It makes the history ready.
 It takes in the person's hand edits (below). It makes the change. It commits the change with a message such

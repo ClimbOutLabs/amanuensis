@@ -191,6 +191,7 @@ function withoutStaleSearchProviderMounts(input: {
 export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
   readonly #memory: MemoryTurnContext;
   readonly #toolOutputScreen: ToolOutputScreenConfig;
+  readonly #personName: string | undefined;
 
   constructor(
     deps: ConstructorParameters<typeof PersonaTurnResourceResolver>[0],
@@ -219,6 +220,7 @@ export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
     });
     this.#memory = memory;
     this.#toolOutputScreen = toolOutputScreen;
+    this.#personName = profile?.user_name ?? undefined;
   }
 
   /** True in an incognito chat: nothing from it may outlive it. */
@@ -282,6 +284,7 @@ export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
       keepsNothing: this.#memory.keepsNothing,
       maxPageTokens: this.#memory.config.pages.maxTokens,
       watch,
+      personName: this.#personName,
     });
     return { capability, watch };
   }

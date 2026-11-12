@@ -460,6 +460,98 @@ export function keepFactsFromPerson({
   });
 }
 
+/** Share of a sentence's content words that must be the person's own before it may be kept as their statement. */
+const OWN_STATEMENT_WORD_SHARE = 0.6;
+
+const LINK_OR_ADDRESS = /(?:https?:\/\/|www\.)[^\s<>"')\]]+|[\w.+-]+@[\w-]+(?:\.[\w-]+)+/giu;
+
+const DIGIT_RUN = /\d+/g;
+
+/** The web links and mail addresses in a text, folded, without the punctuation that ends a sentence. */
+function linksAndAddresses(text: string): string[] {
+  return (text.match(LINK_OR_ADDRESS) ?? []).map(quoted => foldText(quoted).replace(/[.,;:!?]+$/, ''));
+}
+
+/** Whether a text holds a web link or a mail address. */
+export function holdsLinkOrAddress(text: string): boolean {
+  return linksAndAddresses(text).length > 0;
+}
+
+/** Most content words of a statement that may be missing from what the person typed. */
+const OWN_STATEMENT_MAX_UNSAID_WORDS = 2;
+
+/** Sentences and clauses of a text: split after sentence punctuation or a semicolon, and at line breaks. */
+function clausesOf(text: string): string[] {
+  return text
+    .split(/(?<=[.;!?])\s+|\n+/)
+    .map(clause => clause.trim())
+    .filter(clause => clause !== '');
+}
+
+/**
+ * Whether a statement is made of the person's own typed words, strictly enough to be kept as theirs. Every
+ * link, mail address and run of digits in it must be in what they typed. Every name must be there as the
+ * same word. In each sentence or clause, most content words must be theirs, so one added clause fails the
+ * whole statement. A statement in another script than their text passes only on names and numbers they
+ * typed. Text they pasted into their own message is theirs. The person's own name and stop words do not count.
+ */
+export function isPersonsOwnStatement({
+  text,
+  personText,
+  personName,
+}: {
+  text: string;
+  personText: string;
+  personName: string | undefined;
+}): boolean {
+  const said = foldText(personText);
+  const saidWords = wordsOf(said).map(stem);
+  if (saidWords.length === 0) {
+    return false;
+  }
+  // A link or address is compared whole, so one that only sits inside a longer one they typed is not theirs.
+  const saidQuoted = new Set(linksAndAddresses(personText));
+  if (linksAndAddresses(text).some(quoted => !saidQuoted.has(quoted))) {
+    return false;
+  }
+  const saidDigits = new Set(personText.match(DIGIT_RUN) ?? []);
+  if ((text.match(DIGIT_RUN) ?? []).some(digits => !saidDigits.has(digits))) {
+    return false;
+  }
+  const saidExactly = new Set(saidWords);
+  const ownName = new Set(wordsOf(foldText(usablePersonName(personName) ?? '')));
+  const isCounted = (word: string): boolean => !FACT_STOPWORDS.has(word) && !ownName.has(word);
+  const isContent = (word: string): boolean =>
+    isCounted(word) && (word.length >= 3 || SINGLE_CHARACTER_WORD.test(word) || /^\d+$/.test(word));
+  const isSaid = (word: string): boolean => saidWords.some(candidate => sameWord({ a: word, b: candidate }));
+  const personScript = dominantScript(personText);
+  let matched = 0;
+  let unsaid = 0;
+  for (const clause of clausesOf(text)) {
+    const anchors = anchorsOf({ fact: clause, isCounted });
+    if (anchors.some(anchor => !saidExactly.has(anchor))) {
+      return false;
+    }
+    matched += anchors.length;
+    const clauseScript = dominantScript(clause);
+    if (personScript === undefined || (clauseScript !== undefined && clauseScript !== personScript)) {
+      if (anchors.length === 0) {
+        return false;
+      }
+      continue;
+    }
+    const words = [...new Set(wordsOf(foldText(clause)).map(stem).filter(isContent))];
+    const shared = words.filter(isSaid).length;
+    if (words.length > 0 && shared / words.length < OWN_STATEMENT_WORD_SHARE) {
+      return false;
+    }
+    matched += shared;
+    unsaid += words.length - shared;
+  }
+  // A tail joined on with "and" or a comma hides inside a long sentence of theirs, so the count is capped too.
+  return matched > 0 && unsaid <= OWN_STATEMENT_MAX_UNSAID_WORDS;
+}
+
 /** Drops a plural "s" so "wants" meets "want". */
 function stem(word: string): string {
   return word.length > 3 && word.endsWith('s') ? word.slice(0, -1) : word;

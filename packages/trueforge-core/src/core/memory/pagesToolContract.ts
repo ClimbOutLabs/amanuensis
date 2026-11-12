@@ -1,9 +1,9 @@
 /**
  * Canonical owner of the memory page tool names. Three tools write short facts to the pages Aman keeps about
- * people and matters. They run without a card: what they write is the person's own words from this chat, nothing
- * leaves the machine, and every write is a commit that can be undone. They refuse in a chat that has read mail,
- * the web, a document or any other outside text, so outside text can never reach a page this way. Two tools only
- * read: one lists the pages, one shows a page. They run without a card too.
+ * people and matters. They run without a card: a line is saved as the person's own only when it is words they
+ * typed, anything else is marked as read content and never replaces their words, nothing leaves the machine, and
+ * every write is a commit that can be undone. Two tools only read: one lists the pages, one shows a page. They
+ * run without a card too.
  */
 export const MEMORY_PAGES_SERVER_ID = 'memory_pages';
 
