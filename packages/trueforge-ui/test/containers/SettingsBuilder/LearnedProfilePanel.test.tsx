@@ -108,6 +108,43 @@ describe('LearnedProfilePanel', () => {
     );
   });
 
+  it('keeps a switch click made the moment the profile finishes loading', async () => {
+    // The profile arriving and the click can land in the same instant. The click is the
+    // person's choice and must stick; the loaded value must not overwrite it.
+    let finishLoad: (profile: PersonalizationProfile) => void = () => {};
+    const loaded = new Promise<PersonalizationProfile>(resolve => {
+      finishLoad = resolve;
+    });
+    const { container } = render(
+      <PersonalizationProvider
+        api={{ getProfile: () => loaded, updateProfile: async profile => profile, deleteProfile: async () => {} }}
+      >
+        <LearnedProfilePanel />
+      </PersonalizationProvider>,
+    );
+    // Click in the same moment the switch first appears, before anything else can run.
+    const clicked = new Promise<void>(done => {
+      const observer = new MutationObserver(() => {
+        const toggle = container.querySelector('[role="switch"]');
+        if (toggle instanceof HTMLElement) {
+          observer.disconnect();
+          fireEvent.click(toggle);
+          done();
+        }
+      });
+      observer.observe(container, { childList: true, subtree: true });
+    });
+
+    finishLoad(initialProfile);
+    await clicked;
+
+    await waitFor(() =>
+      expect(screen.getByRole('switch', { name: 'Learn from conversations' })).toHaveAttribute('aria-checked', 'true'),
+    );
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(screen.getByRole('switch', { name: 'Learn from conversations' })).toHaveAttribute('aria-checked', 'true');
+  });
+
   it('turns the switch back off on a profile that holds nothing else', async () => {
     // Trying the feature and changing your mind is a common path for a new toggle, and it is
     // the one case where the saved profile carries no content but the switch. The panel must
