@@ -563,6 +563,8 @@ export type {
   Tier3Card,
   Tier3Persona,
   Tier3Schedule,
+  Tier3ScheduleTools,
+  Tier3Skill,
   TierDecision,
   TrackedExecutionBinding,
 } from './permissions/tier';

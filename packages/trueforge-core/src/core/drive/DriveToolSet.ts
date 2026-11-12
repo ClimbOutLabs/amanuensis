@@ -281,7 +281,7 @@ export class DriveToolSet extends LocalToolMCP {
       created_by: sentinel.created_by,
       mcp_server_name: DRIVE_SERVER_ID,
       tool_name: input.toolName,
-      mcp_server_host: null,
+      connector_binding: null,
     });
   }
 

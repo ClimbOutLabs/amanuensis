@@ -4,6 +4,7 @@ import type * as TrueForge from "../../api/index.js";
 import * as core from "../../core/index.js";
 import type * as serializers from "../index.js";
 import { Tier3ScheduleAction } from "./Tier3ScheduleAction.js";
+import { Tier3ScheduleTools } from "./Tier3ScheduleTools.js";
 
 export const Tier3Schedule: core.serialization.ObjectSchema<serializers.Tier3Schedule.Raw, TrueForge.Tier3Schedule> =
     core.serialization.object({
@@ -13,6 +14,7 @@ export const Tier3Schedule: core.serialization.ObjectSchema<serializers.Tier3Sch
         runsAs: core.serialization.property("runs_as", core.serialization.string()),
         task: core.serialization.string(),
         timeZone: core.serialization.property("time_zone", core.serialization.string()),
+        tools: Tier3ScheduleTools.optionalNullable(),
         when: core.serialization.string(),
     });
 
@@ -24,6 +26,7 @@ export declare namespace Tier3Schedule {
         runs_as: string;
         task: string;
         time_zone: string;
+        tools?: (Tier3ScheduleTools.Raw | null | undefined) | null;
         when: string;
     }
 }

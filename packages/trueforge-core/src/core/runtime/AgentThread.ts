@@ -75,6 +75,7 @@ import {
 } from '../llm/LLMTypes';
 import { resolveMaxOutputTokens } from '../llm/maxOutputTokens';
 import { buildModelWaitingEvent } from '../llm/modelWaitingEvent';
+import { describeTurnFailure } from '../llm/plainFailureMessages';
 import { noticeAfter, REPEAT_STOP_NOTE, TOOL_MARKUP_NOTICE, UNBACKED_CLAIM_NOTES } from '../llm/replyNotices';
 import { toOpenAIResponseFormat } from '../llm/responseFormat';
 import {
@@ -155,9 +156,11 @@ import {
   HeldActionRefusedError,
   heldActionsNote,
   holdApprovalCalls,
+  isBrowserEdit,
   type NotSavedReason,
 } from '../permissions/heldActions';
 import type { Tier, Tier3Card } from '../permissions/tier';
+import type { ToolGrantKey } from '../permissions/toolGrants';
 import { assistantDisplayName } from '../personas/assistantName';
 import {
   SANDBOX_EXEC_TOOL_NAME,
@@ -203,6 +206,7 @@ import {
   CALENDAR_PASSWORD_PROMPT,
   CHECK_BEFORE_ASKING_PROMPT,
   createSourceDiscoveryContract,
+  createSourceOffPrompt,
   DEMO_EMAIL_PROMPT,
   EMAIL_PASSWORD_PROMPT,
   EMPTY_ANSWER_NUDGE_MESSAGE,
@@ -1557,8 +1561,10 @@ export async function classifyUnstampedToolCall(input: {
   info: InternalToolCallInfo;
   /** The connector the call goes to, bound into the approval token; absent when the tool set has none. */
   connector?: ConnectorBinding | undefined;
+  /** What a standing grant for this call binds to; absent when the tool set has none. */
+  grant_binding?: string | undefined;
 }): Promise<InternalToolCallInfo> {
-  const { sentinel, canonical_params, info, connector } = input;
+  const { sentinel, canonical_params, info, connector, grant_binding } = input;
   if (
     sentinel === undefined ||
     info.tier !== undefined ||
@@ -1593,6 +1599,7 @@ export async function classifyUnstampedToolCall(input: {
             mcp_server_id: connector.server_id,
             ...(connector.destination_host === null ? {} : { mcp_server_host: connector.destination_host }),
           }),
+      ...(grant_binding === undefined ? {} : { mcp_grant_binding: grant_binding }),
       mcp_hints: {
         read_only_hint: info.read_only_hint,
         destructive_hint: info.destructive_hint,
@@ -1600,7 +1607,7 @@ export async function classifyUnstampedToolCall(input: {
       },
       maps_hosts: info.maps_hosts,
       document_scope: info.document_scope,
-      browser_click: info.browser_click,
+      browser_element: info.browser_element,
     },
   });
   return { ...info, ...stampSentinelDecision({ decision }) };
@@ -1744,6 +1751,10 @@ async function enrichAssistantMessage({
       canonical_params: params.arguments ?? {},
       info: policed,
       connector: toolInfo.toolSet.resolveConnector?.({
+        name: toolInfo.originalToolName,
+        arguments: tryParseToolArgs(toolCall.function.arguments),
+      }),
+      grant_binding: toolInfo.toolSet.resolveGrantBinding?.({
         name: toolInfo.originalToolName,
         arguments: tryParseToolArgs(toolCall.function.arguments),
       }),
@@ -2214,6 +2225,15 @@ export class AgentThread {
         capabilities.addSection('no-sandbox', NO_SANDBOX_PROMPT);
       }
     }
+    if (!this.definition.readOnly) {
+      const sourceOff = createSourceOffPrompt({
+        attachedConnectorNames: (this.definition.toolSets ?? []).map(toolSet => toolSet.name),
+        setUpConnectorNames: this.definition.setUpConnectorNames,
+      });
+      if (sourceOff !== undefined) {
+        capabilities.addSection('sources-off', sourceOff);
+      }
+    }
     this.toolBundles?.buildInstruction(capabilities);
     this.sandbox?.buildSkillsInstruction(capabilities);
     if (this.deferredTool) {
@@ -2326,6 +2346,11 @@ export class AgentThread {
           heldById,
           signal,
         });
+        // The wider scopes a decision asks for take effect only once the decision itself is committed below, so a
+        // decision that never lands (its write fails, or the turn stops first) leaves no grant behind.
+        const chatGrants: string[] = [];
+        const standingGrants: ToolGrantKey[] = [];
+        let mapsLastingAnswer = false;
         for (const approval of approvals) {
           if (approval.approval.status !== 'allow') {
             continue;
@@ -2339,7 +2364,7 @@ export class AgentThread {
             pending.tool_info.implementation_plan_grant === undefined &&
             allowsChatApproval(pending.tool_info)
           ) {
-            this.chatApprovalGrants.add(approvalGrantKey(pending.tool_info));
+            chatGrants.push(approvalGrantKey(pending.tool_info));
           }
           if (
             approval.approval.scope === 'always' &&
@@ -2347,17 +2372,14 @@ export class AgentThread {
             allowsToolGrant(pending.tool_info)
           ) {
             if (mapsCardTakesLastingAnswer(pending.tool_info)) {
-              await this.sentinel.services.allowMapsWithoutAsking({
-                tenant_id: this.sentinel.tenant_id,
-                created_by: this.sentinel.created_by,
-              });
+              mapsLastingAnswer = true;
             } else {
-              await this.sentinel.services.tool_grants.recordToolGrant({
+              standingGrants.push({
                 tenant_id: this.sentinel.tenant_id,
                 created_by: this.sentinel.created_by,
                 mcp_server_name: pending.tool_info.mcp_server_name,
                 tool_name: pending.tool_info.grant_tool_name ?? pending.tool_info.original_tool_name,
-                mcp_server_host: pending.tool_info.grant_host ?? null,
+                connector_binding: pending.tool_info.grant_binding ?? null,
               });
             }
           }
@@ -2413,6 +2435,18 @@ export class AgentThread {
           usage: undefined,
           toolCallMemo: nudgeFlush.toolCallMemoAfterFlush ?? this.toolCallMemo,
         });
+        for (const key of chatGrants) {
+          this.chatApprovalGrants.add(key);
+        }
+        for (const grant of standingGrants) {
+          await this.sentinel?.services.tool_grants.recordToolGrant(grant);
+        }
+        if (mapsLastingAnswer && this.sentinel !== undefined) {
+          await this.sentinel.services.allowMapsWithoutAsking({
+            tenant_id: this.sentinel.tenant_id,
+            created_by: this.sentinel.created_by,
+          });
+        }
         this.pendingHeldReplayEvents = heldReplay.events;
         this.heldReplayOutput = heldReplay.events.at(-1);
         if (nudgeFlush.toolCallMemoAfterFlush !== undefined) {
@@ -4370,6 +4404,7 @@ export class AgentThread {
       const held = holdApprovalCalls({
         message: assistantMessage,
         alreadyHeld: findHeldToolCalls(this.context).length,
+        browserEditWaiting: findUndecidedHeldToolCalls(this.context).some(call => isBrowserEdit(call.tool_info)),
         isSubAgent: this.parent !== undefined,
       });
       assistantMessage = held.message;
@@ -6155,7 +6190,9 @@ export class AgentThread {
       // Providers / transports often reject with plain objects; instanceof Error would
       // otherwise collapse those into an opaque "Unknown error occurred" in Agent Steps.
       this.logger.error('Agent thread execution failed', extractErrorLogFields(error));
-      yield this.generateErrorEvent(describeUnknownError(error), undefined, 'fatal_error');
+      // The chat gets plain words; the details above stay in the log.
+      const message = error instanceof RequestOverLimitError ? CHAT_TOO_LONG_MESSAGE : describeTurnFailure(error);
+      yield this.generateErrorEvent(message, undefined, 'fatal_error');
     } finally {
       this.contextBusy = false;
     }

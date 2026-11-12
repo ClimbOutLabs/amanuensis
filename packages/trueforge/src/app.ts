@@ -47,6 +47,7 @@ import { createPersonalizationRouter } from './apis/personalization';
 import { createPersonasRouter, createSessionPersonasRouter } from './apis/personas';
 import { createChatPrivacyRouter, createPrivateChatSweepRouter } from './apis/privateChats';
 import { createReachRouter } from './apis/reach';
+import { createRemindersRouter } from './apis/reminders';
 import { createRepositoriesRouter, createSessionRepositoryRouter } from './apis/repositories';
 import { createScheduleExecutionRouter, createSchedulesRouter } from './apis/schedules';
 import { createSentinelSettingsRouter } from './apis/sentinelSettings';
@@ -819,6 +820,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         turnArtifactStore: deps.turnArtifactStore,
         tokenStore: deps.tokenStore,
         resolveMcpServerStore: deps.resolveMcpServerStore,
+        resolveModelProviderStore: deps.resolveModelProviderStore,
         resolveAgentStore: deps.resolveAgentStore,
         authorizer: deps.authorizer,
         outboundSecrets: deps.outboundSecrets,
@@ -846,6 +848,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       chatSearchIndexer: deps.chatSearchIndexer,
       tokenStore: deps.tokenStore,
       resolveMcpServerStore: deps.resolveMcpServerStore,
+      resolveModelProviderStore: deps.resolveModelProviderStore,
       resolveAgentStore: deps.resolveAgentStore,
       mcpCatalog: deps.mcpCatalog,
       withTransaction: deps.withTransaction,
@@ -979,6 +982,20 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       createTextNumberRouter({
         textNumbers: deps.textNumbers,
         available: () => deps.reachChannels().texts.available,
+        resolveRequestContext,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
+    '/api/v1/user/reminders',
+    withAuth(
+      createRemindersRouter({
+        scheduleStore: deps.scheduleStore,
+        sessionStore: deps.sessionStore,
+        agentStore: deps.agentStore,
+        personaStore: deps.personaStore,
+        personalizationStore: deps.personalizationStore,
         resolveRequestContext,
       }),
       authMiddleware,
@@ -1376,6 +1393,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     withAuth(
       createTurnsRouter({
         mcpCatalog: deps.mcpCatalog,
+        skillCatalog: deps.skillCatalog,
         sessions: deps.sessions,
         sessionStore: deps.sessionStore,
         activeTurns: deps.activeTurns,

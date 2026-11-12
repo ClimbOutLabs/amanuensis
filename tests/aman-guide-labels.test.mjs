@@ -16,7 +16,7 @@ async function readLabelOwners() {
 
 /** In guide pages, bold text means a label on screen. */
 function boldPhrases(text) {
-  return [...text.matchAll(/\*\*([^*]+)\*\*/g)].map(match => match[1]);
+  return [...text.matchAll(/\*\*([^*\n]+)\*\*/g)].map(match => match[1]);
 }
 
 function escapeRegExp(text) {

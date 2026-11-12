@@ -37,7 +37,7 @@ import {
   MAIL_CONTENT_TOOL_NAME,
 } from '../email/mailConnector/toolContract';
 import { GOOGLE_SETUP_SERVER_ID, GOOGLE_SETUP_STATUS_TOOL_NAME } from '../google/setupToolContract';
-import type { BrowserClickReview, DocumentScope, MapsHosts } from '../llm/LLMTypes';
+import type { BrowserElementReview, DocumentScope, MapsHosts } from '../llm/LLMTypes';
 import {
   APPEND_TO_INBOX_TOOL_NAME,
   isNotesFolderReadToolName,
@@ -61,6 +61,7 @@ import {
   SET_REMINDER_TOOL_NAME,
 } from '../schedules/toolContract';
 import { tavilyApprovalWhat } from '../search/tavilyCardText';
+import { isSkillWriteToolName, LIST_SKILLS_TOOL_NAME, SKILL_SERVER_ID } from '../skills/toolContract';
 import {
   isSpaceReadToolName,
   isSpaceWriteToolName,
@@ -180,6 +181,7 @@ import {
   type Tier3Card,
   type Tier3Persona,
   type Tier3Schedule,
+  type Tier3Skill,
   type TierDecision,
   type TrackedExecutionBinding,
 } from './tier';
@@ -239,6 +241,8 @@ export interface SentinelAction {
   mcp_server_id?: string | undefined;
   /** Host of the connector's configured server URL, for the approval card. Never derived from tool arguments. */
   mcp_server_host?: string | undefined;
+  /** What a standing grant on this connector binds to (see `ToolGrantKey`). Set by the host, never from tool arguments. */
+  mcp_grant_binding?: string | undefined;
   /** The host provisioned this connector itself. Never derived from tool metadata or client input. */
   mcp_first_party?: boolean | undefined;
   /** The CalDAV event a change names, read once before classifying. Set only for the CalDAV connector. */
@@ -288,6 +292,8 @@ export interface SentinelAction {
   schedule_write?: Tier3Schedule | undefined;
   /** The persona a create would add, settled by the persona tool set from the request and the owner's personas. */
   persona_write?: Tier3Persona | undefined;
+  /** The skill an install would add, settled by the skill tool set from the place the skill comes from. */
+  skill_install?: Tier3Skill | undefined;
   /** The schedule a pause or resume would change, settled by the schedule tool set from the store. */
   schedule_status?: ScheduleStatusReview | undefined;
   /**
@@ -296,12 +302,12 @@ export interface SentinelAction {
    */
   reminder?: ReminderLine | undefined;
   /**
-   * Context for a browser_click call, read from the live page before the click: the site, the
-   * element's accessible name, whether it submits a form, and the form's values. Set by the browser
-   * tool set from the sidecar's read, never from model params. Undefined when the host could not
-   * read it, which fails the call closed to the generic Tier 3 path.
+   * Context for the element a browser click, type or select acts on, read from the live page first:
+   * the site, its name and role, whether it submits a form, the form's values, and its address when it
+   * is a plain link. Set by the browser tool set from the sidecar's read, never from model params.
+   * Undefined when the host could not read it, which refuses the call before any card.
    */
-  browser_click?: BrowserClickReview | undefined;
+  browser_element?: BrowserElementReview | undefined;
 }
 
 /** What a pause or resume card shows: which schedule, and when it runs, as the store holds it. */
@@ -2632,7 +2638,7 @@ function hasStandingToolGrant(ctx: ClassifyContext, action: SentinelAction): Pro
     created_by: ctx.created_by,
     mcp_server_name: action.mcp_server_name,
     tool_name: action.tool_name,
-    mcp_server_host: action.mcp_server_host ?? null,
+    connector_binding: action.mcp_grant_binding ?? null,
   });
 }
 
@@ -2646,7 +2652,7 @@ function hasStandingScopeGrant(ctx: ClassifyContext, action: SentinelAction, sco
     created_by: ctx.created_by,
     mcp_server_name: action.mcp_server_name,
     tool_name: scope_key,
-    mcp_server_host: action.mcp_server_host ?? null,
+    connector_binding: action.mcp_grant_binding ?? null,
   });
 }
 
@@ -2892,6 +2898,16 @@ function scheduleWriteCard(input: { review: Tier3Schedule; agent_intent: string 
       task: escapeDisplayText(review.task, { keepNewlines: true }),
       runs_as: show(review.runs_as),
       next_runs: review.next_runs.map(show),
+      ...(review.tools === undefined || review.tools === null
+        ? {}
+        : {
+            tools: {
+              ...review.tools,
+              agent_name: show(review.tools.agent_name),
+              connectors: review.tools.connectors.map(choice => ({ ...choice, name: show(choice.name) })),
+              skills: review.tools.skills.map(choice => ({ ...choice, name: show(choice.name) })),
+            },
+          }),
     },
   };
 }
@@ -2952,6 +2968,64 @@ async function classifyPersonaTool(action: SentinelAction, ctx: ClassifyContext)
     card: personaWriteCard({ review: action.persona_write, agent_intent: ctx.agent_intent }),
     reason: 'persona_write',
     reason_detail: 'Adding a persona always asks.',
+    sensitive_read: false,
+    approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
+  });
+}
+
+function skillInstallCard(input: { review: Tier3Skill; assistant: string; agent_intent: string | null }): Tier3Card {
+  const { review } = input;
+  const show = (text: string) => escapeDisplayText(text);
+  return {
+    plain_what: `Add the skill ${cardSubject(review.name)}? ${input.assistant} will follow its instructions when a task calls for it.`,
+    plain_why: plainWhy(input.agent_intent),
+    cannot_be_undone: null,
+    why_asked_again: null,
+    destination: null,
+    recipient: null,
+    amount: null,
+    parsed_command: null,
+    outbound_text: null,
+    destination_host: null,
+    outbound_truncated: false,
+    skill: {
+      name: show(review.name),
+      description: show(review.description),
+      source: show(review.source),
+      version: show(review.version),
+      starter: review.starter,
+      instructions:
+        review.instructions === null ? null : escapeDisplayText(review.instructions, { keepNewlines: true }),
+    },
+  };
+}
+
+/**
+ * Adding a skill always asks, with where it comes from and the exact version. Reading the list runs without
+ * asking. Any other skill tool name fails closed.
+ */
+async function classifySkillTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
+  if (action.tool_name === LIST_SKILLS_TOOL_NAME) {
+    return tier1Decision({ reason: 'skill_read', reason_detail: 'Read your skills.', sensitive_read: false });
+  }
+  if (!isSkillWriteToolName(action.tool_name)) {
+    return failClosedDecision({ reason_detail: 'Unknown skill tool.' });
+  }
+  if (action.skill_install === undefined) {
+    return autoDenyDecision({
+      reason: 'destination_unverifiable',
+      reason_detail: 'The skill could not be checked, so it was not offered.',
+      sensitive_read: false,
+    });
+  }
+  return tier3Decision({
+    card: skillInstallCard({
+      review: action.skill_install,
+      assistant: ctx.web_search.assistantName,
+      agent_intent: ctx.agent_intent,
+    }),
+    reason: 'skill_install',
+    reason_detail: 'Adding a skill always asks.',
     sensitive_read: false,
     approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
   });
@@ -3608,7 +3682,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
         created_by: ctx.created_by,
         mcp_server_name: action.mcp_server_name,
         tool_name: action.tool_name,
-        mcp_server_host: action.mcp_server_host ?? null,
+        connector_binding: action.mcp_grant_binding ?? null,
       }))
         ? action.mcp_server_name
         : undefined;
@@ -3657,7 +3731,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
       : 'Fail-closed: unrecognized tools require approval.',
     sensitive_read: readsPrivateData,
     inspection: grantableRead,
-    grant_host: action.mcp_server_host ?? null,
+    grant_binding: action.mcp_grant_binding ?? null,
     secret_path_read: containsSecretPath(action.canonical_params) || pathLike,
     approval_token_id: await mintPlainToken({
       ctx,
@@ -3903,7 +3977,7 @@ function incognitoRefusal(): TierDecision {
 
 /**
  * A call on one of the assistant's own lasting things that is not a known read of it: a schedule, a reminder, a
- * persona, a space or the notes folder. Switching this chat's persona changes only the chat.
+ * persona, a skill, a space or the notes folder. Switching this chat's persona changes only the chat.
  */
 function changesOwnLastingThing(action: SentinelAction): boolean {
   if (action.tool_type !== 'truefoundry-system') {
@@ -3915,6 +3989,8 @@ function changesOwnLastingThing(action: SentinelAction): boolean {
       return name !== LIST_SCHEDULES_TOOL_NAME && name !== LIST_REMINDERS_TOOL_NAME;
     case PERSONA_SERVER_ID:
       return name !== LIST_PERSONAS_TOOL_NAME && name !== USE_PERSONA_TOOL_NAME;
+    case SKILL_SERVER_ID:
+      return name !== LIST_SKILLS_TOOL_NAME;
     case SPACE_SERVER_ID:
       return !isSpaceReadToolName(name);
     case NOTES_FOLDER_SERVER_ID:
@@ -3953,6 +4029,9 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === PERSONA_SERVER_ID) {
     return classifyPersonaTool(action, ctx);
   }
+  if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === SKILL_SERVER_ID) {
+    return classifySkillTool(action, ctx);
+  }
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === SPACE_SERVER_ID) {
     return classifySpaceTool(action);
   }
@@ -3990,12 +4069,17 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
       }
     }
     if (name === 'run_code' || name === 'submit_implementation_plan') {
+      // The card names the language when the call gives one; the code itself is shown under it.
+      const language = name === 'run_code' ? stringParam(action.canonical_params, 'language') : null;
+      const languageName = language === 'python' ? 'Python' : language === 'node' ? 'Node.js' : null;
       return tier3Decision({
         card: {
           plain_what:
-            name === 'run_code'
-              ? 'Run code the assistant wrote in the sandbox?'
-              : 'Submit this implementation plan for review?',
+            name !== 'run_code'
+              ? 'Submit this implementation plan for review?'
+              : languageName === null
+                ? 'Run code the assistant wrote in the sandbox?'
+                : `Run this ${languageName} code the assistant wrote?`,
           plain_why: plainWhy(ctx.agent_intent),
           cannot_be_undone: "Once this runs, it can't be undone.",
           why_asked_again: null,

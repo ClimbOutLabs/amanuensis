@@ -1,6 +1,6 @@
 ---
 title: 'The aman command'
-description: 'Every aman command and installer command, what it does, and when to use it.'
+description: 'Every aman command and installer command: what it does, and when to use it.'
 ---
 
 # The aman command
@@ -13,8 +13,19 @@ Most people only need four: `aman doctor`, `aman backup`, `aman upgrade` and `am
 
 There are two versions of the command. Which one you have depends on how you installed Aman.
 
-- **Mac, Linux, and Windows with WSL:** the installer (`installer/install.sh`) puts `aman` in `~/.amanuensis/bin`. New terminal windows find it on their own. If a terminal says `aman: command not found`, open a new terminal window. If it still says so, run `~/.amanuensis/bin/aman`, or run `./installer/install.sh command` in the folder you installed from to put the command back.
-- **Windows with Aman Setup:** Aman Setup installs its own `aman` command. Its commands are listed under [Windows with Aman Setup](#windows-with-aman-setup). The Start menu has entries for the common ones, so you rarely need it.
+=== "Mac, Linux and WSL"
+
+    The installer (`installer/install.sh`) puts `aman` in `~/.amanuensis/bin`. New terminal windows find it on their own.
+
+    If a terminal says `aman: command not found`:
+
+    1. Open a new terminal window.
+    2. If it still says so, run `~/.amanuensis/bin/aman`.
+    3. Or, in the folder you installed from, run `./installer/install.sh command` to put the command back.
+
+=== "Windows with Aman Setup"
+
+    Aman Setup installs its own `aman` command. Its commands are listed under [Windows with Aman Setup](#windows-with-aman-setup). The Start menu has entries for the common ones, so you rarely need it.
 
 The rest of this page, up to the Windows section, is for Mac, Linux and WSL.
 
@@ -24,7 +35,7 @@ The rest of this page, up to the Windows section, is for Mac, Linux and WSL.
 aman doctor
 ```
 
-Checks this computer and every instance, then prints one **Next:** line for each problem, with the command that fixes it. It changes nothing.
+It checks this computer and every instance, then prints one **Next:** line for each problem, with the command that fixes it. It changes nothing. An instance is one person's own copy of Aman.
 
 | Command                       | What it does                                                                       |
 | ----------------------------- | ---------------------------------------------------------------------------------- |
@@ -40,7 +51,7 @@ Checks this computer and every instance, then prints one **Next:** line for each
 
 ### Check one area and fix it
 
-Each of these checks one area. Add `--fix` to repair what it finds. A fix asks before it changes anything, and asks before anything that needs your admin password. Add `--yes` after `--fix` to answer yes to its questions.
+Each of these checks one area. Add `--fix` to repair what it finds. A fix asks before it changes anything, and before anything that needs your admin password. Add `--yes` after `--fix` to answer yes to its questions.
 
 | Command                | What it checks                                                                                    | What `--fix` does                                                                               |
 | ---------------------- | ------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
@@ -53,7 +64,7 @@ Each of these checks one area. Add `--fix` to repair what it finds. A fix asks b
 | `aman doctor network`  | Each of this computer's addresses is allowed for sign-in                                          | Adds the new addresses and restarts the instance                                                |
 | `aman doctor sandbox`  | The sandbox where Aman runs code passes its safety checks, then makes a real call through the app | Rebuilds the sandbox image, reloads its safety profile, recreates missing disks and restarts it |
 
-`aman doctor instance`, `aman doctor network` and `aman doctor sandbox` also take `--instance NAME`. `aman doctor sandbox` takes `--disk-gb N` to set the size of each sandbox disk, and `--no-hard-disk-limit` where the computer cannot make fixed-size disks.
+`aman doctor instance`, `aman doctor network` and `aman doctor sandbox` also take `--instance NAME`. `aman doctor sandbox` takes `--disk-gb N` to set the size of each sandbox disk, and `--no-hard-disk-limit` where the computer can't make fixed-size disks.
 
 ## Back up and restore your data
 
@@ -65,28 +76,72 @@ Each of these checks one area. Add `--fix` to repair what it finds. A fix asks b
 | `aman restore --latest` | Put back the newest backup without the list                                                      |
 | `aman restore NAME`     | Restore one instance when there are several                                                      |
 
-Backups go to `~/.amanuensis/backups`, one folder per backup. Aman keeps the seven newest. A restore says what it will replace and waits for you to type `yes`, and saves a copy of what you have now first. [Backups](backup.md) explains what is in them, how a restore works and how to copy a backup off your computer. To turn daily backups on or off, see [Installer commands](#installer-commands).
+Backups go to `~/.amanuensis/backups`, one folder per backup. Aman keeps the seven newest. A restore says what it will replace, waits for you to type `yes`, and saves a copy of what you have now first.
+
+[Back up and restore](backup.md) explains what's in a backup, how a restore works and how to copy a backup off your computer. To turn daily backups on or off, see [Installer commands](#installer-commands).
 
 ## Update Aman
 
-`aman upgrade` updates Aman to the copy of the code in the folder you installed from. It does not download the new version itself, so first get the newest release into that folder. Run these lines in it (here `~/amanuensis`; use your own folder):
+=== "Mac and Linux"
 
-```bash
-cd ~/amanuensis
-VERSION=$(curl -fsSL -o /dev/null -w '%{url_effective}' https://github.com/ClimbOutLabs/amanuensis/releases/latest)
-VERSION=${VERSION##*/}
-git fetch --tags
-git checkout "$VERSION"
-aman upgrade
-```
+    `aman upgrade` updates Aman to the copy of the code in the folder you installed from. It doesn't download the new version itself, so first get the newest release into that folder.
 
-The second and third lines ask GitHub which release is the newest. Always update to a release, not to the code that is still being worked on. If the `git checkout` line fails, there is no newer release, and nothing was changed.
+    1. Open a terminal.
+    2. Run these lines in the folder you installed from. Here it's `~/amanuensis`; use your own folder.
+
+        ```bash
+        cd ~/amanuensis
+        VERSION=$(curl -fsSL -o /dev/null -w '%{url_effective}' https://github.com/ClimbOutLabs/amanuensis/releases/latest)
+        VERSION=${VERSION##*/}
+        git fetch --tags
+        git checkout "$VERSION"
+        aman upgrade
+        ```
+
+    3. Wait while it works. It backs up your data first, builds the new version (about 15 minutes), and switches over.
+
+    The second and third lines ask GitHub which release is the newest. Always update to a release, not to code that is still being worked on. If the `git checkout` line fails, there is no newer release, and nothing was changed.
+
+=== "Windows"
+
+    Choose **Update Aman** in the Start menu. Or type `aman upgrade` in PowerShell.
+
+If anything fails, the old version comes back on its own, and your data was backed up first.
 
 | Command                | What it does                                                                                              |
 | ---------------------- | --------------------------------------------------------------------------------------------------------- |
 | `aman upgrade`         | Back up, build the new version, and switch over. If anything fails, the old version comes back on its own |
 | `aman upgrade --check` | Show what would change, and change nothing                                                                |
-| `aman upgrade --force` | Upgrade even when the version has not changed                                                             |
+| `aman upgrade --force` | Upgrade even when the version hasn't changed                                                              |
+
+## Remove Aman
+
+!!! warning "This deletes your chats and memory"
+
+    Removing Aman with its data can't be undone. Make a backup first with `aman backup`, or copy one off your computer, if you might want your data later.
+
+=== "Mac and Linux"
+
+    1. Open a terminal.
+    2. Run these lines. Here the folder is `~/amanuensis`; use your own folder.
+
+        ```bash
+        cd ~/amanuensis
+        ./installer/install.sh instance remove main --purge-data
+        ```
+
+    3. Type `main` when it asks, to confirm.
+
+    Your backups stay in `~/.amanuensis/backups`. Delete that folder too if you don't want them. On a Mac, you can also uninstall Docker Desktop if you don't use it for anything else.
+
+=== "Windows"
+
+    1. Choose **Remove Aman** in the Start menu. Or type `aman uninstall` in PowerShell. It first says what it removes.
+    2. It asks `Remove Aman and delete all of its data?` Type `yes` to go ahead. Anything else removes nothing.
+    3. It asks whether to delete your backups folder too. Type `yes` to delete the backups as well. Anything else keeps them, with one last backup made first.
+    4. If Windows asks for permission to change the firewall, choose **Yes**.
+
+    It leaves Docker Desktop installed, because other programs may use it. If nothing else uses it, you can remove it yourself. The [Windows guide](install-windows.md#remove-aman) has the details.
 
 ## Sign-in password
 
@@ -96,7 +151,7 @@ The second and third lines ask GitHub which release is the newest. Always update
 | `aman password --instance NAME`  | The same, for one instance when there are several                                    |
 | `aman password --password-stdin` | Read the new password from the input instead of asking                               |
 
-Run it on the computer where Aman is installed.
+Run it on the computer where Aman is installed. [Password and sign-in](../packages/trueforge/guide/topics/account.md) has more.
 
 ## Bring data in
 
@@ -114,38 +169,42 @@ Run it on the computer where Aman is installed.
 
 Some jobs are done by the installer itself. Run these in the folder you installed from.
 
-**People and instances.** Each person gets their own instance, with their own chats, memory and sign-in.
+??? note "People and instances"
 
-| Command                                                    | What it does                                                                               |
-| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `./installer/install.sh`                                   | Set Aman up on this computer: check it, show the plan, build, and start the first instance |
-| `./installer/install.sh --dry-run`                         | Show the plan and change nothing                                                           |
-| `./installer/install.sh instance add NAME`                 | Add an instance for another person                                                         |
-| `./installer/install.sh instance list`                     | Show every instance                                                                        |
-| `./installer/install.sh instance refresh NAME`             | Start an instance again with its current settings                                          |
-| `./installer/install.sh instance password NAME`            | Set a new owner password for that instance and sign everyone out                           |
-| `./installer/install.sh instance remove NAME`              | Remove an instance. Its data stays                                                         |
-| `./installer/install.sh instance remove NAME --purge-data` | Remove an instance and delete its data. It asks you to type the name to confirm            |
+    Each person gets their own instance, with their own chats, memory and sign-in.
 
-**Mail and calendar.** Each command asks for the details, then restarts the instance.
+    | Command                                                    | What it does                                                                               |
+    | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+    | `./installer/install.sh`                                   | Set Aman up on this computer: check it, show the plan, build, and start the first instance |
+    | `./installer/install.sh --dry-run`                         | Show the plan and change nothing                                                           |
+    | `./installer/install.sh instance add NAME`                 | Add an instance for another person                                                         |
+    | `./installer/install.sh instance list`                     | Show every instance                                                                        |
+    | `./installer/install.sh instance refresh NAME`             | Start an instance again with its current settings                                          |
+    | `./installer/install.sh instance password NAME`            | Set a new owner password for that instance and sign everyone out                           |
+    | `./installer/install.sh instance remove NAME`              | Remove an instance. Its data stays                                                         |
+    | `./installer/install.sh instance remove NAME --purge-data` | Remove an instance and delete its data. It asks you to type the name to confirm            |
 
-| Command                                                  | What it does                       |
-| -------------------------------------------------------- | ---------------------------------- |
-| `./installer/install.sh instance email NAME`             | Connect or change an email account |
-| `./installer/install.sh instance email NAME --remove`    | Remove the email account           |
-| `./installer/install.sh instance calendar NAME`          | Connect a calendar                 |
-| `./installer/install.sh instance calendar NAME --remove` | Remove the calendar                |
+??? note "Mail and calendar"
 
-**Looking after the computer.**
+    Each command asks for the details, then restarts the instance.
 
-| Command                                | What it does                                                                            |
-| -------------------------------------- | --------------------------------------------------------------------------------------- |
-| `./installer/install.sh backups daily` | Back up every day at 03:30                                                              |
-| `./installer/install.sh backups off`   | Stop the daily backup                                                                   |
-| `./installer/install.sh docker`        | Install, start or update Docker. It asks before anything that needs your admin password |
-| `./installer/install.sh command`       | Put the `aman` command back                                                             |
-| `./installer/install.sh tls`           | Renew the https certificates that are due                                               |
-| `./installer/install.sh upgrade`       | The same as `aman upgrade`                                                              |
+    | Command                                                  | What it does                       |
+    | -------------------------------------------------------- | ---------------------------------- |
+    | `./installer/install.sh instance email NAME`             | Connect or change an email account |
+    | `./installer/install.sh instance email NAME --remove`    | Remove the email account           |
+    | `./installer/install.sh instance calendar NAME`          | Connect a calendar                 |
+    | `./installer/install.sh instance calendar NAME --remove` | Remove the calendar                |
+
+??? note "Looking after the computer"
+
+    | Command                                | What it does                                                                            |
+    | -------------------------------------- | --------------------------------------------------------------------------------------- |
+    | `./installer/install.sh backups daily` | Back up every day at 03:30                                                              |
+    | `./installer/install.sh backups off`   | Stop the daily backup                                                                   |
+    | `./installer/install.sh docker`        | Install, start or update Docker. It asks before anything that needs your admin password |
+    | `./installer/install.sh command`       | Put the `aman` command back                                                             |
+    | `./installer/install.sh tls`           | Renew the https certificates that are due                                               |
+    | `./installer/install.sh upgrade`       | The same as `aman upgrade`                                                              |
 
 `./installer/install.sh --help` lists every option, such as `--local-only` to keep Aman on this computer only, `--port` to pick its port, and `--no-sandbox` to install without the sandbox. The [install guide](install.mdx) explains them.
 
@@ -176,4 +235,4 @@ The [Windows guide](install-windows.md) walks through Aman Setup.
 
 ## When a command fails
 
-Every command says what went wrong and the one thing to do next. If that does not help, see [Troubleshooting](troubleshooting.md).
+Every command says what went wrong and the one thing to do next. If that doesn't help, see [Troubleshooting](troubleshooting.md).
