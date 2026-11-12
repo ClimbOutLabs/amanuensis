@@ -108,11 +108,11 @@ export function withoutRelaxations(services: SentinelServices): SentinelServices
 }
 
 /**
- * Services for one unattended turn: no relaxations, and a call that would ask is held for the
- * owner while nobody watches.
+ * Services for one unattended turn: no relaxations, the sandbox "without asking" switch off, and a call
+ * that would ask is held for the owner while nobody watches.
  */
 export function forUnattendedRun(services: SentinelServices): SentinelServices {
-  return { ...withoutRelaxations(services), unattended: true };
+  return { ...withoutRelaxations(services), sandboxWithoutAsking: () => Promise.resolve(false), unattended: true };
 }
 
 /**

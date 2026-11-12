@@ -21,6 +21,8 @@ import { allowsChatApproval } from '@truefoundry/trueforge-core/core/mcp/approva
 import { createToolCallMemoState, executeToolCalls } from '@truefoundry/trueforge-core/core/mcp/executeToolCalls';
 import { isCallToolResponseResult } from '@truefoundry/trueforge-core/core/mcp/IMCPServer';
 import { approvalExpiredReason } from '@truefoundry/trueforge-core/core/permissions/approvalExpiry';
+import { forUnattendedRun } from '@truefoundry/trueforge-core/core/permissions/context';
+import { HELD_RESULT_TEXT, holdApprovalCalls } from '@truefoundry/trueforge-core/core/permissions/heldActions';
 import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import { NOOP_AGENT_TRACING } from '@truefoundry/trueforge-core/core/tracing/NoopAgentTracing';
 import winston from 'winston';
@@ -751,6 +753,113 @@ describe('reminder tools', () => {
     expect(resultText(missing.result)).toContain('Call list_reminders');
     await dispatch({ built, name: 'cancel_reminder', args: { reminder: 'take the medicine' } });
     expect(await built.listAll()).toEqual([]);
+  });
+});
+
+/** The same tools as `built`, in a run a schedule started with nobody watching. */
+function inScheduledRun(built: Setup): Setup {
+  const sentinel = { ...built.sentinel, services: forUnattendedRun(built.sentinel.services) };
+  return { ...built, sentinel, tools: new ScheduleToolSet({ ...built.options, sentinel }) };
+}
+
+/** Classifies a call as a scheduled run would, holds it if it asks, and dispatches what is left. */
+async function dispatchUnattended(input: { built: Setup; name: string; args: Record<string, unknown> }) {
+  const run = inScheduledRun(input.built);
+  const info = await run.tools.toolCallInfo({ name: input.name, arguments: input.args });
+  const { message } = holdApprovalCalls({
+    message: {
+      role: 'assistant',
+      content: null,
+      tool_calls: [
+        {
+          id: 'call-1',
+          type: 'function',
+          function: { name: input.name, arguments: JSON.stringify(input.args) },
+          tool_info: info,
+        },
+      ],
+    },
+    alreadyHeld: 0,
+    isSubAgent: false,
+  });
+  const result = await executeToolCalls({
+    assistantMessage: message,
+    toolMapping: new Map([[input.name, { toolSet: run.tools, originalToolName: input.name }]]),
+    threadId: 'main',
+    approvalDecisions: new Map(),
+    memoState: createToolCallMemoState(),
+    sentinel: {
+      services: run.sentinel.services,
+      web_search: run.sentinel.web_search,
+      identity: {
+        tenant_id: run.sentinel.tenant_id,
+        created_by: run.sentinel.created_by,
+        conversation_id: run.sentinel.conversation_id,
+        repository_id: null,
+        workspace_cwd: null,
+        agent_intent: null,
+      },
+    },
+  });
+  return { info, result };
+}
+
+describe('in a scheduled run, a change to a reminder or a schedule waits for the owner', () => {
+  it('holds a new reminder: the card says when and what, and nothing is saved', async () => {
+    const built = await setup();
+    const { info, result } = await dispatchUnattended({ built, name: 'set_reminder', args: MEDICINE });
+    expect(info).toMatchObject({ tier: 3, is_approval_required: true });
+    expect(info.tier3_card?.plain_what).toBe('Set a reminder for Monday, October 19 at 6:00 PM: Take the medicine?');
+    expect(resultText(result)).toBe(HELD_RESULT_TEXT);
+    expect(await built.listAll()).toEqual([]);
+  });
+
+  it('holds a cancel: the card names the reminder, and the reminder stays', async () => {
+    const built = await setup();
+    await dispatch({ built, name: 'set_reminder', args: MEDICINE });
+    const { info, result } = await dispatchUnattended({
+      built,
+      name: 'cancel_reminder',
+      args: { reminder: 'Take the medicine' },
+    });
+    expect(info).toMatchObject({ tier: 3, is_approval_required: true });
+    expect(info.tier3_card?.plain_what).toBe('Cancel the reminder: Take the medicine?');
+    expect(resultText(result)).toBe(HELD_RESULT_TEXT);
+    expect(await built.listAll()).toHaveLength(1);
+  });
+
+  it('holds a pause and a resume: the card names the schedule, and its state stays', async () => {
+    const built = await setup();
+    await dispatch({ built, name: 'create_schedule', args: MORNING_BRIEF, decision: { status: 'allow' } });
+    const paused = await dispatchUnattended({ built, name: 'pause_schedule', args: { schedule: 'morning-brief' } });
+    expect(paused.info).toMatchObject({ tier: 3, is_approval_required: true });
+    expect(paused.info.tier3_card?.plain_what).toBe('Pause the schedule "Morning brief"?');
+    expect(resultText(paused.result)).toBe(HELD_RESULT_TEXT);
+    expect((await built.listAll())[0]?.status).toBe('active');
+
+    await dispatch({ built, name: 'pause_schedule', args: { schedule: 'morning-brief' } });
+    const resumed = await dispatchUnattended({ built, name: 'resume_schedule', args: { schedule: 'morning-brief' } });
+    expect(resumed.info.tier3_card?.plain_what).toBe('Resume the schedule "Morning brief"?');
+    expect((await built.listAll())[0]?.status).toBe('paused');
+  });
+
+  it('still lists schedules and reminders without asking', async () => {
+    const built = await setup();
+    await dispatch({ built, name: 'set_reminder', args: MEDICINE });
+    const schedules = await dispatchUnattended({ built, name: 'list_schedules', args: {} });
+    const reminders = await dispatchUnattended({ built, name: 'list_reminders', args: {} });
+    expect(schedules.info).toMatchObject({ tier: 1, is_approval_required: false });
+    expect(reminders.info).toMatchObject({ tier: 1, is_approval_required: false });
+    expect(JSON.parse(resultText(reminders.result)).reminders).toHaveLength(1);
+  });
+
+  it('runs the held reminder once the owner approves it in the chat', async () => {
+    const built = await setup();
+    await dispatchUnattended({ built, name: 'set_reminder', args: MEDICINE });
+    // Approving replays the same call in the chat the owner is in, where it is classified again.
+    const { info } = await dispatch({ built, name: 'set_reminder', args: MEDICINE });
+    expect(info).toMatchObject({ tier: 1, is_approval_required: false });
+    expect(await built.listAll()).toHaveLength(1);
   });
 });
 
