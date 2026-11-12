@@ -712,7 +712,7 @@ test('disk on Windows: the drive Docker Desktop keeps its data on is judged agai
   });
 });
 
-test('disk on Windows is read from Windows, so it is judged while Docker is down', async () => {
+test('disk on Windows is read from Windows, not from Docker, so a stopped Docker does not skip it', async () => {
   const record = await windowsDiskRecord(
     { status: 'read', drive: 'C:', freeBytes: 12 * GIB },
     withAnswer(readyAnswers(), INFO_LINE, NOT_RUNNING),

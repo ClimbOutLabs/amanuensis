@@ -15,8 +15,8 @@ What it can do today:
   On Windows it also checks that the folders Aman keeps on the PC itself
   can be read by the person's own account only, and its disk check reads
   the free space on the drive Docker Desktop keeps its data on (usually
-  C:), warning under about 20 GB and failing under 2 GB, whether or not
-  Docker is running. `aman doctor --json`
+  C:), read from Windows itself rather than through Docker, warning under
+  about 20 GB and failing under 2 GB. `aman doctor --json`
   prints the same checks as data. With `aman doctor --local` the
   instances' own checks skip the ones that reach the network, as the
   health gate before an upgrade needs. `aman doctor --fix` makes the
