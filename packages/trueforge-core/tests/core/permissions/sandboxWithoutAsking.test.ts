@@ -6,6 +6,7 @@ import { classifyTier, type ClassifyContext, type SentinelAction } from '../../.
 import {
   defaultSentinelServices,
   forUnattendedRun,
+  withoutRelaxations,
   type SentinelServices,
 } from '../../../src/core/permissions/context';
 import { verifyPreDispatch } from '../../../src/core/permissions/dispatch';
@@ -131,19 +132,118 @@ describe('in-sandbox work with the switch on runs without a card', () => {
       expect(decision.card).toBeNull();
     }),
   );
+});
+
+describe('a scheduled run asks before in-sandbox work, with the switch on', () => {
+  function scheduledRun(workspace: string, services = servicesWith({ sandbox_without_asking: true })): ClassifyContext {
+    return makeCtx({ services: forUnattendedRun(services), workspace });
+  }
 
   test(
-    'a scheduled run runs code without a card',
+    'inline code asks',
     withWorkspace(async workspace => {
       const decision = await classifyTier(
         action('run_code', { code: 'print(1)', language: 'python' }),
-        makeCtx({
-          services: forUnattendedRun(servicesWith({ sandbox_without_asking: true })),
-          workspace,
-        }),
+        scheduledRun(workspace),
       );
-      expect(decision.tier).toBe(1);
+      expect(decision.tier).toBe(3);
       expect(decision.auto_deny).toBeNull();
+      expect(decision.card).not.toBeNull();
+    }),
+  );
+
+  test(
+    'a new file in the workspace asks',
+    withWorkspace(async workspace => {
+      const decision = await classifyTier(
+        action('write_file', { path: join(workspace, 'notes.py'), content: 'print(1)' }),
+        scheduledRun(workspace),
+      );
+      expect(decision.tier).not.toBe(1);
+      expect(decision.reason).not.toBe('sandbox_file_write');
+      expect(decision.auto_deny).toBeNull();
+    }),
+  );
+
+  test(
+    'a script Aman wrote in the same chat asks, by exec and by run_code',
+    withWorkspace(async workspace => {
+      const services = servicesWith({ sandbox_without_asking: true });
+      writeScript({ services, workspace, name: 'agent_tool.py', authored: true });
+      const byExec = await classifyTier(
+        action('exec', { command: 'python3 agent_tool.py', cwd: workspace }),
+        scheduledRun(workspace, services),
+      );
+      const byRunCode = await classifyTier(
+        action('run_code', { script_path: join(workspace, 'agent_tool.py'), language: 'python' }),
+        scheduledRun(workspace, services),
+      );
+      expect(byExec.tier).toBe(3);
+      expect(byExec.auto_deny).toBeNull();
+      expect(byRunCode.tier).toBe(3);
+      expect(byRunCode.auto_deny).toBeNull();
+    }),
+  );
+
+  test(
+    'a package install asks',
+    withWorkspace(async workspace => {
+      const decision = await classifyTier(
+        action('exec', { command: 'npm install --ignore-scripts humanize', cwd: workspace }),
+        scheduledRun(workspace),
+      );
+      expect(decision.tier).toBe(3);
+      expect(decision.reason).not.toBe('sandbox_package_install');
+      expect(decision.auto_deny).toBeNull();
+    }),
+  );
+
+  test(
+    'a command that only reads the workspace still runs without a card',
+    withWorkspace(async workspace => {
+      const decision = await classifyTier(action('exec', { command: 'ls', cwd: workspace }), scheduledRun(workspace));
+      expect(decision.tier).toBe(1);
+    }),
+  );
+});
+
+describe("a turn the person types in a scheduled run's chat asks before in-sandbox work, with the switch on", () => {
+  function typedTurn(workspace: string): ClassifyContext {
+    return makeCtx({ services: withoutRelaxations(servicesWith({ sandbox_without_asking: true })), workspace });
+  }
+
+  test(
+    'inline code asks with a card to answer',
+    withWorkspace(async workspace => {
+      const decision = await classifyTier(
+        action('run_code', { code: 'print(1)', language: 'python' }),
+        typedTurn(workspace),
+      );
+      expect(decision.tier).toBe(3);
+      expect(decision.auto_deny).toBeNull();
+      expect(decision.card).not.toBeNull();
+      expect(decision.approval_token_id).not.toBeNull();
+    }),
+  );
+
+  test(
+    'a new file in the workspace asks',
+    withWorkspace(async workspace => {
+      const decision = await classifyTier(
+        action('write_file', { path: join(workspace, 'notes.py'), content: 'print(1)' }),
+        typedTurn(workspace),
+      );
+      expect(decision.tier).not.toBe(1);
+      expect(decision.reason).not.toBe('sandbox_file_write');
+      expect(decision.auto_deny).toBeNull();
+    }),
+  );
+
+  test(
+    'a command that only reads the workspace still runs without a card',
+    withWorkspace(async workspace => {
+      const decision = await classifyTier(action('exec', { command: 'ls', cwd: workspace }), typedTurn(workspace));
+      expect(decision.tier).toBe(1);
     }),
   );
 });

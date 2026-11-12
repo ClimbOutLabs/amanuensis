@@ -131,6 +131,7 @@ export function stampSentinelDecision(input: {
   | 'audit_description'
   | 'effect'
   | 'grant_host'
+  | 'grant_tool_name'
   | 'secret_path_read'
   | 'mail_send'
 > {
@@ -146,6 +147,7 @@ export function stampSentinelDecision(input: {
     // A connector read is inspection per call: its arguments decide it, not the tool's annotations.
     ...(decision.inspection ? { effect: 'inspect' as const } : {}),
     ...(decision.grant_host === null ? {} : { grant_host: decision.grant_host }),
+    ...(decision.grant_tool_name === null ? {} : { grant_tool_name: decision.grant_tool_name }),
     ...(decision.secret_path_read ? { secret_path_read: true as const } : {}),
     ...(decision.mail_send ? { mail_send: true as const } : {}),
     ...(decision.silent_search_query === null ? {} : { silent_search_query: decision.silent_search_query }),
@@ -187,6 +189,8 @@ function autoDenyMessage(decision: TierDecision): string {
       return `Not run: ${decision.reason_detail ?? 'this reply already looked up a lot.'} Answer from what you already found.`;
     case 'steered_by_content':
       return `Skipped: ${decision.reason_detail ?? 'something read, not the person, asked for it.'} Continue without it.`;
+    case 'home_assistant_refused':
+      return `Not run: ${decision.reason_detail ?? 'Aman does not control locks, alarms or garage doors.'} Continue without it.`;
     case 'private_detail':
       return `Skipped: ${decision.reason_detail ?? 'it would have shared something private.'} Continue without it.`;
     default:
