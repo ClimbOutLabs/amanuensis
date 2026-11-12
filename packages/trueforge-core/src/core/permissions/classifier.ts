@@ -3002,6 +3002,16 @@ function scheduleWriteCard(input: { review: Tier3Schedule; agent_intent: string 
       task: escapeDisplayText(review.task, { keepNewlines: true }),
       runs_as: show(review.runs_as),
       next_runs: review.next_runs.map(show),
+      ...(review.tools === undefined || review.tools === null
+        ? {}
+        : {
+            tools: {
+              ...review.tools,
+              agent_name: show(review.tools.agent_name),
+              connectors: review.tools.connectors.map(choice => ({ ...choice, name: show(choice.name) })),
+              skills: review.tools.skills.map(choice => ({ ...choice, name: show(choice.name) })),
+            },
+          }),
     },
   };
 }
