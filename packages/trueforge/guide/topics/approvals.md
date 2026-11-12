@@ -27,7 +27,7 @@ If the mail goes to an address that is not on your Email list, the buttons are *
 
 A card that opens a page names the site it will open. The full address is on the card, behind **Details**.
 
-If a page Aman read named the address, the card says which page Aman read the address on. That card has no **Always allow** choice. An address that came from something Aman read always asks, even on a site you have allowed.
+If a page Aman read named the address, the card says which page Aman read the address on. That card has no **Always allow this site**. An address that came from something Aman read always asks, even on a site you have allowed.
 
 If you did not give the address, the card can offer **Always allow this site**. That covers every page on that site for the rest of this chat. A site means the exact name in the address. A page on a longer name, such as shop.example.com when you allowed example.com, asks again. A new chat asks again too.
 
