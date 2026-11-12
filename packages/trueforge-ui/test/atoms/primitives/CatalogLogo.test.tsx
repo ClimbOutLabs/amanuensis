@@ -57,4 +57,10 @@ describe('CatalogLogo', () => {
       'https://assets.example/github-dark.svg',
     );
   });
+
+  it('draws a bundled logo inline instead of loading an image', () => {
+    const { container } = renderLogo({ mode: 'dark', src: 'catalog-logo:model/openai' });
+    expect(container.querySelector('img')).toBeNull();
+    expect(screen.getByRole('img', { name: 'Provider' }).tagName.toLowerCase()).toBe('svg');
+  });
 });

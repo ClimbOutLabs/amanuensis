@@ -95,6 +95,8 @@ vi.mock('@/server/ShellModeContext.js', () => ({
     mode: { status: 'active', isMutable: mutableChat },
     pendingSessionId: null,
   }),
+  // The mail setup panels point at Reach me through the shell; this page is tested without one.
+  useOptionalShellMode: () => null,
 }));
 
 /**
@@ -814,14 +816,14 @@ describe('ConnectorSettings page order and vocabulary', () => {
     return (first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
   }
 
-  it('renders Configured first, then the account cards, then the Available catalog rows', async () => {
+  it('renders Configured first, then the account cards, then the Add a connector catalog rows', async () => {
     renderSettings([parallelWeb, github], accountPorts({}));
 
     const configured = await screen.findByRole('heading', { name: /Configured/ });
     const email = screen.getByRole('heading', { name: 'Email', level: 4 });
     const calendar = screen.getByRole('heading', { name: 'Calendar', level: 4 });
     const google = screen.getByRole('heading', { name: 'Google', level: 4 });
-    const available = screen.getByRole('heading', { name: /Available/ });
+    const available = screen.getByRole('heading', { name: /Add a connector/ });
 
     expect(headingFollows(configured, email)).toBe(true);
     expect(headingFollows(email, calendar)).toBe(true);
@@ -832,7 +834,7 @@ describe('ConnectorSettings page order and vocabulary', () => {
   it('shows Available on each unconnected account card instead of Not connected', async () => {
     renderSettings([parallelWeb], accountPorts({}));
 
-    await screen.findByRole('heading', { name: /Available/ });
+    await screen.findByRole('heading', { name: /Add a connector/ });
     expect(screen.getAllByText('Available')).toHaveLength(3);
     expect(screen.queryByText('Not connected')).not.toBeInTheDocument();
   });
@@ -853,7 +855,22 @@ describe('ConnectorSettings page order and vocabulary', () => {
   it('never renders the word the owner struck from this page', async () => {
     renderSettings([emailInstance, parallelWeb], accountPorts({}));
 
-    await screen.findByRole('heading', { name: /Available/ });
+    await screen.findByRole('heading', { name: /Add a connector/ });
     expect(document.body.textContent ?? '').not.toMatch(/template/i);
+  });
+
+  it('shows the whole catalog description, with no class cutting it off', async () => {
+    const notionEntry = {
+      id: 'notion',
+      name: 'notion',
+      description:
+        'Search pages, read content, query databases, create pages. Signing in gives the connection the same access you have, so it can reach any page or database you can open.',
+      url: 'https://mcp.notion.com/mcp',
+      auth: { type: 'dcr' as const },
+    };
+    renderSettings([parallelWeb], { ...accountPorts({}), getConnectorCatalog: async () => [notionEntry] });
+
+    const description = await screen.findByText(notionEntry.description);
+    expect(description.className).not.toMatch(/truncate|line-clamp/);
   });
 });

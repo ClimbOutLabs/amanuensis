@@ -436,12 +436,35 @@ export function hasSentHostNoteThisTurn(
   return false;
 }
 
+/** Opens the host's note on a picture the host itself attached, such as a browser screenshot. */
+const HOST_PICTURE_NOTE_START = `${SYSTEM_TAG_START}[host-picture] `;
+
+/**
+ * A picture the host shows the model, with the host's note on it: a user-role message the person
+ * did not write, so it never takes the place of the person's message.
+ */
+export function hostPictureMessage(input: { note: string; imageUrl: string }): ChatCompletionMessageParam {
+  return {
+    role: 'user',
+    content: [
+      { type: 'text', text: internalSystemTag(`[host-picture] ${input.note}`) },
+      { type: 'image_url', image_url: { url: input.imageUrl } },
+    ],
+  };
+}
+
 function isHostWrittenUserContent(content: ChatCompletionMessageParam['content']): boolean {
   if (typeof content === 'string') {
     return isHostWrappedText(content);
   }
   if (!Array.isArray(content) || content.length === 0) {
     return false;
+  }
+  // A picture the host attached comes with its note first. A person's own picture never does: an
+  // upload is announced by other host text, so a message of the person's keeps counting as theirs.
+  const [first, ...rest] = content;
+  if (first?.type === 'text' && first.text.startsWith(HOST_PICTURE_NOTE_START)) {
+    return rest.every(part => part.type === 'image_url' || (part.type === 'text' && isHostWrappedText(part.text)));
   }
   return content.every(part => part.type === 'text' && isHostWrappedText(part.text));
 }

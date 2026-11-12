@@ -1,12 +1,20 @@
 ---
 id: memory
 title: Memory
-covers:
+covers: settings:memory, route:memoryRecall, route:memoryScreen, route:memorySummarize, route:memoryVault
 ---
 
 Aman remembers what matters to you. Ask "What do you remember about me so far?" to see it.
 
 Memory is on by default. It is stored as plain Markdown files on your own computer. Open Settings, then Memory, to read, change or delete what Aman remembers.
+
+The Memory page has tabs along the top:
+
+- **Memories**: read, change or delete what Aman remembers.
+- **Sharing**: choose which personas share which memories.
+- **Learned profile**: what Aman has learned about you from your chats, and the switch that lets it keep learning. You can change or clear it.
+- **Import and export**: save your memories to a file, bring them back from one, and set up topics.
+- **Settings**: set up memory and change how it works.
 
 Memory search uses a small model that runs on your computer. Nothing about it is sent away.
 

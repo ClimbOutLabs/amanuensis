@@ -32,7 +32,7 @@ export interface StatusDeps {
 // containers are up (instance.sh, APP_EXPECTED_CONTAINERS).
 const EXPECTED_CONTAINERS = 3;
 
-async function instanceState(runner: ProcessRunner, name: string): Promise<InstanceState> {
+export async function instanceState(runner: ProcessRunner, name: string): Promise<InstanceState> {
   const result = await runner.run('docker', [
     'ps',
     '-q',

@@ -38,15 +38,15 @@ function stubApi(): { api: SentinelApi; updateUserSettings: ReturnType<typeof vi
   return { api, updateUserSettings };
 }
 
-describe('SentinelSettings Always allow', () => {
-  it('renders an Always allow toggle for each Tier 2 kind, off by default', async () => {
+describe('SentinelSettings Always allow everywhere', () => {
+  it('renders an Always allow everywhere toggle for each Tier 2 kind, off by default', async () => {
     const { api, updateUserSettings } = stubApi();
     render(
       <SentinelApiProvider api={api}>
         <SentinelSettings />
       </SentinelApiProvider>,
     );
-    const fileToggle = await screen.findByRole('switch', { name: 'Always allow: file_write' });
+    const fileToggle = await screen.findByRole('switch', { name: 'Always allow everywhere: file_write' });
     await waitFor(() => {
       expect(fileToggle).toBeEnabled();
     });
@@ -59,7 +59,7 @@ describe('SentinelSettings Always allow', () => {
     });
     // The saved settings come back through the provider, so the switch follows them.
     await waitFor(() => {
-      expect(screen.getByRole('switch', { name: 'Always allow: file_write' })).toBeChecked();
+      expect(screen.getByRole('switch', { name: 'Always allow everywhere: file_write' })).toBeChecked();
     });
   });
 
@@ -79,7 +79,7 @@ describe('SentinelSettings Always allow', () => {
         <SentinelSettings />
       </SentinelApiProvider>,
     );
-    const fileToggle = await screen.findByRole('switch', { name: 'Always allow: file_write' });
+    const fileToggle = await screen.findByRole('switch', { name: 'Always allow everywhere: file_write' });
     await waitFor(() => {
       expect(fileToggle).toBeChecked();
     });
@@ -105,7 +105,7 @@ describe('SentinelSettings Always allow', () => {
         <SentinelSettings />
       </SentinelApiProvider>,
     );
-    const fileToggle = await screen.findByRole('switch', { name: 'Always allow: file_write' });
+    const fileToggle = await screen.findByRole('switch', { name: 'Always allow everywhere: file_write' });
     await waitFor(() => {
       expect(fileToggle).toBeChecked();
     });

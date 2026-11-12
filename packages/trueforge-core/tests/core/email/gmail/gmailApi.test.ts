@@ -1,6 +1,7 @@
 import { GmailApi, mapSkippingMissing } from '../../../../src/core/email/gmail/gmailApi';
 import { estimateTokens, MAX_TOKENS_PER_CALL } from '../../../../src/core/email/gmail/tokenBound';
 import { GoogleAccessTokens } from '../../../../src/core/google/GoogleAccessTokens';
+import { GoogleApiError, GoogleUnusableReplyError } from '../../../../src/core/google/errors';
 import { connectedRecord, FakeConnections, OWNER } from '../../google/fakes';
 import { message } from './fixtures';
 import { build, gmailThreadResponse, googleError, HANG, INSUFFICIENT_SCOPE_BODY, json, route, text } from './harness';
@@ -283,6 +284,7 @@ describe('the size of a response', () => {
     const parse = jest.spyOn(response, 'json');
     const { api } = await apiOver(() => response);
     await expect(api.getMessage('m1')).rejects.toThrow('more than Aman will read at once');
+    await expect(api.getMessage('m1')).rejects.toBeInstanceOf(GoogleUnusableReplyError);
     expect(parse).not.toHaveBeenCalled();
   });
 
@@ -316,6 +318,14 @@ describe('the size of a response', () => {
     const nested = `${'{"parts":['.repeat(depth)}${']}'.repeat(depth)}`;
     const { api } = await apiOver(() => new Response(`{"id":"m1","threadId":"t1","payload":${nested}}`));
     await expect(api.getMessage('m1')).rejects.toThrow('could not read');
+    await expect(api.getMessage('m1')).rejects.toBeInstanceOf(GoogleUnusableReplyError);
+  });
+
+  it('does not call a failing Gmail an unusable reply, since asking again can work', async () => {
+    const { api } = await apiOver(() => new Response('{}', { status: 502 }));
+    const failure: unknown = await api.getMessage('m1').catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(GoogleApiError);
+    expect(failure).not.toBeInstanceOf(GoogleUnusableReplyError);
   });
 
   it('reads a whole attachment even though it is larger than a thread may be', async () => {
@@ -404,5 +414,48 @@ describe('requests that create or send', () => {
     });
     expect((await api.getMessage('m1')).id).toBe('m1');
     expect(calls).toBe(3);
+  });
+});
+
+describe('listing messages and reading their headers', () => {
+  it('lists message ids for a search, one page at a time', async () => {
+    const asked: URL[] = [];
+    const { api } = await apiOver(url => {
+      asked.push(url);
+      return json({ messages: [{ id: 'm2' }, { id: 'm1' }], nextPageToken: 'next' });
+    });
+    await expect(api.listMessages({ query: 'in:inbox after:1', maxResults: 100, pageToken: 'p1' })).resolves.toEqual({
+      messageIds: ['m2', 'm1'],
+      nextPageToken: 'next',
+    });
+    expect(asked[0]?.pathname).toMatch(/\/messages$/);
+    expect(asked[0]?.searchParams.get('q')).toBe('in:inbox after:1');
+    expect(asked[0]?.searchParams.get('maxResults')).toBe('100');
+    expect(asked[0]?.searchParams.get('pageToken')).toBe('p1');
+  });
+
+  it('reads an empty search as no messages and no next page', async () => {
+    const { api } = await apiOver(() => json({ resultSizeEstimate: 0 }));
+    await expect(api.listMessages({ query: 'in:inbox', maxResults: 10, pageToken: undefined })).resolves.toEqual({
+      messageIds: [],
+      nextPageToken: undefined,
+    });
+  });
+
+  it('refuses a list whose rows have no id', async () => {
+    const { api } = await apiOver(() => json({ messages: [{ threadId: 't1' }] }));
+    await expect(api.listMessages({ query: 'in:inbox', maxResults: 10, pageToken: undefined })).rejects.toThrow();
+  });
+
+  it('asks for only the headers a sender check needs, with no message text', async () => {
+    const asked: URL[] = [];
+    const { api } = await apiOver(url => {
+      asked.push(url);
+      return json(message({ id: 'm1', body: 'x' }));
+    });
+    await expect(api.getMessageHeaders('m1')).resolves.toMatchObject({ id: 'm1' });
+    expect(asked[0]?.pathname).toMatch(/\/messages\/m1$/);
+    expect(asked[0]?.searchParams.get('format')).toBe('metadata');
+    expect(asked[0]?.searchParams.getAll('metadataHeaders')).toEqual(['From', 'Subject', 'Authentication-Results']);
   });
 });

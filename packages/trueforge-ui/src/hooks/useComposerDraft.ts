@@ -189,7 +189,7 @@ interface TrackedConversation extends ComposerDraftKey {
  * still finds the text on the way back. If the runtime gives the text back instead, the hook sees
  * it as ordinary typing and keeps saving it.
  */
-export function useComposerDraft(): void {
+export function useComposerDraft({ saves = true }: { saves?: boolean } = {}): void {
   const aui = useAui();
   const text = useAuiState(state => state.composer.text);
   const remoteId = useAuiState(state => state.threadListItem.remoteId);
@@ -203,6 +203,14 @@ export function useComposerDraft(): void {
   const tracked = useRef<TrackedConversation | null>(null);
 
   useEffect(() => {
+    if (!saves) {
+      // An incognito chat keeps nothing, not even unsent text in this tab: drop anything stored
+      // for it (typed before Incognito was chosen) and track nothing.
+      clearComposerDraft({ scope, thread });
+      clearComposerDraft({ scope, thread: localId });
+      tracked.current = null;
+      return;
+    }
     if (isLoading) {
       // History is still hydrating: whether a stored draft was already delivered cannot be told
       // yet, and nothing can be typed into a composer the thread view does not show while loading.
@@ -308,6 +316,7 @@ export function useComposerDraft(): void {
     messageCount,
     messages,
     remoteId,
+    saves,
     scope,
     sendThreadId,
     text,
