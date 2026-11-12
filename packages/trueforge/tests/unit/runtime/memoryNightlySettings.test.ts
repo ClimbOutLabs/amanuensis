@@ -10,16 +10,13 @@ const logger = createLogger({ silent: true });
 
 describe('readMemoryNightlySetting', () => {
   const originalDefault = configuration.MEMORY_NIGHTLY_JOB;
-  const originalBackend = configuration.MEMORY_BACKEND;
 
   beforeEach(() => {
-    configuration.MEMORY_BACKEND = 'markdown';
     configuration.MEMORY_NIGHTLY_JOB = false;
   });
 
   afterEach(() => {
     configuration.MEMORY_NIGHTLY_JOB = originalDefault;
-    configuration.MEMORY_BACKEND = originalBackend;
   });
 
   it('is off when nothing is stored and the default is off', async () => {
@@ -37,14 +34,6 @@ describe('readMemoryNightlySetting', () => {
     });
     await store.deleteSetting({ key: MEMORY_NIGHTLY_SETTING_KEY });
     expect((await readMemoryNightlySetting({ globalSettingsStore: store, logger })).enabled).toBe(false);
-  });
-
-  it('is effectively off without Markdown memory', async () => {
-    configuration.MEMORY_BACKEND = 'hindsight';
-    const store = inMemoryGlobalSettingsStore({ [MEMORY_NIGHTLY_SETTING_KEY]: 'true' });
-    const setting = await readMemoryNightlySetting({ globalSettingsStore: store, logger });
-    expect(setting.enabled).toBe(true);
-    expect(setting.effectiveEnabled).toBe(false);
   });
 
   it('ignores a malformed stored value', async () => {

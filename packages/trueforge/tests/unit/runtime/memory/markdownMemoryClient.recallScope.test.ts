@@ -1,9 +1,9 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import type { RecallItem } from '../../../../src/runtime/memory/hindsightClient';
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
 import { formatMemoryBlock } from '../../../../src/runtime/memory/memoryCapability';
+import type { RecallItem } from '../../../../src/runtime/memory/memoryClient';
 
 async function makeClient(): Promise<{ client: MarkdownMemoryClient; dir: string }> {
   const dir = await mkdtemp(path.join(tmpdir(), 'mdscope-'));

@@ -62,7 +62,6 @@ const ChangesSchema = z.object({
 });
 
 describe('memory pages API', () => {
-  const originalBackend = configuration.MEMORY_BACKEND;
   const originalDir = configuration.MEMORY_MARKDOWN_DIR;
   let baseDir: string;
   let tenant = 'default';
@@ -96,7 +95,6 @@ describe('memory pages API', () => {
 
   beforeEach(async () => {
     baseDir = await mkdtemp(join(tmpdir(), 'pages-api-'));
-    configuration.MEMORY_BACKEND = 'markdown';
     configuration.MEMORY_MARKDOWN_DIR = baseDir;
     tenant = 'default';
     app = new OpenAPIHono();
@@ -110,7 +108,6 @@ describe('memory pages API', () => {
   });
 
   afterEach(async () => {
-    configuration.MEMORY_BACKEND = originalBackend;
     configuration.MEMORY_MARKDOWN_DIR = originalDir;
     await rm(baseDir, { recursive: true, force: true });
   });
@@ -409,14 +406,5 @@ describe('memory pages API', () => {
       expect(again.status).toBe(404);
       expect(ErrorSchema.parse(await again.json()).error.message).toContain('Reload the page');
     });
-  });
-
-  it('answers not available when the store keeps no pages', async () => {
-    configuration.MEMORY_BACKEND = 'hindsight';
-    for (const path of ['', '/changes', '/person/wendy']) {
-      const response = await call(path);
-      expect(response.status).toBe(501);
-      expect(ErrorSchema.parse(await response.json()).error.message).toContain('markdown memory backend');
-    }
   });
 });

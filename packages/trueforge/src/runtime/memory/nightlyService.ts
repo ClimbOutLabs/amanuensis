@@ -61,9 +61,6 @@ export function startNightlyMemoryJob({
   tokenFactoryBudget: TokenFactoryBudget;
   logger: Logger;
 }): void {
-  if (configuration.MEMORY_BACKEND !== 'markdown') {
-    return;
-  }
   const deps: Omit<NightlyDeps, 'mode'> = {
     baseDir: configuration.MEMORY_MARKDOWN_DIR,
     now: () => new Date(),
@@ -87,12 +84,10 @@ export function startNightlyMemoryJob({
     },
     similarPagesFor: vault => {
       const client = createMemoryClient({
-        backend: 'markdown',
         markdownDir: configuration.MEMORY_MARKDOWN_DIR,
         namespace: TENANT_ID,
         vaultScope:
           vault.persona === undefined ? undefined : { personaName: vault.persona.name, personaId: vault.persona.id },
-        hindsight: undefined,
         embeddings: configuration.MEMORY_EMBEDDINGS_ENABLED
           ? {
               modelDir: configuration.MEMORY_EMBEDDINGS_MODEL_DIR,
@@ -101,7 +96,7 @@ export function startNightlyMemoryJob({
             }
           : undefined,
       });
-      return client === undefined ? undefined : similarPagesFinder(client);
+      return similarPagesFinder(client);
     },
     runner: execFileRunner,
     logger,

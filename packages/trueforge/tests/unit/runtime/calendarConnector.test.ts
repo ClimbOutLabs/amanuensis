@@ -83,7 +83,6 @@ describe('CALENDAR_ACCOUNT_URL', () => {
   it('makes the derived endpoint first-party, so the read-only calendar tools run without asking', () => {
     expect(
       firstPartyOriginsFor({
-        raw: undefined,
         calendarUrl: hostCalendarMcpUrl({
           calendarMcpUrl: undefined,
           calendarAccountUrl: 'http://calendar-caldav:9560',
@@ -94,21 +93,12 @@ describe('CALENDAR_ACCOUNT_URL', () => {
 });
 
 describe('first-party origins with a calendar connector', () => {
-  it('adds the calendar origin to the operator list', () => {
-    expect(firstPartyOriginsFor({ raw: 'https://memory.internal:8443', calendarUrl: URL })).toEqual([
-      'https://memory.internal:8443',
-      'http://calendar-caldav:9558',
-    ]);
+  it('lists the calendar origin', () => {
+    expect(firstPartyOriginsFor({ calendarUrl: URL })).toEqual(['http://calendar-caldav:9558']);
   });
 
-  it('keeps the list unchanged when no calendar connector is configured', () => {
-    expect(firstPartyOriginsFor({ raw: undefined, calendarUrl: undefined })).toEqual([]);
-  });
-
-  it('does not repeat an origin already listed', () => {
-    expect(firstPartyOriginsFor({ raw: 'http://calendar-caldav:9558', calendarUrl: URL })).toEqual([
-      'http://calendar-caldav:9558',
-    ]);
+  it('lists nothing when no calendar connector is configured', () => {
+    expect(firstPartyOriginsFor({ calendarUrl: undefined })).toEqual([]);
   });
 });
 

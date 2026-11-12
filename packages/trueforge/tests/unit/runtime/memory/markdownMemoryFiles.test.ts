@@ -3,7 +3,6 @@ import { createHash } from 'node:crypto';
 import { appendFile, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import type { RetainItem } from '../../../../src/runtime/memory/hindsightClient';
 import {
   dailyLogEntries,
   entryMetadata,
@@ -24,6 +23,7 @@ import {
   writeVaultSharing,
   type VaultScope,
 } from '../../../../src/runtime/memory/markdownMemoryFiles';
+import type { RetainItem } from '../../../../src/runtime/memory/memoryClient';
 
 async function makeDir(): Promise<string> {
   return mkdtemp(path.join(tmpdir(), 'mdfiles-'));
@@ -257,6 +257,25 @@ describe('markdownMemoryFiles', () => {
       expect(once).toBe('## 2026-09-01T10:00:00.000Z\n\nThe person has a cat.\n');
       expect(upgradeLegacyEntries(once)).toBe(once);
     });
+
+    it.each(['> Source: read content', '> From you', '> External source: an email'])(
+      'keeps the source mark "%s" an older entry closes with',
+      mark => {
+        const legacy = [
+          '## 2026-09-01T10:00:00.000Z',
+          '',
+          'Turn summary: The person has a cat named Miso.',
+          '',
+          '> Chat title: Pets',
+          '',
+          mark,
+          '',
+        ].join('\n');
+        expect(upgradeLegacyEntries(legacy)).toBe(
+          ['## 2026-09-01T10:00:00.000Z', '', 'The person has a cat named Miso.', '', mark, ''].join('\n'),
+        );
+      },
+    );
 
     it('leaves a title-looking line inside an entry text alone', () => {
       const content = [

@@ -23,11 +23,6 @@ export interface ReadMemoryNightlySettingDeps {
   logger: Logger;
 }
 
-/** The Markdown-only gate, owned here so Settings and the nightly timer cannot disagree. */
-export function isMemoryNightlyEffective(enabled: boolean): boolean {
-  return enabled && configuration.MEMORY_BACKEND === 'markdown';
-}
-
 /**
  * The nightly-job setting, read each time the timer looks at the clock so a change in Settings applies
  * without a restart. A failed read falls back to the env default rather than switching the job on.
@@ -38,7 +33,7 @@ export async function readMemoryNightlySetting(deps: ReadMemoryNightlySettingDep
     enabled: defaultEnabled,
     overridden: false,
     defaultEnabled,
-    effectiveEnabled: isMemoryNightlyEffective(defaultEnabled),
+    effectiveEnabled: defaultEnabled,
   };
   let record;
   try {
@@ -62,6 +57,6 @@ export async function readMemoryNightlySetting(deps: ReadMemoryNightlySettingDep
     enabled: override,
     overridden: true,
     defaultEnabled,
-    effectiveEnabled: isMemoryNightlyEffective(override),
+    effectiveEnabled: override,
   };
 }

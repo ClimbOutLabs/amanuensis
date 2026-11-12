@@ -19,13 +19,9 @@ import {
   VAULT_TOMBSTONES_FILE,
   vaultFilesystemNamespace,
 } from '../runtime/memory/markdownMemoryFiles';
-import type { MemoryClient } from '../runtime/memory/memoryClient';
 import { listPageFiles, pageFolder } from '../runtime/memory/memoryPages';
 import { DataImportError } from './importError';
 import { emptyLedger, type ImportLedger } from './importLedger';
-
-export type MemoryImportTarget =
-  { kind: 'markdown'; markdownDir: string } | { kind: 'client'; client: Pick<MemoryClient, 'listEntries' | 'retain'> };
 
 export interface PreflightDeps<TTransaction> {
   sessionStore: ISessionStore<SessionCustom, TurnCustom>;
@@ -37,12 +33,12 @@ export interface PreflightDeps<TTransaction> {
   agentStore: IAgentStore<TTransaction>;
   /** Tells the web search connector every new instance is given apart from the owner's own. */
   mcpCatalog: McpCatalog;
-  memoryTarget: MemoryImportTarget;
+  /** Root dir of the Markdown memory files. */
+  memoryMarkdownDir: string;
   /** The name the installer gave the owner, '' when none; a profile holding only that name still counts as fresh. */
   ownerName: string;
 }
 
-const MEMORY_LIST_TIMEOUT_MS = 120_000;
 const PAGE_SIZE = 100;
 const MAX_LISTED_COLLISIONS = 5;
 
@@ -268,19 +264,14 @@ export async function findInstanceData<TTransaction>(
   if ((await ownConnectors(deps, tenantId)).own.length > 0) {
     found.push('connectors');
   }
-  if (deps.memoryTarget.kind === 'markdown') {
-    const markdownDir = deps.memoryTarget.markdownDir;
-    if (await markdownMemoryHasContent({ markdownDir, tenantId, ignored: new Set(ignoring.memory_files) })) {
-      found.push('memories');
-    }
-  } else {
-    const outcome = await deps.memoryTarget.client.listEntries({ namespace: '', timeoutMs: MEMORY_LIST_TIMEOUT_MS });
-    if (!outcome.ok) {
-      throw new DataImportError('The memory store could not be read, so the import cannot run.', 500);
-    }
-    if (outcome.entries.length > 0) {
-      found.push('memories');
-    }
+  if (
+    await markdownMemoryHasContent({
+      markdownDir: deps.memoryMarkdownDir,
+      tenantId,
+      ignored: new Set(ignoring.memory_files),
+    })
+  ) {
+    found.push('memories');
   }
 
   return found;

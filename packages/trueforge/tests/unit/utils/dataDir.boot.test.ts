@@ -103,7 +103,6 @@ describe('server boot storage check', () => {
   it('refuses to start when the markdown memory directory cannot be created', async () => {
     const { exitCode, output } = await bootServer({
       PERSONA_KNOWLEDGE_DIR: join(root, 'persona-knowledge'),
-      MEMORY_BACKEND: 'markdown',
       MEMORY_MARKDOWN_DIR: await pathUnderFile('memory'),
     });
 

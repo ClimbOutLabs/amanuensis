@@ -3,14 +3,12 @@
 import type * as TrueForge from "../../api/index.js";
 import * as core from "../../core/index.js";
 import type * as serializers from "../index.js";
-import { MemoryDefaultsCapabilityBackend } from "./MemoryDefaultsCapabilityBackend.js";
 import { MemoryDefaultsCapabilityReflectBudget } from "./MemoryDefaultsCapabilityReflectBudget.js";
 
 export const MemoryDefaultsCapability: core.serialization.ObjectSchema<
     serializers.MemoryDefaultsCapability.Raw,
     TrueForge.MemoryDefaultsCapability
 > = core.serialization.object({
-    backend: MemoryDefaultsCapabilityBackend,
     curatedEnabled: core.serialization.property("curated_enabled", core.serialization.boolean()),
     curatedMaxModels: core.serialization.property("curated_max_models", core.serialization.number()),
     curatedMaxTokens: core.serialization.property("curated_max_tokens", core.serialization.number()),
@@ -29,7 +27,6 @@ export const MemoryDefaultsCapability: core.serialization.ObjectSchema<
 
 export declare namespace MemoryDefaultsCapability {
     export interface Raw {
-        backend: MemoryDefaultsCapabilityBackend.Raw;
         curated_enabled: boolean;
         curated_max_models: number;
         curated_max_tokens: number;

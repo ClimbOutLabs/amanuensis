@@ -2,7 +2,7 @@
  * Memory pages API (mounted at /api/v1/memory/pages).
  *
  * Lists, shows, edits and deletes the pages Aman keeps for people and matters, settles unconfirmed lines and
- * undoes recent changes. Only the markdown memory backend keeps pages; anything else answers 501.
+ * undoes recent changes.
  */
 import { OpenAPIHono, type RouteHandler } from '@hono/zod-openapi';
 import { execFileRunner } from '@truefoundry/trueforge-core/core';
@@ -44,21 +44,11 @@ export interface MemoryPagesRouterDeps {
 
 const STATUS_OF_REFUSAL = { not_found: 404, invalid: 400, conflict: 409 } as const;
 
-/** The vault folder for a tenant and wire namespace, or undefined when this server keeps no pages. */
+/** The vault folder for a tenant and wire namespace. */
 function pagesVaultDir({ tenantId, namespace }: { tenantId: string; namespace: string | undefined }) {
-  if (configuration.MEMORY_BACKEND !== 'markdown') {
-    return undefined;
-  }
   return namespaceDirFor(
     configuration.MEMORY_MARKDOWN_DIR,
     vaultFilesystemNamespace(sanitizeNamespace(tenantId), namespace),
-  );
-}
-
-function pagesNotAvailable(c: Context) {
-  return c.json(
-    { error: { message: 'Memory pages need the markdown memory backend, which this server does not use.' } },
-    501,
   );
 }
 
@@ -67,19 +57,15 @@ function noSuchPage(c: Context) {
 }
 
 export function createMemoryPagesRouter(deps: MemoryPagesRouterDeps) {
-  /** The vault and the options a change needs, or the 501 answer. */
-  function scope(c: Context, namespace: string | undefined) {
+  /** The vault and the options a change needs. */
+  function scope(c: Context, namespace: string | undefined): PageChangeOptions {
     const vaultDir = pagesVaultDir({ tenantId: deps.resolveRequestContext(c).tenant_id, namespace });
-    if (vaultDir === undefined) {
-      return undefined;
-    }
-    const options: PageChangeOptions = {
+    return {
       vaultDir,
       runner: execFileRunner,
       today: localDay({ instant: new Date() }).date,
       logger: deps.logger,
     };
-    return options;
   }
 
   function refusal(c: Context, outcome: Refusal) {
@@ -88,25 +74,16 @@ export function createMemoryPagesRouter(deps: MemoryPagesRouterDeps) {
 
   const listHandler: RouteHandler<typeof listMemoryPagesRoute> = async c => {
     const options = scope(c, c.req.valid('query').namespace);
-    if (options === undefined) {
-      return pagesNotAvailable(c);
-    }
     return c.json({ data: await listPagesForScreen(options.vaultDir) }, 200);
   };
 
   const changesHandler: RouteHandler<typeof listMemoryPageChangesRoute> = async c => {
     const options = scope(c, c.req.valid('query').namespace);
-    if (options === undefined) {
-      return pagesNotAvailable(c);
-    }
     return c.json({ data: await listPageChanges({ vaultDir: options.vaultDir, runner: options.runner }) }, 200);
   };
 
   const undoHandler: RouteHandler<typeof undoMemoryPageChangeRoute> = async c => {
     const options = scope(c, c.req.valid('query').namespace);
-    if (options === undefined) {
-      return pagesNotAvailable(c);
-    }
     const outcome = await undoPageChange({ options, changeId: c.req.valid('param').change_id });
     return outcome.ok ? c.json({ data: outcome.value }, 200) : refusal(c, outcome);
   };
@@ -114,9 +91,6 @@ export function createMemoryPagesRouter(deps: MemoryPagesRouterDeps) {
   const getHandler: RouteHandler<typeof getMemoryPageRoute> = async c => {
     const { kind, slug } = c.req.valid('param');
     const options = scope(c, c.req.valid('query').namespace);
-    if (options === undefined) {
-      return pagesNotAvailable(c);
-    }
     const page = await readPageForScreen({ vaultDir: options.vaultDir, kind, slug });
     return page === undefined ? noSuchPage(c) : c.json({ data: page }, 200);
   };
@@ -124,9 +98,6 @@ export function createMemoryPagesRouter(deps: MemoryPagesRouterDeps) {
   const updateHandler: RouteHandler<typeof updateMemoryPageRoute> = async c => {
     const { kind, slug } = c.req.valid('param');
     const options = scope(c, c.req.valid('query').namespace);
-    if (options === undefined) {
-      return pagesNotAvailable(c);
-    }
     const { markdown, version } = c.req.valid('json');
     const outcome = await savePageEdit({ options, kind, slug, markdown, version });
     return outcome.ok ? c.json({ data: outcome.value }, 200) : refusal(c, outcome);
@@ -135,9 +106,6 @@ export function createMemoryPagesRouter(deps: MemoryPagesRouterDeps) {
   const deleteHandler: RouteHandler<typeof deleteMemoryPageRoute> = async c => {
     const { kind, slug } = c.req.valid('param');
     const options = scope(c, c.req.valid('query').namespace);
-    if (options === undefined) {
-      return pagesNotAvailable(c);
-    }
     const outcome = await deletePageFile({ options, kind, slug });
     return outcome.ok ? c.json({}, 200) : refusal(c, outcome);
   };
@@ -145,9 +113,6 @@ export function createMemoryPagesRouter(deps: MemoryPagesRouterDeps) {
   const confirmHandler: RouteHandler<typeof confirmMemoryPageLineRoute> = async c => {
     const { kind, slug, fact_id: factId } = c.req.valid('param');
     const options = scope(c, c.req.valid('query').namespace);
-    if (options === undefined) {
-      return pagesNotAvailable(c);
-    }
     const body = c.req.valid('json');
     const outcome = await confirmPageLine({ options, kind, slug, factId, section: body.section });
     return outcome.ok ? c.json({ data: outcome.value }, 200) : refusal(c, outcome);
@@ -156,9 +121,6 @@ export function createMemoryPagesRouter(deps: MemoryPagesRouterDeps) {
   const dismissHandler: RouteHandler<typeof dismissMemoryPageLineRoute> = async c => {
     const { kind, slug, fact_id: factId } = c.req.valid('param');
     const options = scope(c, c.req.valid('query').namespace);
-    if (options === undefined) {
-      return pagesNotAvailable(c);
-    }
     const outcome = await dismissPageLine({ options, kind, slug, factId });
     return outcome.ok ? c.json({ data: outcome.value }, 200) : refusal(c, outcome);
   };
@@ -166,9 +128,6 @@ export function createMemoryPagesRouter(deps: MemoryPagesRouterDeps) {
   const dismissDisagreementHandler: RouteHandler<typeof dismissMemoryPageDisagreementRoute> = async c => {
     const { kind, slug, disagreement_id: disagreementId } = c.req.valid('param');
     const options = scope(c, c.req.valid('query').namespace);
-    if (options === undefined) {
-      return pagesNotAvailable(c);
-    }
     const outcome = await dismissPageDisagreement({ vaultDir: options.vaultDir, kind, slug, disagreementId });
     return outcome.ok ? c.json({ data: outcome.value }, 200) : refusal(c, outcome);
   };

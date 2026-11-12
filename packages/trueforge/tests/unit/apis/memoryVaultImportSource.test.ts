@@ -16,14 +16,12 @@ const ALICE: RequestContext = {
 };
 
 describe('notes brought in through the Memories import', () => {
-  const originalBackend = configuration.MEMORY_BACKEND;
   const originalDir = configuration.MEMORY_MARKDOWN_DIR;
   let baseDir: string;
   let app: OpenAPIHono;
 
   beforeEach(async () => {
     baseDir = await mkdtemp(join(tmpdir(), 'vault-import-source-'));
-    configuration.MEMORY_BACKEND = 'markdown';
     configuration.MEMORY_MARKDOWN_DIR = baseDir;
     app = new OpenAPIHono();
     app.route(
@@ -36,7 +34,6 @@ describe('notes brought in through the Memories import', () => {
   });
 
   afterEach(async () => {
-    configuration.MEMORY_BACKEND = originalBackend;
     configuration.MEMORY_MARKDOWN_DIR = originalDir;
     await rm(baseDir, { recursive: true, force: true });
   });

@@ -17,11 +17,10 @@ import type { TurnModelUsage } from '../modelUsage';
 import { sessionKeepsNothing } from '../privateChat';
 import type { TokenFactoryBudget } from '../tokenFactoryBudget';
 import { withoutAbilityNotes } from './assistantAbilityNotes';
-import type { RetainItem, WrittenEntry } from './hindsightClient';
-import { isOperationCompletedStatus, isOperationFailedStatus } from './hindsightClient';
 import { localDay } from './localDay';
 import { normalizedEntryBody, SESSION_ID_METADATA_KEY } from './markdownMemoryFiles';
-import type { MemoryClient } from './memoryClient';
+import type { MemoryClient, RetainItem, WrittenEntry } from './memoryClient';
+import { isOperationCompletedStatus, isOperationFailedStatus } from './memoryClient';
 import {
   ASSISTANT_RESPONSE_SOURCE,
   labeledNoteText,

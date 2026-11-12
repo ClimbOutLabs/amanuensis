@@ -10,9 +10,9 @@ import {
 } from '../../../../src/runtime/memory/embeddingModel';
 import { EmbeddingSubsystem } from '../../../../src/runtime/memory/embeddingRetrieval';
 import { appendHandledNote, type HandledOutcome } from '../../../../src/runtime/memory/handledNotes';
-import type { RetainItem } from '../../../../src/runtime/memory/hindsightClient';
 import { formatRetainEntry, scanNamespaceEntries } from '../../../../src/runtime/memory/markdownMemoryFiles';
 import { computeMeaningGate, type MeaningGate } from '../../../../src/runtime/memory/meaningGate';
+import type { RetainItem } from '../../../../src/runtime/memory/memoryClient';
 import {
   NOTE_DATE_METADATA_KEY,
   NOTE_SOURCE_METADATA_KEY,

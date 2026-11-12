@@ -1,28 +1,112 @@
 /**
- * Backend-agnostic interface for the long-term memory provider Aman speaks to each turn.
+ * The long-term memory store Aman speaks to each turn, and the shapes its calls hand back.
  *
- * `HindsightClient` (REST API over a Hindsight bank) and `MarkdownMemoryClient` (local
- * Markdown files, OpenClaw-style) both implement this. Callers must depend on this
- * interface, never on a concrete client, so the backend selected by `MEMORY_BACKEND`
- * is a drop-in replacement.
- *
- * The contract mirrors `HindsightClient`'s: every method returns a discriminated `{ ok }`
- * result and never throws, so a memory failure degrades a turn instead of failing it.
+ * Every method returns a discriminated `{ ok }` result and never throws, so a memory failure
+ * degrades a turn instead of failing it.
  */
-import type {
-  GetOperationOutcome,
-  GetProfileOutcome,
-  ListMentalModelsOutcome,
-  RecallOutcome,
-  ReflectBudget,
-  ReflectOutcome,
-  RetainItem,
-  RetainOutcome,
-  RetryOperationOutcome,
-} from './hindsightClient';
 import type { MeaningGate } from './meaningGate';
+import type { RetainMetadata } from './memoryOrigin';
 import type { LoadedPage, PageLoadStats } from './memoryPageLoader';
 import type { PageListing } from './memoryPages';
+
+export interface RecallItem {
+  id: string;
+  text: string;
+  entities?: string[];
+  occurred_start?: string;
+  occurred_end?: string;
+  context?: string;
+  /** Provenance and bookkeeping stored with the memory (e.g. `origin`, `turn_id`), so the recall screen can read its origin. */
+  metadata?: Record<string, string>;
+  /** Relevance score, when the store ranks by one; absent means the array order is the ranking. */
+  score?: number;
+}
+
+export interface EntityObservation {
+  text: string;
+  mentioned_at?: string;
+}
+
+export interface EntitySummary {
+  name: string;
+  canonical_name: string;
+  observations: EntityObservation[];
+  score?: number;
+}
+
+/** One failed call. `code` is what callers switch on; `reason` is the line for logs. */
+export interface MemoryFailure {
+  ok: false;
+  code: 'request_failed' | 'timeout';
+  reason: string;
+}
+
+export function timeoutFailure(timeoutMs: number): MemoryFailure {
+  return { ok: false, code: 'timeout', reason: `request timed out after ${String(timeoutMs)}ms` };
+}
+
+export type RecallOutcome = { ok: true; results: RecallItem[]; entities: EntitySummary[] } | MemoryFailure;
+
+export interface RetainItem {
+  content: string;
+  timestamp: string;
+  context?: string;
+  document_id: string;
+  /** Always names where the memory came from; a save without it is refused. */
+  metadata: RetainMetadata;
+}
+
+/** One entry a retain added to the daily log, as the log keeps it. */
+export interface WrittenEntry {
+  /** Stable id `md:{namespace}:{file}#{index}`. */
+  id: string;
+  /** The whole entry: heading, text and hidden trailer lines. */
+  text: string;
+}
+
+export interface RetainOutcome {
+  ok: boolean;
+  reason?: string;
+  /** The entries this call added. Absent when the call added none. */
+  written?: readonly WrittenEntry[];
+}
+
+export type GetOperationOutcome = { ok: true; status: string } | MemoryFailure;
+
+/** The only readings of an operation status the host relies on. */
+export function isOperationCompletedStatus(status: string): boolean {
+  return status === 'completed' || status === 'success' || status === 'succeeded';
+}
+
+export function isOperationFailedStatus(status: string): boolean {
+  return status === 'failed' || status === 'error';
+}
+
+export interface BankProfile {
+  name: string | undefined;
+  mission: string | undefined;
+  background: string | undefined;
+}
+
+export type GetProfileOutcome = { ok: true; profile: BankProfile } | MemoryFailure;
+
+export interface MentalModel {
+  id: string;
+  name: string;
+  content: string;
+  tags: string[];
+  isStale: boolean | undefined;
+}
+
+export type ListMentalModelsOutcome = { ok: true; models: MentalModel[] } | MemoryFailure;
+
+export type ReflectBudget = 'low' | 'mid' | 'high';
+
+export type ReflectOutcome = { ok: true; text: string; basedOn: number } | MemoryFailure;
+
+export interface RetryOperationOutcome {
+  ok: boolean;
+}
 
 export interface MemoryClient {
   recall(params: {

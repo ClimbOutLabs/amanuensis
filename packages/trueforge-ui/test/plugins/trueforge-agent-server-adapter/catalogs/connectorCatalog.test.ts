@@ -4,7 +4,6 @@ import { afterEach, describe, it, vi } from 'vitest';
 
 import {
   createConnectorCatalog,
-  memoryProviderWriteRequestOptions,
   toHarnessAuth,
   toHarnessManifest,
   toUiAuthPublic,
@@ -15,30 +14,6 @@ import {
 } from '@/plugins/trueforge-agent-server-adapter/catalogs/connectorCatalog.js';
 
 describe('connectorCatalog mappers', () => {
-  it('uses one bounded non-retrying request for memory-provider writes', () => {
-    assert.deepEqual(memoryProviderWriteRequestOptions(true), { timeoutInSeconds: 125, maxRetries: 0 });
-    assert.equal(memoryProviderWriteRequestOptions(false), undefined);
-    assert.equal(memoryProviderWriteRequestOptions(undefined), undefined);
-  });
-
-  it('carries memory tuning from the UI request to the manifest and back to the UI connector', () => {
-    const memorySettings = { recallTimeoutMs: 6_000, reflectEnabled: false, reflectBudget: 'low' as const };
-    const manifest = toHarnessManifest({
-      name: 'hindsight',
-      url: 'https://memory.example/mcp/default/',
-      auth: { type: 'none' },
-      memoryProvider: true,
-      memorySettings,
-    });
-    assert.deepEqual(Reflect.get(manifest, 'memorySettings'), memorySettings);
-    const connector = toUiConnector({ name: 'hindsight', manifest, authStatus: { status: 'not_required' } });
-    assert.deepEqual(connector.memorySettings, memorySettings);
-    assert.equal(
-      'memorySettings' in toHarnessManifest({ name: 'plain', url: 'https://mcp.example/', auth: { type: 'none' } }),
-      false,
-    );
-  });
-
   it('maps harness auth to UI public auth without secrets', () => {
     assert.deepEqual(toUiAuthPublic(undefined), { type: 'none' });
     assert.deepEqual(toUiAuthPublic({ type: 'dcr' }), { type: 'dcr' });
@@ -184,35 +159,6 @@ describe('connectorCatalog mappers', () => {
     assert.equal(connected.requiresAuth, false);
   });
 
-  it('maps memoryProvider from the manifest onto the UI connector', () => {
-    // `TrueForgeApi.McpServerManifest` may not declare `memoryProvider` yet (it lands
-    // separately on the server side); widen the fixture's type locally rather than the SDK.
-    const manifestWithMemory: TrueForgeApi.McpServerManifest & { memoryProvider: boolean } = {
-      type: 'remote',
-      name: 'hindsight',
-      url: 'https://memory.example/mcp/default/',
-      description: 'Hindsight memory MCP server.',
-      memoryProvider: true,
-    };
-    assert.deepEqual(
-      toUiConnector({
-        name: 'hindsight',
-        manifest: manifestWithMemory,
-        authStatus: { status: 'not_required' },
-      }),
-      {
-        id: 'hindsight',
-        name: 'hindsight',
-        description: 'Hindsight memory MCP server.',
-        url: 'https://memory.example/mcp/default/',
-        auth: { type: 'none' },
-        requiresAuth: false,
-        authenticated: true,
-        memoryProvider: true,
-      },
-    );
-  });
-
   it('maps the search provider role from the manifest the SDK delivers', () => {
     const base = {
       type: 'remote' as const,
@@ -276,7 +222,7 @@ describe('connectorCatalog mappers', () => {
     );
   });
 
-  it('omits memoryProvider when the manifest does not set it', () => {
+  it('maps a plain manifest onto the UI connector with no extra fields', () => {
     assert.deepEqual(
       toUiConnector({
         name: 'deepwiki',
@@ -425,106 +371,6 @@ describe('connectorCatalog mappers', () => {
         auth: { type: 'dcr' },
       },
     );
-  });
-
-  it('forwards memoryProvider onto the harness manifest', () => {
-    assert.deepEqual(
-      toHarnessManifest({
-        name: 'hindsight',
-        url: 'https://memory.example/mcp/default/',
-        auth: { type: 'none' },
-        memoryProvider: true,
-      }),
-      {
-        type: 'remote',
-        name: 'hindsight',
-        url: 'https://memory.example/mcp/default/',
-        description: 'hindsight MCP server',
-        memoryProvider: true,
-      },
-    );
-    assert.deepEqual(
-      toHarnessManifest({
-        name: 'hindsight',
-        url: 'https://memory.example/mcp/default/',
-        auth: { type: 'none' },
-        memoryProvider: false,
-      }),
-      {
-        type: 'remote',
-        name: 'hindsight',
-        url: 'https://memory.example/mcp/default/',
-        description: 'hindsight MCP server',
-        memoryProvider: false,
-      },
-    );
-  });
-
-  it('omits memoryProvider from the harness manifest when unset', () => {
-    assert.deepEqual(
-      toHarnessManifest({
-        name: 'hindsight',
-        url: 'https://memory.example/mcp/default/',
-        auth: { type: 'none' },
-      }),
-      {
-        type: 'remote',
-        name: 'hindsight',
-        url: 'https://memory.example/mcp/default/',
-        description: 'hindsight MCP server',
-      },
-    );
-  });
-});
-
-describe('connectorCatalog memory-provider check', () => {
-  const client = new TrueForge({ baseUrl: 'http://harness.test' });
-
-  function catalogWithFetch(fetchImpl: typeof fetch) {
-    return createConnectorCatalog(client, { baseUrl: 'http://harness.test', fetch: fetchImpl });
-  }
-
-  function jsonResponse(body: unknown, status = 200): Response {
-    return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
-  }
-
-  it('posts to the memory-check route and maps a healthy result', async () => {
-    const calls: { url: string; method: string | undefined }[] = [];
-    const catalog = catalogWithFetch(async (input, init) => {
-      calls.push({ url: String(input), method: init?.method });
-      return jsonResponse({ data: { status: 'ok' } });
-    });
-
-    assert.deepEqual(await catalog.checkMemoryProvider({ id: 'hindsight' }), { ok: true });
-    assert.deepEqual(calls, [{ url: 'http://harness.test/api/v1/mcp-servers/hindsight/memory-check', method: 'POST' }]);
-  });
-
-  it('maps a failed check onto the reason the provider gave', async () => {
-    const catalog = catalogWithFetch(async () =>
-      jsonResponse({
-        data: {
-          status: 'failed',
-          code: 'http_error',
-          reason: 'recall returned HTTP 401: Authentication failed: Invalid API key',
-          http_status: 401,
-          detail: 'Authentication failed: Invalid API key',
-        },
-      }),
-    );
-
-    assert.deepEqual(await catalog.checkMemoryProvider({ id: 'hindsight' }), {
-      ok: false,
-      code: 'http_error',
-      reason: 'recall returned HTTP 401: Authentication failed: Invalid API key',
-    });
-  });
-
-  it('throws the API error message when the route rejects the request', async () => {
-    const catalog = catalogWithFetch(async () =>
-      jsonResponse({ error: { message: 'MCP server not found: nope' } }, 404),
-    );
-
-    await assert.rejects(() => catalog.checkMemoryProvider({ id: 'nope' }), /MCP server not found: nope/);
   });
 });
 

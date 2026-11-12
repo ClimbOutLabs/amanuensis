@@ -500,7 +500,6 @@ export type {
   ConnectorChecks,
   ConnectorConnectionFailureKind,
   ConnectorConnectionTest,
-  MemoryProviderCheck,
 } from './server/connectorChecks.js';
 export { createTrueFoundryServer } from './server/createTrueFoundryServer.js';
 export type { CreateTrueFoundryServerOptions, TrueFoundryServer } from './server/createTrueFoundryServer.js';

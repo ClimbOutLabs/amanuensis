@@ -116,7 +116,6 @@ Tests use synthetic data only, never a person's real memories.
 
 ## Out of scope
 
-- The Hindsight backend.
 - A separate memory service or a graph database.
 - Importing memories from other assistants.
 - Changes to the learned profile.

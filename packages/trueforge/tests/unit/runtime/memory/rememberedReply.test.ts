@@ -4,10 +4,10 @@ import path from 'node:path';
 
 import { hasReadContent, type ChatProvenance } from '@truefoundry/trueforge-core/core/permissions/provenance';
 import { createWebSearchTurnState } from '@truefoundry/trueforge-core/core/permissions/webSearch';
-import type { RecallOutcome, RetainItem } from '../../../../src/runtime/memory/hindsightClient';
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
 import { entryMetadata, formatRetainEntry } from '../../../../src/runtime/memory/markdownMemoryFiles';
-import { hindsightMemoryCapability } from '../../../../src/runtime/memory/memoryCapability';
+import { memoryCapability } from '../../../../src/runtime/memory/memoryCapability';
+import type { RecallOutcome, RetainItem } from '../../../../src/runtime/memory/memoryClient';
 import {
   ASSISTANT_RESPONSE_SOURCE,
   formatMarker,
@@ -74,7 +74,7 @@ async function recalledInANewChat(input: {
     }
     const webSearch = createWebSearchTurnState();
     const recall = jest.spyOn(client, 'recall');
-    const capability = hindsightMemoryCapability({
+    const capability = memoryCapability({
       client,
       config: DEFAULT_CONFIG,
       logger: makeLogger(),

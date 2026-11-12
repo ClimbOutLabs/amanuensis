@@ -2,14 +2,11 @@
 
 ## What this is
 
-Host-enforced long-term memory. Exactly one MCP connector carries
-`memory_provider: true` in its manifest; the host recalls from it before
-every model call and retains every completed turn to it. The model is never
-responsible for remembering to use it. The one exception is the page
+Host-enforced long-term memory, kept as Markdown files on the server. The host
+recalls from it before every model call and retains every completed turn to it.
+The model is never responsible for remembering to use it. The one exception is the page
 tools described under [Writing pages](#writing-pages), three of which keep short facts
-the person asked for on a page and are not a way to write to the provider.
-Hindsight is the recommended provider: a self-hosted,
-long-term memory bank, run as its own service, with one bank per user.
+the person asked for on a page.
 
 Deliberate principles: recall is user-visible byte for byte; one dispatch
 path, no side channel; empty recall returns a distinguishable empty, never
@@ -220,8 +217,7 @@ and backups, keep what they held.
 ## Pages
 
 Pages are short Markdown files about one person or one matter. They sit beside the daily log in a
-vault and hold what stays true, so it does not have to be dug out of old entries. They work with the
-Markdown memory backend only. Hindsight does not use them.
+vault and hold what stays true, so it does not have to be dug out of old entries.
 
 Pages can be written by hand, and in a chat Aman can add, change and forget single facts with three
 tools, and look pages up with two more (see [Writing pages](#writing-pages)). Every change Aman makes is a commit in a history that sits

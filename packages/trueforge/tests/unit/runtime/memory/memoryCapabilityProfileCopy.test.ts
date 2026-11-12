@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import winston from 'winston';
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
-import { hindsightMemoryCapability, type MemoryConfig } from '../../../../src/runtime/memory/memoryCapability';
+import { memoryCapability, type MemoryConfig } from '../../../../src/runtime/memory/memoryCapability';
 
 const CONFIG: MemoryConfig = {
   recallMaxTokens: 2048,
@@ -49,7 +49,7 @@ describe('recall and the learned profile copy', () => {
         timeoutMs: 1_000,
       });
 
-      const capability = hindsightMemoryCapability({
+      const capability = memoryCapability({
         client,
         config: CONFIG,
         logger: winston.createLogger({ silent: true }),

@@ -28,9 +28,6 @@ export async function openDemoSeedSession(): Promise<DemoSeedSession> {
   if (!configuration.STANDALONE) {
     throw new Error('demo-seed writes to the standalone (SQLite) instance only. Set STANDALONE=true.');
   }
-  if (configuration.MEMORY_BACKEND !== 'markdown') {
-    throw new Error('demo-seed writes to the local markdown memory. Set MEMORY_BACKEND=markdown.');
-  }
   await mkdir(path.dirname(configuration.SQLITE_PATH), { recursive: true });
   const db = createSqliteDb(configuration.SQLITE_PATH);
   try {

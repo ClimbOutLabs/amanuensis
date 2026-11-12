@@ -10,13 +10,11 @@ type Mode = 'off' | 'report' | 'on';
 
 /** The trueforge adapter's two ports, backed by memory so a save reads back as the server would answer. */
 function renderCard({
-  markdown = true,
   mode = 'off',
   enabled = false,
   withPorts = true,
   failSave = false,
 }: {
-  markdown?: boolean;
   mode?: Mode;
   enabled?: boolean;
   withPorts?: boolean;
@@ -28,13 +26,13 @@ function renderCard({
     mode: next,
     overridden: true,
     defaultMode: 'off' as const,
-    effectiveMode: markdown ? next : ('off' as const),
+    effectiveMode: next,
   });
   const nightly = (next: boolean) => ({
     enabled: next,
     overridden: true,
     defaultEnabled: false,
-    effectiveEnabled: markdown && next,
+    effectiveEnabled: next,
   });
   const ports = withPorts
     ? {
@@ -58,7 +56,7 @@ function renderCard({
   const server = { ...createMockAgentUIServer({ catalog: createMockCatalog() }), ...ports };
   render(
     <ServerProvider server={server}>
-      <MemoryHelpersCard markdown={markdown} />
+      <MemoryHelpersCard />
     </ServerProvider>,
   );
   return { modeWrites, enabledWrites };
@@ -128,17 +126,6 @@ describe('MemoryHelpersCard', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Try again in a moment.');
     expect(screen.getByRole('radio', { name: /^Off/ })).toBeChecked();
-  });
-
-  it('disables both with a plain reason when memory is not kept as Markdown files', async () => {
-    renderCard({ markdown: false, mode: 'on', enabled: true });
-
-    await screen.findByText('Sort what Aman saves onto pages');
-    expect(screen.getAllByText(/needs memory kept as Markdown files/)).toHaveLength(2);
-    expect(screen.getByRole('radio', { name: /^Off/ })).toBeDisabled();
-    expect(screen.getByRole('radio', { name: /^On(?!ly)/ })).toBeDisabled();
-    expect(screen.getByRole('switch', { name: 'Tidy pages once a day' })).toBeDisabled();
-    expect(screen.getByRole('switch', { name: 'Tidy pages once a day' })).not.toBeChecked();
   });
 
   it('hides the card when the server has no such ports', () => {

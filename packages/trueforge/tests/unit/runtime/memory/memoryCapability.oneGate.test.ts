@@ -3,7 +3,7 @@ import path from 'node:path';
 import winston from 'winston';
 
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
-import { hindsightMemoryCapability } from '../../../../src/runtime/memory/memoryCapability';
+import { memoryCapability } from '../../../../src/runtime/memory/memoryCapability';
 import { serverMemoryConfig } from '../../../../src/runtime/memory/memorySettings';
 import {
   askAbout,
@@ -50,7 +50,7 @@ describe('one meaning gate for each message', () => {
     const embedQueries = jest.spyOn(model, 'embedQueries');
     const message = askAbout({ topic: 2, closeness: 1 });
 
-    const capability = hindsightMemoryCapability({
+    const capability = memoryCapability({
       client,
       config: serverMemoryConfig(),
       logger: winston.createLogger({ silent: true }),

@@ -6,7 +6,6 @@ import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import { getMemoryNightlyRoute, putMemoryNightlyRoute } from '../routes/memoryNightlyRoutes';
 import {
   MEMORY_NIGHTLY_SETTING_KEY,
-  isMemoryNightlyEffective,
   readMemoryNightlySetting,
   type MemoryNightlySetting,
 } from '../runtime/memoryNightlySettings';
@@ -58,7 +57,7 @@ export function createMemoryNightlyRouter<TTransaction>(deps: MemoryNightlyRoute
           enabled,
           overridden: body.enabled !== null,
           defaultEnabled,
-          effectiveEnabled: isMemoryNightlyEffective(enabled),
+          effectiveEnabled: enabled,
         }),
       },
       200,

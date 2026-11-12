@@ -112,7 +112,6 @@ describe('bug-report HTTP endpoint', () => {
         sessions,
         agentStore,
         sandboxProviderStore,
-        mcpServerStore,
         globalSettingsStore: new SqliteGlobalSettingsStore(db),
         resolveRequestContext: () => STANDALONE_REQUEST_CONTEXT,
         logger: createLogger({ silent: true }),

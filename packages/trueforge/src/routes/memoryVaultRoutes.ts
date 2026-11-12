@@ -89,10 +89,6 @@ export const listMemoryVaultEntriesRoute = createRoute({
     },
     ...UNAUTHENTICATED,
     ...SERVER_ERROR,
-    501: {
-      content: { 'application/json': { schema: RequestErrorResponseSchema } },
-      description: 'The server does not run the markdown memory backend.',
-    },
   },
 });
 
@@ -118,10 +114,6 @@ export const exportMemoryVaultRoute = createRoute({
     },
     ...UNAUTHENTICATED,
     ...SERVER_ERROR,
-    501: {
-      content: { 'application/json': { schema: RequestErrorResponseSchema } },
-      description: 'The server does not run the markdown memory backend.',
-    },
   },
 });
 
@@ -150,10 +142,6 @@ export const importMemoryVaultRoute = createRoute({
     },
     ...UNAUTHENTICATED,
     ...SERVER_ERROR,
-    501: {
-      content: { 'application/json': { schema: RequestErrorResponseSchema } },
-      description: 'The server does not run the markdown memory backend.',
-    },
   },
 });
 
@@ -172,10 +160,6 @@ export const getMemoryVaultSharingRoute = createRoute({
     },
     ...UNAUTHENTICATED,
     ...SERVER_ERROR,
-    501: {
-      content: { 'application/json': { schema: RequestErrorResponseSchema } },
-      description: 'The server does not run the markdown memory backend.',
-    },
   },
 });
 
@@ -204,10 +188,6 @@ export const putMemoryVaultSharingRoute = createRoute({
     },
     ...UNAUTHENTICATED,
     ...SERVER_ERROR,
-    501: {
-      content: { 'application/json': { schema: RequestErrorResponseSchema } },
-      description: 'The server does not run the markdown memory backend.',
-    },
   },
 });
 
@@ -233,10 +213,6 @@ export const getMemoryVaultSummaryStatusRoute = createRoute({
     },
     ...UNAUTHENTICATED,
     ...SERVER_ERROR,
-    501: {
-      content: { 'application/json': { schema: RequestErrorResponseSchema } },
-      description: 'The server does not run the markdown memory backend.',
-    },
   },
 });
 
@@ -271,10 +247,6 @@ export const updateMemoryVaultEntryRoute = createRoute({
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
       description: 'No vault entry with that id.',
     },
-    501: {
-      content: { 'application/json': { schema: RequestErrorResponseSchema } },
-      description: 'The server does not run the markdown memory backend.',
-    },
   },
 });
 
@@ -305,10 +277,6 @@ export const deleteMemoryVaultEntryRoute = createRoute({
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
       description: 'No vault entry with that id.',
     },
-    501: {
-      content: { 'application/json': { schema: RequestErrorResponseSchema } },
-      description: 'The server does not run the markdown memory backend.',
-    },
   },
 });
 
@@ -335,10 +303,6 @@ export const listMemoryVaultReviewNotesRoute = createRoute({
     },
     ...UNAUTHENTICATED,
     ...SERVER_ERROR,
-    501: {
-      content: { 'application/json': { schema: RequestErrorResponseSchema } },
-      description: 'The server does not run the markdown memory backend.',
-    },
   },
 });
 
@@ -368,9 +332,5 @@ export const markMemoryVaultReviewNotesRoute = createRoute({
     },
     ...UNAUTHENTICATED,
     ...SERVER_ERROR,
-    501: {
-      content: { 'application/json': { schema: RequestErrorResponseSchema } },
-      description: 'The server does not run the markdown memory backend.',
-    },
   },
 });

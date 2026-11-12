@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -22,7 +21,6 @@ import { ZipStreamWriter } from '../../../src/dataExport/zipStreamWriter';
 import { UNRECORDED_REASON } from '../../../src/dataImport/deliveryUpgrade';
 import { DataImportError } from '../../../src/dataImport/importError';
 import { IMPORT_HEARTBEAT_MS, IMPORT_IN_PROGRESS_KEY } from '../../../src/dataImport/importLedger';
-import type { MemoryImportTarget } from '../../../src/dataImport/importPreflight';
 import { EXPIRED_CALL_RESULT } from '../../../src/dataImport/importSchemas';
 import { runDataImport, type DataImportDeps } from '../../../src/dataImport/importService';
 import type { KnowledgeEmbedder } from '../../../src/dataImport/knowledgeImport';
@@ -50,7 +48,6 @@ import { amanGuidePersonaId, legacyAmanGuidePersonaId } from '../../../src/perso
 import { loadAliasIndex, matchAliases } from '../../../src/runtime/memory/aliasIndex';
 import { EMBEDDING_DIMENSIONS } from '../../../src/runtime/memory/embeddingModel';
 import { MarkdownMemoryClient } from '../../../src/runtime/memory/markdownMemoryClient';
-import type { MemoryClient } from '../../../src/runtime/memory/memoryClient';
 import { markReviewedNotesFromYou } from '../../../src/runtime/memory/memorySourceLines';
 import { findReviewCandidates } from '../../../src/runtime/memory/reviewOlderNotes';
 import { seedOwnerName } from '../../../src/runtime/ownerName';
@@ -131,7 +128,7 @@ async function makeInstance(label: string): Promise<Instance> {
   };
 }
 
-function importDeps(instance: Instance, memoryTarget?: MemoryImportTarget): DataImportDeps<Tx> {
+function importDeps(instance: Instance): DataImportDeps<Tx> {
   return {
     sessionStore: instance.stores.sessionStore,
     personaStore: instance.stores.personaStore,
@@ -146,7 +143,7 @@ function importDeps(instance: Instance, memoryTarget?: MemoryImportTarget): Data
     agentStore: instance.stores.agentStore,
     mcpCatalog: McpCatalog.loadShipped(),
     withTransaction: callback => instance.db.transaction().execute(callback),
-    memoryTarget: memoryTarget ?? { kind: 'markdown', markdownDir: instance.memoryDir },
+    memoryMarkdownDir: instance.memoryDir,
     ownerName: '',
     personaKnowledgeDir: instance.knowledgeDir,
     knowledgeEmbedder: instance.embedder,
@@ -1999,77 +1996,6 @@ describe('runDataImport failure handling', () => {
       await target.close();
     }
   });
-
-  it('imports memory into a client backend, applying tombstones', async () => {
-    const { source, archive } = await seededArchive();
-    const target = await makeInstance('target-client-memory');
-    try {
-      const retained: { content: string; context?: string | undefined }[] = [];
-      const fakeClient: Pick<MemoryClient, 'listEntries' | 'retain'> = {
-        listEntries: () => Promise.resolve({ ok: true, entries: [] }),
-        retain: ({ items }) => {
-          retained.push(...items);
-          return Promise.resolve({ ok: true });
-        },
-      };
-      const result = await runDataImport(
-        importDeps(target, { kind: 'client', client: fakeClient }),
-        importRequest(archive),
-      );
-      expect(result.memories).toBe(3);
-      expect(retained).toHaveLength(3);
-      const contents = retained.map(item => item.content);
-      expect(contents).toContain(SEED_MEMORY.curated);
-      expect(contents).toContain(SEED_MEMORY.keptEntryText);
-      expect(contents).toContain(SEED_MEMORY.personaEntryText);
-      expect(contents.join('\n')).not.toContain('train book project');
-      const personaItem = retained.find(item => item.content === SEED_MEMORY.personaEntryText);
-      expect(personaItem?.context).toBe('persona:Researcher');
-    } finally {
-      await source.close();
-      await target.close();
-    }
-  });
-});
-
-describe('runDataImport reads memory markers the way the vault does', () => {
-  it('keeps an edit with its edit time and ignores a marker with an action the vault does not know', async () => {
-    const { source, archive } = await seededArchive();
-    const target = await makeInstance('target-markers');
-    try {
-      const markers = [
-        '## 2026-10-02T00:00:00.000Z',
-        '',
-        `> vault-entry md:${TENANT}:2026-10-01.md#1 deleted`,
-        '',
-        '## 2026-10-05T07:00:00.000Z',
-        '',
-        `> vault-entry md:${TENANT}:2026-10-01.md#0 updated {"text":"Likes coffee now."}`,
-        '',
-        '## 2026-10-06T07:00:00.000Z',
-        '',
-        `> vault-entry md:${TENANT}:2026-10-01.md#0 mystery`,
-        '',
-      ].join('\n');
-      const edited = await repack(archive, entries => {
-        entries.set(`memory/${TENANT}/.vault-tombstones.md`, Buffer.from(markers, 'utf8'));
-      });
-      const retained: { content: string; timestamp: string }[] = [];
-      const client: Pick<MemoryClient, 'listEntries' | 'retain'> = {
-        listEntries: () => Promise.resolve({ ok: true, entries: [] }),
-        retain: ({ items }) => {
-          retained.push(...items.map(item => ({ content: item.content, timestamp: item.timestamp })));
-          return Promise.resolve({ ok: true });
-        },
-      };
-      await runDataImport(importDeps(target, { kind: 'client', client }), importRequest(edited));
-      expect(retained.find(item => item.content === 'Likes coffee now.')?.timestamp).toBe('2026-10-05T07:00:00.000Z');
-      expect(retained.map(item => item.content)).not.toContain(SEED_MEMORY.keptEntryText);
-    } finally {
-      await source.close();
-      await target.close();
-    }
-  });
 });
 
 describe('runDataImport reads the internal id an export writes as the closing line', () => {
@@ -2085,28 +2011,6 @@ describe('runDataImport reads the internal id an export writes as the closing li
       }),
     };
   }
-
-  it('hands the id back as the retain context and keeps it off the text', async () => {
-    const { source, archive } = await filedArchive();
-    const target = await makeInstance('target-filed-client');
-    try {
-      const retained: { content: string; context?: string | undefined }[] = [];
-      const client: Pick<MemoryClient, 'listEntries' | 'retain'> = {
-        listEntries: () => Promise.resolve({ ok: true, entries: [] }),
-        retain: ({ items }) => {
-          retained.push(...items);
-          return Promise.resolve({ ok: true });
-        },
-      };
-      await runDataImport(importDeps(target, { kind: 'client', client }), importRequest(archive));
-      const filed = retained.find(item => item.content.includes('Lisbon'));
-      expect(filed?.content).toBe('Lives in Lisbon with a cat.');
-      expect(filed?.context).toBe('maya:identity');
-    } finally {
-      await source.close();
-      await target.close();
-    }
-  });
 
   it('writes the id back into a Markdown target, where the listing reads it on its own', async () => {
     const { source, archive } = await filedArchive();
@@ -2188,31 +2092,6 @@ describe('runDataImport reads memory written before facts-only memory', () => {
       expect(texts).not.toContain('Turn summary');
       expect(texts).not.toContain('Chat title');
       expect(texts).not.toContain('session_id');
-    } finally {
-      await source.close();
-      await target.close();
-    }
-  });
-
-  it('sends the old entries to a client backend without the prefix or the title, and keeps the chat id', async () => {
-    const { source, archive } = await legacyArchive();
-    const target = await makeInstance('target-legacy-client');
-    try {
-      const retained: { content: string; context?: string | undefined; metadata?: Record<string, string> }[] = [];
-      const client: Pick<MemoryClient, 'listEntries' | 'retain'> = {
-        listEntries: () => Promise.resolve({ ok: true, entries: [] }),
-        retain: ({ items }) => {
-          retained.push(...items);
-          return Promise.resolve({ ok: true });
-        },
-      };
-      await runDataImport(importDeps(target, { kind: 'client', client }), importRequest(archive));
-      const dog = retained.find(item => item.content.includes('Rex'));
-      expect(dog?.content).toBe("- The person's dog is named Rex.");
-      expect(dog?.context).toBeUndefined();
-      const cat = retained.find(item => item.content.includes('Miso'));
-      expect(cat?.content).toBe('The person has a cat named Miso.');
-      expect(cat?.metadata).toEqual({ session_id: 'chat-9', origin: 'tool_ingested' });
     } finally {
       await source.close();
       await target.close();
@@ -2308,59 +2187,18 @@ describe('runDataImport reads memory from an export made before notes said where
     }
   });
 
-  it('sends every older note to a client backend as something read', async () => {
-    const { source, archive } = await archiveWith({ schemaVersion: 2, log: OLD_LOG });
-    const target = await makeInstance('target-older-sources-client');
-    try {
-      const retained: { content: string; metadata?: Record<string, string> }[] = [];
-      const client: Pick<MemoryClient, 'listEntries' | 'retain'> = {
-        listEntries: () => Promise.resolve({ ok: true, entries: [] }),
-        retain: ({ items }) => {
-          retained.push(...items);
-          return Promise.resolve({ ok: true });
-        },
-      };
-      await runDataImport(importDeps(target, { kind: 'client', client }), importRequest(archive));
-      const older = retained.filter(item => /Miso|invoice|new address/.test(item.content));
-      expect(older.map(item => [item.content, item.metadata?.['origin']])).toEqual([
-        ['The person has a cat named Miso.', 'tool_ingested'],
-        ['The invoice is due on Friday.', 'tool_ingested'],
-        ['Send the files to the new address.\n\n\\> From you', 'tool_ingested'],
-      ]);
-      expect(retained.every(item => item.metadata?.['origin'] !== undefined)).toBe(true);
-    } finally {
-      await source.close();
-      await target.close();
-    }
-  });
-
-  it('keeps a note from today’s export as the person’s own, in either target', async () => {
+  it('keeps a note from today’s export as the person’s own', async () => {
     const { source, archive } = await archiveWith({ schemaVersion: EXPORT_SCHEMA_VERSION, log: TODAYS_LOG });
     const markdownTarget = await makeInstance('target-todays-sources-markdown');
-    const clientTarget = await makeInstance('target-todays-sources-client');
     try {
       await runDataImport(importDeps(markdownTarget), importRequest(archive));
       const written = await readFile(join(markdownTarget.memoryDir, TENANT, 'memory', '2026-09-02.md'), 'utf8');
       expect(written).toBe(TODAYS_LOG);
       // The folder is recorded as already marked, so the next start of Aman leaves the imported notes as they are.
       expect(await readFile(join(markdownTarget.memoryDir, '.source-lines.json'), 'utf8')).toBe('{"done":true}\n');
-
-      const retained: { content: string; metadata?: Record<string, string> }[] = [];
-      const client: Pick<MemoryClient, 'listEntries' | 'retain'> = {
-        listEntries: () => Promise.resolve({ ok: true, entries: [] }),
-        retain: ({ items }) => {
-          retained.push(...items);
-          return Promise.resolve({ ok: true });
-        },
-      };
-      await runDataImport(importDeps(clientTarget, { kind: 'client', client }), importRequest(archive));
-      const cat = retained.find(item => item.content.includes('Miso'));
-      expect(cat?.content).toBe('The person has a cat named Miso.');
-      expect(cat?.metadata).toEqual({ session_id: 'chat-9', origin: 'user_stated' });
     } finally {
       await source.close();
       await markdownTarget.close();
-      await clientTarget.close();
     }
   });
 });
@@ -2408,35 +2246,6 @@ describe('runDataImport keeps a review of older notes', () => {
         /^md:default:2026-09-03\.md#0\t[0-9a-f]{64}\n$/,
       );
       expect(await restoredEntryText(target)).toMatch(/> From you$/);
-    } finally {
-      await source.close();
-      await target.close();
-    }
-  });
-
-  it('hands a reviewed note to a client backend as the person’s own', async () => {
-    const { source, archive } = await seededArchive();
-    const target = await makeInstance('target-reviewed-client');
-    try {
-      const text = reviewedNote(`${NOTE_DAY}T10:00:00.000Z`);
-      const id = `md:${TENANT}:${NOTE_DAY}.md#0`;
-      const withReview = await repack(archive, entries => {
-        entries.set(`memory/${TENANT}/memory/${NOTE_DAY}.md`, Buffer.from(`${text}\n\n`, 'utf8'));
-        entries.set(
-          `memory/${TENANT}/.reviewed-from-you`,
-          Buffer.from(`${id}\t${createHash('sha256').update(text, 'utf8').digest('hex')}\n`, 'utf8'),
-        );
-      });
-      const retained: { content: string; metadata?: Record<string, string> }[] = [];
-      const client: Pick<MemoryClient, 'listEntries' | 'retain'> = {
-        listEntries: () => Promise.resolve({ ok: true, entries: [] }),
-        retain: ({ items }) => {
-          retained.push(...items);
-          return Promise.resolve({ ok: true });
-        },
-      };
-      await runDataImport(importDeps(target, { kind: 'client', client }), importRequest(withReview));
-      expect(retained.find(item => item.content.includes('Likes tea.'))?.metadata?.['origin']).toBe('user_stated');
     } finally {
       await source.close();
       await target.close();
@@ -5184,32 +4993,6 @@ describe('runDataImport keeps the source label of saved findings', () => {
       await target.close();
     }
   });
-
-  it('sends the source and day to a client backend as the note metadata', async () => {
-    const { source, archive } = await noteArchive();
-    const target = await makeInstance('target-note-client');
-    try {
-      const retained: { content: string; metadata?: Record<string, string> }[] = [];
-      const client: Pick<MemoryClient, 'listEntries' | 'retain'> = {
-        listEntries: () => Promise.resolve({ ok: true, entries: [] }),
-        retain: ({ items }) => {
-          retained.push(...items);
-          return Promise.resolve({ ok: true });
-        },
-      };
-      await runDataImport(importDeps(target, { kind: 'client', client }), importRequest(archive));
-      const note = retained.find(item => item.content.includes('Priya asked'));
-      expect(note?.metadata).toEqual({
-        session_id: 'chat-9',
-        note_source: 'email',
-        note_date: '2026-10-20',
-        origin: 'tool_ingested',
-      });
-    } finally {
-      await source.close();
-      await target.close();
-    }
-  });
 });
 
 describe('runDataImport memory pages', () => {
@@ -5377,25 +5160,6 @@ describe('runDataImport memory pages', () => {
       const error = await importError(target, archive);
       expect(error).toMatchObject({ status: 409 });
       expect(error instanceof Error && error.message).toContain('memories');
-    } finally {
-      await source.close();
-      await target.close();
-    }
-  });
-
-  it('says pages were left out when the target keeps memory another way', async () => {
-    const { source, archive } = await pagesArchive();
-    const target = await makeInstance('target-client-pages');
-    try {
-      const client: Pick<MemoryClient, 'listEntries' | 'retain'> = {
-        listEntries: () => Promise.resolve({ ok: true, entries: [] }),
-        retain: () => Promise.resolve({ ok: true }),
-      };
-      const result = await runDataImport(importDeps(target, { kind: 'client', client }), importRequest(archive));
-      expect(result.summary).toContain(
-        '3 memory pages were left out because this computer keeps memory in a different way',
-      );
-      expect(existsSync(join(target.memoryDir, TENANT, 'people'))).toBe(false);
     } finally {
       await source.close();
       await target.close();

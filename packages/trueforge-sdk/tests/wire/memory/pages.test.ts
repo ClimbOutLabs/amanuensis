@@ -150,25 +150,6 @@ describe("PagesClient", () => {
         }).rejects.toThrow(TrueForgeTypes.InternalServerError);
     });
 
-    test("list (7)", async () => {
-        const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = { error: { message: "message" } };
-
-        server
-            .mockEndpoint()
-            .get("/api/v1/memory/pages")
-            .respondWith()
-            .statusCode(501)
-            .jsonBody(rawResponseBody)
-            .build();
-
-        await expect(async () => {
-            return await client.memory.pages.list();
-        }).rejects.toThrow(TrueForgeTypes.NotImplementedError);
-    });
-
     test("list_changes (1)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
@@ -315,25 +296,6 @@ describe("PagesClient", () => {
         }).rejects.toThrow(TrueForgeTypes.InternalServerError);
     });
 
-    test("list_changes (7)", async () => {
-        const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = { error: { message: "message" } };
-
-        server
-            .mockEndpoint()
-            .get("/api/v1/memory/pages/changes")
-            .respondWith()
-            .statusCode(501)
-            .jsonBody(rawResponseBody)
-            .build();
-
-        await expect(async () => {
-            return await client.memory.pages.listChanges();
-        }).rejects.toThrow(TrueForgeTypes.NotImplementedError);
-    });
-
     test("undo_change (1)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
@@ -454,25 +416,6 @@ describe("PagesClient", () => {
         await expect(async () => {
             return await client.memory.pages.undoChange("change_id");
         }).rejects.toThrow(TrueForgeTypes.InternalServerError);
-    });
-
-    test("undo_change (7)", async () => {
-        const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = { error: { message: "message" } };
-
-        server
-            .mockEndpoint()
-            .post("/api/v1/memory/pages/changes/change_id/undo")
-            .respondWith()
-            .statusCode(501)
-            .jsonBody(rawResponseBody)
-            .build();
-
-        await expect(async () => {
-            return await client.memory.pages.undoChange("change_id");
-        }).rejects.toThrow(TrueForgeTypes.NotImplementedError);
     });
 
     test("get (1)", async () => {
@@ -666,25 +609,6 @@ describe("PagesClient", () => {
         await expect(async () => {
             return await client.memory.pages.get("person", "slug");
         }).rejects.toThrow(TrueForgeTypes.InternalServerError);
-    });
-
-    test("get (7)", async () => {
-        const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = { error: { message: "message" } };
-
-        server
-            .mockEndpoint()
-            .get("/api/v1/memory/pages/person/slug")
-            .respondWith()
-            .statusCode(501)
-            .jsonBody(rawResponseBody)
-            .build();
-
-        await expect(async () => {
-            return await client.memory.pages.get("person", "slug");
-        }).rejects.toThrow(TrueForgeTypes.NotImplementedError);
     });
 
     test("update (1)", async () => {
@@ -904,29 +828,6 @@ describe("PagesClient", () => {
         }).rejects.toThrow(TrueForgeTypes.InternalServerError);
     });
 
-    test("update (7)", async () => {
-        const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = { markdown: "x", version: "x" };
-        const rawResponseBody = { error: { message: "message" } };
-
-        server
-            .mockEndpoint()
-            .put("/api/v1/memory/pages/person/slug")
-            .jsonBody(rawRequestBody)
-            .respondWith()
-            .statusCode(501)
-            .jsonBody(rawResponseBody)
-            .build();
-
-        await expect(async () => {
-            return await client.memory.pages.update("person", "slug", {
-                markdown: "x",
-                version: "x",
-            });
-        }).rejects.toThrow(TrueForgeTypes.NotImplementedError);
-    });
-
     test("delete (1)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
@@ -1038,25 +939,6 @@ describe("PagesClient", () => {
         await expect(async () => {
             return await client.memory.pages.delete("person", "slug");
         }).rejects.toThrow(TrueForgeTypes.InternalServerError);
-    });
-
-    test("delete (7)", async () => {
-        const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = { error: { message: "message" } };
-
-        server
-            .mockEndpoint()
-            .delete("/api/v1/memory/pages/person/slug")
-            .respondWith()
-            .statusCode(501)
-            .jsonBody(rawResponseBody)
-            .build();
-
-        await expect(async () => {
-            return await client.memory.pages.delete("person", "slug");
-        }).rejects.toThrow(TrueForgeTypes.NotImplementedError);
     });
 
     test("dismiss_disagreement (1)", async () => {
@@ -1250,25 +1132,6 @@ describe("PagesClient", () => {
         await expect(async () => {
             return await client.memory.pages.dismissDisagreement("person", "slug", "disagreement_id");
         }).rejects.toThrow(TrueForgeTypes.InternalServerError);
-    });
-
-    test("dismiss_disagreement (7)", async () => {
-        const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = { error: { message: "message" } };
-
-        server
-            .mockEndpoint()
-            .post("/api/v1/memory/pages/person/slug/disagreements/disagreement_id/dismiss")
-            .respondWith()
-            .statusCode(501)
-            .jsonBody(rawResponseBody)
-            .build();
-
-        await expect(async () => {
-            return await client.memory.pages.dismissDisagreement("person", "slug", "disagreement_id");
-        }).rejects.toThrow(TrueForgeTypes.NotImplementedError);
     });
 
     test("confirm_line (1)", async () => {
@@ -1470,26 +1333,6 @@ describe("PagesClient", () => {
         }).rejects.toThrow(TrueForgeTypes.InternalServerError);
     });
 
-    test("confirm_line (7)", async () => {
-        const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-        const rawRequestBody = {};
-        const rawResponseBody = { error: { message: "message" } };
-
-        server
-            .mockEndpoint()
-            .post("/api/v1/memory/pages/person/slug/lines/fact_id/confirm")
-            .jsonBody(rawRequestBody)
-            .respondWith()
-            .statusCode(501)
-            .jsonBody(rawResponseBody)
-            .build();
-
-        await expect(async () => {
-            return await client.memory.pages.confirmLine("person", "slug", "fact_id");
-        }).rejects.toThrow(TrueForgeTypes.NotImplementedError);
-    });
-
     test("dismiss_line (1)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
@@ -1681,24 +1524,5 @@ describe("PagesClient", () => {
         await expect(async () => {
             return await client.memory.pages.dismissLine("person", "slug", "fact_id");
         }).rejects.toThrow(TrueForgeTypes.InternalServerError);
-    });
-
-    test("dismiss_line (7)", async () => {
-        const server = mockServerPool.createServer();
-        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
-
-        const rawResponseBody = { error: { message: "message" } };
-
-        server
-            .mockEndpoint()
-            .post("/api/v1/memory/pages/person/slug/lines/fact_id/dismiss")
-            .respondWith()
-            .statusCode(501)
-            .jsonBody(rawResponseBody)
-            .build();
-
-        await expect(async () => {
-            return await client.memory.pages.dismissLine("person", "slug", "fact_id");
-        }).rejects.toThrow(TrueForgeTypes.NotImplementedError);
     });
 });

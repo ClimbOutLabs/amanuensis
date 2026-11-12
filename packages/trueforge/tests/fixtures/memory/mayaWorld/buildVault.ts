@@ -2,9 +2,9 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { appendHandledNote, readHandledNotes } from '../../../../src/runtime/memory/handledNotes';
-import type { RetainItem } from '../../../../src/runtime/memory/hindsightClient';
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
 import { namespaceDirFor, scanNamespaceEntries } from '../../../../src/runtime/memory/markdownMemoryFiles';
+import type { RetainItem } from '../../../../src/runtime/memory/memoryClient';
 import { labeledNoteText, noteLabel } from '../../../../src/runtime/memory/memoryNotes';
 import { USER_STATED_ORIGIN } from '../../../../src/runtime/memory/memoryOrigin';
 import { pagePath } from '../../../../src/runtime/memory/memoryPages';

@@ -28,7 +28,7 @@ jest.mock('../../../../src/runtime/memory/memorySummarize', () => {
 
 import type { IModelProviderStore } from '../../../../src/db/modelProviderStore';
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
-import { hindsightMemoryCapability, type MemoryConfig } from '../../../../src/runtime/memory/memoryCapability';
+import { memoryCapability, type MemoryConfig } from '../../../../src/runtime/memory/memoryCapability';
 import { submitRetainWithVerification, type SummarizeTurnContext } from '../../../../src/runtime/memory/memoryRetain';
 import { summarizeTurnContent } from '../../../../src/runtime/memory/memorySummarize';
 
@@ -86,7 +86,7 @@ function secondTurnContext(): Readonly<AgentThreadExecutionContext> {
   return { threadId: 'main', currentContextUsage: { prompt_tokens: 0, completion_tokens: 0 }, context };
 }
 
-async function runSecondTurn(capability: ReturnType<typeof hindsightMemoryCapability>): Promise<void> {
+async function runSecondTurn(capability: ReturnType<typeof memoryCapability>): Promise<void> {
   const processor = capability.preLLMProcessors?.[0];
   if (!processor) {
     throw new Error('expected a preLLM processor');
@@ -104,7 +104,7 @@ function savedLogs(dir: string): string[] {
 }
 
 function capabilityFor(client: MarkdownMemoryClient, keepsFullExchange?: boolean) {
-  return hindsightMemoryCapability({
+  return memoryCapability({
     client,
     config: CONFIG,
     logger: makeLogger(),

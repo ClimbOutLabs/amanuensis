@@ -86,7 +86,6 @@ function fakeModelProviderStore(): IModelProviderStore {
 }
 
 describe('scheduled run memory wiring', () => {
-  const originalBackend = configuration.MEMORY_BACKEND;
   const originalDir = configuration.MEMORY_MARKDOWN_DIR;
   const originalEmbeddings = configuration.MEMORY_EMBEDDINGS_ENABLED;
   const originalSummarize = configuration.MEMORY_SUMMARIZE;
@@ -95,14 +94,12 @@ describe('scheduled run memory wiring', () => {
   beforeEach(async () => {
     mockedStartTurnInProcess.mockReset();
     baseDir = await mkdtemp(join(tmpdir(), 'schedule-run-memory-'));
-    configuration.MEMORY_BACKEND = 'markdown';
     configuration.MEMORY_MARKDOWN_DIR = baseDir;
     configuration.MEMORY_EMBEDDINGS_ENABLED = false;
     configuration.MEMORY_SUMMARIZE = true;
   });
 
   afterEach(async () => {
-    configuration.MEMORY_BACKEND = originalBackend;
     configuration.MEMORY_MARKDOWN_DIR = originalDir;
     configuration.MEMORY_EMBEDDINGS_ENABLED = originalEmbeddings;
     configuration.MEMORY_SUMMARIZE = originalSummarize;

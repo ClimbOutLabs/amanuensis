@@ -14,9 +14,8 @@ export interface McpServerRecord {
   name: ResourceName;
   manifest: McpServerManifest;
   /**
-   * Server-owned trust marker, never part of the manifest or any request: true only when the
-   * memory provider setup passed its check on an origin the operator listed. Loading the connector
-   * for a turn also requires that origin to still be listed.
+   * Server-owned trust marker, never part of the manifest or any request: no save sets it. Loading the
+   * connector for a turn also requires its origin to be on the first-party list.
    */
   first_party: boolean;
   /** ISO-8601 UTC instant. */

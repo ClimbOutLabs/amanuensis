@@ -69,11 +69,9 @@ A message matches when it contains every word you searched for, as a whole word.
 
 Manage it in **Settings → Memory**: see what's stored, turn recall on or off (the rail toggle does the same), and check the memory status. Recall is bounded, so a large memory can't blow up the model's context window, and every recall is auditable.
 
-Prefer a hosted memory bank? Set `MEMORY_BACKEND=hindsight` to use a self-hosted [Hindsight](../ops/memory/RUNBOOK.md) instance instead — currently experimental. Point Amanuensis at your bank's MCP endpoint (`{apiBase}/mcp/{bank}`) with a `Bearer` API key in **Settings → Memory**. Memory calls Hindsight's REST API directly for recall and retain, so use a key valid on both surfaces; see [the runbook's two-surfaces note](../ops/memory/RUNBOOK.md#two-surfaces-one-connector) if recall stops working after a key rotation.
-
 Two optional Prompt Guard screens can check content around memory before it reaches the model, both off by default:
 
-- **Memory recall screen**: screens memories recalled from the bank before they reach the model. Turn it on per bank in Settings → Memory with the "Screen recalled memories with Prompt Guard" switch; it needs a classifier URL configured and reachable first. Your own stated memories are never withheld; it only applies to memories that came from tools, documents, or email.
+- **Memory recall screen**: screens recalled memories before they reach the model. Turn it on in Settings → Memory with the "Screen recalled memories with Prompt Guard" switch; it needs a classifier URL configured and reachable first. Your own stated memories are never withheld; it only applies to memories that came from tools, documents, or email.
 - **Tool output screen**: screens tool results before they re-enter model context. This one is environment-only, with no Settings switch, and shares the same classifier URL, token, and threshold as the recall screen.
 
 See [Deployment Security](deployment-security.mdx#prompt-guard-screens) for the full configuration and [Memory design](../ops/memory/DESIGN.md) for how recall and retention work.

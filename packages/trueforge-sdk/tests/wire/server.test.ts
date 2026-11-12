@@ -13,7 +13,6 @@ describe("ServerClient", () => {
             data: {
                 build: { ref: "ref", version: "version" },
                 memory_defaults: {
-                    backend: "markdown",
                     curated_enabled: true,
                     curated_max_models: 1,
                     curated_max_tokens: 1,
@@ -74,7 +73,6 @@ describe("ServerClient", () => {
                     version: "version",
                 },
                 memoryDefaults: {
-                    backend: "markdown",
                     curatedEnabled: true,
                     curatedMaxModels: 1,
                     curatedMaxTokens: 1,

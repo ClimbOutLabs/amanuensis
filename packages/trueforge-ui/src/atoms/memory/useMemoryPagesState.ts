@@ -14,7 +14,7 @@ import {
   memoryVaultErrorMessage,
   personaVaultNamespace,
 } from '@/plugins/trueforge-agent-server-adapter/catalogs/memoryVaultCatalog.js';
-import { readMemoryBackend } from '@/plugins/trueforge-agent-server-adapter/lists.js';
+import { memoryStatusReported } from '@/plugins/trueforge-agent-server-adapter/lists.js';
 import { useOptionalServer, useServerCapabilities } from '@/server/ServerContext.js';
 import { useForgetWithUndo } from './useForgetWithUndo.js';
 
@@ -25,11 +25,11 @@ export function hasMemoryPagesPort(server: object): server is { memoryPages: Mem
   return typeof port === 'object' && port !== null && typeof Reflect.get(port, 'listPages') === 'function';
 }
 
-/** Whether the Pages tab is offered: the server keeps Markdown memory and has the pages routes. */
+/** Whether the Pages tab is offered: the server reported its memory and has the pages routes. */
 export function useMemoryPagesAvailable(): boolean {
   const server = useOptionalServer();
-  const backend = readMemoryBackend(useServerCapabilities());
-  return backend === 'markdown' && server !== null && hasMemoryPagesPort(server);
+  const reported = memoryStatusReported(useServerCapabilities());
+  return reported && server !== null && hasMemoryPagesPort(server);
 }
 
 export type PageRef = { kind: MemoryPageKind; slug: string };

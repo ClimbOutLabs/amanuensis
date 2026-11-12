@@ -11,7 +11,6 @@ import {
 } from '@truefoundry/trueforge-core/agent-session';
 import { AgentHarnessError, HeldActionRefusedError } from '@truefoundry/trueforge-core/core';
 import { STANDALONE_REQUEST_CONTEXT, type RequestContext } from '../../../src/auth/identity';
-import configuration from '../../../src/config';
 import {
   CHILD_CALL_ID,
   CHILD_CARD,
@@ -420,13 +419,6 @@ describe('the calls read for a turn that answers a card', () => {
 
   it('never stop the turn when the paused turn cannot be read', async () => {
     const { createTurn } = await answerAllow();
-    expect(createTurn).toHaveBeenCalledTimes(1);
-  });
-
-  it('are not read at all when memory is off', async () => {
-    jest.replaceProperty(configuration, 'MEMORY_BACKEND', 'hindsight');
-    const { read, createTurn } = await answerAllow();
-    expect(read).not.toHaveBeenCalled();
     expect(createTurn).toHaveBeenCalledTimes(1);
   });
 });

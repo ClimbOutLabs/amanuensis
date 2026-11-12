@@ -1,7 +1,7 @@
 /**
  * Wire schemas for the host-enforced memory recall passthrough event (`aman.memory.recall`).
  *
- * `injected_block` is byte-for-byte what {@link HindsightMemoryProcessor.processPreLLMEphemeral}
+ * `injected_block` is byte-for-byte what {@link MemoryProcessor.processPreLLMEphemeral}
  * inserted ahead of the model call (or `null` when nothing was injected), so that the UI can
  * render this event and every datum the model received stays user-visible (SPEC.md invariant I5).
  *

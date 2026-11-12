@@ -4,22 +4,18 @@
  * UI: `dcr` / `header` / `none`, connector `id`.
  * Harness: `dcr` / `header` / omitted auth, resource `name`.
  */
-import { MEMORY_PROVIDER_MAX_TIMEOUT_MS } from '@truefoundry/trueforge-core/core/memory/memorySettingsLimits';
 import type { TrueForge, TrueForgeApi } from '@truefoundry/trueforge-sdk';
 import { z } from 'zod';
 import {
-  parseMemoryProviderCheck,
   type ConnectorChecks,
   type ConnectorConnectionFailureKind,
   type HomeAssistantCheckPort,
-  type MemoryProviderCheck,
 } from '../../../server/connectorChecks.js';
 
 import type { CalendarSetupPort } from '../../../server/calendarSetup.js';
 import { parseToolGrants, type ConnectorToolGrants } from '../../../server/connectorToolGrants.js';
 import type { EmailSetupPort } from '../../../server/emailSetup.js';
 import type { GoogleSetupPort } from '../../../server/googleSetup.js';
-import type { MemoryProviderFields } from '../../../server/memoryProviderTypes.js';
 import type { NotesFolderSetupPort } from '../../../server/notesFolderSetup.js';
 import type { SearchProviderFields } from '../../../server/searchProviderTypes.js';
 import type {
@@ -44,34 +40,15 @@ export type UiConnectorAuth = ConnectorAuth;
 export type UiConnectorAuthPublic = ConnectorAuthPublic;
 /**
  * `ConnectorBase` is the runtime's generic connector row type; it doesn't know about the
- * memory-provider or search-provider flags. Widen locally rather than editing
+ * search-provider flag. Widen locally rather than editing
  * `@truefoundry/assistant-ui-runtime`.
  */
-export type UiConnector = ConnectorBase & MemoryProviderFields & SearchProviderFields;
+export type UiConnector = ConnectorBase & SearchProviderFields;
 /** A preset can offer to become the search provider; the settings screen decides whether it does. */
 export type UiConnectorCatalogEntry = ConnectorCatalogEntry & SearchProviderFields;
 /** `updateConnector` sends the full manifest; widen its request to carry the role fields alongside it. */
-export type UiUpdateConnectorRequest = UpdateConnectorRequest & MemoryProviderFields & SearchProviderFields;
-/**
- * Create carries the flag too, so pointing at a memory bank for the first time is one write that
- * the server validates once, rather than a create followed by a flag-setting update that could
- * fail and leave an unflagged row behind.
- */
-export type UiCreateConnectorRequest = CreateConnectorRequest & MemoryProviderFields & SearchProviderFields;
-
-/** Five seconds past the longest deadline any memory check can be configured to, server-wide or per bank. */
-const MEMORY_PROVIDER_WRITE_TIMEOUT_SECONDS = MEMORY_PROVIDER_MAX_TIMEOUT_MS / 1000 + 5;
-
-/**
- * A memory-provider write performs a live recall before committing, waiting up to the bank's own
- * recall deadline (at most 120 s). Keep the browser request alive past that, and never retry a
- * write whose first attempt may have committed after the client lost its response.
- */
-export function memoryProviderWriteRequestOptions(memoryProvider: boolean | undefined) {
-  return memoryProvider === true
-    ? { timeoutInSeconds: MEMORY_PROVIDER_WRITE_TIMEOUT_SECONDS, maxRetries: 0 }
-    : undefined;
-}
+export type UiUpdateConnectorRequest = UpdateConnectorRequest & SearchProviderFields;
+export type UiCreateConnectorRequest = CreateConnectorRequest & SearchProviderFields;
 
 const ApiErrorResponseSchema = z.object({ error: z.object({ message: z.string() }) });
 
@@ -129,23 +106,6 @@ async function requestMcpServerRoute({
     );
   }
   return body;
-}
-
-async function requestMemoryProviderCheck({
-  name,
-  options,
-}: {
-  name: string;
-  options: CreateTrueForgeClientOptions;
-}): Promise<MemoryProviderCheck> {
-  const body = await requestMcpServerRoute({
-    name,
-    route: 'memory-check',
-    method: 'POST',
-    failureLabel: 'Memory check',
-    options,
-  });
-  return parseMemoryProviderCheck(body);
 }
 
 /** Deleting a connector row is a local DB write; it never needs the SDK's full 60s default. */
@@ -254,8 +214,6 @@ export function toUiConnector(server: TrueForgeApi.ConfiguredMcpServer): UiConne
   const manifest = server.manifest;
   const auth = toUiAuthPublic(manifest.auth);
   const remote = manifest.type === 'remote' ? manifest : undefined;
-  const memoryProvider = remote?.memoryProvider;
-  const memorySettings = remote?.memorySettings;
   const searchProvider = remote?.searchProvider;
   return {
     id: server.name,
@@ -265,8 +223,6 @@ export function toUiConnector(server: TrueForgeApi.ConfiguredMcpServer): UiConne
     auth,
     requiresAuth: server.authStatus.status === 'auth_required',
     authenticated: server.authStatus.status !== 'auth_required',
-    ...(memoryProvider === undefined ? {} : { memoryProvider }),
-    ...(memorySettings === undefined ? {} : { memorySettings }),
     ...(searchProvider === undefined ? {} : { searchProvider }),
   };
 }
@@ -292,8 +248,7 @@ export function toHarnessManifest(
     url: string;
     auth: ConnectorAuth;
     description?: string;
-  } & MemoryProviderFields &
-    SearchProviderFields,
+  } & SearchProviderFields,
 ): TrueForgeApi.McpServerManifest {
   const auth = toHarnessAuth(req.auth);
   const trimmed = req.description?.trim();
@@ -303,8 +258,6 @@ export function toHarnessManifest(
     url: req.url,
     description: trimmed !== undefined && trimmed !== '' ? trimmed : `${req.name} MCP server`,
     ...(auth === undefined ? {} : { auth }),
-    ...(req.memoryProvider === undefined ? {} : { memoryProvider: req.memoryProvider }),
-    ...(req.memorySettings === undefined ? {} : { memorySettings: req.memorySettings }),
     ...(req.searchProvider === undefined ? {} : { searchProvider: req.searchProvider }),
   };
   return manifest;
@@ -409,38 +362,28 @@ export function createConnectorCatalog(
     getToolsByConnectorId: async ({ id }) => listConnectorTools(id),
     createConnector: async req => {
       const auth = await resolveWriteAuth({ auth: req.auth });
-      const body = await client.settings.mcpServers.create(
-        {
-          manifest: toHarnessManifest({
-            name: req.name,
-            url: req.url,
-            auth,
-            description: req.description,
-            memoryProvider: req.memoryProvider,
-            memorySettings: req.memorySettings,
-            searchProvider: req.searchProvider,
-          }),
-        },
-        memoryProviderWriteRequestOptions(req.memoryProvider),
-      );
+      const body = await client.settings.mcpServers.create({
+        manifest: toHarnessManifest({
+          name: req.name,
+          url: req.url,
+          auth,
+          description: req.description,
+          searchProvider: req.searchProvider,
+        }),
+      });
       return toUiConnector(body.data);
     },
     updateConnector: async req => {
       const auth = await resolveWriteAuth({ id: req.id, auth: req.auth });
-      const body = await client.settings.mcpServers.createOrUpdate(
-        {
-          manifest: toHarnessManifest({
-            name: req.id,
-            url: req.url,
-            auth,
-            description: req.description,
-            memoryProvider: req.memoryProvider,
-            memorySettings: req.memorySettings,
-            searchProvider: req.searchProvider,
-          }),
-        },
-        memoryProviderWriteRequestOptions(req.memoryProvider),
-      );
+      const body = await client.settings.mcpServers.createOrUpdate({
+        manifest: toHarnessManifest({
+          name: req.id,
+          url: req.url,
+          auth,
+          description: req.description,
+          searchProvider: req.searchProvider,
+        }),
+      });
       return toUiConnector(body.data);
     },
     authenticateConnector: async req => {
@@ -470,7 +413,6 @@ export function createConnectorCatalog(
         maxRetries: 0,
       });
     },
-    checkMemoryProvider: async req => requestMemoryProviderCheck({ name: req.id, options: clientOptions }),
     checkHomeAssistant: async req => {
       const result = await client.mcpServers.homeAssistantCheck(req.id);
       return result.data;

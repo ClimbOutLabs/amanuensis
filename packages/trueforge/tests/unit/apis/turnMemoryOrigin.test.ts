@@ -3,7 +3,7 @@ import { EventType } from '@truefoundry/trueforge-core/agent-session';
 import winston from 'winston';
 import { drainTurnEvents } from '../../../src/apis/turns';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription';
-import { HindsightClient, type RetainItem } from '../../../src/runtime/memory/hindsightClient';
+import { type RetainItem } from '../../../src/runtime/memory/memoryClient';
 import {
   ASSISTANT_RESPONSE_SOURCE,
   isReplyThatReadNothing,
@@ -12,6 +12,7 @@ import {
 import { isPersonOrigin, MEMORY_ORIGIN_METADATA_KEY } from '../../../src/runtime/memory/memoryOrigin';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import { TurnExecutionDeadline } from '../../../src/runtime/turnExecutionDeadline';
+import { QuietMemoryClient } from '../../fixtures/memory/quietMemoryClient';
 
 const NOW = '2026-09-01T12:00:00.000Z';
 
@@ -98,12 +99,7 @@ async function retainedItems(input: {
   reply?: string;
   chatHasReadContent?: () => boolean;
 }): Promise<RetainItem[]> {
-  const client = new HindsightClient({
-    apiBase: 'https://hindsight.test.example',
-    bank: 'aman',
-    headers: {},
-    fetchImpl: () => Promise.reject(new Error('drain tests must not reach the network')),
-  });
+  const client = new QuietMemoryClient();
   const retain = jest.spyOn(client, 'retain').mockResolvedValue({ ok: true });
   jest.spyOn(client, 'getOperation').mockResolvedValue({ ok: true, status: 'completed' });
   const executionDeadline = new TurnExecutionDeadline({

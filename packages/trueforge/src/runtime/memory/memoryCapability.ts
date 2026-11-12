@@ -1,8 +1,8 @@
 /**
- * Host-enforced long-term memory (Hindsight): recalls before every model call and retains
+ * Host-enforced long-term memory: recalls before every model call and retains
  * every completed turn, without the model ever being responsible for remembering to use it.
  *
- * `HindsightMemoryProcessor` implements both hook shapes a single memory capability needs:
+ * `MemoryProcessor` implements both hook shapes a single memory capability needs:
  * - `processPreLLM` (persisted-context hook, fires every LLM iteration): on the thread's first
  *   iteration only, it calls recall, formats the result into a block, sweeps pending retain
  *   operations from durable state, and yields exactly one passthrough event describing what
@@ -40,20 +40,20 @@ import type { Logger } from 'winston';
 import { BACKGROUND_NOT_WORK_SENTENCE } from '../../personalization/backgroundFraming';
 import { noteRecallContent, type InternalSourceState } from '../internalSourceGuard';
 import { isLearnedProfileCopy, LEARNED_PROFILE_CLEARED_CONTENT } from '../profileLearning';
+import { localDay } from './localDay';
+import type { MeaningGate } from './meaningGate';
 import type {
   BankProfile,
   EntitySummary,
   GetOperationOutcome,
+  MemoryClient,
   MemoryFailure,
   MentalModel,
   RecallItem,
   RecallOutcome,
   ReflectBudget,
   RetryOperationOutcome,
-} from './hindsightClient';
-import { localDay } from './localDay';
-import type { MeaningGate } from './meaningGate';
-import type { MemoryClient } from './memoryClient';
+} from './memoryClient';
 import type {
   MemoryCuratedStats,
   MemoryLayersStats,
@@ -129,7 +129,7 @@ function memoryInstruction({ keepsNothing, pageTools }: { keepsNothing: boolean;
 }
 
 /**
- * The memory recall screen's settings, distinct from the memory provider's. When `enabled` is
+ * The memory recall screen's settings. When `enabled` is
  * false the recall path is lossless and unscreened exactly as before; nothing here gates writes.
  */
 export interface MemoryScreenConfig {
@@ -181,7 +181,7 @@ export interface MemoryConfig {
   /** Most entity summaries kept, by provider rank, when the response carries no per-entity score. */
   recallMaxEntities: number;
   /**
-   * Whether the pre-recall gate may skip the memory provider reads on high-confidence trivial
+   * Whether the pre-recall gate may skip the memory reads on high-confidence trivial
    * turns (short greetings, bare acknowledgements). Off unless the server enables it
    * (`MEMORY_PRERECALL_GATE_ENABLED`) or the bank overrides it in Settings > Memory.
    */
@@ -1419,7 +1419,7 @@ function isFailedStatus(status: string): boolean {
   return status === 'failed' || status === 'error';
 }
 
-export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentContextProcessor {
+export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentContextProcessor {
   private readonly client: MemoryClient;
   private readonly config: MemoryConfig;
   private readonly logger: Logger;
@@ -2286,13 +2286,6 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
     }
   }
 
-  private formatFailureCode(failure: MemoryFailure): string {
-    if (failure.httpStatus !== undefined) {
-      return `${failure.code}_${String(failure.httpStatus)}`;
-    }
-    return failure.code;
-  }
-
   private async sweepPending(): Promise<{
     nextPending: PendingRetainOp[];
     summary: SweepSummary;
@@ -2326,7 +2319,7 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
       if (!result.ok) {
         // Transient failure reading status: leave the entry untouched for the next sweep.
         unreachable += 1;
-        unreachable_code = this.formatFailureCode(result);
+        unreachable_code = result.code;
         next.push(entry);
         continue;
       }
@@ -2463,7 +2456,7 @@ function resolveScreenClient(input: {
   });
 }
 
-export function hindsightMemoryCapability(input: {
+export function memoryCapability(input: {
   client: MemoryClient;
   config: MemoryConfig;
   logger: Logger;
@@ -2495,7 +2488,7 @@ export function hindsightMemoryCapability(input: {
   /** Present when the memory page tools are offered this turn: the instruction then names them, and the block's contents are reported to it. */
   pageToolsWatch?: TurnReadWatch | undefined;
 }): AgentCapability {
-  const processor = new HindsightMemoryProcessor({
+  const processor = new MemoryProcessor({
     ...input,
     blockWatch: input.pageToolsWatch,
     screenClient: resolveScreenClient(input),

@@ -6,7 +6,6 @@ import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import { getMemoryPageSortingRoute, putMemoryPageSortingRoute } from '../routes/memoryPageSortingRoutes';
 import {
   MEMORY_PAGE_SORTING_SETTING_KEY,
-  effectivePageSortMode,
   readMemoryPageSortingSetting,
   type MemoryPageSortingSetting,
 } from '../runtime/memoryPageSortingSettings';
@@ -55,7 +54,7 @@ export function createMemoryPageSortingRouter<TTransaction>(deps: MemoryPageSort
           mode,
           overridden: body.mode !== null,
           defaultMode,
-          effectiveMode: effectivePageSortMode(mode),
+          effectiveMode: mode,
         }),
       },
       200,

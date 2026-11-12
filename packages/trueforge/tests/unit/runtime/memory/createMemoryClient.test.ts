@@ -16,17 +16,7 @@ afterEach(async () => {
 });
 
 function markdownClient(vaultScope: VaultScope | undefined): MemoryClient {
-  const client = createMemoryClient({
-    backend: 'markdown',
-    markdownDir,
-    namespace: 'tenant-1',
-    vaultScope,
-    hindsight: undefined,
-  });
-  if (client === undefined) {
-    throw new Error('expected a markdown memory client');
-  }
-  return client;
+  return createMemoryClient({ markdownDir, namespace: 'tenant-1', vaultScope });
 }
 
 async function retainOne(client: MemoryClient, content: string): Promise<void> {

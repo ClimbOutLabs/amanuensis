@@ -1,8 +1,8 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import type { RetainItem } from '../../../../src/runtime/memory/hindsightClient';
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
+import type { RetainItem } from '../../../../src/runtime/memory/memoryClient';
 
 const MESSAGE =
   "Hi June, remember Wendy's is coming up in December in India and I wont be able to attend. Can you come up with 3 gift ideas and create a space for me";

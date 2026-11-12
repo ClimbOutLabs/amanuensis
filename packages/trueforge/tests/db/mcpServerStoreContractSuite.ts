@@ -217,7 +217,7 @@ export function runMcpServerStoreContractSuite(getStore: () => IMcpServerStore):
     const trusted = await store.createServer({
       tenant_id: TENANT,
       name: 'memory',
-      manifest: manifest({ name: 'memory', url: 'https://hindsight.example.com/mcp/aman', memory_provider: true }),
+      manifest: manifest({ name: 'memory', url: 'https://first-party.example.com/mcp/aman' }),
       first_party: true,
     });
     await store.createServer({
@@ -242,7 +242,7 @@ export function runMcpServerStoreContractSuite(getStore: () => IMcpServerStore):
     const created = await store.upsertServer({
       tenant_id: TENANT,
       name: 'memory',
-      manifest: manifest({ name: 'memory', url: 'https://hindsight.example.com/mcp/aman', memory_provider: true }),
+      manifest: manifest({ name: 'memory', url: 'https://first-party.example.com/mcp/aman' }),
       first_party: true,
     });
     expect(created.first_party).toBe(true);
@@ -250,7 +250,7 @@ export function runMcpServerStoreContractSuite(getStore: () => IMcpServerStore):
     const dropped = await store.upsertServer({
       tenant_id: TENANT,
       name: 'memory',
-      manifest: manifest({ name: 'memory', url: 'https://hindsight.example.com/mcp/other', memory_provider: true }),
+      manifest: manifest({ name: 'memory', url: 'https://first-party.example.com/mcp/other' }),
       first_party: false,
     });
     expect(dropped.id).toBe(created.id);
@@ -260,7 +260,7 @@ export function runMcpServerStoreContractSuite(getStore: () => IMcpServerStore):
     const regranted = await store.upsertServer({
       tenant_id: TENANT,
       name: 'memory',
-      manifest: manifest({ name: 'memory', url: 'https://hindsight.example.com/mcp/other', memory_provider: true }),
+      manifest: manifest({ name: 'memory', url: 'https://first-party.example.com/mcp/other' }),
       first_party: true,
     });
     expect(regranted.first_party).toBe(true);

@@ -76,20 +76,15 @@ export function readSignInMode(capabilities: unknown): SignInMode | undefined {
 }
 
 /**
- * The memory backend the server resolved (`MEMORY_BACKEND`), read defensively from the
- * `memory_defaults` capability. Undefined when the capability is missing, malformed, or
- * names an unknown backend — the caller then reports memory as unknown rather than guessing.
+ * Whether the server reported its memory status (the `memory_defaults` capability). False when the
+ * capability is missing or malformed: the caller then says memory is unknown and does not guess.
  */
-export function readMemoryBackend(capabilities: unknown): 'markdown' | 'hindsight' | undefined {
+export function memoryStatusReported(capabilities: unknown): boolean {
   if (typeof capabilities !== 'object' || capabilities === null) {
-    return undefined;
+    return false;
   }
   // The SDK normalizes wire keys to camelCase; a direct host adapter may expose the raw
   // snake_case payload instead.
   const defaults: unknown = Reflect.get(capabilities, 'memoryDefaults') ?? Reflect.get(capabilities, 'memory_defaults');
-  if (typeof defaults !== 'object' || defaults === null) {
-    return undefined;
-  }
-  const backend: unknown = Reflect.get(defaults, 'backend');
-  return backend === 'markdown' || backend === 'hindsight' ? backend : undefined;
+  return typeof defaults === 'object' && defaults !== null;
 }

@@ -1071,69 +1071,6 @@ await client.mcpServers.homeAssistantCheck("name");
 </dl>
 </details>
 
-<details><summary><code>client.mcpServers.<a href="/src/api/resources/mcpServers/client/Client.ts">memoryCheck</a>(name) -> TrueForge.MemoryProviderCheckResponse</code></summary>
-<dl>
-<dd>
-
-#### 📝 Description
-
-<dl>
-<dd>
-
-<dl>
-<dd>
-
-Runs one live recall against the Hindsight REST API behind this connector, the surface host-enforced memory actually calls. That is not the MCP endpoint `auth_status` reflects, and it may validate a different credential. Read-only: the connector is never modified, and a failed check is a 200 carrying the reason. The same check runs on every create or replace that sets `manifest.memory_provider: true`.
-</dd>
-</dl>
-</dd>
-</dl>
-
-#### 🔌 Usage
-
-<dl>
-<dd>
-
-<dl>
-<dd>
-
-```typescript
-await client.mcpServers.memoryCheck("name");
-
-```
-</dd>
-</dl>
-</dd>
-</dl>
-
-#### ⚙️ Parameters
-
-<dl>
-<dd>
-
-<dl>
-<dd>
-
-**name:** `string` — MCP server name.
-
-</dd>
-</dl>
-
-<dl>
-<dd>
-
-**requestOptions:** `McpServersClient.RequestOptions`
-
-</dd>
-</dl>
-</dd>
-</dl>
-
-
-</dd>
-</dl>
-</details>
-
 <details><summary><code>client.mcpServers.<a href="/src/api/resources/mcpServers/client/Client.ts">listToolGrants</a>(name) -> TrueForge.ListMcpToolGrantsResponse</code></summary>
 <dl>
 <dd>

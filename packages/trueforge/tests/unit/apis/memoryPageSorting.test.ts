@@ -26,16 +26,13 @@ const putInit = (mode: unknown): RequestInit => ({
 
 describe('memoryPageSorting router', () => {
   const originalDefault = configuration.MEMORY_PAGE_SORTING;
-  const originalBackend = configuration.MEMORY_BACKEND;
 
   beforeEach(() => {
     configuration.MEMORY_PAGE_SORTING = 'off';
-    configuration.MEMORY_BACKEND = 'markdown';
   });
 
   afterEach(() => {
     configuration.MEMORY_PAGE_SORTING = originalDefault;
-    configuration.MEMORY_BACKEND = originalBackend;
   });
 
   it('GET reports the env default when no override is stored', async () => {
@@ -75,15 +72,5 @@ describe('memoryPageSorting router', () => {
     const response = await router.request('/', putInit('sometimes'));
     expect(response.status).toBe(400);
     expect(await globalSettingsStore.getSetting({ key: KEY })).toBeUndefined();
-  });
-
-  it('reports effective off when memory is not kept as Markdown files', async () => {
-    configuration.MEMORY_BACKEND = 'hindsight';
-    const { router } = await createRouter();
-    await router.request('/', putInit('on'));
-    const response = await router.request('/');
-    expect(await response.json()).toEqual({
-      data: { mode: 'on', overridden: true, default_mode: 'off', effective_mode: 'off' },
-    });
   });
 });

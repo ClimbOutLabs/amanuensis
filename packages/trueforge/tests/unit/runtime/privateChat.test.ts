@@ -18,12 +18,12 @@ import { SqliteSentinelSettingsStore } from '../../../src/db/sqlite/sentinel-set
 import { SqliteSessionStore } from '../../../src/db/sqlite/session-store/SqliteSessionStore';
 import { ChatSearchIndexer } from '../../../src/runtime/chatSearchIndexing';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription';
-import { HindsightClient } from '../../../src/runtime/memory/hindsightClient';
 import { PRIVATE_CHAT_LIFETIME_MS, privateChatExpiry, sessionKeepsNothing } from '../../../src/runtime/privateChat';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import { TurnExecutionDeadline } from '../../../src/runtime/turnExecutionDeadline';
 import { TENANT_ID } from '../../../src/tenancy';
 import { createSqliteTestDatabase, type SqliteTestDatabase } from '../../db/sqlite/testDatabase';
+import { QuietMemoryClient } from '../../fixtures/memory/quietMemoryClient';
 
 const OWNER = 'user-1';
 const QUESTION = 'When does the ferry to the island leave?';
@@ -121,12 +121,7 @@ describe('a finished turn in a private chat and a normal chat', () => {
       turn_done_event: makeTurnDoneEvent(state),
     });
 
-    const client = new HindsightClient({
-      apiBase: 'https://hindsight.test.example',
-      bank: 'aman',
-      headers: {},
-      fetchImpl: () => Promise.reject(new Error('drain tests must not reach the network')),
-    });
+    const client = new QuietMemoryClient();
     const retain = jest.spyOn(client, 'retain').mockResolvedValue({ ok: true });
     jest.spyOn(client, 'getOperation').mockResolvedValue({ ok: true, status: 'completed' });
     const executionDeadline = new TurnExecutionDeadline({

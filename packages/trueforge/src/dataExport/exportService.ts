@@ -49,13 +49,9 @@ import {
   REVIEWED_FROM_YOU_FILE,
   VAULT_TOMBSTONES_FILE,
   personaForVaultFilesystemNamespace,
-  personaVaultNamespace,
   sanitizeNamespace,
-  vaultFilesystemNamespace,
   vaultWriteNamespace,
-  withHiddenContext,
 } from '../runtime/memory/markdownMemoryFiles';
-import type { MemoryClient } from '../runtime/memory/memoryClient';
 import { listPageFiles, pageFolder, parsePageFilePath } from '../runtime/memory/memoryPages';
 import { MEMORY_NIGHTLY_SETTING_KEY } from '../runtime/memoryNightlySettings';
 import { MEMORY_PAGE_SORTING_SETTING_KEY } from '../runtime/memoryPageSortingSettings';
@@ -86,9 +82,6 @@ const SESSION_PART_TARGET_BYTES = 64 * 1024 * 1024;
 /** Persona choices read per chat; a chat records one per turn at most. */
 const PERSONA_ACTIVATION_LIMIT = 100_000;
 
-/** Same bound the memory vault API uses for one list call. */
-const MEMORY_LIST_TIMEOUT_MS = 10_000;
-
 /** Instance-wide, non-secret toggles. Anything not listed here never leaves in settings.json. */
 export const EXPORTED_GLOBAL_SETTING_KEYS = [
   DEFAULT_CHAT_MODEL_SETTING_KEY,
@@ -112,17 +105,6 @@ export interface ExportSubject {
   includeInstanceData: boolean;
 }
 
-/**
- * Where memory comes from: the Markdown backend is read from its files
- * verbatim; any other backend is read through its MemoryClient and rendered
- * into Markdown files in the same layout. `unavailable` is a backend that is
- * selected but not set up (no provider), which skips memory with a note.
- */
-export type MemoryExportSource =
-  | { kind: 'markdown'; markdownDir: string }
-  | { kind: 'client'; backend: string; client: Pick<MemoryClient, 'listEntries'> }
-  | { kind: 'unavailable'; backend: string; reason: string };
-
 export interface DataExportDeps<TTransaction> {
   sessionStore: ISessionStore<SessionCustom, TurnCustom>;
   personaStore: IPersonaStore<TTransaction>;
@@ -137,7 +119,8 @@ export interface DataExportDeps<TTransaction> {
   mcpServerStore: IMcpServerStore<TTransaction>;
   /** The agents the user may manage; the entry point resolves them because access rules differ per deployment. */
   listAgents: () => Promise<readonly AgentRecord[]>;
-  memorySource: MemoryExportSource;
+  /** Root dir of the Markdown memory files. */
+  memoryMarkdownDir: string;
   /** Root dir of the per-persona knowledge SQLite files. */
   personaKnowledgeDir: string;
 }
@@ -707,7 +690,6 @@ async function writeMemoryEntries<TTransaction>(
   context: ExportContext<TTransaction>,
   { personas, leftOut }: { personas: readonly Persona[]; leftOut: number },
 ): Promise<MemoryReport> {
-  const { memorySource } = context.deps;
   const sharedIncluded = context.request.subject.includeInstanceData;
   const leftOutNote =
     leftOut === 0
@@ -715,30 +697,9 @@ async function writeMemoryEntries<TTransaction>(
       : {
           note: `Memory of ${String(leftOut)} persona(s) was left out: another person here has a persona with the same name, so that memory is shared and cannot be split.`,
         };
-  if (memorySource.kind === 'unavailable') {
-    return {
-      backend: memorySource.backend,
-      status: 'skipped',
-      vaults: 0,
-      shared_vaults_included: false,
-      persona_vaults_left_out: 0,
-      note: memorySource.reason,
-    };
-  }
-  if (memorySource.kind === 'markdown') {
-    const vaults = await writeMarkdownMemoryFiles(context, { markdownDir: memorySource.markdownDir, personas });
-    return {
-      backend: 'markdown',
-      status: 'included',
-      vaults,
-      shared_vaults_included: sharedIncluded,
-      persona_vaults_left_out: leftOut,
-      ...leftOutNote,
-    };
-  }
-  const vaults = await writeClientMemoryFiles(context, { client: memorySource.client, personas });
+  const vaults = await writeMarkdownMemoryFiles(context, { markdownDir: context.deps.memoryMarkdownDir, personas });
   return {
-    backend: memorySource.backend,
+    backend: 'markdown',
     status: 'included',
     vaults,
     shared_vaults_included: sharedIncluded,
@@ -873,46 +834,4 @@ async function writeMarkdownMemoryFiles<TTransaction>(
     }
   }
   return dirNames.length;
-}
-
-/**
- * Non-Markdown backends render their vault entries into Markdown files in
- * the same layout the Markdown backend uses, one file per namespace named
- * for the export day, entries oldest first in the retain format
- * (`## <timestamp>` heading, then the text).
- */
-async function writeClientMemoryFiles<TTransaction>(
-  context: ExportContext<TTransaction>,
-  input: { client: Pick<MemoryClient, 'listEntries'>; personas: readonly Persona[] },
-): Promise<number> {
-  const { subject, exportedAt } = context.request;
-  const wireNamespaces: (string | undefined)[] = [
-    ...(subject.includeInstanceData ? [undefined] : []),
-    ...input.personas.map(persona => personaVaultNamespace(persona.display_name)),
-  ];
-  const fileDate = exportedAt.toISOString().slice(0, 10);
-  let vaults = 0;
-  for (const wireNamespace of wireNamespaces) {
-    const outcome = await input.client.listEntries({
-      namespace: wireNamespace ?? '',
-      timeoutMs: MEMORY_LIST_TIMEOUT_MS,
-    });
-    if (!outcome.ok) {
-      // Memory is part of the export; a namespace that cannot be read fails
-      // the export rather than silently shipping without those memories.
-      throw new Error(`Memory export failed for a namespace: ${outcome.reason}`);
-    }
-    if (outcome.entries.length === 0) {
-      continue;
-    }
-    const fsNamespace = vaultFilesystemNamespace(subject.tenantId, wireNamespace);
-    const rendered = [...outcome.entries]
-      .reverse()
-      // The internal id goes back as the closing line, so the file matches a daily log and needs no import step.
-      .map(entry => `## ${entry.timestamp}\n\n${withHiddenContext({ text: entry.text, context: entry.context })}`)
-      .join('\n\n');
-    await context.zip.addTextEntry(`memory/${fsNamespace}/memory/${fileDate}.md`, `${context.scrub.text(rendered)}\n`);
-    vaults += 1;
-  }
-  return vaults;
 }

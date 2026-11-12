@@ -23,13 +23,11 @@ const personaStore = {
 };
 
 describe('the nightly timer', () => {
-  const originalBackend = configuration.MEMORY_BACKEND;
   const originalJob = configuration.MEMORY_NIGHTLY_JOB;
   const originalSorting = configuration.MEMORY_PAGE_SORTING;
   const run = jest.mocked(runNightlyJob);
 
   beforeEach(() => {
-    configuration.MEMORY_BACKEND = 'markdown';
     configuration.MEMORY_NIGHTLY_JOB = false;
     configuration.MEMORY_PAGE_SORTING = 'off';
     jest.useFakeTimers({ now: new Date(2026, 10, 11, 3, 0, 0) });
@@ -39,7 +37,6 @@ describe('the nightly timer', () => {
 
   afterEach(() => {
     jest.useRealTimers();
-    configuration.MEMORY_BACKEND = originalBackend;
     configuration.MEMORY_NIGHTLY_JOB = originalJob;
     configuration.MEMORY_PAGE_SORTING = originalSorting;
   });
@@ -87,12 +84,5 @@ describe('the nightly timer', () => {
     await settings.setSetting({ key: MEMORY_NIGHTLY_SETTING_KEY, value: 'false' });
     await jest.advanceTimersByTimeAsync(LOOK);
     expect(run).toHaveBeenCalledTimes(2);
-  });
-
-  it('never starts a timer without Markdown memory', async () => {
-    configuration.MEMORY_BACKEND = 'hindsight';
-    start(inMemoryGlobalSettingsStore({ [MEMORY_NIGHTLY_SETTING_KEY]: 'true' }));
-    await jest.advanceTimersByTimeAsync(LOOK * 3);
-    expect(run).not.toHaveBeenCalled();
   });
 });

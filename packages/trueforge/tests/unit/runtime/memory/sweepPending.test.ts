@@ -1,7 +1,8 @@
 import { createLogger } from 'winston';
-import type { HindsightClient, MemoryFailure } from '../../../../src/runtime/memory/hindsightClient';
 import type { MemoryConfig } from '../../../../src/runtime/memory/memoryCapability';
-import { HindsightMemoryProcessor } from '../../../../src/runtime/memory/memoryCapability';
+import { MemoryProcessor } from '../../../../src/runtime/memory/memoryCapability';
+import type { MemoryFailure } from '../../../../src/runtime/memory/memoryClient';
+import type { QuietMemoryClient } from '../../../fixtures/memory/quietMemoryClient';
 
 const silentLogger = createLogger({ silent: true });
 
@@ -49,9 +50,9 @@ describe('Memory sweep retain operations', () => {
     const mockClient = {
       getOperation: jest.fn().mockResolvedValue(mockFailure),
       retryOperation: jest.fn().mockResolvedValue({ ok: true }),
-    } as unknown as HindsightClient;
+    } as unknown as QuietMemoryClient;
 
-    const processor = new HindsightMemoryProcessor({
+    const processor = new MemoryProcessor({
       client: mockClient,
       config: mockConfig,
       logger: silentLogger,
@@ -86,52 +87,13 @@ describe('Memory sweep retain operations', () => {
     expect(result.nextPending[1]).toEqual(pendingOps[1]);
   });
 
-  it('includes HTTP status in failure code when available', async () => {
-    const mockFailure: MemoryFailure = {
-      ok: false,
-      code: 'http_error',
-      reason: 'Service unavailable',
-      httpStatus: 503,
-    };
-
-    const mockClient = {
-      getOperation: jest.fn().mockResolvedValue(mockFailure),
-      retryOperation: jest.fn().mockResolvedValue({ ok: true }),
-    } as unknown as HindsightClient;
-
-    const processor = new HindsightMemoryProcessor({
-      client: mockClient,
-      config: mockConfig,
-      logger: silentLogger,
-      sessionId: 'test-session',
-      previousTurnId: null,
-    });
-
-    const pendingOps = [
-      {
-        op: 'op-1',
-        turn: 'turn-1',
-        attempts: 0,
-        submitted_at: new Date().toISOString(),
-      },
-    ];
-
-    processor['pending'] = pendingOps;
-    processor['config'].sweepMaxPerTurn = 1;
-
-    const result = await processor['sweepPending']();
-
-    expect(result.summary.unreachable).toBe(1);
-    expect(result.summary.unreachable_code).toBe('http_error_503');
-  });
-
   it('does not record unreachable when all operations succeed', async () => {
     const mockClient = {
       getOperation: jest.fn().mockResolvedValue({ ok: true, status: 'succeeded' }),
       retryOperation: jest.fn().mockResolvedValue({ ok: true }),
-    } as unknown as HindsightClient;
+    } as unknown as QuietMemoryClient;
 
-    const processor = new HindsightMemoryProcessor({
+    const processor = new MemoryProcessor({
       client: mockClient,
       config: mockConfig,
       logger: silentLogger,

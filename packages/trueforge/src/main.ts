@@ -1053,18 +1053,16 @@ try {
     dir: configuration.PERSONA_KNOWLEDGE_DIR,
     envVar: 'PERSONA_KNOWLEDGE_DIR',
   });
-  if (configuration.MEMORY_BACKEND === 'markdown') {
-    await ensureWritableDataDir({
-      dir: configuration.MEMORY_MARKDOWN_DIR,
-      envVar: 'MEMORY_MARKDOWN_DIR',
+  await ensureWritableDataDir({
+    dir: configuration.MEMORY_MARKDOWN_DIR,
+    envVar: 'MEMORY_MARKDOWN_DIR',
+  });
+  const marked = await ensureMemorySourceLines({ baseDir: configuration.MEMORY_MARKDOWN_DIR });
+  if (marked !== undefined && marked.notesMarked > 0) {
+    logger.info('Older memory notes were marked as having no record of where they came from', {
+      files_changed: marked.filesChanged,
+      notes_marked: marked.notesMarked,
     });
-    const marked = await ensureMemorySourceLines({ baseDir: configuration.MEMORY_MARKDOWN_DIR });
-    if (marked !== undefined && marked.notesMarked > 0) {
-      logger.info('Older memory notes were marked as having no record of where they came from', {
-        files_changed: marked.filesChanged,
-        notes_marked: marked.notesMarked,
-      });
-    }
   }
 
   if (configuration.STANDALONE) {
@@ -1288,7 +1286,7 @@ try {
   // on its own before the first chat turn. Fire-and-forget: startup never waits, a
   // failure degrades to keyword search with the usual cooldown retry, and other
   // tenants warm on first use reusing the shared download.
-  if (configuration.MEMORY_EMBEDDINGS_ENABLED && configuration.MEMORY_BACKEND === 'markdown') {
+  if (configuration.MEMORY_EMBEDDINGS_ENABLED) {
     warmEmbeddingsAtBoot({
       baseDir: configuration.MEMORY_MARKDOWN_DIR,
       namespace: TENANT_ID,

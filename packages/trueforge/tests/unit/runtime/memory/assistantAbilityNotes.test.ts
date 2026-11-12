@@ -2,9 +2,9 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { stripAssistantAbilityNotes, withoutAbilityNotes } from '../../../../src/runtime/memory/assistantAbilityNotes';
-import { HindsightClient } from '../../../../src/runtime/memory/hindsightClient';
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
 import { buildRetainItem } from '../../../../src/runtime/memory/memoryRetain';
+import { QuietMemoryClient } from '../../../fixtures/memory/quietMemoryClient';
 
 describe('withoutAbilityNotes and stripAssistantAbilityNotes', () => {
   it.each([
@@ -256,7 +256,7 @@ describe('memory write path: MarkdownMemoryClient.retain', () => {
   });
 });
 
-describe('memory write path: HindsightClient.retain', () => {
+describe('memory write path: QuietMemoryClient.retain', () => {
   function jsonResponse(body: unknown): Response {
     const text = JSON.stringify(body);
     const headers = new Headers();
@@ -266,12 +266,7 @@ describe('memory write path: HindsightClient.retain', () => {
 
   it('sends nothing when every item is an ability note, and still succeeds', async () => {
     const fetchImpl = jest.fn(async () => jsonResponse({}));
-    const client = new HindsightClient({
-      apiBase: 'https://hindsight.example',
-      bank: 'aman',
-      headers: {},
-      fetchImpl,
-    });
+    const client = new QuietMemoryClient();
     const outcome = await client.retain({
       items: [
         {

@@ -1,9 +1,9 @@
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import type { RetainItem } from '../../../../src/runtime/memory/hindsightClient';
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
 import { VAULT_TOMBSTONES_FILE } from '../../../../src/runtime/memory/markdownMemoryFiles';
+import type { RetainItem } from '../../../../src/runtime/memory/memoryClient';
 
 async function withClient(run: (client: MarkdownMemoryClient, dir: string) => Promise<void>): Promise<void> {
   const dir = await mkdtemp(path.join(tmpdir(), 'mdmem-doc-'));

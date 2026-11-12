@@ -11,12 +11,6 @@ import {
 import { createWebSearchTurnState } from '@truefoundry/trueforge-core/core/permissions/webSearch';
 import { BACKGROUND_NOT_WORK_SENTENCE } from '../../../../src/personalization/backgroundFraming';
 import { buildInternalSourceToolPolicy, createInternalSourceState } from '../../../../src/runtime/internalSourceGuard';
-import type {
-  EntitySummary,
-  GetOperationOutcome,
-  MentalModel,
-  RecallItem,
-} from '../../../../src/runtime/memory/hindsightClient';
 import { estimateTokens } from '../../../../src/runtime/memory/markdownMemoryFiles';
 import {
   applyRelevanceGate,
@@ -24,14 +18,20 @@ import {
   extractQuery,
   extractQueryParts,
   formatMemoryBlock,
-  hindsightMemoryCapability,
   MEMORY_FRAMING_SENTENCE,
+  memoryCapability,
   type MemoryConfig,
   selectMentalModels,
   weightedRecallQuery,
   WRAPPER_OVERHEAD_TOKENS,
 } from '../../../../src/runtime/memory/memoryCapability';
-import type { MemoryClient } from '../../../../src/runtime/memory/memoryClient';
+import type {
+  EntitySummary,
+  GetOperationOutcome,
+  MemoryClient,
+  MentalModel,
+  RecallItem,
+} from '../../../../src/runtime/memory/memoryClient';
 import {
   DRAFTING_END,
   DRAFTING_HEADING,
@@ -326,12 +326,12 @@ describe('formatMemoryBlock', () => {
   });
 });
 
-describe('hindsightMemoryCapability instruction', () => {
+describe('memoryCapability instruction', () => {
   function renderedInstruction({
     keepsNothing = false,
     pageTools = false,
   }: { keepsNothing?: boolean; pageTools?: boolean } = {}): string {
-    const capability = hindsightMemoryCapability({
+    const capability = memoryCapability({
       client: makeClient({}),
       config: DEFAULT_CONFIG,
       logger: makeLogger(),
@@ -386,14 +386,14 @@ describe('hindsightMemoryCapability instruction', () => {
   });
 });
 
-describe('HindsightMemoryProcessor.processPreLLM', () => {
+describe('MemoryProcessor.processPreLLM', () => {
   it('recalls once on the first iteration, caches the block, and yields nothing on later iterations', async () => {
     const recall = jest.fn().mockResolvedValue({
       ok: true,
       results: [{ id: '1', occurred_start: '2026-08-14', text: 'fact' }],
       entities: [],
     });
-    const capability = hindsightMemoryCapability({
+    const capability = memoryCapability({
       client: makeClient({ recall }),
       config: DEFAULT_CONFIG,
       logger: makeLogger(),
@@ -417,7 +417,7 @@ describe('HindsightMemoryProcessor.processPreLLM', () => {
 
   it('skips recall entirely when there is no user message', async () => {
     const recall = jest.fn();
-    const capability = hindsightMemoryCapability({
+    const capability = memoryCapability({
       client: makeClient({ recall }),
       config: DEFAULT_CONFIG,
       logger: makeLogger(),
@@ -442,7 +442,7 @@ describe('HindsightMemoryProcessor.processPreLLM', () => {
       results: [{ id: '1', occurred_start: '2026-08-14', text: 'fact one' }],
       entities: [],
     });
-    const capability = hindsightMemoryCapability({
+    const capability = memoryCapability({
       client: makeClient({ recall }),
       config: DEFAULT_CONFIG,
       logger: makeLogger(),
@@ -474,7 +474,7 @@ describe('HindsightMemoryProcessor.processPreLLM', () => {
       ],
       entities: [],
     });
-    const capability = hindsightMemoryCapability({
+    const capability = memoryCapability({
       client: makeClient({ recall }),
       config: DEFAULT_CONFIG,
       logger: makeLogger(),
@@ -501,7 +501,7 @@ describe('HindsightMemoryProcessor.processPreLLM', () => {
       ],
       entities: [],
     });
-    const capability = hindsightMemoryCapability({
+    const capability = memoryCapability({
       client: makeClient({ recall }),
       config: DEFAULT_CONFIG,
       logger: makeLogger(),
@@ -527,7 +527,7 @@ describe('HindsightMemoryProcessor.processPreLLM', () => {
         results: [{ id: '1', occurred_start: day, text: 'fact', metadata: { origin: 'user_stated' } }],
         entities: [],
       });
-      const capability = hindsightMemoryCapability({
+      const capability = memoryCapability({
         client: makeClient({ recall }),
         config: DEFAULT_CONFIG,
         logger: makeLogger(),
@@ -552,7 +552,7 @@ describe('HindsightMemoryProcessor.processPreLLM', () => {
       results: [{ id: '1', occurred_start: '2026-08-14', text: 'fact' }],
       entities: [],
     });
-    const capability = hindsightMemoryCapability({
+    const capability = memoryCapability({
       client: makeClient({ recall }),
       config: DEFAULT_CONFIG,
       logger: makeLogger(),
@@ -589,7 +589,7 @@ describe('HindsightMemoryProcessor.processPreLLM', () => {
   });
 
   it("places the recall block before the person's message, not before attached file text that follows it", async () => {
-    const capability = hindsightMemoryCapability({
+    const capability = memoryCapability({
       client: makeClient({
         recall: jest.fn().mockResolvedValue({
           ok: true,
@@ -625,7 +625,7 @@ describe('HindsightMemoryProcessor.processPreLLM', () => {
   });
 
   it('returns undefined from processPreLLMEphemeral when nothing was recalled', async () => {
-    const capability = hindsightMemoryCapability({
+    const capability = memoryCapability({
       client: makeClient({ recall: jest.fn().mockResolvedValue({ ok: true, results: [], entities: [] }) }),
       config: DEFAULT_CONFIG,
       logger: makeLogger(),
@@ -646,7 +646,7 @@ describe('HindsightMemoryProcessor.processPreLLM', () => {
 
   it('loads pending state defensively, resetting to empty on a bad shape', async () => {
     const getOperation = jest.fn();
-    const capability = hindsightMemoryCapability({
+    const capability = memoryCapability({
       client: makeClient({ getOperation }),
       config: DEFAULT_CONFIG,
       logger: makeLogger(),
@@ -666,7 +666,7 @@ describe('HindsightMemoryProcessor.processPreLLM', () => {
 
   it('skips the sweep entirely when recall shows the provider unreachable, carrying pending over untouched', async () => {
     const getOperation = jest.fn();
-    const capability = hindsightMemoryCapability({
+    const capability = memoryCapability({
       client: makeClient({
         recall: jest.fn().mockResolvedValue({ ok: false, code: 'timeout', reason: 'request timed out after 2500ms' }),
         getOperation,
@@ -707,7 +707,7 @@ describe('HindsightMemoryProcessor.processPreLLM', () => {
         statusByOp[id] ?? { ok: false, code: 'request_failed', reason: 'unexpected id' },
     );
     const retryOperation = jest.fn().mockResolvedValue({ ok: true });
-    const capability = hindsightMemoryCapability({
+    const capability = memoryCapability({
       client: makeClient({ getOperation, retryOperation }),
       config: DEFAULT_CONFIG,
       logger: makeLogger(),
@@ -762,7 +762,7 @@ describe('HindsightMemoryProcessor.processPreLLM', () => {
 
   it('abandons an unknown op once it exhausts its retry attempts, the same as a failed one', async () => {
     const getOperation = jest.fn().mockResolvedValue({ ok: true, status: 'unknown' });
-    const capability = hindsightMemoryCapability({
+    const capability = memoryCapability({
       client: makeClient({ getOperation }),
       config: DEFAULT_CONFIG,
       logger: makeLogger(),
@@ -785,7 +785,7 @@ describe('HindsightMemoryProcessor.processPreLLM', () => {
   it('recovers the previous turn vanished retain by resubmitting the exchange from context when summaries are off', async () => {
     const getOperation = jest.fn().mockResolvedValue({ ok: true, status: 'unknown' });
     const retain = jest.fn().mockResolvedValue({ ok: true });
-    const capability = hindsightMemoryCapability({
+    const capability = memoryCapability({
       client: makeClient({ getOperation, retain }),
       config: DEFAULT_CONFIG,
       logger: makeLogger(),
@@ -831,7 +831,7 @@ describe('HindsightMemoryProcessor.processPreLLM', () => {
   it('re-queues the previous turn vanished retain with attempts + 1 instead of dropping it when the exchange is no longer in context', async () => {
     const getOperation = jest.fn().mockResolvedValue({ ok: true, status: 'unknown' });
     const retain = jest.fn();
-    const capability = hindsightMemoryCapability({
+    const capability = memoryCapability({
       client: makeClient({ getOperation, retain }),
       config: DEFAULT_CONFIG,
       logger: makeLogger(),
@@ -860,7 +860,7 @@ describe('HindsightMemoryProcessor.processPreLLM', () => {
 
   it('treats an unexpected throw from client.recall as a recall error instead of failing the turn', async () => {
     const recall = jest.fn().mockRejectedValue(new Error('boom'));
-    const capability = hindsightMemoryCapability({
+    const capability = memoryCapability({
       client: makeClient({ recall }),
       config: DEFAULT_CONFIG,
       logger: makeLogger(),
@@ -879,7 +879,7 @@ describe('HindsightMemoryProcessor.processPreLLM', () => {
 
   it('treats an unexpected throw from client.getOperation during the sweep as a transient failure, leaving the entry pending', async () => {
     const getOperation = jest.fn().mockRejectedValue(new Error('boom'));
-    const capability = hindsightMemoryCapability({
+    const capability = memoryCapability({
       client: makeClient({ getOperation }),
       config: DEFAULT_CONFIG,
       logger: makeLogger(),
@@ -900,7 +900,7 @@ describe('HindsightMemoryProcessor.processPreLLM', () => {
   });
 });
 
-describe('HindsightMemoryProcessor and where links come from', () => {
+describe('MemoryProcessor and where links come from', () => {
   it("counts a site in what the assistant remembers of the person as the person's own", async () => {
     const recall = jest.fn().mockResolvedValue({
       ok: true,
@@ -916,7 +916,7 @@ describe('HindsightMemoryProcessor and where links come from', () => {
       entities: [],
     });
     const webSearch = createWebSearchTurnState();
-    const capability = hindsightMemoryCapability({
+    const capability = memoryCapability({
       client: makeClient({ recall }),
       config: DEFAULT_CONFIG,
       logger: makeLogger(),
@@ -956,7 +956,7 @@ describe('HindsightMemoryProcessor and where links come from', () => {
     message?: string;
   }) {
     const webSearch = createWebSearchTurnState();
-    const capability = hindsightMemoryCapability({
+    const capability = memoryCapability({
       client: makeClient({
         recall: jest.fn().mockResolvedValue({ ok: true, results: input.results ?? [], entities: input.entities ?? [] }),
         ...input.client,
@@ -1092,9 +1092,9 @@ describe('HindsightMemoryProcessor and where links come from', () => {
   });
 });
 
-describe('HindsightMemoryProcessor internal-source state', () => {
+describe('MemoryProcessor internal-source state', () => {
   function processorWithState(recall: jest.Mock, internalSourceState: ReturnType<typeof createInternalSourceState>) {
-    const capability = hindsightMemoryCapability({
+    const capability = memoryCapability({
       client: makeClient({ recall }),
       config: DEFAULT_CONFIG,
       logger: makeLogger(),
@@ -1174,7 +1174,7 @@ describe('HindsightMemoryProcessor internal-source state', () => {
   });
 });
 
-describe('HindsightMemoryProcessor recall screening', () => {
+describe('MemoryProcessor recall screening', () => {
   function recallReturning(results: RecallItem[]): jest.Mock {
     return jest.fn().mockResolvedValue({ ok: true, results, entities: [] });
   }
@@ -1186,7 +1186,7 @@ describe('HindsightMemoryProcessor recall screening', () => {
     now?: () => number;
   }) {
     const screenClient = makeScreenClient(input.classify);
-    return hindsightMemoryCapability({
+    return memoryCapability({
       client: makeClient({ recall: input.recall }),
       config: input.config ?? withScreenEnabled(),
       logger: makeLogger(),
@@ -1198,7 +1198,7 @@ describe('HindsightMemoryProcessor recall screening', () => {
     });
   }
 
-  async function runRecall(capability: ReturnType<typeof hindsightMemoryCapability>) {
+  async function runRecall(capability: ReturnType<typeof memoryCapability>) {
     const processor = capability.preLLMProcessors?.[0];
     if (!processor) {
       throw new Error('expected a preLLM processor');
@@ -1743,7 +1743,7 @@ describe('selectMentalModels', () => {
   });
 });
 
-describe('HindsightMemoryProcessor curated and reflect layers', () => {
+describe('MemoryProcessor curated and reflect layers', () => {
   const tax = 'How much tax did I pay in 2025';
   const taxes: MentalModel = {
     id: 'm1',
@@ -1786,7 +1786,7 @@ describe('HindsightMemoryProcessor curated and reflect layers', () => {
     message: string;
     screenClient?: ScreenClient;
   }) {
-    const capability = hindsightMemoryCapability({
+    const capability = memoryCapability({
       client: input.client,
       config: input.config ?? withLayers(),
       logger: makeLogger(),
@@ -2019,7 +2019,7 @@ describe('HindsightMemoryProcessor curated and reflect layers', () => {
   });
 });
 
-describe('HindsightMemoryProcessor pages layer', () => {
+describe('MemoryProcessor pages layer', () => {
   const wendyText = '[page: Wendy — person, household]\nNow:\n- Booked the movie. (you said)';
   const loadedWendy = {
     vaultDir: '/v',
@@ -2044,7 +2044,7 @@ describe('HindsightMemoryProcessor pages layer', () => {
     screenClient?: ScreenClient;
     logger?: ReturnType<typeof makeLogger>;
   }) {
-    const capability = hindsightMemoryCapability({
+    const capability = memoryCapability({
       client: input.client,
       config: input.config ?? DEFAULT_CONFIG,
       logger: input.logger ?? makeLogger(),
@@ -2338,7 +2338,7 @@ describe('HindsightMemoryProcessor pages layer', () => {
     });
 
     it('is told to the model with the same heading and end line the block uses', () => {
-      const capability = hindsightMemoryCapability({
+      const capability = memoryCapability({
         client: makeClient({}),
         config: DEFAULT_CONFIG,
         logger: makeLogger(),
@@ -2581,7 +2581,7 @@ describe('weightedRecallQuery', () => {
   });
 });
 
-describe('HindsightMemoryProcessor post-compaction recall damping', () => {
+describe('MemoryProcessor post-compaction recall damping', () => {
   /** A host-written compaction summary message, the same framing ContextCompaction produces. */
   function compactionSummaryMessage(text: string): ContextMessage {
     return { role: 'user', content: `<tfy-internal>${HOST_SUMMARY_PREFACE}\n\n${text}</tfy-internal>` };
@@ -2607,7 +2607,7 @@ describe('HindsightMemoryProcessor post-compaction recall damping', () => {
     config?: MemoryConfig;
     recallEnabled?: boolean;
   }): Promise<{ event: ReturnType<typeof passthroughEvent>; nextState: unknown }> {
-    const capability = hindsightMemoryCapability({
+    const capability = memoryCapability({
       client: input.client,
       config: input.config ?? DEFAULT_CONFIG,
       logger: makeLogger(),
@@ -2761,14 +2761,14 @@ describe('HindsightMemoryProcessor post-compaction recall damping', () => {
   });
 });
 
-describe('hindsightMemoryCapability with recallEnabled', () => {
+describe('memoryCapability with recallEnabled', () => {
   it('skips recall with reason disabled_by_user when recallEnabled is false', async () => {
     const recall = jest.fn().mockResolvedValue({
       ok: true,
       results: [{ id: '1', occurred_start: '2026-08-14', text: 'fact' }],
       entities: [],
     });
-    const capability = hindsightMemoryCapability({
+    const capability = memoryCapability({
       client: makeClient({ recall }),
       config: DEFAULT_CONFIG,
       logger: makeLogger(),
@@ -2806,7 +2806,7 @@ describe('hindsightMemoryCapability with recallEnabled', () => {
       results: [{ id: '1', occurred_start: '2026-08-14', text: 'fact' }],
       entities: [],
     });
-    const capability = hindsightMemoryCapability({
+    const capability = memoryCapability({
       client: makeClient({ recall }),
       config: DEFAULT_CONFIG,
       logger: makeLogger(),
@@ -2839,7 +2839,7 @@ describe('hindsightMemoryCapability with recallEnabled', () => {
       results: [{ id: '1', occurred_start: '2026-08-14', text: 'fact' }],
       entities: [],
     });
-    const capability = hindsightMemoryCapability({
+    const capability = memoryCapability({
       client: makeClient({ recall }),
       config: DEFAULT_CONFIG,
       logger: makeLogger(),
@@ -2870,7 +2870,7 @@ describe('hindsightMemoryCapability with recallEnabled', () => {
     const getOperation = jest.fn().mockResolvedValue({ ok: true, status: 'unknown' });
     const retain = jest.fn().mockResolvedValue({ ok: true });
     const recall = jest.fn();
-    const capability = hindsightMemoryCapability({
+    const capability = memoryCapability({
       client: makeClient({ getOperation, retain, recall }),
       config: DEFAULT_CONFIG,
       logger: makeLogger(),
@@ -2944,7 +2944,7 @@ describe('memory origin is kept and shown', () => {
   async function resubmittedOrigin(context: ContextMessage[]): Promise<unknown> {
     const getOperation = jest.fn().mockResolvedValue({ ok: true, status: 'unknown' });
     const retain = jest.fn().mockResolvedValue({ ok: true });
-    const capability = hindsightMemoryCapability({
+    const capability = memoryCapability({
       client: makeClient({ getOperation, retain }),
       config: DEFAULT_CONFIG,
       logger: makeLogger(),
@@ -3117,7 +3117,7 @@ describe('recall of saved findings and assistant reply notes', () => {
   }
 
   async function recalledBlock(results: RecallItem[]): Promise<string> {
-    const capability = hindsightMemoryCapability({
+    const capability = memoryCapability({
       client: makeClient({ recall: jest.fn().mockResolvedValue({ ok: true, results, entities: [] }) }),
       config: DEFAULT_CONFIG,
       logger: makeLogger(),
@@ -3197,7 +3197,7 @@ describe('recall of saved findings and assistant reply notes', () => {
   });
 
   it('tells the model in the system section how to treat findings', () => {
-    const capability = hindsightMemoryCapability({
+    const capability = memoryCapability({
       client: makeClient({}),
       config: DEFAULT_CONFIG,
       logger: makeLogger(),

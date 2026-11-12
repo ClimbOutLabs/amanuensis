@@ -43,8 +43,7 @@ import {
 } from '../personalization/profile';
 import { ProfileLearnedEventSchema, type ProfileLearnedEvent } from '../schemas/profileLearningEvents';
 import type { EventSubscription } from './event-subscription';
-import type { RetainItem } from './memory/hindsightClient';
-import type { MemoryClient } from './memory/memoryClient';
+import type { MemoryClient, RetainItem } from './memory/memoryClient';
 import { LEARNED_PROFILE_LINE_SOURCE, MEMORY_ORIGIN_METADATA_KEY, TOOL_INGESTED_ORIGIN } from './memory/memoryOrigin';
 import { summarizeTurnContent, type ProfileLineSuggestion } from './memory/memorySummarize';
 import { uuidv5 } from './memory/uuidv5';

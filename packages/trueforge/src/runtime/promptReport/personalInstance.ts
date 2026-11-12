@@ -289,7 +289,6 @@ export async function buildPersonalInstance(input: {
     sessionId: SESSION_ID,
     previousTurnId: null,
     summarize: undefined,
-    providerServerName: undefined,
     keepsNothing: false,
   };
   const space: SpaceTurnContext = {

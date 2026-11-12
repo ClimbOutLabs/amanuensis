@@ -1,9 +1,9 @@
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import type { RetainItem } from '../../../../src/runtime/memory/hindsightClient';
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
 import { entryMetadata, splitEntries } from '../../../../src/runtime/memory/markdownMemoryFiles';
+import type { RetainItem } from '../../../../src/runtime/memory/memoryClient';
 
 const DAY = '2026-10-01';
 const TIMEOUT_MS = 5_000;

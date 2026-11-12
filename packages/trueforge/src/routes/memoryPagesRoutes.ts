@@ -60,7 +60,6 @@ const COMMON_ERRORS = {
   409: FAILURE('The page changed after it was opened, a later change must be undone first, or no history is kept.'),
   401: FAILURE('Authentication required.'),
   500: FAILURE('The page operation failed.'),
-  501: FAILURE('The server does not keep memory pages.'),
 };
 
 const FERN_GROUP = ['memory', 'pages'];

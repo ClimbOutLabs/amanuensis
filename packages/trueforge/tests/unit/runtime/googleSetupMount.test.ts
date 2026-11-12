@@ -50,7 +50,6 @@ const memory: MemoryTurnContext = {
   sessionId: 's1',
   previousTurnId: null,
   summarize: undefined,
-  providerServerName: undefined,
 };
 
 const STORE: SpaceToolStore = {

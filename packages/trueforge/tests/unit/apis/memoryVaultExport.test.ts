@@ -21,14 +21,12 @@ const ListResponseSchema = z.object({ data: z.array(EntrySchema) });
 const ExportResponseSchema = z.object({ data: z.object({ entries: z.array(EntrySchema) }) });
 
 describe('memory vault export keeps the internal id an entry was filed under', () => {
-  const originalBackend = configuration.MEMORY_BACKEND;
   const originalDir = configuration.MEMORY_MARKDOWN_DIR;
   let baseDir: string;
   let app: OpenAPIHono;
 
   beforeEach(async () => {
     baseDir = await mkdtemp(join(tmpdir(), 'vault-export-'));
-    configuration.MEMORY_BACKEND = 'markdown';
     configuration.MEMORY_MARKDOWN_DIR = baseDir;
     app = new OpenAPIHono();
     app.route(
@@ -41,7 +39,6 @@ describe('memory vault export keeps the internal id an entry was filed under', (
   });
 
   afterEach(async () => {
-    configuration.MEMORY_BACKEND = originalBackend;
     configuration.MEMORY_MARKDOWN_DIR = originalDir;
     await rm(baseDir, { recursive: true, force: true });
   });

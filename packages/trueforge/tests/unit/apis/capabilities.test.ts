@@ -11,7 +11,6 @@ import {
   SANDBOX_UNAVAILABLE_FOR_MEMBER,
   toBuildIdentity,
 } from '../../../src/apis/capabilities';
-import { TENANT_ID } from '../../../src/apis/sessions';
 import type { Authenticator } from '../../../src/auth/authenticator';
 import { resolveRequestContext } from '../../../src/auth/identity';
 import { createAuthMiddleware } from '../../../src/auth/middleware';
@@ -22,7 +21,6 @@ import configuration, { UNSTAMPED_BUILD_REF, type OIDCConfig } from '../../../sr
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
-import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
 import { SqliteSandboxProviderStore } from '../../../src/db/sqlite/sandbox-provider-store/SqliteSandboxProviderStore';
 import { PACKAGE_VERSION } from '../../../src/packageVersion';
 import { setCachedLocalSandboxSupport } from '../../../src/sandbox/localRuntime';
@@ -50,7 +48,6 @@ const silentLogger = createLogger({ silent: true });
 const expectedBuild = toBuildIdentity({ version: PACKAGE_VERSION, buildRef: configuration.BUILD_REF });
 /** The resolved MEMORY_* defaults, as the capability reports them for every caller. */
 const expectedMemoryDefaults = {
-  backend: configuration.MEMORY_BACKEND,
   markdown_dir: configuration.MEMORY_MARKDOWN_DIR,
   recall_timeout_ms: configuration.MEMORY_RECALL_TIMEOUT_MS,
   recall_query_window: configuration.MEMORY_RECALL_QUERY_WINDOW,
@@ -142,17 +139,14 @@ describe('capabilities routers', () => {
 
   async function makeRouter(authenticator: Authenticator = new StandaloneAuthenticator()): Promise<{
     router: OpenAPIHono;
-    mcpServerStore: SqliteMcpServerStore;
     globalSettingsStore: SqliteGlobalSettingsStore;
   }> {
     const db = createSqliteDb(':memory:');
     await migrateSqliteToLatest(db);
-    const mcpServerStore = new SqliteMcpServerStore(db);
     const globalSettingsStore = new SqliteGlobalSettingsStore(db);
     const router = withAuth(
       createCapabilitiesRouter({
         resolveSandboxProviderStore: () => new SqliteSandboxProviderStore(db),
-        mcpServerStore,
         globalSettingsStore,
         withTransaction: callback => db.transaction().execute(callback),
         logger: silentLogger,
@@ -160,7 +154,7 @@ describe('capabilities routers', () => {
       }),
       authenticator,
     );
-    return { router, mcpServerStore, globalSettingsStore };
+    return { router, globalSettingsStore };
   }
 
   it('reports sandbox + skill disabled when no image status is available', async () => {
@@ -394,7 +388,6 @@ describe('capabilities routers', () => {
       const router = withAuth(
         createCapabilitiesRouter({
           resolveSandboxProviderStore: () => new SqliteSandboxProviderStore(db),
-          mcpServerStore: new SqliteMcpServerStore(db),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           withTransaction: callback => db.transaction().execute(callback),
           logger: silentLogger,
@@ -432,7 +425,6 @@ describe('capabilities routers', () => {
       const router = withAuth(
         createCapabilitiesRouter({
           resolveSandboxProviderStore: () => new SqliteSandboxProviderStore(db),
-          mcpServerStore: new SqliteMcpServerStore(db),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           withTransaction: callback => db.transaction().execute(callback),
           logger: silentLogger,
@@ -480,7 +472,6 @@ describe('capabilities routers', () => {
           tool_output_screen: toolOutputScreenNotConfigured,
           // Non-admin callers do not get the host filesystem path.
           memory_defaults: {
-            backend: expectedMemoryDefaults.backend,
             recall_timeout_ms: expectedMemoryDefaults.recall_timeout_ms,
             recall_query_window: expectedMemoryDefaults.recall_query_window,
             recall_min_score: expectedMemoryDefaults.recall_min_score,
@@ -548,87 +539,6 @@ describe('capabilities routers', () => {
         data: {
           memory_screen: { enabled: false, configured: false, reason: MEMORY_SCREEN_NOT_CONFIGURED_REASON },
         },
-      });
-    });
-
-    it('turns screening off when the per-bank screen_enabled setting is explicitly false, overriding MEMORY_SCREEN_ENABLED', async () => {
-      disableOidcAuth();
-      configuration.MEMORY_SCREEN_ENABLED = true;
-      configuration.MEMORY_SCREEN_URL = 'https://screen.internal.example.com:8443';
-      configuration.MEMORY_SCREEN_THRESHOLD = 0.7;
-      const { router, mcpServerStore } = await makeRouter();
-      await mcpServerStore.upsertServer({
-        tenant_id: TENANT_ID,
-        name: 'hindsight',
-        manifest: {
-          type: 'remote',
-          name: 'hindsight',
-          url: 'https://hindsight.example.com/mcp/aman/',
-          description: 'Hindsight memory provider.',
-          memory_provider: true,
-          memory_settings: { screen_enabled: false },
-        },
-        first_party: false,
-      });
-
-      const response = await router.request('/');
-      expect(response.status).toBe(200);
-      expect(await response.json()).toMatchObject({
-        data: { memory_screen: { enabled: false, configured: true } },
-      });
-    });
-
-    it('turns screening on when the per-bank screen_enabled setting is explicitly true, overriding a false MEMORY_SCREEN_ENABLED', async () => {
-      disableOidcAuth();
-      configuration.MEMORY_SCREEN_ENABLED = false;
-      configuration.MEMORY_SCREEN_URL = 'https://screen.internal.example.com:8443';
-      configuration.MEMORY_SCREEN_THRESHOLD = 0.7;
-      const { router, mcpServerStore } = await makeRouter();
-      await mcpServerStore.upsertServer({
-        tenant_id: TENANT_ID,
-        name: 'hindsight',
-        manifest: {
-          type: 'remote',
-          name: 'hindsight',
-          url: 'https://hindsight.example.com/mcp/aman/',
-          description: 'Hindsight memory provider.',
-          memory_provider: true,
-          memory_settings: { screen_enabled: true },
-        },
-        first_party: false,
-      });
-
-      const response = await router.request('/');
-      expect(response.status).toBe(200);
-      expect(await response.json()).toMatchObject({
-        data: { memory_screen: { enabled: true, configured: true, threshold: 0.7 } },
-      });
-    });
-
-    it('falls back to MEMORY_SCREEN_ENABLED when the per-bank screen_enabled setting is unset', async () => {
-      disableOidcAuth();
-      configuration.MEMORY_SCREEN_ENABLED = true;
-      configuration.MEMORY_SCREEN_URL = 'https://screen.internal.example.com:8443';
-      configuration.MEMORY_SCREEN_THRESHOLD = 0.7;
-      const { router, mcpServerStore } = await makeRouter();
-      await mcpServerStore.upsertServer({
-        tenant_id: TENANT_ID,
-        name: 'hindsight',
-        manifest: {
-          type: 'remote',
-          name: 'hindsight',
-          url: 'https://hindsight.example.com/mcp/aman/',
-          description: 'Hindsight memory provider.',
-          memory_provider: true,
-          memory_settings: { recall_timeout_ms: 6000 },
-        },
-        first_party: false,
-      });
-
-      const response = await router.request('/');
-      expect(response.status).toBe(200);
-      expect(await response.json()).toMatchObject({
-        data: { memory_screen: { enabled: true, configured: true, threshold: 0.7 } },
       });
     });
 
@@ -734,27 +644,12 @@ describe('capabilities routers', () => {
       });
     });
 
-    it('reports the persisted recall-screen override over the env default and the per-bank setting', async () => {
+    it('reports the persisted recall-screen override over the env default', async () => {
       disableOidcAuth();
       configuration.MEMORY_SCREEN_ENABLED = true;
       configuration.MEMORY_SCREEN_URL = 'https://screen.internal.example.com:8443';
       configuration.MEMORY_SCREEN_THRESHOLD = 0.7;
-      const { router, mcpServerStore, globalSettingsStore } = await makeRouter();
-      // A legacy per-bank setting that disagrees with the persisted override: the
-      // Settings toggle's stored value must win.
-      await mcpServerStore.upsertServer({
-        tenant_id: TENANT_ID,
-        name: 'hindsight',
-        manifest: {
-          type: 'remote',
-          name: 'hindsight',
-          url: 'https://hindsight.example.com/mcp/aman/',
-          description: 'Hindsight memory provider.',
-          memory_provider: true,
-          memory_settings: { screen_enabled: true },
-        },
-        first_party: false,
-      });
+      const { router, globalSettingsStore } = await makeRouter();
 
       await globalSettingsStore.setSetting({ key: 'memory_screen_enabled', value: 'false' });
       const overridden = await router.request('/');

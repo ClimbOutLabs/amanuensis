@@ -23,7 +23,6 @@
  */
 import { AgentSpecSchema, type CreatedBySubject, type ISessionStore } from '@truefoundry/trueforge-core/agent-session';
 import { Kysely } from 'kysely';
-import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -48,42 +47,22 @@ import { personaKnowledgeLocation } from '../personaKnowledge/knowledgePaths';
 import { amanGuidePersonaId, isAmanGuidePersona, isAnyAmanGuideId } from '../personas/amanGuide/identity';
 import { PERSISTED_ARTIFACT_MIME } from '../runtime/artifacts/persistTurnArtifacts';
 import { requestChatSearchBackfill } from '../runtime/chatSearchIndexing';
-import type { RetainItem } from '../runtime/memory/hindsightClient';
 import {
   applyVaultTombstones,
   CURATED_MEMORY_FILE,
   dailyLogEntries,
   dailyLogFileAt,
-  DOCUMENT_ID_METADATA_KEY,
-  entryMetadata,
-  hiddenContext,
   latestTombstonesByEntry,
   parseReviewedMarks,
   parseVaultTombstones,
   personaVaultNamespace,
   REVIEWED_FROM_YOU_FILE,
-  SESSION_ID_METADATA_KEY,
   upgradeLegacyEntries,
   VAULT_TOMBSTONES_FILE,
   vaultEntryTimestamp,
   vaultFilesystemNamespace,
-  withoutHiddenMarkers,
-  withoutSourceLines,
   withSourceLines,
 } from '../runtime/memory/markdownMemoryFiles';
-import {
-  isMemoryNoteSource,
-  NOTE_DATE_METADATA_KEY,
-  NOTE_SOURCE_METADATA_KEY,
-  noteRetainContent,
-} from '../runtime/memory/memoryNotes';
-import {
-  isPersonOrigin,
-  MEMORY_ORIGIN_METADATA_KEY,
-  TOOL_INGESTED_ORIGIN,
-  USER_STATED_ORIGIN,
-  type AmanMemoryOrigin,
-} from '../runtime/memory/memoryOrigin';
 import { isInPageFolder, pageFolder, parsePageFilePath } from '../runtime/memory/memoryPages';
 import { ensureMemorySourceLines } from '../runtime/memory/memorySourceLines';
 import { MEMORY_NIGHTLY_SETTING_KEY } from '../runtime/memoryNightlySettings';
@@ -96,6 +75,7 @@ import { TOOL_OUTPUT_SCREEN_ENABLED_SETTING_KEY } from '../runtime/toolOutputScr
 import type { ImportDataResult } from '../schemas/dataImport';
 import { newId } from '../utils/id';
 import { detachConnectors, normalizeImportedConnectors, withoutKeptConnector } from './connectorImport';
+import { upgradeArchivedConnectors } from './connectorUpgrade';
 import { upgradeArchivedDeliveries } from './deliveryUpgrade';
 import { damagedExportError, DataImportError } from './importError';
 import {
@@ -190,7 +170,6 @@ export interface DataImportRequest {
   dryRun?: boolean;
 }
 
-const MEMORY_RETAIN_TIMEOUT_MS = 120_000;
 const MAX_LOGGED_ISSUES = 20;
 /** Chats or sections whose left-out rows are shown in the summary; the import log has them all. */
 const LEFT_OUT_OWNERS_SHOWN = 20;
@@ -734,7 +713,7 @@ function loadArchive(input: {
   // a damaged section means the archive cannot be trusted as a whole.
   section('chats.json', CommonChatExportFileSchema);
   const folders = section('folders.json', ImportFoldersFileSchema);
-  const connectors = section('connectors.json', ImportConnectorsFileSchema);
+  const connectors = section('connectors.json', ImportConnectorsFileSchema, upgradeArchivedConnectors);
   const sessionEntries = readSessionEntries({
     files,
     logger,
@@ -1007,79 +986,6 @@ function countMemories(namespaces: readonly ParsedMemoryNamespace[]): number {
   );
 }
 
-/** The origin an archived note is restored with: the person's own only when its closing line says so. */
-function archivedOrigin(metadata: Readonly<Record<string, string>>): AmanMemoryOrigin {
-  return isPersonOrigin(metadata) ? USER_STATED_ORIGIN : TOOL_INGESTED_ORIGIN;
-}
-
-/** Builds retain items for a client (non-Markdown) memory backend from the parsed namespaces. */
-function buildRetainItems(
-  namespaces: readonly ParsedMemoryNamespace[],
-  input: { exportedAt: string; personaWireBySourceSeg: ReadonlyMap<string, string> },
-): RetainItem[] {
-  const items: RetainItem[] = [];
-  const documentIdFor = (seed: string): string =>
-    `import-${createHash('sha256').update(seed, 'utf8').digest('hex').slice(0, 32)}`;
-  for (const namespace of namespaces) {
-    // A client backend has one bank per tenant, so a persona vault's entries
-    // keep their origin as the retain context instead of a separate vault.
-    const vaultContext = input.personaWireBySourceSeg.get(namespace.seg);
-    if (namespace.curated !== undefined) {
-      items.push({
-        content: namespace.curated,
-        timestamp: input.exportedAt,
-        document_id: documentIdFor(`curated:${namespace.seg}`),
-        ...(vaultContext === undefined ? {} : { context: vaultContext }),
-        metadata: { [MEMORY_ORIGIN_METADATA_KEY]: archivedOrigin(entryMetadata(namespace.curated)) },
-      });
-    }
-    for (const entry of namespace.entries) {
-      let body = entry.text;
-      let entryContext: string | undefined;
-      if (body.startsWith('## ')) {
-        const newline = body.indexOf('\n');
-        body = newline < 0 ? '' : body.slice(newline + 1).replace(/^\n+/, '');
-      }
-      const trailers = entryMetadata(body);
-      const sessionId = trailers[SESSION_ID_METADATA_KEY];
-      const noteSource = trailers[NOTE_SOURCE_METADATA_KEY];
-      const noteDate = trailers[NOTE_DATE_METADATA_KEY];
-      // The page text drops an id-shaped context line, so it is read before the body is cleaned.
-      entryContext = hiddenContext(body);
-      // The source travels as the item's origin, so its line is not part of the text.
-      body = withoutSourceLines(withoutHiddenMarkers(body));
-      const contextMatch = /\n\n> ([^\n]*)$/.exec(body);
-      if (contextMatch !== null) {
-        const contextValue = contextMatch[1];
-        if (contextValue !== undefined) {
-          entryContext ??= contextValue;
-          body = body.slice(0, contextMatch.index);
-        }
-      }
-      const itemContext = vaultContext ?? entryContext;
-      items.push({
-        // A note's marker rides inside its text, so a backend that drops metadata still hands it back.
-        content:
-          noteSource !== undefined && isMemoryNoteSource(noteSource) && noteDate !== undefined
-            ? noteRetainContent({ text: body, source: noteSource, date: noteDate })
-            : body,
-        timestamp: entry.timestamp,
-        // A replaceable entry keeps its document id, so a later update replaces it instead of adding a copy.
-        document_id: trailers[DOCUMENT_ID_METADATA_KEY] ?? documentIdFor(entry.id),
-        ...(itemContext === undefined ? {} : { context: itemContext }),
-        metadata: {
-          [MEMORY_ORIGIN_METADATA_KEY]: archivedOrigin(trailers),
-          ...(sessionId === undefined ? {} : { [SESSION_ID_METADATA_KEY]: sessionId }),
-          ...(noteSource === undefined || noteDate === undefined
-            ? {}
-            : { [NOTE_SOURCE_METADATA_KEY]: noteSource, [NOTE_DATE_METADATA_KEY]: noteDate }),
-        },
-      });
-    }
-  }
-  return items;
-}
-
 function pluralize(count: number, singular: string, plural: string): string {
   return `${String(count)} ${count === 1 ? singular : plural}`;
 }
@@ -1157,11 +1063,6 @@ function buildSummary({
   }
   if (memoryPages.imported > 0) {
     notes.push(`${pluralize(memoryPages.imported, 'memory page', 'memory pages')} came along.`);
-  }
-  if (memoryPages.leftOut > 0) {
-    notes.push(
-      `${pluralize(memoryPages.leftOut, 'memory page was', 'memory pages were')} left out because this computer keeps memory in a different way, and pages only work with memory kept as files.`,
-    );
   }
   if (memoryPages.unreadableNames > 0) {
     notes.push(
@@ -1274,8 +1175,6 @@ interface MemoryPageCounts {
   unreadableNames: number;
   /** Files in a page folder that are not page files (not `.md`, deeper folders, hidden or unsafe names); they are not written. */
   unusable: number;
-  /** Pages not written because the memory here is not kept as Markdown files. */
-  leftOut: number;
 }
 
 /** The vault-relative part of a `memory/<vault>/<file>` archive path, or undefined for any other path. */
@@ -1355,18 +1254,6 @@ function planMarkdownMemory(
     planned.push({ targetPath, bytes, isPage: page !== undefined });
   }
   return { files: planned, unusablePages, unreadableNames };
-}
-
-/** How many page files the archive holds, for a memory backend that keeps no page files. */
-function countArchivePages(contents: ArchiveContents): number {
-  let count = 0;
-  for (const name of contents.files.keys()) {
-    const inner = memoryFileAt(name)?.inner;
-    if (inner !== undefined && isInPageFolder(inner)) {
-      count += 1;
-    }
-  }
-  return count;
 }
 
 /** Writes planned files, each created exclusively so an existing file is never replaced. */
@@ -1541,7 +1428,6 @@ async function importArchive<TTransaction>(
     logger: deps.logger,
   });
   const {
-    manifest,
     sessions,
     folders,
     personas: archivedPersonas,
@@ -1631,12 +1517,10 @@ async function importArchive<TTransaction>(
   }
 
   const personaSegBySource = new Map<string, string>();
-  const personaWireBySourceSeg = new Map<string, string>();
   for (const { persona } of archivedPersonas) {
     const wire = personaVaultNamespace(persona.display_name);
     const sourceSeg = vaultFilesystemNamespace(contents.sourceTenantId, wire);
     personaSegBySource.set(sourceSeg, vaultFilesystemNamespace(tenantId, wire));
-    personaWireBySourceSeg.set(sourceSeg, wire);
   }
   const memoryNamespaces = parseMemoryNamespaces(contents.files);
   for (const namespace of memoryNamespaces) {
@@ -1654,16 +1538,15 @@ async function importArchive<TTransaction>(
     }
   }
   const memoryCount = countMemories(memoryNamespaces);
-  const memoryPlan =
-    deps.memoryTarget.kind === 'markdown'
-      ? planMarkdownMemory(deps.memoryTarget.markdownDir, contents, { targetTenantId: tenantId, personaSegBySource })
-      : { files: [], unusablePages: 0, unreadableNames: 0 };
+  const memoryPlan = planMarkdownMemory(deps.memoryMarkdownDir, contents, {
+    targetTenantId: tenantId,
+    personaSegBySource,
+  });
   const plannedMemoryFiles = memoryPlan.files;
   const memoryPages: MemoryPageCounts = {
     imported: plannedMemoryFiles.filter(file => file.isPage).length,
     unreadableNames: memoryPlan.unreadableNames,
     unusable: memoryPlan.unusablePages,
-    leftOut: deps.memoryTarget.kind === 'markdown' ? 0 : countArchivePages(contents),
   };
   for (const file of plannedMemoryFiles) {
     if (existsSync(file.targetPath)) {
@@ -1814,29 +1697,9 @@ async function importArchive<TTransaction>(
       });
     }
 
-    if (deps.memoryTarget.kind === 'markdown') {
-      // The folder's own older notes are marked first, so the imported ones are never taken for older notes.
-      await ensureMemorySourceLines({ baseDir: deps.memoryTarget.markdownDir });
-      await writeMarkdownMemory(plannedMemoryFiles);
-    } else if (memoryNamespaces.length > 0) {
-      const items = buildRetainItems(memoryNamespaces, {
-        exportedAt: manifest.exported_at,
-        personaWireBySourceSeg,
-      });
-      if (items.length > 0) {
-        const outcome = await deps.memoryTarget.client.retain({
-          items,
-          operationId: `data-import-${newId()}`,
-          timeoutMs: MEMORY_RETAIN_TIMEOUT_MS,
-        });
-        if (!outcome.ok) {
-          throw new DataImportError(
-            `The memory store could not save the imported memories${outcome.reason === undefined ? '' : `: ${outcome.reason}`}. Nothing was imported.`,
-            500,
-          );
-        }
-      }
-    }
+    // The folder's own older notes are marked first, so the imported ones are never taken for older notes.
+    await ensureMemorySourceLines({ baseDir: deps.memoryMarkdownDir });
+    await writeMarkdownMemory(plannedMemoryFiles);
 
     // --- Everything else commits in one transaction, together with the removal of the marker. ---
     let connectorsImported = 0;

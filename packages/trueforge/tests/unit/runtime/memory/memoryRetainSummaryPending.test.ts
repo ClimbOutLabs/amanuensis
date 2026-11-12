@@ -25,10 +25,10 @@ jest.mock('../../../../src/runtime/memory/memorySummarize', () => {
 });
 
 import type { IModelProviderStore } from '../../../../src/db/modelProviderStore';
-import { HindsightClient } from '../../../../src/runtime/memory/hindsightClient';
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
 import { submitRetain } from '../../../../src/runtime/memory/memoryRetain';
 import { summarizeTurnContent } from '../../../../src/runtime/memory/memorySummarize';
+import { QuietMemoryClient } from '../../../fixtures/memory/quietMemoryClient';
 
 const mockSummarize = jest.mocked(summarizeTurnContent);
 
@@ -174,12 +174,7 @@ describe('submitRetain summary-pending marker', () => {
   });
 
   it('stores nothing, and does not fail, on a client without summary tracking when a summary fails', async () => {
-    const client = new HindsightClient({
-      apiBase: 'https://hindsight.test.example',
-      bank: 'aman',
-      headers: {},
-      fetchImpl: () => Promise.reject(new Error('summary pending tests must not reach the network')),
-    });
+    const client = new QuietMemoryClient();
     const retain = jest.spyOn(client, 'retain').mockResolvedValue({ ok: true });
     mockSummarize.mockResolvedValue({ status: 'failed', reason: 'boom', fallback: 'model_failed' });
 

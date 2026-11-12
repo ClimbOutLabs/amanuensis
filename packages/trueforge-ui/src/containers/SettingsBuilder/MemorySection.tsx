@@ -1,6 +1,6 @@
 'use client';
 
-import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 
 import { MemoryPagesPanel } from '@/atoms/memory/MemoryPagesPanel.js';
 import { MemoryTabs } from '@/atoms/memory/MemoryTabs.js';
@@ -8,8 +8,6 @@ import { MemoryVaultFactsPanel, MemoryVaultSharingPanel } from '@/atoms/memory/M
 import { useMemoryPagesAvailable } from '@/atoms/memory/useMemoryPagesState.js';
 import { useMemoryVaultState } from '@/atoms/memory/useMemoryVaultState.js';
 import { Spinner } from '@/atoms/primitives/Spinner.js';
-import { readMemoryBackend } from '@/plugins/trueforge-agent-server-adapter/lists.js';
-import { useServerCapabilities, useServerCapabilitiesSettled } from '@/server/ServerContext.js';
 
 // The settings panel loads only when its sub-tab mounts, like every other section module.
 const MemorySettings = lazy(() => import('./MemorySettings.js'));
@@ -34,39 +32,21 @@ const MEMORY_TABS: ReadonlyArray<{ id: MemoryTab; label: string }> = [
 
 /**
  * Settings > Memory: one section with sub-tabs. Memories and Sharing are the memory
- * list and its sharing controls; Pages (Markdown memory only) is where the pages Aman keeps are read and fixed; Settings is where memory is set up and tuned.
+ * list and its sharing controls; Pages is where the pages Aman keeps are read and fixed; Settings is where memory is set up and tuned.
  *
- * Opens on Memories. When the server reports no memory backend once capabilities settle,
- * memory is not set up yet, so it opens on Settings instead, where setup lives. Any tab the
- * user picks while the section is open wins.
+ * Opens on Memories.
  */
 export default function MemorySection() {
-  const capabilities = useServerCapabilities();
-  const settled = useServerCapabilitiesSettled();
-  const backend = readMemoryBackend(capabilities);
   const state = useMemoryVaultState();
   const pagesAvailable = useMemoryPagesAvailable();
   const tabs = pagesAvailable ? MEMORY_TABS : MEMORY_TABS.filter(item => item.id !== 'pages');
   const [tab, setTab] = useState<MemoryTab>('memories');
-  const userPickedRef = useRef(false);
-
-  useEffect(() => {
-    if (userPickedRef.current) return;
-    if (settled && backend === undefined) {
-      setTab('settings');
-    }
-  }, [settled, backend]);
-
-  const selectTab = (next: MemoryTab) => {
-    userPickedRef.current = true;
-    setTab(next);
-  };
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">
-      <MemoryTabs ariaLabel="Memory sections" tabs={tabs} activeTab={tab} onTabChange={selectTab} />
+      <MemoryTabs ariaLabel="Memory sections" tabs={tabs} activeTab={tab} onTabChange={setTab} />
 
-      {tab === 'memories' ? <MemoryVaultFactsPanel state={state} onOpenSettings={() => selectTab('settings')} /> : null}
+      {tab === 'memories' ? <MemoryVaultFactsPanel state={state} onOpenSettings={() => setTab('settings')} /> : null}
       {tab === 'pages' && pagesAvailable ? <MemoryPagesPanel /> : null}
       {tab === 'sharing' ? <MemoryVaultSharingPanel state={state} /> : null}
       {tab === 'settings' ? (

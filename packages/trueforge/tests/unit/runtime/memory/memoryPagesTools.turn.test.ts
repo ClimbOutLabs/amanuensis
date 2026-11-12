@@ -26,7 +26,7 @@ import winston from 'winston';
 import { z } from 'zod';
 
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
-import { hindsightMemoryCapability, type MemoryConfig } from '../../../../src/runtime/memory/memoryCapability';
+import { memoryCapability, type MemoryConfig } from '../../../../src/runtime/memory/memoryCapability';
 import type { MemoryClient } from '../../../../src/runtime/memory/memoryClient';
 import { pagePath } from '../../../../src/runtime/memory/memoryPages';
 import { memoryPagesCapability } from '../../../../src/runtime/memory/memoryPagesTools';
@@ -361,7 +361,7 @@ const MEMORY_CONFIG: MemoryConfig = {
 
 function memoryWith(client: MemoryClient): (watch: TurnReadWatch) => AgentCapability[] {
   return watch => [
-    hindsightMemoryCapability({
+    memoryCapability({
       client,
       config: MEMORY_CONFIG,
       logger: winston.createLogger({ silent: true }),

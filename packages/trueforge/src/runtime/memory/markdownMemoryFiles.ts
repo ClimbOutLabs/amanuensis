@@ -18,7 +18,7 @@ import {
   isDataDirConfigurationError,
   USER_FACING_STORAGE_UNAVAILABLE_MESSAGE,
 } from '../../utils/dataDir';
-import type { RetainItem } from './hindsightClient';
+import type { RetainItem } from './memoryClient';
 import {
   ASSISTANT_RESPONSE_SOURCE,
   formatMarker,
@@ -146,8 +146,8 @@ const SESSION_MARKER_PATTERN = new RegExp(`^<!-- session_id: (${SESSION_ID_CHARA
 export const DOCUMENT_ID_METADATA_KEY = 'document_id';
 
 /**
- * Metadata key (value `true`) asking a store that keeps entries as appended text to replace the
- * item's earlier entries with the same document id, as Hindsight does by itself.
+ * Metadata key (value `true`) asking the store to replace the item's earlier entries with the
+ * same document id.
  */
 export const REPLACE_DOCUMENT_METADATA_KEY = 'replace_document';
 

@@ -5,12 +5,12 @@ import type {
 } from '@truefoundry/trueforge-core/core';
 import { InternalEventType } from '@truefoundry/trueforge-core/core';
 import winston from 'winston';
-import type { HindsightClient } from '../../../../src/runtime/memory/hindsightClient';
 import {
   classifyPreRecallGate,
-  hindsightMemoryCapability,
+  memoryCapability,
   type MemoryConfig,
 } from '../../../../src/runtime/memory/memoryCapability';
+import type { QuietMemoryClient } from '../../../fixtures/memory/quietMemoryClient';
 
 const CONFIG: MemoryConfig = {
   recallMaxTokens: 2048,
@@ -38,7 +38,7 @@ function makeClient(overrides: {
   getProfile?: jest.Mock;
   listMentalModels?: jest.Mock;
   getOperation?: jest.Mock;
-}): HindsightClient {
+}): QuietMemoryClient {
   return {
     recall: overrides.recall ?? jest.fn().mockResolvedValue({ ok: true, results: [], entities: [] }),
     retain: jest.fn().mockResolvedValue({ ok: true }),
@@ -51,7 +51,7 @@ function makeClient(overrides: {
         .mockResolvedValue({ ok: true, profile: { name: undefined, mission: undefined, background: undefined } }),
     listMentalModels: overrides.listMentalModels ?? jest.fn().mockResolvedValue({ ok: true, models: [] }),
     reflect: jest.fn().mockResolvedValue({ ok: true, text: '', basedOn: 0 }),
-  } as unknown as HindsightClient;
+  } as unknown as QuietMemoryClient;
 }
 
 function makeExecution(context: ContextMessage[]): Readonly<AgentThreadExecutionContext> {
@@ -161,7 +161,7 @@ describe('pre-recall gate in processPreLLM', () => {
     getOperation?: jest.Mock;
   }) {
     const client = makeClient(input);
-    const capability = hindsightMemoryCapability({
+    const capability = memoryCapability({
       client,
       config: { ...CONFIG, preRecallGateEnabled: input.gateEnabled },
       logger: makeLogger(),

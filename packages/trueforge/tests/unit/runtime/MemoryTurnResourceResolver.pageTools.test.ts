@@ -5,11 +5,11 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createLogger } from 'winston';
 
-import { HindsightClient } from '../../../src/runtime/memory/hindsightClient';
 import { MarkdownMemoryClient } from '../../../src/runtime/memory/markdownMemoryClient';
 import type { MemoryConfig } from '../../../src/runtime/memory/memoryCapability';
 import type { MemoryClient } from '../../../src/runtime/memory/memoryClient';
 import { MemoryTurnResourceResolver } from '../../../src/runtime/MemoryTurnResourceResolver';
+import { QuietMemoryClient } from '../../fixtures/memory/quietMemoryClient';
 
 const MEMORY_CONFIG: MemoryConfig = {
   recallMaxTokens: 2048,
@@ -44,12 +44,7 @@ function markdownClient(): MarkdownMemoryClient {
 
 /** A client of another backend: it has no folder of pages, so it cannot take page writes. */
 function otherBackend(): MemoryClient {
-  return new HindsightClient({
-    apiBase: 'https://hindsight.test.example',
-    bank: 'aman',
-    headers: {},
-    fetchImpl: () => Promise.reject(new Error('these tests must not reach the network')),
-  });
+  return new QuietMemoryClient();
 }
 
 async function resolveWith(input: {
@@ -85,7 +80,6 @@ async function resolveWith(input: {
       sessionId: 'session-1',
       previousTurnId: null,
       summarize: undefined,
-      providerServerName: undefined,
       recallEnabled: input.recallEnabled,
       keepsNothing: input.keepsNothing ?? false,
     },

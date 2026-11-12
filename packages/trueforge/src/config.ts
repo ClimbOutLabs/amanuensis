@@ -45,7 +45,7 @@ import { ZIP_MAX_ARCHIVE_BYTES } from './dataExport/zipStreamWriter';
 import { normalizedOrigin } from './mcp/firstParty';
 import { PACKAGE_VERSION } from './packageVersion';
 import { defaultEmbeddingModelDir } from './runtime/memory/embeddingRetrieval';
-import type { ReflectBudget } from './runtime/memory/hindsightClient';
+import type { ReflectBudget } from './runtime/memory/memoryClient';
 import { PageSortModeSchema, type PageSortMode } from './runtime/memory/pageSortMode';
 import { parseModelPrices, type ModelPrices } from './runtime/modelPricing';
 import { DEFAULT_TOKEN_FACTORY_MODEL } from './runtime/tokenFactoryDefaults';
@@ -186,33 +186,6 @@ export function parseOidcAllowedEmails(raw: string | undefined): string[] {
     .split(',')
     .map(part => part.trim())
     .filter(part => part.length > 0);
-}
-
-/**
- * Parses `FIRST_PARTY_MCP_ORIGINS`: comma-separated exact origins (scheme, host and optional
- * port, no path) of the operator's own memory provider. Unset / blank → none, so no connector is
- * first-party. Each entry is normalized the way a connector URL's origin is, then matched exactly.
- * Anything else fails the boot: a silently dropped typo would read as "nothing is trusted", and a
- * path or wildcard would suggest a prefix or suffix match the list never does.
- */
-export function parseFirstPartyMcpOrigins(raw: string | undefined): string[] {
-  if (raw === undefined || raw.trim() === '') {
-    return [];
-  }
-  const origins = new Set<string>();
-  for (const entry of raw
-    .split(',')
-    .map(part => part.trim())
-    .filter(part => part.length > 0)) {
-    const origin = normalizedOrigin(entry);
-    if (origin === undefined || origin.includes('*') || new URL(entry).href !== `${origin}/`) {
-      throw new Error(
-        `FIRST_PARTY_MCP_ORIGINS entries must be exact http(s) origins such as https://memory.internal:8443, got: ${entry}`,
-      );
-    }
-    origins.add(origin);
-  }
-  return [...origins];
 }
 
 /**
@@ -485,22 +458,10 @@ export function parseBrowserSecret(raw: string | undefined): string | undefined 
   return trimmed;
 }
 
-/**
- * The first-party origins: the operator's list, plus the Calendar connector's origin when one is configured.
- */
-export function firstPartyOriginsFor({
-  raw,
-  calendarUrl,
-}: {
-  raw: string | undefined;
-  calendarUrl: string | undefined;
-}): string[] {
-  const origins = parseFirstPartyMcpOrigins(raw);
+/** The first-party origins before mail is added: the Calendar connector's origin when one is configured. */
+export function firstPartyOriginsFor({ calendarUrl }: { calendarUrl: string | undefined }): string[] {
   const calendarOrigin = calendarUrl === undefined ? undefined : normalizedOrigin(calendarUrl);
-  if (calendarOrigin !== undefined && !origins.includes(calendarOrigin)) {
-    origins.push(calendarOrigin);
-  }
-  return origins;
+  return calendarOrigin === undefined ? [] : [calendarOrigin];
 }
 
 /**
@@ -636,28 +597,6 @@ function parseSandboxBackend(options: { envKey: string; raw: string | undefined 
 
 /** Most slot services the compose files define. */
 export const SANDBOX_MAX_SLOTS = 2;
-
-/** Which long-term memory backend Aman uses. */
-export type MemoryBackend = 'markdown' | 'hindsight';
-
-/**
- * Parses `MEMORY_BACKEND`. Unset/blank → default. `hindsight` is experimental
- * (rollback only); the parser accepts it but callers must treat it as unsupported.
- */
-function parseMemoryBackend(options: {
-  envKey: string;
-  raw: string | undefined;
-  defaultValue: MemoryBackend;
-}): MemoryBackend {
-  if (options.raw === undefined || options.raw.trim() === '') {
-    return options.defaultValue;
-  }
-  const value = options.raw.trim().toLowerCase();
-  if (value === 'markdown' || value === 'hindsight') {
-    return value;
-  }
-  throw new Error(`${options.envKey} must be one of markdown, hindsight; got ${JSON.stringify(options.raw)}`);
-}
 
 /** Parses `MEMORY_PAGE_SORTING`. Unset/blank → default. */
 export function parsePageSortMode(options: {
@@ -1416,10 +1355,9 @@ export interface SharedServerConfiguration {
    */
   MCP_HTTP_MAX_RETRIES: number;
   /**
-   * Origins of the operator's own memory provider, as normalized `scheme://host[:port]` strings.
-   * A connector saved as the memory provider on one of these origins is first-party: its tools that
-   * declare `readOnlyHint` true and `openWorldHint` false run without an approval card. Empty means
-   * no connector is first-party. Env: `FIRST_PARTY_MCP_ORIGINS` (comma-separated). Default empty.
+   * Origins of the host's own Email and Calendar sidecars, as normalized `scheme://host[:port]` strings.
+   * Only a connector the host registered on one of these is first-party: its tools that declare
+   * `readOnlyHint` true and `openWorldHint` false run without an approval card. Derived, never set by hand.
    */
   FIRST_PARTY_MCP_ORIGINS: string[];
   /**
@@ -1823,7 +1761,7 @@ export interface SharedServerConfiguration {
    */
   TRUSTED_PROXY_ADDRESSES: string[];
   /**
-   * Max tokens requested from the memory provider's recall endpoint.
+   * Max tokens asked for in one recall.
    * Env: `MEMORY_RECALL_MAX_TOKENS`. Default 600. Recall runs once per reply, so this bounds the block every step sends.
    */
   MEMORY_RECALL_MAX_TOKENS: number;
@@ -1879,27 +1817,13 @@ export interface SharedServerConfiguration {
    */
   MEMORY_RETAIN_TIMEOUT_MS: number;
   /**
-   * Max bytes read from a memory provider HTTP response body.
-   * Env: `MEMORY_MAX_RESPONSE_BYTES`. Default 524288 (512 KiB).
-   */
-  MEMORY_MAX_RESPONSE_BYTES: number;
-  /**
    * Max pending retain operations swept (status-checked) per turn.
    * Env: `MEMORY_SWEEP_MAX_PER_TURN`. Default 5.
    */
   MEMORY_SWEEP_MAX_PER_TURN: number;
   /**
-   * Max milliseconds for the memory-provider connection check run on save and on demand.
-   * Longer than the recall timeout: a check waits on a cold provider rather than rejecting
-   * a correct configuration, while a turn degrades fast.
-   * Capped at the shared memory deadline maximum (120000); a larger value fails fast at startup.
-   * Env: `MEMORY_CHECK_TIMEOUT_MS`. Default 5000.
-   */
-  MEMORY_CHECK_TIMEOUT_MS: number;
-  /**
    * Memory recall screen: master switch for the prompt-injection screen applied to recalled
-   * memories at the moment they would be injected into the model's context. This is a separate
-   * subsystem from the memory provider (Hindsight): the provider stores and recalls, this screen
+   * memories at the moment they would be injected into the model's context. This screen
    * decides which recalled items are allowed to reach the model this turn. Off by default, so
    * until an operator deploys the screen sidecar and turns this on, recall is lossless and
    * unscreened exactly as before. Env: `MEMORY_SCREEN_ENABLED`. Default false.
@@ -1907,7 +1831,7 @@ export interface SharedServerConfiguration {
   MEMORY_SCREEN_ENABLED: boolean;
   /**
    * Base URL of the `aman-content-screen` classifier the recall screen calls (`POST {url}/classify`).
-   * Distinct from the memory provider URL. Only consulted when `MEMORY_SCREEN_ENABLED` is true;
+   * Only consulted when `MEMORY_SCREEN_ENABLED` is true;
    * empty or unreachable degrades to an "unknown" screen result, never a thrown turn.
    * Env: `MEMORY_SCREEN_URL`. Default empty.
    */
@@ -1979,7 +1903,7 @@ export interface SharedServerConfiguration {
    */
   MAPS_USER_AGENT: string;
   /**
-   * Bearer token for the memory recall screen classifier. Distinct from any memory-provider
+   * Bearer token for the memory recall screen classifier. Distinct from any connector
    * credential. Env: `MEMORY_SCREEN_AUTH_TOKEN`. Default empty.
    */
   MEMORY_SCREEN_AUTH_TOKEN: string;
@@ -2036,7 +1960,7 @@ export interface SharedServerConfiguration {
    */
   SCREEN_CLASSIFY_CACHE_MAX_ENTRIES: number;
   /**
-   * Whether the pre-recall gate may skip the memory provider reads on high-confidence trivial
+   * Whether the pre-recall gate may skip the memory reads on high-confidence trivial
    * turns (short greetings, bare acknowledgements). Off by default; a bank can override it in
    * Settings > Memory. Env: `MEMORY_PRERECALL_GATE_ENABLED`. Default false.
    */
@@ -2068,16 +1992,8 @@ export interface SharedServerConfiguration {
    */
   MEMORY_REFLECT_BUDGET: ReflectBudget;
   /**
-   * Which long-term memory backend Aman uses. `markdown` (the default) stores memories as
-   * local Markdown files (OpenClaw-style, no server required) and is the stable, supported
-   * path. `hindsight` uses the Hindsight REST API via the MCP server flagged as the memory
-   * provider; it is EXPERIMENTAL and retained for rollback only, not supported.
-   * Env: `MEMORY_BACKEND`. Default `markdown`.
-   */
-  MEMORY_BACKEND: MemoryBackend;
-  /**
    * Base directory for the markdown memory backend. Each tenant gets a sanitized
-   * subdirectory. Only consulted when `MEMORY_BACKEND` is `markdown`.
+   * subdirectory.
    * Env: `MEMORY_MARKDOWN_DIR`. Default `./data/memory` (relative to the process cwd).
    */
   MEMORY_MARKDOWN_DIR: string;
@@ -2085,14 +2001,14 @@ export interface SharedServerConfiguration {
    * When true, the markdown memory backend summarizes each turn via the LLM before writing
    * it to the daily log, instead of appending the verbatim User:/Assistant: transcript.
    * Summarization failures fall back to the verbatim transcript so a memory is never lost.
-   * Only consulted when `MEMORY_BACKEND` is `markdown`.
+   *
    * Env: `MEMORY_SUMMARIZE`. Default `true`.
    */
   MEMORY_SUMMARIZE: boolean;
   /**
    * Whether each note saved to the daily log is sorted onto the people and matter pages: `off` does nothing,
    * `report` asks the model and only records what it would have done in the vault's `.sorter-report.jsonl`,
-   * `on` writes the pages. Only consulted when `MEMORY_BACKEND` is `markdown`.
+   * `on` writes the pages.
    * Settings can store an override that wins over this default, so a change needs no restart.
    * Env: `MEMORY_PAGE_SORTING`. Default `off`.
    */
@@ -2100,7 +2016,7 @@ export interface SharedServerConfiguration {
   /**
    * Whether the nightly job tidies pages once a day for each vault, in the server's quiet hours: it moves ended
    * lines to Earlier, sorts notes the sorter missed (as `MEMORY_PAGE_SORTING` allows) and lists lines that
-   * disagree. It never edits a line's words. Only consulted when `MEMORY_BACKEND` is `markdown`.
+   * disagree. It never edits a line's words.
    * Settings can store an override that wins over this default, so a change needs no restart.
    * Env: `MEMORY_NIGHTLY_JOB`. Default `false`.
    */
@@ -2536,10 +2452,7 @@ const shared: SharedServerConfiguration = {
     minValue: 0,
   }),
   FIRST_PARTY_MCP_ORIGINS: withMailSidecarOrigin({
-    origins: firstPartyOriginsFor({
-      raw: getEnv('FIRST_PARTY_MCP_ORIGINS'),
-      calendarUrl: calendarSidecarMcpUrl,
-    }),
+    origins: firstPartyOriginsFor({ calendarUrl: calendarSidecarMcpUrl }),
     mailUrl: mailSidecarMcpUrl,
   }),
   MAIL_EMAIL_MCP_URL: mailEmailMcpUrl,
@@ -2837,21 +2750,10 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('MEMORY_RETAIN_TIMEOUT_MS'),
     defaultValue: 10_000,
   }),
-  MEMORY_MAX_RESPONSE_BYTES: parsePositiveInt({
-    envKey: 'MEMORY_MAX_RESPONSE_BYTES',
-    raw: getEnv('MEMORY_MAX_RESPONSE_BYTES'),
-    defaultValue: 524_288,
-  }),
   MEMORY_SWEEP_MAX_PER_TURN: parsePositiveInt({
     envKey: 'MEMORY_SWEEP_MAX_PER_TURN',
     raw: getEnv('MEMORY_SWEEP_MAX_PER_TURN'),
     defaultValue: 5,
-  }),
-  MEMORY_CHECK_TIMEOUT_MS: parsePositiveInt({
-    envKey: 'MEMORY_CHECK_TIMEOUT_MS',
-    raw: getEnv('MEMORY_CHECK_TIMEOUT_MS'),
-    defaultValue: 5000,
-    maxValue: MEMORY_PROVIDER_MAX_TIMEOUT_MS,
   }),
   MEMORY_SCREEN_ENABLED: parseBoolean({
     envKey: 'MEMORY_SCREEN_ENABLED',
@@ -2968,11 +2870,6 @@ const shared: SharedServerConfiguration = {
     envKey: 'MEMORY_REFLECT_BUDGET',
     raw: getEnv('MEMORY_REFLECT_BUDGET'),
     defaultValue: 'low',
-  }),
-  MEMORY_BACKEND: parseMemoryBackend({
-    envKey: 'MEMORY_BACKEND',
-    raw: getEnv('MEMORY_BACKEND'),
-    defaultValue: 'markdown',
   }),
   MEMORY_MARKDOWN_DIR: getEnv('MEMORY_MARKDOWN_DIR', { defaultValue: './data/memory' }) ?? './data/memory',
   MEMORY_SUMMARIZE: parseBoolean({

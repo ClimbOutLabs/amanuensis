@@ -34,19 +34,6 @@ import {
 import { stripAssistantAbilityNotes } from './assistantAbilityNotes';
 import type { EmbeddingSubsystemResolver, RankedMemory } from './embeddingRetrieval';
 import {
-  timeoutFailure,
-  type GetOperationOutcome,
-  type GetProfileOutcome,
-  type ListMentalModelsOutcome,
-  type RecallItem,
-  type RecallOutcome,
-  type ReflectBudget,
-  type ReflectOutcome,
-  type RetainItem,
-  type RetainOutcome,
-  type RetryOperationOutcome,
-} from './hindsightClient';
-import {
   DOCUMENT_ID_METADATA_KEY,
   REPLACE_DOCUMENT_METADATA_KEY,
   appendVaultTombstone,
@@ -91,6 +78,19 @@ import type {
   PageLoadResult,
   SummaryOutcomeNote,
   UpdateMemoryVaultEntryOutcome,
+} from './memoryClient';
+import {
+  timeoutFailure,
+  type GetOperationOutcome,
+  type GetProfileOutcome,
+  type ListMentalModelsOutcome,
+  type RecallItem,
+  type RecallOutcome,
+  type ReflectBudget,
+  type ReflectOutcome,
+  type RetainItem,
+  type RetainOutcome,
+  type RetryOperationOutcome,
 } from './memoryClient';
 import { MISSING_ORIGIN_REASON, everyItemNamesOrigin } from './memoryOrigin';
 import { loadPagesForMessage } from './memoryPageLoader';
@@ -534,8 +534,7 @@ export class MarkdownMemoryClient implements MemoryClient {
     try {
       // Local reads are fast, but a stalled filesystem must not hold a turn open past its budget.
       const seen = await withTimeout(this.readOperationIds(), timeoutMs, `markdown getOperation ${id}`);
-      // A vanished operation reads the same as "nothing to wait for" so a sweep drops it,
-      // mirroring HindsightClient's 404 handling.
+      // A vanished operation reads the same as "nothing to wait for" so a sweep drops it.
       return { ok: true, status: seen.has(id) ? 'completed' : 'unknown' };
     } catch (error) {
       if (error instanceof PromiseTimeoutError) {

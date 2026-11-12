@@ -18,10 +18,8 @@ vi.mock('@truefoundry/assistant-ui-runtime', async importOriginal => ({
   }),
 }));
 
-/** Memory-defaults fixture per the generated SDK type. The page only reads `backend` and
- * `markdownDir` from it; the tuning fields exist to satisfy the type. */
+/** Memory-defaults fixture per the generated SDK type. The page only reads `markdownDir` from it; the tuning fields exist to satisfy the type. */
 const MARKDOWN_DEFAULTS = {
-  backend: 'markdown',
   recallTimeoutMs: 2500,
   recallQueryWindow: 5,
   recallMaxItems: 50,
@@ -71,16 +69,15 @@ function renderMemory(serverOverrides: Partial<AgentUIServer> = {}) {
   );
 }
 
-describe('MemorySettings (backend honesty)', () => {
+describe('MemorySettings (status honesty)', () => {
   it('says it is checking while capabilities are unsettled — never claiming on', async () => {
-    // A capabilities promise that never resolves: the page must not name a backend.
+    // A capabilities promise that never resolves: the page must not claim memory is on.
     const getCapabilities = vi.fn((): Promise<AgentBuilderCapabilitiesResponse> => new Promise(() => {}));
     renderMemory({ getCapabilities });
 
     expect(await screen.findByText('Checking memory status…')).toBeInTheDocument();
     expect(screen.queryByText('Memory is on')).not.toBeInTheDocument();
     expect(screen.queryByText('Markdown (local files)')).not.toBeInTheDocument();
-    expect(screen.queryByText('Hindsight (experimental)')).not.toBeInTheDocument();
     expect(screen.queryByText('Memory status unavailable')).not.toBeInTheDocument();
   });
 
@@ -99,7 +96,6 @@ describe('MemorySettings (backend honesty)', () => {
     renderMemory(capabilitiesWith({ memoryDefaults: MARKDOWN_DEFAULTS }));
     await screen.findByText('Markdown (local files)');
 
-    expect(screen.queryByText('Hindsight')).not.toBeInTheDocument();
     expect(screen.queryByText('Test connection')).not.toBeInTheDocument();
     expect(screen.queryByText('No memory bank configured')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /connect/i })).not.toBeInTheDocument();
@@ -122,13 +118,13 @@ describe('MemorySettings (backend honesty)', () => {
   });
 
   it('reads the raw snake_case wire shape for the storage location', async () => {
-    renderMemory(capabilitiesWith({ memory_defaults: { backend: 'markdown', markdown_dir: '/var/lib/aman/memory' } }));
+    renderMemory(capabilitiesWith({ memory_defaults: { markdown_dir: '/var/lib/aman/memory' } }));
 
     expect(await screen.findByText('/var/lib/aman/memory')).toBeInTheDocument();
     expect(screen.getByText(/Memories live in/)).toBeInTheDocument();
   });
 
-  it('says the status is unavailable when the settled capability names no known backend', async () => {
+  it('says the status is unavailable when the settled capability carries no memory status', async () => {
     renderMemory(capabilitiesWith({}));
 
     // Missing `memory_defaults`: the UI must not guess Markdown.
@@ -136,31 +132,7 @@ describe('MemorySettings (backend honesty)', () => {
     expect(screen.getByText(/on or off cannot be confirmed here/)).toBeInTheDocument();
     expect(screen.queryByText('Memory is on')).not.toBeInTheDocument();
     expect(screen.queryByText('Markdown (local files)')).not.toBeInTheDocument();
-    expect(screen.queryByText('Hindsight (experimental)')).not.toBeInTheDocument();
     expect(screen.queryByText('How memory works')).not.toBeInTheDocument();
-  });
-
-  it('says the status is unavailable when the server names an unknown backend', async () => {
-    // Raw wire shape: the typed fixture cannot spell an unknown backend, but the wire can.
-    renderMemory(capabilitiesWith({ memory_defaults: { backend: 'flux-capacitor' } }));
-
-    expect(await screen.findByText('Memory status unavailable')).toBeInTheDocument();
-    expect(screen.queryByText('Memory is on')).not.toBeInTheDocument();
-    expect(screen.queryByText('Markdown (local files)')).not.toBeInTheDocument();
-  });
-
-  it('names Hindsight truthfully — experimental, Markdown off — on the hindsight backend', async () => {
-    renderMemory(capabilitiesWith({ memoryDefaults: { ...MARKDOWN_DEFAULTS, backend: 'hindsight' } }));
-
-    // Hindsight is a working server-side backend, so memory reads as on — but the card
-    // names it truthfully and makes no Markdown claims.
-    expect(await screen.findByText('Memory is on')).toBeInTheDocument();
-    expect(screen.getByText('Hindsight (experimental)')).toBeInTheDocument();
-    expect(screen.getByText(/Markdown file memory.*does not apply here/)).toBeInTheDocument();
-    expect(screen.getByText(/uses the experimental Hindsight memory instead of note files/)).toBeInTheDocument();
-    expect(screen.queryByText('Markdown (local files)')).not.toBeInTheDocument();
-    expect(screen.queryByText('How memory works')).not.toBeInTheDocument();
-    expect(screen.queryByText(/Memories live in/)).not.toBeInTheDocument();
   });
 
   describe('recall screening status', () => {
@@ -324,8 +296,6 @@ describe('MemorySettings (backend honesty)', () => {
           getMemorySummarize: async () => stored,
           setMemorySummarizeEnabled: async (enabled: boolean | null) => {
             writes.push(enabled);
-            // The mock server applies the same markdown-only gate as the real one:
-            // on this (markdown) backend the effective state equals the stored value.
             const nextEnabled = enabled === null ? stored.defaultEnabled : enabled;
             return {
               enabled: nextEnabled,
@@ -688,7 +658,7 @@ describe('MemorySettings (use memories in replies)', () => {
     expect(screen.getByRole('switch', { name: 'Use memories in replies' })).toBeChecked();
   });
 
-  it('hides the recall switch while the memory backend is not confirmed', async () => {
+  it('hides the recall switch while the memory status is not confirmed', async () => {
     renderMemory(capabilitiesWith({}));
 
     expect(await screen.findByText('Memory status unavailable')).toBeInTheDocument();

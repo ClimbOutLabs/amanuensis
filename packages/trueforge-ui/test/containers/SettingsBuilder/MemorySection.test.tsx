@@ -42,9 +42,8 @@ vi.mock('@/containers/SettingsBuilder/MemorySettings.js', () => ({
   default: () => <div>Memory settings content</div>,
 }));
 
-/** Memory-defaults fixture per the generated SDK type; only `backend` is read here. */
+/** Memory-defaults fixture per the generated SDK type. */
 const MEMORY_DEFAULTS = {
-  backend: 'markdown',
   recallTimeoutMs: 2500,
   recallQueryWindow: 5,
   recallMaxItems: 50,
@@ -201,16 +200,6 @@ describe('Settings Memory section', () => {
 
     expect(screen.getByRole('tab', { name: 'Memories' })).toHaveAttribute('aria-selected', 'true');
     expect(await screen.findByText('The user drinks tea in the morning.')).toBeInTheDocument();
-  });
-
-  it('opens on Settings when memory is not set up yet', async () => {
-    render(<TestShell server={createServer({ memorySetUp: false })} />);
-    await openMemorySection();
-
-    await waitFor(() => {
-      expect(screen.getByRole('tab', { name: 'Settings' })).toHaveAttribute('aria-selected', 'true');
-    });
-    expect(await screen.findByText('Memory settings content')).toBeInTheDocument();
   });
 
   it('shows the Sharing sub-tab content when picked', async () => {

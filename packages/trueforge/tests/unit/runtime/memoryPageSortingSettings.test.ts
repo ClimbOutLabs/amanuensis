@@ -13,16 +13,13 @@ const logger = createLogger({ silent: true });
 
 describe('readMemoryPageSortingSetting', () => {
   const originalDefault = configuration.MEMORY_PAGE_SORTING;
-  const originalBackend = configuration.MEMORY_BACKEND;
 
   beforeEach(() => {
-    configuration.MEMORY_BACKEND = 'markdown';
     configuration.MEMORY_PAGE_SORTING = 'off';
   });
 
   afterEach(() => {
     configuration.MEMORY_PAGE_SORTING = originalDefault;
-    configuration.MEMORY_BACKEND = originalBackend;
   });
 
   it('is off when nothing is stored and the default is off', async () => {
@@ -48,17 +45,6 @@ describe('readMemoryPageSortingSetting', () => {
     expect((await readMemoryPageSortingSetting({ globalSettingsStore: store, logger })).effectiveMode).toBe('on');
     await store.setSetting({ key: MEMORY_PAGE_SORTING_SETTING_KEY, value: 'off' });
     expect((await readMemoryPageSortingSetting({ globalSettingsStore: store, logger })).effectiveMode).toBe('off');
-  });
-
-  it('is effectively off without Markdown memory', async () => {
-    configuration.MEMORY_BACKEND = 'hindsight';
-    const store = inMemoryGlobalSettingsStore({ [MEMORY_PAGE_SORTING_SETTING_KEY]: 'on' });
-    expect(await readMemoryPageSortingSetting({ globalSettingsStore: store, logger })).toEqual({
-      mode: 'on',
-      overridden: true,
-      defaultMode: 'off',
-      effectiveMode: 'off',
-    });
   });
 
   it('ignores a malformed stored value', async () => {

@@ -16,7 +16,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat';
 import winston from 'winston';
-import { hindsightMemoryCapability, type MemoryConfig } from '../../../../src/runtime/memory/memoryCapability';
+import { memoryCapability, type MemoryConfig } from '../../../../src/runtime/memory/memoryCapability';
 import type { MemoryClient } from '../../../../src/runtime/memory/memoryClient';
 
 const NOTE_TOOL = 'write_note';
@@ -158,7 +158,7 @@ async function runReply(
     return stepCount === 1 ? toolCallStream() : finalTextStream();
   });
   const modelClient: ILLM = { create, createNonStream: jest.fn() };
-  const memory = hindsightMemoryCapability({
+  const memory = memoryCapability({
     client: makeMemoryClient(recalledText),
     config: CONFIG,
     logger: makeLogger(),

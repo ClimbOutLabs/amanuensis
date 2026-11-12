@@ -5,10 +5,9 @@
 import { execFileRunner, extractErrorLogFields, withTimeout } from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
 
-import type { WrittenEntry } from './hindsightClient';
 import { localDay } from './localDay';
 import { entryMetadata, entryRecallText } from './markdownMemoryFiles';
-import type { MemoryClient } from './memoryClient';
+import type { MemoryClient, WrittenEntry } from './memoryClient';
 import type { PageListing } from './memoryPages';
 import type { SummarizeTurnContext } from './memoryRetain';
 import { askSummaryModel, extractReplyJson, summaryLlmResolver } from './memorySummarize';

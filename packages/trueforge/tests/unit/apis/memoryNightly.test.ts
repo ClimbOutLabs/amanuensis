@@ -68,16 +68,13 @@ function putInit(enabled: boolean | null): RequestInit {
 
 describe('memoryNightly router', () => {
   const originalDefault = configuration.MEMORY_NIGHTLY_JOB;
-  const originalBackend = configuration.MEMORY_BACKEND;
 
   beforeEach(() => {
     configuration.MEMORY_NIGHTLY_JOB = false;
-    configuration.MEMORY_BACKEND = 'markdown';
   });
 
   afterEach(() => {
     configuration.MEMORY_NIGHTLY_JOB = originalDefault;
-    configuration.MEMORY_BACKEND = originalBackend;
   });
 
   it('GET reports the env default when no override is stored', async () => {
@@ -132,18 +129,6 @@ describe('memoryNightly router', () => {
       body: JSON.stringify({ enabled: 'yes' }),
     });
     expect(response.status).toBe(400);
-  });
-
-  it('reports effective false on a non-markdown backend even when the stored setting is on', async () => {
-    configuration.MEMORY_BACKEND = 'hindsight';
-    const { router } = await createRouter();
-    await router.request('/', putInit(true));
-
-    const response = await router.request('/');
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
-      data: { enabled: true, overridden: true, default_enabled: false, effective_enabled: false },
-    });
   });
 
   it('PUT reports the written state instead of fabricating it when the read-back fails', async () => {

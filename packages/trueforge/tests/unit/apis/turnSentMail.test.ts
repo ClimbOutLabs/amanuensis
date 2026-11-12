@@ -27,11 +27,12 @@ import { approvedToolCalls } from '../../../src/apis/approvedToolCalls';
 import { drainTurnEvents } from '../../../src/apis/turns';
 import type { SessionCustom, TurnCustom } from '../../../src/db/sessionCustom';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription';
-import { HindsightClient, type RetainItem } from '../../../src/runtime/memory/hindsightClient';
+import { type RetainItem } from '../../../src/runtime/memory/memoryClient';
 import { NOTE_SOURCE_METADATA_KEY } from '../../../src/runtime/memory/memoryNotes';
 import { MEMORY_ORIGIN_METADATA_KEY } from '../../../src/runtime/memory/memoryOrigin';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import { TurnExecutionDeadline } from '../../../src/runtime/turnExecutionDeadline';
+import { QuietMemoryClient } from '../../fixtures/memory/quietMemoryClient';
 
 const NOW = '2026-10-31T12:00:00.000Z';
 const SEND_ARGS = JSON.stringify({
@@ -52,12 +53,7 @@ function resultContent(text: string): string {
 }
 
 function memoryClient() {
-  const client = new HindsightClient({
-    apiBase: 'https://hindsight.test.example',
-    bank: 'aman',
-    headers: {},
-    fetchImpl: () => Promise.reject(new Error('drain tests must not reach the network')),
-  });
+  const client = new QuietMemoryClient();
   const retain = jest.spyOn(client, 'retain').mockResolvedValue({ ok: true });
   jest.spyOn(client, 'getOperation').mockResolvedValue({ ok: true, status: 'completed' });
   return { client, retain };
@@ -76,7 +72,7 @@ async function drain({
   approvedCalls,
   privateChat = false,
 }: {
-  client: HindsightClient | undefined;
+  client: QuietMemoryClient | undefined;
   stream: AsyncIterable<TurnStreamingEvent>;
   approvedCalls?: Awaited<ReturnType<typeof approvedToolCalls>>;
   privateChat?: boolean;

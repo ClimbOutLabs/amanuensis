@@ -1,10 +1,9 @@
 import winston from 'winston';
 import {
-  HindsightClient,
   type GetOperationOutcome,
   type RetainOutcome,
   type RetryOperationOutcome,
-} from '../../../../src/runtime/memory/hindsightClient';
+} from '../../../../src/runtime/memory/memoryClient';
 import {
   buildRetainItem,
   retainOperationId,
@@ -12,6 +11,7 @@ import {
   submitRetainWithVerification,
   type SubmitRetainParams,
 } from '../../../../src/runtime/memory/memoryRetain';
+import { QuietMemoryClient } from '../../../fixtures/memory/quietMemoryClient';
 
 describe('buildRetainItem', () => {
   it("builds the item for the person's words alone, never the reply", () => {
@@ -91,20 +91,15 @@ describe('submitRetain', () => {
     return winston.createLogger({ silent: true });
   }
 
-  type RetainSpy = jest.SpyInstance<Promise<RetainOutcome>, Parameters<HindsightClient['retain']>>;
+  type RetainSpy = jest.SpyInstance<Promise<RetainOutcome>, Parameters<QuietMemoryClient['retain']>>;
 
   /**
    * A real client with `retain` scripted on the instance, mirroring profileLearning.test.ts: the
    * constructor and method signature are the client's own, so a change to either fails these tests
    * at compile time. Its fetch rejects so an unscripted call can never reach the network.
    */
-  function retainingClient(): { client: HindsightClient; retain: RetainSpy } {
-    const client = new HindsightClient({
-      apiBase: 'https://hindsight.test.example',
-      bank: 'aman',
-      headers: {},
-      fetchImpl: () => Promise.reject(new Error('retain tests must not reach the network')),
-    });
+  function retainingClient(): { client: QuietMemoryClient; retain: RetainSpy } {
+    const client = new QuietMemoryClient();
     const retain = jest.spyOn(client, 'retain');
     return { client, retain };
   }
@@ -276,10 +271,10 @@ describe('submitRetainWithVerification', () => {
     return winston.createLogger({ silent: true });
   }
 
-  type GetOperationSpy = jest.SpyInstance<Promise<GetOperationOutcome>, Parameters<HindsightClient['getOperation']>>;
+  type GetOperationSpy = jest.SpyInstance<Promise<GetOperationOutcome>, Parameters<QuietMemoryClient['getOperation']>>;
   type RetryOperationSpy = jest.SpyInstance<
     Promise<RetryOperationOutcome>,
-    Parameters<HindsightClient['retryOperation']>
+    Parameters<QuietMemoryClient['retryOperation']>
   >;
 
   /**
@@ -288,17 +283,12 @@ describe('submitRetainWithVerification', () => {
    * reach the network.
    */
   function verifyingClient(): {
-    client: HindsightClient;
-    retain: jest.SpyInstance<Promise<RetainOutcome>, Parameters<HindsightClient['retain']>>;
+    client: QuietMemoryClient;
+    retain: jest.SpyInstance<Promise<RetainOutcome>, Parameters<QuietMemoryClient['retain']>>;
     getOperation: GetOperationSpy;
     retryOperation: RetryOperationSpy;
   } {
-    const client = new HindsightClient({
-      apiBase: 'https://hindsight.test.example',
-      bank: 'aman',
-      headers: {},
-      fetchImpl: () => Promise.reject(new Error('retain tests must not reach the network')),
-    });
+    const client = new QuietMemoryClient();
     return {
       client,
       retain: jest.spyOn(client, 'retain'),
@@ -307,7 +297,7 @@ describe('submitRetainWithVerification', () => {
     };
   }
 
-  function submitParams(client: HindsightClient): SubmitRetainParams {
+  function submitParams(client: QuietMemoryClient): SubmitRetainParams {
     return {
       origin: 'user_stated',
       session: { is_incognito: false },

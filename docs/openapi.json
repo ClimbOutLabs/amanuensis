@@ -6837,14 +6837,6 @@
       },
       "MemoryDefaultsCapability": {
         "properties": {
-          "backend": {
-            "description": "`MEMORY_BACKEND` as resolved.",
-            "enum": [
-              "markdown",
-              "hindsight"
-            ],
-            "type": "string"
-          },
           "curated_enabled": {
             "description": "`MEMORY_CURATED_ENABLED` as resolved.",
             "type": "boolean"
@@ -6908,7 +6900,6 @@
           }
         },
         "required": [
-          "backend",
           "recall_timeout_ms",
           "recall_query_window",
           "recall_min_score",
@@ -7402,170 +7393,6 @@
         "required": [
           "pages"
         ],
-        "type": "object"
-      },
-      "MemoryProviderCheckResponse": {
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/MemoryProviderCheckResult"
-          }
-        },
-        "required": [
-          "data"
-        ],
-        "type": "object"
-      },
-      "MemoryProviderCheckResult": {
-        "description": "Outcome of one live recall against the memory provider REST API.",
-        "oneOf": [
-          {
-            "additionalProperties": false,
-            "properties": {
-              "status": {
-                "description": "The provider answered a real recall request over its REST API.",
-                "enum": [
-                  "ok"
-                ],
-                "type": "string"
-              }
-            },
-            "required": [
-              "status"
-            ],
-            "type": "object"
-          },
-          {
-            "additionalProperties": false,
-            "properties": {
-              "code": {
-                "$ref": "#/components/schemas/MemoryProviderFailureCode"
-              },
-              "detail": {
-                "description": "The provider's own error message, when it sent one.",
-                "type": "string"
-              },
-              "http_status": {
-                "description": "Status the provider answered with, when it answered at all.",
-                "type": "integer"
-              },
-              "reason": {
-                "description": "Human-readable failure line, including the upstream detail when there is one.",
-                "type": "string"
-              },
-              "status": {
-                "description": "The provider did not answer a real recall request.",
-                "enum": [
-                  "failed"
-                ],
-                "type": "string"
-              }
-            },
-            "required": [
-              "status",
-              "code",
-              "reason"
-            ],
-            "type": "object"
-          }
-        ]
-      },
-      "MemoryProviderFailureCode": {
-        "description": "Why the memory provider could not be reached: `invalid_url` (not an `{apiBase}/mcp/{bank}` URL), `auth_required` (the connector still needs authorization), `header_resolution_failed` (a `${env:}` / `${file:}` header reference did not resolve), `timeout`, `request_failed` (the host could not reach it), `http_error` (it answered with a non-2xx status), or `invalid_response` (its answer was unreadable).",
-        "enum": [
-          "invalid_url",
-          "auth_required",
-          "header_resolution_failed",
-          "timeout",
-          "request_failed",
-          "http_error",
-          "invalid_response"
-        ],
-        "type": "string"
-      },
-      "MemoryProviderSettings": {
-        "additionalProperties": false,
-        "description": "Per-bank memory tuning; each field present overrides the matching server-wide MEMORY_* setting for this provider.",
-        "properties": {
-          "curated_enabled": {
-            "description": "Inject the bank profile and matching mental models on every turn. Default MEMORY_CURATED_ENABLED.",
-            "type": "boolean"
-          },
-          "curated_max_models": {
-            "description": "Most mental models injected on one turn. Default MEMORY_CURATED_MAX_MODELS.",
-            "maximum": 20,
-            "minimum": 1,
-            "type": "integer"
-          },
-          "curated_max_tokens": {
-            "description": "Token budget for the injected mental-model lines. Default MEMORY_CURATED_MAX_TOKENS.",
-            "maximum": 8192,
-            "minimum": 64,
-            "type": "integer"
-          },
-          "prerecall_gate_enabled": {
-            "description": "Skip the memory provider reads on high-confidence trivial turns (short greetings, bare acknowledgements). Default MEMORY_PRERECALL_GATE_ENABLED.",
-            "type": "boolean"
-          },
-          "recall_max_entities": {
-            "description": "Most entity summaries kept, by provider rank, when the response carries no per-entity score. Default MEMORY_RECALL_MAX_ENTITIES.",
-            "maximum": 200,
-            "minimum": 0,
-            "type": "integer"
-          },
-          "recall_max_items": {
-            "description": "Most recalled items kept, by provider rank, when the response carries no per-item score. Default MEMORY_RECALL_MAX_ITEMS.",
-            "maximum": 200,
-            "minimum": 1,
-            "type": "integer"
-          },
-          "recall_min_score": {
-            "description": "Relevance floor for a recalled item or entity summary that carries a provider score; anything scored lower is dropped. Ignored for a response with no scores. Default MEMORY_RECALL_MIN_SCORE.",
-            "maximum": 1,
-            "minimum": 0,
-            "type": "number"
-          },
-          "recall_query_window": {
-            "description": "How many recent user messages form the recall query. Default MEMORY_RECALL_QUERY_WINDOW.",
-            "maximum": 20,
-            "minimum": 1,
-            "type": "integer"
-          },
-          "recall_timeout_ms": {
-            "description": "How long a turn waits for recalled memory before continuing without it. Default MEMORY_RECALL_TIMEOUT_MS.",
-            "maximum": 120000,
-            "minimum": 500,
-            "type": "integer"
-          },
-          "reflect_budget": {
-            "description": "Reflect effort. Default MEMORY_REFLECT_BUDGET.",
-            "enum": [
-              "low",
-              "mid",
-              "high"
-            ],
-            "type": "string"
-          },
-          "reflect_enabled": {
-            "description": "Ask the bank to reflect on synthesis-shaped asks. Default MEMORY_REFLECT_ENABLED.",
-            "type": "boolean"
-          },
-          "reflect_max_tokens": {
-            "description": "Max tokens the bank may spend on a reflect answer. Default MEMORY_REFLECT_MAX_TOKENS.",
-            "maximum": 8192,
-            "minimum": 64,
-            "type": "integer"
-          },
-          "reflect_timeout_ms": {
-            "description": "How long a turn waits for a reflection before continuing without it. Default MEMORY_REFLECT_TIMEOUT_MS.",
-            "maximum": 120000,
-            "minimum": 500,
-            "type": "integer"
-          },
-          "screen_enabled": {
-            "description": "Screen recalled items and entity summaries with the Prompt Guard classifier before they reach the model. Has no effect when no classifier service is configured (`MEMORY_SCREEN_URL`). Default MEMORY_SCREEN_ENABLED.",
-            "type": "boolean"
-          }
-        },
         "type": "object"
       },
       "MemoryRecall": {
@@ -9952,13 +9779,6 @@
             "description": "Concise summary of what this MCP server provides.",
             "minLength": 1,
             "type": "string"
-          },
-          "memory_provider": {
-            "description": "When true, this connector is the long-term memory provider: the host recalls from it before every model call and retains every completed turn. Its URL must be a single-bank Hindsight MCP URL.",
-            "type": "boolean"
-          },
-          "memory_settings": {
-            "$ref": "#/components/schemas/MemoryProviderSettings"
           },
           "name": {
             "$ref": "#/components/schemas/ResourceName"
@@ -17700,7 +17520,7 @@
                 }
               }
             },
-            "description": "MCP servers attachable to a chat (chat projection). Excludes the memory provider."
+            "description": "MCP servers attachable to a chat (chat projection)."
           },
           "401": {
             "content": {
@@ -18075,54 +17895,6 @@
         "x-fern-sdk-method-name": "home_assistant_check"
       }
     },
-    "/api/v1/mcp-servers/{name}/memory-check": {
-      "post": {
-        "description": "Runs one live recall against the Hindsight REST API behind this connector, the surface host-enforced memory actually calls. That is not the MCP endpoint `auth_status` reflects, and it may validate a different credential. Read-only: the connector is never modified, and a failed check is a 200 carrying the reason. The same check runs on every create or replace that sets `manifest.memory_provider: true`.",
-        "parameters": [
-          {
-            "description": "MCP server name.",
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "description": "MCP server name.",
-              "minLength": 1,
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MemoryProviderCheckResponse"
-                }
-              }
-            },
-            "description": "The check ran; the result says whether the provider answered and why not."
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestErrorResponse"
-                }
-              }
-            },
-            "description": "MCP server not found."
-          }
-        },
-        "summary": "Check an MCP server as a memory provider",
-        "tags": [
-          "MCP Servers"
-        ],
-        "x-fern-sdk-group-name": [
-          "mcpServers"
-        ],
-        "x-fern-sdk-method-name": "memory_check"
-      }
-    },
     "/api/v1/mcp-servers/{name}/tool-grants": {
       "get": {
         "description": "Tools on this MCP server the caller chose Always allow for. Their calls run without an approval prompt unless a safety rule asks again.",
@@ -18404,16 +18176,6 @@
               }
             },
             "description": "The page operation failed."
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestErrorResponse"
-                }
-              }
-            },
-            "description": "The server does not keep memory pages."
           }
         },
         "summary": "List memory pages",
@@ -18503,16 +18265,6 @@
               }
             },
             "description": "The page operation failed."
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestErrorResponse"
-                }
-              }
-            },
-            "description": "The server does not keep memory pages."
           }
         },
         "summary": "List recent page changes",
@@ -18611,16 +18363,6 @@
               }
             },
             "description": "The page operation failed."
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestErrorResponse"
-                }
-              }
-            },
-            "description": "The server does not keep memory pages."
           }
         },
         "summary": "Undo a page change",
@@ -18732,16 +18474,6 @@
               }
             },
             "description": "The page operation failed."
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestErrorResponse"
-                }
-              }
-            },
-            "description": "The server does not keep memory pages."
           }
         },
         "summary": "Delete a memory page",
@@ -18851,16 +18583,6 @@
               }
             },
             "description": "The page operation failed."
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestErrorResponse"
-                }
-              }
-            },
-            "description": "The server does not keep memory pages."
           }
         },
         "summary": "Get a memory page",
@@ -18980,16 +18702,6 @@
               }
             },
             "description": "The page operation failed."
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestErrorResponse"
-                }
-              }
-            },
-            "description": "The server does not keep memory pages."
           }
         },
         "summary": "Save a page edit",
@@ -19111,16 +18823,6 @@
               }
             },
             "description": "The page operation failed."
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestErrorResponse"
-                }
-              }
-            },
-            "description": "The server does not keep memory pages."
           }
         },
         "summary": "Dismiss a pair of lines that disagree",
@@ -19252,16 +18954,6 @@
               }
             },
             "description": "The page operation failed."
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestErrorResponse"
-                }
-              }
-            },
-            "description": "The server does not keep memory pages."
           }
         },
         "summary": "Confirm an unconfirmed line",
@@ -19383,16 +19075,6 @@
               }
             },
             "description": "The page operation failed."
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestErrorResponse"
-                }
-              }
-            },
-            "description": "The server does not keep memory pages."
           }
         },
         "summary": "Dismiss an unconfirmed line",
@@ -19462,16 +19144,6 @@
               }
             },
             "description": "The vault operation failed."
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestErrorResponse"
-                }
-              }
-            },
-            "description": "The server does not run the markdown memory backend."
           }
         },
         "summary": "List memory vault entries",
@@ -19541,16 +19213,6 @@
               }
             },
             "description": "The vault operation failed."
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestErrorResponse"
-                }
-              }
-            },
-            "description": "The server does not run the markdown memory backend."
           }
         },
         "summary": "Export a memory vault",
@@ -19617,16 +19279,6 @@
               }
             },
             "description": "The vault operation failed."
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestErrorResponse"
-                }
-              }
-            },
-            "description": "The server does not run the markdown memory backend."
           }
         },
         "summary": "Import into a memory vault",
@@ -19707,16 +19359,6 @@
               }
             },
             "description": "The vault operation failed."
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestErrorResponse"
-                }
-              }
-            },
-            "description": "The server does not run the markdown memory backend."
           }
         },
         "summary": "List older notes to review",
@@ -19781,16 +19423,6 @@
               }
             },
             "description": "The vault operation failed."
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestErrorResponse"
-                }
-              }
-            },
-            "description": "The server does not run the markdown memory backend."
           }
         },
         "summary": "Mark older notes as from you",
@@ -19837,16 +19469,6 @@
               }
             },
             "description": "The vault operation failed."
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestErrorResponse"
-                }
-              }
-            },
-            "description": "The server does not run the markdown memory backend."
           }
         },
         "summary": "Get memory vault sharing",
@@ -19911,16 +19533,6 @@
               }
             },
             "description": "The vault operation failed."
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestErrorResponse"
-                }
-              }
-            },
-            "description": "The server does not run the markdown memory backend."
           }
         },
         "summary": "Replace memory vault sharing",
@@ -19990,16 +19602,6 @@
               }
             },
             "description": "The vault operation failed."
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestErrorResponse"
-                }
-              }
-            },
-            "description": "The server does not run the markdown memory backend."
           }
         },
         "summary": "Get memory vault summary status",
@@ -20080,16 +19682,6 @@
               }
             },
             "description": "The vault operation failed."
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestErrorResponse"
-                }
-              }
-            },
-            "description": "The server does not run the markdown memory backend."
           }
         },
         "summary": "Delete a memory vault entry",
@@ -20178,16 +19770,6 @@
               }
             },
             "description": "The vault operation failed."
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RequestErrorResponse"
-                }
-              }
-            },
-            "description": "The server does not run the markdown memory backend."
           }
         },
         "summary": "Update a memory vault entry",
@@ -25541,7 +25123,7 @@
                 }
               }
             },
-            "description": "An MCP server with this name already exists, or `manifest.memory_provider` or `manifest.search_provider` is set to true while another server already holds it."
+            "description": "An MCP server with this name already exists, or `manifest.search_provider` is set to true while another server already holds it."
           },
           "422": {
             "content": {
@@ -25551,7 +25133,7 @@
                 }
               }
             },
-            "description": "The server cannot satisfy `auth.type: dcr` (e.g. it advertises no registration_endpoint), or `manifest.memory_provider: true` is set and the memory-provider connection check failed. The message carries the upstream reason."
+            "description": "The server cannot satisfy `auth.type: dcr` (e.g. it advertises no registration_endpoint). The message carries the upstream reason."
           },
           "424": {
             "content": {
@@ -25615,7 +25197,7 @@
                 }
               }
             },
-            "description": "`manifest.memory_provider` or `manifest.search_provider` is set to true while another server already holds it, or the connector changed while its memory-provider connection check was running, so the save must be retried."
+            "description": "`manifest.search_provider` is set to true while another server already holds it."
           },
           "422": {
             "content": {
@@ -25625,7 +25207,7 @@
                 }
               }
             },
-            "description": "The server cannot satisfy `auth.type: dcr` (e.g. it advertises no registration_endpoint), or `manifest.memory_provider: true` is set and the memory-provider connection check failed. The message carries the upstream reason."
+            "description": "The server cannot satisfy `auth.type: dcr` (e.g. it advertises no registration_endpoint). The message carries the upstream reason."
           },
           "424": {
             "content": {

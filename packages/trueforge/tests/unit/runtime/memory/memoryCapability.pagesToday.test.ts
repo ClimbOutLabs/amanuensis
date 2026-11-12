@@ -1,4 +1,4 @@
-import { hindsightMemoryCapability } from '../../../../src/runtime/memory/memoryCapability';
+import { memoryCapability } from '../../../../src/runtime/memory/memoryCapability';
 import type { MemoryClient } from '../../../../src/runtime/memory/memoryClient';
 import { collect, DEFAULT_CONFIG, makeClient, makeExecution, makeLogger } from './memoryCapabilityTestKit';
 
@@ -15,7 +15,7 @@ async function dayHandedOver({ instant, timeZone }: { instant: string; timeZone:
       skippedFiles: [],
     });
     const client: MemoryClient = Object.assign(makeClient({}), { loadPages });
-    const capability = hindsightMemoryCapability({
+    const capability = memoryCapability({
       client,
       config: DEFAULT_CONFIG,
       logger: makeLogger(),

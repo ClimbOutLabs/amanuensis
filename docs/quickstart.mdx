@@ -97,14 +97,13 @@ The app does not ship with a model configured — a fresh checkout has no defaul
 
 ## Confirm it works
 
-Start a **New Chat**, pick your model from the selector in the message box, and send a message. A reply streaming back confirms the app, the database, and the model connection are all working. The right-hand rail shows which model and memory bank (if any) are active for the session.
+Start a **New Chat**, pick your model from the selector in the message box, and send a message. A reply streaming back confirms the app, the database, and the model connection are all working. The right-hand rail shows which model is active for the session.
 
 ## Optional add-ons
 
 None of these are required to chat with a model. Each is one sentence plus where to read more:
 
 - **Sandbox** — lets an agent run code and use skills that need a filesystem, via [Daytona](https://www.daytona.io). Standalone mode also supports a built-in local adapter on supported macOS and Linux hosts; hosted mode needs a configured provider. See [Sandbox](/sandbox).
-- **Memory (Hindsight)** — a self-hosted, long-term memory bank the app recalls from and writes to automatically. See the [Memory runbook](/../ops/memory/RUNBOOK.md) and the README's [Memory](https://github.com/ClimbOutLabs/amanuensis#memory) section.
 - **Prompt Guard** — an optional classifier sidecar that screens recalled memories and tool output for prompt injection before they reach the model. See [Deployment Security → Prompt Guard screens](/deployment-security#prompt-guard-screens).
 - **OIDC login** — always on in standalone; in hosted mode it is required before the app is reachable by anyone but you, since without it every request is one shared admin identity. See [Setup Login](/authentication/overview).
 

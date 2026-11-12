@@ -14,13 +14,13 @@ import { SqliteSandboxProviderStore } from '../../../src/db/sqlite/sandbox-provi
 import { SqliteTurnArtifactStore } from '../../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import type { PersonalizationProfileContent } from '../../../src/personalization/profile';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription';
-import { HindsightClient } from '../../../src/runtime/memory/hindsightClient';
 import { TurnModelUsageLedger } from '../../../src/runtime/modelUsage';
 import type { ProfileLearningDrainMember } from '../../../src/runtime/profileLearning';
 import { resolveSandboxProvider } from '../../../src/runtime/sessionResources';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import { TurnExecutionDeadline } from '../../../src/runtime/turnExecutionDeadline';
 import { discardedModelUsage } from '../../fixtures/discardedModelUsage';
+import { QuietMemoryClient } from '../../fixtures/memory/quietMemoryClient';
 import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
 function tick(): Promise<void> {
@@ -102,12 +102,7 @@ describe('drainTurnEvents awaits the TURN_DONE submissions', () => {
     await migrateSqliteToLatest(db);
     try {
       // Memory retain: the submission blocks on its gate; the verification check reads completed.
-      const memoryClient = new HindsightClient({
-        apiBase: 'https://hindsight.test.example',
-        bank: 'aman',
-        headers: {},
-        fetchImpl: () => Promise.reject(new Error('drain tests must not reach the network')),
-      });
+      const memoryClient = new QuietMemoryClient();
       const retain = jest.spyOn(memoryClient, 'retain').mockImplementation(async () => {
         await retainGate.promise;
         return { ok: true };
@@ -240,12 +235,7 @@ describe('drainTurnEvents awaits the TURN_DONE submissions', () => {
       identity,
       usage: { input_tokens: 1000, output_tokens: 100, total_tokens: 1100 },
     });
-    const memoryClient = new HindsightClient({
-      apiBase: 'https://hindsight.test.example',
-      bank: 'aman',
-      headers: {},
-      fetchImpl: () => Promise.reject(new Error('drain tests must not reach the network')),
-    });
+    const memoryClient = new QuietMemoryClient();
     const appendsWhenRetainStarted: number[] = [];
     jest.spyOn(memoryClient, 'retain').mockImplementation(() => {
       appendsWhenRetainStarted.push(eventStore.appends.length);

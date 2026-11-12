@@ -3,8 +3,6 @@
 import type * as TrueForge from "../index.js";
 
 export interface MemoryDefaultsCapability {
-    /** `MEMORY_BACKEND` as resolved. */
-    backend: TrueForge.MemoryDefaultsCapabilityBackend;
     /** `MEMORY_CURATED_ENABLED` as resolved. */
     curatedEnabled: boolean;
     /** `MEMORY_CURATED_MAX_MODELS` as resolved. */

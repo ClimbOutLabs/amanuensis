@@ -24,11 +24,6 @@ export interface ReadMemoryPageSortingSettingDeps {
   logger: Logger;
 }
 
-/** The Markdown-only gate, owned here so Settings and the sorter cannot disagree. */
-export function effectivePageSortMode(mode: PageSortMode): PageSortMode {
-  return configuration.MEMORY_BACKEND === 'markdown' ? mode : 'off';
-}
-
 /**
  * The page-sorting setting, read each time the sorter is about to work so a change in Settings applies
  * without a restart. A failed read falls back to the env default rather than switching the model on.
@@ -41,7 +36,7 @@ export async function readMemoryPageSortingSetting(
     mode: defaultMode,
     overridden: false,
     defaultMode,
-    effectiveMode: effectivePageSortMode(defaultMode),
+    effectiveMode: defaultMode,
   };
   let record;
   try {
@@ -65,6 +60,6 @@ export async function readMemoryPageSortingSetting(
     mode: parsed.data,
     overridden: true,
     defaultMode,
-    effectiveMode: effectivePageSortMode(parsed.data),
+    effectiveMode: parsed.data,
   };
 }

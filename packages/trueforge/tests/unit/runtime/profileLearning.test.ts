@@ -16,7 +16,7 @@ import {
   type PersonalizationProfileContent,
 } from '../../../src/personalization/profile';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription';
-import { HindsightClient, type RetainOutcome } from '../../../src/runtime/memory/hindsightClient';
+import { type RetainOutcome } from '../../../src/runtime/memory/memoryClient';
 import type { ProfileLineSuggestion } from '../../../src/runtime/memory/memorySummarize';
 import {
   addLearnedLines,
@@ -31,6 +31,7 @@ import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import { TurnExecutionDeadline } from '../../../src/runtime/turnExecutionDeadline';
 import { discardedModelUsage } from '../../fixtures/discardedModelUsage';
 import { inMemoryGlobalSettingsStore } from '../../fixtures/inMemoryGlobalSettingsStore';
+import { QuietMemoryClient } from '../../fixtures/memory/quietMemoryClient';
 import { startModelEndpointStub } from '../../fixtures/modelEndpointStub';
 import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
 
@@ -70,8 +71,8 @@ function llmAnswering(text: string, onCall?: () => Promise<void>): { llm: ILLM; 
   return { llm, createNonStream };
 }
 
-type DeleteDocumentSpy = jest.SpyInstance<Promise<RetainOutcome>, Parameters<HindsightClient['deleteDocument']>>;
-type RetainSpy = jest.SpyInstance<Promise<RetainOutcome>, Parameters<HindsightClient['retain']>>;
+type DeleteDocumentSpy = jest.SpyInstance<Promise<RetainOutcome>, Parameters<QuietMemoryClient['deleteDocument']>>;
+type RetainSpy = jest.SpyInstance<Promise<RetainOutcome>, Parameters<QuietMemoryClient['retain']>>;
 
 /**
  * A real client with `retain` and `deleteDocument` scripted on the instance: the constructor and the method signature
@@ -79,16 +80,11 @@ type RetainSpy = jest.SpyInstance<Promise<RetainOutcome>, Parameters<HindsightCl
  * wired to reject, which keeps an unscripted call from ever reaching the network.
  */
 function retainingClient(outcome: RetainOutcome = { ok: true }): {
-  client: HindsightClient;
+  client: QuietMemoryClient;
   retain: RetainSpy;
   deleteDocument: DeleteDocumentSpy;
 } {
-  const client = new HindsightClient({
-    apiBase: 'https://hindsight.test.example',
-    bank: 'aman',
-    headers: {},
-    fetchImpl: () => Promise.reject(new Error('profile learning must not reach the network in tests')),
-  });
+  const client = new QuietMemoryClient();
   const retain = jest.spyOn(client, 'retain').mockResolvedValue(outcome);
   const deleteDocument = jest.spyOn(client, 'deleteDocument').mockResolvedValue({ ok: true });
   return { client, retain, deleteDocument };

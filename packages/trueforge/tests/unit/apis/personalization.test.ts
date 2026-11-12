@@ -9,6 +9,7 @@ import {
   GetPersonalizationContextResponseSchema,
   GetPersonalizationProfileResponseSchema,
 } from '../../../src/schemas/personalization';
+import { QuietMemoryClient } from '../../fixtures/memory/quietMemoryClient';
 
 const userA: RequestContext = {
   tenant_id: 'default',
@@ -35,7 +36,7 @@ describe('personalization router', () => {
     const router = createPersonalizationRouter({
       personalizationStore: store,
       resolveRequestContext: () => userA,
-      resolveMemoryClient: async () => undefined,
+      resolveMemoryClient: () => new QuietMemoryClient(),
       logger: winston.createLogger({ silent: true }),
     });
     const page = {
@@ -97,7 +98,7 @@ describe('personalization router', () => {
     const router = createPersonalizationRouter({
       personalizationStore: store,
       resolveRequestContext: () => userA,
-      resolveMemoryClient: async () => undefined,
+      resolveMemoryClient: () => new QuietMemoryClient(),
       logger: winston.createLogger({ silent: true }),
     });
     const empty = {
@@ -145,7 +146,7 @@ describe('personalization router', () => {
     const router = createPersonalizationRouter({
       personalizationStore: new SqlitePersonalizationStore(db),
       resolveRequestContext: () => userA,
-      resolveMemoryClient: async () => undefined,
+      resolveMemoryClient: () => new QuietMemoryClient(),
       logger: winston.createLogger({ silent: true }),
     });
     const base = {
@@ -185,7 +186,7 @@ describe('personalization router', () => {
     const router = createPersonalizationRouter({
       personalizationStore: new SqlitePersonalizationStore(db),
       resolveRequestContext: () => user,
-      resolveMemoryClient: async () => undefined,
+      resolveMemoryClient: () => new QuietMemoryClient(),
       logger: winston.createLogger({ silent: true }),
     });
     const request = {
@@ -225,7 +226,7 @@ describe('personalization router', () => {
     const router = createPersonalizationRouter({
       personalizationStore: new SqlitePersonalizationStore(db),
       resolveRequestContext: () => userA,
-      resolveMemoryClient: async () => undefined,
+      resolveMemoryClient: () => new QuietMemoryClient(),
       logger: winston.createLogger({ silent: true }),
     });
     const profileFields = {
@@ -277,7 +278,7 @@ describe('personalization router', () => {
     const router = createPersonalizationRouter({
       personalizationStore: new SqlitePersonalizationStore(db),
       resolveRequestContext: () => userA,
-      resolveMemoryClient: async () => undefined,
+      resolveMemoryClient: () => new QuietMemoryClient(),
       logger: winston.createLogger({ silent: true }),
     });
     const profileFields = {
@@ -318,7 +319,7 @@ describe('personalization router', () => {
     const router = createPersonalizationRouter({
       personalizationStore: new SqlitePersonalizationStore(db),
       resolveRequestContext: () => userA,
-      resolveMemoryClient: async () => undefined,
+      resolveMemoryClient: () => new QuietMemoryClient(),
       logger: winston.createLogger({ silent: true }),
     });
     const profileFields = {
@@ -361,7 +362,7 @@ describe('personalization router', () => {
     const router = createPersonalizationRouter({
       personalizationStore: new SqlitePersonalizationStore(db),
       resolveRequestContext: () => userA,
-      resolveMemoryClient: async () => undefined,
+      resolveMemoryClient: () => new QuietMemoryClient(),
       logger: winston.createLogger({ silent: true }),
     });
     const emptyContent = {

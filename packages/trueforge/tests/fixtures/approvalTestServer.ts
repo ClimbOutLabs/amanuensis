@@ -7,12 +7,9 @@
  * drop every in-process registry and reopen the same durable state.
  *
  * The `inert` connector is stored directly, like one a user added by URL. The first-party
- * memory connector, when asked for, is registered through the real memory-provider setup
- * (`POST /api/v1/settings/mcp-servers` with `memory_provider`), so the server itself marks it, and
- * only because the fixture lists the inert server's origin as the operator would in
- * `FIRST_PARTY_MCP_ORIGINS`. Without that option the list is empty and nothing is first-party.
+ * connector, when asked for, is stored directly with the first-party mark, and only counts
+ * because the fixture puts the inert server's origin on the first-party origin list. Without that option the list is empty and nothing is first-party.
  */
-import type { OpenAPIHono } from '@hono/zod-openapi';
 import { Sessions, type TurnStreamingEvent } from '@truefoundry/trueforge-core/agent-session';
 import type { SandboxProvider } from '@truefoundry/trueforge-core/core';
 import { RequestReplyRouter } from '@truefoundry/trueforge-core/request-reply';
@@ -76,7 +73,7 @@ export const MODEL_PROVIDER_NAME = 'scripted';
 export const MODEL_FQN = `${MODEL_PROVIDER_NAME}/scripted-model`;
 /** A second configured model, so a test can prove which one a turn actually used. */
 export const ALT_MODEL_FQN = `${MODEL_PROVIDER_NAME}/scripted-alt-model`;
-/** The inert server registered as the memory provider, when a test asks for it. */
+/** The inert server registered as a first-party connector, when a test asks for it. */
 export const INERT_MEMORY_SERVER_NAME = 'inert-memory';
 
 type SqliteDb = ReturnType<typeof createSqliteDb>;
@@ -94,7 +91,7 @@ export interface ApprovalTestServer {
   sessionStore: () => SqliteSessionStore;
   /** The database itself, so a test can construct any other store over the same data. */
   db: () => SqliteDb;
-  /** Replaces the operator's first-party origin list, as booting with another `FIRST_PARTY_MCP_ORIGINS` would. */
+  /** Replaces the first-party origin list, as booting with other Email and Calendar addresses would. */
   setFirstPartyOrigins: (origins: string[]) => void;
   /**
    * Turns eval mode on or off, as booting with another `AMAN_EVAL_MODE` would. While on, Gmail and Google Calendar
@@ -215,33 +212,13 @@ function buildApp(input: {
   });
 }
 
-/** Registers the inert server as the memory provider through the settings API, as a user would. */
-async function registerMemoryProvider({ app, mcp }: { app: OpenAPIHono; mcp: InertMcpServer }): Promise<void> {
-  const response = await app.request('/api/v1/settings/mcp-servers', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      manifest: {
-        type: 'remote',
-        name: INERT_MEMORY_SERVER_NAME,
-        url: mcp.memoryProviderUrl,
-        description: 'Inert connector registered as the memory provider.',
-        memory_provider: true,
-      },
-    }),
-  });
-  if (response.status !== 201) {
-    throw new Error(`memory provider setup failed (${String(response.status)}): ${await response.text()}`);
-  }
-}
-
 /** The memory folder the test run was configured with, read before any test changes it. */
 const CONFIGURED_MEMORY_DIR = configuration.MEMORY_MARKDOWN_DIR;
 
 export async function startApprovalTestServer(options?: {
   sandboxProvider?: SandboxProvider | undefined;
-  /** Also register the inert server as the memory provider, which makes that connector first-party. */
-  memoryProvider?: boolean | undefined;
+  /** Also register the inert server as a first-party connector, listing its origin as the operator would. */
+  firstPartyConnector?: boolean | undefined;
   /** Replaces the standalone authenticator, for tests that need distinct or unauthenticated callers. */
   authenticator?: Authenticator | undefined;
   /** Adds the inert connector's opt-in `web_search` tool. */
@@ -323,6 +300,20 @@ export async function startApprovalTestServer(options?: {
     first_party: false,
   });
 
+  if (options?.firstPartyConnector === true) {
+    await new SqliteMcpServerStore(db).upsertServer({
+      tenant_id: TENANT_ID,
+      name: INERT_MEMORY_SERVER_NAME,
+      manifest: {
+        type: 'remote',
+        name: INERT_MEMORY_SERVER_NAME,
+        url: mcp.url,
+        description: 'Inert connector registered as first-party.',
+      },
+      first_party: true,
+    });
+  }
+
   const originalFirstPartyOrigins = configuration.FIRST_PARTY_MCP_ORIGINS;
   const originalEvalMode = configuration.AMAN_EVAL_MODE;
   // Each server keeps its own memory, so one test's chats are never recalled into another's. A test that chose a
@@ -331,14 +322,11 @@ export async function startApprovalTestServer(options?: {
   if (originalMemoryDir === CONFIGURED_MEMORY_DIR) {
     configuration.MEMORY_MARKDOWN_DIR = join(directory, 'memory');
   }
-  configuration.FIRST_PARTY_MCP_ORIGINS = options?.memoryProvider === true ? [mcp.origin] : [];
+  configuration.FIRST_PARTY_MCP_ORIGINS = options?.firstPartyConnector === true ? [mcp.origin] : [];
 
   // One registry for the server's life, so close() can wait for turn drains the way main.ts does.
   const turnDrains = new TurnDrainRegistry();
   let app = buildApp({ db, sandboxProvider: options?.sandboxProvider, authenticator, turnDrains });
-  if (options?.memoryProvider === true) {
-    await registerMemoryProvider({ app, mcp });
-  }
 
   return {
     // Hono's request() is sync-or-async depending on the route; the fixture

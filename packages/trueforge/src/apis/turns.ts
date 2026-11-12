@@ -104,18 +104,17 @@ import { mailAccountDirectory } from '../runtime/mailConnector';
 import { createMemoryClient } from '../runtime/memory/createMemoryClient';
 import type { MemoryClient } from '../runtime/memory/memoryClient';
 import type { TurnToolResult } from '../runtime/memory/memoryNotesSummarize';
-import { resolveMemoryProvider } from '../runtime/memory/memoryProvider';
 import {
   submitRetainWithVerification,
   type RetainOutcomeLog,
   type SummarizeTurnContext,
 } from '../runtime/memory/memoryRetain';
-import { applyMemorySettings, serverMemoryConfig } from '../runtime/memory/memorySettings';
+import { serverMemoryConfig, withMemoryScreenOverride } from '../runtime/memory/memorySettings';
 import { resolveSummarizationModelFqn, type ProfileLineSuggestion } from '../runtime/memory/memorySummarize';
 import { saveSentMail, sentMailFromCall, sentMailWentThrough } from '../runtime/memory/sentMail';
 import { createOutsideInputTracker, inputAttachesFiles } from '../runtime/memory/turnOutsideInput';
 import { readMemoryRecallSetting } from '../runtime/memoryRecallSettings';
-import { applyMemoryScreenOverride, readMemoryScreenSetting } from '../runtime/memoryScreenSettings';
+import { readMemoryScreenSetting } from '../runtime/memoryScreenSettings';
 import { resolveTurnSummarizeContext } from '../runtime/memorySummarizeSettings';
 import { resolveModelContextLength } from '../runtime/modelContextLength';
 import {
@@ -174,7 +173,6 @@ import { packageMirrorTokens } from '../sandbox/mirrors/packageMirrorTokens';
 import { checkSnapshotStatus } from '../sandbox/providerUtils';
 import { resolveSkillNetworkGrant } from '../sandbox/skillnet/skillNetworkGrant';
 import { skillNetworkTokens } from '../sandbox/skillnet/skillNetworkTokens';
-import type { MemoryProviderSettings } from '../schemas/mcpServer';
 import { canReadSession } from './agentAccess';
 import { approvedToolCalls, toolCallKey } from './approvedToolCalls';
 import { readServerSandboxAvailable } from './capabilities';
@@ -367,8 +365,8 @@ export type BeginTurnExecutionDeps = Pick<
   personaContext?: PersonaContext | undefined;
   boundRepository?: BoundRepository | undefined;
   memoryClient?: MemoryClient | undefined;
-  memoryProviderServerName?: string | undefined;
-  memorySettings?: MemoryProviderSettings | undefined;
+  /** The Settings switch for the recall screen, when the person set one. */
+  memoryScreenOverride?: boolean | undefined;
   previousTurnId?: string | null;
   /** From CreateTurnRequest.client_timezone, or a schedule's own time zone for its runs. */
   clientTimezone?: string | undefined;
@@ -416,8 +414,8 @@ function createTurnResolver(deps: {
   sentinelSettingsStore?: ISentinelSettingsStore | undefined;
   sessionStore: ISessionStore<SessionCustom, TurnCustom>;
   memoryClient?: MemoryClient | undefined;
-  memoryProviderServerName?: string | undefined;
-  memorySettings?: MemoryProviderSettings | undefined;
+  /** The Settings switch for the recall screen, when the person set one. */
+  memoryScreenOverride?: boolean | undefined;
   /** No person watches this turn (a scheduled run): recall stays off, so a recalled earlier task cannot fingerprint-block the run's own searches. Retain and summarize still run. */
   unattended?: boolean | undefined;
   previousTurnId?: string | null;
@@ -486,8 +484,7 @@ function createTurnResolver(deps: {
     sentinelSettingsStore,
     sessionStore,
     memoryClient,
-    memoryProviderServerName,
-    memorySettings,
+    memoryScreenOverride,
     previousTurnId,
     memorySummarize,
     memoryRecallEnabled,
@@ -911,10 +908,9 @@ function createTurnResolver(deps: {
     personaContext,
     {
       client: memoryClient,
-      config: applyMemorySettings(memorySettings, serverMemoryConfig()),
+      config: withMemoryScreenOverride({ base: serverMemoryConfig(), override: memoryScreenOverride }),
       sessionId,
       previousTurnId: previousTurnId ?? null,
-      providerServerName: memoryProviderServerName,
       keepsNothing: sessionKeepsNothing({ session: session.record }),
       searchProviderServerName: async () => {
         const servers = await mcpServerStore.listServers({ tenant_id, names: undefined });
@@ -1232,7 +1228,7 @@ export interface DrainTurnEventsInput {
   logger: Logger;
   turnDrains: TurnDrainRegistry;
   onEvent?: (event: TurnStreamingEvent, sequenceNumber: number) => Promise<void>;
-  /** Present only when a memory provider resolved for this turn; the drain awaits the retain. */
+  /** Present only when the turn has memory; the drain awaits the retain. */
   memory?:
     | {
         client: MemoryClient;
@@ -1841,10 +1837,6 @@ async function beginAcceptedTurnExecution(
         globalSettingsStore: deps.globalSettingsStore,
         logger: deps.logger,
       });
-      const effectiveMemorySettings = applyMemoryScreenOverride(
-        deps.memorySettings,
-        memoryScreenSetting.overridden ? memoryScreenSetting.enabled : undefined,
-      );
       const internalSources = await resolveTurnInternalSources({
         session,
         previousTurnId,
@@ -1894,8 +1886,7 @@ async function beginAcceptedTurnExecution(
         personaKnowledgeHits: internalSources.personaKnowledgeHits,
         internalSourceState: internalSources.internalSourceState,
         memoryClient: deps.memoryClient,
-        memoryProviderServerName: deps.memoryProviderServerName,
-        memorySettings: effectiveMemorySettings,
+        memoryScreenOverride: memoryScreenSetting.overridden ? memoryScreenSetting.enabled : undefined,
         unattended: params.unattended,
         previousTurnId: deps.previousTurnId ?? null,
         memorySummarize,
@@ -2609,23 +2600,6 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       library_near_miss: internalSources.libraryNearMiss,
     };
 
-    // Resolved before the turn exists, same as the model/sandbox lookups above: a missing or
-    // invalid memory provider must never fail the turn, so this degrades to `undefined` rather
-    // than throwing. Read once and shared between the resolver (recall) and the drain hook
-    // (retain) so a turn dials the provider through a single client instance. The markdown
-    // backend needs no MCP server, so the provider lookup is skipped unless hindsight is
-    // selected.
-    const memoryProvider =
-      configuration.MEMORY_BACKEND === 'hindsight'
-        ? await resolveMemoryProvider({
-            mcpServerStore,
-            tokenStore: deps.tokenStore,
-            tenantId: requestContext.tenant_id,
-            clientName: configuration.MCP_DCR_OAUTH_CLIENT_NAME,
-            userRef,
-            logger: deps.logger,
-          })
-        : undefined;
     const vaultScope =
       persona?.kind === 'persona'
         ? { personaName: persona.persona.display_name, personaId: persona.persona.id }
@@ -2637,18 +2611,9 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       previousTurnCustom?.persona?.persona_name ?? legacyParentActivation?.persona_name ?? null;
     const memoryPreviousTurnId = previousTurnPersonaName === (vaultScope?.personaName ?? null) ? previousTurnId : null;
     const memoryClient = createMemoryClient({
-      backend: configuration.MEMORY_BACKEND,
       markdownDir: configuration.MEMORY_MARKDOWN_DIR,
       namespace: requestContext.tenant_id,
       vaultScope,
-      hindsight:
-        memoryProvider === undefined
-          ? undefined
-          : {
-              apiBase: memoryProvider.apiBase,
-              bank: memoryProvider.bank,
-              headers: memoryProvider.headers,
-            },
       // Meaning-based recall: the subsystem singleton loads the model once per
       // process and degrades to keyword-only until it is ready, so a missing or
       // slow model download never fails or slows the turn.
@@ -2675,7 +2640,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       agentStore,
       personaModelName: persona?.kind === 'persona' ? persona.persona.model_name : undefined,
       sessionAgent: session.record.agent,
-      memoryClientPresent: memoryClient !== undefined,
+      memoryClientPresent: true,
       personName: profile?.user_name ?? undefined,
       profileLines: profile ? personalizationFactLines(profile) : undefined,
       assistantName:
@@ -2753,10 +2718,6 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       globalSettingsStore: deps.globalSettingsStore,
       logger: deps.logger,
     });
-    const effectiveMemorySettings = applyMemoryScreenOverride(
-      memoryProvider?.settings,
-      memoryScreenSetting.overridden ? memoryScreenSetting.enabled : undefined,
-    );
     const resolver = createTurnResolver({
       mcpCatalog: deps.mcpCatalog,
       chatDeletionStore: deps.chatDeletionStore,
@@ -2790,8 +2751,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       sentinelSettingsStore: deps.sentinelSettingsStore,
       sessionStore: deps.sessionStore,
       memoryClient,
-      memoryProviderServerName: memoryProvider?.serverName,
-      memorySettings: effectiveMemorySettings,
+      memoryScreenOverride: memoryScreenSetting.overridden ? memoryScreenSetting.enabled : undefined,
       previousTurnId: memoryPreviousTurnId,
       memorySummarize,
       memoryRecallEnabled,
@@ -2852,10 +2812,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
     const title = session.record.last_turn_id ? undefined : deriveSessionTitle(body.input);
 
     // Read before the turn exists and only when memory will save the send; a read failure falls back to none.
-    const approvedCalls =
-      memoryClient === undefined
-        ? undefined
-        : await approvedToolCalls({ pausedTurn: previousTurn, input: body.input, logger: deps.logger });
+    const approvedCalls = await approvedToolCalls({ pausedTurn: previousTurn, input: body.input, logger: deps.logger });
 
     // Turning down held actions ends the turn with no model call. Approving one runs the call,
     // and the model continues with its result.
@@ -3161,24 +3118,21 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           turnDrains: deps.turnDrains,
           modelUsage: { ledger: modelUsage, eventStore: deps.sessionStore },
           privateChat: privateChatDrainMember({ session, sessionStore: deps.sessionStore }),
-          memory:
-            memoryClient === undefined
-              ? undefined
-              : {
-                  client: memoryClient,
-                  session: session.record,
-                  userText: extractUserMessageText(body.input),
-                  attachedFiles: inputAttachesFiles(body.input ?? []),
-                  chatHasReadContent: () => chatSawOutsideText(resolver.webSearchTurn),
-                  timeZone: body.client_timezone,
-                  // Resolved once on the create-turn path above; absent means verbatim.
-                  summarize: memorySummarize,
-                  outcomeLog: {
-                    personaName: vaultScope?.personaName ?? 'shared',
-                    personaStore: deps.personaStore,
-                    tenantId: requestContext.tenant_id,
-                  },
-                },
+          memory: {
+            client: memoryClient,
+            session: session.record,
+            userText: extractUserMessageText(body.input),
+            attachedFiles: inputAttachesFiles(body.input ?? []),
+            chatHasReadContent: () => chatSawOutsideText(resolver.webSearchTurn),
+            timeZone: body.client_timezone,
+            // Resolved once on the create-turn path above; absent means verbatim.
+            summarize: memorySummarize,
+            outcomeLog: {
+              personaName: vaultScope?.personaName ?? 'shared',
+              personaStore: deps.personaStore,
+              tenantId: requestContext.tenant_id,
+            },
+          },
           profileLearning,
           approvedCalls,
           chatSearch:

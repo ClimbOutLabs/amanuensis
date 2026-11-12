@@ -8,14 +8,13 @@ import {
   type ChatProvenance,
 } from '@truefoundry/trueforge-core/core/permissions/provenance';
 import { createWebSearchTurnState } from '@truefoundry/trueforge-core/core/permissions/webSearch';
-import type { RecallItem } from '../../../../src/runtime/memory/hindsightClient';
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
 import {
-  hindsightMemoryCapability,
+  memoryCapability,
   WRAPPER_OVERHEAD_TOKENS,
   type MemoryConfig,
 } from '../../../../src/runtime/memory/memoryCapability';
-import type { MemoryClient } from '../../../../src/runtime/memory/memoryClient';
+import type { MemoryClient, RecallItem } from '../../../../src/runtime/memory/memoryClient';
 import { loadPagesForMessage } from '../../../../src/runtime/memory/memoryPageLoader';
 import { collect, DEFAULT_CONFIG, makeClient, makeExecution, makeLogger } from './memoryCapabilityTestKit';
 import { pageText, writePageFile } from './pageFixtures';
@@ -32,7 +31,7 @@ async function recallInto(input: {
   config?: MemoryConfig;
 }): Promise<ChatProvenance> {
   const webSearch = createWebSearchTurnState();
-  const capability = hindsightMemoryCapability({
+  const capability = memoryCapability({
     client: input.client,
     config: input.config ?? DEFAULT_CONFIG,
     logger: makeLogger(),

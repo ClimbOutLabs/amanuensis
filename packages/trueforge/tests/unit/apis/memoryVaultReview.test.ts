@@ -31,7 +31,6 @@ const ID = 'md:default:2026-10-02.md#0';
 const BASE = '/api/v1/memory/vault/review';
 
 describe('the review of older notes', () => {
-  const originalBackend = configuration.MEMORY_BACKEND;
   const originalDir = configuration.MEMORY_MARKDOWN_DIR;
   let baseDir: string;
   let app: OpenAPIHono;
@@ -44,7 +43,6 @@ describe('the review of older notes', () => {
 
   beforeEach(async () => {
     baseDir = await mkdtemp(path.join(tmpdir(), 'vault-review-'));
-    configuration.MEMORY_BACKEND = 'markdown';
     configuration.MEMORY_MARKDOWN_DIR = baseDir;
     await writeFile(path.join(baseDir, '.source-lines.json'), '{"done":true}\n', 'utf8');
     const store = new InMemorySessionStore<SessionCustom, TurnCustom>();
@@ -88,7 +86,6 @@ describe('the review of older notes', () => {
   });
 
   afterEach(async () => {
-    configuration.MEMORY_BACKEND = originalBackend;
     configuration.MEMORY_MARKDOWN_DIR = originalDir;
     await rm(baseDir, { recursive: true, force: true });
   });
@@ -167,11 +164,5 @@ describe('the review of older notes', () => {
     expect(await response.json()).toMatchObject({ data: { marked_count: 0 } });
     const other = await post({ namespace: 'persona:Maya', entry_ids: [ID] });
     expect(await other.json()).toMatchObject({ data: { marked_count: 0 } });
-  });
-
-  it('answers 501 when the server does not use the markdown backend', async () => {
-    configuration.MEMORY_BACKEND = 'hindsight';
-    expect((await app.request(BASE)).status).toBe(501);
-    expect((await post({ entry_ids: [ID] })).status).toBe(501);
   });
 });

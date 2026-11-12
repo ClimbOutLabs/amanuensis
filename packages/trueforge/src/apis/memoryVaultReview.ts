@@ -2,7 +2,7 @@
  * Review of older memory notes (mounted at /api/v1/memory/vault/review).
  *
  * Lists the older notes that may be marked as the person's own words and marks the ones the person
- * named. Only the markdown backend serves it; anything else answers 501.
+ * named.
  */
 import { OpenAPIHono, type RouteHandler } from '@hono/zod-openapi';
 import type { ISessionStore } from '@truefoundry/trueforge-core/agent-session';
@@ -36,13 +36,6 @@ const REVIEW_REFUSAL_WORDS: Record<ReviewRefusal | ReviewSkipReason, string> = {
   already_reviewed: 'This note is already marked as yours.',
 };
 
-function markdownBackendRequired(c: Context) {
-  return c.json(
-    { error: { message: 'The memory vault needs the markdown memory backend, which this server does not use.' } },
-    501,
-  );
-}
-
 export function createMemoryVaultReviewRouter(deps: MemoryVaultReviewRouterDeps) {
   /** The vault a review runs in, and whose chats may vouch for its notes. */
   const reviewScope = (c: Context, namespace: string | undefined): ReviewScope => {
@@ -60,9 +53,6 @@ export function createMemoryVaultReviewRouter(deps: MemoryVaultReviewRouterDeps)
 
   const listHandler: RouteHandler<typeof listMemoryVaultReviewNotesRoute> = async c => {
     const { namespace, cursor } = c.req.valid('query');
-    if (configuration.MEMORY_BACKEND !== 'markdown') {
-      return markdownBackendRequired(c);
-    }
     try {
       const found = await findReviewCandidates({
         scope: reviewScope(c, namespace),
@@ -92,9 +82,6 @@ export function createMemoryVaultReviewRouter(deps: MemoryVaultReviewRouterDeps)
 
   const markHandler: RouteHandler<typeof markMemoryVaultReviewNotesRoute> = async c => {
     const body = c.req.valid('json');
-    if (configuration.MEMORY_BACKEND !== 'markdown') {
-      return markdownBackendRequired(c);
-    }
     try {
       const scope = reviewScope(c, body.namespace);
       // Every id is judged again here, whatever an earlier list said.

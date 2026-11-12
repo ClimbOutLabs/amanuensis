@@ -6,7 +6,6 @@ import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import { getMemorySummarizeRoute, putMemorySummarizeRoute } from '../routes/memorySummarizeRoutes';
 import {
   MEMORY_SUMMARIZE_SETTING_KEY,
-  isMemorySummarizeEffective,
   readMemorySummarizeSetting,
   type MemorySummarizeSetting,
 } from '../runtime/memorySummarizeSettings';
@@ -64,7 +63,7 @@ export function createMemorySummarizeRouter<TTransaction>(deps: MemorySummarizeR
       enabled,
       overridden: body.enabled !== null,
       defaultEnabled,
-      effectiveEnabled: isMemorySummarizeEffective(enabled),
+      effectiveEnabled: enabled,
     };
     return c.json({ data: toMemorySummarize(confirmed) }, 200);
   };

@@ -18,8 +18,8 @@ import { TENANT_ID } from './sessions';
 export interface PersonalizationRouterDeps {
   personalizationStore: IPersonalizationStore;
   resolveRequestContext: ResolveRequestContext;
-  /** The memory client for this person, or undefined when no memory is configured. */
-  resolveMemoryClient: (input: { tenantId: string; subjectId: string }) => Promise<MemoryClient | undefined>;
+  /** The memory client for this person. */
+  resolveMemoryClient: (input: { tenantId: string }) => MemoryClient;
   logger: Logger;
 }
 
@@ -55,7 +55,7 @@ export function createPersonalizationRouter(deps: PersonalizationRouterDeps) {
   const removeMemoryCopy = async (subjectId: string): Promise<void> => {
     try {
       await deleteLearnedProfileCopy({
-        client: await deps.resolveMemoryClient({ tenantId: TENANT_ID, subjectId }),
+        client: deps.resolveMemoryClient({ tenantId: TENANT_ID }),
         userRef: subjectId,
         timeoutMs: configuration.MEMORY_RETAIN_TIMEOUT_MS,
         logger: deps.logger,

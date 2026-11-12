@@ -48,15 +48,6 @@ function parseOverride(value: string): boolean | undefined {
 }
 
 /**
- * The markdown-only gate, owned here: summarization runs only on the markdown backend.
- * `beginTurnExecution` and the effective-state computation both go through this so the
- * Settings toggle can never disagree with what the turn path actually does.
- */
-export function isMemorySummarizeEffective(enabled: boolean): boolean {
-  return enabled && configuration.MEMORY_BACKEND === 'markdown';
-}
-
-/**
  * The turn-summarization stored setting: the persisted override when one is stored,
  * otherwise `MEMORY_SUMMARIZE`. A stored value that is not exactly `'true'`/`'false'`
  * is treated as unset. Fails closed to the env default when the store read throws, so
@@ -74,7 +65,7 @@ export async function readMemorySummarizeSetting(
     enabled: defaultEnabled,
     overridden: false,
     defaultEnabled,
-    effectiveEnabled: isMemorySummarizeEffective(defaultEnabled),
+    effectiveEnabled: defaultEnabled,
   };
   let record;
   try {
@@ -100,7 +91,7 @@ export async function readMemorySummarizeSetting(
     enabled: override,
     overridden: true,
     defaultEnabled,
-    effectiveEnabled: isMemorySummarizeEffective(override),
+    effectiveEnabled: override,
   };
 }
 
@@ -172,21 +163,10 @@ export async function resolveTurnSummarizeContext(
     memoryClientPresent,
   } = params;
   const enabled = await resolveMemorySummarizeEnabled({ globalSettingsStore, logger });
-  if (!isMemorySummarizeEffective(enabled)) {
-    if (enabled) {
-      // Summarization is markdown-only; say so once per turn rather than failing silently.
-      logger.debug(
-        'Turn summarization is enabled but the memory backend is not markdown; turns will be retained verbatim',
-        {
-          sessionId,
-          memoryBackend: configuration.MEMORY_BACKEND,
-        },
-      );
-    } else {
-      logger.debug('Turn summarization is off for this turn; retaining the verbatim transcript', {
-        sessionId,
-      });
-    }
+  if (!enabled) {
+    logger.debug('Turn summarization is off for this turn; retaining the verbatim transcript', {
+      sessionId,
+    });
     return undefined;
   }
   if (!memoryClientPresent) {

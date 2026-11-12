@@ -4,7 +4,6 @@ import type * as TrueForge from "../../api/index.js";
 import * as core from "../../core/index.js";
 import type * as serializers from "../index.js";
 import { McpServerManifestAuth } from "./McpServerManifestAuth.js";
-import { MemoryProviderSettings } from "./MemoryProviderSettings.js";
 import { ResourceName } from "./ResourceName.js";
 
 export const RemoteMcpServerManifest: core.serialization.ObjectSchema<
@@ -13,8 +12,6 @@ export const RemoteMcpServerManifest: core.serialization.ObjectSchema<
 > = core.serialization.object({
     auth: McpServerManifestAuth.optional(),
     description: core.serialization.string(),
-    memoryProvider: core.serialization.property("memory_provider", core.serialization.boolean().optional()),
-    memorySettings: core.serialization.property("memory_settings", MemoryProviderSettings.optional()),
     name: ResourceName,
     searchProvider: core.serialization.property("search_provider", core.serialization.boolean().optional()),
     searchTools: core.serialization.property(
@@ -29,8 +26,6 @@ export declare namespace RemoteMcpServerManifest {
     export interface Raw {
         auth?: McpServerManifestAuth.Raw | null;
         description: string;
-        memory_provider?: boolean | null;
-        memory_settings?: MemoryProviderSettings.Raw | null;
         name: ResourceName.Raw;
         search_provider?: boolean | null;
         search_tools?: string[] | null;

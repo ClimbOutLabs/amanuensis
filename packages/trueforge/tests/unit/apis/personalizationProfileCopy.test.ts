@@ -73,7 +73,7 @@ describe('learned profile copy in memory', () => {
     const router = createPersonalizationRouter({
       personalizationStore: store,
       resolveRequestContext: () => userA,
-      resolveMemoryClient: async () => client,
+      resolveMemoryClient: () => client,
       logger,
     });
     const learn = () =>
@@ -196,7 +196,7 @@ describe('learned profile copy in memory', () => {
     const router = createPersonalizationRouter({
       personalizationStore: store,
       resolveRequestContext: () => userA,
-      resolveMemoryClient: async () => {
+      resolveMemoryClient: () => {
         throw new Error('memory is down');
       },
       logger: winston.createLogger({ silent: true }),

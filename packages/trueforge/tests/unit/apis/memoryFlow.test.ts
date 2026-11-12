@@ -7,8 +7,8 @@
  * invocation counters — the counters are the only evidence that a call actually reached
  * the mock server, independent of what the UI would render.
  *
- * The connector under test is registered through the memory-provider setup, so the server
- * marks it first-party: that is what lets its annotated read-only retrieval tools run
+ * The connector under test is stored with the first-party mark, with its origin listed as the
+ * operator would: that is what lets its annotated read-only retrieval tools run
  * without an approval pause.
  *
  * Five axes, from the dossier's acceptance list:
@@ -130,7 +130,7 @@ function agentSpec({
         preload,
         // Defaults (`@write`, `@destructive`, `@unclassified`) never cover ask_memory /
         // search_memory — both are readOnlyHint+non-open-world, so they escape gating on
-        // their own, and the memory provider's first-party mark lets them run. `forceApprovalTools`
+        // their own, and the connector's first-party mark lets them run. `forceApprovalTools`
         // adds a literal name to force-gate one anyway, the same way approvalFlow.test.ts
         // force-gates `inert_read` for its chat-grant test.
         require_approval_for_tools: ['@write', '@destructive', '@unclassified', ...forceApprovalTools],
@@ -328,7 +328,7 @@ describe('LKOS-shaped memory retrieval over the inert connector', () => {
   let server: ApprovalTestServer;
 
   beforeAll(async () => {
-    server = await startApprovalTestServer({ memoryProvider: true });
+    server = await startApprovalTestServer({ firstPartyConnector: true });
   }, TURN_TIMEOUT_MS);
 
   afterAll(async () => {

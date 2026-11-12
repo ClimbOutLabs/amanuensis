@@ -95,7 +95,6 @@ describe('the tools an incognito chat is offered', () => {
       sessionId: 's1',
       previousTurnId: null,
       summarize: undefined,
-      providerServerName: undefined,
     };
     const turnResolver = new SpaceTurnResourceResolver(
       {

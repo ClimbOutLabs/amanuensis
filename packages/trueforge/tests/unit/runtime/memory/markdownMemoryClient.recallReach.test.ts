@@ -1,8 +1,8 @@
 import { mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import type { RetainItem } from '../../../../src/runtime/memory/hindsightClient';
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
+import type { RetainItem } from '../../../../src/runtime/memory/memoryClient';
 import {
   NOTE_DATE_METADATA_KEY,
   NOTE_SOURCE_METADATA_KEY,

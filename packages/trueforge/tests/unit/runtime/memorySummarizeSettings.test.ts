@@ -1,7 +1,6 @@
 /**
  * Effective turn-summarization state: persisted override when stored,
- * otherwise the `MEMORY_SUMMARIZE` env default — with the markdown-only gate
- * applied, so the Settings toggle can never disagree with the turn path.
+ * otherwise the `MEMORY_SUMMARIZE` env default.
  */
 import { AgentSpecSchema, type SessionAgent } from '@truefoundry/trueforge-core/agent-session';
 import { Writable } from 'stream';
@@ -13,7 +12,6 @@ import type { GlobalSettingRecord, IGlobalSettingsStore } from '../../../src/db/
 import type { IModelProviderStore } from '../../../src/db/modelProviderStore';
 import {
   MEMORY_SUMMARIZE_SETTING_KEY,
-  isMemorySummarizeEffective,
   readMemorySummarizeSetting,
   resolveMemorySummarizeEnabled,
   resolveTurnSummarizeContext,
@@ -122,15 +120,9 @@ function emptyStore(): IGlobalSettingsStore {
 
 describe('readMemorySummarizeSetting', () => {
   const originalDefault = configuration.MEMORY_SUMMARIZE;
-  const originalBackend = configuration.MEMORY_BACKEND;
-
-  beforeEach(() => {
-    configuration.MEMORY_BACKEND = 'markdown';
-  });
 
   afterEach(() => {
     configuration.MEMORY_SUMMARIZE = originalDefault;
-    configuration.MEMORY_BACKEND = originalBackend;
   });
 
   it('falls back to the env default when nothing is stored', async () => {
@@ -164,7 +156,7 @@ describe('readMemorySummarizeSetting', () => {
     const setting = await readMemorySummarizeSetting({ globalSettingsStore: store, logger: silentLogger });
     expect(setting.overridden).toBe(false);
     expect(setting.enabled).toBe(configuration.MEMORY_SUMMARIZE);
-    expect(setting.effectiveEnabled).toBe(isMemorySummarizeEffective(configuration.MEMORY_SUMMARIZE));
+    expect(setting.effectiveEnabled).toBe(configuration.MEMORY_SUMMARIZE);
   });
 
   it('fails closed to the env default when the store read throws', async () => {
@@ -183,14 +175,6 @@ describe('readMemorySummarizeSetting', () => {
     expect(setting.enabled).toBe(configuration.MEMORY_SUMMARIZE);
   });
 
-  it('reports effective false on a non-markdown backend even when the stored setting is on', async () => {
-    configuration.MEMORY_BACKEND = 'hindsight';
-    configuration.MEMORY_SUMMARIZE = true;
-    const store = storeWith(new Map([[MEMORY_SUMMARIZE_SETTING_KEY, record('true')]]));
-    const setting = await readMemorySummarizeSetting({ globalSettingsStore: store, logger: silentLogger });
-    expect(setting).toEqual({ enabled: true, overridden: true, defaultEnabled: true, effectiveEnabled: false });
-  });
-
   it('resolveMemorySummarizeEnabled returns the stored setting verbatim (no external gate)', async () => {
     configuration.MEMORY_SUMMARIZE = false;
     const store = storeWith(new Map([[MEMORY_SUMMARIZE_SETTING_KEY, record('true')]]));
@@ -203,38 +187,15 @@ describe('readMemorySummarizeSetting', () => {
   });
 });
 
-describe('isMemorySummarizeEffective', () => {
-  const originalBackend = configuration.MEMORY_BACKEND;
-
-  afterEach(() => {
-    configuration.MEMORY_BACKEND = originalBackend;
-  });
-
-  it('is the stored value on the markdown backend', () => {
-    configuration.MEMORY_BACKEND = 'markdown';
-    expect(isMemorySummarizeEffective(true)).toBe(true);
-    expect(isMemorySummarizeEffective(false)).toBe(false);
-  });
-
-  it('is always false on any other backend', () => {
-    configuration.MEMORY_BACKEND = 'hindsight';
-    expect(isMemorySummarizeEffective(true)).toBe(false);
-    expect(isMemorySummarizeEffective(false)).toBe(false);
-  });
-});
-
 describe('resolveTurnSummarizeContext', () => {
   const originalDefault = configuration.MEMORY_SUMMARIZE;
-  const originalBackend = configuration.MEMORY_BACKEND;
 
   beforeEach(() => {
     configuration.MEMORY_SUMMARIZE = true;
-    configuration.MEMORY_BACKEND = 'markdown';
   });
 
   afterEach(() => {
     configuration.MEMORY_SUMMARIZE = originalDefault;
-    configuration.MEMORY_BACKEND = originalBackend;
   });
 
   function baseParams(
@@ -295,18 +256,6 @@ describe('resolveTurnSummarizeContext', () => {
     expect(context).toBeUndefined();
     expect(jest.mocked(agentStore.getAgent)).not.toHaveBeenCalled();
     expect(logged(lines, 'Turn summarization is off for this turn')).toBe(true);
-  });
-
-  it('returns undefined and logs when the backend is not markdown', async () => {
-    configuration.MEMORY_BACKEND = 'hindsight';
-    const { logger, lines } = capturingLogger();
-    const agentStore = fakeAgentStore();
-
-    const context = await resolveTurnSummarizeContext({ ...baseParams({ logger, agentStore }) });
-
-    expect(context).toBeUndefined();
-    expect(jest.mocked(agentStore.getAgent)).not.toHaveBeenCalled();
-    expect(logged(lines, 'not markdown')).toBe(true);
   });
 
   it('still returns a context, without a model, when no summarization model resolves', async () => {

@@ -7,7 +7,7 @@ import winston from 'winston';
 import type { EmbeddingModel } from '../../../../src/runtime/memory/embeddingModel';
 import { EmbeddingSubsystem } from '../../../../src/runtime/memory/embeddingRetrieval';
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
-import { hindsightMemoryCapability } from '../../../../src/runtime/memory/memoryCapability';
+import { memoryCapability } from '../../../../src/runtime/memory/memoryCapability';
 import {
   DRAFTING_HEADING,
   NOT_CONFIRMED_TRAILER,
@@ -200,7 +200,7 @@ export async function memoryBlockFor({
   /** The turn's watch for outside text, which the page tools consult before they write. */
   watch?: TurnReadWatch | undefined;
 }): Promise<string> {
-  const capability = hindsightMemoryCapability({
+  const capability = memoryCapability({
     client: new MarkdownMemoryClient({
       baseDir: dir,
       namespace: MAYA_NAMESPACE,
