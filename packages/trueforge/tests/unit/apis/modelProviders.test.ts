@@ -20,6 +20,7 @@ import { SqliteSandboxProviderStore } from '../../../src/db/sqlite/sandbox-provi
 import { SqliteSkillStore } from '../../../src/db/sqlite/skill-store/SqliteSkillStore';
 import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import type { LocalModels, ResolveHostAddresses } from '../../../src/runtime/localModels';
+import { RequestErrorResponseSchema } from '../../../src/schemas/errors';
 import {
   ListAvailableModelsResponseSchema,
   ListModelProvidersResponseSchema,
@@ -689,7 +690,7 @@ describe('a model address that is this computer', () => {
     for (const init of [postInit(localBody(baseUrl)), putInit(localBody(baseUrl))]) {
       const response = await settingsRouter.request('/model-providers', init);
       expect(response.status).toBe(400);
-      const body = (await response.json()) as { error: { message: string; code: string; param: string } };
+      const body = RequestErrorResponseSchema.parse(await response.json());
       expect(body.error.code).toBe('model_on_this_computer');
       expect(body.error.param).toBe('manifest.base_url');
       expect(body.error.message).toContain('is this computer.');
@@ -709,7 +710,7 @@ describe('a model address that is this computer', () => {
       postInit(localBody('https://spark.example.ts.net/v1')),
     );
     expect(response.status).toBe(400);
-    const body = (await response.json()) as { error: { message: string } };
+    const body = RequestErrorResponseSchema.parse(await response.json());
     expect(body.error.message).toContain('run aman local-model with the port your model server listens on');
   });
 
