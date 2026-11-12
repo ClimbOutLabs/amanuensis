@@ -318,13 +318,13 @@ export function AgentRuntimeConfigFields({
             >
               <label className="flex items-center justify-between gap-4">
                 <span>
-                  <span className="text-text-primary block text-xs font-medium">When to summarize long chats:</span>
+                  <span className="text-text-primary block text-xs font-medium">When to summarize long chats</span>
                   <span className="text-text-secondary mt-0.5 block text-xs">
                     Aman summarizes the oldest part of a long chat so the model can keep reading it.
                   </span>
                 </span>
                 <select
-                  aria-label="When to summarize long chats:"
+                  aria-label="When to summarize long chats"
                   disabled={disabled || !compactionEnabled}
                   value={compactionTrigger === undefined ? 'automatic' : 'set_size'}
                   className={auiInputClass('h-8 cursor-pointer py-1.5 disabled:opacity-60')}

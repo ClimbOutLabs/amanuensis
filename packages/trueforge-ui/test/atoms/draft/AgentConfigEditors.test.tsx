@@ -483,8 +483,8 @@ describe('AgentConfigEditors', () => {
 
     expect(screen.getByRole('switch', { name: 'File downloads' })).toBeDisabled();
     expect(screen.getByRole('switch', { name: 'File downloads' })).toHaveAttribute('aria-checked', 'false');
-    expect(screen.getByRole('combobox', { name: 'When to summarize long chats:' })).toBeDisabled();
-    expect(screen.getByRole('combobox', { name: 'When to summarize long chats:' })).toHaveValue('set_size');
+    expect(screen.getByRole('combobox', { name: 'When to summarize long chats' })).toBeDisabled();
+    expect(screen.getByRole('combobox', { name: 'When to summarize long chats' })).toHaveValue('set_size');
     expect(screen.getByRole('spinbutton', { name: /Chat size to summarize at/ })).toBeDisabled();
     expect(screen.getByRole('spinbutton', { name: /Chat size to summarize at/ })).toHaveValue(42_000);
 
@@ -543,7 +543,7 @@ describe('AgentConfigEditors', () => {
     it('reads saved settings with no value as Automatic and shows no number field', () => {
       renderRuntime({ spec: { model: { name: 'openai/gpt' } } });
 
-      const select = screen.getByRole('combobox', { name: 'When to summarize long chats:' });
+      const select = screen.getByRole('combobox', { name: 'When to summarize long chats' });
       expect(select).toHaveValue('automatic');
       expect(screen.getByRole('option', { name: 'Automatic (recommended)' })).toBeInTheDocument();
       expect(screen.getByRole('option', { name: 'At a set size' })).toBeInTheDocument();
@@ -563,7 +563,7 @@ describe('AgentConfigEditors', () => {
         },
       });
 
-      expect(screen.getByRole('combobox', { name: 'When to summarize long chats:' })).toHaveValue('set_size');
+      expect(screen.getByRole('combobox', { name: 'When to summarize long chats' })).toHaveValue('set_size');
       expect(screen.getByRole('spinbutton', { name: /Chat size to summarize at/ })).toHaveValue(42_000);
     });
 
@@ -580,7 +580,7 @@ describe('AgentConfigEditors', () => {
       };
       renderRuntime({ spec, onChange });
 
-      fireEvent.change(screen.getByRole('combobox', { name: 'When to summarize long chats:' }), {
+      fireEvent.change(screen.getByRole('combobox', { name: 'When to summarize long chats' }), {
         target: { value: 'automatic' },
       });
       expect(onChange).toHaveBeenLastCalledWith({
@@ -595,7 +595,7 @@ describe('AgentConfigEditors', () => {
       const onChange = vi.fn();
       renderRuntime({ spec: { model: { name: 'openai/gpt' } }, onChange });
 
-      fireEvent.change(screen.getByRole('combobox', { name: 'When to summarize long chats:' }), {
+      fireEvent.change(screen.getByRole('combobox', { name: 'When to summarize long chats' }), {
         target: { value: 'set_size' },
       });
       expect(onChange.mock.lastCall?.[0].config.contextManagement.compaction).toEqual({
