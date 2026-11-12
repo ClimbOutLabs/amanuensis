@@ -26,6 +26,12 @@ export const SCRIPTED_PERSONA = {
   description: 'Plans trips and keeps the bookings in one place.',
   instructions: 'Help plan trips. Keep answers short and list what is booked and what is not.',
 };
+/** What `run:install_skill` asks to add: one of the starter skills, so nothing is looked up outside. */
+export const SCRIPTED_SKILL = {
+  name: 'algorithmic-art',
+  url: 'https://github.com/anthropics/skills',
+  path: 'skills/algorithmic-art',
+};
 /** What `run:create_schedule` asks to add. */
 export const SCRIPTED_SCHEDULE = {
   name: 'friday-review',
@@ -283,6 +289,9 @@ function argumentsJsonForTool({
   }
   if (name.endsWith('create_persona')) {
     return JSON.stringify(SCRIPTED_PERSONA);
+  }
+  if (name.endsWith('install_skill')) {
+    return JSON.stringify({ url: SCRIPTED_SKILL.url, path: SCRIPTED_SKILL.path });
   }
   if (name.endsWith('create_schedule')) {
     return JSON.stringify(SCRIPTED_SCHEDULE);

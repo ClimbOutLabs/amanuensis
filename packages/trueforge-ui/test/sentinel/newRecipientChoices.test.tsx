@@ -23,6 +23,7 @@ function baseCard(overrides: Partial<SentinelApprovalCard> = {}): SentinelApprov
     calendar_event: null,
     schedule: null,
     persona: null,
+    skill: null,
     ...overrides,
   };
 }
