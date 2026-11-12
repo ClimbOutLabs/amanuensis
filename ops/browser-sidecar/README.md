@@ -116,7 +116,9 @@ ended with the focus somewhere else. The other runs first in every frame inside 
 frames from other sites. Aman never acts inside a frame, so it stops all real input that reaches one.
 Either way the action is refused as `changed`. The frame guard is switched off only while one of the
 person's own live-view clicks or keys runs, so they can use a human check or a card form inside a frame
-by hand. A page's scripts cannot switch it off. The person's acts and Aman's own input take turns on a
+by hand. A page's scripts cannot switch it off: the key it answers to is never in any script the
+page can read, and the sidecar hands it over only through the browser's debugging channel. If any
+frame on the page cannot be checked to have its guard on, Aman's input is refused as `unchecked`. The person's acts and Aman's own input take turns on a
 tab, so the frame guard is always on while Aman's input runs. A guard that could only be set up after the page's
 scripts ran is not trusted, so the action is refused as `unchecked`.
 

@@ -118,6 +118,46 @@ async function withWorld(run) {
           window.addEventListener(type, () => fetch('/reached', { method: 'POST', body: type }));
         }
       </script>`),
+    // A widget that hunts for its guard's key: in the switch's own source, and in anything the page's
+    // built-ins are handed. Whatever it finds it tries on the switch, and says so if the guard went off.
+    '/tricky-widget': html(`<input id="w" oninput="fetch('/typed', { method: 'POST', body: this.value })">
+      <script>
+        const found = new Set();
+        const tryAll = () => {
+          for (const key of found) {
+            if (window.amanFrameGuard?.(key, false) === true) fetch('/leaked', { method: 'POST' });
+          }
+        };
+        // The moment the focus arrives, before the next key does.
+        window.addEventListener('focus', () => {
+          tryAll();
+          document.getElementById('w').focus();
+        });
+        const hunt = value => {
+          for (const match of String(value).match(/[0-9a-f]{64}/g) ?? []) found.add(match);
+        };
+        hunt(window.amanFrameGuard?.toString());
+        const iterate = Array.prototype[Symbol.iterator];
+        Array.prototype[Symbol.iterator] = function () {
+          for (const item of Array.prototype.slice.call(this)) hunt(item);
+          return iterate.call(this);
+        };
+        const realEval = globalThis.eval;
+        globalThis.eval = code => (hunt(code), realEval(code));
+        const realParse = JSON.parse;
+        JSON.parse = (text, ...rest) => (hunt(text), realParse(text, ...rest));
+        for (const name of ['call', 'apply']) {
+          const real = Function.prototype[name];
+          Function.prototype[name] = function (...args) {
+            args.forEach(hunt);
+            return Reflect.apply(real, this, args);
+          };
+        }
+        setInterval(tryAll, 5);
+        for (const type of ['keydown', 'pointerup', 'mouseup']) {
+          window.addEventListener(type, () => fetch('/reached', { method: 'POST', body: type }));
+        }
+      </script>`),
     '*': html('<h1>Mail inbox</h1><p>Your private messages</p>'),
   });
   const siteA = await fixture({
@@ -345,6 +385,11 @@ async function withWorld(run) {
       <button id="swap" onpointerdown="document.getElementById('trap').hidden = false">Swap on press</button>
       <div id="trap" hidden style="position: fixed; inset: 0; background: red"
         onclick="fetch('/stray', { method: 'POST' })"></div>`),
+    // A field whose page moves the focus into a frame while it is typed in; the frame's widget hunts for the guard's key.
+    '/tricky-frames': html(`<h1>Frames</h1>
+      <label for="q">Search</label>
+      <input id="q" onkeydown="document.getElementById('side').focus()">
+      <iframe id="side" src="http://site-b.test/tricky-widget" style="width: 12rem; height: 5rem"></iframe>`),
     // A page with another site's widget in a frame at its top corner, as a human check sits on a page.
     '/widget-frame': html(`<iframe src="http://site-b.test/widget"
       style="position: fixed; left: 0; top: 0; width: 12rem; height: 8rem; border: 0"></iframe>`),
@@ -1487,6 +1532,34 @@ test(
 );
 
 test(
+  "a frame cannot find its guard's key, in the switch or on its way, so Aman's typing never reaches it",
+  { skip: !browsersAvailable },
+  async () => {
+    await withWorld(async ({ sidecar, siteB }) => {
+      const where = { owner: 'owner-1', tab: 'chat-1' };
+      const opened = await sidecar.open({ ...where, url: 'http://site-a.test/tricky-frames' });
+      await settle();
+      // The person's own acts switch every frame's guard off and on again, so the key travels.
+      for (const key of ['Shift', 'Shift']) {
+        assert.deepEqual(await sidecar.liveInput({ ...where, input: { kind: 'key', key } }), { status: 'ok' });
+      }
+      await settle();
+      const ref = refFor(opened.text, 'Search');
+      assert.deepEqual(await sidecar.type({ ...where, ref, expect: await checked(sidecar, ref), text: 'hello' }), {
+        status: 'refused',
+        reason: 'changed',
+      });
+      await settle();
+      assert.deepEqual(
+        siteB.hits.filter(hit => hit.method === 'POST').map(hit => hit.url),
+        [],
+        'the frame never switched its guard off, and none of the typing reached it',
+      );
+    });
+  },
+);
+
+test(
   "typing that the page moves into another site's frame is stopped there and refused",
   { skip: !browsersAvailable },
   async () => {
@@ -1692,6 +1765,7 @@ async function fakeSidecar() {
     goto: async () => undefined,
     exposeBinding: async () => undefined,
     addInitScript: async () => undefined,
+    context: () => context,
     screenshot: async options => {
       if (shotsToFail > 0) {
         shotsToFail -= 1;
@@ -1768,7 +1842,13 @@ async function fakeSidecar() {
     on: () => undefined,
     route: async () => undefined,
     newPage: async () => page,
-    newCDPSession: async () => cdp,
+    // The page has no frames from another site, so only the page itself gets a session.
+    newCDPSession: async target => {
+      if (target !== page) {
+        throw new Error('not a frame from another site');
+      }
+      return cdp;
+    },
     close: async () => undefined,
   };
   // The gateway the sidecar asks before opening: every address is fine, and stays the address it was.

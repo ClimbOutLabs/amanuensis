@@ -236,7 +236,7 @@ async function prepareReadWorld(tab) {
   tab.cdp.on('Runtime.executionContextsCleared', () => {
     tab.readWorld = undefined;
   });
-  await tab.cdp.send('Runtime.enable');
+  await trackFrameWorlds({ session: tab.cdp, worlds: tab.frameWorlds, isTop: frameId => frameId === mainFrameId });
   // Scripts for new documents run only for a session with the Page domain on.
   await tab.cdp.send('Page.enable');
   await tab.cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: GUARD_SCRIPT, worldName: READ_WORLD });
@@ -334,8 +334,10 @@ const FRAME_INPUT_BINDING = 'amanFrameInput';
 
 /**
  * The name of each frame guard's switch, and the key it answers to. The key is made fresh for each run
- * of the sidecar and lives only inside the guard, so a page's scripts can call the switch but never
- * turn the guard off.
+ * of the sidecar. In the frame it is held only in the guard's closure, never in the text of a function
+ * a script can reach, and the sidecar hands it over only through the browser's debugging channel,
+ * never through any of the page's own JavaScript. So a frame's scripts can call the switch but never
+ * turn their guard off.
  */
 const FRAME_GUARD_SWITCH = 'amanFrameGuard';
 const FRAME_GUARD_KEY = randomBytes(32).toString('hex');
@@ -355,12 +357,15 @@ const FRAME_GUARD_SCRIPT = `(() => {
   const stop = Event.prototype.stopImmediatePropagation;
   const cancel = Event.prototype.preventDefault;
   const report = window.${FRAME_INPUT_BINDING};
+  const secret = ${JSON.stringify(FRAME_GUARD_KEY)};
   let on = true;
   Object.defineProperty(window, ${JSON.stringify(FRAME_GUARD_SWITCH)}, {
     value: (key, wanted) => {
-      if (key === ${JSON.stringify(FRAME_GUARD_KEY)}) {
-        on = wanted === true;
+      if (key !== secret) {
+        return false;
       }
+      on = wanted === true;
+      return true;
     },
     writable: false,
     enumerable: false,
@@ -474,6 +479,10 @@ function createTab({ page, cdp }) {
     refusedRedirect: undefined,
     movedTo: undefined,
     frameInput: false,
+    // The page's own script world in each frame but the top one, by context id, with the frame's origin.
+    frameWorlds: new Map(),
+    // The frames from other sites, each with its own CDP session and its script worlds.
+    remoteFrames: new Map(),
     // The page's last open file picker, waiting for the person to upload a file from the live view.
     fileChooser: undefined,
     // The live view's acts, run one at a time in the order they arrived, so typed keys never swap.
@@ -504,20 +513,81 @@ async function capturePage(page, options) {
 }
 
 /**
- * Turns the guard in every frame of the tab on or off. A frame that goes away meanwhile is skipped:
- * whatever loads in its place starts with its guard on.
+ * Keeps the ids of the page's own script worlds in every frame but the top one that a CDP session
+ * reaches, so a frame's guard can be switched there without going through any of the page's scripts.
+ */
+async function trackFrameWorlds({ session, worlds, isTop }) {
+  session.on('Runtime.executionContextCreated', ({ context }) => {
+    if (context.auxData?.isDefault === true && !isTop(context.auxData.frameId)) {
+      worlds.set(context.id, context.origin);
+    }
+  });
+  session.on('Runtime.executionContextDestroyed', ({ executionContextId }) => {
+    worlds.delete(executionContextId);
+  });
+  session.on('Runtime.executionContextsCleared', () => {
+    worlds.clear();
+  });
+  await session.send('Runtime.enable');
+}
+
+/** Errors that mean a frame's script world went away while it was being switched. */
+const WORLD_GONE_ERRORS = ['Cannot find context with specified id', 'Execution context was destroyed', 'Target closed'];
+
+/**
+ * Turns the guard in every frame of the tab on or off, and says whether every frame still on the page
+ * took it. A frame from another site runs in its own process, reached through a CDP session of its
+ * own. A frame that goes away meanwhile is skipped: whatever loads in its place starts with its guard
+ * on. A frame on the page's own origin that has no guard (an empty frame made before any script ran)
+ * is the page's own, so it is not counted as a failure.
  */
 async function setFrameGuards(tab, on) {
-  await Promise.all(
-    tab.page
-      .frames()
-      .filter(frame => frame !== tab.page.mainFrame())
-      .map(frame =>
-        frame
-          .evaluate(([name, key, wanted]) => globalThis[name]?.(key, wanted), [FRAME_GUARD_SWITCH, FRAME_GUARD_KEY, on])
-          .catch(() => undefined),
-      ),
+  for (const frame of tab.page.frames()) {
+    if (frame === tab.page.mainFrame() || tab.remoteFrames.has(frame)) {
+      continue;
+    }
+    // Only a frame from another site's process gets a session; any other frame is in the page's own.
+    const session = await tab.page
+      .context()
+      .newCDPSession(frame)
+      .catch(() => undefined);
+    if (session !== undefined) {
+      const worlds = new Map();
+      tab.remoteFrames.set(frame, { session, worlds });
+      await trackFrameWorlds({ session, worlds, isTop: () => false });
+    }
+  }
+  for (const [frame, remote] of tab.remoteFrames) {
+    if (frame.isDetached()) {
+      tab.remoteFrames.delete(frame);
+      await remote.session.detach().catch(() => undefined);
+    }
+  }
+  const topOrigin = new URL(tab.page.url()).origin;
+  const targets = [
+    ...[...tab.frameWorlds].map(([id, origin]) => ({ session: tab.cdp, id, origin })),
+    ...[...tab.remoteFrames.values()].flatMap(({ session, worlds }) =>
+      [...worlds].map(([id, origin]) => ({ session, id, origin })),
+    ),
+  ];
+  const results = await Promise.all(
+    targets.map(async ({ session, id, origin }) => {
+      try {
+        const reply = await session.send('Runtime.evaluate', {
+          expression: `window[${JSON.stringify(FRAME_GUARD_SWITCH)}]?.(${JSON.stringify(FRAME_GUARD_KEY)}, ${String(on)})`,
+          contextId: id,
+          returnByValue: true,
+        });
+        if (reply.exceptionDetails !== undefined) {
+          return false;
+        }
+        return reply.result.value === true || (reply.result.value === undefined && origin === topOrigin);
+      } catch (error) {
+        return WORLD_GONE_ERRORS.some(message => String(error).includes(message));
+      }
+    }),
   );
+  return results.every(Boolean);
 }
 
 /** Live-view acts that press or type; a move or a wheel turn is not input the frame guards stop. */
@@ -1131,8 +1201,10 @@ export class BrowserSidecar {
       // Real input, so the page's controls react as they do to a person. The guards stop any of it
       // that lands outside the checked element, in this page or a frame inside it, before the page sees it.
       const sent = await inLiveOrder(tab, async () => {
-        // Every live act turns the guards back on; this covers a frame that missed that call.
-        await setFrameGuards(tab, true);
+        // Every live act turns the guards back on; this checks that each frame really took it.
+        if (!(await setFrameGuards(tab, true))) {
+          return 'unguarded';
+        }
         tab.frameInput = false;
         return realInput({ tab, result, text: rest.text });
       }).then(
@@ -1143,6 +1215,11 @@ export class BrowserSidecar {
       const strayed = await inReadWorld({ tab, expression: DISARM_SCRIPT }).catch(() => false);
       if (sent.error !== undefined) {
         throw sent.error;
+      }
+      // A frame on the page whose guard could not be checked could take this input unseen.
+      if (sent.done === 'unguarded') {
+        tab.refs.reset();
+        return { status: 'refused', reason: 'unchecked' };
       }
       if (!sent.done || strayed === true || tab.frameInput) {
         tab.refs.reset();
