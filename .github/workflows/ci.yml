@@ -589,6 +589,100 @@ jobs:
           COMMAND_EXECUTION_TEST_REDIS_URL: redis://localhost:56379
         run: pnpm test:store:postgres
 
+  # Root-level script tests. Each is small, so they run on every change. The guide's tests run in Help guide.
+  root-script-tests:
+    name: Root script tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Theme tokens
+        run: pnpm lint:theme
+
+      - name: Repository policy checks
+        run: pnpm test:repo-policy
+
+      - name: Pre-push hook
+        run: pnpm test:pre-push
+
+      - name: Chart version
+        run: pnpm test:chart-version
+
+      - name: Test mailbox
+        run: pnpm test:test-mailbox
+
+      - name: Eval sets
+        run: |
+          pnpm test:eval-tokens
+          pnpm test:eval-spaces
+
+  # AGENTS.md forbids `as T` and `x!`. Older ones are still being removed, so this reads only the
+  # lines a pull request adds; a merge queue, manual or nightly run has no base to compare with.
+  new-assertions:
+    name: No new type assertions
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      # The pull request's own head, so the diff's line numbers match the files read.
+      - name: Check out repository code
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check added lines
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: pnpm check:new-assertions --base "$BASE_SHA" --head "$HEAD_SHA"
+
+  # No dependency install: must run fast and stay green even when pnpm install fails.
+  repo-rules:
+    name: Repository layout rules
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: Check layout rules
+        run: node scripts/check-repo-rules.mjs
+
   # No dependency install: must run fast and stay green even when pnpm install fails.
   # Also runs the outside-hosts check and the nightly report's test, which need nothing installed either.
   private-data-scan:
@@ -727,6 +821,9 @@ jobs:
       - installer-shell
       - chart-checks
       - store-tests
+      - root-script-tests
+      - new-assertions
+      - repo-rules
       - private-data-scan
       - help-guide
       - feature-coverage
@@ -746,13 +843,16 @@ jobs:
           INSTALLER_SHELL: ${{ needs.installer-shell.result }}
           CHART_CHECKS: ${{ needs.chart-checks.result }}
           STORE_TESTS: ${{ needs.store-tests.result }}
+          ROOT_SCRIPT_TESTS: ${{ needs.root-script-tests.result }}
+          NEW_ASSERTIONS: ${{ needs.new-assertions.result }}
+          REPO_RULES: ${{ needs.repo-rules.result }}
           PRIVATE_DATA_SCAN: ${{ needs.private-data-scan.result }}
           HELP_GUIDE: ${{ needs.help-guide.result }}
           FEATURE_COVERAGE: ${{ needs.feature-coverage.result }}
           GENERATED_CONTRACT_DRIFT: ${{ needs.generated-contract-drift.result }}
         run: |
           ok() { [ "$1" = success ] || [ "$1" = skipped ]; }
-          echo "detect-changes=$DETECT_CHANGES migration-order=$MIGRATION_ORDER typecheck-and-build=$TYPECHECK_AND_BUILD npx-smoke=$NPX_SMOKE package-checks=$PACKAGE_CHECKS screenshots=$SCREENSHOTS installer-shell=$INSTALLER_SHELL chart-checks=$CHART_CHECKS store-tests=$STORE_TESTS private-data-scan=$PRIVATE_DATA_SCAN help-guide=$HELP_GUIDE feature-coverage=$FEATURE_COVERAGE generated-contract-drift=$GENERATED_CONTRACT_DRIFT"
+          echo "detect-changes=$DETECT_CHANGES migration-order=$MIGRATION_ORDER typecheck-and-build=$TYPECHECK_AND_BUILD npx-smoke=$NPX_SMOKE package-checks=$PACKAGE_CHECKS screenshots=$SCREENSHOTS installer-shell=$INSTALLER_SHELL chart-checks=$CHART_CHECKS store-tests=$STORE_TESTS root-script-tests=$ROOT_SCRIPT_TESTS new-assertions=$NEW_ASSERTIONS repo-rules=$REPO_RULES private-data-scan=$PRIVATE_DATA_SCAN help-guide=$HELP_GUIDE feature-coverage=$FEATURE_COVERAGE generated-contract-drift=$GENERATED_CONTRACT_DRIFT"
           [ "$DETECT_CHANGES" = success ] || exit 1
           [ "$MIGRATION_ORDER" = success ] || exit 1
           [ "$TYPECHECK_AND_BUILD" = success ] || exit 1
@@ -763,6 +863,9 @@ jobs:
           ok "$INSTALLER_SHELL" || exit 1
           ok "$CHART_CHECKS" || exit 1
           ok "$STORE_TESTS" || exit 1
+          [ "$ROOT_SCRIPT_TESTS" = success ] || exit 1
+          ok "$NEW_ASSERTIONS" || exit 1
+          [ "$REPO_RULES" = success ] || exit 1
           [ "$PRIVATE_DATA_SCAN" = success ] || exit 1
           [ "$HELP_GUIDE" = success ] || exit 1
           [ "$FEATURE_COVERAGE" = success ] || exit 1

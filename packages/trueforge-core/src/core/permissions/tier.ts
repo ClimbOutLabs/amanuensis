@@ -16,15 +16,17 @@ export const TierSchema = z.union([z.literal(1), z.literal(2), z.literal(3)]).de
 
 /** Tier 1 reason codes for a command run in the sandbox without a card. Each one is written to the activity list. */
 export const SANDBOX_COMMAND_REASON = 'sandbox_command';
-export const SANDBOX_PACKAGE_INSTALL_REASON = 'sandbox_package_install';
 export const SANDBOX_FILE_WRITE_REASON = 'sandbox_file_write';
 export const SANDBOX_RUN_CODE_REASON = 'sandbox_run_code';
 export const SANDBOX_SILENT_REASONS: ReadonlySet<string> = new Set([
   SANDBOX_COMMAND_REASON,
-  SANDBOX_PACKAGE_INSTALL_REASON,
   SANDBOX_FILE_WRITE_REASON,
   SANDBOX_RUN_CODE_REASON,
 ]);
+
+/** Tier 3 reason codes for cancelling a reminder and for pausing or resuming a schedule. Each asks every time. */
+export const REMINDER_CANCEL_REASON = 'reminder_cancel';
+export const SCHEDULE_STATUS_REASON = 'schedule_status';
 
 /** Reason code for a consequential action whose recipient or site only content the assistant read named. */
 export const CONTENT_STEERED_REASON = 'content_steered';
@@ -56,14 +58,17 @@ export const GRANT_BARRED_TIER_REASONS: ReadonlySet<string> = new Set([
   'connector_calendar_write',
   'schedule_write',
   'persona_write',
+  REMINDER_CANCEL_REASON,
+  SCHEDULE_STATUS_REASON,
   CONTENT_STEERED_REASON,
   CONNECTOR_READ_GUARD_REASON,
 ]);
 
 /**
  * Consequential actions a person may answer once for the whole chat with "Always allow this here". The chat grant
- * binds the tool and its destination, never a standing grant across chats. A send, a guest change and a steered call
- * are never among them: each of those asks every time.
+ * binds the tool and its destination, never a standing grant across chats, so it is offered only when the card
+ * names one. A send, a guest change, a steered call, and creating a schedule or a persona are never among them:
+ * each of those asks every time.
  */
 export const CHAT_GRANTABLE_CONSEQUENCE_REASONS: ReadonlySet<string> = new Set([
   'gmail_draft',
@@ -71,8 +76,6 @@ export const CHAT_GRANTABLE_CONSEQUENCE_REASONS: ReadonlySet<string> = new Set([
   'destructive_action',
   'mcp_destructive_hint',
   'mcp_open_world_hint',
-  'schedule_write',
-  'persona_write',
 ]);
 
 /**
@@ -104,6 +107,7 @@ export const AUTO_DENY_REASONS = [
   'steered_by_content',
   'tool_not_prepared',
   'unattended_run',
+  'home_assistant_refused',
 ] as const;
 export type AutoDenyReason = (typeof AUTO_DENY_REASONS)[number];
 
@@ -293,6 +297,11 @@ export interface TierDecision {
   inspection: boolean;
   /** Host of the connector the call goes to; a standing grant the user records on this ask binds to it. */
   grant_host: string | null;
+  /**
+   * Tool name a standing grant for this call is recorded under, when the grant covers a scope
+   * wider than the one tool (a Home Assistant domain, say). Null records under the tool's own name.
+   */
+  grant_tool_name: string | null;
   /** True for a private read: a sensitive path, or an argument with a path shape. Never eligible for a standing grant or chat scope. */
   secret_path_read: boolean;
   /** True for a send through the host's own Email sidecar. Steering changes the reason, never this, so the send-list step still runs. */
@@ -333,6 +342,7 @@ export function failClosedDecision(input: { reason_detail: string | null }): Tie
     shell_binding: null,
     inspection: false,
     grant_host: null,
+    grant_tool_name: null,
     secret_path_read: false,
     mail_send: false,
   };
@@ -353,6 +363,7 @@ function baseDecision(): Omit<TierDecision, 'tier' | 'reason' | 'reason_detail'>
     shell_binding: null,
     inspection: false,
     grant_host: null,
+    grant_tool_name: null,
     secret_path_read: false,
     mail_send: false,
   };
@@ -414,6 +425,7 @@ export function tier3Decision(input: {
   shell_binding?: ShellApprovalBinding | null | undefined;
   inspection?: boolean | undefined;
   grant_host?: string | null | undefined;
+  grant_tool_name?: string | null | undefined;
   secret_path_read?: boolean | undefined;
   mail_send?: boolean | undefined;
 }): TierDecision {
@@ -431,6 +443,7 @@ export function tier3Decision(input: {
     shell_binding: input.shell_binding ?? null,
     inspection: input.inspection === true,
     grant_host: input.grant_host ?? null,
+    grant_tool_name: input.grant_tool_name ?? null,
     secret_path_read: input.secret_path_read === true,
     mail_send: input.mail_send === true,
   };
