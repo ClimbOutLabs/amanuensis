@@ -1,6 +1,9 @@
 'use client';
 
-import { DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS } from '@truefoundry/trueforge-core/core/capabilities/builtins/tokenBudgetConstants';
+import {
+  DEFAULT_CONTEXT_COMPACTION_RATIO,
+  DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS,
+} from '@truefoundry/trueforge-core/core/capabilities/builtins/tokenBudgetConstants';
 
 import type { AgentInputTokensCompactionTrigger, TrueForgeAgentRuntimeConfig } from '../../server/types.js';
 import { cn } from '../lib/cn.js';
@@ -16,7 +19,8 @@ export type AgentRuntimeConfigFieldsProps = {
   showCapabilities?: boolean;
   layout?: 'compact' | 'detailed';
   /** Whether the selected model reports its context length; undefined while that is not known to the catalog. */
-  modelContextLengthKnown?: boolean;
+  /** The picked model's size limit in tokens; null when a model is picked but its limit is unknown. */
+  modelContextLength?: number | null;
   onChange: (value: TrueForgeAgentRuntimeConfig) => void;
 };
 
@@ -87,6 +91,15 @@ function applyBudgetedTools(value: TrueForgeAgentRuntimeConfig, budgetedTools: s
   };
 }
 
+/** A set size starts where Automatic would summarize, in whole thousands, so switching does not shrink it. */
+function startingCompactionSize(modelContextLength: number | null | undefined): number {
+  if (modelContextLength === null || modelContextLength === undefined) {
+    return DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS;
+  }
+  const size = Math.floor((modelContextLength * DEFAULT_CONTEXT_COMPACTION_RATIO) / 1000) * 1000;
+  return size > 0 ? size : DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS;
+}
+
 const SANDBOX_UNAVAILABLE_HINT = 'The sandbox is not available on this server';
 
 type RuntimeSwitchField = {
@@ -105,7 +118,7 @@ export function AgentRuntimeConfigFields({
   disabled = false,
   showCapabilities = true,
   layout = 'compact',
-  modelContextLengthKnown,
+  modelContextLength,
   onChange,
 }: AgentRuntimeConfigFieldsProps) {
   const capabilityFields: RuntimeSwitchField[] = [
@@ -331,7 +344,7 @@ export function AgentRuntimeConfigFields({
                   onChange={event =>
                     setCompactionTrigger(
                       event.target.value === 'set_size'
-                        ? { type: 'input_tokens', value: DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS }
+                        ? { type: 'input_tokens', value: startingCompactionSize(modelContextLength) }
                         : undefined,
                     )
                   }
@@ -340,7 +353,7 @@ export function AgentRuntimeConfigFields({
                   <option value="set_size">At a set size</option>
                 </select>
               </label>
-              {compactionTrigger === undefined && modelContextLengthKnown === false ? (
+              {compactionTrigger === undefined && modelContextLength === null ? (
                 <p className="text-text-secondary mt-1 text-xs">
                   {"This model's size limit isn't known, so Aman uses a safe default."}
                 </p>

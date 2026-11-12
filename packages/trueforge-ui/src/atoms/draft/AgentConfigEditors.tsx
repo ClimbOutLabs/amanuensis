@@ -188,8 +188,8 @@ export function AgentConfigEditors({
           open
           spec={spec}
           sandboxAvailable={sandboxAvailable}
-          modelContextLengthKnown={
-            selectedModel === undefined ? undefined : selectedModel.properties.contextLength !== undefined
+          modelContextLength={
+            selectedModel === undefined ? undefined : (selectedModel.properties.contextLength ?? null)
           }
           onChange={onChange}
           onClose={close}

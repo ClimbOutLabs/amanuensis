@@ -10,3 +10,6 @@ export const TOKEN_BUDGET_SAFETY_MARGIN = 512;
 
 /** Compaction threshold used when the model's context length is unknown. */
 export const DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS = 50 * 1000;
+
+/** Share of the model's context length a chat may fill before it is summarized. */
+export const DEFAULT_CONTEXT_COMPACTION_RATIO = 0.8;

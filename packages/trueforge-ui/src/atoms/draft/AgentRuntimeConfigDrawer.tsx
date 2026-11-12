@@ -8,7 +8,8 @@ export type AgentRuntimeConfigDrawerProps = {
   open: boolean;
   spec: AgentSpec;
   sandboxAvailable: boolean;
-  modelContextLengthKnown?: boolean;
+  /** The picked model's size limit in tokens; null when a model is picked but its limit is unknown. */
+  modelContextLength?: number | null;
   onChange: (spec: AgentSpec) => void;
   onClose: () => void;
 };
@@ -17,7 +18,7 @@ export function AgentRuntimeConfigDrawer({
   open,
   spec,
   sandboxAvailable,
-  modelContextLengthKnown,
+  modelContextLength,
   onChange,
   onClose,
 }: AgentRuntimeConfigDrawerProps) {
@@ -37,7 +38,7 @@ export function AgentRuntimeConfigDrawer({
       <AgentRuntimeEditorContent
         spec={spec}
         sandboxAvailable={sandboxAvailable}
-        modelContextLengthKnown={modelContextLengthKnown}
+        modelContextLength={modelContextLength}
         onChange={onChange}
       />
     </SideDrawer>

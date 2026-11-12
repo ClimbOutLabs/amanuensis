@@ -591,9 +591,23 @@ describe('AgentConfigEditors', () => {
       });
     });
 
-    it('starts a set size from the safe default when leaving Automatic', () => {
+    it("starts a set size where Automatic would summarize for the model's size limit", () => {
       const onChange = vi.fn();
       renderRuntime({ spec: { model: { name: 'openai/gpt' } }, onChange });
+
+      fireEvent.change(screen.getByRole('combobox', { name: 'When to summarize long chats' }), {
+        target: { value: 'set_size' },
+      });
+      // 80% of the 128,000-token limit, in whole thousands.
+      expect(onChange.mock.lastCall?.[0].config.contextManagement.compaction).toEqual({
+        enabled: true,
+        trigger: { type: 'input_tokens', value: 102_000 },
+      });
+    });
+
+    it("starts a set size from the safe default when the model's size limit is unknown", () => {
+      const onChange = vi.fn();
+      renderRuntime({ spec: { model: { name: 'openai/gpt' } }, models: [UNKNOWN_MODEL], onChange });
 
       fireEvent.change(screen.getByRole('combobox', { name: 'When to summarize long chats' }), {
         target: { value: 'set_size' },

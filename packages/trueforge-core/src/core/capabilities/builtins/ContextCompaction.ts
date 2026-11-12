@@ -36,7 +36,11 @@ import type {
 } from '../AgentContextProcessor';
 import { formatBoundRepositoryContext } from './RepositoryBindingContext';
 import { TaskChecklistRequestState, type TaskChecklistAccess } from './TaskChecklist';
-import { DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS, TOKEN_BUDGET_SAFETY_MARGIN } from './tokenBudgetConstants';
+import {
+  DEFAULT_CONTEXT_COMPACTION_RATIO,
+  DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS,
+  TOKEN_BUDGET_SAFETY_MARGIN,
+} from './tokenBudgetConstants';
 
 export const MAX_COMPACTION_TOUCHED_PATHS = 200;
 export const COMPACTION_TOUCHED_PATHS_STATE_KEY = 'tfy.context_compaction.touched_paths';
@@ -52,7 +56,6 @@ export const MAX_REJECTED_OUTPUT_PREVIEW_CHARS = 2_000;
 export const MAX_CONSECUTIVE_COMPACTION_SKIPS = 3;
 /** Unused: retained for API compatibility. The truncation fallback supersedes the skip circuit breaker. */
 export const COMPACTION_BACKOFF_TOKEN_DELTA = 10_000;
-export const DEFAULT_CONTEXT_COMPACTION_RATIO = 0.8;
 
 /** A separately configured summarizing model; its own context length bounds the summarization request. */
 export interface CompactionModel {
