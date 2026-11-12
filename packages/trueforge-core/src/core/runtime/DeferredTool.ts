@@ -279,6 +279,19 @@ export class DeferredTool extends LocalToolMCP {
     );
   }
 
+  /** What an "Always allow" grant for the tool a `call_tool` wrapper names binds to, as its own tool set reports it. */
+  resolveGrantBinding(params: CallToolRequest['params']): string | undefined {
+    if (params.name !== CALL_TOOL_NAME) {
+      return undefined;
+    }
+    const parsed = callToolSchema.safeParse(params.arguments);
+    if (!parsed.success || ALIASABLE_META_TOOL_NAMES.has(parsed.data.tool_name)) {
+      return undefined;
+    }
+    const server = this.resolveServer(parsed.data.mcp_server);
+    return server?.resolveGrantBinding?.({ name: parsed.data.tool_name, arguments: parsed.data.input });
+  }
+
   /** The connector a `call_tool` wrapper will reach right now, as its own tool set reports it. */
   resolveConnector(params: CallToolRequest['params']): ConnectorBinding | undefined {
     if (params.name !== CALL_TOOL_NAME) {

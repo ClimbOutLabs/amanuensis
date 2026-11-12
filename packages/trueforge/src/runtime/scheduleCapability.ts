@@ -1,5 +1,5 @@
 import type { CallToolRequest } from '@modelcontextprotocol/sdk/types.js';
-import type { CreatedBySubject } from '@truefoundry/trueforge-core/agent-session';
+import type { AgentSpec, CreatedBySubject } from '@truefoundry/trueforge-core/agent-session';
 import type {
   AgentCapability,
   AgentTracing,
@@ -8,6 +8,7 @@ import type {
   ScheduleStatusReview,
   SentinelHostContext,
   Tier3Schedule,
+  Tier3ScheduleTools,
 } from '@truefoundry/trueforge-core/core';
 import {
   classifyHostToolCall,
@@ -35,7 +36,7 @@ import {
 import { randomUUID } from 'node:crypto';
 import type { Logger } from 'winston';
 import { z } from 'zod';
-import type { AgentRecord } from '../db/agentStore';
+import { AgentNameConflictError, type AgentRecord } from '../db/agentStore';
 import { ScheduleNameConflictError, type IScheduleStore, type ScheduleRecord } from '../db/scheduleStore';
 import type { WithTransaction } from '../db/transaction';
 import { NameSchema } from '../schemas/common';
@@ -52,6 +53,7 @@ import {
 import { ChatAssistantUnavailableError, type ChatAssistant } from './chatAssistant';
 import { firstRunAfter, nextTriggerAfter, validateManifest } from './cron';
 import { toolsForChat } from './privateChat';
+import { specWithTools } from './scheduleTools';
 
 /** Cron day-of-week order: index 0 is Sunday. */
 const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'] as const;
@@ -64,14 +66,16 @@ export const CreateScheduleToolSchema = z
     morning_brief: z
       .boolean()
       .optional()
-      .describe('True for a morning brief. The brief instructions are filled in for you, so leave task out.'),
-    repeat: z
-      .enum(['daily', 'weekdays', 'weekly'])
-      .optional()
-      .describe('daily, weekdays (Monday to Friday), or weekly on the given days.'),
-    days: z.array(WeekdaySchema).optional().describe('Days for a weekly schedule.'),
+      .describe('True for a morning brief. Leave task out: it is filled in for you.'),
+    repeat: z.enum(['daily', 'weekdays', 'weekly']).optional().describe('weekly needs days.'),
+    days: z.array(WeekdaySchema).optional(),
     time: z.string().optional().describe('24-hour local time, like 08:00.'),
     time_zone: TimezoneSchema.optional(),
+    // Kept bare to save prompt tokens: a call without them, or with a wrong name, is answered with what to pass.
+    connectors: z.array(z.string()).optional(),
+    skills: z.array(z.string()).optional(),
+    run_code: z.boolean().optional(),
+    memory: z.boolean().optional(),
   })
   .strict();
 
@@ -104,6 +108,7 @@ type CancelReminderToolInput = z.infer<typeof CancelReminderToolSchema>;
 const APPROVED_ZONE_KEY = 'resolved_time_zone';
 const APPROVED_RUNS_AS_KEY = 'resolved_runs_as';
 const APPROVED_SCHEDULE_KEY = 'resolved_schedule_id';
+const APPROVED_TOOLS_KEY = 'resolved_tools';
 
 const NOT_APPROVED = 'Nothing was changed because the user has not approved it. Ask again if they still want it.';
 
@@ -118,7 +123,7 @@ export interface ScheduleTurnContext {
   tenant_id: string;
   /** The person in the chat; schedules are created as, listed for and changed only by them. */
   owner: CreatedBySubject;
-  /** A schedule made here always runs as this chat's own assistant. */
+  /** Who a schedule or reminder made here runs as: the chat's saved agent, or an agent made for the schedule. */
   chatAssistant: ChatAssistant;
   /** Who a saved schedule runs as, in plain words. */
   runsAs: (schedule: ScheduleRecord) => Promise<string>;
@@ -153,6 +158,18 @@ interface PreparedAsk {
 interface PreparedCreate extends PreparedAsk {
   review: Tier3Schedule;
   manifest: ScheduleManifest;
+  /** The agent to make for this schedule; null when it runs as the chat's saved agent. */
+  ownAgent: { name: string; spec: AgentSpec } | null;
+}
+
+/** What a new schedule runs with: the card's rows, and the agent setup to save when it gets its own agent. */
+interface SettledTools {
+  tools: Tier3ScheduleTools;
+  ownSpec: AgentSpec | null;
+}
+
+function namesList(names: readonly string[]): string {
+  return names.length === 0 ? 'none' : names.join(', ');
 }
 
 interface PreparedDelete extends PreparedAsk {
@@ -304,8 +321,8 @@ function plainIssues(error: z.ZodError): string {
 }
 
 /**
- * Older tool lists offered an `agent` field. A schedule always runs as this chat's assistant, so a stray one is
- * dropped and the person still gets the card.
+ * Older tool lists offered an `agent` field. The host settles who a schedule runs as, so a stray one is dropped
+ * and the person still gets the card.
  */
 function withoutRetiredAgent(params: CallToolRequest['params']): CallToolRequest['params'] {
   if (params.name !== CREATE_SCHEDULE_TOOL_NAME || params.arguments === undefined || !('agent' in params.arguments)) {
@@ -343,7 +360,7 @@ export class ScheduleToolSet extends LocalToolMCP {
       defineTool({
         name: CREATE_SCHEDULE_TOOL_NAME,
         description:
-          "The only way to make a recurring task, not a calendar event; it runs as the assistant here. For a plain reminder use set_reminder. Never say it is scheduled unless this succeeded. Ask first if how often or when is unclear. Times use the user's time zone. Morning brief: set morning_brief, not task. The user approves a card first.",
+          "The only way to make a recurring task, not a calendar event. For a plain reminder use set_reminder. Never say it is scheduled unless this succeeded. Ask first if how often or when is unclear. Times use the user's time zone. Morning brief: set morning_brief, not task. The user approves a card first.",
         schema: CreateScheduleToolSchema,
         annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
         handler: (input, approval) => this.#create({ input, approval }),
@@ -490,7 +507,100 @@ export class ScheduleToolSet extends LocalToolMCP {
     }
   }
 
-  #prepareCreate(args: Record<string, unknown>): Prepared<PreparedCreate> {
+  /**
+   * What the new schedule would run with. In a chat that runs as a saved agent that is the agent's own tools. In a
+   * plain chat the schedule gets its own agent, so the call must pick from what the person has set up.
+   */
+  async #settleTools(input: CreateScheduleToolInput): Promise<Prepared<SettledTools>> {
+    const { chatAssistant } = this.#options;
+    const maker = chatAssistant.ownAgent;
+    if (maker === null) {
+      const agent = await chatAssistant.agent();
+      const spec = agent.manifest;
+      return {
+        ok: true,
+        value: {
+          tools: {
+            editable: false,
+            agent_name: agent.name,
+            connectors: (spec.mcp_servers ?? []).map(server => ({ name: server.name, on: true })),
+            skills: (spec.skills ?? []).map(skill => ({ name: skill.name, on: true })),
+            run_code: spec.config.sandbox.enabled,
+            memory: spec.config.memory.recall_enabled,
+          },
+          ownSpec: null,
+        },
+      };
+    }
+    const available = await maker.available();
+    const choices = `Connectors: ${namesList(available.connectors)}. Skills: ${namesList(available.skills)}.`;
+    const { connectors, skills } = input;
+    if (connectors === undefined || skills === undefined) {
+      return {
+        ok: false,
+        message: `Nothing was saved yet. Call again with the connectors and skills this task needs, [] for none. ${choices} run_code and memory can be set to true or false.`,
+      };
+    }
+    const unknown = [
+      ...connectors.filter(name => !available.connectors.includes(name)),
+      ...skills.filter(name => !available.skills.includes(name)),
+    ];
+    if (unknown.length > 0) {
+      return {
+        ok: false,
+        message: `Nothing was saved because these are not set up: ${unknown.join(', ')}. Call again with names from these lists. ${choices}`,
+      };
+    }
+    const runCode = input.run_code ?? skills.length > 0;
+    if (skills.length > 0 && !runCode) {
+      return {
+        ok: false,
+        message: 'Nothing was saved because skills need run_code. Set run_code to true or pass no skills.',
+      };
+    }
+    const memory = input.memory ?? maker.spec.config.memory.recall_enabled;
+    const swapped = specWithTools({
+      spec: maker.spec,
+      tools: { connectors: [...new Set(connectors)], skills: [...new Set(skills)], sandbox_enabled: runCode },
+    });
+    if (!swapped.ok) {
+      return { ok: false, message: `Nothing was saved. ${swapped.message}` };
+    }
+    const ownSpec: AgentSpec = {
+      ...swapped.spec,
+      config: { ...swapped.spec.config, memory: { ...swapped.spec.config.memory, recall_enabled: memory } },
+    };
+    const problem = await maker.problemWith(ownSpec);
+    if (problem !== null) {
+      return {
+        ok: false,
+        message: `Nothing was saved because these choices cannot run: ${problem}. Change the connectors, skills or run_code and try again.`,
+      };
+    }
+    const agentName = await maker.freeName(input.name);
+    if (agentName === null) {
+      return {
+        ok: false,
+        message: `Nothing was saved because too many agents are named like "${input.name}". Try again with another name.`,
+      };
+    }
+    return {
+      ok: true,
+      value: {
+        tools: {
+          editable: true,
+          agent_name: agentName,
+          connectors: available.connectors.map(name => ({ name, on: connectors.includes(name) })),
+          skills: available.skills.map(name => ({ name, on: skills.includes(name) })),
+          run_code: runCode,
+          memory,
+        },
+        ownSpec,
+      },
+    };
+  }
+
+  async #prepareCreate(args: Record<string, unknown>): Promise<Prepared<PreparedCreate>> {
     const parsed = CreateScheduleToolSchema.safeParse(args);
     if (!parsed.success) {
       return { ok: false, message: `Nothing was saved. ${plainIssues(parsed.error)} Fix this and try again.` };
@@ -543,23 +653,36 @@ export class ScheduleToolSet extends LocalToolMCP {
       }
       throw error;
     }
+    const settled = await this.#settleTools(input);
+    if (!settled.ok) {
+      return settled;
+    }
+    const { tools, ownSpec } = settled.value;
     const { chatAssistant } = this.#options;
     return {
       ok: true,
       value: {
-        approved: { ...args, [APPROVED_ZONE_KEY]: timezone, [APPROVED_RUNS_AS_KEY]: chatAssistant.approval_key },
+        approved: {
+          ...args,
+          [APPROVED_ZONE_KEY]: timezone,
+          [APPROVED_RUNS_AS_KEY]: chatAssistant.approval_key,
+          // The approval covers exactly the tools the card showed, so any later change asks again.
+          [APPROVED_TOOLS_KEY]: JSON.stringify(tools),
+        },
         review: {
           action: 'create',
           name: plainScheduleName(input.name),
           when: describeScheduleTiming(timing.cron),
           time_zone: timezone,
           task: manifest.task,
-          runs_as: chatAssistant.display_name,
+          runs_as: chatAssistant.display_name ?? tools.agent_name,
           next_runs: upcomingRuns({ cron: timing.cron, timezone, from: now, count: PREVIEW_RUNS }).map(at =>
             formatRunTime({ at, timezone }),
           ),
+          tools,
         },
         manifest,
+        ownAgent: ownSpec === null ? null : { name: tools.agent_name, spec: ownSpec },
       },
     };
   }
@@ -671,31 +794,52 @@ export class ScheduleToolSet extends LocalToolMCP {
     if (input.approval?.status !== 'allow') {
       return errorResult(NOT_APPROVED);
     }
-    const prepared = this.#prepareCreate(input.input);
+    const prepared = await this.#prepareCreate(input.input);
     if (!prepared.ok) {
       return errorResult(prepared.message);
     }
-    const saved = await this.#save({ name: input.input.name, manifest: prepared.value.manifest });
+    const saved = await this.#save({
+      name: input.input.name,
+      manifest: prepared.value.manifest,
+      ownAgent: prepared.value.ownAgent,
+    });
     if (!saved.ok) {
       return errorResult(saved.message);
     }
     return jsonResult({ created: await this.#summary(saved.value) });
   }
 
-  /** Saves a schedule that runs as this chat's assistant, with its first run queued. */
-  async #save(input: { name: string; manifest: ScheduleManifest }): Promise<Prepared<ScheduleRecord>> {
+  /**
+   * Saves a schedule with its first run queued. With `ownAgent` it gets its own saved agent, made in the same
+   * step so neither is left behind without the other; otherwise it runs as this chat's assistant.
+   */
+  async #save(input: {
+    name: string;
+    manifest: ScheduleManifest;
+    ownAgent: { name: string; spec: AgentSpec } | null;
+  }): Promise<Prepared<ScheduleRecord>> {
     const { chatAssistant } = this.#options;
-    let agent: AgentRecord;
-    try {
-      agent = await chatAssistant.agent();
-    } catch (error) {
-      if (error instanceof ChatAssistantUnavailableError) {
-        return { ok: false, message: error.message };
+    const maker = chatAssistant.ownAgent;
+    const { ownAgent } = input;
+    let shared: AgentRecord | undefined;
+    if (maker === null || ownAgent === null) {
+      try {
+        shared = await chatAssistant.agent();
+      } catch (error) {
+        if (error instanceof ChatAssistantUnavailableError) {
+          return { ok: false, message: error.message };
+        }
+        throw error;
       }
-      throw error;
     }
     try {
       const schedule = await this.#options.withTransaction(async transaction => {
+        const agent =
+          shared ??
+          (maker !== null && ownAgent !== null ? await maker.create({ ...ownAgent, transaction }) : undefined);
+        if (agent === undefined) {
+          throw new ChatAssistantUnavailableError();
+        }
         const result = await this.#options.store.createScheduleAndRun(
           {
             tenant_id: this.#options.tenant_id,
@@ -713,6 +857,12 @@ export class ScheduleToolSet extends LocalToolMCP {
       });
       return { ok: true, value: schedule };
     } catch (error) {
+      if (error instanceof AgentNameConflictError) {
+        return {
+          ok: false,
+          message: 'Nothing was saved because the agent name was taken just now. Try again.',
+        };
+      }
       if (error instanceof ScheduleNameConflictError) {
         return {
           ok: false,
@@ -819,7 +969,11 @@ export class ScheduleToolSet extends LocalToolMCP {
     if (!prepared.ok) {
       return errorResult(prepared.message);
     }
-    const saved = await this.#save({ name: `reminder-${randomUUID().slice(0, 8)}`, manifest: prepared.value.manifest });
+    const saved = await this.#save({
+      name: `reminder-${randomUUID().slice(0, 8)}`,
+      manifest: prepared.value.manifest,
+      ownAgent: null,
+    });
     if (!saved.ok) {
       return errorResult(saved.message);
     }

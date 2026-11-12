@@ -1,8 +1,14 @@
 import { AgentSpecSchema, type AgentSpec } from '@truefoundry/trueforge-core/agent-session';
+import { HTTPException } from 'hono/http-exception';
 import type { AgentRecord } from '../db/agentStore';
+import type { IMcpServerStore } from '../db/mcpServerStore';
+import type { IModelProviderStore } from '../db/modelProviderStore';
+import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
 import type { ScheduleRecord } from '../db/scheduleStore';
+import type { ISkillStore } from '../db/skillStore';
 import type { ScheduleTools, UpdateScheduleToolsRequest } from '../schemas/schedule';
-import { isChatAssistantAgent } from './chatAssistant';
+import { isChatAssistantAgent, type ScheduleAgentChoices } from './chatAssistant';
+import { validateAgentSpec } from './sessionResources';
 
 /** The tools a schedule runs with, read from the agent it is bound to. */
 export function scheduleToolsOf({ schedule, agent }: { schedule: ScheduleRecord; agent: AgentRecord }): ScheduleTools {
@@ -40,4 +46,42 @@ export function specWithTools({
     return { ok: false, message: 'These tools could not be saved. Check the connectors and skills, then try again.' };
   }
   return { ok: true, spec: parsed.data };
+}
+
+/** The connectors and skills a person may give a schedule made in a chat, and the check any saved agent passes. */
+export function scheduleAgentChoices(input: {
+  tenant_id: string;
+  modelProviderStore: IModelProviderStore;
+  mcpServerStore: IMcpServerStore;
+  skillStore: ISkillStore;
+  sandboxProviderStore: ISandboxProviderStore;
+  searchProviderPresetNames: readonly string[];
+}): ScheduleAgentChoices {
+  const { tenant_id } = input;
+  return {
+    available: async () => {
+      const [servers, skills] = await Promise.all([
+        input.mcpServerStore.listServers({ tenant_id, names: undefined }),
+        input.skillStore.listSkills({ tenant_id, names: undefined }),
+      ]);
+      return {
+        // The memory provider is host-owned and never offered as a choice.
+        connectors: servers
+          .filter(server => !(server.manifest.type === 'remote' && server.manifest.memory_provider === true))
+          .map(server => server.name),
+        skills: skills.map(skill => skill.name),
+      };
+    },
+    problemWith: async spec => {
+      try {
+        await validateAgentSpec({ ...input, spec });
+        return null;
+      } catch (error) {
+        if (error instanceof HTTPException && error.status === 422) {
+          return error.message;
+        }
+        throw error;
+      }
+    },
+  };
 }
