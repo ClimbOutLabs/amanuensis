@@ -13,6 +13,8 @@ export * from "./personalization/client/requests/index.js";
 export * as personalization from "./personalization/index.js";
 export * from "./personas/client/requests/index.js";
 export * as personas from "./personas/index.js";
+export * from "./reach/client/requests/index.js";
+export * as reach from "./reach/index.js";
 export * from "./repositories/client/requests/index.js";
 export * as repositories from "./repositories/index.js";
 export * from "./repositoryCommandProposals/client/requests/index.js";

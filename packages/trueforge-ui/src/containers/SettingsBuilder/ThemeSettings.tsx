@@ -3,9 +3,10 @@
 import { cn } from '@/atoms/lib/cn.js';
 import { Switch } from '@/atoms/primitives/Switch.js';
 import { VoiceInputSettings, VoiceReplySettings } from '@/components/VoiceReplySettings.js';
-import { useTheme } from '@/theme/ThemeProvider.js';
+import { useOptionalResolvedThemeTokens, useTheme } from '@/theme/ThemeProvider.js';
 import { PRESETS } from '@/theme/presets/index.js';
 import { THEME_PRESET_IDS, type ThemePreset } from '@/theme/types.js';
+import { CHAT_FONT_SIZES, chatFontSizeStyle, useChatFontSize } from '@/utils/chatFontSizePreference.js';
 import { useModelUsageVisible } from '@/utils/modelUsageDisplayPreference.js';
 
 /** Display metadata for each theme preset. The picker order comes from THEME_PRESET_IDS. */
@@ -32,13 +33,15 @@ function PresetSwatches({ preset, mode }: { preset: ThemePreset; mode: 'light' |
 const ThemeSettings = () => {
   const { preset, setPreset, mode, preference, setTheme, isDark } = useTheme();
   const { visible: modelUsageVisible, setVisible: setModelUsageVisible } = useModelUsageVisible();
+  const { size: chatFontSize, setSize: setChatFontSize } = useChatFontSize();
+  const themeTokens = useOptionalResolvedThemeTokens();
 
   return (
     <div className="flex flex-col gap-6">
       <div>
         <h2 className="text-base font-semibold text-text-primary">Appearance</h2>
         <p className="mt-1 text-sm text-text-secondary">
-          Choose a color theme. Light and dark modes apply on top of the selected theme.
+          Choose a color theme and how big chat text is. Light and dark modes apply on top of the selected theme.
         </p>
       </div>
 
@@ -63,6 +66,38 @@ const ThemeSettings = () => {
             </button>
           ))}
         </div>
+      </div>
+
+      <div>
+        <h3 className="mb-2 text-sm font-medium text-text-primary">Chat text size</h3>
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Chat text size">
+          {CHAT_FONT_SIZES.map(option => (
+            <button
+              key={option.id}
+              type="button"
+              onClick={() => setChatFontSize(option.id)}
+              aria-pressed={chatFontSize === option.id}
+              className={cn(
+                'rounded-md border px-3 py-1.5 text-sm font-medium transition-colors',
+                'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring',
+                chatFontSize === option.id
+                  ? 'border-primary-button-bg bg-primary-button-bg text-primary-button-text'
+                  : 'border-border bg-secondary-bg text-text-secondary hover:text-text-primary',
+              )}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+        <p className="mt-2 text-xs text-text-secondary">
+          How big the words are in your chats, including the box where you write. The rest of the app keeps its size.
+        </p>
+        <p
+          className="mt-2 rounded-lg border border-border bg-card-bg p-3 text-base text-text-primary"
+          style={chatFontSizeStyle(chatFontSize, themeTokens)}
+        >
+          This is how chat messages will look.
+        </p>
       </div>
 
       <div>

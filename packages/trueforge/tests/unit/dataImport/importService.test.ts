@@ -28,6 +28,7 @@ import type { KnowledgeEmbedder } from '../../../src/dataImport/knowledgeImport'
 import { EXPIRED_APPROVAL_NOTICE } from '../../../src/dataImport/sessionRestore';
 import { DeliveryStore } from '../../../src/db/deliveryStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
+import { ReachSettingsStore } from '../../../src/db/reachSettingsStore';
 import { SentinelAuditStore } from '../../../src/db/sentinelAuditStore';
 import type { SessionCustom, TurnCustom } from '../../../src/db/sessionCustom';
 import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgentStore';
@@ -101,6 +102,7 @@ async function makeInstance(label: string): Promise<Instance> {
     sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
     auditStore: new SentinelAuditStore(db),
     deliveryStore: new DeliveryStore(db),
+    reachSettingsStore: new ReachSettingsStore(db),
     turnArtifactStore: new SqliteTurnArtifactStore(db),
     mcpServerStore: new SqliteMcpServerStore(db),
   };
@@ -138,6 +140,7 @@ function importDeps(instance: Instance, memoryTarget?: MemoryImportTarget): Data
     turnArtifactStore: instance.stores.turnArtifactStore,
     auditStore: instance.stores.auditStore,
     deliveryStore: instance.stores.deliveryStore,
+    reachSettingsStore: instance.stores.reachSettingsStore,
     mcpServerStore: instance.stores.mcpServerStore,
     agentStore: instance.stores.agentStore,
     mcpCatalog: McpCatalog.loadShipped(),
@@ -230,8 +233,8 @@ describe('runDataImport', () => {
           'Good to know:',
           '  • Connectors (dcr-connector, header-connector, plain-connector) come without an agent. Attach them on the Agents page.',
           '  • Chats keep their dates and totals. Personas, spaces, folders and schedules show the time of the import.',
-          '  • Approvals given for one chat only do not carry over.',
-          '  • 3 past permission decisions came along.',
+          "  • 'Approve for this chat' choices do not carry over.",
+          '  • Your permission history came along, with 3 past choices in it.',
           '  • 1 item from your feed came along.',
           '  • Not brought over: model keys, connector sign-ins, your own skills.',
           '    Add your model again and sign in to your connectors.',
@@ -488,7 +491,7 @@ describe('runDataImport', () => {
         (caught: unknown) => caught,
       );
       expect(error).toBeInstanceOf(DataImportError);
-      expect(error instanceof Error && error.message).toContain('missing its sessions/0001.json section');
+      expect(error instanceof Error && error.message).toContain('missing the part that holds your chats');
     } finally {
       await source.close();
       await target.close();
@@ -507,6 +510,28 @@ describe('runDataImport', () => {
       );
       expect(error).toBeInstanceOf(DataImportError);
       expect(error).toMatchObject({ status: 400 });
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('names the rejected part and why, in plain words, never its file name or a machine code', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-rejected');
+    try {
+      const broken = await repack(archive, entries => {
+        entries.set('personas.json', Buffer.from('[42]'));
+      });
+      const error: unknown = await runDataImport(importDeps(target), importRequest(broken)).catch(
+        (caught: unknown) => caught,
+      );
+      expect(error).toBeInstanceOf(DataImportError);
+      const message = error instanceof Error ? error.message : '';
+      expect(message).toContain('The part of this export that holds your personas could not be read');
+      expect(message).toContain('Export again from the Aman it came from, then import the new file.');
+      expect(message).not.toContain('personas.json');
+      expect(message).not.toContain('invalid_type');
     } finally {
       await source.close();
       await target.close();
@@ -2934,7 +2959,7 @@ describe('runDataImport keeps permission history and persona choices', () => {
           .reverse()
           .map(activation => [activation.id, activation.persona_id, activation.source]),
       );
-      expect(result.summary).toContain('3 past permission decisions came along.');
+      expect(result.summary).toContain('Your permission history came along, with 3 past choices in it.');
     } finally {
       await source.close();
       await target.close();
@@ -2958,7 +2983,7 @@ describe('runDataImport keeps permission history and persona choices', () => {
       expect(
         await target.stores.auditStore.listOwned({ tenant_id: TENANT, created_by: 'bob', limit: 10, offset: 0 }),
       ).toEqual([]);
-      expect(result.summary).not.toContain('past permission decisions');
+      expect(result.summary).not.toContain('permission history came along');
     } finally {
       await source.close();
       await target.close();
@@ -3005,6 +3030,76 @@ describe('runDataImport keeps permission history and persona choices', () => {
       const feed = await target.stores.deliveryStore.list({ tenant_id: TENANT, created_by: 'bob', limit: 10 });
       expect(feed.deliveries.map(item => item.text)).toEqual(['Call the dentist']);
       expect(result.summary).toContain('1 item from your feed came along.');
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('carries Reach me settings, and brings texts and calls in switched off', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-reach');
+    try {
+      const entries = new Map(readZipEntries(archive).map(entry => [entry.name, entry.data]));
+      const rows = listAt(parseJson(entries.get('reach.json'), 'reach.json'), 'reach.json');
+      expect(rows).toHaveLength(1);
+      expect(recordAt(recordAt(rows[0], 'row')['channels'], 'channels')['calls']).toBe(true);
+
+      await runDataImport(importDeps(target), importRequest(archive));
+      const imported = await target.stores.reachSettingsStore.get({ tenant_id: TENANT, created_by: 'bob' });
+      expect(imported).toMatchObject({
+        channels: { texts: false, calls: false },
+        call_kinds: ['travel'],
+        max_nudges_per_day: 3,
+        timezone: 'Europe/Paris',
+      });
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('brings the background checks in switched off, from an export made before the switch and from one with it on', async () => {
+    const { source, archive } = await seededArchive();
+    try {
+      const withSwitch = (noticing_on: boolean | undefined) =>
+        repack(archive, entries => {
+          const rows = listAt(parseJson(entries.get('reach.json'), 'reach.json'), 'reach.json').map(row => {
+            const { noticing_on: _dropped, ...rest } = recordAt(row, 'row');
+            return noticing_on === undefined ? rest : { ...rest, noticing_on };
+          });
+          entries.set('reach.json', Buffer.from(JSON.stringify(rows), 'utf8'));
+        });
+      for (const [name, value] of [
+        ['target-reach-before-switch', undefined],
+        ['target-reach-switch-on', true],
+      ] as const) {
+        const target = await makeInstance(name);
+        try {
+          await runDataImport(importDeps(target), importRequest(await withSwitch(value)));
+          const imported = await target.stores.reachSettingsStore.get({ tenant_id: TENANT, created_by: 'bob' });
+          expect(imported).toMatchObject({ noticing_on: false, max_nudges_per_day: 3 });
+        } finally {
+          await target.close();
+        }
+      }
+    } finally {
+      await source.close();
+    }
+  });
+
+  it('still imports an export made before Reach me settings existed, leaving the person on the quiet defaults', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-no-reach');
+    try {
+      const older = await repack(archive, entries => {
+        entries.delete('reach.json');
+      });
+      const result = await runDataImport(importDeps(target), importRequest(older));
+      expect(result.chats).toBe(3);
+      await expect(
+        target.stores.reachSettingsStore.get({ tenant_id: TENANT, created_by: 'bob' }),
+      ).resolves.toBeUndefined();
     } finally {
       await source.close();
       await target.close();
@@ -4540,7 +4635,7 @@ describe('runDataImport tells the person everything it left out', () => {
           '',
           'Good to know:',
           '  • Chats keep their dates and totals. Personas, spaces, folders and schedules show the time of the import.',
-          '  • Approvals given for one chat only do not carry over.',
+          "  • 'Approve for this chat' choices do not carry over.",
           '  • Not brought over: model keys, connector sign-ins, your own skills.',
           '    Add your model again and sign in to your connectors.',
           '  • Permissions start fresh, so each tool will ask again.',
