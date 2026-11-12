@@ -232,11 +232,12 @@ Prettier and ESLint run as pre-commit hooks via husky + lint-staged.
 
 1. Fork (or branch) and create a topic branch: `git checkout -b my-fix`.
 2. Make your change, with tests where it makes sense. Do not commit generated OpenAPI/SDK output (forks: source only; `main` regenerates after merge).
-3. Make sure `pnpm build`, `pnpm test`, `pnpm typecheck`, `pnpm lint:ci`, and `pnpm format:check` pass - CI runs exactly these.
+3. Make sure `pnpm build`, `pnpm test`, `pnpm typecheck`, `pnpm lint:ci`, and `pnpm format:check` pass. CI also runs the root script tests (`pnpm test:repo-policy`, `pnpm lint:theme` and the other root `test:*` scripts), the layout rules (`pnpm check:repo-rules`), a check that the PR adds no `as T` or non-null `!` assertions (`pnpm check:new-assertions`), and, when `installer/` changes, `pnpm lint:installer` and `pnpm test:installer`.
 4. If the PR changes a screen people see, update the help topic that covers it under `packages/trueforge/guide/topics`. When no topic needs to change, add the label `help: no change needed` and say why in the PR. The **Help changed with screens** check enforces this.
 5. Keep PRs focused and reasonably small; describe **what** changed and **why** in the description.
-6. Open the PR. The maintainer will review it; squash-merge is the norm.
-7. **Please avoid rebasing or force-pushing once a maintainer has started reviewing.** It can make iterative reviewing harder. To update your branch, merge `main` instead. We squash-merge at the end, so messy in-PR history is fine.
+6. Keep the description, commit messages and added lines free of AI-tool attribution: no generated-by footers, no AI `Co-Authored-By` or session trailers, and no links to private assistant workspaces. Leave out privacy or license checklists too; CI checks dependency licenses. The **PR hygiene** check fails on any of these and runs again when you edit the description.
+7. Open the PR. The maintainer will review it; squash-merge is the norm.
+8. **Please avoid rebasing or force-pushing once a maintainer has started reviewing.** It can make iterative reviewing harder. To update your branch, merge `main` instead. We squash-merge at the end, so messy in-PR history is fine.
 
 ## Nightly run
 

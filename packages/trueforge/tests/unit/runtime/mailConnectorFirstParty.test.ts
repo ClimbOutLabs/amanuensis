@@ -109,7 +109,7 @@ describe('the Email connector on the real tool route', () => {
       true,
     );
     expect(send.is_approval_required).toBe(true);
-    // A send asks every time: its card never offers "Always allow this here".
+    // A send asks every time: its card never offers "Always allow in this chat".
     expect(allowsChatApproval(send)).toBe(false);
     expect(allowsToolGrant(send)).toBe(false);
   }
