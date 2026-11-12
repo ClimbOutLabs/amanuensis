@@ -122,7 +122,8 @@ describe('mail-email entrypoint wrapper', () => {
   it('restarts the server with the saved account when the account file changes', async () => {
     startWrapper();
     await eventually(async () => (await readOrEmpty(status)) !== '');
-    expect(await readOrEmpty(envLog)).toContain('addr:unset');
+    // The hash is written once the server is launched, which may not have logged its account yet.
+    await eventually(async () => (await readOrEmpty(envLog)).includes('addr:unset'));
     await writeFile(
       accountFile,
       [
