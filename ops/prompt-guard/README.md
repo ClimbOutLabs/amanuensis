@@ -165,3 +165,7 @@ benchmark and its standard-library runner live in
 [`evaluation/`](./evaluation/); it takes `--url` so it can be pointed at
 either backend. The benchmark result and provenance decision are recorded in
 the ADR; generated timing output is intentionally not checked into Git.
+
+## Tests
+
+`pnpm test:prompt-guard` (from the repository root, and in CI) runs the unit tests. They use a stand-in scorer, so no model files are needed.

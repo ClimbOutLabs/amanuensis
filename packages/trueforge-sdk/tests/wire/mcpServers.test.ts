@@ -331,6 +331,49 @@ describe("McpServersClient", () => {
         }).rejects.toThrow(TrueForgeTypes.NotFoundError);
     });
 
+    test("home_assistant_check (1)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { data: { entity_count: 1, status: "ok", tool_count: 1 } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/mcp-servers/name/home-assistant-check")
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        const response = await client.mcpServers.homeAssistantCheck("name");
+        expect(response).toEqual({
+            data: {
+                entityCount: 1,
+                status: "ok",
+                toolCount: 1,
+            },
+        });
+    });
+
+    test("home_assistant_check (2)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .post("/api/v1/mcp-servers/name/home-assistant-check")
+            .respondWith()
+            .statusCode(404)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.mcpServers.homeAssistantCheck("name");
+        }).rejects.toThrow(TrueForgeTypes.NotFoundError);
+    });
+
     test("memory_check (1)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });

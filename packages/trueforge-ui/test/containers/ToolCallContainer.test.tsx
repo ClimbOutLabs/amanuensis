@@ -763,7 +763,7 @@ describe('ToolCallContainer', () => {
     );
 
     expectNewCardOnly();
-    expect(screen.getByRole('button', { name: 'Always allow this here' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Always allow in this chat' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Allow' })).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
     expect(respondToToolApproval).toHaveBeenCalledWith(
@@ -838,7 +838,7 @@ describe('ToolCallContainer', () => {
     );
   });
 
-  it('preserves the chat scope option when Always allow this here is clicked', () => {
+  it('preserves the chat scope option when Always allow in this chat is clicked', () => {
     respondToToolApproval.mockClear();
     const onRespondToToolApproval = vi.fn();
     renderPendingApprovalMessage(
@@ -863,7 +863,7 @@ describe('ToolCallContainer', () => {
       { onRespondToToolApproval },
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Always allow this here' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Always allow in this chat' }));
     expect(respondToToolApproval).toHaveBeenCalledWith(
       expect.objectContaining({ approvalId: 'approval-1', approved: true, optionId: 'allow-chat' }),
     );
@@ -896,7 +896,7 @@ describe('ToolCallContainer', () => {
     expect(screen.queryByText('Execution details')).not.toBeInTheDocument();
     expectNewCardOnly();
     expect(screen.getByRole('button', { name: 'Allow' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Always allow this here' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Always allow in this chat' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Not now' })).toBeInTheDocument();
   });
 
@@ -1079,6 +1079,7 @@ describe('ToolCallContainer', () => {
         calendar_event: null,
         schedule: null,
         persona: null,
+        skill: null,
       });
       const approval = (toolCallId: string, host: string): SentinelApprovalInfo => ({
         toolCallId,
@@ -1174,6 +1175,7 @@ describe('ToolCallContainer: held search request', () => {
       calendar_event: null,
       schedule: null,
       persona: null,
+      skill: null,
     };
     const info: SentinelApprovalInfo = { toolCallId: 'search-1', tier: 3, card, eventId: null, threadId: null };
     const api: SentinelApi = {

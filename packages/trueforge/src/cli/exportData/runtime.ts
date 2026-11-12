@@ -64,6 +64,7 @@ async function buildSession<TTransaction>({
         source_id: undefined,
         folder_id: undefined,
         no_folder: false,
+        include_private: false,
       });
       for (const session of page.data) {
         const { subject_id: userId, subject_display_name: displayName } = session.created_by_subject;
@@ -131,6 +132,7 @@ async function buildSession<TTransaction>({
           sentinelSettingsStore: stores.sentinelSettingsStore,
           auditStore: stores.auditStore,
           deliveryStore: stores.deliveryStore,
+          reachSettingsStore: stores.reachSettingsStore,
           turnArtifactStore: stores.turnArtifactStore,
           mcpServerStore: stores.mcpServerStore,
           listAgents: () => listUserAgents(userId),
@@ -188,6 +190,7 @@ export async function openExportDataSession({ migrate }: { migrate: boolean }): 
     poolMax: configuration.DATABASE_POOL_MAX,
     statementTimeoutMs: configuration.POSTGRES_STATEMENT_TIMEOUT_MS,
     idleInTransactionSessionTimeoutMs: configuration.POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS,
+    connectionTimeoutMs: configuration.POSTGRES_CONNECT_TIMEOUT_MS,
     migrate,
   });
   return buildSession({ stores, signInOffUserId });

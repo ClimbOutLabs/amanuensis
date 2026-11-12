@@ -65,7 +65,7 @@ function propertyMap(objectLiteral) {
 }
 
 /** Reads the Tour cards from the card table in tourPrompts.ts source, without running the UI. */
-function readTour(source, fileName) {
+export function readTour(source, fileName) {
   const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const capabilityKeys = new Set();
   const declarations = new Map();
@@ -144,7 +144,10 @@ function capabilityList(node, where) {
   return node.elements.map(element => literalText(element, where));
 }
 
-/** Parses the `---` front matter block: id, title and a comma list of Tour cards the page covers. */
+/**
+ * Parses the `---` front matter block: id, title and a comma list of what the page covers. A bare
+ * word is a Tour card key; a `kind:name` entry names another surface, checked by check-help-coverage.mjs.
+ */
 function parseTopic(text, fileName) {
   const match = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/.exec(text);
   if (match === null) {
@@ -173,7 +176,7 @@ function parseTopic(text, fileName) {
   return { id, title, covers, body };
 }
 
-async function readTopics(topicsDir) {
+export async function readTopics(topicsDir) {
   const names = (await readdir(topicsDir)).filter(name => name.endsWith('.md')).sort();
   const topics = [];
   for (const name of names) {
@@ -299,7 +302,7 @@ function chunkDocsBody(body) {
  * it came from, so an answer built on it can carry the link. Docs entries cover
  * no Tour cards; the coverage check stays about the hand-written pages.
  */
-async function readDocs(docsDir) {
+export async function readDocs(docsDir) {
   let names;
   try {
     names = (await readdir(docsDir)).filter(name => name.endsWith('.mdx')).sort();
@@ -352,6 +355,11 @@ async function readRequiredCards(requiredCardsPath) {
   return parsed;
 }
 
+/** A cover with a `kind:` prefix names a surface other than a Tour card. */
+export function isTourCardCover(cover) {
+  return !cover.includes(':');
+}
+
 /**
  * Fails on a broken page or a required card with no page. Returns the Tour cards
  * that have no page yet; those are warnings, not errors.
@@ -363,13 +371,13 @@ function checkTopics({ topics, cards, requiredKeys }) {
       throw new AmanGuideBuildError(`Duplicate guide topic id "${topic.id}".`);
     }
     ids.add(topic.id);
-    for (const key of topic.covers) {
+    for (const key of topic.covers.filter(isTourCardCover)) {
       if (!cards.has(key)) {
         throw new AmanGuideBuildError(`Guide topic "${topic.id}" names "${key}", which is not a Tour card.`);
       }
     }
   }
-  const covered = new Set(topics.flatMap(topic => topic.covers));
+  const covered = new Set(topics.flatMap(topic => topic.covers.filter(isTourCardCover)));
   for (const key of requiredKeys) {
     if (!cards.has(key)) {
       throw new AmanGuideBuildError(`required-cards.json lists "${key}", which is not a Tour card.`);

@@ -4,10 +4,10 @@ import type { SentinelApprovalCard } from './types.js';
 /** The approval choices, in the order every approval surface shows them. */
 export const APPROVAL_CHOICES = {
   approve: { label: 'Approve', hint: 'Allow this one call only.' },
-  approveForChat: { label: 'Always allow this here', hint: "Don't ask again for this kind of action in this chat." },
-  alwaysAllow: { label: 'Always allow', hint: 'Remember this for every chat.' },
+  approveForChat: { label: 'Always allow in this chat', hint: "Don't ask again for this kind of action in this chat." },
+  alwaysAllow: { label: 'Always allow everywhere', hint: 'Remember this for every chat.' },
   alwaysAllowTool: {
-    label: 'Always allow this tool',
+    label: 'Always allow everywhere',
     hint: 'Run this tool on this connector without asking, in every chat, until you remove it in settings.',
   },
   changeIt: { label: 'Change it', hint: 'Ask the persona to change this first. Nothing runs now.' },
@@ -69,4 +69,27 @@ export function offersChangeIt(card: SentinelApprovalCard): boolean {
     card.persona !== null ||
     isNewRecipientCard(card)
   );
+}
+
+/** The words of the every-chat button and its confirm step: what the answer covers and where to undo it. */
+export type AlwaysAllowConfirm = { hint: string; description: string; undo: string };
+
+/**
+ * The every-chat answer on a maps card turns on the Maps switch, so its confirm step names maps and that switch.
+ * On any other card it allows one tool of a connector, and `toolSay` says so in that card's own words.
+ */
+export function alwaysAllowConfirm(input: { covers: 'maps' | undefined; toolSay: string }): AlwaysAllowConfirm {
+  if (input.covers === 'maps') {
+    return {
+      hint: 'Show maps without asking, in every chat, until you turn it off in Settings.',
+      description:
+        'Maps will show without asking, in every chat and in scheduled runs. A map still asks if it would send something that looks like a password or key.',
+      undo: 'You can turn this off later with the Maps switch in Settings.',
+    };
+  }
+  return {
+    hint: APPROVAL_CHOICES.alwaysAllowTool.hint,
+    description: input.toolSay,
+    undo: 'You can remove this later in connector settings.',
+  };
 }

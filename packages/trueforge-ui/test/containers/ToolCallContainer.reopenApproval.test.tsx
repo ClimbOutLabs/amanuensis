@@ -196,8 +196,8 @@ describe('a reopened chat with one held search', () => {
 
       it('offers a chat-wide choice only when the server allows one, and never an always choice', async () => {
         const live = await liveChoices(search);
-        expect(live.includes('Always allow this here')).toBe(search.can_chat_allow);
-        expect(live).not.toContain('Always allow this tool');
+        expect(live.includes('Always allow in this chat')).toBe(search.can_chat_allow);
+        expect(live).not.toContain('Always allow everywhere');
         expect(live.slice(0, 3)).toEqual(['Allow', 'Change it', 'Not now']);
       });
     });

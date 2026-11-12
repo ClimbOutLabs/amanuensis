@@ -52,6 +52,28 @@ const TOOL_WORDS: ReadonlyMap<string, ToolWords> = new Map([
     'update_event',
     'calendar_write',
   ]),
+  ...words(
+    { doing: 'Checking your Google Drive files', done: 'Read your Google Drive files', thing: 'Your Drive files' },
+    ['list_files', 'read_drive_file', 'google_drive_read'],
+  ),
+  ...words(
+    {
+      doing: 'Changing your Google Drive files',
+      done: 'Changed your Google Drive files',
+      thing: 'A Google Drive change',
+    },
+    ['create_doc', 'append_rows', 'google_drive_write'],
+  ),
+  ...words({ doing: 'Searching your notes', done: 'Searched your notes', thing: 'A notes search' }, [
+    'search_notes',
+    'notes_read',
+  ]),
+  ...words({ doing: 'Reading a note', done: 'Read note', thing: 'A note' }, ['read_note']),
+  ...words({ doing: 'Adding to your notes inbox', done: 'Added to your notes inbox', thing: 'A notes inbox entry' }, [
+    'append_to_inbox',
+    'notes_write',
+  ]),
+  ...words({ doing: 'Making a note', done: 'Made a note', thing: 'A new note' }, ['create_note']),
   ...words({ doing: 'Searching the web', done: 'Searched the web', thing: 'A web search' }, [
     'tavily_search',
     'web_search',
@@ -115,9 +137,11 @@ const TOOL_WORDS: ReadonlyMap<string, ToolWords> = new Map([
     'list_schedules',
     'schedule_read',
   ]),
-  ...words({ doing: 'Changing a schedule', done: 'Changed a schedule', thing: 'A schedule change' }, [
-    'create_schedule',
+  ...words({ doing: 'Creating a schedule', done: 'Created a schedule', thing: 'A new schedule' }, ['create_schedule']),
+  ...words({ doing: 'Deleting a schedule', done: 'Deleted a schedule', thing: 'A schedule to delete' }, [
     'delete_schedule',
+  ]),
+  ...words({ doing: 'Changing a schedule', done: 'Changed a schedule', thing: 'A schedule change' }, [
     'pause_schedule',
     'resume_schedule',
     'schedule_write',
@@ -131,6 +155,11 @@ const TOOL_WORDS: ReadonlyMap<string, ToolWords> = new Map([
     'persona_switch',
   ]),
   ...words({ doing: 'Making a persona', done: 'Made a persona', thing: 'A new persona' }, ['create_persona']),
+  ...words({ doing: 'Checking the skills', done: 'Checked the skills', thing: 'The skills' }, [
+    'list_skills',
+    'skill_read',
+  ]),
+  ...words({ doing: 'Adding a skill', done: 'Added a skill', thing: 'A new skill' }, ['install_skill']),
   ...words({ doing: 'Showing a picture', done: 'Showed a picture', thing: 'A picture' }, ['show_image']),
   ...words({ doing: 'Making a report', done: 'Made a report', thing: 'A report' }, ['create_document_report']),
   ...words({ doing: 'Making a plan', done: 'Made a plan', thing: 'A plan' }, ['submit_implementation_plan']),

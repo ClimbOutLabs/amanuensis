@@ -18,15 +18,12 @@ import {
 } from '@truefoundry/trueforge-core/core/memory/memorySettingsLimits';
 import type { OAuthToken } from '../mcp/auth/types';
 import { NameSchema } from './common';
-
-const MCP_SERVER_TYPES = ['remote', 'truefoundry'] as const;
-
-/**
- * Transport/kind of MCP server.
- * `remote` — user-configured URL (standalone / local registry).
- * `truefoundry` — TrueFoundry-managed: gateway proxy URL.
- */
-export const McpServerTypeSchema = z.enum(MCP_SERVER_TYPES).openapi('MCPServerType');
+import {
+  McpSearchToolsSchema,
+  McpServerDescriptionSchema,
+  McpServerManifestAuthSchema,
+  McpServerTypeSchema,
+} from './mcpServerCommon';
 
 export const McpServerNameParamsSchema = z
   .object({ name: z.string().min(1).describe('MCP server name.') })
@@ -51,58 +48,6 @@ export const ListMcpServerToolsResponseSchema = z
       .describe('MCP `tools/list` entries, passed through verbatim from the MCP server.'),
   })
   .openapi('ListMCPServerToolsResponse');
-
-const McpServerHeaderAuthSchema = z
-  .object({
-    type: z.literal('header').describe('Authenticate with static HTTP headers.'),
-    headers: z
-      .record(z.string().min(1), z.string().min(1))
-      .refine(headers => Object.keys(headers).length > 0, {
-        message: 'must include at least one header',
-      })
-      .describe(
-        'Request headers for this MCP server. Responses are redacted; on PUT, a real value sets/rotates and a redacted value keeps the stored secret for that header name.',
-      ),
-  })
-  .strict()
-  .openapi('MCPServerHeaderAuth');
-
-/** OAuth Dynamic Client Registration — stub until authorize/token exchange is wired. */
-const McpServerDcrAuthSchema = z
-  .object({
-    type: z.literal('dcr').describe('Authenticate via OAuth Dynamic Client Registration.'),
-  })
-  .strict()
-  .openapi('MCPServerDcrAuth');
-
-const McpServerOAuthClientAuthSchema = z
-  .object({
-    type: z.literal('oauth_client').describe('Authenticate with a pre-registered OAuth client.'),
-    client_id: z.string().min(1).describe('OAuth client ID registered with the authorization server.'),
-    client_secret: z
-      .string()
-      .min(1)
-      .describe(
-        'OAuth client secret. Responses are redacted; on PUT, a real value sets/rotates and a redacted value keeps the stored secret.',
-      ),
-    scopes: z
-      .array(z.string().min(1))
-      .optional()
-      .describe('OAuth scopes to request. When absent, requests the default scopes for the server.'),
-  })
-  .strict()
-  .openapi('MCPServerOAuthClientAuth');
-
-export const McpServerManifestAuthSchema = z
-  .discriminatedUnion('type', [McpServerHeaderAuthSchema, McpServerDcrAuthSchema, McpServerOAuthClientAuthSchema])
-  .describe('Optional auth settings. Omit when the server needs no credentials.')
-  .openapi('MCPServerManifestAuth');
-
-export const McpServerDescriptionSchema = z
-  .string()
-  .trim()
-  .min(1)
-  .describe('Concise summary of what this MCP server provides.');
 
 const boundedInt = (bounds: IntegerBounds) => z.number().int().min(bounds.min).max(bounds.max).optional();
 /** As {@link boundedInt}, for a fractional bound (`recall_min_score`) rather than an integer one. */
@@ -177,9 +122,6 @@ export const MemoryProviderSettingsSchema = z
   .openapi('MemoryProviderSettings');
 
 export type MemoryProviderSettings = z.infer<typeof MemoryProviderSettingsSchema>;
-
-/** Names of the tools of a web search provider that may run without asking. */
-export const McpSearchToolsSchema = z.array(z.string().min(1).max(128)).max(16);
 
 /** User-configured remote MCP endpoint. */
 const RemoteMcpServerManifestSchema = z
@@ -330,8 +272,6 @@ export const ListMcpToolGrantsResponseSchema = z
 
 export const DeleteMcpToolGrantResponseSchema = z.object({}).openapi('DeleteMCPToolGrantResponse');
 
-export type McpServerType = z.infer<typeof McpServerTypeSchema>;
-export type McpServerManifestAuth = z.infer<typeof McpServerManifestAuthSchema>;
 export type RemoteMcpServerManifest = z.infer<typeof RemoteMcpServerManifestSchema>;
 export type TrueFoundryMcpServerManifest = z.infer<typeof TrueFoundryMcpServerManifestSchema>;
 export type McpServerManifest = z.infer<typeof McpServerManifestSchema>;

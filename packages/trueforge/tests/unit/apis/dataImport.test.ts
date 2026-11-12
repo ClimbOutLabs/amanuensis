@@ -11,6 +11,7 @@ import configuration from '../../../src/config';
 import { EXPORT_SCHEMA_VERSION } from '../../../src/dataExport/exportService';
 import { ZipStreamWriter } from '../../../src/dataExport/zipStreamWriter';
 import { DeliveryStore } from '../../../src/db/deliveryStore';
+import { ReachSettingsStore } from '../../../src/db/reachSettingsStore';
 import { SentinelAuditStore } from '../../../src/db/sentinelAuditStore';
 import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgentStore';
 import { SqliteGlobalSettingsStore } from '../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
@@ -103,6 +104,7 @@ describe('Data import route', () => {
       sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
       auditStore: new SentinelAuditStore(db),
       deliveryStore: new DeliveryStore(db),
+      reachSettingsStore: new ReachSettingsStore(db),
       turnArtifactStore: new SqliteTurnArtifactStore(db),
       mcpServerStore: new SqliteMcpServerStore(db),
     };
