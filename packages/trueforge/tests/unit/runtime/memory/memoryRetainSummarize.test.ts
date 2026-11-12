@@ -229,7 +229,7 @@ describe('submitRetain with MEMORY_SUMMARIZE=true', () => {
     expect(retain).not.toHaveBeenCalled();
   });
 
-  it('does not summarize when no summarize context is provided (the exchange is kept for the backend)', async () => {
+  it('does not summarize when no summarize context is provided (the turn is kept in full)', async () => {
     const { client, retain } = retainingClient();
     retain.mockResolvedValue({ ok: true });
 
@@ -243,7 +243,11 @@ describe('submitRetain with MEMORY_SUMMARIZE=true', () => {
     });
 
     expect(mockSummarize).not.toHaveBeenCalled();
-    expect(retain.mock.calls[0]?.[0]?.items[0]?.content).toBe('User: hi\n\nAssistant: hello');
+    const items = retain.mock.calls[0]?.[0]?.items ?? [];
+    expect(items[0]?.content).toBe('User: hi');
+    expect(items[1]?.content).toContain('reply, ');
+    expect(items[1]?.content).toContain(': hello');
+    expect(items).toHaveLength(2);
   });
 });
 

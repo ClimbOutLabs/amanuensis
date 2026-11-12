@@ -14,18 +14,17 @@ import {
 } from '../../../../src/runtime/memory/memoryRetain';
 
 describe('buildRetainItem', () => {
-  it('builds the expected item shape', () => {
+  it("builds the item for the person's words alone, never the reply", () => {
     const item = buildRetainItem({
       origin: 'user_stated',
       sessionId: 's1',
       turnId: 't1',
       userText: 'What is my wife’s name?',
-      assistantText: 'Your wife’s name is Robin.',
       completedAt: '2026-08-30T12:00:00.000Z',
     });
 
     expect(item).toEqual({
-      content: 'User: What is my wife’s name?\n\nAssistant: Your wife’s name is Robin.',
+      content: 'User: What is my wife’s name?',
       timestamp: '2026-08-30T12:00:00.000Z',
       document_id: 'aman-s1-t1',
       // The origin the caller gives is the one stamped.
@@ -39,7 +38,6 @@ describe('buildRetainItem', () => {
       sessionId: 's1',
       turnId: 't1',
       userText: 'hi',
-      assistantText: 'hello',
       completedAt: '2026-08-30T12:00:00.000Z',
     });
     expect(clean?.metadata?.['origin']).toBe('user_stated');
@@ -48,36 +46,21 @@ describe('buildRetainItem', () => {
       sessionId: 's1',
       turnId: 't1',
       userText: 'summarize this email',
-      assistantText: 'here is the summary',
       completedAt: '2026-08-30T12:00:00.000Z',
       origin: 'tool_ingested',
     });
     expect(tainted?.metadata?.['origin']).toBe('tool_ingested');
   });
 
-  it('skips (returns undefined) when both sides are empty', () => {
+  it('skips (returns undefined) when the person wrote nothing', () => {
     const item = buildRetainItem({
       origin: 'user_stated',
       sessionId: 's1',
       turnId: 't1',
       userText: '   ',
-      assistantText: '',
       completedAt: '2026-08-30T12:00:00.000Z',
     });
     expect(item).toBeUndefined();
-  });
-
-  it('keeps an item when only one side has text', () => {
-    expect(
-      buildRetainItem({
-        origin: 'user_stated',
-        sessionId: 's1',
-        turnId: 't1',
-        userText: 'hi',
-        assistantText: '',
-        completedAt: '2026-08-30T12:00:00.000Z',
-      }),
-    ).toBeDefined();
   });
 });
 
@@ -147,12 +130,86 @@ describe('submitRetain', () => {
     expect(call?.operationId).toBe(retainOperationId({ sessionId: 's1', turnId: 't1' }));
     expect(call?.items).toEqual([
       {
-        content: 'User: hi\n\nAssistant: hello',
+        content: 'User: hi',
         timestamp: '2026-08-30T12:00:00.000Z',
         document_id: 'aman-s1-t1',
         metadata: { session_id: 's1', turn_id: 't1', source: 'aman-chat', origin: 'user_stated' },
       },
+      {
+        content: "From the assistant's reply, Aug 30: hello\n\n<!-- note: assistant_response 2026-08-30 -->",
+        timestamp: '2026-08-30T12:00:00.000Z',
+        document_id: 'aman-s1-t1-note-0',
+        metadata: {
+          session_id: 's1',
+          turn_id: 't1',
+          source: 'aman-chat',
+          origin: 'tool_ingested',
+          note_source: 'assistant_response',
+          note_date: '2026-08-30',
+        },
+      },
     ]);
+  });
+
+  it("saves the reply as a note of its own, so an address only the reply named is never the person's", async () => {
+    const { client, retain } = retainingClient();
+    retain.mockResolvedValue({ ok: true });
+
+    await submitRetain({
+      origin: 'user_stated',
+      session: { is_incognito: false },
+      client,
+      sessionId: 's1',
+      turnId: 't1',
+      userText: 'who takes print orders',
+      assistantText: 'Orders go to bookings@harbour-prints.example.',
+      completedAt: '2026-08-30T12:00:00.000Z',
+      logger: makeLogger(),
+    });
+
+    const items = retain.mock.calls[0]?.[0]?.items ?? [];
+    const own = items.filter(item => item.metadata['origin'] === 'user_stated');
+    expect(own.map(item => item.content)).toEqual(['User: who takes print orders']);
+    const named = items.filter(item => item.content.includes('bookings@harbour-prints.example'));
+    expect(named.map(item => item.metadata['origin'])).toEqual(['tool_ingested']);
+  });
+
+  it("saves only the person's words when the reply only said what the assistant cannot do", async () => {
+    const { client, retain } = retainingClient();
+    retain.mockResolvedValue({ ok: true });
+
+    await submitRetain({
+      origin: 'user_stated',
+      session: { is_incognito: false },
+      client,
+      sessionId: 's1',
+      turnId: 't1',
+      userText: 'Please read my new email.',
+      assistantText: "I can't read email.",
+      completedAt: '2026-08-30T12:00:00.000Z',
+      logger: makeLogger(),
+    });
+
+    expect(retain.mock.calls[0]?.[0]?.items.map(item => item.content)).toEqual(['User: Please read my new email.']);
+  });
+
+  it('saves only the reply note when the person wrote nothing', async () => {
+    const { client, retain } = retainingClient();
+    retain.mockResolvedValue({ ok: true });
+
+    await submitRetain({
+      origin: 'user_stated',
+      session: { is_incognito: false },
+      client,
+      sessionId: 's1',
+      turnId: 't1',
+      userText: '',
+      assistantText: 'Your dentist appointment is on Friday at 10.',
+      completedAt: '2026-08-30T12:00:00.000Z',
+      logger: makeLogger(),
+    });
+
+    expect(retain.mock.calls[0]?.[0]?.items.map(item => item.metadata['origin'])).toEqual(['tool_ingested']);
   });
 
   it('threads a tool_ingested origin through to the retained metadata', async () => {
@@ -372,7 +429,6 @@ describe('buildRetainItem with memoryText', () => {
       sessionId: 's1',
       turnId: 't1',
       userText: 'Please remember that my synthetic test robot is named Bleep-Bloop.',
-      assistantText: 'Got it — Bleep-Bloop is your synthetic test robot.',
       completedAt: '2026-09-19T12:00:00.000Z',
       memoryText: 'The person has a synthetic test robot named Bleep-Bloop.',
     });
@@ -388,7 +444,6 @@ describe('buildRetainItem with memoryText', () => {
       sessionId: 's1',
       turnId: 't1',
       userText: 'hi',
-      assistantText: 'hello',
       completedAt: '2026-09-19T12:00:00.000Z',
       memoryText: '   ',
     });
@@ -396,17 +451,16 @@ describe('buildRetainItem with memoryText', () => {
     expect(item).toBeUndefined();
   });
 
-  it('uses the exchange when memoryText is absent (summarization off)', () => {
+  it("uses the person's words when memoryText is absent (summarization off)", () => {
     const item = buildRetainItem({
       origin: 'user_stated',
       sessionId: 's1',
       turnId: 't1',
       userText: 'hi',
-      assistantText: 'hello',
       completedAt: '2026-09-19T12:00:00.000Z',
     });
 
-    expect(item?.content).toBe('User: hi\n\nAssistant: hello');
+    expect(item?.content).toBe('User: hi');
   });
 
   it('keeps a tool_ingested origin (summarization is not a trust upgrade)', () => {
@@ -414,7 +468,6 @@ describe('buildRetainItem with memoryText', () => {
       sessionId: 's1',
       turnId: 't1',
       userText: 'tool output here',
-      assistantText: 'processed the tool output',
       completedAt: '2026-09-19T12:00:00.000Z',
       origin: 'tool_ingested',
       memoryText: 'The person received a tool report.',
@@ -430,7 +483,6 @@ describe('buildRetainItem with memoryText', () => {
       sessionId: 's1',
       turnId: 't1',
       userText: 'a',
-      assistantText: 'b',
       completedAt: '2026-09-19T12:00:00.000Z',
       memoryText: 'The person has a cat.',
     });
