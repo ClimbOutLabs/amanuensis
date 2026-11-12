@@ -2,8 +2,6 @@ import { getTrueForgeAuthMode, TrueForgeAuthMode } from '../config';
 import type { AgentCodeSnippets } from '../schemas/agent';
 import { typescriptNonStreamTemplate, typescriptStreamTemplate } from './codesnippet-templates/typescript';
 
-const TYPESCRIPT_ICON = 'https://assets.production.truefoundry.com/typescript.svg';
-
 /** Bearer `token` for OIDC / TrueFoundry; omitted in standalone where login is off. */
 const TOKEN_LINE = '\n  token: "USER_API_KEY",';
 
@@ -34,7 +32,6 @@ export function buildAgentCodeSnippets(input: { agentName: string; baseUrl: stri
       {
         label_name: 'TypeScript',
         language: 'typescript',
-        icon: TYPESCRIPT_ICON,
         sample_code: {
           stream: renderSnippetTemplate(typescriptStreamTemplate, vars),
           non_stream: renderSnippetTemplate(typescriptNonStreamTemplate, vars),
