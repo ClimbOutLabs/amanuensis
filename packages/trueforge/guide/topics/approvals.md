@@ -26,7 +26,7 @@ If the mail goes to an address that is not on your Email list, the buttons are *
 
 1. Click **More** in the left bar, click **Settings**, then click **Permissions**.
 2. Under **Always allow everywhere**, turn on **Write files** if you want Aman to write files without asking.
-3. Turn on **Web searches**, the maps switch or the **Sandbox** switch to stop those questions. Each one has its own switch. The **Sandbox** switch covers new files and scripts Aman wrote in the same chat, and only where the sandbox has no network. Where you allowed package downloads, or a skill may reach its own sites, they still ask. Installing a package still asks.
+3. Turn on **Web searches**, the **Maps** switch or the **Sandbox** switch to stop those questions. Each one has its own switch. With the **Maps** switch off, a scheduled run skips its maps. The **Sandbox** switch covers new files and scripts Aman wrote in the same chat, and only where the sandbox has no network. Where you allowed package downloads, or a skill may reach its own sites, they still ask. Installing a package still asks.
 4. Sending email is not on this page. It always asks.
 
 To take back an always allowed tool, click **More**, then **Settings**, then **Connectors**. Open the connector and stop allowing the tool.
