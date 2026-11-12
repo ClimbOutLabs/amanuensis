@@ -359,6 +359,8 @@ export function truncateInlineReason(text: string): string {
  * Builds the outcome text shown next to a tool step: the disposition label alone when there is no
  * failure reason (or nothing has run yet), and the label plus the reason's first line otherwise —
  * so a step never shows a bare "Execution failed" when the tool result carries an explanation.
+ * A step that ran and failed is the exception: it shows the reason itself, in full, with no
+ * label in front of it and nothing cut off, so an error like a Google one reads exactly as written.
  */
 export function buildOutcomeText(
   disposition: ToolDispositionView | undefined,
@@ -366,6 +368,10 @@ export function buildOutcomeText(
 ): string | undefined {
   if (disposition === undefined) return undefined;
   if (!failureReason) return disposition.label;
+  if (disposition.disposition === 'executed_nonzero') {
+    const reason = failureReason.trim();
+    return reason === '' ? disposition.label : reason;
+  }
   const inline = truncateInlineReason(failureReason);
   return inline ? `${disposition.label}: ${inline}` : disposition.label;
 }
