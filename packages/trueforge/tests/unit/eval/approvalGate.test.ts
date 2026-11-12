@@ -95,6 +95,15 @@ describe('gateEvalApprovals', () => {
     expect(gated?.[0]).toMatchObject({ approval: { status: 'deny', reason: EVAL_DECLINE_REASON } });
   });
 
+  it('denies every approval when the chat has no turn to answer', async () => {
+    const getTurn = jest.fn();
+
+    const gated = await gateEvalApprovals({ session: { getTurn }, previous_turn_id: null, input: [allow('call-any')] });
+
+    expect(gated?.[0]).toMatchObject({ approval: { status: 'deny', reason: EVAL_DECLINE_REASON } });
+    expect(getTurn).not.toHaveBeenCalled();
+  });
+
   it('leaves input with no allowed approvals exactly as it was', async () => {
     const input = [
       {

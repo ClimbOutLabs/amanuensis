@@ -6,6 +6,7 @@ import {
   SlotFsReadResponseSchema,
   SlotHealthResponseSchema,
   SlotRunCodeResponseSchema,
+  SlotSessionsResponseSchema,
   type SlotErrorCode,
   type SlotExecRequest,
   type SlotExecResponse,
@@ -13,6 +14,7 @@ import {
   type SlotHealthResponse,
   type SlotRunCodeRequest,
   type SlotRunCodeResponse,
+  type SlotSessionsResponse,
 } from './slotContract';
 
 /** Larger than the agent's biggest legitimate reply (two 4 MiB streams plus 128 MiB of base64 files). */
@@ -50,6 +52,20 @@ export class SlotClient {
       path: '/v1/health',
       body: undefined,
       schema: SlotHealthResponseSchema,
+      signal: input.signal,
+      timeoutMs: input.timeoutMs,
+    });
+  }
+
+  sessions(input: {
+    signal: AbortSignal | undefined;
+    timeoutMs: number;
+  }): Promise<SlotCallResult<SlotSessionsResponse>> {
+    return this.call({
+      method: 'GET',
+      path: '/v1/sessions',
+      body: undefined,
+      schema: SlotSessionsResponseSchema,
       signal: input.signal,
       timeoutMs: input.timeoutMs,
     });

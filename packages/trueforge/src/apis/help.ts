@@ -9,13 +9,15 @@ import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { IGoogleConnectionStore } from '../db/googleConnectionStore';
 import type { IMcpServerStore } from '../db/mcpServerStore';
 import type { IModelProviderStore } from '../db/modelProviderStore';
+import type { IPersonalizationStore } from '../db/personalizationStore';
 import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
 import { buildHelpHealthCheck, type SchedulerProbe } from '../help/healthCheck';
-import { probeConnectors, probeGoogleLogin, probeModel } from '../help/healthProbes';
+import { probeConnectors, probeGoogleLogin, probeModel, probeProfileNamed } from '../help/healthProbes';
 import { readHostReport } from '../help/hostReport';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
+import { PACKAGE_VERSION } from '../packageVersion';
 import { getHelpHealthCheckRoute } from '../routes/helpRoutes';
-import { computeCapabilitiesData } from './capabilities';
+import { computeCapabilitiesData, toBuildIdentity } from './capabilities';
 
 export interface HelpRouterDeps {
   resolveRequestContext: ResolveRequestContext;
@@ -25,6 +27,7 @@ export interface HelpRouterDeps {
   tokenStore: IOAuthTokenStore;
   globalSettingsStore: IGlobalSettingsStore;
   googleConnectionStore: IGoogleConnectionStore;
+  personalizationStore: IPersonalizationStore;
   /** Where the installer writes its latest full check. Read only. */
   hostReportPath: string;
   /** Whether the schedule loop runs in this process, and if so whether it is running. */
@@ -41,7 +44,7 @@ export function createHelpRouter(deps: HelpRouterDeps) {
     const tenantId = requestContext.tenant_id;
     const now = new Date();
     const mcpServerStore = deps.resolveMcpServerStore(c);
-    const [model, connectors, google, sandboxReady, hostReport] = await Promise.all([
+    const [model, connectors, google, sandboxReady, hostReport, profileNamed] = await Promise.all([
       probeModel({
         tenantId,
         modelProviderStore: deps.resolveModelProviderStore(c),
@@ -79,10 +82,19 @@ export function createHelpRouter(deps: HelpRouterDeps) {
         },
       ),
       readHostReport({ path: deps.hostReportPath, now }),
+      probeProfileNamed({
+        tenantId,
+        userId: requestContext.subject.id,
+        personalizationStore: deps.personalizationStore,
+        logger: deps.logger,
+      }),
     ]);
+    const build = toBuildIdentity({ version: PACKAGE_VERSION, buildRef: configuration.BUILD_REF });
     const data = buildHelpHealthCheck({
       results: {
         model,
+        profileNamed,
+        app: { version: build.version, buildRef: build.ref ?? null },
         connectors,
         google,
         sandboxReady,

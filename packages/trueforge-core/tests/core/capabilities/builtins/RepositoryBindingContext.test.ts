@@ -81,7 +81,7 @@ async function buildRequest(
   }
   let result = messages;
   for (const processor of capability.preLLMEphemeralProcessors ?? []) {
-    result = processor.processPreLLMEphemeral(result) ?? result;
+    result = processor.processPreLLMEphemeral(result, { modelSupportsVision: false }) ?? result;
   }
   return { events, messages: result };
 }

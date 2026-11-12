@@ -1,7 +1,7 @@
 ---
 id: memory
 title: Memory
-covers:
+covers: settings:memory, route:memoryRecall, route:memoryScreen, route:memorySummarize, route:memoryVault
 ---
 
 Aman remembers what matters to you. Ask "What do you remember about me so far?" to see it.

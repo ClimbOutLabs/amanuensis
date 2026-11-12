@@ -9,6 +9,7 @@ import {
   markBriefItemDoneRoute,
   undoBriefItemDoneRoute,
 } from '../routes/briefItemRoutes';
+import { PRIVATE_CHAT_BRIEF_MESSAGE, sessionKeepsNothing } from '../runtime/privateChat';
 import { checkSessionAccess } from './sessions';
 
 export interface BriefItemsRouterDeps {
@@ -34,6 +35,10 @@ export function createBriefItemsRouter(deps: BriefItemsRouterDeps) {
       !checkSessionAccess({ userRef: owner.created_by, createdBy: session.created_by_subject.subject_id })
     ) {
       return c.json({ error: { message: `Session not found: ${body.session_id}` } }, 404);
+    }
+    // The brief never carries anything from a private chat, so nothing there can be marked done.
+    if (sessionKeepsNothing({ session })) {
+      return c.json({ error: { message: PRIVATE_CHAT_BRIEF_MESSAGE } }, 422);
     }
     const completion = await deps.briefItemStore.markDone({
       ...owner,

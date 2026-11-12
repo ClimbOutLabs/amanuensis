@@ -116,6 +116,20 @@ describe('one-time schedule', () => {
       timezone: 'UTC',
       status: 'active',
       kind: 'task',
+      urgent: false,
+      origin_session_id: null,
     });
+  });
+
+  it('reads a manifest saved before urgent reminders existed as not urgent', () => {
+    expect(
+      ScheduleManifestSchema.parse({
+        task: 'Pay rent',
+        run_at: '2026-10-26T18:00:00-04:00',
+        timezone: 'UTC',
+        status: 'active',
+        kind: 'reminder',
+      }).urgent,
+    ).toBe(false);
   });
 });
