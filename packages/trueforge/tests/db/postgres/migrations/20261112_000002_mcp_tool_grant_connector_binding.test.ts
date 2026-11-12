@@ -1,5 +1,5 @@
 /**
- * `20261112_000001_mcp_tool_grant_connector_binding` binds each standing grant to its connector's setup instead
+ * `20261112_000002_mcp_tool_grant_connector_binding` binds each standing grant to its connector's setup instead
  * of its host. A grant recorded for a host can never match a setup, so it is removed and the next call asks again.
  */
 import { sql } from 'kysely';
@@ -9,7 +9,7 @@ import { createPostgresTestDatabase, type PostgresTestDatabase } from '../testDa
 
 const describePg = process.env['PG_STORE_TESTS_ENABLED'] === '1' ? describe : describe.skip;
 const PREVIOUS_MIGRATION = '20261111_000001_noticing';
-const THIS_MIGRATION = '20261112_000001_mcp_tool_grant_connector_binding';
+const THIS_MIGRATION = '20261112_000002_mcp_tool_grant_connector_binding';
 
 describePg('Postgres mcp tool grant connector binding migration', () => {
   let env: PostgresTestDatabase | undefined;

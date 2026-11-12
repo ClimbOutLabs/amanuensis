@@ -58,7 +58,7 @@ export interface McpConnection {
   first_party: boolean;
   /** Set when the user designated this connector as their search provider: the tools stored on its record, which the shipped catalog completes per turn. */
   search_provider: { tools: readonly string[] } | undefined;
-  /** What an "Always allow" grant on this connector binds to; see {@link connectorGrantBinding}. */
+  /** What an "Always allow" grant on this connector binds to: its setup digest from `connectorGrantBinding`. */
   grant_binding: string;
 }
 
