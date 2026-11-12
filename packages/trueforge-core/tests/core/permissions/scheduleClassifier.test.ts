@@ -65,6 +65,22 @@ describe('Schedule tool classification', () => {
     expect(decision.card?.schedule).toEqual(MORNING_BRIEF);
   });
 
+  it('shows what a new schedule runs with, every choice as the host settled it', async () => {
+    const tools = {
+      editable: true,
+      agent_name: 'morning-brief',
+      connectors: [
+        { name: 'gmail', on: true },
+        { name: 'calendar', on: false },
+      ],
+      skills: [{ name: 'pdf', on: false }],
+      run_code: false,
+      memory: true,
+    };
+    const decision = await classifyTier(scheduleAction('create_schedule', { ...MORNING_BRIEF, tools }), makeCtx());
+    expect(decision.card?.schedule?.tools).toEqual(tools);
+  });
+
   it('asks before deleting and says it cannot be undone', async () => {
     const decision = await classifyTier(
       scheduleAction('delete_schedule', { ...MORNING_BRIEF, action: 'delete', next_runs: [] }),
