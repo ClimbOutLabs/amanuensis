@@ -1,42 +1,70 @@
 ---
 id: personas
-title: Personas, agents, and choosing who answers
-covers: settings:model-roles, route:persona, route:personaKnowledge, route:agent, route:agentImport
+title: Personas
+covers: settings:model-roles, route:persona, route:personaKnowledge
 ---
 
-A persona is a helper that answers in your chats. It has its own name, its own instructions, and its own model. For example, a travel persona can plan a trip for you.
+A persona is a helper with its own name, role and model that can answer in any chat. For example, a travel persona named Zara can plan your trips, while Aman handles everything else.
 
-An agent is different. It is a saved set of instructions you build and try, and it is what runs your schedules.
+How to get there: Click **More** in the left bar, then **Settings**, then **Roles and Personas**.
 
-## Make a persona that answers in your chats
+!!! note "Persona or agent?"
 
-1. Click **More** in the left bar, then click **Settings**.
-2. Click **Roles and Personas**.
-3. Click the **Personas** tab.
-4. Click **Add persona**.
-5. In **Name**, type the name you will use to call the persona, such as Zara.
-6. In **Also answers to**, type other names for it, with commas between them. You can skip this.
-7. In **Model**, pick the model the persona should use.
-8. In **Role**, write how the persona should answer.
-9. Click **Save persona**.
+    A persona talks with you in your chats, the way Aman does. An [agent](agents.md) is a saved setup for a job, such as a weekly report, that you try on its own or run on a schedule. If you want someone to chat with, make a persona.
 
-Each persona in that list has a knowledge library. You can add documents to it there.
+## Make a persona
 
-## Choose who answers a chat
+1. Click the **Personas** tab.
+2. Click **Add persona**.
+3. In **Name**, type the name you will call it by, such as Zara.
+4. In **Also answers to**, type any other names for it, with commas between them, such as "Z, Zara Quinn". You can skip this.
+5. In **Model**, pick the model the persona should use.
+6. In **Role**, describe how it should answer, such as "You are a travel planner. Suggest two options and say what each costs."
+7. Click **Create persona**.
 
-- Start your message with the persona's name, such as "Zara, plan a long weekend". The persona answers the rest of that chat.
-- Or click the small button by the message box that shows the name of who is answering. Its tip says "Choose a persona". A list opens. Click a persona in it.
-- This button shows only after you have made at least one persona.
-- That button shows the name of who is answering. To go back, click it again and click the first name in the list. That is Aman itself.
+Each name must be different from every other persona's names.
 
-## Build an agent to save and try
+## Talk to a persona
 
-1. Click **More** in the left bar, then click **Build agent**.
-2. The **Agent Config** panel opens.
-3. Click **Edit Model** and choose a model.
-4. Click **Edit Instructions** and write what the agent should do.
-5. Click **Save Agent**.
-6. Type an **Agent name** and a **Description**. You need both.
-7. Click **Save changes**.
+- By name: start your message with the name, such as "Zara, plan a long weekend in Porto". Zara answers the rest of that chat, with the same history.
+- From the menu: click the button beside the message box that shows who is answering. Its tip says **Choose a persona**. Under **Who answers this chat**, click a persona.
 
-To use it, click **More** in the left bar, then click **Agents**. Click **Try** on the row of your agent. You can also pick it when you make a schedule.
+The button only shows once you have made at least one persona.
+
+To go back to the main assistant, click the button and choose the first name in the list. Or say so in the chat, using the assistant's name, such as "Can I talk to Mannie again?"
+
+!!! tip
+
+    Just mentioning a name doesn't switch personas. "I was reading about Zara yesterday" keeps the same speaker.
+
+## Give a persona its own documents
+
+Each persona can have a private library of documents, links and notes. Only that persona searches them.
+
+1. Click **Knowledge** on the persona's row.
+2. Pick **File**, **Link** or **Text**.
+3. Choose the file, paste the link, or paste the text with a title.
+4. Click **Add to library**.
+
+Aman reads new documents in the background. You can keep chatting while it does.
+
+## Change or remove a persona
+
+- Click **Edit** on its row, change what you need, then click **Save persona**.
+- Click **Delete** on its row to remove it. It is removed at once, without asking first. Its memories are kept, and past chats still show who answered.
+
+## Choose which model does each job
+
+The top of this page also sets which model answers you and which does background work, such as summarizing long chats. See [A model for each job](../../../../docs/model-roles.mdx).
+
+## Good to know
+
+- A persona changes who answers, not what Aman may do. Tools, approvals and safety rules stay the same.
+- Each persona keeps its own memories. On the **Memory** page you can choose which personas can read each other's notes. See [Memory](memory.md).
+- If a persona's model is removed, the persona stays. Its row says the model is missing, so you can pick another one.
+
+## Related
+
+- [Agents](agents.md)
+- [Personalization](personalization.md)
+- [A model for each job](../../../../docs/model-roles.mdx)

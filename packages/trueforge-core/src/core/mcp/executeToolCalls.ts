@@ -2015,6 +2015,9 @@ export async function executeToolCalls({
             ...(toolCall.tool_info.git_remote_precondition === undefined
               ? {}
               : { git_remote_precondition: toolCall.tool_info.git_remote_precondition }),
+            ...(toolCall.tool_info.browser_element === undefined
+              ? {}
+              : { browser_element_precondition: toolCall.tool_info.browser_element }),
           },
         );
       };
