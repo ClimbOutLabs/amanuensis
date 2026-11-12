@@ -41,6 +41,7 @@ function card(plain_what: string, outbound_text: string | null = null): Sentinel
     calendar_event: null,
     schedule: null,
     persona: null,
+    skill: null,
   };
 }
 
