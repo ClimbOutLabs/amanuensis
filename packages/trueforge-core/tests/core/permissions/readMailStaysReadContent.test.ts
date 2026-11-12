@@ -5,7 +5,11 @@ import {
   steeredDestinations,
   steeredLinks,
 } from '../../../src/core/permissions/provenance';
-import { createWebSearchTurnState, recordToolResultProvenance } from '../../../src/core/permissions/webSearch';
+import {
+  createWebSearchTurnState,
+  NO_HOST_STAMP,
+  recordToolResultProvenance,
+} from '../../../src/core/permissions/webSearch';
 
 /**
  * An email whose text looks like trusted markers: a block that looks internal, a line that looks
@@ -37,6 +41,7 @@ describe('a mail with look-alike markers is still recorded as read content in fu
     tool_name: 'read_email',
     argument_values: ['m1'],
     texts: [READ_MAIL],
+    stamp: NO_HOST_STAMP,
   });
   const { provenance } = state;
 
