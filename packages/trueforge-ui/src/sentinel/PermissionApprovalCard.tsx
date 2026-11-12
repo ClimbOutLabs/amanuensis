@@ -39,7 +39,7 @@ export type PermissionApprovalCardProps = {
   /** Only passed when the server declared a chat-scoped allow for this call. */
   onApproveForChat?: (() => void) | undefined;
   /**
-   * Records a standing "Always allow this tool" grant and approves this call. Only passed when the
+   * Records a standing "Always allow everywhere" grant and approves this call. Only passed when the
    * server says the owner may always allow this tool; the card asks for confirmation first.
    */
   onApproveAlways?: (() => void) | undefined;
@@ -184,6 +184,12 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
   const plumbingText = card.outbound_plumbing_text ?? null;
   const outboundShown =
     card.outbound_text === null ? null : visibleOutboundText(card.outbound_text, plumbingText) || null;
+  // The card-level Details holds only the request, the search service fields, and the Always allow
+  // control. A card with none of the three shows no Details at all, so it never opens empty.
+  const hasCardDetails =
+    (!outboundOpen && outboundShown !== null) ||
+    plumbingText !== null ||
+    (onApproveAlways !== undefined && !newRecipients);
 
   // The stub tears only for an approval the ledger allows; otherwise it simply goes.
   const markSent = (send: () => void) => () => {
@@ -338,23 +344,25 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
           </Button>
         )}
 
-        <details>
-          <summary className="cursor-pointer text-text-secondary underline">Details</summary>
-          <div className="mt-2 space-y-3">
-            {!outboundOpen && outboundShown !== null && (
-              <OutboundBlock text={outboundShown} truncated={card.outbound_truncated} />
-            )}
-            {plumbingText !== null && <PlumbingDetails text={plumbingText} />}
-            {onApproveAlways !== undefined && !newRecipients && (
-              <AlwaysAllowToolControl
-                size="small"
-                disabled={disabled || sentAt !== null}
-                description={`${assistant} will run this kind of action on this connector without asking, in every chat.`}
-                onConfirm={markSent(onApproveAlways)}
-              />
-            )}
-          </div>
-        </details>
+        {hasCardDetails && (
+          <details>
+            <summary className="cursor-pointer text-text-secondary underline">Details</summary>
+            <div className="mt-2 space-y-3">
+              {!outboundOpen && outboundShown !== null && (
+                <OutboundBlock text={outboundShown} truncated={card.outbound_truncated} />
+              )}
+              {plumbingText !== null && <PlumbingDetails text={plumbingText} />}
+              {onApproveAlways !== undefined && !newRecipients && (
+                <AlwaysAllowToolControl
+                  size="small"
+                  disabled={disabled || sentAt !== null}
+                  description={`${assistant} will run this kind of action on this connector without asking, in every chat.`}
+                  onConfirm={markSent(onApproveAlways)}
+                />
+              )}
+            </div>
+          </details>
+        )}
       </div>
       {sentAt === null && <div className="aui-ticket__stub">{stubContent}</div>}
       <StubTear play={tearing} onDone={() => setTearing(false)} className="aui-ticket__stub">

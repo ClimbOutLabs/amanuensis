@@ -8,19 +8,23 @@ export const CalendarProvider: core.serialization.ObjectSchema<
     serializers.CalendarProvider.Raw,
     TrueForge.CalendarProvider
 > = core.serialization.object({
+    accountUrlTemplate: core.serialization.property("account_url_template", core.serialization.string().nullable()),
     helpHint: core.serialization.property("help_hint", core.serialization.string()),
     helpUrl: core.serialization.property("help_url", core.serialization.string().nullable()),
     key: core.serialization.string(),
     name: core.serialization.string(),
     serverUrl: core.serialization.property("server_url", core.serialization.string().nullable()),
+    setupSteps: core.serialization.property("setup_steps", core.serialization.list(core.serialization.string())),
 });
 
 export declare namespace CalendarProvider {
     export interface Raw {
+        account_url_template?: string | null;
         help_hint: string;
         help_url?: string | null;
         key: string;
         name: string;
         server_url?: string | null;
+        setup_steps: string[];
     }
 }

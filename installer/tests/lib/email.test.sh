@@ -380,7 +380,7 @@ test_instance_commands_keep_the_connector() {
 }
 
 test_agent_secret() {
-  t_begin "the app and the email connector share one secret through the settings file"
+  t_begin "the app and the email connector share one secret through the settings file, and the connector has a network of its own"
   sandbox_new
   install_with_gmail
   local env=$AMAN_HOME/instances/main/.env compose=$AMAN_HOME/instances/main/compose.yaml first
@@ -388,6 +388,9 @@ test_agent_secret() {
   assert_eq "${#first}" 64 "a random secret of 64 characters is made"
   assert_not_contains "$(cat "$compose")" "$first" "the compose file never holds the secret"
   assert_contains "$(cat "$compose")" "AMAN_MAIL_ACCOUNT_SECRET: \${MAIL_EMAIL_ACCOUNT_SECRET:?missing from .env}" "the compose file points the connector at the shared secret"
+  assert_eq "$(awk '/^  mail-email:/{f=1;next} /^  [a-z]/{f=0} f && /^    networks:/{n=1;next} f && n && /^      - /{print $2} f && n && !/^      - /{n=0}' "$compose" | tr '\n' ' ')" "mail " "the connector joins only its own network"
+  assert_contains "$(awk '/^  loopback:/{f=1;next} /^  [a-z]/{f=0} f' "$compose")" "- mail" "the app's network holder joins it"
+  assert_eq "$(awk '/^  [a-z]/{svc=$1} svc != "mail-email:" && svc != "loopback:" && /^      - mail$/{print svc}' "$compose")" "" "no other service joins the mail network"
   run_install instance email main --remove
   assert_rc 0
   assert_eq "$(sed -n 's/^MAIL_EMAIL_ACCOUNT_SECRET=//p' "$env")" "$first" "the same secret is still there"

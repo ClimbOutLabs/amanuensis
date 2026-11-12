@@ -13,6 +13,7 @@ const ServiceSchema = z
     command: z.array(z.string()).optional(),
     environment: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
     volumes: z.array(z.string()).optional(),
+    networks: z.array(z.string()).optional(),
     env_file: z
       .array(z.union([z.string(), z.object({ path: z.string(), required: z.boolean().optional() })]))
       .optional(),
@@ -22,6 +23,7 @@ const ServiceSchema = z
 const ComposeSchema = z.object({
   services: z.record(z.string(), ServiceSchema),
   volumes: z.record(z.string(), z.unknown()).optional(),
+  networks: z.record(z.string(), z.unknown()).optional(),
 });
 
 const compose = ComposeSchema.parse(parse(readFileSync(resolve(REPO_ROOT, 'docker-compose.yml'), 'utf8')));
@@ -49,6 +51,16 @@ describe('mail and calendar sidecars', () => {
     const service = serviceNamed('mail-email');
     expect(service.expose).toEqual(['9557', '9559']);
     expect(service.command).toEqual(['streamable-http', '--host', '0.0.0.0', '--port', '9557']);
+  });
+
+  it('mail-email sits on a network of its own that only the app shares', () => {
+    expect(serviceNamed('mail-email').networks).toEqual(['mail']);
+    expect(serviceNamed('loopback').networks).toContain('mail');
+    const others = Object.entries(compose.services).filter(
+      ([name, service]) => name !== 'mail-email' && name !== 'loopback' && (service.networks ?? []).includes('mail'),
+    );
+    expect(others).toEqual([]);
+    expect(compose.networks).toHaveProperty('mail');
   });
 
   it('mail-email runs the account agent on the private network, holding the one account file', () => {

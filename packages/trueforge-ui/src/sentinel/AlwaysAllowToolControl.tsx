@@ -16,7 +16,7 @@ export type AlwaysAllowToolControlProps = {
   onConfirm: () => void;
 };
 
-/** "Always allow this tool" and its confirm step, shared by every approval card that offers it. */
+/** "Always allow everywhere" and its confirm step, shared by every approval card that offers it. */
 export const AlwaysAllowToolControl: FC<AlwaysAllowToolControlProps> = ({
   description,
   size,
@@ -44,7 +44,7 @@ export const AlwaysAllowToolControl: FC<AlwaysAllowToolControlProps> = ({
         onOpenChange={open => {
           if (!open) setConfirming(false);
         }}
-        title="Always allow this tool?"
+        title="Always allow everywhere?"
         description={description}
         contentSized
         aria-label="Confirm always allowing this tool"

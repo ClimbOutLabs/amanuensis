@@ -314,6 +314,49 @@ describe('extractSentinelFromEvent', () => {
     });
   });
 
+  it('keeps the name a mail is sent as and its name-left-off note, and leaves them off an older card', () => {
+    const card = (extra: Record<string, unknown>) =>
+      extractSentinelFromEvent({
+        type: 'tool.approval_required',
+        tool_calls: [
+          {
+            id: 'call-14',
+            tier: 3,
+            tier3_card: {
+              plain_what: 'Do it',
+              email: { action: 'send', to: [], cc: [], bcc: [], subject: 's', body: 'b', ...extra },
+            },
+          },
+        ],
+      })[0]?.card.email;
+    expect(card({ from_name: 'PayPal Security', name_left_off: true })).toMatchObject({
+      from_name: 'PayPal Security',
+      name_left_off: true,
+    });
+    expect(card({ from_name: null })).toMatchObject({ from_name: null });
+    expect(card({})).not.toHaveProperty('from_name');
+    expect(card({})).not.toHaveProperty('name_left_off');
+  });
+
+  it('keeps the duplicate and multi-day warnings of an event', () => {
+    const event = (extra: Record<string, unknown>) =>
+      extractSentinelFromEvent({
+        type: 'tool.approval_required',
+        tool_calls: [
+          {
+            id: 'call-15',
+            tier: 3,
+            tier3_card: { plain_what: 'Do it', calendar_event: { ...CALENDAR_EVENT, ...extra } },
+          },
+        ],
+      })[0]?.card.calendar_event;
+    expect(event({ already_created: true, span_days: 3 })).toMatchObject({ already_created: true, span_days: 3 });
+    expect(event({})).not.toHaveProperty('span_days');
+    for (const span_days of [0, -2, 1.5, '3']) {
+      expect(event({ span_days })).toBeNull();
+    }
+  });
+
   const CALENDAR_EVENT = {
     action: 'change',
     calendar: 'ada@example.com',

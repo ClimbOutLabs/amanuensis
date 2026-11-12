@@ -14,6 +14,7 @@ import {
   CustomActionRenderersProvider,
   type CustomActionRendererProps,
 } from '@/server/CustomActionRenderersContext.js';
+import { adoptPrivateChat, forgetPrivateChat } from '@/server/privateChatStore.js';
 import { ServerProvider } from '@/server/ServerContext.js';
 import { ShellModeProvider, type AgentConfig } from '@/server/ShellModeContext.js';
 import { SlotsProvider } from '@/theme/SlotsProvider.js';
@@ -70,6 +71,7 @@ vi.mock('@truefoundry/assistant-ui-runtime', () => ({
   useTrueFoundryApprovals: () => approvalsState,
   useTrueFoundryAgentSpec: () => ({ agentSpec: agentSpecState.agentSpec }),
   useTrueFoundryUpdateAgentSpec: () => updateAgentSpec,
+  useTrueFoundryReload: () => () => undefined,
 }));
 
 vi.mock('@/atoms/lib/voiceRecorder.js', () => ({
@@ -175,6 +177,29 @@ describe('ComposerContainer', () => {
     const input = screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Message input' });
     await waitFor(() => expect(input.value).toBe('Madrid rental requirements: two bedrooms'));
     expect(window.sessionStorage.getItem(key)).toBe('Madrid rental requirements: two bedrooms');
+  });
+
+  it('never saves what is typed in an incognito chat, and drops what was saved before', async () => {
+    const remoteId = 'ses_incognito';
+    const key = composerDraftKey({ scope: '', thread: remoteId });
+    window.sessionStorage.setItem(key, 'typed before incognito was chosen');
+    act(() => adoptPrivateChat(remoteId));
+    try {
+      render(
+        <RuntimeHarness messages={[]} threadId="t-incognito" remoteId={remoteId}>
+          <ComposerBusyProvider>
+            <ComposerContainer />
+          </ComposerBusyProvider>
+        </RuntimeHarness>,
+      );
+      const input = screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Message input' });
+      await waitFor(() => expect(window.sessionStorage.getItem(key)).toBeNull());
+      expect(input.value).toBe('');
+      fireEvent.change(input, { target: { value: 'a question nobody should find later' } });
+      expect(draftKeys()).toEqual([]);
+    } finally {
+      act(() => forgetPrivateChat(remoteId));
+    }
   });
 
   it('saves the draft as it is typed and drops it once the user empties the box', async () => {
@@ -1087,6 +1112,7 @@ function voiceInput(availability: VoiceAvailability): VoiceInputApi {
       return () => {};
     },
     transcribe: async () => ({ text: '', language: 'en', duration_ms: 0, model: 'test' }),
+    connect: async () => ({ url: 'wss://aman.test/stream', protocols: [] }),
   };
 }
 

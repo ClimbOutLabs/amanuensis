@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -8,9 +7,9 @@ import { createServer } from 'vite';
 
 import { startApprovalTestServer } from '../../trueforge/tests/fixtures/approvalTestServer.ts';
 import { inProcessApi, pausedSession } from './support/approvalChat.ts';
+import { featureShotPath, saveFailureShots } from './support/featureShots.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
 import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
-import { screenshotDir } from './support/screenshotDir.ts';
 import { privateViteCache } from './support/viteCache.ts';
 
 /**
@@ -69,7 +68,6 @@ test(
       server: { host: '127.0.0.1', port: 0, strictPort: false },
     });
     let browser: Browser | undefined;
-    const outDir = await screenshotDir('aman-card-layout-');
     try {
       await vite.listen();
       const address = vite.httpServer?.address();
@@ -84,7 +82,9 @@ test(
       });
       const allow = page.getByRole('button', { name: ALLOW }).first();
       await allow.waitFor({ timeout: RENDER_TIMEOUT_MS });
-      await page.screenshot({ path: join(outDir, 'layout-1-waiting-card-at-rest.png') });
+      await page.screenshot({
+        path: await featureShotPath({ surface: 'screen:approval-card', step: 'waiting-card-at-rest' }),
+      });
 
       // No gradient fade hangs over the messages above the composer.
       const fade = await page.evaluate(() => {
@@ -110,7 +110,9 @@ test(
       await arrow.waitFor({ timeout: RENDER_TIMEOUT_MS });
       const deny = page.getByRole('button', { name: DENY }).first();
       await deny.waitFor({ timeout: RENDER_TIMEOUT_MS });
-      await page.screenshot({ path: join(outDir, 'layout-2-scrolled-up-arrow-clear-of-the-card.png') });
+      await page.screenshot({
+        path: await featureShotPath({ surface: 'screen:approval-card', step: 'scrolled-up-arrow-clear-of-the-card' }),
+      });
 
       const arrowBox = await arrow.boundingBox();
       const allowBox = await allow.boundingBox();
@@ -126,7 +128,9 @@ test(
       assert.equal(await centreIsClickable(page, DENY), true, 'the centre of Not now takes the click');
 
       assert.equal(api.mcp.writeInvocations(), 0, 'looking at the card ran nothing');
-      console.log(`approval-card layout screenshots written to ${outDir}`);
+    } catch (error) {
+      await saveFailureShots({ browser, surface: 'screen:approval-card' });
+      throw error;
     } finally {
       await browser?.close();
       await vite.close();

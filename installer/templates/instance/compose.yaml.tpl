@@ -26,6 +26,7 @@ services:
       - default
       - link
 @@IF_CALENDAR@@      - calendar
+@@IF_EMAIL@@      - mail
 @@IF_BROWSER@@      - browser-control
     restart: unless-stopped
 
@@ -189,10 +190,11 @@ services:
 @@IF_CALENDAR@@      - no-new-privileges:true
 @@IF_CALENDAR@@    restart: unless-stopped
 
-# Email connector. It starts with the instance, and the app reaches it at http://mail-email:9557/mcp on this project's
-# private network. Nothing is published. The account lives in a volume this sidecar owns, which the installer writes
-# through the sidecar's account agent and the Settings Email card changes through the same agent on port 9559,
-# also private-network only. The account agent answers only a caller that presents this instance's secret.
+# Email connector. It starts with the instance, and the app reaches it at http://mail-email:9557/mcp. Nothing is
+# published. It sits on a network of its own that only the app's network holder shares, so no other service can reach
+# its tool port or its account port. The account lives in a volume this sidecar owns, which the installer writes
+# through the sidecar's account agent and the Settings Email card changes through the same agent on port 9559.
+# The account agent answers only a caller that presents this instance's secret.
 @@IF_EMAIL@@  mail-email:
 @@IF_EMAIL@@    image: @@MAIL_EMAIL_IMAGE@@
 @@IF_EMAIL@@    pull_policy: never
@@ -214,6 +216,8 @@ services:
 @@IF_EMAIL@@      AMAN_MAIL_ACCOUNT_AGENT: /usr/local/bin/aman-mail-account-agent
 @@IF_EMAIL@@      AMAN_MAIL_EMAIL_CHECK: /usr/local/bin/aman-mail-email-check
 @@IF_EMAIL@@      MCP_EMAIL_SERVER_ENABLE_ATTACHMENT_CONTENT: 'true'
+@@IF_EMAIL@@    networks:
+@@IF_EMAIL@@      - mail
 @@IF_EMAIL@@    volumes:
 @@IF_EMAIL@@      - ./mail-email-entrypoint.sh:/usr/local/bin/aman-mail-entrypoint:ro
 @@IF_EMAIL@@      - ./mail-account-agent.py:/usr/local/bin/aman-mail-account-agent:ro
@@ -390,6 +394,9 @@ networks:
   # Between the app's network holder and the calendar connector only. Not internal: the connector reaches the
   # calendar server on the internet.
 @@IF_CALENDAR@@  calendar: {}
+@@IF_EMAIL@@  # Between the app's network holder and the mail connector only. Not internal: the connector reaches the mail
+@@IF_EMAIL@@  # server on the internet.
+@@IF_EMAIL@@  mail: {}
 @@IF_BROWSER@@  # The browser and its gateway only. Internal: the browser has no way out but the gateway.
 @@IF_BROWSER@@  browser-internal:
 @@IF_BROWSER@@    internal: true

@@ -36,7 +36,7 @@ export type HeldActionStatus =
 export type HeldActionCardProps = {
   card: SentinelApprovalCard;
   status: HeldActionStatus;
-  /** Show "Always allow this tool": the server only accepts it for some tools. */
+  /** Show "Always allow everywhere": the server only accepts it for some tools. */
   alwaysAllowOffered: boolean;
   /** Lets a person who cannot manage this chat read the card without answering it. */
   disabled?: boolean;

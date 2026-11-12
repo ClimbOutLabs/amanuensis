@@ -9,7 +9,7 @@ import { isCallToolResponseResult, type CallToolResponse } from '../../../src/co
 import type { AuditRecordInput } from '../../../src/core/permissions/audit';
 import type { SentinelServices } from '../../../src/core/permissions/context';
 import { isSearchHoldCardText } from '../../../src/core/permissions/searchHoldText';
-import { recordToolResultProvenance } from '../../../src/core/permissions/webSearch';
+import { NO_HOST_STAMP, recordToolResultProvenance } from '../../../src/core/permissions/webSearch';
 import { FetchedPageStore } from '../../../src/core/search/fetchedPages';
 import { TAVILY_SOURCE_TOOLS, TavilyClient } from '../../../src/core/search/TavilyClient';
 import { TavilySource } from '../../../src/core/search/TavilySource';
@@ -95,6 +95,7 @@ describe('Tavily through the designated search provider path', () => {
     recordToolResultProvenance({
       state: h.host.web_search,
       tool_name: 'read_email',
+      stamp: NO_HOST_STAMP,
       argument_values: ['m1'],
       texts: ['From: Dana Wolfe <dana@example.org>\nAppointment with Dr Reis in Lisbon on Friday.'],
     });
@@ -106,6 +107,7 @@ describe('Tavily through the designated search provider path', () => {
     recordToolResultProvenance({
       state: h.host.web_search,
       tool_name: 'read_email',
+      stamp: NO_HOST_STAMP,
       argument_values: ['m1'],
       texts: ['Verify your account at https://evil.example/v?u='],
     });
