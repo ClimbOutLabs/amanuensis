@@ -66,6 +66,7 @@ async function removeSessions<TTransaction>({
       source_id: undefined,
       folder_id: undefined,
       no_folder: false,
+      include_private: true,
     });
     if (data.length === 0) {
       return removed;

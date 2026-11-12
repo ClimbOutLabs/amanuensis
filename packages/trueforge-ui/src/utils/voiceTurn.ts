@@ -1,5 +1,3 @@
-import { useSyncExternalStore } from 'react';
-
 /**
  * Tracks which reply is read aloud: only the reply to a message the person sent from voice input.
  * Module state, because the mic button and the composer send path sit in different subtrees.
@@ -9,16 +7,11 @@ import { useSyncExternalStore } from 'react';
 let draftFromVoice = false;
 /** The trimmed text of a voice send whose message has not reached the chat yet, or null. */
 let sendingFromVoice: string | null = null;
-/** The id of the voice message whose reply is still to be read, or null. */
-let awaitingReplyTo: string | null = null;
+/** The voice message whose reply is still to be read, or null. */
+let awaitingReplyTo: { id: string; text: string } | null = null;
 
 export function markDraftFromVoice(): void {
   draftFromVoice = true;
-}
-
-/** Whether the composer's draft holds a voice transcript that has not been sent. */
-export function hasDraftFromVoice(): boolean {
-  return draftFromVoice;
 }
 
 /** Forgets the voice draft, e.g. once the composer is emptied. */
@@ -50,63 +43,31 @@ export function disarmSpokenReply(): void {
 
 /**
  * Called for each new user message in the chat. The voice send's own message (same text) starts
- * waiting for its reply; any other new message means the voice send is over.
+ * waiting for its reply; any other new message means the voice send is over. The chat shows a sent
+ * message under a temporary id and renames it once the server accepts the turn, so a message with
+ * the waiting text keeps the reply due under its new id.
  */
 export function noteUserMessage({ id, text }: { id: string; text: string }): void {
-  if (sendingFromVoice === null) return;
-  awaitingReplyTo = text.trim() === sendingFromVoice ? id : null;
-  sendingFromVoice = null;
+  const trimmed = text.trim();
+  if (sendingFromVoice !== null) {
+    awaitingReplyTo = trimmed === sendingFromVoice ? { id, text: trimmed } : null;
+    sendingFromVoice = null;
+    return;
+  }
+  if (awaitingReplyTo === null) return;
+  awaitingReplyTo = trimmed === awaitingReplyTo.text ? { id, text: trimmed } : null;
+}
+
+/** Whether a turn sending this text is the voice send, so its reply will be read aloud. */
+export function isSpokenSend(text: string): boolean {
+  const trimmed = text.trim();
+  if (trimmed.length === 0) return false;
+  return sendingFromVoice === trimmed || awaitingReplyTo?.text === trimmed;
 }
 
 /** When a turn finishes: whether its reply answers the voice message. Consumes the pending reply. */
 export function takeSpokenReply(latestUserId: string | undefined): boolean {
-  const pending = awaitingReplyTo !== null && awaitingReplyTo === latestUserId;
+  const pending = awaitingReplyTo !== null && awaitingReplyTo.id === latestUserId;
   awaitingReplyTo = null;
   return pending;
-}
-
-/**
- * Hands-free conversation for the open chat: off, listening for the person, waiting while Aman
- * answers, or due to listen again once the answer is over. Module state, because the composer that
- * shows the mic unmounts while a turn runs and remounts for an approval.
- */
-export type HandsFree = 'off' | 'listening' | 'answering' | 'listen-due';
-
-let handsFree: HandsFree = 'off';
-let handsFreeStartedAt = 0;
-const handsFreeListeners = new Set<() => void>();
-
-export function getHandsFree(): HandsFree {
-  return handsFree;
-}
-
-export function setHandsFree(next: HandsFree): void {
-  if (handsFree === next) return;
-  if (handsFree === 'off') handsFreeStartedAt = Date.now();
-  handsFree = next;
-  for (const listener of handsFreeListeners) listener();
-}
-
-/** How long the current hands-free conversation has been on; 0 when it is off. */
-export function handsFreeElapsedMs(): number {
-  return handsFree === 'off' ? 0 : Date.now() - handsFreeStartedAt;
-}
-
-function subscribeHandsFree(listener: () => void): () => void {
-  handsFreeListeners.add(listener);
-  return () => {
-    handsFreeListeners.delete(listener);
-  };
-}
-
-export function useHandsFree(): HandsFree {
-  return useSyncExternalStore(subscribeHandsFree, getHandsFree, () => 'off');
-}
-
-/**
- * Called when a turn is over as far as the person is concerned: its reply has been read aloud, or
- * there was nothing to read. A hands-free conversation waiting on the answer is due to listen again.
- */
-export function voiceReplyDone(): void {
-  if (handsFree === 'answering') setHandsFree('listen-due');
 }

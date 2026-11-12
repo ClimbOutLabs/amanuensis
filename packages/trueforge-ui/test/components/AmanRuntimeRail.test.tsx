@@ -728,7 +728,7 @@ describe('AmanRuntimeRail recent actions, rules and Needs you', () => {
     expect(screen.queryByText('Your rules')).not.toBeInTheDocument();
 
     const activity = fold('activity');
-    expect(await within(activity ?? document.body).findByText('Changed a schedule')).toBeInTheDocument();
+    expect(await within(activity ?? document.body).findByText('Created a schedule')).toBeInTheDocument();
     expect(within(activity ?? document.body).queryByText('Read your email')).not.toBeInTheDocument();
     expect(activity?.querySelectorAll('li')).toHaveLength(5);
     expect(screen.queryByText(/Show all/i)).not.toBeInTheDocument();

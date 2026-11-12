@@ -13,21 +13,31 @@
 
 let pending: Promise<unknown> | null = null;
 
+const settledListeners = new Set<() => void>();
+
+/**
+ * Calls `listener` each time a pill mutation settles, so what depends on who answers the chat (the
+ * incognito banner) can read it again. Returns the unsubscribe.
+ */
+export function onPersonaMutationSettled(listener: () => void): () => void {
+  settledListeners.add(listener);
+  return () => {
+    settledListeners.delete(listener);
+  };
+}
+
 /** Register a pill mutation; turn creation will wait for it before admitting. */
 export function registerPersonaMutation(promise: Promise<unknown>): void {
   pending = promise;
-  void promise.then(
-    () => {
-      if (pending === promise) {
-        pending = null;
-      }
-    },
-    () => {
-      if (pending === promise) {
-        pending = null;
-      }
-    },
-  );
+  const settle = () => {
+    if (pending === promise) {
+      pending = null;
+    }
+    for (const listener of settledListeners) {
+      listener();
+    }
+  };
+  void promise.then(settle, settle);
 }
 
 /**

@@ -10,6 +10,8 @@ import {
   GetPushConfigResponseSchema,
   GetPushSubscriptionResponseSchema,
   ListDeliveriesResponseSchema,
+  LookupPushSubscriptionRequestSchema,
+  LookupPushSubscriptionResponseSchema,
   MarkDeliveriesSeenRequestSchema,
 } from '../schemas/deliveries';
 import { RequestErrorResponseSchema } from '../schemas/errors';
@@ -176,6 +178,28 @@ export const deletePushSubscriptionRoute = createRoute({
     200: {
       content: { 'application/json': { schema: DeletePushSubscriptionResponseSchema } },
       description: 'The device no longer gets notices.',
+    },
+    400: invalidRequestResponse,
+    401: unauthorizedResponse,
+  },
+});
+
+export const lookupPushSubscriptionRoute = createRoute({
+  method: 'post',
+  path: '/subscriptions/lookup',
+  tags: [OpenApiTag.DELIVERIES],
+  summary: 'Check whether a device gets notices',
+  description:
+    'Says whether this device is still saved for the signed-in person. A device drops off when 10 newer ones are saved or its push service says it is gone.',
+  'x-fern-sdk-group-name': ['deliveries', 'push'],
+  'x-fern-sdk-method-name': 'lookup_subscription',
+  request: {
+    body: { content: { 'application/json': { schema: LookupPushSubscriptionRequestSchema } }, required: true },
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: LookupPushSubscriptionResponseSchema } },
+      description: 'Whether the device is saved.',
     },
     400: invalidRequestResponse,
     401: unauthorizedResponse,

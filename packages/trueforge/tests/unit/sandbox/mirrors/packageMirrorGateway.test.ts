@@ -73,6 +73,7 @@ interface Harness {
 async function setup(options?: {
   maxDownloadBytes?: number;
   maxCacheBytes?: number;
+  extraGoModuleHosts?: readonly string[];
   allowanceHolds?: PackageMirrorAllowanceCheck;
 }): Promise<Harness> {
   const upstreamHits: string[] = [];
@@ -169,6 +170,11 @@ async function setup(options?: {
       res.end(body);
       return;
     }
+    if (url.endsWith('/supported')) {
+      res.writeHead(404, { 'content-type': 'text/plain' });
+      res.end('not found');
+      return;
+    }
     if (url.startsWith('/crates/') || url.startsWith('/@scope') || url.startsWith('/sumdb/')) {
       res.writeHead(200, { 'content-type': 'application/octet-stream' });
       res.end(`upstream saw ${url}`);
@@ -201,6 +207,7 @@ async function setup(options?: {
     },
     ...(options?.maxDownloadBytes === undefined ? {} : { maxDownloadBytes: options.maxDownloadBytes }),
     ...(options?.maxCacheBytes === undefined ? {} : { maxCacheBytes: options.maxCacheBytes }),
+    ...(options?.extraGoModuleHosts === undefined ? {} : { extraGoModuleHosts: options.extraGoModuleHosts }),
   });
   const server = createServer(gateway.handler);
   const port = await listen(server);
@@ -520,7 +527,7 @@ describe('PackageMirrorGateway', () => {
         token: harness.token,
       });
       expect(reply.status).toBe(403);
-      expect(reply.body).toContain('well-known code host');
+      expect(reply.body).toContain('SANDBOX_MIRROR_GO_EXTRA_HOSTS');
       expect(harness.upstreamHits).toEqual([]);
     } finally {
       await harness.close();
@@ -535,8 +542,212 @@ describe('PackageMirrorGateway', () => {
         token: harness.token,
       });
       expect(reply.status).toBe(403);
-      expect(reply.body).toContain('well-known code host');
+      expect(reply.body).toContain('SANDBOX_MIRROR_GO_EXTRA_HOSTS');
       expect(harness.upstreamHits).toEqual([]);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it.each([
+    '/go/modules.example.net/lib/%40v/list',
+    '/go/modules.example.net/lib%2F@v/list',
+    '/go/modules.example.net%2Flib/@v/v1.0.0.info',
+    '/go/%6Dodules.example.net/lib/@v/list',
+    '/go/sumdb/sum.golang.org/%6Cookup/modules.example.net/lib@v1.0.0',
+    '/go/sumdb/sum.golang.org/lookup/modules.example.net%2Flib%40v1.0.0',
+  ])('refuses %s, however it is encoded, and fetches nothing', async path => {
+    const harness = await setup();
+    try {
+      const reply = await call(harness.port, { path, token: harness.token });
+      expect([403, 404]).toContain(reply.status);
+      expect(harness.upstreamHits).toEqual([]);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('sends the decoded form of a listed module upstream, however it was encoded', async () => {
+    const harness = await setup();
+    try {
+      const plain = await call(harness.port, { path: '/go/github.com/example/lib/@v/list', token: harness.token });
+      const encoded = await call(harness.port, {
+        path: '/go/github.com/example/lib/%40v/list',
+        token: harness.token,
+      });
+      const slash = await call(harness.port, { path: '/go/github.com%2Fexample%2Flib/@v/list', token: harness.token });
+      expect([plain.status, encoded.status, slash.status]).toEqual([200, 200, 200]);
+      expect(new Set(harness.upstreamHits)).toEqual(new Set(['GET /github.com/example/lib/@v/list']));
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it.each([
+    '/go/',
+    '/go/github.com/example/lib',
+    '/go/github.com/example/lib/@v/',
+    '/go/github.com/example/lib/@v/v1.0.0.txt',
+    '/go/github.com/example/lib/@v/v1.0.0',
+    '/go/github.com/example/lib/@v/list/extra',
+    '/go/github.com/example/lib/@latest/extra',
+    '/go/github.com/example/lib/@x/list',
+    '/go/github.com/Example/lib/@v/list',
+    '/go/github.com/example/lib/@v/V1.0.0.info',
+    '/go/github.com/example/../lib/@v/list',
+    '/go/github.com//lib/@v/list',
+    '/go/github.com:8080/example/@v/list',
+    '/go/sumdb/example.org/lookup/github.com/example/lib@v1.0.0',
+    '/go/sumdb/sum.golang.org/other',
+    '/go/sumdb/sum.golang.org/lookup/github.com/example/lib',
+    '/go/sumdb/sum.golang.org/tile/8/0/abc',
+    '/go/via/127.0.0.1/other',
+  ])('refuses the unknown Go address %s', async path => {
+    const harness = await setup();
+    try {
+      const reply = await call(harness.port, { path, token: harness.token });
+      expect([403, 404]).toContain(reply.status);
+      expect(harness.upstreamHits).toEqual([]);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('says what to do when a Go address is not one the mirror serves', async () => {
+    const harness = await setup();
+    try {
+      const reply = await call(harness.port, {
+        path: '/go/github.com/example/lib/@v/v1.0.0.txt',
+        token: harness.token,
+      });
+      expect(reply.status).toBe(404);
+      expect(reply.body).toContain('go mod download');
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('refuses a Go address that carries a query', async () => {
+    const harness = await setup();
+    try {
+      const reply = await call(harness.port, { path: '/go/github.com/example/lib/@v/list?x=1', token: harness.token });
+      expect(reply.status).toBe(404);
+      expect(harness.upstreamHits).toEqual([]);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it.each([
+    '/go/github.com/example/lib/@v/list',
+    '/go/github.com/example/lib/@v/v1.2.3-rc.1+incompatible.mod',
+    '/go/github.com/example/lib/@v/v1.2.3.zip',
+    '/go/github.com/example/lib/@latest',
+    '/go/github.com/example/lib/v2/@v/v2.0.0.info',
+    '/go/github.com/example/lib/@v/master.info',
+    '/go/sumdb/sum.golang.org/latest',
+    '/go/sumdb/sum.golang.org/tile/8/0/x001/234.p/2',
+    '/go/sumdb/sum.golang.org/tile/8/data/001',
+    '/go/filippo.io/edwards25519/@v/v1.1.0.info',
+    '/go/rsc.io/quote/@v/list',
+    '/go/cloud.google.com/go/@v/v0.110.0.mod',
+  ])('serves the Go address %s', async path => {
+    const harness = await setup();
+    try {
+      const reply = await call(harness.port, { path, token: harness.token });
+      expect(reply.status).toBe(200);
+      expect(harness.upstreamHits).toHaveLength(1);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('answers /supported itself only for sum.golang.org, not for another host behind /via/', async () => {
+    const harness = await setup();
+    try {
+      const reply = await call(harness.port, {
+        path: '/go/via/github.com/supported',
+        token: harness.token,
+        method: 'GET',
+      });
+      expect(reply.status).not.toBe(200);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it.each(['/go/sumdb/sum.golang.org/supported', '/go/via/sum.golang.org/supported'])(
+    'answers %s itself with 200, since the real one answers 404',
+    async path => {
+      const harness = await setup();
+      try {
+        for (const method of ['GET', 'HEAD']) {
+          const reply = await call(harness.port, { path, token: harness.token, method });
+          expect(reply.status).toBe(200);
+          expect(reply.body).toBe('');
+        }
+        expect(harness.upstreamHits).toEqual([]);
+      } finally {
+        await harness.close();
+      }
+    },
+  );
+
+  it('names the blocked host and the setting that adds it', async () => {
+    const harness = await setup();
+    try {
+      const reply = await call(harness.port, { path: '/go/modules.evil.net/b/@v/list', token: harness.token });
+      expect(reply.status).toBe(403);
+      expect(reply.body).toContain('modules.evil.net');
+      expect(reply.body).toContain('SANDBOX_MIRROR_GO_EXTRA_HOSTS');
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('serves a module with upper-case letters in its escaped form and refuses a raw upper-case one', async () => {
+    const harness = await setup();
+    try {
+      const escaped = await call(harness.port, {
+        path: '/go/github.com/!burnt!sushi/toml/@v/v1.3.2.info',
+        token: harness.token,
+      });
+      expect(escaped.status).toBe(200);
+      expect(escaped.body).toBe('upstream saw /github.com/!burnt!sushi/toml/@v/v1.3.2.info');
+      const lookup = await call(harness.port, {
+        path: '/go/sumdb/sum.golang.org/lookup/github.com/!burnt!sushi/toml@v1.3.2',
+        token: harness.token,
+      });
+      expect(lookup.status).toBe(200);
+      const raw = await call(harness.port, {
+        path: '/go/github.com/BurntSushi/toml/@v/v1.3.2.info',
+        token: harness.token,
+      });
+      expect(raw.status).toBe(404);
+      expect(harness.upstreamHits).toHaveLength(2);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('serves modules from a host the owner added, and still refuses an unlisted one', async () => {
+    const harness = await setup({ extraGoModuleHosts: ['modules.example.net'] });
+    try {
+      const added = await call(harness.port, {
+        path: '/go/modules.example.net/library/@v/v1.2.3.info',
+        token: harness.token,
+      });
+      expect(added.status).toBe(200);
+      const sum = await call(harness.port, {
+        path: '/go/sumdb/sum.golang.org/lookup/modules.example.net/library@v1.2.3',
+        token: harness.token,
+      });
+      expect(sum.status).toBe(200);
+      const other = await call(harness.port, {
+        path: '/go/other.example.net/library/@v/v1.2.3.info',
+        token: harness.token,
+      });
+      expect(other.status).toBe(403);
     } finally {
       await harness.close();
     }
