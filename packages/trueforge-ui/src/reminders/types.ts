@@ -23,17 +23,12 @@ export type ReminderItem = {
   setAt: string;
   /** The persona the reminder was set with. */
   personaName: string;
-};
-
-/** The one chat reminders are delivered into. Null until a first reminder has fired. */
-export type ReminderChat = { sessionId: string; title: string };
-
-export type RemindersList = {
-  reminders: ReminderItem[];
-  remindersChat: ReminderChat | null;
+  /** The chat the reminder was set in, or null when it was set elsewhere or that chat is gone. */
+  sessionId: string | null;
 };
 
 /** The reminders list, served by the host. Read-only: reminders are set and changed in chat. */
 export type RemindersApi = {
-  listReminders(): Promise<RemindersList>;
+  /** Every reminder the person set. */
+  listReminders(): Promise<ReminderItem[]>;
 };

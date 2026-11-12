@@ -14,7 +14,7 @@ import {
   ModelUsageProvider,
   PersonalizationProvider,
   PersonaProvider,
-  RemindersProvider,
+  ReminderListProvider,
   RepositoryWorkProvider,
   RunCodeStatusProvider,
   SentinelApiProvider,
@@ -550,7 +550,7 @@ export function App() {
         <SentinelApiProvider api={sentinelApi}>
           <DeliveriesProvider api={deliveriesApi}>
             <LocalAccountProvider api={localAccountApi}>
-              <RemindersProvider api={remindersApi}>
+              <ReminderListProvider api={remindersApi}>
                 <PersonalizationProvider api={personalizationApi}>
                   <ImplementationPlanGrantProvider api={implementationPlanGrantApi}>
                     <RepositoryWorkProvider api={repositoryWorkApi}>
@@ -598,7 +598,7 @@ export function App() {
                     </RepositoryWorkProvider>
                   </ImplementationPlanGrantProvider>
                 </PersonalizationProvider>
-              </RemindersProvider>
+              </ReminderListProvider>
             </LocalAccountProvider>
           </DeliveriesProvider>
         </SentinelApiProvider>

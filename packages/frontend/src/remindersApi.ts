@@ -1,10 +1,14 @@
-import type { ReminderChat, ReminderItem, RemindersApi, ReminderState } from '@truefoundry/trueforge-ui';
+import type { ReminderItem, RemindersApi, ReminderState } from '@truefoundry/trueforge-ui';
 
 import { apiPath } from './publicPath';
 
 // The server owns the wire shape (src/schemas/reminders.ts). Bodies are checked here, never asserted: a reminder
 // this version does not recognise is dropped rather than drawn wrong.
 const REMINDERS_URL = '/api/v1/user/reminders';
+/** Schedules the server reads per page; the most it accepts. */
+const PAGE_LIMIT = 100;
+/** A stop for a server that keeps handing back a page token: no person has this many pages of schedules. */
+const MAX_PAGES = 50;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -33,6 +37,7 @@ function parseItem(value: unknown): ReminderItem | null {
     last_due_at: lastDueAt,
     set_at: setAt,
     persona_name: personaName,
+    session_id: sessionId,
   } = value;
   const state = parseState(value.state);
   if (
@@ -46,7 +51,8 @@ function parseItem(value: unknown): ReminderItem | null {
     !isNullableString(lastRemindedAt) ||
     !isNullableString(lastDueAt) ||
     typeof setAt !== 'string' ||
-    typeof personaName !== 'string'
+    typeof personaName !== 'string' ||
+    !isNullableString(sessionId)
   ) {
     return null;
   }
@@ -62,16 +68,8 @@ function parseItem(value: unknown): ReminderItem | null {
     lastDueAt,
     setAt,
     personaName,
+    sessionId,
   };
-}
-
-function parseChat(value: unknown): ReminderChat | null {
-  if (!isRecord(value)) {
-    return null;
-  }
-  return typeof value.session_id === 'string' && typeof value.title === 'string'
-    ? { sessionId: value.session_id, title: value.title }
-    : null;
 }
 
 function errorMessage({ body, status }: { body: unknown; status: number }): string {
@@ -81,18 +79,33 @@ function errorMessage({ body, status }: { body: unknown; status: number }): stri
   return `That did not work (error ${String(status)}). Try again in a moment.`;
 }
 
-/** Backs `RemindersProvider`: every reminder the signed-in person set, read-only. */
+/** Backs `ReminderListProvider`: every reminder the signed-in person set, read-only, gathered page by page. */
 export function createRemindersApi(fetcher: typeof fetch): RemindersApi {
   return {
     async listReminders() {
-      const response = await fetcher(apiPath(REMINDERS_URL));
-      const body: unknown = await response.json().catch((): null => null);
-      if (!response.ok) {
-        throw new Error(errorMessage({ body, status: response.status }));
+      const reminders: ReminderItem[] = [];
+      let pageToken: string | undefined;
+      for (let page = 0; page < MAX_PAGES; page += 1) {
+        const query = new URLSearchParams({ limit: String(PAGE_LIMIT) });
+        if (pageToken !== undefined) {
+          query.set('page_token', pageToken);
+        }
+        const response = await fetcher(apiPath(`${REMINDERS_URL}?${query.toString()}`));
+        const body: unknown = await response.json().catch((): null => null);
+        if (!response.ok) {
+          throw new Error(errorMessage({ body, status: response.status }));
+        }
+        const rows: unknown = isRecord(body) ? body.data : undefined;
+        if (Array.isArray(rows)) {
+          reminders.push(...rows.map(parseItem).filter(item => item !== null));
+        }
+        const next: unknown = isRecord(body) ? body.next_page_token : undefined;
+        if (typeof next !== 'string' || next === '') {
+          break;
+        }
+        pageToken = next;
       }
-      const rows: unknown = isRecord(body) ? body.data : undefined;
-      const reminders = Array.isArray(rows) ? rows.map(parseItem).filter(item => item !== null) : [];
-      return { reminders, remindersChat: parseChat(isRecord(body) ? body.reminders_chat : undefined) };
+      return reminders;
     },
   };
 }

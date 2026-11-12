@@ -5,14 +5,13 @@
  * Making, changing and cancelling reminders stays in chat, where it already lives.
  */
 import { OpenAPIHono, type RouteHandler } from '@hono/zod-openapi';
-import type { ISessionStore } from '@truefoundry/trueforge-core/agent-session';
-import { REMINDERS_CHAT_TITLE } from '@truefoundry/trueforge-core/core/schedules/toolContract';
+import { InvalidPageTokenError, type ISessionStore } from '@truefoundry/trueforge-core/agent-session';
 
 import type { ResolveRequestContext } from '../auth/identity';
 import type { IAgentStore } from '../db/agentStore';
 import type { IPersonalizationStore } from '../db/personalizationStore';
 import type { IPersonaStore } from '../db/personaStore';
-import type { IScheduleStore, ScheduleRecord } from '../db/scheduleStore';
+import type { IScheduleStore, ScheduleRecord, ScheduleRunRecord } from '../db/scheduleStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import { listRemindersRoute } from '../routes/reminderRoutes';
 import { scheduleRunsAs } from '../runtime/chatAssistant';
@@ -20,43 +19,27 @@ import { describeManifestTiming } from '../runtime/scheduleCapability';
 import type { ReminderItem, ReminderState } from '../schemas/reminders';
 
 export interface RemindersRouterDeps<TTransaction> {
-  scheduleStore: Pick<IScheduleStore<TTransaction>, 'listSchedules' | 'listRuns' | 'getScheduledRunFor'>;
-  sessionStore: Pick<ISessionStore<SessionCustom, TurnCustom>, 'getSessionByExternalId'>;
+  scheduleStore: Pick<IScheduleStore<TTransaction>, 'listSchedules' | 'listLatestRuns'>;
+  sessionStore: Pick<ISessionStore<SessionCustom, TurnCustom>, 'getOwnedIds'>;
   agentStore: Pick<IAgentStore<TTransaction>, 'getAgent'>;
   personaStore: Pick<IPersonaStore<TTransaction>, 'getPersona'>;
   personalizationStore: Pick<IPersonalizationStore<TTransaction>, 'getProfile'>;
   resolveRequestContext: ResolveRequestContext;
 }
 
-const REMINDERS_PAGE_SIZE = 100;
-/** Same bound the chat tools use when they read a person's reminders. */
-const REMINDERS_LOOKUP_LIMIT = 500;
-/** Past runs read per reminder; the view shows only the latest, with room to find it past the queued one. */
+/** Runs read per reminder: the queued one, if any, and enough past ones to find the latest reminded. */
 const RUNS_READ = 5;
 
-/** The external id of the one chat reminders are delivered into. Mirrors the writer in reminderDelivery. */
-function remindersExternalId(subjectId: string): string {
-  return `reminders:${subjectId}`;
-}
-
-/** One reminder as the view shows it: its words, where it stands, and when it is due or last fired. */
-async function reminderItem<TTransaction>(input: {
-  deps: RemindersRouterDeps<TTransaction>;
+/** One reminder as the view shows it: its words, where it stands, when it is due or last fired, and its chat. */
+function reminderItem(input: {
   record: ScheduleRecord;
-  runsAs: (schedule: ScheduleRecord) => Promise<string>;
-}): Promise<ReminderItem> {
-  const { deps, record } = input;
-  const pending = await deps.scheduleStore.getScheduledRunFor({
-    tenant_id: record.tenant_id,
-    schedule_id: record.id,
-  });
-  const { data: runs } = await deps.scheduleStore.listRuns({
-    tenant_id: record.tenant_id,
-    schedule_id: record.id,
-    limit: RUNS_READ,
-    page_token: undefined,
-  });
-  // Runs come back newest due first; the queued one is not a past firing.
+  runs: readonly ScheduleRunRecord[];
+  personaName: string;
+  sessionId: string | null;
+}): ReminderItem {
+  const { record, runs } = input;
+  // Runs come newest due first. The queued one is not a past firing.
+  const pending = runs.find(run => run.status === 'scheduled');
   const past = runs.filter(run => run.status === 'triggered' || run.status === 'failed');
   const latestPast = past[0];
   const latestReminded = past.find(run => run.status === 'triggered');
@@ -90,63 +73,102 @@ async function reminderItem<TTransaction>(input: {
       latestReminded === undefined ? null : (latestReminded.triggered_at ?? latestReminded.scheduled_for),
     last_due_at: latestPast?.scheduled_for ?? null,
     set_at: record.created_at,
-    persona_name: await input.runsAs(record),
+    persona_name: input.personaName,
+    session_id: input.sessionId,
   };
 }
 
 /**
- * Every reminder the person set, plus the chat they are delivered into. The chat is read, never
- * made: it exists only once a first reminder has fired, and until then the view says so.
+ * One page of the reminders the person set. Each page reads one page of their schedules, the runs of
+ * its reminders in one query, and which of their chats are still theirs in one query, so a person with
+ * many reminders never fans out into a query per reminder.
  */
-export async function buildRemindersView<TTransaction>(input: {
+export async function buildRemindersPage<TTransaction>(input: {
   deps: RemindersRouterDeps<TTransaction>;
   tenant_id: string;
   owner_subject_id: string;
-}): Promise<{ data: ReminderItem[]; reminders_chat: { session_id: string; title: string } | null }> {
+  limit: number;
+  page_token: string | undefined;
+}): Promise<{ data: ReminderItem[]; next_page_token: string | undefined }> {
   const { deps, tenant_id, owner_subject_id } = input;
-  const records: ScheduleRecord[] = [];
-  let pageToken: string | undefined;
-  do {
-    const page = await deps.scheduleStore.listSchedules({
-      tenant_id,
-      limit: REMINDERS_PAGE_SIZE,
-      page_token: pageToken,
-      agent_names: undefined,
-      created_by_or_agent_ids: { created_by_subject_id: owner_subject_id, agent_ids: [] },
-    });
-    records.push(...page.data.filter(record => record.manifest.kind === 'reminder'));
-    pageToken = page.pagination.next_page_token;
-  } while (pageToken !== undefined && records.length < REMINDERS_LOOKUP_LIMIT);
+  const page = await deps.scheduleStore.listSchedules({
+    tenant_id,
+    limit: input.limit,
+    page_token: input.page_token,
+    agent_names: undefined,
+    created_by_or_agent_ids: { created_by_subject_id: owner_subject_id, agent_ids: [] },
+  });
+  const records = page.data.filter(record => record.manifest.kind === 'reminder');
 
+  const runs = await deps.scheduleStore.listLatestRuns({
+    tenant_id,
+    schedule_ids: records.map(record => record.id),
+    per_schedule: RUNS_READ,
+  });
+  const runsBySchedule = new Map<string, ScheduleRunRecord[]>();
+  for (const run of runs) {
+    const list = runsBySchedule.get(run.schedule_id) ?? [];
+    list.push(run);
+    runsBySchedule.set(run.schedule_id, list);
+  }
+
+  // A row leads only to a chat the person still has: a deleted chat, or one someone else started, gets no link.
+  const originIds = [
+    ...new Set(
+      records.flatMap(record =>
+        record.manifest.origin_session_id === null ? [] : [record.manifest.origin_session_id],
+      ),
+    ),
+  ];
+  const ownedChats = new Set(
+    await deps.sessionStore.getOwnedIds({ tenant_id, ids: originIds, subject_id: owner_subject_id }),
+  );
+
+  // One persona lookup per persona or agent, not per reminder: the helper keeps what it has read.
   const runsAs = scheduleRunsAs({
     tenant_id,
     agentStore: deps.agentStore,
     personaStore: deps.personaStore,
     personalizationStore: deps.personalizationStore,
   });
-  const data = await Promise.all(records.map(record => reminderItem({ deps, record, runsAs })));
-
-  const chat = await deps.sessionStore.getSessionByExternalId({
-    tenant_id,
-    external_id: remindersExternalId(owner_subject_id),
-  });
-  return {
-    data,
-    reminders_chat:
-      chat === undefined ? null : { session_id: chat.session_id, title: chat.title ?? REMINDERS_CHAT_TITLE },
-  };
+  const data: ReminderItem[] = [];
+  for (const record of records) {
+    const origin = record.manifest.origin_session_id;
+    data.push(
+      reminderItem({
+        record,
+        runs: runsBySchedule.get(record.id) ?? [],
+        personaName: await runsAs(record),
+        sessionId: origin !== null && ownedChats.has(origin) ? origin : null,
+      }),
+    );
+  }
+  return { data, next_page_token: page.pagination.next_page_token };
 }
 
 /** The signed-in person's reminders, mounted at /api/v1/user/reminders. Every read is scoped to tenant and creator. */
 export function createRemindersRouter<TTransaction>(deps: RemindersRouterDeps<TTransaction>) {
   const listHandler: RouteHandler<typeof listRemindersRoute> = async c => {
     const context = deps.resolveRequestContext(c);
-    const view = await buildRemindersView({
-      deps,
-      tenant_id: context.tenant_id,
-      owner_subject_id: context.subject.id,
-    });
-    return c.json(view, 200);
+    const query = c.req.valid('query');
+    try {
+      const page = await buildRemindersPage({
+        deps,
+        tenant_id: context.tenant_id,
+        owner_subject_id: context.subject.id,
+        limit: query.limit,
+        page_token: query.page_token,
+      });
+      return c.json(page, 200);
+    } catch (error) {
+      if (error instanceof InvalidPageTokenError) {
+        return c.json(
+          { error: { message: 'That page of your reminders is out of date. Reload to start again.' } },
+          400,
+        );
+      }
+      throw error;
+    }
   };
 
   const router = new OpenAPIHono();

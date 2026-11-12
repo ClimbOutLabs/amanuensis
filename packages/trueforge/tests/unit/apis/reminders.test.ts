@@ -85,43 +85,47 @@ function runRecord(overrides: Partial<ScheduleRunRecord> & { schedule_id: string
 
 async function build(input: {
   records: ScheduleRecord[];
-  pending?: Record<string, ScheduleRunRecord>;
+  /** Each reminder's runs, newest due first, the queued one included. */
   runs?: Record<string, ScheduleRunRecord[]>;
-  withChat?: boolean;
+  /** Chats that exist, by id, with the person who started each. */
+  chats?: Record<string, string>;
+  nextPageToken?: string;
 }) {
+  const calls = { listSchedules: [] as { limit: number; page_token: string | undefined }[], listLatestRuns: 0 };
   const scheduleStore: RemindersRouterDeps<never>['scheduleStore'] = {
     listSchedules: async query => {
+      calls.listSchedules.push({ limit: query.limit, page_token: query.page_token });
       const mine = input.records.filter(
         record =>
           record.tenant_id === query.tenant_id &&
           record.created_by_subject.subject_id === query.created_by_or_agent_ids?.created_by_subject_id,
       );
-      return { data: mine, pagination: { limit: query.limit } };
+      return {
+        data: mine,
+        pagination:
+          input.nextPageToken === undefined
+            ? { limit: query.limit }
+            : { limit: query.limit, next_page_token: input.nextPageToken },
+      };
     },
-    getScheduledRunFor: async query => input.pending?.[query.schedule_id],
-    listRuns: async query => ({
-      data: (input.runs?.[query.schedule_id] ?? []).slice(0, query.limit),
-      pagination: { limit: query.limit },
-    }),
+    listLatestRuns: async query => {
+      calls.listLatestRuns += 1;
+      return query.schedule_ids.flatMap(id => (input.runs?.[id] ?? []).slice(0, query.per_schedule));
+    },
   };
   const sessionStore = new InMemorySessionStore<SessionCustom, TurnCustom>();
-  if (input.withChat === true) {
+  for (const [sessionId, subjectId] of Object.entries(input.chats ?? {})) {
     await sessionStore.createSession({
       tenant_id: 'default',
-      session_id: 'reminders-session-1',
+      session_id: sessionId,
       agent: { type: 'reference', id: 'agent-1', name: 'chat-assistant-alice' },
-      created_by_subject: OWNER,
-      external_id: 'reminders:alice',
-      metadata: { is_reminders: 'true' },
+      created_by_subject: { subject_id: subjectId, subject_type: 'user', subject_display_name: subjectId },
+      external_id: null,
+      metadata: {},
       source: null,
       custom: null,
-    });
-    await sessionStore.updateSession({
-      tenant_id: 'default',
-      session_id: 'reminders-session-1',
-      agent: undefined,
-      title: 'Reminders',
-      metadata: undefined,
+      is_incognito: false,
+      private_expires_at: null,
     });
   }
   let current = ALICE;
@@ -137,13 +141,13 @@ async function build(input: {
   };
   const app = new OpenAPIHono();
   app.route('/reminders', createRemindersRouter(deps));
-  const list = async (as: RequestContext) => {
+  const list = async (as: RequestContext, query = '') => {
     current = as;
-    const response = await app.request('/reminders');
+    const response = await app.request(`/reminders${query}`);
     expect(response.status).toBe(200);
     return ListRemindersResponseSchema.parse(await response.json());
   };
-  return { list };
+  return { list, calls };
 }
 
 function byWhat(items: ReminderItem[], what: string): ReminderItem {
@@ -161,11 +165,11 @@ describe('reminders view route', () => {
     });
     const { list } = await build({
       records: [record],
-      pending: { [record.id]: runRecord({ schedule_id: record.id, scheduled_for: '2026-11-04T17:00:00.000Z' }) },
+      runs: { [record.id]: [runRecord({ schedule_id: record.id, scheduled_for: '2026-11-04T17:00:00.000Z' })] },
     });
 
     const view = await list(ALICE);
-    expect(view.reminders_chat).toBeNull();
+    expect(view.next_page_token).toBeUndefined();
     expect(view.data).toHaveLength(1);
     const item = view.data[0];
     if (item === undefined) throw new Error('The view is empty.');
@@ -194,7 +198,6 @@ describe('reminders view route', () => {
           }),
         ],
       },
-      withChat: true,
     });
 
     const view = await list(ALICE);
@@ -203,7 +206,6 @@ describe('reminders view route', () => {
     expect(item.next_due_at).toBeNull();
     expect(item.last_reminded_at).toBe('2026-11-02T17:00:05.000Z');
     expect(item.last_due_at).toBe('2026-11-02T17:00:00.000Z');
-    expect(view.reminders_chat).toEqual({ session_id: 'reminders-session-1', title: 'Reminders' });
   });
 
   it('keeps a repeating reminder upcoming after a firing, and remembers the last one', async () => {
@@ -212,7 +214,6 @@ describe('reminders view route', () => {
     });
     const { list } = await build({
       records: [record],
-      pending: { [record.id]: runRecord({ schedule_id: record.id, scheduled_for: '2026-11-04T17:00:00.000Z' }) },
       runs: {
         [record.id]: [
           runRecord({ schedule_id: record.id, scheduled_for: '2026-11-04T17:00:00.000Z' }),
@@ -301,10 +302,57 @@ describe('reminders view route', () => {
     });
     const { list } = await build({
       records: [record],
-      pending: { [record.id]: runRecord({ schedule_id: record.id }) },
+      runs: { [record.id]: [runRecord({ schedule_id: record.id })] },
     });
 
     const item = byWhat((await list(ALICE)).data, 'Stretch');
     expect(item.persona_name).toBe('chat-assistant-alice');
+  });
+
+  it('links each reminder to the chat it was set in, only while that chat is there and the person started it', async () => {
+    const inOwnChat = reminderRecord({
+      manifest: {
+        ...manifest({ task: 'In my chat', run_at: '2026-11-04T17:00:00.000Z' }),
+        origin_session_id: 'chat-mine',
+      },
+    });
+    const chatDeleted = reminderRecord({
+      manifest: {
+        ...manifest({ task: 'Chat deleted', run_at: '2026-11-04T17:00:00.000Z' }),
+        origin_session_id: 'chat-gone',
+      },
+    });
+    const othersChat = reminderRecord({
+      manifest: {
+        ...manifest({ task: 'Someone else chat', run_at: '2026-11-04T17:00:00.000Z' }),
+        origin_session_id: 'chat-bob',
+      },
+    });
+    const setElsewhere = reminderRecord({
+      manifest: manifest({ task: 'Set elsewhere', run_at: '2026-11-04T17:00:00.000Z' }),
+    });
+    const { list } = await build({
+      records: [inOwnChat, chatDeleted, othersChat, setElsewhere],
+      chats: { 'chat-mine': 'alice', 'chat-bob': 'bob' },
+    });
+
+    const view = await list(ALICE);
+    expect(byWhat(view.data, 'In my chat').session_id).toBe('chat-mine');
+    expect(byWhat(view.data, 'Chat deleted').session_id).toBeNull();
+    expect(byWhat(view.data, 'Someone else chat').session_id).toBeNull();
+    expect(byWhat(view.data, 'Set elsewhere').session_id).toBeNull();
+  });
+
+  it('reads the runs of a whole page of reminders in one read, and hands back the next page token', async () => {
+    const records = Array.from({ length: 30 }, (_, index) =>
+      reminderRecord({ manifest: manifest({ task: `Reminder ${String(index)}`, run_at: '2026-11-04T17:00:00.000Z' }) }),
+    );
+    const { list, calls } = await build({ records, nextPageToken: 'next-1' });
+
+    const view = await list(ALICE, '?limit=30&page_token=page-0');
+    expect(view.data).toHaveLength(30);
+    expect(view.next_page_token).toBe('next-1');
+    expect(calls.listLatestRuns).toBe(1);
+    expect(calls.listSchedules).toEqual([{ limit: 30, page_token: 'page-0' }]);
   });
 });

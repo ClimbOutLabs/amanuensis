@@ -1,8 +1,13 @@
 import { createRoute } from '@hono/zod-openapi';
 
 import { RequestErrorResponseSchema } from '../schemas/errors';
-import { ListRemindersResponseSchema } from '../schemas/reminders';
+import { ListRemindersResponseSchema, RemindersPageQuerySchema } from '../schemas/reminders';
 import { OpenApiTag } from './openapiTags';
+
+const invalidRequestResponse = {
+  content: { 'application/json': { schema: RequestErrorResponseSchema } },
+  description: 'Invalid request.',
+};
 
 const unauthorizedResponse = {
   content: { 'application/json': { schema: RequestErrorResponseSchema } },
@@ -15,14 +20,16 @@ export const listRemindersRoute = createRoute({
   tags: [OpenApiTag.REMINDERS],
   summary: 'List reminders',
   description:
-    'Lists every reminder the signed-in person set, upcoming and past, with the chat they are delivered into.',
+    'Lists the reminders the signed-in person set, upcoming and past, a page at a time, each with the chat it was set in.',
   'x-fern-sdk-group-name': ['reminders'],
   'x-fern-sdk-method-name': 'list',
+  request: { query: RemindersPageQuerySchema },
   responses: {
     200: {
       content: { 'application/json': { schema: ListRemindersResponseSchema } },
-      description: 'Every reminder the signed-in person set.',
+      description: 'One page of the reminders the signed-in person set.',
     },
+    400: invalidRequestResponse,
     401: unauthorizedResponse,
   },
 });

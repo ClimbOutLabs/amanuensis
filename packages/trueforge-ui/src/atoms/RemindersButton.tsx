@@ -1,7 +1,7 @@
 'use client';
 
 import { Icon } from '../icons/Icon.js';
-import { useOptionalReminders } from '../reminders/RemindersContext.js';
+import { useOptionalReminderList } from '../reminders/ReminderListContext.js';
 import { useOptionalShellMode } from '../server/ShellModeContext.js';
 import {
   auiButtonClass,
@@ -20,7 +20,7 @@ export type RemindersButtonProps = {
 
 export function RemindersButton({ className, compact = false, selected }: RemindersButtonProps) {
   const shell = useOptionalShellMode();
-  const reminders = useOptionalReminders();
+  const reminders = useOptionalReminderList();
 
   const enabled = reminders !== null && shell != null;
   const open = shell?.remindersOpen === true;

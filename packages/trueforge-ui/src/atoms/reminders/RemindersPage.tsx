@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useState, type ComponentType } from 'react';
 
+import { openDeliveryLink } from '../../deliveries/openDelivery.js';
 import { groupReminders, reminderDetailLine, reminderWhenLine } from '../../reminders/groupReminders.js';
-import { useReminders } from '../../reminders/RemindersContext.js';
-import type { ReminderChat, ReminderItem, RemindersList } from '../../reminders/types.js';
+import { useReminderList } from '../../reminders/ReminderListContext.js';
+import type { ReminderItem } from '../../reminders/types.js';
 import { useOptionalShellMode } from '../../server/ShellModeContext.js';
 import { EmptyScreen } from '../EmptyScreen.js';
 import { cn } from '../lib/cn.js';
@@ -14,16 +15,9 @@ import { Skeleton } from '../primitives/Skeleton.js';
 
 const ROW_CLASS = 'flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left';
 
-function ReminderRow({
-  item,
-  chat,
-  onOpenChat,
-}: {
-  item: ReminderItem;
-  chat: ReminderChat | null;
-  onOpenChat: () => void;
-}) {
+function ReminderRow({ item, onOpenChat }: { item: ReminderItem; onOpenChat: (sessionId: string) => void }) {
   const past = item.state === 'reminded' || item.state === 'missed';
+  const sessionId = item.sessionId;
   const content = (
     <>
       <span className="min-w-0 flex-1">
@@ -31,14 +25,14 @@ function ReminderRow({
         <span className="block truncate text-sm text-text-secondary">{reminderWhenLine(item)}</span>
         <span className="block truncate text-xs text-text-secondary">{reminderDetailLine(item)}</span>
       </span>
-      {chat !== null ? (
+      {sessionId !== null ? (
         <span className="shrink-0 text-xs text-text-secondary">
-          {past ? `See it in the ${chat.title} chat` : `Will appear in the ${chat.title} chat`}
+          {past ? 'See it in its chat' : 'Will appear in its chat'}
         </span>
       ) : null}
     </>
   );
-  if (chat === null) {
+  if (sessionId === null) {
     return <li className={ROW_CLASS}>{content}</li>;
   }
   return (
@@ -46,8 +40,8 @@ function ReminderRow({
       <button
         type="button"
         className={cn(ROW_CLASS, 'hover:bg-secondary-button-hover')}
-        onClick={onOpenChat}
-        aria-label={`${item.what}. Opens the ${chat.title} chat.`}
+        onClick={() => onOpenChat(sessionId)}
+        aria-label={`${item.what}. Opens the chat it was set in.`}
       >
         {content}
       </button>
@@ -59,14 +53,12 @@ function ReminderGroup({
   title,
   items,
   emptyText,
-  chat,
   onOpenChat,
 }: {
   title: string;
   items: ReminderItem[];
   emptyText: string;
-  chat: ReminderChat | null;
-  onOpenChat: () => void;
+  onOpenChat: (sessionId: string) => void;
 }) {
   return (
     <section aria-label={title} className="flex flex-col gap-1">
@@ -76,7 +68,7 @@ function ReminderGroup({
       ) : (
         <ul className="flex flex-col">
           {items.map(item => (
-            <ReminderRow key={item.id} item={item} chat={chat} onOpenChat={onOpenChat} />
+            <ReminderRow key={item.id} item={item} onOpenChat={onOpenChat} />
           ))}
         </ul>
       )}
@@ -89,9 +81,9 @@ function ReminderGroup({
  * Read-only on purpose. Reminders are set, changed and cancelled in chat, with the persona that set them.
  */
 export function RemindersPage() {
-  const { api } = useReminders();
+  const { api } = useReminderList();
   const shell = useOptionalShellMode();
-  const [list, setList] = useState<RemindersList | null>(null);
+  const [list, setList] = useState<ReminderItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -111,14 +103,15 @@ export function RemindersPage() {
     };
   }, [api, reloadKey]);
 
-  const groups = useMemo(() => (list === null ? null : groupReminders(list.reminders)), [list]);
-  const chat = list?.remindersChat ?? null;
+  const groups = useMemo(() => (list === null ? null : groupReminders(list)), [list]);
 
-  const openChat = useCallback(() => {
-    if (chat === null || shell === null) return;
-    shell.setRemindersOpen(false);
-    shell.openHistorySession({ sessionId: chat.sessionId, isMutable: false });
-  }, [chat, shell]);
+  const openChat = useCallback(
+    (sessionId: string) => {
+      if (shell === null) return;
+      openDeliveryLink({ shell, link: { type: 'chat', sessionId } });
+    },
+    [shell],
+  );
 
   const retry = useCallback(() => {
     setList(null);
@@ -158,19 +151,12 @@ export function RemindersPage() {
               title="Coming up"
               items={groups.comingUp}
               emptyText="No reminders coming up. When you ask a persona to remind you, it will show up here."
-              chat={chat}
               onOpenChat={openChat}
             />
-            {chat === null && groups.comingUp.length > 0 ? (
-              <p className="-mt-6 px-3 text-xs text-text-secondary">
-                When the first reminder's time comes, it will appear in a chat called Reminders.
-              </p>
-            ) : null}
             <ReminderGroup
               title="Already reminded"
               items={groups.alreadyReminded}
               emptyText="Nothing here yet. When a reminder's time comes, it will show up here."
-              chat={chat}
               onOpenChat={openChat}
             />
           </div>

@@ -21,6 +21,7 @@ function item(overrides: Partial<ReminderItem>): ReminderItem {
     lastDueAt: null,
     setAt: '2026-11-01T09:00:00.000Z',
     personaName: 'Mannie',
+    sessionId: null,
     ...overrides,
   };
 }

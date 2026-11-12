@@ -14,15 +14,6 @@ const NullableIsoTimestamp = z.iso
  */
 export const ReminderStateSchema = z.enum(['upcoming', 'paused', 'reminded', 'missed']).openapi('ReminderState');
 
-/** The one chat every reminder is delivered into, once the first one has fired. */
-export const ReminderChatSchema = z
-  .object({
-    session_id: z.string(),
-    title: z.string(),
-  })
-  .strict()
-  .openapi('ReminderChat');
-
 /** One reminder the signed-in person set, with everything the reminders view shows about it. */
 export const ReminderItemSchema = z
   .object({
@@ -37,18 +28,31 @@ export const ReminderItemSchema = z
     last_due_at: NullableIsoTimestamp.describe('When its latest past time was due, or null if none has passed.'),
     set_at: IsoTimestamp.describe('When the reminder was set.'),
     persona_name: z.string().describe('The persona the reminder was set with.'),
+    session_id: z
+      .string()
+      .nullable()
+      .describe('The chat the reminder was set in, or null when it was set elsewhere or that chat is gone.'),
   })
   .strict()
   .openapi('ReminderItem');
 
+export const RemindersPageQuerySchema = z
+  .object({
+    limit: z.coerce.number().int().min(1).max(100).default(50).describe('Most schedules to read for this page.'),
+    page_token: z.string().optional().describe('Token from the previous page; omit for the first page.'),
+  })
+  .openapi('ListRemindersRequestQuery');
+
 export const ListRemindersResponseSchema = z
   .object({
     data: z.array(ReminderItemSchema),
-    reminders_chat: ReminderChatSchema.nullable(),
+    next_page_token: z
+      .string()
+      .optional()
+      .describe('Pass as page_token to get more reminders; absent on the last page.'),
   })
   .strict()
   .openapi('ListRemindersResponse');
 
 export type ReminderState = z.infer<typeof ReminderStateSchema>;
-export type ReminderChat = z.infer<typeof ReminderChatSchema>;
 export type ReminderItem = z.infer<typeof ReminderItemSchema>;
