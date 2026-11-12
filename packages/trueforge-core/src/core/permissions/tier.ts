@@ -7,6 +7,7 @@ import { z } from '@hono/zod-openapi';
 
 import { APPROVAL_EXPIRED_REASON_CODE } from './approvalExpiry';
 import type { ShellApprovalBinding } from './approvalTokens.js';
+import { MAPS_HOLD_REASON } from './mapsToolNames';
 import { Tier3MailboxSchema } from './tierMailbox';
 
 /** Sentinel permission tier: 1 silent, 2 asks unless the user relaxed its kind, 3 always asks. */
@@ -64,6 +65,7 @@ export const GRANT_BARRED_TIER_REASONS: ReadonlySet<string> = new Set([
   SCHEDULE_STATUS_REASON,
   CONTENT_STEERED_REASON,
   CONNECTOR_READ_GUARD_REASON,
+  MAPS_HOLD_REASON,
 ]);
 
 /**

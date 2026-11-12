@@ -9,6 +9,7 @@ import configuration from '../../../src/config';
 import { TurnStreamingEventSchema } from '../../../src/schemas/events';
 import { GetTurnResponseSchema } from '../../../src/schemas/turn';
 import { MODEL_FQN, startApprovalTestServer, type ApprovalTestServer } from '../../fixtures/approvalTestServer';
+import { HARBOUR_ADDRESS, installRecordedTavily } from '../../fixtures/groundedFinderFixtures';
 import {
   HA_CALL_ACTION_TOOL,
   HA_LAMP,
@@ -557,6 +558,142 @@ describe("an event on the person's own calendar", () => {
       const refused = await sendTurn({ server, chatId, input: answer({ card: withGuest, scope: 'chat' }) });
       expect(refused.status).toBe(422);
       expect(await savedEvents()).toBe(before + 1);
+    },
+    TURN_TIMEOUT_MS,
+  );
+});
+
+describe('a map', () => {
+  let server: ApprovalTestServer;
+  let recorded: ReturnType<typeof installRecordedTavily>;
+
+  async function setMapsWithoutAsking(value: boolean): Promise<void> {
+    const response = await server.request('/api/v1/user/settings/sentinel', {
+      ...jsonInit({ maps_without_asking: value }),
+      method: 'PATCH',
+    });
+    expect(response.status).toBe(200);
+  }
+
+  async function mapsWithoutAsking(): Promise<boolean> {
+    const response = await server.request('/api/v1/user/settings/sentinel');
+    return z.object({ data: z.object({ maps_without_asking: z.boolean() }).loose() }).parse(await response.json()).data
+      .maps_without_asking;
+  }
+
+  /** One turn that asks for a map of the harbour address. */
+  async function runMapTurn(chatId: string): Promise<Turn> {
+    server.model.next({ toolArguments: { place_name: HARBOUR_ADDRESS } });
+    const input: TurnInputItem[] = [
+      { type: 'user.message', content: `${RUN_DIRECTIVE_PREFIX}render_map of ${HARBOUR_ADDRESS}` },
+    ];
+    return runTurn({ server, chatId, input });
+  }
+
+  async function mapCards(chatId: string) {
+    return cards(await runMapTurn(chatId));
+  }
+
+  /** Has the chat read a page through a connector, then asks for a map of a place the person never named. */
+  async function mapPlaceTheChatOnlyRead(chatId: string) {
+    server.model.next({ toolArguments: { page_id: 'welcome' } });
+    const read = onlyCard(await runTurn({ server, chatId, input: ask(INERT_GET_PAGE_TOOL) }));
+    await runTurn({ server, chatId, input: answer({ card: read, scope: 'once' }) });
+    server.model.next({ toolArguments: { place_name: '40 Rua Augusta, Lisbon' } });
+    return cards(await runTurn({ server, chatId, input: ask('render_map') }));
+  }
+
+  /** Asks for a map whose place text looks like a key. */
+  async function mapOfSomethingLikeAKey(chatId: string) {
+    server.model.next({ toolArguments: { place_name: ['AKI', 'A', 'ABCDEFGH', 'IJKLMNOP'].join('') } });
+    return cards(await runTurn({ server, chatId, input: ask('render_map') }));
+  }
+
+  beforeAll(async () => {
+    recorded = installRecordedTavily();
+    server = await startApprovalTestServer({ inertPageById: true });
+  });
+
+  afterAll(async () => {
+    await server.close();
+    recorded.restore();
+  });
+
+  afterEach(async () => {
+    await setMapsWithoutAsking(true);
+  });
+
+  it(
+    'runs with no card while maps are on, also for a place the chat only read',
+    async () => {
+      const chatId = await createChat(server);
+      expect(await mapsWithoutAsking()).toBe(true);
+      expect(await mapCards(chatId)).toEqual([]);
+      expect(await mapPlaceTheChatOnlyRead(chatId)).toEqual([]);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'with maps set to ask offers both lasting answers, and "Always allow in this chat" covers that chat only',
+    async () => {
+      await setMapsWithoutAsking(false);
+      const chatId = await createChat(server);
+      const [card, ...others] = await mapCards(chatId);
+      expect(others).toEqual([]);
+      expect(card).toMatchObject({ can_chat_allow: true, can_always_allow: true, always_allow_covers: 'maps' });
+      if (card === undefined) {
+        throw new Error('the map did not ask');
+      }
+      await runTurn({ server, chatId, input: answer({ card, scope: 'chat' }) });
+      expect(await mapCards(chatId)).toEqual([]);
+      expect(await mapPlaceTheChatOnlyRead(chatId)).toEqual([]);
+      expect(await mapsWithoutAsking()).toBe(false);
+
+      expect(await mapCards(await createChat(server))).toHaveLength(1);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'answered with "Always allow everywhere" turns maps on, so a later chat gets its map with no card',
+    async () => {
+      await setMapsWithoutAsking(false);
+      const chatId = await createChat(server);
+      const card = onlyCard(await runMapTurn(chatId));
+      await runTurn({ server, chatId, input: answer({ card, scope: 'always' }) });
+      expect(await mapsWithoutAsking()).toBe(true);
+
+      expect(await mapCards(await createChat(server))).toEqual([]);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'that would send something that looks like a key offers no lasting answer, also after both were given',
+    async () => {
+      await setMapsWithoutAsking(false);
+      const chatId = await createChat(server);
+      const [plain] = await mapCards(chatId);
+      if (plain === undefined) {
+        throw new Error('the map did not ask');
+      }
+      await runTurn({ server, chatId, input: answer({ card: plain, scope: 'chat' }) });
+      await setMapsWithoutAsking(true);
+
+      const [held, ...others] = await mapOfSomethingLikeAKey(chatId);
+      expect(others).toEqual([]);
+      expect(held).toMatchObject({ can_chat_allow: false, can_always_allow: false });
+      expect(held).not.toHaveProperty('always_allow_covers');
+      if (held === undefined) {
+        throw new Error('the map that looks like it sends a key did not ask');
+      }
+      for (const scope of ['chat', 'always'] as const) {
+        const refused = await sendTurn({ server, chatId, input: answer({ card: held, scope }) });
+        expect(refused.status).toBe(422);
+      }
+      await runTurn({ server, chatId, input: answer({ card: held, scope: 'once' }) });
+      expect(await mapCards(chatId)).toEqual([]);
     },
     TURN_TIMEOUT_MS,
   );
