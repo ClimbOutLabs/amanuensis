@@ -6,7 +6,7 @@ import { withMigrationTransaction } from '../migrationTransaction';
  * The sites the person allowed one by one for a skill, and the sites they turned down, beside
  * the approved list. Existing skills get empty lists: no per-site decisions, exactly the
  * behaviour before network cards. Mirrors
- * db/sqlite/migrations/20261105_000001_skill_network_host_decisions.ts.
+ * db/sqlite/migrations/20261112_000002_skill_network_host_decisions.ts.
  */
 export async function up(db: Kysely<unknown>): Promise<void> {
   await withMigrationTransaction(db, async trx => {

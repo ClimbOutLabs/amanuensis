@@ -252,6 +252,40 @@
         ],
         "type": "object"
       },
+      "AlwaysImportantSender": {
+        "properties": {
+          "added_at": {
+            "description": "When the person added this sender, ISO 8601 UTC.",
+            "type": "string"
+          },
+          "address": {
+            "description": "The sender address, lower case.",
+            "maxLength": 254,
+            "pattern": "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$",
+            "type": "string"
+          },
+          "name": {
+            "description": "What the person calls them. Left out when they gave no name.",
+            "maxLength": 120,
+            "minLength": 1,
+            "type": "string"
+          },
+          "source": {
+            "description": "Whether the person typed this sender or accepted it from a memory suggestion.",
+            "enum": [
+              "settings",
+              "memory"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "address",
+          "source",
+          "added_at"
+        ],
+        "type": "object"
+      },
       "AnthropicModelProvider": {
         "additionalProperties": false,
         "properties": {
@@ -1281,6 +1315,34 @@
           "providers"
         ],
         "type": "object"
+      },
+      "CalendarProblem": {
+        "description": "Set when the calendar has not been checked for about an hour. Null when calendar checks work.",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/CalendarProblemKind"
+          },
+          "since": {
+            "description": "When calendar checks first failed, with none succeeding since, ISO 8601 UTC.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "since",
+          "kind"
+        ],
+        "type": [
+          "object",
+          "null"
+        ]
+      },
+      "CalendarProblemKind": {
+        "description": "Why the calendar could not be checked: Google needs signing in again, or something else went wrong.",
+        "enum": [
+          "google_sign_in",
+          "other"
+        ],
+        "type": "string"
       },
       "CalendarProvider": {
         "properties": {
@@ -3691,6 +3753,17 @@
         ],
         "type": "object"
       },
+      "GetReachResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ReachView"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "GetRepositoryResponse": {
         "properties": {
           "data": {
@@ -5802,6 +5875,21 @@
         ],
         "type": "object"
       },
+      "ListReachSuggestionsResponse": {
+        "properties": {
+          "data": {
+            "description": "Senders memory suggests. Nothing is added until accepted.",
+            "items": {
+              "$ref": "#/components/schemas/ReachSuggestion"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "ListRepositoriesResponse": {
         "properties": {
           "data": {
@@ -6611,6 +6699,48 @@
           "name"
         ],
         "type": "object"
+      },
+      "MailProblem": {
+        "description": "Set when mail has not been checked for about an hour. Null when mail checks work.",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/MailProblemKind"
+          },
+          "since": {
+            "description": "When mail checks first failed, with none succeeding since, ISO 8601 UTC.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "since",
+          "kind"
+        ],
+        "type": [
+          "object",
+          "null"
+        ]
+      },
+      "MailProblemKind": {
+        "description": "Why mail could not be checked: the mail server answered too slowly, Google needs signing in again, the shared Email connector could not log in, or something else went wrong.",
+        "enum": [
+          "too_slow",
+          "google_sign_in",
+          "email_password",
+          "other"
+        ],
+        "type": "string"
+      },
+      "MailSourceKind": {
+        "description": "Where mail is read from. Null until mail has been checked once.",
+        "enum": [
+          "google",
+          "email_connector",
+          null
+        ],
+        "type": [
+          "string",
+          "null"
+        ]
       },
       "MarkBriefItemDoneRequest": {
         "properties": {
@@ -8019,14 +8149,15 @@
         "type": "object"
       },
       "ModelUsageRole": {
-        "description": "Job the model did: chat answers, sub-agent work, compaction, turn summarization, profile learning, or the knowledge relevance check.",
+        "description": "Job the model did: chat answers, sub-agent work, compaction, turn summarization, profile learning, the knowledge relevance check, or deciding how loudly to tell the person about something noticed.",
         "enum": [
           "chat",
           "delegation",
           "compaction",
           "summarization",
           "profile_learning",
-          "relevance_judge"
+          "relevance_judge",
+          "noticing"
         ],
         "type": "string"
       },
@@ -8197,6 +8328,25 @@
           "note_count"
         ],
         "type": "object"
+      },
+      "NoticingKind": {
+        "description": "A kind of event the assistant watches for.",
+        "enum": [
+          "mail_always",
+          "calendar_clash",
+          "travel",
+          "bill_due",
+          "approval_waiting"
+        ],
+        "type": "string"
+      },
+      "NoticingWatcher": {
+        "enum": [
+          "mail",
+          "calendar",
+          "approvals"
+        ],
+        "type": "string"
       },
       "NudgeDelivery": {
         "properties": {
@@ -9123,6 +9273,30 @@
         ],
         "type": "object"
       },
+      "QuietHours": {
+        "properties": {
+          "enabled": {
+            "description": "Whether calls are held back during quiet hours.",
+            "type": "boolean"
+          },
+          "end": {
+            "description": "When quiet hours end, in the time zone below.",
+            "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+            "type": "string"
+          },
+          "start": {
+            "description": "When quiet hours start, in the time zone below.",
+            "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled",
+          "start",
+          "end"
+        ],
+        "type": "object"
+      },
       "RawToolCall": {
         "allOf": [
           {
@@ -9138,6 +9312,240 @@
             "type": "object"
           }
         ]
+      },
+      "ReachAvailability": {
+        "properties": {
+          "calls": {
+            "$ref": "#/components/schemas/ReachChannelAvailability"
+          },
+          "texts": {
+            "$ref": "#/components/schemas/ReachChannelAvailability"
+          }
+        },
+        "required": [
+          "texts",
+          "calls"
+        ],
+        "type": "object"
+      },
+      "ReachChannelAvailability": {
+        "properties": {
+          "available": {
+            "description": "Whether this channel can be used on this server now.",
+            "type": "boolean"
+          },
+          "note": {
+            "description": "A plain-words line about the channel, shown beside its switch.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "available",
+          "note"
+        ],
+        "type": "object"
+      },
+      "ReachChannels": {
+        "properties": {
+          "calls": {
+            "description": "Whether phone calls may be used. Off until phone calls are set up.",
+            "type": "boolean"
+          },
+          "texts": {
+            "description": "Whether texts may be used. Off until text messages are set up.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "texts",
+          "calls"
+        ],
+        "type": "object"
+      },
+      "ReachSettings": {
+        "description": "How the person wants to be reached. Quiet hours and \"today\" are read in `timezone`.",
+        "properties": {
+          "always_important": {
+            "description": "Senders whose mail the assistant tells the person about, once the mail server vouches for them.",
+            "items": {
+              "$ref": "#/components/schemas/AlwaysImportantSender"
+            },
+            "maxItems": 200,
+            "type": "array"
+          },
+          "approval_wait_minutes": {
+            "description": "How long an approval may wait before the assistant says so. A request expires after 30 minutes.",
+            "maximum": 20,
+            "minimum": 5,
+            "type": "integer"
+          },
+          "call_for_urgent_reminders": {
+            "description": "Whether a reminder marked urgent may call.",
+            "type": "boolean"
+          },
+          "call_kinds": {
+            "description": "The kinds of event the person allows a phone call for. Empty means none.",
+            "items": {
+              "$ref": "#/components/schemas/NoticingKind"
+            },
+            "maxItems": 5,
+            "type": "array"
+          },
+          "channels": {
+            "$ref": "#/components/schemas/ReachChannels"
+          },
+          "dismissed_suggestions": {
+            "description": "Addresses the person turned down as always-important, so they are not suggested again.",
+            "items": {
+              "maxLength": 254,
+              "type": "string"
+            },
+            "maxItems": 500,
+            "type": "array"
+          },
+          "max_nudges_per_day": {
+            "description": "Most nudges in one day. Past it, events become notes.",
+            "maximum": 50,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "min_hours_between_calls": {
+            "description": "Fewest hours between two calls.",
+            "maximum": 72,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "noticing_on": {
+            "default": false,
+            "description": "Whether the assistant checks mail, the calendar and waiting approvals in the background. Reminders work either way.",
+            "type": "boolean"
+          },
+          "quiet_hours": {
+            "$ref": "#/components/schemas/QuietHours"
+          },
+          "timezone": {
+            "$ref": "#/components/schemas/Timezone"
+          },
+          "travel_lead_minutes": {
+            "description": "How long before an event with a place the person wants to hear about leaving.",
+            "maximum": 1440,
+            "minimum": 15,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "channels",
+          "always_important",
+          "dismissed_suggestions",
+          "call_kinds",
+          "call_for_urgent_reminders",
+          "quiet_hours",
+          "timezone",
+          "max_nudges_per_day",
+          "min_hours_between_calls",
+          "travel_lead_minutes",
+          "approval_wait_minutes"
+        ],
+        "type": "object"
+      },
+      "ReachSuggestion": {
+        "properties": {
+          "address": {
+            "description": "A sender address found in a memory.",
+            "type": "string"
+          },
+          "memory": {
+            "description": "The memory it came from, so the person can judge it.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "address",
+          "memory"
+        ],
+        "type": "object"
+      },
+      "ReachTestChannel": {
+        "description": "The channel to try.",
+        "enum": [
+          "in_app",
+          "push",
+          "text",
+          "call"
+        ],
+        "type": "string"
+      },
+      "ReachTestResult": {
+        "properties": {
+          "delivery_id": {
+            "description": "The test item, now in the feed.",
+            "type": "string"
+          },
+          "devices_reached": {
+            "description": "Devices a push notice went to.",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "delivery_id",
+          "devices_reached"
+        ],
+        "type": "object"
+      },
+      "ReachView": {
+        "properties": {
+          "availability": {
+            "$ref": "#/components/schemas/ReachAvailability"
+          },
+          "calendar_problem": {
+            "$ref": "#/components/schemas/CalendarProblem"
+          },
+          "mail_problem": {
+            "$ref": "#/components/schemas/MailProblem"
+          },
+          "mail_source": {
+            "$ref": "#/components/schemas/MailSourceKind"
+          },
+          "max_levels": {
+            "description": "The highest level each kind of event can ever reach, whatever the model says.",
+            "properties": {
+              "approval_waiting": {
+                "$ref": "#/components/schemas/DeliveryLevel"
+              },
+              "bill_due": {
+                "$ref": "#/components/schemas/DeliveryLevel"
+              },
+              "calendar_clash": {
+                "$ref": "#/components/schemas/DeliveryLevel"
+              },
+              "mail_always": {
+                "$ref": "#/components/schemas/DeliveryLevel"
+              },
+              "travel": {
+                "$ref": "#/components/schemas/DeliveryLevel"
+              }
+            },
+            "type": "object"
+          },
+          "saved": {
+            "description": "False until the person saves once. While false, the settings are the quiet defaults.",
+            "type": "boolean"
+          },
+          "settings": {
+            "$ref": "#/components/schemas/ReachSettings"
+          }
+        },
+        "required": [
+          "settings",
+          "saved",
+          "availability",
+          "max_levels",
+          "mail_problem",
+          "calendar_problem",
+          "mail_source"
+        ],
+        "type": "object"
       },
       "ReasoningEffort": {
         "enum": [
@@ -9632,6 +10040,47 @@
           "null"
         ]
       },
+      "RunNoticingRequest": {
+        "properties": {
+          "watcher": {
+            "$ref": "#/components/schemas/NoticingWatcher"
+          }
+        },
+        "required": [
+          "watcher"
+        ],
+        "type": "object"
+      },
+      "RunNoticingResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/RunNoticingResult"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "RunNoticingResult": {
+        "properties": {
+          "owners": {
+            "description": "People checked.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "raised": {
+            "description": "New events turned into notes or nudges.",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "owners",
+          "raised"
+        ],
+        "type": "object"
+      },
       "RuntimeConfig": {
         "default": {
           "ask_user_questions": {
@@ -10096,6 +10545,11 @@
           },
           "timezone": {
             "$ref": "#/components/schemas/Timezone"
+          },
+          "urgent": {
+            "default": false,
+            "description": "For a reminder: the person marked it urgent, so it may call if they allowed that.",
+            "type": "boolean"
           }
         },
         "required": [
@@ -10125,6 +10579,11 @@
           },
           "timezone": {
             "$ref": "#/components/schemas/Timezone"
+          },
+          "urgent": {
+            "default": false,
+            "description": "For a reminder: the person marked it urgent, so it may call if they allowed that.",
+            "type": "boolean"
           }
         },
         "required": [
@@ -10388,7 +10847,7 @@
             "$ref": "#/components/schemas/SessionAgent"
           },
           "approval_grants": {
-            "description": "Server-derived grants created by \"Always allow this here\" for one kind of action in this chat.",
+            "description": "Server-derived grants created by \"Always allow in this chat\" for one kind of action in this chat.",
             "items": {
               "type": "string"
             },
@@ -11800,6 +12259,28 @@
         "required": [
           "result",
           "account_email"
+        ],
+        "type": "object"
+      },
+      "TestReachChannelRequest": {
+        "properties": {
+          "channel": {
+            "$ref": "#/components/schemas/ReachTestChannel"
+          }
+        },
+        "required": [
+          "channel"
+        ],
+        "type": "object"
+      },
+      "TestReachChannelResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ReachTestResult"
+          }
+        },
+        "required": [
+          "data"
         ],
         "type": "object"
       },
@@ -14626,6 +15107,17 @@
         ],
         "type": "object"
       },
+      "UpdateReachRequest": {
+        "properties": {
+          "settings": {
+            "$ref": "#/components/schemas/ReachSettings"
+          }
+        },
+        "required": [
+          "settings"
+        ],
+        "type": "object"
+      },
       "UpdateSandboxProviderRequest": {
         "additionalProperties": false,
         "properties": {
@@ -15848,6 +16340,62 @@
           "metrics"
         ],
         "x-fern-sdk-method-name": "get_meters"
+      }
+    },
+    "/api/internal/noticing/run": {
+      "post": {
+        "description": "Runs one pass of one watcher for everyone it can watch.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunNoticingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunNoticingResponse"
+                }
+              }
+            },
+            "description": "The pass finished."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid service credential."
+          }
+        },
+        "summary": "Run a noticing pass",
+        "tags": [
+          "Internal"
+        ],
+        "x-fern-sdk-group-name": [
+          "internal",
+          "noticing"
+        ],
+        "x-fern-sdk-method-name": "run"
       }
     },
     "/api/internal/private-chats/sweep": {
@@ -27109,6 +27657,194 @@
           "push"
         ],
         "x-fern-sdk-method-name": "lookup_subscription"
+      }
+    },
+    "/api/v1/user/reach": {
+      "get": {
+        "description": "Reads how the signed-in person wants to be reached, with which channels are set up on this server.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetReachResponse"
+                }
+              }
+            },
+            "description": "The settings."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "Get Reach me settings",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "reach"
+        ],
+        "x-fern-sdk-method-name": "get"
+      },
+      "put": {
+        "description": "Replaces how the signed-in person wants to be reached. Texts and calls cannot be turned on until set up.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateReachRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetReachResponse"
+                }
+              }
+            },
+            "description": "The saved settings."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "Save Reach me settings",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "reach"
+        ],
+        "x-fern-sdk-method-name": "create_or_update"
+      }
+    },
+    "/api/v1/user/reach/suggestions": {
+      "get": {
+        "description": "Lists senders the memory suggests. Nothing is added until the person accepts it in a saved update.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListReachSuggestionsResponse"
+                }
+              }
+            },
+            "description": "The suggestions."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "List always-important suggestions",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "reach"
+        ],
+        "x-fern-sdk-method-name": "list_suggestions"
+      }
+    },
+    "/api/v1/user/reach/test": {
+      "post": {
+        "description": "Sends the signed-in person a test item on one channel. A channel that is not set up answers 409.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestReachChannelRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestReachChannelResponse"
+                }
+              }
+            },
+            "description": "The test item."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "That channel is not set up yet."
+          }
+        },
+        "summary": "Try a channel",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "reach"
+        ],
+        "x-fern-sdk-method-name": "test_channel"
       }
     },
     "/api/v1/user/settings/calendar": {

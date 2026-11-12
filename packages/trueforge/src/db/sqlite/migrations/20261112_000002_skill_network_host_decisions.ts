@@ -4,7 +4,7 @@ import { sql, type Kysely } from 'kysely';
  * The sites the person allowed one by one for a skill, and the sites they turned down, beside
  * the approved list. Existing skills get empty lists: no per-site decisions, exactly the
  * behaviour before network cards. Mirrors
- * db/postgres/migrations/20261105_000001_skill_network_host_decisions.ts.
+ * db/postgres/migrations/20261112_000002_skill_network_host_decisions.ts.
  */
 export async function up(db: Kysely<unknown>): Promise<void> {
   await db.transaction().execute(async trx => {
