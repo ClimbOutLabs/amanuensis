@@ -246,7 +246,6 @@
           }
         },
         "required": [
-          "auth",
           "models",
           "type"
         ],
@@ -317,7 +316,6 @@
           }
         },
         "required": [
-          "auth",
           "models",
           "type"
         ],
@@ -381,6 +379,38 @@
           "status"
         ],
         "type": "object"
+      },
+      "ApprovalCardCopy": {
+        "description": "The headline, consequence and reason the card renders. Every builder fills it from its copy owner; null only where a later choke point fills it, never on a finished card.",
+        "properties": {
+          "consequence": {
+            "description": "What follows from approving, in one line, or null when nothing needs saying.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "headline": {
+            "description": "What will happen, in one sentence, in words the person recognises.",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Why the tier asks, in plain words, or null when it needs no reason.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "headline",
+          "consequence",
+          "reason"
+        ],
+        "type": [
+          "object",
+          "null"
+        ]
       },
       "ApprovalDecision": {
         "discriminator": {
@@ -3294,7 +3324,6 @@
           }
         },
         "required": [
-          "auth",
           "models",
           "type"
         ],
@@ -4447,7 +4476,6 @@
           }
         },
         "required": [
-          "auth",
           "models",
           "type"
         ],
@@ -8241,7 +8269,6 @@
           }
         },
         "required": [
-          "auth",
           "models",
           "type"
         ],
@@ -8460,7 +8487,6 @@
           }
         },
         "required": [
-          "auth",
           "models",
           "type"
         ],
@@ -12688,6 +12714,9 @@
               "null"
             ]
           },
+          "copy": {
+            "$ref": "#/components/schemas/ApprovalCardCopy"
+          },
           "destination": {
             "description": "Verifiable destination (URL, service name), or null.",
             "type": [
@@ -12701,6 +12730,10 @@
               "string",
               "null"
             ]
+          },
+          "destructive": {
+            "description": "True when the action destroys or sends something for good, so its button wears the destructive ink.",
+            "type": "boolean"
           },
           "email": {
             "$ref": "#/components/schemas/Tier3Email"
@@ -12765,6 +12798,10 @@
               "null"
             ]
           },
+          "safe_choice": {
+            "description": "True when the safe choice is the primary button: the action is irreversible or reaches other people.",
+            "type": "boolean"
+          },
           "schedule": {
             "$ref": "#/components/schemas/Tier3Schedule"
           },
@@ -12817,6 +12854,7 @@
         },
         "required": [
           "plain_what",
+          "copy",
           "plain_why",
           "cannot_be_undone",
           "why_asked_again",
@@ -13034,6 +13072,53 @@
             "description": "IANA time zone the times are in.",
             "type": "string"
           },
+          "tools": {
+            "description": "What a new schedule runs with; absent for a delete and on an older card.",
+            "properties": {
+              "agent_name": {
+                "description": "The agent the schedule runs as.",
+                "type": "string"
+              },
+              "connectors": {
+                "description": "Connectors the person may pick from.",
+                "items": {
+                  "$ref": "#/components/schemas/Tier3ScheduleToolChoice"
+                },
+                "type": "array"
+              },
+              "editable": {
+                "description": "True when the person may ask for other choices before approving.",
+                "type": "boolean"
+              },
+              "memory": {
+                "description": "True when runs recall memories.",
+                "type": "boolean"
+              },
+              "run_code": {
+                "description": "True when runs may run code.",
+                "type": "boolean"
+              },
+              "skills": {
+                "description": "Skills the person may pick from.",
+                "items": {
+                  "$ref": "#/components/schemas/Tier3ScheduleToolChoice"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "editable",
+              "agent_name",
+              "connectors",
+              "skills",
+              "run_code",
+              "memory"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          },
           "when": {
             "description": "When it runs, in plain words.",
             "type": "string"
@@ -13052,6 +13137,23 @@
           "object",
           "null"
         ]
+      },
+      "Tier3ScheduleToolChoice": {
+        "properties": {
+          "name": {
+            "description": "Connector or skill name.",
+            "type": "string"
+          },
+          "on": {
+            "description": "True when the schedule runs with it.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "on"
+        ],
+        "type": "object"
       },
       "Tier3Skill": {
         "description": "The skill a chat call adds, shown in full.",
@@ -13143,7 +13245,6 @@
           }
         },
         "required": [
-          "auth",
           "models",
           "type"
         ],
@@ -13180,7 +13281,6 @@
           }
         },
         "required": [
-          "auth",
           "models",
           "type"
         ],
@@ -16083,7 +16183,6 @@
           }
         },
         "required": [
-          "auth",
           "models",
           "type"
         ],

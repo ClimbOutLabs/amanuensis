@@ -4,11 +4,12 @@
  */
 import { sql } from 'kysely';
 
-import { migrateToLatest } from '../../../../src/db/migratePostgres';
+import { migrateTo } from '../../../../src/db/migratePostgres';
 import { createPostgresTestDatabase, type PostgresTestDatabase } from '../testDatabase';
 
 const describePg = process.env['PG_STORE_TESTS_ENABLED'] === '1' ? describe : describe.skip;
 const PREVIOUS_MIGRATION = '20261020_000001_sentinel_maps_without_asking';
+const THIS_MIGRATION = '20261020_000002_mcp_tool_grant_server_host';
 
 describePg('Postgres mcp tool grant server host migration', () => {
   let env: PostgresTestDatabase | undefined;
@@ -33,7 +34,8 @@ describePg('Postgres mcp tool grant server host migration', () => {
       VALUES ('tenant-1', 'alice', 'notes', 'lookup_note', now())
     `.execute(env.db);
 
-    await migrateToLatest(env.db);
+    // A later migration replaces the host column, so this one is checked on its own.
+    await migrateTo(env.db, THIS_MIGRATION);
 
     const remaining = await sql<{ tool_name: string }>`SELECT tool_name FROM mcp_tool_grant`.execute(env.db);
     expect(remaining.rows).toEqual([]);

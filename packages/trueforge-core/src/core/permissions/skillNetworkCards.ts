@@ -16,6 +16,7 @@
  * blaming the skill the answer is filed under.
  */
 import { domainToUnicode } from 'node:url';
+import { simpleCardCopy } from './cardCopy';
 import type { Tier3Card, Tier3SkillNetwork } from './tier';
 
 /**
@@ -67,6 +68,7 @@ export function buildSkillNetworkCard(input: {
   if (input.reason === 'code_changed') {
     return {
       plain_what: `Let the ${input.skill_name} skill reach ${sites}?`,
+      copy: simpleCardCopy({ headline: `Let the ${input.skill_name} skill reach ${sites}?`, undo: null, reason: null }),
       plain_why:
         'This skill\u2019s code changed since you approved it, so the approval was cancelled. Approving again covers the code as it is now.',
       cannot_be_undone: null,
@@ -84,6 +86,7 @@ export function buildSkillNetworkCard(input: {
   if (input.reason === 'first_use') {
     return {
       plain_what: `Let the ${input.skill_name} skill reach ${sites}?`,
+      copy: simpleCardCopy({ headline: `Let the ${input.skill_name} skill reach ${sites}?`, undo: null, reason: null }),
       plain_why: 'This skill names these sites as the ones it needs. It cannot reach any of them until you say yes.',
       cannot_be_undone: null,
       why_asked_again: null,
@@ -99,6 +102,7 @@ export function buildSkillNetworkCard(input: {
   }
   return {
     plain_what: `Allow a connection to ${sites} in this chat?`,
+    copy: simpleCardCopy({ headline: `Allow a connection to ${sites} in this chat?`, undo: null, reason: null }),
     plain_why: `A command in this chat tried to reach ${sites}, which is not one of the sites approved for the skills in this chat, and the connection was refused. Aman cannot tell which skill, if any, made the attempt.`,
     cannot_be_undone: null,
     why_asked_again: null,

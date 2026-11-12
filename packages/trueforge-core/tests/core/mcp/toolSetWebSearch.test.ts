@@ -402,6 +402,11 @@ describe('provider plumbing fields on the designated provider', () => {
     expect(result.tier3_card?.plain_what).toBe(
       `Search the web for ${objective}? Searches are set to ask, so Aman is checking with you first.`,
     );
+    expect(result.tier3_card?.copy).toEqual({
+      headline: `Search the web for ${objective}?`,
+      consequence: null,
+      reason: 'Searches are set to ask, so Aman is checking with you first.',
+    });
     expect(result.tier3_card?.outbound_text).toContain(uuid);
     expect(result.tier3_card?.outbound_text).toContain('invented-model-7');
   });
@@ -692,6 +697,11 @@ describe('links and where they came from', () => {
     expect(info.tier3_card?.plain_what).toBe(
       `Open ${page}? Searches are set to ask, so Aman is checking with you first.`,
     );
+    expect(info.tier3_card?.copy).toEqual({
+      headline: `Open ${page}?`,
+      consequence: null,
+      reason: 'Searches are set to ask, so Aman is checking with you first.',
+    });
   });
 });
 

@@ -114,6 +114,7 @@ describe('checkHeldReplay for a skill network card', () => {
   function card(overrides: Partial<Tier3Card> = {}): Tier3Card {
     return {
       plain_what: 'Run a command.',
+      copy: null,
       plain_why: null,
       cannot_be_undone: null,
       why_asked_again: null,

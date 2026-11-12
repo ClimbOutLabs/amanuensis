@@ -101,7 +101,7 @@ async function setup(options: { refuseAnswers?: boolean } = {}) {
     created_by: OWNER.subject_id,
     mcp_server_name: 'fetcher',
     tool_name: 'fetch_page',
-    mcp_server_host: null,
+    connector_binding: null,
   });
   const refused: CallToolResolvedResponse = {
     result: { content: [{ type: 'text', text: REFUSAL_TEXT }], isError: true },
