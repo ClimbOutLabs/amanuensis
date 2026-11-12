@@ -245,11 +245,14 @@ export async function startApprovalTestServer(options?: {
   inertWebSearch?: boolean | undefined;
   /** Adds the inert connector's opt-in read of one page by its id. */
   inertPageById?: boolean | undefined;
+  /** Adds the inert connector's opt-in `search_messages` lookup. */
+  inertMessageSearch?: boolean | undefined;
 }): Promise<ApprovalTestServer> {
   const authenticator = options?.authenticator ?? createAuthenticator({ mode: TrueForgeAuthMode.Standalone });
   const mcp = await startInertMcpServer({
     webSearch: options?.inertWebSearch === true,
     pageById: options?.inertPageById === true,
+    messageSearch: options?.inertMessageSearch === true,
   });
   const model = await startScriptedModelServer();
   const directory = await mkdtemp(join(tmpdir(), 'tfy-approval-'));
