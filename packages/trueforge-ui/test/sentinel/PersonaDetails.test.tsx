@@ -29,6 +29,7 @@ const TRAVEL_PLANNER_CARD = {
     instructions: INSTRUCTIONS,
     model_name: 'openai/gpt-5.2',
   },
+  skill: null,
 } satisfies SentinelApprovalCard;
 
 function renderCard(card: SentinelApprovalCard) {

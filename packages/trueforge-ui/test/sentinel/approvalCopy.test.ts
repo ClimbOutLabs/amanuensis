@@ -33,6 +33,7 @@ function cardWith(overrides: Partial<SentinelApprovalCard>): SentinelApprovalCar
     calendar_event: null,
     schedule: null,
     persona: null,
+    skill: null,
     ...overrides,
   };
 }

@@ -40,7 +40,7 @@ export function cardHeadline(card: SentinelApprovalCard): string {
  * The headline for a card with neither copy nor the fields a question is built from. A card saved
  * before copy existed can carry a raw server sentence as its plain_what, identifiers and all (an
  * old calendar card named the event by its id), so that sentence never appears on a headline
- * surface: not the card's title, not the strip, not the stub, not the spoken line. The card's own
+ * surface: not the card's title, not the strip, not the spoken line. The card's own
  * detail rows still show what the card holds, so the person can judge it there.
  */
 export const GENERIC_CARD_HEADLINE = 'Needs your OK';
@@ -65,7 +65,7 @@ export function cardReason(card: SentinelApprovalCard): string | null {
  * an identifier, so it is never the question a surface shows.
  */
 export function approvalQuestion(card: SentinelApprovalCard): string {
-  const { email, calendar_event: event, schedule, persona } = card;
+  const { email, calendar_event: event, schedule, persona, skill } = card;
   if (email != null) return emailQuestion(email);
   if (event != null) {
     return event.action === 'create'
@@ -78,6 +78,7 @@ export function approvalQuestion(card: SentinelApprovalCard): string {
       : `Delete the schedule "${schedule.name}"?`;
   }
   if (persona != null) return `Add the persona "${persona.name}"?`;
+  if (skill != null) return `Add the skill "${skill.name}"?`;
   return GENERIC_CARD_HEADLINE;
 }
 

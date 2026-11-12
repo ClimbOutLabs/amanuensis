@@ -35,6 +35,7 @@ createRoot(rootElement).render(
             calendar_event: null,
             schedule: null,
             persona: null,
+            skill: null,
           }}
           othersWaiting={0}
           onApprove={noop}
@@ -62,6 +63,7 @@ createRoot(rootElement).render(
             calendar_event: null,
             schedule: null,
             persona: null,
+            skill: null,
           }}
           othersWaiting={0}
           onApprove={noop}

@@ -22,6 +22,7 @@ const MORNING_BRIEF_CARD = {
   email: null,
   calendar_event: null,
   persona: null,
+  skill: null,
   schedule: {
     action: 'create',
     name: 'Morning brief',

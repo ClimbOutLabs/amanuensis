@@ -26,6 +26,7 @@ const card: SentinelApprovalCard = {
   calendar_event: null,
   schedule: null,
   persona: null,
+  skill: null,
 };
 
 const buttonNames = () => screen.getAllByRole('button').map(button => button.textContent);

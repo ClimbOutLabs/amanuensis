@@ -26,6 +26,7 @@ import { CalendarEventDetails } from './CalendarEventDetails.js';
 import { ChangeRequestBox } from './ChangeRequestBox.js';
 import { PersonaDetails } from './PersonaDetails.js';
 import { ScheduleDetails } from './ScheduleDetails.js';
+import { SkillDetails } from './SkillDetails.js';
 import type { SentinelApprovalCard } from './types.js';
 
 export type PermissionApprovalCardProps = {
@@ -135,7 +136,7 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
   const changeButtonRef = useRef<HTMLButtonElement>(null);
   const { tryPlay } = useRewardLedger();
 
-  const { calendar_event: calendarEvent, schedule, persona } = card;
+  const { calendar_event: calendarEvent, schedule, persona, skill } = card;
   // A new-recipient send never offers a standing grant or a chat-wide allow: approving it adds addresses.
   const newRecipients = isNewRecipientCard(card);
   const plumbingText = card.outbound_plumbing_text ?? null;
@@ -205,6 +206,8 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
       {schedule !== null && <ScheduleDetails schedule={schedule} />}
 
       {persona !== null && <PersonaDetails persona={persona} />}
+
+      {skill !== null && <SkillDetails skill={skill} />}
 
       {outboundOpen && outboundShown !== null && (
         <OutboundBlock text={outboundShown} truncated={card.outbound_truncated} />

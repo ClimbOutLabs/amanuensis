@@ -12,6 +12,7 @@ import {
   SCRIPTED_EVENT,
   SCRIPTED_PERSONA,
   SCRIPTED_SCHEDULE,
+  SCRIPTED_SKILL,
 } from '../../trueforge/tests/fixtures/scriptedModelServer.ts';
 import { inProcessApi, pausedSession } from './support/approvalChat.ts';
 import { featureShotPath, saveFailureShots } from './support/featureShots.ts';
@@ -137,6 +138,31 @@ test('each kind of approval card shows what will happen, and Allow does it', { t
     assert.ok(
       (await savedNames({ api, path: '/api/v1/schedules' })).includes(SCRIPTED_SCHEDULE.name),
       'Allow saved the schedule',
+    );
+    await page.screenshot({ path: await featureShotPath({ surface: current, step: '2-allowed' }) });
+
+    // A starter skill: it is added as shipped, so the card needs nothing from outside this machine.
+    current = 'approval:skill';
+    assert.ok(
+      !(await savedNames({ api, path: '/api/v1/settings/skills' })).includes(SCRIPTED_SKILL.name),
+      'the skill is not there before the card is allowed',
+    );
+    await askFromHome({ page, origin, ask: 'run:install_skill please' });
+    const skillCard = page.locator('main');
+    await skillCard.getByText(`Add the skill "${SCRIPTED_SKILL.name}"?`).waitFor({ timeout: RENDER_TIMEOUT_MS });
+    await skillCard
+      .getByText(`github.com/anthropics/skills, folder ${SCRIPTED_SKILL.path}`)
+      .first()
+      .waitFor({ timeout: RENDER_TIMEOUT_MS });
+    await page.screenshot({ path: await featureShotPath({ surface: current, step: '1-card' }) });
+    assert.ok(
+      !(await savedNames({ api, path: '/api/v1/settings/skills' })).includes(SCRIPTED_SKILL.name),
+      'nothing is saved while the card waits',
+    );
+    await allow(page);
+    assert.ok(
+      (await savedNames({ api, path: '/api/v1/settings/skills' })).includes(SCRIPTED_SKILL.name),
+      'Allow added the skill',
     );
     await page.screenshot({ path: await featureShotPath({ surface: current, step: '2-allowed' }) });
 

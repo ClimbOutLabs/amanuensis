@@ -38,6 +38,7 @@ export interface Tier3Card {
     /** True when the safe choice is the primary button: the action is irreversible or reaches other people. */
     safeChoice?: boolean;
     schedule?: TrueForge.Tier3Schedule | null;
+    skill?: TrueForge.Tier3Skill | null;
     /** Actual cause of re-escalation, or null on first ask. */
     whyAskedAgain: string | null;
 }

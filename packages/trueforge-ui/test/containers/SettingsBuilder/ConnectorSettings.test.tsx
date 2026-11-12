@@ -95,6 +95,8 @@ vi.mock('@/server/ShellModeContext.js', () => ({
     mode: { status: 'active', isMutable: mutableChat },
     pendingSessionId: null,
   }),
+  // The mail setup panels point at Reach me through the shell; this page is tested without one.
+  useOptionalShellMode: () => null,
 }));
 
 /**
