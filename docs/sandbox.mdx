@@ -1,55 +1,87 @@
 ---
-title: 'Setup Sandbox'
-sidebarTitle: 'Sandbox'
-description: 'Connect an isolated execution environment for code, files, and shell commands — provisioned only when the agent needs one.'
+title: 'Sandbox setup'
+description: 'Where Aman runs code, files and shell commands, and how the person who runs Aman sets it up.'
 ---
 
-The sandbox gives your agent a secure, isolated environment to run code, manipulate files, and execute shell commands — separate from the TrueForge server and your infrastructure.
+This page is for the person who runs Aman. The sandbox is a walled-off space where Aman runs code, works with files and runs shell commands, apart from the Aman server and the rest of your computer. To ask Aman to run code, see [Run code](../packages/trueforge/guide/topics/code.md).
 
-Skills and [Code Mode](/key-features/code-mode) require a sandbox. Check that it is ready under **Settings → Sandbox**, then enable the sandbox on each agent that needs it.
+How to get there: Click **More** in the left bar, then **Settings**, then **Sandbox**.
 
-## TrueForge's approach
+Skills and [Code Mode](/key-features/code-mode) need a sandbox. Check that it is ready under **Settings → Sandbox**, then turn the sandbox on for each agent that needs it.
 
-There are two common patterns for combining agents with sandboxes:
+## How Aman uses the sandbox
 
-| Pattern | Where the agent runs | Trade-off |
+There are two common ways to combine an assistant with a sandbox:
+
+| Pattern | Where the assistant runs | Trade-off |
 | --- | --- | --- |
-| **Agent in sandbox** | Inside the sandbox image | Sandbox is provisioned even for the simplest request; secrets must live in the sandbox; updates mean rebuilding images |
-| **Sandbox as tool** | Outside, on the server | Sandbox is provisioned on demand when needed; secrets stay in the harness; sandbox is only for exec/files |
+| **Assistant in the sandbox** | Inside the sandbox image | A sandbox starts even for the simplest request; secrets must live in the sandbox; an update means rebuilding images |
+| **Sandbox as a tool** | Outside, on the server | A sandbox starts only when needed; secrets stay on the server; the sandbox only runs code, files and commands |
 
-TrueForge uses **sandbox as tool**: the agent loop and credentials stay in the harness; the sandbox only runs code, file, and shell operations.
+Aman uses the sandbox as a tool. The assistant and its credentials stay on the server, and the sandbox only runs code, file and shell steps. That means:
 
-That means:
-
-- Model and MCP credentials never enter the sandbox.
-- Conversation state survives a sandbox crash.
-- A sandbox is created only when the agent actually needs one — simple Q&A and MCP calls incur no sandbox cost.
+- Model and connector credentials never enter the sandbox.
+- A chat survives a sandbox crash.
+- A sandbox starts only when Aman actually needs one. Simple questions and connector calls never start one.
 
 ## The Docker sandbox
 
-Code the assistant writes with `run_code` (Python and Node.js) runs in an isolated Docker container with no network access. **Settings → Sandbox** shows whether it can run right now: ready, or off with the reason (Docker not available to the server, image not downloaded, image signature not verified, and so on) and what to do about it. Use **Re-check** after you fix the cause. The image and the limits for each run (time, memory, disk) come from the server configuration and change only with a restart.
-A script the assistant writes in the chat's workspace runs with `run_code` by name (`script_path`). The run reads a copy of that one file and never changes it. Package installs work in a chat bound to a repository where downloads are allowed, or in any other chat when you have allowed downloads for your chats without a project, and only on a sandbox that can reach the package gateway (sandbox slots). The Docker sandbox has no network for packages, so an install there is refused before any approval prompt. Build, test and run commands still run there as ordinary commands.
+Code Aman writes with `run_code` (Python and Node.js) runs in an isolated Docker container with no network access.
+
+**Settings → Sandbox** shows whether it can run right now: ready, or off with the reason and what to do about it. Reasons include Docker not being available to the server, the image not being downloaded, or the image signature not being verified. Click **Re-check** after you fix the cause.
+
+The image and the limits for each run come from the server settings, and change only with a restart:
+
+| Setting | What it limits |
+| --- | --- |
+| `SANDBOX_DEFAULT_TIMEOUT_SECONDS`, `SANDBOX_MAX_TIMEOUT_SECONDS` | How long a run may take |
+| `SANDBOX_MEMORY_MB` | Memory for each run |
+| `SANDBOX_DISK_MB` | Disk space for the files the code writes |
+
+A script Aman wrote in the chat's workspace runs with `run_code` by name (`script_path`). The run reads a copy of that one file and never changes it.
+
+Package installs work only on a sandbox that can reach the package mirrors (sandbox slots). They also need downloads allowed: for the repository a chat is working on, or for your chats without a project. The Docker sandbox has no network for packages, so an install there is refused before any approval card. Build, test and run commands still run there as ordinary commands.
 
 Settings no longer offers a choice of sandbox provider. Docker is the only option offered there.
 
 ## Sandbox slots (preview)
 
-A second backend runs `run_code` and the shell and file tools in two hardened slot containers instead of Docker containers started by the server. Each slot runs one call at a time, so two calls can run at once and a third waits for a free slot. Each slot may use up to 2 GB of memory while it runs code. Each slot runs a small agent as PID 1, and every call starts in a fresh gVisor guest with no network. The server holds no Docker socket: it reaches a slot through a Unix socket in a small control volume that only the server mounts. The volume is mounted read-only so the server cannot change what is in it; that does not limit what the server can ask the slot to do, because connecting to the socket is all it takes. Keep the control volumes out of every other container.
+The installer uses a second kind of sandbox: two hardened slot containers, instead of Docker containers that the server starts. Slots run `run_code` and the shell and file tools.
+
+- Each slot runs one call at a time, so two calls can run at once and a third waits for a free slot.
+- Each slot may use up to 2 GB of memory while it runs code.
+- Each slot runs a small agent as PID 1, and every call starts in a fresh gVisor guest with no network.
+- The server holds no Docker socket. It reaches a slot through a Unix socket in a small control volume that only the server mounts.
+- The control volume is mounted read-only, so the server cannot change what is in it. That does not limit what the server can ask the slot to do, because connecting to the socket is all it takes. Keep the control volumes out of every other container.
+
+### Setting up and repairing slots
 
 - The installer sets the slots up for every instance and connects the instance's app to them: one `installer/install.sh` run builds the slot image, installs the AppArmor profile in `/etc/apparmor.d` (so it loads again at every boot) and creates the slot disks on Linux (asking before any `sudo`), and makes sure Docker starts at boot, starts the two slots and checks each one. An install from before had four slots; the next run of the installer (or `aman doctor sandbox --fix`) removes slots 3 and 4 with their volumes and, on Linux, their disks. `aman doctor sandbox` checks the slots and their attestation again at any time, and `aman doctor sandbox --fix` repairs them: it rebuilds the image, reinstalls and reloads the AppArmor profile, recreates missing disks and restarts the slots, asking before any `sudo`. Developers working from a checkout without the installer can start slots with `pnpm sandbox:slots`, which runs the same code. Either way it builds the image, starts the slots and checks each one; the agent refuses to run anything unless every safety check passes (user, capabilities, no-new-privileges, seccomp, read-only root, loopback only, no Docker socket, cgroup limits, AppArmor where the host has it, a workspace on its own disk, and a working gVisor guest).
+- The installer's instance compose file sets `SANDBOX_BACKEND=slots` and `SANDBOX_SLOTS_DIR` for the app and mounts the control volumes, so there is nothing to add to any command. Each instance has its own slots (a Compose project named `<instance>-slots`). Installing with `--no-sandbox` leaves run code off. The default backend outside the installer stays `docker`.
+
+### Disk space and limits
+
 - Each chat's workspace has a size limit (2 GB by default), enforced while a command runs. On Linux, setup (the installer, `aman doctor sandbox --fix`, or `pnpm sandbox:slots --fix`) also gives each slot a fixed-size disk of its own (16 GB by default, `--disk-gb` to change it). Each disk may fill completely, so setup needs that much free for each one, 32 GB for both by default. After asking, it creates the disk files under `/var/lib/aman-slots`, adds them to `/etc/fstab` and mounts them, so a runaway command can fill only its own slot's disk. On Docker Desktop and WSL2 there is no per-slot disk; the virtual machine's disk bounds the workspaces. `installer/install.sh instance remove <name> --purge-data` removes the instance's disk files along with its data (`pnpm sandbox:slots --down --purge` does it for a checkout-only setup).
 - A command can use at most 128 processes. Allowed environment variables for a command are a short list (locale, terminal, language runtime and git settings); others are refused with their names.
-- The installer's instance compose file sets `SANDBOX_BACKEND=slots` and `SANDBOX_SLOTS_DIR` for the app and mounts the control volumes, so there is nothing to add to any command. Each instance has its own slots (a Compose project named `<instance>-slots`). Installing with `--no-sandbox` leaves run code off. The default backend outside the installer stays `docker`.
+
+### What is installed
+
 - The guest image has Python 3 with pypdf, pdfplumber, reportlab, python-docx, openpyxl, pandas, matplotlib and Pillow, plus pytest, ruff and mypy for testing and checking code, and venv for making a project environment; Node.js with TypeScript, plus vitest, jest, eslint and prettier for testing and checking code; bash and coreutils; git; gcc, g++ and make; and poppler-utils with poppler-data, and Tesseract with language data, for reading PDFs and images. More packages can be downloaded only as described under Package downloads below.
+
+### Attachments and languages
+
 - Files you attach in chat reach the sandbox the same way as on Docker, and the sandbox never fetches anything: the server sends the file into the chat's workspace (under `/workspace/.aman/uploads`) and offers it to `run_code` under `/ingress`. The text of a PDF or image is read inside the sandbox and placed in the message, so any model sees it without running code. Gmail attachments use the same path: Aman fetches the file from Gmail, sends it into the chat's workspace, and reads it there. Text taken from a file is passed to the model as data, not instructions, and goes through the tool-output screen when one is configured. Office documents, saved emails, web pages and text files are read the same way, inside the sandbox; see [Document attachments](#document-attachments). Other files are read with `run_code`.
 - Languages: PDF text works in any language (poppler-data covers Chinese, Japanese and Korean PDFs). Scanned pages and images are read with Tesseract: it detects each page's script and reads the page with that script's languages only (Latin: English, Portuguese, Spanish, French, German, Italian, Dutch; Devanagari: Hindi, Marathi; Arabic; Cyrillic: Russian; Chinese, simplified and traditional; Japanese; Korean). `DOCUMENT_OCR_LANGUAGES` (default: the Latin set) is used when a page's script cannot be detected, for example a page with very little text. Setting it to a language the image lacks is ignored for that language, so OCR keeps working.
 - `pnpm test:slots-live` (from the checkout, `--instance <name>` for an instance other than `main`) proves it end to end on an installed instance: it reads generated PDFs and scanned images in each script family through that instance's sandbox, prints a line per case, and ends with a verdict. The test images are drawn in a throwaway container, so nothing is installed on the host.
 - `aman doctor` reports `attachments`: ok when a test file sent into the sandbox comes back and the sandbox has the PDF and OCR tools and every language above; a failure with `aman doctor sandbox --fix` otherwise; a warning when the sandbox was too busy to check. A status list (`aman doctor --local`) and the upgrade check skip this live test. An install from before this release gets the tools and languages from `install.sh upgrade`, which rebuilds the sandbox image (about 140 MB larger); a plain `install.sh` re-run also starts running slots again when the image was rebuilt.
+
+### Status and everyday behavior
+
 - When every slot already holds as many chats as its disk fits, the sandbox is off and the chat's **Add-ons** picker says so: the sandbox is full, and deleting old chats makes room. Any other reason the sandbox is off shows there too. Only a server admin sees the detailed reason; everyone else is told to ask the person who runs Aman. The server log notes once when the slots fill up, not on every check.
 - Files in a chat's `/workspace` persist between commands. Processes do not: a background process ends when its command returns.
 - Optional toolchains: `pnpm sandbox:slots --add go`, `--add rust` or `--add java` (a comma list works) adds Go 1.27, Rust 1.99 (rustc and cargo) or OpenJDK 21 to the guest image and rebuilds it; `--remove` takes one out again, and the choice stays until you remove it. The Go and Rust archives are downloaded on the host and checked against checksums pinned in the repository; Java comes from the Ubuntu archive. Guests have no network of their own, so Go and Cargo dependencies come only through the package mirrors described below, and Maven cannot download dependencies at all.
 - Approvals judge a path in `/workspace` by its name: `..` is collapsed and anything that ends up outside `/workspace` asks, as with a local sandbox. The server cannot follow symlinks inside a slot, so for shell commands the thing that actually keeps a command inside its workspace is the guest, which mounts only that chat's workspace; a silent (Tier 1) command is contained by the guest's view, not by its tier. The slot agent opens every path of its own file reads and writes without following links.
-- Skills are not available on slots yet.
+- Skills run on slots too. A skill that needs its own websites reaches only the sites you approved, through a gateway on the host. The gateway connects only to a site named in that chat's approval, and logs every refusal with the site, the chat and the approval it was checked against.
 - Git works through the server. `git clone`, `fetch`, `pull`, `ls-remote` and `push` of github.com repositories run as one plain command; the server does the network part with your GitHub connector's token and hands the result to the sandbox as files. The token is never placed in a slot and a slot never contacts GitHub. A push shows an approval card naming the repository, the branch and the commits first, and then sends only those commits as a fast-forward: forced pushes, deleting branches, pushing tags and changes to submodules or `.gitmodules` are refused. Repositories over 100 MB are refused; use `git clone --depth 1`.
 
 ## Package downloads
@@ -64,13 +96,15 @@ A project often needs packages before its code can build or its tests can run. O
 - Downloads are kept in a cache on the host so repeat installs are quick. One file may be at most 1 GB and the whole cache at most 10 GB; the oldest files are removed first when the cache fills. Every download is written to the server log with the package, the version, the repository when the chat works on one, and the chat that asked, and when.
 - Allowing downloads is per repository and stays off until you allow it (the repositories API carries the setting as `package_downloads_allowed`). You hold one more allowance of your own, for chats that are not working on a project; it also covers chats run on a schedule, and it stays off until you allow it. Both allowances live in Settings, in the Sandbox section, under "Package downloads": one switch per repository, plus the switch for chats without a project. Taking an allowance back stops new downloads on the next command and ends any live mirror token for that scope at once. With more than one server, the mirrors check every token against the shared database, so a change made through any server takes effect everywhere within a few seconds. Deleting a chat ends its tokens too, and a download that was still going is told the chat was deleted. Only a command or a piece of code that names the download itself can ask for the allowance, because that is what the card shows. A build, test or run command that only might fetch packages (for example `cargo build`, `go test`, `npx tsc` or `npm run prepare`) never shows the download card and never turns the allowance on: it runs as an ordinary command, and if it does try to download while downloads are off, its result says so in plain words. A saved script that installs packages is not run until downloads are allowed: run the install on its own first, then run the script. The download check reads shell wrappers (`bash -c`, `eval`, subshells, `xargs`, `sudo`, `timeout`), aliases, setup scripts such as `make install` and `npm run setup`, and installs a Python script starts through `subprocess`, `os.system` or `pip.main`. When an install still fails because downloads are off, the result says so in plain words and says how to allow them.
 
-## Enabling the sandbox on an agent
+## Turning the sandbox on for an agent
 
-The sandbox is **off by default** per agent. Turn it on in the agent builder when you need code execution, skills, or Code Mode. You can also set `config.sandbox.enabled` in the [agent spec](/create-agent/overview#config) when creating agents via the SDK.
+The sandbox is off by default for each agent. Turn it on in the agent builder when the agent needs to run code, use skills or use Code Mode. When you create agents through the SDK, you can also set `config.sandbox.enabled` in the [agent spec](/create-agent/overview#config).
+
+In a chat, the **Sandbox** switch is in the **Add-ons** list of the message box.
 
 Optional controls:
 
-- **File downloads** — let users download files the agent produces (on by default in the chat UI).
+- **File downloads**: lets people download files the agent makes. It is on by default in the chat.
 
 ### Downloads outlive the sandbox
 
@@ -100,7 +134,7 @@ model can read them with its own file tools.
 ## Document attachments
 
 Office documents, saved emails, web pages and text files are read inside the sandbox by one
-reader that uses only Python's standard library, so it works in every sandbox image (slots,
+reader that uses only the Python standard library, so it works in every sandbox image (slots,
 Docker, the local sandbox) with nothing extra installed. It never runs in the server process.
 
 | Kind | Extensions | What comes out |
@@ -133,11 +167,11 @@ that can be read. A document with no text (only pictures) says so.
 
 ## Repository-bound coding sessions
 
-A session can be bound to one registered repository and an absolute checkout path. On every turn and thread rebuild, the harness verifies that checkout and gives the agent its repository ID, current branch, HEAD commit, working directory, and the IDs of confirmed build, test, and verification commands.
+A session can be bound to one registered repository and an absolute checkout path. On every turn and thread rebuild, Aman's server checks that checkout and gives the agent its repository ID, current branch, HEAD commit, working directory, and the IDs of confirmed build, test, and verification commands.
 
-Confirmed commands are host-owned. The agent invokes a command by ID, while the harness supplies the exact command, working directory, purpose, and timeout. A missing command or invalid checkout fails clearly instead of falling back to a guessed command or directory.
+Confirmed commands are host-owned. The agent invokes a command by ID, while the server supplies the exact command, working directory, purpose, and timeout. A missing command or invalid checkout fails clearly instead of falling back to a guessed command or directory.
 
-To reduce first-run setup friction, the harness can propose commands from four bounded repository files after a checkout is bound:
+To reduce first-run setup friction, the server can propose commands from four bounded repository files after a checkout is bound:
 
 - `package.json` scripts named `build`, `test`, or `verify`
 - explicit `Build:`, `Test:`, or `Verify:` command declarations in `AGENTS.md`
@@ -172,11 +206,11 @@ one array element per line but unreliably produce embedded newlines inside a sin
 value, so the array form is the reliable way for those models to send multi-line content; the
 plain string form keeps working unchanged for models that handle it correctly.
 
-Every call to these three tools passes through one argument-normalisation layer before
+Every call to these three tools passes through one argument-normalization layer before
 validation: a leading byte-order mark or a surrounding markdown code fence is stripped, CRLF
 line endings are normalized to LF, an absolute path inside the bound repository is rewritten as
 cwd-relative, and Unicode hyphen or no-break-space characters inside a path are normalized to
-their ASCII form. A rejection that survives normalisation states what was received and what was
+their ASCII form. A rejection that survives normalization states what was received and what was
 expected, so a retrying model has something concrete to correct.
 
 `write_file` creates a new file only; it never overwrites one. It creates any folders on the path
@@ -224,13 +258,13 @@ retried after an error: it may have gone through anyway, so Aman checks and tell
 If a skill cannot be copied into the sandbox, Aman says so once per chat, on the first tool result
 that follows, and keeps working without it.
 
-## Lifecycle
+## When a sandbox starts and stops
 
-- Provisioned on demand when the agent needs code, files, skills, or Code Mode.
-- Reused across turns in the same session (files persist).
-- Stopped after idle time, then archived and eventually deleted per the provider settings.
+- A sandbox starts when Aman first needs code, files, skills or Code Mode in a chat.
+- The same sandbox is used for the rest of that chat, so its files stay.
+- It stops after a while with nothing to do. It is then archived, and later deleted, as the sandbox settings say.
 
-## Credential safety
+## Keeping credentials safe
 
-- Model and MCP credentials stay in the harness.
-- MCP calls from [Code Mode](/key-features/code-mode) scripts are bridged back to the harness — the sandbox never holds those tokens.
+- Model and connector credentials stay on the server.
+- Connector calls from [Code Mode](/key-features/code-mode) scripts are passed back to the server, so the sandbox never holds those tokens.

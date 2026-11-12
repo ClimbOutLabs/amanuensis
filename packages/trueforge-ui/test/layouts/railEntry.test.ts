@@ -8,6 +8,7 @@ const closed = {
   sessionsOpen: false,
   libraryOpen: false,
   schedulesOpen: false,
+  remindersOpen: false,
   spacesOpen: false,
 };
 
@@ -16,6 +17,7 @@ describe('railEntryFor', () => {
     expect(railEntryFor({ ...closed, mode: chat })).toBe('chats');
     expect(railEntryFor({ ...closed, spacesOpen: true, mode: chat })).toBe('spaces');
     expect(railEntryFor({ ...closed, schedulesOpen: true, mode: chat })).toBe('schedules');
+    expect(railEntryFor({ ...closed, remindersOpen: true, mode: chat })).toBe('reminders');
   });
 
   it('lights the parent for pages reached through More', () => {
