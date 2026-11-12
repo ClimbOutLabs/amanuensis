@@ -590,10 +590,11 @@ function parseToolChoices(value: unknown): SentinelScheduleToolChoice[] | undefi
 /** Tools missing any field are not shown, so a partial list is never approved as if it were whole. */
 function parseScheduleTools(value: unknown): SentinelScheduleTools | undefined {
   if (!isRecord(value)) return undefined;
-  const agent_name = optionalString(value, 'agent_name');
+  const agent_name = optionalString(value, 'agent_name') ?? optionalString(value, 'agentName');
   const connectors = parseToolChoices(value.connectors);
   const skills = parseToolChoices(value.skills);
-  const { editable, run_code, memory } = value;
+  const { editable, memory } = value;
+  const run_code = value.run_code ?? value.runCode;
   if (
     agent_name === undefined ||
     connectors === undefined ||

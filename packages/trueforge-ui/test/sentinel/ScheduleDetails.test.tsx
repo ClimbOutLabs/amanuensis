@@ -203,5 +203,11 @@ describe('schedule approval card', () => {
     expect(
       extractSentinelFromEvent(event({ ...PICKABLE_CARD.schedule, tools: { editable: true } }))[0]?.card.schedule,
     ).toBeNull();
+    // The generated client hands the same card over with camelCase keys.
+    const { agent_name: agentName, run_code: runCode, ...rest } = PICKABLE_CARD.schedule.tools;
+    expect(
+      extractSentinelFromEvent(event({ ...PICKABLE_CARD.schedule, tools: { ...rest, agentName, runCode } }))[0]?.card
+        .schedule,
+    ).toEqual(PICKABLE_CARD.schedule);
   });
 });
