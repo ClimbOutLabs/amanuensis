@@ -58,7 +58,7 @@ describe('approval copy', () => {
   });
 
   it('keeps the shared grant words when the server set no wider scope', () => {
-    expect(chatGrantLabel(undefined)).toBe('Always allow this here');
+    expect(chatGrantLabel(undefined)).toBe('Always allow in this chat');
   });
 
   it('never shows a search connector id on a held search stub', () => {
