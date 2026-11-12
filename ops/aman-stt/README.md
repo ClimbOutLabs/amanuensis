@@ -106,8 +106,9 @@ pins nothing so it starts on any core count; put pins in a
 `docker-compose.override.yml` (see "Dedicated cores" in
 `docs/voice-input.mdx`), for example:
 
-- `aman-stt` and `aman-tts`: `cpuset: '16-19'` (4 cores), `cpu_threads=4`,
-  memory limit 2 GB.
+- `aman-stt` and `aman-tts`: `cpuset: '16-19'` (4 cores), `cpu_threads=4`.
+  Their memory limits stay as `docker-compose.yml` sets them: 2 GB for
+  `aman-stt` and 1 GB for `aman-tts`.
 - The agent server and its in-process embedding workload: `cpuset: '0-15'`.
 
 Pinning is the primary mechanism: soft CPU limits still let bursts land on
