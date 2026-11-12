@@ -646,6 +646,7 @@ function createTurnResolver(deps: {
             metadataHeaders,
           }),
           first_party: connection.first_party,
+          grant_binding: connection.grant_binding,
           search_provider:
             connection.search_provider === undefined
               ? undefined
