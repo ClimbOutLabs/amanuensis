@@ -291,6 +291,11 @@ describe('classifyTier: browser_click', () => {
     expect(decision.tier).toBe(3);
     expect(decision.reason).toBe('browser_commit');
     expect(decision.card?.plain_what).toBe('Click "Place order" on shop.example?');
+    expect(decision.card?.copy).toEqual({
+      headline: 'Click "Place order" on shop.example?',
+      consequence: null,
+      reason: null,
+    });
     expect(decision.card?.outbound_text).toContain('card_last4');
     expect(decision.approval_token_id).toEqual(expect.any(String));
   });
