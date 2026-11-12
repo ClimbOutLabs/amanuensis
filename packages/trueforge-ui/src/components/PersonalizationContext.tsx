@@ -26,7 +26,78 @@ export type PersonalizationProfile = {
    * switch as off; never send a value the host never sent.
    */
   learning_enabled?: boolean;
+  /**
+   * The saved version this copy was read from. A save sends it back so the host can refuse a
+   * save made from an older copy. Absent before a profile exists.
+   */
+  revision?: number;
 };
+
+/** The host refused a save because the profile changed after this copy was read. */
+export class PersonalizationConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PersonalizationConflictError';
+  }
+}
+
+function keepEdit<T>({ base, edited, latest }: { base: T; edited: T; latest: T }): T {
+  return JSON.stringify(edited) === JSON.stringify(base) ? latest : edited;
+}
+
+/**
+ * Carries the person's edits onto the newest saved profile. A field they changed keeps their
+ * value; a field they left alone takes the newest value, so text the assistant learned while
+ * the page was open is not put back to what the page first showed.
+ */
+export function mergeProfileEdits({
+  base,
+  edited,
+  latest,
+}: {
+  base: PersonalizationProfile;
+  edited: PersonalizationProfile;
+  latest: PersonalizationProfile;
+}): PersonalizationProfile {
+  const learningEnabled = keepEdit({
+    base: base.learning_enabled,
+    edited: edited.learning_enabled,
+    latest: latest.learning_enabled,
+  });
+  return {
+    assistant_name: keepEdit({
+      base: base.assistant_name,
+      edited: edited.assistant_name,
+      latest: latest.assistant_name,
+    }),
+    assistant_identity: keepEdit({
+      base: base.assistant_identity,
+      edited: edited.assistant_identity,
+      latest: latest.assistant_identity,
+    }),
+    voice_guidance: keepEdit({
+      base: base.voice_guidance,
+      edited: edited.voice_guidance,
+      latest: latest.voice_guidance,
+    }),
+    user_name: keepEdit({ base: base.user_name, edited: edited.user_name, latest: latest.user_name }),
+    address_as: keepEdit({ base: base.address_as, edited: edited.address_as, latest: latest.address_as }),
+    user_profile: keepEdit({ base: base.user_profile, edited: edited.user_profile, latest: latest.user_profile }),
+    pinned_preferences: keepEdit({
+      base: base.pinned_preferences,
+      edited: edited.pinned_preferences,
+      latest: latest.pinned_preferences,
+    }),
+    help_areas: keepEdit({ base: base.help_areas, edited: edited.help_areas, latest: latest.help_areas }),
+    learned_profile: keepEdit({
+      base: base.learned_profile,
+      edited: edited.learned_profile,
+      latest: latest.learned_profile,
+    }),
+    ...(learningEnabled === undefined ? {} : { learning_enabled: learningEnabled }),
+    ...(latest.revision === undefined ? {} : { revision: latest.revision }),
+  };
+}
 
 export type PersonalizationApi = {
   getProfile: () => Promise<PersonalizationProfile | null>;
@@ -89,11 +160,27 @@ export const PersonalizationProvider: FC<{ api: PersonalizationApi; children: Re
 
   const updateProfile = useCallback(
     async (next: PersonalizationProfile) => {
-      const saved = await api.updateProfile(next);
+      let saved: PersonalizationProfile;
+      try {
+        saved = await api.updateProfile(next);
+      } catch (error) {
+        if (!(error instanceof PersonalizationConflictError)) {
+          throw error;
+        }
+        // The profile moved on while the page was open, most often because the assistant
+        // learned something. Save the person's edits on top of the newest copy, once.
+        const latest = await api.getProfile();
+        if (latest === null) {
+          throw error;
+        }
+        saved = await api.updateProfile(
+          mergeProfileEdits({ base: profile ?? EMPTY_PERSONALIZATION_PROFILE, edited: next, latest }),
+        );
+      }
       setProfile(saved);
       return saved;
     },
-    [api],
+    [api, profile],
   );
 
   const deleteProfile = useCallback(async () => {

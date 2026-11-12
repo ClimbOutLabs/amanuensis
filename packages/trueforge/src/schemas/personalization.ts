@@ -136,6 +136,14 @@ export const PersonalizationProfileContentSchema = PersonalizationProfileContent
 export const UpdatePersonalizationProfileRequestSchema = z
   .object({
     profile: PersonalizationProfileContentSchema,
+    // Optional so older clients keep saving; a client that read the profile sends it so a save
+    // made from a stale page cannot put back text the learning pass replaced since.
+    expected_revision: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe('The profile revision this save was made from. A save from an older revision is refused with 409.'),
   })
   .strict()
   .openapi('UpdatePersonalizationProfileRequest', {

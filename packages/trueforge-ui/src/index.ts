@@ -274,6 +274,7 @@ export type {
 } from './components/PersonaContext.js';
 export {
   EMPTY_PERSONALIZATION_PROFILE,
+  PersonalizationConflictError,
   PersonalizationProvider,
   useOptionalPersonalization,
   usePersonalization,

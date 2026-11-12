@@ -19,5 +19,7 @@ import type * as TrueForge from "../../../../index.js";
  *     }
  */
 export interface UpdatePersonalizationProfileRequest {
+    /** The profile revision this save was made from. A save from an older revision is refused with 409. */
+    expectedRevision?: number;
     profile: TrueForge.PersonalizationProfileContent;
 }

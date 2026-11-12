@@ -189,3 +189,22 @@ test('personalization API uses the Phase 1 profile routes', async () => {
   );
   assert.deepEqual(await requests[1]!.json(), { profile });
 });
+
+test('personalization API sends the revision it read beside the profile, never inside it', async () => {
+  const { api, savedProfiles } = recordingApi({ ...profile, revision: 4 });
+
+  await api.updateProfile(await loadProfile(api));
+
+  assert.deepEqual(savedProfiles, [{ profile, expected_revision: 4 }]);
+});
+
+test('personalization API reports a save from an older copy as a conflict, with the server wording', async () => {
+  const api = createPersonalizationApi(async () =>
+    Response.json({ error: { message: 'Your profile changed while this page was open.' } }, { status: 409 }),
+  );
+
+  await assert.rejects(api.updateProfile({ ...profile, revision: 1 }), {
+    name: 'PersonalizationConflictError',
+    message: 'Your profile changed while this page was open.',
+  });
+});

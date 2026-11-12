@@ -2,7 +2,7 @@ import { OpenAPIHono, type RouteHandler } from '@hono/zod-openapi';
 import type { Logger } from 'winston';
 import type { ResolveRequestContext } from '../auth/identity';
 import configuration from '../config';
-import type { IPersonalizationStore } from '../db/personalizationStore';
+import { PersonalizationRevisionConflictError, type IPersonalizationStore } from '../db/personalizationStore';
 import { buildPersonalizationContext, type PersonalizationProfile } from '../personalization/profile';
 import {
   deletePersonalizationProfileRoute,
@@ -79,16 +79,33 @@ export function createPersonalizationRouter(deps: PersonalizationRouterDeps) {
   const updateProfileHandler: RouteHandler<typeof updatePersonalizationProfileRoute> = async c => {
     const body: UpdatePersonalizationProfileRequest = c.req.valid('json');
     const requestContext = deps.resolveRequestContext(c);
-    const profile = await deps.personalizationStore.upsertProfile({
-      tenant_id: TENANT_ID,
-      created_by: requestContext.subject.id,
-      updated_by: requestContext.subject.id,
-      ...body.profile,
-      // The wire keeps the switch optional so validation can tell an explicit "off" from a
-      // client that predates the toggle. A stored profile carries a concrete value either way,
-      // and a client that never sends the key never opts in.
-      learning_enabled: body.profile.learning_enabled ?? false,
-    });
+    let profile: PersonalizationProfile;
+    try {
+      profile = await deps.personalizationStore.upsertProfile({
+        tenant_id: TENANT_ID,
+        created_by: requestContext.subject.id,
+        updated_by: requestContext.subject.id,
+        ...body.profile,
+        // The wire keeps the switch optional so validation can tell an explicit "off" from a
+        // client that predates the toggle. A stored profile carries a concrete value either way,
+        // and a client that never sends the key never opts in.
+        learning_enabled: body.profile.learning_enabled ?? false,
+        ...(body.expected_revision === undefined ? {} : { expected_revision: body.expected_revision }),
+      });
+    } catch (error) {
+      if (error instanceof PersonalizationRevisionConflictError) {
+        return c.json(
+          {
+            error: {
+              message: 'Your profile changed while this page was open. Reload the page, then save again.',
+              type: 'conflict',
+            },
+          },
+          409,
+        );
+      }
+      throw error;
+    }
     await removeMemoryCopy(requestContext.subject.id);
     return c.json({ data: toWireProfile(profile) }, 200);
   };

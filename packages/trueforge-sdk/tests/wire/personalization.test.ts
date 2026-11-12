@@ -284,6 +284,42 @@ describe("PersonalizationClient", () => {
         }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
 
+    test("create_or_update_profile (4)", async () => {
+        const server = mockServerPool.createServer();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = {
+            profile: {
+                assistant_identity: null,
+                assistant_name: null,
+                pinned_preferences: ["pinned_preferences", "pinned_preferences"],
+                user_profile: null,
+                voice_guidance: null,
+            },
+        };
+        const rawResponseBody = { error: { message: "message" } };
+
+        server
+            .mockEndpoint()
+            .put("/api/v1/personalization/profile")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(409)
+            .jsonBody(rawResponseBody)
+            .build();
+
+        await expect(async () => {
+            return await client.personalization.createOrUpdateProfile({
+                profile: {
+                    assistantIdentity: null,
+                    assistantName: null,
+                    pinnedPreferences: ["pinned_preferences", "pinned_preferences"],
+                    userProfile: null,
+                    voiceGuidance: null,
+                },
+            });
+        }).rejects.toThrow(TrueForgeTypes.ConflictError);
+    });
+
     test("delete_profile (1)", async () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });

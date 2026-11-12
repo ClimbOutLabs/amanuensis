@@ -15168,6 +15168,11 @@
           }
         },
         "properties": {
+          "expected_revision": {
+            "description": "The profile revision this save was made from. A save from an older revision is refused with 409.",
+            "exclusiveMinimum": 0,
+            "type": "integer"
+          },
           "profile": {
             "$ref": "#/components/schemas/PersonalizationProfileContent"
           }
@@ -20150,6 +20155,16 @@
               }
             },
             "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The profile changed since the revision this save was made from."
           }
         },
         "summary": "Create or update personalization profile",
