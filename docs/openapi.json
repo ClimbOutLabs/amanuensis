@@ -12624,6 +12624,9 @@
           "schedule": {
             "$ref": "#/components/schemas/Tier3Schedule"
           },
+          "skill": {
+            "$ref": "#/components/schemas/Tier3Skill"
+          },
           "why_asked_again": {
             "description": "Actual cause of re-escalation, or null on first ask.",
             "type": [
@@ -12933,6 +12936,50 @@
           "on"
         ],
         "type": "object"
+      },
+      "Tier3Skill": {
+        "description": "The skill a chat call adds, shown in full.",
+        "properties": {
+          "description": {
+            "description": "What the skill is for, as the skill itself says.",
+            "type": "string"
+          },
+          "instructions": {
+            "description": "The skill's own instruction file as the host read it, or null for a starter skill.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "description": "Skill name.",
+            "type": "string"
+          },
+          "source": {
+            "description": "The repository the skill comes from, and the folder in it when there is one.",
+            "type": "string"
+          },
+          "starter": {
+            "description": "True when this is one of the starter skills that come with the app.",
+            "type": "boolean"
+          },
+          "version": {
+            "description": "The exact commit that is added. A later change to the repository is not picked up.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "source",
+          "version",
+          "starter",
+          "instructions"
+        ],
+        "type": [
+          "object",
+          "null"
+        ]
       },
       "Timezone": {
         "default": "UTC",

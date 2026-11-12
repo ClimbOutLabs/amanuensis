@@ -92,7 +92,7 @@ export function ComposerShell({
         </div>
         <div className="aui-composer-actions ml-auto flex min-w-0 max-w-full shrink-0 flex-wrap items-center justify-end gap-1">
           {modelLabel && !isRunning && (
-            <span className="text-text-secondary flex max-w-[10rem] items-center gap-1 truncate px-2 text-sm">
+            <span className="aui-composer-model-label text-text-secondary flex max-w-[10rem] items-center gap-1 truncate px-2 text-sm">
               {modelIcon}
               <span className="truncate">{modelLabel}</span>
             </span>
