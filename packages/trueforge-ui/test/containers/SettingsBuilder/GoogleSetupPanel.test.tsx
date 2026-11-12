@@ -102,6 +102,47 @@ function withCalendarWrite(status: GoogleConnectionStatus): GoogleConnectionStat
   };
 }
 
+/** A parsed wire status: an object whose features are objects with a name, a label and a granted flag. */
+function isConnectionStatusWire(value: unknown): value is GoogleConnectionStatus {
+  if (typeof value !== 'object' || value === null || !('state' in value) || !('features' in value)) {
+    return false;
+  }
+  return (
+    Array.isArray(value.features) &&
+    value.features.every(
+      item =>
+        typeof item === 'object' &&
+        item !== null &&
+        'feature' in item &&
+        typeof item.feature === 'string' &&
+        'label' in item &&
+        typeof item.label === 'string' &&
+        'granted' in item &&
+        typeof item.granted === 'boolean',
+    )
+  );
+}
+
+/**
+ * The same status with the Drive feature the server sends once it is connected. Built as wire JSON, as the
+ * server sends it: the generated SDK type gains the drive_files member with the SDK step this change owes.
+ */
+function withDrive(status: GoogleConnectionStatus, granted: boolean): GoogleConnectionStatus {
+  const wire: unknown = JSON.parse(
+    JSON.stringify({
+      ...status,
+      features: [
+        ...status.features,
+        { feature: 'drive_files', label: 'Read and add to Drive files Aman created or you opened with Aman', granted },
+      ],
+    }),
+  );
+  if (!isConnectionStatusWire(wire)) {
+    throw new Error('The Drive fixture did not parse as a connection status.');
+  }
+  return wire;
+}
+
 function makePort(overrides: Partial<GoogleSetupPort> = {}) {
   const begin = vi.fn<GoogleSetupPort['beginGoogleConsent']>(async () => ({
     authorizationUrl: 'https://accounts.example.test/auth',
@@ -400,7 +441,7 @@ describe('GoogleSetupPanel', () => {
     expect(await screen.findByText('Reconnect needed')).toBeInTheDocument();
     expect(
       screen.getByText(
-        /Google sign-in expired\. Mail and calendar are paused, and other parts of Aman keep working\. Select Reconnect to sign in again\./,
+        /Google sign-in expired\. Mail, calendar and Drive files are paused, and other parts of Aman keep working\. Select Reconnect to sign in again\./,
       ),
     ).toBeInTheDocument();
     expect(screen.getByText(/open Audience and choose Publish app, then reconnect once\./)).toBeInTheDocument();
@@ -461,6 +502,63 @@ describe('GoogleSetupPanel', () => {
     );
   });
 
+  it('shows no Drive section while the server status carries no Drive feature', async () => {
+    renderPanel(makePort({ getGoogleStatus: async () => connectedStatus() }).port);
+    await screen.findByLabelText('Calendar');
+    expect(screen.queryByLabelText('Google Drive')).not.toBeInTheDocument();
+  });
+
+  it('shows Drive as a separate add-on, with its three API links and plain words about the files Aman can see', async () => {
+    const { port, begin } = makePort({ getGoogleStatus: async () => withDrive(connectedStatus(), false) });
+    renderPanel(port);
+    const row = await screen.findByLabelText('Google Drive');
+    expect(row).toHaveTextContent('Google Drive: not connected');
+    expect(row).toHaveTextContent('the files it created, and the files you opened with it');
+    expect(row).toHaveTextContent('The rest of your Drive stays invisible to Aman.');
+    expect(row).toHaveTextContent('Turn on the Google Drive, Docs and Sheets APIs');
+    expect(row).not.toHaveTextContent(/scope|consent screen/i);
+    expect(within(row).getByRole('link', { name: /Drive API link/ })).toHaveAttribute(
+      'href',
+      'https://console.cloud.google.com/apis/library/drive.googleapis.com',
+    );
+    expect(within(row).getByRole('link', { name: /Docs API link/ })).toHaveAttribute(
+      'href',
+      'https://console.cloud.google.com/apis/library/docs.googleapis.com',
+    );
+    expect(within(row).getByRole('link', { name: /Sheets API link/ })).toHaveAttribute(
+      'href',
+      'https://console.cloud.google.com/apis/library/sheets.googleapis.com',
+    );
+    expect(
+      screen.queryByText(/Read and add to Drive files Aman created or you opened with Aman: /),
+    ).not.toBeInTheDocument();
+    fireEvent.click(within(row).getByRole('button', { name: 'Connect Google Drive' }));
+    await waitFor(() => expect(begin).toHaveBeenCalled());
+    expect(begin.mock.calls[0]?.[0]).toEqual({ client: null, features: ['drive_files'] });
+  });
+
+  it('shows Drive as connected, with nothing left to connect and the API links kept', async () => {
+    renderPanel(makePort({ getGoogleStatus: async () => withDrive(connectedStatus(), true) }).port);
+    const row = await screen.findByLabelText('Google Drive');
+    expect(row).toHaveTextContent('Google Drive: connected');
+    expect(row).toHaveTextContent('It cannot delete files or change who a file is shared with.');
+    expect(within(row).queryByRole('button', { name: 'Connect Google Drive' })).not.toBeInTheDocument();
+    expect(within(row).getByRole('link', { name: /Drive API link/ })).toHaveAttribute(
+      'href',
+      'https://console.cloud.google.com/apis/library/drive.googleapis.com',
+    );
+  });
+
+  it('keeps Drive when reconnecting', async () => {
+    const { port, begin } = makePort({
+      getGoogleStatus: async () => withDrive(connectedStatus({ state: 'needs_reconnect' }), true),
+    });
+    renderPanel(port);
+    fireEvent.click(await screen.findByRole('button', { name: 'Reconnect' }));
+    await waitFor(() => expect(begin).toHaveBeenCalled());
+    expect(begin.mock.calls[0]?.[0].features).toContain('drive_files');
+  });
+
   it('says in plain words when mail works but Calendar did not answer', async () => {
     renderPanel(
       makePort({
@@ -506,7 +604,7 @@ describe('GoogleSetupPanel', () => {
     });
     const { onChanged } = renderPanel(port);
     fireEvent.click(await screen.findByRole('button', { name: 'Disconnect' }));
-    expect(screen.getByRole('alertdialog')).toHaveTextContent('turns off both mail and calendar');
+    expect(screen.getByRole('alertdialog')).toHaveTextContent('turns off mail, calendar and Google Drive');
     expect(screen.getByRole('alertdialog')).toHaveTextContent('everywhere it is used');
     expect(screen.getByRole('alertdialog')).toHaveTextContent('Emails already sent stay in Gmail.');
     fireEvent.click(screen.getByRole('button', { name: 'Disconnect Google' }));

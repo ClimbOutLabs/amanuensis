@@ -1,11 +1,12 @@
 /**
- * A private chat end to end over the real HTTP surface: it starts private, runs an action that
- * asks for approval, is approved, then is closed and deleted. Afterwards no table holds a row for
- * it except the receipts of what it did, the memory folder is unchanged, and the chat list and
- * the brief know nothing of it.
+ * A private chat end to end over the real HTTP surface: it starts private, is refused a change
+ * through a connector, saves an email draft that asks for approval and is approved, then is
+ * closed and deleted. Afterwards no table holds a row for it except the receipts of what it did,
+ * the memory folder is unchanged, and the chat list and the brief know nothing of it.
  */
 import { createHash } from 'node:crypto';
-import { readdir, readFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { z } from '@hono/zod-openapi';
@@ -110,13 +111,22 @@ async function folderFingerprint(dir: string): Promise<string> {
 
 describe('a private chat from start to Close and delete', () => {
   let server: ApprovalTestServer;
+  let memoryDir: string;
+  const sharedMemoryDir = configuration.MEMORY_MARKDOWN_DIR;
 
   beforeAll(async () => {
+    // A memory folder of its own, so only this chat could change it.
+    memoryDir = await mkdtemp(path.join(tmpdir(), 'tfy-private-chat-memory-'));
+    configuration.MEMORY_MARKDOWN_DIR = memoryDir;
     server = await startApprovalTestServer();
+    // The invented inbox stands in for the person's own mail.
+    server.setEvalMode(true);
   }, TURN_TIMEOUT_MS);
 
   afterAll(async () => {
     await server.close();
+    configuration.MEMORY_MARKDOWN_DIR = sharedMemoryDir;
+    await rm(memoryDir, { recursive: true, force: true });
   });
 
   async function count(query: ReturnType<typeof sql<{ n: number }>>): Promise<number> {
@@ -148,7 +158,7 @@ describe('a private chat from start to Close and delete', () => {
   }
 
   it(
-    'runs an approved action, then leaves only its receipts behind',
+    'refuses a connector change, runs an approved email draft, then leaves only its receipts behind',
     async () => {
       const memoryBefore = await folderFingerprint(configuration.MEMORY_MARKDOWN_DIR);
 
@@ -160,11 +170,23 @@ describe('a private chat from start to Close and delete', () => {
       const session = SessionResponseSchema.parse(await created.json()).data;
       expect(session.is_incognito).toBe(true);
 
-      // The action asks first, as in a normal chat, and runs once approved.
-      const paused = await runTurn({
+      // A connector the person added cannot change anything from here: there is no card to allow.
+      const refused = await runTurn({
         server,
         sessionId: session.id,
         input: [{ type: 'user.message', content: `${RUN_DIRECTIVE_PREFIX}${INERT_WRITE_TOOL} please` }],
+      });
+      expect(refused.state.status === 'done' ? refused.state.required_actions : undefined).toEqual([]);
+      expect(server.mcp.writeInvocations()).toBe(0);
+
+      // The person's own email asks first, as in a normal chat, and is saved once approved.
+      const { gmail } = server.evalSources();
+      const drafts = async () => (await gmail.listDrafts({ maxResults: 10, pageToken: undefined })).draftIds.length;
+      const draftsBefore = await drafts();
+      const paused = await runTurn({
+        server,
+        sessionId: session.id,
+        input: [{ type: 'user.message', content: `${RUN_DIRECTIVE_PREFIX}draft_email please` }],
       });
       const resumed = await runTurn({
         server,
@@ -174,7 +196,7 @@ describe('a private chat from start to Close and delete', () => {
         ],
       });
       expect(resumed.state.status).toBe('done');
-      expect(server.mcp.writeInvocations()).toBe(1);
+      expect(await drafts()).toBe(draftsBefore + 1);
 
       const receiptsBefore = {
         approval_token: await count(sql<{ n: number }>`SELECT count(*) AS n FROM approval_token`),

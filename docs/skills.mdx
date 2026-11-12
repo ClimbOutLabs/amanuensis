@@ -15,6 +15,17 @@ Open **Settings → Skills**, pick a starter skill from the catalog, or add your
 
 The starter skills in the catalog come from the shipped skill catalog — see [Initial Setup](/harness/initial-setup#what-is-supported-out-of-the-box) for how catalogs work and how to change what the UI offers.
 
+## Adding a skill from a chat
+
+You can ask the assistant to add a skill for you: name one of the starter skills, or paste the address of a skill in a public GitHub repository.
+
+- The assistant reads the skill's `SKILL.md` on GitHub and settles the branch or tag to one exact commit. The skill is saved pinned to that commit, so a later change to the repository is not picked up.
+- An approval card shows the name, the description, the repository and folder, and the commit. For a skill read from GitHub it also shows the skill's own instructions. The name and description come from the skill's `SKILL.md`, not from the model. Nothing is saved until you allow it, and the card asks every time.
+- A starter skill is added as shipped, at the commit the catalog pins, with no lookup.
+- After you allow it, the skill is turned on for that chat and listed under **Settings → Skills**.
+
+From a chat the assistant can only add. Changing or removing a skill, and letting a skill reach sites, stay in **Settings → Skills**. Incognito chats and scheduled runs cannot add a skill. See the [safety story](/safety) for the rules behind this.
+
 ## What a skill contains
 
 ```text

@@ -52,6 +52,18 @@ const TOOL_WORDS: ReadonlyMap<string, ToolWords> = new Map([
     'update_event',
     'calendar_write',
   ]),
+  ...words(
+    { doing: 'Checking your Google Drive files', done: 'Read your Google Drive files', thing: 'Your Drive files' },
+    ['list_files', 'read_drive_file', 'google_drive_read'],
+  ),
+  ...words(
+    {
+      doing: 'Changing your Google Drive files',
+      done: 'Changed your Google Drive files',
+      thing: 'A Google Drive change',
+    },
+    ['create_doc', 'append_rows', 'google_drive_write'],
+  ),
   ...words({ doing: 'Searching your notes', done: 'Searched your notes', thing: 'A notes search' }, [
     'search_notes',
     'notes_read',
@@ -143,6 +155,11 @@ const TOOL_WORDS: ReadonlyMap<string, ToolWords> = new Map([
     'persona_switch',
   ]),
   ...words({ doing: 'Making a persona', done: 'Made a persona', thing: 'A new persona' }, ['create_persona']),
+  ...words({ doing: 'Checking the skills', done: 'Checked the skills', thing: 'The skills' }, [
+    'list_skills',
+    'skill_read',
+  ]),
+  ...words({ doing: 'Adding a skill', done: 'Added a skill', thing: 'A new skill' }, ['install_skill']),
   ...words({ doing: 'Showing a picture', done: 'Showed a picture', thing: 'A picture' }, ['show_image']),
   ...words({ doing: 'Making a report', done: 'Made a report', thing: 'A report' }, ['create_document_report']),
   ...words({ doing: 'Making a plan', done: 'Made a plan', thing: 'A plan' }, ['submit_implementation_plan']),

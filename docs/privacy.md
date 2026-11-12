@@ -12,10 +12,12 @@ If you use a hosted model, the company running it sees each chat: your messages,
 - **To the model you chose:** your message, the chat so far, what Aman knows about you, the memories Aman recalls for that message, and the results of any tools Aman used. With a local model, this stays on your computer.
 - **To the model you chose, when Aman uses its browser:** the text of each page Aman reads. With a model that reads images, also the screenshots Aman takes, with password, card and one-time-code fields, and anything a page embeds from elsewhere, covered. The live browser's pictures never go to the model. What you leave on a page is in Aman's next read of it, apart from those fields; see [Aman's browser](/browser).
 - **To the web search service:** the search words, and the links Aman opens from the results, when Aman searches the web. The service also sees this computer's internet address.
-- **To the map service:** the places and routes Aman looks up, after you approve the card.
+- **To the map service:** the places and routes Aman looks up. They go only to the map service that Aman is set up to use. Maps run without asking unless you turn off the **Maps** switch in Settings. With the switch off, a map shows a card first.
 - **To your browser's push service (Google, Apple or Mozilla), only for devices where you turned notices on:** a sealed notice holding an item number and a generic title such as "Reminder", never the reminder text. The service also sees this computer's internet address and the project's public page as the sender's contact.
+- **To the model a new chat starts on, only when something new happens:** Aman notices new events, such as mail from someone you marked always important, a calendar clash, a bill due soon or an approval that has waited. For each one, it sends that one event's short description to the model, such as a sender, a subject and the start of the message. The model only suggests how loudly to tell you. Nothing is sent when nothing is new. If no model can answer, these events arrive as quiet notes. This install's shared Email and Calendar connectors are watched for the owner only. Everyone else is watched only through their own Google connection.
 - **To a connector's service:** whatever a connector call sends, such as an email you approved. Calls that send or change something show a card first; see [Safety story](/safety).
 - **To Telegram, when you connect a Telegram bot:** the messages you send the bot, Aman's replies, reminder text, the details of anything that needs your ok, and any photos or files you send the bot all pass through Telegram's servers. Chats with a bot are not end to end encrypted, so Telegram can hold and read them. Do not send the bot anything you would not want Telegram to hold. The chats themselves still live on your computer.
+- **To GitHub, when you ask Aman in a chat to add a skill:** the address of that skill and a request to read it. Nothing about you is in it. GitHub also sees this computer's internet address.
 - **To package sources (npm, PyPI, Go and Rust), when a skill you approved installs packages:** the names and versions of those packages.
 - **To Hugging Face, once:** a request for the memory search model's files the first time Aman starts. Nothing about you is in it, and Aman checks each file against a fixed fingerprint before using it.
 
@@ -23,7 +25,7 @@ The browser loads nothing from third parties: fonts and icons are bundled with A
 
 ## What stays on your machine
 
-- Voice input. Speech is turned into text by a small model running on your computer.
+- Voice input and voice mode. Speech is turned into text by a small model running on your computer, and replies are read aloud by a voice running on your computer. Nothing you say is saved except the message in your chat. The small speech-detection model it needs ships inside the Aman image. Voice mode ends by itself after 2 minutes without you speaking, and after 30 minutes in any case, so a forgotten tab does not keep the microphone open. See [Voice input](/voice-input).
 - Memory search. Aman finds related memories with a small model running on your computer.
 - Backups. They are written to a folder on your computer; see [Backups](/backup).
 
@@ -35,7 +37,9 @@ While an incognito chat is open:
 
 - Aman can still read what it already knows, such as your memories and its persona's notes.
 - Aman saves nothing from it. It writes no memories and no daily notes, learns nothing about you from it, and adds nothing to past-chat search, the brief or Home.
-- Aman cannot make or change anything that would outlive the chat: no spaces, no reminders, no schedules and no new personas. It can still read your spaces, schedules and reminders, and switch to a persona you already have. Ask in a normal chat for anything you want kept.
+- Aman cannot make or change anything of its own that would outlive the chat: no spaces, no reminders, no schedules, no new personas and no notes in your notes folder. It can still read them, and switch to a persona you already have. Ask in a normal chat for anything you want kept.
+- Through a connector you added, Aman can only look things up. It refuses anything else it would do through one, and tells you to ask in a normal chat. It also refuses a lookup it does not know by name, because a connector's own word that a tool only reads is not enough here.
+- Your own email and calendar work as in any chat. Sending a message, saving a draft and adding an event each ask you first.
 - The web browser is off, because it keeps its history and sign-ins between chats.
 - Text you type but do not send is not saved in the browser tab.
 - It shows in the Chats list with an **Incognito** label, only in the browser tab that started it. It never shows in search, and it cannot be put in a folder.

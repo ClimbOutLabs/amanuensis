@@ -44,7 +44,7 @@
           },
           {
             "group": "Your Data and Safety",
-            "pages": ["safety", "privacy", "browser", "schedules", "backup"]
+            "pages": ["safety", "privacy", "browser", "schedules", "reach-me", "backup"]
           },
           {
             "group": "Connectors",
@@ -60,6 +60,7 @@
                   "models",
                   "model-roles",
                   "mcp-servers",
+                  "connectors/home-assistant",
                   "google",
                   "skills",
                   "sandbox",

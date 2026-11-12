@@ -253,6 +253,8 @@ export type {
   ImplementationPlanGrant,
   ImplementationPlanGrantApi,
 } from './components/ImplementationPlanGrantContext.js';
+export { LocalAccountProvider, useOptionalLocalAccount } from './components/LocalAccountContext.js';
+export type { LocalAccountApi } from './components/LocalAccountContext.js';
 export { MemoryRecallProvider, useOptionalMemoryRecall } from './components/MemoryRecallContext.js';
 export type { MemoryRecallApi, MemoryTurnContext } from './components/MemoryRecallContext.js';
 export { ModelUsageProvider, useOptionalModelUsage } from './components/ModelUsageContext.js';
@@ -298,7 +300,12 @@ export type { RunCodeStatus, RunCodeStatusApi } from './components/RunCodeStatus
 export { SpokenReplyProvider, useSpokenReply } from './components/SpokenReplyContext.js';
 export type { TourCapabilities } from './components/tourPrompts.js';
 export { VoiceInputProvider, useOptionalVoiceInput } from './components/VoiceInputContext.js';
-export type { VoiceAvailability, VoiceInputApi, VoiceTranscription } from './components/VoiceInputContext.js';
+export type {
+  VoiceAvailability,
+  VoiceConnection,
+  VoiceInputApi,
+  VoiceTranscription,
+} from './components/VoiceInputContext.js';
 export { AgentStepsContainer } from './containers/AgentStepsContainer.js';
 export type { AgentStepsContainerProps } from './containers/AgentStepsContainer.js';
 export { ApprovalNavContainer } from './containers/ApprovalNavContainer.js';
@@ -745,6 +752,18 @@ export type { SessionsBrowserButtonProps } from './atoms/SessionsBrowserButton.j
 export { SpacesButton } from './atoms/SpacesButton.js';
 export type { SpacesButtonProps } from './atoms/SpacesButton.js';
 export { DeliveriesProvider, useOptionalDeliveries } from './deliveries/DeliveriesContext.js';
-export type { DeliveriesApi, DeliveryItem, DeliveryLink, DeliveryPage, PushDevice } from './deliveries/types.js';
+export { NOTICING_KINDS } from './deliveries/types.js';
+export type {
+  DeliveriesApi,
+  DeliveryItem,
+  DeliveryLink,
+  DeliveryPage,
+  NoticingKind,
+  PushDevice,
+  ReachApi,
+  ReachSender,
+  ReachSettings,
+  ReachView,
+} from './deliveries/types.js';
 export { SpaceProvider, useOptionalSpaces } from './server/SpaceContext.js';
 export type { Space, SpaceFolder, SpaceFormat, SpaceStatus, SpaceStore } from './server/SpaceContext.js';

@@ -152,8 +152,8 @@ describe('createAuthAwareFetch', () => {
 });
 
 describe('auth status landings', () => {
-  it('reads error reason for sign-in failures', () => {
-    assert.equal(parseAuthErrorReason('?error=access_denied'), 'access_denied');
+  it('reads a sign-in failure as one of the fixed reasons', () => {
+    assert.equal(parseAuthErrorReason('?error=access_denied'), 'login_failed');
     assert.equal(parseAuthErrorReason('?other=1'), null);
   });
 });

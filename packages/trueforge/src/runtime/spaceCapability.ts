@@ -77,6 +77,7 @@ import { pastChatsCapability, type PastChatsTurnContext } from './pastChatsCapab
 import { personaCapability, type PersonaTurnContext } from './personaCapability';
 import { privateChatCapability, toolsForChat } from './privateChat';
 import { scheduleCapability, type ScheduleTurnContext } from './scheduleCapability';
+import { skillCapability, type SkillTurnContext } from './skillCapability';
 import { maskDocumentationRegions } from './spaceDocumentationMask';
 import {
   dropDuplicateRows,
@@ -2780,6 +2781,8 @@ export interface SpaceTurnContext {
   schedules?: ScheduleTurnContext | undefined;
   /** Present where the chat has a model to answer with; absent, no persona tool mounts. */
   personas?: PersonaTurnContext | undefined;
+  /** Present where this app keeps the skills itself; absent, no skill tools mount. */
+  skills?: SkillTurnContext | undefined;
   /** The request carries a new message from the person, not an approval resuming the same answer. */
   startsAnswer: boolean;
 }
@@ -2843,6 +2846,7 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
     const sentinel = this.#sentinel(input);
     const schedules = this.#space.schedules;
     const personas = this.#space.personas;
+    const skills = this.#space.skills;
     const keepsNothing = this.keepsNothing;
     return {
       ...resolved,
@@ -2891,6 +2895,9 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
                 keepsNothing,
               }),
             ]),
+        ...(skills === undefined
+          ? []
+          : [skillCapability({ ...skills, tracing: input.tracing, sentinel, keepsNothing })]),
         ...(schedules === undefined
           ? []
           : [
@@ -2961,7 +2968,11 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
       return [];
     }
     try {
-      const capability = await notesFolderCapability({ service: notesFolder.service, tracing: input.tracing });
+      const capability = await notesFolderCapability({
+        service: notesFolder.service,
+        tracing: input.tracing,
+        keepsNothing: this.keepsNothing,
+      });
       return capability === undefined ? [] : [capability];
     } catch (error) {
       this.#space.logger.warn(

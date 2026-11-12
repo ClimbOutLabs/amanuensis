@@ -33,7 +33,7 @@ One function, `sessionKeepsNothing({ session })`, is called by every writer:
 - brief items and the Home feed
 - bug reports, which leave an incognito chat out
 
-The same gate decides which tools the chat is offered. Aman's own lasting things are read-only there: spaces, schedules and reminders can be listed and read but not made or changed, and personas can be listed and switched to but not added. A tool set offers only its tools marked read-only, plus tools that change nothing beyond the chat, so a new writing tool is left out until it says otherwise. The web browser is not mounted, because it keeps one lasting profile per person, with history and sign-ins. The model is told what it cannot do here and to point the person to a normal chat.
+The same gate decides which tools the chat is offered. Aman's own lasting things are read-only there: spaces, schedules, reminders and the notes folder can be listed and read but not made or changed, and personas can be listed and switched to but not added. A tool set offers only its tools marked read-only, plus tools that change nothing beyond the chat, so a new writing tool is left out until it says otherwise. The permission check refuses the same calls on its own, from the tool the host named and never from what a tool says about itself, so a call that reaches it anyway does nothing. A connector the person added can only read: the check lets through a read it knows by its name and refuses every other call, without a card. The host's own mail and calendar keep their cards. The web browser is not mounted, because it keeps one lasting profile per person, with history and sign-ins. The model is told what it cannot do here and to point the person to a normal chat.
 
 `GET /api/v1/sessions` leaves incognito chats out unless `include_private=true`, and only the person who started an incognito chat can see it. The client keeps the one open incognito chat's id in memory, never in browser storage, and asks for it by name. Spaces in this app are the pages Aman keeps, so the chat-side grouping is folders: moving an incognito chat into a folder is refused with "Incognito chats cannot be added to a folder. Start a normal chat to keep it in one." Session metrics keep per-model token counts.
 
@@ -71,7 +71,7 @@ A model counts as local only when its address is this machine (loopback, `localh
 
 ## Privacy
 
-An incognito chat narrows what Aman keeps: no vault write, no learned-profile write, no past-chat search, no brief or Home item, no space, reminder, schedule or persona, no browser history, no history after it closes, no files, and no unsent text in browser storage. It does not narrow what leaves the machine: model, search and connector traffic is unchanged, and the banner says so. Only the receipts of actions and per-model token counts outlive the chat.
+An incognito chat narrows what Aman keeps: no vault write, no learned-profile write, no past-chat search, no brief or Home item, no space, reminder, schedule, persona or note, no browser history, no history after it closes, no files, and no unsent text in browser storage. It does not narrow what leaves the machine: model, search and connector traffic is unchanged, and the banner says so. Only the receipts of actions and per-model token counts outlive the chat.
 
 ## Testing
 
@@ -84,10 +84,11 @@ All tests use synthetic data, never anyone's real memory or mail.
 - The sweep deletes only past-expiry incognito chats.
 - Export omits incognito chats, and an older export imports with the default.
 - Update refuses the flip with the exact message.
-- An incognito chat is offered only the read tools for spaces, schedules and reminders, cannot add a persona, has no browser, and is told so; a normal chat keeps them all.
+- An incognito chat is offered only the read tools for spaces, schedules, reminders and notes, cannot add a persona, has no browser, and is told so; a normal chat keeps them all.
+- The permission check refuses each of those writes in an incognito chat, and any connector call it does not know as a read, even when the connector calls the tool read-only.
 - The banner reads again after a persona switch and shows the hosted line.
 - Unsent text in an incognito chat is never written to browser storage.
-- An end-to-end run over the HTTP surface: an approved action in an incognito chat, then Close and delete leaves only the receipts.
+- An end-to-end run over the HTTP surface: an incognito chat is refused a change through a connector and saves an approved email draft, then Close and delete leaves only the receipts.
 
 ## Out of scope
 

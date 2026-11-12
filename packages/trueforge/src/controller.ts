@@ -2,6 +2,7 @@ import type { ISessionStore } from '@truefoundry/trueforge-core/agent-session';
 import type { Logger } from 'winston';
 import { getPublicBaseUrl } from './config';
 import { Controller } from './controller/Controller';
+import { noticingLoops } from './controller/noticingLoops';
 import { privateChatSweepLoop } from './controller/privateChatSweep';
 import { scheduleDispatchLoop } from './controller/scheduleDispatch';
 import { telegramPollLoop, telegramReplyLoop, type TelegramUpdateExecutor } from './controller/telegramDispatch';
@@ -20,7 +21,7 @@ export interface TelegramControllerDeps {
 }
 
 /**
- * Controller whose loops (schedule runs, the expired private chat sweep) hand work to the server over HTTP
+ * Controller whose loops (schedule runs, noticing, the expired private chat sweep) hand work to the server over HTTP
  * (`SERVER_URL` + `TRUEFORGE_API_KEY` from process config). Standalone uses
  * loopback; distributed uses the dedicated controller against the server Service.
  * With Telegram deps it also runs the channel's polling and reply loops.
@@ -37,6 +38,7 @@ export function createController<TTransaction>(params: {
       withTransaction: params.withTransaction,
       logger: params.logger,
     }),
+    ...noticingLoops({ logger: params.logger }),
     privateChatSweepLoop({ logger: params.logger }),
   ];
   if (params.telegram !== undefined) {

@@ -10,8 +10,15 @@ import { CatalogLogo } from '@/atoms/primitives/CatalogLogo.js';
 import { CenteredModal } from '@/atoms/primitives/CenteredModal.js';
 import SearchInput from '@/atoms/primitives/SearchInput.js';
 import { Icon } from '@/icons/Icon.js';
+import { HOME_ASSISTANT_SERVER_NAME } from '@truefoundry/trueforge-core/core/homeassistant/toolContract';
+
 import { hasCalendarSetup, type CalendarAccountStatus } from '@/server/calendarSetup.js';
-import { hasConnectorConnectionTest, type ConnectorConnectionFailureKind } from '@/server/connectorChecks.js';
+import {
+  hasConnectorConnectionTest,
+  hasHomeAssistantCheck,
+  type ConnectorConnectionFailureKind,
+  type HomeAssistantCheck,
+} from '@/server/connectorChecks.js';
 import { hasEmailSetup, type EmailAccountStatus } from '@/server/emailSetup.js';
 import { hasGoogleSetup, type GoogleConnectionStatus } from '@/server/googleSetup.js';
 import { hasNotesFolderSetup, type NotesFolderStatus } from '@/server/notesFolderSetup.js';
@@ -21,6 +28,7 @@ import { shellIsMutable, useShellMode } from '@/server/ShellModeContext.js';
 import { hasTelegramSetup, type TelegramAccountStatus } from '@/server/telegramSetup.js';
 import type { AgentSpec, ConnectorAuth, ConnectorBase, ConnectorCatalogEntry } from '@/server/types.js';
 import { getErrorMessage } from '@/utils/getErrorMessage.js';
+import { buildHomeAssistantEndpoint } from '@/utils/homeAssistantPreset.js';
 import { useAssistantDisplayName } from '../../components/PersonalizationContext.js';
 import { useToasterOptional } from '../ToasterContainer.js';
 import AccountConnectorCard from './AccountConnectorCard.js';
@@ -56,6 +64,20 @@ function connectionTestSuccessMessage(toolCount: number): string {
  * Always what the endpoint said, never a generic failure line. A rejected credential and an
  * endpoint that cannot be reached are fixed in different places, so each carries its own next step.
  */
+/** The Home Assistant check in the brief's words: the counts it found, or the one thing to fix. */
+function homeAssistantCheckMessage(result: HomeAssistantCheck): ConnectorCheckStatus {
+  if (result.status === 'failed') {
+    return { ok: false, message: result.reason };
+  }
+  if (result.entityCount === null) {
+    return { ok: true, message: `Connected. ${String(result.toolCount)} tools available.` };
+  }
+  return {
+    ok: true,
+    message: `Connected. ${String(result.toolCount)} ${result.toolCount === 1 ? 'tool' : 'tools'}, ${String(result.entityCount)} exposed ${result.entityCount === 1 ? 'entity' : 'entities'}`,
+  };
+}
+
 function connectionTestFailureMessage(result: { kind: ConnectorConnectionFailureKind; message: string }): string {
   if (result.kind === 'auth_required') {
     return withRemediation({ message: result.message, remediation: 'Reconnect it or replace its key.' });
@@ -145,6 +167,11 @@ const ConnectorSettings = () => {
   const [addMcpServerFormOpen, setAddMcpServerFormOpen] = useState(false);
   const [editingConnector, setEditingConnector] = useState<ConnectorBase | null>(null);
   const [connectorAwaitingKey, setConnectorAwaitingKey] = useState<ConnectorCatalogEntry | null>(null);
+  const [connectorAwaitingHomeAssistant, setConnectorAwaitingHomeAssistant] = useState<ConnectorCatalogEntry | null>(
+    null,
+  );
+  const [homeAssistantAddress, setHomeAssistantAddress] = useState('');
+  const [homeAssistantToken, setHomeAssistantToken] = useState('');
   const [selectedConnector, setSelectedConnector] = useState<ConnectorBase | null>(null);
   const [apiKey, setApiKey] = useState('');
   // A native window.confirm() blocks the JS event loop until dismissed, which reads as a frozen
@@ -322,6 +349,13 @@ const ConnectorSettings = () => {
   };
 
   const handleConnect = (entry: ConnectorCatalogEntry) => {
+    if (entry.name === HOME_ASSISTANT_SERVER_NAME) {
+      setHomeAssistantAddress('');
+      setHomeAssistantToken('');
+      setFormError(null);
+      setConnectorAwaitingHomeAssistant(entry);
+      return;
+    }
     if (entry.auth.type === 'header') {
       setApiKey('');
       setFormError(null);
@@ -366,6 +400,34 @@ const ConnectorSettings = () => {
           title: `${entry.name} ${existingConnector ? 'updated' : 'connected'}`,
         });
       }, 100);
+    }, setFormError).catch(() => {});
+  };
+
+  const closeHomeAssistantModal = () => {
+    setConnectorAwaitingHomeAssistant(null);
+    setHomeAssistantAddress('');
+    setHomeAssistantToken('');
+    setFormError(null);
+  };
+
+  // The preset builds the endpoint and the Authorization header from the two fields, so the
+  // person never types either. The token is stored like every other connector key and is never
+  // shown again. Once saved, the check runs and its line lands on the connector's row.
+  const handleHomeAssistantSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!connectorAwaitingHomeAssistant || !homeAssistantToken.trim()) return;
+    const built = buildHomeAssistantEndpoint(homeAssistantAddress);
+    if ('problem' in built) {
+      setFormError(built.problem);
+      return;
+    }
+    const entry = connectorAwaitingHomeAssistant;
+    setFormError(null);
+    void runMutation(async () => {
+      const auth: ConnectorAuth = { type: 'header', apiKey: homeAssistantToken, headerName: 'Authorization' };
+      await createFromCatalog({ ...entry, url: built.url }, auth);
+      closeHomeAssistantModal();
+      handleConnectionTest({ id: entry.id, name: entry.name });
     }, setFormError).catch(() => {});
   };
 
@@ -472,11 +534,17 @@ const ConnectorSettings = () => {
     ? (req: { id: string }) => connectorCatalog.testConnector(req)
     : undefined;
 
+  // The Home Assistant check rides the same status slot as the connection test, with its own
+  // words: the tool and exposed entity counts, or the one thing to fix.
+  const homeAssistantChecker = hasHomeAssistantCheck(connectorCatalog)
+    ? (req: { id: string }) => connectorCatalog.checkHomeAssistant(req)
+    : undefined;
+
   const canUpdateChat = shellIsMutable(mode) && agentSpec != null && updateAgentSpec != null;
   const isPlainDraft = mode.status === 'active' && mode.isMutable && mode.agentId == null && pendingSessionId == null;
 
-  const handleConnectionTest = (connector: ConnectorBase) => {
-    if (connectionTester === undefined || checkInFlightIds.has(connector.id)) {
+  const handleConnectionTest = (connector: Pick<ConnectorBase, 'id' | 'name'>) => {
+    if ((connectionTester === undefined && homeAssistantChecker === undefined) || checkInFlightIds.has(connector.id)) {
       return;
     }
     // Captured now, checked when the response lands: if invalidateConnectionCheck bumped this
@@ -487,17 +555,23 @@ const ConnectorSettings = () => {
     checkGenerationById.current.set(connector.id, generation);
     setCheckInFlightIds(current => new Set(current).add(connector.id));
     const isCurrent = () => checkGenerationById.current.get(connector.id) === generation;
-    void connectionTester({ id: connector.id })
+    const status: Promise<ConnectorCheckStatus> =
+      connector.name === HOME_ASSISTANT_SERVER_NAME && homeAssistantChecker !== undefined
+        ? homeAssistantChecker({ id: connector.id }).then(homeAssistantCheckMessage)
+        : connectionTester === undefined
+          ? Promise.reject(new Error('The connection test is not available'))
+          : connectionTester({ id: connector.id }).then(result => ({
+              ok: result.ok,
+              message: result.ok
+                ? connectionTestSuccessMessage(result.toolNames.length)
+                : connectionTestFailureMessage(result),
+            }));
+    void status
       .then(result => {
         if (!isCurrent()) return;
         setCheckStatusById(current => {
           const next = new Map(current);
-          next.set(connector.id, {
-            ok: result.ok,
-            message: result.ok
-              ? connectionTestSuccessMessage(result.toolNames.length)
-              : connectionTestFailureMessage(result),
-          });
+          next.set(connector.id, result);
           return next;
         });
       })
@@ -1068,6 +1142,75 @@ const ConnectorSettings = () => {
                 </Button>
                 <Button type="submit" disabled={!apiKey.trim() || busy}>
                   {isReplacingKey ? 'Replace Key' : 'Connect'}
+                </Button>
+              </footer>
+            </form>
+          </CenteredModal>
+
+          <CenteredModal
+            open={connectorAwaitingHomeAssistant !== null}
+            onOpenChange={open => {
+              if (!open) closeHomeAssistantModal();
+            }}
+            title="Connect Home Assistant"
+            description="Your Home Assistant address and a long-lived access token."
+            contentSized
+            className="md:max-w-xl"
+          >
+            <form onSubmit={handleHomeAssistantSubmit}>
+              <div className="space-y-5 px-5 py-5">
+                <div>
+                  <label
+                    htmlFor="home-assistant-address"
+                    className="mb-2 block text-xs font-semibold uppercase tracking-wide text-text-secondary"
+                  >
+                    Home Assistant address
+                  </label>
+                  <input
+                    id="home-assistant-address"
+                    type="text"
+                    value={homeAssistantAddress}
+                    onChange={event => {
+                      setHomeAssistantAddress(event.target.value);
+                    }}
+                    placeholder="https://homeassistant.local:8123"
+                    autoFocus
+                    required
+                    className={auiInputClass('h-11')}
+                  />
+                </div>
+                <div>
+                  <label
+                    htmlFor="home-assistant-token"
+                    className="mb-2 block text-xs font-semibold uppercase tracking-wide text-text-secondary"
+                  >
+                    Long-lived access token
+                  </label>
+                  <input
+                    id="home-assistant-token"
+                    type="password"
+                    value={homeAssistantToken}
+                    onChange={event => {
+                      setHomeAssistantToken(event.target.value);
+                    }}
+                    placeholder="Paste the token from Home Assistant"
+                    required
+                    className={auiInputClass('h-11')}
+                  />
+                  <p className="mt-2 text-sm text-text-secondary">
+                    In Home Assistant, open your profile, then Security, and make a long-lived access token. Then add
+                    the Model Context Protocol Server integration under Settings, Devices and services. Only entities
+                    you expose to voice assistants are visible to Aman.
+                  </p>
+                </div>
+                {formError ? <p className="text-failure-bg text-sm">{formError}</p> : null}
+              </div>
+              <footer className="flex justify-end gap-2 border-t border-border px-5 py-4">
+                <Button variant="ghost" type="button" onClick={closeHomeAssistantModal} disabled={busy}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={!homeAssistantAddress.trim() || !homeAssistantToken.trim() || busy}>
+                  Connect
                 </Button>
               </footer>
             </form>
