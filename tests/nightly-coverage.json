@@ -127,6 +127,10 @@
       "set": "install",
       "tests": []
     },
+    "command:restore": {
+      "set": "install",
+      "tests": []
+    },
     "command:setup": {
       "set": "install",
       "tests": []
@@ -488,6 +492,10 @@
       "set": "account",
       "tests": ["packages/frontend/tests/settingsPanels.browser.test.ts"]
     },
+    "settings:account": {
+      "set": "account",
+      "tests": []
+    },
     "settings:audit": {
       "set": "safety",
       "tests": ["packages/frontend/tests/settingsPanels.browser.test.ts"]
@@ -725,6 +733,7 @@
     "command:network",
     "command:open",
     "command:password",
+    "command:restore",
     "command:setup",
     "command:status",
     "command:uninstall",
@@ -782,6 +791,7 @@
     "route:tokenFactoryUsage",
     "route:toolOutputScreen",
     "route:voice",
+    "settings:account",
     "tour:company",
     "tour:explain",
     "tour:locals_know",

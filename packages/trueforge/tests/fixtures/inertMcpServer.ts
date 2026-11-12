@@ -45,6 +45,10 @@ import { z } from 'zod';
 export const INERT_SERVER_NAME = 'inert';
 export const INERT_ECHO_TOOL = 'inert_echo';
 export const INERT_READ_TOOL = 'inert_read';
+/** Opt-in (`pageById: true`): reads one page by its id, next to an optional parent id. Read-only and non-open-world. */
+export const INERT_GET_PAGE_TOOL = 'inert_get_page';
+/** Opt-in (`messageSearch: true`): a search whose name alone says it only looks things up. */
+export const INERT_SEARCH_MESSAGES_TOOL = 'search_messages';
 export const INERT_WRITE_TOOL = 'inert_write';
 export const INERT_UNANNOTATED_TOOL = 'inert_unannotated';
 export const INERT_ASK_MEMORY_TOOL = 'ask_memory';
@@ -116,6 +120,8 @@ export interface InertMcpServer {
   writeInvocations: () => number;
   echoInvocations: () => number;
   readInvocations: () => number;
+  getPageInvocations: () => number;
+  searchMessagesInvocations: () => number;
   unannotatedInvocations: () => number;
   askMemoryInvocations: () => number;
   searchMemoryInvocations: () => number;
@@ -168,6 +174,8 @@ export interface InertMcpServer {
 interface Counters {
   echo: number;
   read: number;
+  getPage: number;
+  searchMessages: number;
   write: number;
   unannotated: number;
   askMemory: number;
@@ -236,6 +244,8 @@ function buildMcpServer({
   searchProvider,
   mail,
   calendar,
+  pageById,
+  messageSearch,
 }: {
   counters: Counters;
   gates: WriteGate[];
@@ -245,6 +255,8 @@ function buildMcpServer({
   searchProvider: boolean;
   mail: boolean;
   calendar: boolean;
+  pageById: boolean;
+  messageSearch: boolean;
 }): McpServer {
   const server = new McpServer({ name: 'inert-connector', version: '0.0.0' });
 
@@ -275,6 +287,36 @@ function buildMcpServer({
       return textResult(text);
     },
   );
+
+  if (pageById) {
+    server.registerTool(
+      INERT_GET_PAGE_TOOL,
+      {
+        description: 'Returns the page with this id. Read-only and non-open-world.',
+        inputSchema: { page_id: z.string(), parent_id: z.string().optional() },
+        annotations: { readOnlyHint: true, openWorldHint: false },
+      },
+      ({ page_id }) => {
+        counters.getPage += 1;
+        return textResult(`page ${page_id}`);
+      },
+    );
+  }
+
+  if (messageSearch) {
+    server.registerTool(
+      INERT_SEARCH_MESSAGES_TOOL,
+      {
+        description: 'Searches the messages on this connector. Read-only and non-open-world.',
+        inputSchema: { query: z.string() },
+        annotations: { readOnlyHint: true, openWorldHint: false },
+      },
+      ({ query }) => {
+        counters.searchMessages += 1;
+        return textResult(`no messages match ${query}`);
+      },
+    );
+  }
 
   server.registerTool(
     INERT_WRITE_TOOL,
@@ -489,6 +531,10 @@ export async function startInertMcpServer(options?: {
   mail?: boolean;
   /** Adds the Calendar sidecar's tool names; the reads declare read-only and closed-world. */
   calendar?: boolean;
+  /** Adds `inert_get_page`, a read by id. */
+  pageById?: boolean;
+  /** Adds `search_messages`, a search known as a lookup by its name. */
+  messageSearch?: boolean;
 }): Promise<InertMcpServer> {
   const webSearch = options?.webSearch === true;
   const searchProvider = options?.searchProvider === true;
@@ -500,6 +546,8 @@ export async function startInertMcpServer(options?: {
   const counters: Counters = {
     echo: 0,
     read: 0,
+    getPage: 0,
+    searchMessages: 0,
     write: 0,
     unannotated: 0,
     askMemory: 0,
@@ -582,6 +630,8 @@ export async function startInertMcpServer(options?: {
       searchProvider,
       mail,
       calendar,
+      pageById: options?.pageById === true,
+      messageSearch: options?.messageSearch === true,
     }).connect(asTransport(transport));
     await transport.handleRequest(req, res, body);
   }
@@ -649,6 +699,8 @@ export async function startInertMcpServer(options?: {
     writeInvocations: () => counters.write,
     echoInvocations: () => counters.echo,
     readInvocations: () => counters.read,
+    getPageInvocations: () => counters.getPage,
+    searchMessagesInvocations: () => counters.searchMessages,
     unannotatedInvocations: () => counters.unannotated,
     askMemoryInvocations: () => counters.askMemory,
     searchMemoryInvocations: () => counters.searchMemory,

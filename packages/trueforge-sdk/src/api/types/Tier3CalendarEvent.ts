@@ -8,6 +8,8 @@ import type * as TrueForge from "../index.js";
 export interface Tier3CalendarEvent {
     /** Whether a new event is added or an existing one changed. */
     action: TrueForge.Tier3CalendarEventAction;
+    /** True when the same event was already created in this chat a few minutes ago. */
+    alreadyCreated?: boolean;
     /** Every guest on the event. */
     attendees: string[];
     before: TrueForge.Tier3CalendarEventBefore | null;
@@ -23,6 +25,8 @@ export interface Tier3CalendarEvent {
     location: string;
     /** True when this changes one date of a repeating event. */
     oneOfRepeating: boolean;
+    /** How many days the event runs over; 1 for an ordinary event. */
+    spanDays?: number;
     /** IANA time zone the times are in. */
     timeZone: string;
     /** Event title. */
