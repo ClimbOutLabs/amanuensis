@@ -91,7 +91,10 @@ async function build(input: {
   chats?: Record<string, string>;
   nextPageToken?: string;
 }) {
-  const calls = { listSchedules: [] as { limit: number; page_token: string | undefined }[], listLatestRuns: 0 };
+  const calls: { listSchedules: { limit: number; page_token: string | undefined }[]; listLatestRuns: number } = {
+    listSchedules: [],
+    listLatestRuns: 0,
+  };
   const scheduleStore: RemindersRouterDeps<never>['scheduleStore'] = {
     listSchedules: async query => {
       calls.listSchedules.push({ limit: query.limit, page_token: query.page_token });
