@@ -19,6 +19,7 @@ import { SqliteModelProviderStore } from '../../../src/db/sqlite/model-provider-
 import { SqliteSandboxProviderStore } from '../../../src/db/sqlite/sandbox-provider-store/SqliteSandboxProviderStore';
 import { SqliteSkillStore } from '../../../src/db/sqlite/skill-store/SqliteSkillStore';
 import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
+import { RequestErrorResponseSchema } from '../../../src/schemas/errors';
 import {
   ListAvailableModelsResponseSchema,
   ListModelProvidersResponseSchema,
@@ -656,8 +657,7 @@ describe('the address check on model providers', () => {
   }
 
   async function errorMessage(response: Response): Promise<string> {
-    const body = (await response.json()) as { error: { message: string } };
-    return body.error.message;
+    return RequestErrorResponseSchema.parse(await response.json()).error.message;
   }
 
   it('refuses a provider at a loopback address, naming the setting that allows a local model', async () => {

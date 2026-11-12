@@ -16,6 +16,7 @@ import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/Sq
 import { SqliteMcpToolGrantStore } from '../../../src/db/sqlite/mcp-tool-grant-store/SqliteMcpToolGrantStore';
 import { SqliteOAuthTokenStore } from '../../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { mcpOAuthCallbackUrl } from '../../../src/mcp/auth/mcpOAuthHelpers';
+import { RequestErrorResponseSchema } from '../../../src/schemas/errors';
 import {
   INERT_ASK_MEMORY_TOOL,
   INERT_ECHO_TOOL,
@@ -1987,8 +1988,7 @@ describe('mcp-servers routers', () => {
     }
 
     async function errorMessage(response: Response): Promise<string> {
-      const body = (await response.json()) as { error: { message: string } };
-      return body.error.message;
+      return RequestErrorResponseSchema.parse(await response.json()).error.message;
     }
 
     it('refuses to create a server at a loopback address, and saves nothing', async () => {

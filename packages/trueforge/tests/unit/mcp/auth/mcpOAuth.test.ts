@@ -867,16 +867,13 @@ describe('the address check on sign-in dials', () => {
     dialed: string[];
   } {
     const dialed: string[] = [];
-    globalThis.fetch = (async (input, init) => {
+    globalThis.fetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
       const url = String(input);
       dialed.push(url);
       if (url.includes('oauth-protected-resource')) {
         return json({ resource: SERVER_URL, authorization_servers: [AS_ORIGIN] });
       }
-      if (
-        url === `${AS_ORIGIN}/.well-known/oauth-authorization-server` &&
-        options.redirectMetadataTo !== undefined
-      ) {
+      if (url === `${AS_ORIGIN}/.well-known/oauth-authorization-server` && options.redirectMetadataTo !== undefined) {
         return new Response(null, { status: 302, headers: { location: options.redirectMetadataTo } });
       }
       if (
@@ -901,7 +898,7 @@ describe('the address check on sign-in dials', () => {
         });
       }
       return new Response(`unexpected url: ${url}`, { status: 404 });
-    }) as typeof fetch;
+    };
     return { dialed };
   }
 
@@ -953,14 +950,14 @@ describe('the address check on sign-in dials', () => {
     const received: Array<{ url: string; headers: Headers }> = [];
     const stubDial = (redirectTarget: string): void => {
       received.length = 0;
-      globalThis.fetch = (async (input, init) => {
+      globalThis.fetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
         const url = String(input);
         received.push({ url, headers: new Headers(init?.headers) });
         if (url === `${AS_ORIGIN}/token`) {
           return new Response(null, { status: 307, headers: { location: redirectTarget } });
         }
         return json({ access_token: 'token-1', token_type: 'Bearer', expires_in: 3600 });
-      }) as typeof fetch;
+      };
     };
     const sent = {
       method: 'POST',
