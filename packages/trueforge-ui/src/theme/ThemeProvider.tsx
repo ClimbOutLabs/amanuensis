@@ -43,6 +43,12 @@ export type ThemeContextValue = {
   icons: IconMap;
   classNames: ContentClassNames;
   tokens: Partial<SemanticTokens>;
+  /**
+   * The tokens the theme root renders with: the preset's for the current mode, with the
+   * host's `tokens` applied over them. Components that derive values from the theme (the
+   * chat text size, for one) read these instead of merging the two again.
+   */
+  resolvedTokens: Partial<SemanticTokens>;
 };
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
@@ -97,7 +103,7 @@ function initialPreset(hostPreset: ThemePreset | undefined): ThemePreset {
   return resolveThemePreset(hostPreset) ?? DEFAULT_THEME_PRESET;
 }
 
-function tokensToStyle(tokens: Partial<SemanticTokens> | undefined): CSSProperties {
+export function tokensToStyle(tokens: Partial<SemanticTokens> | undefined): CSSProperties {
   if (!tokens) return {};
   const style: Record<string, string> = {};
   for (const [key, value] of Object.entries(tokens) as [keyof SemanticTokens, string | undefined][]) {
@@ -192,6 +198,11 @@ export function ThemeProvider({ theme, children }: { theme?: ThemeConfig; childr
 
   const hostTokens = useMemo(() => resolveHostTokens(theme?.tokens, mode), [theme?.tokens, mode]);
 
+  const resolvedTokens = useMemo(
+    () => ({ ...resolvePresetTokens(preset, mode), ...hostTokens }),
+    [preset, hostTokens, mode],
+  );
+
   const value = useMemo<ThemeContextValue>(
     () => ({
       preset,
@@ -204,18 +215,23 @@ export function ThemeProvider({ theme, children }: { theme?: ThemeConfig; childr
       icons: theme?.icons ?? {},
       classNames: theme?.classNames ?? {},
       tokens: hostTokens,
+      resolvedTokens,
     }),
-    [preset, mode, preference, setTheme, setPreset, theme?.brand, theme?.icons, theme?.classNames, hostTokens],
+    [
+      preset,
+      mode,
+      preference,
+      setTheme,
+      setPreset,
+      theme?.brand,
+      theme?.icons,
+      theme?.classNames,
+      hostTokens,
+      resolvedTokens,
+    ],
   );
 
-  const rootStyle = useMemo(
-    () =>
-      tokensToStyle({
-        ...resolvePresetTokens(preset, mode),
-        ...hostTokens,
-      }),
-    [preset, hostTokens, mode],
-  );
+  const rootStyle = useMemo(() => tokensToStyle(resolvedTokens), [resolvedTokens]);
 
   return (
     <ThemeContext.Provider value={value}>
@@ -274,4 +290,15 @@ export function useOptionalThemePreset(): ThemePreset {
 /** Safe for trees that may sit outside ThemeProvider (falls back to {}). */
 export function useOptionalContentClassNames(): ContentClassNames {
   return useContext(ThemeContext)?.classNames ?? {};
+}
+
+const DEFAULT_RESOLVED_TOKENS: Partial<SemanticTokens> = resolvePresetTokens(DEFAULT_THEME_PRESET, 'light');
+
+/**
+ * The tokens components render with: the preset's, with the host's applied over them.
+ * Safe for trees that may sit outside ThemeProvider (falls back to the default preset's
+ * light tokens).
+ */
+export function useOptionalResolvedThemeTokens(): Partial<SemanticTokens> {
+  return useContext(ThemeContext)?.resolvedTokens ?? DEFAULT_RESOLVED_TOKENS;
 }
