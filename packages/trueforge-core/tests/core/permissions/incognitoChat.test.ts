@@ -1,3 +1,4 @@
+import { MEMORY_PAGES_SERVER_ID } from '../../../src/core/memory/pagesToolContract';
 import { NOTES_FOLDER_SERVER_ID } from '../../../src/core/notes/toolContract';
 import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
 import {
@@ -64,6 +65,10 @@ describe('an incognito chat makes or changes nothing that outlives it', () => {
     ['a new persona', ownTool(PERSONA_SERVER_ID, 'create_persona', { name: 'Planner' })],
     ['an entry in the notes inbox', ownTool(NOTES_FOLDER_SERVER_ID, 'append_to_inbox', { text: 'Buy milk' })],
     ['a new note', ownTool(NOTES_FOLDER_SERVER_ID, 'create_note', { path: 'ideas.md', text: 'An idea' })],
+    [
+      'a fact on a memory page',
+      ownTool(MEMORY_PAGES_SERVER_ID, 'remember_fact', { about: 'Wendy', text: 'Likes tulips.' }),
+    ],
     ['a tool these sets do not have', ownTool(SPACE_SERVER_ID, 'purge_spaces')],
   ])('refuses %s without a card', async (_label, action) => {
     const decision = await classifyTier(action, incognitoChat());
@@ -79,6 +84,7 @@ describe('an incognito chat makes or changes nothing that outlives it', () => {
     ['its personas', ownTool(PERSONA_SERVER_ID, 'list_personas')],
     ['a note', ownTool(NOTES_FOLDER_SERVER_ID, 'read_note', { path: 'ideas.md' })],
     ['its notes', ownTool(NOTES_FOLDER_SERVER_ID, 'search_notes', { query: 'milk' })],
+    ['a memory page', ownTool(MEMORY_PAGES_SERVER_ID, 'read_page', { about: 'Wendy' })],
   ])('still reads %s without a card', async (_label, action) => {
     expect(await classifyTier(action, incognitoChat())).toMatchObject({ tier: 1, card: null, auto_deny: null });
   });
