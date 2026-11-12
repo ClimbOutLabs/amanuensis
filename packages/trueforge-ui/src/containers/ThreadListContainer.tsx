@@ -711,7 +711,7 @@ export function ThreadListContainer({ onThreadOpen, variant = 'default' }: Threa
     );
   } else {
     listBody = (
-      <ThreadListPrimitive.Root className="flex min-h-0 shrink-0 flex-col gap-0.5">
+      <ThreadListPrimitive.Root className="flex shrink-0 flex-col gap-0.5">
         {isRecentHistory ? (
           <RecentChatsGroups chats={shownEntries} openKey={openKey} renderRow={renderEntry} />
         ) : (

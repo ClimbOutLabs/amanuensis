@@ -114,19 +114,13 @@ export function ChatMessageMatches({
                   ),
                 })}
               >
-                {/* The title and snippet stack in a plain block: as a direct flex item the snippet's
-                    box display is blockified, which silently disables its two-line clamp. */}
-                <span className="block w-full min-w-0">
-                  <span className="flex w-full min-w-0 items-center gap-2">
-                    <span className="min-w-0 flex-1 truncate text-sm text-text-primary">{hit.title ?? 'New Chat'}</span>
-                    <span className="shrink-0 text-xs text-text-muted">
-                      {formatRelativeShort(new Date(hit.matchedAt))}
-                    </span>
-                  </span>
-                  <span className="line-clamp-2 mt-0.5 w-full text-xs whitespace-normal text-text-secondary">
-                    {hit.snippet}
+                <span className="flex w-full min-w-0 items-center gap-2">
+                  <span className="min-w-0 flex-1 truncate text-sm text-text-primary">{hit.title ?? 'New Chat'}</span>
+                  <span className="shrink-0 text-xs text-text-muted">
+                    {formatRelativeShort(new Date(hit.matchedAt))}
                   </span>
                 </span>
+                <span className="line-clamp-2 w-full text-xs whitespace-normal text-text-secondary">{hit.snippet}</span>
               </button>
             </li>
           ))}

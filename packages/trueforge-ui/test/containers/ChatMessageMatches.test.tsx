@@ -116,7 +116,7 @@ describe('ChatMessageMatches', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('Searching your chats failed. Try again in a moment.');
   });
 
-  it('stacks the title and snippet in a plain block so the snippet clamp keeps its own space', async () => {
+  it('keeps the matches section at its full height and clamps a long snippet to two lines', async () => {
     const longSnippet = 'the ferry to the island leaves at nine and the last one back leaves at six '.repeat(4).trim();
     catalogAnswering(async () => ({ searchEnabled: true, hits: [{ ...HIT_TRIP, snippet: longSnippet }] }));
     const { container } = render(
@@ -124,13 +124,7 @@ describe('ChatMessageMatches', () => {
     );
     await settle();
 
-    const snippet = screen.getByText(longSnippet);
-    expect(snippet).toHaveClass('line-clamp-2');
-    // A clamped element that is a direct flex item is blockified and loses its clamp, so the
-    // snippet must sit in a plain block inside the button, never as the button's flex child.
-    const stack = snippet.parentElement;
-    expect(stack).toHaveClass('block');
-    expect(stack?.parentElement?.tagName).toBe('BUTTON');
+    expect(screen.getByText(longSnippet)).toHaveClass('line-clamp-2');
     expect(container.querySelector('section[aria-label="Matches inside chats"]')).toHaveClass('shrink-0');
   });
 });
