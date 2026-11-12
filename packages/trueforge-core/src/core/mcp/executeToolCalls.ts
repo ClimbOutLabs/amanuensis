@@ -54,6 +54,7 @@ import {
 } from '../permissions/webSearch';
 import { identicalCallNudgeMessage } from '../runtime/contextUtils';
 import { CALL_TOOL_NAME, tryParseCallToolWrapper } from '../runtime/DeferredTool';
+import { REPLY_CALL_NOT_RUN_OWNER_MESSAGE } from '../runtime/modelReplyGuard';
 import { connectorUnreachableText, type ToolResultKind, type UnfinishedKind } from '../runtime/replyBudget';
 import type { SandboxInfo, WorkspaceVerificationReceiptCandidate } from '../sandbox/Sandbox';
 import { SPACE_WRITE_REASON } from '../spaces/toolContract';
@@ -2025,6 +2026,9 @@ export async function executeToolCalls({
             ...(toolCall.tool_info.git_remote_precondition === undefined
               ? {}
               : { git_remote_precondition: toolCall.tool_info.git_remote_precondition }),
+            ...(toolCall.tool_info.browser_element === undefined
+              ? {}
+              : { browser_element_precondition: toolCall.tool_info.browser_element }),
           },
         );
       };
@@ -2351,7 +2355,7 @@ export async function executeToolCalls({
               {
                 toolName: toolCall.tool_info.original_tool_name,
                 tier: toolCall.tool_info.tier,
-                message: failure.owner_message ?? failure.message,
+                message: failure.owner_message ?? REPLY_CALL_NOT_RUN_OWNER_MESSAGE,
               },
             ];
       }),

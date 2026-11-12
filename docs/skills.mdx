@@ -1,19 +1,33 @@
 ---
-title: 'Setup Skills'
-sidebarTitle: 'Skills'
-description: 'Register git-backed SKILL.md instruction packs from the shipped catalog or your own repository.'
+title: 'Skills setup'
+sidebarTitle: 'Skills setup'
+description: 'How skills are built, where they come from, and how Aman loads them.'
 ---
 
-Skills teach an agent how to perform specialized tasks — querying a database, triaging an alert, following an escalation playbook, or drafting release notes.
+A skill teaches an agent how to do a particular job, such as querying a database, sorting an alert, following an escalation playbook or drafting release notes. To turn skills on and use them, see [Skills](../packages/trueforge/guide/topics/skills.md).
 
-A skill is a **directory in a git repository** rooted at a `SKILL.md` file. Register skills once under **Settings → Skills**, then attach them by name when you [create an agent](/create-agent/overview).
+A skill is a folder in a git repository with a `SKILL.md` file at its top. You add skills once in **Settings → Skills**. Then you switch them on for a chat, or attach them by name when you [create an agent](create-agent/overview.mdx).
 
-## Registering a skill
+## Adding a skill
 
-Open **Settings → Skills**, pick a starter skill from the catalog, or add your own GitHub/GitLab repository (URL, optional path, and ref). Pin a tag or commit SHA for production stability.
+Open **Settings → Skills**. Either enable a starter skill from the catalog, or click **Import from GitHub** and give the repository URL, the folder that holds `SKILL.md`, and the branch.
 
+!!! tip
 
-The starter skills in the catalog come from the shipped skill catalog — see [Initial Setup](/harness/initial-setup#what-is-supported-out-of-the-box) for how catalogs work and how to change what the UI offers.
+    For a setup you rely on, pin a tag or a commit instead of a moving branch, so the skill doesn't change under you.
+
+The starter skills come from the skill catalog that ships with Aman. See [Initial setup](harness/initial-setup.mdx#what-is-supported-out-of-the-box) for how catalogs work and how to change what Settings offers.
+
+## Adding a skill from a chat
+
+You can ask the assistant to add a skill for you: name one of the starter skills, or paste the address of a skill in a public GitHub repository.
+
+- The assistant reads the skill's `SKILL.md` on GitHub and settles the branch or tag to one exact commit. The skill is saved pinned to that commit, so a later change to the repository is not picked up.
+- An approval card shows the name, the description, the repository and folder, and the commit. For a skill read from GitHub it also shows the skill's own instructions. The name and description come from the skill's `SKILL.md`, not from the model. Nothing is saved until you allow it, and the card asks every time.
+- A starter skill is added as shipped, at the commit the catalog pins, with no lookup.
+- After you allow it, the skill is turned on for that chat and listed under **Settings → Skills**.
+
+From a chat the assistant can only add. Changing or removing a skill, and letting a skill reach sites, stay in **Settings → Skills**. Incognito chats and scheduled runs cannot add a skill. See the [safety story](/safety) for the rules behind this.
 
 ## What a skill contains
 
@@ -26,24 +40,27 @@ customer-support-skill/
     └── classify_ticket.py
 ```
 
-`SKILL.md` has YAML frontmatter (`name`, `description`) and a markdown body of instructions. The `description` is what the agent sees upfront; the full body and supporting files load only when the agent picks the skill (**progressive disclosure**).
+`SKILL.md` starts with YAML front matter (`name` and `description`), followed by Markdown instructions.
 
-## Runtime requirements
+The agent sees only the `description` at first. It loads the full instructions and the supporting files only when it picks the skill. This is called progressive disclosure, and it keeps unused skills from taking up room in the conversation.
 
-<Note>
-  Skills require the agent's [sandbox](/sandbox) to be enabled. The skill repository is cloned into the sandbox, and the
-  agent reads `SKILL.md` (and can run bundled scripts) there. Two skills cannot share the same name on one agent.
-</Note>
+## What a skill needs to run
 
-At runtime:
+!!! note
 
-1. The harness exposes each attached skill's name and description.
-2. When the model decides a skill is relevant, the repo is materialized under `/opt/tfy/skills/{name}`.
-3. The agent follows `SKILL.md` and uses supporting files as needed.
+    Skills need the agent's [sandbox](sandbox.mdx) to be on. The skill's repository is copied into the sandbox, and the agent reads `SKILL.md` and runs any bundled scripts there. Two skills on one agent can't share the same name.
 
-## Network access for skills
+While a turn runs:
 
-A skill can name the sites it needs in its manifest (`network_hosts`). The sandbox has no network of its own, so a skill can reach only the sites you allow for it, and only while it is switched on for the chat.
+1. Aman shows the model each attached skill's name and description.
+2. When the model decides a skill fits, the repository is copied to `/opt/tfy/skills/{name}` in the sandbox.
+3. The agent follows `SKILL.md` and uses the supporting files as needed.
+
+### Network access
+
+A skill has no internet access by default. A skill can list the sites it needs. Settings then asks the person to allow them, and once allowed, a chat using that skill can reach those sites and no others. Settings warns when one of the sites can send email.
+
+A skill names the sites it needs in its manifest (`network_hosts`). The sandbox has no network of its own, so a skill can reach only the sites you allow for it, and only while it is switched on for the chat.
 
 The first time a skill with named sites runs in a chat, a card asks whether it may reach the sites it still needs: the ones you have not already allowed, and not the ones you turned down. The chat keeps working without the sites until you answer. If a skill tries a site it did not name, the connection is refused at once and a card asks about that one site. A card names the site and why it is asking.
 
@@ -53,20 +70,20 @@ Each card takes one of three answers:
 - **Always allow for this skill** remembers the sites for that skill in every chat. On a card for a refused site, the choice names the skill the answer is kept under, because the card cannot tell which skill tried the site. It does not change the list the skill names.
 - **Deny** remembers the sites as turned down for that skill, and no card asks about them again until you clear them.
 
-A scheduled run never waits for an answer: the run finishes, and the card waits for you with the run's other held actions.
+A scheduled run never waits for an answer. The run finishes, and the card waits for you with the run's other held actions.
 
-**Settings → Skills** shows, for each skill, the sites it names, the ones in force, the ones allowed one by one, the ones allowed once in a chat that is still open, and the ones turned down. You can clear an allowed or turned-down site there, or take back the whole approval; a change takes effect on the next command.
+**Settings, Skills** shows, for each skill, the sites it names, the ones in force, the ones allowed one by one, the ones allowed once in a chat that is still open, and the ones turned down. You can clear an allowed or turned-down site there, or take back the whole approval. A change takes effect on the next command.
 
-## Skills + MCP tools
+## Skills and connectors
 
-- **Skills** define _how_ to handle a task (procedure, decision logic, formatting).
-- **MCP tools** provide the _actions and data_ to execute it.
+- Skills say how to handle a task: the steps, the decisions and the format.
+- Connectors (MCP tools) provide the actions and the data.
 
-Example: a CRM follow-up skill sets tone and escalation rules; MCP tools look up the record, update the ticket, and notify Slack.
+For example, a customer follow-up skill sets the tone and when to escalate. Connectors look up the record, update the ticket and post to Slack.
 
-## Authoring tips
+## Tips for writing a skill
 
-- Keep the `description` sharp — it is the only thing the model sees before loading the skill.
-- Write `SKILL.md` like instructions to a competent teammate.
-- Put heavy reference material in supporting files the skill links to.
-- Prefer several focused skills over one sprawling pack.
+- Keep the `description` sharp. It is the only thing the model sees before it loads the skill.
+- Write `SKILL.md` like instructions to a capable teammate.
+- Put long reference material in supporting files that the skill links to.
+- Prefer several focused skills to one sprawling one.

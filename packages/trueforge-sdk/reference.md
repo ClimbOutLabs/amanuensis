@@ -7440,6 +7440,70 @@ await client.reach.testChannel({
 </dl>
 </details>
 
+## Reminders
+<details><summary><code>client.reminders.<a href="/src/api/resources/reminders/client/Client.ts">list</a>({ ...params }) -> TrueForge.ListRemindersResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Lists the reminders the signed-in person set, upcoming and past, a page at a time, each with the chat it was set in.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.reminders.list();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.ListRemindersRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `RemindersClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 ## Voice
 <details><summary><code>client.voice.<a href="/src/api/resources/voice/client/Client.ts">connect</a>({ ...params }) -> TrueForge.VoiceTicketResponse</code></summary>
 <dl>
