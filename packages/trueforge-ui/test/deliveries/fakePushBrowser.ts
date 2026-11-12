@@ -14,8 +14,22 @@ type StubSubscription = {
   unsubscribe: () => Promise<boolean>;
 };
 
-/** A browser that can take push. `existingKey` makes it start with a subscription made with that key. */
-export function stubPushBrowser({ existingKey }: { existingKey?: string } = {}) {
+/**
+ * A browser that can take push. `existingKey` makes it start with a subscription made with that key.
+ * `registerError` makes registering the notice program fail the way the browser reports it;
+ * `subscribeError` and `unsubscribeError` make those steps fail the same way.
+ */
+export function stubPushBrowser({
+  existingKey,
+  registerError,
+  subscribeError,
+  unsubscribeError,
+}: {
+  existingKey?: string;
+  registerError?: Error;
+  subscribeError?: unknown;
+  unsubscribeError?: unknown;
+} = {}) {
   let made = 0;
   const unsubscribed: string[] = [];
   const makeSubscription = (key: ArrayBuffer | null): StubSubscription => {
@@ -26,6 +40,7 @@ export function stubPushBrowser({ existingKey }: { existingKey?: string } = {}) 
       options: { applicationServerKey: key },
       getKey: (name: string) => new TextEncoder().encode(name).buffer,
       unsubscribe: () => {
+        if (unsubscribeError !== undefined) return Promise.reject(unsubscribeError);
         unsubscribed.push(endpoint);
         current = null;
         return Promise.resolve(true);
@@ -37,6 +52,7 @@ export function stubPushBrowser({ existingKey }: { existingKey?: string } = {}) 
     pushManager: {
       getSubscription: vi.fn(() => Promise.resolve(current)),
       subscribe: vi.fn((options: { applicationServerKey: Uint8Array<ArrayBuffer> }) => {
+        if (subscribeError !== undefined) return Promise.reject(subscribeError);
         current = makeSubscription(options.applicationServerKey.buffer);
         return Promise.resolve(current);
       }),
@@ -45,7 +61,10 @@ export function stubPushBrowser({ existingKey }: { existingKey?: string } = {}) 
   Object.defineProperty(navigator, 'serviceWorker', {
     configurable: true,
     value: {
-      register: vi.fn(() => Promise.resolve(registration)),
+      register:
+        registerError === undefined
+          ? vi.fn(() => Promise.resolve(registration))
+          : vi.fn(() => Promise.reject(registerError)),
       ready: Promise.resolve(registration),
       getRegistration: vi.fn(() => Promise.resolve(current === null ? undefined : registration)),
       addEventListener: vi.fn(),
