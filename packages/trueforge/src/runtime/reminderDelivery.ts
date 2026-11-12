@@ -16,6 +16,8 @@ import type { Logger } from 'winston';
 import type { ScheduleDispatchItem } from '../db/scheduleStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { DeliveryService } from './delivery/deliveryService';
+import { joinReasons } from './noticing/reachRules';
+import type { ReminderReach } from './noticing/reminderReach';
 import { formatRunTime } from './scheduleCapability';
 
 /** The line the person reads in the chat the reminder was set in. */
@@ -64,6 +66,8 @@ export async function deliverReminder(params: {
   now: Date;
   /** The feed the reminder is also delivered through; it writes the reason to Activity. */
   deliveries: Pick<DeliveryService, 'deliver'>;
+  /** Settles how loud the reminder is, by the person's own rules for the channels. */
+  reach: ReminderReach;
   logger: Logger;
   /** Runs once the line is in the chat, which can be after a reply running there ends. */
   onLineWritten?: (line: { session_id: string; turn_id: string }) => Promise<void>;
@@ -84,14 +88,22 @@ export async function deliverReminder(params: {
   // The line only goes into a chat the reminder's owner started.
   const chatId = origin?.created_by_subject.subject_id === owner.subject_id ? origin.session_id : null;
 
-  await params.deliveries.deliver({
-    tenant_id: schedule.tenant_id,
-    created_by: owner.subject_id,
-    kind: 'reminder',
-    level: 'nudge',
-    text: feedText(what),
-    reason,
-    link: chatId === null ? null : { type: 'chat', session_id: chatId },
+  const person = { tenant_id: schedule.tenant_id, created_by: owner.subject_id };
+  await params.reach.deliver({
+    owner: person,
+    urgent: schedule.manifest.urgent,
+    timezone: schedule.manifest.timezone,
+    at: now,
+    send: decision =>
+      params.deliveries.deliver({
+        ...person,
+        kind: 'reminder',
+        level: decision.delivered,
+        text: feedText(what),
+        reason: joinReasons([reason, ...decision.steps]),
+        link: chatId === null ? null : { type: 'chat', session_id: chatId },
+        created_at: now,
+      }),
   });
   if (chatId === null) {
     return { session_id: null, line: Promise.resolve(null) };

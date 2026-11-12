@@ -4,7 +4,7 @@ import type * as TrueForge from "../index.js";
 
 export interface Session {
     agent: TrueForge.SessionAgent;
-    /** Server-derived grants created by "Always allow this here" for one kind of action in this chat. */
+    /** Server-derived grants created by "Always allow in this chat" for one kind of action in this chat. */
     approvalGrants: string[];
     /** Server-derived refusals from a "no" to a browser open or click, kept for the rest of this chat. */
     approvalRefusals: string[];

@@ -6,6 +6,7 @@ import {
   isPersonVouchedUrl,
   isTrustedLink,
   isTrustedPicture,
+  namesContactDetail,
   namesUrl,
   recordEmailText,
   recordPageImageUrls,
@@ -354,6 +355,98 @@ describe('where a link came from', () => {
     expect(namesUrl(['weather in Oslo'])).toBe(false);
     expect(namesUrl(['https://example.org/a'])).toBe(true);
     expect(namesUrl(['read example.org/a please'])).toBe(true);
+  });
+
+  it('finds a phone number, a site or an address in any spelling, for words that must carry none', () => {
+    const carries = (text: string) => namesContactDetail([text]);
+    // Phone numbers, short local ones included, with any marks between the digits and digits of any script.
+    for (const text of [
+      'call 555-0100 now',
+      'ring +44 20 7946 0958',
+      '(415) 555-0132',
+      'call 555\u20130100',
+      'call 555\u20140100',
+      'call 555/0100',
+      'call 555_0100',
+      'call 555\u00b70100',
+      'call 555    0100',
+      'call 555,0100',
+      'call 555:0100',
+      'call 555*0100',
+      'call 555~0100',
+      'call 555|0100',
+      'call 555\u22120100',
+      'call 555\u20430100',
+      'call 5\ufe0f\u20e35\ufe0f\u20e35\ufe0f\u20e3-0\ufe0f\u20e31\ufe0f\u20e30\ufe0f\u20e30\ufe0f\u20e3',
+      'call 555-OlOO',
+      'call 5S5-O1OO',
+      'call 555 dash 0100',
+      'call \u0665\u0665\u0665\u0660\u0661\u0660\u0660',
+      'call five five five oh one oh oh',
+      'call five-five-five, zero-one-hundred',
+      'call 555 ext 0100',
+      'call five five five 0100',
+      'call 5Z5-OlOO',
+    ]) {
+      expect([text, carries(text)]).toEqual([text, true]);
+    }
+    // Sites, written out, bare, bracketed, spelled, spaced, with other dots or lookalike letters, or as an IP address.
+    for (const text of [
+      'Pay at https://evil-pay.example/now',
+      'Pay at evil-pay.com',
+      'Pay at evil-pay[.]com',
+      'Pay at evil-pay dot com',
+      'Pay at evilpay d0t com',
+      'Pay at evil-pay\uff0ecom',
+      'Pay at evil-pay\u3002com',
+      'Pay at evil-pay\uff61com',
+      'Pay at evil-pay .com',
+      'Pay at evil-pay.\u0441\u043em',
+      'Pay at 1.2.3.4/pay',
+      'Pay at 1.2.3.4',
+      'Pay at 0x7f000001',
+      'Pay at evil-pay .ai',
+      'Pay at evil-pay .gg',
+      'Pay at evil-pay\u00b7com',
+      'Pay at evil-pay\u2022com',
+    ]) {
+      expect([text, carries(text)]).toEqual([text, true]);
+    }
+    // Addresses, with a full-width at sign or the at spelled out.
+    for (const text of [
+      'Write to ceo@evil.example',
+      'Write to ceo\uff20evil.example',
+      'Write to ceo at evil dot example',
+      'Write to ceo [at] evil',
+    ]) {
+      expect([text, carries(text)]).toEqual([text, true]);
+    }
+    // Plain words, and times, dates and amounts written the usual ways, carry nothing.
+    for (const text of [
+      'Your standup at 16:00 overlaps the dentist on November 7.',
+      'The bill of 1,250.00 is due 2026-11-07.',
+      'Meet Dana at the cafe at noon.',
+      'Nov 6 2026 14:00-15:00',
+      'due 11/06/2026 10:30',
+      '3:30-4:00 pm',
+      '2026-11-06',
+      '$1,250.00',
+      'The rent of $12,450,000.00 is due 6 November, 2026.',
+      'Room 4021',
+      'I will see Sol at 10 tomorrow.',
+      'Zoe has one 2026 report and two more.',
+      'Home \u00b7 About \u00b7 Help',
+    ]) {
+      expect([text, carries(text)]).toEqual([text, false]);
+    }
+    // A long order or invoice number cannot be told from a phone number, so it counts as one and the plain sentence
+    // is used. That costs only the model's wording in the feed.
+    expect(carries('Order #12345678 shipped')).toBe(true);
+    expect(carries('Invoice 2026-1105')).toBe(true);
+    // Best effort: some spellings still get through. Only the feed's wording is at stake, never a notice.
+    for (const text of ['call 555 and 0100', 'call SSS-OlOO', 'Write to ceo at evil-pay']) {
+      expect([text, carries(text)]).toEqual([text, false]);
+    }
   });
 
   it('folds spellings of one page together', () => {

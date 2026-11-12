@@ -22,7 +22,9 @@ A schedule asks Aman to do the same job again and again, for example every weekd
 
 A reminder is for something that should happen once. In any chat, ask with a time, such as "Remind me at 5 pm to call the pharmacy".
 
-When it is due, the reminder shows in the bell and, if you allowed notices, on your devices. Its line also appears at the end of the chat you set it in. If Aman is still answering in that chat, the line waits until the answer ends. A reminder whose chat was deleted still shows in the bell.
+When it is due, the reminder shows in the bell with the reason you got it. It also reaches you the way you chose in Settings, Reach me, such as a notice on your devices. Its line also appears at the end of the chat you set it in. If Aman is still answering in that chat, the line waits until the answer ends. A reminder whose chat was deleted still shows in the bell.
+
+To mark a reminder urgent, say so when you ask, such as "Remind me at 5 pm to call the pharmacy, it's urgent". An urgent reminder can call you once phone calls are set up and you allow it.
 
 Reminders do not show on the Schedules page. To see or cancel them, ask in a chat, such as "What reminders do I have?". Before Aman cancels one, a card shows the reminder and waits for your OK. A cancelled reminder is gone for good.
 
