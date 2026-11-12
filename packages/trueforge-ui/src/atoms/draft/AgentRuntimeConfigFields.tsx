@@ -1,6 +1,8 @@
 'use client';
 
-import type { TrueForgeAgentRuntimeConfig } from '../../server/types.js';
+import { DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS } from '@truefoundry/trueforge-core/core/capabilities/builtins/tokenBudgetConstants';
+
+import type { AgentInputTokensCompactionTrigger, TrueForgeAgentRuntimeConfig } from '../../server/types.js';
 import { cn } from '../lib/cn.js';
 import { auiInputClass } from '../lib/inputClasses.js';
 import { Switch } from '../primitives/Switch.js';
@@ -84,9 +86,6 @@ function applyBudgetedTools(value: TrueForgeAgentRuntimeConfig, budgetedTools: s
     },
   };
 }
-
-// Starting point for "At a set size"; the same fixed default the server uses when a model's limit is unknown.
-const DEFAULT_SET_SIZE_TOKENS = 50_000;
 
 const SANDBOX_UNAVAILABLE_HINT = 'The sandbox is not available on this server';
 
@@ -183,18 +182,15 @@ export function AgentRuntimeConfigFields({
   };
   const runtimeFields = [sandboxField, fileDownloadsField, compactionField, largeToolResponseField];
   const compactionTrigger = value.contextManagement?.compaction?.trigger;
-  const setCompactionTrigger = (trigger: { type: 'input_tokens'; value: number } | undefined) => {
-    const { trigger: _dropped, ...compaction } = value.contextManagement?.compaction ?? { enabled: compactionEnabled };
-    void _dropped;
+  const setCompactionTrigger = (trigger: AgentInputTokensCompactionTrigger | undefined) =>
     onChange({
       ...value,
       contextManagement: {
         ...value.contextManagement,
-        compaction: { ...compaction, enabled: compactionEnabled, ...(trigger === undefined ? {} : { trigger }) },
+        compaction: { enabled: compactionEnabled, ...(trigger === undefined ? {} : { trigger }) },
         largeToolResponse: value.contextManagement?.largeToolResponse ?? { enabled: true },
       },
     });
-  };
 
   const switchField = ({
     field,
@@ -335,7 +331,7 @@ export function AgentRuntimeConfigFields({
                   onChange={event =>
                     setCompactionTrigger(
                       event.target.value === 'set_size'
-                        ? { type: 'input_tokens', value: DEFAULT_SET_SIZE_TOKENS }
+                        ? { type: 'input_tokens', value: DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS }
                         : undefined,
                     )
                   }

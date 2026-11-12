@@ -9,6 +9,7 @@ import { withInitialUserMessages } from '@/atoms/draft/agentConfigMessages.js';
 import { ServerProvider } from '@/server/ServerContext.js';
 import type { AgentSkill, AgentSpec, ConnectorState, ModelSelection } from '@/server/types.js';
 import { SlotsProvider } from '@/theme/SlotsProvider.js';
+import { DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS } from '@truefoundry/trueforge-core/core/capabilities/builtins/tokenBudgetConstants';
 import { createMockAgentUIServer, createMockCatalog } from '../../server/mockServer.js';
 
 vi.mock('@/atoms/MonacoEditorCore.js', () => ({
@@ -599,7 +600,28 @@ describe('AgentConfigEditors', () => {
       });
       expect(onChange.mock.lastCall?.[0].config.contextManagement.compaction).toEqual({
         enabled: true,
-        trigger: { type: 'input_tokens', value: 50_000 },
+        trigger: { type: 'input_tokens', value: DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS },
+      });
+    });
+
+    it('saves a typed number as the set size', () => {
+      const onChange = vi.fn();
+      renderRuntime({
+        spec: {
+          model: { name: 'openai/gpt' },
+          config: {
+            contextManagement: { compaction: { enabled: true, trigger: { type: 'input_tokens', value: 42_000 } } },
+          },
+        },
+        onChange,
+      });
+
+      fireEvent.change(screen.getByRole('spinbutton', { name: /Chat size to summarize at/ }), {
+        target: { value: '7000' },
+      });
+      expect(onChange.mock.lastCall?.[0].config.contextManagement.compaction).toEqual({
+        enabled: true,
+        trigger: { type: 'input_tokens', value: 7_000 },
       });
     });
 
