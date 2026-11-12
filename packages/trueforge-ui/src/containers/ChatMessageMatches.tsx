@@ -129,7 +129,7 @@ export function ChatMessageMatches({
   }
 
   return (
-    <section aria-label="Matches inside chats" className="mt-1 flex flex-col gap-0.5">
+    <section aria-label="Matches inside chats" className="mt-1 flex shrink-0 flex-col gap-0.5">
       <h3 className="m-0 px-2.5 pt-1 pb-0.5 text-xs font-normal text-text-secondary">In messages</h3>
       {body}
     </section>

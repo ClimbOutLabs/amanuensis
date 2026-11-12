@@ -28,6 +28,7 @@ Nothing here changes or removes a skill.
 ## 2. Reading the skill
 
 - Only public repositories on github.com are read, with no sign-in. Anything else is refused with a plain message that points to Settings, under Skills.
+- Every lookup goes through the app's one guard for outside addresses. Only `api.github.com` is asked, the address it answers from must be on the public internet, and a redirect is never followed.
 - The ref is settled to a full commit through the GitHub API. No ref means the repository's main branch. A full commit is used as it is.
 - `SKILL.md` is read at that commit. Its opening block must hold a description. The stored name is the skill's own name in the form skill names take (lower-case letters, digits and hyphens); when the file names none, the folder name is used.
 - A `SKILL.md` over 100 KB, a description over 1,024 characters, or a name that cannot be made into a skill name is refused.

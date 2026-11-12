@@ -37,7 +37,7 @@ import {
   MAIL_CONTENT_TOOL_NAME,
 } from '../email/mailConnector/toolContract';
 import { GOOGLE_SETUP_SERVER_ID, GOOGLE_SETUP_STATUS_TOOL_NAME } from '../google/setupToolContract';
-import type { BrowserClickReview, DocumentScope, MapsHosts } from '../llm/LLMTypes';
+import type { BrowserElementReview, DocumentScope, MapsHosts } from '../llm/LLMTypes';
 import {
   APPEND_TO_INBOX_TOOL_NAME,
   isNotesFolderReadToolName,
@@ -241,6 +241,8 @@ export interface SentinelAction {
   mcp_server_id?: string | undefined;
   /** Host of the connector's configured server URL, for the approval card. Never derived from tool arguments. */
   mcp_server_host?: string | undefined;
+  /** What a standing grant on this connector binds to (see `ToolGrantKey`). Set by the host, never from tool arguments. */
+  mcp_grant_binding?: string | undefined;
   /** The host provisioned this connector itself. Never derived from tool metadata or client input. */
   mcp_first_party?: boolean | undefined;
   /** The CalDAV event a change names, read once before classifying. Set only for the CalDAV connector. */
@@ -300,12 +302,12 @@ export interface SentinelAction {
    */
   reminder?: ReminderLine | undefined;
   /**
-   * Context for a browser_click call, read from the live page before the click: the site, the
-   * element's accessible name, whether it submits a form, and the form's values. Set by the browser
-   * tool set from the sidecar's read, never from model params. Undefined when the host could not
-   * read it, which fails the call closed to the generic Tier 3 path.
+   * Context for the element a browser click, type or select acts on, read from the live page first:
+   * the site, its name and role, whether it submits a form, the form's values, and its address when it
+   * is a plain link. Set by the browser tool set from the sidecar's read, never from model params.
+   * Undefined when the host could not read it, which refuses the call before any card.
    */
-  browser_click?: BrowserClickReview | undefined;
+  browser_element?: BrowserElementReview | undefined;
 }
 
 /** What a pause or resume card shows: which schedule, and when it runs, as the store holds it. */
@@ -2636,7 +2638,7 @@ function hasStandingToolGrant(ctx: ClassifyContext, action: SentinelAction): Pro
     created_by: ctx.created_by,
     mcp_server_name: action.mcp_server_name,
     tool_name: action.tool_name,
-    mcp_server_host: action.mcp_server_host ?? null,
+    connector_binding: action.mcp_grant_binding ?? null,
   });
 }
 
@@ -2650,7 +2652,7 @@ function hasStandingScopeGrant(ctx: ClassifyContext, action: SentinelAction, sco
     created_by: ctx.created_by,
     mcp_server_name: action.mcp_server_name,
     tool_name: scope_key,
-    mcp_server_host: action.mcp_server_host ?? null,
+    connector_binding: action.mcp_grant_binding ?? null,
   });
 }
 
@@ -2896,6 +2898,16 @@ function scheduleWriteCard(input: { review: Tier3Schedule; agent_intent: string 
       task: escapeDisplayText(review.task, { keepNewlines: true }),
       runs_as: show(review.runs_as),
       next_runs: review.next_runs.map(show),
+      ...(review.tools === undefined || review.tools === null
+        ? {}
+        : {
+            tools: {
+              ...review.tools,
+              agent_name: show(review.tools.agent_name),
+              connectors: review.tools.connectors.map(choice => ({ ...choice, name: show(choice.name) })),
+              skills: review.tools.skills.map(choice => ({ ...choice, name: show(choice.name) })),
+            },
+          }),
     },
   };
 }
@@ -3670,7 +3682,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
         created_by: ctx.created_by,
         mcp_server_name: action.mcp_server_name,
         tool_name: action.tool_name,
-        mcp_server_host: action.mcp_server_host ?? null,
+        connector_binding: action.mcp_grant_binding ?? null,
       }))
         ? action.mcp_server_name
         : undefined;
@@ -3719,7 +3731,7 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
       : 'Fail-closed: unrecognized tools require approval.',
     sensitive_read: readsPrivateData,
     inspection: grantableRead,
-    grant_host: action.mcp_server_host ?? null,
+    grant_binding: action.mcp_grant_binding ?? null,
     secret_path_read: containsSecretPath(action.canonical_params) || pathLike,
     approval_token_id: await mintPlainToken({
       ctx,
@@ -4057,12 +4069,17 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
       }
     }
     if (name === 'run_code' || name === 'submit_implementation_plan') {
+      // The card names the language when the call gives one; the code itself is shown under it.
+      const language = name === 'run_code' ? stringParam(action.canonical_params, 'language') : null;
+      const languageName = language === 'python' ? 'Python' : language === 'node' ? 'Node.js' : null;
       return tier3Decision({
         card: {
           plain_what:
-            name === 'run_code'
-              ? 'Run code the assistant wrote in the sandbox?'
-              : 'Submit this implementation plan for review?',
+            name !== 'run_code'
+              ? 'Submit this implementation plan for review?'
+              : languageName === null
+                ? 'Run code the assistant wrote in the sandbox?'
+                : `Run this ${languageName} code the assistant wrote?`,
           plain_why: plainWhy(ctx.agent_intent),
           cannot_be_undone: "Once this runs, it can't be undone.",
           why_asked_again: null,
