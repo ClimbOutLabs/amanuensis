@@ -15,9 +15,13 @@ interface ProvenanceValues {
   overflowed: boolean;
 }
 
-/** Where the assistant read a value: as the sender of an email, or the kind of content it appeared in. `memory` is read earlier and saved. */
+/**
+ * Where the assistant read a value: as the sender of an email, or the kind of content it appeared in. `memory` is
+ * read earlier and saved. `reply` is the assistant's own earlier reply, which can repeat what it read in a turn
+ * whose record is gone.
+ */
 export type ReadSource =
-  'email_sender' | 'email' | 'event' | 'page' | 'browser_page' | 'file' | 'tool_result' | 'memory' | 'other';
+  'email_sender' | 'email' | 'event' | 'page' | 'browser_page' | 'file' | 'tool_result' | 'memory' | 'reply' | 'other';
 
 export interface ReadOrigin {
   source: ReadSource;
@@ -28,7 +32,10 @@ export interface ReadOrigin {
 export interface ChatProvenance {
   /** From the person's messages, profile and memory, and search results. */
   trusted: ProvenanceValues;
-  /** Seen in content the assistant read: web pages, mail (headers too), files, tool output, earlier summaries. */
+  /**
+   * Seen in content the assistant read: web pages, mail (headers too), files, tool output, earlier summaries.
+   * Addresses the assistant's own earlier replies named are here too.
+   */
   untrusted: ProvenanceValues;
   /** Exact picture URLs from pages the chat opened. Pictures only: never a link, and never steering-trusted. */
   page_pictures: ProvenanceValues;
@@ -115,7 +122,15 @@ function hostKey(host: string): string {
   return host.toLowerCase().replace(/^www\./, '');
 }
 
-/** One page however it is spelled: http or https, host case, `www.`, one trailing slash, and the fragment fold away. */
+/** Whether a link carries a sign-in name or password before its site. Both are sent to the site when it is opened. */
+function carriesSignIn(url: URL): boolean {
+  return url.username !== '' || url.password !== '';
+}
+
+/**
+ * One page however it is spelled: http or https, host case, `www.`, one trailing slash, and the fragment fold away.
+ * A sign-in name or password before the site stays in the key, so a link that adds one never matches a recorded link.
+ */
 function urlKey(value: string): string | undefined {
   const url = parsedUrl(value);
   if (url === undefined || url.hostname === '') {
@@ -123,7 +138,8 @@ function urlKey(value: string): string | undefined {
   }
   const path = url.pathname.length > 1 && url.pathname.endsWith('/') ? url.pathname.slice(0, -1) : url.pathname;
   const port = url.port === '' ? '' : `:${url.port}`;
-  return `${hostKey(url.hostname)}${port}${path === '/' ? '' : path}${url.search}`;
+  const signIn = carriesSignIn(url) ? `${url.username}:${url.password}@` : '';
+  return `${signIn}${hostKey(url.hostname)}${port}${path === '/' ? '' : path}${url.search}`;
 }
 
 function add(input: { side: ProvenanceValues; kind: 'urls' | 'hosts' | 'addresses'; value: string }): void {
@@ -144,16 +160,21 @@ function untrustedHas(input: { provenance: ChatProvenance; kind: 'urls' | 'hosts
   return side.overflowed || side[input.kind].has(input.value);
 }
 
-/** Records one link; returns its site, or undefined when it is not a link. */
+/**
+ * Records one link; returns its site, or undefined when it is not a link. A link with a sign-in name or password
+ * before its site is never recorded as a link, whoever wrote it: only its site is noted.
+ */
 function recordUrl(side: ProvenanceValues, value: string): string | undefined {
   const key = urlKey(value);
-  const host = parsedUrl(value)?.hostname;
-  if (key === undefined || host === undefined) {
+  const url = parsedUrl(value);
+  if (key === undefined || url === undefined) {
     return undefined;
   }
-  add({ side, kind: 'urls', value: key });
-  add({ side, kind: 'hosts', value: hostKey(host) });
-  return hostKey(host);
+  if (!carriesSignIn(url)) {
+    add({ side, kind: 'urls', value: key });
+  }
+  add({ side, kind: 'hosts', value: hostKey(url.hostname) });
+  return hostKey(url.hostname);
 }
 
 /** Records the links, sites and addresses in a text; returns the `site:` and `address:` keys it found. */
@@ -267,7 +288,10 @@ function recordDetails(provenance: ChatProvenance, text: string): void {
   }
 }
 
-/** Notes where a value was first read. An email's sender wins over any plainer place, since it says who they are. */
+/**
+ * Notes where a value was first read. An email's sender wins over any plainer place, since it says who they are,
+ * and any place the assistant read it wins over its own reply, which only repeated it.
+ */
 function noteOrigin(input: { provenance: ChatProvenance; key: string; origin: ReadOrigin }): void {
   const known = input.provenance.read_from.get(input.key);
   if (known === undefined) {
@@ -276,7 +300,10 @@ function noteOrigin(input: { provenance: ChatProvenance; key: string; origin: Re
     }
     return;
   }
-  if (known.source !== 'email_sender' && input.origin.source === 'email_sender') {
+  const saysMore =
+    (known.source !== 'email_sender' && input.origin.source === 'email_sender') ||
+    (known.source === 'reply' && input.origin.source !== 'reply');
+  if (saysMore) {
     input.provenance.read_from.set(input.key, input.origin);
   }
 }
@@ -305,6 +332,19 @@ export function recordUntrustedText(input: { provenance: ChatProvenance; text: s
   }
   for (const key of recordText(input.provenance.untrusted, input.text)) {
     noteOrigin({ provenance: input.provenance, key, origin: { source: input.source, name: null } });
+  }
+}
+
+/**
+ * Text of the assistant's own earlier reply. An address it names is not the person's say: the reply may repeat
+ * one the assistant read. Only addresses are noted. A reply is not other people's content, so it does not mark
+ * the chat as having read any, and its links and sites are left as they were.
+ */
+export function recordReplyText(input: { provenance: ChatProvenance; text: string }): void {
+  for (const match of input.text.matchAll(EMAIL)) {
+    const address = match[0].toLowerCase();
+    add({ side: input.provenance.untrusted, kind: 'addresses', value: address });
+    noteOrigin({ provenance: input.provenance, key: `address:${address}`, origin: { source: 'reply', name: null } });
   }
 }
 
@@ -466,16 +506,22 @@ export function recordSearchResults(input: { provenance: ChatProvenance; texts: 
 export function recordPageImageUrls(input: { provenance: ChatProvenance; urls: readonly string[] }): void {
   for (const url of input.urls) {
     const key = urlKey(url);
-    if (key !== undefined) {
+    const parsed = parsedUrl(url);
+    if (key !== undefined && parsed !== undefined && !carriesSignIn(parsed)) {
       add({ side: input.provenance.page_pictures, kind: 'urls', value: key });
     }
   }
 }
 
-/** Whether a link names only a site, with no path or query: it adds nothing to the site, so the site's trust holds. */
+/** Whether a link names only a site, with no path, query or sign-in: it adds nothing, so the site's trust holds. */
 function isBareSite(url: string): boolean {
   const parsed = parsedUrl(url);
-  return parsed !== undefined && (parsed.pathname === '' || parsed.pathname === '/') && parsed.search === '';
+  return (
+    parsed !== undefined &&
+    (parsed.pathname === '' || parsed.pathname === '/') &&
+    parsed.search === '' &&
+    !carriesSignIn(parsed)
+  );
 }
 
 /**
