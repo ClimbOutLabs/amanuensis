@@ -364,7 +364,7 @@ One more setting decides whether saved notes are sorted onto pages at all:
 | Setting               | Default | Meaning                                                                                        |
 | --------------------- | ------- | ---------------------------------------------------------------------------------------------- |
 | `MEMORY_PAGE_SORTING` | `off`   | `off` does nothing. `report` only records what sorting would do. `on` writes pages. See below. |
-| `MEMORY_NIGHTLY_JOB`  | `false` | Once a day per vault, tidies pages in the server's quiet hours. See "The nightly job".         |
+| `MEMORY_NIGHTLY_JOB`  | `false` | Once a day per vault, tidies pages from the hour set in Settings. See "The nightly job".       |
 
 Both are only the starting choice. Settings, then Memory, stores an override in the global settings store
 (`memory_page_sorting_mode`, `memory_nightly_job_enabled`) that wins over the environment value, and clearing it
@@ -667,11 +667,15 @@ adds nothing, so the note stays unsorted and recall keeps showing it from the lo
 ## The nightly job
 
 `nightlyService.ts` starts a timer with the server (Markdown backend) that looks at the server's clock every ten
-minutes. Each look in the quiet hours first reads the stored tidy-up setting (`MEMORY_NIGHTLY_JOB` is only its default,
-off) and the stored sorting setting, so a change in Settings counts without a restart. In the quiet hours (02:00 to 05:00, server time) `runNightlyJob` goes through the
+minutes. Each look first reads the stored tidy-up setting (`MEMORY_NIGHTLY_JOB` is only its default, off), the stored
+hour (`memory_nightly_job_hour`, 0 to 23, midnight when unset) and the stored sorting setting, so a change in Settings
+counts without a restart. From that hour and for up to three hours, never past the end of the day (server time),
+`runNightlyJob` goes through the
 shared vault and each persona's vault one after the other and stops starting vaults when the hours end. A failure in one
 vault is logged and does not stop the others. The job is not part of any chat, so an incognito chat neither starts it nor
-feeds it.
+feeds it. `POST /api/v1/settings/memory-nightly/run` runs the same steps now for every vault and answers with the
+counts. It runs at any hour and with the switch off, neither checks nor takes the day, and answers `busy` while a run
+is under way in this process.
 
 **Once a day per vault.** `claimNightlyDay` reads and writes `last_run_day` in `.memory-state/nightly.json` under the
 vault lock. Two processes starting together cannot both take the day. The day is taken before any work, so a crash halfway

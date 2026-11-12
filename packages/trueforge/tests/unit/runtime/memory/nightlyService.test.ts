@@ -2,7 +2,10 @@
 import configuration from '../../../../src/config';
 import { runNightlyJob } from '../../../../src/runtime/memory/nightlyJob';
 import { startNightlyMemoryJob } from '../../../../src/runtime/memory/nightlyService';
-import { MEMORY_NIGHTLY_SETTING_KEY } from '../../../../src/runtime/memoryNightlySettings';
+import {
+  MEMORY_NIGHTLY_HOUR_SETTING_KEY,
+  MEMORY_NIGHTLY_SETTING_KEY,
+} from '../../../../src/runtime/memoryNightlySettings';
 import { MEMORY_PAGE_SORTING_SETTING_KEY } from '../../../../src/runtime/memoryPageSortingSettings';
 import { inMemoryGlobalSettingsStore } from '../../../fixtures/inMemoryGlobalSettingsStore';
 import { uncappedTokenFactoryBudget } from '../../../fixtures/uncappedTokenFactoryBudget';
@@ -30,9 +33,9 @@ describe('the nightly timer', () => {
   beforeEach(() => {
     configuration.MEMORY_NIGHTLY_JOB = false;
     configuration.MEMORY_PAGE_SORTING = 'off';
-    jest.useFakeTimers({ now: new Date(2026, 10, 11, 3, 0, 0) });
+    jest.useFakeTimers({ now: new Date(2026, 10, 11, 1, 0, 0) });
     run.mockReset();
-    run.mockResolvedValue(undefined);
+    run.mockResolvedValue({ movedToEarlier: 2, notesAsked: 0, notesSorted: 1, pagesAsked: 0, pairsListed: 0 });
   });
 
   afterEach(() => {
@@ -41,8 +44,8 @@ describe('the nightly timer', () => {
     configuration.MEMORY_PAGE_SORTING = originalSorting;
   });
 
-  function start(settings: ReturnType<typeof inMemoryGlobalSettingsStore>): void {
-    startNightlyMemoryJob({
+  function start(settings: ReturnType<typeof inMemoryGlobalSettingsStore>) {
+    return startNightlyMemoryJob({
       personaStore,
       modelProviderStore: {
         listProviders: jest.fn(),
@@ -74,15 +77,56 @@ describe('the nightly timer', () => {
     await settings.setSetting({ key: MEMORY_NIGHTLY_SETTING_KEY, value: 'true' });
     await jest.advanceTimersByTimeAsync(LOOK);
     expect(run).toHaveBeenCalledTimes(1);
-    expect(run.mock.calls[0]?.[0]).toMatchObject({ mode: 'off' });
+    expect(run.mock.calls[0]?.[0]).toMatchObject({ deps: { mode: 'off', hour: 0 } });
 
     await settings.setSetting({ key: MEMORY_PAGE_SORTING_SETTING_KEY, value: 'on' });
     await jest.advanceTimersByTimeAsync(LOOK);
     expect(run).toHaveBeenCalledTimes(2);
-    expect(run.mock.calls[1]?.[0]).toMatchObject({ mode: 'on' });
+    expect(run.mock.calls[1]?.[0]).toMatchObject({ deps: { mode: 'on' } });
 
     await settings.setSetting({ key: MEMORY_NIGHTLY_SETTING_KEY, value: 'false' });
     await jest.advanceTimersByTimeAsync(LOOK);
     expect(run).toHaveBeenCalledTimes(2);
+  });
+
+  it('waits for the hour the person chose', async () => {
+    const settings = inMemoryGlobalSettingsStore();
+    await settings.setSetting({ key: MEMORY_NIGHTLY_SETTING_KEY, value: 'true' });
+    await settings.setSetting({ key: MEMORY_NIGHTLY_HOUR_SETTING_KEY, value: '2' });
+    start(settings);
+    await jest.advanceTimersByTimeAsync(LOOK * 3);
+    expect(run).not.toHaveBeenCalled();
+
+    await jest.advanceTimersByTimeAsync(60 * 60 * 1000);
+    expect(run).toHaveBeenCalled();
+    expect(run.mock.calls[0]?.[0]).toMatchObject({ deps: { hour: 2 } });
+  });
+
+  it('tidies now when asked, at any hour and with the daily tidy-up off', async () => {
+    jest.setSystemTime(new Date(2026, 10, 11, 14, 0, 0));
+    const job = start(inMemoryGlobalSettingsStore());
+
+    expect(await job.tidyNow()).toEqual({
+      status: 'ran',
+      counts: { movedToEarlier: 2, notesAsked: 0, notesSorted: 1, pagesAsked: 0, pairsListed: 0 },
+    });
+    expect(run.mock.calls[0]?.[0]).toMatchObject({ onRequest: true });
+  });
+
+  it('says it is busy when a tidy-up is already running', async () => {
+    let finish: (() => void) | undefined;
+    run.mockImplementationOnce(
+      () =>
+        new Promise(resolve => {
+          finish = () => resolve({ movedToEarlier: 0, notesAsked: 0, notesSorted: 0, pagesAsked: 0, pairsListed: 0 });
+        }),
+    );
+    const job = start(inMemoryGlobalSettingsStore());
+    const first = job.tidyNow();
+    await jest.advanceTimersByTimeAsync(0);
+
+    expect(await job.tidyNow()).toEqual({ status: 'busy' });
+    finish?.();
+    expect((await first).status).toBe('ran');
   });
 });

@@ -8,6 +8,7 @@ import {
   type MemoryNightlySetting,
   type MemoryPageSortingCatalog,
   type MemoryPageSortingSetting,
+  type MemoryTidyRun,
   type PageSortMode,
 } from '../../plugins/trueforge-agent-server-adapter/catalogs/memoryHelpersCatalog.js';
 import { useOptionalServer } from '../../server/ServerContext.js';
@@ -27,7 +28,8 @@ function isNightlyCatalog(port: unknown): port is MemoryNightlyCatalog {
     typeof port === 'object' &&
     port !== null &&
     typeof Reflect.get(port, 'getMemoryNightly') === 'function' &&
-    typeof Reflect.get(port, 'setMemoryNightlyEnabled') === 'function'
+    typeof Reflect.get(port, 'setMemoryNightly') === 'function' &&
+    typeof Reflect.get(port, 'tidyMemoryNow') === 'function'
   );
 }
 
@@ -122,11 +124,22 @@ export interface MemoryNightlyState {
   supported: boolean;
   /** The stored setting; `null` until the server has answered. */
   enabled: boolean | null;
+  /** The hour of the day the tidy-up starts at, 0 to 23; `null` until the server has answered. */
+  hour: number | null;
   saving: boolean;
   error: string | null;
   /** Resolves true when saved, false when the save failed (the error is then in `error`). */
   setEnabled(enabled: boolean): Promise<boolean>;
+  setHour(hour: number): Promise<boolean>;
+  /** True while a tidy-up asked for here is running. */
+  tidying: boolean;
+  /** What the last tidy-up asked for here did; `null` before the first one and while one runs. */
+  tidied: MemoryTidyRun | null;
+  tidyError: string | null;
+  tidyNow(): Promise<void>;
 }
+
+type NightlyChange = { enabled?: boolean; hour?: number };
 
 export function useMemoryNightlySetting(): MemoryNightlyState {
   const server = useOptionalServer();
@@ -134,19 +147,43 @@ export function useMemoryNightlySetting(): MemoryNightlyState {
   const catalog = isNightlyCatalog(port) ? port : null;
   const load = useMemo(() => (catalog === null ? null : () => catalog.getMemoryNightly()), [catalog]);
   const save = useMemo(
-    () => (catalog === null ? null : (enabled: boolean) => catalog.setMemoryNightlyEnabled(enabled)),
+    () => (catalog === null ? null : (change: NightlyChange) => catalog.setMemoryNightly(change)),
     [catalog],
   );
-  const state = useStoredSetting<MemoryNightlySetting, boolean>({
+  // While a change is being saved, `value` holds only the changed field; the other one is read from what is stored.
+  const state = useStoredSetting<MemoryNightlySetting, NightlyChange>({
     load,
     save,
-    valueOf: stored => stored.enabled,
+    valueOf: stored => ({ enabled: stored.enabled, hour: stored.hour }),
   });
+  const [tidying, setTidying] = useState(false);
+  const [tidied, setTidied] = useState<MemoryTidyRun | null>(null);
+  const [tidyError, setTidyError] = useState<string | null>(null);
+  const tidyNow = useCallback(async () => {
+    if (catalog === null) return;
+    setTidying(true);
+    setTidied(null);
+    setTidyError(null);
+    try {
+      setTidied(await catalog.tidyMemoryNow());
+    } catch (caught) {
+      setTidyError(memoryHelperErrorMessage(caught));
+    } finally {
+      setTidying(false);
+    }
+  }, [catalog]);
+  const { change } = state;
   return {
     supported: catalog !== null,
-    enabled: state.value,
+    enabled: state.value?.enabled ?? state.stored?.enabled ?? null,
+    hour: state.value?.hour ?? state.stored?.hour ?? null,
     saving: state.saving,
     error: state.error,
-    setEnabled: state.change,
+    setEnabled: enabled => change({ enabled }),
+    setHour: hour => change({ hour }),
+    tidying,
+    tidied,
+    tidyError,
+    tidyNow,
   };
 }

@@ -136,6 +136,7 @@ type SharedDeps = Pick<
   | 'skillCatalog'
   | 'sandboxCatalog'
   | 'tokenFactoryBudget'
+  | 'tidyMemoryNow'
   | 'activeTurns'
   | 'turnDrains'
   | 'requestReplyRouter'
@@ -154,6 +155,7 @@ function sharedDeps(): SharedDeps {
     skillCatalog: SkillCatalog.load(),
     sandboxCatalog: SandboxCatalog.load(),
     tokenFactoryBudget: uncappedTokenFactoryBudget,
+    tidyMemoryNow: () => Promise.resolve({ status: 'busy' }),
     activeTurns: new ActiveTurnRegistry(),
     turnDrains: new TurnDrainRegistry(),
     requestReplyRouter: new RequestReplyRouter(),

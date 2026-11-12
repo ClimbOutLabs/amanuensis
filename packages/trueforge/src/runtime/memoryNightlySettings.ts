@@ -7,6 +7,17 @@ import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 /** Global-settings key for the stored nightly-job override. Values are `'true'` / `'false'`; anything else reads as unset. */
 export const MEMORY_NIGHTLY_SETTING_KEY = 'memory_nightly_job_enabled';
 
+/** Global-settings key for the hour of the server's day the tidy-up starts at, `0` to `23`; anything else reads as unset. */
+export const MEMORY_NIGHTLY_HOUR_SETTING_KEY = 'memory_nightly_job_hour';
+
+/** Midnight on the server's clock, used until the person picks another hour. */
+export const DEFAULT_MEMORY_NIGHTLY_HOUR = 0;
+
+/** The hour a stored value names, or undefined when it is not a whole hour of the day. */
+export function parseNightlyHour(value: string): number | undefined {
+  return /^(?:\d|1\d|2[0-3])$/.test(value) ? Number(value) : undefined;
+}
+
 export interface MemoryNightlySetting {
   /** The stored setting: the persisted override when present, else the env default. */
   enabled: boolean;
@@ -14,6 +25,8 @@ export interface MemoryNightlySetting {
   overridden: boolean;
   /** The `MEMORY_NIGHTLY_JOB` env default used when no override is stored. */
   defaultEnabled: boolean;
+  /** The hour of the server's day, 0 to 23, the tidy-up starts at. */
+  hour: number;
 }
 
 export interface ReadMemoryNightlySettingDeps {
@@ -31,10 +44,13 @@ export async function readMemoryNightlySetting(deps: ReadMemoryNightlySettingDep
     enabled: defaultEnabled,
     overridden: false,
     defaultEnabled,
+    hour: DEFAULT_MEMORY_NIGHTLY_HOUR,
   };
   let record;
   try {
     record = await deps.globalSettingsStore.getSetting({ key: MEMORY_NIGHTLY_SETTING_KEY });
+    const storedHour = await deps.globalSettingsStore.getSetting({ key: MEMORY_NIGHTLY_HOUR_SETTING_KEY });
+    unset.hour = (storedHour === undefined ? undefined : parseNightlyHour(storedHour.value)) ?? unset.hour;
   } catch (error) {
     deps.logger.warn(
       'Global setting read failed; using the env default for the nightly job',
@@ -54,5 +70,6 @@ export async function readMemoryNightlySetting(deps: ReadMemoryNightlySettingDep
     enabled: override,
     overridden: true,
     defaultEnabled,
+    hour: unset.hour,
   };
 }

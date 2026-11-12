@@ -66,6 +66,7 @@ function setUpDeps({
   const deps: NightlyDeps = {
     baseDir,
     mode,
+    hour: 2,
     now: () => now,
     vaults: () => Promise.resolve(vaults),
     summarizeFor,
@@ -158,7 +159,7 @@ describe('the nightly job', () => {
     const personaDir = await vaultWithPage(baseDir, PERSONA_NAMESPACE);
     const { deps, summarizeFor } = setUpDeps({ baseDir, vaults: [SHARED, PERSONA] });
 
-    await runNightlyJob(deps);
+    await runNightlyJob({ deps });
 
     expect(history(sharedDir)).toContain('Aman moved 1 ended line to Earlier');
     expect(history(personaDir)).toContain('Aman moved 1 ended line to Earlier');
@@ -175,10 +176,23 @@ describe('the nightly job', () => {
     const { deps } = setUpDeps({ baseDir, vaults: [{ namespace: 'default__broken' }, PERSONA] });
     const warn = jest.spyOn(deps.logger, 'warn');
 
-    await runNightlyJob(deps);
+    await runNightlyJob({ deps });
 
     expect(warn).toHaveBeenCalledWith('The nightly memory tidy failed for a vault.', expect.anything());
     expect(history(goodDir)).toContain('Aman moved 1 ended line to Earlier');
+  });
+
+  it('runs at any hour when the person asks, and does not take the day', async () => {
+    const { baseDir, vaultDir } = await makeBase();
+    await writePage(vaultDir, 'matter', 'wendy', TWO_LINES);
+    const noon = new Date(2026, 10, 11, 12, 0, 0);
+    const { deps } = setUpDeps({ baseDir, now: noon });
+
+    const counts = await runNightlyJob({ deps, onRequest: true });
+
+    expect(counts.movedToEarlier).toBe(1);
+    expect(history(vaultDir)).toContain('Aman moved 1 ended line to Earlier');
+    expect((await runNightlyForVault({ vault: SHARED, deps })).status).toBe('ran');
   });
 
   it('does nothing outside the quiet hours, and skips a vault that has no folder yet', async () => {
@@ -187,11 +201,13 @@ describe('the nightly job', () => {
     const noon = new Date(2026, 10, 11, 12, 0, 0);
     const { deps } = setUpDeps({ baseDir, now: noon });
 
-    await runNightlyJob(deps);
+    await runNightlyJob({ deps });
 
     expect(history(vaultDir)).toEqual([]);
-    expect(inQuietHours(noon)).toBe(false);
-    expect(inQuietHours(NIGHT)).toBe(true);
+    expect(inQuietHours({ now: noon, hour: 2 })).toBe(false);
+    expect(inQuietHours({ now: NIGHT, hour: 2 })).toBe(true);
+    expect(inQuietHours({ now: noon, hour: 12 })).toBe(true);
+    expect(inQuietHours({ now: new Date(2026, 10, 11, 0, 30, 0), hour: 23 })).toBe(false);
     expect(serverDay(NIGHT)).toBe('2026-11-11');
     expect(await runNightlyForVault({ vault: { namespace: 'default__nobody' }, deps })).toEqual({
       status: 'skipped',

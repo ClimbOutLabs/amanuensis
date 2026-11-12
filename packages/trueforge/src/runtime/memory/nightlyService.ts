@@ -20,7 +20,7 @@ import type { TokenFactoryBudget } from '../tokenFactoryBudget';
 import { createMemoryClient } from './createMemoryClient';
 import { personaVaultNamespace, sanitizeNamespace, vaultFilesystemNamespace } from './markdownMemoryFiles';
 import type { SummarizeTurnContext } from './memoryRetain';
-import { inQuietHours, runNightlyJob, type NightlyDeps, type NightlyVault } from './nightlyJob';
+import { inQuietHours, runNightlyJob, type NightlyCounts, type NightlyDeps, type NightlyVault } from './nightlyJob';
 import { similarPagesFinder } from './pageSortRun';
 
 /** How often the server looks at the clock; the job itself runs at most once a day per vault. */
@@ -44,6 +44,14 @@ async function personaVaults(personaStore: PersonaLister): Promise<NightlyVault[
   return vaults;
 }
 
+/** What a tidy-up the person asked for did, or `busy` when one was already running. */
+export type TidyNowResult = { status: 'ran'; counts: NightlyCounts } | { status: 'busy' };
+
+export interface NightlyMemoryJob {
+  /** Tidies every vault now, whatever the hour and whether or not the daily tidy-up is switched on. */
+  tidyNow: () => Promise<TidyNowResult>;
+}
+
 /**
  * Starts the once-a-day timer on a Markdown server. The tidy-up setting and the sorting setting are read each time
  * the timer looks at the clock, so a change in Settings applies without a restart.
@@ -60,8 +68,8 @@ export function startNightlyMemoryJob({
   globalSettingsStore: IGlobalSettingsStore;
   tokenFactoryBudget: TokenFactoryBudget;
   logger: Logger;
-}): void {
-  const deps: Omit<NightlyDeps, 'mode'> = {
+}): NightlyMemoryJob {
+  const deps: Omit<NightlyDeps, 'mode' | 'hour'> = {
     baseDir: configuration.MEMORY_MARKDOWN_DIR,
     now: () => new Date(),
     vaults: async () => [{ namespace: sanitizeNamespace(TENANT_ID) }, ...(await personaVaults(personaStore))],
@@ -104,17 +112,17 @@ export function startNightlyMemoryJob({
 
   let running = false;
   const look = (): void => {
-    if (running || !inQuietHours(deps.now())) {
+    if (running) {
       return;
     }
     running = true;
     void (async () => {
       const nightly = await readMemoryNightlySetting({ globalSettingsStore, logger });
-      if (!nightly.enabled) {
+      if (!nightly.enabled || !inQuietHours({ now: deps.now(), hour: nightly.hour })) {
         return;
       }
       const sorting = await readMemoryPageSortingSetting({ globalSettingsStore, logger });
-      await runNightlyJob({ ...deps, mode: sorting.mode });
+      await runNightlyJob({ deps: { ...deps, mode: sorting.mode, hour: nightly.hour } });
     })()
       .catch((error: unknown) => {
         logger.warn('The nightly memory job could not start.', extractErrorLogFields(error));
@@ -124,4 +132,24 @@ export function startNightlyMemoryJob({
       });
   };
   setInterval(look, LOOK_INTERVAL_MS).unref();
+
+  return {
+    tidyNow: async () => {
+      if (running) {
+        return { status: 'busy' };
+      }
+      running = true;
+      try {
+        const nightly = await readMemoryNightlySetting({ globalSettingsStore, logger });
+        const sorting = await readMemoryPageSortingSetting({ globalSettingsStore, logger });
+        const counts = await runNightlyJob({
+          deps: { ...deps, mode: sorting.mode, hour: nightly.hour },
+          onRequest: true,
+        });
+        return { status: 'ran', counts };
+      } finally {
+        running = false;
+      }
+    },
+  };
 }

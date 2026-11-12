@@ -16,6 +16,7 @@ import type {
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
+import type { TidyNowResult } from '../../../src/runtime/memory/nightlyService';
 
 const silentLogger = createLogger({ silent: true });
 
@@ -54,8 +55,9 @@ async function createRouter() {
   const db = createSqliteDb(':memory:');
   await migrateSqliteToLatest(db);
   const globalSettingsStore = new SqliteGlobalSettingsStore(db);
-  const router = createMemoryNightlyRouter({ globalSettingsStore, logger: silentLogger });
-  return { router, globalSettingsStore };
+  const tidyNow = jest.fn<Promise<TidyNowResult>, []>();
+  const router = createMemoryNightlyRouter({ globalSettingsStore, tidyNow, logger: silentLogger });
+  return { router, globalSettingsStore, tidyNow };
 }
 
 function putInit(enabled: boolean | null): RequestInit {
@@ -82,7 +84,7 @@ describe('memoryNightly router', () => {
     const response = await router.request('/');
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
-      data: { enabled: false, overridden: false, default_enabled: false },
+      data: { enabled: false, overridden: false, default_enabled: false, hour: 0 },
     });
   });
 
@@ -92,20 +94,20 @@ describe('memoryNightly router', () => {
     const putTrue = await router.request('/', putInit(true));
     expect(putTrue.status).toBe(200);
     expect(await putTrue.json()).toEqual({
-      data: { enabled: true, overridden: true, default_enabled: false },
+      data: { enabled: true, overridden: true, default_enabled: false, hour: 0 },
     });
     expect((await globalSettingsStore.getSetting({ key: KEY }))?.value).toBe('true');
 
     const putFalse = await router.request('/', putInit(false));
     expect(putFalse.status).toBe(200);
     expect(await putFalse.json()).toEqual({
-      data: { enabled: false, overridden: true, default_enabled: false },
+      data: { enabled: false, overridden: true, default_enabled: false, hour: 0 },
     });
     expect((await globalSettingsStore.getSetting({ key: KEY }))?.value).toBe('false');
 
     const get = await router.request('/');
     expect(await get.json()).toEqual({
-      data: { enabled: false, overridden: true, default_enabled: false },
+      data: { enabled: false, overridden: true, default_enabled: false, hour: 0 },
     });
   });
 
@@ -116,9 +118,70 @@ describe('memoryNightly router', () => {
     const cleared = await router.request('/', putInit(null));
     expect(cleared.status).toBe(200);
     expect(await cleared.json()).toEqual({
-      data: { enabled: false, overridden: false, default_enabled: false },
+      data: { enabled: false, overridden: false, default_enabled: false, hour: 0 },
     });
     expect(await globalSettingsStore.getSetting({ key: KEY })).toBeUndefined();
+  });
+
+  it('PUT hour saves the hour and leaves the switch as it is', async () => {
+    const { router, globalSettingsStore } = await createRouter();
+    await router.request('/', putInit(true));
+
+    const put = await router.request('/', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ hour: 21 }),
+    });
+    expect(put.status).toBe(200);
+    expect(await put.json()).toEqual({
+      data: { enabled: true, overridden: true, default_enabled: false, hour: 21 },
+    });
+    expect((await globalSettingsStore.getSetting({ key: 'memory_nightly_job_hour' }))?.value).toBe('21');
+
+    const off = await router.request('/', putInit(false));
+    expect(await off.json()).toEqual({
+      data: { enabled: false, overridden: true, default_enabled: false, hour: 21 },
+    });
+  });
+
+  it.each([24, -1, 1.5, '3'])('PUT with hour %p is rejected', async hour => {
+    const { router } = await createRouter();
+    const response = await router.request('/', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ hour }),
+    });
+    expect(response.status).toBe(400);
+  });
+
+  it('GET reads a stored hour that is not an hour of the day as midnight', async () => {
+    const { router, globalSettingsStore } = await createRouter();
+    await globalSettingsStore.setSetting({ key: 'memory_nightly_job_hour', value: '99' });
+    expect(await (await router.request('/')).json()).toEqual({
+      data: { enabled: false, overridden: false, default_enabled: false, hour: 0 },
+    });
+  });
+
+  it('POST /run tidies now and reports what was done', async () => {
+    const { router, tidyNow } = await createRouter();
+    tidyNow.mockResolvedValue({
+      status: 'ran',
+      counts: { movedToEarlier: 3, notesAsked: 4, notesSorted: 2, pagesAsked: 5, pairsListed: 1 },
+    });
+    const response = await router.request('/run', { method: 'POST' });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      data: { status: 'ran', moved_to_earlier: 3, notes_sorted: 2, pairs_listed: 1 },
+    });
+  });
+
+  it('POST /run says so when a tidy-up is already running', async () => {
+    const { router, tidyNow } = await createRouter();
+    tidyNow.mockResolvedValue({ status: 'busy' });
+    const response = await router.request('/run', { method: 'POST' });
+    expect(await response.json()).toEqual({
+      data: { status: 'busy', moved_to_earlier: 0, notes_sorted: 0, pairs_listed: 0 },
+    });
   });
 
   it('PUT with a non-boolean enabled is rejected', async () => {
@@ -137,6 +200,7 @@ describe('memoryNightly router', () => {
     await migrateSqliteToLatest(db);
     const router = createMemoryNightlyRouter({
       globalSettingsStore: new ReadFailingGlobalSettingsStore(new SqliteGlobalSettingsStore(db)),
+      tidyNow: () => Promise.resolve({ status: 'busy' }),
       logger: silentLogger,
     });
 
@@ -145,14 +209,14 @@ describe('memoryNightly router', () => {
     const putFalse = await router.request('/', putInit(false));
     expect(putFalse.status).toBe(200);
     expect(await putFalse.json()).toEqual({
-      data: { enabled: false, overridden: true, default_enabled: true },
+      data: { enabled: false, overridden: true, default_enabled: true, hour: 0 },
     });
 
     // Clearing the override reports the env default as the effective state.
     const cleared = await router.request('/', putInit(null));
     expect(cleared.status).toBe(200);
     expect(await cleared.json()).toEqual({
-      data: { enabled: true, overridden: false, default_enabled: true },
+      data: { enabled: true, overridden: false, default_enabled: true, hour: 0 },
     });
   });
 });

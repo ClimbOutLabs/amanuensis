@@ -60,7 +60,7 @@ describe('createMemoryPageSortingCatalog', () => {
 });
 
 describe('createMemoryNightlyCatalog', () => {
-  const wire = { data: { enabled: true, overridden: true, default_enabled: false } };
+  const wire = { data: { enabled: true, overridden: true, default_enabled: false, hour: 21 } };
 
   it('GETs and PUTs the nightly setting', async () => {
     const seen: Array<{ url: string; method?: string; body?: string }> = [];
@@ -77,11 +77,28 @@ describe('createMemoryNightlyCatalog', () => {
       enabled: true,
       overridden: true,
       defaultEnabled: false,
+      hour: 21,
     });
-    await catalog.setMemoryNightlyEnabled(false);
+    await catalog.setMemoryNightly({ enabled: false });
+    await catalog.setMemoryNightly({ hour: 6 });
     expect(seen).toEqual([
       { url: '/api/v1/settings/memory-nightly', method: 'GET', body: undefined },
       { url: '/api/v1/settings/memory-nightly', method: 'PUT', body: JSON.stringify({ enabled: false }) },
+      { url: '/api/v1/settings/memory-nightly', method: 'PUT', body: JSON.stringify({ hour: 6 }) },
     ]);
+  });
+
+  it('POSTs a tidy-up and maps what it did', async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(input)).toBe('/api/v1/settings/memory-nightly/run');
+      expect(init?.method).toBe('POST');
+      return okJson({ data: { status: 'ran', moved_to_earlier: 2, notes_sorted: 1, pairs_listed: 0 } });
+    });
+    await expect(createMemoryNightlyCatalog({ fetch: fetchImpl }).tidyMemoryNow()).resolves.toEqual({
+      status: 'ran',
+      movedToEarlier: 2,
+      notesSorted: 1,
+      pairsListed: 0,
+    });
   });
 });

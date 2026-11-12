@@ -131,6 +131,7 @@ import { resolveDefaultChatModel } from './runtime/defaultChatModel';
 import type { DeliveryService } from './runtime/delivery/deliveryService';
 import type { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { createMemoryClient } from './runtime/memory/createMemoryClient';
+import type { TidyNowResult } from './runtime/memory/nightlyService';
 import { resolveSandboxProvider } from './runtime/sessionResources';
 import { createSpacePictureService } from './runtime/spacePictures/spacePictureService';
 import { TokenFactoryDailyCapError, type TokenFactoryBudget } from './runtime/tokenFactoryBudget';
@@ -328,6 +329,8 @@ export interface ServerDeps<TTransaction> {
   schedulerStatus: () => SchedulerProbe;
   /** Per-instance daily Token Factory token cap, enforced when a turn starts on Token Factory. */
   tokenFactoryBudget: TokenFactoryBudget;
+  /** Runs the memory tidy-up now and answers when it has finished. */
+  tidyMemoryNow: () => Promise<TidyNowResult>;
   /** Post-completion passthrough appends ride the same store (see db/completedTurnEvents.ts). */
   sessionStore: ISessionStore<SessionCustom, TurnCustom> & ICompletedTurnEventStore;
   sessions: Sessions<SessionCustom, TurnCustom>;
@@ -854,6 +857,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         resolveSandboxProviderStore: deps.resolveSandboxProviderStore,
         globalSettingsStore: deps.globalSettingsStore,
         tokenFactoryBudget: deps.tokenFactoryBudget,
+        tidyMemoryNow: deps.tidyMemoryNow,
         envManagedModelProviderNames: envManagedProviders,
         withTransaction: deps.withTransaction,
         logger: deps.logger,

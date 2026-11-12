@@ -929,7 +929,17 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     personaStore,
     logger,
   });
+  // Once a day per vault, from the hour the person chose: ended lines move to Earlier, missed notes are sorted,
+  // and lines that disagree are listed. Best effort: a failure is logged and never reaches a turn.
+  const nightlyMemoryJob = startNightlyMemoryJob({
+    personaStore,
+    modelProviderStore,
+    globalSettingsStore,
+    tokenFactoryBudget,
+    logger,
+  });
   const app = createServerApp({
+    tidyMemoryNow: nightlyMemoryJob.tidyNow,
     chatSearchIndexer,
     modelCatalog,
     mcpCatalog,
@@ -1005,10 +1015,6 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   } catch (error) {
     logger.error('Could not delete expired private chats at startup', extractErrorLogFields(error));
   }
-
-  // Once a day per vault, in the quiet hours: ended lines move to Earlier, missed notes are sorted, and lines
-  // that disagree are listed. Best effort: a failure is logged and never reaches a turn.
-  startNightlyMemoryJob({ personaStore, modelProviderStore, globalSettingsStore, tokenFactoryBudget, logger });
 
   return {
     activeTurns,

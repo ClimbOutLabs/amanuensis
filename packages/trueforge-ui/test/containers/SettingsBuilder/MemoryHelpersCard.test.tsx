@@ -14,7 +14,9 @@ function renderCard({
   enabled = false,
   withPorts = true,
   failSave = false,
+  tidy = { status: 'ran' as const, movedToEarlier: 2, notesSorted: 1, pairsListed: 0 },
 }: {
+  tidy?: { status: 'ran' | 'busy'; movedToEarlier: number; notesSorted: number; pairsListed: number };
   mode?: Mode;
   enabled?: boolean;
   withPorts?: boolean;
@@ -22,15 +24,19 @@ function renderCard({
 } = {}) {
   const modeWrites: Mode[] = [];
   const enabledWrites: boolean[] = [];
+  const hourWrites: number[] = [];
+  let hour = 0;
   const sorting = (next: Mode) => ({
     mode: next,
     overridden: true,
     defaultMode: 'off' as const,
   });
-  const nightly = (next: boolean) => ({
-    enabled: next,
+  let nightlyEnabled = enabled;
+  const nightly = () => ({
+    enabled: nightlyEnabled,
     overridden: true,
     defaultEnabled: false,
+    hour,
   });
   const ports = withPorts
     ? {
@@ -43,11 +49,19 @@ function renderCard({
           },
         },
         memoryNightly: {
-          getMemoryNightly: async () => nightly(enabled),
-          setMemoryNightlyEnabled: async (next: boolean) => {
-            enabledWrites.push(next);
-            return nightly(next);
+          getMemoryNightly: async () => nightly(),
+          setMemoryNightly: async (change: { enabled?: boolean; hour?: number }) => {
+            if (change.enabled !== undefined) {
+              enabledWrites.push(change.enabled);
+              nightlyEnabled = change.enabled;
+            }
+            if (change.hour !== undefined) {
+              hourWrites.push(change.hour);
+              hour = change.hour;
+            }
+            return nightly();
           },
+          tidyMemoryNow: async () => tidy,
         },
       }
     : {};
@@ -57,7 +71,13 @@ function renderCard({
       <MemoryHelpersCard />
     </ServerProvider>,
   );
-  return { modeWrites, enabledWrites };
+  return { modeWrites, enabledWrites, hourWrites };
+}
+
+async function renderCardAndTidy(tidy: NonNullable<Parameters<typeof renderCard>[0]>['tidy']) {
+  renderCard({ tidy });
+  fireEvent.click(await screen.findByRole('button', { name: 'Tidy now' }));
+  return screen.findByRole('status');
 }
 
 describe('MemoryHelpersCard', () => {
@@ -111,6 +131,44 @@ describe('MemoryHelpersCard', () => {
     await waitFor(() => {
       expect(toggle).toBeChecked();
     });
+  });
+
+  it('starts at midnight and saves another hour', async () => {
+    const { hourWrites, enabledWrites } = renderCard();
+    const picker = await screen.findByLabelText('Start the daily tidy-up at');
+    await waitFor(() => {
+      expect(picker).toBeEnabled();
+    });
+    expect(picker).toHaveValue('0');
+    expect(screen.getByRole('option', { name: '12:00 AM (midnight)' })).toBeInTheDocument();
+
+    fireEvent.change(picker, { target: { value: '21' } });
+
+    await waitFor(() => {
+      expect(hourWrites).toEqual([21]);
+    });
+    await waitFor(() => {
+      expect(picker).toHaveValue('21');
+    });
+    expect(enabledWrites).toEqual([]);
+  });
+
+  it('tidies now and says what was done', async () => {
+    renderCard();
+    fireEvent.click(await screen.findByRole('button', { name: 'Tidy now' }));
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Done. Aman moved 2 ended lines to Earlier and sorted 1 note onto pages.',
+    );
+  });
+
+  it('says so when nothing needed tidying', async () => {
+    const first = renderCardAndTidy({ status: 'ran', movedToEarlier: 0, notesSorted: 0, pairsListed: 0 });
+    expect(await first).toHaveTextContent('Done. Nothing needed tidying.');
+  });
+
+  it('says to try again when a tidy-up is already running', async () => {
+    const status = renderCardAndTidy({ status: 'busy', movedToEarlier: 0, notesSorted: 0, pairsListed: 0 });
+    expect(await status).toHaveTextContent('A tidy-up is already running. Try again in a few minutes.');
   });
 
   it('says what to do when a save fails, and keeps the old choice', async () => {

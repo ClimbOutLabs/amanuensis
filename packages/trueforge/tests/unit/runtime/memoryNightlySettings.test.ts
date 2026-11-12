@@ -21,7 +21,7 @@ describe('readMemoryNightlySetting', () => {
 
   it('is off when nothing is stored and the default is off', async () => {
     const setting = await readMemoryNightlySetting({ globalSettingsStore: inMemoryGlobalSettingsStore(), logger });
-    expect(setting).toEqual({ enabled: false, overridden: false, defaultEnabled: false });
+    expect(setting).toEqual({ enabled: false, overridden: false, defaultEnabled: false, hour: 0 });
   });
 
   it('lets a stored value beat the env default, and falls back when it is cleared', async () => {
@@ -30,6 +30,7 @@ describe('readMemoryNightlySetting', () => {
       enabled: true,
       overridden: true,
       defaultEnabled: false,
+      hour: 0,
     });
     await store.deleteSetting({ key: MEMORY_NIGHTLY_SETTING_KEY });
     expect((await readMemoryNightlySetting({ globalSettingsStore: store, logger })).enabled).toBe(false);

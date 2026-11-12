@@ -18,6 +18,16 @@ export interface MemoryNightlySetting {
   enabled: boolean;
   overridden: boolean;
   defaultEnabled: boolean;
+  /** The hour of the server's day the tidy-up starts at, 0 to 23. */
+  hour: number;
+}
+
+/** What a tidy-up asked for now did; `busy` means one was already running and nothing was started. */
+export interface MemoryTidyRun {
+  status: 'ran' | 'busy';
+  movedToEarlier: number;
+  notesSorted: number;
+  pairsListed: number;
 }
 
 export interface MemoryPageSortingCatalog {
@@ -27,7 +37,9 @@ export interface MemoryPageSortingCatalog {
 
 export interface MemoryNightlyCatalog {
   getMemoryNightly(): Promise<MemoryNightlySetting>;
-  setMemoryNightlyEnabled(enabled: boolean): Promise<MemoryNightlySetting>;
+  /** Saves the fields given; a field left out stays as it is. */
+  setMemoryNightly(change: { enabled?: boolean; hour?: number }): Promise<MemoryNightlySetting>;
+  tidyMemoryNow(): Promise<MemoryTidyRun>;
 }
 
 const PageSortModeSchema = z.enum(['off', 'report', 'on']);
@@ -45,19 +57,29 @@ const NightlyResponseSchema = z.object({
     enabled: z.boolean(),
     overridden: z.boolean(),
     default_enabled: z.boolean(),
+    hour: z.number().int().min(0).max(23),
+  }),
+});
+
+const TidyRunResponseSchema = z.object({
+  data: z.object({
+    status: z.enum(['ran', 'busy']),
+    moved_to_earlier: z.number(),
+    notes_sorted: z.number(),
+    pairs_listed: z.number(),
   }),
 });
 
 /**
- * Calls GET/PUT on one /api/v1/settings route with the base URL, token and fetch the SDK client was built from.
+ * Calls GET, PUT or POST on one /api/v1/settings route with the base URL, token and fetch the SDK client was built from.
  * Cookie auth rides along: the default base URL is same-origin, and a host pointing the UI at another origin
  * supplies its own `fetch`.
  */
 function settingRequester(options: CreateTrueForgeClientOptions, path: string) {
   const base = (options.baseUrl ?? '/').replace(/\/+$/, '');
   const fetchImpl = options.fetch ?? ((input: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(input, init));
-  return async (method: 'GET' | 'PUT', body?: object): Promise<unknown> => {
-    const response = await fetchImpl(`${base}${path}`, {
+  return async (method: 'GET' | 'PUT' | 'POST', body?: object, action = ''): Promise<unknown> => {
+    const response = await fetchImpl(`${base}${path}${action}`, {
       method,
       headers: {
         ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
@@ -71,7 +93,7 @@ function settingRequester(options: CreateTrueForgeClientOptions, path: string) {
       throw new Error(
         failure.success
           ? failure.data.error.message
-          : `The setting could not be saved (HTTP ${String(response.status)}). Try again in a moment.`,
+          : `That did not work (HTTP ${String(response.status)}). Try again in a moment.`,
       );
     }
     return responseBody;
@@ -101,16 +123,24 @@ export function createMemoryNightlyCatalog(options: CreateTrueForgeClientOptions
     if (!parsed.success) {
       throw new Error('The server sent back something unexpected. Reload the page and try again.');
     }
-    const { enabled, overridden, default_enabled } = parsed.data.data;
-    return { enabled, overridden, defaultEnabled: default_enabled };
+    const { enabled, overridden, default_enabled, hour } = parsed.data.data;
+    return { enabled, overridden, defaultEnabled: default_enabled, hour };
   };
   return {
     getMemoryNightly: async () => parse(await request('GET')),
-    setMemoryNightlyEnabled: async enabled => parse(await request('PUT', { enabled })),
+    setMemoryNightly: async change => parse(await request('PUT', change)),
+    tidyMemoryNow: async () => {
+      const parsed = TidyRunResponseSchema.safeParse(await request('POST', undefined, '/run'));
+      if (!parsed.success) {
+        throw new Error('The server sent back something unexpected. Reload the page and try again.');
+      }
+      const { status, moved_to_earlier, notes_sorted, pairs_listed } = parsed.data.data;
+      return { status, movedToEarlier: moved_to_earlier, notesSorted: notes_sorted, pairsListed: pairs_listed };
+    },
   };
 }
 
 /** Human-readable error for the controls; callers render it inline. */
 export function memoryHelperErrorMessage(error: unknown): string {
-  return getErrorMessage(error, 'The setting could not be saved. Try again in a moment.');
+  return getErrorMessage(error, 'That did not work. Try again in a moment.');
 }

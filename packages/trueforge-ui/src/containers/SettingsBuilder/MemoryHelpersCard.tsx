@@ -1,8 +1,12 @@
 'use client';
 
+import { Button } from '@/atoms/primitives/Button.js';
 import { Switch } from '@/atoms/primitives/Switch.js';
 import { useAssistantDisplayName } from '../../components/PersonalizationContext.js';
-import type { PageSortMode } from '../../plugins/trueforge-agent-server-adapter/catalogs/memoryHelpersCatalog.js';
+import type {
+  MemoryTidyRun,
+  PageSortMode,
+} from '../../plugins/trueforge-agent-server-adapter/catalogs/memoryHelpersCatalog.js';
 import { useToasterOptional } from '../ToasterContainer.js';
 import { useMemoryNightlySetting, useMemoryPageSortingSetting } from './memoryHelperSettings.js';
 
@@ -69,6 +73,38 @@ function PageSortingControl() {
   );
 }
 
+const HOURS = Array.from({ length: 24 }, (_, hour) => hour);
+
+/** An hour of the day as a clock time: 0 is midnight, 12 is noon. */
+function hourLabel(hour: number): string {
+  if (hour === 0) return '12:00 AM (midnight)';
+  if (hour === 12) return '12:00 PM (noon)';
+  return hour < 12 ? `${String(hour)}:00 AM` : `${String(hour - 12)}:00 PM`;
+}
+
+function count(amount: number, { one, many }: { one: string; many: string }): string {
+  return `${String(amount)} ${amount === 1 ? one : many}`;
+}
+
+/** One plain sentence on what a tidy-up asked for now did. */
+function tidyResultCopy({ run, assistant }: { run: MemoryTidyRun; assistant: string }): string {
+  if (run.status === 'busy') {
+    return 'A tidy-up is already running. Try again in a few minutes.';
+  }
+  const done = [
+    ...(run.movedToEarlier > 0
+      ? [`moved ${count(run.movedToEarlier, { one: 'ended line', many: 'ended lines' })} to Earlier`]
+      : []),
+    ...(run.notesSorted > 0 ? [`sorted ${count(run.notesSorted, { one: 'note', many: 'notes' })} onto pages`] : []),
+    ...(run.pairsListed > 0
+      ? [`listed ${count(run.pairsListed, { one: 'pair of lines', many: 'pairs of lines' })} that disagree`]
+      : []),
+  ];
+  return done.length === 0
+    ? 'Done. Nothing needed tidying.'
+    : `Done. ${assistant} ${new Intl.ListFormat('en', { type: 'conjunction' }).format(done)}.`;
+}
+
 function NightlyControl() {
   const assistant = useAssistantDisplayName();
   const setting = useMemoryNightlySetting();
@@ -76,35 +112,83 @@ function NightlyControl() {
   const disabled = setting.saving || setting.enabled === null;
 
   return (
-    <div className="flex items-start justify-between gap-4">
-      <div className="min-w-0">
-        <label htmlFor="memory-nightly-toggle" className="text-sm font-medium text-text-primary">
-          Tidy pages once a day
-        </label>
-        <p className="mt-0.5 text-xs text-text-secondary">
-          In the night, {assistant} moves lines that have ended to Earlier, sorts notes that were missed, and lists
-          lines that disagree. This uses the model while you are not chatting.
-        </p>
-        <p className="mt-0.5 text-xs text-text-secondary">
-          Sorting missed notes follows the sorting choice above. With sorting off, {assistant} only moves ended lines.
-        </p>
-        {setting.error === null ? null : (
-          <p className="mt-1.5 text-xs text-danger" role="alert">
-            {setting.error}
+    <div className="flex flex-col gap-3">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <label htmlFor="memory-nightly-toggle" className="text-sm font-medium text-text-primary">
+            Tidy pages once a day
+          </label>
+          <p className="mt-0.5 text-xs text-text-secondary">
+            Once a day, {assistant} moves lines that have ended to Earlier, sorts notes that were missed, and lists
+            lines that disagree. This uses the model while you are not chatting.
           </p>
-        )}
+          <p className="mt-0.5 text-xs text-text-secondary">
+            Sorting missed notes follows the sorting choice above. With sorting off, {assistant} only moves ended lines.
+          </p>
+          {setting.error === null ? null : (
+            <p className="mt-1.5 text-xs text-danger" role="alert">
+              {setting.error}
+            </p>
+          )}
+        </div>
+        <Switch
+          id="memory-nightly-toggle"
+          checked={setting.enabled === true}
+          disabled={disabled}
+          onCheckedChange={next => {
+            void setting.setEnabled(next).then(saved => {
+              if (saved) toaster?.showSuccess({ title: next ? 'Daily tidy-up is on' : 'Daily tidy-up is off' });
+            });
+          }}
+          aria-label="Tidy pages once a day"
+        />
       </div>
-      <Switch
-        id="memory-nightly-toggle"
-        checked={setting.enabled === true}
-        disabled={disabled}
-        onCheckedChange={next => {
-          void setting.setEnabled(next).then(saved => {
-            if (saved) toaster?.showSuccess({ title: next ? 'Daily tidy-up is on' : 'Daily tidy-up is off' });
-          });
-        }}
-        aria-label="Tidy pages once a day"
-      />
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="flex flex-col gap-1">
+          <label htmlFor="memory-nightly-hour" className="text-xs font-medium text-text-secondary">
+            Start the daily tidy-up at
+          </label>
+          <select
+            id="memory-nightly-hour"
+            className="rounded-md border border-border bg-primary-bg px-2 py-1.5 text-sm text-text-primary"
+            value={setting.hour ?? 0}
+            disabled={disabled}
+            onChange={event => {
+              const next = Number(event.target.value);
+              void setting.setHour(next).then(saved => {
+                if (saved) toaster?.showSuccess({ title: `Daily tidy-up starts at ${hourLabel(next)}` });
+              });
+            }}
+          >
+            {HOURS.map(hour => (
+              <option key={hour} value={hour}>
+                {hourLabel(hour)}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-text-secondary">This is the time on the computer {assistant} runs on.</p>
+        </div>
+        <Button.Secondary
+          type="button"
+          size="small"
+          disabled={setting.tidying}
+          onClick={() => {
+            void setting.tidyNow();
+          }}
+        >
+          {setting.tidying ? 'Tidying…' : 'Tidy now'}
+        </Button.Secondary>
+      </div>
+      {setting.tidied === null ? null : (
+        <p className="text-xs text-text-secondary" role="status">
+          {tidyResultCopy({ run: setting.tidied, assistant })}
+        </p>
+      )}
+      {setting.tidyError === null ? null : (
+        <p className="text-xs text-danger" role="alert">
+          {setting.tidyError}
+        </p>
+      )}
     </div>
   );
 }

@@ -18,8 +18,8 @@ import type { PageSortMode } from './pageSortMode';
 import { summaryModelForSorting } from './pageSortRun';
 import { VaultBusyError } from './vaultLock';
 
-/** The job starts in the server's local hours from this one up to, not including, the next. */
-const QUIET_HOURS = { from: 2, until: 5 } as const;
+/** How many hours after the chosen hour the job may still start; it never starts past the end of that day. */
+const START_WINDOW_HOURS = 3;
 
 /** One vault the job tidies: a person's own, or a persona's. */
 export interface NightlyVault {
@@ -32,6 +32,8 @@ export interface NightlyVault {
 export interface NightlyDeps {
   baseDir: string;
   mode: PageSortMode;
+  /** The hour of the server's day, 0 to 23, from which the job may start. */
+  hour: number;
   now: () => Date;
   vaults: () => Promise<NightlyVault[]>;
   /** What the summary model needs for this vault, or undefined when no model is configured. */
@@ -59,9 +61,9 @@ export function serverDay(now: Date): string {
   return `${String(now.getFullYear())}-${two(now.getMonth() + 1)}-${two(now.getDate())}`;
 }
 
-/** Whether the server's clock is in the quiet hours. */
-export function inQuietHours(now: Date): boolean {
-  return now.getHours() >= QUIET_HOURS.from && now.getHours() < QUIET_HOURS.until;
+/** Whether the server's clock is in the hours the job may start in, from the chosen hour on. */
+export function inQuietHours({ now, hour }: { now: Date; hour: number }): boolean {
+  return now.getHours() >= hour && now.getHours() < Math.min(hour + START_WINDOW_HOURS, 24);
 }
 
 async function vaultExists(vaultDir: string): Promise<boolean> {
@@ -92,14 +94,17 @@ async function attempt<T>({
 
 /**
  * Tidies one vault if today has not been taken for it yet. The day is taken under the vault lock before any work,
- * so a second server process skips the vault, and a crash halfway is repeated the next day.
+ * so a second server process skips the vault, and a crash halfway is repeated the next day. A run the person asked
+ * for (`onRequest`) neither checks nor takes the day, so it runs now and the daily run still happens.
  */
 export async function runNightlyForVault({
   vault,
   deps,
+  onRequest = false,
 }: {
   vault: NightlyVault;
   deps: NightlyDeps;
+  onRequest?: boolean;
 }): Promise<NightlyOutcome> {
   const { baseDir, mode, logger } = deps;
   const vaultDir = namespaceDirFor(baseDir, vault.namespace);
@@ -107,15 +112,17 @@ export async function runNightlyForVault({
     return { status: 'skipped', reason: 'no_vault' };
   }
   const today = serverDay(deps.now());
-  try {
-    if (!(await claimNightlyDay({ vaultDir, today }))) {
-      return { status: 'skipped', reason: 'already_ran' };
+  if (!onRequest) {
+    try {
+      if (!(await claimNightlyDay({ vaultDir, today }))) {
+        return { status: 'skipped', reason: 'already_ran' };
+      }
+    } catch (error) {
+      if (error instanceof VaultBusyError) {
+        return { status: 'skipped', reason: 'busy' };
+      }
+      throw error;
     }
-  } catch (error) {
-    if (error instanceof VaultBusyError) {
-      return { status: 'skipped', reason: 'busy' };
-    }
-    throw error;
   }
 
   const options = { vaultDir, runner: deps.runner, today, logger };
@@ -159,14 +166,31 @@ export async function runNightlyForVault({
   return { status: 'ran', counts };
 }
 
-/** Tidies every vault one after the other. A failure in one vault is logged and the others still run. Stops starting vaults once the quiet hours end. */
-export async function runNightlyJob(deps: NightlyDeps): Promise<void> {
+/**
+ * Tidies every vault one after the other and adds up what was done. A failure in one vault is logged and the
+ * others still run. The daily run stops starting vaults once its hours end; a run the person asked for does not.
+ */
+export async function runNightlyJob({
+  deps,
+  onRequest = false,
+}: {
+  deps: NightlyDeps;
+  onRequest?: boolean;
+}): Promise<NightlyCounts> {
+  const total: NightlyCounts = { movedToEarlier: 0, notesAsked: 0, notesSorted: 0, pagesAsked: 0, pairsListed: 0 };
   for (const vault of await deps.vaults()) {
-    if (!inQuietHours(deps.now())) {
-      return;
+    if (!onRequest && !inQuietHours({ now: deps.now(), hour: deps.hour })) {
+      break;
     }
     try {
-      await runNightlyForVault({ vault, deps });
+      const outcome = await runNightlyForVault({ vault, deps, onRequest });
+      if (outcome.status === 'ran') {
+        total.movedToEarlier += outcome.counts.movedToEarlier;
+        total.notesAsked += outcome.counts.notesAsked;
+        total.notesSorted += outcome.counts.notesSorted;
+        total.pagesAsked += outcome.counts.pagesAsked;
+        total.pairsListed += outcome.counts.pairsListed;
+      }
     } catch (error) {
       deps.logger.warn('The nightly memory tidy failed for a vault.', {
         personaId: vault.persona?.id,
@@ -174,4 +198,5 @@ export async function runNightlyJob(deps: NightlyDeps): Promise<void> {
       });
     }
   }
+  return total;
 }
