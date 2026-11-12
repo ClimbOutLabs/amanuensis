@@ -39,7 +39,13 @@ For a short overview, see [Your privacy](../packages/trueforge/guide/topics/priv
 
 ??? note "To the map service"
 
-    The places and routes Aman looks up.
+    The places and routes Aman looks up. They go only to the map service that Aman is set up to use. Maps run without asking unless you turn off the **Maps** switch in Settings. With the switch off, a map shows a card first.
+
+??? note "To the model a new chat starts on, only when something new happens"
+
+    Aman notices new events, such as mail from someone you marked always important, a calendar clash, a bill due soon or an approval that has waited. For each one, it sends that one event's short description to the model, such as a sender, a subject and the start of the message. The model only suggests how loudly to tell you. Nothing is sent when nothing is new. If no model can answer, these events arrive as quiet notes.
+
+    This install's shared Email and Calendar connectors are watched for the owner only. Everyone else is watched only through their own Google connection.
 
 ??? note "To your browser's push service, only on devices where you turned notices on"
 

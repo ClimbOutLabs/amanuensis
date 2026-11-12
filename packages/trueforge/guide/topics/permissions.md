@@ -24,7 +24,7 @@ Each switch covers one kind of action. Turn a switch on to stop the questions fo
 
 1. Click **More** in the left bar, click **Settings**, then click **Permissions**.
 2. Use the **Web searches** switch. When it's on, searches run on their own and show a "Searched" chip in the chat. When it's off, every search shows a card with the exact words first.
-3. Use the **Maps** switch. When it's on, maps run without asking. A map still asks first if it would send a password or a key.
+3. Use the **Maps** switch. When it's on, maps run without asking. A map still asks first if it would send a password or a key. When it's off, a scheduled run skips its maps.
 4. Use the **Sandbox** switch. The sandbox is the sealed-off space on your computer where Aman runs code. When the switch is on, Aman can make new files and run scripts it wrote in the same chat without asking.
 5. Under **Always allow everywhere**, turn on **Write files** if you want Aman to write files without asking.
 

@@ -74,7 +74,17 @@ A card that names no such place offers only a yes or a no, because there's nothi
 
 A change to your own calendar that reaches no guests also offers **Always allow in this chat**. That answer covers every later change to your own calendar in that chat. It's the only lasting answer on a calendar card, so a calendar change asks again in every new chat.
 
-**Always allow everywhere** covers every chat. It's never offered for sends, deletes, installs, outside services or a calendar change. The connector tools you always allow are listed in that connector's page under **Settings**, **Connectors**, where **Revoke** turns each one off.
+**Always allow everywhere** covers every chat. It's never offered for sends, deletes, installs, outside services or a calendar change. A maps card is the one exception: its **Always allow everywhere** turns on the **Maps** switch, described under Maps below. The connector tools you always allow are listed in that connector's page under **Settings**, **Connectors**, where **Revoke** turns each one off.
+
+### Maps
+
+A map sends the places it looks up to the map service that Aman is set up to use. Nothing else gets them.
+
+In Settings, under Permissions, the **Maps** switch decides whether a map asks first. The switch starts on, so maps run without asking, wherever the place came from. In a chat, a map that would send something that looks like a password, a key or a payment card number still shows a card. That card offers only a yes or a no, and no earlier answer covers it.
+
+With the switch off, each map shows a card that names the places and the map service they go to. The card offers two lasting answers. **Always allow in this chat** stops the question for the rest of that chat. **Always allow everywhere** turns the **Maps** switch on, so maps stop asking in every chat and in scheduled runs.
+
+A scheduled run never waits for you on a map. With the switch on, its maps run. With the switch off, the run leaves the map out and tells you in one line to turn on **Maps**. A map that would send something that looks like a password or key is left out of a scheduled run too, and the run says so in one line.
 
 ### Commands in the sandbox
 

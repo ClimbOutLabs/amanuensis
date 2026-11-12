@@ -134,6 +134,15 @@ The **Google** card connects Gmail first. Calendar and Google Drive are extra st
 
 To add your calendar, click **Manage** on the **Google** card, turn on the Calendar API with the link in the Calendar part, then click **Connect Calendar**. To add Google Drive, turn on the three links in the Drive part, then click **Connect Google Drive**.
 
+## Let Aman watch your mail
+
+Aman can watch your mail for you. It can tell you about bills that are due soon, and about mail from people you mark always important. This is off until you turn it on.
+
+1. In the Google or Email panel, click **Open Reach me**. Or click **More** in the left bar, then **Settings**, then **Reach me**.
+2. Turn on the switch called "Let Aman watch for things".
+
+See [Reach me](reach-me.md) for what Aman watches for and how it tells you.
+
 ## Change or remove a connection
 
 === "Email or Calendar card"

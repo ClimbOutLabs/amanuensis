@@ -35,6 +35,8 @@ For public transport, say when you need to be there, such as "I need to be at th
 - Name both places. Aman doesn't know where you are right now.
 - Finding places needs a web search provider. Aman comes with one already set up. See [Search the web](web.md).
 - Maps run without asking. To check each one first, click **More** in the left bar, then **Settings**, then **Permissions**, and turn off **Maps**. A map that looks like it would send a password or key always asks.
+- With the **Maps** switch off, each map shows a card first. **Always allow in this chat** stops the question for that chat. **Always allow everywhere** turns the **Maps** switch back on.
+- With the **Maps** switch off, a scheduled run, such as your morning brief, skips its maps.
 - What a map sends where: the place names you look up go to free map services built on OpenStreetMap. Public transport trips go to Transitous, a free timetable service. The map pictures come through Aman, so those services never see your browser.
 - For a route, the route service gets your starting point rounded to about 100 meters.
 - Maps don't work while **Offline mode** is on.

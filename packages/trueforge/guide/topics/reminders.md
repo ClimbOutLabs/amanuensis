@@ -22,7 +22,7 @@ A reminder can also repeat every day, every weekday, or on the days you choose, 
 - It shows under the bell at the top of the screen. A number on the bell counts what you haven't seen.
 - It also appears at the end of the chat you set it in. If Aman is still answering in that chat, the line waits until the answer ends.
 - That chat shows an unread mark in your chat list until you open it.
-- If you turned on notices, your device shows one too, even when Aman is closed. The notice only says "Reminder". The words open in Aman.
+- If you turned on notices, your device shows one too, even when Aman is closed. The notice only says "Reminder". The words open in Aman. You choose how reminders reach you in **Settings**, then **Reach me**. See [Reach me](reach-me.md).
 
 ![The bell panel open, showing a reminder that is due](../../../../docs/screenshots/app/reminders-bell-desktop.png)
 
@@ -45,6 +45,10 @@ To change it later:
 2. Under **Notices on this device**, click **Turn on for this device** or **Turn off on this device**.
 
 Each device has its own setting. If the page says notices are not set up on this server, ask the person who runs your Aman to turn them on.
+
+## Mark a reminder urgent
+
+Say so when you ask, such as "Remind me at 5 pm to call the pharmacy, it's urgent". An urgent reminder can call you once phone calls are set up and you tick **Call me for reminders I mark urgent** in **Reach me**.
 
 ## See or cancel reminders
 

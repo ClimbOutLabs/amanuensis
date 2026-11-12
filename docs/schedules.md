@@ -92,7 +92,8 @@ A schedule is a morning brief when its name is `morning-brief`, or when its task
 A reminder is for something that should happen at a set time. In any chat, ask with a time, such as "Remind me at 5 pm to call the pharmacy". A reminder can also repeat daily, on weekdays, or weekly on the days you choose.
 
 - Setting a reminder needs no card, because it only adds a note for you. It is written to the activity log.
-- When it is due, the reminder shows in the bell and, if you turned on notices, on your devices. Its line also appears at the end of the chat you set it in.
+- When it is due, the reminder shows in the bell with the reason you got it. It also reaches you the way you chose in Settings, Reach me, such as a notice on your devices. Its line also appears at the end of the chat you set it in.
+- To mark a reminder urgent, say so when you ask, such as "Remind me at 5 pm to call the pharmacy, it's urgent". An urgent reminder can call you once phone calls are set up and you allow it.
 - If Aman is still answering in that chat, the line waits until the answer ends.
 - No model is called to deliver a reminder, so it costs nothing.
 - A reminder whose chat was deleted still shows in the bell.

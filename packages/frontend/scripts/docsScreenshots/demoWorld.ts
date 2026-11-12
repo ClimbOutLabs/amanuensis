@@ -295,7 +295,7 @@ export const CHATS = {
           start: `${nextFriday()}T12:30`,
           end: `${nextFriday()}T13:30`,
           time_zone: TIME_ZONE,
-          location: 'Little Goat Diner, 820 W Randolph St, Chicago',
+          location: 'Maple Street Diner, 100 Maple St',
           attendees: ['dana.kim@example.com'],
           send_updates: 'all',
         },

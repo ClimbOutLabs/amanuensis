@@ -31,6 +31,10 @@ Two Settings pages work together:
 
     To decide whether you asked to switch personas, Aman can make one short call to the main chat model, with no tools. It is not a separate job. The call only decides whether you asked to change who answers. It can't answer your message or pick a model you haven't set up.
 
+!!! note "Noticing"
+
+    Noticing makes one short, tool-free call when it finds something new for you, such as a calendar clash or a bill due soon. The call goes to the model a new chat starts on. It only suggests how loudly to tell you, and your [Reach me](../packages/trueforge/guide/topics/reach-me.md) settings decide. It is not part of a chat, so it shows in no chat's details, but it counts toward the daily Token Factory cap. Nothing is called when nothing new is found.
+
 ### If a chosen model goes away
 
 If a job names a model that is no longer set up, the turn stops and says so. Aman never quietly hands the work to a different model, because work credited to a model that didn't do it is worse than a clear error.
