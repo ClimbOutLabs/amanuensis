@@ -60,6 +60,7 @@
                   "models",
                   "model-roles",
                   "mcp-servers",
+                  "connectors/home-assistant",
                   "google",
                   "skills",
                   "sandbox",

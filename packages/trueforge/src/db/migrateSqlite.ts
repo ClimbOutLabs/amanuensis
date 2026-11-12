@@ -7,6 +7,20 @@ import { FileMigrationProvider, Migrator } from 'kysely/migration';
 import { importAbsoluteModule } from '../util/crossPlatform';
 import type { Database } from './sqlite/types';
 
+function sqliteMigrationProvider(): FileMigrationProvider {
+  return new FileMigrationProvider({
+    fs,
+    path,
+    import: importAbsoluteModule,
+    migrationFolder: path.join(import.meta.dirname, 'sqlite', 'migrations'),
+  });
+}
+
+/** The names of the SQLite migrations this build ships, which are the ones it can run or has run. */
+export async function knownSqliteMigrationNames(): Promise<string[]> {
+  return Object.keys(await sqliteMigrationProvider().getMigrations()).sort();
+}
+
 /**
  * Runs all pending SQLite migrations.
  *
@@ -24,12 +38,7 @@ export async function migrateSqliteToLatest(db: Kysely<Database>): Promise<void>
     // filename order. Missing migration files still fail closed, while this
     // lets each known migration run exactly once on either upgrade path.
     allowUnorderedMigrations: true,
-    provider: new FileMigrationProvider({
-      fs,
-      path,
-      import: importAbsoluteModule,
-      migrationFolder: path.join(import.meta.dirname, 'sqlite', 'migrations'),
-    }),
+    provider: sqliteMigrationProvider(),
   });
 
   const { error, results } = await migrator.migrateToLatest();

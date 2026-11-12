@@ -15,7 +15,7 @@ CURRENT_TEST=
 
 # System tools the installer needs. docker, sudo, sg, id and friends are never taken from the host.
 TOOLS="bash sh env awk sed grep egrep cut tr od head tail sort uniq wc cat cp mv rm mkdir rmdir chmod mktemp date cmp find
-basename dirname uname kill sleep ln install git sha256sum shasum tee readlink ls touch xargs timeout getconf true false python3 diff tar gzip stat openssl"
+basename dirname uname kill sleep ln install git sha256sum shasum tee readlink ls touch xargs timeout getconf true false python3 diff tar gzip stat openssl du"
 
 sandbox_new() {
   SB=$(mktemp -d)
@@ -38,6 +38,11 @@ sandbox_new() {
   stage_installer
   STUB_REAL_DF=$(command -v df)
   export STUB_LOG=$SB/stub.log STUB_STATE=$SB_STATE STUB_BIN=$SB_BIN STUB_USER=testuser
+  # The installer runs as an ordinary user who owns the files the tests make, as a person owns their own checkout. Under
+  # root (whose files every check accepts) that user is 1000.
+  STUB_UID=$(id -u) STUB_GID=$(id -g)
+  if [ "$STUB_UID" = 0 ]; then STUB_UID=1000 STUB_GID=1000; fi
+  export STUB_UID STUB_GID
   # The fixtures' git never reads this computer's git settings (signing, hooks, push options, default branch), so
   # every commit and push a test makes behaves the same everywhere.
   export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
@@ -51,7 +56,7 @@ sandbox_new() {
   unset STUB_DOCKER_DENIED STUB_DOCKER_DOWN STUB_ROOTLESS STUB_PODMAN STUB_BUILD_FAIL STUB_BUILD_OOM STUB_DOCKER_MEM_BYTES STUB_UP_FAIL_UNLESS_TAG \
     STUB_DOCKER_ROOT STUB_DOCKER_ROOT_KB AMAN_PASSWORD STUB_BUSY_PORTS STUB_BACKUP_FAIL STUB_VOLUME_RM_FAIL STUB_ENGINE_VERSION STUB_COMPOSE_VERSION STUB_DOCTOR_EXIT STUB_DOCTOR_JSON STUB_VIA_SG STUB_VIA_SUDO \
     STUB_CURL_FAIL STUB_CURL_CORRUPT STUB_SUDO_SH_FAIL STUB_SUDO_REFUSE STUB_SLOT_DISK_FAIL STUB_APPARMOR STUB_CGROUP STUB_DOCKER_OS STUB_NO_BUNDLE STUB_UP_FAIL_LOG STUB_ADDRS STUB_HOSTNAME STUB_TS_IP STUB_TS_NAME STUB_TS_HANG STUB_TS_SERVE_PORTS STUB_NODE_VERSION STUB_PKI_FAIL STUB_PUSH_KEYS_FAIL STUB_SANDBOX_DOCTOR_EXIT STUB_SLOT_BUILD_RC STUB_DEMO_FAIL STUB_IMPORT_FAIL STUB_IMPORT_SIGNAL \
-    STUB_MODEL_DOWNLOADING STUB_MODEL_BROKEN STUB_EXPORT_USERS STUB_EXPORT_FAIL STUB_EXPORT_LIST_FAIL STUB_PGDUMP_FAIL STUB_OLD_PG_STOPPED STUB_COPY_SIGNAL STUB_FAIL_ON || true
+    STUB_MODEL_DOWNLOADING STUB_MODEL_BROKEN STUB_EXPORT_USERS STUB_EXPORT_FAIL STUB_EXPORT_LIST_FAIL STUB_PGDUMP_FAIL STUB_OLD_PG_STOPPED STUB_COPY_SIGNAL STUB_FAIL_ON STUB_UP_FAIL_ONCE STUB_RESTORE_FAIL || true
   # Room for two instances with the sandbox: two 16 GB disks each, plus Docker's 10 GB when it shares the disk.
   STUB_DF_KB=90000000
   INSTALL_EXTRA=()
@@ -200,7 +205,7 @@ repo_commit_change() {
 build_run_env() {
   RUN_ENV=(PATH="$SB_BIN" HOME="$SB/user" AMAN_HOME="$AMAN_HOME" AMAN_REPO_ROOT="$REPO" GIT_CONFIG_NOSYSTEM=1
     AMAN_OS_RELEASE="${AMAN_OS_RELEASE:-$SB/os-release}" AMAN_DMI_DIR="${AMAN_DMI_DIR:-$SB/no-dmi}"
-    STUB_LOG="$STUB_LOG" STUB_STATE="$STUB_STATE" STUB_BIN="$STUB_BIN" STUB_USER="$STUB_USER"
+    STUB_LOG="$STUB_LOG" STUB_STATE="$STUB_STATE" STUB_BIN="$STUB_BIN" STUB_USER="$STUB_USER" STUB_UID="$STUB_UID" STUB_GID="$STUB_GID"
     STUB_DOCKER_SRC="$STUB_DOCKER_SRC" STUB_REAL_DF="$STUB_REAL_DF"
     STUB_DOCKER_DENIED="${STUB_DOCKER_DENIED:-}" STUB_DOCKER_DOWN="${STUB_DOCKER_DOWN:-}"
     STUB_ROOTLESS="${STUB_ROOTLESS:-}" STUB_PODMAN="${STUB_PODMAN:-}" STUB_BUILD_FAIL="${STUB_BUILD_FAIL:-}"
@@ -214,6 +219,7 @@ build_run_env() {
     STUB_UP_FAIL_LOG="${STUB_UP_FAIL_LOG:-}" STUB_ADDRS="${STUB_ADDRS:-}" STUB_HOSTNAME="${STUB_HOSTNAME:-}" STUB_TS_IP="${STUB_TS_IP:-}" STUB_TS_NAME="${STUB_TS_NAME:-}" STUB_TS_HANG="${STUB_TS_HANG:-}" STUB_TS_SERVE_PORTS="${STUB_TS_SERVE_PORTS:-}" STUB_NODE_VERSION="${STUB_NODE_VERSION:-}" STUB_SANDBOX_DOCTOR_EXIT="${STUB_SANDBOX_DOCTOR_EXIT:-}" STUB_SLOT_BUILD_RC="${STUB_SLOT_BUILD_RC:-}" STUB_DEMO_FAIL="${STUB_DEMO_FAIL:-}" STUB_IMPORT_FAIL="${STUB_IMPORT_FAIL:-}" STUB_IMPORT_SIGNAL="${STUB_IMPORT_SIGNAL:-}"
     STUB_MODEL_DOWNLOADING="${STUB_MODEL_DOWNLOADING:-}" STUB_MODEL_BROKEN="${STUB_MODEL_BROKEN:-}" STUB_EXPORT_USERS="${STUB_EXPORT_USERS:-}"
     STUB_EXPORT_FAIL="${STUB_EXPORT_FAIL:-}" STUB_EXPORT_LIST_FAIL="${STUB_EXPORT_LIST_FAIL:-}" STUB_PGDUMP_FAIL="${STUB_PGDUMP_FAIL:-}" STUB_OLD_PG_STOPPED="${STUB_OLD_PG_STOPPED:-}" STUB_COPY_SIGNAL="${STUB_COPY_SIGNAL:-}" AMAN_IMPORT_POLL_SECONDS=0 STUB_FAIL_ON="${STUB_FAIL_ON:-}"
+    STUB_UP_FAIL_ONCE="${STUB_UP_FAIL_ONCE:-}" STUB_RESTORE_FAIL="${STUB_RESTORE_FAIL:-}"
     STUB_DOCTOR_EXIT="${STUB_DOCTOR_EXIT:-}" STUB_DOCTOR_JSON="${STUB_DOCTOR_JSON:-}" STUB_DOCKER_ROOT="${STUB_DOCKER_ROOT:-}" STUB_DOCKER_ROOT_KB="${STUB_DOCKER_ROOT_KB:-}"
     STUB_CALENDAR_REFUSES="${STUB_CALENDAR_REFUSES:-}" STUB_CALENDAR_CHECK="${STUB_CALENDAR_CHECK:-}"
     STUB_UI_SH="$INSTALLER_DIR/lib/ui.sh" STUB_REAL_NODE="$STUB_REAL_NODE" STUB_PKI_FAIL="${STUB_PKI_FAIL:-}" STUB_PUSH_KEYS_FAIL="${STUB_PUSH_KEYS_FAIL:-}"
@@ -352,7 +358,7 @@ dir_names() {
   for f in "$1"/* "$1"/.[!.]*; do
     [ -e "$f" ] || continue
     basename "$f"
-  done | sort | tr '\n' ' '
+  done | LC_ALL=C sort | tr '\n' ' '
 }
 
 log_has() { grep -Fq -- "$1" "$STUB_LOG"; }

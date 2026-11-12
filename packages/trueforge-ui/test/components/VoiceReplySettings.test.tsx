@@ -138,6 +138,7 @@ const api: VoiceInputApi = {
     return () => {};
   },
   transcribe: async () => ({ text: '', language: 'en', duration_ms: 0, model: 'm' }),
+  connect: async () => ({ url: 'wss://aman.test/stream', protocols: [] }),
 };
 
 describe('VoiceInputSettings', () => {

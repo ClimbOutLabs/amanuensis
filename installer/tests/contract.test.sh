@@ -168,7 +168,8 @@ test_image_keeps_app_data_on_the_data_volume() {
   assert_not_contains "$dockerfile" "useradd --create-home" "the runtime user gets no home"
   assert_contains "$dockerfile" "APP_DATA_DIR=/data/app" "the app data dir is under /data"
   assert_contains "$dockerfile" "mkdir -p /data/memory /data/persona-knowledge /data/app" "the dir exists and is owned by the runtime user"
-  assert_contains "$(cat "$repo/packages/trueforge/src/config.ts")" "'APP_DATA_DIR'" "the server reads APP_DATA_DIR"
+  assert_contains "$(cat "$repo/packages/trueforge/src/appDataDir.ts")" "env['APP_DATA_DIR']" "the server reads APP_DATA_DIR"
+  assert_contains "$(cat "$repo/packages/trueforge/src/config.ts")" "appDataDirFromEnv(process.env)" "the server config takes its data dir from that reader"
   assert_contains "$(cat "$INSTALLER_DIR/templates/instance/compose.yaml.tpl")" "      - data:/data" "the instance mounts its data volume at /data"
 }
 
