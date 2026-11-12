@@ -4666,6 +4666,87 @@
         ],
         "type": "object"
       },
+      "HomeAssistantCheckFailureCode": {
+        "description": "Why Home Assistant could not be connected: `unreachable` (nothing answered at the address), `token_refused` (Home Assistant refused the token), `integration_missing` (the Model Context Protocol Server integration is not installed), `certificate` (the address uses a certificate that cannot be checked), or `error` (anything else).",
+        "enum": [
+          "unreachable",
+          "token_refused",
+          "integration_missing",
+          "certificate",
+          "error"
+        ],
+        "type": "string"
+      },
+      "HomeAssistantCheckResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/HomeAssistantCheckResult"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "HomeAssistantCheckResult": {
+        "description": "Outcome of one Home Assistant connection check.",
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "entity_count": {
+                "description": "How many exposed entities the live-context tool named, or null when it is not offered.",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "status": {
+                "description": "Home Assistant answered the handshake and the live-context read.",
+                "enum": [
+                  "ok"
+                ],
+                "type": "string"
+              },
+              "tool_count": {
+                "description": "How many tools the server offers.",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "status",
+              "tool_count",
+              "entity_count"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/HomeAssistantCheckFailureCode"
+              },
+              "reason": {
+                "description": "One plain line saying what to fix.",
+                "type": "string"
+              },
+              "status": {
+                "description": "Home Assistant could not be connected.",
+                "enum": [
+                  "failed"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "code",
+              "reason"
+            ],
+            "type": "object"
+          }
+        ]
+      },
       "HostedModelProvider": {
         "properties": {
           "name": {
@@ -17623,6 +17704,54 @@
           "mcpServers"
         ],
         "x-fern-sdk-method-name": "authorize"
+      }
+    },
+    "/api/v1/mcp-servers/{name}/home-assistant-check": {
+      "post": {
+        "description": "Runs the MCP handshake against the saved connector, lists its tools, and reads the live-context tool once, so the answer says how many tools and exposed entities Aman can see, or the one thing to fix. Read-only: the connector is never modified, and a failed check is a 200 carrying the reason.",
+        "parameters": [
+          {
+            "description": "MCP server name.",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "MCP server name.",
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HomeAssistantCheckResponse"
+                }
+              }
+            },
+            "description": "The check ran; the result says whether Home Assistant answered and why not."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "MCP server not found."
+          }
+        },
+        "summary": "Check a Home Assistant connector",
+        "tags": [
+          "MCP Servers"
+        ],
+        "x-fern-sdk-group-name": [
+          "mcpServers"
+        ],
+        "x-fern-sdk-method-name": "home_assistant_check"
       }
     },
     "/api/v1/mcp-servers/{name}/memory-check": {

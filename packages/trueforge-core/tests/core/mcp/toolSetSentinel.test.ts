@@ -190,14 +190,22 @@ describe('ToolSet Sentinel classification of connector tools', () => {
     expect(remediation?.message).not.toMatch(/card/i);
   });
 
-  it('refuses a standing grant when the server hints escalate the tier, but lets the chat answer once', async () => {
-    const info = await makeToolSet({ tools: [destructiveRead], services: servicesWithGrants([]) }).toolCallInfo({
+  it('refuses a standing grant when the server hints escalate the tier, and offers the chat answer only for a named place', async () => {
+    const toolSet = makeToolSet({ tools: [destructiveRead], services: servicesWithGrants([]) });
+    const unnamed = await toolSet.toolCallInfo({ name: 'archive_note', arguments: {} });
+    expect(unnamed.tier).toBe(3);
+    // The connector's own address is on the card, but it is the same for every call, so it names no place.
+    expect(unnamed.tier3_card?.destination_host).not.toBeNull();
+    expect(allowsChatApproval(unnamed)).toBe(false);
+    expect(allowsToolGrant(unnamed)).toBe(false);
+
+    const named = await toolSet.toolCallInfo({
       name: 'archive_note',
-      arguments: {},
+      arguments: { url: 'https://notes.example.com/team' },
     });
-    expect(info.tier).toBe(3);
-    expect(allowsChatApproval(info)).toBe(true);
-    expect(allowsToolGrant(info)).toBe(false);
+    expect(named.tier).toBe(3);
+    expect(allowsChatApproval(named)).toBe(true);
+    expect(allowsToolGrant(named)).toBe(false);
   });
 
   it('runs a tool the user always allows at Tier 1, without approval, and audits the run exactly once', async () => {
