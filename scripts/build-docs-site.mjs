@@ -196,10 +196,16 @@ export function rewriteLinks(markdown, { fromHelp, fromFile = 'index.md', pages 
     let link = target.replace(/\.mdx(?=$|#)/, '.md');
     if (fromHelp && link.startsWith(DOCS_FROM_TOPICS)) {
       link = `../${link.slice(DOCS_FROM_TOPICS.length)}`;
-    } else if (!fromHelp && link.startsWith(TOPICS_FROM_DOCS)) {
-      link = `${HELP_DIR}/${link.slice(TOPICS_FROM_DOCS.length)}`;
     } else if (!fromHelp && link.startsWith('../')) {
-      link = `${REPO_BLOB_BASE}/${link.slice(3)}`;
+      // Resolve from the page's own folder, so a page in docs/connectors/ maps the same way as one in docs/.
+      const fromDir = path.posix.dirname(fromFile);
+      const fromDocsRoot = path.posix.normalize(path.posix.join(fromDir, link));
+      if (fromDocsRoot.startsWith(TOPICS_FROM_DOCS)) {
+        const helpPage = `${HELP_DIR}/${fromDocsRoot.slice(TOPICS_FROM_DOCS.length)}`;
+        link = path.posix.relative(fromDir, helpPage.replace(/#.*$/, '')) + (/#.*$/.exec(helpPage)?.[0] ?? '');
+      } else if (fromDocsRoot.startsWith('../')) {
+        link = `${REPO_BLOB_BASE}/${fromDocsRoot.slice(3)}`;
+      }
     }
     return `](${link})`;
   });
@@ -208,6 +214,42 @@ export function rewriteLinks(markdown, { fromHelp, fromFile = 'index.md', pages 
 /** A "How to get there:" line, which says where a screen is in the app, becomes a highlighted box. */
 export function howToGetThereBoxes(markdown) {
   return markdown.replace(/^How to get there: (.+)$/gm, '!!! tip "How to get there"\n    $1');
+}
+
+/**
+ * Prettier indents a nested list by the width of its parent's marker (two or three spaces), but MkDocs only
+ * reads four. This moves every list item's content to four spaces per level; code fences are left alone.
+ */
+export function fourSpaceLists(markdown) {
+  const out = [];
+  /** Each open list item: where its content starts in the source, and where it starts on the site. */
+  const open = [];
+  let fence = false;
+  for (const line of markdown.split('\n')) {
+    const indent = line.length - line.trimStart().length;
+    if (line.trim() === '') {
+      out.push(line);
+      continue;
+    }
+    const fenceLine = /^\s*(```|~~~)/.test(line);
+    const inCode = fence && !fenceLine;
+    if (!fence) {
+      while (open.length > 0 && indent < open[open.length - 1].from) {
+        open.pop();
+      }
+    }
+    if (fenceLine) {
+      fence = !fence;
+    }
+    const parent = open[open.length - 1];
+    const shifted = parent === undefined ? indent : parent.to + (indent - parent.from);
+    const item = inCode || fenceLine ? null : /^(\s*)([-*+]|\d+[.)])(\s+)/.exec(line);
+    if (item) {
+      open.push({ from: indent + item[2].length + item[3].length, to: shifted + 4 });
+    }
+    out.push(parent === undefined ? line : ' '.repeat(Math.max(shifted, 0)) + line.trimStart());
+  }
+  return out.join('\n');
 }
 
 /** The topic front matter is for the in-app help; the site only needs the title. */
@@ -330,7 +372,7 @@ export async function buildDocsSite({
     await mkdir(path.dirname(path.join(outDir, target)), { recursive: true });
     await writeFile(
       path.join(outDir, target),
-      howToGetThereBoxes(rewriteLinks(text, { fromHelp: false, fromFile: target, pages })),
+      fourSpaceLists(howToGetThereBoxes(rewriteLinks(text, { fromHelp: false, fromFile: target, pages }))),
     );
   }
 
@@ -346,7 +388,7 @@ export async function buildDocsSite({
     const text = await readFile(path.join(topicsDir, name), 'utf8');
     await writeFile(
       path.join(outDir, HELP_DIR, name),
-      howToGetThereBoxes(rewriteLinks(siteFrontMatter(text), { fromHelp: true })),
+      fourSpaceLists(howToGetThereBoxes(rewriteLinks(siteFrontMatter(text), { fromHelp: true }))),
     );
   }
   // The settings live in docs-site/mkdocs.yml; this file adds the menu built from the docs home.

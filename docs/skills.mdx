@@ -1,19 +1,22 @@
 ---
-title: 'Setup Skills'
-sidebarTitle: 'Skills'
-description: 'Register git-backed SKILL.md instruction packs from the shipped catalog or your own repository.'
+title: 'Skills setup'
+sidebarTitle: 'Skills setup'
+description: 'How skills are built, where they come from, and how Aman loads them.'
 ---
 
-Skills teach an agent how to perform specialized tasks — querying a database, triaging an alert, following an escalation playbook, or drafting release notes.
+A skill teaches an agent how to do a particular job, such as querying a database, sorting an alert, following an escalation playbook or drafting release notes. To turn skills on and use them, see [Skills](../packages/trueforge/guide/topics/skills.md).
 
-A skill is a **directory in a git repository** rooted at a `SKILL.md` file. Register skills once under **Settings → Skills**, then attach them by name when you [create an agent](/create-agent/overview).
+A skill is a folder in a git repository with a `SKILL.md` file at its top. You add skills once in **Settings → Skills**. Then you switch them on for a chat, or attach them by name when you [create an agent](create-agent/overview.mdx).
 
-## Registering a skill
+## Adding a skill
 
-Open **Settings → Skills**, pick a starter skill from the catalog, or add your own GitHub/GitLab repository (URL, optional path, and ref). Pin a tag or commit SHA for production stability.
+Open **Settings → Skills**. Either enable a starter skill from the catalog, or click **Import from GitHub** and give the repository URL, the folder that holds `SKILL.md`, and the branch.
 
+!!! tip
 
-The starter skills in the catalog come from the shipped skill catalog — see [Initial Setup](/harness/initial-setup#what-is-supported-out-of-the-box) for how catalogs work and how to change what the UI offers.
+    For a setup you rely on, pin a tag or a commit instead of a moving branch, so the skill doesn't change under you.
+
+The starter skills come from the skill catalog that ships with Aman. See [Initial setup](harness/initial-setup.mdx#what-is-supported-out-of-the-box) for how catalogs work and how to change what Settings offers.
 
 ## What a skill contains
 
@@ -26,31 +29,36 @@ customer-support-skill/
     └── classify_ticket.py
 ```
 
-`SKILL.md` has YAML frontmatter (`name`, `description`) and a markdown body of instructions. The `description` is what the agent sees upfront; the full body and supporting files load only when the agent picks the skill (**progressive disclosure**).
+`SKILL.md` starts with YAML front matter (`name` and `description`), followed by Markdown instructions.
 
-## Runtime requirements
+The agent sees only the `description` at first. It loads the full instructions and the supporting files only when it picks the skill. This is called progressive disclosure, and it keeps unused skills from taking up room in the conversation.
 
-<Note>
-  Skills require the agent's [sandbox](/sandbox) to be enabled. The skill repository is cloned into the sandbox, and the
-  agent reads `SKILL.md` (and can run bundled scripts) there. Two skills cannot share the same name on one agent.
-</Note>
+## What a skill needs to run
 
-At runtime:
+!!! note
 
-1. The harness exposes each attached skill's name and description.
-2. When the model decides a skill is relevant, the repo is materialized under `/opt/tfy/skills/{name}`.
-3. The agent follows `SKILL.md` and uses supporting files as needed.
+    Skills need the agent's [sandbox](sandbox.mdx) to be on. The skill's repository is copied into the sandbox, and the agent reads `SKILL.md` and runs any bundled scripts there. Two skills on one agent can't share the same name.
 
-## Skills + MCP tools
+While a turn runs:
 
-- **Skills** define _how_ to handle a task (procedure, decision logic, formatting).
-- **MCP tools** provide the _actions and data_ to execute it.
+1. Aman shows the model each attached skill's name and description.
+2. When the model decides a skill fits, the repository is copied to `/opt/tfy/skills/{name}` in the sandbox.
+3. The agent follows `SKILL.md` and uses the supporting files as needed.
 
-Example: a CRM follow-up skill sets tone and escalation rules; MCP tools look up the record, update the ticket, and notify Slack.
+### Network access
 
-## Authoring tips
+A skill has no internet access by default. A skill can list the sites it needs. Settings then asks the person to allow them, and once allowed, a chat using that skill can reach those sites and no others. Settings warns when one of the sites can send email.
 
-- Keep the `description` sharp — it is the only thing the model sees before loading the skill.
-- Write `SKILL.md` like instructions to a competent teammate.
-- Put heavy reference material in supporting files the skill links to.
-- Prefer several focused skills over one sprawling pack.
+## Skills and connectors
+
+- Skills say how to handle a task: the steps, the decisions and the format.
+- Connectors (MCP tools) provide the actions and the data.
+
+For example, a customer follow-up skill sets the tone and when to escalate. Connectors look up the record, update the ticket and post to Slack.
+
+## Tips for writing a skill
+
+- Keep the `description` sharp. It is the only thing the model sees before it loads the skill.
+- Write `SKILL.md` like instructions to a capable teammate.
+- Put long reference material in supporting files that the skill links to.
+- Prefer several focused skills to one sprawling one.

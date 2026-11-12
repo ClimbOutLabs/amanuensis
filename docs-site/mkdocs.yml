@@ -13,7 +13,14 @@ theme:
   # Use the system fonts, so the site loads nothing from Google.
   font: false
   features:
+    - navigation.tabs
     - navigation.sections
+    - navigation.path
+    - navigation.instant
+    - navigation.tracking
+    - toc.follow
+    - search.suggest
+    - content.tooltips
     - navigation.top
     - navigation.footer
     - search.highlight
@@ -55,9 +62,19 @@ markdown_extensions:
       alternate_style: true
   - pymdownx.highlight
   - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - abbr
+  - def_list
 
 plugins:
   - search
+  # Click a screenshot to see it full size.
+  - glightbox
 
 validation:
   links:

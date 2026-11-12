@@ -6,6 +6,7 @@ import test from 'node:test';
 import {
   buildDocsSite,
   convertMintlify,
+  fourSpaceLists,
   howToGetThereBoxes,
   navFromDocsHome,
   REPO_BLOB_BASE,
@@ -87,6 +88,13 @@ test('a "How to get there" line becomes a highlighted box', () => {
   );
 });
 
+test('nested lists move to four spaces a level, inside tabs too, and code is kept', () => {
+  assert.equal(
+    fourSpaceLists('1. One\n   - a\n     more\n2. Two\n\n=== "Mac"\n\n    1. Step\n       - x\n\n```\n  code\n```\n'),
+    '1. One\n    - a\n        more\n2. Two\n\n=== "Mac"\n\n    1. Step\n        - x\n\n```\n  code\n```\n',
+  );
+});
+
 test('topic front matter keeps only the title', () => {
   assert.equal(siteFrontMatter('---\nid: x\ntitle: X\ncovers: a\n---\nBody\n'), '---\ntitle: X\n---\nBody\n');
 });
@@ -162,5 +170,15 @@ test('the website leaves out the parts for people working on the code', () => {
   assert.equal(
     siteDocsHome(home),
     ['- [Getting started](#getting-started): x', '## Getting started', '- [Try Aman](try-aman.md): x'].join('\n'),
+  );
+});
+
+test('a page in a docs subfolder links help topics on the site, not on GitHub', () => {
+  assert.equal(
+    rewriteLinks('[Notes](../../packages/trueforge/guide/topics/notes-folder.md#set-up) [Sec](../../SECURITY.md)', {
+      fromHelp: false,
+      fromFile: 'connectors/notes-folder.md',
+    }),
+    `[Notes](../help/notes-folder.md#set-up) [Sec](${REPO_BLOB_BASE}/SECURITY.md)`,
   );
 });

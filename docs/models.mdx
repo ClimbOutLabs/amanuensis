@@ -1,64 +1,83 @@
 ---
-title: 'Setup Models'
-sidebarTitle: 'Models'
-description: 'Connect model providers from the shipped catalog or add a custom OpenAI-compatible endpoint.'
+title: 'Models and providers'
+sidebarTitle: 'Models and providers'
+description: 'Connect model providers from the shipped catalog or add your own OpenAI-compatible endpoint, and how long Aman waits for a model.'
 ---
 
-Aman works with the major model providers and any OpenAI-compatible endpoint. Configure credentials once under **Settings → Models**. Agents reference models by name — agent definitions never contain API keys.
+Aman works with the major AI model companies, called providers, and with any endpoint that speaks the OpenAI API. You add a provider's key once, under **Settings, Models**. Agents name the models they use, and agent definitions never contain API keys.
 
 How to get there: Click **More** in the left bar, then **Settings**, then **Models**.
 
+For the everyday steps of adding a model, see [Set up Aman](../packages/trueforge/guide/topics/first-steps.md#step-1-add-a-model).
+
 ## Supported providers
 
-| Provider type   | Notes                                                                  |
-| --------------- | ---------------------------------------------------------------------- |
-| `openai`        | OpenAI                                                                 |
-| `anthropic`     | Anthropic                                                              |
-| `google-gemini` | Google Gemini                                                          |
-| `fireworks`     | Fireworks AI                                                           |
-| `together`      | Together AI                                                            |
-| `moonshot`      | Moonshot AI (Kimi)                                                     |
-| `zai`           | Z.ai (GLM)                                                             |
-| `alibaba`       | Alibaba (Qwen)                                                         |
-| `custom`        | Any OpenAI-compatible endpoint — self-hosted models, gateways, proxies |
+| Provider       | Provider type   |
+| -------------- | --------------- |
+| OpenAI         | `openai`        |
+| Anthropic      | `anthropic`     |
+| Google Gemini  | `google-gemini` |
+| Fireworks AI   | `fireworks`     |
+| Together AI    | `together`      |
+| Moonshot AI (Kimi) | `moonshot`  |
+| Z.ai (GLM)     | `zai`           |
+| Alibaba (Qwen) | `alibaba`       |
+| Any OpenAI-compatible endpoint: self-hosted models, gateways, proxies | `custom` |
 
-## Configuring a standard provider
+Nebius Token Factory (`tokenfactory`) is set up by the server, not in Settings.
 
-Open **Settings → Models**, pick a provider, and paste your API key. Models from that provider become available immediately in the agent model selector.
+## Add a provider from the list
 
+1. Open **Settings, Models**.
+2. Under **Available**, click **Configure** next to the provider.
+3. Paste your key into **API key**, and click **Create**.
 
-The provider list comes from the shipped model catalog — see [Initial Setup](/harness/initial-setup#what-is-supported-out-of-the-box) for how catalogs work and how to change what the UI offers.
+All of that provider's models become available right away, in the chat's model button and in the agent model selector. The provider moves to **Configured**, where you can:
 
-## Adding a custom provider
+- add more of its models under **Available to add**, with **Add**;
+- remove one model with its trash button;
+- change the key with **Edit**, or remove the provider with **Remove**.
 
-Use the `custom` provider type for vLLM, Ollama, a corporate gateway, or any other OpenAI-compatible API. Custom providers are not in the catalog — you add them yourself with a base URL, API key, and the model IDs you want exposed.
+If you use a regional or proxy endpoint, open **Advanced · custom endpoint** in the same box and fill in **Base URL**. Otherwise leave it blank.
 
+The provider list comes from the shipped model catalog. [Initial Setup](harness/initial-setup.mdx#what-is-supported-out-of-the-box) explains how catalogs work and how to change what the UI offers.
 
-## Assigning models to jobs
+A provider marked **Managed by server environment** is written by the server from its settings on every start, so it can't be edited here.
 
-This page is inventory: which providers are connected and which models exist. Which model does which
-job (main chat, sub-agents, compaction, and named personas) lives under **Settings → Roles and Personas**.
-See [Roles and Personas](/model-roles).
+## Add a custom provider
 
-<Note>
-  **Planned:** automatic model selection for different turns or subagents. Today every model choice is one
-  you made explicitly, per role or per persona. In the future, Aman will be able to pick among a set
-  of models per turn or subagent based on task complexity, latency, and cost.
-</Note>
+Use a custom provider for vLLM, Ollama, a company gateway, or any other OpenAI-compatible API. Custom providers are not in the catalog, so you add them yourself.
 
-## Stalled model streams
+1. Open **Settings, Models**, and click **Add custom provider**.
+2. Give it a name. You can't change the name later.
+3. Fill in the base URL. It is usually the address that ends in `/v1`, such as `http://localhost:11434/v1`.
+4. Fill in the API key, or leave it blank if your endpoint needs none, as with a local model.
+5. Add each model you want to use, with its model ID and a name. Set its max output tokens to the model's real limit.
+6. Click **Add provider**.
+
+## Assign models to jobs
+
+This page is the inventory: which providers are connected and which models exist. Which model does which job lives under **Settings, Roles and Personas**. That covers the main chat, sub-agents, compaction and named personas. See [Roles and Personas](model-roles.mdx).
+
+!!! note "Planned"
+
+    Automatic model selection for different turns or sub-agents is planned. Today, every model choice is one you made yourself, per role or per persona. Later, Aman will be able to pick among a set of models per turn or sub-agent, based on how hard the task is, speed and cost.
+
+## When a model stops answering
 
 ### How long Aman waits
 
-Aman waits 90 seconds for a model's first output. After that it waits 60 seconds between chunks. While the model is writing out a tool call, it waits 3 minutes between chunks.
+- Aman waits 90 seconds for a model's first output.
+- After that, it waits 60 seconds between chunks.
+- While the model is writing out a tool call, it waits 3 minutes between chunks.
 
-The first-output wait starts when the request is sent. So it also covers the wait for the provider to start answering.
+The first-output wait starts when the request is sent, so it also covers the wait for the provider to start answering.
 
-Nonempty reasoning and tool-argument chunks count as progress. Empty transport heartbeats do not.
+Reasoning and tool-argument chunks that have content count as progress. Empty transport heartbeats don't.
 
-There is no overall answer-duration ceiling, and thinking remains enabled where configured.
+There is no overall limit on how long an answer may take, and thinking stays on where it is set up.
 
-### Changing the waits
+### Change the waits
 
 Set `MODEL_FIRST_RESPONSE_TIMEOUT_MS`, `MODEL_STREAM_IDLE_TIMEOUT_MS` and `MODEL_STREAM_TOOL_CALL_IDLE_TIMEOUT_MS` to change them.
 
@@ -66,14 +85,12 @@ A provider's `stream_timeout` can only shorten them for that provider.
 
 To give a local model that takes long to load more time, raise `MODEL_FIRST_RESPONSE_TIMEOUT_MS`.
 
-Embedders of the core library can supply `VercelAILLMConfig.streamTimeout` with positive `firstChunkMs` and `chunkMs` values within the runtime timer range (at most 2,147,483,647 milliseconds). Without it the defaults are five minutes and sixty seconds.
+Embedders of the core library can supply `VercelAILLMConfig.streamTimeout` with positive `firstChunkMs` and `chunkMs` values within the runtime timer range (at most 2,147,483,647 milliseconds). Without it, the defaults are five minutes and sixty seconds.
 
 These are host settings, not model request parameters. Standalone embedders must supply their own overall cancellation signal.
 
-### When a timeout happens
+### When a wait runs out
 
-A timeout fails the turn with its recorded cause.
-
-An unfinished tool proposal is never approved or executed, and is not automatically retried.
-
-Results from earlier completed tool calls remain in the audit history.
+- The turn fails, and the cause is recorded.
+- An unfinished tool proposal is never approved or run, and is not retried on its own.
+- Results from earlier finished tool calls stay in the audit history.

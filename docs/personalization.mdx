@@ -1,58 +1,76 @@
 ---
-title: 'Personalization'
-description: 'A small, inspectable local profile for assistant identity, voice, and user preferences.'
+title: 'Personalization details'
+description: 'What the Personalization page stores, what the model sees, and the API behind it.'
 ---
 
-How to get there: Click **More** in the left bar, then **Settings**, then **Personalization**.
-
-![The Personalization page in Settings](screenshots/app/settings-personalization.png)
+This page explains what Aman keeps from the Personalization page and how it uses it. To fill in the page, see [Personalization](../packages/trueforge/guide/topics/personalization.md).
 
 ## What is stored
 
-Personalization is a single profile owned by the authenticated user. It contains only:
+Personalization is one profile per signed-in person. It holds only:
 
-- Your name and how the assistant should address you
-- Assistant name and concise identity guidance
-- Voice guidance
-- A concise user profile
-- Up to 12 pinned preferences
-- The areas you picked for the Tour's "What would help you most?" question, in the order picked. They shape the Tour's cards and are never sent to the model
-- An optional learned profile document, maintained by the server when profile learning is on
-- A profile learning switch, off by default
+- your name, and how the assistant should address you
+- the assistant's name and a short identity
+- voice guidance
+- a short profile of you
+- up to 12 pinned preferences, each up to 280 characters
+- the areas you picked for the Tour's "What would help you most?" question, in the order you picked them; they shape the Tour's cards and are never sent to the model
+- an optional learned profile, kept up to date by Aman when profile learning is on
+- the profile learning switch, off by default
 
-The profile is stored locally in the configured database. Standalone mode uses SQLite. Distributed mode uses Postgres.
+Each text box holds up to 2,000 characters. Everything you write, apart from the learned profile, adds up to at most 5,500 characters. The learned profile has its own limit of 4,000.
 
-It is never copied from chat history automatically, and it is not shared with other users.
+The profile is stored in Aman's database on your computer: SQLite in standalone mode and Postgres in distributed mode. It is never filled in from chat history on its own, and it is never shared with other people who use the same Aman.
 
-### What the profile records
+??? note "What the profile records about itself"
 
-The profile records its owner, last updater, timestamps, a monotonic revision number, and a SHA-256 digest of the model-facing content.
+    The profile records its owner, who last changed it, timestamps, a revision number that only goes up, and a SHA-256 digest of the parts the model sees.
 
-Updating a profile with identical content leaves its revision unchanged.
-
-The learning switch and the help areas are not model-facing, so they are deliberately outside the digest. The server compares them separately. Changing either alone still writes and still advances the revision.
+    Saving identical content leaves the revision unchanged. The learning switch and the help areas are not shown to the model, so they are outside the digest. The server compares them separately, so changing either one alone still saves and still advances the revision.
 
 ## What the model sees
 
-On every root-agent turn, the server builds one bounded `<personalization-context>` section from the current profile. Dynamic subagents never receive it.
+On every main-assistant turn, the server builds one size-limited `<personalization-context>` section from the profile. Helpers that Aman starts for a task (subagents) never receive it.
 
-Default-assistant turns receive:
+When the main assistant answers, the section holds:
 
-- the assistant name, identity and voice
-- your name and form of address
-- the user profile, pinned preferences and learned profile
+- the assistant's name, identity and voice
+- your name and how to address you
+- your profile, pinned preferences and learned profile
 
-When a configured persona is active, that persona is the sole assistant identity. The server omits the default assistant's name, identity and voice. It keeps your name and form of address, the user profile, pinned preferences and learned profile.
+When a [persona](../packages/trueforge/guide/topics/personas.md) answers, the persona is the only assistant identity. The server leaves out the main assistant's name, identity and voice. It keeps your name, how to address you, your profile, pinned preferences and learned profile.
 
-The default-assistant profile projection is available through:
+The persona and its instructions stay visible in **Roles and Personas** and on the chat's "who is answering" button.
 
-```text
-GET /api/v1/personalization/context
-```
+## Learned profile
 
-The active persona and its instructions remain visible in Personas and on the chat's active-speaker indicator. The server derives the turn's speaker-specific projection from those visible sources.
+Profile learning is off until you turn on **Learn from conversations** in **Settings**, **Personalization**. The switch is saved with the rest of the profile as `learning_enabled`. Someone with no profile has never opted in, so nothing runs for them. There is no server-wide switch and no restart needed.
 
-`profile_digest` identifies the source profile, not the projected prompt bytes.
+### What it does
+
+With learning on, Aman runs a short pass after each finished turn.
+
+1. A model call reads the current learned profile and that turn's exchange.
+2. It returns the whole profile rewritten: lasting facts, preferences and ways of working, under Markdown headings.
+3. If the exchange held nothing lasting, the profile comes back unchanged and nothing is written.
+
+The pass checks the switch as it starts and again after the model call. If you turn learning off during a turn, the pass stops without writing anything.
+
+### Limits
+
+- The pass never delays or fails the turn it learns from. If anything goes wrong inside it, it quietly does nothing.
+- After the pass writes, it waits before writing again: `PROFILE_LEARNING_MIN_INTERVAL_MS`, one hour by default. Your own edits are never limited.
+- `PROFILE_LEARNING_MODEL` picks a separate model for the pass. When it is empty, the pass uses the turn's own model. Neither setting turns learning on.
+
+### The change trail
+
+Every write by the pass adds an `aman.profile.learned` event to that turn's event log. The event holds the previous profile, the new one, and the new revision number, so you can review every change through the events API. With **Agent details** on, the answer also shows a **Learned profile updated** card.
+
+When a memory provider is set up, a pass that finishes with learning still on also copies the current profile into it, under one document id per person. An unchanged profile is not stored twice.
+
+### Where you see it
+
+The learned profile goes into the `<personalization-context>` section after your pinned preferences, with a note saying it was learned from past conversations. You can read, edit or clear it at any time in **Settings**, **Personalization**. What the model sees is exactly what that page shows.
 
 ## API
 
@@ -63,54 +81,12 @@ DELETE /api/v1/personalization/profile
 GET    /api/v1/personalization/context
 ```
 
-`PUT` replaces the complete profile. Use `DELETE` to remove it. The authenticated identity determines profile ownership. Callers cannot select another user's profile.
+- The signed-in identity owns the profile. A caller can't pick another person's profile.
+- `PUT` replaces the whole profile. A `PUT` with nothing in it is refused, because `DELETE` is how you remove a profile.
+- `learning_enabled` counts as content whether it is on or off. So a profile holding only the switch is valid; that is where someone lands after trying profile learning and turning it back off. Leaving the field out counts as no content, and as learning off.
+- `GET /api/v1/personalization/context` returns the main assistant's view of the profile. On a persona turn the server builds the persona's view from the persona settings.
+- `profile_digest` identifies the source profile, not the exact text sent to the model.
 
-A `PUT` whose body carries nothing at all is rejected, because removing a profile is what `DELETE` is for.
+## Not included yet
 
-`learning_enabled` counts as content in either position. So a profile holding only the switch is legitimate, whether it is on or off. That is the state a user lands in by trying profile learning and then turning it back off.
-
-Omitting the field entirely reads as no content. It also reads as learning off.
-
-## Learned profile
-
-### Turning it on
-
-Profile learning is off until you turn it on. Use the switch beside the learned profile, in Settings under Personalization.
-
-The switch is the `learning_enabled` field on the profile. It persists through the same profile `PUT` as everything else.
-
-A user with no profile has never opted in, so nothing runs for them. Nothing else gates the pass. There is no operator-side switch and no restart to change it.
-
-### What the pass does
-
-With it on, the server runs an autonomous distillation pass after each successfully completed turn.
-
-A bounded model call reads the current learned profile document plus the turn's exchange. It returns the complete rewritten document: stable facts, preferences, and ways of working, organized under markdown headings.
-
-Nothing durable in the exchange means the document comes back unchanged and nothing is written.
-
-The pass reads the switch again as it starts, so turning it off while a turn is running takes effect for that turn too. It reads the switch once more after the model call. A pass that finds the switch off by then stops without writing the profile or the mirror.
-
-### Limits on the pass
-
-The pass is fire and forget. It never delays or fails the turn it learned from, and every failure inside it is a silent no-op.
-
-Host writes are rate capped. After the pass writes, it will not write again for `PROFILE_LEARNING_MIN_INTERVAL_MS` (default one hour). A user edit is never capped.
-
-`PROFILE_LEARNING_MODEL` selects a dedicated model FQN for the pass. When empty, the pass uses the turn's own model. Both are operator tuning only, and neither turns learning on.
-
-### The change trail
-
-Every host write leaves an `aman.profile.learned` event on the completed turn's event log. It carries the previous document, the new document, and the profile revision the write produced. So the change trail is auditable through the events API.
-
-When a memory provider is configured, a pass that reaches the end with learning still on also mirrors the current document into it under a per-user document id. An unchanged document deduplicates on the provider side.
-
-### Where you see it
-
-The document is part of the personalization profile. It renders in the model-facing `<personalization-context>` block after pinned preferences, with a preamble stating that it was learned from past conversations.
-
-You can read, edit, or clear it at any time in Settings under Personalization. It round-trips through the same profile `PUT`.
-
-## Deliberately not included yet
-
-This phase does not extract episodic memories, create embeddings, use a vector database, or store hidden reasoning. The learned profile is the only automated write, it is off by default, and it stays fully visible: the exact document the model sees is the document shown in Settings.
+Personalization doesn't pull separate memories out of chats, build search indexes, or store hidden reasoning. The learned profile is its only automatic write. It is off by default and always fully visible.
