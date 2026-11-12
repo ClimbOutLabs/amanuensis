@@ -1,6 +1,8 @@
 import dedent from 'dedent';
 import { createHash } from 'node:crypto';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat';
+import { DEFAULT_ON_SOURCE_CONNECTOR_NAMES } from '../connectors/chatConnectorChoice';
+import { connectorUnavailableLine } from '../connectors/connectorAvailability';
 import { MAIL_DRAFT_TOOL_NAME } from '../email/mailConnector/toolContract';
 import type { ApprovalDecision } from '../events/schema';
 import {
@@ -121,6 +123,37 @@ ${connector} is connected only in Settings, under Connectors, ${connector}, with
 }
 
 export const EMAIL_PASSWORD_PROMPT = connectorPasswordPrompt({ connector: 'Email', owner: 'email' });
+
+/**
+ * Mail and calendar come only from their connectors. With one off, a model asked for an appointment hunts for a
+ * stand-in such as a helper or a schedule, so it gets one plain line per missing source instead. Undefined when
+ * every source is attached, or when the host does not report what is set up.
+ */
+export function createSourceOffPrompt({
+  attachedConnectorNames,
+  setUpConnectorNames,
+}: {
+  attachedConnectorNames: readonly string[];
+  setUpConnectorNames: readonly string[] | undefined;
+}): string | undefined {
+  if (setUpConnectorNames === undefined) {
+    return undefined;
+  }
+  const lines = DEFAULT_ON_SOURCE_CONNECTOR_NAMES.filter(name => !attachedConnectorNames.includes(name)).map(name =>
+    connectorUnavailableLine({
+      connector: name,
+      availability: setUpConnectorNames.includes(name) ? 'turned-off' : 'not-set-up',
+    }),
+  );
+  if (lines.length === 0) {
+    return undefined;
+  }
+  return dedent`
+Email and calendar are available only through the connectors below, and these are not attached to this chat.
+${lines.join('\n')}
+When a request needs one of them, say so in one plain line with the next step above, then stop. Never offer a schedule, a helper, a search, or another tool in its place, and do not look for the connector under another name.
+`;
+}
 
 /**
  * A demo instance refuses to send from the Email account but lets a draft be saved. The model is told so, or it answers "send it"
