@@ -63,6 +63,10 @@
       "set": "approvals",
       "tests": ["packages/frontend/tests/approvalKinds.browser.test.ts"]
     },
+    "approval:skill": {
+      "set": "approvals",
+      "tests": ["packages/frontend/tests/approvalKinds.browser.test.ts"]
+    },
     "calendar-preset:fastmail": {
       "set": "calendar",
       "tests": []
@@ -124,6 +128,10 @@
       "tests": []
     },
     "command:password": {
+      "set": "install",
+      "tests": []
+    },
+    "command:restore": {
       "set": "install",
       "tests": []
     },
@@ -339,6 +347,10 @@
       "set": "chat",
       "tests": []
     },
+    "route:reach": {
+      "set": "reach",
+      "tests": []
+    },
     "route:repository": {
       "set": "code",
       "tests": []
@@ -487,6 +499,10 @@
     "settings:about": {
       "set": "account",
       "tests": ["packages/frontend/tests/settingsPanels.browser.test.ts"]
+    },
+    "settings:account": {
+      "set": "account",
+      "tests": []
     },
     "settings:audit": {
       "set": "safety",
@@ -725,6 +741,7 @@
     "command:network",
     "command:open",
     "command:password",
+    "command:restore",
     "command:setup",
     "command:status",
     "command:uninstall",
@@ -769,6 +786,7 @@
     "route:personaKnowledge",
     "route:personalization",
     "route:privateChat",
+    "route:reach",
     "route:repository",
     "route:runCode",
     "route:sandboxProvider",
@@ -782,6 +800,7 @@
     "route:tokenFactoryUsage",
     "route:toolOutputScreen",
     "route:voice",
+    "settings:account",
     "tour:company",
     "tour:explain",
     "tour:locals_know",

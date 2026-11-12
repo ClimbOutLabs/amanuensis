@@ -67,7 +67,12 @@ export const TABLES_TO_MOVE = [
   'brief_item_completion',
   'delivery',
   'delivery_attempt',
+  'reach_settings',
+  'noticing_event',
+  'noticing_checkpoint',
+  'reach_lease',
   'push_subscription',
+  'local_user',
 ] as const;
 
 /**
