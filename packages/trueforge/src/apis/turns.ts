@@ -2852,7 +2852,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
               tenant_id: requestContext.tenant_id,
               catalog: deps.skillCatalog.list(),
               sandboxReady: serverSandboxAvailable,
-              fetchImpl: fetch,
+              lookup: { fetchImpl: undefined, resolveAddresses: undefined },
             },
       schedules:
         deps.schedules === undefined || chatRunner === undefined

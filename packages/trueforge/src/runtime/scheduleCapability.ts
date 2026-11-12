@@ -360,7 +360,7 @@ export class ScheduleToolSet extends LocalToolMCP {
       defineTool({
         name: CREATE_SCHEDULE_TOOL_NAME,
         description:
-          "The only way to make a recurring task. For a plain reminder use set_reminder instead. Never say it is scheduled unless this succeeded. Ask first if how often or when is unclear. Times use the user's time zone. Name the connectors and skills it needs. The user approves a card first.",
+          "The only way to make a recurring task. A schedule repeats a task for the person. It is not a calendar event. For a plain reminder use set_reminder instead. Never say it is scheduled unless this succeeded. Ask first if how often or when is unclear. Times use the user's time zone. The user approves a card first.",
         schema: CreateScheduleToolSchema,
         annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
         handler: (input, approval) => this.#create({ input, approval }),
