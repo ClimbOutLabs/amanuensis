@@ -136,7 +136,9 @@ export function createPersonalizationApi(fetcher: typeof fetch): Personalization
         // A switch the profile does not carry is a switch this server never sent, and it stays
         // off the wire: the request object is strict and would reject the unknown key. The
         // revision travels beside the profile, so the server can refuse a save from an older copy.
-        body: JSON.stringify({ profile, ...(revision === undefined ? {} : { expected_revision: revision }) }),
+        // No revision means this page read no profile, and null says so: a profile created since
+        // is then a conflict too.
+        body: JSON.stringify({ profile, expected_revision: revision ?? null }),
       });
       if (response.status === 409) {
         throw new PersonalizationConflictError((await readError(response)).message);

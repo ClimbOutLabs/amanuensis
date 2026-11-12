@@ -14401,9 +14401,12 @@
         },
         "properties": {
           "expected_revision": {
-            "description": "The profile revision this save was made from. A save from an older revision is refused with 409.",
+            "description": "The profile revision this save was made from, or null when no profile existed yet. A save made from an older state is refused with 409.",
             "exclusiveMinimum": 0,
-            "type": "integer"
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "profile": {
             "$ref": "#/components/schemas/PersonalizationProfileContent"
