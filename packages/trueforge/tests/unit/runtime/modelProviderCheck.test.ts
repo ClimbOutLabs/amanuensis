@@ -139,6 +139,7 @@ describe('createModelProviderChecker', () => {
 /** The checker only hands the store to getModelDetails, which is mocked here, so no store behaviour is needed. */
 function fakeStore(): IModelProviderStore {
   return {
+    managedElsewhere: false,
     listProviders: () => Promise.resolve([]),
     getProvider: () => Promise.resolve(undefined),
     getProviderForUpdate: () => Promise.resolve(undefined),
