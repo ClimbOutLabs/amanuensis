@@ -1,13 +1,22 @@
-import type { LLMUserMessage, RawAssistantMessage, RawToolCall } from '../../llm/LLMTypes';
+import { z } from 'zod';
+import {
+  InternalToolCallInfoSchema,
+  type LLMUserMessage,
+  type RawAssistantMessage,
+  type RawToolCall,
+} from '../../llm/LLMTypes';
 import { parseToolCallArguments } from '../../mcp/toolArgumentCheck';
 import { isMemoryPagesToolName } from '../../memory/pagesToolContract';
 import { collectOutboundStrings } from '../../permissions/outboundGuard';
 import type { ReadSource } from '../../permissions/provenance';
 import { recordPersonText, recordReplyText, recordUntrustedText } from '../../permissions/provenance';
 import {
+  hostToolStamp,
+  NO_HOST_STAMP,
   readSourceOf,
   recordToolResultProvenance,
   toolReturnsOutsideContent,
+  type HostToolStamp,
   type WebSearchTurnState,
 } from '../../permissions/webSearch';
 import type { ContextMessage, LLMContextMessage } from '../../runtime/AgentThread.types';
@@ -26,7 +35,12 @@ import { HOST_SUMMARY_PREFACE } from './ContextCompaction';
  * The tool a call reached and the arguments it sent. A call the model made through the call_tool wrapper counts as
  * the tool the wrapper names, so wrapped and direct calls to the same tool count the same way.
  */
-function calledTool(call: RawToolCall): { tool_name: string; argument_values: string[]; wrapped: boolean } {
+function calledTool(call: RawToolCall): {
+  tool_name: string;
+  stamp: HostToolStamp;
+  argument_values: string[];
+  wrapped: boolean;
+} {
   const args = parseToolCallArguments(call);
   const wrapped =
     args !== undefined && (call.function.name === CALL_TOOL_NAME || call.function.name.endsWith(`__${CALL_TOOL_NAME}`))
@@ -35,14 +49,26 @@ function calledTool(call: RawToolCall): { tool_name: string; argument_values: st
   const sent = collectOutboundStrings(wrapped?.input ?? args ?? {});
   return {
     tool_name: wrapped?.tool_name ?? call.function.name,
+    stamp: stampOf(call),
     argument_values: sent === undefined ? [] : [...sent.values, ...sent.plumbing],
     wrapped: wrapped !== undefined,
   };
 }
 
+const StampedCallSchema = z.object({
+  tool_info: InternalToolCallInfoSchema.pick({ type: true, search_provider_call: true }),
+});
+
+/** The host's stamp on a stored call. A call stored without one, or with one that does not parse, earns no standing. */
+function stampOf(call: RawToolCall): HostToolStamp {
+  const stamped = StampedCallSchema.safeParse(call);
+  return hostToolStamp(stamped.success ? stamped.data.tool_info : undefined);
+}
+
 /**
  * Whether the result of a tool call may hold text from outside the chat, whether the call was made directly or
- * through the call_tool wrapper. A result with no known call counts as outside content.
+ * through the call_tool wrapper. A result with no known call counts as outside content, and so does the result
+ * of any tool the host did not stamp as its own.
  */
 export function callReturnsOutsideContent(call: RawToolCall | undefined): boolean {
   if (call === undefined) {
@@ -50,7 +76,7 @@ export function callReturnsOutsideContent(call: RawToolCall | undefined): boolea
   }
   const called = calledTool(call);
   // A connector's tool can share a bare name with a host tool, so a wrapped call never counts as the host's.
-  return toolReturnsOutsideContent(called.tool_name) || (called.wrapped && isMemoryPagesToolName(called.tool_name));
+  return toolReturnsOutsideContent(called) || (called.wrapped && isMemoryPagesToolName(called.tool_name));
 }
 
 /** Where a tool result came from, as a person would say it: their mail, their calendar, the web, a file, or any other tool. */
@@ -206,7 +232,10 @@ export function chatProvenanceCapability(input: { turn: WebSearchTurnState }): A
         if (callReturnsOutsideContent(call)) {
           input.turn.outsideToolResult = true;
         }
-        const called = call === undefined ? { tool_name: '', argument_values: [] } : calledTool(call);
+        const called =
+          call === undefined
+            ? { tool_name: '', stamp: NO_HOST_STAMP, argument_values: [], wrapped: false }
+            : calledTool(call);
         recordToolResultProvenance({ state: input.turn, ...called, texts: [message.content] });
       }
     }

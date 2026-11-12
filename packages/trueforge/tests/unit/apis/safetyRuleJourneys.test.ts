@@ -21,7 +21,12 @@ import {
   startHomeAssistantStub,
   type HomeAssistantStub,
 } from '../../fixtures/homeAssistantMcpServer';
-import { INERT_GET_PAGE_TOOL, INERT_SERVER_NAME, INERT_WRITE_TOOL } from '../../fixtures/inertMcpServer';
+import {
+  INERT_GET_PAGE_TOOL,
+  INERT_SEARCH_MESSAGES_TOOL,
+  INERT_SERVER_NAME,
+  INERT_WRITE_TOOL,
+} from '../../fixtures/inertMcpServer';
 import {
   RUN_DIRECTIVE_PREFIX,
   SCRIPTED_EVENT,
@@ -127,7 +132,13 @@ function onlyCard(turn: Turn) {
   return card;
 }
 
-function answer({ card, scope }: { card: { thread_id: string; id: string }; scope: 'once' | 'chat' }): TurnInputItem[] {
+function answer({
+  card,
+  scope,
+}: {
+  card: { thread_id: string; id: string };
+  scope: 'once' | 'chat' | 'always';
+}): TurnInputItem[] {
   return [
     {
       type: 'user.tool_approval',
@@ -696,12 +707,16 @@ describe("an event on the person's own calendar", () => {
   });
 
   it(
-    'with no guests offers "Always allow this here", and the answer covers the next one in that chat only',
+    'with no guests offers "Always allow in this chat" and never "Always allow everywhere", and the answer covers the next one in that chat only',
     async () => {
       const before = await savedEvents();
       const chatId = await createChat(server);
       const card = onlyCard(await runTurn({ server, chatId, input: ask('create_event') }));
       expect(card.can_chat_allow).toBe(true);
+      expect(card.can_always_allow).toBe(false);
+      const everywhere = await sendTurn({ server, chatId, input: answer({ card, scope: 'always' }) });
+      expect(everywhere.status).toBe(422);
+      expect(await savedEvents()).toBe(before);
 
       await runTurn({ server, chatId, input: answer({ card, scope: 'chat' }) });
       expect(cards(await runTurn({ server, chatId, input: ask('create_event') }))).toEqual([]);
@@ -965,6 +980,87 @@ describe('the Home Assistant connector', () => {
       expect(card.tier3_card?.plain_what).toBe('Turn off Living room lamp');
       await runTurn({ server, chatId, input: answer({ card, scope: 'once' }) });
       expect(home.entityState(HA_LAMP)).toBe('off');
+    },
+    TURN_TIMEOUT_MS,
+  );
+});
+
+describe('an Incognito chat', () => {
+  let server: ApprovalTestServer;
+  const AT = `${new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)}T18:00:00+00:00`;
+
+  beforeAll(async () => {
+    server = await startApprovalTestServer({ inertMessageSearch: true });
+  });
+
+  afterAll(async () => {
+    await server.close();
+  });
+
+  async function startChat({ incognito }: { incognito: boolean }): Promise<string> {
+    const response = await server.request(
+      '/api/v1/sessions',
+      jsonInit({ agent: { spec: AGENT_SPEC }, is_incognito: incognito }),
+    );
+    expect(response.status).toBe(201);
+    return z.object({ data: z.object({ id: z.string() }) }).parse(await response.json()).data.id;
+  }
+
+  /** Asks for a reminder and a space under these names, and says which of them were saved. */
+  async function askForLastingThings({ chatId, reminder, space }: { chatId: string; reminder: string; space: string }) {
+    server.model.next({ toolArguments: { what: reminder, at: AT } });
+    const reminderCards = cards(await runTurn({ server, chatId, input: ask('set_reminder') }));
+    server.model.next({
+      toolArguments: { name: space, purpose: 'Things to bring.', status: 'active', body: '- Tent' },
+    });
+    const spaceCards = cards(await runTurn({ server, chatId, input: ask('create_space') }));
+    return {
+      cards: [...reminderCards, ...spaceCards],
+      reminderSaved: (await savedNames({ server, path: '/api/v1/schedules' })).includes(reminder),
+      spaceSaved: (await savedNames({ server, path: '/api/v1/spaces' })).includes(space),
+    };
+  }
+
+  it(
+    'saves no reminder and no space, and shows no card for them',
+    async () => {
+      const chatId = await startChat({ incognito: true });
+      expect(await askForLastingThings({ chatId, reminder: 'Water the fig tree', space: 'Fig tree notes' })).toEqual({
+        cards: [],
+        reminderSaved: false,
+        spaceSaved: false,
+      });
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'lets an added connector look things up once approved, and shows no card for a change it may not make',
+    async () => {
+      const chatId = await startChat({ incognito: true });
+      const searchesBefore = server.mcp.searchMessagesInvocations();
+      const writesBefore = server.mcp.writeInvocations();
+
+      server.model.next({ toolArguments: { query: 'lunch on friday' } });
+      const lookup = onlyCard(await runTurn({ server, chatId, input: ask(INERT_SEARCH_MESSAGES_TOOL) }));
+      await runTurn({ server, chatId, input: answer({ card: lookup, scope: 'once' }) });
+      expect(server.mcp.searchMessagesInvocations()).toBe(searchesBefore + 1);
+
+      expect(cards(await runTurn({ server, chatId, input: ask(INERT_WRITE_TOOL) }))).toEqual([]);
+      expect(server.mcp.writeInvocations()).toBe(writesBefore);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'an ordinary chat still saves the reminder and the space',
+    async () => {
+      const chatId = await startChat({ incognito: false });
+      expect(await askForLastingThings({ chatId, reminder: 'Feed the sourdough', space: 'Sourdough notes' })).toEqual({
+        cards: [],
+        reminderSaved: true,
+        spaceSaved: true,
+      });
     },
     TURN_TIMEOUT_MS,
   );

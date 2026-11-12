@@ -6,6 +6,7 @@ import { HOST_SUMMARY_PREFACE } from '../../../../src/core/capabilities/builtins
 import type { ContextMessage } from '../../../../src/core/runtime/AgentThread.types';
 import { internalSystemTag, untrustedDocumentTag } from '../../../../src/core/runtime/contextUtils';
 
+/** A call to a connector's tool, as the host stores it. */
 function call(id: string, name: string, args: unknown = {}) {
   return {
     id,
@@ -18,6 +19,19 @@ function call(id: string, name: string, args: unknown = {}) {
       original_tool_name: name,
       is_approval_required: false,
       is_client_side: false,
+    },
+  };
+}
+
+/** A call to one of the assistant's own tools, which the host stamps as its own. */
+function hostCall(id: string, name: string, args: unknown = {}) {
+  return {
+    ...call(id, name, args),
+    tool_info: {
+      ...call(id, name, args).tool_info,
+      type: 'truefoundry-system' as const,
+      mcp_server_id: '',
+      mcp_server_name: '',
     },
   };
 }
@@ -61,7 +75,11 @@ describe('turnReadOutsideText', () => {
     expect(
       turnReadOutsideText([
         USER,
-        { role: 'assistant', content: null, tool_calls: [call('c1', 'remember_fact'), call('c2', 'record_finding')] },
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [hostCall('c1', 'remember_fact'), hostCall('c2', 'record_finding')],
+        },
         { role: 'tool', tool_call_id: 'c1', content: '{"saved":true}' },
         { role: 'tool', tool_call_id: 'c2', content: '{}' },
       ]),
@@ -72,7 +90,7 @@ describe('turnReadOutsideText', () => {
     expect(
       turnReadOutsideText([
         USER,
-        { role: 'assistant', content: null, tool_calls: [call('c1', 'list_pages'), call('c2', 'read_page')] },
+        { role: 'assistant', content: null, tool_calls: [hostCall('c1', 'list_pages'), hostCall('c2', 'read_page')] },
         { role: 'tool', tool_call_id: 'c1', content: '{"pages":[]}' },
         { role: 'tool', tool_call_id: 'c2', content: '[page: Wendy]' },
       ]),
@@ -116,10 +134,16 @@ describe('turnReadOutsideText', () => {
 
 describe('callReturnsOutsideContent', () => {
   it('is false for a direct page tool call and true for the same name through call_tool', () => {
-    expect(callReturnsOutsideContent(call('c1', 'forget_fact'))).toBe(false);
+    expect(callReturnsOutsideContent(hostCall('c1', 'forget_fact'))).toBe(false);
     expect(
-      callReturnsOutsideContent(call('c2', 'call_tool', { mcp_server: 'Notes', tool_name: 'forget_fact', input: {} })),
+      callReturnsOutsideContent(
+        hostCall('c2', 'call_tool', { mcp_server: 'Notes', tool_name: 'forget_fact', input: {} }),
+      ),
     ).toBe(true);
+  });
+
+  it('is true for a page tool name the host did not stamp as its own', () => {
+    expect(callReturnsOutsideContent(call('c1', 'forget_fact'))).toBe(true);
   });
 
   it('is true for a connector tool whose name ends in a page tool name', () => {
