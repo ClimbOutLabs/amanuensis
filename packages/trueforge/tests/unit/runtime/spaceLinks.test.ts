@@ -178,6 +178,29 @@ describe('unseen link words', () => {
   });
 });
 
+describe('a link with a sign-in name before its site', () => {
+  const WITH_NAME = SEEN.replace('https://', 'https://lake-house@');
+
+  it('is cut out even when a search returned the same link without the name', () => {
+    const result = dropOf({ body: `<p><a href="${WITH_NAME}">Fox</a></p>`, format: 'html' });
+    expect(result.body).toBe('<p><a >Fox</a></p>');
+    expect(result).toMatchObject({ links: 1, pictures: 0 });
+  });
+
+  it('is cut out as a picture even when a page listed the same picture without the name', () => {
+    const state = createWebSearchTurnState();
+    recordPageImageUrls({ provenance: state.provenance, urls: [SEEN] });
+    const result = dropUnseenSpaceLinks({
+      body: `<p><img src="${WITH_NAME}" alt="A red fox"></p>`,
+      previousBody: '',
+      format: 'html',
+      web_search: state,
+    });
+    expect(result.body).toBe('<p>A red fox</p>');
+    expect(result).toMatchObject({ links: 0, pictures: 1 });
+  });
+});
+
 describe('space links are checked from a real parse of the body', () => {
   describe.each([...HTML_SPELLINGS, ...MARKDOWN_SPELLINGS])('$name', ({ format, body }) => {
     it('cuts out a link the chat never returned, whatever its spelling', () => {

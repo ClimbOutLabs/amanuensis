@@ -97,6 +97,7 @@ describe('connectorCatalog mappers', () => {
         name: 'linear',
         url: 'https://mcp.linear.app/mcp',
         description: 'Linear MCP server.',
+        logo: 'catalog-logo:mcp/linear',
         auth: { type: 'dcr' },
       },
     );
@@ -109,11 +110,24 @@ describe('connectorCatalog mappers', () => {
         name: 'linear',
         url: 'https://mcp.linear.app/mcp',
         description: 'Linear MCP server.',
-        logo: 'https://assets.production.truefoundry.com/linear.svg',
+        logo: 'https://assets.example/linear.svg',
       },
       { baseUrl: '/' },
     );
-    assert.equal(entry.logo, '/catalog-logos/https/assets.production.truefoundry.com/linear.svg');
+    assert.equal(entry.logo, '/catalog-logos/https/assets.example/linear.svg');
+  });
+
+  it('uses the bundled logo when the shipped catalog names none', () => {
+    const entry = toUiCatalogEntry(
+      { type: 'remote', name: 'linear', url: 'https://mcp.linear.app/mcp', description: 'Linear MCP server.' },
+      { baseUrl: '/' },
+    );
+    assert.equal(entry.logo, 'catalog-logo:mcp/linear');
+    const unknown = toUiCatalogEntry(
+      { type: 'remote', name: 'unknown-server', url: 'https://mcp.example/mcp', description: 'No logo.' },
+      { baseUrl: '/' },
+    );
+    assert.equal(unknown.logo, undefined);
   });
 
   it('maps configured servers without embedding tools', () => {
@@ -511,6 +525,46 @@ describe('connectorCatalog memory-provider check', () => {
     );
 
     await assert.rejects(() => catalog.checkMemoryProvider({ id: 'nope' }), /MCP server not found: nope/);
+  });
+});
+
+describe('connectorCatalog Home Assistant check', () => {
+  function catalogWithFetch(fetchImpl: typeof fetch) {
+    const client = new TrueForge({ baseUrl: 'http://harness.test', maxRetries: 0, fetch: fetchImpl });
+    return createConnectorCatalog(client, { baseUrl: 'http://harness.test' });
+  }
+
+  function jsonResponse(body: unknown, status = 200): Response {
+    return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+  }
+
+  it('posts to the check route through the generated client and maps the counts', async () => {
+    const calls: { url: string; method: string | undefined }[] = [];
+    const catalog = catalogWithFetch(async (input, init) => {
+      calls.push({ url: String(input), method: init?.method });
+      return jsonResponse({ data: { status: 'ok', tool_count: 9, entity_count: 5 } });
+    });
+
+    assert.deepEqual(await catalog.checkHomeAssistant({ id: 'home-assistant' }), {
+      status: 'ok',
+      toolCount: 9,
+      entityCount: 5,
+    });
+    assert.deepEqual(calls, [
+      { url: 'http://harness.test/api/v1/mcp-servers/home-assistant/home-assistant-check', method: 'POST' },
+    ]);
+  });
+
+  it('maps a failed check onto the reason Home Assistant gave', async () => {
+    const catalog = catalogWithFetch(async () =>
+      jsonResponse({ data: { status: 'failed', code: 'token_refused', reason: 'Home Assistant refused the token' } }),
+    );
+
+    assert.deepEqual(await catalog.checkHomeAssistant({ id: 'home-assistant' }), {
+      status: 'failed',
+      code: 'token_refused',
+      reason: 'Home Assistant refused the token',
+    });
   });
 });
 

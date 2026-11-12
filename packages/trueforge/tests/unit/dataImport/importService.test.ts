@@ -5,7 +5,11 @@ import { join } from 'node:path';
 import v8 from 'node:v8';
 
 import { sql, type Transaction } from 'kysely';
-import { makeCreateTurnInput, makeModelMessageEvent } from '../../../../trueforge-core/tests/agent-session/testHelpers';
+import {
+  makeAgentSpec,
+  makeCreateTurnInput,
+  makeModelMessageEvent,
+} from '../../../../trueforge-core/tests/agent-session/testHelpers';
 
 import { AgentSpecSchema, InMemorySessionStore, MAIN_THREAD_ID } from '@truefoundry/trueforge-core/agent-session';
 import { defaultSearchConnector } from '../../../src/catalog/defaultSearchConnector';
@@ -253,6 +257,7 @@ describe('runDataImport', () => {
         source_id: undefined,
         folder_id: undefined,
         no_folder: false,
+        include_private: false,
       });
       expect(sessions.data.map(session => session.session_id).sort()).toEqual([
         SEED_IDS.sessionMain,
@@ -1016,6 +1021,8 @@ describe('export and import round trip', () => {
         metadata: {},
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
       await source.stores.sessionStore.createTurn(
         makeCreateTurnInput({
@@ -1076,6 +1083,7 @@ async function chatsOf(instance: Instance, userId: string) {
     source_id: undefined,
     folder_id: undefined,
     no_folder: false,
+    include_private: false,
   });
   return page.data;
 }
@@ -1235,6 +1243,7 @@ describe('runDataImport keeps what the archive recorded', () => {
         source_id: undefined,
         folder_id: undefined,
         no_folder: false,
+        include_private: false,
       });
       expect(newestFirst.data.map(session => session.session_id)).toEqual([
         SEED_IDS.sessionRunning,
@@ -1757,6 +1766,8 @@ describe('runDataImport refuses an instance that is not fresh', () => {
         metadata: {},
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
       const error = await importError(target, archive);
       expect(error).toMatchObject({ status: 409 });
@@ -1897,6 +1908,7 @@ describe('runDataImport failure handling', () => {
         source_id: undefined,
         folder_id: undefined,
         no_folder: false,
+        include_private: false,
       });
       expect(sessions.data).toHaveLength(0);
       expect(
@@ -1954,6 +1966,7 @@ describe('runDataImport failure handling', () => {
         source_id: undefined,
         folder_id: undefined,
         no_folder: false,
+        include_private: false,
       });
       expect(sessions.data).toHaveLength(0);
       expect(await target.stores.agentStore.getAgent({ tenant_id: TENANT, name: SEED_IDS.agentName })).toBeUndefined();
@@ -1981,6 +1994,8 @@ describe('runDataImport failure handling', () => {
         metadata: {},
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
       await sql`CREATE TRIGGER import_fail_space_update BEFORE UPDATE ON space BEGIN SELECT RAISE(ABORT, 'injected failure'); END`.execute(
         target.db,
@@ -2096,6 +2111,8 @@ describe('runDataImport failure handling', () => {
         metadata: {},
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
       const error = await importError(target, archive);
       expect(error).toMatchObject({ status: 409 });
@@ -2499,6 +2516,8 @@ describe('runDataImport at scale', () => {
           metadata: {},
           external_id: null,
           source: null,
+          is_incognito: false,
+          private_expires_at: null,
         });
         await inMemory.createTurn(
           makeCreateTurnInput({
@@ -3847,6 +3866,7 @@ describe('runDataImport never restores a live approval', () => {
         source_id: undefined,
         folder_id: undefined,
         no_folder: false,
+        include_private: false,
       });
       expect(sessions.data).toHaveLength(3);
       for (const session of sessions.data) {
@@ -3892,6 +3912,8 @@ async function seedLongChat(
     metadata: {},
     external_id: null,
     source: null,
+    is_incognito: false,
+    private_expires_at: null,
   });
   let previousTurnId: string | undefined;
   for (let index = 0; index < turns; index += 1) {
@@ -4166,6 +4188,7 @@ describe('runDataImport dry run on a long chat', () => {
         source_id: undefined,
         folder_id: undefined,
         no_folder: false,
+        include_private: false,
       });
       expect(sessions.data).toEqual([]);
     } finally {
@@ -4201,6 +4224,8 @@ async function seedEditedFirstMessageChat(instance: Instance): Promise<void> {
     metadata: {},
     external_id: null,
     source: null,
+    is_incognito: false,
+    private_expires_at: null,
   });
   const turns = [
     { turnId: 'edited-turn-1', previousTurnId: undefined, question: 'Plan a walk', answer: 'Sure.' },
@@ -4759,6 +4784,7 @@ describe('runDataImport tells the person everything it left out', () => {
         source_id: undefined,
         folder_id: undefined,
         no_folder: false,
+        include_private: false,
       });
       expect(sessions.data).toEqual([]);
 
@@ -5161,6 +5187,108 @@ describe('runDataImport keeps the source label of saved findings', () => {
         note_source: 'email',
         note_date: '2026-10-20',
       });
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+});
+
+describe('runDataImport and private chats', () => {
+  function sessionRecordsOf(entries: Map<string, Buffer>): JsonRecord[] {
+    const records = recordsAt(parseJson(entries.get('sessions/0001.json'), 'part'), 'part');
+    return records.filter(record => record['kind'] === 'session').map(record => recordAt(record['session'], 'session'));
+  }
+
+  it('imports an export made before private chats as ordinary chats', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-before-private-chats');
+    try {
+      const older = await repack(archive, entries => {
+        const records = recordsAt(parseJson(entries.get('sessions/0001.json'), 'part'), 'part');
+        for (const record of records) {
+          if (record['kind'] === 'session') {
+            const session = recordAt(record['session'], 'session');
+            delete session['is_incognito'];
+            delete session['private_expires_at'];
+          }
+        }
+        entries.set('sessions/0001.json', Buffer.from(JSON.stringify(records)));
+      });
+      expect(
+        sessionRecordsOf(new Map(readZipEntries(older).map(entry => [entry.name, entry.data]))),
+      ).not.toContainEqual(expect.objectContaining({ is_incognito: expect.anything() }));
+
+      const result = await runDataImport(importDeps(target), importRequest(older));
+
+      expect(result.chats).toBeGreaterThan(0);
+      const session = await target.stores.sessionStore.getSession({
+        tenant_id: TENANT,
+        session_id: SEED_IDS.sessionMain,
+      });
+      expect(session).toMatchObject({ is_incognito: false, private_expires_at: null });
+    } finally {
+      await source.close();
+      await target.close();
+    }
+  });
+
+  it('leaves a private chat out of the export', async () => {
+    const source = await makeInstance('source-private-chat');
+    try {
+      await seedRichInstance({
+        stores: source.stores,
+        tenantId: TENANT,
+        userId: 'alice',
+        memoryDir: source.memoryDir,
+        knowledgeDir: source.knowledgeDir,
+      });
+      await source.stores.sessionStore.createSession({
+        tenant_id: TENANT,
+        session_id: 'private-chat',
+        created_by_subject: { subject_id: 'alice', subject_type: 'user', subject_display_name: 'alice' },
+        agent: { type: 'inline', spec: makeAgentSpec() },
+        custom: null,
+        metadata: {},
+        external_id: null,
+        source: null,
+        is_incognito: true,
+        private_expires_at: new Date(Date.now() + 60_000),
+      });
+
+      const archive = await exportArchive(source);
+
+      const ids = sessionRecordsOf(new Map(readZipEntries(archive).map(entry => [entry.name, entry.data]))).map(
+        session => session['session_id'],
+      );
+      expect(ids).toContain(SEED_IDS.sessionMain);
+      expect(ids).not.toContain('private-chat');
+    } finally {
+      await source.close();
+    }
+  });
+
+  it('never brings back a chat an archive marks private', async () => {
+    const { source, archive } = await seededArchive();
+    const target = await makeInstance('target-private-in-archive');
+    try {
+      const marked = await repack(archive, entries => {
+        const records = recordsAt(parseJson(entries.get('sessions/0001.json'), 'part'), 'part');
+        for (const record of records) {
+          const session = record['kind'] === 'session' ? recordAt(record['session'], 'session') : undefined;
+          if (session?.['session_id'] === SEED_IDS.sessionMain) {
+            session['is_incognito'] = true;
+            session['private_expires_at'] = new Date(Date.now() + 60_000).toISOString();
+          }
+        }
+        entries.set('sessions/0001.json', Buffer.from(JSON.stringify(records)));
+      });
+
+      await runDataImport(importDeps(target), importRequest(marked));
+
+      expect(
+        await target.stores.sessionStore.getSession({ tenant_id: TENANT, session_id: SEED_IDS.sessionMain }),
+      ).toBeUndefined();
     } finally {
       await source.close();
       await target.close();

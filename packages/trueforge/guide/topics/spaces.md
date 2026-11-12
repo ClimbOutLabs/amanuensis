@@ -1,7 +1,7 @@
 ---
 id: spaces
 title: Spaces, your saved pages
-covers:
+covers: route:space
 ---
 
 A space is a page that Aman keeps up to date for you. It can be a list, a table or a board.

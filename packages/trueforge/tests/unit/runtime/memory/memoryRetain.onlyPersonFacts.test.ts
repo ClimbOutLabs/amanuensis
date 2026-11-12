@@ -64,6 +64,7 @@ describe('memory across chats', () => {
       const client = new MarkdownMemoryClient({ baseDir: dir, namespace: 'tenant-1' });
 
       await submitRetain({
+        session: { is_incognito: false },
         client,
         sessionId: 'chat-1',
         turnId: 't1',

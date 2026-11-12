@@ -149,6 +149,7 @@ async function drainTurn(input: {
     logger,
     turnDrains: new TurnDrainRegistry(),
     memory: {
+      session: { is_incognito: false },
       client,
       userText,
       attachedFiles: false,

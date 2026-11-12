@@ -19,6 +19,7 @@ import { ConnectionStatusContainer } from './ConnectionStatusContainer.js';
 import { DocumentIngestionStatusProvider } from './DocumentIngestionStatusProvider.js';
 import { HistoryLoaderContainer } from './HistoryLoaderContainer.js';
 import { ThreadImplementationPlanGrantControls } from './ImplementationPlanGrantControls.js';
+import { LiveVoiceBridge } from './LiveVoiceBridge.js';
 import { MemoryTurnContextProvider } from './MemoryTurnContextProvider.js';
 import { ModelUsageTurnProvider } from './ModelUsageTurnProvider.js';
 import { PendingApprovalsBanner } from './PendingApprovalsBanner.js';
@@ -118,6 +119,7 @@ export function ThreadContainer({ composer }: ThreadContainerProps) {
           <SentinelStateProvider>
             <ComposerBusyProvider>
               <AvatarActivityBridge />
+              <LiveVoiceBridge />
               <SpokenReplyContainer />
               <ApprovalFocusProvider>
                 <WorkOnRepoPanelProvider>

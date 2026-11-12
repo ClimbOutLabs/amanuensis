@@ -15,6 +15,7 @@ import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import { PACKAGE_VERSION } from '../packageVersion';
 import { createSessionBugReportRoute } from '../routes/sessionRoutes';
+import { PRIVATE_CHAT_BUG_REPORT_MESSAGE, sessionKeepsNothing } from '../runtime/privateChat';
 import { EVENTS_PAGE_LIMIT } from '../schemas/common';
 import { buildBugReportBundle } from './bugReportRedactor';
 import { readLocalCapabilitiesData, toBuildIdentity } from './capabilities';
@@ -96,6 +97,10 @@ export function createBugReportRouter<TTransaction>(deps: BugReportRouterDeps<TT
       })
     ) {
       return c.json({ error: { message: FORBIDDEN_SESSION_ACCESS } }, 403);
+    }
+    // Nothing from a private chat leaves in a report, not even its trace.
+    if (sessionKeepsNothing({ session: session.record })) {
+      return c.json({ error: { message: PRIVATE_CHAT_BUG_REPORT_MESSAGE } }, 422);
     }
 
     // config_flags are sourced from the persisted sandbox status only: generating a bug report

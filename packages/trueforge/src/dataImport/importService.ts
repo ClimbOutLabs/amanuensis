@@ -626,7 +626,7 @@ function readSessionEntries(input: {
       logger,
       leftOut,
     });
-    return () => entries;
+    return () => withoutPrivateChats({ entries, logger });
   }
   if (partNames.length === 0) {
     throw new DataImportError(
@@ -658,7 +658,26 @@ function readSessionEntries(input: {
       yield* last.records;
     }
   }
-  return () => assembleSessionParts(records());
+  return () => withoutPrivateChats({ entries: assembleSessionParts(records()), logger });
+}
+
+/**
+ * Exports never hold a private chat, since nothing of one is kept. An archive that claims one
+ * anyway does not bring it back: restoring it would keep the chat its owner meant to forget.
+ */
+function* withoutPrivateChats(input: {
+  entries: Iterable<ImportSessionEntry>;
+  logger: DataImportDeps<never>['logger'];
+}): Generator<ImportSessionEntry> {
+  for (const entry of input.entries) {
+    if (entry.session.is_incognito) {
+      input.logger.warn('Data import skipped a private chat found in the archive', {
+        sessionId: entry.session.session_id,
+      });
+      continue;
+    }
+    yield entry;
+  }
 }
 
 function loadArchive(input: {

@@ -58,10 +58,6 @@
       "AgentCodeSnippet": {
         "additionalProperties": false,
         "properties": {
-          "icon": {
-            "format": "uri",
-            "type": "string"
-          },
           "label_name": {
             "minLength": 1,
             "type": "string"
@@ -77,7 +73,6 @@
         "required": [
           "label_name",
           "language",
-          "icon",
           "sample_code"
         ],
         "type": "object"
@@ -1280,6 +1275,13 @@
       },
       "CalendarProvider": {
         "properties": {
+          "account_url_template": {
+            "description": "A built-in calendar address made from the email address; null when the provider does not use one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "help_hint": {
             "description": "One plain sentence on how to get an app password.",
             "type": "string"
@@ -1292,7 +1294,7 @@
             ]
           },
           "key": {
-            "description": "Stable provider key, such as fastmail or other.",
+            "description": "Stable provider key, such as google or other.",
             "type": "string"
           },
           "name": {
@@ -1300,25 +1302,39 @@
             "type": "string"
           },
           "server_url": {
-            "description": "The built-in calendar address; null when it depends on the email domain or is typed.",
+            "description": "The built-in calendar address; null when it depends on the email domain, the email address or is typed.",
             "type": [
               "string",
               "null"
             ]
+          },
+          "setup_steps": {
+            "description": "Plain steps to show before the form; empty when the hint is enough.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           }
         },
         "required": [
           "key",
           "name",
           "server_url",
+          "account_url_template",
           "help_url",
-          "help_hint"
+          "help_hint",
+          "setup_steps"
         ],
         "type": "object"
       },
       "CancelSessionRequest": {
-        "description": "Empty request body. Cancel identifies the session via the path only.",
-        "properties": {},
+        "description": "Optional request body. The session comes from the path.",
+        "properties": {
+          "turn_id": {
+            "description": "Cancel only this turn, and nothing else running in the session. Omit to cancel the last turn.",
+            "type": "string"
+          }
+        },
         "type": "object"
       },
       "CancelSessionResponse": {
@@ -1349,6 +1365,9 @@
           "settings": {
             "$ref": "#/components/schemas/SettingsCapability"
           },
+          "sign_in": {
+            "$ref": "#/components/schemas/SignInCapability"
+          },
           "skill": {
             "$ref": "#/components/schemas/SkillCapability"
           },
@@ -1368,6 +1387,7 @@
           "memory_defaults",
           "memory_embeddings",
           "sandbox_isolation",
+          "sign_in",
           "build"
         ],
         "type": "object"
@@ -1754,6 +1774,26 @@
         ],
         "type": "object"
       },
+      "ChatPrivacy": {
+        "properties": {
+          "hosted_providers": {
+            "description": "Providers off this machine that may answer this chat; empty when it stays here.",
+            "items": {
+              "$ref": "#/components/schemas/HostedModelProvider"
+            },
+            "type": "array"
+          },
+          "leaves_machine": {
+            "description": "True when a model that may answer this chat runs off this machine.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "leaves_machine",
+          "hosted_providers"
+        ],
+        "type": "object"
+      },
       "CheckGoogleClientRequest": {
         "properties": {
           "client": {
@@ -1945,6 +1985,31 @@
         "required": [
           "command_id",
           "timeout_ms"
+        ],
+        "type": "object"
+      },
+      "ConnectVoiceRequest": {
+        "properties": {
+          "client_timezone": {
+            "description": "IANA time zone of the person talking.",
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string"
+          },
+          "session_id": {
+            "description": "The chat to talk in.",
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "voice": {
+            "description": "Voice id for spoken replies. Defaults to the server voice.",
+            "pattern": "^[a-z]{2}_[a-z]+$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id"
         ],
         "type": "object"
       },
@@ -2265,7 +2330,7 @@
             "$ref": "#/components/schemas/ResourceName"
           },
           "manifest": {
-            "$ref": "#/components/schemas/ScheduleManifest"
+            "$ref": "#/components/schemas/ScheduleManifestInput"
           },
           "name": {
             "$ref": "#/components/schemas/ResourceName"
@@ -2360,6 +2425,10 @@
         "properties": {
           "agent": {
             "$ref": "#/components/schemas/CreateSessionAgent"
+          },
+          "is_incognito": {
+            "description": "True starts a private chat: nothing from it is remembered, and it is deleted when closed.",
+            "type": "boolean"
           },
           "metadata": {
             "$ref": "#/components/schemas/SessionMetadata"
@@ -3249,6 +3318,17 @@
         ],
         "type": "object"
       },
+      "GetChatPrivacyResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ChatPrivacy"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "GetDeliveryResponse": {
         "properties": {
           "data": {
@@ -3491,6 +3571,17 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/ConfiguredModelProvider"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "GetNotesFolderResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/NotesFolderStatus"
           }
         },
         "required": [
@@ -4212,7 +4303,8 @@
           "gmail_read",
           "gmail_compose",
           "calendar_read",
-          "calendar_write"
+          "calendar_write",
+          "drive_files"
         ],
         "type": "string"
       },
@@ -4304,6 +4396,41 @@
         ],
         "type": "object"
       },
+      "HelpConnectorState": {
+        "properties": {
+          "connected": {
+            "description": "Whether the connector answered this check with its tools.",
+            "type": "boolean"
+          },
+          "last_error": {
+            "description": "One plain sentence on why it did not answer this check, or null.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "description": "The connector name. Never a token or address.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "connected",
+          "last_error"
+        ],
+        "type": "object"
+      },
+      "HelpGoogleLoginState": {
+        "description": "The built-in Google login: answered, needs connecting again, did not answer, or not set up.",
+        "enum": [
+          "answered",
+          "needs_reconnect",
+          "no_answer",
+          "not_set_up"
+        ],
+        "type": "string"
+      },
       "HelpHealthCheck": {
         "properties": {
           "checked_at": {
@@ -4323,13 +4450,17 @@
           "model_ready": {
             "description": "Whether the default model answered the test call.",
             "type": "boolean"
+          },
+          "state": {
+            "$ref": "#/components/schemas/HelpState"
           }
         },
         "required": [
           "checked_at",
           "model_ready",
           "items",
-          "host_report"
+          "host_report",
+          "state"
         ],
         "type": "object"
       },
@@ -4421,6 +4552,170 @@
           "stale"
         ],
         "type": "string"
+      },
+      "HelpSetupStep": {
+        "properties": {
+          "done": {
+            "description": "Whether this setup step is done.",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "model: a default model is chosen. about_you: your name is saved in Personalization.",
+            "enum": [
+              "model",
+              "about_you"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "done"
+        ],
+        "type": "object"
+      },
+      "HelpState": {
+        "properties": {
+          "app_version": {
+            "description": "The version of Aman this server runs.",
+            "type": "string"
+          },
+          "build_ref": {
+            "description": "The build this server runs, or null when the build was not stamped.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "connectors": {
+            "description": "Each connector, whether it answered, and why not.",
+            "items": {
+              "$ref": "#/components/schemas/HelpConnectorState"
+            },
+            "type": "array"
+          },
+          "google_login": {
+            "$ref": "#/components/schemas/HelpGoogleLoginState"
+          },
+          "sandbox_ready": {
+            "description": "Whether the sandbox that reads files and runs code is ready.",
+            "type": "boolean"
+          },
+          "setup_steps": {
+            "description": "The first-run setup steps and whether each is done.",
+            "items": {
+              "$ref": "#/components/schemas/HelpSetupStep"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "setup_steps",
+          "connectors",
+          "google_login",
+          "sandbox_ready",
+          "app_version",
+          "build_ref"
+        ],
+        "type": "object"
+      },
+      "HomeAssistantCheckFailureCode": {
+        "description": "Why Home Assistant could not be connected: `unreachable` (nothing answered at the address), `token_refused` (Home Assistant refused the token), `integration_missing` (the Model Context Protocol Server integration is not installed), `certificate` (the address uses a certificate that cannot be checked), or `error` (anything else).",
+        "enum": [
+          "unreachable",
+          "token_refused",
+          "integration_missing",
+          "certificate",
+          "error"
+        ],
+        "type": "string"
+      },
+      "HomeAssistantCheckResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/HomeAssistantCheckResult"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "HomeAssistantCheckResult": {
+        "description": "Outcome of one Home Assistant connection check.",
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "entity_count": {
+                "description": "How many exposed entities the live-context tool named, or null when it is not offered.",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "status": {
+                "description": "Home Assistant answered the handshake and the live-context read.",
+                "enum": [
+                  "ok"
+                ],
+                "type": "string"
+              },
+              "tool_count": {
+                "description": "How many tools the server offers.",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "status",
+              "tool_count",
+              "entity_count"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/HomeAssistantCheckFailureCode"
+              },
+              "reason": {
+                "description": "One plain line saying what to fix.",
+                "type": "string"
+              },
+              "status": {
+                "description": "Home Assistant could not be connected.",
+                "enum": [
+                  "failed"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "code",
+              "reason"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "HostedModelProvider": {
+        "properties": {
+          "name": {
+            "description": "The provider name as configured.",
+            "type": "string"
+          },
+          "type": {
+            "description": "Provider type, for example `anthropic` or `custom`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "name"
+        ],
+        "type": "object"
       },
       "ImplementationPlan": {
         "additionalProperties": false,
@@ -6396,10 +6691,11 @@
         "type": "object"
       },
       "MeSessionType": {
-        "description": "`oidc-connected` when the process is running with browser OIDC login; `default` for standalone or TrueFoundry token auth.",
+        "description": "`oidc-connected` when the process is running with browser OIDC login; `local-connected` for local sign-in (`TRUEFORGE_AUTH_MODE=local`); `default` for standalone or TrueFoundry token auth.",
         "enum": [
           "default",
-          "oidc-connected"
+          "oidc-connected",
+          "local-connected"
         ],
         "type": "string"
       },
@@ -7847,6 +8143,45 @@
         ],
         "type": "object"
       },
+      "NotesFolderStatus": {
+        "properties": {
+          "folder_path": {
+            "description": "The folder of notes the person connected; null when no folder is connected.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "inbox_file": {
+            "description": "The file inside the folder that inbox entries are added to; the default name until one is picked.",
+            "type": "string"
+          },
+          "note_count": {
+            "description": "How many notes the folder holds; null when no folder is connected or it cannot be read right now.",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "state": {
+            "description": "Connected, not connected, connected but the saved sign-in no longer works, or saved but the server cannot be reached right now.",
+            "enum": [
+              "connected",
+              "not_connected",
+              "sign_in_stopped",
+              "not_working"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "folder_path",
+          "inbox_file",
+          "note_count"
+        ],
+        "type": "object"
+      },
       "NudgeDelivery": {
         "properties": {
           "attempts": {
@@ -8977,6 +9312,17 @@
         ],
         "type": "object"
       },
+      "RemoveNotesFolderResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/NotesFolderStatus"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "ReplyResultsByKind": {
         "description": "Tool call results in this reply: ok, refused, unavailable, or error.",
         "properties": {
@@ -9345,6 +9691,10 @@
           "enabled": {
             "description": "Whether a sandbox provider is configured for this tenant.",
             "type": "boolean"
+          },
+          "reason": {
+            "description": "Why the sandbox is off, in plain words; present only when it is off and a reason is known.",
+            "type": "string"
           }
         },
         "required": [
@@ -9621,6 +9971,33 @@
         ],
         "type": "object"
       },
+      "SaveNotesFolderRequest": {
+        "properties": {
+          "folder_path": {
+            "description": "The path of the folder of Markdown notes, on the computer Aman runs on.",
+            "type": "string"
+          },
+          "inbox_file": {
+            "description": "The file in the folder that inbox entries are added to; the default name when left out.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "folder_path"
+        ],
+        "type": "object"
+      },
+      "SaveNotesFolderResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/NotesFolderStatus"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "Schedule": {
         "additionalProperties": false,
         "properties": {
@@ -9673,6 +10050,43 @@
         "type": "string"
       },
       "ScheduleManifest": {
+        "additionalProperties": false,
+        "properties": {
+          "cron": {
+            "$ref": "#/components/schemas/CronExpression"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ScheduleKind"
+          },
+          "origin_session_id": {
+            "default": null,
+            "description": "The chat a reminder was set in, so its line lands in that chat when it fires. Null for tasks, for reminders set outside a chat, and for reminders saved before this was recorded.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "run_at": {
+            "$ref": "#/components/schemas/RunAt"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ScheduleStatus"
+          },
+          "task": {
+            "description": "First user message sent to the agent on every run.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "timezone": {
+            "$ref": "#/components/schemas/Timezone"
+          }
+        },
+        "required": [
+          "task"
+        ],
+        "type": "object"
+      },
+      "ScheduleManifestInput": {
         "additionalProperties": false,
         "properties": {
           "cron": {
@@ -9981,11 +10395,22 @@
             "description": "Unique session id.",
             "type": "string"
           },
+          "is_incognito": {
+            "description": "True for a private chat: nothing from it is remembered, and it is deleted when it is closed.",
+            "type": "boolean"
+          },
           "metadata": {
             "$ref": "#/components/schemas/SessionMetadata"
           },
           "metrics": {
             "$ref": "#/components/schemas/SessionMetrics"
+          },
+          "private_expires_at": {
+            "description": "ISO 8601 time a private chat is deleted if it is not closed first; null for other chats.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "source": {
             "$ref": "#/components/schemas/SessionSource"
@@ -10013,7 +10438,9 @@
           "approval_grants",
           "metrics",
           "metadata",
-          "source"
+          "source",
+          "is_incognito",
+          "private_expires_at"
         ],
         "type": "object"
       },
@@ -10811,6 +11238,24 @@
         ],
         "type": "object"
       },
+      "SignInCapability": {
+        "properties": {
+          "mode": {
+            "description": "How this instance signs people in. `local` means Aman keeps one email and password itself.",
+            "enum": [
+              "local",
+              "oidc",
+              "standalone",
+              "truefoundry"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "type": "object"
+      },
       "Skill": {
         "additionalProperties": false,
         "properties": {
@@ -11238,6 +11683,19 @@
         ],
         "type": "object"
       },
+      "SweepPrivateChatsResponse": {
+        "properties": {
+          "deleted": {
+            "description": "Private chats deleted because they expired.",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "deleted"
+        ],
+        "type": "object"
+      },
       "TaskStateConfig": {
         "default": {},
         "properties": {
@@ -11467,6 +11925,10 @@
             ],
             "type": "string"
           },
+          "already_created": {
+            "description": "True when the same event was already created in this chat a few minutes ago.",
+            "type": "boolean"
+          },
           "attendees": {
             "description": "Every guest on the event.",
             "items": {
@@ -11500,6 +11962,11 @@
           "one_of_repeating": {
             "description": "True when this changes one date of a repeating event.",
             "type": "boolean"
+          },
+          "span_days": {
+            "description": "How many days the event runs over; 1 for an ordinary event.",
+            "minimum": 1,
+            "type": "integer"
           },
           "time_zone": {
             "description": "IANA time zone the times are in.",
@@ -11715,6 +12182,17 @@
               "$ref": "#/components/schemas/Tier3Mailbox"
             },
             "type": "array"
+          },
+          "from_name": {
+            "description": "The display name the message is sent as, or null when none is set.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name_left_off": {
+            "description": "True when a name was left off an address because it looked like an address.",
+            "type": "boolean"
           },
           "replaces": {
             "description": "The saved draft a change replaces, or null.",
@@ -14070,7 +14548,7 @@
         "additionalProperties": false,
         "properties": {
           "manifest": {
-            "$ref": "#/components/schemas/ScheduleManifest"
+            "$ref": "#/components/schemas/ScheduleManifestInput"
           },
           "name": {
             "$ref": "#/components/schemas/ResourceName"
@@ -14174,6 +14652,10 @@
         "properties": {
           "agent": {
             "$ref": "#/components/schemas/SessionAgentSpecBody"
+          },
+          "is_incognito": {
+            "description": "Set only when a chat is created. A value that differs from the chat is refused.",
+            "type": "boolean"
           },
           "metadata": {
             "$ref": "#/components/schemas/SessionMetadata"
@@ -14724,6 +15206,44 @@
         ],
         "type": "object"
       },
+      "VoiceTicket": {
+        "properties": {
+          "expires_in_seconds": {
+            "description": "Seconds the ticket stays valid.",
+            "type": "integer"
+          },
+          "path": {
+            "description": "WebSocket path to open on this server.",
+            "type": "string"
+          },
+          "protocol": {
+            "description": "Sub-protocol name to ask for on the WebSocket.",
+            "type": "string"
+          },
+          "ticket": {
+            "description": "Single-use ticket to open the voice line. Send it as the `ticket.<id>` sub-protocol.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticket",
+          "expires_in_seconds",
+          "protocol",
+          "path"
+        ],
+        "type": "object"
+      },
+      "VoiceTicketResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/VoiceTicket"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "VoiceTranscription": {
         "properties": {
           "duration_ms": {
@@ -15207,6 +15727,42 @@
           "metrics"
         ],
         "x-fern-sdk-method-name": "get_meters"
+      }
+    },
+    "/api/internal/private-chats/sweep": {
+      "post": {
+        "description": "Delete private chats whose expiry time has passed. Safe to call any time.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SweepPrivateChatsResponse"
+                }
+              }
+            },
+            "description": "Sweep finished."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid service credential."
+          }
+        },
+        "summary": "Delete expired private chats",
+        "tags": [
+          "Internal"
+        ],
+        "x-fern-sdk-group-name": [
+          "internal",
+          "private_chats"
+        ],
+        "x-fern-sdk-method-name": "sweep"
       }
     },
     "/api/internal/schedules/runs/execute": {
@@ -15854,7 +16410,7 @@
     },
     "/api/v1/auth/me": {
       "get": {
-        "description": "Returns the authenticated caller identity (`type`, `tenant_id`, `subject`, `roles`) wrapped as `{ data }`. `type` is `oidc-connected` when browser OIDC is enabled, otherwise `default`. When auth is enabled this requires a valid `id_token` cookie or `Authorization: Bearer` token (401 otherwise). When auth is disabled, returns the standalone default identity.",
+        "description": "Returns the authenticated caller identity (`type`, `tenant_id`, `subject`, `roles`) wrapped as `{ data }`. `type` is `oidc-connected` when browser OIDC is enabled, `local-connected` for local sign-in, otherwise `default`. When auth is enabled this requires a valid `id_token` cookie or `Authorization: Bearer` token (401 otherwise). When auth is disabled, returns the standalone default identity.",
         "responses": {
           "200": {
             "content": {
@@ -16679,6 +17235,54 @@
           "mcpServers"
         ],
         "x-fern-sdk-method-name": "authorize"
+      }
+    },
+    "/api/v1/mcp-servers/{name}/home-assistant-check": {
+      "post": {
+        "description": "Runs the MCP handshake against the saved connector, lists its tools, and reads the live-context tool once, so the answer says how many tools and exposed entities Aman can see, or the one thing to fix. Read-only: the connector is never modified, and a failed check is a 200 carrying the reason.",
+        "parameters": [
+          {
+            "description": "MCP server name.",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "MCP server name.",
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HomeAssistantCheckResponse"
+                }
+              }
+            },
+            "description": "The check ran; the result says whether Home Assistant answered and why not."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "MCP server not found."
+          }
+        },
+        "summary": "Check a Home Assistant connector",
+        "tags": [
+          "MCP Servers"
+        ],
+        "x-fern-sdk-group-name": [
+          "mcpServers"
+        ],
+        "x-fern-sdk-method-name": "home_assistant_check"
       }
     },
     "/api/v1/mcp-servers/{name}/memory-check": {
@@ -20116,6 +20720,16 @@
             }
           },
           {
+            "description": "When true, your own open private chats are included. They are left out by default.",
+            "in": "query",
+            "name": "include_private",
+            "required": false,
+            "schema": {
+              "description": "When true, your own open private chats are included. They are left out by default.",
+              "type": "boolean"
+            }
+          },
+          {
             "description": "When true, only sessions created by the authenticated subject.",
             "in": "query",
             "name": "created_by_me",
@@ -20593,6 +21207,16 @@
               }
             },
             "description": "Session not found."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The chat is private, so no report is made from it."
           }
         },
         "summary": "Generate a redacted bug-report bundle for a session",
@@ -20607,7 +21231,7 @@
     },
     "/api/v1/sessions/{session_id}/cancel": {
       "post": {
-        "description": "Cancel the running last turn for a session. Only the session creator may cancel.",
+        "description": "Cancel the running last turn for a session, or only the turn named by `turn_id`. Only the session creator may cancel.",
         "parameters": [
           {
             "description": "Session identifier.",
@@ -20930,6 +21554,16 @@
               }
             },
             "description": "Session or owner-scoped folder not found."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Private chats cannot be filed in a folder."
           }
         },
         "summary": "Assign a session to a folder",
@@ -21295,6 +21929,65 @@
           "session-personas"
         ],
         "x-fern-sdk-method-name": "list_activations"
+      }
+    },
+    "/api/v1/sessions/{session_id}/privacy": {
+      "get": {
+        "description": "Whether the models that may answer this chat run on this machine, and which providers run elsewhere.",
+        "parameters": [
+          {
+            "description": "Session identifier.",
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "description": "Session identifier.",
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetChatPrivacyResponse"
+                }
+              }
+            },
+            "description": "Where the chat is answered."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Caller is not the session creator."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Session not found."
+          }
+        },
+        "summary": "Where a chat is answered",
+        "tags": [
+          "Agent Sessions"
+        ],
+        "x-fern-sdk-group-name": [
+          "sessions"
+        ],
+        "x-fern-sdk-method-name": "get_privacy"
       }
     },
     "/api/v1/sessions/{session_id}/repository": {
@@ -25162,7 +25855,7 @@
     },
     "/api/v1/user/audit-log": {
       "get": {
-        "description": "Lists the authenticated user’s Sentinel audit entries from every chat, newest first, including chats that were deleted. Read-only and paged.",
+        "description": "Lists the authenticated user’s Sentinel audit entries from every chat, newest first, including chats that were deleted. Can be narrowed by outcome and by a from and to time. Read-only and paged.",
         "parameters": [
           {
             "in": "query",
@@ -25199,6 +25892,28 @@
                 "denied",
                 "auto_denied"
               ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only entries at or after this time. The caller sends the start of a day in its own timezone.",
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "description": "Only entries at or after this time. The caller sends the start of a day in its own timezone.",
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only entries before this time. The caller sends the start of the day after its last shown day.",
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "description": "Only entries before this time. The caller sends the start of the day after its last shown day.",
+              "format": "date-time",
               "type": "string"
             }
           }
@@ -25361,6 +26076,16 @@
               }
             },
             "description": "The chat was not found."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The chat is private, so it has no brief items."
           }
         },
         "summary": "Mark a morning brief item done",
@@ -26724,6 +27449,162 @@
         "x-fern-sdk-method-name": "test_connection"
       }
     },
+    "/api/v1/user/settings/notes-folder": {
+      "delete": {
+        "description": "Forgets the folder. Nothing inside the folder is changed or removed.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemoveNotesFolderResponse"
+                }
+              }
+            },
+            "description": "The folder is disconnected."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
+          }
+        },
+        "summary": "Remove the notes folder",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "notes"
+        ],
+        "x-fern-sdk-method-name": "remove_folder"
+      },
+      "post": {
+        "description": "Checks the folder first and saves it only when it can be used: it must be there, be a folder, and not be where Aman keeps its own memory.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveNotesFolderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SaveNotesFolderResponse"
+                }
+              }
+            },
+            "description": "The folder is connected."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The folder could not be used, and the message says what to pick instead."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
+          }
+        },
+        "summary": "Connect a notes folder",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "notes"
+        ],
+        "x-fern-sdk-method-name": "save_folder"
+      }
+    },
+    "/api/v1/user/settings/notes-folder/status": {
+      "get": {
+        "description": "Returns whether a notes folder is connected, the folder, the inbox file name, and how many notes the folder holds.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetNotesFolderResponse"
+                }
+              }
+            },
+            "description": "The notes folder status."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
+          }
+        },
+        "summary": "Get the notes folder status",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "notes"
+        ],
+        "x-fern-sdk-method-name": "get_status"
+      }
+    },
     "/api/v1/user/settings/sentinel": {
       "get": {
         "description": "Returns the authenticated user’s offline mode, the Tier 2 action kinds that run without asking, and whether web searches run without asking.",
@@ -26810,6 +27691,91 @@
           "personalization"
         ],
         "x-fern-sdk-method-name": "update_sentinel_settings"
+      }
+    },
+    "/api/v1/voice/connect": {
+      "post": {
+        "description": "Checks that the chat belongs to the caller and voice mode is ready, then returns a single-use ticket for the voice WebSocket. The WebSocket itself is not described here.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectVoiceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceTicketResponse"
+                }
+              }
+            },
+            "description": "A ticket and the path of the voice WebSocket."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The request is missing the chat."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The chat was not found."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Too many requests; wait for the Retry-After seconds."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Voice mode is off, or speech to text, the voice or the listening model is not ready."
+          }
+        },
+        "summary": "Open a live voice conversation",
+        "tags": [
+          "Agent Sessions"
+        ],
+        "x-fern-sdk-group-name": [
+          "voice"
+        ],
+        "x-fern-sdk-method-name": "connect"
       }
     },
     "/api/v1/voice/speak": {

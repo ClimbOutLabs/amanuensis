@@ -35,6 +35,8 @@ export interface SentinelServices {
   outboundSecrets: (input: { tenant_id: string; created_by: string }) => Promise<readonly string[]>;
   /** True when no person watches this turn (a scheduled run), so a call that would ask is held for the owner. */
   unattended: boolean;
+  /** True in an incognito chat: a call that would make or change something that outlives the chat is refused. */
+  incognito: boolean;
   /** On a demo instance, the only addresses mail may go to; null when this is not a demo. Empty allows no send. */
   demoSendAllowlist: readonly string[] | null;
   /** Addresses the Email connector may send to without a new-recipient card, lowercased. Empty allows no send. */
@@ -91,6 +93,7 @@ export function defaultSentinelServices(input: { pinned_path: string }): Sentine
     sandboxWithoutAsking: () => Promise.resolve(false),
     outboundSecrets: () => Promise.resolve([]),
     unattended: false,
+    incognito: false,
     demoSendAllowlist: null,
     mail_listed_addresses: () => Promise.resolve([]),
     mail_add_recipients: () => Promise.resolve('not_loaded'),
@@ -99,20 +102,26 @@ export function defaultSentinelServices(input: { pinned_path: string }): Sentine
 }
 
 /**
- * Services with the user's Tier 2 relaxations switched off, so such an action asks. Used for every
- * turn of a scheduled chat: its context holds what the run read, so the owner's relaxations must
- * not apply even once they are typing. Token and grant stores stay shared with the session.
+ * Services with the user's relaxations switched off: the Tier 2 ones and the sandbox "without asking" switch, so
+ * such an action asks. Used for every turn of a scheduled chat: its context holds what the run read, so the
+ * owner's relaxations must not apply even once they are typing. Token and grant stores stay shared with the session.
  */
 export function withoutRelaxations(services: SentinelServices): SentinelServices {
-  return { ...services, tier2AutoAllow: () => Promise.resolve(new Set<Tier2ActionKind>()) };
+  return {
+    ...services,
+    tier2AutoAllow: () => Promise.resolve(new Set<Tier2ActionKind>()),
+    sandboxWithoutAsking: () => Promise.resolve(false),
+  };
 }
 
-/**
- * Services for one unattended turn: no relaxations, and a call that would ask is held for the
- * owner while nobody watches.
- */
+/** Services for one unattended turn: no relaxations, and a call that would ask is held for the owner while nobody watches. */
 export function forUnattendedRun(services: SentinelServices): SentinelServices {
   return { ...withoutRelaxations(services), unattended: true };
+}
+
+/** Services for a turn of an incognito chat. Token and grant stores stay shared with the session. */
+export function forIncognitoChat(services: SentinelServices): SentinelServices {
+  return { ...services, incognito: true };
 }
 
 /**

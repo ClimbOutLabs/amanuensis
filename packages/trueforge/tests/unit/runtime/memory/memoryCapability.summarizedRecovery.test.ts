@@ -128,6 +128,7 @@ describe('the turn after a turn that saved nothing, with summaries on', () => {
 
   function drainFirstTurn(): Promise<boolean> {
     return submitRetainWithVerification({
+      session: { is_incognito: false },
       ...TURN,
       client,
       userText: 'thanks',
