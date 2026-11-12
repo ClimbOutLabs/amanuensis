@@ -39,7 +39,12 @@ import {
 import { GOOGLE_SETUP_SERVER_ID, GOOGLE_SETUP_STATUS_TOOL_NAME } from '../google/setupToolContract';
 import type { BrowserClickReview, DocumentScope, MapsHosts } from '../llm/LLMTypes';
 import { isMemoryPagesReadToolName, isMemoryPagesToolName, MEMORY_PAGES_SERVER_ID } from '../memory/pagesToolContract';
-import { APPEND_TO_INBOX_TOOL_NAME, isNotesFolderWriteToolName, NOTES_FOLDER_SERVER_ID } from '../notes/toolContract';
+import {
+  APPEND_TO_INBOX_TOOL_NAME,
+  isNotesFolderReadToolName,
+  isNotesFolderWriteToolName,
+  NOTES_FOLDER_SERVER_ID,
+} from '../notes/toolContract';
 import {
   isPersonaWriteToolName,
   LIST_PERSONAS_TOOL_NAME,
@@ -3305,6 +3310,23 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   });
   // A card for the host's own Email sidecar never shows the sidecar's endpoint as a destination: the recipient is.
   const hostMailCall = isHostMailCall(action);
+  // In an incognito chat a connector may only read. A read is one the extractor knows by its name, or a
+  // read-only tool on a connector the host vouches for; a connector's own word that a tool only reads is
+  // not enough. The host's own mail keeps its cards, and the search provider its own checks.
+  if (
+    services.incognito &&
+    action.tool_type === 'mcp' &&
+    !hostMailCall &&
+    action.mcp_search_provider !== true &&
+    !extraction.connector_read &&
+    !(
+      action.mcp_first_party === true &&
+      action.mcp_hints.read_only_hint === true &&
+      action.mcp_hints.open_world_hint === false
+    )
+  ) {
+    return incognitoRefusal();
+  }
   // A read is not a send by name, so it is not carded as an external-service send; its annotations still decide.
   const namedSend = extraction.external_service && !extraction.connector_read;
   // A connector read is private data, so a search in the same chat asks afterwards.
@@ -3881,8 +3903,46 @@ async function classifyNotesFolderToolCall(action: SentinelAction, ctx: Classify
  * unrecognized; MCP hints escalate, and lower a connector tool only through
  * first-party trust or a standing grant.
  */
+/** What the model is told when an incognito chat is refused a lasting change: what happened and where to ask instead. */
+const INCOGNITO_REFUSAL =
+  'This is an incognito chat, so nothing that outlives it can be made or changed here. Tell the user to ask again in a normal chat.';
+
+function incognitoRefusal(): TierDecision {
+  return autoDenyDecision({ reason: 'incognito_chat', reason_detail: INCOGNITO_REFUSAL, sensitive_read: false });
+}
+
+/**
+ * A call on one of the assistant's own lasting things that is not a known read of it: a schedule, a reminder, a
+ * persona, a space, the notes folder or a memory page. Switching this chat's persona changes only the chat.
+ */
+function changesOwnLastingThing(action: SentinelAction): boolean {
+  if (action.tool_type !== 'truefoundry-system') {
+    return false;
+  }
+  const name = action.tool_name;
+  switch (action.mcp_server_name) {
+    case SCHEDULE_SERVER_ID:
+      return name !== LIST_SCHEDULES_TOOL_NAME && name !== LIST_REMINDERS_TOOL_NAME;
+    case PERSONA_SERVER_ID:
+      return name !== LIST_PERSONAS_TOOL_NAME && name !== USE_PERSONA_TOOL_NAME;
+    case SPACE_SERVER_ID:
+      return !isSpaceReadToolName(name);
+    case NOTES_FOLDER_SERVER_ID:
+      return !isNotesFolderReadToolName(name);
+    case MEMORY_PAGES_SERVER_ID:
+      return !isMemoryPagesReadToolName(name);
+    default:
+      return false;
+  }
+}
+
 export async function classifyTier(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   const name = action.tool_name;
+
+  // Decided here from the tool the host itself named, before anything the tool says about itself is read.
+  if (ctx.services.incognito && changesOwnLastingThing(action)) {
+    return incognitoRefusal();
+  }
 
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === GMAIL_SERVER_ID) {
     return steeringChecked({ decision: await classifyGmailTool(action, ctx), ctx, guests: [] });

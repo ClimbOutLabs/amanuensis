@@ -28,6 +28,7 @@ import {
   SearchNotesSchema,
 } from '@truefoundry/trueforge-core/core/notes/toolContract';
 import { NotesFolderProblem, type NotesFolderService } from './notesFolder/notesFolderService';
+import { toolsForChat } from './privateChat';
 
 /** Note text is data, never directions: it can quote anything, including text dressed as an instruction. */
 const NOTES_UNTRUSTED_NOTICE =
@@ -54,11 +55,13 @@ export class NotesFolderToolSet extends LocalToolMCP {
   readonly name = NOTES_FOLDER_SERVER_ID;
   readonly displayName = 'Notes folder';
   readonly #service: NotesFolderService;
+  readonly #keepsNothing: boolean;
   readonly #tools: ToolDefinition[];
 
-  constructor(options: { service: NotesFolderService; tracing: AgentTracing }) {
+  constructor(options: { service: NotesFolderService; tracing: AgentTracing; keepsNothing: boolean }) {
     super({ tracing: options.tracing });
     this.#service = options.service;
+    this.#keepsNothing = options.keepsNothing;
     this.#tools = [
       defineTool({
         name: SEARCH_NOTES_TOOL_NAME,
@@ -95,8 +98,9 @@ export class NotesFolderToolSet extends LocalToolMCP {
     ];
   }
 
+  /** A chat that keeps nothing reads the notes but is not offered the tools that add to them. */
   protected getTools(): ToolDefinition[] {
-    return this.#tools;
+    return toolsForChat({ tools: this.#tools, keepsNothing: this.#keepsNothing, chatOnly: new Set() });
   }
 
   async #search(input: { query: string; max_results: number }) {
@@ -171,6 +175,7 @@ function buildNotesFolderInstruction(builder: InstructionBuilder): void {
 export async function notesFolderCapability(options: {
   service: NotesFolderService;
   tracing: AgentTracing;
+  keepsNothing: boolean;
 }): Promise<AgentCapability | undefined> {
   const { state } = await options.service.connectionState();
   if (state !== 'connected') {
