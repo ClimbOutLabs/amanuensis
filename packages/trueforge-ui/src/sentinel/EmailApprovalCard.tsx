@@ -6,7 +6,7 @@ import { useLayoutEffect, useRef, useState, type FC } from 'react';
 import { cn } from '../atoms/lib/cn.js';
 import { Button } from '../atoms/primitives/Button.js';
 import { APPROVAL_CHOICES, EMAIL_CHOICES, isNewRecipientCard } from './approvalChoices.js';
-import { approvalTime, approveVerb, declineVerb, emailQuestion } from './approvalCopy.js';
+import { approvalTime, approveVerb, cardConsequence, cardHeadline, declineVerb, safeVerb } from './approvalCopy.js';
 import { ChangeRequestBox } from './ChangeRequestBox.js';
 import { countEmailWords, isLongEmailBody, splitEmailBody } from './emailBody.js';
 import { MailFromPicker, useMailFromPick } from './MailFromPicker.js';
@@ -128,6 +128,10 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
     setSentAt(approvalTime(new Date()));
     onApprove(fromPick.picked);
   };
+  // A send reaches other people and cannot be unsent, so the server marks its card safe-first:
+  // the safe choice is the primary button and the send follows it in the destructive ink.
+  const safeFirst = card.safe_choice === true;
+  const consequence = cardConsequence(card);
 
   return (
     <article
@@ -138,7 +142,7 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
     >
       <header className="flex items-center gap-2 px-4 py-3">
         <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-gold-ink" />
-        <h3 className="aui-approval-card__title min-w-0 flex-1 text-text-primary">{emailQuestion(email)}</h3>
+        <h3 className="aui-approval-card__title min-w-0 flex-1 text-text-primary">{cardHeadline(card)}</h3>
         <span className="shrink-0 text-text-secondary">Gmail</span>
         {sentAt === null && <span className="shrink-0 text-text-secondary">{WAITING_FOR_YOU_LABEL}</span>}
       </header>
@@ -200,7 +204,7 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
         {/* For a new address the server's sentence says that approving adds it; the fields above do not. */}
         {isNewRecipientCard(card) && <p className="mt-2 text-text-primary">{card.plain_what}</p>}
         {card.plain_why !== null && <p className="mt-2 text-text-secondary">Why: {card.plain_why}</p>}
-        {card.cannot_be_undone !== null && <p className="mt-2 text-text-secondary">{card.cannot_be_undone}</p>}
+        {consequence !== null && <p className="mt-2 text-text-secondary">{consequence}</p>}
         {card.why_asked_again !== null && (
           <p className="mt-2 text-text-secondary">You have seen this before: {card.why_asked_again}</p>
         )}
@@ -226,17 +230,34 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
         </div>
       )}
 
-      <div className="sticky bottom-0 flex flex-wrap items-center gap-2 border-t border-border bg-card-bg px-4 py-3">
+      <div className="aui-approval-card__choices sticky bottom-0 flex flex-wrap items-center gap-2 border-t border-border bg-card-bg px-4 py-3">
         {sentAt === null ? (
           <>
+            {safeFirst && (
+              <Button
+                variant="primary"
+                size="small"
+                data-approval-primary
+                title={APPROVAL_CHOICES.deny.hint}
+                onClick={onDeny}
+                disabled={disabled}
+                className="border-transparent bg-text-primary text-card-bg hover:bg-text-primary/90"
+              >
+                {safeVerb(card)}
+              </Button>
+            )}
             <Button
-              variant="primary"
+              variant={safeFirst ? 'secondary' : 'primary'}
               size="small"
-              data-approval-primary
+              {...(safeFirst ? {} : { 'data-approval-primary': true })}
               title={APPROVAL_CHOICES.approve.hint}
               onClick={sendNow}
               disabled={disabled}
-              className="border-transparent bg-text-primary text-card-bg hover:bg-text-primary/90"
+              className={
+                safeFirst
+                  ? cn(card.destructive === true && 'text-failure-bg')
+                  : 'border-transparent bg-text-primary text-card-bg hover:bg-text-primary/90'
+              }
             >
               {approveVerb(card)}
             </Button>
@@ -265,16 +286,18 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
                 {EMAIL_CHOICES.saveDraft.label}
               </Button>
             )}
-            <Button
-              variant="ghost"
-              size="small"
-              title={APPROVAL_CHOICES.deny.hint}
-              onClick={onDeny}
-              disabled={disabled}
-              className="ml-auto border-transparent bg-transparent px-1 text-text-primary shadow-none hover:underline"
-            >
-              {declineVerb(card)}
-            </Button>
+            {!safeFirst && (
+              <Button
+                variant="ghost"
+                size="small"
+                title={APPROVAL_CHOICES.deny.hint}
+                onClick={onDeny}
+                disabled={disabled}
+                className="ml-auto border-transparent bg-transparent px-1 text-text-primary shadow-none hover:underline"
+              >
+                {declineVerb(card)}
+              </Button>
+            )}
           </>
         ) : (
           <p className="text-text-secondary">

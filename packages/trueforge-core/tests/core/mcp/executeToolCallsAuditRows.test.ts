@@ -17,6 +17,7 @@ import { TEST_TOKEN_SCOPE, testApprovalOwner } from '../permissions/approvalToke
 
 const CARD = {
   plain_what: 'Send an email to dana@example.com?',
+  copy: null,
   plain_why: null,
   cannot_be_undone: null,
   why_asked_again: null,

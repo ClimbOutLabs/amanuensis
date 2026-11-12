@@ -13,7 +13,7 @@ Everything voice does runs on your own computer. No speech service on the intern
 Aman's voice uses two small helper programs, each in its own container. A container is a sealed box that Docker runs next to Aman.
 
 - **`aman-stt`** turns speech into text. It runs the Whisper `small` model (int8, on the processor) through faster-whisper.
-- **`aman-tts`** turns reply text into speech. It runs the Kokoro voice model (Apache-2.0) on the processor. The model and its six voices are built into the container, so it never goes online.
+- **`aman-tts`** turns reply text into speech. It runs the Kokoro voice model (Apache-2.0) on the processor. The model and its twelve voices are built into the container, so it never goes online.
 
 Voice mode also uses a small speech-detection model inside Aman itself. It finds where each sentence starts and ends.
 

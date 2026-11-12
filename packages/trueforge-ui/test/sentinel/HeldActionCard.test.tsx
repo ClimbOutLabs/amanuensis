@@ -10,6 +10,7 @@ import type { SentinelApprovalCard } from '@/sentinel/types.js';
 function card(overrides: Partial<SentinelApprovalCard> = {}): SentinelApprovalCard {
   return {
     plain_what: 'Send a note to Ana?',
+    copy: { headline: 'Send a note to Ana?', consequence: "Once this is sent, it can't be unsent.", reason: null },
     plain_why: 'It was on the Monday list.',
     cannot_be_undone: "Once this is sent, it can't be unsent.",
     why_asked_again: null,
@@ -192,6 +193,7 @@ describe('HeldActionCard', () => {
       {},
       {
         plain_what: 'Add "Dentist" to your Google Calendar.',
+        copy: null,
         recipient: null,
         destination: null,
         destination_host: null,

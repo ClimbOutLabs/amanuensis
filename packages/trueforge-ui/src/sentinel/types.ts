@@ -141,6 +141,21 @@ export type SentinelApprovalSchedule = {
 };
 
 /**
+ * The words an approval card is made of, produced by the server by one owner per action kind.
+ * The UI renders the three parts and never builds sentences of its own. Absent on cards saved
+ * before copy existed; those build their headline from their own fields, or show the generic
+ * headline when they have none, never their stored plain_what.
+ */
+export type SentinelApprovalCopy = {
+  /** What will happen, in one sentence, in words the person recognises. */
+  headline: string;
+  /** What follows from approving, in one line, or null when nothing needs saying. */
+  consequence: string | null;
+  /** Why the tier asks, in plain words, shown behind "Why I'm asking", or null. */
+  reason: string | null;
+};
+
+/**
  * Server-rendered approval card for Tier 2 and Tier 3 actions. Mirrors the backend `Tier3Card` schema:
  * destination/recipient/amount come from the server-side extractor registry over
  * canonical params, never agent text. Shell cards carry the server-parsed command.
@@ -149,6 +164,12 @@ export type SentinelApprovalSchedule = {
 export type SentinelApprovalCard = {
   /** One plain-language sentence describing what will happen. No jargon. Always present. */
   plain_what: string;
+  /** The headline, consequence and reason the card renders, or null on cards saved before copy existed. */
+  copy?: SentinelApprovalCopy | null | undefined;
+  /** True when the safe choice is the primary button: the action is irreversible or reaches other people. */
+  safe_choice?: boolean | undefined;
+  /** True when the action destroys or sends something for good, so its button wears the destructive ink. */
+  destructive?: boolean | undefined;
   /** One sentence on why the agent wants this, from agent intent when available. */
   plain_why: string | null;
   /** What cannot be undone, or null when fully reversible. */
@@ -707,12 +728,27 @@ function parseSchedule(value: unknown): SentinelApprovalSchedule | null {
   return { action, name, when, time_zone, task, runs_as, next_runs, ...(tools === undefined ? {} : { tools }) };
 }
 
+/** The card's copy, read from the wire shape or its camel twin; undefined when the card predates copy. */
+function parseApprovalCopy(value: unknown): SentinelApprovalCopy | undefined {
+  if (!isRecord(value)) return undefined;
+  const headline = optionalString(value, 'headline');
+  if (headline === undefined) return undefined;
+  return {
+    headline,
+    consequence: cardString(value, { snake: 'consequence', camel: 'consequence' }),
+    reason: cardString(value, { snake: 'reason', camel: 'reason' }),
+  };
+}
+
 function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
   if (!isRecord(value)) return undefined;
   const plain_what = optionalString(value, 'plain_what') ?? optionalString(value, 'plainWhat');
   if (plain_what === undefined) return undefined;
   return readSavedHoldReason({
     plain_what,
+    copy: parseApprovalCopy(value.copy),
+    safe_choice: cardFlag(value, { snake: 'safe_choice', camel: 'safeChoice' }),
+    destructive: cardFlag(value, { snake: 'destructive', camel: 'destructive' }),
     plain_why: cardString(value, { snake: 'plain_why', camel: 'plainWhy' }),
     cannot_be_undone: cardString(value, { snake: 'cannot_be_undone', camel: 'cannotBeUndone' }),
     why_asked_again: cardString(value, { snake: 'why_asked_again', camel: 'whyAskedAgain' }),

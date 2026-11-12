@@ -1160,7 +1160,7 @@ try {
       });
     }
   } else {
-    logger.info('TrueForge starting', { mode: 'distributed' });
+    logger.info('Aman starting', { mode: 'distributed' });
   }
 
   const {
