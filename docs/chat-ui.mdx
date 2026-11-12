@@ -23,9 +23,11 @@ The sidebar's chat history list supports renaming chats, filing them into folder
 
 **Folders**: click **New folder** next to the chat history header to create a folder. Move an existing chat into one from its **···** menu (**Move to folder**), which also lets you create a folder on the spot. Folders render as collapsible sections above the unfiled chats; each folder's own **···** button opens a dialog to rename or delete it, deleting a folder keeps its chats, just unfiled.
 
-**Agent details**: while a chat is open, the **Show agent details** button next to **Clear chat** in the header turns the agent's internal steps on or off for that chat. The button looks pressed while they are on. With them on, each answer shows its steps, tool calls, sub-agents, the lines the model wrote between steps, and the model and cost line. With them off, you see only your message, the answer, and anything that needs you: approval cards, notices written for you, and one progress line while Aman works. If a step failed or was blocked, one plain line under the answer says so. A reply that could not finish says so in one plain line. The button only appears once the chat has a persisted session, and is hidden while the chat is idle or on a fresh, unsaved chat.
+**Agent details**: while a chat is open, the **Agent details** switch in the header turns the agent's internal steps on or off for that chat. On a phone narrower than 360px it is labelled **Details**. The switch shows whether they are on. With them on, each answer shows its steps, tool calls, sub-agents, the lines the model wrote between steps, and the model and cost line. With them off, you see only your message, the answer, and anything that needs you: approval cards, notices written for you, and one progress line while Aman works. If a step failed or was blocked, one plain line under the answer says so. A reply that could not finish says so in one plain line. The switch only appears once the chat has a persisted session, and is hidden while the chat is idle or on a fresh, unsaved chat.
 
 A chat's **···** menu itself only appears when at least one of Rename, Delete, or Move to folder is actually available for it.
+
+**Incognito chats**: on a new chat, press **Start incognito chat** beside the persona button before you send the first message. Hover over the button for a short reminder of what it does. The message box then gets a frame in the text color instead of the accent color, and a line above it says that nothing from the chat is kept and whether the words leave this machine. Aman can still read its memories, spaces and reminders in an incognito chat, but saves nothing from it: it cannot make spaces, reminders, schedules or personas there, and the web browser is off. The line above the message box is checked again after each reply and when you switch persona. While the chat is open, it shows in the history list with an **Incognito** label, in that browser tab only. It never shows in search, and it cannot be moved to a folder. Press **Close and delete** above the message box, then **Delete for good** to confirm; the chat is deleted for good and the app opens a new chat. An incognito chat left open is deleted 24 hours after its last reply. See [Privacy](/privacy#incognito-chats) for what is kept on purpose.
 
 ## Spaces and folders
 
@@ -78,9 +80,3 @@ When you run TrueForge ([Quickstart](/quickstart)), open the app URL (for exampl
 | **Server** | TrueForge server, TrueFoundry-backed, or a custom server that implements the contract |
 
 */}
-
-## Interactive controls & code examples
-
-The hosted webapp provides an interactive interface for exploring and configuring all available controls and properties. Configure and preview component properties, override defaults, and generate a code snippet from your configuration.
-
-[https://ui.trueforge.dev/](https://ui.trueforge.dev/)

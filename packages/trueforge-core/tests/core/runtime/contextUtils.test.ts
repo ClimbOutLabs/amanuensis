@@ -3,6 +3,7 @@ import type { ContextMessage } from '../../../src/core/runtime/AgentThread.types
 import {
   hasCalledRetrievalTool,
   hasRetrievalTool,
+  hostPictureMessage,
   internalSystemMessage,
   internalSystemTag,
   isFreshnessQuestion,
@@ -252,6 +253,14 @@ describe('personMessageIndex', () => {
           { type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA' } },
         ],
       },
+    ];
+    expect(personMessageIndex(messages)).toBe(0);
+  });
+
+  it('skips a picture the host attached, such as a browser screenshot', () => {
+    const messages: ChatCompletionMessageParam[] = [
+      { role: 'user', content: 'Book me the 9am slot' },
+      hostPictureMessage({ note: 'The browser screenshot you took.', imageUrl: 'data:image/png;base64,AAAA' }),
     ];
     expect(personMessageIndex(messages)).toBe(0);
   });

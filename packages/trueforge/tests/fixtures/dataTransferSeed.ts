@@ -263,6 +263,8 @@ export async function seedRichInstance<TTransaction>(input: SeedRichInstanceInpu
     metadata: {},
     external_id: null,
     source: null,
+    is_incognito: false,
+    private_expires_at: null,
   });
   await stores.sessionStore.setSessionFolder({
     tenant_id: tenantId,
@@ -394,6 +396,8 @@ export async function seedRichInstance<TTransaction>(input: SeedRichInstanceInpu
     metadata: {},
     external_id: null,
     source: { type: 'schedule', id: SEED_IDS.scheduleDaily, run_id: 'run-1' },
+    is_incognito: false,
+    private_expires_at: null,
   });
   await stores.sessionStore.createTurn(
     makeCreateTurnInput({
@@ -429,6 +433,8 @@ export async function seedRichInstance<TTransaction>(input: SeedRichInstanceInpu
     metadata: {},
     external_id: null,
     source: null,
+    is_incognito: false,
+    private_expires_at: null,
   });
   await stores.sessionStore.createTurn(
     makeCreateTurnInput({

@@ -74,6 +74,8 @@ describePg('20260914_000001_space_format migration', () => {
       poolMax: 5,
       statementTimeoutMs: 60_000,
       idleInTransactionSessionTimeoutMs: 60_000,
+      connectionTimeoutMs: 70_000,
+      onIdleClientError: () => undefined,
     });
     // createDb pins search_path to the trueforge schema; the app creates that schema before it
     // migrates, so a fresh database needs the same bootstrap before any migration can create a table.

@@ -10,7 +10,7 @@ export const listUserAuditLogRoute = createRoute({
   tags: [OpenApiTag.PERSONALIZATION],
   summary: 'List the Sentinel audit log across all chats',
   description:
-    'Lists the authenticated user’s Sentinel audit entries from every chat, newest first, including chats that were deleted. Read-only and paged.',
+    'Lists the authenticated user’s Sentinel audit entries from every chat, newest first, including chats that were deleted. Can be narrowed by outcome and by a from and to time. Read-only and paged.',
   'x-fern-sdk-group-name': ['personalization', 'auditLog'],
   'x-fern-sdk-method-name': 'list',
   'x-fern-pagination': TOKEN_PAGINATION,

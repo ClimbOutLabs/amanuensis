@@ -34,11 +34,21 @@ export const GetMeSubjectSchema = z
   .openapi('GetMeSubject');
 
 export const MeSessionTypeSchema = z
-  .enum(['default', 'oidc-connected'])
+  .enum(['default', 'oidc-connected', 'local-connected'])
   .describe(
-    '`oidc-connected` when the process is running with browser OIDC login; `default` for standalone or TrueFoundry token auth.',
+    '`oidc-connected` when the process is running with browser OIDC login; `local-connected` for local sign-in ' +
+      '(`TRUEFORGE_AUTH_MODE=local`); `default` for standalone or TrueFoundry token auth.',
   )
   .openapi('MeSessionType');
+
+export const ChangePasswordRequestSchema = z
+  .object({
+    current_password: z.string().min(1).describe('The password the person signs in with now.'),
+    new_password: z.string().min(1).describe('The new password. At least 8 characters.'),
+  })
+  .openapi('ChangePasswordRequest');
+
+export type ChangePasswordRequest = z.infer<typeof ChangePasswordRequestSchema>;
 
 export const MeSchema = z
   .object({

@@ -1,0 +1,50 @@
+name: Nightly
+
+# Every suite on main, every night, whatever changed that day. Pull requests run only the suites
+# their changed paths select, so this is the run that catches a suite another package broke.
+on:
+  schedule:
+    # 09:17 UTC, the small hours in the Americas; off the hour, when scheduled runs start late.
+    - cron: '17 9 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  suites:
+    name: Every suite
+    uses: ./.github/workflows/ci.yml
+    with:
+      all_packages: true
+    permissions:
+      contents: read
+      pull-requests: read
+
+  # One issue tracks a failing nightly run: opened on the first failure, added to while it keeps
+  # failing, closed on the next pass. Runs started by hand on another branch report nothing.
+  report:
+    name: Report
+    needs: suites
+    if: always() && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      issues: write
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: Open, update or close the nightly issue
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          NIGHTLY_RESULT: ${{ needs.suites.result }}
+        run: npm run nightly:report

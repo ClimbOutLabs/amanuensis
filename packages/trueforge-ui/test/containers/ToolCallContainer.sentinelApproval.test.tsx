@@ -87,7 +87,7 @@ type PendingCall = {
   options?: ApprovalOptions;
   /** What the server said about chat scope; absent from older servers. */
   chatAllowOffered?: boolean;
-  /** What the server said about a standing "Always allow this tool"; absent when it did not say. */
+  /** What the server said about a standing "Always allow everywhere"; absent when it did not say. */
   alwaysAllowOffered?: boolean;
   /** Tool name; defaults to a generic name per call. */
   toolName?: string;
@@ -174,7 +174,7 @@ describe('ToolCallContainer Sentinel approvals', () => {
 
   it('Approve all sends allow-once for each call even when allow-chat is declared first', () => {
     const chatFirst: ApprovalOptions = [
-      { id: 'allow-chat', kind: 'allow-always', label: 'Always allow this here' },
+      { id: 'allow-chat', kind: 'allow-always', label: 'Always allow in this chat' },
       { id: 'allow-once', kind: 'allow-once' },
       { id: 'deny', kind: 'reject-once', confirm: {} },
     ];
@@ -276,7 +276,7 @@ describe('ToolCallContainer Sentinel approvals', () => {
           id: 'a',
           tier,
           options: [
-            { id: 'allow-chat', kind: 'allow-always', label: 'Always allow this here' },
+            { id: 'allow-chat', kind: 'allow-always', label: 'Always allow in this chat' },
             { id: 'allow-once', kind: 'allow-once' },
             { id: 'deny', kind: 'reject-once', confirm: {} },
           ],
@@ -308,7 +308,7 @@ describe('ToolCallContainer Sentinel approvals', () => {
     expect(response).not.toHaveProperty('optionId');
     expect(respondToApproval).not.toHaveBeenCalled();
   });
-  describe('Always allow this here', () => {
+  describe('Always allow in this chat', () => {
     const declaredChat: ApprovalOptions = [
       { id: 'allow-once', kind: 'allow-once' },
       { id: 'allow-chat', kind: 'allow-always' },
@@ -317,25 +317,25 @@ describe('ToolCallContainer Sentinel approvals', () => {
 
     it('is hidden when the server refuses chat scope, even if the option is declared', () => {
       renderPending([{ id: 'a', tier: 3, options: declaredChat, chatAllowOffered: false }]);
-      expect(screen.queryByRole('button', { name: 'Always allow this here' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Always allow in this chat' })).not.toBeInTheDocument();
     });
 
     it('is shown when the server offers it', () => {
       renderPending([{ id: 'a', tier: 3, options: declaredChat, chatAllowOffered: true }]);
-      expect(screen.getByRole('button', { name: 'Always allow this here' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Always allow in this chat' })).toBeInTheDocument();
     });
 
     it('follows the declared options when an older server says nothing', () => {
       renderPending([{ id: 'a', tier: 3, options: declaredChat }]);
-      expect(screen.getByRole('button', { name: 'Always allow this here' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Always allow in this chat' })).toBeInTheDocument();
     });
   });
 });
 
 describe('ToolCallContainer always allow this tool', () => {
-  const ALWAYS_ALLOW_TOOL = 'Always allow this tool';
+  const ALWAYS_ALLOW_TOOL = 'Always allow everywhere';
 
-  it('offers Always allow this tool only on a card the server says may be always allowed', () => {
+  it('offers Always allow everywhere only on a card the server says may be always allowed', () => {
     renderPending([{ id: 'read', tier: 3, alwaysAllowOffered: true }]);
     expect(screen.getByRole('button', { name: ALWAYS_ALLOW_TOOL })).toBeInTheDocument();
   });
@@ -351,7 +351,7 @@ describe('ToolCallContainer always allow this tool', () => {
   it('asks for confirmation, and records nothing when the owner cancels', () => {
     renderPending([{ id: 'read', tier: 3, alwaysAllowOffered: true }]);
     fireEvent.click(screen.getByRole('button', { name: ALWAYS_ALLOW_TOOL }));
-    expect(screen.getByRole('heading', { name: 'Always allow this tool?' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Always allow everywhere?' })).toBeInTheDocument();
     expect(respondToApproval).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByTestId('always-allow-cancel'));

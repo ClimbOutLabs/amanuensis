@@ -23,6 +23,17 @@ const CHECK: HelpHealthCheck = {
     },
   ],
   host_report: { state: 'ok', checked_at: '2026-10-20T08:30:00Z', message: null, next_step: null },
+  state: {
+    setup_steps: [
+      { id: 'model', done: true },
+      { id: 'about_you', done: false },
+    ],
+    connectors: [],
+    google_login: 'not_set_up',
+    sandbox_ready: true,
+    app_version: '1.4.0',
+    build_ref: null,
+  },
 };
 
 describe('buildIrisHelpMessage', () => {
@@ -41,6 +52,32 @@ describe('buildIrisHelpMessage', () => {
     expect(message).toContain('Last error: Request failed (500): The connector did not answer.');
   });
 
+  it('gives Iris the state under the field names her instructions read', () => {
+    const message = buildIrisHelpMessage({
+      check: {
+        ...CHECK,
+        state: {
+          ...CHECK.state,
+          connectors: [
+            { name: 'linear', connected: true, last_error: null },
+            { name: 'notion', connected: false, last_error: 'It did not answer.' },
+          ],
+          google_login: 'needs_reconnect',
+          sandbox_ready: false,
+          build_ref: 'abc1234',
+        },
+      },
+      screen: 'Home',
+      lastError: null,
+    });
+
+    expect(message).toContain('State:\n- setup_steps: model done, about_you not done');
+    expect(message).toContain('- connectors: linear connected; notion not connected, last_error: It did not answer.');
+    expect(message).toContain('- google_login: needs_reconnect');
+    expect(message).toContain('- sandbox_ready: no');
+    expect(message).toContain('- app_version: 1.4.0 (build abc1234)');
+  });
+
   it('says none when there was no last error', () => {
     const message = buildIrisHelpMessage({ check: CHECK, screen: 'Chat', lastError: null });
 
@@ -56,6 +93,7 @@ describe('buildIrisHelpMessage', () => {
       const allowed =
         line.startsWith('Iris, ') ||
         line === 'Health check results:' ||
+        line === 'State:' ||
         line.startsWith('- ') ||
         line.startsWith('You were on: ') ||
         line.startsWith('Last error: ');

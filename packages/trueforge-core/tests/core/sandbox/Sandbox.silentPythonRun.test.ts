@@ -4,7 +4,12 @@ import { join } from 'node:path';
 import { createSentinelHostContext, defaultSentinelServices } from '../../../src/core';
 import type { RunCodeBackend } from '../../../src/core/sandbox/driver/RunCodeService';
 import type { ExecResult, SandboxExecParams, SandboxProvider } from '../../../src/core/sandbox/provider/Provider';
-import { Sandbox, SANDBOX_EXEC_TOOL_NAME, type BoundRepository } from '../../../src/core/sandbox/Sandbox';
+import {
+  Sandbox,
+  SANDBOX_EXEC_TOOL_NAME,
+  SANDBOX_WRITE_FILE_TOOL_NAME,
+  type BoundRepository,
+} from '../../../src/core/sandbox/Sandbox';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { makeSilentLogger } from '../harnessMocks';
 import { TestDurableWorkspaceCoordinator } from './durableWorkspaceCoordinator';
@@ -20,14 +25,21 @@ const PACKAGE_GATEWAY_RUN_CODE_SERVICE: RunCodeBackend = {
   scrubDispatchErrorText: text => text,
 };
 
-/** A plain install with no install scripts: silent with the switch on. */
-const SILENT_INSTALL = 'npm install --ignore-scripts humanize';
-/** The same install without the ignore flag: it keeps its card. */
-const CARDED_INSTALL = 'npm install humanize';
+/** A plain install with no install scripts. */
+const PLAIN_INSTALL = 'npm install --ignore-scripts humanize';
+/** The same install without the ignore flag. */
+const SCRIPTED_INSTALL = 'npm install humanize';
 
-function makeProvider(execCalls: SandboxExecParams[], workspace: string): SandboxProvider {
+function makeProvider(input: {
+  execCalls: SandboxExecParams[];
+  workspace: string;
+  /** Whether the provider says nothing run in its sandbox can reach a network. */
+  noNetwork: boolean;
+}): SandboxProvider {
+  const { execCalls, workspace } = input;
   return {
     type: 'test',
+    network: input.noNetwork ? 'none' : undefined,
     buildImage: () => Promise.resolve({ status: 'ready', reason: null, metadata: null }),
     getImageBuildStatus: () => Promise.resolve({ status: 'ready', reason: null, metadata: null }),
     createSandbox: () => Promise.resolve({ sandboxId: 'raw-1' }),
@@ -69,8 +81,19 @@ function makeProvider(execCalls: SandboxExecParams[], workspace: string): Sandbo
 /**
  * A sandbox bound to a repository that allows downloads, over a real workspace whose host has the switch on or off.
  * Installs are refused in a chat whose repository does not allow downloads, so the bound repository is required.
+ * By default the provider says its sandbox has no network, as the installed one does, and downloads are allowed.
  */
-function setUp({ sandboxWithoutAsking }: { sandboxWithoutAsking: boolean }): {
+function setUp({
+  sandboxWithoutAsking,
+  noNetwork = true,
+  downloadsAllowed = true,
+  skillSites = [],
+}: {
+  sandboxWithoutAsking: boolean;
+  noNetwork?: boolean;
+  downloadsAllowed?: boolean;
+  skillSites?: readonly string[];
+}): {
   sandbox: Sandbox;
   execCalls: SandboxExecParams[];
   cleanup: () => void;
@@ -87,13 +110,15 @@ function setUp({ sandboxWithoutAsking }: { sandboxWithoutAsking: boolean }): {
   services.sandboxWithoutAsking = () => Promise.resolve(sandboxWithoutAsking);
   const execCalls: SandboxExecParams[] = [];
   const sandbox = new Sandbox({
-    provider: makeProvider(execCalls, workspace),
+    provider: makeProvider({ execCalls, workspace, noNetwork }),
     boundRepository,
     loadBoundRepository: async () => boundRepository,
     workspaceVerificationCoordinator: new TestDurableWorkspaceCoordinator(),
     workspaceLeaseOwnerId: 'test-replica',
-    loadPackageMirrorToken: async () => 'mirror-token',
-    loadPackageDownloadsAllowed: async () => true,
+    loadPackageMirrorToken: async () => (downloadsAllowed ? 'mirror-token' : undefined),
+    loadPackageDownloadsAllowed: async () => downloadsAllowed,
+    loadSkillNetworkGrant: async () =>
+      skillSites.length === 0 ? undefined : { token: 'skill-token', hosts: skillSites },
     runCodeService: PACKAGE_GATEWAY_RUN_CODE_SERVICE,
     allowPackageDownloads: async () => undefined,
     blockDestructiveToolsInCodeMode: true,
@@ -119,41 +144,32 @@ function execCall(command: string) {
   };
 }
 
-describe('a silent sandbox run reaches the provider only as a silent run', () => {
-  it('runs a plain install with the switch on, without an approval card', async () => {
-    const { sandbox, execCalls, cleanup } = setUp({ sandboxWithoutAsking: true });
-    try {
-      const info = await sandbox.toolCallInfo(execCall(SILENT_INSTALL));
-      expect(info.is_approval_required).toBe(false);
-      await sandbox.callTool(execCall(SILENT_INSTALL));
-      expect(execCalls.map(call => call.command)).toContain(SILENT_INSTALL);
-    } finally {
-      cleanup();
-    }
-  });
+describe('a package install asks before it reaches the provider', () => {
+  it.each([PLAIN_INSTALL, SCRIPTED_INSTALL])(
+    'holds %s with the switch on until it is approved, and then runs it',
+    async command => {
+      const { sandbox, execCalls, cleanup } = setUp({ sandboxWithoutAsking: true });
+      try {
+        const info = await sandbox.toolCallInfo(execCall(command));
+        expect(info.is_approval_required).toBe(true);
+        await sandbox.callTool(execCall(command));
+        expect(execCalls.map(call => call.command)).not.toContain(command);
 
-  it('holds a carded install until it is approved, and then runs it', async () => {
-    const { sandbox, execCalls, cleanup } = setUp({ sandboxWithoutAsking: true });
-    try {
-      const info = await sandbox.toolCallInfo(execCall(CARDED_INSTALL));
-      expect(info.is_approval_required).toBe(true);
-      await sandbox.callTool(execCall(CARDED_INSTALL));
-      expect(execCalls.map(call => call.command)).not.toContain(CARDED_INSTALL);
+        await sandbox.callTool(execCall(command), { status: 'allow' });
+        expect(execCalls.map(call => call.command)).toContain(command);
+      } finally {
+        cleanup();
+      }
+    },
+  );
 
-      await sandbox.callTool(execCall(CARDED_INSTALL), { status: 'allow' });
-      expect(execCalls.map(call => call.command)).toContain(CARDED_INSTALL);
-    } finally {
-      cleanup();
-    }
-  });
-
-  it('asks for the silent install with the switch off', async () => {
+  it('asks for an install with the switch off', async () => {
     const { sandbox, execCalls, cleanup } = setUp({ sandboxWithoutAsking: false });
     try {
-      const info = await sandbox.toolCallInfo(execCall(SILENT_INSTALL));
+      const info = await sandbox.toolCallInfo(execCall(PLAIN_INSTALL));
       expect(info.is_approval_required).toBe(true);
-      await sandbox.callTool(execCall(SILENT_INSTALL));
-      expect(execCalls.map(call => call.command)).not.toContain(SILENT_INSTALL);
+      await sandbox.callTool(execCall(PLAIN_INSTALL));
+      expect(execCalls.map(call => call.command)).not.toContain(PLAIN_INSTALL);
     } finally {
       cleanup();
     }
@@ -165,6 +181,49 @@ describe('a silent sandbox run reaches the provider only as a silent run', () =>
       const response = await sandbox.callTool(execCall('python3 agent_tool.py'));
       expect(JSON.stringify(response)).toContain('run_code');
       expect(execCalls).toEqual([]);
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+describe('a new file is placed without a card only where nothing run in the sandbox can reach a network', () => {
+  const WRITE_CALL = {
+    name: SANDBOX_WRITE_FILE_TOOL_NAME,
+    arguments: { intent: 'Save the notes', path: 'notes.txt', content: 'hello\n' },
+  };
+
+  it('is placed without a card with the switch on, in a sandbox with no network and no downloads allowed', async () => {
+    const { sandbox, cleanup } = setUp({ sandboxWithoutAsking: true, downloadsAllowed: false });
+    try {
+      const info = await sandbox.toolCallInfo(WRITE_CALL);
+      expect(info).toMatchObject({ tier: 1, tier_reason: 'sandbox_file_write', tier3_card: null });
+    } finally {
+      cleanup();
+    }
+  });
+
+  it.each([
+    [
+      'the switch on, in a sandbox that may reach a network',
+      { sandboxWithoutAsking: true, noNetwork: false, downloadsAllowed: false },
+    ],
+    [
+      'the switch on, where package downloads are allowed for the repository',
+      { sandboxWithoutAsking: true, downloadsAllowed: true },
+    ],
+    [
+      'the switch on, where a skill may reach the sites approved for it',
+      { sandboxWithoutAsking: true, downloadsAllowed: false, skillSites: ['api.example.com'] },
+    ],
+    ['the switch off, in a sandbox with no network', { sandboxWithoutAsking: false, downloadsAllowed: false }],
+  ])('gets a card with %s', async (_label, options) => {
+    const { sandbox, cleanup } = setUp(options);
+    try {
+      const info = await sandbox.toolCallInfo(WRITE_CALL);
+      expect(info).toMatchObject({ tier: 2, tier_reason: 'sandbox_write' });
+      expect(info.tier3_card?.plain_what).toBe('Change `notes.txt` in your workspace?');
+      expect(typeof info.approval_token_id).toBe('string');
     } finally {
       cleanup();
     }

@@ -4,6 +4,7 @@ import { MAX_BYTES_PER_DOCUMENT } from '../../../documents/documentExtraction';
 import { EXTRACT_DOCUMENT_TEXT_TOOL_NAME } from '../../../documents/toolContract';
 import { CHAT_IMAGE_INPUT_MIME_TYPES } from '../../chatImages';
 import { InvalidFileInputError } from '../../errors';
+import type { ApprovalDecision } from '../../events/schema';
 import { GoogleApiError, GoogleOAuthError, GoogleReconnectRequiredError } from '../../google/errors';
 import type { GoogleFeature } from '../../google/scopes';
 import { errorResult, failureResult, jsonResult as neutralizedJsonResult } from '../../google/toolResults';
@@ -110,6 +111,8 @@ function invalidDraftReason(error: z.ZodError): string {
     : 'The draft details were not valid, so nothing was saved.';
 }
 
+const DRAFT_NOT_APPROVED = 'This draft was not approved, so nothing was saved. Ask to save the draft again.';
+
 /** A sandbox the staging call had to create must still reach the thread, or the next turn would not find it. */
 function sandboxCreatedOverrides(created: SandboxInfo | undefined) {
   return created === undefined ? undefined : { sandboxCreated: true, sandboxInfo: created };
@@ -122,7 +125,8 @@ function jsonResult(value: unknown, sandboxCreated?: SandboxInfo) {
 
 /**
  * Gmail for one user's turn, over Gmail's REST API with that user's own login. Reads are silent; what a call
- * may do is decided by the host classifier, never by this class.
+ * may do is decided by the host classifier, never by this class. A write still refuses a call that reaches it
+ * without the user's yes, so no other route to this class can save or send.
  */
 export class GmailToolSet extends LocalToolMCP {
   readonly name = GMAIL_SERVER_ID;
@@ -226,7 +230,7 @@ export class GmailToolSet extends LocalToolMCP {
             'Save a new plain-text draft. Nothing is sent. Pass in_reply_to (a message id) to reply inside that thread; the subject then becomes "Re: <original subject>", and without a "to" the reply is addressed to that message\'s sender. The user is asked before the draft is saved.',
           schema: DraftEmailSchema,
           annotations: WRITE_ANNOTATIONS,
-          handler: input => this.#draftEmail(input),
+          handler: (input, approval) => this.#draftEmail({ input, approval }),
         }),
         defineTool({
           name: UPDATE_DRAFT_TOOL_NAME,
@@ -234,7 +238,7 @@ export class GmailToolSet extends LocalToolMCP {
             'Replace the content of a saved plain-text draft, keeping its draft_id and its place in a thread. A draft with attachments or formatting cannot be changed. The user is asked first.',
           schema: UpdateDraftSchema,
           annotations: WRITE_ANNOTATIONS,
-          handler: input => this.#updateDraft(input),
+          handler: (input, approval) => this.#updateDraft({ input, approval }),
         }),
         defineTool({
           name: SEND_DRAFT_TOOL_NAME,
@@ -670,7 +674,17 @@ export class GmailToolSet extends LocalToolMCP {
     }
   }
 
-  async #draftEmail(input: z.infer<typeof DraftEmailSchema>) {
+  /** Saves a new draft only on the user's own yes to this call. A call that arrives without one, by any route, saves nothing. */
+  async #draftEmail({
+    input,
+    approval,
+  }: {
+    input: z.infer<typeof DraftEmailSchema>;
+    approval: ApprovalDecision | undefined;
+  }) {
+    if (approval?.status !== 'allow') {
+      return errorResult(DRAFT_NOT_APPROVED);
+    }
     try {
       const { content, reply, threadId } = await this.#resolveContent({ input, existing: undefined });
       const created = await this.#options.api.createDraft({ raw: buildRawMessage({ content, reply }), threadId });
@@ -686,7 +700,17 @@ export class GmailToolSet extends LocalToolMCP {
     }
   }
 
-  async #updateDraft(input: z.infer<typeof UpdateDraftSchema>) {
+  /** Changes a draft only on the user's own yes to this call, as a new draft is saved. */
+  async #updateDraft({
+    input,
+    approval,
+  }: {
+    input: z.infer<typeof UpdateDraftSchema>;
+    approval: ApprovalDecision | undefined;
+  }) {
+    if (approval?.status !== 'allow') {
+      return errorResult(DRAFT_NOT_APPROVED);
+    }
     try {
       const existing = await this.#editableDraft(input.draft_id);
       if ('failure' in existing) {
