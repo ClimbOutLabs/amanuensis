@@ -31,7 +31,7 @@ export interface InternalSourceState {
   libraryAnswered: boolean;
   /**
    * Normalized content tokens of what recall injected this turn (recalled
-   * items plus entity summaries). Undefined when recall injected nothing.
+   * items). Undefined when recall injected nothing.
    */
   recallTokens: readonly string[] | undefined;
 }
@@ -282,7 +282,7 @@ function expandWithInitialisms(tokens: readonly string[]): ExpandedTokenSet {
 const LIBRARY_OVERLAP_THRESHOLD = 0.6;
 /**
  * Higher bar for recall: the recall token bag is a union over everything
- * recall injected (items, entities, observations), so coincidental overlap
+ * recall injected, so coincidental overlap
  * with an open-web question is likelier than against the single library
  * question. 2/3 overlap ("best tapas Madrid" vs a Madrid-trip recall) passes;
  * 3/4 and above blocks.

@@ -9,9 +9,7 @@ describe("MemorySummarizeClient", () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
 
-        const rawResponseBody = {
-            data: { default_enabled: true, effective_enabled: true, enabled: true, overridden: true },
-        };
+        const rawResponseBody = { data: { default_enabled: true, enabled: true, overridden: true } };
 
         server
             .mockEndpoint()
@@ -25,7 +23,6 @@ describe("MemorySummarizeClient", () => {
         expect(response).toEqual({
             data: {
                 defaultEnabled: true,
-                effectiveEnabled: true,
                 enabled: true,
                 overridden: true,
             },
@@ -74,9 +71,7 @@ describe("MemorySummarizeClient", () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
         const rawRequestBody = { enabled: true };
-        const rawResponseBody = {
-            data: { default_enabled: true, effective_enabled: true, enabled: true, overridden: true },
-        };
+        const rawResponseBody = { data: { default_enabled: true, enabled: true, overridden: true } };
 
         server
             .mockEndpoint()
@@ -93,7 +88,6 @@ describe("MemorySummarizeClient", () => {
         expect(response).toEqual({
             data: {
                 defaultEnabled: true,
-                effectiveEnabled: true,
                 enabled: true,
                 overridden: true,
             },

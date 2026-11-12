@@ -10,22 +10,18 @@ import {
   memoryCapability,
   type MemoryConfig,
 } from '../../../../src/runtime/memory/memoryCapability';
-import type { QuietMemoryClient } from '../../../fixtures/memory/quietMemoryClient';
+import { QuietMemoryClient } from '../../../fixtures/memory/quietMemoryClient';
 
 const CONFIG: MemoryConfig = {
   recallMaxTokens: 2048,
-  recallEntityTokens: 512,
   recallTimeoutMs: 2500,
   recallQueryWindow: 5,
   recallMinScore: 0.5,
   recallMaxItems: 12,
-  recallMaxEntities: 8,
   preRecallGateEnabled: false,
   retainTimeoutMs: 10_000,
   sweepMaxPerTurn: 5,
   screen: { enabled: false, url: '', authToken: '', threshold: 0.5, timeoutMs: 1500, maxConcurrency: 8 },
-  curated: { enabled: true, maxModels: 3, maxTokens: 512 },
-  reflect: { enabled: false, budget: 'low', maxTokens: 512, timeoutMs: 8000 },
   pages: { maxCount: 6, maxTokens: 1500 },
 };
 
@@ -33,25 +29,15 @@ function makeLogger() {
   return winston.createLogger({ silent: true });
 }
 
-function makeClient(overrides: {
-  recall?: jest.Mock;
-  getProfile?: jest.Mock;
-  listMentalModels?: jest.Mock;
-  getOperation?: jest.Mock;
-}): QuietMemoryClient {
-  return {
-    recall: overrides.recall ?? jest.fn().mockResolvedValue({ ok: true, results: [], entities: [] }),
-    retain: jest.fn().mockResolvedValue({ ok: true }),
-    getOperation: overrides.getOperation ?? jest.fn().mockResolvedValue({ ok: true, status: 'succeeded' }),
-    retryOperation: jest.fn().mockResolvedValue({ ok: true }),
-    getProfile:
-      overrides.getProfile ??
-      jest
-        .fn()
-        .mockResolvedValue({ ok: true, profile: { name: undefined, mission: undefined, background: undefined } }),
-    listMentalModels: overrides.listMentalModels ?? jest.fn().mockResolvedValue({ ok: true, models: [] }),
-    reflect: jest.fn().mockResolvedValue({ ok: true, text: '', basedOn: 0 }),
-  } as unknown as QuietMemoryClient;
+function makeClient(overrides: { recall?: jest.Mock; getOperation?: jest.Mock }): QuietMemoryClient {
+  const client = new QuietMemoryClient();
+  if (overrides.recall) {
+    jest.spyOn(client, 'recall').mockImplementation(overrides.recall);
+  }
+  if (overrides.getOperation) {
+    jest.spyOn(client, 'getOperation').mockImplementation(overrides.getOperation);
+  }
+  return client;
 }
 
 function makeExecution(context: ContextMessage[]): Readonly<AgentThreadExecutionContext> {
@@ -153,13 +139,7 @@ describe('classifyPreRecallGate', () => {
 });
 
 describe('pre-recall gate in processPreLLM', () => {
-  function makeProcessor(input: {
-    gateEnabled: boolean;
-    recall?: jest.Mock;
-    getProfile?: jest.Mock;
-    listMentalModels?: jest.Mock;
-    getOperation?: jest.Mock;
-  }) {
+  function makeProcessor(input: { gateEnabled: boolean; recall?: jest.Mock; getOperation?: jest.Mock }) {
     const client = makeClient(input);
     const capability = memoryCapability({
       client,
@@ -180,7 +160,7 @@ describe('pre-recall gate in processPreLLM', () => {
   }
 
   it('recalls a greeting when the gate is off (default behavior preserved)', async () => {
-    const recall = jest.fn().mockResolvedValue({ ok: true, results: [], entities: [] });
+    const recall = jest.fn().mockResolvedValue({ ok: true, results: [] });
     const { processor } = makeProcessor({ gateEnabled: false, recall });
     const events = await collect(processor.processPreLLM(makeExecution([userMessage('hey')])));
     expect(recall).toHaveBeenCalledTimes(1);
@@ -189,14 +169,10 @@ describe('pre-recall gate in processPreLLM', () => {
 
   it('skips every provider read on a greeting when the gate is on', async () => {
     const recall = jest.fn();
-    const getProfile = jest.fn();
-    const listMentalModels = jest.fn();
-    const { processor } = makeProcessor({ gateEnabled: true, recall, getProfile, listMentalModels });
+    const { processor } = makeProcessor({ gateEnabled: true, recall });
     const events = await collect(processor.processPreLLM(makeExecution([userMessage('hey')])));
 
     expect(recall).not.toHaveBeenCalled();
-    expect(getProfile).not.toHaveBeenCalled();
-    expect(listMentalModels).not.toHaveBeenCalled();
     expect(passthroughEvent(events)).toMatchObject({
       type: 'aman.memory.recall',
       injected_block: null,
@@ -216,7 +192,7 @@ describe('pre-recall gate in processPreLLM', () => {
   });
 
   it('recalls a history reference when the gate is on', async () => {
-    const recall = jest.fn().mockResolvedValue({ ok: true, results: [], entities: [] });
+    const recall = jest.fn().mockResolvedValue({ ok: true, results: [] });
     const { processor } = makeProcessor({ gateEnabled: true, recall });
     const events = await collect(processor.processPreLLM(makeExecution([userMessage('remember what you told me')])));
     expect(recall).toHaveBeenCalledTimes(1);
@@ -224,7 +200,7 @@ describe('pre-recall gate in processPreLLM', () => {
   });
 
   it('recalls an uncertain message when the gate is on', async () => {
-    const recall = jest.fn().mockResolvedValue({ ok: true, results: [], entities: [] });
+    const recall = jest.fn().mockResolvedValue({ ok: true, results: [] });
     const { processor } = makeProcessor({ gateEnabled: true, recall });
     await collect(processor.processPreLLM(makeExecution([userMessage('hmm, not sure')])));
 

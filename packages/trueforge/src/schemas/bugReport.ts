@@ -105,7 +105,7 @@ export const BugReportTraceEventSchema = z
     counts: z
       .record(z.string(), z.number().int().nonnegative())
       .optional()
-      .describe('Named counts for a countable event (e.g. memory recall items/entities), never the recalled content.'),
+      .describe('Named counts for a countable event (e.g. memory recall items), never the recalled content.'),
     sweep_unreachable: z
       .number()
       .int()

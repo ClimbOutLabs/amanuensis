@@ -10,7 +10,7 @@ export const getMemoryNightlyRoute = createRoute({
   tags: [OpenApiTag.CAPABILITIES],
   summary: 'Get the nightly tidy-up setting',
   description:
-    'Whether the nightly tidy-up runs: the stored override, or the `MEMORY_NIGHTLY_JOB` env default when none is stored, plus the effective state for a server that keeps memory as Markdown files.',
+    'Whether the nightly tidy-up runs: the stored override, or the `MEMORY_NIGHTLY_JOB` env default when none is stored.',
   'x-fern-sdk-group-name': ['settings', 'memoryNightly'],
   'x-fern-sdk-method-name': 'get',
   responses: {
@@ -35,7 +35,7 @@ export const putMemoryNightlyRoute = createRoute({
   tags: [OpenApiTag.CAPABILITIES],
   summary: 'Create, replace, or clear the nightly tidy-up override',
   description:
-    'Persists the nightly tidy-up override: `true` or `false` turns it on or off; `null` clears it back to the `MEMORY_NIGHTLY_JOB` env default. The response carries the effective state.',
+    'Persists the nightly tidy-up override: `true` or `false` turns it on or off; `null` clears it back to the `MEMORY_NIGHTLY_JOB` env default.',
   'x-fern-sdk-group-name': ['settings', 'memoryNightly'],
   'x-fern-sdk-method-name': 'create_or_update',
   request: {

@@ -24,12 +24,6 @@ export interface MemorySummarizeSetting {
   overridden: boolean;
   /** The `MEMORY_SUMMARIZE` env default used when no override is stored. */
   defaultEnabled: boolean;
-  /**
-   * What the server will actually do for the next turn: the stored setting ANDed with
-   * the markdown-only gate. This is the truth the Settings toggle shows — on any other
-   * backend turns are retained verbatim even when `enabled` is true.
-   */
-  effectiveEnabled: boolean;
 }
 
 export interface ReadMemorySummarizeSettingDeps {
@@ -52,10 +46,6 @@ function parseOverride(value: string): boolean | undefined {
  * otherwise `MEMORY_SUMMARIZE`. A stored value that is not exactly `'true'`/`'false'`
  * is treated as unset. Fails closed to the env default when the store read throws, so
  * a settings-table outage can never silently flip summarization.
- *
- * The returned `enabled` is the stored setting (override else env default); `effectiveEnabled`
- * is what the server will actually do, with the markdown-only gate applied. See
- * `beginTurnExecution`.
  */
 export async function readMemorySummarizeSetting(
   deps: ReadMemorySummarizeSettingDeps,
@@ -65,7 +55,6 @@ export async function readMemorySummarizeSetting(
     enabled: defaultEnabled,
     overridden: false,
     defaultEnabled,
-    effectiveEnabled: defaultEnabled,
   };
   let record;
   try {
@@ -91,16 +80,12 @@ export async function readMemorySummarizeSetting(
     enabled: override,
     overridden: true,
     defaultEnabled,
-    effectiveEnabled: override,
   };
 }
 
 /**
- * Effective on/off for turn construction: the stored setting. Unlike screening there is
- * no external service to AND in, so the stored value is the effective value. When summaries are
- * on, a failed or missing summary saves nothing; the full exchange is never the fallback. The
- * markdown-only gate stays in the turn path (`resolveTurnSummarizeContext`), which also logs why
- * a non-markdown backend retains turns verbatim.
+ * On/off for turn construction: the stored setting. When summaries are on, a failed or missing
+ * summary saves nothing; the full exchange is never the fallback.
  */
 export async function resolveMemorySummarizeEnabled(deps: ReadMemorySummarizeSettingDeps): Promise<boolean> {
   const setting = await readMemorySummarizeSetting(deps);
@@ -138,7 +123,7 @@ export interface ResolveTurnSummarizeContextParams {
 /**
  * Resolves one turn's summarization context, shared by every turn-creation path (the chat
  * route and `beginTurnExecution`). Returns undefined only when the turn keeps the full exchange
- * (setting off, a backend that digests it itself, or no memory client). When summaries are on,
+ * (setting off, or no memory client). When summaries are on,
  * a context is always returned: a model that cannot be found has no FQN, and the turn then saves
  * nothing rather than the raw exchange. Every outcome is logged at debug.
  *

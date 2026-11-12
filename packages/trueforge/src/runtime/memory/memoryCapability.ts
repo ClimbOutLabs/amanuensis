@@ -43,23 +43,17 @@ import { isLearnedProfileCopy, LEARNED_PROFILE_CLEARED_CONTENT } from '../profil
 import { localDay } from './localDay';
 import type { MeaningGate } from './meaningGate';
 import type {
-  BankProfile,
-  EntitySummary,
   GetOperationOutcome,
   MemoryClient,
   MemoryFailure,
-  MentalModel,
   RecallItem,
   RecallOutcome,
-  ReflectBudget,
   RetryOperationOutcome,
 } from './memoryClient';
 import type {
-  MemoryCuratedStats,
   MemoryLayersStats,
   MemoryPagesStats,
   MemoryRecallEvent,
-  MemoryReflectStats,
   MemoryScreenRecord,
   MemoryScreenStats,
 } from './memoryEvents';
@@ -82,10 +76,8 @@ import {
   sanitizeMemoryText,
 } from './memoryPageLoader';
 import { retainOperationId, submitRetain } from './memoryRetain';
-import { decideMemoryRoute } from './memoryRouting';
 import { rankNamedPeopleFirst } from './recallNameBoost';
 import { ScreenClient, type ScreenClassifyResult } from './screenClient';
-import { QUERY_STOPWORDS } from './stopWords';
 import { TurnReadWatch } from './turnReadWatch';
 
 const MEMORY_STATE_KEY = 'aman.memory';
@@ -138,59 +130,31 @@ export interface MemoryScreenConfig {
   authToken: string;
   threshold: number;
   timeoutMs: number;
-  /** Maximum classifier requests in flight at once across a turn's screened items and entities. */
+  /** Maximum classifier requests in flight at once across a turn's screened items and pages. */
   maxConcurrency: number;
-}
-
-/** The curated layer: bank profile plus the mental models relevant to the query, every turn. */
-export interface MemoryCuratedConfig {
-  enabled: boolean;
-  /**
-   * A bank with many overlapping models would otherwise fill the block with curated text; this
-   * caps how many are considered before the token cap below applies.
-   */
-  maxModels: number;
-  /**
-   * Taken out of the recall budget, so curated text cannot crowd out recalled facts even when every
-   * selected model is long.
-   */
-  maxTokens: number;
-}
-
-/** The reflect layer: the provider's synthesized answer, on synthesis-shaped asks only. */
-export interface MemoryReflectConfig {
-  enabled: boolean;
-  budget: ReflectBudget;
-  maxTokens: number;
-  timeoutMs: number;
 }
 
 export interface MemoryConfig {
   recallMaxTokens: number;
-  recallEntityTokens: number;
   recallTimeoutMs: number;
   recallQueryWindow: number;
   /**
-   * Relevance floor for a recalled item or entity summary that carries a provider score: anything
-   * scored below this is dropped before formatting (see {@link applyRelevanceGate}). Ignored for a
-   * response with no scores, where {@link recallMaxItems} / {@link recallMaxEntities} apply instead.
+   * Relevance floor for a recalled item that carries a score: anything scored below this is
+   * dropped before formatting. Ignored for a response with no scores, where `recallMaxItems`
+   * applies instead.
    */
   recallMinScore: number;
-  /** Most recalled items kept, by provider rank, when the response carries no per-item score. */
+  /** Most recalled items kept, by rank, when the response carries no per-item score. */
   recallMaxItems: number;
-  /** Most entity summaries kept, by provider rank, when the response carries no per-entity score. */
-  recallMaxEntities: number;
   /**
    * Whether the pre-recall gate may skip the memory reads on high-confidence trivial
    * turns (short greetings, bare acknowledgements). Off unless the server enables it
-   * (`MEMORY_PRERECALL_GATE_ENABLED`) or the bank overrides it in Settings > Memory.
+   * (`MEMORY_PRERECALL_GATE_ENABLED`) or the person overrides it in Settings > Memory.
    */
   preRecallGateEnabled: boolean;
   retainTimeoutMs: number;
   sweepMaxPerTurn: number;
   screen: MemoryScreenConfig;
-  curated: MemoryCuratedConfig;
-  reflect: MemoryReflectConfig;
   pages: MemoryPagesConfig;
 }
 
@@ -216,7 +180,6 @@ type BudgetReason = 'normal' | 'post_compaction';
 
 interface RecallStats {
   items: number;
-  entities: number;
   dropped_over_budget: number;
   dropped_below_threshold: number;
   estimated_tokens: number;
@@ -286,7 +249,7 @@ const RECALL_DAMPING_TURNS = 2;
 
 interface MemoryDurableState {
   pending: PendingRetainOp[];
-  /** Turns left (including this one, once decided) where the recall budget is halved and entity summaries skipped. */
+  /** Turns left (including this one, once decided) where the recall budget is halved. */
   dampingTurnsRemaining: number;
   /**
    * Fingerprint of the last host compaction summary seen in context, on the last turn this ran.
@@ -409,7 +372,7 @@ export function extractQuery(context: readonly ContextMessage[], window: number)
 }
 
 /**
- * The recall query text actually sent to the provider: {@link extractQueryParts}'s newest message
+ * The recall query text actually used for recall: {@link extractQueryParts}'s newest message
  * leads, so a topic change shows up in the query's earliest and most heavily-weighted terms right
  * away; the rest of the window follows in its original oldest-to-newest order, carried at lower
  * relative weight since it trails the leading term. Every part from `parts` is still included,
@@ -522,15 +485,13 @@ export function extractPreviousExchange(
   return { userText, assistantText, origin: readUntrusted ? 'tool_ingested' : USER_STATED_ORIGIN };
 }
 
-const ELLIPSIS = '...';
-
 function estimateTokens(text: string): number {
   // Mirrors trueforge-core's internal (non-exported) estimateTokensForString formula, kept in
   // sync manually since that helper is not part of the package's public entry point.
   return text.length / 4;
 }
 
-/** A date-valued instant, such as a provider's midnight-UTC day, which names a day rather than a moment. */
+/** A date-valued instant, such as a midnight-UTC day, which names a day rather than a moment. */
 const DATE_VALUED_INSTANT = /^\d{4}-\d{2}-\d{2}T00:00:00(?:\.0+)?Z$/;
 
 /**
@@ -548,11 +509,10 @@ function withLocalDay({ item, timeZone }: { item: RecallItem; timeZone: string |
 }
 
 /**
- * A recalled item's full line exactly as it reaches the model, with every provider-controlled byte
- * sanitized. The date and the text are provider-supplied, so both are sanitized here; the surrounding
- * brackets and comma are the only host bytes. The provider's own kind label is not shown: it names a
- * storage detail, not anything the model can use. Shared by formatMemoryBlock and the recall screen
- * so the classifier judges the same bytes the model sees, prefix included, and no provider field can
+ * A recalled item's full line exactly as it reaches the model, with every stored byte
+ * sanitized. The date and the text come from the note files, so both are sanitized here; the surrounding
+ * brackets and comma are the only host bytes. Shared by formatMemoryBlock and the recall screen
+ * so the classifier judges the same bytes the model sees, prefix included, and no stored field can
  * escape the wrapper or slip past the screen unsanitized.
  */
 function noteLabelFor(source: MemoryNoteSource): string {
@@ -565,7 +525,7 @@ function noteLabelFor(source: MemoryNoteSource): string {
 function formatItemLine(item: RecallItem): string {
   const date = item.occurred_start ? sanitizeMemoryLine(item.occurred_start.slice(0, 10)) : 'undated';
   const from = recalledItemSource(item);
-  // Only a fixed phrase is emitted for the origin, never the provider's own value.
+  // Only a fixed phrase is emitted for the origin, never the stored value.
   const source =
     from.kind === 'note' ? `, ${noteLabelFor(from.source)}` : from.kind === 'person' ? '' : `, ${READ_CONTENT_LABEL}`;
   return `[${date}${source}] ${sanitizeMemoryLine(withoutNoteTrailer(item.text))}`;
@@ -614,13 +574,8 @@ function recalledReadSource(item: RecallItem): ReadSource | undefined {
  * Records where the links and addresses of an injected block came from. Only what the person said is
  * theirs to use. An item the assistant read keeps that mark here as it does in the text. A remembered reply
  * that says its chat had read nothing counts as the assistant's own reply, and any other reply as read. The
- * summary lines (profile, mental models, people, reflection) have no single source, so they count as read.
  */
-function recordRecallProvenance(input: {
-  provenance: ChatProvenance;
-  items: readonly RecallItem[];
-  summaryLines: readonly string[];
-}): void {
+function recordRecallProvenance(input: { provenance: ChatProvenance; items: readonly RecallItem[] }): void {
   const { provenance } = input;
   for (const item of input.items) {
     const text = formatItemLine(item);
@@ -634,72 +589,13 @@ function recordRecallProvenance(input: {
       recordUntrustedText({ provenance, text, source });
     }
   }
-  for (const text of input.summaryLines) {
-    recordUntrustedText({ provenance, text, source: 'other' });
-  }
-}
-
-/**
- * One entity's serialized `label: observation`, sanitized exactly as it appears in the People line.
- * Shared by {@link formatEntitiesLine} and the recall screen so classification and injection judge
- * identical bytes: sanitization strips control characters and rewrites delimiters, so screening the
- * raw text could authorize a materially different injected string.
- */
-function formatEntityPart(entity: EntitySummary): string {
-  const label = sanitizeMemoryLine(entity.canonical_name || entity.name);
-  const firstObservation = sanitizeMemoryLine(entity.observations[0]?.text ?? '');
-  return `${label}: ${firstObservation}`;
-}
-
-/**
- * Shortens a curated line to fit `maxTokens`, ending it with an ellipsis. Returns undefined when
- * not even a sliver fits. The text is already sanitized, so cutting it cannot reopen a delimiter.
- */
-function fitLineToTokens(line: string, maxTokens: number): string | undefined {
-  if (maxTokens <= 0) {
-    return undefined;
-  }
-  if (estimateTokens(line) <= maxTokens) {
-    return line;
-  }
-  const maxChars = Math.floor(maxTokens * 4) - ELLIPSIS.length;
-  if (maxChars <= 0) {
-    return undefined;
-  }
-  return `${line.slice(0, maxChars).trimEnd()}${ELLIPSIS}`;
-}
-
-/** The longest leading run of entities whose People line fits `maxTokens`, and that line. */
-function fitEntitiesLine(entities: EntitySummary[], maxTokens: number): { line: string | undefined; included: number } {
-  let line: string | undefined;
-  let included = 0;
-  for (let count = 1; count <= entities.length; count += 1) {
-    const candidate = formatEntitiesLine(entities.slice(0, count));
-    if (candidate === undefined || estimateTokens(candidate) > maxTokens) {
-      break;
-    }
-    line = candidate;
-    included = count;
-  }
-  return { line, included };
-}
-
-function formatEntitiesLine(entities: EntitySummary[]): string | undefined {
-  if (entities.length === 0) {
-    return undefined;
-  }
-  return `People: ${entities.map(formatEntityPart).join(' | ')}`;
 }
 
 export interface FormattedMemoryBlock {
   block: string;
   includedItems: number;
-  includedEntities: number;
   droppedOverBudget: number;
   estimatedTokens: number;
-  /** The curated lines that made it into the block, in order. */
-  curatedLines: string[];
-  includedReflection: boolean;
   /** Pages that made it into the block, in priority order. */
   includedPages: number;
   /** The person's own lines and drafting lines of the pages that made it in. */
@@ -712,130 +608,15 @@ export interface FormattedMemoryBlock {
 // overhead reserved for it below never undershoots. Kept in sync by hand with the clause shapes
 // built in formatMemoryBlock.
 const STATS_LINE_PLACEHOLDER =
-  '(memory: 9999 items, 9999 entities; 999999 tokens of 999999 budget; 9999 dropped over budget; 9999 withheld by screen; entities dropped over budget)';
+  '(memory: 9999 items; 999999 tokens of 999999 budget; 9999 dropped over budget; 9999 withheld by screen)';
 
 /**
  * Fixed token overhead for the block's wrapper tags and its own stats line, reserved out of
- * `budgetTokens` before laying out items and the entities line. Without this, a block whose
- * items and entities line together fit the budget could still overflow it once the wrapper tags
- * and the stats line describing them are added (finding 12).
+ * `budgetTokens` before laying out items. Without this, a block whose items fit the budget could
+ * still overflow it once the wrapper tags and the stats line describing them are added.
  */
-/** Stats-line growth reserved when a curated, reflection, or pages clause is present. */
+/** Stats-line growth reserved when a pages clause is present. */
 const LAYER_STATS_OVERHEAD_TOKENS = 16;
-
-/** How many mental models to list from the bank before relevance selection. */
-const MENTAL_MODEL_LIST_LIMIT = 50;
-
-function formatMentalModelLine(model: MentalModel): string {
-  const stale = model.isStale === true ? ', stale' : '';
-  return `[mental model: ${sanitizeMemoryLine(model.name)}${stale}] ${sanitizeMemoryLine(model.content)}`;
-}
-
-/** The bank profile as one line, or undefined when it carries neither a mission nor a background. */
-function formatProfileLine(profile: BankProfile): string | undefined {
-  const fields: string[] = [];
-  const mission = profile.mission?.trim();
-  if (mission) {
-    fields.push(`mission: ${sanitizeMemoryLine(mission)}`);
-  }
-  const background = profile.background?.trim();
-  if (background) {
-    fields.push(`background: ${sanitizeMemoryLine(background)}`);
-  }
-  return fields.length > 0 ? `[profile] ${fields.join('; ')}` : undefined;
-}
-
-function formatReflectionLine(text: string): string {
-  return `[reflection] ${sanitizeMemoryLine(text.trim())}`;
-}
-
-/** Lower-cased tokens of letters and digits, split on everything else. */
-function tokenize(text: string): string[] {
-  return text.toLowerCase().split(/[^\p{L}\p{N}]+/u);
-}
-
-/** Query terms of three or more characters, minus function words. */
-function queryTerms(query: string): Set<string> {
-  const terms = new Set<string>();
-  for (const raw of tokenize(query)) {
-    if (raw.length >= 3 && !QUERY_STOPWORDS.has(raw)) {
-      terms.add(raw);
-    }
-  }
-  return terms;
-}
-
-/**
- * Mental models worth injecting for this query: those sharing at least one whole term with it
- * (the query and the model's name, tags and content are tokenized the same way, so "art" does not
- * select a model about "party"), current models first, then models whose freshness the provider
- * did not report, then stale ones, more shared terms first, name as the tie-break, capped at `maxModels` and at `maxTokens` of formatted lines. No shared term
- * means nothing is injected, so an unrelated bank of models never dilutes a turn. Deterministic:
- * the same models and query always select the same lines, in the same order.
- */
-/**
- * The text Hindsight lists for a mental model while a refresh is still generating it. The listing
- * carries no other signal for that state (`last_refreshed_at` is already set), so the content is
- * matched directly; injecting the placeholder would put a provider status message in front of the
- * model as if it were memory.
- */
-const MENTAL_MODEL_PLACEHOLDER = 'generating content...';
-
-function hasUsableContent(model: MentalModel): boolean {
-  const content = model.content.trim();
-  return content !== '' && content.toLowerCase() !== MENTAL_MODEL_PLACEHOLDER;
-}
-
-/** Current before unknown before stale: an unreported verdict must not pass as current. */
-function freshnessRank(model: MentalModel): number {
-  if (model.isStale === false) {
-    return 0;
-  }
-  return model.isStale === undefined ? 1 : 2;
-}
-
-export function selectMentalModels(input: {
-  models: readonly MentalModel[];
-  query: string;
-  maxModels: number;
-  maxTokens: number;
-}): MentalModel[] {
-  const terms = queryTerms(input.query);
-  if (terms.size === 0) {
-    return [];
-  }
-  const scored = input.models.flatMap(model => {
-    if (!hasUsableContent(model)) {
-      return [];
-    }
-    const modelTerms = new Set(tokenize(`${model.name} ${model.tags.join(' ')} ${model.content}`));
-    let score = 0;
-    for (const term of terms) {
-      if (modelTerms.has(term)) {
-        score += 1;
-      }
-    }
-    return score > 0 ? [{ model, score }] : [];
-  });
-  scored.sort(
-    (a, b) =>
-      freshnessRank(a.model) - freshnessRank(b.model) || b.score - a.score || a.model.name.localeCompare(b.model.name),
-  );
-  const selected: MentalModel[] = [];
-  let usedTokens = 0;
-  for (const { model } of scored) {
-    if (selected.length >= input.maxModels) {
-      break;
-    }
-    const lineTokens = estimateTokens(formatMentalModelLine(model));
-    if (usedTokens + lineTokens > input.maxTokens) {
-      break;
-    }
-    selected.push(model);
-    usedTokens += lineTokens;
-  }
-  return selected;
-}
 
 /**
  * First inside the block on every turn it is injected: the model is told plainly that what
@@ -867,22 +648,15 @@ export const WRAPPER_OVERHEAD_TOKENS = Math.ceil(
  * as dropped rather than being truncated mid-item. The server already enforces `max_tokens` on
  * the recall request itself: this is the belt-and-braces client-side re-clamp.
  *
- * The budget covers the whole serialized block, not just item lines: the entities line and a
- * fixed overhead for the wrapper tags and stats line are reserved first, so `estimatedTokens`
- * (an estimate of the FINAL assembled block string) never exceeds `budgetTokens`. The profile and
- * the entities keep reserved shares that recalled items cannot take: a curated line is shortened to
- * fit, and entities are kept from the front of the list until their share is full.
+ * The budget covers the whole serialized block, not just item lines: a fixed overhead for the
+ * wrapper tags and stats line is reserved first, so `estimatedTokens` (an estimate of the FINAL
+ * assembled block string) never exceeds `budgetTokens`.
  */
 export function formatMemoryBlock(params: {
   results: RecallItem[];
-  entities: EntitySummary[];
   budgetTokens: number;
-  /** Items and entity summaries the recall screen withheld this turn, noted in the stats line. */
+  /** Items the recall screen withheld this turn, noted in the stats line. */
   withheldItems?: number;
-  /** Curated lines (profile, mental models), already sanitized, placed ahead of the recalled items. */
-  curated?: string[];
-  /** The reflect layer's sanitized line, placed after the entities line. */
-  reflection?: string;
   /**
    * Rendered pages, already sanitized, placed first: they are what the host knows about the
    * people and matters the message names. They draw on `pagesBudgetTokens`, not `budgetTokens`.
@@ -892,7 +666,7 @@ export function formatMemoryBlock(params: {
   pages?: PageEntry[];
   pagesBudgetTokens?: number;
 }): FormattedMemoryBlock {
-  const { results, entities, budgetTokens } = params;
+  const { results, budgetTokens } = params;
   const withheldItems = params.withheldItems ?? 0;
 
   // Pages have their own budget on top of the recall budget; the first page that would overflow
@@ -917,59 +691,9 @@ export function formatMemoryBlock(params: {
     draftingBlock.push(...entry.drafting);
   }
 
-  // Everything draws on one pool: wrapper and stats overhead first, then the curated lines, the
-  // entities line, and the reflection; recalled items get whatever is left. The profile and the
-  // entities each have a reserved share (half and a quarter of the budget) that recalled items can
-  // never take, so a long recall trims recalled items first, not what the model knows about the person.
-  const candidateCurated = params.curated ?? [];
-  const layerOverheadTokens =
-    candidateCurated.length > 0 || params.reflection !== undefined || pageTexts.length > 0 || pagesDropped > 0
-      ? LAYER_STATS_OVERHEAD_TOKENS
-      : 0;
-  let remaining = Math.max(0, budgetTokens - WRAPPER_OVERHEAD_TOKENS - layerOverheadTokens);
-
-  const curatedLines: string[] = [];
-  let curatedTokens = 0;
-  let curatedDropped = 0;
-  let curatedWalkEnded = false;
-  for (const line of candidateCurated) {
-    // Once a line is shortened or dropped, the rest are dropped too, so the included lines stay a prefix.
-    const fitted = curatedWalkEnded
-      ? undefined
-      : fitLineToTokens(line, Math.min(budgetTokens / 2 - curatedTokens, remaining));
-    if (fitted === undefined) {
-      curatedWalkEnded = true;
-      curatedDropped += 1;
-      continue;
-    }
-    if (fitted !== line) {
-      curatedWalkEnded = true;
-    }
-    const fittedTokens = estimateTokens(fitted);
-    curatedLines.push(fitted);
-    curatedTokens += fittedTokens;
-    remaining -= fittedTokens;
-  }
-
-  // Entities keep the people at the front of the list and drop the rest, instead of dropping the whole line.
-  const entitiesFit = fitEntitiesLine(entities, Math.min(budgetTokens / 4, remaining));
-  const entitiesLine = entitiesFit.line;
-  const entitiesTokens = entitiesLine !== undefined ? estimateTokens(entitiesLine) : 0;
-  const includedEntities = entitiesFit.included;
-  const entitiesDroppedOverBudget = includedEntities < entities.length;
-  remaining -= entitiesTokens;
-
-  let reflectionLine = params.reflection;
-  let reflectionTokens = reflectionLine !== undefined ? estimateTokens(reflectionLine) : 0;
-  let reflectionDropped = false;
-  if (reflectionLine !== undefined && (reflectionTokens > budgetTokens / 2 || reflectionTokens > remaining)) {
-    reflectionLine = undefined;
-    reflectionTokens = 0;
-    reflectionDropped = true;
-  }
-  remaining -= reflectionTokens;
-
-  const itemBudget = remaining;
+  // Wrapper and stats overhead come off the budget first; recalled items get whatever is left.
+  const layerOverheadTokens = pageTexts.length > 0 || pagesDropped > 0 ? LAYER_STATS_OVERHEAD_TOKENS : 0;
+  const itemBudget = Math.max(0, budgetTokens - WRAPPER_OVERHEAD_TOKENS - layerOverheadTokens);
 
   const lines: string[] = [];
   let usedTokens = 0;
@@ -992,9 +716,9 @@ export function formatMemoryBlock(params: {
     usedTokens += lineTokens;
   }
 
-  const contentEstimate = Math.round(usedTokens + entitiesTokens + curatedTokens + reflectionTokens);
+  const contentEstimate = Math.round(usedTokens);
   const clauses: string[] = [
-    `memory: ${String(lines.length)} items, ${String(includedEntities)} entities`,
+    `memory: ${String(lines.length)} items`,
     `${String(contentEstimate)} tokens of ${String(budgetTokens)} budget`,
   ];
   if (dropped > 0) {
@@ -1002,21 +726,6 @@ export function formatMemoryBlock(params: {
   }
   if (withheldItems > 0) {
     clauses.push(`${String(withheldItems)} withheld by screen`);
-  }
-  if (entitiesDroppedOverBudget) {
-    clauses.push('entities dropped over budget');
-  }
-  if (curatedLines.length > 0) {
-    clauses.push(`${String(curatedLines.length)} curated`);
-  }
-  if (curatedDropped > 0) {
-    clauses.push(`${String(curatedDropped)} curated dropped over budget`);
-  }
-  if (reflectionLine !== undefined) {
-    clauses.push('reflection');
-  }
-  if (reflectionDropped) {
-    clauses.push('reflection dropped over budget');
   }
   if (pageTexts.length > 0) {
     clauses.push(`${String(pageTexts.length)} pages`);
@@ -1029,10 +738,7 @@ export function formatMemoryBlock(params: {
   const body = [
     MEMORY_FRAMING_SENTENCE,
     ...pageTexts,
-    ...curatedLines,
     ...lines,
-    ...(entitiesLine ? [entitiesLine] : []),
-    ...(reflectionLine !== undefined ? [reflectionLine] : []),
     statsLine,
     // Last, so nothing recalled or read from mail can sit between the heading and its end line.
     ...(draftingBlock.length > 0 ? [DRAFTING_HEADING, ...draftingBlock, DRAFTING_END] : []),
@@ -1042,11 +748,8 @@ export function formatMemoryBlock(params: {
   return {
     block,
     includedItems: lines.length,
-    includedEntities,
     droppedOverBudget: dropped,
     estimatedTokens: Math.round(estimateTokens(block)),
-    curatedLines,
-    includedReflection: reflectionLine !== undefined,
     includedPages: pageTexts.length,
     pagePersonText,
     pageReadText,
@@ -1055,44 +758,28 @@ export function formatMemoryBlock(params: {
 
 export interface RelevanceGateResult {
   items: RecallItem[];
-  entities: EntitySummary[];
   droppedBelowThreshold: number;
 }
 
 /**
- * Filters recalled items and entity summaries down to what is relevant to this turn, before
- * screening and the token budget ever see them. Items and entities are gated independently:
+ * Filters recalled items down to what is relevant to this turn, before screening and the token
+ * budget ever see them:
  *
- * - A response where at least one item carries a provider `score` is treated as scored: every
- *   item scored below `minScore` is dropped (an item with no score in an otherwise-scored
- *   response is treated as unscored-out, i.e. dropped, rather than guessed at) and the count is
- *   added to `droppedBelowThreshold`. There is no separate rank cap on this path — the threshold
- *   is the provider's own judgment of relevance, already expressed on every item.
- * - A response with no scores at all is trusted for rank only: the provider's response order is
- *   kept as given (it is not re-sorted), capped at `maxItems` / `maxEntities`.
- *
- * Entities are gated the same way, independently of items, since a bank can score one and not
- * the other: `maxEntities` caps only the unscored (rank-trust) path, exactly as the public
- * `recall_max_entities` setting is documented — a scored response with more than `maxEntities`
- * entities clearing the threshold keeps every one of them, the same as scored items do.
- *
- * Post-compaction damping's "suppress every entity summary for two turns" requirement is a
- * distinct concern from that rank cap and is threaded through separately as `suppressEntities`:
- * when set, every entity is dropped regardless of score or rank, without narrowing what a normal
- * (non-damped) turn is allowed to keep.
+ * - A response where at least one item carries a `score` is treated as scored: every item scored
+ *   below `minScore` is dropped (an item with no score in an otherwise-scored response is treated
+ *   as unscored-out, i.e. dropped, rather than guessed at) and the count is added to
+ *   `droppedBelowThreshold`. There is no separate rank cap on this path.
+ * - A response with no scores at all is trusted for rank only: the response order is kept as
+ *   given (it is not re-sorted), capped at `maxItems`.
  */
 export function applyRelevanceGate(input: {
   items: readonly RecallItem[];
-  entities: readonly EntitySummary[];
   minScore: number;
   maxItems: number;
-  maxEntities: number;
-  /** Post-compaction damping posture: drop every entity summary regardless of score or rank. */
-  suppressEntities?: boolean;
   /** The person's newest message: items naming a person it mentions rank ahead of the rest. */
   message?: string;
 }): RelevanceGateResult {
-  const { entities, minScore, maxItems, maxEntities, suppressEntities = false, message } = input;
+  const { minScore, maxItems, message } = input;
   let droppedBelowThreshold = 0;
 
   // Ordered before the rank cap and the token budget, since both drop from the end of the list.
@@ -1108,26 +795,10 @@ export function applyRelevanceGate(input: {
       })
     : items.slice(0, maxItems);
 
-  let gatedEntities: EntitySummary[];
-  if (suppressEntities) {
-    gatedEntities = [];
-  } else {
-    const entitiesScored = entities.some(entity => entity.score !== undefined);
-    gatedEntities = entitiesScored
-      ? entities.filter(entity => {
-          const keep = entity.score !== undefined && entity.score >= minScore;
-          if (!keep) {
-            droppedBelowThreshold += 1;
-          }
-          return keep;
-        })
-      : entities.slice(0, maxEntities);
-  }
-
-  return { items: gatedItems, entities: gatedEntities, droppedBelowThreshold };
+  return { items: gatedItems, droppedBelowThreshold };
 }
 
-/** Why the pre-recall gate skipped the provider reads: the turn was a bare greeting or acknowledgement. */
+/** Why the pre-recall gate skipped the memory reads: the turn was a bare greeting or acknowledgement. */
 export type PreRecallGateSkipReason = 'trivial_greeting' | 'trivial_acknowledgement';
 
 /**
@@ -1195,20 +866,6 @@ export function classifyPreRecallGate(context: readonly ContextMessage[]): PreRe
   return undefined;
 }
 
-/**
- * A per-turn-unique, type-qualified id for an item's screen record, keyed on the trusted per-turn
- * `index` rather than the provider's item id. Provider ids are not guaranteed unique within a turn
- * (and an id like `#1` could otherwise collide with the empty-id fallback), so the index is what
- * makes every record distinguishable; the `item:` prefix keeps items and entities in separate
- * namespaces. Symmetric with {@link entityScreenRecordId}: the recalled item order in this turn's
- * model-context snapshot maps `#index` back to the exact datum without embedding provider text here.
- */
-function curatedScreenRecordId(index: number): string {
-  return `curated:#${String(index)}`;
-}
-
-const REFLECTION_SCREEN_RECORD_ID = 'reflection:#0';
-
 /** A page as the block carries it: its sanitized text and its sanitized lines for the one drafting block. */
 interface PageEntry {
   text: string;
@@ -1228,44 +885,37 @@ function pageScreenRecordId(index: number): string {
   return `page:#${String(index)}`;
 }
 
+/**
+ * A per-turn-unique, type-qualified id for an item's screen record, keyed on the trusted per-turn
+ * `index` rather than the stored item id. Stored ids are not guaranteed unique within a turn, so
+ * the index is what makes every record distinguishable; the `item:` prefix keeps items and pages
+ * in separate namespaces.
+ */
 function itemScreenRecordId(index: number): string {
   return `item:#${String(index)}`;
 }
 
-/** A per-turn-unique, type-qualified id for an entity summary's screen record. See {@link itemScreenRecordId}. */
-function entityScreenRecordId(index: number): string {
-  return `entity:#${String(index)}`;
-}
-
 /**
- * One unit for the recall screen: a recalled item or an entity summary, carrying the exact sanitized
+ * One unit for the recall screen: a recalled item or a page, carrying the exact sanitized
  * text to classify, its record id, and its origin. The discriminant routes a screened unit back to
  * the right injected list.
  */
 type ScreenTarget =
   | { kind: 'item'; item: RecallItem; id: string; origin: string | undefined; text: string }
-  | { kind: 'entity'; entity: EntitySummary; id: string; origin: undefined; text: string }
-  // Curated lines and the reflection are provider-synthesized text with no per-datum origin, so
-  // they take the stricter untrusted posture: withheld when flagged or when the screen gave no verdict.
-  | { kind: 'curated'; id: string; origin: undefined; text: string }
-  | { kind: 'reflection'; id: string; origin: undefined; text: string }
   // A page mixes the person's own lines with lines read from mail and pages, so it takes the
   // untrusted posture as a whole.
   | { kind: 'page'; id: string; origin: undefined; text: string; entry: PageEntry };
 
 const SCREEN_WITHHELD_MESSAGES: Record<ScreenTarget['kind'], string> = {
   item: 'Memory recall screen withheld an item',
-  entity: 'Memory recall screen withheld an entity summary',
-  curated: 'Memory recall screen withheld a curated line',
-  reflection: 'Memory recall screen withheld the reflection',
   page: 'Memory recall screen withheld a page',
 };
 
 /**
  * Maps `fn` over `items` with at most `limit` calls in flight at once, preserving input order in the
  * result. A single shared iterator hands each of `limit` workers the next item as it frees up, so
- * the recall screen's outbound classifier requests stay bounded even when a provider response yields
- * thousands of entities, rather than fanning out into one simultaneous request per datum.
+ * the recall screen's outbound classifier requests stay bounded even when a recall yields
+ * thousands of items, rather than fanning out into one simultaneous request per datum.
  */
 async function mapWithConcurrency<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
   const results = new Array<R>(items.length);
@@ -1281,9 +931,9 @@ async function mapWithConcurrency<T, R>(items: readonly T[], limit: number, fn: 
 }
 
 /**
- * The recall screen's per-datum decision, applied uniformly to a recalled item and to a recalled
- * entity summary. Origin-aware and, above all, lossless: a decision only withholds the datum from
- * THIS turn's injected block; nothing is deleted from the bank.
+ * The recall screen's per-datum decision, applied uniformly to a recalled item and to a
+ * page. Origin-aware and, above all, lossless: a decision only withholds the datum from
+ * THIS turn's injected block; nothing is deleted from memory.
  *
  * Fail posture (the whole matrix in one place):
  * - screen disabled          -> screening never runs; everything injected, as before.
@@ -1296,9 +946,9 @@ async function mapWithConcurrency<T, R>(items: readonly T[], limit: number, fn: 
  * - unknown/timeout + untrusted -> WITHHOLD (record `fenced_untrusted_origin_on_unknown`).
  *
  * "Untrusted" is every origin that is not exactly `user_stated`: `tool_ingested`, an N8N origin
- * such as `email`/`document`, and absent metadata we cannot vouch for. Entity summaries carry no
- * per-entity origin (they are provider-derived aggregates), so callers pass `origin: undefined` and
- * they always take the stricter untrusted posture, recorded with origin `absent`.
+ * such as `email`/`document`, and absent metadata we cannot vouch for. A page carries no
+ * single origin, so callers pass `origin: undefined` and it always takes the stricter untrusted
+ * posture, recorded with origin `absent`.
  */
 function decideScreen(input: { id: string; origin: string | undefined; result: ScreenClassifyResult }): {
   withheld: boolean;
@@ -1338,73 +988,8 @@ function decideScreen(input: { id: string; origin: string | undefined; result: S
   return { withheld: false, record: undefined };
 }
 
-/** What the curated layer read this turn, before screening and budget decide what is injected. */
-interface FetchedCurated {
-  enabled: boolean;
-  profileLine: string | undefined;
-  modelLines: string[];
-  candidates: number;
-  failure: MemoryFailure | undefined;
-}
-
-/** Curated layer stats for the event, from what was read and what the block finally carries. */
-function curatedStats(input: {
-  fetched: FetchedCurated;
-  injected: string[];
-  withheld: number;
-  dropped: number;
-}): MemoryCuratedStats {
-  const { fetched, injected, withheld, dropped } = input;
-  if (!fetched.enabled) {
-    return { profile: false, mental_models: 0, candidates: 0, withheld: 0, dropped: 0, outcome: 'disabled' };
-  }
-  const profile = fetched.profileLine !== undefined && injected.includes(fetched.profileLine);
-  const failure = fetched.failure;
-  let outcome: MemoryCuratedStats['outcome'];
-  if (failure !== undefined) {
-    outcome = failure.code === 'timeout' ? 'timeout' : 'error';
-  } else if (injected.length > 0) {
-    outcome = 'ok';
-  } else if (withheld > 0) {
-    outcome = 'withheld';
-  } else if (dropped > 0) {
-    outcome = 'dropped';
-  } else {
-    outcome = 'empty';
-  }
-  return {
-    profile,
-    mental_models: injected.length - (profile ? 1 : 0),
-    candidates: fetched.candidates,
-    withheld,
-    dropped,
-    outcome,
-    ...(failure !== undefined ? { reason: failure.reason } : {}),
-  };
-}
-
-/** A fetched reflection counts as injected only if it survived the screen and the budget. */
-function finalizeReflectStats(
-  stats: MemoryReflectStats,
-  fate: { withheld: boolean; dropped: boolean },
-): MemoryReflectStats {
-  if (stats.outcome !== 'ok') {
-    return stats;
-  }
-  if (fate.withheld) {
-    return { ...stats, outcome: 'withheld' };
-  }
-  if (fate.dropped) {
-    return { ...stats, outcome: 'dropped' };
-  }
-  return stats;
-}
-
 interface ScreenPartition {
   injectedItems: RecallItem[];
-  injectedEntities: EntitySummary[];
-  injectedCurated: string[];
-  injectedReflection: string | undefined;
   injectedPages: PageEntry[];
   withheld: number;
   records: MemoryScreenRecord[];
@@ -1563,7 +1148,7 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
     // turns after it.
     const { applyDamping } = this.resolveDamping(execution.context);
 
-    // The pre-recall gate skips the provider reads on high-confidence trivial turns when enabled.
+    // The pre-recall gate skips the memory reads on high-confidence trivial turns when enabled.
     // Everything else on this path runs unchanged: damping resolved above, retain seeding and
     // sweeping below. The caches are cleared up front so no turn — skipped or otherwise — ever
     // injects a stale block, screen, or layer stats from an earlier turn; a non-skipped turn
@@ -1577,7 +1162,6 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
     const stats: RecallStats = !this.recallEnabled
       ? {
           items: 0,
-          entities: 0,
           dropped_over_budget: 0,
           dropped_below_threshold: 0,
           estimated_tokens: 0,
@@ -1589,7 +1173,6 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
       : gateSkip !== undefined
         ? {
             items: 0,
-            entities: 0,
             dropped_over_budget: 0,
             dropped_below_threshold: 0,
             estimated_tokens: 0,
@@ -1702,9 +1285,9 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
 
   /**
    * `applyDamping` is decided once per turn by {@link resolveDamping} before this runs: it halves
-   * the recall token budget and skips entity summaries (`suppressEntities: true`, `entityTokens:
-   * 0`) for the two turns after a host compaction summary is newly seen, since the context just
-   * shrank sharply and a full recall block would otherwise dominate what little of it remains.
+   * the recall token budget for the two turns after a host compaction summary is newly seen, since
+   * the context just shrank sharply and a full recall block would otherwise dominate what little of
+   * it remains.
    */
   private async recallAndCache(context: readonly ContextMessage[], applyDamping: boolean): Promise<RecallStats> {
     const budgetReason: BudgetReason = applyDamping ? 'post_compaction' : 'normal';
@@ -1712,7 +1295,6 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
     if (parts === undefined) {
       return {
         items: 0,
-        entities: 0,
         dropped_over_budget: 0,
         dropped_below_threshold: 0,
         estimated_tokens: 0,
@@ -1722,7 +1304,6 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
       };
     }
     const query = weightedRecallQuery(parts);
-    const decision = this.config.reflect.enabled ? decideMemoryRoute(parts[parts.length - 1]) : undefined;
 
     // Floored at WRAPPER_OVERHEAD_TOKENS, not 1: formatMemoryBlock always serializes the wrapper
     // tags, framing sentence, and stats line, so a halved budget smaller than that mandatory cost
@@ -1730,9 +1311,8 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
     const recallBudgetTokens = applyDamping
       ? Math.max(WRAPPER_OVERHEAD_TOKENS, Math.floor(this.config.recallMaxTokens / 2))
       : this.config.recallMaxTokens;
-    const recallEntityTokens = applyDamping ? 0 : this.config.recallEntityTokens;
 
-    // The three provider reads are independent, so they run concurrently. Each degrades on its
+    // The recall and the pages are independent, so they run concurrently. Each degrades on its
     // own and none can fail the turn (design invariant 1).
     // The gate says whether the message is clearly about something remembered. It is worked out once and
     // both the log and the pages use that one answer.
@@ -1740,24 +1320,19 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
       message: parts[parts.length - 1] ?? '',
       currentSessionId: this.sessionId,
     });
-    const [recall, curated, reflection, pages] = await Promise.all([
-      this.timedRecall(query, recallBudgetTokens, recallEntityTokens, gate),
-      this.fetchCurated(query),
-      this.fetchReflection(query, decision),
+    const [recall, pages] = await Promise.all([
+      this.timedRecall(query, recallBudgetTokens, gate),
       this.fetchPages(parts, gate),
     ]);
-    const curatedLines = [...(curated.profileLine !== undefined ? [curated.profileLine] : []), ...curated.modelLines];
 
     let recallStats: RecallStats;
     let items: RecallItem[] = [];
-    let entities: EntitySummary[] = [];
     if (!recall.outcome.ok) {
       this.logger.warn('Memory recall failed; continuing turn without recalled memory', {
         reason: recall.outcome.reason,
       });
       recallStats = {
         items: 0,
-        entities: 0,
         dropped_over_budget: 0,
         dropped_below_threshold: 0,
         estimated_tokens: 0,
@@ -1769,10 +1344,7 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
     } else {
       // Narrows recall down to what is actually relevant before screening and the budget ever see
       // it, instead of injecting the full recalled set unconditionally: scored items below
-      // recallMinScore are dropped outright, and everything else (unscored items, and every
-      // entity summary when a provider score is absent) is capped by rank. Damping suppresses
-      // every entity summary outright (`suppressEntities`) rather than folding into that rank
-      // cap, so a normal, non-damped turn is never narrowed by the damping posture.
+      // recallMinScore are dropped outright, and unscored items are capped by rank.
       const gated = applyRelevanceGate({
         // Read content older than the freshness limit stays stored but is not recalled; the
         // assistant's own replies are always recalled.
@@ -1783,67 +1355,44 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
             !isLearnedProfileCopy(item.metadata) &&
             !isNoteTooOld({ metadata: item.metadata, text: item.text, now: new Date() }),
         ),
-        entities: recall.outcome.entities,
         minScore: this.config.recallMinScore,
         maxItems: this.config.recallMaxItems,
-        maxEntities: this.config.recallMaxEntities,
-        suppressEntities: applyDamping,
         message: parts[parts.length - 1] ?? '',
       });
       items = gated.items.map(item => withLocalDay({ item, timeZone: this.timeZone }));
-      entities = gated.entities;
       // The tool policy reads this to block web_search as a substitute for
       // recall: a web query about material recall already surfaced can never
       // be a legitimate open-web question.
-      noteRecallContent(this.internalSourceState, [
-        ...gated.items.map(item => item.text),
-        ...gated.entities.flatMap(entity => [
-          entity.name,
-          entity.canonical_name,
-          ...entity.observations.map(observation => observation.text),
-        ]),
-      ]);
+      noteRecallContent(
+        this.internalSourceState,
+        gated.items.map(item => item.text),
+      );
       recallStats = {
         items: 0,
-        entities: 0,
         dropped_over_budget: 0,
         dropped_below_threshold: gated.droppedBelowThreshold,
         estimated_tokens: 0,
         recall_ms: recall.recallMs,
-        outcome: items.length === 0 && entities.length === 0 ? 'empty' : 'ok',
+        outcome: items.length === 0 ? 'empty' : 'ok',
         budget_reason: budgetReason,
       };
     }
-    if (
-      items.length === 0 &&
-      entities.length === 0 &&
-      curatedLines.length === 0 &&
-      reflection.line === undefined &&
-      pages.entries.length === 0
-    ) {
-      this.cachedLayers = {
-        curated: curatedStats({ fetched: curated, injected: [], withheld: 0, dropped: 0 }),
-        reflect: reflection.stats,
-        ...(pages.stats === undefined ? {} : { pages: pages.stats }),
-      };
+    if (items.length === 0 && pages.entries.length === 0) {
+      if (pages.stats !== undefined) {
+        this.cachedLayers = { pages: pages.stats };
+      }
       return recallStats;
     }
 
     const screening = await this.screenRecall({
       items,
-      entities,
-      curated: curatedLines,
-      reflection: reflection.line,
       pages: pages.entries,
       recallMs: recall.recallMs,
     });
     const formatted = formatMemoryBlock({
       results: screening.injectedItems,
-      entities: screening.injectedEntities,
       budgetTokens: recallBudgetTokens,
       withheldItems: screening.withheld,
-      curated: screening.injectedCurated,
-      ...(screening.injectedReflection !== undefined ? { reflection: screening.injectedReflection } : {}),
       pages: screening.injectedPages,
       pagesBudgetTokens: this.config.pages.maxTokens,
     });
@@ -1852,9 +1401,6 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
     this.cachedBlock = formatted.block;
     const holdsOutsideText =
       screening.injectedItems.some(item => recalledItemSource(item).kind !== 'person') ||
-      screening.injectedEntities.length > 0 ||
-      screening.injectedCurated.length > 0 ||
-      screening.injectedReflection !== undefined ||
       screening.injectedPages.some(page => page.holdsOutsideText);
     this.blockWatch?.noteBlock({ holdsOutsideText });
     if (holdsOutsideText) {
@@ -1862,17 +1408,9 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
     }
     if (this.webSearch !== undefined) {
       // The block holds a leading run of what the screen let through, so the same runs are recorded.
-      const entitiesLine = formatEntitiesLine(screening.injectedEntities.slice(0, formatted.includedEntities));
       recordRecallProvenance({
         provenance: this.webSearch.provenance,
         items: screening.injectedItems.slice(0, formatted.includedItems),
-        summaryLines: [
-          ...formatted.curatedLines,
-          ...(entitiesLine === undefined ? [] : [entitiesLine]),
-          ...(formatted.includedReflection && screening.injectedReflection !== undefined
-            ? [screening.injectedReflection]
-            : []),
-        ],
       });
       // On a page only the person's own lines make a link or address theirs to use. A line Aman read stays
       // read content, in this chat and every later one.
@@ -1883,38 +1421,25 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
         source: 'memory',
       });
     }
-    // Layer stats describe the block as injected, not as fetched: a line the screen withheld or the
+    // Page stats describe the block as injected, not as loaded: a page the screen withheld or the
     // budget dropped is counted as such, so the event never claims more than the block carries.
-    this.cachedLayers = {
-      curated: curatedStats({
-        fetched: curated,
-        injected: formatted.curatedLines,
-        withheld: curatedLines.length - screening.injectedCurated.length,
-        dropped: screening.injectedCurated.length - formatted.curatedLines.length,
-      }),
-      reflect: finalizeReflectStats(reflection.stats, {
-        withheld: reflection.line !== undefined && screening.injectedReflection === undefined,
-        dropped: screening.injectedReflection !== undefined && !formatted.includedReflection,
-      }),
-      ...(pages.stats === undefined
-        ? {}
-        : {
-            pages: {
-              ...pages.stats,
-              loaded: formatted.includedPages,
-              withheld: pages.entries.length - screening.injectedPages.length,
-              dropped_over_budget:
-                pages.stats.dropped_over_budget + (screening.injectedPages.length - formatted.includedPages),
-            },
-          }),
-    };
+    if (pages.stats !== undefined) {
+      this.cachedLayers = {
+        pages: {
+          ...pages.stats,
+          loaded: formatted.includedPages,
+          withheld: pages.entries.length - screening.injectedPages.length,
+          dropped_over_budget:
+            pages.stats.dropped_over_budget + (screening.injectedPages.length - formatted.includedPages),
+        },
+      };
+    }
     if (screening.ran) {
       this.cachedScreen = { withheld: screening.withheld, records: screening.records };
     }
     return {
       ...recallStats,
       items: formatted.includedItems,
-      entities: formatted.includedEntities,
       dropped_over_budget: formatted.droppedOverBudget,
       estimated_tokens: formatted.estimatedTokens,
     };
@@ -1923,7 +1448,7 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
   /**
    * The pages the chat's messages name and the single statements the newest message is about, rendered and
    * sanitized, with the counts the event records. `parts` are the query messages, oldest first.
-   * `stats` is undefined on a backend without pages. Never fails the turn.
+   * `stats` is undefined on a client without pages. Never fails the turn.
    */
   private async fetchPages(
     parts: readonly string[],
@@ -1972,7 +1497,6 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
   private async timedRecall(
     query: string,
     maxTokens: number,
-    entityTokens: number,
     gate: Promise<MeaningGate> | undefined,
   ): Promise<{ outcome: RecallOutcome; recallMs: number }> {
     const startedAt = this.now();
@@ -1980,7 +1504,6 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
       this.client.recall({
         query,
         maxTokens,
-        entityTokens,
         queryTimestamp: new Date().toISOString(),
         timeoutMs: this.config.recallTimeoutMs,
         currentSessionId: this.sessionId,
@@ -1988,92 +1511,6 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
       }),
     );
     return { outcome, recallMs: this.now() - startedAt };
-  }
-
-  /**
-   * The curated layer: the bank profile and the mental models relevant to the query, read with the
-   * recall timeout. Lines from whichever read succeeded are injected even when the other failed;
-   * the outcome reports the worse of the two. Stats are finalized after screening and formatting.
-   */
-  private async fetchCurated(query: string): Promise<FetchedCurated> {
-    if (!this.config.curated.enabled) {
-      return { enabled: false, profileLine: undefined, modelLines: [], candidates: 0, failure: undefined };
-    }
-    const timeoutMs = this.config.recallTimeoutMs;
-    const [profile, listed] = await Promise.all([
-      this.guarded('profile', () => this.client.getProfile(timeoutMs)),
-      this.guarded('mental models', () => this.client.listMentalModels({ limit: MENTAL_MODEL_LIST_LIMIT, timeoutMs })),
-    ]);
-    const profileLine = profile.ok ? formatProfileLine(profile.profile) : undefined;
-    const models = listed.ok
-      ? selectMentalModels({
-          models: listed.models,
-          query,
-          maxModels: this.config.curated.maxModels,
-          maxTokens: this.config.curated.maxTokens,
-        })
-      : [];
-    const failure = [profile, listed].find((result): result is MemoryFailure => !result.ok);
-    if (failure !== undefined) {
-      this.logger.warn('Memory curated layer degraded; continuing turn with what was read', { reason: failure.reason });
-    }
-    return {
-      enabled: true,
-      profileLine,
-      modelLines: models.map(formatMentalModelLine),
-      candidates: listed.ok ? listed.models.length : 0,
-      failure,
-    };
-  }
-
-  /** The reflect layer, only on a reflect route; `decision` is undefined when the layer is off. */
-  private async fetchReflection(
-    query: string,
-    decision: ReturnType<typeof decideMemoryRoute> | undefined,
-  ): Promise<{ line: string | undefined; stats: MemoryReflectStats }> {
-    if (decision === undefined) {
-      return { line: undefined, stats: { route: 'recall', outcome: 'disabled', reflect_ms: 0, based_on: 0 } };
-    }
-    if (decision.route === 'recall') {
-      return { line: undefined, stats: { route: 'recall', outcome: 'skipped', reflect_ms: 0, based_on: 0 } };
-    }
-    const base = {
-      route: 'reflect' as const,
-      ...(decision.matched !== undefined ? { matched: decision.matched } : {}),
-    };
-    const startedAt = this.now();
-    const outcome = await this.guarded('reflect', () =>
-      this.client.reflect({
-        query,
-        budget: this.config.reflect.budget,
-        maxTokens: this.config.reflect.maxTokens,
-        timeoutMs: this.config.reflect.timeoutMs,
-      }),
-    );
-    const reflectMs = this.now() - startedAt;
-    if (!outcome.ok) {
-      this.logger.warn('Memory reflect failed; continuing turn without a reflection', { reason: outcome.reason });
-      return {
-        line: undefined,
-        stats: {
-          ...base,
-          outcome: outcome.code === 'timeout' ? 'timeout' : 'error',
-          reflect_ms: reflectMs,
-          based_on: 0,
-          reason: outcome.reason,
-        },
-      };
-    }
-    if (outcome.text.trim() === '') {
-      return {
-        line: undefined,
-        stats: { ...base, outcome: 'empty', reflect_ms: reflectMs, based_on: outcome.basedOn },
-      };
-    }
-    return {
-      line: formatReflectionLine(outcome.text),
-      stats: { ...base, outcome: 'ok', reflect_ms: reflectMs, based_on: outcome.basedOn },
-    };
   }
 
   /**
@@ -2096,40 +1533,31 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
   }
 
   /**
-   * Screens recalled items AND entity summaries at the recall chokepoint, the one place this host
-   * fully controls: the external N8N pipeline writes into the bank without touching Aman's retain
-   * path, so origin stamps alone cannot be trusted and the TEXT is screened here regardless of
-   * origin. Entity summaries feed the injected "People:" line, so their text is screened too;
-   * lacking any per-entity origin, they take the stricter untrusted posture. The screen only
-   * decides what reaches the model THIS turn; nothing is deleted from the bank.
+   * Screens recalled items and pages at the recall chokepoint, the one place this host fully
+   * controls: other tools write into memory without touching Aman's retain path, so origin stamps
+   * alone cannot be trusted and the TEXT is screened here regardless of origin. The screen only
+   * decides what reaches the model THIS turn; nothing is deleted from memory.
    *
-   * The text screened is the exact sanitized text that would be injected ({@link itemScreenText} /
-   * {@link formatEntityPart}), so sanitization can never authorize a benign verdict for one string
-   * while the model sees a different one.
+   * The text screened is the exact sanitized text that would be injected, so sanitization can never
+   * authorize a benign verdict for one string while the model sees a different one.
    *
    * Latency and fan-out are both bounded so screening never delays the turn past the recall budget
-   * nor floods the classifier: items and entities are screened together through a worker pool capped
+   * nor floods the classifier: items and pages are screened together through a worker pool capped
    * at `screen.maxConcurrency`, and each call is clamped to whatever remains of the screen budget
    * (the smaller of the per-call timeout and the leftover `recallTimeoutMs`) at the moment it
    * begins, recomputed per call so a large batch shares the one deadline rather than each getting a
    * fresh one. When nothing remains, calls return "unknown" immediately (fencing untrusted origins,
-   * injecting the user's own), so a slow recall or a huge entity set degrades safely.
+   * injecting the user's own), so a slow recall or a huge recall set degrades safely.
    */
   private async screenRecall(input: {
     items: RecallItem[];
-    entities: EntitySummary[];
-    curated: string[];
-    reflection: string | undefined;
     pages: PageEntry[];
     recallMs: number;
   }): Promise<ScreenPartition> {
-    const { items, entities, curated, reflection, pages, recallMs } = input;
+    const { items, pages, recallMs } = input;
     if (!this.config.screen.enabled || this.screenClient === undefined) {
       return {
         injectedItems: items,
-        injectedEntities: entities,
-        injectedCurated: curated,
-        injectedReflection: reflection,
         injectedPages: pages,
         withheld: 0,
         records: [],
@@ -2139,7 +1567,7 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
     const budgetMs = Math.min(this.config.screen.timeoutMs, Math.max(0, this.config.recallTimeoutMs - recallMs));
     const screenDeadline = this.now() + budgetMs;
 
-    // Items first, then entities: input order is preserved through the pool, so per-kind indices and
+    // Items first, then pages: input order is preserved through the pool, so per-kind indices and
     // the injected order both stay stable.
     const targets: ScreenTarget[] = [
       ...items.map((item, index): ScreenTarget => ({
@@ -2147,27 +1575,9 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
         item,
         id: itemScreenRecordId(index),
         origin: item.metadata?.[MEMORY_ORIGIN_METADATA_KEY],
-        // The full sanitized line, prefix included, so the classifier judges every provider byte.
+        // The full sanitized line, prefix included, so the classifier judges every stored byte.
         text: formatItemLine(item),
       })),
-      // Entities carry no origin metadata: origin stays undefined, so the stricter untrusted posture
-      // applies and the record's origin reads as `absent`.
-      ...entities.map((entity, index): ScreenTarget => ({
-        kind: 'entity',
-        entity,
-        id: entityScreenRecordId(index),
-        origin: undefined,
-        text: formatEntityPart(entity),
-      })),
-      ...curated.map((text, index): ScreenTarget => ({
-        kind: 'curated',
-        id: curatedScreenRecordId(index),
-        origin: undefined,
-        text,
-      })),
-      ...(reflection !== undefined
-        ? [{ kind: 'reflection', id: REFLECTION_SCREEN_RECORD_ID, origin: undefined, text: reflection } as const]
-        : []),
       ...pages.map((entry, index): ScreenTarget => ({
         kind: 'page',
         id: pageScreenRecordId(index),
@@ -2184,9 +1594,6 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
     }));
 
     const injectedItems: RecallItem[] = [];
-    const injectedEntities: EntitySummary[] = [];
-    const injectedCurated: string[] = [];
-    let injectedReflection: string | undefined;
     const injectedPages: PageEntry[] = [];
     const records: MemoryScreenRecord[] = [];
     let withheld = 0;
@@ -2209,15 +1616,6 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
         case 'item':
           injectedItems.push(target.item);
           break;
-        case 'entity':
-          injectedEntities.push(target.entity);
-          break;
-        case 'curated':
-          injectedCurated.push(target.text);
-          break;
-        case 'reflection':
-          injectedReflection = target.text;
-          break;
         case 'page':
           injectedPages.push(target.entry);
           break;
@@ -2226,9 +1624,6 @@ export class MemoryProcessor implements PreLLMProcessor, PreLLMEphemeralAgentCon
 
     return {
       injectedItems,
-      injectedEntities,
-      injectedCurated,
-      injectedReflection,
       injectedPages,
       withheld,
       records,

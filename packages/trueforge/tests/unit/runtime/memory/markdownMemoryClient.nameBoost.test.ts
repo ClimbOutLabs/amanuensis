@@ -55,7 +55,6 @@ describe('MarkdownMemoryClient recall ranks notes naming the person asked about 
         query: MESSAGE,
         maxTokens: 600,
         queryTimestamp: '2026-10-28T13:00:00.000Z',
-        entityTokens: 0,
         timeoutMs: 5000,
       });
       if (!outcome.ok) {

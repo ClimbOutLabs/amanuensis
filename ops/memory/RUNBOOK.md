@@ -98,7 +98,7 @@ accepted.
 Recall screening stays off by default. It needs a classifier sidecar that the
 installer does not start, so a default of "on" would have nothing to screen
 against: with no service reachable, every memory that came from something Aman
-read would be withheld. With it on, each recalled item and entity costs one
+read would be withheld. With it on, each recalled item and each page costs one
 classifier request per turn (run in parallel, up to the concurrency setting,
 each bounded by `MEMORY_SCREEN_TIMEOUT_MS`); the recorded runs show a median of
 about 21 ms, but a 95th percentile of about 6 s on CPU and about 0.7 s on GPU.

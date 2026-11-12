@@ -47,16 +47,8 @@ const MEMORY_DEFAULTS = {
   recallTimeoutMs: 2500,
   recallQueryWindow: 5,
   recallMaxItems: 50,
-  recallMaxEntities: 10,
   recallMinScore: 0.6,
-  curatedEnabled: true,
-  curatedMaxModels: 3,
-  curatedMaxTokens: 512,
   prerecallGateEnabled: false,
-  reflectEnabled: true,
-  reflectBudget: 'low',
-  reflectMaxTokens: 512,
-  reflectTimeoutMs: 8000,
 } satisfies TrueForgeApi.MemoryDefaultsCapability;
 
 const vaultCatalog: MemoryVaultCatalog = {

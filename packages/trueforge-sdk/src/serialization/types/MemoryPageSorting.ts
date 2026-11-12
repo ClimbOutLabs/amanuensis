@@ -4,7 +4,6 @@ import type * as TrueForge from "../../api/index.js";
 import * as core from "../../core/index.js";
 import type * as serializers from "../index.js";
 import { MemoryPageSortingDefaultMode } from "./MemoryPageSortingDefaultMode.js";
-import { MemoryPageSortingEffectiveMode } from "./MemoryPageSortingEffectiveMode.js";
 import { MemoryPageSortingMode } from "./MemoryPageSortingMode.js";
 
 export const MemoryPageSorting: core.serialization.ObjectSchema<
@@ -12,7 +11,6 @@ export const MemoryPageSorting: core.serialization.ObjectSchema<
     TrueForge.MemoryPageSorting
 > = core.serialization.object({
     defaultMode: core.serialization.property("default_mode", MemoryPageSortingDefaultMode),
-    effectiveMode: core.serialization.property("effective_mode", MemoryPageSortingEffectiveMode),
     mode: MemoryPageSortingMode,
     overridden: core.serialization.boolean(),
 });
@@ -20,7 +18,6 @@ export const MemoryPageSorting: core.serialization.ObjectSchema<
 export declare namespace MemoryPageSorting {
     export interface Raw {
         default_mode: MemoryPageSortingDefaultMode.Raw;
-        effective_mode: MemoryPageSortingEffectiveMode.Raw;
         mode: MemoryPageSortingMode.Raw;
         overridden: boolean;
     }

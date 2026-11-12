@@ -33,7 +33,6 @@ describe('one recall over a log of 5,000 notes', () => {
         query: askAbout({ topic: 2, closeness: 1 }),
         maxTokens: 4000,
         queryTimestamp: new Date().toISOString(),
-        entityTokens: 0,
         timeoutMs: 30_000,
       });
       timings.push(`${call} recall ${String(Math.round(performance.now() - startedAt))} ms`);

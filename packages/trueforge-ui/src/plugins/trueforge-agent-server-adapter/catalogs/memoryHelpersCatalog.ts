@@ -6,23 +6,18 @@ import type { CreateTrueForgeClientOptions } from '../client.js';
 /** How saved notes are sorted onto pages. `report` only writes down what Aman would do. */
 export type PageSortMode = 'off' | 'report' | 'on';
 
-/**
- * The page-sorting setting: `mode` is the stored value (an override, else the server default),
- * `effectiveMode` is what the server will do, which is `off` unless memory is kept as Markdown files.
- */
+/** The page-sorting setting: `mode` is the stored value (an override, else the server default). */
 export interface MemoryPageSortingSetting {
   mode: PageSortMode;
   overridden: boolean;
   defaultMode: PageSortMode;
-  effectiveMode: PageSortMode;
 }
 
-/** The nightly tidy-up setting, with the same stored and effective split as page sorting. */
+/** The nightly tidy-up setting: `enabled` is the stored value (an override, else the server default). */
 export interface MemoryNightlySetting {
   enabled: boolean;
   overridden: boolean;
   defaultEnabled: boolean;
-  effectiveEnabled: boolean;
 }
 
 export interface MemoryPageSortingCatalog {
@@ -42,7 +37,6 @@ const PageSortingResponseSchema = z.object({
     mode: PageSortModeSchema,
     overridden: z.boolean(),
     default_mode: PageSortModeSchema,
-    effective_mode: PageSortModeSchema,
   }),
 });
 
@@ -51,7 +45,6 @@ const NightlyResponseSchema = z.object({
     enabled: z.boolean(),
     overridden: z.boolean(),
     default_enabled: z.boolean(),
-    effective_enabled: z.boolean(),
   }),
 });
 
@@ -92,8 +85,8 @@ export function createMemoryPageSortingCatalog(options: CreateTrueForgeClientOpt
     if (!parsed.success) {
       throw new Error('The server sent back something unexpected. Reload the page and try again.');
     }
-    const { mode, overridden, default_mode, effective_mode } = parsed.data.data;
-    return { mode, overridden, defaultMode: default_mode, effectiveMode: effective_mode };
+    const { mode, overridden, default_mode } = parsed.data.data;
+    return { mode, overridden, defaultMode: default_mode };
   };
   return {
     getMemoryPageSorting: async () => parse(await request('GET')),
@@ -108,8 +101,8 @@ export function createMemoryNightlyCatalog(options: CreateTrueForgeClientOptions
     if (!parsed.success) {
       throw new Error('The server sent back something unexpected. Reload the page and try again.');
     }
-    const { enabled, overridden, default_enabled, effective_enabled } = parsed.data.data;
-    return { enabled, overridden, defaultEnabled: default_enabled, effectiveEnabled: effective_enabled };
+    const { enabled, overridden, default_enabled } = parsed.data.data;
+    return { enabled, overridden, defaultEnabled: default_enabled };
   };
   return {
     getMemoryNightly: async () => parse(await request('GET')),

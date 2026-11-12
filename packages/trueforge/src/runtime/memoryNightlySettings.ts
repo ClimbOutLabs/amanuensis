@@ -14,8 +14,6 @@ export interface MemoryNightlySetting {
   overridden: boolean;
   /** The `MEMORY_NIGHTLY_JOB` env default used when no override is stored. */
   defaultEnabled: boolean;
-  /** What the server will do: the stored setting, and only when memory is kept as Markdown files. */
-  effectiveEnabled: boolean;
 }
 
 export interface ReadMemoryNightlySettingDeps {
@@ -33,7 +31,6 @@ export async function readMemoryNightlySetting(deps: ReadMemoryNightlySettingDep
     enabled: defaultEnabled,
     overridden: false,
     defaultEnabled,
-    effectiveEnabled: defaultEnabled,
   };
   let record;
   try {
@@ -57,6 +54,5 @@ export async function readMemoryNightlySetting(deps: ReadMemoryNightlySettingDep
     enabled: override,
     overridden: true,
     defaultEnabled,
-    effectiveEnabled: override,
   };
 }

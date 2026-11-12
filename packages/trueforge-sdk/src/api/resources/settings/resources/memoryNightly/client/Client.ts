@@ -24,7 +24,7 @@ export class MemoryNightlyClient {
     }
 
     /**
-     * Whether the nightly tidy-up runs: the stored override, or the `MEMORY_NIGHTLY_JOB` env default when none is stored, plus the effective state for a server that keeps memory as Markdown files.
+     * Whether the nightly tidy-up runs: the stored override, or the `MEMORY_NIGHTLY_JOB` env default when none is stored.
      *
      * @param {MemoryNightlyClient.RequestOptions} requestOptions - Request-specific configuration.
      *
@@ -121,7 +121,7 @@ export class MemoryNightlyClient {
     }
 
     /**
-     * Persists the nightly tidy-up override: `true` or `false` turns it on or off; `null` clears it back to the `MEMORY_NIGHTLY_JOB` env default. The response carries the effective state.
+     * Persists the nightly tidy-up override: `true` or `false` turns it on or off; `null` clears it back to the `MEMORY_NIGHTLY_JOB` env default.
      *
      * @param {TrueForge.settings.UpdateMemoryNightlyRequest} request
      * @param {MemoryNightlyClient.RequestOptions} requestOptions - Request-specific configuration.

@@ -275,16 +275,14 @@ function MemoryScreenToggle(props: { status: TrueForgeApi.MemoryScreenCapability
 function MemorySummarizeToggle({ setting }: { setting: MemorySummarizeSettingState }) {
   const toaster = useToasterOptional();
 
-  const blocked = setting.enabled === true && setting.effectiveEnabled === false;
-  const checked = setting.effectiveEnabled ?? false;
-  const disabled = setting.saving || setting.effectiveEnabled === null || blocked;
+  const checked = setting.enabled ?? false;
+  const disabled = setting.saving || setting.enabled === null;
   /**
    * The reset link stays disabled while there is no stored override to clear; unlike
    * screening there is no unconfigured state that neuters the stored value, so the
-   * switch always reflects the stored setting. Hidden entirely while the backend
-   * gate blocks, where a stored override changes nothing.
+   * switch always reflects the stored setting.
    */
-  const showReset = setting.overridden === true && !blocked;
+  const showReset = setting.overridden === true;
   const resetDisabled = setting.saving || setting.enabled === null;
   const defaultLabel =
     setting.defaultEnabled === null
@@ -301,14 +299,7 @@ function MemorySummarizeToggle({ setting }: { setting: MemorySummarizeSettingSta
         <label htmlFor="memory-summarize-toggle" className="text-sm font-medium text-text-primary">
           Summarize turns before saving
         </label>
-        {blocked ? (
-          <p className="mt-0.5 text-xs text-text-secondary">
-            Turn summaries need Markdown memory. This server&rsquo;s memory setup saves the full transcript, so the
-            switch stays off.
-          </p>
-        ) : (
-          <p className="mt-0.5 text-xs text-text-secondary">{stateCopy}</p>
-        )}
+        <p className="mt-0.5 text-xs text-text-secondary">{stateCopy}</p>
         {showReset ? (
           <button
             type="button"

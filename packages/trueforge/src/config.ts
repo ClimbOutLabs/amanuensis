@@ -34,10 +34,7 @@ import {
   TOKEN_FACTORY_DEFAULT_BASE_URL,
   validateRunCodeStartupConfig,
 } from '@truefoundry/trueforge-core/core';
-import {
-  MEMORY_PROVIDER_MAX_TIMEOUT_MS,
-  MEMORY_SETTINGS_LIMITS,
-} from '@truefoundry/trueforge-core/core/memory/memorySettingsLimits';
+import { MEMORY_MAX_TIMEOUT_MS } from '@truefoundry/trueforge-core/core/memory/memorySettingsLimits';
 
 import { appDataDirFromEnv, voiceModelDirFromEnv } from './appDataDir';
 import { ARCHIVE_DEFAULT_MAX_BYTES } from './dataExport/archiveLimits';
@@ -45,7 +42,6 @@ import { ZIP_MAX_ARCHIVE_BYTES } from './dataExport/zipStreamWriter';
 import { normalizedOrigin } from './mcp/firstParty';
 import { PACKAGE_VERSION } from './packageVersion';
 import { defaultEmbeddingModelDir } from './runtime/memory/embeddingRetrieval';
-import type { ReflectBudget } from './runtime/memory/memoryClient';
 import { PageSortModeSchema, type PageSortMode } from './runtime/memory/pageSortMode';
 import { parseModelPrices, type ModelPrices } from './runtime/modelPricing';
 import { DEFAULT_TOKEN_FACTORY_MODEL } from './runtime/tokenFactoryDefaults';
@@ -496,11 +492,9 @@ function parseHandoffUrl(raw: string | undefined): string | null {
 
 /**
  * Parses a bounded-integer env var, falling back to `defaultValue` when unset/blank. Defaults to
- * requiring a positive value (`minValue: 1`); pass `minValue: 0` for a setting whose shared
- * limit accepts zero as a valid "disable" value (e.g. {@link MEMORY_SETTINGS_LIMITS}'s
- * `recallMaxEntities`), so the env-var parser stays synchronized with that limit instead of
- * rejecting the value the schema and UI both allow. An optional `maxValue` fails fast at startup
- * instead of letting an oversized value surface later.
+ * requiring a positive value (`minValue: 1`); pass `minValue: 0` for a setting where zero means
+ * "disabled". An optional `maxValue` fails fast at startup instead of letting an oversized value
+ * surface later.
  */
 export function parsePositiveInt(options: {
   envKey: string;
@@ -542,21 +536,6 @@ function parseUnitInterval(options: { envKey: string; raw: string | undefined; d
     throw new Error(`Environment variable ${envKey} must be a number between 0 and 1, got "${raw}"`);
   }
   return value;
-}
-
-/** Parses a boolean env var; anything but `true`/`false` throws instead of reading as `false`. */
-function parseReflectBudget(options: {
-  envKey: string;
-  raw: string | undefined;
-  defaultValue: ReflectBudget;
-}): ReflectBudget {
-  if (options.raw === undefined || options.raw === '') {
-    return options.defaultValue;
-  }
-  if (options.raw === 'low' || options.raw === 'mid' || options.raw === 'high') {
-    return options.raw;
-  }
-  throw new Error(`${options.envKey} must be one of low, mid, high; got ${JSON.stringify(options.raw)}`);
 }
 
 /** Which process-isolation backend runs `run_code` executions. */
@@ -1766,11 +1745,6 @@ export interface SharedServerConfiguration {
    */
   MEMORY_RECALL_MAX_TOKENS: number;
   /**
-   * Max tokens requested for the recall response's entity summaries.
-   * Env: `MEMORY_RECALL_ENTITY_TOKENS`. Default 512.
-   */
-  MEMORY_RECALL_ENTITY_TOKENS: number;
-  /**
    * Max milliseconds to wait for a memory recall before the turn proceeds without it. Capped at
    * the shared memory deadline maximum (120000); a larger value fails fast at startup.
    * Env: `MEMORY_RECALL_TIMEOUT_MS`. Default 2500.
@@ -1784,22 +1758,16 @@ export interface SharedServerConfiguration {
    */
   MEMORY_RECALL_QUERY_WINDOW: number;
   /**
-   * Relevance floor for a recalled item or entity summary that carries a provider score:
-   * anything scored below this is dropped before it reaches the model. Ignored for a response
-   * with no scores at all, where `MEMORY_RECALL_MAX_ITEMS` / `MEMORY_RECALL_MAX_ENTITIES` apply
-   * instead. Env: `MEMORY_RECALL_MIN_SCORE`. Default 0.5.
+   * Relevance floor for a recalled item that carries a score: anything scored below this is
+   * dropped before it reaches the model. Ignored for a response with no scores at all, where
+   * `MEMORY_RECALL_MAX_ITEMS` applies instead. Env: `MEMORY_RECALL_MIN_SCORE`. Default 0.5.
    */
   MEMORY_RECALL_MIN_SCORE: number;
   /**
-   * Most recalled items kept, by provider rank, when the response carries no per-item score.
+   * Most recalled items kept, by rank, when the response carries no per-item score.
    * Env: `MEMORY_RECALL_MAX_ITEMS`. Default 12.
    */
   MEMORY_RECALL_MAX_ITEMS: number;
-  /**
-   * Most entity summaries kept, by provider rank, when the response carries no per-entity score.
-   * Env: `MEMORY_RECALL_MAX_ENTITIES`. Default 8.
-   */
-  MEMORY_RECALL_MAX_ENTITIES: number;
   /**
    * Most people and matter pages loaded in full before a turn, by priority.
    * Env: `MEMORY_PAGES_MAX_COUNT`. Default 6.
@@ -1920,8 +1888,8 @@ export interface SharedServerConfiguration {
    */
   MEMORY_SCREEN_TIMEOUT_MS: number;
   /**
-   * Max recall-screen classify calls in flight at once across a turn's items and entities. Bounds
-   * outbound fan-out so a provider response with many entities cannot spawn one simultaneous request
+   * Max recall-screen classify calls in flight at once across a turn's items and pages. Bounds
+   * outbound fan-out so a recall with many items cannot spawn one simultaneous request
    * per datum and exhaust sockets or overload the classifier sidecar.
    * Env: `MEMORY_SCREEN_MAX_CONCURRENCY`. Default 8.
    */
@@ -1965,32 +1933,6 @@ export interface SharedServerConfiguration {
    * Settings > Memory. Env: `MEMORY_PRERECALL_GATE_ENABLED`. Default false.
    */
   MEMORY_PRERECALL_GATE_ENABLED: boolean;
-  /**
-   * Whether every turn also injects the memory bank's curated layer: its profile and the mental
-   * models relevant to the recall query. Cheap reads with no model call behind them.
-   * Env: `MEMORY_CURATED_ENABLED`. Default true.
-   */
-  MEMORY_CURATED_ENABLED: boolean;
-  /**
-   * Most mental models injected on one turn. Env: `MEMORY_CURATED_MAX_MODELS`. Default 3.
-   */
-  MEMORY_CURATED_MAX_MODELS: number;
-  /**
-   * Token budget for the injected mental-model lines, taken out of `MEMORY_RECALL_MAX_TOKENS`.
-   * Env: `MEMORY_CURATED_MAX_TOKENS`. Default 512.
-   */
-  MEMORY_CURATED_MAX_TOKENS: number;
-  /**
-   * Whether a synthesis-shaped user message (summarize, brief me, recommend, compare, what should I
-   * do) also asks the memory provider to reflect and injects its answer. Reflect spends model calls
-   * on the local inference server; factual questions never take this route.
-   * Env: `MEMORY_REFLECT_ENABLED`. Default true.
-   */
-  MEMORY_REFLECT_ENABLED: boolean;
-  /**
-   * Reflect effort: `low` (one pass), `mid`, or `high`. Env: `MEMORY_REFLECT_BUDGET`. Default low.
-   */
-  MEMORY_REFLECT_BUDGET: ReflectBudget;
   /**
    * Base directory for the markdown memory backend. Each tenant gets a sanitized
    * subdirectory.
@@ -2122,17 +2064,6 @@ export interface SharedServerConfiguration {
    * Env: `MEMORY_EMBEDDINGS_BACKFILL_BATCH_SIZE`. Default 8.
    */
   MEMORY_EMBEDDINGS_BACKFILL_BATCH_SIZE: number;
-  /**
-   * Max tokens the provider may spend on a reflect answer. Env: `MEMORY_REFLECT_MAX_TOKENS`.
-   * Default 512.
-   */
-  MEMORY_REFLECT_MAX_TOKENS: number;
-  /**
-   * Max milliseconds to wait for a reflect answer before the turn proceeds without it. Capped at
-   * the shared memory deadline maximum (120000); a larger value fails fast at startup.
-   * Env: `MEMORY_REFLECT_TIMEOUT_MS`. Default 8000.
-   */
-  MEMORY_REFLECT_TIMEOUT_MS: number;
   /**
    * Space-separated Tesseract language codes OCR falls back to when a page's script cannot be detected; a page
    * whose script is detected is read with that script's languages instead. Languages the sandbox image lacks are
@@ -2702,16 +2633,11 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('MEMORY_RECALL_MAX_TOKENS'),
     defaultValue: 600,
   }),
-  MEMORY_RECALL_ENTITY_TOKENS: parsePositiveInt({
-    envKey: 'MEMORY_RECALL_ENTITY_TOKENS',
-    raw: getEnv('MEMORY_RECALL_ENTITY_TOKENS'),
-    defaultValue: 512,
-  }),
   MEMORY_RECALL_TIMEOUT_MS: parsePositiveInt({
     envKey: 'MEMORY_RECALL_TIMEOUT_MS',
     raw: getEnv('MEMORY_RECALL_TIMEOUT_MS'),
     defaultValue: 2500,
-    maxValue: MEMORY_PROVIDER_MAX_TIMEOUT_MS,
+    maxValue: MEMORY_MAX_TIMEOUT_MS,
   }),
   MEMORY_RECALL_QUERY_WINDOW: parsePositiveInt({
     envKey: 'MEMORY_RECALL_QUERY_WINDOW',
@@ -2737,13 +2663,6 @@ const shared: SharedServerConfiguration = {
     envKey: 'MEMORY_PAGES_MAX_TOKENS',
     raw: getEnv('MEMORY_PAGES_MAX_TOKENS'),
     defaultValue: 1500,
-  }),
-  MEMORY_RECALL_MAX_ENTITIES: parsePositiveInt({
-    envKey: 'MEMORY_RECALL_MAX_ENTITIES',
-    raw: getEnv('MEMORY_RECALL_MAX_ENTITIES'),
-    defaultValue: 8,
-    minValue: MEMORY_SETTINGS_LIMITS.recallMaxEntities.min,
-    maxValue: MEMORY_SETTINGS_LIMITS.recallMaxEntities.max,
   }),
   MEMORY_RETAIN_TIMEOUT_MS: parsePositiveInt({
     envKey: 'MEMORY_RETAIN_TIMEOUT_MS',
@@ -2846,31 +2765,6 @@ const shared: SharedServerConfiguration = {
     raw: getEnv('MEMORY_PRERECALL_GATE_ENABLED'),
     defaultValue: false,
   }),
-  MEMORY_CURATED_ENABLED: parseBoolean({
-    envKey: 'MEMORY_CURATED_ENABLED',
-    raw: getEnv('MEMORY_CURATED_ENABLED'),
-    defaultValue: true,
-  }),
-  MEMORY_CURATED_MAX_MODELS: parsePositiveInt({
-    envKey: 'MEMORY_CURATED_MAX_MODELS',
-    raw: getEnv('MEMORY_CURATED_MAX_MODELS'),
-    defaultValue: 3,
-  }),
-  MEMORY_CURATED_MAX_TOKENS: parsePositiveInt({
-    envKey: 'MEMORY_CURATED_MAX_TOKENS',
-    raw: getEnv('MEMORY_CURATED_MAX_TOKENS'),
-    defaultValue: 512,
-  }),
-  MEMORY_REFLECT_ENABLED: parseBoolean({
-    envKey: 'MEMORY_REFLECT_ENABLED',
-    raw: getEnv('MEMORY_REFLECT_ENABLED'),
-    defaultValue: true,
-  }),
-  MEMORY_REFLECT_BUDGET: parseReflectBudget({
-    envKey: 'MEMORY_REFLECT_BUDGET',
-    raw: getEnv('MEMORY_REFLECT_BUDGET'),
-    defaultValue: 'low',
-  }),
   MEMORY_MARKDOWN_DIR: getEnv('MEMORY_MARKDOWN_DIR', { defaultValue: './data/memory' }) ?? './data/memory',
   MEMORY_SUMMARIZE: parseBoolean({
     envKey: 'MEMORY_SUMMARIZE',
@@ -2924,17 +2818,6 @@ const shared: SharedServerConfiguration = {
   }),
   PERSONA_KNOWLEDGE_DIR:
     getEnv('PERSONA_KNOWLEDGE_DIR', { defaultValue: './data/persona-knowledge' }) ?? './data/persona-knowledge',
-  MEMORY_REFLECT_MAX_TOKENS: parsePositiveInt({
-    envKey: 'MEMORY_REFLECT_MAX_TOKENS',
-    raw: getEnv('MEMORY_REFLECT_MAX_TOKENS'),
-    defaultValue: 512,
-  }),
-  MEMORY_REFLECT_TIMEOUT_MS: parsePositiveInt({
-    envKey: 'MEMORY_REFLECT_TIMEOUT_MS',
-    raw: getEnv('MEMORY_REFLECT_TIMEOUT_MS'),
-    defaultValue: 8000,
-    maxValue: MEMORY_PROVIDER_MAX_TIMEOUT_MS,
-  }),
   DOCUMENT_OCR_LANGUAGES:
     getEnv('DOCUMENT_OCR_LANGUAGES', { defaultValue: DEFAULT_OCR_LANGUAGES }) ?? DEFAULT_OCR_LANGUAGES,
   PUBLIC_BASE_URL: parsePublicBaseUrl(getEnv('PUBLIC_BASE_URL', { defaultValue: '' }), { allowPath: !standalone }),

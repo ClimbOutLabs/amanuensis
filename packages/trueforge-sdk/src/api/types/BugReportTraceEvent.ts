@@ -9,7 +9,7 @@ export interface BugReportTraceEvent {
     budgetReason?: TrueForge.BugReportTraceEventBudgetReason;
     /** Character count of the stripped message text. */
     charCount?: number;
-    /** Named counts for a countable event (e.g. memory recall items/entities), never the recalled content. */
+    /** Named counts for a countable event (e.g. memory recall items), never the recalled content. */
     counts?: Record<string, number>;
     /** Wall-clock duration, when both endpoints are known. */
     durationMs?: number;

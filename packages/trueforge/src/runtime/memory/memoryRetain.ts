@@ -567,7 +567,7 @@ export function startPageSorting({
   }
   // The setting is read now, after the save, so a change in Settings applies to the very next save.
   void readMemoryPageSortingSetting({ globalSettingsStore: summarize.globalSettingsStore, logger }).then(setting =>
-    sortWrittenNotes({ mode: setting.effectiveMode, client, written, summarize, timeZone, logger }),
+    sortWrittenNotes({ mode: setting.mode, client, written, summarize, timeZone, logger }),
   );
 }
 

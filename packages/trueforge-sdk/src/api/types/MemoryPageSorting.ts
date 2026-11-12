@@ -5,8 +5,6 @@ import type * as TrueForge from "../index.js";
 export interface MemoryPageSorting {
     /** The `MEMORY_PAGE_SORTING` env default used when no override is stored. */
     defaultMode: TrueForge.MemoryPageSortingDefaultMode;
-    /** What the server will do: the stored setting, or `off` when memory is not kept as Markdown files. */
-    effectiveMode: TrueForge.MemoryPageSortingEffectiveMode;
     /** The stored setting: the persisted override when set, else the env default. */
     mode: TrueForge.MemoryPageSortingMode;
     /** Whether a persisted override is currently stored. */

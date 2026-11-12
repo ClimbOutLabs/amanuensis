@@ -24,7 +24,7 @@ export class MemorySummarizeClient {
     }
 
     /**
-     * The stored override for turn summarization, or the `MEMORY_SUMMARIZE` env default when none is stored, plus the effective state with the markdown-only gate applied.
+     * The stored override for turn summarization, or the `MEMORY_SUMMARIZE` env default when none is stored.
      *
      * @param {MemorySummarizeClient.RequestOptions} requestOptions - Request-specific configuration.
      *
@@ -121,7 +121,7 @@ export class MemorySummarizeClient {
     }
 
     /**
-     * Persists the turn-summarization override: `true`/`false` turns summarization on/off; `null` clears the override back to the `MEMORY_SUMMARIZE` env default. The response carries the effective state.
+     * Persists the turn-summarization override: `true`/`false` turns summarization on/off; `null` clears the override back to the `MEMORY_SUMMARIZE` env default.
      *
      * @param {TrueForge.settings.UpdateMemorySummarizeRequest} request
      * @param {MemorySummarizeClient.RequestOptions} requestOptions - Request-specific configuration.

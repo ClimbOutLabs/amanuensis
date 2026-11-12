@@ -10289,7 +10289,7 @@ await client.settings.mcpServers.delete("name");
 <dl>
 <dd>
 
-Whether the nightly tidy-up runs: the stored override, or the `MEMORY_NIGHTLY_JOB` env default when none is stored, plus the effective state for a server that keeps memory as Markdown files.
+Whether the nightly tidy-up runs: the stored override, or the `MEMORY_NIGHTLY_JOB` env default when none is stored.
 </dd>
 </dl>
 </dd>
@@ -10344,7 +10344,7 @@ await client.settings.memoryNightly.get();
 <dl>
 <dd>
 
-Persists the nightly tidy-up override: `true` or `false` turns it on or off; `null` clears it back to the `MEMORY_NIGHTLY_JOB` env default. The response carries the effective state.
+Persists the nightly tidy-up override: `true` or `false` turns it on or off; `null` clears it back to the `MEMORY_NIGHTLY_JOB` env default.
 </dd>
 </dl>
 </dd>
@@ -10410,7 +10410,7 @@ await client.settings.memoryNightly.createOrUpdate({
 <dl>
 <dd>
 
-How saved notes are sorted onto pages: the stored override, or the `MEMORY_PAGE_SORTING` env default when none is stored, plus the effective mode for a server that keeps memory as Markdown files.
+How saved notes are sorted onto pages: the stored override, or the `MEMORY_PAGE_SORTING` env default when none is stored.
 </dd>
 </dl>
 </dd>
@@ -10465,7 +10465,7 @@ await client.settings.memoryPageSorting.get();
 <dl>
 <dd>
 
-Persists the page-sorting override: `off`, `report` (only note what it would do) or `on`; `null` clears it back to the `MEMORY_PAGE_SORTING` env default. The response carries the effective mode.
+Persists the page-sorting override: `off`, `report` (only note what it would do) or `on`; `null` clears it back to the `MEMORY_PAGE_SORTING` env default.
 </dd>
 </dl>
 </dd>
@@ -10773,7 +10773,7 @@ await client.settings.memoryScreens.createOrUpdate({
 <dl>
 <dd>
 
-The stored override for turn summarization, or the `MEMORY_SUMMARIZE` env default when none is stored, plus the effective state with the markdown-only gate applied.
+The stored override for turn summarization, or the `MEMORY_SUMMARIZE` env default when none is stored.
 </dd>
 </dl>
 </dd>
@@ -10828,7 +10828,7 @@ await client.settings.memorySummarize.get();
 <dl>
 <dd>
 
-Persists the turn-summarization override: `true`/`false` turns summarization on/off; `null` clears the override back to the `MEMORY_SUMMARIZE` env default. The response carries the effective state.
+Persists the turn-summarization override: `true`/`false` turns summarization on/off; `null` clears the override back to the `MEMORY_SUMMARIZE` env default.
 </dd>
 </dl>
 </dd>

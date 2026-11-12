@@ -128,27 +128,27 @@ describe('readMemorySummarizeSetting', () => {
   it('falls back to the env default when nothing is stored', async () => {
     configuration.MEMORY_SUMMARIZE = false;
     const setting = await readMemorySummarizeSetting({ globalSettingsStore: emptyStore(), logger: silentLogger });
-    expect(setting).toEqual({ enabled: false, overridden: false, defaultEnabled: false, effectiveEnabled: false });
+    expect(setting).toEqual({ enabled: false, overridden: false, defaultEnabled: false });
   });
 
   it('falls back to an env default of true when nothing is stored', async () => {
     configuration.MEMORY_SUMMARIZE = true;
     const setting = await readMemorySummarizeSetting({ globalSettingsStore: emptyStore(), logger: silentLogger });
-    expect(setting).toEqual({ enabled: true, overridden: false, defaultEnabled: true, effectiveEnabled: true });
+    expect(setting).toEqual({ enabled: true, overridden: false, defaultEnabled: true });
   });
 
   it('returns the stored true override over an env default of false', async () => {
     configuration.MEMORY_SUMMARIZE = false;
     const store = storeWith(new Map([[MEMORY_SUMMARIZE_SETTING_KEY, record('true')]]));
     const setting = await readMemorySummarizeSetting({ globalSettingsStore: store, logger: silentLogger });
-    expect(setting).toEqual({ enabled: true, overridden: true, defaultEnabled: false, effectiveEnabled: true });
+    expect(setting).toEqual({ enabled: true, overridden: true, defaultEnabled: false });
   });
 
   it('returns the stored false override over an env default of true', async () => {
     configuration.MEMORY_SUMMARIZE = true;
     const store = storeWith(new Map([[MEMORY_SUMMARIZE_SETTING_KEY, record('false')]]));
     const setting = await readMemorySummarizeSetting({ globalSettingsStore: store, logger: silentLogger });
-    expect(setting).toEqual({ enabled: false, overridden: true, defaultEnabled: true, effectiveEnabled: false });
+    expect(setting).toEqual({ enabled: false, overridden: true, defaultEnabled: true });
   });
 
   it('treats a malformed stored value as unset', async () => {
@@ -156,7 +156,6 @@ describe('readMemorySummarizeSetting', () => {
     const setting = await readMemorySummarizeSetting({ globalSettingsStore: store, logger: silentLogger });
     expect(setting.overridden).toBe(false);
     expect(setting.enabled).toBe(configuration.MEMORY_SUMMARIZE);
-    expect(setting.effectiveEnabled).toBe(configuration.MEMORY_SUMMARIZE);
   });
 
   it('fails closed to the env default when the store read throws', async () => {

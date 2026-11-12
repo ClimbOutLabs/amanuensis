@@ -25,18 +25,14 @@ const DEFAULT_RECALL = ["Alex's wife is named Robin.", 'Coffee with Robin on Fri
 
 const CONFIG: MemoryConfig = {
   recallMaxTokens: 600,
-  recallEntityTokens: 0,
   recallTimeoutMs: 2500,
   recallQueryWindow: 5,
   recallMinScore: 0.5,
   recallMaxItems: 12,
-  recallMaxEntities: 8,
   preRecallGateEnabled: false,
   retainTimeoutMs: 10_000,
   sweepMaxPerTurn: 5,
   screen: { enabled: false, url: '', authToken: '', threshold: 0.5, timeoutMs: 1500, maxConcurrency: 8 },
-  curated: { enabled: false, maxModels: 3, maxTokens: 512 },
-  reflect: { enabled: false, budget: 'low', maxTokens: 512, timeoutMs: 8000 },
   pages: { maxCount: 6, maxTokens: 1500 },
 };
 
@@ -54,17 +50,11 @@ function makeMemoryClient(recalledText: string[]): MemoryClient {
         occurred_start: '2026-08-14T00:00:00Z',
         text,
       })),
-      entities: [],
       budgetTokens: 600,
     }),
     retain: jest.fn().mockResolvedValue({ ok: true }),
     getOperation: jest.fn().mockResolvedValue({ ok: true, status: 'unknown' }),
     retryOperation: jest.fn().mockResolvedValue({ ok: true }),
-    getProfile: jest
-      .fn()
-      .mockResolvedValue({ ok: true, profile: { name: undefined, mission: undefined, background: undefined } }),
-    listMentalModels: jest.fn().mockResolvedValue({ ok: true, models: [] }),
-    reflect: jest.fn().mockResolvedValue({ ok: true, text: '', basedOn: 0 }),
     listEntries: jest.fn().mockResolvedValue({ ok: true, entries: [] }),
     updateEntry: jest.fn(),
     deleteEntry: jest.fn(),

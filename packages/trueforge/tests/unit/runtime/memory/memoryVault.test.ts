@@ -273,7 +273,6 @@ describe('memory vault', () => {
           query: 'meetings',
           maxTokens: 1000,
           queryTimestamp: new Date().toISOString(),
-          entityTokens: 0,
           timeoutMs: TIMEOUT_MS,
         });
         expect(recall.ok).toBe(true);

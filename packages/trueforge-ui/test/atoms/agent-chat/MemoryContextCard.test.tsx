@@ -12,7 +12,6 @@ const recallEvent: TrueForgeApi.MemoryRecallPersistedEvent = {
   injectedBlock: '<aman-memory>recalled fact</aman-memory>',
   stats: {
     items: 1,
-    entities: 2,
     droppedOverBudget: 0,
     droppedBelowThreshold: 0,
     estimatedTokens: 42,
@@ -29,16 +28,17 @@ describe('MemoryContextCard', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it('pluralizes counts correctly at one and at other counts, including an irregular plural', () => {
-    render(<MemoryContextCard recall={recallEvent} />);
-    // The collapsed status line already exercises both the singular form (1 item) and the
-    // irregular plural (2 entities, not "entitys").
-    expect(screen.getByText('1 item, 2 entities')).toBeInTheDocument();
-
-    // Expand to also check the same counts rendered as their own rows in the body.
-    fireEvent.click(screen.getByRole('button', { name: 'Expand step' }));
+  it('pluralizes the item count at one and at other counts', () => {
+    const { rerender } = render(<MemoryContextCard recall={recallEvent} />);
+    // The collapsed status line shows the singular form.
     expect(screen.getByText('1 item')).toBeInTheDocument();
-    expect(screen.getByText('2 entities')).toBeInTheDocument();
+
+    rerender(<MemoryContextCard recall={{ ...recallEvent, stats: { ...recallEvent.stats, items: 2 } }} />);
+    expect(screen.getByText('2 items')).toBeInTheDocument();
+
+    // Expand to also check the same count rendered as its own row in the body.
+    fireEvent.click(screen.getByRole('button', { name: 'Expand step' }));
+    expect(screen.getAllByText('2 items')).toHaveLength(2);
   });
 
   it('shows an actionable unavailable state instead of rendering as if nothing happened', () => {

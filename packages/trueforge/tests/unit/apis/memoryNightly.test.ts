@@ -82,7 +82,7 @@ describe('memoryNightly router', () => {
     const response = await router.request('/');
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
-      data: { enabled: false, overridden: false, default_enabled: false, effective_enabled: false },
+      data: { enabled: false, overridden: false, default_enabled: false },
     });
   });
 
@@ -92,20 +92,20 @@ describe('memoryNightly router', () => {
     const putTrue = await router.request('/', putInit(true));
     expect(putTrue.status).toBe(200);
     expect(await putTrue.json()).toEqual({
-      data: { enabled: true, overridden: true, default_enabled: false, effective_enabled: true },
+      data: { enabled: true, overridden: true, default_enabled: false },
     });
     expect((await globalSettingsStore.getSetting({ key: KEY }))?.value).toBe('true');
 
     const putFalse = await router.request('/', putInit(false));
     expect(putFalse.status).toBe(200);
     expect(await putFalse.json()).toEqual({
-      data: { enabled: false, overridden: true, default_enabled: false, effective_enabled: false },
+      data: { enabled: false, overridden: true, default_enabled: false },
     });
     expect((await globalSettingsStore.getSetting({ key: KEY }))?.value).toBe('false');
 
     const get = await router.request('/');
     expect(await get.json()).toEqual({
-      data: { enabled: false, overridden: true, default_enabled: false, effective_enabled: false },
+      data: { enabled: false, overridden: true, default_enabled: false },
     });
   });
 
@@ -116,7 +116,7 @@ describe('memoryNightly router', () => {
     const cleared = await router.request('/', putInit(null));
     expect(cleared.status).toBe(200);
     expect(await cleared.json()).toEqual({
-      data: { enabled: false, overridden: false, default_enabled: false, effective_enabled: false },
+      data: { enabled: false, overridden: false, default_enabled: false },
     });
     expect(await globalSettingsStore.getSetting({ key: KEY })).toBeUndefined();
   });
@@ -145,14 +145,14 @@ describe('memoryNightly router', () => {
     const putFalse = await router.request('/', putInit(false));
     expect(putFalse.status).toBe(200);
     expect(await putFalse.json()).toEqual({
-      data: { enabled: false, overridden: true, default_enabled: true, effective_enabled: false },
+      data: { enabled: false, overridden: true, default_enabled: true },
     });
 
     // Clearing the override reports the env default as the effective state.
     const cleared = await router.request('/', putInit(null));
     expect(cleared.status).toBe(200);
     expect(await cleared.json()).toEqual({
-      data: { enabled: true, overridden: false, default_enabled: true, effective_enabled: true },
+      data: { enabled: true, overridden: false, default_enabled: true },
     });
   });
 });

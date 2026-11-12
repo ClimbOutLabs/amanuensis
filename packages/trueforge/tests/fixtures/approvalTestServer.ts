@@ -6,9 +6,8 @@
  * The database lives in a temp directory rather than `:memory:` so `restart()` can
  * drop every in-process registry and reopen the same durable state.
  *
- * The `inert` connector is stored directly, like one a user added by URL. The first-party
- * connector, when asked for, is stored directly with the first-party mark, and only counts
- * because the fixture puts the inert server's origin on the first-party origin list. Without that option the list is empty and nothing is first-party.
+ * The `inert` connector is stored directly, like one a user added by URL. The first-party origin
+ * list starts empty, so nothing is first-party until a test sets up an Email or Calendar address.
  */
 import { Sessions, type TurnStreamingEvent } from '@truefoundry/trueforge-core/agent-session';
 import type { SandboxProvider } from '@truefoundry/trueforge-core/core';
@@ -73,8 +72,6 @@ export const MODEL_PROVIDER_NAME = 'scripted';
 export const MODEL_FQN = `${MODEL_PROVIDER_NAME}/scripted-model`;
 /** A second configured model, so a test can prove which one a turn actually used. */
 export const ALT_MODEL_FQN = `${MODEL_PROVIDER_NAME}/scripted-alt-model`;
-/** The inert server registered as a first-party connector, when a test asks for it. */
-export const INERT_MEMORY_SERVER_NAME = 'inert-memory';
 
 type SqliteDb = ReturnType<typeof createSqliteDb>;
 
@@ -217,8 +214,6 @@ const CONFIGURED_MEMORY_DIR = configuration.MEMORY_MARKDOWN_DIR;
 
 export async function startApprovalTestServer(options?: {
   sandboxProvider?: SandboxProvider | undefined;
-  /** Also register the inert server as a first-party connector, listing its origin as the operator would. */
-  firstPartyConnector?: boolean | undefined;
   /** Replaces the standalone authenticator, for tests that need distinct or unauthenticated callers. */
   authenticator?: Authenticator | undefined;
   /** Adds the inert connector's opt-in `web_search` tool. */
@@ -300,20 +295,6 @@ export async function startApprovalTestServer(options?: {
     first_party: false,
   });
 
-  if (options?.firstPartyConnector === true) {
-    await new SqliteMcpServerStore(db).upsertServer({
-      tenant_id: TENANT_ID,
-      name: INERT_MEMORY_SERVER_NAME,
-      manifest: {
-        type: 'remote',
-        name: INERT_MEMORY_SERVER_NAME,
-        url: mcp.url,
-        description: 'Inert connector registered as first-party.',
-      },
-      first_party: true,
-    });
-  }
-
   const originalFirstPartyOrigins = configuration.FIRST_PARTY_MCP_ORIGINS;
   const originalEvalMode = configuration.AMAN_EVAL_MODE;
   // Each server keeps its own memory, so one test's chats are never recalled into another's. A test that chose a
@@ -322,7 +303,7 @@ export async function startApprovalTestServer(options?: {
   if (originalMemoryDir === CONFIGURED_MEMORY_DIR) {
     configuration.MEMORY_MARKDOWN_DIR = join(directory, 'memory');
   }
-  configuration.FIRST_PARTY_MCP_ORIGINS = options?.firstPartyConnector === true ? [mcp.origin] : [];
+  configuration.FIRST_PARTY_MCP_ORIGINS = [];
 
   // One registry for the server's life, so close() can wait for turn drains the way main.ts does.
   const turnDrains = new TurnDrainRegistry();

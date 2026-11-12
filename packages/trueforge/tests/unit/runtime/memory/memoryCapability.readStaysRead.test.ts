@@ -48,7 +48,7 @@ async function recallInto(input: {
 }
 
 function recallClient(results: RecallItem[]): MemoryClient {
-  return makeClient({ recall: jest.fn().mockResolvedValue({ ok: true, results, entities: [] }) });
+  return makeClient({ recall: jest.fn().mockResolvedValue({ ok: true, results }) });
 }
 
 function isTrusted(provenance: ChatProvenance, value: string): boolean {

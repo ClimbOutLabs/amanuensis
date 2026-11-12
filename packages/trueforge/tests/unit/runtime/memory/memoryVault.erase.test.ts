@@ -82,7 +82,6 @@ async function recallIds(client: MarkdownMemoryClient, query: string): Promise<s
     query,
     maxTokens: 2000,
     queryTimestamp: new Date().toISOString(),
-    entityTokens: 0,
     timeoutMs: TIMEOUT_MS,
   });
   if (!recall.ok) {

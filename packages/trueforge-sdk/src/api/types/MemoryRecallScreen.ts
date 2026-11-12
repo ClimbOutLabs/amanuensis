@@ -5,6 +5,6 @@ import type * as TrueForge from "../index.js";
 export interface MemoryRecallScreen {
     /** One entry per surfaced screen decision this turn. */
     records: TrueForge.MemoryScreenRecord[];
-    /** Recalled items kept out of the injected block by the screen. */
+    /** Recalled items and pages kept out of the injected block by the screen. */
     withheld: number;
 }

@@ -3,7 +3,7 @@
 import type * as TrueForge from "../index.js";
 
 export interface MemoryScreenRecord {
-    /** Per-turn-unique, type-qualified record id: `item:#<index>` for a recalled item, `entity:#<index>` for an entity summary, `curated:#<index>` for a profile or mental-model line, `reflection:#0` for the reflect answer, where <index> is the datum position within this turn. Not the provider's item id; correlate to the datum by its position in this turn's model-context snapshot. */
+    /** Per-turn-unique, type-qualified record id: `item:#<index>` for a recalled item, `page:#<index>` for a page, where <index> is the position within this turn. Not the stored item id; correlate to the item by its position in this turn's model-context snapshot. */
     id: string;
     /** The item's recorded origin, or 'absent' when legacy metadata carried none. */
     origin: string;

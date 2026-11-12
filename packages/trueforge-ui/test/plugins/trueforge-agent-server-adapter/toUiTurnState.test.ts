@@ -62,7 +62,6 @@ describe('toUiTurnState', () => {
           budgetReason: 'normal',
           droppedBelowThreshold: 0,
           droppedOverBudget: 0,
-          entities: 0,
           estimatedTokens: 0,
           items: 0,
           outcome: 'ok',

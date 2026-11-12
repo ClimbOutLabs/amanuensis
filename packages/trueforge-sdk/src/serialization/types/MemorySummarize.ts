@@ -9,7 +9,6 @@ export const MemorySummarize: core.serialization.ObjectSchema<
     TrueForge.MemorySummarize
 > = core.serialization.object({
     defaultEnabled: core.serialization.property("default_enabled", core.serialization.boolean()),
-    effectiveEnabled: core.serialization.property("effective_enabled", core.serialization.boolean()),
     enabled: core.serialization.boolean(),
     overridden: core.serialization.boolean(),
 });
@@ -17,7 +16,6 @@ export const MemorySummarize: core.serialization.ObjectSchema<
 export declare namespace MemorySummarize {
     export interface Raw {
         default_enabled: boolean;
-        effective_enabled: boolean;
         enabled: boolean;
         overridden: boolean;
     }

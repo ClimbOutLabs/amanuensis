@@ -37,7 +37,6 @@ describe('a memory note is the person’s own only when it says so', () => {
       query,
       maxTokens: 2_000,
       queryTimestamp: `${DAY}T12:00:00.000Z`,
-      entityTokens: 0,
       timeoutMs: TIMEOUT_MS,
     });
     if (!outcome.ok) {

@@ -9,9 +9,6 @@ export const MemoryPageSortingSchema = z
     mode: PageSortModeSchema.describe('The stored setting: the persisted override when set, else the env default.'),
     overridden: z.boolean().describe('Whether a persisted override is currently stored.'),
     default_mode: PageSortModeSchema.describe('The `MEMORY_PAGE_SORTING` env default used when no override is stored.'),
-    effective_mode: PageSortModeSchema.describe(
-      'What the server will do: the stored setting, or `off` when memory is not kept as Markdown files.',
-    ),
   })
   .openapi('MemoryPageSorting');
 

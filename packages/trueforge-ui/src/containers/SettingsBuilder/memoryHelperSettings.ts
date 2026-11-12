@@ -87,7 +87,7 @@ function useStoredSetting<Stored, Value>({
 
 export interface MemoryPageSortingState {
   supported: boolean;
-  /** What the server will do; `null` until it has answered. Shows `off` on a server without Markdown memory. */
+  /** The stored mode; `null` until the server has answered. */
   mode: PageSortMode | null;
   saving: boolean;
   error: string | null;
@@ -107,7 +107,7 @@ export function useMemoryPageSortingSetting(): MemoryPageSortingState {
   const state = useStoredSetting<MemoryPageSortingSetting, PageSortMode>({
     load,
     save,
-    valueOf: stored => stored.effectiveMode,
+    valueOf: stored => stored.mode,
   });
   return {
     supported: catalog !== null,
@@ -120,7 +120,7 @@ export function useMemoryPageSortingSetting(): MemoryPageSortingState {
 
 export interface MemoryNightlyState {
   supported: boolean;
-  /** What the server will do; `null` until it has answered. */
+  /** The stored setting; `null` until the server has answered. */
   enabled: boolean | null;
   saving: boolean;
   error: string | null;
@@ -140,7 +140,7 @@ export function useMemoryNightlySetting(): MemoryNightlyState {
   const state = useStoredSetting<MemoryNightlySetting, boolean>({
     load,
     save,
-    valueOf: stored => stored.effectiveEnabled,
+    valueOf: stored => stored.enabled,
   });
   return {
     supported: catalog !== null,

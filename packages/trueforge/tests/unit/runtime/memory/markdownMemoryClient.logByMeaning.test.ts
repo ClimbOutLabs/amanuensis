@@ -46,7 +46,6 @@ async function recallTexts({ client, query }: { client: MarkdownMemoryClient; qu
     query,
     maxTokens: 4000,
     queryTimestamp: new Date().toISOString(),
-    entityTokens: 0,
     timeoutMs: TIMEOUT_MS,
   });
   if (!outcome.ok) {

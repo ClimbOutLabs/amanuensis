@@ -204,15 +204,7 @@ function memoryDefaultsCapability(isAdmin: boolean): MemoryDefaultsCapability {
     recall_query_window: configuration.MEMORY_RECALL_QUERY_WINDOW,
     recall_min_score: configuration.MEMORY_RECALL_MIN_SCORE,
     recall_max_items: configuration.MEMORY_RECALL_MAX_ITEMS,
-    recall_max_entities: configuration.MEMORY_RECALL_MAX_ENTITIES,
     prerecall_gate_enabled: configuration.MEMORY_PRERECALL_GATE_ENABLED,
-    curated_enabled: configuration.MEMORY_CURATED_ENABLED,
-    curated_max_models: configuration.MEMORY_CURATED_MAX_MODELS,
-    curated_max_tokens: configuration.MEMORY_CURATED_MAX_TOKENS,
-    reflect_enabled: configuration.MEMORY_REFLECT_ENABLED,
-    reflect_budget: configuration.MEMORY_REFLECT_BUDGET,
-    reflect_max_tokens: configuration.MEMORY_REFLECT_MAX_TOKENS,
-    reflect_timeout_ms: configuration.MEMORY_REFLECT_TIMEOUT_MS,
   };
 }
 

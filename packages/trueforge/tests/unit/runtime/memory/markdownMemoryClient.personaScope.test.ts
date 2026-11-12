@@ -79,7 +79,6 @@ async function recall(
     query,
     maxTokens,
     queryTimestamp: '2026-09-27T10:00:00.000Z',
-    entityTokens: 0,
     timeoutMs: TIMEOUT_MS,
     currentSessionId,
   });

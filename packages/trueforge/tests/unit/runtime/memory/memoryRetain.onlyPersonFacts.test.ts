@@ -89,7 +89,6 @@ describe('memory across chats', () => {
         query: 'ranks insert chunks table mechanic bill',
         maxTokens: 4000,
         queryTimestamp: '2026-10-29T09:00:00.000Z',
-        entityTokens: 0,
         timeoutMs: 1000,
         currentSessionId: 'chat-2',
       });

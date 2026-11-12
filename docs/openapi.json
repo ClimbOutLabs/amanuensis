@@ -1075,7 +1075,7 @@
               "minimum": 0,
               "type": "integer"
             },
-            "description": "Named counts for a countable event (e.g. memory recall items/entities), never the recalled content.",
+            "description": "Named counts for a countable event (e.g. memory recall items), never the recalled content.",
             "type": "object"
           },
           "duration_ms": {
@@ -6837,18 +6837,6 @@
       },
       "MemoryDefaultsCapability": {
         "properties": {
-          "curated_enabled": {
-            "description": "`MEMORY_CURATED_ENABLED` as resolved.",
-            "type": "boolean"
-          },
-          "curated_max_models": {
-            "description": "`MEMORY_CURATED_MAX_MODELS` as resolved.",
-            "type": "integer"
-          },
-          "curated_max_tokens": {
-            "description": "`MEMORY_CURATED_MAX_TOKENS` as resolved.",
-            "type": "integer"
-          },
           "markdown_dir": {
             "description": "`MEMORY_MARKDOWN_DIR` as resolved. Only present for admin callers; a host filesystem path is not disclosed to non-admin authenticated users.",
             "type": "string"
@@ -6856,10 +6844,6 @@
           "prerecall_gate_enabled": {
             "description": "`MEMORY_PRERECALL_GATE_ENABLED` as resolved.",
             "type": "boolean"
-          },
-          "recall_max_entities": {
-            "description": "`MEMORY_RECALL_MAX_ENTITIES` as resolved.",
-            "type": "integer"
           },
           "recall_max_items": {
             "description": "`MEMORY_RECALL_MAX_ITEMS` as resolved.",
@@ -6876,27 +6860,6 @@
           "recall_timeout_ms": {
             "description": "`MEMORY_RECALL_TIMEOUT_MS` as resolved.",
             "type": "integer"
-          },
-          "reflect_budget": {
-            "description": "`MEMORY_REFLECT_BUDGET` as resolved.",
-            "enum": [
-              "low",
-              "mid",
-              "high"
-            ],
-            "type": "string"
-          },
-          "reflect_enabled": {
-            "description": "`MEMORY_REFLECT_ENABLED` as resolved.",
-            "type": "boolean"
-          },
-          "reflect_max_tokens": {
-            "description": "`MEMORY_REFLECT_MAX_TOKENS` as resolved.",
-            "type": "integer"
-          },
-          "reflect_timeout_ms": {
-            "description": "`MEMORY_REFLECT_TIMEOUT_MS` as resolved.",
-            "type": "integer"
           }
         },
         "required": [
@@ -6904,15 +6867,7 @@
           "recall_query_window",
           "recall_min_score",
           "recall_max_items",
-          "recall_max_entities",
-          "prerecall_gate_enabled",
-          "curated_enabled",
-          "curated_max_models",
-          "curated_max_tokens",
-          "reflect_enabled",
-          "reflect_budget",
-          "reflect_max_tokens",
-          "reflect_timeout_ms"
+          "prerecall_gate_enabled"
         ],
         "type": "object"
       },
@@ -6956,10 +6911,6 @@
             "description": "The `MEMORY_NIGHTLY_JOB` env default used when no override is stored.",
             "type": "boolean"
           },
-          "effective_enabled": {
-            "description": "What the server will do: the stored setting, and only when memory is kept as Markdown files.",
-            "type": "boolean"
-          },
           "enabled": {
             "description": "The stored setting: the persisted override when set, else the `MEMORY_NIGHTLY_JOB` env default.",
             "type": "boolean"
@@ -6972,8 +6923,7 @@
         "required": [
           "enabled",
           "overridden",
-          "default_enabled",
-          "effective_enabled"
+          "default_enabled"
         ],
         "type": "object"
       },
@@ -7292,15 +7242,6 @@
             ],
             "type": "string"
           },
-          "effective_mode": {
-            "description": "What the server will do: the stored setting, or `off` when memory is not kept as Markdown files.",
-            "enum": [
-              "off",
-              "report",
-              "on"
-            ],
-            "type": "string"
-          },
           "mode": {
             "description": "The stored setting: the persisted override when set, else the env default.",
             "enum": [
@@ -7318,8 +7259,7 @@
         "required": [
           "mode",
           "overridden",
-          "default_mode",
-          "effective_mode"
+          "default_mode"
         ],
         "type": "object"
       },
@@ -7410,76 +7350,12 @@
         ],
         "type": "object"
       },
-      "MemoryRecallCurated": {
-        "properties": {
-          "candidates": {
-            "description": "Mental models the bank returned before relevance selection.",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "dropped": {
-            "description": "Curated lines dropped by the token budget.",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "mental_models": {
-            "description": "Mental models in the injected block, after screening and budget.",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "outcome": {
-            "description": "ok: at least one curated line injected. empty: nothing relevant. withheld/dropped: lines were read but none survived the screen or the budget. disabled: layer off. timeout/error: the worse of the profile and mental-model reads failed; lines from the other read are still injected.",
-            "enum": [
-              "ok",
-              "empty",
-              "withheld",
-              "dropped",
-              "disabled",
-              "timeout",
-              "error"
-            ],
-            "type": "string"
-          },
-          "profile": {
-            "description": "True when a bank profile line is in the injected block, after screening and budget.",
-            "type": "boolean"
-          },
-          "reason": {
-            "description": "Failure detail when outcome is timeout or error.",
-            "type": "string"
-          },
-          "withheld": {
-            "description": "Curated lines the recall screen kept out of the block.",
-            "minimum": 0,
-            "type": "integer"
-          }
-        },
-        "required": [
-          "profile",
-          "mental_models",
-          "candidates",
-          "withheld",
-          "dropped",
-          "outcome"
-        ],
-        "type": "object"
-      },
       "MemoryRecallLayers": {
         "properties": {
-          "curated": {
-            "$ref": "#/components/schemas/MemoryRecallCurated"
-          },
           "pages": {
             "$ref": "#/components/schemas/MemoryRecallPages"
-          },
-          "reflect": {
-            "$ref": "#/components/schemas/MemoryRecallReflect"
           }
         },
-        "required": [
-          "curated",
-          "reflect"
-        ],
         "type": "object"
       },
       "MemoryRecallPages": {
@@ -7564,57 +7440,6 @@
         ],
         "type": "object"
       },
-      "MemoryRecallReflect": {
-        "properties": {
-          "based_on": {
-            "description": "Memories the provider reported the reflection drew on.",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "matched": {
-            "description": "Source of the synthesis pattern that selected reflect.",
-            "type": "string"
-          },
-          "outcome": {
-            "description": "ok: reflection injected. empty: reflect returned no text. withheld: the recall screen kept it out. dropped: the token budget kept it out. skipped: route was recall. disabled: layer off. timeout/error: reflect failed; the turn proceeded with the other layers.",
-            "enum": [
-              "ok",
-              "empty",
-              "withheld",
-              "dropped",
-              "skipped",
-              "disabled",
-              "timeout",
-              "error"
-            ],
-            "type": "string"
-          },
-          "reason": {
-            "description": "Failure detail when outcome is timeout or error.",
-            "type": "string"
-          },
-          "reflect_ms": {
-            "description": "Wall-clock time spent on the reflect call.",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "route": {
-            "description": "The route the newest user message selected.",
-            "enum": [
-              "recall",
-              "reflect"
-            ],
-            "type": "string"
-          }
-        },
-        "required": [
-          "route",
-          "outcome",
-          "reflect_ms",
-          "based_on"
-        ],
-        "type": "object"
-      },
       "MemoryRecallScreen": {
         "properties": {
           "records": {
@@ -7625,7 +7450,7 @@
             "type": "array"
           },
           "withheld": {
-            "description": "Recalled items kept out of the injected block by the screen.",
+            "description": "Recalled items and pages kept out of the injected block by the screen.",
             "minimum": 0,
             "type": "integer"
           }
@@ -7639,7 +7464,7 @@
       "MemoryRecallStats": {
         "properties": {
           "budget_reason": {
-            "description": "normal: the full configured recall budget applied. post_compaction: a host-written compaction summary was seen recently, so the token budget was halved and entity summaries were skipped for this turn.",
+            "description": "normal: the full configured recall budget applied. post_compaction: a host-written compaction summary was seen recently, so the token budget was halved for this turn.",
             "enum": [
               "normal",
               "post_compaction"
@@ -7647,17 +7472,12 @@
             "type": "string"
           },
           "dropped_below_threshold": {
-            "description": "Recalled items and entity summaries dropped by the relevance gate (score below recall_min_score).",
+            "description": "Recalled items dropped by the relevance gate (score below recall_min_score).",
             "minimum": 0,
             "type": "integer"
           },
           "dropped_over_budget": {
             "description": "Recalled items dropped by the client-side token re-clamp.",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "entities": {
-            "description": "Entity summaries included in the injected block.",
             "minimum": 0,
             "type": "integer"
           },
@@ -7672,7 +7492,7 @@
             "type": "integer"
           },
           "outcome": {
-            "description": "ok: recall returned memory. empty: recall found none. timeout/error: recall failed; the turn proceeded anyway. skipped: recall was skipped (e.g., user disabled memory for this session, or for sandbox sessions). The curated and reflect layers (see `layers`) can still put a block in front of the model when recall itself found nothing.",
+            "description": "ok: recall returned memory. empty: recall found none. timeout/error: recall failed; the turn proceeded anyway. skipped: recall was skipped (e.g., user disabled memory for this session, or for sandbox sessions). Pages (see `layers`) can still put a block in front of the model when recall itself found nothing.",
             "enum": [
               "ok",
               "empty",
@@ -7694,7 +7514,6 @@
         },
         "required": [
           "items",
-          "entities",
           "dropped_over_budget",
           "dropped_below_threshold",
           "estimated_tokens",
@@ -7785,7 +7604,7 @@
       "MemoryScreenRecord": {
         "properties": {
           "id": {
-            "description": "Per-turn-unique, type-qualified record id: `item:#<index>` for a recalled item, `entity:#<index>` for an entity summary, `curated:#<index>` for a profile or mental-model line, `reflection:#0` for the reflect answer, where <index> is the datum position within this turn. Not the provider's item id; correlate to the datum by its position in this turn's model-context snapshot.",
+            "description": "Per-turn-unique, type-qualified record id: `item:#<index>` for a recalled item, `page:#<index>` for a page, where <index> is the position within this turn. Not the stored item id; correlate to the item by its position in this turn's model-context snapshot.",
             "type": "string"
           },
           "origin": {
@@ -7825,10 +7644,6 @@
             "description": "The `MEMORY_SUMMARIZE` env default used when no override is stored.",
             "type": "boolean"
           },
-          "effective_enabled": {
-            "description": "What the server will actually do: the stored setting with the markdown-only gate applied. The Settings toggle shows this value.",
-            "type": "boolean"
-          },
           "enabled": {
             "description": "The stored setting: the persisted override when set, else the `MEMORY_SUMMARIZE` env default.",
             "type": "boolean"
@@ -7841,8 +7656,7 @@
         "required": [
           "enabled",
           "overridden",
-          "default_enabled",
-          "effective_enabled"
+          "default_enabled"
         ],
         "type": "object"
       },
@@ -25329,7 +25143,7 @@
     },
     "/api/v1/settings/memory-nightly": {
       "get": {
-        "description": "Whether the nightly tidy-up runs: the stored override, or the `MEMORY_NIGHTLY_JOB` env default when none is stored, plus the effective state for a server that keeps memory as Markdown files.",
+        "description": "Whether the nightly tidy-up runs: the stored override, or the `MEMORY_NIGHTLY_JOB` env default when none is stored.",
         "responses": {
           "200": {
             "content": {
@@ -25373,7 +25187,7 @@
         "x-fern-sdk-method-name": "get"
       },
       "put": {
-        "description": "Persists the nightly tidy-up override: `true` or `false` turns it on or off; `null` clears it back to the `MEMORY_NIGHTLY_JOB` env default. The response carries the effective state.",
+        "description": "Persists the nightly tidy-up override: `true` or `false` turns it on or off; `null` clears it back to the `MEMORY_NIGHTLY_JOB` env default.",
         "requestBody": {
           "content": {
             "application/json": {
@@ -25439,7 +25253,7 @@
     },
     "/api/v1/settings/memory-page-sorting": {
       "get": {
-        "description": "How saved notes are sorted onto pages: the stored override, or the `MEMORY_PAGE_SORTING` env default when none is stored, plus the effective mode for a server that keeps memory as Markdown files.",
+        "description": "How saved notes are sorted onto pages: the stored override, or the `MEMORY_PAGE_SORTING` env default when none is stored.",
         "responses": {
           "200": {
             "content": {
@@ -25483,7 +25297,7 @@
         "x-fern-sdk-method-name": "get"
       },
       "put": {
-        "description": "Persists the page-sorting override: `off`, `report` (only note what it would do) or `on`; `null` clears it back to the `MEMORY_PAGE_SORTING` env default. The response carries the effective mode.",
+        "description": "Persists the page-sorting override: `off`, `report` (only note what it would do) or `on`; `null` clears it back to the `MEMORY_PAGE_SORTING` env default.",
         "requestBody": {
           "content": {
             "application/json": {
@@ -25779,7 +25593,7 @@
     },
     "/api/v1/settings/memory-summarize": {
       "get": {
-        "description": "The stored override for turn summarization, or the `MEMORY_SUMMARIZE` env default when none is stored, plus the effective state with the markdown-only gate applied.",
+        "description": "The stored override for turn summarization, or the `MEMORY_SUMMARIZE` env default when none is stored.",
         "responses": {
           "200": {
             "content": {
@@ -25823,7 +25637,7 @@
         "x-fern-sdk-method-name": "get"
       },
       "put": {
-        "description": "Persists the turn-summarization override: `true`/`false` turns summarization on/off; `null` clears the override back to the `MEMORY_SUMMARIZE` env default. The response carries the effective state.",
+        "description": "Persists the turn-summarization override: `true`/`false` turns summarization on/off; `null` clears the override back to the `MEMORY_SUMMARIZE` env default.",
         "requestBody": {
           "content": {
             "application/json": {

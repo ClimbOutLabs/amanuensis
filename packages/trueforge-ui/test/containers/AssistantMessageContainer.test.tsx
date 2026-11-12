@@ -934,7 +934,6 @@ describe('AssistantMessageContainer memory recall visibility', () => {
     injectedBlock: '<aman-memory>recalled fact</aman-memory>',
     stats: {
       items: 3,
-      entities: 1,
       droppedOverBudget: 0,
       droppedBelowThreshold: 0,
       estimatedTokens: 42,
@@ -991,7 +990,7 @@ describe('AssistantMessageContainer memory recall visibility', () => {
     await renderWithStoredPreference({ agentDetails: 'expanded' });
     const internals = getAgentInternals();
     expect(within(internals).queryByText(/recalled/)).not.toBeInTheDocument();
-    expect(within(internals).getAllByText('3 items, 1 entity')).toHaveLength(1);
+    expect(within(internals).getAllByText('3 items')).toHaveLength(1);
   });
 
   it('hides the recall counts when agent details are collapsed', async () => {

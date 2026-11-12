@@ -24,7 +24,7 @@ describe('readMemoryPageSortingSetting', () => {
 
   it('is off when nothing is stored and the default is off', async () => {
     const setting = await readMemoryPageSortingSetting({ globalSettingsStore: inMemoryGlobalSettingsStore(), logger });
-    expect(setting).toEqual({ mode: 'off', overridden: false, defaultMode: 'off', effectiveMode: 'off' });
+    expect(setting).toEqual({ mode: 'off', overridden: false, defaultMode: 'off' });
   });
 
   it('lets a stored value beat the env default, and falls back when it is cleared', async () => {
@@ -33,7 +33,6 @@ describe('readMemoryPageSortingSetting', () => {
       mode: 'report',
       overridden: true,
       defaultMode: 'off',
-      effectiveMode: 'report',
     });
     await store.deleteSetting({ key: MEMORY_PAGE_SORTING_SETTING_KEY });
     expect((await readMemoryPageSortingSetting({ globalSettingsStore: store, logger })).mode).toBe('off');
@@ -42,9 +41,9 @@ describe('readMemoryPageSortingSetting', () => {
   it('reads a change on the next call', async () => {
     const store = inMemoryGlobalSettingsStore();
     await store.setSetting({ key: MEMORY_PAGE_SORTING_SETTING_KEY, value: 'on' });
-    expect((await readMemoryPageSortingSetting({ globalSettingsStore: store, logger })).effectiveMode).toBe('on');
+    expect((await readMemoryPageSortingSetting({ globalSettingsStore: store, logger })).mode).toBe('on');
     await store.setSetting({ key: MEMORY_PAGE_SORTING_SETTING_KEY, value: 'off' });
-    expect((await readMemoryPageSortingSetting({ globalSettingsStore: store, logger })).effectiveMode).toBe('off');
+    expect((await readMemoryPageSortingSetting({ globalSettingsStore: store, logger })).mode).toBe('off');
   });
 
   it('ignores a malformed stored value', async () => {

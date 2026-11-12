@@ -27,12 +27,8 @@ function formatMs(ms: number): string {
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${String(ms)}ms`;
 }
 
-/** `pluralForm` and `singular` are both plain strings — grouped so a call site can't swap them. */
-function plural(
-  count: number,
-  { singular, pluralForm = `${singular}s` }: { singular: string; pluralForm?: string },
-): string {
-  return `${String(count)} ${count === 1 ? singular : pluralForm}`;
+function plural(count: number, { singular }: { singular: string }): string {
+  return `${String(count)} ${count === 1 ? singular : `${singular}s`}`;
 }
 
 function RecallRow({ event }: { event: TrueForgeApi.MemoryRecallPersistedEvent }) {
@@ -43,7 +39,7 @@ function RecallRow({ event }: { event: TrueForgeApi.MemoryRecallPersistedEvent }
   let statusText = 'No memory recalled';
   if (stats.outcome === 'ok') {
     status = 'success';
-    statusText = `${plural(stats.items, { singular: 'item' })}, ${plural(stats.entities, { singular: 'entity', pluralForm: 'entities' })}`;
+    statusText = plural(stats.items, { singular: 'item' });
   } else if (stats.outcome === 'timeout' || stats.outcome === 'error') {
     status = 'warning';
     statusText = stats.outcome === 'timeout' ? 'Recall timed out' : 'Recall failed';
@@ -65,7 +61,6 @@ function RecallRow({ event }: { event: TrueForgeApi.MemoryRecallPersistedEvent }
       <div className="flex flex-col gap-2 pb-1 font-sans text-xs text-text-secondary">
         <div className="flex flex-wrap gap-x-3 gap-y-1">
           <span>{plural(stats.items, { singular: 'item' })}</span>
-          <span>{plural(stats.entities, { singular: 'entity', pluralForm: 'entities' })}</span>
           <span>~{stats.estimatedTokens} tokens</span>
           <span>{formatMs(stats.recallMs)}</span>
           {stats.droppedOverBudget > 0 && (

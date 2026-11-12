@@ -7,7 +7,6 @@ import type * as serializers from "../index.js";
 export const MemoryNightly: core.serialization.ObjectSchema<serializers.MemoryNightly.Raw, TrueForge.MemoryNightly> =
     core.serialization.object({
         defaultEnabled: core.serialization.property("default_enabled", core.serialization.boolean()),
-        effectiveEnabled: core.serialization.property("effective_enabled", core.serialization.boolean()),
         enabled: core.serialization.boolean(),
         overridden: core.serialization.boolean(),
     });
@@ -15,7 +14,6 @@ export const MemoryNightly: core.serialization.ObjectSchema<serializers.MemoryNi
 export declare namespace MemoryNightly {
     export interface Raw {
         default_enabled: boolean;
-        effective_enabled: boolean;
         enabled: boolean;
         overridden: boolean;
     }

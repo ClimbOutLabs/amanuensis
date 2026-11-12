@@ -10,7 +10,7 @@ function okJson(body: unknown) {
 }
 
 describe('createMemoryPageSortingCatalog', () => {
-  const wire = { data: { mode: 'report', overridden: true, default_mode: 'off', effective_mode: 'report' } };
+  const wire = { data: { mode: 'report', overridden: true, default_mode: 'off' } };
 
   it('GETs through the supplied base URL, token and fetch, mapping snake_case fields', async () => {
     const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -28,7 +28,6 @@ describe('createMemoryPageSortingCatalog', () => {
       mode: 'report',
       overridden: true,
       defaultMode: 'off',
-      effectiveMode: 'report',
     });
   });
 
@@ -61,7 +60,7 @@ describe('createMemoryPageSortingCatalog', () => {
 });
 
 describe('createMemoryNightlyCatalog', () => {
-  const wire = { data: { enabled: true, overridden: true, default_enabled: false, effective_enabled: true } };
+  const wire = { data: { enabled: true, overridden: true, default_enabled: false } };
 
   it('GETs and PUTs the nightly setting', async () => {
     const seen: Array<{ url: string; method?: string; body?: string }> = [];
@@ -78,7 +77,6 @@ describe('createMemoryNightlyCatalog', () => {
       enabled: true,
       overridden: true,
       defaultEnabled: false,
-      effectiveEnabled: true,
     });
     await catalog.setMemoryNightlyEnabled(false);
     expect(seen).toEqual([

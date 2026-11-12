@@ -462,7 +462,6 @@ describe('markdown round trip (synthetic end-to-end)', () => {
         query: 'What is my houseplant named?',
         maxTokens: 2000,
         queryTimestamp: '2026-09-21T12:01:00.000Z',
-        entityTokens: 0,
         timeoutMs: 5000,
       });
       if (!recallOutcome.ok) {

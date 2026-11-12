@@ -184,7 +184,6 @@ describe('turn memory with findings and reply notes', () => {
     expect(content.endsWith('<!-- note: email 2026-10-29 -->')).toBe(true);
     const block = formatMemoryBlock({
       results: [{ id: 'h1', occurred_start: '2026-10-29', text: content }],
-      entities: [],
       budgetTokens: 2000,
     }).block;
     expect(block).toContain('found earlier by the assistant] From an email, found Oct 29: Priya asked');
@@ -212,7 +211,6 @@ describe('turn memory with findings and reply notes', () => {
       query: 'page ended line',
       maxTokens: 1000,
       queryTimestamp: '2026-10-30T09:00:00.000Z',
-      entityTokens: 0,
       timeoutMs: 5000,
     });
     if (!recalled.ok) {
@@ -220,7 +218,7 @@ describe('turn memory with findings and reply notes', () => {
     }
     expect(recalled.results).toHaveLength(1);
     expect(recalled.results[0]?.metadata?.['note_source']).toBeUndefined();
-    const block = formatMemoryBlock({ results: recalled.results, entities: [], budgetTokens: 2000 }).block;
+    const block = formatMemoryBlock({ results: recalled.results, budgetTokens: 2000 }).block;
     expect(block).toContain('It ended with this line.');
     expect(block).not.toContain('found earlier by the assistant');
   });
@@ -373,14 +371,13 @@ describe('turn memory with findings and reply notes', () => {
       query: 'signed form Priya',
       maxTokens: 1000,
       queryTimestamp: '2026-10-30T09:00:00.000Z',
-      entityTokens: 0,
       timeoutMs: 5000,
     });
     if (!recalled.ok) {
       throw new Error('expected recall');
     }
     expect(recalled.results[0]?.metadata).toMatchObject({ note_source: 'email', note_date: '2026-10-29' });
-    const block = formatMemoryBlock({ results: recalled.results, entities: [], budgetTokens: 2000 }).block;
+    const block = formatMemoryBlock({ results: recalled.results, budgetTokens: 2000 }).block;
     expect(block).toContain('found earlier by the assistant');
     expect(block).toContain('From an email, found Oct 29: Priya asked for the signed form by 2026-11-03.');
   });

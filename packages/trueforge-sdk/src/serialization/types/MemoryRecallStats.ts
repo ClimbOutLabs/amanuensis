@@ -13,7 +13,6 @@ export const MemoryRecallStats: core.serialization.ObjectSchema<
     budgetReason: core.serialization.property("budget_reason", MemoryRecallStatsBudgetReason),
     droppedBelowThreshold: core.serialization.property("dropped_below_threshold", core.serialization.number()),
     droppedOverBudget: core.serialization.property("dropped_over_budget", core.serialization.number()),
-    entities: core.serialization.number(),
     estimatedTokens: core.serialization.property("estimated_tokens", core.serialization.number()),
     items: core.serialization.number(),
     outcome: MemoryRecallStatsOutcome,
@@ -26,7 +25,6 @@ export declare namespace MemoryRecallStats {
         budget_reason: MemoryRecallStatsBudgetReason.Raw;
         dropped_below_threshold: number;
         dropped_over_budget: number;
-        entities: number;
         estimated_tokens: number;
         items: number;
         outcome: MemoryRecallStatsOutcome.Raw;

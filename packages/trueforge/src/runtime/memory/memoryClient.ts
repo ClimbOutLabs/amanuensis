@@ -22,18 +22,6 @@ export interface RecallItem {
   score?: number;
 }
 
-export interface EntityObservation {
-  text: string;
-  mentioned_at?: string;
-}
-
-export interface EntitySummary {
-  name: string;
-  canonical_name: string;
-  observations: EntityObservation[];
-  score?: number;
-}
-
 /** One failed call. `code` is what callers switch on; `reason` is the line for logs. */
 export interface MemoryFailure {
   ok: false;
@@ -45,7 +33,7 @@ export function timeoutFailure(timeoutMs: number): MemoryFailure {
   return { ok: false, code: 'timeout', reason: `request timed out after ${String(timeoutMs)}ms` };
 }
 
-export type RecallOutcome = { ok: true; results: RecallItem[]; entities: EntitySummary[] } | MemoryFailure;
+export type RecallOutcome = { ok: true; results: RecallItem[] } | MemoryFailure;
 
 export interface RetainItem {
   content: string;
@@ -82,28 +70,6 @@ export function isOperationFailedStatus(status: string): boolean {
   return status === 'failed' || status === 'error';
 }
 
-export interface BankProfile {
-  name: string | undefined;
-  mission: string | undefined;
-  background: string | undefined;
-}
-
-export type GetProfileOutcome = { ok: true; profile: BankProfile } | MemoryFailure;
-
-export interface MentalModel {
-  id: string;
-  name: string;
-  content: string;
-  tags: string[];
-  isStale: boolean | undefined;
-}
-
-export type ListMentalModelsOutcome = { ok: true; models: MentalModel[] } | MemoryFailure;
-
-export type ReflectBudget = 'low' | 'mid' | 'high';
-
-export type ReflectOutcome = { ok: true; text: string; basedOn: number } | MemoryFailure;
-
 export interface RetryOperationOutcome {
   ok: boolean;
 }
@@ -113,7 +79,6 @@ export interface MemoryClient {
     query: string;
     maxTokens: number;
     queryTimestamp: string;
-    entityTokens: number;
     timeoutMs: number;
     /** The chat being answered: notes retained from it are never returned (its history is already in the conversation). */
     currentSessionId?: string | undefined;
@@ -134,17 +99,6 @@ export interface MemoryClient {
 
   retryOperation(id: string, timeoutMs: number): Promise<RetryOperationOutcome>;
 
-  getProfile(timeoutMs: number): Promise<GetProfileOutcome>;
-
-  listMentalModels(params: { limit: number; timeoutMs: number }): Promise<ListMentalModelsOutcome>;
-
-  reflect(params: {
-    query: string;
-    budget: ReflectBudget;
-    maxTokens: number;
-    timeoutMs: number;
-  }): Promise<ReflectOutcome>;
-
   /**
    * Memory vault: the effective entries of one vault namespace, newest first.
    * `namespace` is the wire namespace: empty or `default` for the shared vault,
@@ -156,7 +110,7 @@ export interface MemoryClient {
 
   /**
    * Memory vault: the live entries in the newest `maxDailyFiles` daily files of the vault this client's
-   * `retain` writes into. Absent on a backend without a cheap listing.
+   * `retain` writes into. Absent on a client without a cheap listing.
    */
   listRecentWrittenEntries?(params: {
     maxDailyFiles: number;
@@ -180,8 +134,7 @@ export interface MemoryClient {
   /**
    * Optional: note the outcome of one turn-summary attempt for this client's vault, so a
    * failed summary stays visible on the Memories page until a later summary succeeds.
-   * Only the markdown client implements it, matching the markdown-only gate on turn
-   * summarization itself. Never throws.
+   * Never throws.
    */
   noteSummaryOutcome?(params: SummaryOutcomeNote): Promise<void>;
 

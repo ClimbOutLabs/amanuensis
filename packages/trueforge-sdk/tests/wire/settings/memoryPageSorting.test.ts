@@ -9,7 +9,7 @@ describe("MemoryPageSortingClient", () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
 
-        const rawResponseBody = { data: { default_mode: "off", effective_mode: "off", mode: "off", overridden: true } };
+        const rawResponseBody = { data: { default_mode: "off", mode: "off", overridden: true } };
 
         server
             .mockEndpoint()
@@ -23,7 +23,6 @@ describe("MemoryPageSortingClient", () => {
         expect(response).toEqual({
             data: {
                 defaultMode: "off",
-                effectiveMode: "off",
                 mode: "off",
                 overridden: true,
             },
@@ -72,7 +71,7 @@ describe("MemoryPageSortingClient", () => {
         const server = mockServerPool.createServer();
         const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
         const rawRequestBody = { mode: "report" };
-        const rawResponseBody = { data: { default_mode: "off", effective_mode: "off", mode: "off", overridden: true } };
+        const rawResponseBody = { data: { default_mode: "off", mode: "off", overridden: true } };
 
         server
             .mockEndpoint()
@@ -89,7 +88,6 @@ describe("MemoryPageSortingClient", () => {
         expect(response).toEqual({
             data: {
                 defaultMode: "off",
-                effectiveMode: "off",
                 mode: "off",
                 overridden: true,
             },

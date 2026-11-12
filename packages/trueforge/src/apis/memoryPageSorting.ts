@@ -21,7 +21,6 @@ function toMemoryPageSorting(setting: MemoryPageSortingSetting): MemoryPageSorti
     mode: setting.mode,
     overridden: setting.overridden,
     default_mode: setting.defaultMode,
-    effective_mode: setting.effectiveMode,
   };
 }
 
@@ -54,7 +53,6 @@ export function createMemoryPageSortingRouter<TTransaction>(deps: MemoryPageSort
           mode,
           overridden: body.mode !== null,
           defaultMode,
-          effectiveMode: mode,
         }),
       },
       200,

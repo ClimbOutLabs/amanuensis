@@ -24,7 +24,7 @@ export class MemoryPageSortingClient {
     }
 
     /**
-     * How saved notes are sorted onto pages: the stored override, or the `MEMORY_PAGE_SORTING` env default when none is stored, plus the effective mode for a server that keeps memory as Markdown files.
+     * How saved notes are sorted onto pages: the stored override, or the `MEMORY_PAGE_SORTING` env default when none is stored.
      *
      * @param {MemoryPageSortingClient.RequestOptions} requestOptions - Request-specific configuration.
      *
@@ -121,7 +121,7 @@ export class MemoryPageSortingClient {
     }
 
     /**
-     * Persists the page-sorting override: `off`, `report` (only note what it would do) or `on`; `null` clears it back to the `MEMORY_PAGE_SORTING` env default. The response carries the effective mode.
+     * Persists the page-sorting override: `off`, `report` (only note what it would do) or `on`; `null` clears it back to the `MEMORY_PAGE_SORTING` env default.
      *
      * @param {TrueForge.settings.UpdateMemoryPageSortingRequest} request
      * @param {MemoryPageSortingClient.RequestOptions} requestOptions - Request-specific configuration.

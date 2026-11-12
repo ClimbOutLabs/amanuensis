@@ -9,18 +9,14 @@ import type { MemoryClient } from '../../../../src/runtime/memory/memoryClient';
 
 export const DEFAULT_CONFIG: MemoryConfig = {
   recallMaxTokens: 2048,
-  recallEntityTokens: 512,
   recallTimeoutMs: 2500,
   recallQueryWindow: 5,
   recallMinScore: 0.5,
   recallMaxItems: 12,
-  recallMaxEntities: 8,
   preRecallGateEnabled: false,
   retainTimeoutMs: 10_000,
   sweepMaxPerTurn: 5,
   screen: { enabled: false, url: '', authToken: '', threshold: 0.5, timeoutMs: 1500, maxConcurrency: 8 },
-  curated: { enabled: false, maxModels: 3, maxTokens: 512 },
-  reflect: { enabled: false, budget: 'low', maxTokens: 512, timeoutMs: 8000 },
   pages: { maxCount: 6, maxTokens: 1500 },
 };
 
@@ -33,22 +29,12 @@ export function makeClient(overrides: {
   getOperation?: jest.Mock;
   retryOperation?: jest.Mock;
   retain?: jest.Mock;
-  getProfile?: jest.Mock;
-  listMentalModels?: jest.Mock;
-  reflect?: jest.Mock;
 }): MemoryClient {
   return {
-    recall: overrides.recall ?? jest.fn().mockResolvedValue({ ok: true, results: [], entities: [] }),
+    recall: overrides.recall ?? jest.fn().mockResolvedValue({ ok: true, results: [] }),
     retain: overrides.retain ?? jest.fn().mockResolvedValue({ ok: true }),
     getOperation: overrides.getOperation ?? jest.fn().mockResolvedValue({ ok: true, status: 'unknown' }),
     retryOperation: overrides.retryOperation ?? jest.fn().mockResolvedValue({ ok: true }),
-    getProfile:
-      overrides.getProfile ??
-      jest
-        .fn()
-        .mockResolvedValue({ ok: true, profile: { name: undefined, mission: undefined, background: undefined } }),
-    listMentalModels: overrides.listMentalModels ?? jest.fn().mockResolvedValue({ ok: true, models: [] }),
-    reflect: overrides.reflect ?? jest.fn().mockResolvedValue({ ok: true, text: '', basedOn: 0 }),
     deleteDocument: jest.fn().mockResolvedValue({ ok: true }),
     listEntries: jest.fn().mockResolvedValue({ ok: true, entries: [] }),
     updateEntry: jest.fn().mockResolvedValue({ ok: false, code: 'not_found', reason: 'not used' }),

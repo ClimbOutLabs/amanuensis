@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { createMemorySummarizeCatalog } from '@/plugins/trueforge-agent-server-adapter/catalogs/memorySummarizeCatalog.js';
 
-const WIRE_SETTING = { data: { enabled: true, overridden: true, default_enabled: false, effective_enabled: true } };
+const WIRE_SETTING = { data: { enabled: true, overridden: true, default_enabled: false } };
 
 function okJson(body: unknown) {
   return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -25,7 +25,6 @@ describe('createMemorySummarizeCatalog', () => {
       enabled: true,
       overridden: true,
       defaultEnabled: false,
-      effectiveEnabled: true,
     });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
@@ -51,19 +50,6 @@ describe('createMemorySummarizeCatalog', () => {
     // Same-origin default: no Authorization header when no token is supplied.
     const getCalls = await catalog.getMemorySummarize();
     expect(getCalls.enabled).toBe(true);
-  });
-
-  it('carries effective_enabled through, even when the backend gate blocks', async () => {
-    const catalog = createMemorySummarizeCatalog({
-      fetch: async () =>
-        okJson({ data: { enabled: true, overridden: true, default_enabled: true, effective_enabled: false } }),
-    });
-    await expect(catalog.getMemorySummarize()).resolves.toEqual({
-      enabled: true,
-      overridden: true,
-      defaultEnabled: true,
-      effectiveEnabled: false,
-    });
   });
 
   it('throws the server error message on a non-2xx response', async () => {

@@ -21,7 +21,6 @@ function toMemoryNightly(setting: MemoryNightlySetting): MemoryNightly {
     enabled: setting.enabled,
     overridden: setting.overridden,
     default_enabled: setting.defaultEnabled,
-    effective_enabled: setting.effectiveEnabled,
   };
 }
 
@@ -57,7 +56,6 @@ export function createMemoryNightlyRouter<TTransaction>(deps: MemoryNightlyRoute
           enabled,
           overridden: body.enabled !== null,
           defaultEnabled,
-          effectiveEnabled: enabled,
         }),
       },
       200,

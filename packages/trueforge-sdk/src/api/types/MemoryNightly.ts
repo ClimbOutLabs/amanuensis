@@ -3,8 +3,6 @@
 export interface MemoryNightly {
     /** The `MEMORY_NIGHTLY_JOB` env default used when no override is stored. */
     defaultEnabled: boolean;
-    /** What the server will do: the stored setting, and only when memory is kept as Markdown files. */
-    effectiveEnabled: boolean;
     /** The stored setting: the persisted override when set, else the `MEMORY_NIGHTLY_JOB` env default. */
     enabled: boolean;
     /** Whether a persisted override is currently stored. */

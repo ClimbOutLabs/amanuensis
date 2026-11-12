@@ -7,9 +7,6 @@ export const MemoryNightlySchema = z
       .describe('The stored setting: the persisted override when set, else the `MEMORY_NIGHTLY_JOB` env default.'),
     overridden: z.boolean().describe('Whether a persisted override is currently stored.'),
     default_enabled: z.boolean().describe('The `MEMORY_NIGHTLY_JOB` env default used when no override is stored.'),
-    effective_enabled: z
-      .boolean()
-      .describe('What the server will do: the stored setting, and only when memory is kept as Markdown files.'),
   })
   .openapi('MemoryNightly');
 

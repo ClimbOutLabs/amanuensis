@@ -77,7 +77,6 @@ describe('MarkdownMemoryClient', () => {
           query: 'tenant a secret',
           maxTokens: 2048,
           queryTimestamp: '2026-09-19T13:00:00.000Z',
-          entityTokens: 0,
           timeoutMs: 5000,
         });
         expect(outcome.ok).toBe(true);
@@ -155,13 +154,11 @@ describe('MarkdownMemoryClient', () => {
           query: 'tea',
           maxTokens: 2048,
           queryTimestamp: '2026-09-19T13:00:00.000Z',
-          entityTokens: 0,
           timeoutMs: 5000,
         });
         expect(outcome.ok).toBe(true);
         if (outcome.ok) {
           expect(outcome.results[0]?.text).toContain('Loves tea');
-          expect(outcome.entities).toEqual([]);
         }
       } finally {
         await cleanup(dir);
@@ -195,7 +192,6 @@ describe('MarkdownMemoryClient', () => {
           query: 'PIN dentist Rivera',
           maxTokens: 2048,
           queryTimestamp: '2026-09-19T13:00:00.000Z',
-          entityTokens: 0,
           timeoutMs: 5000,
         });
         expect(outcome.ok).toBe(true);
@@ -229,7 +225,6 @@ describe('MarkdownMemoryClient', () => {
           query: 'dog Rex',
           maxTokens: 2048,
           queryTimestamp: '2026-09-20T13:00:00.000Z',
-          entityTokens: 0,
           timeoutMs: 5000,
         });
         expect(outcome.ok).toBe(true);
@@ -299,7 +294,6 @@ describe('MarkdownMemoryClient', () => {
           query: 'wire landlord account',
           maxTokens: 2048,
           queryTimestamp: '2026-09-19T13:00:00.000Z',
-          entityTokens: 0,
           timeoutMs: 5000,
         });
         expect(outcome.ok).toBe(true);
@@ -335,7 +329,6 @@ describe('MarkdownMemoryClient', () => {
           query: 'dentist Friday',
           maxTokens: 2048,
           queryTimestamp: '2026-09-19T13:00:00.000Z',
-          entityTokens: 0,
           timeoutMs: 5000,
         });
         expect(outcome.ok).toBe(true);
@@ -373,7 +366,6 @@ describe('MarkdownMemoryClient', () => {
           query: 'Madrid hotel September',
           maxTokens: 2048,
           queryTimestamp: '2026-09-19T13:00:00.000Z',
-          entityTokens: 0,
           timeoutMs: 5000,
         });
         expect(outcome.ok).toBe(true);
@@ -393,10 +385,9 @@ describe('MarkdownMemoryClient', () => {
           query: 'anything',
           maxTokens: 2048,
           queryTimestamp: '2026-09-19T13:00:00.000Z',
-          entityTokens: 0,
           timeoutMs: 5000,
         });
-        expect(outcome).toEqual({ ok: true, results: [], entities: [] });
+        expect(outcome).toEqual({ ok: true, results: [] });
       } finally {
         await cleanup(dir);
       }
@@ -422,34 +413,6 @@ describe('MarkdownMemoryClient', () => {
         expect(await client.getOperation('op-99', 1000)).toEqual({ ok: true, status: 'completed' });
         expect(await client.getOperation('op-missing', 1000)).toEqual({ ok: true, status: 'unknown' });
         expect(await client.retryOperation('op-99', 1000)).toMatchObject({ ok: true });
-      } finally {
-        await cleanup(dir);
-      }
-    });
-  });
-
-  describe('unsupported surfaces', () => {
-    it('getProfile returns an empty profile and listMentalModels returns none', async () => {
-      const { client, dir } = await makeClient();
-      try {
-        expect(await client.getProfile(1000)).toEqual({
-          ok: true,
-          profile: { name: undefined, mission: undefined, background: undefined },
-        });
-        expect(await client.listMentalModels({ limit: 5, timeoutMs: 1000 })).toEqual({ ok: true, models: [] });
-      } finally {
-        await cleanup(dir);
-      }
-    });
-
-    it('reflect fails closed as unsupported', async () => {
-      const { client, dir } = await makeClient();
-      try {
-        const outcome = await client.reflect({ query: 'q', budget: 'low', maxTokens: 100, timeoutMs: 1000 });
-        expect(outcome.ok).toBe(false);
-        if (!outcome.ok) {
-          expect(outcome.code).toBe('request_failed');
-        }
       } finally {
         await cleanup(dir);
       }

@@ -23,16 +23,8 @@ const MARKDOWN_DEFAULTS = {
   recallTimeoutMs: 2500,
   recallQueryWindow: 5,
   recallMaxItems: 50,
-  recallMaxEntities: 10,
   recallMinScore: 0.6,
-  curatedEnabled: true,
-  curatedMaxModels: 3,
-  curatedMaxTokens: 512,
   prerecallGateEnabled: false,
-  reflectEnabled: true,
-  reflectBudget: 'low',
-  reflectMaxTokens: 512,
-  reflectTimeoutMs: 8000,
 } satisfies TrueForgeApi.MemoryDefaultsCapability;
 
 /** The storage directory the server reports for the markdown backend. */
@@ -286,7 +278,6 @@ describe('MemorySettings (status honesty)', () => {
       enabled: boolean;
       overridden: boolean;
       defaultEnabled: boolean;
-      effectiveEnabled: boolean;
     };
 
     /** The trueforge adapter's summarization port, so the toggle renders instead of hiding. */
@@ -301,7 +292,6 @@ describe('MemorySettings (status honesty)', () => {
               enabled: nextEnabled,
               overridden: enabled !== null,
               defaultEnabled: stored.defaultEnabled,
-              effectiveEnabled: nextEnabled,
             };
           },
         },
@@ -313,7 +303,7 @@ describe('MemorySettings (status honesty)', () => {
     }
 
     it('renders the Turn summaries card in plain English', async () => {
-      renderSummarizeSwitch({ enabled: true, overridden: true, defaultEnabled: false, effectiveEnabled: true });
+      renderSummarizeSwitch({ enabled: true, overridden: true, defaultEnabled: false });
 
       expect(await screen.findByText('Turn summaries')).toBeInTheDocument();
       expect(screen.getByText(/saves only the lasting facts/)).toBeInTheDocument();
@@ -323,12 +313,11 @@ describe('MemorySettings (status honesty)', () => {
 
     it('shows ON at startup when the env default is on and nothing is stored', async () => {
       // Fresh install, no MEMORY_SUMMARIZE env var, no override: the toggle shows the
-      // effective state, which is on.
+      // default, which is on.
       renderSummarizeSwitch({
         enabled: true,
         overridden: false,
         defaultEnabled: true,
-        effectiveEnabled: true,
       });
 
       const toggle = await screen.findByRole('switch', { name: SWITCH_NAME });
@@ -338,26 +327,9 @@ describe('MemorySettings (status honesty)', () => {
       expect(screen.queryByRole('button', { name: RESET_NAME })).not.toBeInTheDocument();
     });
 
-    it('shows the effective state — off and disabled — when the backend gate blocks', async () => {
-      // The stored setting says on, but this server will not summarize: the toggle
-      // shows the truth instead of the stored wish.
-      renderSummarizeSwitch({
-        enabled: true,
-        overridden: true,
-        defaultEnabled: true,
-        effectiveEnabled: false,
-      });
-
-      const toggle = await screen.findByRole('switch', { name: SWITCH_NAME });
-      expect(toggle).not.toBeChecked();
-      expect(toggle).toBeDisabled();
-      expect(screen.getByText(/need Markdown memory/)).toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: RESET_NAME })).not.toBeInTheDocument();
-    });
-
     it('flips the toggle and writes the new state through the port', async () => {
       const writes: Array<boolean | null> = [];
-      renderSummarizeSwitch({ enabled: true, overridden: true, defaultEnabled: false, effectiveEnabled: true }, writes);
+      renderSummarizeSwitch({ enabled: true, overridden: true, defaultEnabled: false }, writes);
 
       const toggle = await screen.findByRole('switch', { name: SWITCH_NAME });
       fireEvent.click(toggle);
@@ -370,7 +342,7 @@ describe('MemorySettings (status honesty)', () => {
 
     it('offers reset only while overridden, and clearing returns to the server default', async () => {
       const writes: Array<boolean | null> = [];
-      renderSummarizeSwitch({ enabled: true, overridden: true, defaultEnabled: false, effectiveEnabled: true }, writes);
+      renderSummarizeSwitch({ enabled: true, overridden: true, defaultEnabled: false }, writes);
 
       const reset = await screen.findByRole('button', { name: RESET_NAME });
       fireEvent.click(reset);

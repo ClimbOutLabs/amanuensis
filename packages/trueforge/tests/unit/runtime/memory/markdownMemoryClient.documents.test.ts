@@ -29,7 +29,6 @@ async function recalledTexts(client: MarkdownMemoryClient): Promise<string[]> {
     query: 'profile tea coffee',
     maxTokens: 4000,
     queryTimestamp: '2026-10-28T13:00:00.000Z',
-    entityTokens: 0,
     timeoutMs: 1000,
   });
   if (!outcome.ok) {

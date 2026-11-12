@@ -40,7 +40,7 @@ describe('memoryPageSorting router', () => {
     const response = await router.request('/');
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
-      data: { mode: 'off', overridden: false, default_mode: 'off', effective_mode: 'off' },
+      data: { mode: 'off', overridden: false, default_mode: 'off' },
     });
   });
 
@@ -50,7 +50,7 @@ describe('memoryPageSorting router', () => {
       const response = await router.request('/', putInit(mode));
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual({
-        data: { mode, overridden: true, default_mode: 'off', effective_mode: mode },
+        data: { mode, overridden: true, default_mode: 'off' },
       });
       expect((await globalSettingsStore.getSetting({ key: KEY }))?.value).toBe(mode);
     }
@@ -62,7 +62,7 @@ describe('memoryPageSorting router', () => {
     const cleared = await router.request('/', putInit(null));
     expect(cleared.status).toBe(200);
     expect(await cleared.json()).toEqual({
-      data: { mode: 'off', overridden: false, default_mode: 'off', effective_mode: 'off' },
+      data: { mode: 'off', overridden: false, default_mode: 'off' },
     });
     expect(await globalSettingsStore.getSetting({ key: KEY })).toBeUndefined();
   });

@@ -60,7 +60,6 @@ describe('notes brought in through the Memories import', () => {
       query: 'What is the gate code?',
       maxTokens: 2_000,
       queryTimestamp: '2026-10-03T10:00:00.000Z',
-      entityTokens: 0,
       timeoutMs: 5_000,
     });
     expect(outcome.ok && outcome.results.map(item => item.metadata?.['origin'])).toEqual(['tool_ingested']);

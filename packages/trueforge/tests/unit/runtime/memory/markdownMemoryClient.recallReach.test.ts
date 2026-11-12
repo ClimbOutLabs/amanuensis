@@ -60,7 +60,6 @@ describe('MarkdownMemoryClient recall reach', () => {
       query,
       maxTokens,
       queryTimestamp: new Date(NOW).toISOString(),
-      entityTokens: 0,
       timeoutMs: 5000,
     });
     if (!outcome.ok) {
@@ -114,7 +113,6 @@ describe('MarkdownMemoryClient recall reach', () => {
       query: 'what is Wendy allergic to?',
       maxTokens: 600,
       queryTimestamp: new Date(NOW).toISOString(),
-      entityTokens: 0,
       timeoutMs: 5000,
     });
 

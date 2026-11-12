@@ -1,11 +1,8 @@
 import type {
   DeleteMemoryVaultEntryOutcome,
-  GetProfileOutcome,
   ListMemoryVaultEntriesOutcome,
-  ListMentalModelsOutcome,
   MemoryClient,
   RecallOutcome,
-  ReflectOutcome,
   UpdateMemoryVaultEntryOutcome,
 } from '../../../src/runtime/memory/memoryClient';
 
@@ -15,7 +12,7 @@ import type {
  */
 export class QuietMemoryClient implements MemoryClient {
   recall(): Promise<RecallOutcome> {
-    return Promise.resolve({ ok: true, results: [], entities: [] });
+    return Promise.resolve({ ok: true, results: [] });
   }
 
   retain: MemoryClient['retain'] = () => Promise.resolve({ ok: true });
@@ -25,18 +22,6 @@ export class QuietMemoryClient implements MemoryClient {
   getOperation: MemoryClient['getOperation'] = () => Promise.resolve({ ok: true, status: 'completed' });
 
   retryOperation: MemoryClient['retryOperation'] = () => Promise.resolve({ ok: true });
-
-  getProfile(): Promise<GetProfileOutcome> {
-    return Promise.resolve({ ok: true, profile: { name: undefined, mission: undefined, background: undefined } });
-  }
-
-  listMentalModels(): Promise<ListMentalModelsOutcome> {
-    return Promise.resolve({ ok: true, models: [] });
-  }
-
-  reflect(): Promise<ReflectOutcome> {
-    return Promise.resolve({ ok: true, text: '', basedOn: 0 });
-  }
 
   listEntries(): Promise<ListMemoryVaultEntriesOutcome> {
     return Promise.resolve({ ok: true, entries: [] });

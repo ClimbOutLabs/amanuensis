@@ -23,7 +23,6 @@ async function recallItems({
     query,
     maxTokens: 4000,
     queryTimestamp: '2026-10-26T10:00:00.000Z',
-    entityTokens: 0,
     timeoutMs: 5000,
     currentSessionId,
   });
@@ -101,7 +100,6 @@ describe('MarkdownMemoryClient recall scope', () => {
         query: 'follow-up reminder',
         maxTokens: 120,
         queryTimestamp: '2026-10-26T10:00:00.000Z',
-        entityTokens: 0,
         timeoutMs: 5000,
         currentSessionId: 'chat-now',
       });
@@ -226,7 +224,7 @@ describe('recalled block', () => {
         timeoutMs: 5000,
       });
       const results = await recallItems({ client, query: 'follow-up reminder', currentSessionId: 'chat-now' });
-      const { block } = formatMemoryBlock({ results, entities: [], budgetTokens: 600 });
+      const { block } = formatMemoryBlock({ results, budgetTokens: 600 });
       const lines = block.split('\n');
       expect(lines).toContain(
         '[2026-10-20, from something read for the person] The dentist is Dr Rivera, per a follow-up reminder email.',

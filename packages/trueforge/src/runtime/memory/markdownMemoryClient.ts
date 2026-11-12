@@ -82,12 +82,8 @@ import type {
 import {
   timeoutFailure,
   type GetOperationOutcome,
-  type GetProfileOutcome,
-  type ListMentalModelsOutcome,
   type RecallItem,
   type RecallOutcome,
-  type ReflectBudget,
-  type ReflectOutcome,
   type RetainItem,
   type RetainOutcome,
   type RetryOperationOutcome,
@@ -235,7 +231,6 @@ export class MarkdownMemoryClient implements MemoryClient {
     query: string;
     maxTokens: number;
     queryTimestamp: string;
-    entityTokens: number;
     timeoutMs: number;
     currentSessionId?: string | undefined;
     gate?: MeaningGate | undefined;
@@ -332,7 +327,7 @@ export class MarkdownMemoryClient implements MemoryClient {
         }
       }
 
-      return { ok: true, results, entities: [] };
+      return { ok: true, results };
     } catch (error) {
       return failure(failureReason('markdown recall failed', error));
     }
@@ -551,29 +546,6 @@ export class MarkdownMemoryClient implements MemoryClient {
       return await withTimeout(Promise.resolve({ ok: true }), timeoutMs, `markdown retryOperation ${id}`);
     } catch {
       return { ok: false };
-    }
-  }
-
-  async getProfile(timeoutMs: number): Promise<GetProfileOutcome> {
-    // Phase 1 has no bank profile concept; the curated MEMORY.md serves this purpose.
-    const outcome: GetProfileOutcome = {
-      ok: true,
-      profile: { name: undefined, mission: undefined, background: undefined },
-    };
-    try {
-      return await withTimeout(Promise.resolve(outcome), timeoutMs, 'markdown getProfile');
-    } catch {
-      return timeoutFailure(timeoutMs);
-    }
-  }
-
-  async listMentalModels(params: { limit: number; timeoutMs: number }): Promise<ListMentalModelsOutcome> {
-    // Phase 1 has no mental-model store; the curated MEMORY.md serves this purpose.
-    const outcome: ListMentalModelsOutcome = { ok: true, models: [] };
-    try {
-      return await withTimeout(Promise.resolve(outcome), params.timeoutMs, 'markdown listMentalModels');
-    } catch {
-      return timeoutFailure(params.timeoutMs);
     }
   }
 
@@ -868,24 +840,6 @@ export class MarkdownMemoryClient implements MemoryClient {
         return vaultTimeoutFailure(params.timeoutMs);
       }
       return { ok: false, code: 'request_failed', reason: failureReason('markdown vault delete failed', error) };
-    }
-  }
-
-  async reflect(params: {
-    query: string;
-    budget: ReflectBudget;
-    maxTokens: number;
-    timeoutMs: number;
-  }): Promise<ReflectOutcome> {
-    const outcome: ReflectOutcome = {
-      ok: false,
-      code: 'request_failed',
-      reason: 'reflect is not supported by the markdown memory backend',
-    };
-    try {
-      return await withTimeout(Promise.resolve(outcome), params.timeoutMs, 'markdown reflect');
-    } catch {
-      return timeoutFailure(params.timeoutMs);
     }
   }
 

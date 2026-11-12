@@ -26,13 +26,11 @@ function renderCard({
     mode: next,
     overridden: true,
     defaultMode: 'off' as const,
-    effectiveMode: next,
   });
   const nightly = (next: boolean) => ({
     enabled: next,
     overridden: true,
     defaultEnabled: false,
-    effectiveEnabled: next,
   });
   const ports = withPorts
     ? {

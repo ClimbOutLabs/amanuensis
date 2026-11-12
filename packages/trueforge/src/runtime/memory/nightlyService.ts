@@ -67,7 +67,7 @@ export function startNightlyMemoryJob({
     vaults: async () => [{ namespace: sanitizeNamespace(TENANT_ID) }, ...(await personaVaults(personaStore))],
     summarizeFor: async (vault): Promise<SummarizeTurnContext | undefined> => {
       const setting = await readMemorySummarizeSetting({ globalSettingsStore, logger });
-      if (!setting.effectiveEnabled) {
+      if (!setting.enabled) {
         return undefined;
       }
       const summarizationModelFqn =
@@ -110,11 +110,11 @@ export function startNightlyMemoryJob({
     running = true;
     void (async () => {
       const nightly = await readMemoryNightlySetting({ globalSettingsStore, logger });
-      if (!nightly.effectiveEnabled) {
+      if (!nightly.enabled) {
         return;
       }
       const sorting = await readMemoryPageSortingSetting({ globalSettingsStore, logger });
-      await runNightlyJob({ ...deps, mode: sorting.effectiveMode });
+      await runNightlyJob({ ...deps, mode: sorting.mode });
     })()
       .catch((error: unknown) => {
         logger.warn('The nightly memory job could not start.', extractErrorLogFields(error));

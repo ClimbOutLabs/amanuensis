@@ -90,30 +90,17 @@ previously admitted content are outside this first structural boundary.
 
 ## Recall layers per turn
 
-Every turn assembles one `<aman-memory>` block from up to three provider layers, each read
-independently and each degrading on its own, so none can fail a turn:
+Every turn assembles one `<aman-memory>` block from up to two layers, read independently, so
+neither can fail a turn:
 
-- **Curated** (every turn, `MEMORY_CURATED_ENABLED`): `GET /profile` and `GET /mental-models`.
-  The profile's mission and background become one `[profile]` line when set. Mental models are
-  selected deterministically by term overlap with the recall query (current before stale, more
-  shared terms first, name as tie-break), capped at `MEMORY_CURATED_MAX_MODELS` and
-  `MEMORY_CURATED_MAX_TOKENS`; no shared term injects nothing. These are cheap reads with no
-  model call behind them. Lines sit ahead of the recalled items.
-- **Recall** (every turn): `POST /memories/recall` with the windowed query
+- **Pages** (every turn, `MEMORY_PAGES_MAX_COUNT`, `MEMORY_PAGES_MAX_TOKENS`): the people and matter
+  pages the message names, loaded in full and placed ahead of the recalled items.
+- **Recall** (every turn): the note files searched with the windowed query
   (`MEMORY_RECALL_QUERY_WINDOW`). Facts, no model call.
-- **Reflect** (`MEMORY_REFLECT_ENABLED`, only on a reflect route): `POST /reflect` with the same
-  query, `MEMORY_REFLECT_BUDGET` (default `low`), `MEMORY_REFLECT_MAX_TOKENS`, and its own
-  `MEMORY_REFLECT_TIMEOUT_MS`. The route is decided from the newest user message alone by the
-  literal synthesis patterns in `runtime/memory/memoryRouting.ts` (summarize, brief me,
-  recommend, compare, assess, what should I do, what have we learned, and so on). A factual lookup
-  stays on recall. Reflect spends model calls on the same local inference server that serves chat,
-  which is why the gate is a short list of literal patterns and not a classifier. Its answer is one
-  `[reflection]` line after the entities line.
 
-Curated lines and the reflection are provider-synthesized text with no per-datum origin, so when
-the recall screen is on they are classified like an untrusted-origin item (`curated:#<index>`,
-`reflection:#0`): withheld when flagged or when the screen gave no verdict. The screen's time
-budget is charged for the recall call alone, not the parallel wall clock.
+When the recall screen is on, each recalled item (`item:#<index>`) and each page (`page:#<index>`) is
+classified: withheld when flagged or when the screen gave no verdict, unless it is the person's own
+words. The screen's time budget is charged for the recall call alone, not the parallel wall clock.
 
 The Markdown store writes a source line on every note: `> From you` for the person's own words and
 `> External source: <what>` for the rest. At recall it hands back each note with its origin: `user_stated`
@@ -132,11 +119,9 @@ escaped, an edit turns the note back into a plain reply note, and an import neve
 note is recorded as the assistant's own earlier reply: its sites are the reply's own, its addresses count as
 read, and it does not mark the chat as having read outside content. Its origin stays `tool_ingested`.
 
-The event's `layers` field records, per turn, whether a profile line and how many mental models
-were injected (and how many candidates the bank returned), the route and the pattern that selected
-it, and the reflect outcome with its wall clock and the number of memories the provider said the
-answer drew on. Consolidation into mental models stays the provider's background job; the host
-never triggers it from a turn.
+The event's `layers` field records, per turn, how many pages the message named, how many made it into
+the block, and how many were left out by the page count cap, the page budget or the recall screen. It is
+absent when the turn loaded no pages.
 
 ## Messages the person sends
 
@@ -475,7 +460,7 @@ it can be found. Shared words alone never show a note while the rules can judge.
   with one heading, "How the person writes to these contacts (follow when drafting to them):", and
   ends with one fixed line, "End of the writing instructions." Between the two, each loaded contact is
   listed by name with the lines from its "How you write to them" section. This is the only place those
-  lines appear. Recalled items, curated lines, entities and the stats line all come before the
+  lines appear. Recalled items and the stats line all come before the
   heading, so nothing from recall, mail or the calendar can sit inside the section.
 - The heading and the end line are reserved. Before the block is built, the host replaces the words
   of either with "[reserved text removed]" wherever they appear in a page or in recalled text. The
@@ -569,7 +554,7 @@ that is read content can be changed or forgotten in any turn. Two things count, 
   written in the same step as a mail read is judged on the step before it.
 - _Recalled into the memory block._ When the memory block built for the turn holds a recalled note whose origin
   is not the person's own words (mail, web, documents, read content, messages they sent, the assistant's
-  earlier replies), a provider summary (entities, profile lines, reflection), or a page line whose source is
+  earlier replies), or a page line whose source is
   mail, calendar, read content, inferred or a sent message, or whose marker cannot be read, the turn counts
   as tainted. Only notes stated by the person and page lines with source `you_said`, `you_edited` or no marker
   count as their own. The block builder sets this when it builds the block, from what it actually put

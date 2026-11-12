@@ -34,12 +34,6 @@ export interface MemorySummarizeSettingState {
    * round-trip to reflect a flip. `null` until the first GET settles.
    */
   enabled: boolean | null;
-  /**
-   * What the server will actually do for the next turn — the truth the toggle shows.
-   * On the markdown backend this equals `enabled`; on any other backend it is false
-   * even when the stored setting is on. `null` until the first GET settles.
-   */
-  effectiveEnabled: boolean | null;
   /** Whether a persisted override is stored; `null` until the first successful GET. */
   overridden: boolean | null;
   /** The `MEMORY_SUMMARIZE` env default; `null` until the first successful GET. */
@@ -54,10 +48,7 @@ export interface MemorySummarizeSettingState {
 
 /**
  * The live turn-summarization switch state. Reads the stored setting once via the
- * catalog port; writes go straight through. Unlike screening there is no external
- * service to be (un)configured, so on the markdown backend the stored value is the
- * effective value — the toggle shows `effectiveEnabled`, what the server will
- * actually do, so what you see is the truth.
+ * catalog port; writes go straight through.
  */
 export function useMemorySummarizeSetting(): MemorySummarizeSettingState {
   const server = useOptionalServer();
@@ -95,7 +86,7 @@ export function useMemorySummarizeSetting(): MemorySummarizeSettingState {
     async (next: boolean | null) => {
       if (catalog === null) return;
       // For a clear, the value that lands is the env default; fall back to the last
-      // confirmed effective state when the default isn't known yet.
+      // confirmed state when the default isn't known yet.
       const optimisticValue = next ?? stored?.defaultEnabled ?? stored?.enabled ?? null;
       setOptimistic(optimisticValue);
       setSaving(true);
@@ -117,15 +108,10 @@ export function useMemorySummarizeSetting(): MemorySummarizeSettingState {
   );
 
   const enabled = optimistic ?? stored?.enabled ?? null;
-  // The backend gate is server config: it cannot change mid-write, and the switch is
-  // disabled whenever the gate blocks, so the optimistic effective value follows the
-  // optimistic stored value the same way the last confirmed pair did.
-  const effectiveEnabled = optimistic ?? stored?.effectiveEnabled ?? null;
 
   return {
     supported: catalog !== null,
     enabled,
-    effectiveEnabled,
     overridden: stored === null ? null : stored.overridden,
     defaultEnabled: stored === null ? null : stored.defaultEnabled,
     saving,

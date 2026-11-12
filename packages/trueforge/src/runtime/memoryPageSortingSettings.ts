@@ -15,8 +15,6 @@ export interface MemoryPageSortingSetting {
   overridden: boolean;
   /** The `MEMORY_PAGE_SORTING` env default used when no override is stored. */
   defaultMode: PageSortMode;
-  /** What the server will do: the stored setting, or `off` when memory is not kept as Markdown files. */
-  effectiveMode: PageSortMode;
 }
 
 export interface ReadMemoryPageSortingSettingDeps {
@@ -36,7 +34,6 @@ export async function readMemoryPageSortingSetting(
     mode: defaultMode,
     overridden: false,
     defaultMode,
-    effectiveMode: defaultMode,
   };
   let record;
   try {
@@ -60,6 +57,5 @@ export async function readMemoryPageSortingSetting(
     mode: parsed.data,
     overridden: true,
     defaultMode,
-    effectiveMode: parsed.data,
   };
 }

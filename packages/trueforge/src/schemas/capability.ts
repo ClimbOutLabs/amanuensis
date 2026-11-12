@@ -1,5 +1,4 @@
 import { z } from '@hono/zod-openapi';
-import { REFLECT_BUDGETS } from '@truefoundry/trueforge-core/core/memory/memorySettingsLimits';
 
 const SandboxCapabilitySchema = z
   .object({
@@ -127,15 +126,7 @@ const MemoryDefaultsCapabilitySchema = z
     recall_query_window: z.number().int().describe('`MEMORY_RECALL_QUERY_WINDOW` as resolved.'),
     recall_min_score: z.number().describe('`MEMORY_RECALL_MIN_SCORE` as resolved.'),
     recall_max_items: z.number().int().describe('`MEMORY_RECALL_MAX_ITEMS` as resolved.'),
-    recall_max_entities: z.number().int().describe('`MEMORY_RECALL_MAX_ENTITIES` as resolved.'),
     prerecall_gate_enabled: z.boolean().describe('`MEMORY_PRERECALL_GATE_ENABLED` as resolved.'),
-    curated_enabled: z.boolean().describe('`MEMORY_CURATED_ENABLED` as resolved.'),
-    curated_max_models: z.number().int().describe('`MEMORY_CURATED_MAX_MODELS` as resolved.'),
-    curated_max_tokens: z.number().int().describe('`MEMORY_CURATED_MAX_TOKENS` as resolved.'),
-    reflect_enabled: z.boolean().describe('`MEMORY_REFLECT_ENABLED` as resolved.'),
-    reflect_budget: z.enum(REFLECT_BUDGETS).describe('`MEMORY_REFLECT_BUDGET` as resolved.'),
-    reflect_max_tokens: z.number().int().describe('`MEMORY_REFLECT_MAX_TOKENS` as resolved.'),
-    reflect_timeout_ms: z.number().int().describe('`MEMORY_REFLECT_TIMEOUT_MS` as resolved.'),
   })
   .openapi('MemoryDefaultsCapability');
 
