@@ -8,7 +8,7 @@ import type { ReviewableDraft } from '../../../src/core/email/gmail/draftReview'
 import { allowsChatApproval } from '../../../src/core/mcp/approvalGrant';
 import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
 import { defaultSentinelServices, forUnattendedRun } from '../../../src/core/permissions/context';
-import { recordPersonText } from '../../../src/core/permissions/provenance';
+import { recordPersonText, recordReplyText } from '../../../src/core/permissions/provenance';
 import { createWebSearchTurnState, recordToolResultProvenance } from '../../../src/core/permissions/webSearch';
 
 function makeCtx(options: { unattended?: boolean; secrets?: readonly string[] } = {}): ClassifyContext {
@@ -201,6 +201,19 @@ const gmailInfo = (original_tool_name: string, tier_reason: string) => ({
   original_tool_name,
   tier: 3 as const,
   tier_reason,
+});
+
+describe("a site the assistant's own reply named", () => {
+  it('still opens a page there without asking, in a chat that read nothing else', async () => {
+    const ctx = makeCtx();
+    recordPersonText({ provenance: ctx.web_search.provenance, text: 'Where are the Python docs?' });
+    recordReplyText({ provenance: ctx.web_search.provenance, text: 'They are at https://docs.python.example/3/.' });
+    recordPersonText({ provenance: ctx.web_search.provenance, text: 'Open the asyncio page.' });
+    expect(await classifyTier(openPage('https://docs.python.example/3/library/asyncio.html'), ctx)).toMatchObject({
+      tier: 1,
+      card: null,
+    });
+  });
 });
 
 describe('sends and guest changes ask every time, with only Allow and Not now', () => {
@@ -418,6 +431,33 @@ describe('what is held, because content steered it', () => {
       / This goes to billing@supplier\.example, whose address was in a file Aman read\.$/,
     );
     expect(allowsChatApproval(gmailInfo('send_draft', decision.reason))).toBe(false);
+  });
+
+  it("holds a send to an address only the assistant's earlier reply named, and says so", async () => {
+    const ctx = makeCtx();
+    recordPersonText({ provenance: ctx.web_search.provenance, text: 'Who takes print orders?' });
+    recordReplyText({ provenance: ctx.web_search.provenance, text: 'Orders go to bookings@harbour-prints.example.' });
+    recordPersonText({ provenance: ctx.web_search.provenance, text: 'Ok, write to them.' });
+    const decision = await classifyTier(
+      sendDraft(draft({ to: [{ name: '', address: 'bookings@harbour-prints.example' }] })),
+      ctx,
+    );
+    expect(decision.card?.plain_what).toMatch(
+      / This goes to bookings@harbour-prints\.example, whose address was only in an earlier reply from Aman, not in your own words\.$/,
+    );
+    expect(allowsChatApproval(gmailInfo('send_draft', decision.reason))).toBe(false);
+  });
+
+  it('adds nothing to the card when the person gave the address and the reply only repeated it', async () => {
+    const ctx = makeCtx();
+    recordPersonText({ provenance: ctx.web_search.provenance, text: 'Write to dana@example.org about Friday.' });
+    recordReplyText({ provenance: ctx.web_search.provenance, text: 'Here is a draft for dana@example.org.' });
+    const said = await classifyTier(sendDraft(draft({ to: [{ name: '', address: 'dana@example.org' }] })), ctx);
+    const fresh = makeCtx();
+    recordPersonText({ provenance: fresh.web_search.provenance, text: 'Write to dana@example.org about Friday.' });
+    const unsaid = await classifyTier(sendDraft(draft({ to: [{ name: '', address: 'dana@example.org' }] })), fresh);
+    expect(said.card?.plain_what).toBe(unsaid.card?.plain_what);
+    expect(said.reason).toBe(unsaid.reason);
   });
 
   it('holds a search that carries a real secret, whatever its source', async () => {

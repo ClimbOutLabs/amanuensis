@@ -74,6 +74,8 @@ export const TurnImagesResultSchema = z.discriminatedUnion('status', [
     count: z.number().int().positive(),
     /** Site a single reply image comes from; null for an email. */
     host: z.string().nullable(),
+    /** The whole address a single reply image would be loaded from, as it would be requested; null for an email. */
+    url: z.string().nullable(),
   }),
 ]);
 export type TurnImagesResult = z.infer<typeof TurnImagesResultSchema>;

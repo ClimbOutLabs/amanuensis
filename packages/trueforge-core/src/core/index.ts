@@ -541,9 +541,10 @@ export {
   isTrustedPicture,
   recordPageImageUrls,
   recordPersonText,
+  recordUntrustedText,
   searchResultUrls,
 } from './permissions/provenance';
-export type { SearchResultUrls } from './permissions/provenance';
+export type { ChatProvenance, ReadSource, SearchResultUrls } from './permissions/provenance';
 export {
   AUTO_DENY_REASONS,
   TIER2_ACTION_KINDS,

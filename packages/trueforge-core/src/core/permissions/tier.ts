@@ -16,12 +16,10 @@ export const TierSchema = z.union([z.literal(1), z.literal(2), z.literal(3)]).de
 
 /** Tier 1 reason codes for a command run in the sandbox without a card. Each one is written to the activity list. */
 export const SANDBOX_COMMAND_REASON = 'sandbox_command';
-export const SANDBOX_PACKAGE_INSTALL_REASON = 'sandbox_package_install';
 export const SANDBOX_FILE_WRITE_REASON = 'sandbox_file_write';
 export const SANDBOX_RUN_CODE_REASON = 'sandbox_run_code';
 export const SANDBOX_SILENT_REASONS: ReadonlySet<string> = new Set([
   SANDBOX_COMMAND_REASON,
-  SANDBOX_PACKAGE_INSTALL_REASON,
   SANDBOX_FILE_WRITE_REASON,
   SANDBOX_RUN_CODE_REASON,
 ]);
@@ -32,6 +30,12 @@ export const SCHEDULE_STATUS_REASON = 'schedule_status';
 
 /** Reason code for a consequential action whose recipient or site only content the assistant read named. */
 export const CONTENT_STEERED_REASON = 'content_steered';
+
+/**
+ * A connector read that would run without a card, stopped because of what its arguments carry. It asks each
+ * time: an answer that covered later reads would cover whatever they carry.
+ */
+export const CONNECTOR_READ_GUARD_REASON = 'connector_read_guard';
 
 /**
  * Tier 3 reason codes for calls the classifier ranks as a send, destructive, install or hint-escalated
@@ -57,6 +61,7 @@ export const GRANT_BARRED_TIER_REASONS: ReadonlySet<string> = new Set([
   REMINDER_CANCEL_REASON,
   SCHEDULE_STATUS_REASON,
   CONTENT_STEERED_REASON,
+  CONNECTOR_READ_GUARD_REASON,
 ]);
 
 /**
@@ -79,6 +84,13 @@ export const CHAT_GRANTABLE_CONSEQUENCE_REASONS: ReadonlySet<string> = new Set([
  * Only these may get an "Always allow" or chat grant. Anything that cannot be shown guest-free is a guest change.
  */
 export const OWN_CALENDAR_CHANGE_REASONS: ReadonlySet<string> = new Set(['calendar_write', 'caldav_calendar_change']);
+
+/**
+ * Drive writes touch only the person's own files: a new Doc, or rows added to their own Sheet. Nothing is
+ * sent to anyone and nothing is shared, so only these may get an "Always allow" or chat grant, as an
+ * own-calendar change may.
+ */
+export const OWN_DRIVE_WRITE_REASONS: ReadonlySet<string> = new Set(['google_drive_write']);
 
 /** Tier 2 action kinds the user may relax to run without asking. Pinned to the Tier 2 member list. */
 export const TIER2_ACTION_KINDS = ['file_write'] as const;
