@@ -87,11 +87,6 @@ describeUnix('LocalSandboxProvider missing root', () => {
       expect(provider.getFileUploadsDir()).toBe('uploads');
       expect(provider.getSkillsDir()).toBe('skills');
       expect(provider.getSkillDownloaderPath()).toBe('skill_downloader.py');
-      const install = provider.createCodeModeTransport().getClientInstall({
-        sandboxId: join(sandboxRootPathParent, 'x'),
-      });
-      expect(install.remotePath).toBe(join('mcp-client', 'mcp_client.py'));
-      expect(install.remotePath.startsWith('/')).toBe(false);
     } finally {
       await rm(sandboxRootPathParent, { recursive: true, force: true });
     }

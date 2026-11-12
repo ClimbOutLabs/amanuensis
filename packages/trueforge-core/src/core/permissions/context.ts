@@ -99,20 +99,21 @@ export function defaultSentinelServices(input: { pinned_path: string }): Sentine
 }
 
 /**
- * Services with the user's Tier 2 relaxations switched off, so such an action asks. Used for every
- * turn of a scheduled chat: its context holds what the run read, so the owner's relaxations must
- * not apply even once they are typing. Token and grant stores stay shared with the session.
+ * Services with the user's relaxations switched off: the Tier 2 ones and the sandbox "without asking" switch, so
+ * such an action asks. Used for every turn of a scheduled chat: its context holds what the run read, so the
+ * owner's relaxations must not apply even once they are typing. Token and grant stores stay shared with the session.
  */
 export function withoutRelaxations(services: SentinelServices): SentinelServices {
-  return { ...services, tier2AutoAllow: () => Promise.resolve(new Set<Tier2ActionKind>()) };
+  return {
+    ...services,
+    tier2AutoAllow: () => Promise.resolve(new Set<Tier2ActionKind>()),
+    sandboxWithoutAsking: () => Promise.resolve(false),
+  };
 }
 
-/**
- * Services for one unattended turn: no relaxations, the sandbox "without asking" switch off, and a call
- * that would ask is held for the owner while nobody watches.
- */
+/** Services for one unattended turn: no relaxations, and a call that would ask is held for the owner while nobody watches. */
 export function forUnattendedRun(services: SentinelServices): SentinelServices {
-  return { ...withoutRelaxations(services), sandboxWithoutAsking: () => Promise.resolve(false), unattended: true };
+  return { ...withoutRelaxations(services), unattended: true };
 }
 
 /**

@@ -5,7 +5,12 @@
  */
 import type { CalendarWriteReview } from '../../../src/core/calendar/eventWrite';
 import type { ReviewableDraft } from '../../../src/core/email/gmail/draftReview';
-import { allowsChatApproval } from '../../../src/core/mcp/approvalGrant';
+import {
+  allowsChatApproval,
+  allowsToolGrant,
+  approvalGrantKey,
+  effectiveToolAdmissions,
+} from '../../../src/core/mcp/approvalGrant';
 import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
 import { defaultSentinelServices, forUnattendedRun } from '../../../src/core/permissions/context';
 import { recordPersonText, recordReplyText } from '../../../src/core/permissions/provenance';
@@ -285,7 +290,7 @@ describe("a site the assistant's own reply named", () => {
   });
 });
 
-describe('sends and guest changes ask every time, with only Allow and Not now', () => {
+describe('sends, mail drafts and guest changes ask every time, with only Allow and Not now', () => {
   it('asks before sending an email, and never offers the chat-wide answer', async () => {
     const decision = await classifyTier(sendDraft(draft({})), makeCtx());
     expect(decision).toMatchObject({ tier: 3, reason: 'gmail_send' });
@@ -318,10 +323,41 @@ describe('sends and guest changes ask every time, with only Allow and Not now', 
     expect(decision.card?.plain_what).toContain('so Mannie always asks.');
   });
 
-  it('still lets the chat-wide answer cover saving a draft, which sends nothing', async () => {
+  it('asks before saving a draft every time, and never offers the chat-wide answer or a standing one', async () => {
     const saved = await classifyTier({ ...sendDraft(draft({})), tool_name: 'draft_email' }, makeCtx());
-    expect(saved.reason).toBe('gmail_draft');
-    expect(allowsChatApproval({ ...gmailInfo('draft_email', saved.reason), tier3_card: saved.card })).toBe(true);
+    expect(saved).toMatchObject({ tier: 3, auto_deny: null, reason: 'gmail_draft' });
+    expect(saved.card?.email?.to).toEqual([{ name: 'Dana Wolfe', address: 'dana@example.org' }]);
+    const info = { ...gmailInfo('draft_email', saved.reason), is_approval_required: true, tier3_card: saved.card };
+    expect(allowsChatApproval(info)).toBe(false);
+    expect(allowsToolGrant(info)).toBe(false);
+  });
+
+  it('asks again for a second draft to the same people, whatever was answered for the first', async () => {
+    const saved = await classifyTier({ ...sendDraft(draft({})), tool_name: 'draft_email' }, makeCtx());
+    const info = { ...gmailInfo('draft_email', saved.reason), is_approval_required: true, tier3_card: saved.card };
+    const admissions = effectiveToolAdmissions({
+      calls: [{ id: 'second', type: 'function', function: { name: 'draft_email', arguments: '{}' }, tool_info: info }],
+      decisions: new Map(),
+      chatApprovalGrants: new Set([approvalGrantKey(info)]),
+      implementationPlanGrants: new Set(),
+    });
+    expect(admissions.get('second')).toEqual({ decision: undefined, admission_provenance: { source: 'automatic' } });
+  });
+
+  it('still offers the chat-wide answer for an event on your own calendar that has no guests', async () => {
+    const decision = await classifyTier(calendarCreate([]), makeCtx());
+    expect(decision).toMatchObject({ tier: 3, auto_deny: null, reason: 'calendar_write' });
+    expect(
+      allowsChatApproval({
+        type: 'truefoundry-system',
+        mcp_server_id: 'google_calendar',
+        mcp_server_name: 'google_calendar',
+        original_tool_name: 'create_event',
+        tier: 3,
+        tier_reason: decision.reason,
+        tier3_card: decision.card,
+      }),
+    ).toBe(true);
   });
 
   it("asks as usual for a reply to the sender of the message it answers, read by the host from the person's mail", async () => {

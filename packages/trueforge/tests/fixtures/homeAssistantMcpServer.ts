@@ -18,6 +18,8 @@ import { z } from 'zod';
 
 export const HOME_ASSISTANT_STUB_SERVER_NAME = 'home-assistant';
 
+export const HA_CALL_ACTION_TOOL = 'call_action';
+export const HA_UNFAMILIAR_TOOL = 'HassVacuumStart';
 export const HA_LAMP = 'light.living_room_lamp';
 export const HA_THERMOSTAT = 'climate.hallway_thermostat';
 export const HA_LOCK = 'lock.front_door';
@@ -62,7 +64,12 @@ const TARGET_ARGS = {
 };
 
 export async function startHomeAssistantStub(
-  options: { token?: string; integrationInstalled?: boolean } = {},
+  options: {
+    token?: string;
+    integrationInstalled?: boolean;
+    /** Adds the generic action tool and a change tool Aman has no wording for, as newer servers serve. */
+    newerTools?: boolean;
+  } = {},
 ): Promise<HomeAssistantStub> {
   const entities = new Map(ENTITIES.map(entity => [entity.entity_id, { ...entity }]));
   const counts = new Map<string, number>();
@@ -145,6 +152,10 @@ export async function startHomeAssistantStub(
       return temperature === null ? `Set ${entity.name}.` : `Set ${entity.name} to ${String(temperature)} degrees.`;
     });
     change('HassSetPosition', entity => `Set the position of ${entity.name}.`);
+    if (options.newerTools === true) {
+      change(HA_CALL_ACTION_TOOL, entity => `Ran an action on ${entity.name}.`);
+      change(HA_UNFAMILIAR_TOOL, entity => `Started ${entity.name}.`);
+    }
     return server;
   };
 
