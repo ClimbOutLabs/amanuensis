@@ -7,6 +7,7 @@ import {
 import type { ApprovalDecision } from '@truefoundry/trueforge-core/core/events/schema';
 import { InstructionBuilder } from '@truefoundry/trueforge-core/core/InstructionBuilder';
 import type { InternalEnrichedAssistantMessage } from '@truefoundry/trueforge-core/core/llm/LLMTypes';
+import { allowsChatApproval } from '@truefoundry/trueforge-core/core/mcp/approvalGrant';
 import { createToolCallMemoState, executeToolCalls } from '@truefoundry/trueforge-core/core/mcp/executeToolCalls';
 import { isCallToolResponseResult } from '@truefoundry/trueforge-core/core/mcp/IMCPServer';
 import { classifyUnstampedToolCall } from '@truefoundry/trueforge-core/core/runtime/AgentThread';
@@ -159,6 +160,13 @@ function resultText(result: Awaited<ReturnType<typeof dispatch>>['result']): str
 }
 
 describe('create_persona', () => {
+  it('asks every time: its card never offers the chat-wide answer', async () => {
+    const built = await setup();
+    const info = await built.tools.toolCallInfo({ name: 'create_persona', arguments: TRAVEL_PLANNER });
+    expect(info).toMatchObject({ tier_reason: 'persona_write', is_approval_required: true });
+    expect(allowsChatApproval(info)).toBe(false);
+  });
+
   it('shows one card with the whole persona, then saves it on approval', async () => {
     const built = await setup();
     const info = await built.tools.toolCallInfo({ name: 'create_persona', arguments: TRAVEL_PLANNER });

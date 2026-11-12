@@ -91,7 +91,13 @@ export const MODEL_FQN = `${MODEL_PROVIDER_NAME}/scripted-model`;
 
 export interface OwnershipServer {
   /** Sends one request through the mounted app as `user`; `path` is a full API path. */
-  request: (input: { user: string; path: string; method?: string; json?: unknown }) => Promise<Response>;
+  request: (input: {
+    user: string;
+    path: string;
+    method?: string;
+    json?: unknown;
+    headers?: Record<string, string>;
+  }) => Promise<Response>;
   /** The mounted routes, as `METHOD /path` with `:param` segments, for the sign-in sweep. */
   routes: { method: string; path: string }[];
   /** The inert connector, to prove a refused call never ran its tools. */
@@ -105,10 +111,13 @@ export interface OwnershipServer {
 
 export const ADMIN_USER = 'admin@example.test';
 
-/** The caller is named by `x-test-user`; a missing header is an anonymous request. */
+/**
+ * The caller is named by `x-test-user`, or by `authorization: Test <name>` for a request that is replayed inside
+ * the server with only the headers voice mode forwards. A missing header is an anonymous request.
+ */
 const headerAuthenticator: Authenticator = {
   authenticate: c => {
-    const user = c.req.header('x-test-user');
+    const user = c.req.header('x-test-user') ?? c.req.header('authorization')?.replace(/^Test /, '');
     if (user === undefined) {
       return Promise.reject(new HTTPException(401, { message: 'Authentication required' }));
     }
@@ -135,6 +144,7 @@ type SharedDeps = Pick<
   | 'eventSubscriptions'
   | 'logger'
   | 'oidcDiscovery'
+  | 'localUserStore'
   | 'authenticator'
   | 'authorizer'
 >;
@@ -152,6 +162,7 @@ function sharedDeps(): SharedDeps {
     eventSubscriptions: new EventSubscriptionRegistry<TurnStreamingEvent>(undefined),
     logger: createLogger({ silent: true }),
     oidcDiscovery: undefined,
+    localUserStore: undefined,
     authenticator: headerAuthenticator,
     authorizer: new TrueForgeAuthorizer(),
   };
@@ -216,8 +227,8 @@ function wrap({
   close: () => Promise<void>;
 }): OwnershipServer {
   return {
-    request: async ({ user, path, method, json }) => {
-      const headers = new Headers({ 'x-test-user': user });
+    request: async ({ user, path, method, json, headers: extra }) => {
+      const headers = new Headers({ 'x-test-user': user, ...extra });
       if (json !== undefined) {
         headers.set('content-type', 'application/json');
       }

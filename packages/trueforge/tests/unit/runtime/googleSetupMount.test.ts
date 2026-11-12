@@ -24,6 +24,7 @@ const COMPOSE = 'https://www.googleapis.com/auth/gmail.compose';
 const CALENDAR_READ = 'https://www.googleapis.com/auth/calendar.events.readonly';
 const CALENDAR_WRITE = 'https://www.googleapis.com/auth/calendar.events';
 const OWNER = { tenant_id: 't1', created_by: 'u1' };
+const DRIVE = 'https://www.googleapis.com/auth/drive.file';
 
 const MEMORY_CONFIG: MemoryConfig = {
   recallMaxTokens: 2048,
@@ -223,5 +224,11 @@ describe('the guided Google setup mount', () => {
   it('mounts nothing once the login allows everything', async () => {
     await connections.save(record({ granted_scopes: [READ, COMPOSE, CALENDAR_READ, CALENDAR_WRITE] }));
     expect(await setupCapabilityOf(await resolved())).toBeUndefined();
+  });
+
+  it('still mounts it when calendar is missing, even with Drive allowed', async () => {
+    await connections.save(record({ granted_scopes: [READ, COMPOSE, DRIVE] }));
+    const mounted = await setupCapabilityOf(await resolved());
+    expect(mounted?.tools).toEqual(['google_setup_status']);
   });
 });

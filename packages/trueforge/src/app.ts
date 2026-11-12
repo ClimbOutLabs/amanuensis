@@ -92,6 +92,7 @@ import type { ICompletedTurnEventStore } from './db/completedTurnEvents';
 import type { IDeliveryStore } from './db/deliveryStore';
 import type { IGlobalSettingsStore } from './db/globalSettingsStore';
 import type { IGoogleConnectionStore } from './db/googleConnectionStore';
+import type { ILocalUserStore } from './db/localUserStore';
 import type { IMcpServerWithAuthStore } from './db/mcpServerStore';
 import type { IMcpToolGrantStore } from './db/mcpToolGrantStore';
 import type { IModelProviderStore } from './db/modelProviderStore';
@@ -341,6 +342,8 @@ export interface ServerDeps<TTransaction> {
   logger: Logger;
   /** Background OIDC discovery; undefined when browser login is disabled. */
   oidcDiscovery: OidcDiscoveryHandle | undefined;
+  /** The local user store, present only in local sign-in mode. */
+  localUserStore: ILocalUserStore | undefined;
   /** Startup-selected authenticator; middleware is built from this once per app. */
   authenticator: Authenticator;
   /** Startup-selected agent authorization policy. */
@@ -604,6 +607,14 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       oidcDiscovery: deps.oidcDiscovery,
       logger: deps.logger,
       authMiddleware,
+      ...(deps.localUserStore === undefined
+        ? {}
+        : {
+            localSignIn: {
+              localUserStore: deps.localUserStore,
+              globalSettingsStore: deps.globalSettingsStore,
+            },
+          }),
     }),
   );
   app.route(
@@ -1217,6 +1228,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       createVoiceRouter({
         logger: deps.logger,
         resolveRequestContext,
+        app,
       }),
       authMiddleware,
     ),

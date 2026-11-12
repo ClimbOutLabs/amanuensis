@@ -52,6 +52,18 @@ const TOOL_WORDS: ReadonlyMap<string, ToolWords> = new Map([
     'update_event',
     'calendar_write',
   ]),
+  ...words(
+    { doing: 'Checking your Google Drive files', done: 'Read your Google Drive files', thing: 'Your Drive files' },
+    ['list_files', 'read_drive_file', 'google_drive_read'],
+  ),
+  ...words(
+    {
+      doing: 'Changing your Google Drive files',
+      done: 'Changed your Google Drive files',
+      thing: 'A Google Drive change',
+    },
+    ['create_doc', 'append_rows', 'google_drive_write'],
+  ),
   ...words({ doing: 'Searching your notes', done: 'Searched your notes', thing: 'A notes search' }, [
     'search_notes',
     'notes_read',

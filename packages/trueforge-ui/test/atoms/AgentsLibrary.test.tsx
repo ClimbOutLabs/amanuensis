@@ -678,6 +678,35 @@ describe('AgentsLibraryButton', () => {
     expect(await screen.findByRole('button', { name: 'Add schedule for alpha-agent' })).toBeInTheDocument();
   });
 
+  it('does not read the schedules again when a reload returns the same agents in a new list', async () => {
+    const listSchedules = vi.fn(async () => ({ data: [] }));
+    const searchAgents = vi.fn(async () => [{ name: 'alpha-agent', agentId: 'alpha-agent' }]);
+    const server = createMockAgentUIServer({
+      searchAgents,
+      schedules: {
+        listSchedules,
+        getSchedule: vi.fn(),
+        createSchedule: vi.fn(),
+        updateSchedule: vi.fn(),
+        deleteSchedule: vi.fn(),
+        listScheduleRuns: vi.fn(async () => []),
+        createScheduleRun: vi.fn(),
+      },
+    });
+
+    renderLibrary(<LibraryHarness />, { server });
+    fireEvent.click(screen.getByRole('button', { name: 'Open library' }));
+    expect(await screen.findByRole('button', { name: 'Add schedule for alpha-agent' })).toBeInTheDocument();
+    const searches = searchAgents.mock.calls.length;
+
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'alpha' } });
+    await waitFor(() => {
+      expect(searchAgents.mock.calls.length).toBeGreaterThan(searches);
+    });
+    expect(await screen.findByRole('button', { name: 'Add schedule for alpha-agent' })).toBeInTheDocument();
+    expect(listSchedules).toHaveBeenCalledTimes(1);
+  });
+
   it('disables next page when the current page is short', async () => {
     renderLibrary(<LibraryHarness />, { server: mockServer([{ name: 'alpha-agent', agentId: 'alpha-agent' }]) });
     fireEvent.click(screen.getByRole('button', { name: 'Open library' }));

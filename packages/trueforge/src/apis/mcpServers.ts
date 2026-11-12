@@ -6,6 +6,7 @@ import {
   RemoteMCP,
   type RemoteMcpHeaders,
 } from '@truefoundry/trueforge-core/core';
+import { HOME_ASSISTANT_SERVER_NAME } from '@truefoundry/trueforge-core/core/homeassistant/toolContract';
 import type { Context } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { createHash } from 'node:crypto';
@@ -27,6 +28,7 @@ import { createMcpOAuthClient } from '../mcp/auth/mcpDcr';
 import { mcpOAuthRedirectUris } from '../mcp/auth/mcpOAuthHelpers';
 import type { IOAuthTokenStore, OAuthClientRecord } from '../mcp/auth/types';
 import { firstPartyAfterSave, isFirstPartyOrigin } from '../mcp/firstParty';
+import { checkHomeAssistant, homeAssistantUrlProblem, type HomeAssistantProbeClient } from '../mcp/homeAssistant';
 import {
   authorizeMcpServerRoute,
   createMcpServerRoute,
@@ -35,6 +37,7 @@ import {
   deleteMcpToolGrantRoute,
   getAvailableMcpServerRoute,
   getMcpServerRoute,
+  homeAssistantCheckMcpServerRoute,
   listAvailableMcpServersRoute,
   listMcpServersRoute,
   listMcpServerToolsRoute,
@@ -575,6 +578,15 @@ export function createSettingsMcpServersRouter<TTransaction>(
       throw error;
     }
 
+    // The Home Assistant preset's address rule, enforced on the resolved manifest: https, or
+    // http only on a private or loopback address, at the endpoint the preset builds.
+    if (manifest.type === 'remote' && manifest.name === HOME_ASSISTANT_SERVER_NAME) {
+      const problem = homeAssistantUrlProblem(manifest.url);
+      if (problem !== null) {
+        return c.json({ error: { message: problem } }, 400);
+      }
+    }
+
     // After secret resolution, so the check dials with the credential the row will actually
     // carry, and before the write, so a provider memory cannot reach is never committed.
     let memoryProviderChecked = false;
@@ -638,6 +650,13 @@ export function createSettingsMcpServersRouter<TTransaction>(
     const userRef = requestContext.subject.id;
     const body: UpdateMcpServerRequest = c.req.valid('json');
     const incomingManifest = body.manifest;
+
+    if (incomingManifest.type === 'remote' && incomingManifest.name === HOME_ASSISTANT_SERVER_NAME) {
+      const problem = homeAssistantUrlProblem(incomingManifest.url);
+      if (problem !== null) {
+        return c.json({ error: { message: problem } }, 400);
+      }
+    }
 
     if (incomingManifest.type === 'remote' && incomingManifest.memory_provider === true) {
       const conflict = await findOtherRoleHolder({
@@ -978,6 +997,54 @@ export function createMcpServersRouter<TTransaction>(deps: McpServersRouterDeps<
     return c.json({ data: toMemoryProviderCheckResult(outcome) }, 200);
   };
 
+  const homeAssistantCheckHandler: RouteHandler<typeof homeAssistantCheckMcpServerRoute> = async c => {
+    const { name } = c.req.valid('param');
+    const requestContext = deps.resolveRequestContext(c);
+    const userRef = requestContext.subject.id;
+    // Same url + header resolution as turn execution, so the check dials with the saved token.
+    const connection = await getMcpConnection({
+      tenant_id: requestContext.tenant_id,
+      name,
+      store: deps.resolveMcpServerStore(c),
+      userRef,
+    });
+    if (connection === undefined) {
+      return c.json({ error: { message: `MCP server not found: ${name}` } }, 404);
+    }
+    const remote = new RemoteMCP({
+      id: name,
+      name,
+      url: connection.url,
+      headers: connection.headers,
+      requestTimeoutMs: configuration.MCP_REQUEST_TIMEOUT_MS,
+      connectTimeoutMs: configuration.MCP_CONNECT_TIMEOUT_MS,
+      maxResponseBytes: configuration.MCP_TOOL_CALL_MAX_RESPONSE_BYTES,
+      refuseRedirects: connection.first_party,
+      logger: deps.logger,
+      signal: c.req.raw.signal,
+    });
+    const probe: HomeAssistantProbeClient = {
+      listTools: async () => {
+        const response = await remote.listTools();
+        return isAuthRequired(response) ? { authRequired: true } : { tools: response.result.tools };
+      },
+      callTool: async ({ name: toolName, arguments: args }) => {
+        const response = await remote.callTool({ name: toolName, arguments: args });
+        if (isAuthRequired(response)) {
+          return { authRequired: true };
+        }
+        const texts = response.result.content.flatMap(part => (part.type === 'text' ? [part.text] : []));
+        return { texts };
+      },
+    };
+    const data = await checkHomeAssistant(probe);
+    if (data.status === 'failed') {
+      // The code and the plain reason only: never the headers the check dialed with.
+      deps.logger.warn(`Home Assistant check failed for "${name}"`, { code: data.code, reason: data.reason });
+    }
+    return c.json({ data }, 200);
+  };
+
   const deleteAuthorizationHandler: RouteHandler<typeof deleteAuthorizationMcpServerRoute> = async c => {
     const { name } = c.req.valid('param');
     const requestContext = deps.resolveRequestContext(c);
@@ -1106,6 +1173,7 @@ export function createMcpServersRouter<TTransaction>(deps: McpServersRouterDeps<
   router.openapi(deleteMcpToolGrantRoute, deleteToolGrantHandler);
   router.openapi(authorizeMcpServerRoute, authorizeHandler);
   router.openapi(memoryCheckMcpServerRoute, memoryCheckHandler);
+  router.openapi(homeAssistantCheckMcpServerRoute, homeAssistantCheckHandler);
   router.openapi(deleteAuthorizationMcpServerRoute, deleteAuthorizationHandler);
   router.openapi(getAvailableMcpServerRoute, getAvailableHandler);
   return router;
