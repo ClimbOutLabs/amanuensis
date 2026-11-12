@@ -4,7 +4,7 @@ title: Your morning brief and planning your day
 covers: brief, today, route:briefItem
 ---
 
-Your morning brief. Click **Chats**, click **New chat**, then click the **Your morning brief** card. Or ask Aman "What do I need to know today?" It goes through your calendar, your email and your tasks. It gives you one short list, most urgent first: things to check, decisions waiting on you, what is coming up, and what is due. Each item has one next step. Mark an item done and it stays done, so it does not come back tomorrow. The brief only uses what you have connected. With nothing connected, Aman works from what you tell it.
+Your morning brief. Click **Chats**, click **New chat**, then click the **Your morning brief** card. Or ask Aman "What do I need to know today?" It goes through your calendar, your email and your tasks. It gives you one short list, most urgent first: things to check, decisions waiting on you, what is coming up, and what is due. Each item has one next step. Mark an item done and it stays done, so it does not come back tomorrow. The brief only uses what you have connected. With nothing connected, Aman works from what you tell it. If some items, or the whole brief, could not be shown, a line under it says so. Ask for your brief again.
 
 To get it every morning, click **Chats**, click **New chat**, and type "Every weekday at 7:30, send me my morning brief". A card shows the plan. Click **Allow**. The brief then arrives as a chat at that time. See "Running things on a schedule".
 

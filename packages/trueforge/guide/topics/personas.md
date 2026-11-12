@@ -12,12 +12,13 @@ An agent is different. It is a saved set of instructions you build and try, and 
 
 1. Click **More** in the left bar, then click **Settings**.
 2. Click **Roles and Personas**.
-3. Click **Add persona**.
-4. In **Name**, type the name you will use to call the persona, such as Zara.
-5. In **Also answers to**, type other names for it, with commas between them. You can skip this.
-6. In **Model**, pick the model the persona should use.
-7. In **Role**, write how the persona should answer.
-8. Click **Save persona**.
+3. Click the **Personas** tab.
+4. Click **Add persona**.
+5. In **Name**, type the name you will use to call the persona, such as Zara.
+6. In **Also answers to**, type other names for it, with commas between them. You can skip this.
+7. In **Model**, pick the model the persona should use.
+8. In **Role**, write how the persona should answer.
+9. Click **Save persona**.
 
 Each persona in that list has a knowledge library. You can add documents to it there.
 

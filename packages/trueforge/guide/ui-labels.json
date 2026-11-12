@@ -137,5 +137,6 @@
   "Skills": "packages/trueforge-ui/src/sentinel/ScheduleDetails.tsx",
   "Run code": "packages/trueforge-ui/src/sentinel/ScheduleDetails.tsx",
   "Memory": "packages/trueforge-ui/src/sentinel/ScheduleDetails.tsx",
-  "Update the card": "packages/trueforge-ui/src/sentinel/ScheduleDetails.tsx"
+  "Update the card": "packages/trueforge-ui/src/sentinel/ScheduleDetails.tsx",
+  "Personas": "packages/trueforge-ui/src/containers/SettingsBuilder/ModelRoleSettings.tsx"
 }
