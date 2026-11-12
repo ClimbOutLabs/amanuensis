@@ -401,7 +401,8 @@ proxy_trust_sync() { # name
 }
 
 # The app refuses every address on the networks its own containers sit on, so a model or connector address a
-# chat is steered to cannot reach a neighbouring container (the calendar connector, for one). Docker chooses
+# chat is steered to cannot reach a neighbouring container (the calendar account agent, for one). The Email and
+# Calendar connectors' own endpoints stay usable, because the app lists them as its own services. Docker chooses
 # those networks' ranges when the instance starts, so they are learned here and written to the settings
 # file; the app restarts once when they are learned or change. An instance whose networks cannot be read
 # keeps the ranges it already has.

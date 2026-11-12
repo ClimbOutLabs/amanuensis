@@ -209,6 +209,8 @@ Placing the pins is its own step and always asks, because the addresses are sent
 
     Whoever runs Aman can still allow one exact service on the same computer. List its origin in the `FIRST_PARTY_MCP_ORIGINS` setting (see `packages/trueforge/.env.example`). That marks it as the operator's own service, and the check doesn't second-guess it.
 
+    The Email and Calendar connectors' own addresses are on that list already, because Aman adds them itself. A connector saved at one of those addresses is not refused.
+
 ??? note "Where the list of connectors comes from"
 
     The list under **Add a connector** comes from the catalog that ships with Aman. See [Initial setup](harness/initial-setup.mdx#what-is-supported-out-of-the-box) for how the catalog works and how to change what the app offers.
