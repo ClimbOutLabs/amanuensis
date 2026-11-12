@@ -191,8 +191,9 @@ test('each kind of approval card shows what will happen, and Allow does it', { t
     assert.equal(await savedEventCount(api), 0, 'the event is not in the calendar before the card is allowed');
     await askFromHome({ page, origin, ask: 'run:create_event please' });
     const eventCard = page.locator('main');
+    // The headline is the server's copy, which names the calendar and the day.
     await eventCard
-      .getByText(`Add "${SCRIPTED_EVENT.title}" to your calendar?`)
+      .getByText(`Add "${SCRIPTED_EVENT.title}" to your Google Calendar on`)
       .first()
       .waitFor({ timeout: RENDER_TIMEOUT_MS });
     await eventCard.getByText(SCRIPTED_EVENT.location).first().waitFor({ timeout: RENDER_TIMEOUT_MS });
