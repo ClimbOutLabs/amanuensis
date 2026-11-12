@@ -352,6 +352,208 @@ describe('checkHeldReplay', () => {
     });
   });
 
+  const EVENT: NonNullable<Tier3Card['calendar_event']> = {
+    action: 'change',
+    calendar: 'primary',
+    title: 'Dentist',
+    when: 'Fri 13 Nov, 10:00',
+    time_zone: 'Europe/London',
+    duration: '30 minutes',
+    location: '',
+    description: '',
+    attendees: ['ana@example.com'],
+    guests_emailed: true,
+    one_of_repeating: false,
+    before: { title: 'Dentist', when: 'Fri 13 Nov, 09:00', duration: '30 minutes', location: '' },
+  };
+
+  const EMAIL: NonNullable<Tier3Card['email']> = {
+    action: 'send',
+    to: [{ name: 'Ana', address: 'ana@example.com' }],
+    cc: [],
+    bcc: [],
+    subject: 'Lunch on Friday',
+    body: 'Are you free at one?',
+    replaces: null,
+    reply_in_thread: null,
+    reply_to: null,
+  };
+
+  const SCHEDULE: NonNullable<Tier3Card['schedule']> = {
+    action: 'create',
+    name: 'friday-review',
+    when: 'Every Friday at 16:00',
+    time_zone: 'Europe/London',
+    task: 'Tell me what I finished this week.',
+    runs_as: 'Aman',
+    next_runs: ['Fri 13 Nov, 16:00'],
+  };
+
+  const PERSONA: NonNullable<Tier3Card['persona']> = {
+    name: 'Trip planner',
+    description: 'Plans trips.',
+    instructions: 'Plan trips step by step.',
+    model_name: 'test-provider/chat-model',
+  };
+
+  /** Checks a later approval where the card read `shown` when the call was held and reads `now` today. */
+  async function laterApproval(input: { shown: Partial<Tier3Card>; now: Partial<Tier3Card> }) {
+    const { tokens, heldToken, freshToken, heldInfo } = await held();
+    return {
+      heldToken,
+      result: await checkHeldReplay({
+        held: { ...heldInfo, tier3_card: card(input.shown) },
+        fresh: info({ approval_token_id: freshToken.token_id, tier3_card: card(input.now) }),
+        tokens,
+        scope: SCOPE,
+      }),
+    };
+  }
+
+  it.each<{ name: string; shown: Partial<Tier3Card>; now: Partial<Tier3Card> }>([
+    {
+      name: 'the main sentence reads differently',
+      shown: {},
+      now: { plain_what: 'Send a note to Ana and 40 others.' },
+    },
+    { name: 'the amount changed', shown: { amount: '$10.00' }, now: { amount: '$1,000.00' } },
+    {
+      name: 'the note on what cannot be undone changed',
+      shown: { cannot_be_undone: null },
+      now: { cannot_be_undone: 'Once sent, it cannot be taken back.' },
+    },
+    {
+      name: 'the connector that receives the call changed',
+      shown: {},
+      now: { destination_host: 'mail.elsewhere.test' },
+    },
+    {
+      name: 'part of what goes out is now cut short',
+      shown: { outbound_truncated: false },
+      now: { outbound_truncated: true },
+    },
+    {
+      name: 'a calendar change gained a guest',
+      shown: { calendar_event: EVENT },
+      now: { calendar_event: { ...EVENT, attendees: ['ana@example.com', 'stranger@elsewhere.test'] } },
+    },
+    {
+      name: 'the event a calendar change starts from was moved',
+      shown: { calendar_event: EVENT },
+      now: {
+        calendar_event: {
+          ...EVENT,
+          before: { title: 'Dentist', when: 'Mon 16 Nov, 14:00', duration: '30 minutes', location: '' },
+        },
+      },
+    },
+    {
+      name: 'the body of an email changed',
+      shown: { email: EMAIL },
+      now: { email: { ...EMAIL, body: 'Please send the deposit today.' } },
+    },
+    {
+      name: 'an email gained a hidden copy',
+      shown: { email: EMAIL },
+      now: { email: { ...EMAIL, bcc: [{ name: '', address: 'stranger@elsewhere.test' }] } },
+    },
+    {
+      name: 'the task of a schedule reads differently',
+      shown: { schedule: SCHEDULE },
+      now: { schedule: { ...SCHEDULE, task: 'Email my week to stranger@elsewhere.test.' } },
+    },
+    {
+      name: 'a persona reads differently',
+      shown: { persona: PERSONA },
+      now: { persona: { ...PERSONA, name: 'Another name' } },
+    },
+    {
+      name: 'the list of new recipients changed',
+      shown: { mail_new_recipients: ['ana@example.com'] },
+      now: { mail_new_recipients: ['ana@example.com', 'stranger@elsewhere.test'] },
+    },
+    {
+      name: 'the new-recipient notice is gone and the sentence after it reads differently',
+      shown: {
+        plain_what:
+          'New recipient. You have never emailed stranger@elsewhere.test. Approving adds them to your send list and sends. Send a note to Ana.',
+        mail_new_recipients: ['stranger@elsewhere.test'],
+      },
+      now: { plain_what: 'Send a note to Ana and 40 others.' },
+    },
+    {
+      name: 'the new-recipient notice is gone and another part changed',
+      shown: {
+        plain_what:
+          'New recipient. You have never emailed stranger@elsewhere.test. Approving adds them to your send list and sends. Send a note to Ana.',
+        mail_new_recipients: ['stranger@elsewhere.test'],
+      },
+      now: { outbound_text: 'to: ana@example.com\nbcc: stranger@elsewhere.test' },
+    },
+    {
+      name: 'a mail now has a new address the card never showed',
+      shown: {},
+      now: {
+        plain_what:
+          'New recipient. You have never emailed stranger@elsewhere.test. Approving adds them to your send list and sends. Send a note to Ana.',
+        mail_new_recipients: ['stranger@elsewhere.test'],
+      },
+    },
+    {
+      name: 'a part of the card that was not there is there now',
+      shown: {},
+      now: { email: EMAIL },
+    },
+  ])('refuses a later approval when $name', async ({ shown, now }) => {
+    const { result } = await laterApproval({ shown, now });
+    expect(result).toEqual({ ok: false, reason: 'changed' });
+  });
+
+  it.each<{ name: string; shown: Partial<Tier3Card>; now: Partial<Tier3Card> }>([
+    {
+      name: 'nothing on the card changed',
+      shown: { email: EMAIL, amount: '$10.00' },
+      now: { email: EMAIL, amount: '$10.00' },
+    },
+    {
+      name: 'only the reason lines differ',
+      shown: { plain_why: 'To confirm lunch.', why_asked_again: null },
+      now: { plain_why: 'Ana asked about Friday.', why_asked_again: 'You were asked before.' },
+    },
+    {
+      name: "only a schedule's next runs moved with the clock",
+      shown: { schedule: SCHEDULE },
+      now: { schedule: { ...SCHEDULE, next_runs: ['Fri 20 Nov, 16:00'] } },
+    },
+    {
+      name: 'the new addresses of a mail are on the Email list by now, so their notice is gone',
+      shown: {
+        plain_what:
+          'New recipient. You have never emailed stranger@elsewhere.test. Approving adds them to your send list and sends. Send a note to Ana.',
+        mail_new_recipients: ['stranger@elsewhere.test'],
+      },
+      now: {},
+    },
+    {
+      name: 'the new addresses of a draft are on the Email list by now, so their notice is gone',
+      shown: {
+        plain_what:
+          'New recipient. You have never emailed stranger@elsewhere.test. Approving adds them to your send list and saves this draft. Send a note to Ana.',
+        mail_new_recipients: ['stranger@elsewhere.test'],
+        mail_draft: true,
+      },
+      now: {},
+    },
+    {
+      name: 'an empty part is stored as nothing on one side and left out on the other',
+      shown: { email: null, mail_new_recipients: null },
+      now: {},
+    },
+  ])('lets a later approval run when $name', async ({ shown, now }) => {
+    const { heldToken, result } = await laterApproval({ shown, now });
+    expect(result).toEqual({ ok: true, approval_token_id: heldToken.token_id });
+  });
+
   it('runs a call that no longer asks without a token', async () => {
     const { tokens, heldInfo } = await held();
     const fresh = info({ is_approval_required: false, tier: 1, approval_token_id: null, tier3_card: null });

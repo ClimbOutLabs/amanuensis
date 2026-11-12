@@ -6,7 +6,6 @@ import {
   fetchLatestManifest,
   fetchReleaseFile,
   sourceArchiveName,
-  windowsAssetName,
   type FetchBytes,
 } from '../../src/release/download.ts';
 import { buildManifest, manifestToBytes, type SourceIds } from '../../src/release/manifest.ts';
@@ -158,9 +157,4 @@ test('the source archive is the one archive the record names', () => {
     sourceIds: IDS,
   });
   assert.equal(sourceArchiveName(bare), null);
-});
-
-test('the windows asset name follows the release naming', () => {
-  assert.equal(windowsAssetName('x64'), 'aman-windows-x64.exe');
-  assert.equal(windowsAssetName('arm64'), 'aman-windows-arm64.exe');
 });

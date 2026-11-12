@@ -145,6 +145,8 @@ describe('the approval card', () => {
       attendees: ['lin@example.com', 'sam@example.com'],
       guests_emailed: true,
       one_of_repeating: false,
+      already_created: false,
+      span_days: 1,
       before: null,
     });
     expect(info.tier3_card?.plain_what).toBe(
@@ -489,12 +491,12 @@ describe('durable approvals', () => {
     expect(allowsToolGrant(info)).toBe(false);
   });
 
-  it('offers approve-for-this-chat and always-allow for a new event with no guests', async () => {
+  it('offers the answer for this chat, and not the one for every chat, for a new event with no guests', async () => {
     const built = await build({ routes: [], features: [...WRITE], timeZone: 'America/New_York' });
     const info = await built.tools.toolCallInfo({ name: 'create_event', arguments: { ...DENTIST } });
     expect(info).toMatchObject({ tier: 3, tier_reason: 'calendar_write', is_approval_required: true });
     expect(allowsChatApproval(info)).toBe(true);
-    expect(allowsToolGrant(info)).toBe(true);
+    expect(allowsToolGrant(info)).toBe(false);
   });
 });
 
@@ -765,7 +767,7 @@ describe('card date wording and duplicate creates', () => {
 });
 
 describe('the write tool under a standing grant', () => {
-  it('writes an event with no guests under an Always grant, with no answer to that call', async () => {
+  it('asks for an event with no guests under an Always grant, and writes nothing with no answer to that call', async () => {
     const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
     const built = await build({ routes: [insertRoute], features: [...WRITE], timeZone: 'America/New_York', services });
     await services.tool_grants.recordToolGrant({
@@ -776,11 +778,27 @@ describe('the write tool under a standing grant', () => {
       mcp_server_host: null,
     });
     const info = await built.tools.toolCallInfo({ name: 'create_event', arguments: DENTIST });
-    expect(info).toMatchObject({ tier: 1, tier_reason: 'mcp_tool_grant' });
+    expect(info).toMatchObject({ tier: 3, tier_reason: 'calendar_write', is_approval_required: true });
     const response = await built.tools.callTool({ name: 'create_event', arguments: DENTIST }, undefined, {
       admission_provenance: { source: 'automatic' },
       approved_params: info.mint_canonical_params,
     });
+    expect(text(response)).toContain('not approved');
+    expect(writes(built.google.urls)).toEqual([]);
+  });
+
+  it('writes an event with no guests on an answer given for the whole chat', async () => {
+    const built = await build({ routes: [insertRoute], features: [...WRITE], timeZone: 'America/New_York' });
+    const info = await built.tools.toolCallInfo({ name: 'create_event', arguments: DENTIST });
+    expect(info).toMatchObject({ tier: 3, tier_reason: 'calendar_write' });
+    const response = await built.tools.callTool(
+      { name: 'create_event', arguments: DENTIST },
+      { status: 'allow', scope: 'chat' },
+      {
+        admission_provenance: { source: 'chat_grant', decision: 'allow', scope: 'chat' },
+        approved_params: info.mint_canonical_params,
+      },
+    );
     expect(text(response)).not.toContain('not approved');
     expect(writes(built.google.urls)).toHaveLength(1);
   });

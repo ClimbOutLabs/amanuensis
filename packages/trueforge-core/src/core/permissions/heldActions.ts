@@ -8,7 +8,12 @@
 import { InvalidAgentSendInputError } from '../errors';
 import type { InternalEnrichedAssistantMessage, InternalEnrichedToolCall, InternalToolCallInfo } from '../llm/LLMTypes';
 import { gitRemotesMatch } from '../sandbox/gitRemoteObservation';
-import { approvalTokenExpiry, type ApprovalTokenScope, type ApprovalTokenStore } from './approvalTokens';
+import {
+  approvalTokenExpiry,
+  stableStringify,
+  type ApprovalTokenScope,
+  type ApprovalTokenStore,
+} from './approvalTokens';
 import { sameBrowserElementReview } from './browserTier';
 import { BROWSER_CLICK_TOOL_NAME, BROWSER_SELECT_TOOL_NAME, BROWSER_TYPE_TOOL_NAME } from './browserToolNames';
 import type { Tier3Card } from './tier';
@@ -203,14 +208,57 @@ function heldElementUnchanged(input: { held: InternalToolCallInfo; fresh: Intern
     : sameBrowserElementReview({ a: approved, b: current });
 }
 
-/** The card fields a person reads before approving; free text such as the reason is not compared. */
-function sameCardTargets(held: Tier3Card, fresh: Tier3Card): boolean {
+/** A value with every empty part dropped, so "nothing to show" reads the same however it was stored. */
+function withoutEmptyParts(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(withoutEmptyParts);
+  }
+  if (typeof value === 'object' && value !== null) {
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([, part]) => part !== null && part !== undefined)
+        .map(([key, part]) => [key, withoutEmptyParts(part)]),
+    );
+  }
+  return value;
+}
+
+/**
+ * Everything a person reads on a card before approving. The two free-text reason lines are left out, and so is
+ * a schedule's list of next runs, which moves with the clock.
+ */
+function partsRead(card: Tier3Card): Record<string, unknown> {
+  return {
+    ...card,
+    plain_why: null,
+    why_asked_again: null,
+    schedule: card.schedule == null ? null : { ...card.schedule, next_runs: null },
+  };
+}
+
+function asComparableText(parts: Record<string, unknown>): string {
+  return stableStringify(withoutEmptyParts(parts));
+}
+
+/**
+ * Whether a card reads today as it read when the call was held. One difference is expected: approving a mail to
+ * new addresses puts them on the Email list, so a later try no longer carries the new-recipient notice. The
+ * sentence after that notice, and every other part, must still be what the owner read.
+ */
+function readsAsHeld(input: { held: Tier3Card; fresh: Tier3Card }): boolean {
+  const { held, fresh } = input;
+  if (asComparableText(partsRead(held)) === asComparableText(partsRead(fresh))) {
+    return true;
+  }
+  const noticedThen = held.mail_new_recipients ?? [];
+  const noticedNow = fresh.mail_new_recipients ?? [];
+  if (noticedThen.length === 0 || noticedNow.length > 0 || !held.plain_what.endsWith(` ${fresh.plain_what}`)) {
+    return false;
+  }
+  const withoutNotice = { plain_what: fresh.plain_what, mail_new_recipients: null, mail_draft: null };
   return (
-    held.recipient === fresh.recipient &&
-    held.destination === fresh.destination &&
-    held.destination_host === fresh.destination_host &&
-    held.outbound_text === fresh.outbound_text &&
-    held.parsed_command === fresh.parsed_command
+    asComparableText({ ...partsRead(held), ...withoutNotice }) ===
+    asComparableText({ ...partsRead(fresh), ...withoutNotice })
   );
 }
 
@@ -250,7 +298,7 @@ export async function checkHeldReplay(input: {
   }
   const heldCard = held.tier3_card ?? undefined;
   const freshCard = fresh.tier3_card ?? undefined;
-  if (heldCard !== undefined && freshCard !== undefined && !sameCardTargets(heldCard, freshCard)) {
+  if (heldCard !== undefined && freshCard !== undefined && !readsAsHeld({ held: heldCard, fresh: freshCard })) {
     return { ok: false, reason: 'changed' };
   }
   // A fresh call that no longer asks (a standing grant was added meanwhile) runs without the token.

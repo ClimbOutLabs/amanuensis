@@ -41,10 +41,21 @@ and names the person's profile (`owner`) and the chat's tab (`tab`).
   on this computer or a private network, then returns a read.
 - `POST /read { owner, tab }` — the page as text, in reading order: its title, its address, its
   headings and text, and its controls, each actionable one with a short ref (`e14`). A password,
-  payment or one-time-code field never shows its value.
+  payment or one-time-code field never shows its value. Each read says where the view is, in pixels
+  down the page (or the inner box that scrolls). A page too long for one read starts where the view
+  is, keeps its main heading and short alerts, and says that the part above it is left out.
 - `POST /scroll { owner, tab, direction }`, `POST /back { owner, tab }` — move around, then return a
   read.
 - `POST /screenshot { owner, tab }` — a PNG of the page, which the app shows to the person in the chat.
+  With it come `model_png_base64` and `text`. The first is the same picture with every password, card
+  or one-time-code field (shadow roots included) and every embedded frame covered, and a red box and
+  its ref on each control in view. The second is the page text from the same moment. The copy is
+  drawn in a worker, never in the page, from a layout read in an isolated world, and is left out when
+  it cannot be made safely.
+
+A step that fails answers 500 with a fixed `reason` (`timeout`, `navigation_failed`, `page_changed`,
+`page_script_error` or `unknown`), never the error's own text; the full error goes to the sidecar's log.
+
 - `POST /element-info { owner, tab, ref }` — reads one element without touching it: the site, the
   name a person sees on it, its role, whether it submits a form, the form's values (sensitive ones
   masked), and the address when it is a plain link. The app decides from this read whether an action
@@ -58,6 +69,28 @@ An action whose element no longer reads the way `expect` says is refused as `cha
 is not touched. One without `expect` is refused as `unchecked`. A disabled element is refused as
 `disabled`, a read-only field as `read_only`, and an element that something else covers as `covered`. The app and the sidecar are built and
 upgraded together, so the app always sends it.
+
+The live view, where the person drives their own tab by hand from the app's `/browser-live` page:
+
+- `POST /live/tabs { owner }` — the person's open tabs, most recent first, as chat id, title and
+  address. It never starts a browser.
+- `POST /live/frame { owner, tab }`: one JPEG frame of the tab and the viewport size, with
+  `takeover` (whether the person holds the tab) and `challenge` (whether the page is showing a
+  human check: the check's own frame is on the page, or the page is the full-page check).
+- `POST /live/input { owner, tab, kind, ... }`: one act: `click` (x, y and the frame size it was read
+  from), the takeover pointer acts `move`, `down` and `up` (a point, like a click), `type` (text),
+  `key` (one named key) or `wheel` (dy). A click uses the real mouse, so the same
+  rules keep the tab on its site. Acts on one tab run one at a time, in the order they arrived.
+- `POST /live/takeover { owner, tab, on }`: hands the tab to the person, or back to the model. The
+  tab never leaves the browser; only whose hand drives it changes. While a tab is taken over, the
+  model's own steps on it (`/open`, `/scroll`, `/back`, `/click`, `/type`, `/select`) answer
+  `refused` with reason `takeover`, and a streamed `move` is applied in steps from where the
+  pointer last was, so the page sees a hand travelling rather than a pointer appearing.
+- `POST /live/upload { owner, tab, name, mime, data }` — a file, base64, at most 10 MB, put into the
+  file picker the page opened (dropped once the page moves on), or else its first file field. The
+  page itself sends it.
+
+The app server calls the live routes only for the signed-in person's own profile.
 
 ## Reading and acting on a page
 

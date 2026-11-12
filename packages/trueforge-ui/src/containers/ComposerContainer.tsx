@@ -7,6 +7,8 @@ import { useEffect, useRef, useState } from 'react';
 import { CompactionStatusLine } from '../atoms/CompactionStatusLine.js';
 import { DraftCatalogProvider } from '../atoms/draft/DraftCatalogProvider.js';
 import { cn } from '../atoms/lib/cn.js';
+import { PrivateChatBanner } from '../atoms/privateChat/PrivateChatBanner.js';
+import { usePrivateChatFrame } from '../atoms/privateChat/usePrivateChatFrame.js';
 import { useSpokenReply } from '../components/SpokenReplyContext.js';
 import { useComposerBusyState } from '../hooks/useComposerBusyState.js';
 import { takeComposerPrefill, useComposerDraft } from '../hooks/useComposerDraft.js';
@@ -62,12 +64,14 @@ function ComposerBody({
   const text = useAuiState(s => s.composer.text);
   const hasText = text.trim().length > 0;
   const hasAttachments = useAuiState(s => s.composer.attachments.length > 0);
+  const privateFrame = usePrivateChatFrame();
   const { agentSpec } = useTrueFoundryAgentSpec();
   // Named (immutable) agents use a server-side model; only draft/mutable composers pick one here.
   const requiresModel = shell == null || (shell.mode.status === 'active' && shell.mode.isMutable);
   const hasModel = Boolean(agentSpec?.model?.name?.trim());
   const { isBusy, send, resetBusy } = useComposerBusyState();
-  useComposerDraft();
+  // An incognito chat keeps nothing, so its unsent text is never saved in the tab either.
+  useComposerDraft({ saves: !privateFrame });
   // Emptying the composer drops the voice draft, so a later typed message never counts as spoken.
   useEffect(() => {
     if (!hasText) clearDraftFromVoice();
@@ -169,6 +173,8 @@ function ComposerBody({
             className={cn(
               connectedToBanner && 'border-gold-line rounded-t-none border-t-0',
               !connectedToBanner && hasText && 'border-gold-line',
+              // A private chat wears ink where a normal one shows gold.
+              privateFrame && 'border-text-primary focus-within:border-text-primary',
             )}
             disabled={disabled}
             canSubmit={canSubmit}
@@ -227,6 +233,23 @@ export function ComposerContainer({ placeholder: placeholderOverride }: Composer
   const pauseView = useComposerPauseView();
   const canManageSession = useActiveSessionCanManage();
 
+  return (
+    <>
+      <PrivateChatBanner />
+      <ComposerForPause pauseView={pauseView} placeholder={placeholder} canManageSession={canManageSession} />
+    </>
+  );
+}
+
+function ComposerForPause({
+  pauseView,
+  placeholder,
+  canManageSession,
+}: {
+  pauseView: ReturnType<typeof useComposerPauseView>;
+  placeholder: string;
+  canManageSession: boolean;
+}) {
   if (pauseView.kind === 'mcp') {
     return <McpAuthContainer disabled={!canManageSession} />;
   }

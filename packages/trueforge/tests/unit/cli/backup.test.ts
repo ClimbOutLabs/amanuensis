@@ -6,8 +6,12 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import { z } from 'zod';
 
+import { MAIN_THREAD_ID } from '@truefoundry/trueforge-core/agent-session';
+import { makeAgentSpec, makeCreateTurnInput } from '../../../../trueforge-core/tests/agent-session/testHelpers';
 import { backupSqliteFile, createBackup, type BackupDeps } from '../../../src/cli/backup';
 import { UsageError } from '../../../src/cli/io';
+import { SqliteSessionStore } from '../../../src/db/sqlite/session-store/SqliteSessionStore';
+import { createSqliteTestDatabase } from '../../db/sqlite/testDatabase';
 import { fakeIo } from './fakeIo';
 
 const ManifestSchema = z.object({
@@ -211,5 +215,54 @@ describe('backupSqliteFile', () => {
     const copy = new Database(dest, { readonly: true });
     expect(copy.pragma('integrity_check', { simple: true })).toBe('ok');
     copy.close();
+  });
+
+  it('leaves out a private chat that was open, words and all, and keeps normal chats', async () => {
+    const env = await createSqliteTestDatabase();
+    const sessions = new SqliteSessionStore(env.db);
+    const words = { private: 'the private ferry question', normal: 'the normal ferry question' };
+    for (const [sessionId, isPrivate] of [
+      ['private-chat', true],
+      ['normal-chat', false],
+    ] as const) {
+      await sessions.createSession({
+        tenant_id: 'default',
+        session_id: sessionId,
+        created_by_subject: { subject_id: 'user-a', subject_type: 'user', subject_display_name: 'user-a' },
+        external_id: null,
+        source: null,
+        metadata: {},
+        agent: { type: 'inline', spec: makeAgentSpec() },
+        custom: null,
+        is_incognito: isPrivate,
+        private_expires_at: isPrivate ? new Date(Date.now() + 60 * 60 * 1000) : null,
+      });
+      await sessions.createTurn(
+        makeCreateTurnInput({
+          sessionId,
+          turnId: `${sessionId}-turn`,
+          new_context_appends: [
+            {
+              thread_id: MAIN_THREAD_ID,
+              context: [{ role: 'user', content: isPrivate ? words.private : words.normal }],
+              current_context_usage: null,
+            },
+          ],
+        }),
+      );
+    }
+    const dest = path.join(scratch, 'copy.sqlite');
+    try {
+      await backupSqliteFile({ source: env.databaseFile, dest });
+    } finally {
+      await env.teardown();
+    }
+
+    const copy = new Database(dest, { readonly: true });
+    expect(copy.prepare('SELECT session_id FROM session').all()).toEqual([{ session_id: 'normal-chat' }]);
+    copy.close();
+    const bytes = await readFile(dest);
+    expect(bytes.includes(words.normal)).toBe(true);
+    expect(bytes.includes(words.private)).toBe(false);
   });
 });
