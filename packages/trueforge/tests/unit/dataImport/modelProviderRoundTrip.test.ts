@@ -16,6 +16,7 @@ import { runDataImport, type DataImportDeps } from '../../../src/dataImport/impo
 import { DeliveryStore } from '../../../src/db/deliveryStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import type { IModelProviderStore } from '../../../src/db/modelProviderStore';
+import { ReachSettingsStore } from '../../../src/db/reachSettingsStore';
 import { SentinelAuditStore } from '../../../src/db/sentinelAuditStore';
 import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgentStore';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
@@ -69,6 +70,7 @@ async function makeInstance(label: string): Promise<Instance> {
       mcpServerStore: new SqliteMcpServerStore(db),
       modelProviderStore: new SqliteModelProviderStore(db),
       deliveryStore: new DeliveryStore(db),
+      reachSettingsStore: new ReachSettingsStore(db),
     },
     db,
     memoryDir: join(dir, 'memory'),
@@ -93,6 +95,7 @@ function importDeps(instance: Instance): DataImportDeps<Tx> {
     mcpServerStore: instance.stores.mcpServerStore,
     modelProviderStore: instance.stores.modelProviderStore,
     deliveryStore: instance.stores.deliveryStore,
+    reachSettingsStore: instance.stores.reachSettingsStore,
     agentStore: instance.stores.agentStore,
     mcpCatalog: McpCatalog.loadShipped(),
     withTransaction: callback => instance.db.transaction().execute(callback),
