@@ -9,7 +9,7 @@ A schedule asks Aman to do the same job again and again, for example every weekd
 
 - **Tasks** are things to do once. Ask for them in a chat.
 - **Schedules** are things that repeat. Set them up on the Schedules page.
-- **Skills** teach Aman how to do a kind of job. Add them under Settings, Skills.
+- **Skills** teach Aman how to do a kind of job. Add them under Settings, Skills, or ask Aman in a chat to add one.
 
 ## How a schedule runs
 

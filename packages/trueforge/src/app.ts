@@ -1358,6 +1358,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     withAuth(
       createTurnsRouter({
         mcpCatalog: deps.mcpCatalog,
+        skillCatalog: deps.skillCatalog,
         sessions: deps.sessions,
         sessionStore: deps.sessionStore,
         activeTurns: deps.activeTurns,
