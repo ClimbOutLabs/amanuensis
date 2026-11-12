@@ -239,6 +239,10 @@ export class MailConnectorSource implements ToolSource {
     return this.#inner.serverHost;
   }
 
+  get grantBinding(): string | undefined {
+    return this.#inner.grantBinding;
+  }
+
   async listTools(): Promise<ListToolsResponse> {
     const listed = await this.#inner.listTools();
     if (isAuthRequired(listed)) {
