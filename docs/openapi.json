@@ -246,7 +246,6 @@
           }
         },
         "required": [
-          "auth",
           "models",
           "type"
         ],
@@ -317,7 +316,6 @@
           }
         },
         "required": [
-          "auth",
           "models",
           "type"
         ],
@@ -3349,7 +3347,6 @@
           }
         },
         "required": [
-          "auth",
           "models",
           "type"
         ],
@@ -4513,7 +4510,6 @@
           }
         },
         "required": [
-          "auth",
           "models",
           "type"
         ],
@@ -8307,7 +8303,6 @@
           }
         },
         "required": [
-          "auth",
           "models",
           "type"
         ],
@@ -8526,7 +8521,6 @@
           }
         },
         "required": [
-          "auth",
           "models",
           "type"
         ],
@@ -13521,7 +13515,6 @@
           }
         },
         "required": [
-          "auth",
           "models",
           "type"
         ],
@@ -13558,7 +13551,6 @@
           }
         },
         "required": [
-          "auth",
           "models",
           "type"
         ],
@@ -16435,7 +16427,6 @@
           }
         },
         "required": [
-          "auth",
           "models",
           "type"
         ],
