@@ -52,7 +52,6 @@ import {
   isScheduleWriteToolName,
   LIST_REMINDERS_TOOL_NAME,
   LIST_SCHEDULES_TOOL_NAME,
-  PAUSE_SCHEDULE_TOOL_NAME,
   SCHEDULE_SERVER_ID,
   SET_REMINDER_TOOL_NAME,
 } from '../schedules/toolContract';
@@ -122,6 +121,7 @@ import {
   hasReadContent,
   isPersonVouchedUrl,
   namesUrl,
+  replyLinksWithAddedData,
   steeredDestinations,
   steeredLinks,
   steeredUrl,
@@ -156,9 +156,11 @@ import {
   CONNECTOR_READ_GUARD_REASON,
   CONTENT_STEERED_REASON,
   failClosedDecision,
+  REMINDER_CANCEL_REASON,
   SANDBOX_COMMAND_REASON,
   SANDBOX_FILE_WRITE_REASON,
   SANDBOX_RUN_CODE_REASON,
+  SCHEDULE_STATUS_REASON,
   tier1Decision,
   tier2Decision,
   tier3Decision,
@@ -274,10 +276,13 @@ export interface SentinelAction {
   schedule_write?: Tier3Schedule | undefined;
   /** The persona a create would add, settled by the persona tool set from the request and the owner's personas. */
   persona_write?: Tier3Persona | undefined;
-  /** The reminder a set or cancel call touches, settled by the schedule tool set so the activity line reads it plainly. */
+  /** The schedule a pause or resume would change, settled by the schedule tool set from the store. */
+  schedule_status?: ScheduleStatusReview | undefined;
+  /**
+   * The reminder a set or cancel call touches, settled by the schedule tool set: the activity line of a set and
+   * the card of a cancel read it, never the model's words.
+   */
   reminder?: ReminderLine | undefined;
-  /** The name of the schedule a pause or resume call touches, settled by the schedule tool set from the store. */
-  schedule_status?: { name: string } | undefined;
   /**
    * Context for a browser_click call, read from the live page before the click: the site, the
    * element's accessible name, whether it submits a form, and the form's values. Set by the browser
@@ -287,7 +292,15 @@ export interface SentinelAction {
   browser_click?: BrowserClickReview | undefined;
 }
 
-/** What the activity line says about one reminder: when it is due in plain words (set only), and what it says. */
+/** What a pause or resume card shows: which schedule, and when it runs, as the store holds it. */
+export interface ScheduleStatusReview {
+  action: 'pause' | 'resume';
+  name: string;
+  when: string;
+  time_zone: string;
+}
+
+/** What is shown about one reminder: when it is due in plain words, and what it says. */
 export interface ReminderLine {
   when: string | null;
   what: string | null;
@@ -1987,6 +2000,9 @@ async function classifySearchProviderTool(input: {
   if (steeredLinks({ provenance: ctx.web_search.provenance, values: sentValues }).length > 0) {
     return ctx.services.unattended ? steeredSkipped(ctx) : held(SEARCH_STEERED_REASON, say.steered);
   }
+  if (replyLinksWithAddedData({ provenance: ctx.web_search.provenance, values: sentValues }).length > 0) {
+    return ctx.services.unattended ? replyLinkSkipped(ctx) : held(SEARCH_STEERED_REASON, say.reply_link);
+  }
   // The detail is the person's own, but a chat that has read other people's content asks before sending one:
   // what prompted putting it in a lookup may not have been the person.
   if (
@@ -2073,6 +2089,9 @@ async function classifyBrowserOpen(input: { action: SentinelAction; ctx: Classif
           guests: [],
         });
   }
+  if (replyLinksWithAddedData({ provenance, values: [url] }).length > 0) {
+    return ctx.services.unattended ? replyLinkSkipped(ctx) : ask(BROWSER_OPEN_UNVOUCHED_REASON, say.reply_link);
+  }
   if (hasReadContent(provenance)) {
     if (carriedPrivateDetails({ provenance, values: [url] }).length > 0) {
       return ctx.services.unattended
@@ -2108,6 +2127,17 @@ function steeredSkipped(ctx: ClassifyContext): TierDecision {
     reason: 'steered_by_content',
     reason_detail: `A link or address in something ${assistant} read chose this, not you.`,
     owner_message: `One step was skipped, because something ${assistant} read asked for it, not you.`,
+    sensitive_read: false,
+  });
+}
+
+/** A link that adds details to a site only the assistant's own reply named, skipped in a scheduled run. */
+function replyLinkSkipped(ctx: ClassifyContext): TierDecision {
+  const assistant = ctx.web_search.assistantName;
+  return autoDenyDecision({
+    reason: 'steered_by_content',
+    reason_detail: `Its link added details to a site that only ${assistant}'s own earlier reply named.`,
+    owner_message: `One lookup was skipped, because its link added details to a site you did not name.`,
     sensitive_read: false,
   });
 }
@@ -2905,43 +2935,47 @@ async function classifyPersonaTool(action: SentinelAction, ctx: ClassifyContext)
   });
 }
 
-/**
- * A change to the person's own reminders and schedules that a chat they watch makes without asking. A scheduled
- * run has nobody watching, so the same change asks there, which holds it for the owner.
- */
-async function askWhileUnattended(input: {
-  action: SentinelAction;
-  ctx: ClassifyContext;
+/** A card that asks with one sentence and carries nothing else to check. */
+function sentenceCard(input: {
   plain_what: string;
-  reason: string;
-  reason_detail: string;
-}): Promise<TierDecision> {
-  const { action, ctx } = input;
-  return tier3Decision({
-    card: {
-      plain_what: input.plain_what,
-      plain_why: plainWhy(ctx.agent_intent),
-      cannot_be_undone: null,
-      why_asked_again: null,
-      destination: null,
-      recipient: null,
-      amount: null,
-      parsed_command: null,
-      outbound_text: null,
-      destination_host: null,
-      outbound_truncated: false,
-    },
-    reason: input.reason,
-    reason_detail: input.reason_detail,
-    sensitive_read: false,
-    approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
+  cannot_be_undone: string | null;
+  agent_intent: string | null;
+}): Tier3Card {
+  return {
+    plain_what: input.plain_what,
+    plain_why: plainWhy(input.agent_intent),
+    cannot_be_undone: input.cannot_be_undone,
+    why_asked_again: null,
+    destination: null,
+    recipient: null,
+    amount: null,
+    parsed_command: null,
+    outbound_text: null,
+    destination_host: null,
+    outbound_truncated: false,
+  };
+}
+
+/** The approval card for pausing or resuming a schedule, built from the schedule as the store holds it. */
+function scheduleStatusCard(input: { review: ScheduleStatusReview; agent_intent: string | null }): Tier3Card {
+  const { review } = input;
+  const name = cardSubject(review.name);
+  const when = `${escapeDisplayText(review.when)} (${escapeDisplayText(review.time_zone)})`;
+  const runs = `${when.charAt(0).toLowerCase()}${when.slice(1)}`;
+  return sentenceCard({
+    plain_what:
+      review.action === 'pause'
+        ? `Pause the schedule ${name}? It runs ${runs} and will not run again until it is resumed.`
+        : `Resume the schedule ${name}? It runs ${runs} and starts again as soon as you approve.`,
+    cannot_be_undone: null,
+    agent_intent: input.agent_intent,
   });
 }
 
 /**
- * Schedule tools are the host's own, named by server. Creating or deleting always asks with the schedule in full;
- * listing runs without asking. Pausing and resuming run without asking in a chat, and ask in a scheduled run.
- * Any other name fails closed.
+ * Schedule tools are the host's own, named by server. Creating or deleting always asks with the schedule in full.
+ * Pausing or resuming always asks too: either one changes what runs while nobody is watching. Listing runs
+ * without asking. Any other name fails closed.
  */
 async function classifyScheduleTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   if (isReminderToolName(action.tool_name)) {
@@ -2964,21 +2998,19 @@ async function classifyScheduleTool(action: SentinelAction, ctx: ClassifyContext
     });
   }
   if (isScheduleStatusToolName(action.tool_name)) {
-    if (ctx.services.unattended) {
-      const verb = action.tool_name === PAUSE_SCHEDULE_TOOL_NAME ? 'Pause' : 'Resume';
-      const name = action.schedule_status?.name;
-      return askWhileUnattended({
-        action,
-        ctx,
-        plain_what: name === undefined ? `${verb} a schedule?` : `${verb} the schedule ${cardSubject(name)}?`,
-        reason: 'schedule_status_unattended',
-        reason_detail: 'A scheduled run asks before it pauses or resumes a schedule.',
+    if (action.schedule_status === undefined) {
+      return autoDenyDecision({
+        reason: 'destination_unverifiable',
+        reason_detail: 'The schedule could not be loaded to show you, so it was not offered.',
+        sensitive_read: false,
       });
     }
-    return tier1Decision({
-      reason: 'schedule_status',
-      reason_detail: 'Pause or resume a schedule.',
+    return tier3Decision({
+      card: scheduleStatusCard({ review: action.schedule_status, agent_intent: ctx.agent_intent }),
+      reason: SCHEDULE_STATUS_REASON,
+      reason_detail: 'Pausing or resuming a schedule always asks.',
       sensitive_read: false,
+      approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
     });
   }
   if (action.tool_name === LIST_SCHEDULES_TOOL_NAME) {
@@ -2987,30 +3019,43 @@ async function classifyScheduleTool(action: SentinelAction, ctx: ClassifyContext
   return failClosedDecision({ reason_detail: 'Unknown schedule tool.' });
 }
 
+/** The longest note a reminder set in a chat can hold; a cancel card shows that much and marks a longer one as cut. */
+const REMINDER_CARD_MAX_CHARS = 300;
+
+/** A reminder's words for a cancel card: one line, in quotes. Null when there are none to show. */
+function reminderCardWords(what: string | null): string | null {
+  const oneLine = (what ?? '').replace(/\s+/g, ' ').trim();
+  if (oneLine === '') {
+    return null;
+  }
+  const chars = Array.from(escapeDisplayText(oneLine));
+  const shown =
+    chars.length > REMINDER_CARD_MAX_CHARS
+      ? `${chars.slice(0, REMINDER_CARD_MAX_CHARS - 1).join('')}…`
+      : chars.join('');
+  return `"${shown.replace(/"/g, '\\"')}"`;
+}
+
 /**
- * A reminder is the person's own note on their own machine and only ever reaches them, so setting, listing and
- * cancelling one runs without asking in a chat. The activity line is the only trace. A scheduled run asks
- * before it sets or cancels one.
+ * A reminder is the person's own note on their own machine and only ever reaches them, so setting or listing one
+ * runs without asking in a chat, and the activity line is the only trace. A scheduled run has nobody watching, so
+ * it asks before it sets one, which holds it for the owner. Cancelling one always asks: the reminder is gone for
+ * good, and the person would only find out when it never arrives.
  */
 async function classifyReminderTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   const what = displayLineText(action.reminder?.what ?? null);
   const when = displayLineText(action.reminder?.when ?? null);
   if (ctx.services.unattended && action.tool_name === SET_REMINDER_TOOL_NAME) {
-    return askWhileUnattended({
-      action,
-      ctx,
-      plain_what: when !== null && what !== null ? `Set a reminder for ${when}: ${what}?` : 'Set a reminder?',
+    return tier3Decision({
+      card: sentenceCard({
+        plain_what: when !== null && what !== null ? `Set a reminder for ${when}: ${what}?` : 'Set a reminder?',
+        cannot_be_undone: null,
+        agent_intent: ctx.agent_intent,
+      }),
       reason: 'reminder_write_unattended',
       reason_detail: 'A scheduled run asks before it sets a reminder.',
-    });
-  }
-  if (ctx.services.unattended && action.tool_name === CANCEL_REMINDER_TOOL_NAME) {
-    return askWhileUnattended({
-      action,
-      ctx,
-      plain_what: what === null ? 'Cancel a reminder?' : `Cancel the reminder: ${what}?`,
-      reason: 'reminder_write_unattended',
-      reason_detail: 'A scheduled run asks before it cancels a reminder.',
+      sensitive_read: false,
+      approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
     });
   }
   switch (action.tool_name) {
@@ -3020,12 +3065,27 @@ async function classifyReminderTool(action: SentinelAction, ctx: ClassifyContext
         reason_detail: when !== null && what !== null ? `Set a reminder for ${when}: ${what}` : 'Set a reminder.',
         sensitive_read: false,
       });
-    case CANCEL_REMINDER_TOOL_NAME:
-      return tier1Decision({
-        reason: 'reminder_write',
-        reason_detail: what === null ? 'Cancelled a reminder.' : `Cancelled a reminder: ${what}`,
+    case CANCEL_REMINDER_TOOL_NAME: {
+      const words = reminderCardWords(action.reminder?.what ?? null);
+      if (words === null) {
+        return autoDenyDecision({
+          reason: 'destination_unverifiable',
+          reason_detail: 'The reminder could not be loaded to show you, so it was not offered.',
+          sensitive_read: false,
+        });
+      }
+      return tier3Decision({
+        card: sentenceCard({
+          plain_what: `Cancel the reminder ${words}${when === null ? '' : `, set for ${when}`}?`,
+          cannot_be_undone: 'Once cancelled, the reminder is gone for good.',
+          agent_intent: ctx.agent_intent,
+        }),
+        reason: REMINDER_CANCEL_REASON,
+        reason_detail: 'Cancelling a reminder always asks.',
         sensitive_read: false,
+        approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
       });
+    }
     case LIST_REMINDERS_TOOL_NAME:
       return tier1Decision({
         reason: 'reminder_read',

@@ -38,7 +38,7 @@ export {
   mapsDestinationHosts,
   shellBindingFromForm,
 } from './classifier';
-export type { ClassifyContext, ReminderLine, SentinelAction } from './classifier';
+export type { ClassifyContext, ReminderLine, ScheduleStatusReview, SentinelAction } from './classifier';
 export {
   DEFAULT_PINNED_PATH,
   classifyContextFor,
