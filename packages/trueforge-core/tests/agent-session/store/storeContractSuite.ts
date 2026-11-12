@@ -620,6 +620,43 @@ export function runStoreContractSuite<
       expect(mustGet(await store.getSession({ tenant_id: tenant, session_id: sessionId })).metadata).toEqual({});
     });
 
+    it('mergeSessionMetadata sets one key and leaves the other keys and fields alone', async () => {
+      const store = createStore();
+      await store.createSession({
+        tenant_id: tenant,
+        session_id: sessionId,
+        created_by_subject: { subject_id: 'user-1', subject_type: 'user', subject_display_name: 'user-1' },
+        agent: { type: 'inline', spec: makeAgentSpec() },
+        custom: null,
+        metadata: { a: '1', b: '2' },
+        external_id: null,
+        source: null,
+        is_incognito: false,
+        private_expires_at: null,
+      });
+      await store.updateSession({
+        tenant_id: tenant,
+        session_id: sessionId,
+        agent: undefined,
+        title: 'keep-title',
+        metadata: undefined,
+      });
+
+      await store.mergeSessionMetadata({ tenant_id: tenant, session_id: sessionId, key: 'b', value: '22' });
+      await store.mergeSessionMetadata({ tenant_id: tenant, session_id: sessionId, key: 'c', value: '3' });
+
+      const record = mustGet(await store.getSession({ tenant_id: tenant, session_id: sessionId }));
+      expect(record.metadata).toEqual({ a: '1', b: '22', c: '3' });
+      expect(record.title).toBe('keep-title');
+    });
+
+    it('mergeSessionMetadata rejects when the session is absent', async () => {
+      const store = createStore();
+      await expect(
+        store.mergeSessionMetadata({ tenant_id: tenant, session_id: sessionId, key: 'a', value: '1' }),
+      ).rejects.toBeInstanceOf(SessionNotFoundError);
+    });
+
     it('createSession conflict when session already exists', async () => {
       const store = createStore();
       await seedSession(store);

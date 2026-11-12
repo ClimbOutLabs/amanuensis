@@ -21,7 +21,7 @@ import {
 import { CalendarEventDetails } from './CalendarEventDetails.js';
 import { ChangeRequestBox } from './ChangeRequestBox.js';
 import { PersonaDetails } from './PersonaDetails.js';
-import { ScheduleDetails } from './ScheduleDetails.js';
+import { sameScheduleTools, ScheduleDetails, scheduleToolsRequest } from './ScheduleDetails.js';
 import { SkillDetails } from './SkillDetails.js';
 import { WAITING_FOR_YOU_LABEL, type SentinelApprovalCard } from './types.js';
 
@@ -182,6 +182,11 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
     card.destination_host !== null;
 
   const { calendar_event: calendarEvent, schedule, persona, skill } = card;
+  const cardTools = schedule?.tools;
+  const [pickedTools, setPickedTools] = useState(cardTools);
+  // Approving saves what the card shows, so other choices must come back on a new card first.
+  const toolsChanged =
+    cardTools !== undefined && pickedTools !== undefined && !sameScheduleTools(pickedTools, cardTools);
   // A new-recipient send never offers a standing grant or a chat-wide allow: approving it adds addresses.
   const newRecipients = isNewRecipientCard(card);
   const stub = approvalStub(card);
@@ -263,7 +268,23 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
 
         {calendarEvent !== null && <CalendarEventDetails event={calendarEvent} />}
 
-        {schedule !== null && <ScheduleDetails schedule={schedule} />}
+        {schedule !== null && (
+          <ScheduleDetails
+            schedule={schedule}
+            picker={
+              pickedTools === undefined || onChangeRequest === undefined
+                ? undefined
+                : {
+                    picked: pickedTools,
+                    onPick: setPickedTools,
+                    onUpdate: () => {
+                      onChangeRequest(scheduleToolsRequest(pickedTools));
+                    },
+                    disabled: disabled || sentAt !== null,
+                  }
+            }
+          />
+        )}
 
         {persona !== null && <PersonaDetails persona={persona} />}
 
@@ -286,7 +307,7 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
             data-approval-primary
             title={APPROVAL_CHOICES.approve.hint}
             onClick={markSent(onApprove)}
-            disabled={disabled || sentAt !== null}
+            disabled={disabled || sentAt !== null || toolsChanged}
             className="flex-1"
           >
             {approveVerb(card)}

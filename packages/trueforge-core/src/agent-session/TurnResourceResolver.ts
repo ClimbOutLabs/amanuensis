@@ -166,6 +166,8 @@ export class TurnResourceResolver<
         headers?: RemoteMcpHeaders;
         first_party?: boolean;
         search_provider?: SearchProviderGrant | undefined;
+        /** What an "Always allow" grant on this connector binds to, from the host's record of it; see `ToolGrantKey`. */
+        grant_binding?: string | undefined;
       }>;
       mcpRequestTimeoutMs: number;
       mcpConnectTimeoutMs: number;
@@ -465,7 +467,7 @@ export class TurnResourceResolver<
         const source = await this.getOrCreateToolSource({
           id: entry.name,
           create: async () => {
-            const { url, headers, first_party, search_provider } = await this.deps.mcp(entry.name);
+            const { url, headers, first_party, search_provider, grant_binding } = await this.deps.mcp(entry.name);
             if (first_party === true) {
               this.#firstPartyServers.add(entry.name);
             }
@@ -498,6 +500,7 @@ export class TurnResourceResolver<
                 : {}),
               // A vouched-for or designated connector must not hand its trust to wherever it redirects.
               refuseRedirects: first_party === true || search_provider !== undefined,
+              grantBinding: grant_binding,
               logger: this.deps.logger,
               tracing,
               signal,

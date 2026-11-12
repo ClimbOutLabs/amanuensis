@@ -116,3 +116,5 @@ eval-results/
 # Python writes these when the tests run.
 __pycache__/
 *.pyc
+# A person's own Compose settings, such as core pins (docs/voice-input.mdx).
+docker-compose.override.yml

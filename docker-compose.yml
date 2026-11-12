@@ -84,11 +84,8 @@ services:
       # From-source image; root Dockerfile is the npm-install prod recipe.
       dockerfile: Dockerfile.dev
     image: truefoundry-server:latest
-    # The aman-stt and aman-tts sidecars own cores 16-19 (see below); the
-    # server and its in-process embedding workload stay on the remaining cores
-    # so voice work never steals latency from chat. Adjust both pins together
-    # on hosts with a different core count (see docs/voice-input.mdx).
-    cpuset: '0-15'
+    # No core pins here, so the stack starts on any core count. To give voice
+    # and chat their own cores, see "Dedicated cores" in docs/voice-input.mdx.
     # Ports are published by `loopback` above. Compose DNS therefore has no
     # `server` entry; other services reach this one as `loopback`.
     network_mode: 'service:loopback'
@@ -205,12 +202,9 @@ services:
     build:
       context: ops/aman-stt
     image: amanuensis-aman-stt:latest
-    # Dedicated cores, disjoint from the server's 0-15 pin above, so a
-    # transcription never contends with chat or embedding work.
-    cpuset: '16-19'
     mem_limit: 2g
     environment:
-      # Whisper encoder threads; 4 matches the 4 pinned cores.
+      # Whisper encoder threads; match the core count when the sidecar has its own cores.
       AMAN_STT_CPU_THREADS: '4'
       # Model cache location; matches the stt-model-cache volume below.
       AMAN_STT_MODEL_DIR: /data/stt-cache
@@ -229,13 +223,11 @@ services:
   # posts reply text here and returns the audio to the browser. No host port
   # is published, and the voice files are baked into the image, so it sits
   # only on the internal voice network: no way out, and nothing but the app
-  # can reach it. Shares cores 16-19 with aman-stt: a person speaks, then
-  # listens, so the two rarely run at once.
+  # can reach it.
   aman-tts:
     build:
       context: ops/aman-tts
     image: amanuensis-aman-tts:latest
-    cpuset: '16-19'
     mem_limit: 1g
     environment:
       # onnxruntime threads; 4 matches the 4 pinned cores.
