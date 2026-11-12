@@ -259,7 +259,8 @@ export function localSandboxUploadCommand(remotePath: string): string {
 
 export class LocalSandboxProvider implements SandboxProvider {
   readonly type = 'local';
-  readonly supportsCodeMode = true;
+  /** Off for this sandbox: its code can reach the network, so it gets no bridge to connector tools. */
+  readonly supportsCodeMode = false;
   private readonly sandboxRootPathParent: string;
   private readonly codeModeSocketParentPath: string;
   private readonly support: LocalSandboxSupported;
