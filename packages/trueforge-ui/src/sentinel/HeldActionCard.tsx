@@ -7,6 +7,7 @@ import { useAssistantDisplayName } from '../components/PersonalizationContext.js
 import { Icon } from '../icons/Icon.js';
 import { AlwaysAllowToolControl } from './AlwaysAllowToolControl.js';
 import {
+  alwaysAllowConfirm,
   APPROVAL_CHOICES,
   isNewRecipientCard,
   isNewRecipientDraftCard,
@@ -36,7 +37,7 @@ export type HeldActionStatus =
 export type HeldActionCardProps = {
   card: SentinelApprovalCard;
   status: HeldActionStatus;
-  /** Show "Always allow this tool": the server only accepts it for some tools. */
+  /** Show "Always allow everywhere": the server only accepts it for some tools. */
   alwaysAllowOffered: boolean;
   /** Lets a person who cannot manage this chat read the card without answering it. */
   disabled?: boolean;
@@ -205,7 +206,10 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
               <AlwaysAllowToolControl
                 size="large"
                 disabled={disabled}
-                description={`${assistant} will run this tool on this connector without asking, in every chat.`}
+                confirm={alwaysAllowConfirm({
+                  covers: undefined,
+                  toolSay: `${assistant} will run this tool on this connector without asking, in every chat.`,
+                })}
                 onConfirm={onAlwaysAllow}
               />
             )}
