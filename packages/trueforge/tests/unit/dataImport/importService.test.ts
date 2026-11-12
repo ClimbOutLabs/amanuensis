@@ -736,7 +736,7 @@ describe('model providers and the name that come over', () => {
         (caught: unknown) => caught,
       );
       expect(error).toBeInstanceOf(DataImportError);
-      expect(error instanceof Error && error.message).toContain('model_providers.json');
+      expect(error instanceof Error && error.message).toContain('your model setup');
       expect(await target.stores.modelProviderStore.listProviders({ tenant_id: TENANT })).toEqual([]);
     } finally {
       await source.close();
