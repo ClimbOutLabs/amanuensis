@@ -102,15 +102,22 @@ async function runInWindow({ socketUrl, expression }) {
 // three switches a person flips in Obsidian's settings. Returns the plugin's key and versions.
 const TURN_PLUGIN_ON = `(async () => {
   const id = ${JSON.stringify(PLUGIN_ID)};
-  for (let i = 0; i < 300 && !(window.app && window.app.plugins); i++) {
-    await new Promise(resolve => setTimeout(resolve, 200));
-  }
+  // Obsidian builds its window in steps, so each thing is waited for before it is used.
+  const waitFor = async (what, ready) => {
+    for (let i = 0; i < 300; i++) {
+      if (ready()) {
+        return;
+      }
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+    throw new Error(what + ' did not happen in time');
+  };
+  await waitFor('Obsidian opening the vault', () => window.app?.plugins && window.app.workspace?.layoutReady);
   await app.plugins.setEnable(true);
+  await waitFor('Obsidian finding the plugin in the vault', () => app.plugins.manifests[id]);
   await app.plugins.enablePluginAndSave(id);
+  await waitFor('the plugin starting', () => app.plugins.plugins[id]?.settings?.apiKey);
   const plugin = app.plugins.plugins[id];
-  if (!plugin) {
-    throw new Error('the plugin did not load');
-  }
   if (!plugin.settings.enableInsecureServer) {
     plugin.settings.enableInsecureServer = true;
     await plugin.saveSettings();
