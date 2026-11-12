@@ -646,6 +646,7 @@ describe('GET /api/v1/today needs_ok', () => {
             expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
             tier3_card: {
               plain_what: 'Send the email to Ana',
+              copy: null,
               plain_why: null,
               cannot_be_undone: null,
               why_asked_again: null,
@@ -768,6 +769,7 @@ describe('GET /api/v1/today needs_ok', () => {
               expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
               tier3_card: {
                 plain_what: 'Send the email to Ana',
+                copy: null,
                 plain_why: null,
                 cannot_be_undone: null,
                 why_asked_again: null,
@@ -868,6 +870,7 @@ describe('GET /api/v1/today needs_ok', () => {
       ...(overrides.expires_at === undefined ? {} : { expires_at: overrides.expires_at }),
       tier3_card: {
         plain_what: overrides.plain_what,
+        copy: null,
         plain_why: null,
         cannot_be_undone: null,
         why_asked_again: null,
