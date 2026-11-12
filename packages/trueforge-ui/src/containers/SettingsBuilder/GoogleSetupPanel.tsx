@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react'
 import { auiInputClass } from '@/atoms/lib/inputClasses.js';
 import { Button } from '@/atoms/primitives/Button.js';
 import { CenteredModal } from '@/atoms/primitives/CenteredModal.js';
+import { WatchMailNote } from '@/deliveries/WatchMailNote.js';
 import { useOptionalSentinelApiState } from '@/sentinel/SentinelApiContext.js';
 import type {
   GoogleClientCheck,
@@ -861,6 +862,7 @@ export function GoogleSetupPanel({ open, onOpenChange, port, onChanged }: Google
             </Button>
           </section>
         ) : null}
+        <WatchMailNote onOpenReachMe={() => onOpenChange(false)} />
       </div>
     </CenteredModal>
   );
