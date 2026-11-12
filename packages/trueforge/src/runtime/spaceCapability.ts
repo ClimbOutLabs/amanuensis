@@ -2961,7 +2961,11 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
       return [];
     }
     try {
-      const capability = await notesFolderCapability({ service: notesFolder.service, tracing: input.tracing });
+      const capability = await notesFolderCapability({
+        service: notesFolder.service,
+        tracing: input.tracing,
+        keepsNothing: this.keepsNothing,
+      });
       return capability === undefined ? [] : [capability];
     } catch (error) {
       this.#space.logger.warn(

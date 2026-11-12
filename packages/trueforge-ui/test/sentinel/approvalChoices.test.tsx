@@ -31,7 +31,7 @@ const card: SentinelApprovalCard = {
 const buttonNames = () => screen.getAllByRole('button').map(button => button.textContent);
 
 describe('approval choices', () => {
-  it('shows the safe verb, the quiet no, and Always allow this here in plain view, and never Always deny', () => {
+  it('shows the safe verb, the quiet no, and Always allow in this chat in plain view, and never Always deny', () => {
     render(
       <PermissionApprovalCard
         approvalId="approval-1"
@@ -42,18 +42,18 @@ describe('approval choices', () => {
         onDeny={vi.fn()}
       />,
     );
-    expect(buttonNames()).toEqual(['Allow', 'Not now', 'Always allow this here']);
+    expect(buttonNames()).toEqual(['Allow', 'Not now', 'Always allow in this chat']);
     // A choice the server offers is never folded into the closed Details block.
-    expect(screen.getByRole('button', { name: 'Always allow this here' }).closest('details')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Always allow in this chat' }).closest('details')).toBeNull();
     expect(screen.getByRole('button', { name: 'Allow' })).toHaveAttribute('title', 'Allow this one call only.');
-    expect(screen.getByRole('button', { name: 'Always allow this here' })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: 'Always allow in this chat' })).toHaveAttribute(
       'title',
       "Don't ask again for this kind of action in this chat.",
     );
     expect(screen.queryByText(/Always deny/i)).not.toBeInTheDocument();
   });
 
-  it('shows Approve, Always allow this tool, Deny in that order on a held action, and never Always deny', () => {
+  it('shows Approve, Always allow everywhere, Deny in that order on a held action, and never Always deny', () => {
     render(
       <HeldActionCard
         card={card}
@@ -64,8 +64,8 @@ describe('approval choices', () => {
         onDeny={vi.fn()}
       />,
     );
-    expect(buttonNames()).toEqual(['Approve', 'Always allow this tool', 'Deny']);
-    expect(screen.getByRole('button', { name: 'Always allow this tool' })).toHaveAttribute(
+    expect(buttonNames()).toEqual(['Approve', 'Always allow everywhere', 'Deny']);
+    expect(screen.getByRole('button', { name: 'Always allow everywhere' })).toHaveAttribute(
       'title',
       'Run this tool on this connector without asking, in every chat, until you remove it in settings.',
     );
@@ -98,7 +98,7 @@ describe('approval choices', () => {
       </SentinelApiProvider>,
     );
     const terms = (await screen.findAllByRole('term')).map(term => term.textContent);
-    expect(terms).toEqual(['Approve', 'Always allow this here', 'Always allow', 'Deny']);
+    expect(terms).toEqual(['Approve', 'Always allow in this chat', 'Always allow everywhere', 'Deny']);
     expect(screen.queryByText(/Always deny/i)).not.toBeInTheDocument();
   });
 });

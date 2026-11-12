@@ -41,6 +41,8 @@ jobs:
       packages: ${{ steps.packages.outputs.list }}
       chart: ${{ inputs.all_packages || steps.filter.outputs.chart }}
       store: ${{ inputs.all_packages || steps.filter.outputs.store }}
+      local_sandbox: ${{ inputs.all_packages || steps.filter.outputs.local_sandbox }}
+      installer: ${{ inputs.all_packages || steps.filter.outputs.installer }}
       screenshot_folder: ${{ steps.stamp.outputs.folder }}
 
     steps:
@@ -66,6 +68,11 @@ jobs:
               - '.github/workflows/ci.yml'
             trueforge:
               - 'packages/trueforge/**'
+              # The voice tests read these to check the image carries the model the server pins.
+              - 'Dockerfile'
+              - 'Dockerfile.dev'
+              # A voice test runs the voice service's own read-back check on real calendar cards.
+              - 'ops/aman-tts/**'
               - 'package.json'
               - 'pnpm-workspace.yaml'
               - 'tsconfig.base.json'
@@ -151,6 +158,23 @@ jobs:
               - 'package.json'
               - 'pnpm-workspace.yaml'
               - 'tsconfig.base.json'
+              - '.github/workflows/ci.yml'
+            local_sandbox:
+              - 'packages/trueforge/src/sandbox/local/**'
+              - 'packages/trueforge/tests/unit/sandbox/local/**'
+              - 'packages/trueforge/scripts/generate-local-sandbox-scripts.mjs'
+              - 'packages/trueforge/jest.local-sandbox.contract.config.cjs'
+              - 'packages/trueforge/package.json'
+              - 'packages/trueforge-core/package.json'
+              - 'packages/trueforge-core/src/core/sandbox/**'
+              - 'packages/trueforge-core/tests/core/sandbox/**'
+              - 'package.json'
+              - 'pnpm-workspace.yaml'
+              - 'tsconfig.base.json'
+              - '.github/workflows/ci.yml'
+            installer:
+              - 'installer/**'
+              - 'package.json'
               - '.github/workflows/ci.yml'
             chart:
               - 'charts/trueforge/**'
@@ -353,6 +377,19 @@ jobs:
         if: matrix.package == 'trueforge'
         run: python -m pip install pillow==12.3.0
 
+      # The voice tests listen to a recording with the pinned model. It is fetched once, checked against its
+      # fingerprint, and cached by that fingerprint, so no test downloads it.
+      - name: Cache the listening model
+        if: matrix.package == 'trueforge'
+        uses: actions/cache@v6.1.0
+        with:
+          path: packages/trueforge/.cache/voice-model
+          key: silero-vad-${{ hashFiles('packages/trueforge/src/voice/vad/sileroVad.ts', 'packages/trueforge/scripts/lib/vadModelDownload.ts') }}
+
+      - name: Fetch the listening model
+        if: matrix.package == 'trueforge'
+        run: pnpm --filter @truefoundry/trueforge voice:model:test
+
       # The voice service's own locked packages, plus the test client FastAPI's TestClient needs.
       - name: Install voice service packages
         if: matrix.package == 'aman-tts'
@@ -461,6 +498,42 @@ jobs:
         if: runner.os == 'Windows'
         run: packages/aman-installer/dist/aman.exe --version
 
+  # The shell installer and the aman command: shellcheck, the doctor's tests, and the stubbed installer suite split
+  # over six machines, because it runs each test file against a fresh copy of the installer.
+  installer-shell:
+    name: Installer shell (${{ matrix.part }}/6)
+    needs: detect-changes
+    if: needs.detect-changes.outputs.installer == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [1, 2, 3, 4, 5, 6]
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: Shellcheck
+        if: matrix.part == 1
+        run: pnpm lint:installer
+
+      - name: Doctor tests
+        if: matrix.part == 1
+        run: pnpm test:installer-doctor
+
+      - name: Installer tests
+        run: pnpm test:installer ${{ matrix.part }}/6
+
   chart-checks:
     name: Helm Chart
     needs: detect-changes
@@ -547,6 +620,131 @@ jobs:
           SESSION_STORE_TEST_PG_URL: postgres://proto:proto@localhost:55432/proto
           COMMAND_EXECUTION_TEST_REDIS_URL: redis://localhost:56379
         run: pnpm test:store:postgres
+
+  # The sandbox that runs without Docker, started for real, when its paths change. The package tests skip these.
+  local-sandbox-contract:
+    name: Sandbox without Docker
+    needs: detect-changes
+    if: needs.detect-changes.outputs.local_sandbox == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+
+      # python3-venv: the sandbox makes a Python environment of its own, and Ubuntu ships that part apart.
+      - name: Install the programs the sandbox is built from
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends bubblewrap socat ripgrep python3-venv
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Sandbox contract tests
+        run: pnpm test:local-sandbox:contract
+
+  # Root-level script tests. Each is small, so they run on every change. The guide's tests run in Help guide.
+  root-script-tests:
+    name: Root script tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Theme tokens
+        run: pnpm lint:theme
+
+      - name: Repository policy checks
+        run: pnpm test:repo-policy
+
+      - name: Pre-push hook
+        run: pnpm test:pre-push
+
+      - name: Chart version
+        run: pnpm test:chart-version
+
+      - name: Test mailbox
+        run: pnpm test:test-mailbox
+
+      - name: Eval sets
+        run: |
+          pnpm test:eval-tokens
+          pnpm test:eval-spaces
+
+  # AGENTS.md forbids `as T` and `x!`. Older ones are still being removed, so this reads only the
+  # lines a pull request adds; a merge queue, manual or nightly run has no base to compare with.
+  new-assertions:
+    name: No new type assertions
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      # The pull request's own head, so the diff's line numbers match the files read.
+      - name: Check out repository code
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check added lines
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: pnpm check:new-assertions --base "$BASE_SHA" --head "$HEAD_SHA"
+
+  # No dependency install: must run fast and stay green even when pnpm install fails.
+  repo-rules:
+    name: Repository layout rules
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: Check layout rules
+        run: node scripts/check-repo-rules.mjs
 
   # No dependency install: must run fast and stay green even when pnpm install fails.
   # Also runs the outside-hosts check and the nightly report's test, which need nothing installed either.
@@ -683,8 +881,13 @@ jobs:
       - package-checks
       - screenshots
       - aman-installer-exe
+      - installer-shell
       - chart-checks
       - store-tests
+      - local-sandbox-contract
+      - root-script-tests
+      - new-assertions
+      - repo-rules
       - private-data-scan
       - help-guide
       - feature-coverage
@@ -701,15 +904,20 @@ jobs:
           PACKAGE_CHECKS: ${{ needs.package-checks.result }}
           SCREENSHOTS: ${{ needs.screenshots.result }}
           AMAN_INSTALLER_EXE: ${{ needs.aman-installer-exe.result }}
+          INSTALLER_SHELL: ${{ needs.installer-shell.result }}
           CHART_CHECKS: ${{ needs.chart-checks.result }}
           STORE_TESTS: ${{ needs.store-tests.result }}
+          LOCAL_SANDBOX_CONTRACT: ${{ needs.local-sandbox-contract.result }}
+          ROOT_SCRIPT_TESTS: ${{ needs.root-script-tests.result }}
+          NEW_ASSERTIONS: ${{ needs.new-assertions.result }}
+          REPO_RULES: ${{ needs.repo-rules.result }}
           PRIVATE_DATA_SCAN: ${{ needs.private-data-scan.result }}
           HELP_GUIDE: ${{ needs.help-guide.result }}
           FEATURE_COVERAGE: ${{ needs.feature-coverage.result }}
           GENERATED_CONTRACT_DRIFT: ${{ needs.generated-contract-drift.result }}
         run: |
           ok() { [ "$1" = success ] || [ "$1" = skipped ]; }
-          echo "detect-changes=$DETECT_CHANGES migration-order=$MIGRATION_ORDER typecheck-and-build=$TYPECHECK_AND_BUILD npx-smoke=$NPX_SMOKE package-checks=$PACKAGE_CHECKS screenshots=$SCREENSHOTS chart-checks=$CHART_CHECKS store-tests=$STORE_TESTS private-data-scan=$PRIVATE_DATA_SCAN help-guide=$HELP_GUIDE feature-coverage=$FEATURE_COVERAGE generated-contract-drift=$GENERATED_CONTRACT_DRIFT"
+          echo "detect-changes=$DETECT_CHANGES migration-order=$MIGRATION_ORDER typecheck-and-build=$TYPECHECK_AND_BUILD npx-smoke=$NPX_SMOKE package-checks=$PACKAGE_CHECKS screenshots=$SCREENSHOTS installer-shell=$INSTALLER_SHELL chart-checks=$CHART_CHECKS store-tests=$STORE_TESTS local-sandbox-contract=$LOCAL_SANDBOX_CONTRACT root-script-tests=$ROOT_SCRIPT_TESTS new-assertions=$NEW_ASSERTIONS repo-rules=$REPO_RULES private-data-scan=$PRIVATE_DATA_SCAN help-guide=$HELP_GUIDE feature-coverage=$FEATURE_COVERAGE generated-contract-drift=$GENERATED_CONTRACT_DRIFT"
           [ "$DETECT_CHANGES" = success ] || exit 1
           [ "$MIGRATION_ORDER" = success ] || exit 1
           [ "$TYPECHECK_AND_BUILD" = success ] || exit 1
@@ -717,8 +925,13 @@ jobs:
           ok "$PACKAGE_CHECKS" || exit 1
           ok "$SCREENSHOTS" || exit 1
           ok "$AMAN_INSTALLER_EXE" || exit 1
+          ok "$INSTALLER_SHELL" || exit 1
           ok "$CHART_CHECKS" || exit 1
           ok "$STORE_TESTS" || exit 1
+          ok "$LOCAL_SANDBOX_CONTRACT" || exit 1
+          [ "$ROOT_SCRIPT_TESTS" = success ] || exit 1
+          ok "$NEW_ASSERTIONS" || exit 1
+          [ "$REPO_RULES" = success ] || exit 1
           [ "$PRIVATE_DATA_SCAN" = success ] || exit 1
           [ "$HELP_GUIDE" = success ] || exit 1
           [ "$FEATURE_COVERAGE" = success ] || exit 1

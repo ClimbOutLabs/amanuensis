@@ -71,6 +71,7 @@ vi.mock('@truefoundry/assistant-ui-runtime', () => ({
   useTrueFoundryApprovals: () => approvalsState,
   useTrueFoundryAgentSpec: () => ({ agentSpec: agentSpecState.agentSpec }),
   useTrueFoundryUpdateAgentSpec: () => updateAgentSpec,
+  useTrueFoundryReload: () => () => undefined,
 }));
 
 vi.mock('@/atoms/lib/voiceRecorder.js', () => ({
@@ -1111,6 +1112,7 @@ function voiceInput(availability: VoiceAvailability): VoiceInputApi {
       return () => {};
     },
     transcribe: async () => ({ text: '', language: 'en', duration_ms: 0, model: 'test' }),
+    connect: async () => ({ url: 'wss://aman.test/stream', protocols: [] }),
   };
 }
 
