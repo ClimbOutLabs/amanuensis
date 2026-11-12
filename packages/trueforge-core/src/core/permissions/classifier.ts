@@ -56,7 +56,13 @@ import {
   SET_REMINDER_TOOL_NAME,
 } from '../schedules/toolContract';
 import { tavilyApprovalWhat } from '../search/tavilyCardText';
-import { isSpaceReadToolName, isSpaceWriteToolName, SPACE_SERVER_ID, spaceActivityLine } from '../spaces/toolContract';
+import {
+  isSpaceReadToolName,
+  isSpaceWriteToolName,
+  SPACE_SERVER_ID,
+  SPACE_WRITE_REASON,
+  spaceActivityLine,
+} from '../spaces/toolContract';
 import { absolutePatchTarget, applyPatchTargets } from './applyPatchTargets';
 import {
   actionIdFor,
@@ -3105,7 +3111,11 @@ async function classifyReminderTool(action: SentinelAction, ctx: ClassifyContext
 function classifySpaceTool(action: SentinelAction): TierDecision {
   const line = spaceToolLine(action);
   if (line !== null && isSpaceWriteToolName(action.tool_name)) {
-    return tier1Decision({ reason: 'space_write', reason_detail: line, sensitive_read: false });
+    // The line rides with the call, so a scheduled run's saved change can be written to the activity log.
+    return {
+      ...tier1Decision({ reason: SPACE_WRITE_REASON, reason_detail: line, sensitive_read: false }),
+      audit_description: line,
+    };
   }
   if (line !== null && isSpaceReadToolName(action.tool_name)) {
     return tier1Decision({ reason: 'space_read', reason_detail: line, sensitive_read: false });
