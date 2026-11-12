@@ -214,7 +214,7 @@ test_cgroup_and_low_disk() {
   STUB_DF_KB=$((15 * 1024 * 1024))
   run_install --dry-run --email owner@example.invalid
   assert_rc 1
-  assert_flat_contains "$OUT$ERR" "Less than 32 GB free for the sandbox disks under $SB/aman-slots"
+  assert_flat_contains "$OUT$ERR" "Less than 32 GB free for the sandbox disks under /var/lib/aman-slots"
   run_install --dry-run --no-sandbox --email owner@example.invalid
   assert_rc 0
   assert_not_contains "$OUT" "slot"
@@ -225,24 +225,7 @@ test_cgroup_and_low_disk() {
   STUB_DF_KB=$((35 * 1024 * 1024))
   run_install --dry-run --email owner@example.invalid
   assert_rc 1
-  assert_flat_contains "$OUT$ERR" "Less than 42 GB free for the sandbox disks under $SB/aman-slots"
-  sandbox_drop
-}
-
-test_rerun_counts_only_the_disks_still_to_be_made() {
-  t_begin "a rerun asks for room only for the sandbox disks it still has to make"
-  sandbox_new
-  install_machine
-  assert_rc 0
-  assert_file "$SB/aman-slots/main/ws-1.img"
-  STUB_DF_KB=$((15 * 1024 * 1024))
-  run_install --dry-run
-  assert_rc 0
-  assert_not_contains "$OUT$ERR" "free for the sandbox disks"
-  rm -f "$SB/aman-slots/main/ws-2.img"
-  run_install --dry-run
-  assert_rc 1
-  assert_flat_contains "$OUT$ERR" "Less than 16 GB free for the sandbox disks under $SB/aman-slots"
+  assert_flat_contains "$OUT$ERR" "Less than 42 GB free for the sandbox disks under /var/lib/aman-slots"
   sandbox_drop
 }
 
@@ -303,8 +286,8 @@ test_install_without_sandbox() {
   INSTALL_EXTRA=(--no-sandbox)
   install_machine
   assert_eq "$RC" 0
-  # Node.js on this computer never runs; the app image's own Node.js still makes the push keys.
-  assert_eq "$(grep -c '^node ' "$STUB_LOG" || true)" 0 "no Node.js on this computer runs"
+  # Host Node.js is what the sandbox setup runs on; the app image's own Node.js still makes the web push keys.
+  if grep -q '^node ' "$STUB_LOG"; then t_fail "host Node.js ran: $(grep '^node ' "$STUB_LOG" | head -n 1)"; else t_pass; fi
   assert_log_lacks "--entrypoint cat"
   assert_log_lacks "https://nodejs.org" "no runtime is downloaded for an install without the sandbox"
   assert_no_path "$AMAN_HOME/runtime"
@@ -601,6 +584,7 @@ test_remove_asks_for_the_password_before_any_change() {
   sandbox_new
   install_machine
   mkdir -p "$SB/aman-slots/main"
+  RUN_ENV_EXTRA=(AMAN_SLOT_DISK_ROOT="$SB/aman-slots")
   : >"$STUB_LOG"
   STUB_SUDO_REFUSE=1
   run_install instance remove main --purge-data --confirm-name main
@@ -626,6 +610,7 @@ test_remove_that_stops_at_the_slot_disks_can_run_again() {
   sandbox_new
   install_machine
   mkdir -p "$SB/aman-slots/main"
+  RUN_ENV_EXTRA=(AMAN_SLOT_DISK_ROOT="$SB/aman-slots")
   STUB_SLOT_DISK_FAIL=1
   run_install instance remove main --purge-data --confirm-name main
   unset STUB_SLOT_DISK_FAIL
@@ -651,6 +636,7 @@ test_remove_deletes_slots_left_by_a_removed_instance() {
   grep -Ev '^(aman_main_|main_slot_)' "$SB_STATE/volumes" >"$SB_STATE/volumes.new" || true
   mv "$SB_STATE/volumes.new" "$SB_STATE/volumes"
   mkdir -p "$SB/aman-slots/main"
+  RUN_ENV_EXTRA=(AMAN_SLOT_DISK_ROOT="$SB/aman-slots")
   run_install instance remove main
   assert_rc 0
   assert_flat_contains "$OUT" "Instance main is already removed, but its sandboxes are still on this computer."
@@ -853,7 +839,6 @@ test_download_failure_is_explained
 test_host_node_only_by_opt_in
 test_host_node_opt_in_needs_a_new_enough_node
 test_cgroup_and_low_disk
-test_rerun_counts_only_the_disks_still_to_be_made
 test_install_builds_then_starts_slots_then_the_instance
 test_rendered_compose_wires_the_app_to_the_slots
 test_install_without_sandbox

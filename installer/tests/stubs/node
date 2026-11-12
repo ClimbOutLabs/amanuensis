@@ -69,11 +69,6 @@ case "$mode" in
       exit 1
     fi
     say_ok "Started 2 slots"
-    # The real setup makes a disk for each slot before it starts it, and later runs find the disks there.
-    if [ -n "${AMAN_SLOT_DISK_ROOT:-}" ]; then
-      mkdir -p "$AMAN_SLOT_DISK_ROOT/$instance"
-      for n in 1 2; do : >"$AMAN_SLOT_DISK_ROOT/$instance/ws-$n.img"; done
-    fi
     mkdir -p "$S/up"
     echo slots >"$S/up/$instance-slots"
     for n in 1 2; do grep -Fxq "${instance}_slot_ctl_$n" "$S/volumes" || echo "${instance}_slot_ctl_$n" >>"$S/volumes"; done

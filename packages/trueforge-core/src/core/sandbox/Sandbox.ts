@@ -2526,6 +2526,7 @@ export class Sandbox extends LocalToolMCP {
         // cannot follow its symlinks; the slot agent's O_NOFOLLOW walk and the guest's own view contain those.
         path_resolution: this.provider.filesystem,
         ...(this.provider.filesystem === 'remote' ? { file_digest: (path: string) => this.fileDigest(path) } : {}),
+        sandbox_network: await this.networkForUnaskedWork(),
         action: {
           tool_name: params.name,
           canonical_params: effectiveArguments ?? {},
@@ -4143,6 +4144,20 @@ export class Sandbox extends LocalToolMCP {
    */
   private packageDownloadsPossible(): boolean {
     return this.packageGatewayAvailable() && this.packageDownloadsAllowedForChat;
+  }
+
+  /**
+   * `none` only when nothing the agent runs in this chat can reach outside the sandbox: the provider
+   * has no network, and a run would carry neither a package download token nor a skill's site token.
+   * Read fresh for each call, since an approval earlier in the same step can turn downloads on.
+   */
+  private async networkForUnaskedWork(): Promise<'none' | undefined> {
+    if (this.provider.network !== 'none') {
+      return undefined;
+    }
+    await this.refreshPackageDownloadsAllowed();
+    await this.refreshSkillNetworkHosts();
+    return this.packageDownloadsPossible() || this.skillNetworkHostsForChat.length > 0 ? undefined : 'none';
   }
 
   /** Reads the download setting into the cache. A failed read keeps downloads off, never on. */

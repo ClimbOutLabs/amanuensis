@@ -1,26 +1,24 @@
 #!/usr/bin/env bash
-# Runs every installer test file and fails if any of them does.
-# INSTALLER_TEST_SHARD=k/n runs only the k-th of n equal slices of the sorted file list, so CI can
-# spread the suite over several machines; together the n slices run every file exactly once.
+# Runs every installer test file and fails if any of them does. With PART/PARTS (for example 2/4) it runs only every
+# PARTS-th file starting at PART, so CI can split the files over several machines.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
-shard=${INSTALLER_TEST_SHARD:-1/1}
-case "$shard" in
-  */*) shard_index=${shard%/*} shard_count=${shard#*/} ;;
-  *) shard_index='' shard_count='' ;;
-esac
-if ! [[ "$shard_index" =~ ^[1-9][0-9]*$ && "$shard_count" =~ ^[1-9][0-9]*$ ]] || [ "$shard_index" -gt "$shard_count" ]; then
-  echo "INSTALLER_TEST_SHARD must look like 2/4 (slice 2 of 4). It was: $shard" >&2
-  exit 2
+part=1 parts=1
+if [ "$#" -gt 0 ]; then
+  if [[ ! $1 =~ ^([1-9][0-9]*)/([1-9][0-9]*)$ ]] || [ "${BASH_REMATCH[1]}" -gt "${BASH_REMATCH[2]}" ]; then
+    echo "usage: run.sh [PART/PARTS], for example 2/4" >&2
+    exit 2
+  fi
+  part=${BASH_REMATCH[1]}
+  parts=${BASH_REMATCH[2]}
 fi
-failed=0
-position=0
+failed=0 n=0
 while IFS= read -r t; do
-  position=$((position + 1))
-  [ $(((position - 1) % shard_count + 1)) -eq "$shard_index" ] || continue
+  n=$((n + 1))
+  [ $(((n - 1) % parts + 1)) = "$part" ] || continue
   # Each file gets its own stdin, so a test that reads input cannot take the list of the files still to run.
   if ! bash "$t" </dev/null; then
     failed=1
   fi
-done < <(find . -name '*.test.sh' | sort)
+done < <(find . -name '*.test.sh' | LC_ALL=C sort)
 exit "$failed"

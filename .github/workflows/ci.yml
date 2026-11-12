@@ -466,6 +466,42 @@ jobs:
         if: runner.os == 'Windows'
         run: packages/aman-installer/dist/aman.exe --version
 
+  # The shell installer and the aman command: shellcheck, the doctor's tests, and the stubbed installer suite split
+  # over six machines, because it runs each test file against a fresh copy of the installer.
+  installer-shell:
+    name: Installer shell (${{ matrix.part }}/6)
+    needs: detect-changes
+    if: needs.detect-changes.outputs.installer == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [1, 2, 3, 4, 5, 6]
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: Shellcheck
+        if: matrix.part == 1
+        run: pnpm lint:installer
+
+      - name: Doctor tests
+        if: matrix.part == 1
+        run: pnpm test:installer-doctor
+
+      - name: Installer tests
+        run: pnpm test:installer ${{ matrix.part }}/6
+
   chart-checks:
     name: Helm Chart
     needs: detect-changes
@@ -553,62 +589,6 @@ jobs:
           COMMAND_EXECUTION_TEST_REDIS_URL: redis://localhost:56379
         run: pnpm test:store:postgres
 
-  # The shell installer's own tests and shellcheck. The suite runs every test file in a throwaway
-  # home with stubbed system tools, which takes long on one machine, so it is split in four.
-  installer-lint:
-    name: Installer shellcheck
-    needs: detect-changes
-    if: needs.detect-changes.outputs.installer == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-      - name: Check out repository code
-        uses: actions/checkout@v7
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
-
-      # Pinned so a new shellcheck release cannot turn main red without a change here.
-      - name: Install shellcheck
-        env:
-          SHELLCHECK_VERSION: v0.11.0
-        run: |
-          curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.linux.x86_64.tar.xz" | tar -xJ
-          sudo install "shellcheck-${SHELLCHECK_VERSION}/shellcheck" /usr/local/bin/shellcheck
-          shellcheck --version
-
-      - name: Shellcheck
-        run: pnpm lint:installer
-
-  installer-tests:
-    name: Installer tests (${{ matrix.shard }}/4)
-    needs: detect-changes
-    if: needs.detect-changes.outputs.installer == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3, 4]
-
-    steps:
-      - name: Check out repository code
-        uses: actions/checkout@v7
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version-file: '.nvmrc'
-
-      - name: Installer tests
-        env:
-          INSTALLER_TEST_SHARD: ${{ matrix.shard }}/4
-        run: pnpm test:installer
-
   # Root-level script tests. Each is small, so they run on every change. The guide's tests run in Help guide.
   root-script-tests:
     name: Root script tests
@@ -642,9 +622,6 @@ jobs:
 
       - name: Chart version
         run: pnpm test:chart-version
-
-      - name: Installer doctor
-        run: pnpm test:installer-doctor
 
       - name: Test mailbox
         run: pnpm test:test-mailbox
@@ -841,10 +818,9 @@ jobs:
       - package-checks
       - screenshots
       - aman-installer-exe
+      - installer-shell
       - chart-checks
       - store-tests
-      - installer-lint
-      - installer-tests
       - root-script-tests
       - new-assertions
       - repo-rules
@@ -864,10 +840,9 @@ jobs:
           PACKAGE_CHECKS: ${{ needs.package-checks.result }}
           SCREENSHOTS: ${{ needs.screenshots.result }}
           AMAN_INSTALLER_EXE: ${{ needs.aman-installer-exe.result }}
+          INSTALLER_SHELL: ${{ needs.installer-shell.result }}
           CHART_CHECKS: ${{ needs.chart-checks.result }}
           STORE_TESTS: ${{ needs.store-tests.result }}
-          INSTALLER_LINT: ${{ needs.installer-lint.result }}
-          INSTALLER_TESTS: ${{ needs.installer-tests.result }}
           ROOT_SCRIPT_TESTS: ${{ needs.root-script-tests.result }}
           NEW_ASSERTIONS: ${{ needs.new-assertions.result }}
           REPO_RULES: ${{ needs.repo-rules.result }}
@@ -877,7 +852,7 @@ jobs:
           GENERATED_CONTRACT_DRIFT: ${{ needs.generated-contract-drift.result }}
         run: |
           ok() { [ "$1" = success ] || [ "$1" = skipped ]; }
-          echo "detect-changes=$DETECT_CHANGES migration-order=$MIGRATION_ORDER typecheck-and-build=$TYPECHECK_AND_BUILD npx-smoke=$NPX_SMOKE package-checks=$PACKAGE_CHECKS screenshots=$SCREENSHOTS chart-checks=$CHART_CHECKS store-tests=$STORE_TESTS installer-lint=$INSTALLER_LINT installer-tests=$INSTALLER_TESTS root-script-tests=$ROOT_SCRIPT_TESTS new-assertions=$NEW_ASSERTIONS repo-rules=$REPO_RULES private-data-scan=$PRIVATE_DATA_SCAN help-guide=$HELP_GUIDE feature-coverage=$FEATURE_COVERAGE generated-contract-drift=$GENERATED_CONTRACT_DRIFT"
+          echo "detect-changes=$DETECT_CHANGES migration-order=$MIGRATION_ORDER typecheck-and-build=$TYPECHECK_AND_BUILD npx-smoke=$NPX_SMOKE package-checks=$PACKAGE_CHECKS screenshots=$SCREENSHOTS installer-shell=$INSTALLER_SHELL chart-checks=$CHART_CHECKS store-tests=$STORE_TESTS root-script-tests=$ROOT_SCRIPT_TESTS new-assertions=$NEW_ASSERTIONS repo-rules=$REPO_RULES private-data-scan=$PRIVATE_DATA_SCAN help-guide=$HELP_GUIDE feature-coverage=$FEATURE_COVERAGE generated-contract-drift=$GENERATED_CONTRACT_DRIFT"
           [ "$DETECT_CHANGES" = success ] || exit 1
           [ "$MIGRATION_ORDER" = success ] || exit 1
           [ "$TYPECHECK_AND_BUILD" = success ] || exit 1
@@ -885,10 +860,9 @@ jobs:
           ok "$PACKAGE_CHECKS" || exit 1
           ok "$SCREENSHOTS" || exit 1
           ok "$AMAN_INSTALLER_EXE" || exit 1
+          ok "$INSTALLER_SHELL" || exit 1
           ok "$CHART_CHECKS" || exit 1
           ok "$STORE_TESTS" || exit 1
-          ok "$INSTALLER_LINT" || exit 1
-          ok "$INSTALLER_TESTS" || exit 1
           [ "$ROOT_SCRIPT_TESTS" = success ] || exit 1
           ok "$NEW_ASSERTIONS" || exit 1
           [ "$REPO_RULES" = success ] || exit 1
