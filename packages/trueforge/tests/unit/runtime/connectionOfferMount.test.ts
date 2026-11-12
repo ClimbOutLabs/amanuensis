@@ -1,5 +1,5 @@
 /**
- * The Email offer, mounted by the real turn resolver: a person with no email connected and no
+ * The connection offer, mounted by the real turn resolver: a person with no email connected and no
  * remembered no gets the offer tools in the chat. A saved mail account or a remembered decline
  * leaves the turn without them, so the offer cannot chase the person from a later chat. An
  * unattended run (a schedule) never gets them: nobody can answer the card there, and a decline
@@ -10,7 +10,7 @@ import type { ILLM } from '@truefoundry/trueforge-core/core';
 import { createLogger } from 'winston';
 import { SqliteGlobalSettingsStore } from '../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
 import { SqliteSessionStore } from '../../../src/db/sqlite/session-store/SqliteSessionStore';
-import { EMAIL_OFFER_DECLINED_SETTING_KEY } from '../../../src/runtime/emailOfferCapability';
+import { connectionOfferDeclinedSettingKey } from '../../../src/runtime/connectionOfferRegistry';
 import type { MemoryConfig } from '../../../src/runtime/memory/memoryCapability';
 import type { MemoryTurnContext, ToolOutputScreenConfig } from '../../../src/runtime/MemoryTurnResourceResolver';
 import { SpaceTurnResourceResolver, type SpaceToolStore } from '../../../src/runtime/spaceCapability';
@@ -20,6 +20,7 @@ import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryB
 import { noSpaceFolders } from './spaceFolderStoreFake';
 
 const OWNER = { tenant_id: 't1', created_by: 'u1' };
+const EMAIL_DECLINED_KEY = connectionOfferDeclinedSettingKey('email');
 
 const MEMORY_CONFIG: MemoryConfig = {
   recallMaxTokens: 2048,
@@ -86,7 +87,7 @@ function spec(): AgentSpec {
   });
 }
 
-describe('the Email offer mount', () => {
+describe('the connection offer mount', () => {
   let env: SqliteTestDatabase;
   let settings: SqliteGlobalSettingsStore;
   let mailConnectorRegistered: boolean;
@@ -132,7 +133,7 @@ describe('the Email offer mount', () => {
         logger: createLogger({ silent: true }),
         startsAnswer: true,
         unattended: unattendedRun,
-        emailOffer: {
+        connectionOffer: {
           settings,
           mailConnectorRegistered: () => Promise.resolve(mailConnectorRegistered),
         },
@@ -165,7 +166,7 @@ describe('the Email offer mount', () => {
     });
     for (const capability of resolved.extraCapabilities ?? []) {
       for (const set of capability.systemToolSets ?? []) {
-        if (set.name === 'email_offer') {
+        if (set.name === 'connection_offer') {
           const listed = await set.listTools();
           const tools = 'result' in listed ? listed.result.tools.map(tool => tool.name) : [];
           return { tools, instructionBuilders: (capability.instructionBuilders ?? []).length };
@@ -177,7 +178,7 @@ describe('the Email offer mount', () => {
 
   it('mounts the offer tools and guidance when no email is connected', async () => {
     const mounted = await offerCapability();
-    expect(mounted?.tools).toEqual(['email_connection_status', 'record_email_offer_decline']);
+    expect(mounted?.tools).toEqual(['connection_offer_status', 'record_connection_offer_decline']);
     expect(mounted?.instructionBuilders).toBe(1);
   });
 
@@ -187,13 +188,13 @@ describe('the Email offer mount', () => {
   });
 
   it('mounts nothing after the person has turned the offer down', async () => {
-    await settings.setSetting({ key: EMAIL_OFFER_DECLINED_SETTING_KEY, value: 'true' });
+    await settings.setSetting({ key: EMAIL_DECLINED_KEY, value: 'true' });
     expect(await offerCapability()).toBeUndefined();
   });
 
   it('mounts nothing on an unattended run, so no card waits unanswered and no decline can be recorded', async () => {
     unattendedRun = true;
     expect(await offerCapability()).toBeUndefined();
-    expect(await settings.getSetting({ key: EMAIL_OFFER_DECLINED_SETTING_KEY })).toBeUndefined();
+    expect(await settings.getSetting({ key: EMAIL_DECLINED_KEY })).toBeUndefined();
   });
 });

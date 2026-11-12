@@ -439,7 +439,7 @@ function createTurnResolver(deps: {
   spaceStore: ISpaceStore;
   /** Per-user Google logins; absent, no Gmail tools mount. */
   googleConnectionStore?: IGoogleConnectionStore | undefined;
-  /** Instance settings: the Email offer remembers a person's no in them, and the notes folder choice lives in them too. */
+  /** Instance settings: the connection offer remembers a person's no in them, and the notes folder choice lives in them too. */
   globalSettingsStore: IGlobalSettingsStore;
   /** From CreateTurnRequest.client_timezone. See ITurnResourceResolver.clientTimezone. */
   clientTimezone?: string | undefined;
@@ -985,7 +985,7 @@ function createTurnResolver(deps: {
     {
       store: spaceStore,
       googleConnections: googleConnectionStore,
-      emailOffer: {
+      connectionOffer: {
         settings: globalSettingsStore,
         mailConnectorRegistered: async () =>
           (await mcpServerStore.listServers({ tenant_id, names: [MAIL_CONNECTOR_NAME] })).length > 0,
@@ -1000,7 +1000,7 @@ function createTurnResolver(deps: {
       skills,
       logger,
       startsAnswer,
-      // A scheduled run has nobody to answer the Email offer card, so the offer stays unmounted.
+      // A scheduled run has nobody to answer the connection offer card, so the offer stays unmounted.
       unattended: deps.unattended,
     },
     { store: turnArtifactStore, tenantId: tenant_id, sessionId, turnId, logger },

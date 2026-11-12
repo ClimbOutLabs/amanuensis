@@ -17,6 +17,11 @@ import path from 'path';
 import { DOCUMENTS_SERVER_ID, EXTRACT_DOCUMENT_TEXT_TOOL_NAME } from '../../documents/toolContract';
 import type { CalendarWriteReview } from '../calendar/eventWrite';
 import { CALENDAR_SERVER_ID, isCalendarReadToolName, isCalendarWriteToolName } from '../calendar/toolContract';
+import {
+  CONNECTION_OFFER_SERVER_ID,
+  CONNECTION_OFFER_STATUS_TOOL_NAME,
+  RECORD_CONNECTION_OFFER_DECLINE_TOOL_NAME,
+} from '../connectors/connectionOfferContract';
 import { DRIVE_SERVER_ID, isDriveReadToolName, isDriveWriteToolName } from '../drive/toolContract';
 import type { DriveWriteReview } from '../drive/writeReview';
 import type { ReviewableDraft } from '../email/gmail/draftReview';
@@ -36,11 +41,6 @@ import {
   MAIL_CONNECTOR_NAME,
   MAIL_CONTENT_TOOL_NAME,
 } from '../email/mailConnector/toolContract';
-import {
-  EMAIL_CONNECTION_STATUS_TOOL_NAME,
-  EMAIL_OFFER_SERVER_ID,
-  RECORD_EMAIL_OFFER_DECLINE_TOOL_NAME,
-} from '../email/offerToolContract';
 import { GOOGLE_SETUP_SERVER_ID, GOOGLE_SETUP_STATUS_TOOL_NAME } from '../google/setupToolContract';
 import type { BrowserElementReview, DocumentScope, MapsHosts } from '../llm/LLMTypes';
 import {
@@ -2498,28 +2498,28 @@ function classifyGoogleSetupTool(action: SentinelAction): TierDecision {
 }
 
 /**
- * The Email offer tools are the host's own, named by server like the Google setup read. The status
- * read says only whether email is connected and whether the person already turned the offer down:
- * no mail content, so it runs without asking and is not a sensitive read. Recording the decline
- * writes down the answer the person just gave in that same chat, so it also runs without asking.
- * Anything else on this server fails closed.
+ * The connection offer tools are the host's own, named by server like the Google setup read. The
+ * status read says only whether one connector is connected and whether the person already turned
+ * its offer down: no connector content, so it runs without asking and is not a sensitive read.
+ * Recording the decline writes down the answer the person just gave in that same chat, so it also
+ * runs without asking. Anything else on this server fails closed.
  */
-function classifyEmailOfferTool(action: SentinelAction): TierDecision {
-  if (action.tool_name === EMAIL_CONNECTION_STATUS_TOOL_NAME) {
+function classifyConnectionOfferTool(action: SentinelAction): TierDecision {
+  if (action.tool_name === CONNECTION_OFFER_STATUS_TOOL_NAME) {
     return tier1Decision({
-      reason: 'email_offer_read',
-      reason_detail: 'Read whether your email is connected.',
+      reason: 'connection_offer_read',
+      reason_detail: 'Read whether a connector is connected.',
       sensitive_read: false,
     });
   }
-  if (action.tool_name === RECORD_EMAIL_OFFER_DECLINE_TOOL_NAME) {
+  if (action.tool_name === RECORD_CONNECTION_OFFER_DECLINE_TOOL_NAME) {
     return tier1Decision({
-      reason: 'email_offer_decline',
-      reason_detail: 'Remember that you turned down the email connection offer.',
+      reason: 'connection_offer_decline',
+      reason_detail: 'Remember that you turned down an offer to connect a connector.',
       sensitive_read: false,
     });
   }
-  return failClosedDecision({ reason_detail: 'Unknown Email offer tool.' });
+  return failClosedDecision({ reason_detail: 'Unknown connection offer tool.' });
 }
 
 /**
@@ -4038,8 +4038,8 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === GOOGLE_SETUP_SERVER_ID) {
     return steeringChecked({ decision: classifyGoogleSetupTool(action), ctx, guests: [] });
   }
-  if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === EMAIL_OFFER_SERVER_ID) {
-    return steeringChecked({ decision: classifyEmailOfferTool(action), ctx, guests: [] });
+  if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === CONNECTION_OFFER_SERVER_ID) {
+    return steeringChecked({ decision: classifyConnectionOfferTool(action), ctx, guests: [] });
   }
   if (isHostMailRead(action)) {
     return classifyMailRead(action, ctx);

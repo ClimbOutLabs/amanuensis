@@ -49,7 +49,7 @@ import { personaKnowledgeLocation } from '../personaKnowledge/knowledgePaths';
 import { amanGuidePersonaId, isAmanGuidePersona, isAnyAmanGuideId } from '../personas/amanGuide/identity';
 import { PERSISTED_ARTIFACT_MIME } from '../runtime/artifacts/persistTurnArtifacts';
 import { requestChatSearchBackfill } from '../runtime/chatSearchIndexing';
-import { EMAIL_OFFER_DECLINED_SETTING_KEY } from '../runtime/emailOfferCapability';
+import { CONNECTION_OFFER_DECLINED_SETTING_KEYS } from '../runtime/connectionOfferRegistry';
 import type { RetainItem } from '../runtime/memory/hindsightClient';
 import {
   applyVaultTombstones,
@@ -243,7 +243,7 @@ function leftOutName(name: string): string {
 /** Instance-wide settings an import may fill in; the permission settings in the archive are never applied. */
 const IMPORTABLE_GLOBAL_SETTING_KEYS: ReadonlySet<string> = new Set<string>([
   DEFAULT_CHAT_MODEL_SETTING_KEY,
-  EMAIL_OFFER_DECLINED_SETTING_KEY,
+  ...CONNECTION_OFFER_DECLINED_SETTING_KEYS,
   MEMORY_RECALL_ENABLED_SETTING_KEY,
   MEMORY_SCREEN_ENABLED_SETTING_KEY,
   MEMORY_SUMMARIZE_SETTING_KEY,

@@ -47,7 +47,7 @@ import type { WithTransaction } from '../../../src/db/transaction';
 import { personaKnowledgeLocation } from '../../../src/personaKnowledge/knowledgePaths';
 import { openPersonaKnowledgeRepository } from '../../../src/personaKnowledge/sqliteKnowledgeRepository';
 import { amanGuidePersonaId, legacyAmanGuidePersonaId } from '../../../src/personas/amanGuide/identity';
-import { EMAIL_OFFER_DECLINED_SETTING_KEY } from '../../../src/runtime/emailOfferCapability';
+import { CONNECTION_OFFER_DECLINED_SETTING_KEYS } from '../../../src/runtime/connectionOfferRegistry';
 import { EMBEDDING_DIMENSIONS } from '../../../src/runtime/memory/embeddingModel';
 import { MarkdownMemoryClient } from '../../../src/runtime/memory/markdownMemoryClient';
 import type { MemoryClient } from '../../../src/runtime/memory/memoryClient';
@@ -1069,11 +1069,14 @@ describe('runDataImport keeps what the archive recorded', () => {
     }
   });
 
-  it('carries a remembered email offer decline through export and import', async () => {
+  it('carries every remembered connection offer decline through export and import', async () => {
     const { source } = await seededArchive();
     const target = await makeInstance('target-offer-decline');
     try {
-      await source.stores.globalSettingsStore.setSetting({ key: EMAIL_OFFER_DECLINED_SETTING_KEY, value: 'true' });
+      expect(CONNECTION_OFFER_DECLINED_SETTING_KEYS.length).toBeGreaterThan(0);
+      for (const key of CONNECTION_OFFER_DECLINED_SETTING_KEYS) {
+        await source.stores.globalSettingsStore.setSetting({ key, value: 'true' });
+      }
       const archive = await exportArchive(source);
       const settings = recordAt(
         parseJson(
@@ -1082,15 +1085,15 @@ describe('runDataImport keeps what the archive recorded', () => {
         ),
         'settings',
       );
-      const carried = recordsAt(settings['instance'], 'instance settings').find(
-        setting => setting['key'] === EMAIL_OFFER_DECLINED_SETTING_KEY,
-      );
-      expect(carried?.['value']).toBe('true');
+      const instance = recordsAt(settings['instance'], 'instance settings');
+      for (const key of CONNECTION_OFFER_DECLINED_SETTING_KEYS) {
+        expect(instance.find(setting => setting['key'] === key)?.['value']).toBe('true');
+      }
 
       await runDataImport(importDeps(target), importRequest(archive));
-      expect(
-        (await target.stores.globalSettingsStore.getSetting({ key: EMAIL_OFFER_DECLINED_SETTING_KEY }))?.value,
-      ).toBe('true');
+      for (const key of CONNECTION_OFFER_DECLINED_SETTING_KEYS) {
+        expect((await target.stores.globalSettingsStore.getSetting({ key }))?.value).toBe('true');
+      }
     } finally {
       await source.close();
       await target.close();

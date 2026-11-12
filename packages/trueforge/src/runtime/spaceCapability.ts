@@ -69,7 +69,8 @@ import {
 } from '../schemas/space';
 import { browserCapability } from './browserCapability';
 import { toolImagesCapability, type ToolImagesOptions } from './chatImages/toolImagesCapability';
-import { emailOfferCapability } from './emailOfferCapability';
+import { connectionOfferCapability } from './connectionOfferCapability';
+import { OFFERABLE_CONNECTORS } from './connectionOfferRegistry';
 import { googleCapability, sandboxAttachmentStager } from './googleCapability';
 import { googleSetupCapability } from './googleSetupCapability';
 import { mapsCapability } from './mapsCapability';
@@ -2809,8 +2810,8 @@ export interface SpaceTurnContext {
   store: SpaceToolStore;
   /** Per-user Google logins; absent, no Gmail tools mount. */
   googleConnections?: GoogleConnectionStore | undefined;
-  /** The Email offer's footing: the remembered decline and the Email connector's registration. Absent, no offer mounts. */
-  emailOffer?:
+  /** The connection offer's footing: the remembered declines and what its connected checks read. Absent, no offer mounts. */
+  connectionOffer?:
     | {
         settings: Pick<IGlobalSettingsStore, 'getSetting' | 'setSetting'>;
         mailConnectorRegistered: () => Promise<boolean>;
@@ -2832,7 +2833,7 @@ export interface SpaceTurnContext {
   /** The request carries a new message from the person, not an approval resuming the same answer. */
   startsAnswer: boolean;
   /**
-   * No person watches this turn (a scheduled run): the Email offer never mounts, because nobody
+   * No person watches this turn (a scheduled run): the connection offer never mounts, because nobody
    * can answer its card and a decline recorded there would hold in every chat.
    */
   unattended?: boolean | undefined;
@@ -2893,7 +2894,7 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
       return resolved;
     }
     const google = await this.#google(input);
-    const emailOffer = await this.#emailOffer(input);
+    const connectionOffer = await this.#connectionOffer(input);
     const notesFolder = await this.#notesFolder(input);
     const sentinel = this.#sentinel(input);
     const schedules = this.#space.schedules;
@@ -2935,7 +2936,7 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
             ]
           : []),
         ...google,
-        ...emailOffer,
+        ...connectionOffer,
         ...notesFolder,
         ...(personas === undefined
           ? []
@@ -3014,25 +3015,27 @@ export class SpaceTurnResourceResolver extends MemoryTurnResourceResolver {
     }
   }
 
-  /** A state read that fails costs the chat the Email offer, never the chat itself. */
-  async #emailOffer(input: Parameters<MemoryTurnResourceResolver['resolveAgentDefinition']>[0]) {
-    const context = this.#space.emailOffer;
+  /** A state read that fails costs the chat the connection offer, never the chat itself. */
+  async #connectionOffer(input: Parameters<MemoryTurnResourceResolver['resolveAgentDefinition']>[0]) {
+    const context = this.#space.connectionOffer;
     if (context === undefined || configuration.AMAN_EVAL_MODE || this.#space.unattended === true) {
       return [];
     }
-    const owner = { tenant_id: input.tenant_id, created_by: input.created_by };
     try {
-      const capability = await emailOfferCapability({
+      const capability = await connectionOfferCapability({
+        connectors: OFFERABLE_CONNECTORS,
+        host: {
+          mailConnectorRegistered: context.mailConnectorRegistered,
+          googleConnections: this.#space.googleConnections,
+          owner: { tenant_id: input.tenant_id, created_by: input.created_by },
+        },
         settings: context.settings,
-        mailConnectorRegistered: context.mailConnectorRegistered,
-        googleConnections: this.#space.googleConnections,
-        owner,
         tracing: input.tracing,
       });
       return capability === undefined ? [] : [capability];
     } catch (error) {
       this.#space.logger.warn(
-        'Email connection offer not mounted: its state could not be read',
+        'Connection offer not mounted: its state could not be read',
         extractErrorLogFields(error),
       );
       return [];
