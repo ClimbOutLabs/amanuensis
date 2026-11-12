@@ -50,6 +50,7 @@ import { McpServerManifestSchema } from '../schemas/mcpServer';
 import { PersonaActivationSchema, PersonaSchema, validatePersonaContentNames } from '../schemas/persona';
 import { PersonaKnowledgeDocumentSchema } from '../schemas/personaKnowledge';
 import { PersonalizationProfileSchema, validatePersonalizationContent } from '../schemas/personalization';
+import { ReachSettingsSchema } from '../schemas/reach';
 import { ScheduleManifestSchema, ScheduleStatusSchema } from '../schemas/schedule';
 import { SentinelAuditRecordSchema } from '../schemas/sentinelAudit';
 import { SentinelUserSettingsSchema } from '../schemas/sentinelSettings';
@@ -408,6 +409,9 @@ export const ImportSessionRecordSchema = z.object({
   created_at: ArchivedInstantSchema,
   updated_at: ArchivedInstantSchema,
   last_activity_timestamp_ms: internal(z.number(), { label: LEFT_OUT.chatDetail }),
+  // Exports made before private chats lack both fields; such a chat was an ordinary one.
+  is_incognito: z.boolean().default(false),
+  private_expires_at: ArchivedInstantSchema.nullable().default(null),
 });
 export type ImportSessionRecord = z.infer<typeof ImportSessionRecordSchema>;
 
@@ -594,3 +598,6 @@ export const ImportAuditFileSchema = z.array(ImportAuditRecordSchema);
 /** The feed an export carries. Push devices belong to a device, so they are never in an export. */
 export const ImportDeliveriesFileSchema = z.array(DeliverySchema);
 export type ImportDelivery = z.infer<typeof DeliverySchema>;
+
+/** The person's Reach me settings, as a list of none or one. The text and call switches are always off on import. */
+export const ImportReachFileSchema = z.array(ReachSettingsSchema);

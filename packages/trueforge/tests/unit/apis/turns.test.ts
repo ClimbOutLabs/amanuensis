@@ -175,6 +175,8 @@ describe('turns', () => {
         metadata: {},
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
 
       const tokenStore = new SqliteOAuthTokenStore(db);
@@ -182,6 +184,7 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
+          chatDeletionStore: { listDeletedChatModelUsage: () => Promise.resolve([]) },
           mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
@@ -265,11 +268,14 @@ describe('turns', () => {
         metadata: {},
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
       const app = new OpenAPIHono();
       app.route(
         '/',
         createTurnsRouter({
+          chatDeletionStore: { listDeletedChatModelUsage: () => Promise.resolve([]) },
           mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
@@ -428,6 +434,8 @@ describe('turns', () => {
         metadata: {},
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
       await modelProviderStore.upsertProvider({
         tenant_id: 'default',
@@ -502,6 +510,7 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
+          chatDeletionStore: { listDeletedChatModelUsage: () => Promise.resolve([]) },
           mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
@@ -603,6 +612,8 @@ describe('turns', () => {
         metadata: {},
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
 
       // The route itself resolves the referenced agent once, up front, for authorization; that
@@ -641,6 +652,7 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
+          chatDeletionStore: { listDeletedChatModelUsage: () => Promise.resolve([]) },
           mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
@@ -713,6 +725,8 @@ describe('turns', () => {
         metadata: {},
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
 
       // Turn 1 of this chat is still saving its sandbox files.
@@ -747,6 +761,7 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
+          chatDeletionStore: { listDeletedChatModelUsage: () => Promise.resolve([]) },
           mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
@@ -841,6 +856,8 @@ describe('turns', () => {
         metadata: {},
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
       const sessions = {
         get: () =>
@@ -874,6 +891,7 @@ describe('turns', () => {
       app.route(
         '/',
         createTurnsRouter({
+          chatDeletionStore: { listDeletedChatModelUsage: () => Promise.resolve([]) },
           mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,
@@ -961,12 +979,15 @@ describe('turns', () => {
         metadata: {},
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
       const tokenStore = new SqliteOAuthTokenStore(db);
       const app = new OpenAPIHono();
       app.route(
         '/',
         createTurnsRouter({
+          chatDeletionStore: { listDeletedChatModelUsage: () => Promise.resolve([]) },
           mcpCatalog: McpCatalog.loadShipped(),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           tokenFactoryBudget: uncappedTokenFactoryBudget,

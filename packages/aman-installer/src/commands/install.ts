@@ -34,6 +34,7 @@ import {
   INSTALL_PHONE_QUESTION,
   INSTALL_RELEASE_DOWNLOAD_FAILED,
   INSTALL_RELEASE_NOT_THERE,
+  INSTALL_REMOVAL_NOTE_STUCK,
   INSTALL_RESTART_NEEDED,
   INSTALL_RESUME_FAILED,
   INSTALL_SOURCE_FAILED,
@@ -555,6 +556,14 @@ export async function runInstall(deps: InstallDeps, options: { dryRun: boolean }
       print(line);
     }
     return 0;
+  }
+  // An earlier removal's note that Docker is cleared stops being true
+  // the moment this install puts anything there, finished or not.
+  try {
+    await jobs.clearDockerSideRemoved();
+  } catch {
+    print(problemText(INSTALL_REMOVAL_NOTE_STUCK));
+    return 1;
   }
   const resumed = await jobs.runOnceResumePending().catch(() => false);
   if (resumed) {

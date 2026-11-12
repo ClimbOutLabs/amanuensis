@@ -1,6 +1,6 @@
 /** The part of calling a Google product's REST API that does not depend on the product: the user's own login, retries, size caps. */
 import { z } from 'zod';
-import { GoogleApiError } from './errors';
+import { GoogleApiError, GoogleUnusableReplyError, isBusyFailure } from './errors';
 import type { GoogleAccessTokens } from './GoogleAccessTokens';
 import { fetchGoogle } from './oauth';
 
@@ -31,7 +31,6 @@ function reasonOf(body: unknown): string {
   return errors?.[0]?.reason ?? details?.[0]?.reason ?? '';
 }
 
-const BUSY_REASONS = new Set(['userRateLimitExceeded', 'rateLimitExceeded', 'backendError']);
 const API_OFF_REASONS = new Set(['accessNotConfigured', 'SERVICE_DISABLED']);
 const SCOPE_REASONS = new Set(['insufficientPermissions', 'ACCESS_TOKEN_SCOPE_INSUFFICIENT']);
 const RATE_LIMIT_REASONS = new Set(['userRateLimitExceeded', 'rateLimitExceeded']);
@@ -85,7 +84,7 @@ function isRetryable(input: { status: number; reason: string; method: RequestMet
   if (input.method === 'POST' || input.method === 'PATCH') {
     return input.status === 429 || RATE_LIMIT_REASONS.has(input.reason);
   }
-  return input.status === 429 || input.status >= 500 || BUSY_REASONS.has(input.reason);
+  return isBusyFailure(input);
 }
 
 function retryDelayMs(input: { response: Response; attempt: number }): number {
@@ -123,7 +122,7 @@ export interface GoogleRestProduct {
 function describeFailure(input: { product: GoogleRestProduct; status: number; reason: string }): string {
   const { product, status, reason } = input;
   const busy = `${product.name} is busy right now. Try again in a minute.`;
-  if (status === 429 || BUSY_REASONS.has(reason)) {
+  if (isBusyFailure({ status, reason }) && status < 500) {
     return busy;
   }
   if (API_OFF_REASONS.has(reason)) {
@@ -221,7 +220,7 @@ export class GoogleRestClient {
           throw new GoogleApiError({ status: 503, message: input.unknownOutcome ?? busy, cause: error });
         }
         if (!read.ok) {
-          throw new GoogleApiError({ status: 502, message: input.unknownOutcome ?? product.tooLargeMessage });
+          throw new GoogleUnusableReplyError({ message: input.unknownOutcome ?? product.tooLargeMessage });
         }
         return read.value;
       }
@@ -234,6 +233,7 @@ export class GoogleRestClient {
       }
       throw new GoogleApiError({
         status: response.status,
+        busy: isBusyFailure({ status: response.status, reason }),
         message:
           input.unknownOutcome !== undefined && response.status >= 500
             ? input.unknownOutcome
@@ -245,8 +245,7 @@ export class GoogleRestClient {
   async parsed<T>(schema: z.ZodType<T>, request: GoogleRestRequest): Promise<T> {
     const body = safeParse({ schema, value: await this.#send(request) });
     if (!body.success) {
-      throw new GoogleApiError({
-        status: 502,
+      throw new GoogleUnusableReplyError({
         message: request.unknownOutcome ?? `${this.#product.name} returned a response Aman could not read.`,
         cause: body.error,
       });

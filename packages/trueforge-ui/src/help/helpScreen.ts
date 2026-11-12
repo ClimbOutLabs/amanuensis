@@ -13,6 +13,7 @@ const SETTINGS_SECTION_NAMES: Record<SettingsSection, string> = {
   permissions: 'Permissions',
   audit: 'Audit',
   'reach-me': 'Reach me',
+  account: 'Account',
   about: 'About',
 };
 

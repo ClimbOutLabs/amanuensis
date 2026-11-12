@@ -223,6 +223,12 @@ export const InternalToolCallInfoSchema = z.object({
     .describe(
       'Connector host a standing grant for this call binds to, set on a grant-eligible ask. Never model-authored.',
     ),
+  grant_tool_name: z
+    .string()
+    .optional()
+    .describe(
+      'Scope key a standing grant for this call is recorded under, when it covers more than the one tool. Never model-authored.',
+    ),
   audit_description: z
     .string()
     .optional()
