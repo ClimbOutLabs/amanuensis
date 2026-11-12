@@ -173,6 +173,23 @@ ipv4_number() { # a.b.c.d
   echo $(((a << 24) + (b << 16) + (c << 8) + d))
 }
 
+# This computer's IPv4 routes, one destination each. A Mac has no `ip`, so its routes come from netstat.
+host_ipv4_routes() {
+  if command -v ip >/dev/null 2>&1; then
+    ip -4 route show 2>/dev/null | awk '$1 != "default" { print $1 }' || true
+  elif command -v netstat >/dev/null 2>&1; then
+    # netstat leaves off a block's trailing zero parts, so "172.16" is 172.16.0.0/16.
+    netstat -rn -f inet 2>/dev/null | awk '$1 ~ /^[0-9]/ {
+      d = $1; bits = ""
+      if (index(d, "/")) { bits = substr(d, index(d, "/") + 1); d = substr(d, 1, index(d, "/") - 1) }
+      n = split(d, part, ".")
+      if (bits == "") bits = 8 * n
+      while (n < 4) { d = d ".0"; n++ }
+      print d "/" bits
+    }' || true
+  fi
+}
+
 # "first last" for each IPv4 block that Docker's networks or this computer's routes already use.
 ipv4_blocks_in_use() {
   local ids cidr base bits first
@@ -180,7 +197,7 @@ ipv4_blocks_in_use() {
   {
     # shellcheck disable=SC2086 # one id per word
     if [ -n "$ids" ]; then D network inspect --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}' $ids 2>/dev/null || true; fi
-    ip -4 route show 2>/dev/null | awk '$1 != "default" { print $1 }' || true
+    host_ipv4_routes
   } | tr ' ' '\n' | while read -r cidr; do
     base=${cidr%/*}
     valid_ipv4 "$base" || continue

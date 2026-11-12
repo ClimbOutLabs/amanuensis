@@ -121,6 +121,18 @@ test_the_instance_networks_take_small_free_blocks() {
   sandbox_drop
 }
 
+test_a_mac_reads_its_routes_from_netstat() {
+  t_begin "on a computer with no ip command, the instance's networks still skip this computer's routes, read from netstat"
+  sandbox_new
+  cp "$TESTS_DIR/stubs/netstat" "$SB_BIN/netstat"
+  STUB_NETSTAT_ROUTES="172.16.0/27 172.16.0.40 127 0/1"
+  install_machine
+  STUB_NETSTAT_ROUTES=
+  assert_eq "$(network_subnet default)" 172.16.0.64/27 "past a short-form block and a single address"
+  assert_eq "$(network_subnet link)" 172.16.0.48/28 "a smaller block also skips the single address"
+  sandbox_drop
+}
+
 test_the_plan_has_one_row_for_the_browser() {
   t_begin "the plan shows the browser as one build step, and as done once both images are built"
   sandbox_new
