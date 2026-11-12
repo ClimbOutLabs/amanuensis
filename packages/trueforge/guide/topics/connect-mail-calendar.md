@@ -59,6 +59,14 @@ To change an account, click **Manage**, then click **Change** on it. To remove o
 
 The app stores app passwords only on your computer, in the email connector. Your assistant never sees them. Never paste a password into a chat. A chat cannot connect an account. Use Settings.
 
+## Let Aman watch your mail
+
+Aman can watch your mail for you. It can tell you about bills that are due soon, and about mail from people you mark always important. This is off until you turn it on, in **Settings**, then **Reach me**.
+
+The Google panel and the Email panel both say this. Click **Open Reach me** in the panel to go straight there. Then turn on the switch called "Let Aman watch for things".
+
+With several Email accounts connected, Aman watches the inbox of the default account.
+
 ## Connect your calendar
 
 1. Click **More**, click **Settings**, click **Connectors**, find **Google**, and click **Manage**.

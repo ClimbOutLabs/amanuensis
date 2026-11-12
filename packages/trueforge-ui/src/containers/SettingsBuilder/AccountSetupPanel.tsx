@@ -50,6 +50,8 @@ type AccountSetupPanelProps<TStatus extends { state: AccountConnectionState }> =
   removeOne?: ((key: string) => Promise<TStatus>) | undefined;
   /** The line over the form, replacing the standard saved/checked lines for list kinds. */
   saveNote?: string | undefined;
+  /** Shown under the panel's content in every state, such as what the assistant can do once connected. */
+  note?: ReactNode;
 };
 
 const STOPPED_LINE = 'Sign-in stopped working. Make a new app password and save it again.';
@@ -82,6 +84,7 @@ export default function AccountSetupPanel<TStatus extends { state: AccountConnec
   makeDefault,
   removeOne,
   saveNote,
+  note,
 }: AccountSetupPanelProps<TStatus>) {
   const [status, setStatus] = useState<TStatus | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -384,6 +387,7 @@ export default function AccountSetupPanel<TStatus extends { state: AccountConnec
             </div>
           </form>
         ) : null}
+        {note}
       </div>
     </CenteredModal>
   );

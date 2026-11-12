@@ -44,6 +44,7 @@ jobs:
       local_sandbox: ${{ inputs.all_packages || steps.filter.outputs.local_sandbox }}
       installer: ${{ inputs.all_packages || steps.filter.outputs.installer }}
       screenshot_folder: ${{ steps.stamp.outputs.folder }}
+      dependencies: ${{ inputs.all_packages || steps.filter.outputs.dependencies }}
 
     steps:
       - name: Check out repository code
@@ -158,6 +159,25 @@ jobs:
               - 'package.json'
               - 'pnpm-workspace.yaml'
               - 'tsconfig.base.json'
+              - '.github/workflows/ci.yml'
+            dependencies:
+              - '**/package.json'
+              - '**/package-lock.json'
+              - '**/requirements*.txt'
+              - '**/requirements*.lock'
+              - '**/go.mod'
+              - '**/pyproject.toml'
+              - '**/setup.py'
+              - '**/setup.cfg'
+              - '**/*Dockerfile*'
+              - '**/*.dockerfile'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'patches/**'
+              - 'scripts/check-dependency-licenses.mjs'
+              - 'scripts/dependency-license-policy.mjs'
+              - 'scripts/dependency-licenses-reviewed.txt'
+              - 'tests/scripts/dependency-license-policy.test.mjs'
               - '.github/workflows/ci.yml'
             local_sandbox:
               - 'packages/trueforge/src/sandbox/local/**'
@@ -621,6 +641,36 @@ jobs:
           COMMAND_EXECUTION_TEST_REDIS_URL: redis://localhost:56379
         run: pnpm test:store:postgres
 
+  # Runs when dependency manifests or the check itself change.
+  dependency-licenses:
+    name: Dependency Licenses
+    needs: detect-changes
+    if: needs.detect-changes.outputs.dependencies == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Test the license policy
+        run: pnpm test:licenses
+
+      - name: Check dependency licenses
+        run: pnpm licenses:check
+
   # The sandbox that runs without Docker, started for real, when its paths change. The package tests skip these.
   local-sandbox-contract:
     name: Sandbox without Docker
@@ -884,6 +934,7 @@ jobs:
       - installer-shell
       - chart-checks
       - store-tests
+      - dependency-licenses
       - local-sandbox-contract
       - root-script-tests
       - new-assertions
@@ -907,6 +958,7 @@ jobs:
           INSTALLER_SHELL: ${{ needs.installer-shell.result }}
           CHART_CHECKS: ${{ needs.chart-checks.result }}
           STORE_TESTS: ${{ needs.store-tests.result }}
+          DEPENDENCY_LICENSES: ${{ needs.dependency-licenses.result }}
           LOCAL_SANDBOX_CONTRACT: ${{ needs.local-sandbox-contract.result }}
           ROOT_SCRIPT_TESTS: ${{ needs.root-script-tests.result }}
           NEW_ASSERTIONS: ${{ needs.new-assertions.result }}
@@ -917,7 +969,7 @@ jobs:
           GENERATED_CONTRACT_DRIFT: ${{ needs.generated-contract-drift.result }}
         run: |
           ok() { [ "$1" = success ] || [ "$1" = skipped ]; }
-          echo "detect-changes=$DETECT_CHANGES migration-order=$MIGRATION_ORDER typecheck-and-build=$TYPECHECK_AND_BUILD npx-smoke=$NPX_SMOKE package-checks=$PACKAGE_CHECKS screenshots=$SCREENSHOTS installer-shell=$INSTALLER_SHELL chart-checks=$CHART_CHECKS store-tests=$STORE_TESTS local-sandbox-contract=$LOCAL_SANDBOX_CONTRACT root-script-tests=$ROOT_SCRIPT_TESTS new-assertions=$NEW_ASSERTIONS repo-rules=$REPO_RULES private-data-scan=$PRIVATE_DATA_SCAN help-guide=$HELP_GUIDE feature-coverage=$FEATURE_COVERAGE generated-contract-drift=$GENERATED_CONTRACT_DRIFT"
+          echo "detect-changes=$DETECT_CHANGES migration-order=$MIGRATION_ORDER typecheck-and-build=$TYPECHECK_AND_BUILD npx-smoke=$NPX_SMOKE package-checks=$PACKAGE_CHECKS screenshots=$SCREENSHOTS installer-shell=$INSTALLER_SHELL chart-checks=$CHART_CHECKS store-tests=$STORE_TESTS local-sandbox-contract=$LOCAL_SANDBOX_CONTRACT root-script-tests=$ROOT_SCRIPT_TESTS new-assertions=$NEW_ASSERTIONS repo-rules=$REPO_RULES dependency-licenses=$DEPENDENCY_LICENSES private-data-scan=$PRIVATE_DATA_SCAN help-guide=$HELP_GUIDE feature-coverage=$FEATURE_COVERAGE generated-contract-drift=$GENERATED_CONTRACT_DRIFT"
           [ "$DETECT_CHANGES" = success ] || exit 1
           [ "$MIGRATION_ORDER" = success ] || exit 1
           [ "$TYPECHECK_AND_BUILD" = success ] || exit 1
@@ -928,6 +980,7 @@ jobs:
           ok "$INSTALLER_SHELL" || exit 1
           ok "$CHART_CHECKS" || exit 1
           ok "$STORE_TESTS" || exit 1
+          ok "$DEPENDENCY_LICENSES" || exit 1
           ok "$LOCAL_SANDBOX_CONTRACT" || exit 1
           [ "$ROOT_SCRIPT_TESTS" = success ] || exit 1
           ok "$NEW_ASSERTIONS" || exit 1

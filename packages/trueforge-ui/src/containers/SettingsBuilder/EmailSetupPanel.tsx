@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState } from 'react';
 
 import { auiInputClass } from '@/atoms/lib/inputClasses.js';
+import { WatchMailNote } from '@/deliveries/WatchMailNote.js';
 import type { EmailAccountStatus, EmailProviderInfo, EmailSetupPort } from '@/server/emailSetup.js';
 import AccountSetupPanel, { type PanelAccount } from './AccountSetupPanel.js';
 
@@ -177,6 +178,7 @@ export default function EmailSetupPanel({ open, onOpenChange, port, onChanged }:
       removeOne={removeOne}
       saveNote={saveNote}
       canSubmit={address.trim() !== '' && password !== ''}
+      note={<WatchMailNote onOpenReachMe={() => onOpenChange(false)} />}
       fields={status => {
         const providers = [...status.providers, OTHER_PROVIDER];
         const provider = providers.find(item => item.key === providerKey) ?? OTHER_PROVIDER;
