@@ -793,6 +793,33 @@ describe('a connector read the person always allows', () => {
     },
     TURN_TIMEOUT_MS,
   );
+
+  it(
+    'asks again once the connector points at another address',
+    async () => {
+      expect((await readPage({ page_id: PAGE_ID })).cards).toEqual([]);
+
+      const saved = await server.request('/api/v1/settings/mcp-servers', {
+        ...jsonInit({
+          manifest: {
+            type: 'remote',
+            name: INERT_SERVER_NAME,
+            url: `${server.mcp.url}?workspace=second`,
+            description: 'Inert connector used by approval-flow tests.',
+          },
+        }),
+        method: 'PUT',
+      });
+      expect(saved.status).toBe(200);
+
+      const before = server.mcp.getPageInvocations();
+      const [card, ...others] = (await readPage({ page_id: PAGE_ID })).cards;
+      expect(others).toEqual([]);
+      expect(card?.can_always_allow).toBe(true);
+      expect(server.mcp.getPageInvocations()).toBe(before);
+    },
+    TURN_TIMEOUT_MS,
+  );
 });
 
 describe('reminders and schedules in a chat', () => {
