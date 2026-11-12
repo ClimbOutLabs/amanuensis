@@ -28,6 +28,7 @@ const SEARCH_CARD: SentinelApprovalCard = {
   calendar_event: null,
   schedule: null,
   persona: null,
+  skill: null,
 };
 
 function renderSearch(onApproveForChat = vi.fn()) {
