@@ -461,6 +461,11 @@
       "reason": "Memory search model files, downloaded once on first use and checked against pinned hashes."
     },
     {
+      "host": "raw.githubusercontent.com",
+      "category": "model_download",
+      "reason": "Voice mode's speech detection model (Silero VAD v5.1.2), fetched when the Aman image is built and when a source checkout is set up. Only the one pinned file path is used. It is checked against a pinned size and SHA-256, and the server never downloads it."
+    },
+    {
       "host": "desktop.docker.com",
       "category": "package_registry",
       "reason": "Docker Desktop download, which Aman Setup installs on Windows."

@@ -630,6 +630,8 @@ export * from "./VerifyCommandsData.js";
 export * from "./VoiceCapability.js";
 export * from "./VoiceStatus.js";
 export * from "./VoiceStatusResponse.js";
+export * from "./VoiceTicket.js";
+export * from "./VoiceTicketResponse.js";
 export * from "./VoiceTranscription.js";
 export * from "./VoiceTranscriptionResponse.js";
 export * from "./ZaiModelProvider.js";

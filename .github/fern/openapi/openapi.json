@@ -434,6 +434,13 @@
       },
       "ApprovalToolCallRef": {
         "properties": {
+          "always_allow_covers": {
+            "description": "Set when the lasting answer lets maps run without asking, instead of allowing one tool.",
+            "enum": [
+              "maps"
+            ],
+            "type": "string"
+          },
           "can_always_allow": {
             "description": "Whether the owner may allow this tool for good.",
             "type": "boolean"
@@ -1406,8 +1413,13 @@
         "type": "object"
       },
       "CancelSessionRequest": {
-        "description": "Empty request body. Cancel identifies the session via the path only.",
-        "properties": {},
+        "description": "Optional request body. The session comes from the path.",
+        "properties": {
+          "turn_id": {
+            "description": "Cancel only this turn, and nothing else running in the session. Omit to cancel the last turn.",
+            "type": "string"
+          }
+        },
         "type": "object"
       },
       "CancelSessionResponse": {
@@ -2072,6 +2084,31 @@
         "required": [
           "command_id",
           "timeout_ms"
+        ],
+        "type": "object"
+      },
+      "ConnectVoiceRequest": {
+        "properties": {
+          "client_timezone": {
+            "description": "IANA time zone of the person talking.",
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string"
+          },
+          "session_id": {
+            "description": "The chat to talk in.",
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "voice": {
+            "description": "Voice id for spoken replies. Defaults to the server voice.",
+            "pattern": "^[a-z]{2}_[a-z]+$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id"
         ],
         "type": "object"
       },
@@ -12511,6 +12548,10 @@
             ],
             "type": "string"
           },
+          "already_created": {
+            "description": "True when the same event was already created in this chat a few minutes ago.",
+            "type": "boolean"
+          },
           "attendees": {
             "description": "Every guest on the event.",
             "items": {
@@ -12544,6 +12585,11 @@
           "one_of_repeating": {
             "description": "True when this changes one date of a repeating event.",
             "type": "boolean"
+          },
+          "span_days": {
+            "description": "How many days the event runs over; 1 for an ordinary event.",
+            "minimum": 1,
+            "type": "integer"
           },
           "time_zone": {
             "description": "IANA time zone the times are in.",
@@ -12759,6 +12805,17 @@
               "$ref": "#/components/schemas/Tier3Mailbox"
             },
             "type": "array"
+          },
+          "from_name": {
+            "description": "The display name the message is sent as, or null when none is set.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name_left_off": {
+            "description": "True when a name was left off an address because it looked like an address.",
+            "type": "boolean"
           },
           "replaces": {
             "description": "The saved draft a change replaces, or null.",
@@ -15789,6 +15846,44 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/VoiceStatus"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "VoiceTicket": {
+        "properties": {
+          "expires_in_seconds": {
+            "description": "Seconds the ticket stays valid.",
+            "type": "integer"
+          },
+          "path": {
+            "description": "WebSocket path to open on this server.",
+            "type": "string"
+          },
+          "protocol": {
+            "description": "Sub-protocol name to ask for on the WebSocket.",
+            "type": "string"
+          },
+          "ticket": {
+            "description": "Single-use ticket to open the voice line. Send it as the `ticket.<id>` sub-protocol.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticket",
+          "expires_in_seconds",
+          "protocol",
+          "path"
+        ],
+        "type": "object"
+      },
+      "VoiceTicketResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/VoiceTicket"
           }
         },
         "required": [
@@ -21840,7 +21935,7 @@
     },
     "/api/v1/sessions/{session_id}/cancel": {
       "post": {
-        "description": "Cancel the running last turn for a session. Only the session creator may cancel.",
+        "description": "Cancel the running last turn for a session, or only the turn named by `turn_id`. Only the session creator may cancel.",
         "parameters": [
           {
             "description": "Session identifier.",
@@ -28900,6 +28995,91 @@
           "personalization"
         ],
         "x-fern-sdk-method-name": "update_sentinel_settings"
+      }
+    },
+    "/api/v1/voice/connect": {
+      "post": {
+        "description": "Checks that the chat belongs to the caller and voice mode is ready, then returns a single-use ticket for the voice WebSocket. The WebSocket itself is not described here.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectVoiceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceTicketResponse"
+                }
+              }
+            },
+            "description": "A ticket and the path of the voice WebSocket."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The request is missing the chat."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The chat was not found."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Too many requests; wait for the Retry-After seconds."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Voice mode is off, or speech to text, the voice or the listening model is not ready."
+          }
+        },
+        "summary": "Open a live voice conversation",
+        "tags": [
+          "Agent Sessions"
+        ],
+        "x-fern-sdk-group-name": [
+          "voice"
+        ],
+        "x-fern-sdk-method-name": "connect"
       }
     },
     "/api/v1/voice/speak": {

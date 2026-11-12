@@ -181,6 +181,8 @@ function autoDenyMessage(decision: TierDecision): string {
       return `Auto-denied: ${decision.reason_detail ?? 'the send cannot be shown in full.'}`;
     case 'unattended_run':
       return `Auto-denied: ${decision.reason_detail ?? 'a scheduled run cannot do this'}`;
+    case 'incognito_chat':
+      return `Not done: ${decision.reason_detail ?? 'an incognito chat cannot make or change anything lasting.'}`;
     case 'outbound_guard':
       return `Auto-denied: ${decision.reason_detail ?? 'the outbound guard held this call back'} Continue without it.`;
     case 'lookup_limit':

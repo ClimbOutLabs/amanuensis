@@ -325,7 +325,7 @@ export interface ChatSearchDocumentTable {
 }
 
 /** Global key/value settings shared across tenants (e.g. persisted feature overrides). PRIMARY KEY (key). */
-/** "Always allow this tool" grant. PRIMARY KEY (tenant_id, created_by, mcp_server_name, tool_name). */
+/** "Always allow everywhere" grant. PRIMARY KEY (tenant_id, created_by, mcp_server_name, tool_name). */
 export interface McpToolGrantTable {
   tenant_id: string;
   created_by: string;

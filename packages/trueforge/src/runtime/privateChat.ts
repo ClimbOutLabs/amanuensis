@@ -51,7 +51,7 @@ export function toolsForChat({
 
 const PRIVATE_CHAT_INSTRUCTION_SECTION = 'incognito_chat';
 const PRIVATE_CHAT_INSTRUCTION =
-  'This is an incognito chat. Nothing from it may outlive it, so here you cannot make or change spaces, reminders, schedules or personas, and the web browser is off. You can still read spaces, schedules and reminders, and switch persona. When the user asks for something you cannot do here, say so plainly and tell them to ask again in a normal chat.';
+  'This is an incognito chat. Nothing from it may outlive it, so here you cannot make or change spaces, reminders, schedules, personas or notes, connectors other than Email and Calendar can only read, and the web browser is off. You can still read spaces, schedules, reminders and notes, and switch persona. When the user asks for something you cannot do here, say so plainly and tell them to ask again in a normal chat.';
 
 function buildPrivateChatInstruction(builder: InstructionBuilder): void {
   builder.addSection(PRIVATE_CHAT_INSTRUCTION_SECTION, PRIVATE_CHAT_INSTRUCTION);

@@ -102,15 +102,32 @@ function boot(env: Record<string, string>, dataDir: string): Booted {
   return { child, output: () => collected, exited };
 }
 
-async function waitFor(check: () => Promise<boolean>): Promise<void> {
+/**
+ * Waits until the server this test started is the one answering. The port was free a moment ago, but another
+ * test may take it first; that server's health page must not count, so the child has to say it is listening.
+ */
+async function waitUntilServing({ booted, base }: { booted: Booted; base: string }): Promise<void> {
+  let exitCode: number | null | undefined;
+  void booted.exited.then(code => {
+    exitCode = code;
+  });
   const deadline = Date.now() + BOOT_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    if (await check().catch(() => false)) {
-      return;
+    if (exitCode !== undefined) {
+      throw new Error(`The server stopped before it was ready (exit ${String(exitCode)}):\n${booted.output()}`);
+    }
+    if (booted.output().includes('Agent server listening on')) {
+      const healthy = await fetch(`${base}/healthz`).then(
+        response => response.status === 200,
+        () => false,
+      );
+      if (healthy) {
+        return;
+      }
     }
     await delay(250);
   }
-  throw new Error('Timed out waiting for condition');
+  throw new Error(`Timed out waiting for the server to be ready:\n${booted.output()}`);
 }
 
 describe('local sign-in startup', () => {
@@ -153,7 +170,7 @@ describe('local sign-in startup', () => {
     const booted = boot({ PORT: String(port), TRUEFORGE_AUTH_MODE: 'local' }, dataDir);
     running.push(booted);
 
-    await waitFor(async () => (await fetch(`${base}/healthz`)).status === 200);
+    await waitUntilServing({ booted, base });
 
     expect(booted.output()).toContain('Local sign-in is on');
     expect((await fetch(`${base}/api/v1/auth/me`)).status).toBe(401);
@@ -169,7 +186,7 @@ describe('local sign-in startup', () => {
     const booted = boot({ PORT: String(port), TRUEFORGE_AUTH_MODE: 'local' }, dataDir);
     running.push(booted);
 
-    await waitFor(async () => (await fetch(`${base}/healthz`)).status === 200);
+    await waitUntilServing({ booted, base });
 
     const fields = {
       email: 'owner@example.com',

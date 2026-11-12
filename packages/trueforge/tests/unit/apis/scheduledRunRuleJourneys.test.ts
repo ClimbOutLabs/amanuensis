@@ -140,6 +140,33 @@ const HeldCardsSchema = z.object({
   ),
 });
 
+/** Types one message in a chat, as the person would, and returns what the cards of that turn ask. */
+async function typeInChat({
+  server,
+  chatId,
+  text,
+}: {
+  server: ApprovalTestServer;
+  chatId: string;
+  text: string;
+}): Promise<(string | undefined)[]> {
+  const input: TurnInputItem[] = [{ type: 'user.message', content: text }];
+  const response = await server.request(`/api/v1/sessions/${chatId}/turns`, jsonInit({ input, stream: true }));
+  const turnId = /"turn_id":"([^"]+)"/.exec(await response.text())?.[1];
+  if (response.status !== 200 || turnId === undefined) {
+    throw new Error(`the typed turn did not start (${String(response.status)})`);
+  }
+  const turn = GetTurnResponseSchema.parse(
+    await (await server.request(`/api/v1/sessions/${chatId}/turns/${turnId}`)).json(),
+  ).data;
+  if (turn.state.status !== 'done') {
+    throw new Error(`the typed turn is not done: ${JSON.stringify(turn.state)}`);
+  }
+  return turn.state.required_actions.flatMap(action =>
+    action.type === 'tool.approval_required' ? action.tool_calls.map(call => call.tier3_card?.plain_what) : [],
+  );
+}
+
 /** The cards a scheduled run saved for its owner, as the chat's "Needs your OK" list reads them. */
 async function heldCards({ server, chatId }: { server: ApprovalTestServer; chatId: string }) {
   const events = HeldCardsSchema.parse(await (await server.request(`/api/v1/sessions/${chatId}/events`)).json());
@@ -160,6 +187,19 @@ const ListSpacesSchema = z.object({
 
 async function listSpaces(server: ApprovalTestServer) {
   return ListSpacesSchema.parse(await (await server.request('/api/v1/spaces')).json()).data;
+}
+
+const ActivityLogSchema = z.object({
+  data: z.array(z.object({ tool_name: z.string(), description: z.string(), outcome: z.string() }).loose()),
+});
+
+/** What the activity log in Settings says about one space, oldest line first. */
+async function spaceActivity({ server, name }: { server: ApprovalTestServer; name: string }): Promise<string[]> {
+  const log = ActivityLogSchema.parse(await (await server.request('/api/v1/user/audit-log')).json());
+  return log.data
+    .filter(row => row.description.includes(`the space ${name}.`))
+    .map(row => row.description)
+    .reverse();
 }
 
 describe('scheduled runs', () => {
@@ -280,7 +320,7 @@ describe('scheduled runs', () => {
   );
 
   it(
-    'makes and changes a space without asking, and keeps the earlier version so it can be brought back',
+    'makes and changes a space without asking, shows one line per change in the activity log, and keeps the earlier version so it can be brought back',
     async () => {
       const NAME = 'Apartment listings';
       const FIRST = '- Flat on Quay Street, two rooms';
@@ -303,6 +343,7 @@ describe('scheduled runs', () => {
       expect(await heldCards({ server, chatId: made.chatId })).toEqual([]);
       const created = (await listSpaces(server)).spaces.find(space => space.name === NAME);
       expect(created).toMatchObject({ revision: 1, body: FIRST });
+      expect(await spaceActivity({ server, name: NAME })).toEqual([`Created the space ${NAME}.`]);
       if (created === undefined) {
         throw new Error('the scheduled run saved no space');
       }
@@ -326,6 +367,10 @@ describe('scheduled runs', () => {
       expect(current?.revision).toBe(2);
       expect(current?.body).toContain(FIRST);
       expect(current?.body).toContain(SECOND);
+      expect(await spaceActivity({ server, name: NAME })).toEqual([
+        `Created the space ${NAME}.`,
+        `Updated the space ${NAME}.`,
+      ]);
 
       const earlier = await server.request(`/api/v1/spaces/${created.id}?revision=1`);
       expect(SpaceResponseSchema.parse(await earlier.json()).data.body).toBe(FIRST);
@@ -342,7 +387,31 @@ describe('scheduled runs', () => {
     },
     TURN_TIMEOUT_MS,
   );
+
+  it(
+    'a space made in a chat the person is in leaves no line in the activity log',
+    async () => {
+      const NAME = 'Packing list';
+      const chat = await server.request('/api/v1/sessions', jsonInit({ agent: { spec: AGENT_SPEC } }));
+      expect(chat.status).toBe(201);
+      const chatId = z.object({ data: z.object({ id: z.string() }) }).parse(await chat.json()).data.id;
+
+      server.model.next({
+        toolArguments: { name: NAME, purpose: 'What to bring on the trip.', status: 'active', body: '- Tent' },
+      });
+      expect(await typeInChat({ server, chatId, text: `${RUN_DIRECTIVE_PREFIX}create_space please` })).toEqual([]);
+      expect((await listSpaces(server)).spaces.map(space => space.name)).toContain(NAME);
+      expect(await spaceActivity({ server, name: NAME })).toEqual([]);
+    },
+    TURN_TIMEOUT_MS,
+  );
 });
+
+const SANDBOX_AGENT_SPEC = AgentSpecSchema.parse({
+  ...AGENT_SPEC,
+  config: { ...AGENT_SPEC.config, sandbox: { enabled: true } },
+});
+const RUN_CODE_CARD = 'Run code the assistant wrote in the sandbox?';
 
 describe('a scheduled run that wants to run code', () => {
   let server: ApprovalTestServer;
@@ -386,10 +455,7 @@ describe('a scheduled run that wants to run code', () => {
         created_by_subject: OWNER_SUBJECT,
         name: 'weekly-sums',
         description: 'Scheduled agent with a sandbox, used by the scheduled-run rule tests.',
-        manifest: AgentSpecSchema.parse({
-          ...AGENT_SPEC,
-          config: { ...AGENT_SPEC.config, sandbox: { enabled: true } },
-        }),
+        manifest: SANDBOX_AGENT_SPEC,
         external_id: 'weekly-sums-external-id',
       });
 
@@ -403,7 +469,37 @@ describe('a scheduled run that wants to run code', () => {
 
       expect(turn.state.status === 'done' && turn.state.required_actions).toEqual([]);
       const held = await heldCards({ server, chatId });
-      expect(held.map(card => card.tier3_card?.plain_what)).toEqual(['Run code the assistant wrote in the sandbox?']);
+      expect(held.map(card => card.tier3_card?.plain_what)).toEqual([RUN_CODE_CARD]);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    "asks before code when the person types in the run's chat, and an ordinary chat still runs it without a card",
+    async () => {
+      const agent = await new SqliteAgentStore(server.db()).createAgent({
+        host_managed: false,
+        tenant_id: 'default',
+        created_by_subject: OWNER_SUBJECT,
+        name: 'weekly-notes',
+        description: 'Scheduled agent with a sandbox, used by the scheduled-run rule tests.',
+        manifest: SANDBOX_AGENT_SPEC,
+        external_id: 'weekly-notes-external-id',
+      });
+      const { chatId } = await runScheduled({ server, agent, name: 'write-the-week-up', task: 'Write the week up.' });
+
+      server.model.next({ toolArguments: { code: 'print(1)', language: 'python' } });
+      expect(await typeInChat({ server, chatId, text: `${RUN_DIRECTIVE_PREFIX}run_code please` })).toEqual([
+        RUN_CODE_CARD,
+      ]);
+
+      const created = await server.request('/api/v1/sessions', jsonInit({ agent: { spec: SANDBOX_AGENT_SPEC } }));
+      expect(created.status).toBe(201);
+      const ordinary = z.object({ data: z.object({ id: z.string() }) }).parse(await created.json()).data.id;
+      server.model.next({ toolArguments: { code: 'print(1)', language: 'python' } });
+      expect(await typeInChat({ server, chatId: ordinary, text: `${RUN_DIRECTIVE_PREFIX}run_code please` })).toEqual(
+        [],
+      );
     },
     TURN_TIMEOUT_MS,
   );

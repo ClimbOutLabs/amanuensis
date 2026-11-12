@@ -300,7 +300,12 @@ export type { RunCodeStatus, RunCodeStatusApi } from './components/RunCodeStatus
 export { SpokenReplyProvider, useSpokenReply } from './components/SpokenReplyContext.js';
 export type { TourCapabilities } from './components/tourPrompts.js';
 export { VoiceInputProvider, useOptionalVoiceInput } from './components/VoiceInputContext.js';
-export type { VoiceAvailability, VoiceInputApi, VoiceTranscription } from './components/VoiceInputContext.js';
+export type {
+  VoiceAvailability,
+  VoiceConnection,
+  VoiceInputApi,
+  VoiceTranscription,
+} from './components/VoiceInputContext.js';
 export { AgentStepsContainer } from './containers/AgentStepsContainer.js';
 export type { AgentStepsContainerProps } from './containers/AgentStepsContainer.js';
 export { ApprovalNavContainer } from './containers/ApprovalNavContainer.js';

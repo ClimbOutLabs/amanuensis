@@ -18,8 +18,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import envPaths from 'env-paths';
-
 import {
   DEFAULT_MCP_HTTP_BODY_TIMEOUT_MS,
   DEFAULT_MCP_HTTP_CONNECT_TIMEOUT_MS,
@@ -41,6 +39,7 @@ import {
   MEMORY_SETTINGS_LIMITS,
 } from '@truefoundry/trueforge-core/core/memory/memorySettingsLimits';
 
+import { appDataDirFromEnv, voiceModelDirFromEnv } from './appDataDir';
 import { ARCHIVE_DEFAULT_MAX_BYTES } from './dataExport/archiveLimits';
 import { ZIP_MAX_ARCHIVE_BYTES } from './dataExport/zipStreamWriter';
 import { normalizedOrigin } from './mcp/firstParty';
@@ -69,8 +68,6 @@ const DEFAULT_MAX_REQUEST_BODY_BYTES = 36 * 1024 * 1024;
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 /** Turn ids minted by a standalone process; no peer can ever own them. */
 const LOCAL_EXECUTOR_ID = 'local';
-/** OS-standard data dir for SQLite in standalone mode. */
-const ENV_PATHS_APP_NAME = 'trueforge';
 const DEFAULT_POSTGRES_USER = 'trueforge';
 const DEFAULT_POSTGRES_PASSWORD = process.env['POSTGRES_PASSWORD'] ?? 'changeme';
 const DEFAULT_POSTGRES_DB = 'trueforge';
@@ -2004,6 +2001,19 @@ export interface SharedServerConfiguration {
    */
   TTS_URL: string;
   /**
+   * Whether spoken replies and voice mode may use the `aman-tts` sidecar. Off, voice mode does not start
+   * and replies are read by the browser's own voice.
+   * Env: `TTS_ENABLED`. Default true.
+   */
+  TTS_ENABLED: boolean;
+  /**
+   * Folder that holds the small listening model voice mode uses to find where speech starts and
+   * ends. The image carries it, and it is checked against a pinned hash before use. Host
+   * development fetches it with `pnpm voice:model`.
+   * Env: `VOICE_VAD_MODEL_DIR`. Default `<APP_DATA_DIR>/voice-model`.
+   */
+  VOICE_VAD_MODEL_DIR: string;
+  /**
    * Base URL of the Nominatim-compatible geocoder used by the embedded maps tools.
    * Env: `MAPS_GEOCODER_URL`. Default `https://nominatim.openstreetmap.org`.
    */
@@ -2494,17 +2504,7 @@ const standalone = parseBoolean({
  * Env: `APP_DATA_DIR` (optional absolute path). Default: the env-paths data dir, which sits under the
  * home directory. Images that run as a user with no home set this to a path on the data volume.
  */
-export function resolveAppDataDir({ override, suffix }: { override: string | undefined; suffix: string }): string {
-  if (override !== undefined && override.trim() !== '') {
-    return path.resolve(override);
-  }
-  return envPaths(ENV_PATHS_APP_NAME, { suffix }).data;
-}
-
-const appDataDir = resolveAppDataDir({
-  override: getEnv('APP_DATA_DIR'),
-  suffix: getEnv('APP_DATA_DIR_SUFFIX', { defaultValue: '' }) ?? '',
-});
+const appDataDir = appDataDirFromEnv(process.env);
 
 const port = parsePort(getEnv('PORT'));
 const host = getEnv('HOST', { defaultValue: DEFAULT_HOST }) ?? DEFAULT_HOST;
@@ -2932,6 +2932,8 @@ const shared: SharedServerConfiguration = {
   MEMORY_SCREEN_URL: getEnv('MEMORY_SCREEN_URL', { defaultValue: '' }) ?? '',
   STT_URL: getEnv('STT_URL', { defaultValue: 'http://aman-stt:8001' }) ?? 'http://aman-stt:8001',
   TTS_URL: getEnv('TTS_URL', { defaultValue: 'http://aman-tts:8002' }) ?? 'http://aman-tts:8002',
+  TTS_ENABLED: parseBoolean({ envKey: 'TTS_ENABLED', raw: getEnv('TTS_ENABLED'), defaultValue: true }),
+  VOICE_VAD_MODEL_DIR: voiceModelDirFromEnv(process.env),
   MAPS_GEOCODER_URL: parseMapsUrl({
     envKey: 'MAPS_GEOCODER_URL',
     raw: getEnv('MAPS_GEOCODER_URL'),

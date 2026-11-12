@@ -16,6 +16,7 @@ import {
 import {
   countsAsSilentLookup,
   createWebSearchTurnState,
+  hostToolStamp,
   recordToolResultProvenance,
   SILENT_SEARCH_LIMIT,
 } from '../../../src/core/permissions/webSearch';
@@ -238,6 +239,7 @@ describe("browser pages are the person's own", () => {
     recordToolResultProvenance({
       state: ctx.web_search,
       tool_name,
+      stamp: hostToolStamp({ type: 'mcp', search_provider_call: true }),
       argument_values: [],
       texts: ['# Account\nhttps://hulu.com/account\nSigned in as jane.doe@example.com'],
     });
