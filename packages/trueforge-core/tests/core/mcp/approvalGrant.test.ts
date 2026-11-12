@@ -29,7 +29,7 @@ import {
 import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
 import type { SentinelServices } from '../../../src/core/permissions/context';
 import { MAPS_ASK_REASON, MAPS_HOLD_REASON } from '../../../src/core/permissions/mapsToolNames';
-import { recordUntrustedText } from '../../../src/core/permissions/provenance';
+import { recordPersonText, recordReplyText, recordUntrustedText } from '../../../src/core/permissions/provenance';
 import { tier1Decision, type TierDecision } from '../../../src/core/permissions/tier';
 import {
   createWebSearchTurnState,
@@ -1045,6 +1045,40 @@ describe('browser open site grants', () => {
     expect(carrying.decision).toMatchObject({ tier: 3, reason: 'browser_open_private_detail' });
     expect(allowsChatApproval(carrying.info)).toBe(false);
     expect(chatGrantScope(carrying.info)).toBeNull();
+  });
+
+  /** A chat where only Aman's reply named tides.example: a link there that adds details always asks. */
+  function ctxAfterAReply(): ClassifyContext {
+    const ctx = makeCtx();
+    recordPersonText({ provenance: ctx.web_search.provenance, text: 'Where can I read about tide tables?' });
+    recordReplyText({ provenance: ctx.web_search.provenance, text: 'Try https://tides.example/tables.' });
+    return ctx;
+  }
+
+  it('still asks for a reply link that adds details after "Always allow this site" on that site', async () => {
+    const first = await classifiedOpen({ url: 'https://tides.example/first-story', ctx: ctxAfterReading() });
+    expect(chatGrantScope(first.info)).toBe('site');
+    const grants = new Set([approvalGrantKey(first.info)]);
+
+    const replyLink = await classifiedOpen({
+      url: 'https://tides.example/tables?port=harbour&notes=mine',
+      ctx: ctxAfterAReply(),
+    });
+    expect(replyLink.decision).toMatchObject({ tier: 3, reason: 'browser_open_reply_link_data' });
+    expect(admission(replyLink.info, grants)?.decision).toBeUndefined();
+  });
+
+  it('offers no "Always allow this site" on a reply link that adds details', async () => {
+    const replyLink = await classifiedOpen({
+      url: 'https://tides.example/tables?port=harbour&notes=mine',
+      ctx: ctxAfterAReply(),
+    });
+    expect(replyLink.decision).toMatchObject({ tier: 3 });
+    expect(chatGrantScope(replyLink.info)).toBeNull();
+    expect(allowsChatApproval(replyLink.info)).toBe(false);
+    expect(allowsToolGrant(replyLink.info)).toBe(false);
+    // Even a stored key for this very call admits nothing: the card takes no lasting answer.
+    expect(admission(replyLink.info, new Set([approvalGrantKey(replyLink.info)]))?.decision).toBeUndefined();
   });
 
   it('admits nothing outside the reason and tool the grant was given on', async () => {

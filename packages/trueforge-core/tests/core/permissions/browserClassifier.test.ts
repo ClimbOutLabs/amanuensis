@@ -156,7 +156,7 @@ describe("browser open on a site only the assistant's own reply named", () => {
 
   it('asks before opening a link there that adds a part after a question mark, and shows the whole address', async () => {
     const decision = await classifyTier(open('https://tides.example/tables?port=harbour&notes=mine'), ctxAfterAReply());
-    expect(decision).toMatchObject({ tier: 3, reason: 'browser_open_unvouched' });
+    expect(decision).toMatchObject({ tier: 3, reason: 'browser_open_reply_link_data' });
     expect(decision.card?.destination).toBe('https://tides.example/tables?port=harbour&notes=mine');
     expect(decision.card?.plain_what).toContain(
       'You did not name this site. Aman brought it up in an earlier reply, and this link adds details to it, so Aman is checking with you first.',

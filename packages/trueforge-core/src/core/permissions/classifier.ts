@@ -84,6 +84,7 @@ import {
   BROWSER_CLICK_TOOL_NAME,
   BROWSER_OPEN_GUARD_REASON,
   BROWSER_OPEN_PRIVATE_DETAIL_REASON,
+  BROWSER_OPEN_REPLY_LINK_DATA_REASON,
   BROWSER_OPEN_SILENT_REASON,
   BROWSER_OPEN_TOOL_NAME,
   BROWSER_OPEN_UNVOUCHED_REASON,
@@ -2121,7 +2122,7 @@ async function classifyBrowserOpen(input: { action: SentinelAction; ctx: Classif
   if (replyLinksWithAddedData({ provenance, values: [url] }).length > 0) {
     return ctx.services.unattended
       ? replyLinkSkipped(ctx)
-      : ask({ reason: BROWSER_OPEN_UNVOUCHED_REASON, say: say.reply_link, shownUrl: null });
+      : ask({ reason: BROWSER_OPEN_REPLY_LINK_DATA_REASON, say: say.reply_link, shownUrl: null });
   }
   if (hasReadContent(provenance)) {
     if (carriedPrivateDetails({ provenance, values: [url] }).length > 0) {

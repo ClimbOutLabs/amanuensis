@@ -31,7 +31,7 @@ If a page Aman read named the address, the card says which page Aman read the ad
 
 If you did not give the address, the card can offer **Always allow this site**. That covers every page on that site for the rest of this chat. A site means the exact name in the address. A page on a longer name, such as shop.example.com when you allowed example.com, asks again. A new chat asks again too.
 
-Each page on an allowed site is still checked on its own. If a later page would carry one of your private details, or a page Aman read named its address, that page asks.
+Each page on an allowed site is still checked on its own. If a later page would carry one of your private details, its link adds details to a site only Aman brought up in a reply, or a page Aman read named its address, that page asks. Those cards have no **Always allow this site**.
 
 If you click **Not now** on one of these cards, that no lasts for the rest of the chat. Aman does not ask again about the same kind of open on that site. It refuses the open instead. A no on a card for a click on a page lasts the same way. A new chat asks again.
 
