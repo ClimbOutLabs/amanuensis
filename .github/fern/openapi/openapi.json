@@ -7040,6 +7040,10 @@
             "pattern": "^[0-9a-f]{40}$",
             "type": "string"
           },
+          "is_undo": {
+            "description": "Whether this entry undid an earlier change.",
+            "type": "boolean"
+          },
           "message": {
             "description": "What changed, in plain words.",
             "type": "string"
@@ -7063,7 +7067,8 @@
           "changed_at",
           "message",
           "pages",
-          "undo_blocked_by"
+          "undo_blocked_by",
+          "is_undo"
         ],
         "type": "object"
       },

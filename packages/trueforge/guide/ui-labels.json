@@ -129,6 +129,7 @@
   "These lines disagree": "packages/trueforge-ui/src/atoms/memory/MemoryPageView.tsx",
   "Not a problem": "packages/trueforge-ui/src/atoms/memory/MemoryPageView.tsx",
   "Undo": "packages/trueforge-ui/src/atoms/memory/MemoryPagesPanel.tsx",
+  "Put back": "packages/trueforge-ui/src/atoms/memory/MemoryPagesPanel.tsx",
   "Sort what Aman saves onto pages": "packages/trueforge-ui/src/containers/SettingsBuilder/MemoryHelpersCard.tsx",
   "Only note what it would do": "packages/trueforge-ui/src/containers/SettingsBuilder/MemoryHelpersCard.tsx",
   "Tidy pages once a day": "packages/trueforge-ui/src/containers/SettingsBuilder/MemoryHelpersCard.tsx",

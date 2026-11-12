@@ -572,7 +572,7 @@ commit that can be undone.
 
 **Every change is one commit.** Under the vault lock the host does these steps. It makes the history ready.
 It takes in the person's hand edits (below). It makes the change. It commits the change with a message such
-as `You: remembered Likes tulips. (Wendy)`, `You: changed ... to ... (Wendy)` or `You: forgot ... (Wendy)`.
+as `Aman saved: Likes tulips. (Wendy)`, `Aman changed: ... to ... (Wendy)` or `Aman removed: ... (Wendy)`.
 Each call also adds an entry to the activity log. The daily log is never written by these tools.
 If the history fails before the change, nothing is written and the model is told to try again. If it fails
 after, the page is already saved and the failure is logged. If git is not installed, pages are still

@@ -19,7 +19,6 @@ function line(over: Partial<MemoryPageLine> & { text: string }): MemoryPageLine 
     id: null,
     source: 'you_said',
     sourceLabel: 'From you',
-    own: true,
     since: null,
     until: null,
     seen: null,
@@ -38,7 +37,7 @@ const WENDY: MemoryPageDetail = {
   version: 'v1',
   disagreements: [],
   sections: [
-    { name: 'Now', lines: [line({ id: 'f_01', text: 'Plays tennis on Fridays.' })] },
+    { name: 'Now', lines: [line({ id: 'f_01', text: 'Plays tennis on Fridays.', since: '2026-11-11' })] },
     {
       name: 'Unconfirmed',
       lines: [
@@ -47,7 +46,6 @@ const WENDY: MemoryPageDetail = {
           text: 'Might travel in November.',
           source: 'read_content',
           sourceLabel: 'External source: read content',
-          own: false,
         }),
       ],
     },
@@ -217,7 +215,7 @@ describe('MemoryPagesPanel', () => {
     expect(screen.getByText(/No page has that name/)).toBeInTheDocument();
   });
 
-  it('marks lines Aman read, keeps own lines plain, and collapses Earlier', async () => {
+  it('says where every line came from, shows days as people write them, and collapses Earlier', async () => {
     renderPanel(createCatalog({}).catalog);
     await openWendy();
     const unconfirmed = screen.getByRole('region', { name: 'Unconfirmed' });
@@ -225,7 +223,9 @@ describe('MemoryPagesPanel', () => {
     expect(within(unconfirmed).getByText('External source: read content')).toBeInTheDocument();
     const now = screen.getByRole('region', { name: 'Now' });
     expect(within(now).queryByText('Not confirmed')).not.toBeInTheDocument();
-    expect(within(now).queryByText('From you')).not.toBeInTheDocument();
+    expect(within(now).getByText('From you')).toBeInTheDocument();
+    expect(within(now).getByText(/^since .*Nov.*2026$/)).toBeInTheDocument();
+    expect(within(now).queryByText(/2026-11-11/)).not.toBeInTheDocument();
     const earlier = screen.getByText(/^Earlier/).closest('details');
     expect(earlier).not.toHaveAttribute('open');
   });
@@ -323,6 +323,7 @@ describe('MemoryPagesPanel', () => {
             message: 'You: edited the page for Wendy',
             pages: [{ kind: 'person', slug: 'wendy' }],
             undoBlockedBy: null,
+            isUndo: false,
           },
           {
             id: 'b'.repeat(40),
@@ -330,6 +331,7 @@ describe('MemoryPagesPanel', () => {
             message: 'You: dismissed X (Wendy)',
             pages: [{ kind: 'person', slug: 'wendy' }],
             undoBlockedBy: 'You: edited the page for Wendy',
+            isUndo: false,
           },
         ],
       },
@@ -337,9 +339,33 @@ describe('MemoryPagesPanel', () => {
     renderPanel(catalog);
     const recent = await screen.findByRole('region', { name: 'Recent changes' });
     expect(within(recent).getByRole('button', { name: 'Undo: You: dismissed X (Wendy)' })).toBeDisabled();
-    expect(within(recent).getByText(/Undo "You: edited the page for Wendy" first\./)).toBeInTheDocument();
+    expect(within(recent).getByText(/Undo the newer change to this page first\./)).toBeInTheDocument();
     fireEvent.click(within(recent).getByRole('button', { name: 'Undo: You: edited the page for Wendy' }));
     await waitFor(() => expect(calls.undo).toHaveBeenCalledWith({ changeId: 'a'.repeat(40), namespace: '' }));
+  });
+
+  it('offers to put a change back on the entry of an undo, and leaves a repeated summary out of the page', async () => {
+    const { catalog } = createCatalog({
+      pages: [{ ...WENDY, summary: 'Plays tennis on Fridays.' }, MADRID],
+      changes: {
+        available: true,
+        changes: [
+          {
+            id: 'c'.repeat(40),
+            changedAt: '2026-11-03T10:00:00.000Z',
+            message: 'You: undid "Aman saved: Likes tulips. (my wife)"',
+            pages: [{ kind: 'person', slug: 'wendy' }],
+            undoBlockedBy: null,
+            isUndo: true,
+          },
+        ],
+      },
+    });
+    renderPanel(catalog);
+    const recent = await screen.findByRole('region', { name: 'Recent changes' });
+    expect(within(recent).getByRole('button', { name: /^Put back: / })).toHaveTextContent('Put back');
+    await openWendy();
+    expect(screen.getAllByText('Plays tennis on Fridays.')).toHaveLength(1);
   });
 
   it('shows the server’s refusal when an undo is refused', async () => {
@@ -353,6 +379,7 @@ describe('MemoryPagesPanel', () => {
             message: 'You: edited the page for Wendy',
             pages: [],
             undoBlockedBy: null,
+            isUndo: false,
           },
         ],
       },

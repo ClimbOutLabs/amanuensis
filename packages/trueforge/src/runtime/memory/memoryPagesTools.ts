@@ -223,6 +223,15 @@ function clip(text: string, limit = 60): string {
   return text.length > limit ? `${text.slice(0, limit - 1)}…` : text;
 }
 
+/** The history line for a changed fact. Two long facts can shorten to the same words, and then only the new one is shown. */
+function changedMessage({ before, after, about }: { before: string; after: string; about: string }): string {
+  const was = clip(before);
+  const now = clip(after);
+  return was === now
+    ? `Aman changed a line: ${now} (${clip(about)})`
+    : `Aman changed: ${was} to ${now} (${clip(about)})`;
+}
+
 type Outcome = { saved: true; activity: string } | { saved: false; message: string; unchanged?: boolean };
 
 /** What the tools need for one chat turn. */
@@ -513,7 +522,7 @@ export class MemoryPagesToolSet extends LocalToolMCP {
     return this.#change({
       about: input.about,
       kind: input.kind,
-      message: `You: remembered ${clip(text.text)} (${clip(input.about)})`,
+      message: `Aman saved: ${clip(text.text)} (${clip(input.about)})`,
       edit: async ({ title, found, today, newId, write }) => {
         const kind = found?.kind ?? input.kind;
         if (kind === undefined) {
@@ -565,7 +574,7 @@ export class MemoryPagesToolSet extends LocalToolMCP {
     return this.#change({
       about: input.about,
       kind: input.kind,
-      message: `You: changed ${clip(before.text)} to ${clip(after.text)} (${clip(input.about)})`,
+      message: changedMessage({ before: before.text, after: after.text, about: input.about }),
       edit: async ({ title, found, today, newId, write }) => {
         const target = this.#target({ found, text: before.text });
         if (!target.ok) {
@@ -591,7 +600,7 @@ export class MemoryPagesToolSet extends LocalToolMCP {
     return this.#change({
       about: input.about,
       kind: input.kind,
-      message: `You: forgot ${clip(text.text)} (${clip(input.about)})`,
+      message: `Aman removed: ${clip(text.text)} (${clip(input.about)})`,
       edit: async ({ title, found, today, write }) => {
         const target = this.#target({ found, text: text.text });
         if (!target.ok) {

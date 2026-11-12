@@ -41,7 +41,9 @@ function PageRow({ page, state }: { page: MemoryPageSummary; state: MemoryPagesS
             </span>
           ) : null}
         </span>
-        {page.summary === null ? null : <span className="text-sm text-text-secondary">{page.summary}</span>}
+        {page.summary === null ? null : (
+          <span className="line-clamp-2 text-sm text-text-secondary">{page.summary}</span>
+        )}
       </button>
     </li>
   );
@@ -77,17 +79,17 @@ function RecentChanges({ state }: { state: MemoryPagesState }) {
               {change.message}
               <span className="block text-xs text-text-secondary">
                 {whenCopy(change.changedAt)}
-                {change.undoBlockedBy === null ? '' : ` · Undo "${change.undoBlockedBy}" first.`}
+                {change.undoBlockedBy === null ? '' : ' · Undo the newer change to this page first.'}
               </span>
             </span>
             <button
               type="button"
-              aria-label={`Undo: ${change.message}`}
+              aria-label={`${change.isUndo ? 'Put back' : 'Undo'}: ${change.message}`}
               disabled={change.undoBlockedBy !== null}
               onClick={() => void state.undoChange(change.id)}
               className={auiButtonClass({ variant: 'ghost', size: 'small' })}
             >
-              Undo
+              {change.isUndo ? 'Put back' : 'Undo'}
             </button>
           </li>
         ))}

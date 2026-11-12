@@ -13,11 +13,19 @@ import type { MemoryPagesState } from './useMemoryPagesState.js';
 
 const INPUT_CLASS = 'rounded-md border border-border bg-primary-bg px-2 py-1.5 text-sm text-text-primary';
 
+/** A stored day such as 2026-11-11 as people write it; anything else is shown as stored. */
+function dayCopy(day: string): string {
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(day) ? new Date(`${day}T00:00:00`) : null;
+  return date === null || Number.isNaN(date.getTime())
+    ? day
+    : date.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
 function lineDates(line: MemoryPageLine): string | null {
-  if (line.seen !== null) return `seen ${line.seen}`;
-  if (line.since !== null && line.until !== null) return `${line.since} to ${line.until}`;
-  if (line.since !== null) return `since ${line.since}`;
-  if (line.until !== null) return `until ${line.until}`;
+  if (line.seen !== null) return `seen ${dayCopy(line.seen)}`;
+  if (line.since !== null && line.until !== null) return `${dayCopy(line.since)} to ${dayCopy(line.until)}`;
+  if (line.since !== null) return `since ${dayCopy(line.since)}`;
+  if (line.until !== null) return `until ${dayCopy(line.until)}`;
   return null;
 }
 
@@ -39,7 +47,7 @@ function PageLineRow({
       <span className="whitespace-pre-wrap break-words text-sm text-text-primary">{line.text}</span>
       <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-text-secondary">
         {unconfirmed ? <span className="font-medium">Not confirmed</span> : null}
-        {line.own ? null : <span>{line.sourceLabel}</span>}
+        <span>{line.sourceLabel}</span>
         {dates === null ? null : <span>{dates}</span>}
       </span>
       {unconfirmed ? (
@@ -222,7 +230,7 @@ function PageEditor({ page, state, onDone }: { page: MemoryPageDetail; state: Me
   );
 }
 
-/** One page: its sections, a text editor, and Delete page. Lines Aman read are marked; the person's own are plain. */
+/** One page: its sections, a text editor, and Delete page. Every line says where it came from. */
 export function MemoryPageView({ page, state }: { page: MemoryPageDetail; state: MemoryPagesState }) {
   const [editing, setEditing] = useState(false);
   const heading = useRef<HTMLHeadingElement>(null);
@@ -231,6 +239,9 @@ export function MemoryPageView({ page, state }: { page: MemoryPageDetail; state:
     heading.current?.focus();
   }, [page.slug, page.kind]);
 
+  // A page with no summary of its own borrows its first line, which is already shown below.
+  const repeated = page.sections.some(section => section.lines.some(line => line.text === page.summary));
+
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -238,7 +249,7 @@ export function MemoryPageView({ page, state }: { page: MemoryPageDetail; state:
           <h3 ref={heading} tabIndex={-1} className="text-base font-semibold text-text-primary outline-none">
             {page.title}
           </h3>
-          {page.summary === null ? null : <p className="text-sm text-text-secondary">{page.summary}</p>}
+          {page.summary === null || repeated ? null : <p className="text-sm text-text-secondary">{page.summary}</p>}
           {page.otherNames.length === 0 ? null : (
             <p className="text-xs text-text-secondary">Also called: {page.otherNames.join(', ')}</p>
           )}

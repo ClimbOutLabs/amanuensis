@@ -11,6 +11,7 @@ export const MemoryPageChange: core.serialization.ObjectSchema<
 > = core.serialization.object({
     changedAt: core.serialization.property("changed_at", core.serialization.string()),
     id: core.serialization.string(),
+    isUndo: core.serialization.property("is_undo", core.serialization.boolean()),
     message: core.serialization.string(),
     pages: core.serialization.list(MemoryPageRef),
     undoBlockedBy: core.serialization.property("undo_blocked_by", core.serialization.string().nullable()),
@@ -20,6 +21,7 @@ export declare namespace MemoryPageChange {
     export interface Raw {
         changed_at: string;
         id: string;
+        is_undo: boolean;
         message: string;
         pages: MemoryPageRef.Raw[];
         undo_blocked_by?: string | null;

@@ -36,7 +36,6 @@ const PageLineSchema = z
     text: z.string(),
     source: z.string(),
     source_label: z.string(),
-    own: z.boolean(),
     since: z.string().nullable(),
     until: z.string().nullable(),
     seen: z.string().nullable(),
@@ -46,7 +45,6 @@ const PageLineSchema = z
     text: line.text,
     source: line.source,
     sourceLabel: line.source_label,
-    own: line.own,
     since: line.since,
     until: line.until,
     seen: line.seen,
@@ -106,6 +104,7 @@ const ChangesSchema = z
         message: z.string(),
         pages: z.array(z.object({ kind: PageKindSchema, slug: z.string() })),
         undo_blocked_by: z.string().nullable(),
+        is_undo: z.boolean(),
       }),
     ),
   })
@@ -117,6 +116,7 @@ const ChangesSchema = z
       message: change.message,
       pages: change.pages,
       undoBlockedBy: change.undo_blocked_by,
+      isUndo: change.is_undo,
     })),
   }));
 

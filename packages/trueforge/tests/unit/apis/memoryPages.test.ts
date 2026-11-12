@@ -55,6 +55,7 @@ const ChangesSchema = z.object({
         message: z.string(),
         pages: z.array(z.object({ slug: z.string() })),
         undo_blocked_by: z.string().nullable(),
+        is_undo: z.boolean(),
       }),
     ),
   }),

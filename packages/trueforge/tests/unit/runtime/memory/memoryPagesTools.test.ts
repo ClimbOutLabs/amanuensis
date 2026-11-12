@@ -107,7 +107,7 @@ describe('remember_fact', () => {
         '- Likes tulips. <!-- fact: id=f_n1 src=you_said since=2026-11-06 -->\n\n## Unconfirmed',
       ).replace('2026-11-01 -->\n\n- Likes', '2026-11-01 -->\n- Likes'),
     );
-    expect(gitLog(baseDir).at(-1)).toBe('You: remembered Likes tulips. (my wife)');
+    expect(gitLog(baseDir).at(-1)).toBe('Aman saved: Likes tulips. (my wife)');
     expect(audit).toEqual([
       expect.objectContaining({
         tool_name: 'memory_pages',
@@ -217,7 +217,7 @@ describe('update_fact', () => {
     );
     expect(text).not.toContain('## Open\n- Which school');
     expect(gitLog(baseDir).at(-1)).toBe(
-      'You: changed Which school for Leo. to Leo goes to the Colegio Norte. (the move)',
+      'Aman changed: Which school for Leo. to Leo goes to the Colegio Norte. (the move)',
     );
     expect(audit).toHaveLength(1);
   });
@@ -254,7 +254,7 @@ describe('forget_fact', () => {
         '## Earlier\n- Shipping the furniture, not selling it. <!-- fact: id=f_11 src=you_said since=2026-10-22 until=2026-11-06 -->\n',
       ),
     );
-    expect(gitLog(baseDir).at(-1)).toBe('You: forgot Shipping the furniture, not selling it. (Madrid)');
+    expect(gitLog(baseDir).at(-1)).toBe('Aman removed: Shipping the furniture, not selling it. (Madrid)');
   });
 
   it('does not forget a line that is already under Earlier', async () => {

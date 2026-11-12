@@ -52,7 +52,9 @@ describe('createMemoryPagesCatalog', () => {
         return Response.json({
           data: {
             available: true,
-            changes: [{ id: 'a'.repeat(40), changed_at: 't', message: 'm', pages: [], undo_blocked_by: 'x' }],
+            changes: [
+              { id: 'a'.repeat(40), changed_at: 't', message: 'm', pages: [], undo_blocked_by: 'x', is_undo: true },
+            ],
           },
         });
       }
@@ -97,6 +99,7 @@ describe('createMemoryPagesCatalog', () => {
     await catalog.deletePage({ kind: 'person', slug: 'wendy' });
     const changes = await catalog.listChanges();
     assert.equal(changes.changes[0]?.undoBlockedBy, 'x');
+    assert.equal(changes.changes[0]?.isUndo, true);
     await catalog.undoChange({ changeId: 'a'.repeat(40) });
 
     assert.deepEqual(calls, [

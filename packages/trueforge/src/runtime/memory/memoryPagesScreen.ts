@@ -88,6 +88,9 @@ const SOURCE_LABELS: Readonly<Record<MemoryPageLineSource, string>> = {
   unreadable: 'Aman could not read where this came from',
 };
 
+/** How the history line of an undo starts, so the screen can offer to put the change back. */
+const UNDO_MESSAGE_START = 'You: undid ';
+
 const RELOAD_MESSAGE = 'Reload the page to see what is there now.';
 
 function clip(text: string): string {
@@ -509,6 +512,7 @@ export async function listPageChanges(
       message: commit.message,
       pages: pageRefs(commit.paths),
       undo_blocked_by: blocking?.message ?? null,
+      is_undo: commit.message.startsWith(UNDO_MESSAGE_START),
     });
   }
   return { available: true, changes };
@@ -552,7 +556,7 @@ export async function undoPageChange({
   }
   return commitPageChange({
     options,
-    message: `You: undid "${clip(singleLine(target.message))}"`,
+    message: `${UNDO_MESSAGE_START}"${clip(singleLine(target.message))}"`,
     change: async () => {
       const later = await laterChange({ history, commit: target });
       if (later !== undefined) {

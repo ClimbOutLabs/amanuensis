@@ -5,6 +5,8 @@ import type * as TrueForge from "../index.js";
 export interface MemoryPageChange {
     changedAt: string;
     id: string;
+    /** Whether this entry undid an earlier change. */
+    isUndo: boolean;
     /** What changed, in plain words. */
     message: string;
     pages: TrueForge.MemoryPageRef[];

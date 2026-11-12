@@ -141,6 +141,7 @@ export const MemoryPageChangeSchema = z
       .string()
       .nullable()
       .describe('The message of a later change to the same pages that must be undone first, or null.'),
+    is_undo: z.boolean().describe('Whether this entry undid an earlier change.'),
   })
   .openapi('MemoryPageChange');
 

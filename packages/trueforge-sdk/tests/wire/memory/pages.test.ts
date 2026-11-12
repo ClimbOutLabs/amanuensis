@@ -180,6 +180,7 @@ describe("PagesClient", () => {
                     {
                         changed_at: "changed_at",
                         id: "id",
+                        is_undo: true,
                         message: "message",
                         pages: [{ kind: "person", slug: "slug" }],
                         undo_blocked_by: null,
@@ -204,6 +205,7 @@ describe("PagesClient", () => {
                     {
                         changedAt: "changed_at",
                         id: "id",
+                        isUndo: true,
                         message: "message",
                         pages: [
                             {
