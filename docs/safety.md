@@ -51,7 +51,7 @@ You can choose to let file writes run without a card, and to let work in the san
 A scheduled run has nobody watching it, so it never sends anything by itself. The one thing of yours it changes by itself is a space.
 
 - It can read and search, the same as a chat.
-- It can make and change any space without asking, so a list it keeps for you stays up to date. Every change keeps a version you can ask Aman to bring back. Aman cannot delete a space. A space only keeps a clickable link that you gave or that a search returned. A link that only an email or a web page supplied is kept as plain text.
+- It can make and change any space without asking, so a list it keeps for you stays up to date. Every change keeps a version you can ask Aman to bring back. Each change a run saves is also one line in the activity log, under Settings, Audit. Aman cannot delete a space. A space only keeps a clickable link that you gave or that a search returned. A link that only an email or a web page supplied is kept as plain text.
 - Any action that would show a card in a chat is held instead. It is not run, and the model is told it was saved for you.
 - If you let file writes run without a card in chat, a scheduled run ignores that choice and holds them too.
 - If you let Aman run code in the sandbox without asking, a scheduled run ignores that choice as well. It holds code, new files and package installs.
@@ -61,5 +61,6 @@ A scheduled run has nobody watching it, so it never sends anything by itself. Th
 - When you approve a held action, Aman checks it again first. If anything the card showed has changed since it was held, such as the guests of an event or the text of a message, nothing is done and Aman says to ask again in chat.
 - Held actions expire after 24 hours. Up to 20 are kept per chat; if more were held, the list says how many were not saved so you can ask again in chat.
 - A helper job inside a scheduled run cannot hold actions. Its actions are refused.
+- The run's chat stays careful when you open it and type there. That chat still holds what the run read. So your choices to let file writes, or code in the sandbox, run without asking do not apply in it. Each one shows a card. A new chat is not affected.
 
 See [Schedules](/schedules) for how schedules work, and [Privacy](/privacy) for what leaves your machine.

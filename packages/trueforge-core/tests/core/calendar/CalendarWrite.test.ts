@@ -145,6 +145,8 @@ describe('the approval card', () => {
       attendees: ['lin@example.com', 'sam@example.com'],
       guests_emailed: true,
       one_of_repeating: false,
+      already_created: false,
+      span_days: 1,
       before: null,
     });
     expect(info.tier3_card?.plain_what).toBe(
