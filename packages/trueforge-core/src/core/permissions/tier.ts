@@ -67,7 +67,7 @@ export const GRANT_BARRED_TIER_REASONS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Consequential actions a person may answer once for the whole chat with "Always allow this here". The chat grant
+ * Consequential actions a person may answer once for the whole chat with "Always allow in this chat". The chat grant
  * binds the tool and its destination, never a standing grant across chats, so it is offered only when the card
  * names one. A send, a mail draft, a guest change, a steered call, and creating a schedule or a persona are never
  * among them: each of those asks every time.

@@ -219,7 +219,7 @@ export const SentinelSettings: FC = () => {
       </div>
 
       <div className="rounded-lg border border-border p-4">
-        <p className="text-sm font-medium text-text-primary">Always allow</p>
+        <p className="text-sm font-medium text-text-primary">Always allow everywhere</p>
         <p className="mt-1 text-sm text-text-secondary">
           Off means the assistant asks before each of these. On means it runs them without asking.
         </p>
