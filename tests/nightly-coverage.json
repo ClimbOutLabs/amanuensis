@@ -347,6 +347,10 @@
       "set": "chat",
       "tests": []
     },
+    "route:reach": {
+      "set": "reach",
+      "tests": []
+    },
     "route:repository": {
       "set": "code",
       "tests": []
@@ -783,6 +787,7 @@
     "route:personaKnowledge",
     "route:personalization",
     "route:privateChat",
+    "route:reach",
     "route:repository",
     "route:runCode",
     "route:sandboxProvider",

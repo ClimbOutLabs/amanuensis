@@ -1453,7 +1453,7 @@ export interface SharedServerConfiguration {
   MAIL_EMAIL_MCP_URL: string | undefined;
   /**
    * The mail sidecar's account agent, such as `http://mail-email:9559`. The Settings Email card reads and
-   * changes the saved account through it. When set without MAIL_EMAIL_MCP_URL, the MCP endpoint is derived
+   * changes the saved account through it, and noticing lists new mail through it. When set without MAIL_EMAIL_MCP_URL, the MCP endpoint is derived
    * from it for registration once an account exists. Env: `MAIL_EMAIL_ACCOUNT_URL`. Default unset.
    */
   MAIL_EMAIL_ACCOUNT_URL: string | undefined;

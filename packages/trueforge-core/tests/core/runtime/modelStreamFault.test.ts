@@ -8,6 +8,7 @@ import { EventType, newEventId } from '../../../src/core/events/schema';
 import type { ILLM } from '../../../src/core/llm/ILLM';
 import type { ExtendedChatCompletionChunk, RawAssistantMessageWithUsage } from '../../../src/core/llm/LLMTypes';
 import { getEmptyUsage } from '../../../src/core/llm/LLMTypes';
+import { PROVIDER_FAILED_MESSAGE } from '../../../src/core/llm/plainFailureMessages';
 import { mapStreamToChunks, ModelOutputRepetitionError, ModelStreamFault } from '../../../src/core/llm/VercelAILLM';
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
 import type { ContextMessage, InternalThreadDoneEvent } from '../../../src/core/runtime/AgentThread.types';
@@ -411,7 +412,8 @@ describe('ModelStreamFault retry', () => {
     if (doneEvent?.status !== 'error') {
       throw new Error('expected an error-status AGENT_DONE event');
     }
-    expect(doneEvent.error).toBe('Internal Server Error');
+    // The service's own words stay in the log; the chat gets a plain message.
+    expect(doneEvent.error).toBe(PROVIDER_FAILED_MESSAGE);
     expect(doneEvent.error).not.toContain('context is too long');
   });
 
