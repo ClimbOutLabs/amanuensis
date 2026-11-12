@@ -8,9 +8,8 @@ import { tablistTargetIndex } from '@/atoms/lib/tablistKeys.js';
 /**
  * The settings sub-tab pattern: an underlined tablist shared by the standalone memory page,
  * the Settings Memory section and Settings Personalization, so the surfaces navigate the
- * same way. Arrow keys move
- * between tabs (focus follows the selection), Home and End jump to the ends, and only the
- * selected tab is in the tab order. When the tabs are wider than the space they get, the
+ * same way. Arrow keys move between tabs (focus follows the selection), Home and End jump
+ * to the ends, and only the selected tab is in the tab order. When the tabs are wider than the space they get, the
  * strip scrolls sideways rather than squeezing the labels.
  */
 export function MemoryTabs<TabId extends string>(props: {
