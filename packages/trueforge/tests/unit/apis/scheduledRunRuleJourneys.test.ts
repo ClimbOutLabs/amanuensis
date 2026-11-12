@@ -486,7 +486,7 @@ const SANDBOX_AGENT_SPEC = AgentSpecSchema.parse({
   ...AGENT_SPEC,
   config: { ...AGENT_SPEC.config, sandbox: { enabled: true } },
 });
-const RUN_CODE_CARD = 'Run code the assistant wrote in the sandbox?';
+const RUN_CODE_CARD = 'Run this Python code the assistant wrote?';
 
 describe('a scheduled run that wants to run code', () => {
   let server: ApprovalTestServer;

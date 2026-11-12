@@ -27,7 +27,8 @@ export interface BuiltApp {
   close: () => Promise<void>;
 }
 
-async function freePort(): Promise<number> {
+/** A loopback port nothing is listening on right now. */
+export async function freePort(): Promise<number> {
   const probe = createServer();
   await new Promise<void>((resolve, reject) => {
     probe.once('error', reject);

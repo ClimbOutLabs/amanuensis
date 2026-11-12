@@ -497,7 +497,7 @@ describe('running code in the sandbox', () => {
     'asks first when "run without asking" is on and the sandbox can reach a network',
     async () => {
       const held = await runCode({ sandbox: new StandInSandbox(undefined), withoutAsking: true });
-      expect(held).toEqual({ asked: ['Run code the assistant wrote in the sandbox?'], letThrough: false });
+      expect(held).toEqual({ asked: ['Run this Python code the assistant wrote?'], letThrough: false });
     },
     TURN_TIMEOUT_MS,
   );
@@ -506,7 +506,7 @@ describe('running code in the sandbox', () => {
     'asks first when "run without asking" is off',
     async () => {
       const held = await runCode({ sandbox: new StandInSandbox('none'), withoutAsking: false });
-      expect(held).toEqual({ asked: ['Run code the assistant wrote in the sandbox?'], letThrough: false });
+      expect(held).toEqual({ asked: ['Run this Python code the assistant wrote?'], letThrough: false });
     },
     TURN_TIMEOUT_MS,
   );

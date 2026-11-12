@@ -115,4 +115,16 @@ describe('ChatMessageMatches', () => {
 
     expect(screen.getByRole('alert')).toHaveTextContent('Searching your chats failed. Try again in a moment.');
   });
+
+  it('keeps the matches section at its full height and clamps a long snippet to two lines', async () => {
+    const longSnippet = 'the ferry to the island leaves at nine and the last one back leaves at six '.repeat(4).trim();
+    catalogAnswering(async () => ({ searchEnabled: true, hits: [{ ...HIT_TRIP, snippet: longSnippet }] }));
+    const { container } = render(
+      <ChatMessageMatches query="ferry" titleMatchSessionIds={new Set()} onOpen={vi.fn()} />,
+    );
+    await settle();
+
+    expect(screen.getByText(longSnippet)).toHaveClass('line-clamp-2');
+    expect(container.querySelector('section[aria-label="Matches inside chats"]')).toHaveClass('shrink-0');
+  });
 });

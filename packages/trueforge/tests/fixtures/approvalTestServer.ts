@@ -42,6 +42,7 @@ import { SqliteChatImageStore } from '../../src/db/sqlite/chat-image-store/Sqlit
 import { createSqliteDb } from '../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
 import { SqliteGoogleConnectionStore } from '../../src/db/sqlite/google-connection-store/SqliteGoogleConnectionStore';
+import { SqliteLocalUserStore } from '../../src/db/sqlite/local-user-store/SqliteLocalUserStore';
 import { SqliteMcpServerStore } from '../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
 import { SqliteMcpToolGrantStore } from '../../src/db/sqlite/mcp-tool-grant-store/SqliteMcpToolGrantStore';
 import { SqliteModelProviderStore } from '../../src/db/sqlite/model-provider-store/SqliteModelProviderStore';
@@ -111,9 +112,11 @@ function buildApp(input: {
   db: SqliteDb;
   sandboxProvider: SandboxProvider | undefined;
   authenticator: Authenticator;
+  /** Signs the one owner in with an email and password, as `TRUEFORGE_AUTH_MODE=local` does. */
+  localSignIn: boolean;
   turnDrains: TurnDrainRegistry;
 }): ReturnType<typeof createServerApp> {
-  const { db, sandboxProvider, authenticator, turnDrains } = input;
+  const { db, sandboxProvider, turnDrains } = input;
   const sessionStore = new SqliteSessionStore(db);
   const tokenStore = new SqliteOAuthTokenStore(db);
   const agentStore = new SqliteAgentStore(db);
@@ -151,6 +154,11 @@ function buildApp(input: {
     outboundSecrets,
   });
   const personaStore = new SqlitePersonaStore(db);
+  const localUserStore = input.localSignIn ? new SqliteLocalUserStore(db) : undefined;
+  const authenticator =
+    localUserStore === undefined
+      ? input.authenticator
+      : createAuthenticator({ mode: TrueForgeAuthMode.Local, localUserStore, globalSettingsStore });
   return createServerApp({
     chatDeletionStore: new SqliteChatDeletionStore({ db, turnArtifactStore: new SqliteTurnArtifactStore(db) }),
     chatSearchIndexer: new ChatSearchIndexer({
@@ -202,7 +210,7 @@ function buildApp(input: {
     eventSubscriptions: new EventSubscriptionRegistry<TurnStreamingEvent>(undefined),
     logger: createLogger({ silent: true }),
     oidcDiscovery: undefined,
-    localUserStore: undefined,
+    localUserStore,
     authenticator,
     authorizer: new TrueForgeAuthorizer(),
     outboundSecrets,
@@ -248,7 +256,10 @@ export async function startApprovalTestServer(options?: {
   inertPageById?: boolean | undefined;
   /** Adds the inert connector's opt-in `search_messages` lookup. */
   inertMessageSearch?: boolean | undefined;
+  /** Runs local sign-in instead of the standalone user: the first request must create the owner's sign-in. */
+  localSignIn?: boolean | undefined;
 }): Promise<ApprovalTestServer> {
+  const localSignIn = options?.localSignIn === true;
   const authenticator = options?.authenticator ?? createAuthenticator({ mode: TrueForgeAuthMode.Standalone });
   const mcp = await startInertMcpServer({
     webSearch: options?.inertWebSearch === true,
@@ -324,6 +335,10 @@ export async function startApprovalTestServer(options?: {
   const originalFirstPartyOrigins = configuration.FIRST_PARTY_MCP_ORIGINS;
   const originalLocalModelEndpoints = configuration.LOCAL_MODEL_ENDPOINTS;
   const originalEvalMode = configuration.AMAN_EVAL_MODE;
+  const originalAuthMode = configuration.TRUEFORGE_AUTH_MODE;
+  if (localSignIn) {
+    configuration.TRUEFORGE_AUTH_MODE = 'local';
+  }
   // The fixture's own servers are this test instance's own services, and the operator of the
   // instance vouches for them the way the server settings ask: the model's exact endpoint is
   // named as a local model endpoint, and the connector's origin is listed as the operator's
@@ -336,7 +351,7 @@ export async function startApprovalTestServer(options?: {
 
   // One registry for the server's life, so close() can wait for turn drains the way main.ts does.
   const turnDrains = new TurnDrainRegistry();
-  let app = buildApp({ db, sandboxProvider: options?.sandboxProvider, authenticator, turnDrains });
+  let app = buildApp({ db, sandboxProvider: options?.sandboxProvider, authenticator, localSignIn, turnDrains });
   if (options?.memoryProvider === true) {
     await registerMemoryProvider({ app, mcp });
   }
@@ -350,7 +365,7 @@ export async function startApprovalTestServer(options?: {
       // A restart stands in for the process going away, so running replies are cut off, not drained.
       await db.destroy();
       db = createSqliteDb(databaseFile);
-      app = buildApp({ db, sandboxProvider: options?.sandboxProvider, authenticator, turnDrains });
+      app = buildApp({ db, sandboxProvider: options?.sandboxProvider, authenticator, localSignIn, turnDrains });
     },
     mcp,
     model,
@@ -368,6 +383,7 @@ export async function startApprovalTestServer(options?: {
       configuration.FIRST_PARTY_MCP_ORIGINS = originalFirstPartyOrigins;
       configuration.LOCAL_MODEL_ENDPOINTS = originalLocalModelEndpoints;
       configuration.AMAN_EVAL_MODE = originalEvalMode;
+      configuration.TRUEFORGE_AUTH_MODE = originalAuthMode;
       // The guide installs, and the indexing they queue, write into directories removed below, so they finish first.
       await app.guidesSettled();
       await closePersonaKnowledgeIndexers();

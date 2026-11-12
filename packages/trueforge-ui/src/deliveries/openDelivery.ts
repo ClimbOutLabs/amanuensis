@@ -9,6 +9,7 @@ export function openDeliveryLink({ shell, link }: { shell: Shell; link: Delivery
   shell.setLibraryOpen(false);
   shell.setSessionsOpen(false);
   shell.setSchedulesOpen(false);
+  shell.setRemindersOpen(false);
   if (link.type === 'space') {
     shell.openSpaces(link.spaceId);
     return;

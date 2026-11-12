@@ -4,14 +4,12 @@ import { useEffect, useState, type FC, type FormEvent } from 'react';
 
 import { useDraftCatalog } from '@/atoms/draft/DraftCatalogProvider.js';
 import { displayModelLabel } from '@/atoms/draft/DraftModelCatalogPanel.js';
+import { auiSettingsInputClass } from '@/atoms/lib/inputClasses.js';
 import { Button } from '@/atoms/primitives/Button.js';
 import { EMPTY_PERSONA_DRAFT, usePersonas, type Persona, type PersonaDraft } from '@/components/PersonaContext.js';
 import { Icon } from '@/icons/Icon.js';
 import { getErrorMessage } from '@/utils/getErrorMessage.js';
 import { PersonaKnowledgeSection } from './PersonaKnowledge.js';
-
-const inputClassName =
-  'w-full rounded-md border border-border/70 bg-input-box-bg px-3 py-2.5 text-sm text-text-primary outline-none transition-colors placeholder:text-text-muted focus-visible:border-focus-ring focus-visible:ring-2 focus-visible:ring-focus-ring/50';
 
 function toDraft(persona: Persona): PersonaDraft {
   return {
@@ -67,7 +65,7 @@ const PersonaForm: FC<PersonaFormProps> = ({
           </label>
           <input
             id="persona-display-name"
-            className={inputClassName}
+            className={auiSettingsInputClass()}
             value={draft.display_name}
             placeholder="Zara"
             onChange={event => onChange({ ...draft, display_name: event.target.value })}
@@ -80,7 +78,7 @@ const PersonaForm: FC<PersonaFormProps> = ({
           </label>
           <input
             id="persona-aliases"
-            className={inputClassName}
+            className={auiSettingsInputClass()}
             value={aliasesText}
             placeholder="Z, Zara Quinn"
             onChange={event => onAliasesTextChange(event.target.value)}
@@ -95,7 +93,7 @@ const PersonaForm: FC<PersonaFormProps> = ({
         </label>
         <select
           id="persona-model"
-          className={inputClassName}
+          className={auiSettingsInputClass()}
           value={draft.model_name}
           onChange={event => onChange({ ...draft, model_name: event.target.value })}
         >
@@ -115,7 +113,7 @@ const PersonaForm: FC<PersonaFormProps> = ({
         </label>
         <textarea
           id="persona-instructions"
-          className={inputClassName}
+          className={auiSettingsInputClass()}
           rows={4}
           value={draft.instructions}
           placeholder="How this persona should answer."
@@ -210,7 +208,7 @@ const PersonaSettings = () => {
   };
 
   return (
-    <section aria-labelledby="personas-heading" className="mt-6">
+    <section aria-labelledby="personas-heading">
       <div className="mb-2 flex items-center justify-between gap-2">
         <div id="personas-heading" className="text-[0.8125rem] font-semibold uppercase text-text-secondary">
           Personas
