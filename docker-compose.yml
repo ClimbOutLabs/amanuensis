@@ -42,7 +42,7 @@ services:
 
   # Holds the network namespace that `server` and, with the login profile,
   # `dex` share, and publishes their ports. Sharing one namespace is what lets
-  # the OIDC issuer https://localhost:5556/dex be the same URL for the browser
+  # the OIDC issuer http://localhost:5556/dex be the same URL for the browser
   # on the host and for the server verifying tokens. The namespace lives in
   # this idle container so either of the two can restart without stranding
   # the other in a dead namespace.
@@ -149,10 +149,7 @@ services:
     env_file:
       - path: packages/trueforge/.env
         required: true
-    # The login profile's self-signed Dex certificate lives here. Empty, and
-    # unused, unless NODE_EXTRA_CA_CERTS in .env points into it.
     volumes:
-      - dex-tls:/etc/dex-tls:ro
       # Persistent Markdown memory ; without this, memories vanish
       # on container recreate.
       - memory-data:/data/memory
@@ -405,45 +402,26 @@ services:
     restart: unless-stopped
 
   # Login profile. Start with `docker compose --profile login up --build` after
-  # setting the OIDC_*, DEX_* and NODE_EXTRA_CA_CERTS values in
+  # setting the OIDC_* and DEX_* values in
   # packages/trueforge/.env (docs/quickstart.mdx walks through it). The app
   # then shows a real sign-in screen backed by one local account, on Aman's own
   # sign-in service. Standalone also needs OIDC_ALLOWED_EMAILS (the owner).
-
-  # One-shot: mints a self-signed certificate for https://localhost:5556 the
-  # first time the profile runs. OIDC issuers must be HTTPS; the server trusts
-  # this certificate through NODE_EXTRA_CA_CERTS, and the browser asks once.
-  dex-tls:
-    image: alpine/openssl:3.5.1
-    profiles: ['login']
-    entrypoint: ['sh', '-c']
-    command:
-      - |
-        test -f /tls/dex.crt && exit 0
-        openssl req -x509 -newkey rsa:2048 -nodes -days 825           -keyout /tls/dex.key -out /tls/dex.crt           -subj '/CN=localhost'           -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1'
-        # Dex runs unprivileged; the key protects a loopback-only login.
-        chmod 644 /tls/dex.key /tls/dex.crt
-    volumes:
-      - dex-tls:/tls
 
   dex:
     image: ghcr.io/dexidp/dex:v2.41.1
     profiles: ['login']
     # Same network namespace as the server (see `loopback`), so the issuer
-    # https://localhost:5556/dex is one URL for the browser and the server.
+    # http://localhost:5556/dex is one URL for the browser and the server.
     network_mode: 'service:loopback'
     command: ['dex', 'serve', '/etc/dex/config.yaml']
     volumes:
       - ./ops/compose/dex/config.yaml:/etc/dex/config.yaml:ro
-      - dex-tls:/etc/dex/tls:ro
     env_file:
       - path: packages/trueforge/.env
         required: true
     depends_on:
       loopback:
         condition: service_started
-      dex-tls:
-        condition: service_completed_successfully
     # Dex's plain-HTTP telemetry listener serves /healthz; see config.yaml.
     healthcheck:
       test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:5558/healthz']
@@ -469,7 +447,6 @@ networks:
   browser-egress: {}
 
 volumes:
-  dex-tls:
   # The Email send list. Holds only addresses, never credentials.
   mail-policy:
   # Records which send list the Email sidecar loaded. Written by the sidecar, read by the server.

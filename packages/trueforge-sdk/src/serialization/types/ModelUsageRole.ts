@@ -12,8 +12,16 @@ export const ModelUsageRole: core.serialization.Schema<serializers.ModelUsageRol
         "summarization",
         "profile_learning",
         "relevance_judge",
+        "noticing",
     ]);
 
 export declare namespace ModelUsageRole {
-    export type Raw = "chat" | "delegation" | "compaction" | "summarization" | "profile_learning" | "relevance_judge";
+    export type Raw =
+        | "chat"
+        | "delegation"
+        | "compaction"
+        | "summarization"
+        | "profile_learning"
+        | "relevance_judge"
+        | "noticing";
 }

@@ -17,6 +17,15 @@ const WRONG = 'CANARY-WRONG-PASSWORD-9z';
 const HOST = 'caldav.example.invalid';
 const USERNAME = 'owner@example.invalid';
 const PUBLIC_ADDRESS = '93.184.216.34';
+const GOOGLE_USER = 'person@gmail.com';
+const GOOGLE_HOME = `/calendar/dav/${GOOGLE_USER.replace('@', '%40')}/`;
+// Shaped like Google's real answer on its calendar home: it answers there directly, with no redirect.
+const GOOGLE_HOME_BODY =
+  '<?xml version="1.0" encoding="UTF-8"?>' +
+  '<D:multistatus xmlns:D="DAV:"><D:response>' +
+  `<D:href>${GOOGLE_HOME}</D:href>` +
+  '<D:propstat><D:status>HTTP/1.1 200 OK</D:status><D:prop><D:resourcetype><D:collection/></D:resourcetype></D:prop></D:propstat>' +
+  '</D:response></D:multistatus>';
 
 describe('the calendar account agent', () => {
   let folder;
@@ -56,7 +65,7 @@ describe('the calendar account agent', () => {
         '-subj',
         `/CN=${HOST}`,
         '-addext',
-        `subjectAltName=DNS:${HOST}`,
+        `subjectAltName=DNS:${HOST},DNS:calendar.google.com`,
         '-keyout',
         key,
         '-out',
@@ -72,9 +81,38 @@ describe('the calendar account agent', () => {
         res.end();
         return;
       }
+      if (behavior === 'gmx' && req.url !== '/begenda/dav/users/') {
+        // Like GMX and web.de: the saved address redirects before the login is looked at, and the
+        // well-known route names the real address on the same server.
+        const location = req.url === '/.well-known/caldav' ? '/begenda/dav/users/' : '/begenda/';
+        res.writeHead(302, { Location: location });
+        res.end();
+        return;
+      }
+      if (behavior === 'loop') {
+        res.writeHead(302, { Location: '/somewhere-else/' });
+        res.end();
+        return;
+      }
       if (behavior === 'redirect') {
         res.writeHead(302, { Location: 'https://other.example.invalid/' });
         res.end('redirect echoing ' + (req.headers.authorization ?? ''));
+        return;
+      }
+      if (behavior === 'google') {
+        const googleExpected = `Basic ${Buffer.from(`${GOOGLE_USER}:${CANARY}`).toString('base64')}`;
+        if (req.headers.authorization !== googleExpected) {
+          res.writeHead(401, { 'WWW-Authenticate': 'Basic realm="x"' });
+          res.end();
+          return;
+        }
+        if (req.url === GOOGLE_HOME) {
+          res.writeHead(207, { 'Content-Type': 'text/xml; charset=UTF-8' });
+          res.end(GOOGLE_HOME_BODY);
+          return;
+        }
+        res.writeHead(404);
+        res.end();
         return;
       }
       const expected = `Basic ${Buffer.from(`${USERNAME}:${CANARY}`).toString('base64')}`;
@@ -170,19 +208,61 @@ describe('the calendar account agent', () => {
     behavior = 'redirect';
     const redirected = await call('POST', payload());
     assert.deepEqual(JSON.parse(redirected.text), { error: 'redirected' });
-    assert.equal(seen.length, 1);
+    assert.deepEqual(
+      seen.map(request => request.url),
+      ['/dav/', '/.well-known/caldav'],
+    );
     assert.ok(!redirected.text.includes(CANARY));
     assert.equal(existsSync(file), false);
   });
 
-  it('follows one redirect to another path on the same server, such as a trailing slash', async () => {
-    behavior = 'slash';
-    const saved = await call('POST', payload({ url: `https://${HOST}:${calendarPort}/dav` }));
+  it('signs in to Google on its calendar home, the address the tool server asks first', async () => {
+    behavior = 'google';
+    const saved = await call(
+      'POST',
+      payload({
+        url: `https://calendar.google.com:${calendarPort}${GOOGLE_HOME}`,
+        username: GOOGLE_USER,
+        email: GOOGLE_USER,
+      }),
+    );
     assert.equal(saved.status, 200);
     assert.deepEqual(
       seen.map(request => request.url),
-      ['/dav', '/dav/'],
+      [GOOGLE_HOME],
     );
+    assert.ok(!saved.text.includes(CANARY));
+  });
+
+  it('asks the address with one trailing slash, the way the tool server does', async () => {
+    behavior = 'slash';
+    const saved = await call('POST', payload({ url: `https://${HOST}:${calendarPort}/dav//` }));
+    assert.equal(saved.status, 200);
+    assert.deepEqual(
+      seen.map(request => request.url),
+      ['/dav/'],
+    );
+  });
+
+  it('takes the well-known route when the saved address redirects, the way the tool server finds GMX and web.de', async () => {
+    behavior = 'gmx';
+    const saved = await call('POST', payload({ url: `https://${HOST}:${calendarPort}/` }));
+    assert.equal(saved.status, 200);
+    assert.deepEqual(
+      seen.map(request => request.url),
+      ['/', '/.well-known/caldav', '/begenda/dav/users/'],
+    );
+  });
+
+  it('follows only one redirect from the well-known route', async () => {
+    behavior = 'loop';
+    const refused = await call('POST', payload({ url: `https://${HOST}:${calendarPort}/dav/` }));
+    assert.deepEqual(JSON.parse(refused.text), { error: 'redirected' });
+    assert.deepEqual(
+      seen.map(request => request.url),
+      ['/dav/', '/.well-known/caldav', '/somewhere-else/'],
+    );
+    assert.equal(existsSync(file), false);
   });
 
   it('names a certificate it does not trust, and sends nothing after the handshake fails', async () => {

@@ -12,6 +12,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { context, propagation } from '@opentelemetry/api';
 import { McpConnectionError, McpRedirectRefusedError } from '../errors';
+import { currentMcpOutboundFetchOptions, mcpOutboundBaseFetch, withOutboundHttpRetries } from '../util/outboundFetch';
 import { withTimeout } from '../util/promiseUtils';
 import { isRedirectStatus, redirectTargetOrigin } from '../util/redirects';
 import type { ToolSchema } from './IMCPServer';
@@ -143,7 +144,7 @@ function createRedirectGuardFetch({ sameOriginOnly }: { sameOriginOnly: boolean 
       let currentUrl: string | URL = requestUrl;
       let currentInit = init;
       for (let hop = 0; ; hop += 1) {
-        const response = await fetch(currentUrl, { ...currentInit, redirect: 'manual' });
+        const response = await mcpOutboundBaseFetch(currentUrl, { ...currentInit, redirect: 'manual' });
         if (!isRedirectStatus(response.status)) {
           return response;
         }
@@ -198,6 +199,33 @@ const TRANSPORT_ERROR_CODES: ReadonlySet<string> = new Set([
   'ENETUNREACH',
   'EPIPE',
 ]);
+
+/**
+ * Failures that mean the host itself cannot be reached. Another transport at the same address
+ * would fail the same way, so the probe stops instead of doubling the wait.
+ */
+const HOST_UNREACHABLE_CODES: ReadonlySet<string> = new Set([
+  'ECONNREFUSED',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'UND_ERR_CONNECT_TIMEOUT',
+]);
+
+function isHostUnreachable(error: unknown): boolean {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (current instanceof Error && !seen.has(current)) {
+    seen.add(current);
+    const code: unknown = Reflect.get(current, 'code');
+    if (typeof code === 'string' && HOST_UNREACHABLE_CODES.has(code)) {
+      return true;
+    }
+    current = current.cause;
+  }
+  return false;
+}
 
 /** The SDK's JSON-RPC code for a transport that closed under a request. */
 const CONNECTION_CLOSED_CODE: number = ErrorCode.ConnectionClosed;
@@ -369,9 +397,12 @@ export async function connectRemoteMcp(params: {
   const url = new URL(params.url);
   const requestOptions = { signal: params.signal };
   const redirectRefusal = createRedirectGuardFetch({ sameOriginOnly: params.refuseRedirects !== true });
-  const fetchFn = withMaxResponseBytes(
-    redirectRefusal.fetch,
-    params.maxResponseBytes ?? DEFAULT_MAX_MCP_RESPONSE_BYTES,
+  // Retries sit outside the guard and the size cap: a retry replays the whole request, and
+  // only ever for a failure that means the server never answered (tool calls are not
+  // replayable once upstream may have received them, so the MCP options are not idempotent).
+  const fetchFn = withOutboundHttpRetries(
+    withMaxResponseBytes(redirectRefusal.fetch, params.maxResponseBytes ?? DEFAULT_MAX_MCP_RESPONSE_BYTES),
+    currentMcpOutboundFetchOptions(),
   );
   const candidates = params.knownTransportType
     ? [params.knownTransportType, ...TRANSPORT_PROBE_ORDER.filter(t => t !== params.knownTransportType)]
@@ -426,6 +457,9 @@ export async function connectRemoteMcp(params: {
         transportCause = error;
       }
       failures.push({ transport: transportType, error: describeTransportError(error) });
+      if (isHostUnreachable(error)) {
+        break;
+      }
       continue;
     }
 
@@ -437,7 +471,7 @@ export async function connectRemoteMcp(params: {
   }
 
   throw new McpConnectionError(
-    `failed to connect (tried ${candidates.join(', ')}): ${JSON.stringify(failures)}`,
+    `failed to connect (tried ${failures.map(failure => failure.transport).join(', ')}): ${JSON.stringify(failures)}`,
     502,
     transportCause === undefined ? undefined : { cause: transportCause },
   );

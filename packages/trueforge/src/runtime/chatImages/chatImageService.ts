@@ -244,7 +244,7 @@ export function createChatImageService(deps: ChatImageServiceDeps) {
     }
     // Email images always ask: loading one tells the sender the email was opened.
     if (!input.approved) {
-      return { status: 'ask', count: urls.length, host: null };
+      return { status: 'ask', count: urls.length, host: null, url: null };
     }
     const images: ChatImageOutcome[] = [];
     // A few at a time: each has its own time budget, and the sandbox takes two at once anyway.
@@ -285,7 +285,7 @@ export function createChatImageService(deps: ChatImageServiceDeps) {
       if (await deps.sentinel.isOffline(ref.owner)) {
         return { status: 'done', images: [{ status: 'refused', reason: 'offline' }] };
       }
-      return { status: 'ask', count: 1, host: hostOf(url) };
+      return { status: 'ask', count: 1, host: hostOf(url), url };
     }
     return { status: 'done', images: [await showRemote({ ref, url, source_key })] };
   }

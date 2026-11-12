@@ -10,6 +10,8 @@ coverage/
 .pnpm-store/
 .eslintcache
 .prettiercache
+# The voice tests' copy of the listening model (fetched by `pnpm test`).
+packages/trueforge/.cache/
 packages/trueforge-core/src/core/sandbox/sandboxScripts.gen.ts
 packages/trueforge/src/catalog/modelCatalog.gen.ts
 packages/trueforge/src/catalog/mcpCatalog.gen.ts
@@ -111,5 +113,8 @@ scripts/private-data-patterns.local.txt
 # Token eval output folders (scripts/eval-tokens).
 eval-results/
 
+# Python writes these when the tests run.
+__pycache__/
+*.pyc
 # A person's own Compose settings, such as core pins (docs/voice-input.mdx).
 docker-compose.override.yml

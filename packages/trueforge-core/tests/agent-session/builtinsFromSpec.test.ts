@@ -91,7 +91,8 @@ async function processRequest(
   const persistedContext = await processPreLLM(capabilities, initialContext);
   let requestMessages = persistedContext.filter(isLLMContextMessage).map(toOpenAIChatMessage);
   for (const processor of capabilities.flatMap(capability => capability.preLLMEphemeralProcessors ?? [])) {
-    requestMessages = processor.processPreLLMEphemeral(requestMessages) ?? requestMessages;
+    requestMessages =
+      processor.processPreLLMEphemeral(requestMessages, { modelSupportsVision: false }) ?? requestMessages;
   }
   return { persistedContext, requestMessages };
 }

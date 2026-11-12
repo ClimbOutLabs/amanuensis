@@ -37,6 +37,8 @@ async function judgeModelFor(personaModel: string) {
     metadata: {},
     external_id: null,
     source: null,
+    is_incognito: false,
+    private_expires_at: null,
   });
   const record = await sessionStore.getSession({ tenant_id: TENANT_ID, session_id: 's1' });
   if (record === undefined) {

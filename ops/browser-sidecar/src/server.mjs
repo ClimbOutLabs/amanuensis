@@ -8,6 +8,7 @@ import { rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import path from 'node:path';
 import { URL } from 'node:url';
+import { Worker } from 'node:worker_threads';
 import { chromium } from 'playwright-core';
 
 import { elementAtPath } from './extract.mjs';
@@ -25,6 +26,134 @@ const MAX_UPLOAD_BODY_BYTES = Math.ceil((MAX_UPLOAD_BYTES * 4) / 3) + 64 * 1024;
 const EXTRACT_MODULE = readFileSync(new URL('./extract.mjs', import.meta.url), 'utf8').replace(/^export /gm, '');
 
 const EXTRACT_SCRIPT = `(() => {\n${EXTRACT_MODULE}\nreturn extractSnapshotNodes();\n})()`;
+const VIEW_SCRIPT = `(() => {\n${EXTRACT_MODULE}\nreturn viewPosition();\n})()`;
+
+/** How long a scroll may take to come to rest before the page is read anyway. */
+const SCROLL_SETTLE_MS = 1000;
+
+/**
+ * Waits in the page until a scroll has come to rest: the position holds for a few frames, after it
+ * moved or after a short wait for a page that does not move (its end). The position counts the
+ * window and every scroll box under the middle of the view, since the wheel scrolls whichever is there.
+ */
+const SCROLL_SETTLE_SCRIPT = `(async () => {
+  const position = () => {
+    let sum = window.scrollY;
+    for (let box = document.elementFromPoint(innerWidth / 2, innerHeight / 2); box !== null; box = box.parentElement) {
+      sum += box.scrollTop;
+    }
+    return sum;
+  };
+  const start = position();
+  const began = performance.now();
+  let last = start;
+  let still = 0;
+  while (performance.now() - began < ${String(SCROLL_SETTLE_MS)}) {
+    await new Promise(resolve => requestAnimationFrame(resolve));
+    const now = position();
+    still = now === last ? still + 1 : 0;
+    last = now;
+    if (still >= 3 && (now !== start || performance.now() - began > 200)) {
+      return;
+    }
+  }
+})()`;
+
+/** A scroll's settle wait, bounded here too, so a page that stalls its own frames cannot hold the read. */
+async function scrollSettled(page) {
+  let timer;
+  const cap = new Promise(resolve => {
+    timer = setTimeout(resolve, SCROLL_SETTLE_MS + 500);
+  });
+  try {
+    await Promise.race([page.evaluate(SCROLL_SETTLE_SCRIPT).catch(() => undefined), cap]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** The same bundled module, ending in a read-only look at where the elements at `paths` sit in view. */
+function boxesInViewScript(paths) {
+  return `(() => {\n${EXTRACT_MODULE}\nreturn boxesInView(${JSON.stringify(paths)});\n})()`;
+}
+
+/** How long the model's copy of a screenshot may take to draw. */
+const PICTURE_WORKER_MS = 5000;
+
+/** The same bundled module, ending in the boxes the model's copy of a screenshot must cover. */
+const MASK_BOXES_SCRIPT = `(() => {\n${EXTRACT_MODULE}\nreturn maskBoxes();\n})()`;
+
+/**
+ * Runs a read-only script in a world of its own on the tab's main frame. The page's scripts share
+ * the DOM but not this world's JavaScript, so a page that hooks getBoundingClientRect or watches
+ * its own functions being called cannot bend the result or tell that the shot is being taken.
+ */
+async function isolatedWorld(cdp) {
+  const { frameTree } = await cdp.send('Page.getFrameTree');
+  const { executionContextId } = await cdp.send('Page.createIsolatedWorld', {
+    frameId: frameTree.frame.id,
+    worldName: 'aman-picture',
+  });
+  return executionContextId;
+}
+
+async function inIsolatedWorld({ cdp, executionContextId, expression }) {
+  const { result, exceptionDetails } = await cdp.send('Runtime.evaluate', {
+    expression,
+    contextId: executionContextId,
+    returnByValue: true,
+  });
+  if (exceptionDetails !== undefined) {
+    throw new Error('the layout read failed');
+  }
+  return result.value;
+}
+
+/**
+ * Whether a node of a DOM.getDocument tree holds a form field anywhere below it, shadow roots
+ * included. A frame or embed counts too: what it shows cannot be read here, so it is covered whole.
+ */
+function holdsField(node) {
+  if (['INPUT', 'TEXTAREA', 'SELECT', 'IFRAME', 'FRAME', 'EMBED', 'OBJECT'].includes(node.nodeName)) {
+    return true;
+  }
+  return [...(node.children ?? []), ...(node.shadowRoots ?? [])].some(holdsField);
+}
+
+/**
+ * The boxes of elements whose closed shadow root holds a form field. The page's own DOM cannot reach
+ * a closed root, so the browser's DOM view is asked instead, and the whole element is covered.
+ */
+async function closedShadowFieldBoxes(cdp) {
+  const { root } = await cdp.send('DOM.getDocument', { depth: -1, pierce: true });
+  const hosts = [];
+  const visit = node => {
+    for (const shadow of node.shadowRoots ?? []) {
+      if (shadow.shadowRootType === 'closed' && holdsField(shadow)) {
+        hosts.push(node.backendNodeId);
+      }
+      visit(shadow);
+    }
+    // A frame's own document is covered whole already; its tree is not walked here.
+    for (const child of node.children ?? []) {
+      visit(child);
+    }
+  };
+  visit(root);
+  const boxes = [];
+  for (const backendNodeId of hosts) {
+    const model = await cdp.send('DOM.getBoxModel', { backendNodeId }).catch(() => undefined);
+    if (model === undefined) {
+      continue;
+    }
+    const xs = [0, 2, 4, 6].map(at => model.model.border[at]);
+    const ys = [1, 3, 5, 7].map(at => model.model.border[at]);
+    const left = Math.min(...xs);
+    const top = Math.min(...ys);
+    boxes.push({ left, top, width: Math.max(...xs) - left, height: Math.max(...ys) - top });
+  }
+  return boxes;
+}
 
 /** The same bundled module, ending in a read of one element's field, submit and form context. */
 function elementInfoScript(domPath) {
@@ -95,7 +224,29 @@ function createTab({ page }) {
     fileChooser: undefined,
     // The live view's acts, run one at a time in the order they arrived, so typed keys never swap.
     liveActs: Promise.resolve(),
+    // Whether the person has taken this tab over in the live view: while they have, the model's own
+    // steps on the tab are refused, and the person's hand alone drives it.
+    takeover: false,
+    // Where the live view's pointer last was on the page, so a streamed move walks from there.
+    pointer: undefined,
   };
+}
+
+/**
+ * A picture of a tab's page. A headed window that has not drawn its first frame yet cannot be
+ * captured, which is common right after a page opens, so that one error is tried again shortly.
+ */
+async function capturePage(page, options) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await page.screenshot(options);
+    } catch (error) {
+      if (attempt >= 3 || !String(error).includes('Unable to capture screenshot')) {
+        throw error;
+      }
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+  }
 }
 
 /** Runs one live-view act after every act sent before it has finished, whether or not that one worked. */
@@ -109,20 +260,58 @@ function inLiveOrder(tab, act) {
 }
 
 /**
- * One pointer or keyboard act from the live view. A click read from a frame of another size is
- * scaled to the viewport, so it lands where the person clicked on the picture.
+ * The steps a streamed pointer move is applied in: enough that no single step is a jump, so the
+ * page sees a hand travelling, and never so many that the move lags behind the person's own.
  */
-async function liveAct(page, input) {
+export function pointerSteps(distance) {
+  return Math.min(50, Math.max(1, Math.round(distance / 10)));
+}
+
+/**
+ * A point an act names, scaled from the frame it was read from to the page's viewport, so it lands
+ * where the person touched the picture.
+ */
+function scaledPoint(page, input) {
+  const viewport = page.viewportSize();
+  const scale =
+    viewport !== null && input.imageWidth !== undefined && input.imageHeight !== undefined
+      ? { x: viewport.width / input.imageWidth, y: viewport.height / input.imageHeight }
+      : { x: 1, y: 1 };
+  return { x: input.x * scale.x, y: input.y * scale.y };
+}
+
+/** Walks the tab's pointer to a point in steps from where it last was, and remembers it there. */
+async function movePointer(tab, point) {
+  const last = tab.pointer;
+  const distance = last === undefined ? 0 : Math.hypot(point.x - last.x, point.y - last.y);
+  await tab.page.mouse.move(point.x, point.y, { steps: pointerSteps(distance) });
+  tab.pointer = point;
+}
+
+/**
+ * One pointer or keyboard act from the live view. A click keeps its one-step shape; the takeover
+ * acts (move, down, up) are the person's own press, travelled to and let go where it happened.
+ */
+async function liveAct(tab, input) {
+  const page = tab.page;
   switch (input.kind) {
     case 'click': {
-      const viewport = page.viewportSize();
-      const scale =
-        viewport !== null && input.imageWidth !== undefined && input.imageHeight !== undefined
-          ? { x: viewport.width / input.imageWidth, y: viewport.height / input.imageHeight }
-          : { x: 1, y: 1 };
-      await page.mouse.click(input.x * scale.x, input.y * scale.y);
+      const point = scaledPoint(page, input);
+      await page.mouse.click(point.x, point.y);
+      tab.pointer = point;
       break;
     }
+    case 'move':
+      await movePointer(tab, scaledPoint(page, input));
+      break;
+    case 'down':
+      await movePointer(tab, scaledPoint(page, input));
+      await page.mouse.down();
+      break;
+    case 'up':
+      await movePointer(tab, scaledPoint(page, input));
+      await page.mouse.up();
+      break;
     case 'type':
       await page.keyboard.type(input.text);
       break;
@@ -158,6 +347,30 @@ async function putFile(tab, file) {
   }
   await field.setInputFiles(file);
   return { status: 'ok' };
+}
+
+/** The host a human check's widget is served from, whichever site asked for the check. */
+const CHALLENGE_HOST = 'challenges.cloudflare.com';
+
+/** The title of the full-page check a site shows before its own page loads. */
+const CHALLENGE_TITLE = 'Just a moment...';
+
+/**
+ * Whether the page is showing a human check: the check's own frame sits on the page, or the page
+ * is the check itself. Only the frames' addresses and the title are read; nothing is changed.
+ */
+async function challengeShowing(page) {
+  const title = await page.title().catch(() => '');
+  if (title === CHALLENGE_TITLE) {
+    return true;
+  }
+  return page.frames().some(frame => {
+    try {
+      return new URL(frame.url()).hostname === CHALLENGE_HOST;
+    } catch {
+      return false;
+    }
+  });
 }
 
 /**
@@ -377,6 +590,9 @@ export class BrowserSidecar {
       return { status: 'refused', reason: target.reason };
     }
     const tab = await this.#tabFor({ owner, tab: tabId, create: true });
+    if (tab.takeover) {
+      return { status: 'refused', reason: 'takeover' };
+    }
     tab.refs.reset();
     tab.opened = target.url.href;
     tab.refusedRedirect = undefined;
@@ -413,7 +629,8 @@ export class BrowserSidecar {
       try {
         const nodes = await tab.page.evaluate(EXTRACT_SCRIPT);
         const refs = tab.refs.refsFor(nodes);
-        const text = renderSnapshot({ title: await tab.page.title(), url: tab.page.url(), nodes, refs });
+        const view = await tab.page.evaluate(VIEW_SCRIPT);
+        const text = renderSnapshot({ title: await tab.page.title(), url: tab.page.url(), nodes, refs, view });
         return { status: 'ok', text };
       } catch (error) {
         if (attempt >= READ_ATTEMPTS || !String(error).includes('Execution context was destroyed')) {
@@ -429,7 +646,17 @@ export class BrowserSidecar {
     if (tab === undefined) {
       return NO_TAB;
     }
+    if (tab.takeover) {
+      return { status: 'refused', reason: 'takeover' };
+    }
+    // The wheel scrolls whatever is under the pointer, so it is turned over the middle of the view,
+    // and the pointer goes back to the corner so nothing in the middle stays hovered for the read.
+    const viewport = tab.page.viewportSize() ?? { width: 1280, height: 800 };
+    await tab.page.mouse.move(viewport.width / 2, viewport.height / 2);
     await tab.page.mouse.wheel(0, direction === 'up' ? -800 : 800);
+    await tab.page.mouse.move(0, 0);
+    // The wheel only starts the scroll; reading before it ends would show where the page was.
+    await scrollSettled(tab.page);
     return this.#read(tab);
   }
 
@@ -437,6 +664,9 @@ export class BrowserSidecar {
     const tab = await this.#tabFor({ owner, tab: tabId, create: false });
     if (tab === undefined) {
       return NO_TAB;
+    }
+    if (tab.takeover) {
+      return { status: 'refused', reason: 'takeover' };
     }
     tab.refs.reset();
     tab.goingBack = true;
@@ -454,8 +684,69 @@ export class BrowserSidecar {
     if (!checked.ok) {
       return checked.result;
     }
-    const buffer = await tab.page.screenshot({ type: 'png' });
-    return { status: 'ok', png_base64: buffer.toString('base64') };
+    const seen = await this.#pictureLayout(tab).catch(() => undefined);
+    const buffer = await capturePage(tab.page, { type: 'png' });
+    const model = seen === undefined ? undefined : await this.#modelCopy({ tab, seen, buffer });
+    return {
+      status: 'ok',
+      png_base64: buffer.toString('base64'),
+      ...(model === undefined ? {} : { model_png_base64: model.png.toString('base64'), text: model.text }),
+    };
+  }
+
+  /**
+   * The page as the model's copy of a screenshot needs it: its text snapshot, each control's ref and
+   * box, and every box to cover (hidden fields, frames, and closed shadow roots that hold a field).
+   * The layout is read in an isolated world, and nothing on the page is changed.
+   */
+  async #pictureLayout(tab) {
+    const nodes = await tab.page.evaluate(EXTRACT_SCRIPT);
+    const refs = tab.refs.refsFor(nodes);
+    const cdp = await tab.page.context().newCDPSession(tab.page);
+    try {
+      const executionContextId = await isolatedWorld(cdp);
+      const layout = await inIsolatedWorld({
+        cdp,
+        executionContextId,
+        expression: boxesInViewScript([...refs.keys()]),
+      });
+      const covered = await inIsolatedWorld({ cdp, executionContextId, expression: MASK_BOXES_SCRIPT });
+      // Where the view is, read with the layout so the page text says where the picture was taken.
+      const view = await inIsolatedWorld({ cdp, executionContextId, expression: VIEW_SCRIPT });
+      const text = renderSnapshot({ title: await tab.page.title(), url: tab.page.url(), nodes, refs, view });
+      const closed = await closedShadowFieldBoxes(cdp);
+      const boxOf = new Map(layout.boxes.map(({ path, ...box }) => [path, box]));
+      return {
+        text,
+        width: covered.width,
+        controls: [...refs].flatMap(([path, ref]) => {
+          const box = boxOf.get(path);
+          return box === undefined ? [] : [{ ref, box }];
+        }),
+        masks: [...covered.boxes, ...closed],
+      };
+    } finally {
+      await cdp.detach().catch(() => undefined);
+    }
+  }
+
+  /**
+   * The picture the model sees, with the text snapshot from the same moment: the person's picture
+   * with every password, card or one-time-code field covered and each control boxed with its ref,
+   * drawn here and never in the page. The page is looked at again after the shot; if a hidden
+   * field appeared or moved in between, or anything fails, the model gets no picture at all.
+   */
+  async #modelCopy({ tab, seen, buffer }) {
+    try {
+      const after = await this.#pictureLayout(tab);
+      if (JSON.stringify(after.masks) !== JSON.stringify(seen.masks) || after.width !== seen.width) {
+        return undefined;
+      }
+      const png = await markInWorker({ png: buffer, scale: pngWidth(buffer) / seen.width, ...seen });
+      return { png, text: seen.text };
+    } catch {
+      return undefined;
+    }
   }
 
   /**
@@ -509,6 +800,9 @@ export class BrowserSidecar {
     if (!found.ok) {
       return found.result;
     }
+    if (found.tab.takeover) {
+      return { status: 'refused', reason: 'takeover' };
+    }
     found.tab.refs.reset();
     await found.element.click({ timeout: this.#navTimeoutMs });
     return this.#read(found.tab);
@@ -519,6 +813,9 @@ export class BrowserSidecar {
     const found = await this.#elementFor({ owner, tab: tabId, ref });
     if (!found.ok) {
       return found.result;
+    }
+    if (found.tab.takeover) {
+      return { status: 'refused', reason: 'takeover' };
     }
     const info = await found.tab.page.evaluate(elementInfoScript(found.path));
     if (info === null) {
@@ -537,6 +834,9 @@ export class BrowserSidecar {
     const found = await this.#elementFor({ owner, tab: tabId, ref });
     if (!found.ok) {
       return found.result;
+    }
+    if (found.tab.takeover) {
+      return { status: 'refused', reason: 'takeover' };
     }
     try {
       await found.element.selectOption(option, { timeout: this.#navTimeoutMs });
@@ -581,13 +881,31 @@ export class BrowserSidecar {
     if (tab === undefined) {
       return NO_TAB;
     }
-    const buffer = await tab.page.screenshot({ type: 'jpeg', quality: 60 });
+    const buffer = await capturePage(tab.page, { type: 'jpeg', quality: 60 });
     const viewport = tab.page.viewportSize();
     return {
       status: 'ok',
       jpeg_base64: buffer.toString('base64'),
       ...(viewport === null ? {} : { width: viewport.width, height: viewport.height }),
+      // Whose hand is on the tab, and whether the page is asking for a human check: the view says
+      // both plainly instead of leaving the person to guess at either.
+      takeover: tab.takeover,
+      challenge: await challengeShowing(tab.page),
     };
+  }
+
+  /**
+   * Hands the tab to the person, or back to the model. The tab never leaves the browser: only whose
+   * hand drives it changes, so what the person finishes stays in the page for the next read. While
+   * the tab is taken over, the model's own steps on it are refused (see `open` and the rest).
+   */
+  async liveTakeover({ owner, tab: tabId, on }) {
+    const tab = await this.#tabFor({ owner, tab: tabId, create: false });
+    if (tab === undefined) {
+      return NO_TAB;
+    }
+    tab.takeover = on;
+    return { status: 'ok', takeover: tab.takeover };
   }
 
   /**
@@ -600,7 +918,7 @@ export class BrowserSidecar {
     if (tab === undefined) {
       return NO_TAB;
     }
-    return inLiveOrder(tab, () => liveAct(tab.page, input));
+    return inLiveOrder(tab, () => liveAct(tab, input));
   }
 
   /**
@@ -693,25 +1011,36 @@ const MAX_LIVE_TEXT_LENGTH = 10000;
 const isFiniteNumber = value => typeof value === 'number' && Number.isFinite(value);
 
 /**
+ * The point a pointer act names, with the frame size the point was read from (when the caller
+ * measured one), or undefined when the point is not a point.
+ */
+function parsePoint(body) {
+  if (!isFiniteNumber(body.x) || !isFiniteNumber(body.y)) {
+    return undefined;
+  }
+  const imageWidth = isFiniteNumber(body.image_width) && body.image_width > 0 ? body.image_width : undefined;
+  const imageHeight = isFiniteNumber(body.image_height) && body.image_height > 0 ? body.image_height : undefined;
+  return {
+    x: body.x,
+    y: body.y,
+    ...(imageWidth === undefined ? {} : { imageWidth }),
+    ...(imageHeight === undefined ? {} : { imageHeight }),
+  };
+}
+
+/**
  * A live-view input from the request body, or undefined when it is not one the page can be given:
- * a click with its point (and the frame size the point was read from, when the caller measured one),
- * typed text, one named key, or a scroll step.
+ * a pointer act with its point (a click, or the takeover acts move, down and up), typed text, one
+ * named key, or a scroll step.
  */
 function parseLiveInput(body) {
   switch (body.kind) {
-    case 'click': {
-      if (!isFiniteNumber(body.x) || !isFiniteNumber(body.y)) {
-        return undefined;
-      }
-      const imageWidth = isFiniteNumber(body.image_width) && body.image_width > 0 ? body.image_width : undefined;
-      const imageHeight = isFiniteNumber(body.image_height) && body.image_height > 0 ? body.image_height : undefined;
-      return {
-        kind: 'click',
-        x: body.x,
-        y: body.y,
-        ...(imageWidth === undefined ? {} : { imageWidth }),
-        ...(imageHeight === undefined ? {} : { imageHeight }),
-      };
+    case 'click':
+    case 'move':
+    case 'down':
+    case 'up': {
+      const point = parsePoint(body);
+      return point === undefined ? undefined : { kind: body.kind, ...point };
     }
     case 'type':
       return typeof body.text === 'string' && body.text !== '' && body.text.length <= MAX_LIVE_TEXT_LENGTH
@@ -753,6 +1082,8 @@ const ROUTES = {
     const input = parseLiveInput(body);
     return input === undefined ? { status: 'bad_input' } : sidecar.liveInput({ ...where, input });
   },
+  'POST /live/takeover': (sidecar, where, body) =>
+    typeof body.on === 'boolean' ? sidecar.liveTakeover({ ...where, on: body.on }) : { status: 'bad_input' },
 };
 
 const MAX_ID_LENGTH = 256;
@@ -789,6 +1120,61 @@ export function createHttpServer({ sidecar, allowedPeers }) {
   });
 }
 
+/** Draws the model's copy in a worker of its own (see pictureWorker.mjs) and answers it as a PNG. */
+function markInWorker({ png, scale, controls, masks }) {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL('./pictureWorker.mjs', import.meta.url), {
+      workerData: { png, scale, controls, masks },
+    });
+    // Drawing is bounded work; a worker that has not answered by now is stopped, and no copy is made.
+    const timer = setTimeout(() => {
+      reject(new Error('the picture worker took too long'));
+      void worker.terminate();
+    }, PICTURE_WORKER_MS);
+    worker.once('message', marked => {
+      clearTimeout(timer);
+      resolve(Buffer.from(marked));
+      void worker.terminate();
+    });
+    worker.once('error', error => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    worker.once('exit', code => {
+      clearTimeout(timer);
+      if (code !== 0) {
+        reject(new Error('the picture worker stopped'));
+      }
+    });
+  });
+}
+
+/** The width a PNG says it is, from its header. */
+function pngWidth(png) {
+  return png.readUInt32BE(16);
+}
+
+/**
+ * A fixed reason for a step that failed, never the error's own text: that text can come from the
+ * page (a script error it threw), so it must not reach the model as the browser's words.
+ */
+export function failureReason(error) {
+  const message = error instanceof Error ? error.message : '';
+  if (error instanceof Error && error.name === 'TimeoutError') {
+    return 'timeout';
+  }
+  if (/net::ERR_|NS_ERROR_|Navigation failed/.test(message)) {
+    return 'navigation_failed';
+  }
+  if (/not attached|detached|Target page, context or browser has been closed|Target closed/i.test(message)) {
+    return 'page_changed';
+  }
+  if (/^(page|frame|locator)\.evaluate:/.test(message) || /Execution context was destroyed/.test(message)) {
+    return 'page_script_error';
+  }
+  return 'unknown';
+}
+
 async function handleRequest({ req, res, sidecar }) {
   const route = ROUTES[`${req.method} ${req.url}`];
   if (route === undefined) {
@@ -806,8 +1192,12 @@ async function handleRequest({ req, res, sidecar }) {
     const result = await route(sidecar, { owner: body.owner, tab: body.tab }, body);
     res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(result));
   } catch (error) {
+    // The full message stays in the sidecar's own log; the caller gets only the fixed reason.
+    process.stderr.write(
+      `browser sidecar: ${req.url} failed: ${error instanceof Error ? error.message : String(error)}\n`,
+    );
     res
       .writeHead(500, { 'content-type': 'application/json' })
-      .end(JSON.stringify({ status: 'error', message: error instanceof Error ? error.message : 'unknown error' }));
+      .end(JSON.stringify({ status: 'error', reason: failureReason(error) }));
   }
 }
