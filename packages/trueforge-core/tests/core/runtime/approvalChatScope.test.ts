@@ -95,7 +95,7 @@ describe('the approval event says whether chat scope is offered', () => {
     expect(await canChatAllow('content_steered')).toBe(false);
   });
 
-  it.each(['connector_outbound', 'destructive_action', 'mcp_destructive_hint', 'mcp_open_world_hint', 'gmail_draft'])(
+  it.each(['connector_outbound', 'destructive_action', 'mcp_destructive_hint', 'mcp_open_world_hint'])(
     'withholds it for a %s action whose card names no target',
     async reason => {
       expect(await canChatAllow(reason, { tier3_card: cardTo(null) })).toBe(false);
@@ -105,6 +105,11 @@ describe('the approval event says whether chat scope is offered', () => {
 
   it.each(['schedule_write', 'persona_write'])('withholds it for a %s card', async reason => {
     expect(await canChatAllow(reason, { tier3_card: cardTo(null) })).toBe(false);
+  });
+
+  it('withholds it from a mail draft, whoever the draft is addressed to', async () => {
+    expect(await canChatAllow('gmail_draft', { tier3_card: cardTo('dana@example.org') })).toBe(false);
+    expect(await canChatAllow('gmail_draft')).toBe(false);
   });
 
   it('withholds it from every send and every change that invites or emails guests', async () => {
