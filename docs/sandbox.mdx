@@ -222,7 +222,10 @@ through a file or a link is refused with a plain message naming it.
 The shell tool runs repository and workspace commands. It does not run inline code
 (`python3 -c`, `node -e` and the like), a script by path, or any other Python module; those go
 through `run_code`. Building and testing a Python project is the exception: `python3 -m pytest`,
-`python3 -m pip`, `python3 -m venv` and `python3 -m unittest` run in the shell.
+`python3 -m pip`, `python3 -m venv` and `python3 -m unittest` run in the shell. So does a script
+that ships with a skill turned on in the chat, run by its path in the skill's folder (for example
+`python3 /workspace/.aman/skills/<skill>/scripts/<script>.py`), because `run_code` cannot see the
+skill's other files. Running one shows the usual command card.
 
 A reply can do as much work inside the sandbox workspace as the task needs: writing and editing
 files, running code, builds and tests. Two limits still apply to every reply:
