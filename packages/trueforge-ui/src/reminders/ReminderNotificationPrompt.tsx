@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 
 import { useAssistantDisplayName } from '../components/PersonalizationContext.js';
 import { useOptionalDeliveries } from '../deliveries/DeliveriesContext.js';
-import { currentPushSubscription, enablePush, pushSupport } from '../deliveries/pushDevice.js';
+import { enablePush, pushStatus, pushSupport } from '../deliveries/pushDevice.js';
 
 type Offer = 'checking' | 'offer' | 'none';
 
@@ -25,11 +25,9 @@ export function ReminderNotificationPrompt() {
       return;
     }
     let cancelled = false;
-    void Promise.all([currentPushSubscription().catch(() => null), api.pushPublicKey().catch(() => null)]).then(
-      ([subscription, key]) => {
-        if (!cancelled) setOffer(subscription === null && key !== null ? 'offer' : 'none');
-      },
-    );
+    void pushStatus({ api }).then(status => {
+      if (!cancelled) setOffer(status.serverReady && !status.on ? 'offer' : 'none');
+    });
     return () => {
       cancelled = true;
     };
@@ -42,19 +40,24 @@ export function ReminderNotificationPrompt() {
       className="border-border bg-secondary-bg text-text-primary mt-2 rounded-xl border px-3 py-2 text-sm"
     >
       <p>
-        Want a notice on this device when a reminder is due? {assistant} can show one even when Aman is closed. It says
-        only that a reminder is there.
+        Want a notice on this device when a reminder is due? {assistant} can show one even when {assistant} is closed.
+        It says only that a reminder is there.
       </p>
       <div className="mt-2 flex gap-2">
         <button
           type="button"
           onClick={() => {
             setError(null);
-            void enablePush({ api, label: 'This device' })
+            void enablePush({ api, label: 'This device', assistant })
               .then(() => setOffer('none'))
-              .catch((caught: unknown) =>
-                setError(caught instanceof Error ? caught.message : 'Notices could not be turned on. Try again.'),
-              );
+              .catch((caught: unknown) => {
+                console.error(caught);
+                setError(
+                  caught instanceof Error
+                    ? caught.message
+                    : 'Notices could not be turned on. Reload the page, then try again.',
+                );
+              });
           }}
           className="bg-primary-button-bg text-primary-button-text rounded-lg px-3 py-1 text-sm font-medium"
         >

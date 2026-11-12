@@ -134,7 +134,10 @@ describe('Spaces list folders', () => {
     const section = await screen.findByRole('region', { name: 'Moving' });
     expect(within(section).getByText('Empty folder')).toBeInTheDocument();
     fireEvent.click(within(section).getByRole('button', { expanded: true }));
-    expect(within(section).queryByText('Empty folder')).not.toBeInTheDocument();
+    // A click that lands just as the folder appears is followed a moment later, not at once.
+    await waitFor(() => expect(within(section).queryByText('Empty folder')).not.toBeInTheDocument());
+    fireEvent.click(within(section).getByRole('button', { expanded: false }));
+    expect(within(section).getByText('Empty folder')).toBeInTheDocument();
   });
 
   it('makes a new folder from the New folder button', async () => {

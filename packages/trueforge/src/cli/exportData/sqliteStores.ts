@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 
 import { DeliveryStore } from '../../db/deliveryStore';
 import { migrateSqliteToLatest } from '../../db/migrateSqlite';
+import { ReachSettingsStore } from '../../db/reachSettingsStore';
 import { SentinelAuditStore } from '../../db/sentinelAuditStore';
 import { SqliteAgentStore } from '../../db/sqlite/agent-store/SqliteAgentStore';
 import { createSqliteDb } from '../../db/sqlite/client';
@@ -56,6 +57,7 @@ export async function openSqliteStores(options: {
     googleConnectionStore: new SqliteGoogleConnectionStore(db),
     auditStore: new SentinelAuditStore(db),
     deliveryStore: new DeliveryStore(db),
+    reachSettingsStore: new ReachSettingsStore(db),
     close: () => db.destroy(),
   };
 }

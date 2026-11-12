@@ -252,7 +252,12 @@ function RemoteImageThumbnail({ src, alt }: { src: string; alt: string }) {
  * exception: its https pictures load through the owner's picture route. Same-origin, data: and blob:
  * images still render inline.
  */
-function MarkdownImage({
+/**
+ * The one image treatment for everything chat markdown renders, fenced generative UI
+ * included: the OpenUI fence library swaps its own image and markdown components for
+ * ones that render through this gate (see lib/gatedOpenUiLibrary).
+ */
+export function MarkdownImage({
   src,
   alt,
   imgProps,
@@ -408,7 +413,14 @@ function makeComponents(opts: {
       }
 
       if (language === 'openui') {
-        return <OpenUiFenceBlock content={code} isStreaming={isStreaming} darkTheme={darkTheme} />;
+        return (
+          <OpenUiFenceBlock
+            content={code}
+            isStreaming={isStreaming}
+            darkTheme={darkTheme}
+            spacePictures={spacePictures === true}
+          />
+        );
       }
 
       if (language === 'sandbox_artifacts') {

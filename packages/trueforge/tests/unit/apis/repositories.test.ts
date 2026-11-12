@@ -91,6 +91,8 @@ async function setup(
     metadata: {},
     external_id: null,
     source: null,
+    is_incognito: false,
+    private_expires_at: null,
   });
   return {
     app,

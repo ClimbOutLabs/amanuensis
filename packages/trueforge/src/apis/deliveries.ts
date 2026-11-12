@@ -12,6 +12,7 @@ import {
   getDeliveryUnreadCountRoute,
   getPushConfigRoute,
   listDeliveriesRoute,
+  lookupPushSubscriptionRoute,
   markAllDeliveriesSeenRoute,
   markDeliveriesSeenRoute,
 } from '../routes/deliveryRoutes';
@@ -135,9 +136,16 @@ export function createPushRouter(deps: PushRouterDeps) {
     return c.json({}, 200);
   };
 
+  const lookupHandler: RouteHandler<typeof lookupPushSubscriptionRoute> = async c => {
+    const { endpoint } = c.req.valid('json');
+    const saved = await deps.pushSubscriptionStore.hasEndpoint({ ...ownerOf(c), endpoint });
+    return c.json({ data: { saved } }, 200);
+  };
+
   const router = new OpenAPIHono();
   router.openapi(getPushConfigRoute, configHandler);
   router.openapi(createPushSubscriptionRoute, createHandler);
   router.openapi(deletePushSubscriptionRoute, deleteHandler);
+  router.openapi(lookupPushSubscriptionRoute, lookupHandler);
   return router;
 }
