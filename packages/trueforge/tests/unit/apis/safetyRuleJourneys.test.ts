@@ -255,7 +255,9 @@ describe('an email address the person never gave', () => {
   );
 });
 
-describe('an address with a sign-in name before the site', () => {
+const GUIDE_SITE = 'https://guide.example/camping/';
+
+describe('a page Aman opens in its browser', () => {
   let server: ApprovalTestServer;
   let browser: Server;
   const opened: string[] = [];
@@ -304,6 +306,53 @@ describe('an address with a sign-in name before the site', () => {
       browser.close(() => resolve());
     });
   });
+
+  beforeEach(() => {
+    opened.length = 0;
+  });
+
+  /** Asks for one page to be opened, without the address being in the person's own message. */
+  async function open({ chatId, url }: { chatId: string; url: string }) {
+    server.model.next({ toolArguments: { url } });
+    return cards(await runTurn({ server, chatId, input: ask('browser_open') }));
+  }
+
+  /** A new chat where only Aman's reply brought up the guide site and one search link on it. */
+  async function chatWhereTheReplyNamedTheSite(): Promise<string> {
+    const chatId = await createChat(server);
+    server.model.next({
+      reply: `The guide is at ${GUIDE_SITE}. You can search it at ${GUIDE_SITE}search.html?q=tents.`,
+    });
+    await runTurn({ server, chatId, input: [{ type: 'user.message', content: 'Where is the camping guide?' }] });
+    return chatId;
+  }
+
+  it.each([
+    ['the exact link the reply wrote', `${GUIDE_SITE}search.html?q=tents`],
+    ['a plain deeper page', `${GUIDE_SITE}packing/list.html`],
+  ])(
+    "on a site only Aman's reply named, %s opens without a card",
+    async (_label, url) => {
+      const chatId = await chatWhereTheReplyNamedTheSite();
+      expect(await open({ chatId, url })).toEqual([]);
+      expect(opened).toEqual([url]);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    "on a site only Aman's reply named, a link that adds details asks first",
+    async () => {
+      const chatId = await chatWhereTheReplyNamedTheSite();
+      const [card, ...others] = await open({ chatId, url: `${GUIDE_SITE}search.html?q=stoves` });
+      expect(others).toEqual([]);
+      expect(card?.tier3_card?.plain_what).toContain(
+        'You did not name this site. Aman brought it up in an earlier reply, and this link adds details to it, so Aman is checking with you first.',
+      );
+      expect(opened).toEqual([]);
+    },
+    TURN_TIMEOUT_MS,
+  );
 
   it(
     'once a page has been read, the address the person gave still opens, and the same address with a sign-in name asks first',
