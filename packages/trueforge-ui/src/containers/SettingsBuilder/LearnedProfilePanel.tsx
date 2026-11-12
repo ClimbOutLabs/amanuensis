@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, type FormEvent } from 'react';
+import { useState, type FormEvent } from 'react';
 
 import { Markdown } from '../../atoms/Markdown.js';
 import { auiSettingsInputClass } from '../../atoms/lib/inputClasses.js';
@@ -21,31 +21,33 @@ import {
 export default function LearnedProfilePanel() {
   const assistant = useAssistantDisplayName();
   const { profile, loading, loadError, updateProfile } = usePersonalization();
-  const [learnedProfile, setLearnedProfile] = useState<string | null>(null);
-  // Undefined until the profile loads or the user touches the switch: a host that never
-  // sent the switch must not be sent one back.
-  const [learningEnabled, setLearningEnabled] = useState<boolean | undefined>(undefined);
+  // The person's unsaved changes, undefined while untouched. What shows is the change if there
+  // is one, else the loaded profile. Reading the profile at render time (rather than copying it
+  // into state in an effect) means a profile that arrives just as the person clicks can never
+  // overwrite the click.
+  const [learnedProfileEdit, setLearnedProfileEdit] = useState<string | null | undefined>(undefined);
+  const [learningEnabledEdit, setLearningEnabledEdit] = useState<boolean | undefined>(undefined);
+  const learnedProfile = learnedProfileEdit === undefined ? (profile?.learned_profile ?? null) : learnedProfileEdit;
+  // Undefined while the host never sent the switch and the person has not touched it: a host
+  // that never sent the switch must not be sent one back.
+  const learningEnabled = learningEnabledEdit ?? profile?.learning_enabled;
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<{ tone: 'error' | 'success'; message: string } | null>(null);
-
-  useEffect(() => {
-    setLearnedProfile(profile?.learned_profile ?? null);
-    setLearningEnabled(profile?.learning_enabled);
-  }, [profile]);
 
   const save = async (event: FormEvent) => {
     event.preventDefault();
     setSaving(true);
     setFeedback(null);
     try {
-      const saved = await updateProfile({
+      await updateProfile({
         ...(profile ?? EMPTY_PERSONALIZATION_PROFILE),
         learned_profile: learnedProfile !== null && learnedProfile.trim() !== '' ? learnedProfile : null,
         ...(learningEnabled === undefined ? {} : { learning_enabled: learningEnabled }),
       });
-      setLearnedProfile(saved.learned_profile);
-      setLearningEnabled(saved.learning_enabled);
+      // The provider now holds the saved profile, so the edits are folded in.
+      setLearnedProfileEdit(undefined);
+      setLearningEnabledEdit(undefined);
       setFeedback({ tone: 'success', message: 'Learned profile saved.' });
     } catch (error) {
       setFeedback({
@@ -97,7 +99,7 @@ export default function LearnedProfilePanel() {
                 aria-label="Learn from conversations"
                 disabled={saving}
                 className="mt-0.5"
-                onCheckedChange={checked => setLearningEnabled(checked)}
+                onCheckedChange={checked => setLearningEnabledEdit(checked)}
               />
             </div>
 
@@ -109,7 +111,7 @@ export default function LearnedProfilePanel() {
                 aria-label="Learned profile document"
                 className={auiSettingsInputClass('mt-3 min-h-40 resize-y font-mono')}
                 value={learnedProfile}
-                onChange={event => setLearnedProfile(event.target.value)}
+                onChange={event => setLearnedProfileEdit(event.target.value)}
               />
             ) : (
               <div className="mt-3 rounded-md border border-border/70 bg-input-box-bg px-3 py-2.5 text-sm">
@@ -128,7 +130,7 @@ export default function LearnedProfilePanel() {
                   size="small"
                   onClick={() => {
                     setEditing(false);
-                    setLearnedProfile(null);
+                    setLearnedProfileEdit(null);
                   }}
                 >
                   Clear learned profile

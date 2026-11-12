@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   briefFooterLine,
+  briefOmittedLine,
   briefTopBarTitle,
   briefWhenLabel,
   buildBriefView,
@@ -66,6 +67,17 @@ describe('buildBriefView', () => {
     expect(view.sections.map(section => section.items.length)).toEqual([1]);
     expect(view.sections[0]?.count).toBe(1);
     expect(view.hiddenCount).toBe(0);
+  });
+});
+
+describe('briefOmittedLine', () => {
+  it('is empty when nothing was left out', () => {
+    expect(briefOmittedLine(0)).toBe('');
+  });
+
+  it('counts one item and many items in plain words, with the next step', () => {
+    expect(briefOmittedLine(1)).toBe('1 item could not be shown. Ask for your brief again to try once more.');
+    expect(briefOmittedLine(3)).toBe('3 items could not be shown. Ask for your brief again to try once more.');
   });
 });
 
