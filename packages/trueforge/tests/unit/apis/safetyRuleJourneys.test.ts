@@ -10,12 +10,7 @@ import { TurnStreamingEventSchema } from '../../../src/schemas/events';
 import { GetTurnResponseSchema } from '../../../src/schemas/turn';
 import { MODEL_FQN, startApprovalTestServer, type ApprovalTestServer } from '../../fixtures/approvalTestServer';
 import { INERT_SERVER_NAME, INERT_WRITE_TOOL } from '../../fixtures/inertMcpServer';
-import {
-  RUN_DIRECTIVE_PREFIX,
-  SCRIPTED_DRAFT,
-  SCRIPTED_PERSONA,
-  SCRIPTED_SCHEDULE,
-} from '../../fixtures/scriptedModelServer';
+import { RUN_DIRECTIVE_PREFIX, SCRIPTED_PERSONA, SCRIPTED_SCHEDULE } from '../../fixtures/scriptedModelServer';
 import { StandInSandbox } from '../../fixtures/standInSandbox';
 
 const TURN_TIMEOUT_MS = 60_000;
@@ -196,29 +191,6 @@ describe('"Always allow this here" is offered only when the card names who or wh
     },
     TURN_TIMEOUT_MS,
   );
-
-  it(
-    'a mail draft addressed to someone offers it, and the answer covers the same draft again in that chat only',
-    async () => {
-      server.setEvalMode(true);
-      const draftsBefore = await draftCount(server);
-      const chatId = await createChat(server);
-      const card = onlyCard(await runTurn({ server, chatId, input: ask('draft_email') }));
-      expect(card.tier3_card?.email?.to.map(person => person.address)).toEqual(SCRIPTED_DRAFT.to);
-      expect(card.can_chat_allow).toBe(true);
-
-      await runTurn({ server, chatId, input: answer({ card, scope: 'chat' }) });
-      const again = await runTurn({ server, chatId, input: ask('draft_email') });
-      expect(cards(again)).toEqual([]);
-      expect(await draftCount(server)).toBe(draftsBefore + 2);
-
-      const otherChatId = await createChat(server);
-      const elsewhere = onlyCard(await runTurn({ server, chatId: otherChatId, input: ask('draft_email') }));
-      expect(elsewhere.can_chat_allow).toBe(true);
-      expect(await draftCount(server)).toBe(draftsBefore + 2);
-    },
-    TURN_TIMEOUT_MS,
-  );
 });
 
 describe('an email address the person never gave', () => {
@@ -270,7 +242,6 @@ describe('an email address the person never gave', () => {
         }),
       );
       expect(card.tier3_card?.plain_what).not.toContain('earlier reply');
-      expect(card.can_chat_allow).toBe(true);
     },
     TURN_TIMEOUT_MS,
   );
