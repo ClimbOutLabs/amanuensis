@@ -185,7 +185,7 @@ cmd_migrate() {
   # Shared memories and instance settings can hold other people's data, so they come along only when one person used it.
   if [ "$count" = 1 ]; then include=(--include-instance-data); fi
 
-  say "Exporting the chats of $user from the copy"
+  say "Exporting the chats of ${display:-$user} from the copy"
   migrate_export --migrate --include-uploads ${include[@]+"${include[@]}"} --user "$user" \
     --secrets-env /migrate/old.env --out /out/aman-export.zip >/dev/null 2>"$log" ||
     die "Export failed: $(cli_reason "$log" "The export stopped without giving a reason. Run this again.")"
