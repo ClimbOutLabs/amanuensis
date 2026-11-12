@@ -142,7 +142,7 @@ const PersonaForm: FC<PersonaFormProps> = ({
         </label>
         <input
           id="persona-mail-accounts"
-          className={inputClassName}
+          className={auiSettingsInputClass()}
           value={mailAccountsText}
           placeholder="Every connected account"
           onChange={event => onMailAccountsTextChange(event.target.value)}
