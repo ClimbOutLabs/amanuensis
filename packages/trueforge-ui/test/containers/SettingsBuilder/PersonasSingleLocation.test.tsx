@@ -87,7 +87,7 @@ describe('Personas render in exactly one place in Settings', () => {
     ).toEqual(['Roles', 'Personas']);
     expect(within(pageTabs).getByRole('tab', { name: 'Roles' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('heading', { name: 'Main chat model' })).toBeInTheDocument();
-    expect(screen.queryByText('Zara')).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Personas' })).not.toBeInTheDocument();
 
     // On the Personas sub-tab: exactly one "Personas" region, the configured
     // persona listed once, and the role assignments gone.
@@ -95,5 +95,23 @@ describe('Personas render in exactly one place in Settings', () => {
     expect(await screen.findAllByText('Zara')).toHaveLength(1);
     expect(screen.getAllByRole('region', { name: 'Personas' })).toHaveLength(1);
     expect(screen.queryByRole('heading', { name: 'Main chat model' })).not.toBeInTheDocument();
+  }, 60000);
+
+  it('keeps a half-typed persona when switching to Roles and back', async () => {
+    render(<TestShell />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open settings' }));
+    fireEvent.click(await screen.findByRole('tab', { name: 'Roles and Personas' }));
+    const pageTabs = await screen.findByRole('tablist', { name: 'Roles and Personas sections' }, { timeout: 20000 });
+
+    fireEvent.click(within(pageTabs).getByRole('tab', { name: 'Personas' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Add persona' }));
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Milo' } });
+
+    fireEvent.click(within(pageTabs).getByRole('tab', { name: 'Roles' }));
+    expect(screen.getByRole('heading', { name: 'Main chat model' })).toBeInTheDocument();
+    fireEvent.click(within(pageTabs).getByRole('tab', { name: 'Personas' }));
+
+    expect(screen.getByLabelText('Name')).toHaveValue('Milo');
   }, 60000);
 });

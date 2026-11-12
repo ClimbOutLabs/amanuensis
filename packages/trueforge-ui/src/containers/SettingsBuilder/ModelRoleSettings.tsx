@@ -31,7 +31,8 @@ const MODEL_ROLES_TABS: ReadonlyArray<{ id: ModelRolesTab; label: string }> = [
  * uses): Roles for the assignments, Personas for the named personas. A host
  * with no personas gets no tab strip and sees the roles alone, exactly as
  * before. The save-failure line stays above the tabs; it belongs to the
- * whole page.
+ * whole page. The persona list stays mounted (hidden) while Roles is shown, so
+ * a persona half-typed in its form survives a trip to the other tab.
  */
 const ModelRoleSettings = () => {
   const assistant = useAssistantDisplayName();
@@ -129,7 +130,11 @@ const ModelRoleSettings = () => {
           </section>
         ) : null}
 
-        {activeTab === 'personas' && personas != null ? <PersonaSettings /> : null}
+        {personas == null ? null : (
+          <div hidden={activeTab !== 'personas'}>
+            <PersonaSettings />
+          </div>
+        )}
       </div>
     </>
   );
