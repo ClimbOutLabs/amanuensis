@@ -125,7 +125,10 @@ recall screen and the record of where links came from treat a person's own note 
 stores.
 
 A note of the assistant's reply can also carry `reply_read_nothing`. The save sets it only when the turn read
-nothing from outside and the chat's record says no earlier turn, recalled note or summary did either. The
+nothing from outside and the chat's record says no earlier turn, recalled note or summary did either. Memory
+shown in an earlier turn is not in the chat's messages, so the memory capability keeps one flag in its
+cross-turn state (`recalled_outside_text`) once a block it built held anything but the person's own words,
+and `chatSawOutsideText` reads it. The
 store writes it as the closing line `> External source: assistant reply, nothing read before it`, and reads it
 back only when the hidden note line also says the note is a reply. Body text that looks like either line is
 escaped, an edit turns the note back into a plain reply note, and an import never sets it. At recall such a

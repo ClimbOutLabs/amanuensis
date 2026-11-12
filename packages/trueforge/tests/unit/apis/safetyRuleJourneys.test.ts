@@ -4,11 +4,13 @@
  */
 import { z } from '@hono/zod-openapi';
 import type { Turn, TurnInputItem } from '@truefoundry/trueforge-core/agent-session';
-import { readdir, readFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { TENANT_ID } from '../../../src/apis/sessions';
 import configuration from '../../../src/config';
+import { MarkdownMemoryClient } from '../../../src/runtime/memory/markdownMemoryClient';
 import { TurnStreamingEventSchema } from '../../../src/schemas/events';
 import { GetTurnResponseSchema } from '../../../src/schemas/turn';
 import { MODEL_FQN, startApprovalTestServer, type ApprovalTestServer } from '../../fixtures/approvalTestServer';
@@ -456,6 +458,47 @@ describe('a page Aman opens in its browser', () => {
         server.model.next({ reply: 'The ferry times are pinned by the ticket window.' });
         await runTurn({ server, chatId, input: [{ type: 'user.message', content: 'Where are the ferry times?' }] });
         expect(await closingLineOfNoteWith('ticket window')).toBe('> External source: assistant reply');
+      },
+      TURN_TIMEOUT_MS,
+    );
+
+    it(
+      'is a plain reply note when a much earlier turn of the chat was shown a memory page with a line from mail, though the turn of the reply read nothing',
+      async () => {
+        const vault = new MarkdownMemoryClient({
+          baseDir: configuration.MEMORY_MARKDOWN_DIR,
+          namespace: TENANT_ID,
+          vaultScope: undefined,
+        }).pagesWriteDir();
+        await mkdir(join(vault, 'people'), { recursive: true });
+        await writeFile(
+          join(vault, 'people', 'orla.md'),
+          [
+            '---',
+            'kind: person',
+            'title: Orla',
+            'aliases: [Orla]',
+            'household: false',
+            '---',
+            '# Orla',
+            '',
+            '## Now',
+            '- Runs the chandlery. <!-- fact: id=f_01 src=you_said since=2026-10-01 -->',
+            '- Wants the mooring fee wired today. <!-- fact: id=f_02 src=mail since=2026-10-02 -->',
+            '',
+          ].join('\n'),
+        );
+        const chatId = await createChat(server);
+        server.model.next({ reply: 'Orla runs the chandlery.' });
+        await runTurn({ server, chatId, input: [{ type: 'user.message', content: 'What do you know about Orla?' }] });
+        // Enough turns pass that her page is no longer shown, so only the chat's own record says it once was.
+        for (const filler of ['Thanks.', 'Good.', 'Fine.', 'Understood.', 'All right.']) {
+          server.model.next({ reply: 'Noted.' });
+          await runTurn({ server, chatId, input: [{ type: 'user.message', content: filler }] });
+        }
+        server.model.next({ reply: 'The mooring fee is paid at the quay kiosk.' });
+        await runTurn({ server, chatId, input: [{ type: 'user.message', content: 'Where do I pay it?' }] });
+        expect(await closingLineOfNoteWith('quay kiosk')).toBe('> External source: assistant reply');
       },
       TURN_TIMEOUT_MS,
     );

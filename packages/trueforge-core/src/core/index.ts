@@ -574,6 +574,7 @@ export type { ToolGrantIdentity, ToolGrantKey, ToolGrantStore } from './permissi
 export {
   PAGE_PICTURES_LABEL,
   SILENT_SEARCH_LIMIT,
+  chatSawOutsideText,
   createWebSearchTurnState,
   pageImageUrls,
 } from './permissions/webSearch';

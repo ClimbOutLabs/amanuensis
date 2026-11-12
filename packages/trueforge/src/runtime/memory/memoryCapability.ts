@@ -295,6 +295,8 @@ interface MemoryDurableState {
    * compaction has been observed.
    */
   lastCompactionMarker: string | null;
+  /** Whether a memory block shown in an earlier turn of this chat held text that is not the person's own. */
+  recalledOutsideText: boolean;
 }
 
 /** Defensive load, matching {@link parsePendingState}: any unexpected shape reads as the field's default. */
@@ -307,7 +309,12 @@ function parseDurableState(value: JsonValue): MemoryDurableState {
     typeof rawTurns === 'number' && Number.isInteger(rawTurns) && rawTurns >= 0 ? rawTurns : 0;
   const rawMarker = record['recall_damping_marker'];
   const lastCompactionMarker = typeof rawMarker === 'string' ? rawMarker : null;
-  return { pending, dampingTurnsRemaining, lastCompactionMarker };
+  return {
+    pending,
+    dampingTurnsRemaining,
+    lastCompactionMarker,
+    recalledOutsideText: record['recalled_outside_text'] === true,
+  };
 }
 
 function hasRole(message: ContextMessage): message is ContextMessage & { role: string; content: unknown } {
@@ -1432,6 +1439,7 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
   private readonly blockWatch: TurnReadWatch | undefined;
   /** The turn's search state: the injected block is the person's own data, so a search carrying it asks. */
   private readonly webSearch: WebSearchTurnState | undefined;
+  private recalledOutsideText = false;
   /** True only when summaries are off, so a turn is saved as its full exchange and a vanished one may be rebuilt from the chat. */
   private readonly keepsFullExchange: boolean;
   /** The person's time zone, so a recalled memory's day reads as they lived it. */
@@ -1488,6 +1496,17 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
     this.pending = parsed.pending;
     this.dampingTurnsRemaining = parsed.dampingTurnsRemaining;
     this.lastCompactionMarker = parsed.lastCompactionMarker;
+    if (parsed.recalledOutsideText) {
+      this.noteRecalledOutsideText();
+    }
+  }
+
+  /** The block of a later turn is built anew, so the chat keeps that an earlier one held outside text. */
+  private noteRecalledOutsideText(): void {
+    this.recalledOutsideText = true;
+    if (this.webSearch !== undefined) {
+      this.webSearch.recalledOutsideText = true;
+    }
   }
 
   private durableStateSnapshot(): string {
@@ -1499,6 +1518,7 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
       pending: this.pending,
       recall_damping_turns_remaining: this.dampingTurnsRemaining,
       recall_damping_marker: this.lastCompactionMarker,
+      recalled_outside_text: this.recalledOutsideText,
     };
   }
 
@@ -1830,14 +1850,16 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
     // Injected even when every line was withheld or dropped: the stats line then honestly notes
     // the withholding instead of the block silently vanishing.
     this.cachedBlock = formatted.block;
-    this.blockWatch?.noteBlock({
-      holdsOutsideText:
-        screening.injectedItems.some(item => recalledItemSource(item).kind !== 'person') ||
-        screening.injectedEntities.length > 0 ||
-        screening.injectedCurated.length > 0 ||
-        screening.injectedReflection !== undefined ||
-        screening.injectedPages.some(page => page.holdsOutsideText),
-    });
+    const holdsOutsideText =
+      screening.injectedItems.some(item => recalledItemSource(item).kind !== 'person') ||
+      screening.injectedEntities.length > 0 ||
+      screening.injectedCurated.length > 0 ||
+      screening.injectedReflection !== undefined ||
+      screening.injectedPages.some(page => page.holdsOutsideText);
+    this.blockWatch?.noteBlock({ holdsOutsideText });
+    if (holdsOutsideText) {
+      this.noteRecalledOutsideText();
+    }
     if (this.webSearch !== undefined) {
       // The block holds a leading run of what the screen let through, so the same runs are recorded.
       const entitiesLine = formatEntitiesLine(screening.injectedEntities.slice(0, formatted.includedEntities));

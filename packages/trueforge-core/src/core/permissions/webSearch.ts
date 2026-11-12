@@ -17,14 +17,15 @@ import { REPLACE_TASK_CHECKLIST_TOOL_NAME, TASK_STATE_TOOL_NAME } from '../runti
 import { isPageReaderTool, isSearchResultTool } from '../search/fetchedPages';
 import { BROWSER_OPEN_SILENT_REASON, BROWSER_OPEN_TOOL_NAME, isBrowserToolName } from './browserToolNames';
 import {
+  type ChatProvenance,
   emptyChatProvenance,
+  hasReadContent,
   namesUrl,
+  type ReadSource,
   recordEmailText,
   recordPageImageUrls,
   recordSearchResults,
   recordUntrustedText,
-  type ChatProvenance,
-  type ReadSource,
 } from './provenance';
 
 /**
@@ -93,10 +94,17 @@ export interface WebSearchTurnState {
   provenance: ChatProvenance;
   /** Whether a tool that can return text from outside the chat has answered in this chat, a plain search included. */
   outsideToolResult: boolean;
+  /** Whether memory shown in any turn of this chat held text that is not the person's own words. */
+  recalledOutsideText: boolean;
   /** The name the person calls the assistant, for the sentences on its cards. */
   assistantName: string;
   /** Tail of the one-at-a-time chain that classifies and counts the turn's search calls. */
   admission: Promise<void>;
+}
+
+/** Whether any turn of this chat has seen text that is not the person's own: read content, a tool's answer or recalled memory. */
+export function chatSawOutsideText(state: WebSearchTurnState): boolean {
+  return hasReadContent(state.provenance) || state.outsideToolResult || state.recalledOutsideText;
 }
 
 export function createWebSearchTurnState(): WebSearchTurnState {
@@ -105,6 +113,7 @@ export function createWebSearchTurnState(): WebSearchTurnState {
     sentText: '',
     provenance: emptyChatProvenance(),
     outsideToolResult: false,
+    recalledOutsideText: false,
     assistantName: DEFAULT_ASSISTANT_NAME,
     admission: Promise.resolve(),
   };

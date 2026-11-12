@@ -28,9 +28,9 @@ import {
 import {
   AgentHarnessError,
   callResultSource,
+  chatSawOutsideText,
   existingSandboxIdForProvider,
   extractErrorLogFields,
-  hasReadContent,
   HeldActionRefusedError,
   isAgentInputUserMessage,
   isFileContentPart,
@@ -1991,8 +1991,7 @@ async function beginAcceptedTurnExecution(
               session: session.record,
               userText: extractUserMessageText(input ?? []),
               attachedFiles: inputAttachesFiles(input ?? []),
-              chatHasReadContent: () =>
-                hasReadContent(resolver.webSearchTurn.provenance) || resolver.webSearchTurn.outsideToolResult,
+              chatHasReadContent: () => chatSawOutsideText(resolver.webSearchTurn),
               timeZone: deps.clientTimezone,
               summarize: memorySummarize,
             },
@@ -3170,8 +3169,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
                   session: session.record,
                   userText: extractUserMessageText(body.input),
                   attachedFiles: inputAttachesFiles(body.input ?? []),
-                  chatHasReadContent: () =>
-                    hasReadContent(resolver.webSearchTurn.provenance) || resolver.webSearchTurn.outsideToolResult,
+                  chatHasReadContent: () => chatSawOutsideText(resolver.webSearchTurn),
                   timeZone: body.client_timezone,
                   // Resolved once on the create-turn path above; absent means verbatim.
                   summarize: memorySummarize,
