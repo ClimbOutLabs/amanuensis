@@ -14,7 +14,7 @@ import { TIER2_ACTION_KINDS, TIER2_ACTION_LABELS, type Tier2ActionKind } from '.
  * switch and the sandbox switch. While offline mode is on, actions outside this device are auto-denied without an approval
  * card, and the persistent offline indicator shows in the app shell. The search switch decides whether
  * the connector you designated as your search provider asks before each search. The maps switch
- * decides whether maps ask first. After this chat reads mail or calendar, a map is checked against that text first.
+ * decides whether maps ask first. A scheduled run never waits on a map: with the switch off it skips the map.
  */
 export const SentinelSettings: FC = () => {
   const assistant = useAssistantDisplayName();
@@ -178,7 +178,7 @@ export const SentinelSettings: FC = () => {
           <p className="mt-1 text-sm text-text-secondary">
             {mapsWithoutAsking
               ? 'Maps run without asking. A map asks first only if it would send a password or key.'
-              : 'Maps ask before each one.'}
+              : 'Maps ask before each one. A scheduled run, such as a daily briefing, skips its maps.'}
           </p>
           {mapsError !== null && (
             <p className="mt-2 text-xs text-failure-bg" role="alert">
@@ -219,7 +219,7 @@ export const SentinelSettings: FC = () => {
       </div>
 
       <div className="rounded-lg border border-border p-4">
-        <p className="text-sm font-medium text-text-primary">Always allow</p>
+        <p className="text-sm font-medium text-text-primary">Always allow everywhere</p>
         <p className="mt-1 text-sm text-text-secondary">
           Off means the assistant asks before each of these. On means it runs them without asking.
         </p>

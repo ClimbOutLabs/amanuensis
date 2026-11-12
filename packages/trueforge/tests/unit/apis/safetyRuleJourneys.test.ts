@@ -9,6 +9,7 @@ import configuration from '../../../src/config';
 import { TurnStreamingEventSchema } from '../../../src/schemas/events';
 import { GetTurnResponseSchema } from '../../../src/schemas/turn';
 import { MODEL_FQN, startApprovalTestServer, type ApprovalTestServer } from '../../fixtures/approvalTestServer';
+import { HARBOUR_ADDRESS, installRecordedTavily } from '../../fixtures/groundedFinderFixtures';
 import {
   HA_CALL_ACTION_TOOL,
   HA_LAMP,
@@ -16,7 +17,13 @@ import {
   startHomeAssistantStub,
   type HomeAssistantStub,
 } from '../../fixtures/homeAssistantMcpServer';
-import { INERT_GET_PAGE_TOOL, INERT_SERVER_NAME, INERT_WRITE_TOOL } from '../../fixtures/inertMcpServer';
+import {
+  INERT_GET_PAGE_TOOL,
+  INERT_SEARCH_MESSAGES_TOOL,
+  INERT_SERVER_NAME,
+  INERT_WEB_SEARCH_TOOL,
+  INERT_WRITE_TOOL,
+} from '../../fixtures/inertMcpServer';
 import {
   RUN_DIRECTIVE_PREFIX,
   SCRIPTED_EVENT,
@@ -122,7 +129,13 @@ function onlyCard(turn: Turn) {
   return card;
 }
 
-function answer({ card, scope }: { card: { thread_id: string; id: string }; scope: 'once' | 'chat' }): TurnInputItem[] {
+function answer({
+  card,
+  scope,
+}: {
+  card: { thread_id: string; id: string };
+  scope: 'once' | 'chat' | 'always';
+}): TurnInputItem[] {
   return [
     {
       type: 'user.tool_approval',
@@ -143,7 +156,7 @@ async function savedNames({ server, path }: { server: ApprovalTestServer; path: 
   return response.text();
 }
 
-describe('"Always allow this here" is offered only when the card names who or where the action goes', () => {
+describe('"Always allow in this chat" is offered only when the card names who or where the action goes', () => {
   let server: ApprovalTestServer;
 
   beforeAll(async () => {
@@ -503,12 +516,16 @@ describe("an event on the person's own calendar", () => {
   });
 
   it(
-    'with no guests offers "Always allow this here", and the answer covers the next one in that chat only',
+    'with no guests offers "Always allow in this chat" and never "Always allow everywhere", and the answer covers the next one in that chat only',
     async () => {
       const before = await savedEvents();
       const chatId = await createChat(server);
       const card = onlyCard(await runTurn({ server, chatId, input: ask('create_event') }));
       expect(card.can_chat_allow).toBe(true);
+      expect(card.can_always_allow).toBe(false);
+      const everywhere = await sendTurn({ server, chatId, input: answer({ card, scope: 'always' }) });
+      expect(everywhere.status).toBe(422);
+      expect(await savedEvents()).toBe(before);
 
       await runTurn({ server, chatId, input: answer({ card, scope: 'chat' }) });
       expect(cards(await runTurn({ server, chatId, input: ask('create_event') }))).toEqual([]);
@@ -541,6 +558,142 @@ describe("an event on the person's own calendar", () => {
       const refused = await sendTurn({ server, chatId, input: answer({ card: withGuest, scope: 'chat' }) });
       expect(refused.status).toBe(422);
       expect(await savedEvents()).toBe(before + 1);
+    },
+    TURN_TIMEOUT_MS,
+  );
+});
+
+describe('a map', () => {
+  let server: ApprovalTestServer;
+  let recorded: ReturnType<typeof installRecordedTavily>;
+
+  async function setMapsWithoutAsking(value: boolean): Promise<void> {
+    const response = await server.request('/api/v1/user/settings/sentinel', {
+      ...jsonInit({ maps_without_asking: value }),
+      method: 'PATCH',
+    });
+    expect(response.status).toBe(200);
+  }
+
+  async function mapsWithoutAsking(): Promise<boolean> {
+    const response = await server.request('/api/v1/user/settings/sentinel');
+    return z.object({ data: z.object({ maps_without_asking: z.boolean() }).loose() }).parse(await response.json()).data
+      .maps_without_asking;
+  }
+
+  /** One turn that asks for a map of the harbour address. */
+  async function runMapTurn(chatId: string): Promise<Turn> {
+    server.model.next({ toolArguments: { place_name: HARBOUR_ADDRESS } });
+    const input: TurnInputItem[] = [
+      { type: 'user.message', content: `${RUN_DIRECTIVE_PREFIX}render_map of ${HARBOUR_ADDRESS}` },
+    ];
+    return runTurn({ server, chatId, input });
+  }
+
+  async function mapCards(chatId: string) {
+    return cards(await runMapTurn(chatId));
+  }
+
+  /** Has the chat read a page through a connector, then asks for a map of a place the person never named. */
+  async function mapPlaceTheChatOnlyRead(chatId: string) {
+    server.model.next({ toolArguments: { page_id: 'welcome' } });
+    const read = onlyCard(await runTurn({ server, chatId, input: ask(INERT_GET_PAGE_TOOL) }));
+    await runTurn({ server, chatId, input: answer({ card: read, scope: 'once' }) });
+    server.model.next({ toolArguments: { place_name: '40 Rua Augusta, Lisbon' } });
+    return cards(await runTurn({ server, chatId, input: ask('render_map') }));
+  }
+
+  /** Asks for a map whose place text looks like a key. */
+  async function mapOfSomethingLikeAKey(chatId: string) {
+    server.model.next({ toolArguments: { place_name: ['AKI', 'A', 'ABCDEFGH', 'IJKLMNOP'].join('') } });
+    return cards(await runTurn({ server, chatId, input: ask('render_map') }));
+  }
+
+  beforeAll(async () => {
+    recorded = installRecordedTavily();
+    server = await startApprovalTestServer({ inertPageById: true });
+  });
+
+  afterAll(async () => {
+    await server.close();
+    recorded.restore();
+  });
+
+  afterEach(async () => {
+    await setMapsWithoutAsking(true);
+  });
+
+  it(
+    'runs with no card while maps are on, also for a place the chat only read',
+    async () => {
+      const chatId = await createChat(server);
+      expect(await mapsWithoutAsking()).toBe(true);
+      expect(await mapCards(chatId)).toEqual([]);
+      expect(await mapPlaceTheChatOnlyRead(chatId)).toEqual([]);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'with maps set to ask offers both lasting answers, and "Always allow in this chat" covers that chat only',
+    async () => {
+      await setMapsWithoutAsking(false);
+      const chatId = await createChat(server);
+      const [card, ...others] = await mapCards(chatId);
+      expect(others).toEqual([]);
+      expect(card).toMatchObject({ can_chat_allow: true, can_always_allow: true, always_allow_covers: 'maps' });
+      if (card === undefined) {
+        throw new Error('the map did not ask');
+      }
+      await runTurn({ server, chatId, input: answer({ card, scope: 'chat' }) });
+      expect(await mapCards(chatId)).toEqual([]);
+      expect(await mapPlaceTheChatOnlyRead(chatId)).toEqual([]);
+      expect(await mapsWithoutAsking()).toBe(false);
+
+      expect(await mapCards(await createChat(server))).toHaveLength(1);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'answered with "Always allow everywhere" turns maps on, so a later chat gets its map with no card',
+    async () => {
+      await setMapsWithoutAsking(false);
+      const chatId = await createChat(server);
+      const card = onlyCard(await runMapTurn(chatId));
+      await runTurn({ server, chatId, input: answer({ card, scope: 'always' }) });
+      expect(await mapsWithoutAsking()).toBe(true);
+
+      expect(await mapCards(await createChat(server))).toEqual([]);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'that would send something that looks like a key offers no lasting answer, also after both were given',
+    async () => {
+      await setMapsWithoutAsking(false);
+      const chatId = await createChat(server);
+      const [plain] = await mapCards(chatId);
+      if (plain === undefined) {
+        throw new Error('the map did not ask');
+      }
+      await runTurn({ server, chatId, input: answer({ card: plain, scope: 'chat' }) });
+      await setMapsWithoutAsking(true);
+
+      const [held, ...others] = await mapOfSomethingLikeAKey(chatId);
+      expect(others).toEqual([]);
+      expect(held).toMatchObject({ can_chat_allow: false, can_always_allow: false });
+      expect(held).not.toHaveProperty('always_allow_covers');
+      if (held === undefined) {
+        throw new Error('the map that looks like it sends a key did not ask');
+      }
+      for (const scope of ['chat', 'always'] as const) {
+        const refused = await sendTurn({ server, chatId, input: answer({ card: held, scope }) });
+        expect(refused.status).toBe(422);
+      }
+      await runTurn({ server, chatId, input: answer({ card: held, scope: 'once' }) });
+      expect(await mapCards(chatId)).toEqual([]);
     },
     TURN_TIMEOUT_MS,
   );
@@ -772,6 +925,143 @@ describe('the Home Assistant connector', () => {
       expect(card.tier3_card?.plain_what).toBe('Turn off Living room lamp');
       await runTurn({ server, chatId, input: answer({ card, scope: 'once' }) });
       expect(home.entityState(HA_LAMP)).toBe('off');
+    },
+    TURN_TIMEOUT_MS,
+  );
+});
+
+describe('an Incognito chat', () => {
+  let server: ApprovalTestServer;
+  const AT = `${new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)}T18:00:00+00:00`;
+
+  beforeAll(async () => {
+    server = await startApprovalTestServer({ inertMessageSearch: true });
+  });
+
+  afterAll(async () => {
+    await server.close();
+  });
+
+  async function startChat({ incognito }: { incognito: boolean }): Promise<string> {
+    const response = await server.request(
+      '/api/v1/sessions',
+      jsonInit({ agent: { spec: AGENT_SPEC }, is_incognito: incognito }),
+    );
+    expect(response.status).toBe(201);
+    return z.object({ data: z.object({ id: z.string() }) }).parse(await response.json()).data.id;
+  }
+
+  /** Asks for a reminder and a space under these names, and says which of them were saved. */
+  async function askForLastingThings({ chatId, reminder, space }: { chatId: string; reminder: string; space: string }) {
+    server.model.next({ toolArguments: { what: reminder, at: AT } });
+    const reminderCards = cards(await runTurn({ server, chatId, input: ask('set_reminder') }));
+    server.model.next({
+      toolArguments: { name: space, purpose: 'Things to bring.', status: 'active', body: '- Tent' },
+    });
+    const spaceCards = cards(await runTurn({ server, chatId, input: ask('create_space') }));
+    return {
+      cards: [...reminderCards, ...spaceCards],
+      reminderSaved: (await savedNames({ server, path: '/api/v1/schedules' })).includes(reminder),
+      spaceSaved: (await savedNames({ server, path: '/api/v1/spaces' })).includes(space),
+    };
+  }
+
+  it(
+    'saves no reminder and no space, and shows no card for them',
+    async () => {
+      const chatId = await startChat({ incognito: true });
+      expect(await askForLastingThings({ chatId, reminder: 'Water the fig tree', space: 'Fig tree notes' })).toEqual({
+        cards: [],
+        reminderSaved: false,
+        spaceSaved: false,
+      });
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'lets an added connector look things up once approved, and shows no card for a change it may not make',
+    async () => {
+      const chatId = await startChat({ incognito: true });
+      const searchesBefore = server.mcp.searchMessagesInvocations();
+      const writesBefore = server.mcp.writeInvocations();
+
+      server.model.next({ toolArguments: { query: 'lunch on friday' } });
+      const lookup = onlyCard(await runTurn({ server, chatId, input: ask(INERT_SEARCH_MESSAGES_TOOL) }));
+      await runTurn({ server, chatId, input: answer({ card: lookup, scope: 'once' }) });
+      expect(server.mcp.searchMessagesInvocations()).toBe(searchesBefore + 1);
+
+      expect(cards(await runTurn({ server, chatId, input: ask(INERT_WRITE_TOOL) }))).toEqual([]);
+      expect(server.mcp.writeInvocations()).toBe(writesBefore);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'an ordinary chat still saves the reminder and the space',
+    async () => {
+      const chatId = await startChat({ incognito: false });
+      expect(await askForLastingThings({ chatId, reminder: 'Feed the sourdough', space: 'Sourdough notes' })).toEqual({
+        cards: [],
+        reminderSaved: true,
+        spaceSaved: true,
+      });
+    },
+    TURN_TIMEOUT_MS,
+  );
+});
+
+describe('a connector tool named like a search tool', () => {
+  let server: ApprovalTestServer;
+  const ADDRESS = 'noor.haddad@orchard.example';
+  const DRAFT = { to: [ADDRESS], subject: 'Apple order', body: 'Hi Noor, could I order a crate for Saturday?' };
+
+  beforeAll(async () => {
+    server = await startApprovalTestServer({ inertWebSearch: true });
+  });
+
+  afterAll(async () => {
+    await server.close();
+  });
+
+  /** A new chat where the connector's `web_search` was asked about the orchard and answered with the address. */
+  async function chatThatSearchedTheConnector(): Promise<string> {
+    // The invented inbox only stands in once the connector has answered: with it on, an added connector is not run.
+    server.setEvalMode(false);
+    const searchesBefore = server.mcp.webSearchInvocations();
+    const chatId = await createChat(server);
+    server.model.next({ toolArguments: { query: `the orchard, run by ${ADDRESS}` } });
+    const search = onlyCard(await runTurn({ server, chatId, input: ask(INERT_WEB_SEARCH_TOOL) }));
+    await runTurn({ server, chatId, input: answer({ card: search, scope: 'once' }) });
+    expect(server.mcp.webSearchInvocations()).toBe(searchesBefore + 1);
+    server.setEvalMode(true);
+    return chatId;
+  }
+
+  it(
+    'what it returns counts as something Aman read, so a draft to an address only it named says so',
+    async () => {
+      const chatId = await chatThatSearchedTheConnector();
+      server.model.next({ toolArguments: DRAFT });
+      const card = onlyCard(await runTurn({ server, chatId, input: ask('draft_email') }));
+      expect(card.tier3_card?.plain_what).toContain(`This goes to ${ADDRESS}, whose address was in a page Aman read.`);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'a draft to an address the person wrote themselves shows the plain card',
+    async () => {
+      const chatId = await chatThatSearchedTheConnector();
+      server.model.next({ toolArguments: DRAFT });
+      const card = onlyCard(
+        await runTurn({
+          server,
+          chatId,
+          input: [{ type: 'user.message', content: `${RUN_DIRECTIVE_PREFIX}draft_email to ${ADDRESS} please` }],
+        }),
+      );
+      expect(card.tier3_card?.plain_what).not.toContain('Aman read');
     },
     TURN_TIMEOUT_MS,
   );

@@ -38,7 +38,12 @@ import {
 } from '../email/mailConnector/toolContract';
 import { GOOGLE_SETUP_SERVER_ID, GOOGLE_SETUP_STATUS_TOOL_NAME } from '../google/setupToolContract';
 import type { BrowserClickReview, DocumentScope, MapsHosts } from '../llm/LLMTypes';
-import { APPEND_TO_INBOX_TOOL_NAME, isNotesFolderWriteToolName, NOTES_FOLDER_SERVER_ID } from '../notes/toolContract';
+import {
+  APPEND_TO_INBOX_TOOL_NAME,
+  isNotesFolderReadToolName,
+  isNotesFolderWriteToolName,
+  NOTES_FOLDER_SERVER_ID,
+} from '../notes/toolContract';
 import {
   isPersonaWriteToolName,
   LIST_PERSONAS_TOOL_NAME,
@@ -56,7 +61,13 @@ import {
   SET_REMINDER_TOOL_NAME,
 } from '../schedules/toolContract';
 import { tavilyApprovalWhat } from '../search/tavilyCardText';
-import { isSpaceReadToolName, isSpaceWriteToolName, SPACE_SERVER_ID, spaceActivityLine } from '../spaces/toolContract';
+import {
+  isSpaceReadToolName,
+  isSpaceWriteToolName,
+  SPACE_SERVER_ID,
+  SPACE_WRITE_REASON,
+  spaceActivityLine,
+} from '../spaces/toolContract';
 import { absolutePatchTarget, applyPatchTargets } from './applyPatchTargets';
 import {
   actionIdFor,
@@ -100,6 +111,7 @@ import { DEFAULT_MAPS_TRAVEL_MODE, MapsTravelModeSchema } from './mapsRouteSchem
 import {
   isMapsToolName,
   MAPS_ASK_REASON,
+  MAPS_HOLD_REASON,
   MAPS_SILENT_REASON,
   RENDER_PLACES_TOOL_NAME,
   RENDER_ROUTE_TOOL_NAME,
@@ -2212,31 +2224,45 @@ function steeringChecked(input: {
 }
 
 /**
- * An embedded maps call that runs without asking, once the person has let maps run without asking. The outbound
- * secret guard still reads its places. Returns the guard's rule when the call should show its card instead.
+ * A map that would ask, left out of a scheduled run: nobody is there to answer, and a map never leaves a card
+ * waiting for the owner. `guard` is the outbound guard's verdict on what the map would send.
  */
-async function classifyMapsSilently(input: {
-  action: SentinelAction;
-  ctx: ClassifyContext;
-}): Promise<{ decision: TierDecision } | { held: OutboundGuardVerdict }> {
-  const { action, ctx } = input;
-  const strings = collectOutboundStrings(action.canonical_params);
-  const { verdict } = await outboundGuard({ ctx, strings });
-  if (!verdict.ok) {
-    return { held: verdict };
+function mapsSkipped(guard: OutboundGuardVerdict): TierDecision {
+  if (!guard.ok) {
+    return autoDenyDecision({
+      reason: 'outbound_guard',
+      reason_detail:
+        'The map would have sent text that looks like a password, a key, a card number or a long block of text.',
+      owner_message:
+        'One map was skipped, because its place text looked like a password, a key, a card number or a long block of text. Ask for the map in a chat to see what it would send.',
+      sensitive_read: false,
+    });
   }
+  return autoDenyDecision({
+    reason: 'unattended_run',
+    reason_detail: 'Maps are set to ask, and nobody is here to answer in a scheduled run. Continue without the map.',
+    owner_message:
+      'One map was skipped, because maps are set to ask. To get maps in scheduled runs, turn on Maps in Settings, under Permissions.',
+    sensitive_read: false,
+  });
+}
+
+/** An embedded maps call that runs without a card, once the person has let maps run without asking. */
+function mapsSilentDecision(input: {
+  ctx: ClassifyContext;
+  strings: ReturnType<typeof collectOutboundStrings>;
+}): TierDecision {
+  const { ctx, strings } = input;
   // The text leaves with this call, so a later silent search or map sees a secret split across the two.
   if (strings !== undefined) {
     ctx.web_search.sentText = appendOutboundTrace({ earlier: ctx.web_search.sentText, strings });
   }
   const values = strings?.values.map(value => value.trim()).filter(value => value !== '') ?? [];
-  return {
-    decision: tier1Decision({
-      reason: MAPS_SILENT_REASON,
-      reason_detail: `Maps ran without asking: ${values.join(', ')}`,
-      sensitive_read: false,
-    }),
-  };
+  return tier1Decision({
+    reason: MAPS_SILENT_REASON,
+    reason_detail: `Maps ran without asking: ${values.join(', ')}`,
+    sensitive_read: false,
+  });
 }
 
 /** Said on a card when a recipient's name was left off because it looked like an address. */
@@ -2342,6 +2368,8 @@ function gmailWriteCard(input: { action: SentinelAction; agent_intent: string | 
       subject: escapeDisplayText(content.subject),
       body: escapeDisplayText(content.body, { keepNewlines: true }),
       reply_to: content.replyTo === null ? null : escapeDisplayText(content.replyTo),
+      from_name: content.fromName === '' ? null : escapeDisplayText(content.fromName),
+      name_left_off: content.nameLeftOff || replaces?.nameLeftOff === true,
       replaces:
         replaces === undefined
           ? null
@@ -2579,6 +2607,8 @@ function calendarWriteCard(input: {
       attendees: review.attendees.map(show),
       guests_emailed: review.guests_emailed,
       one_of_repeating: review.one_of_repeating,
+      already_created: review.action === 'create' && review.already_created,
+      span_days: review.span_days,
       before:
         review.before === null
           ? null
@@ -2707,15 +2737,7 @@ async function classifyCalendarTool(action: SentinelAction, ctx: ClassifyContext
         });
       }
     }
-    // Only a change that reaches no guest can be covered by a standing grant; a guest change always asks.
     const reachesGuests = review.attendees.length > 0;
-    if (!reachesGuests && (await hasStandingToolGrant(ctx, action))) {
-      return tier1Decision({
-        reason: TOOL_GRANT_REASON,
-        reason_detail: `Always allowed: \`${action.tool_name}\` on your calendar.`,
-        sensitive_read: false,
-      });
-    }
     return tier3Decision({
       card: calendarWriteCard({ review, agent_intent: ctx.agent_intent, assistant: ctx.web_search.assistantName }),
       reason: reachesGuests ? 'calendar_write_guests' : 'calendar_write',
@@ -3105,7 +3127,11 @@ async function classifyReminderTool(action: SentinelAction, ctx: ClassifyContext
 function classifySpaceTool(action: SentinelAction): TierDecision {
   const line = spaceToolLine(action);
   if (line !== null && isSpaceWriteToolName(action.tool_name)) {
-    return tier1Decision({ reason: 'space_write', reason_detail: line, sensitive_read: false });
+    // The line rides with the call, so a scheduled run's saved change can be written to the activity log.
+    return {
+      ...tier1Decision({ reason: SPACE_WRITE_REASON, reason_detail: line, sensitive_read: false }),
+      audit_description: line,
+    };
   }
   if (line !== null && isSpaceReadToolName(action.tool_name)) {
     return tier1Decision({ reason: 'space_read', reason_detail: line, sensitive_read: false });
@@ -3274,6 +3300,23 @@ async function classifyGenericTool(action: SentinelAction, ctx: ClassifyContext)
   });
   // A card for the host's own Email sidecar never shows the sidecar's endpoint as a destination: the recipient is.
   const hostMailCall = isHostMailCall(action);
+  // In an incognito chat a connector may only read. A read is one the extractor knows by its name, or a
+  // read-only tool on a connector the host vouches for; a connector's own word that a tool only reads is
+  // not enough. The host's own mail keeps its cards, and the search provider its own checks.
+  if (
+    services.incognito &&
+    action.tool_type === 'mcp' &&
+    !hostMailCall &&
+    action.mcp_search_provider !== true &&
+    !extraction.connector_read &&
+    !(
+      action.mcp_first_party === true &&
+      action.mcp_hints.read_only_hint === true &&
+      action.mcp_hints.open_world_hint === false
+    )
+  ) {
+    return incognitoRefusal();
+  }
   // A read is not a send by name, so it is not carded as an external-service send; its annotations still decide.
   const namedSend = extraction.external_service && !extraction.connector_read;
   // A connector read is private data, so a search in the same chat asks afterwards.
@@ -3850,8 +3893,44 @@ async function classifyNotesFolderToolCall(action: SentinelAction, ctx: Classify
  * unrecognized; MCP hints escalate, and lower a connector tool only through
  * first-party trust or a standing grant.
  */
+/** What the model is told when an incognito chat is refused a lasting change: what happened and where to ask instead. */
+const INCOGNITO_REFUSAL =
+  'This is an incognito chat, so nothing that outlives it can be made or changed here. Tell the user to ask again in a normal chat.';
+
+function incognitoRefusal(): TierDecision {
+  return autoDenyDecision({ reason: 'incognito_chat', reason_detail: INCOGNITO_REFUSAL, sensitive_read: false });
+}
+
+/**
+ * A call on one of the assistant's own lasting things that is not a known read of it: a schedule, a reminder, a
+ * persona, a space or the notes folder. Switching this chat's persona changes only the chat.
+ */
+function changesOwnLastingThing(action: SentinelAction): boolean {
+  if (action.tool_type !== 'truefoundry-system') {
+    return false;
+  }
+  const name = action.tool_name;
+  switch (action.mcp_server_name) {
+    case SCHEDULE_SERVER_ID:
+      return name !== LIST_SCHEDULES_TOOL_NAME && name !== LIST_REMINDERS_TOOL_NAME;
+    case PERSONA_SERVER_ID:
+      return name !== LIST_PERSONAS_TOOL_NAME && name !== USE_PERSONA_TOOL_NAME;
+    case SPACE_SERVER_ID:
+      return !isSpaceReadToolName(name);
+    case NOTES_FOLDER_SERVER_ID:
+      return !isNotesFolderReadToolName(name);
+    default:
+      return false;
+  }
+}
+
 export async function classifyTier(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
   const name = action.tool_name;
+
+  // Decided here from the tool the host itself named, before anything the tool says about itself is read.
+  if (ctx.services.incognito && changesOwnLastingThing(action)) {
+    return incognitoRefusal();
+  }
 
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === GMAIL_SERVER_ID) {
     return steeringChecked({ decision: await classifyGmailTool(action, ctx), ctx, guests: [] });
@@ -3950,13 +4029,17 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
           sensitive_read: false,
         });
       }
-      const runsWithoutAsking = await ctx.services.mapsWithoutAsking({
-        tenant_id: ctx.tenant_id,
-        created_by: ctx.created_by,
-      });
-      const silent = runsWithoutAsking ? await classifyMapsSilently({ action, ctx }) : undefined;
-      if (silent !== undefined && 'decision' in silent) {
-        return silent.decision;
+      const strings = collectOutboundStrings(action.canonical_params);
+      // Judged whatever the setting says, so an answer given for the chat never covers a map that trips the guard.
+      const { verdict } = await outboundGuard({ ctx, strings });
+      if (
+        verdict.ok &&
+        (await ctx.services.mapsWithoutAsking({ tenant_id: ctx.tenant_id, created_by: ctx.created_by }))
+      ) {
+        return mapsSilentDecision({ ctx, strings });
+      }
+      if (ctx.services.unattended) {
+        return mapsSkipped(verdict);
       }
       const outbound = renderOutboundArguments(
         action.tool_name === RENDER_PLACES_TOOL_NAME
@@ -3977,13 +4060,10 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
           destination_host: action.maps_hosts === undefined ? null : mapsDestinationHosts(action.maps_hosts),
           outbound_truncated: outbound.truncated,
         },
-        reason: MAPS_ASK_REASON,
-        reason_detail:
-          silent === undefined
-            ? holdSay(ctx.web_search.assistantName).maps_always
-            : silent.held.ok
-              ? null
-              : guardRuleSay({ rule: silent.held.rule, assistant: ctx.web_search.assistantName }),
+        reason: verdict.ok ? MAPS_ASK_REASON : MAPS_HOLD_REASON,
+        reason_detail: verdict.ok
+          ? holdSay(ctx.web_search.assistantName).maps_always
+          : guardRuleSay({ rule: verdict.rule, assistant: ctx.web_search.assistantName }),
         sensitive_read: false,
         approval_token_id: await mintPlainToken({
           ctx,
@@ -4033,7 +4113,6 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
       action,
       review: action.caldav_event ?? null,
       assistant: ctx.web_search.assistantName,
-      hasStandingGrant: () => hasStandingToolGrant(ctx, action),
       mintToken: () =>
         mintPlainToken({
           ctx,

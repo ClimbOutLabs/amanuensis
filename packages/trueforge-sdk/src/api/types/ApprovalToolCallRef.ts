@@ -3,6 +3,8 @@
 import type * as TrueForge from "../index.js";
 
 export interface ApprovalToolCallRef {
+    /** Set when the lasting answer lets maps run without asking, instead of allowing one tool. */
+    alwaysAllowCovers?: "maps";
     /** Whether the owner may allow this tool for good. */
     canAlwaysAllow?: boolean;
     /** Whether the user may approve this tool for the rest of the chat. */

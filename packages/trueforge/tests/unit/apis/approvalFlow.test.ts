@@ -687,7 +687,7 @@ describe('approval gate over an inert connector', () => {
     TURN_TIMEOUT_MS,
   );
 
-  describe('Always allow this tool', () => {
+  describe('Always allow everywhere', () => {
     async function listToolGrants(): Promise<string[]> {
       const response = await server.request(`/api/v1/mcp-servers/${INERT_SERVER_NAME}/tool-grants`);
       expect(response.status).toBe(200);

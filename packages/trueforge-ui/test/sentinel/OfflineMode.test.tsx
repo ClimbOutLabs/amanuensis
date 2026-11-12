@@ -203,7 +203,9 @@ describe('SentinelSettings', () => {
     );
     const toggle = await screen.findByRole('switch', { name: 'Show maps without asking' });
     expect(toggle).not.toBeChecked();
-    expect(screen.getByText('Maps ask before each one.')).toBeInTheDocument();
+    expect(
+      screen.getByText('Maps ask before each one. A scheduled run, such as a daily briefing, skips its maps.'),
+    ).toBeInTheDocument();
     fireEvent.click(toggle);
     await waitFor(() => {
       expect(updateUserSettings).toHaveBeenCalledWith({ maps_without_asking: true });

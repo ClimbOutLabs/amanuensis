@@ -39,12 +39,13 @@ import {
 } from '../permissions';
 import { APPROVAL_EXPIRED_REASON_CODE, isExpiredApproval } from '../permissions/approvalExpiry';
 import { toJsonSafeParams } from '../permissions/approvalTokens';
-import { heldCallAuditText, recordNotPreparedRefusals } from '../permissions/audit';
+import { heldCallAuditText, recordNotPreparedRefusals, recordUnattendedSpaceChange } from '../permissions/audit';
 import type { SentinelDispatchContext } from '../permissions/context';
 import { HELD_REASON_CODE, HELD_RESULT_TEXT } from '../permissions/heldActions';
-import { MAPS_ASK_REASON } from '../permissions/mapsToolNames';
+import { isMapsCardReason } from '../permissions/mapsToolNames';
 import { collectOutboundStrings } from '../permissions/outboundGuard';
 import {
+  hostToolStamp,
   isSearchAskReason,
   isSilentSearchReason,
   recordToolResultProvenance,
@@ -54,6 +55,8 @@ import { identicalCallNudgeMessage } from '../runtime/contextUtils';
 import { CALL_TOOL_NAME, tryParseCallToolWrapper } from '../runtime/DeferredTool';
 import { connectorUnreachableText, type ToolResultKind, type UnfinishedKind } from '../runtime/replyBudget';
 import type { SandboxInfo, WorkspaceVerificationReceiptCandidate } from '../sandbox/Sandbox';
+import { SPACE_WRITE_REASON } from '../spaces/toolContract';
+import { spaceWriteResponseSavedNothing } from '../spaces/turnSpaceWrites';
 import { approvalGrantKey } from './approvalGrant';
 import type { MappedMCPTool } from './convertMCPServers';
 import { isGithubFileContentUnavailable, isGithubFileRead } from './githubFileContents';
@@ -1059,7 +1062,7 @@ function isSearchProviderRead(info: Pick<InternalToolCallInfo, 'search_provider_
  * wrongly calls read-only still counts.
  */
 export function isHostVouchedRead(info: Pick<InternalToolCallInfo, 'search_provider_call' | 'tier_reason'>): boolean {
-  return isSearchProviderRead(info) || info.tier_reason === MAPS_ASK_REASON;
+  return isSearchProviderRead(info) || isMapsCardReason(info.tier_reason);
 }
 /** Tool calls written as text that the model is asked to redo in one turn; past this the turn ends. */
 export const MAX_TOOL_MARKUP_RETRIES_PER_TURN = 2;
@@ -2350,6 +2353,22 @@ export async function executeToolCalls({
     const audit = sentinel.services.audit;
     for (const { toolCall, disposition, response, admissionProvenance: admitted } of results) {
       const info = toolCall.tool_info;
+      if (
+        sentinel.services.unattended &&
+        info.tier_reason === SPACE_WRITE_REASON &&
+        disposition === 'executed_ok' &&
+        !spaceWriteResponseSavedNothing(response)
+      ) {
+        // The change is saved; a log that is down must not turn it into a failed call the run would repeat.
+        try {
+          await recordUnattendedSpaceChange({ services: sentinel.services, identity: sentinel.identity, info });
+        } catch (error) {
+          logger?.warn('Could not record a space change in the activity log', {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+        continue;
+      }
       if ((info.tier !== 2 && info.tier !== 3) || info.tier3_card === null) {
         continue;
       }
@@ -2479,6 +2498,7 @@ export async function executeToolCalls({
       recordToolResultProvenance({
         state: sentinel.web_search,
         tool_name: toolCall.tool_info.original_tool_name,
+        stamp: hostToolStamp(toolCall.tool_info),
         argument_values: sent === undefined ? [] : [...sent.values, ...sent.plumbing],
         texts: resultTexts(result),
       });
