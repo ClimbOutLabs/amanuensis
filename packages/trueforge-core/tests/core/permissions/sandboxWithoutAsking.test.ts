@@ -6,6 +6,7 @@ import { classifyTier, type ClassifyContext, type SentinelAction } from '../../.
 import {
   defaultSentinelServices,
   forUnattendedRun,
+  withoutRelaxations,
   type SentinelServices,
 } from '../../../src/core/permissions/context';
 import { verifyPreDispatch } from '../../../src/core/permissions/dispatch';
@@ -201,6 +202,47 @@ describe('a scheduled run asks before in-sandbox work, with the switch on', () =
     'a command that only reads the workspace still runs without a card',
     withWorkspace(async workspace => {
       const decision = await classifyTier(action('exec', { command: 'ls', cwd: workspace }), scheduledRun(workspace));
+      expect(decision.tier).toBe(1);
+    }),
+  );
+});
+
+describe("a turn the person types in a scheduled run's chat asks before in-sandbox work, with the switch on", () => {
+  function typedTurn(workspace: string): ClassifyContext {
+    return makeCtx({ services: withoutRelaxations(servicesWith({ sandbox_without_asking: true })), workspace });
+  }
+
+  test(
+    'inline code asks with a card to answer',
+    withWorkspace(async workspace => {
+      const decision = await classifyTier(
+        action('run_code', { code: 'print(1)', language: 'python' }),
+        typedTurn(workspace),
+      );
+      expect(decision.tier).toBe(3);
+      expect(decision.auto_deny).toBeNull();
+      expect(decision.card).not.toBeNull();
+      expect(decision.approval_token_id).not.toBeNull();
+    }),
+  );
+
+  test(
+    'a new file in the workspace asks',
+    withWorkspace(async workspace => {
+      const decision = await classifyTier(
+        action('write_file', { path: join(workspace, 'notes.py'), content: 'print(1)' }),
+        typedTurn(workspace),
+      );
+      expect(decision.tier).not.toBe(1);
+      expect(decision.reason).not.toBe('sandbox_file_write');
+      expect(decision.auto_deny).toBeNull();
+    }),
+  );
+
+  test(
+    'a command that only reads the workspace still runs without a card',
+    withWorkspace(async workspace => {
+      const decision = await classifyTier(action('exec', { command: 'ls', cwd: workspace }), typedTurn(workspace));
       expect(decision.tier).toBe(1);
     }),
   );
