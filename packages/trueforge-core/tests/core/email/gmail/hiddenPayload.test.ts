@@ -8,7 +8,7 @@ import { hasHiddenCharacters, stripInvisible } from '../../../../src/core/email/
 import { DraftEmailSchema, UpdateDraftSchema } from '../../../../src/core/email/gmail/toolContract';
 import { escapeDisplayText } from '../../../../src/core/permissions/displayText';
 import { message, plainDraft } from './fixtures';
-import { approvalProblem, build, json, route, sentDraft, text } from './harness';
+import { approvalProblem, APPROVED, build, json, route, sentDraft, text } from './harness';
 
 const ACCOUNT = 'ada@example.com';
 const COMPOSE = ['gmail_read', 'gmail_compose'] as const;
@@ -74,7 +74,9 @@ describe('draft_email and update_draft refuse text that would not show', () => {
     const info = await tools.toolCallInfo({ name: 'draft_email', arguments: hiding });
     expect(info.tier3_card ?? null).toBeNull();
     expect(info.is_approval_required).not.toBe(true);
-    expect(text(await tools.callTool({ name: 'draft_email', arguments: hiding }))).toContain('Validation failed');
+    expect(text(await tools.callTool({ name: 'draft_email', arguments: hiding }, APPROVED))).toContain(
+      'Validation failed',
+    );
     expect(google.urls).toHaveLength(0);
   });
 });
@@ -253,10 +255,13 @@ describe('a draft Aman writes itself', () => {
             : undefined,
       ],
     });
-    await tools.callTool({
-      name: 'draft_email',
-      arguments: { to: ['grace@example.com'], subject: 'Lease', body: 'Thursday works. ❤️' },
-    });
+    await tools.callTool(
+      {
+        name: 'draft_email',
+        arguments: { to: ['grace@example.com'], subject: 'Lease', body: 'Thursday works. ❤️' },
+      },
+      APPROVED,
+    );
     const encodedBody = sentDraft(google.bodies[0]).mime.split('\r\n\r\n')[1] ?? '';
     expect(Buffer.from(encodedBody, 'base64').toString('utf8')).toBe('Thursday works. ❤\uFE0F');
   });
@@ -421,7 +426,7 @@ describe('a send delivers the body exactly as the card shows it', () => {
     const args = { to: ['grace@example.com'], subject: '  Lease  ', body: '\n\n  Thursday works.\n\n\n' };
     const info = await tools.toolCallInfo({ name: 'draft_email', arguments: args });
     expect(info.tier3_card?.email).toMatchObject({ subject: 'Lease', body: 'Thursday works.' });
-    await tools.callTool({ name: 'draft_email', arguments: args });
+    await tools.callTool({ name: 'draft_email', arguments: args }, APPROVED);
     const { mime } = sentDraft(google.bodies[0]);
     expect(mime).toContain('Subject: Lease\r\n');
     expect(Buffer.from(mime.split('\r\n\r\n')[1] ?? '', 'base64').toString('utf8')).toBe('Thursday works.');

@@ -36,7 +36,7 @@ test_a_default_install_is_served_over_https() {
   assert_not_contains "$file" "'0.0.0.0:"
   assert_contains "$file" "image: caddy:2.11.6-alpine@sha256:d44355d3c2149dc580ce2cac735955d1c08d3d00882c30489c241aa51a5c10d9"
   assert_contains "$file" "network_mode: 'service:loopback'"
-  assert_contains "$file" "user: '1000:1000'" "the front end runs as the person who installed, so the folders it reads stay theirs"
+  assert_contains "$file" "user: '$STUB_UID:$STUB_GID'" "the front end runs as the person who installed, so the folders it reads stay theirs"
   local dex origin
   dex=$(cat "$AMAN_HOME/instances/main/dex.yaml")
   for origin in ${HTTPS_ORIGINS//,/ }; do

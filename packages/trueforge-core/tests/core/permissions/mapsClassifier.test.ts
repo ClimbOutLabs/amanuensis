@@ -12,9 +12,18 @@ import {
   type SentinelServices,
 } from '../../../src/core/permissions/context';
 import { verifyPreDispatch } from '../../../src/core/permissions/dispatch';
-import { isMapsToolName, MAPS_SILENT_REASON } from '../../../src/core/permissions/mapsToolNames';
+import {
+  isMapsToolName,
+  MAPS_ASK_REASON,
+  MAPS_HOLD_REASON,
+  MAPS_SILENT_REASON,
+} from '../../../src/core/permissions/mapsToolNames';
 import { recordPersonText } from '../../../src/core/permissions/provenance';
-import { createWebSearchTurnState, recordToolResultProvenance } from '../../../src/core/permissions/webSearch';
+import {
+  createWebSearchTurnState,
+  NO_HOST_STAMP,
+  recordToolResultProvenance,
+} from '../../../src/core/permissions/webSearch';
 
 function makeCtx(services?: SentinelServices): ClassifyContext {
   return {
@@ -337,6 +346,17 @@ describe('maps without asking', () => {
   });
   const maps_on = withServices({ mapsWithoutAsking: () => Promise.resolve(true) });
   const maps_off = withServices({ mapsWithoutAsking: () => Promise.resolve(false) });
+  const STRANGER_PLACE = '12 Harbour Street, Lisbon';
+
+  function readStrangerMail(ctx: ClassifyContext): void {
+    recordToolResultProvenance({
+      state: ctx.web_search,
+      tool_name: 'read_email',
+      stamp: NO_HOST_STAMP,
+      argument_values: ['m1'],
+      texts: [`From: Dana Wolfe <dana@example.org>\nLunch at ${STRANGER_PLACE} on Friday.`],
+    });
+  }
 
   it("keeps today's card when the setting is off", async () => {
     for (const services of [defaultSentinelServices({ pinned_path: '/usr/bin:/bin' }), withServices({})]) {
@@ -390,18 +410,13 @@ describe('maps without asking', () => {
     expect(first.tier).toBe(1);
     const second = await classifyTier(mapsAction('render_map', { place_name: HELD_VALUE.slice(10) }), ctx);
     expect(second.tier).toBe(3);
-    expect(second.reason).toBe('maps_tool');
+    expect(second.reason).toBe(MAPS_HOLD_REASON);
   });
 
   it("runs after the chat read mail, since a lookup on the person's behalf is the point", async () => {
     const ctx = makeCtx(maps_on);
-    recordToolResultProvenance({
-      state: ctx.web_search,
-      tool_name: 'read_email',
-      argument_values: ['m1'],
-      texts: ['From: Dana Wolfe <dana@example.org>\nLunch at 12 Harbour Street, Lisbon on Friday.'],
-    });
-    const decision = await classifyTier(mapsAction('render_map', { place_name: '12 Harbour Street, Lisbon' }), ctx);
+    readStrangerMail(ctx);
+    const decision = await classifyTier(mapsAction('render_map', { place_name: STRANGER_PLACE }), ctx);
     expect(decision.tier).toBe(1);
   });
 
@@ -424,8 +439,37 @@ describe('maps without asking', () => {
       makeCtx(services),
     );
     expect(decision.tier).toBe(3);
-    expect(decision.reason).toBe('maps_tool');
+    expect(decision.reason).toBe(MAPS_HOLD_REASON);
     expect(decision.card).not.toBeNull();
+  });
+
+  it('asks with the plain maps reason when the setting is off, wherever the place came from', async () => {
+    const ctx = makeCtx(maps_off);
+    readStrangerMail(ctx);
+    const decision = await classifyTier(mapsAction('render_map', { place_name: STRANGER_PLACE }), ctx);
+    expect(decision).toMatchObject({
+      tier: 3,
+      reason: MAPS_ASK_REASON,
+      reason_detail: 'Maps are set to ask, so Aman is checking with you first.',
+      auto_deny: null,
+    });
+    expect(decision.card).not.toBeNull();
+  });
+
+  it('marks a map that would send a held secret apart from a plain one, also when the setting is off', async () => {
+    const services = withServices({
+      mapsWithoutAsking: () => Promise.resolve(false),
+      outboundSecrets: () => Promise.resolve([HELD_VALUE]),
+    });
+    const decision = await classifyTier(
+      mapsAction('render_map', { place_name: `Paris ${HELD_VALUE}` }),
+      makeCtx(services),
+    );
+    expect(decision).toMatchObject({
+      tier: 3,
+      reason: MAPS_HOLD_REASON,
+      reason_detail: 'This sends something that looks like a password or key.',
+    });
   });
 
   it('denies offline before the setting is consulted', async () => {
@@ -441,6 +485,43 @@ describe('maps without asking', () => {
   it('runs silently in an unattended run on the same clean-chat rule', async () => {
     const services = withServices({ mapsWithoutAsking: () => Promise.resolve(true), unattended: true });
     expect((await classifyTier(mapsAction('render_map', { place_name: 'Paris' }), makeCtx(services))).tier).toBe(1);
+  });
+
+  it.each([
+    ['a map', mapsAction('render_map', { place_name: STRANGER_PLACE })],
+    ['a route', mapsAction('render_route', { from_place: 'Paris', to_place: STRANGER_PLACE })],
+    ['a pin', mapsAction('render_places', { places: [{ ...PLACE_CLAIM, address: STRANGER_PLACE }] })],
+  ])('a scheduled run with maps on shows %s of a place from the mail it read', async (_label, action) => {
+    const ctx = makeCtx(withServices({ mapsWithoutAsking: () => Promise.resolve(true), unattended: true }));
+    readStrangerMail(ctx);
+    expect(await classifyTier(action, ctx)).toMatchObject({ tier: 1, reason: MAPS_SILENT_REASON, card: null });
+  });
+
+  it('a scheduled run with maps set to ask leaves the map out and says which switch to turn on', async () => {
+    const ctx = makeCtx(withServices({ mapsWithoutAsking: () => Promise.resolve(false), unattended: true }));
+    const decision = await classifyTier(mapsAction('render_map', { place_name: 'Paris' }), ctx);
+    expect(decision).toMatchObject({
+      tier: 3,
+      auto_deny: 'unattended_run',
+      card: null,
+      approval_token_id: null,
+      owner_message:
+        'One map was skipped, because maps are set to ask. To get maps in scheduled runs, turn on Maps in Settings, under Permissions.',
+    });
+  });
+
+  it('a scheduled run leaves out a map that would send a held secret, with no card left waiting', async () => {
+    const ctx = makeCtx(
+      withServices({
+        mapsWithoutAsking: () => Promise.resolve(true),
+        outboundSecrets: () => Promise.resolve([HELD_VALUE]),
+        unattended: true,
+      }),
+    );
+    const decision = await classifyTier(mapsAction('render_map', { place_name: `Paris ${HELD_VALUE}` }), ctx);
+    expect(decision).toMatchObject({ tier: 3, auto_deny: 'outbound_guard', card: null, approval_token_id: null });
+    expect(decision.owner_message).toContain('One map was skipped');
+    expect(JSON.stringify(decision)).not.toContain(HELD_VALUE);
   });
 
   it('records a silent map in the audit log with the maps reason', async () => {

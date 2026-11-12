@@ -2,6 +2,7 @@ import type { GmailMessage } from '../../../../src/core/email/gmail/gmailWire';
 import { message, plainDraft } from './fixtures';
 import {
   approvalProblem,
+  APPROVED,
   approvedContext,
   build,
   json,
@@ -156,7 +157,7 @@ describe('a reply with valid threading', () => {
     expect(info.tier3_card?.email).toMatchObject({
       reply_in_thread: { subject: 'Invitation to the lease signing', from: 'grace@example.com' },
     });
-    await tools.callTool({ name: 'draft_email', arguments: args });
+    await tools.callTool({ name: 'draft_email', arguments: args }, APPROVED);
     const saved = sentDraft(google.bodies.at(-1));
     expect(saved.threadId).toBe('t9');
     expect(saved.mime).toContain('In-Reply-To: <orig@mail.example.com>');
@@ -236,13 +237,16 @@ describe('forged or malformed threading is refused', () => {
     const args = { to: ['grace@example.com'], subject: 's', body: 'b', in_reply_to: 'orig', thread_id: 't-other' };
     const info = await tools.toolCallInfo({ name: 'draft_email', arguments: args });
     expect(info.pre_dispatch_failure?.message).toContain('thread_id is not the thread of the message');
-    expect(text(await tools.callTool({ name: 'draft_email', arguments: args }))).toContain(
+    expect(text(await tools.callTool({ name: 'draft_email', arguments: args }, APPROVED))).toContain(
       'thread_id is not the thread',
     );
-    const forged = await tools.callTool({
-      name: 'draft_email',
-      arguments: { to: ['grace@example.com'], subject: 's', body: 'b', references: '<forged@evil.example>' },
-    });
+    const forged = await tools.callTool(
+      {
+        name: 'draft_email',
+        arguments: { to: ['grace@example.com'], subject: 's', body: 'b', references: '<forged@evil.example>' },
+      },
+      APPROVED,
+    );
     expect(text(forged)).toContain('Validation failed');
     expect(google.urls.some(entry => entry.startsWith('POST /gmail'))).toBe(false);
   });
@@ -250,10 +254,13 @@ describe('forged or malformed threading is refused', () => {
   it('will not turn a reply into an unthreaded draft when the answered message has no usable Message-ID', async () => {
     const noId = message({ id: 'orig', threadId: 't9', subject: 'Invitation' });
     const { tools, google } = await build({ features: [...COMPOSE], routes: [route('/messages/orig', noId)] });
-    const response = await tools.callTool({
-      name: 'draft_email',
-      arguments: { to: ['grace@example.com'], subject: 's', body: 'b', in_reply_to: 'orig' },
-    });
+    const response = await tools.callTool(
+      {
+        name: 'draft_email',
+        arguments: { to: ['grace@example.com'], subject: 's', body: 'b', in_reply_to: 'orig' },
+      },
+      APPROVED,
+    );
     expect(text(response)).toContain("can't be answered in its conversation");
     expect(text(response)).toContain('write it as a new email');
     expect(google.urls.some(entry => entry.startsWith('POST /gmail'))).toBe(false);
@@ -265,7 +272,7 @@ describe('forged or malformed threading is refused', () => {
       routes: [draftRoute(() => replyDraft({ inReplyTo: '<forged@evil.example>' })), THREAD_ROUTE],
     });
     const args = { draft_id: 'd1', to: ['grace@example.com'], subject: 's', body: 'new text' };
-    const response = await tools.callTool({ name: 'update_draft', arguments: args });
+    const response = await tools.callTool({ name: 'update_draft', arguments: args }, APPROVED);
     expect(text(response)).toContain('not tied to a message in its own Gmail thread');
     expect(google.urls.some(entry => entry.startsWith('PUT'))).toBe(false);
   });

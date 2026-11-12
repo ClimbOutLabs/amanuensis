@@ -36,6 +36,7 @@ const SCAN_ROOTS = [
   'packages/amanuensis/src/',
   'packages/aman-installer/src/',
   'installer/',
+  'mcp/',
   'ops/',
   'Dockerfile',
   'packages/trueforge-core/scripts/sandbox/sandbox.Dockerfile',
