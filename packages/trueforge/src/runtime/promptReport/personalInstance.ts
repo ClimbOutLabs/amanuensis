@@ -35,12 +35,17 @@ import type { TokenFactoryBudget } from '../tokenFactoryBudget';
 import type { UsageSessionReader } from '../usageSummaryCapability';
 
 export type PersonalInstanceName =
-  'personal' | 'personal-with-google' | 'personal-no-sandbox' | 'personal-no-server-sandbox';
+  | 'personal'
+  | 'personal-with-google'
+  | 'personal-with-connection-offer'
+  | 'personal-no-sandbox'
+  | 'personal-no-server-sandbox';
 
 /** Every standard setup the report measures, in report order. */
 export const PERSONAL_INSTANCE_NAMES = [
   'personal',
   'personal-with-google',
+  'personal-with-connection-offer',
   'personal-no-sandbox',
   'personal-no-server-sandbox',
 ] satisfies PersonalInstanceName[];
@@ -128,6 +133,14 @@ function unusedSpaceStore(): SpaceTurnContext['store'] {
     createSpaceFolder: () => unused('createSpaceFolder'),
     setSpaceFolder: () => unused('setSpaceFolder'),
     listSpaceFolderAssignments: () => unused('listSpaceFolderAssignments'),
+  };
+}
+
+/** No connector connected and no offer turned down: what a new install sends until email is connected. */
+function unconnectedOffer(): NonNullable<SpaceTurnContext['connectionOffer']> {
+  return {
+    settings: { getSetting: () => Promise.resolve(undefined), setSetting: () => unused('setSetting') },
+    mailConnectorRegistered: () => Promise.resolve(false),
   };
 }
 
@@ -272,7 +285,7 @@ export async function buildPersonalInstance(input: {
   const logger = createLogger({ silent: true });
   const tracing = NOOP_AGENT_TRACING;
   // The sandbox object exists only when the spec enables it, as in a real turn.
-  const sandboxEnabled = input.name === 'personal' || input.name === 'personal-with-google';
+  const sandboxEnabled = input.name !== 'personal-no-sandbox' && input.name !== 'personal-no-server-sandbox';
   const spec = personalSpec({ sandbox: sandboxEnabled });
   const sandbox = new Sandbox({
     provider: sandboxProvider(),
@@ -298,6 +311,7 @@ export async function buildPersonalInstance(input: {
     sessionId: SESSION_ID,
     logger,
     googleConnections: input.name === 'personal-with-google' ? connectedGoogleStore(input.googleAccess) : undefined,
+    connectionOffer: input.name === 'personal-with-connection-offer' ? unconnectedOffer() : undefined,
     schedules: scheduleContext(logger),
     startsAnswer: true,
   };
