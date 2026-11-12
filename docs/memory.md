@@ -40,7 +40,7 @@ When you delete a memory on the Memories page, Aman removes its text from your d
 
 ### Where each note came from
 
-Every note ends with one line that says where it came from.
+Every note ends with one line that says where it came from. The Memories tab shows this label only when a note came from somewhere else. A note with no label there is one you said yourself.
 
 - `> From you` means you said it in a chat.
 - `> External source: ...` means it came from somewhere else. The line names the source: `email`, `calendar`, `web page`, `attachment`, `tool result`, `assistant reply`, `a message you sent`, `read content` or `imported file`.
