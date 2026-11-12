@@ -48,17 +48,7 @@ describe('createMemoryPagesCatalog', () => {
       const method = init?.method ?? 'GET';
       const body: unknown = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined;
       calls.push({ path: url.pathname + url.search, method, body });
-      if (url.pathname.endsWith('/changes') && method === 'GET') {
-        return Response.json({
-          data: {
-            available: true,
-            changes: [
-              { id: 'a'.repeat(40), changed_at: 't', message: 'm', pages: [], undo_blocked_by: 'x', is_undo: true },
-            ],
-          },
-        });
-      }
-      if (url.pathname.endsWith('/undo') || method === 'DELETE') {
+      if (method === 'DELETE') {
         return Response.json({ data: {} });
       }
       if (url.pathname === '/api/v1/memory/pages') {
@@ -97,10 +87,6 @@ describe('createMemoryPagesCatalog', () => {
     await catalog.dismissLine({ kind: 'person', slug: 'wendy', factId: 'f_03', namespace: 'persona:Ada' });
     await catalog.dismissDisagreement({ kind: 'person', slug: 'wendy', disagreementId: 'p1' });
     await catalog.deletePage({ kind: 'person', slug: 'wendy' });
-    const changes = await catalog.listChanges();
-    assert.equal(changes.changes[0]?.undoBlockedBy, 'x');
-    assert.equal(changes.changes[0]?.isUndo, true);
-    await catalog.undoChange({ changeId: 'a'.repeat(40) });
 
     assert.deepEqual(calls, [
       { path: '/api/v1/memory/pages?namespace=persona%3AAda', method: 'GET', body: undefined },
@@ -114,8 +100,6 @@ describe('createMemoryPagesCatalog', () => {
       },
       { path: '/api/v1/memory/pages/person/wendy/disagreements/p1/dismiss', method: 'POST', body: {} },
       { path: '/api/v1/memory/pages/person/wendy', method: 'DELETE', body: undefined },
-      { path: '/api/v1/memory/pages/changes', method: 'GET', body: undefined },
-      { path: `/api/v1/memory/pages/changes/${'a'.repeat(40)}/undo`, method: 'POST', body: {} },
     ]);
   });
 

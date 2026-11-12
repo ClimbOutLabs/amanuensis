@@ -7,24 +7,20 @@ import { cn } from '@/atoms/lib/cn.js';
 import { Spinner } from '@/atoms/primitives/Spinner.js';
 import type { MemoryPageSummary } from '@/plugins/trueforge-agent-server-adapter/catalogs/memoryPagesCatalog.js';
 import { useAssistantDisplayName } from '../../components/PersonalizationContext.js';
-import { dayCopy, MemoryPageView } from './MemoryPageView.js';
+import { dayCopy, MemoryPageView, PageActions } from './MemoryPageView.js';
 import { filterPages, useMemoryPagesState, type MemoryPagesState } from './useMemoryPagesState.js';
 
 const INPUT_CLASS = 'rounded-md border border-border bg-primary-bg px-2 py-1.5 text-sm text-text-primary';
 
-function whenCopy(timestamp: string): string {
-  const date = new Date(timestamp);
-  return Number.isNaN(date.getTime()) ? timestamp : date.toLocaleString();
-}
-
 function PageRow({ page, state }: { page: MemoryPageSummary; state: MemoryPagesState }) {
+  const ref = { kind: page.kind, slug: page.slug };
   return (
-    <li>
+    <li className="flex flex-col gap-2 rounded-xl border border-border bg-card-bg p-3">
       <button
         type="button"
-        onClick={() => state.openPage({ kind: page.kind, slug: page.slug })}
+        onClick={() => state.openPage(ref)}
         className={cn(
-          'flex w-full flex-col gap-1 rounded-xl border border-border bg-card-bg p-3 text-left',
+          'flex w-full flex-col gap-1 rounded-md text-left',
           'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring',
         )}
       >
@@ -40,16 +36,22 @@ function PageRow({ page, state }: { page: MemoryPageSummary; state: MemoryPagesS
               {String(page.disagreementCount)} {page.disagreementCount === 1 ? 'pair disagrees' : 'pairs disagree'}
             </span>
           ) : null}
-          {page.changedOn === null ? null : (
-            <span className="ml-auto whitespace-nowrap text-xs font-normal text-text-secondary">
-              Updated {dayCopy(page.changedOn)}
-            </span>
-          )}
         </span>
         {page.summary === null ? null : (
           <span className="line-clamp-2 text-sm text-text-secondary">{page.summary}</span>
         )}
       </button>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-xs text-text-secondary">
+          {page.changedOn === null ? '' : `Updated ${dayCopy(page.changedOn)}`}
+        </span>
+        <PageActions
+          title={page.title}
+          loadPage={() => state.fetchPage(ref)}
+          onEdit={() => state.openPage(ref, { editing: true })}
+          onDelete={() => state.deletePage(ref)}
+        />
+      </div>
     </li>
   );
 }
@@ -62,41 +64,6 @@ function PageGroup({ label, pages, state }: { label: string; pages: MemoryPageSu
       <ul className="m-0 flex list-none flex-col gap-2 p-0">
         {pages.map(page => (
           <PageRow key={`${page.kind}/${page.slug}`} page={page} state={state} />
-        ))}
-      </ul>
-    </section>
-  );
-}
-
-function RecentChanges({ state }: { state: MemoryPagesState }) {
-  const { changes } = state;
-  if (changes === null || !changes.available || changes.changes.length === 0) return null;
-  return (
-    <section aria-label="Recent changes" className="flex flex-col gap-2">
-      <h3 className="text-xs font-semibold text-text-secondary">Recent changes</h3>
-      <ul className="m-0 flex list-none flex-col gap-2 p-0">
-        {changes.changes.map(change => (
-          <li
-            key={change.id}
-            className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-card-bg px-3 py-2"
-          >
-            <span className="min-w-0 text-sm text-text-primary">
-              {change.message}
-              <span className="block text-xs text-text-secondary">
-                {whenCopy(change.changedAt)}
-                {change.undoBlockedBy === null ? '' : ' · Undo the newer change to this page first.'}
-              </span>
-            </span>
-            <button
-              type="button"
-              aria-label={`${change.isUndo ? 'Put back' : 'Undo'}: ${change.message}`}
-              disabled={change.undoBlockedBy !== null}
-              onClick={() => void state.undoChange(change.id)}
-              className={auiButtonClass({ variant: 'ghost', size: 'small' })}
-            >
-              {change.isUndo ? 'Put back' : 'Undo'}
-            </button>
-          </li>
         ))}
       </ul>
     </section>
@@ -159,7 +126,7 @@ function SkippedFiles({ state }: { state: MemoryPagesState }) {
   );
 }
 
-/** Settings > Memory > Pages: the pages Aman keeps for people and matters, one page at a time, and what changed lately. */
+/** Settings > Memory > Pages: the pages Aman keeps for people and matters, one page at a time. */
 export function MemoryPagesPanel() {
   const state = useMemoryPagesState();
 
@@ -229,7 +196,6 @@ export function MemoryPagesPanel() {
           </div>
         ) : null}
         <PageList state={state} />
-        <RecentChanges state={state} />
       </>
     );
   }

@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { useOptionalPersonas } from '@/components/PersonaContext.js';
 import type {
-  MemoryPageChanges,
   MemoryPageDetail,
   MemoryPageKind,
   MemoryPageListing,
@@ -50,7 +49,7 @@ export function filterPages<T extends { title: string; otherNames: string[] }>({
 }
 
 /**
- * All state of the Memory pages tab: the list, the page being read, the recent changes, and the actions on
+ * All state of the Memory pages tab: the list, the page being read, and the actions on
  * them. Deleting a page waits for the undo window like forgetting a memory does.
  */
 export function useMemoryPagesState() {
@@ -70,11 +69,11 @@ export function useMemoryPagesState() {
 
   const [namespace, setNamespace] = useState(SHARED_NAMESPACE);
   const [listing, setListing] = useState<MemoryPageListing | null>(null);
-  const [changes, setChanges] = useState<MemoryPageChanges | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState<PageRef | null>(null);
+  const [openEditing, setOpenEditing] = useState(false);
   const [page, setPage] = useState<MemoryPageDetail | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -86,12 +85,7 @@ export function useMemoryPagesState() {
     }
     setError(null);
     try {
-      const [nextListing, nextChanges] = await Promise.all([
-        pagesPort.listPages(namespace),
-        pagesPort.listChanges(namespace),
-      ]);
-      setListing(nextListing);
-      setChanges(nextChanges);
+      setListing(await pagesPort.listPages(namespace));
     } catch (loadError) {
       setError(memoryVaultErrorMessage(loadError));
     }
@@ -122,9 +116,11 @@ export function useMemoryPagesState() {
     [pagesPort, target],
   );
 
-  function openPage(ref: PageRef) {
+  /** Opens a page to read, or straight in its text editor when asked from the list. */
+  function openPage(ref: PageRef, { editing = false }: { editing?: boolean } = {}) {
     setActionError(null);
     setPage(null);
+    setOpenEditing(editing);
     setOpen(ref);
     void loadPage(ref);
   }
@@ -134,7 +130,7 @@ export function useMemoryPagesState() {
     setPage(null);
   }
 
-  /** Runs an action on the server, then reloads the list and changes. A refusal is shown as the server wrote it. */
+  /** Runs an action on the server, then reloads the list. A refusal is shown as the server wrote it. */
   async function act(work: () => Promise<void>) {
     setActionError(null);
     try {
@@ -196,14 +192,15 @@ export function useMemoryPagesState() {
     deleteWithUndo.forget([refKey(ref)]);
   }
 
-  async function undoChange(changeId: string) {
-    if (pagesPort === null) return;
-    await act(async () => {
-      await pagesPort.undoChange({ changeId, namespace });
-      if (open !== null) {
-        await loadPage(open);
-      }
-    });
+  /** The page as it stands on the server, for copying from the list; a failure is shown like any refusal. */
+  async function fetchPage(ref: PageRef): Promise<MemoryPageDetail | null> {
+    if (pagesPort === null) return null;
+    try {
+      return await pagesPort.getPage(target(ref));
+    } catch (failure) {
+      setActionError(memoryVaultErrorMessage(failure));
+      return null;
+    }
   }
 
   const pages = useMemo(
@@ -223,9 +220,10 @@ export function useMemoryPagesState() {
     skippedFiles: listing?.skippedFiles ?? [],
     search,
     setSearch,
-    changes,
     open,
+    openEditing,
     page,
+    fetchPage,
     openPage,
     closePage,
     confirmLine: (options: { factId: string; section?: string }) => settleLine({ ...options, confirm: true }),
@@ -235,7 +233,6 @@ export function useMemoryPagesState() {
     deletePage,
     deleteHeld: deleteWithUndo.heldCount > 0,
     undoDelete: deleteWithUndo.undo,
-    undoChange,
   };
 }
 

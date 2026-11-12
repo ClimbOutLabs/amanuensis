@@ -33,6 +33,8 @@ const MatterStatusSchema = z.enum(['active', 'done']);
 const pageFrontMatterBase = {
   title: z.string().min(1),
   aliases: z.array(z.string()).default([]),
+  /** One short line Aman wrote on what the page covers. Shown to the person only; never the person's words. */
+  about: z.string().optional(),
 };
 
 const PersonFrontMatterSchema = z.object({
@@ -225,6 +227,39 @@ export function pageSummary(page: MemoryPage): string | undefined {
     }
   }
   return undefined;
+}
+
+/**
+ * The one line the screen shows for a page: the line the person wrote under the title, else the line Aman
+ * wrote on what the page covers, else the person's first own statement. The model is never shown this line.
+ */
+export function pageDescription(page: MemoryPage): string | undefined {
+  const written = page.preamble.map(line => line.trim()).find(line => line !== '' && !line.startsWith('# '));
+  return written ?? page.frontMatter.about ?? pageSummary(page);
+}
+
+/**
+ * The page with Aman's line on what it covers set in its settings block. The block's other lines stay as read.
+ * A page with no settings block, or one whose line was spread over several lines by hand, is returned unchanged.
+ */
+export function withPageAbout(page: MemoryPage, about: string): MemoryPage {
+  const close = page.frontMatterLines.length - 1;
+  if (close < 1) {
+    return page;
+  }
+  const keyLines = page.frontMatterLines.flatMap((line, index) => (line.startsWith(ABOUT_PREFIX) ? [index] : []));
+  const [at] = keyLines;
+  const next = at === undefined ? undefined : page.frontMatterLines[at + 1];
+  if (keyLines.length > 1 || (next !== undefined && /^\s/.test(next))) {
+    return page;
+  }
+  const closing = page.frontMatterLines[close] ?? FENCE;
+  const line = `${ABOUT_KEY}: ${stringify(about, YAML_LINE).trimEnd()}${closing.endsWith('\r') ? '\r' : ''}`;
+  const frontMatterLines =
+    at === undefined
+      ? [...page.frontMatterLines.slice(0, close), line, closing]
+      : page.frontMatterLines.map((existing, index) => (index === at ? line : existing));
+  return { ...page, frontMatter: { ...page.frontMatter, about }, frontMatterLines };
 }
 
 /** The sections a fresh page of each kind may list, in page order. "How you write to them" is for people only. */
@@ -572,6 +607,8 @@ export async function readMemoryPage(input: {
 const MAX_FILE_NAME_BYTES = 255;
 
 const FENCE = '---';
+const ABOUT_KEY = 'about';
+const ABOUT_PREFIX = `${ABOUT_KEY}:`;
 const BOM = '\uFEFF';
 const YAML_LINE: ToStringOptions = { lineWidth: 0 };
 const BULLET_PREFIX_PATTERN = /^\s*[-*]\s+/;
@@ -639,12 +676,14 @@ function frontMatterFrom({
   const aliases = parsedAliases.success ? parsedAliases.data : [];
 
   // Each kind-specific key that does not fit takes its default, so the schema always accepts the result.
+  const parsedAbout = z.string().trim().min(1).safeParse(values[ABOUT_KEY]);
+  const about = parsedAbout.success && !hasLineBreak(parsedAbout.data) ? { about: parsedAbout.data } : {};
   if (kind === 'person') {
     const household = PersonFrontMatterSchema.shape.household.catch(false).parse(values['household']);
-    return PageFrontMatterSchema.parse({ kind, title, aliases, household });
+    return PageFrontMatterSchema.parse({ kind, title, aliases, household, ...about });
   }
   const status = MatterFrontMatterSchema.shape.status.catch('active').parse(values['status']);
-  return PageFrontMatterSchema.parse({ kind, title, aliases, status });
+  return PageFrontMatterSchema.parse({ kind, title, aliases, status, ...about });
 }
 
 function parseBody(lines: string[]): { preamble: string[]; sections: PageSectionBlock[] } {

@@ -5,7 +5,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MemoryPagesPanel } from '@/atoms/memory/MemoryPagesPanel.js';
 import { FORGET_UNDO_MS } from '@/atoms/memory/useForgetWithUndo.js';
 import type {
-  MemoryPageChanges,
   MemoryPageDetail,
   MemoryPageDisagreement,
   MemoryPageLine,
@@ -84,13 +83,7 @@ function summaryOf(page: MemoryPageDetail, unconfirmedCount: number) {
   };
 }
 
-function createCatalog({
-  pages = [WENDY, MADRID],
-  changes,
-}: {
-  pages?: MemoryPageDetail[];
-  changes?: MemoryPageChanges;
-}) {
+function createCatalog({ pages = [WENDY, MADRID] }: { pages?: MemoryPageDetail[] }) {
   let stored = pages;
   const calls = {
     confirm: vi.fn(),
@@ -98,7 +91,6 @@ function createCatalog({
     notAProblem: vi.fn(),
     save: vi.fn(),
     remove: vi.fn(),
-    undo: vi.fn(),
   };
   const find = (slug: string): MemoryPageDetail => {
     const found = stored.find(page => page.slug === slug);
@@ -144,10 +136,6 @@ function createCatalog({
       calls.remove(target);
       stored = stored.filter(page => page.slug !== target.slug);
     },
-    listChanges: async () => changes ?? { available: true, changes: [] },
-    undoChange: async options => {
-      calls.undo(options);
-    },
   };
   return { catalog, calls };
 }
@@ -162,7 +150,7 @@ function renderPanel(catalog: MemoryPagesCatalog) {
 }
 
 async function openWendy() {
-  fireEvent.click(await screen.findByRole('button', { name: /Wendy/ }));
+  fireEvent.click(await screen.findByRole('button', { name: /^Wendy/ }));
   await screen.findByRole('heading', { name: 'Wendy' });
 }
 
@@ -264,7 +252,7 @@ describe('MemoryPagesPanel', () => {
     };
     renderPanel(catalog);
     await openWendy();
-    fireEvent.click(screen.getByRole('button', { name: 'Edit page' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Edit page/ }));
     const editor = screen.getByRole('textbox', { name: 'Edit page text' });
     expect(editor).toHaveValue(WENDY.markdown);
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
@@ -282,7 +270,7 @@ describe('MemoryPagesPanel', () => {
     const { catalog } = createCatalog({});
     renderPanel(catalog);
     await openWendy();
-    fireEvent.click(screen.getByRole('button', { name: 'Edit page' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Edit page/ }));
     fireEvent.change(screen.getByRole('textbox', { name: 'Edit page text' }), { target: { value: 'new text' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(screen.queryByRole('textbox', { name: 'Edit page text' })).not.toBeInTheDocument());
@@ -293,9 +281,9 @@ describe('MemoryPagesPanel', () => {
     const { catalog, calls } = createCatalog({});
     renderPanel(catalog);
     await openWendy();
-    fireEvent.click(screen.getByRole('button', { name: 'Delete page' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Delete page: Wendy/ }));
     expect(await screen.findByText('Page deleted.')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Wendy/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Wendy/ })).not.toBeInTheDocument();
     act(() => vi.advanceTimersByTime(FORGET_UNDO_MS + 100));
     await waitFor(() =>
       expect(calls.remove).toHaveBeenCalledWith(expect.objectContaining({ kind: 'person', slug: 'wendy' })),
@@ -307,90 +295,49 @@ describe('MemoryPagesPanel', () => {
     const { catalog, calls } = createCatalog({});
     renderPanel(catalog);
     await openWendy();
-    fireEvent.click(screen.getByRole('button', { name: 'Delete page' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Delete page: Wendy/ }));
     fireEvent.click(await screen.findByRole('button', { name: 'Undo' }));
-    expect(await screen.findByRole('button', { name: /Wendy/ })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /^Wendy/ })).toBeInTheDocument();
     act(() => vi.advanceTimersByTime(FORGET_UNDO_MS * 2));
     expect(calls.remove).not.toHaveBeenCalled();
   });
 
-  it('lists recent changes, undoes one, and disables undo while a later change blocks it', async () => {
-    const { catalog, calls } = createCatalog({
-      changes: {
-        available: true,
-        changes: [
-          {
-            id: 'a'.repeat(40),
-            changedAt: '2026-11-02T10:00:00.000Z',
-            message: 'You: edited the page for Wendy',
-            pages: [{ kind: 'person', slug: 'wendy' }],
-            undoBlockedBy: null,
-            isUndo: false,
-          },
-          {
-            id: 'b'.repeat(40),
-            changedAt: '2026-11-01T10:00:00.000Z',
-            message: 'You: dismissed X (Wendy)',
-            pages: [{ kind: 'person', slug: 'wendy' }],
-            undoBlockedBy: 'You: edited the page for Wendy',
-            isUndo: false,
-          },
-        ],
-      },
-    });
-    renderPanel(catalog);
-    const recent = await screen.findByRole('region', { name: 'Recent changes' });
-    expect(within(recent).getByRole('button', { name: 'Undo: You: dismissed X (Wendy)' })).toBeDisabled();
-    expect(within(recent).getByText(/Undo the newer change to this page first\./)).toBeInTheDocument();
-    fireEvent.click(within(recent).getByRole('button', { name: 'Undo: You: edited the page for Wendy' }));
-    await waitFor(() => expect(calls.undo).toHaveBeenCalledWith({ changeId: 'a'.repeat(40), namespace: '' }));
-  });
-
-  it('offers to put a change back on the entry of an undo, and leaves a repeated summary out of the page', async () => {
-    const { catalog } = createCatalog({
-      pages: [{ ...WENDY, summary: 'Plays tennis on Fridays.' }, MADRID],
-      changes: {
-        available: true,
-        changes: [
-          {
-            id: 'c'.repeat(40),
-            changedAt: '2026-11-03T10:00:00.000Z',
-            message: 'You: undid "Aman saved: Likes tulips. (my wife)"',
-            pages: [{ kind: 'person', slug: 'wendy' }],
-            undoBlockedBy: null,
-            isUndo: true,
-          },
-        ],
-      },
-    });
-    renderPanel(catalog);
-    const recent = await screen.findByRole('region', { name: 'Recent changes' });
-    expect(within(recent).getByRole('button', { name: /^Put back: / })).toHaveTextContent('Put back');
+  it('leaves a repeated summary out of the page, and shows a summary of its own with the day the page changed', async () => {
+    renderPanel(createCatalog({ pages: [{ ...WENDY, summary: 'Plays tennis on Fridays.' }, MADRID] }).catalog);
     await openWendy();
     expect(screen.getAllByText('Plays tennis on Fridays.')).toHaveLength(1);
+    expect(screen.queryByRole('region', { name: 'Summary' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'All pages' }));
+    fireEvent.click(await screen.findByRole('button', { name: /^The Madrid move/ }));
+    expect(await screen.findByRole('region', { name: 'Summary' })).toHaveTextContent('Moving in spring.');
+    expect(screen.getByText(/^Last updated .*2026/)).toBeInTheDocument();
   });
 
-  it('shows the server’s refusal when an undo is refused', async () => {
-    const { catalog } = createCatalog({
-      changes: {
-        available: true,
-        changes: [
-          {
-            id: 'a'.repeat(40),
-            changedAt: '2026-11-02T10:00:00.000Z',
-            message: 'You: edited the page for Wendy',
-            pages: [],
-            undoBlockedBy: null,
-            isUndo: false,
-          },
-        ],
-      },
-    });
-    catalog.undoChange = async () => {
-      throw new Error('Nothing was undone. A later change also changed these pages. Undo that change first.');
-    };
+  it('shows no log of changes', async () => {
+    renderPanel(createCatalog({}).catalog);
+    await screen.findByRole('region', { name: 'People' });
+    expect(screen.queryByText('Recent changes')).not.toBeInTheDocument();
+  });
+
+  it('has Copy, Edit and Delete under each page in the list', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    const { catalog, calls } = createCatalog({});
     renderPanel(catalog);
-    fireEvent.click(await screen.findByRole('button', { name: /^Undo:/ }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('Undo that change first.');
+    fireEvent.click(await screen.findByRole('button', { name: 'Copy page: Wendy' }));
+    expect(await screen.findByRole('status')).toHaveTextContent('Copied');
+    expect(writeText).toHaveBeenCalledWith(
+      'Wendy\n\nThe owner’s wife.\n\nNow\n- Plays tennis on Fridays.\n\nUnconfirmed\n- Might travel in November.\n\nEarlier\n- Worked at Acme.',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Edit page: Wendy' }));
+    expect(await screen.findByRole('textbox', { name: 'Edit page text' })).toHaveValue(WENDY.markdown);
+    fireEvent.click(screen.getByRole('button', { name: 'All pages' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete page: The Madrid move' }));
+    expect(await screen.findByText('Page deleted.')).toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(FORGET_UNDO_MS + 100));
+    await waitFor(() =>
+      expect(calls.remove).toHaveBeenCalledWith(expect.objectContaining({ kind: 'matter', slug: 'madrid' })),
+    );
   });
 });

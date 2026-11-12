@@ -87,8 +87,6 @@ const pagesCatalog: MemoryPagesCatalog = {
     throw new Error('not used');
   },
   deletePage: async () => {},
-  listChanges: async () => ({ available: true, changes: [] }),
-  undoChange: async () => {},
 };
 
 function createServer(options: { memorySetUp: boolean; withPages?: boolean }): AgentUIServer {

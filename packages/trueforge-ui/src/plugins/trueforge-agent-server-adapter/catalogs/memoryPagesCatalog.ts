@@ -94,32 +94,6 @@ const PageSchema = z
     disagreements: page.disagreements,
   }));
 
-const ChangesSchema = z
-  .object({
-    available: z.boolean(),
-    changes: z.array(
-      z.object({
-        id: z.string(),
-        changed_at: z.string(),
-        message: z.string(),
-        pages: z.array(z.object({ kind: PageKindSchema, slug: z.string() })),
-        undo_blocked_by: z.string().nullable(),
-        is_undo: z.boolean(),
-      }),
-    ),
-  })
-  .transform(result => ({
-    available: result.available,
-    changes: result.changes.map(change => ({
-      id: change.id,
-      changedAt: change.changed_at,
-      message: change.message,
-      pages: change.pages,
-      undoBlockedBy: change.undo_blocked_by,
-      isUndo: change.is_undo,
-    })),
-  }));
-
 const ListingSchema = z
   .object({ pages: z.array(PageSummarySchema), skipped_files: z.array(z.string()) })
   .transform(listing => ({ pages: listing.pages, skippedFiles: listing.skipped_files }));
@@ -128,7 +102,6 @@ export type MemoryPageSummary = z.output<typeof PageSummarySchema>;
 export type MemoryPageLine = z.output<typeof PageLineSchema>;
 export type MemoryPageDisagreement = z.output<typeof DisagreementSchema>;
 export type MemoryPageDetail = z.output<typeof PageSchema>;
-export type MemoryPageChanges = z.output<typeof ChangesSchema>;
 export type MemoryPageListing = z.output<typeof ListingSchema>;
 
 /** One page, named by kind and name, in one collection (the shared one when `namespace` is omitted). */
@@ -146,8 +119,6 @@ export interface MemoryPagesCatalog {
   dismissLine(options: MemoryPageTarget & { factId: string }): Promise<MemoryPageDetail>;
   dismissDisagreement(options: MemoryPageTarget & { disagreementId: string }): Promise<MemoryPageDetail>;
   deletePage(target: MemoryPageTarget): Promise<void>;
-  listChanges(namespace?: string): Promise<MemoryPageChanges>;
-  undoChange(options: { changeId: string; namespace?: string | undefined }): Promise<void>;
 }
 
 const BASE = '/api/v1/memory/pages';
@@ -196,11 +167,6 @@ export function createMemoryPagesCatalog(options: CreateTrueForgeClientOptions =
       ),
     deletePage: async target => {
       await request('DELETE', pagePath(target), undefined, () => undefined);
-    },
-    listChanges: namespace =>
-      request('GET', `${BASE}/changes${namespaceQuery(namespace)}`, undefined, parseData(ChangesSchema)),
-    undoChange: async ({ changeId, namespace }) => {
-      await request('POST', `${BASE}/changes/${changeId}/undo${namespaceQuery(namespace)}`, {}, () => undefined);
     },
   };
 }

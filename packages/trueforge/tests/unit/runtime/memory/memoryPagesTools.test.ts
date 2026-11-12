@@ -345,6 +345,64 @@ function watchAfterMail({ said, mail }: { said: string; mail: string }): TurnRea
   return watch;
 }
 
+describe('page_summary', () => {
+  it('keeps the line on a new page and on a later save, in the settings block only', async () => {
+    const { tools } = build(baseDir, { said: 'My sister Lexie is allergic to shellfish. She lives in Austin.' });
+    const made = await call(tools, 'remember_fact', {
+      about: 'Lexie',
+      kind: 'person',
+      text: 'Allergic to shellfish.',
+      page_summary: 'Sister. Read when planning meals.',
+    });
+    expect(made.isError).toBe(false);
+    expect(await pageText(baseDir, 'person', 'lexie')).toContain(
+      '\nabout: Sister. Read when planning meals.\n---\n# Lexie\n',
+    );
+
+    await call(tools, 'remember_fact', {
+      about: 'Lexie',
+      text: 'Lives in Austin.',
+      page_summary: 'Sister in Austin. Read when planning meals or visits.',
+    });
+    const text = await pageText(baseDir, 'person', 'lexie');
+    expect(text.match(/^about:/gm)).toHaveLength(1);
+    expect(text).toContain('about: Sister in Austin. Read when planning meals or visits.');
+  });
+
+  it.each([
+    ['a link', 'See https://example.test/lexie for more.'],
+    ['a mail address', 'Write to lexie@example.test.'],
+    ['a card number', 'Card 4111 1111 1111 1111.'],
+    ['a line that is too long', 'Sister. '.repeat(30)],
+  ])('saves the fact and drops a summary that holds %s', async (_what, page_summary) => {
+    const { tools } = build(baseDir, { said: 'My sister Lexie is allergic to shellfish.' });
+    const out = await call(tools, 'remember_fact', {
+      about: 'Lexie',
+      kind: 'person',
+      text: 'Allergic to shellfish.',
+      page_summary,
+    });
+    expect(out.isError).toBe(false);
+    const text = await pageText(baseDir, 'person', 'lexie');
+    expect(text).toContain('- Allergic to shellfish.');
+    expect(text).not.toContain('about:');
+  });
+
+  it('is never shown to the model when it reads the page or the list', async () => {
+    const { tools } = build(baseDir, { said: 'My sister Lexie is allergic to shellfish.' });
+    await call(tools, 'remember_fact', {
+      about: 'Lexie',
+      kind: 'person',
+      text: 'Allergic to shellfish.',
+      page_summary: 'Sister. Read when planning meals.',
+    });
+    const read = await call(tools, 'read_page', { about: 'Lexie' });
+    const listed = await call(tools, 'list_pages', {});
+    expect(read.text).not.toContain('Read when planning meals');
+    expect(listed.text).not.toContain('Read when planning meals');
+  });
+});
+
 describe('a line that looks like a secret', () => {
   const secrets = [
     // Put together here so the file itself holds nothing shaped like a key.

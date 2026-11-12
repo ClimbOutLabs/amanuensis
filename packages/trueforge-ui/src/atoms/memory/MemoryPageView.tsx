@@ -9,7 +9,10 @@ import type {
   MemoryPageDisagreement,
   MemoryPageLine,
 } from '@/plugins/trueforge-agent-server-adapter/catalogs/memoryPagesCatalog.js';
+import { copyText } from '@/utils/copyText.js';
 import type { MemoryPagesState } from './useMemoryPagesState.js';
+
+const COPIED_NOTE_MS = 2000;
 
 const INPUT_CLASS = 'rounded-md border border-border bg-primary-bg px-2 py-1.5 text-sm text-text-primary';
 
@@ -19,6 +22,87 @@ export function dayCopy(day: string): string {
   return date === null || Number.isNaN(date.getTime())
     ? day
     : date.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+/** A page as plain text for the clipboard: its name, its summary, then each section with its lines as bullets. */
+function pageAsText(page: MemoryPageDetail): string {
+  const sections = page.sections
+    .filter(section => section.lines.length > 0)
+    .map(section => [section.name, ...section.lines.map(line => `- ${line.text}`)].join('\n'));
+  return [page.title, ...(page.summary === null ? [] : [page.summary]), ...sections].join('\n\n');
+}
+
+/** Copy, Edit and Delete for one page, the same three a memory has. */
+export function PageActions({
+  title,
+  loadPage,
+  onEdit,
+  onDelete,
+}: {
+  title: string;
+  loadPage: () => Promise<MemoryPageDetail | null>;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), COPIED_NOTE_MS);
+    return () => clearTimeout(timer);
+  }, [copied]);
+
+  async function copy() {
+    setFailed(false);
+    try {
+      const page = await loadPage();
+      if (page === null) return;
+      await copyText(pageAsText(page));
+      setCopied(true);
+    } catch {
+      setFailed(true);
+    }
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      {copied ? (
+        <span role="status" className="text-xs text-text-secondary">
+          Copied
+        </span>
+      ) : null}
+      {failed ? (
+        <span role="alert" className="text-xs text-error-text">
+          Could not copy this page. Try again.
+        </span>
+      ) : null}
+      <button
+        type="button"
+        aria-label={`Copy page: ${title}`}
+        onClick={() => void copy()}
+        className={auiButtonClass({ variant: 'ghost', size: 'small' })}
+      >
+        Copy
+      </button>
+      <button
+        type="button"
+        aria-label={`Edit page: ${title}`}
+        onClick={onEdit}
+        className={auiButtonClass({ variant: 'ghost', size: 'small' })}
+      >
+        Edit
+      </button>
+      <button
+        type="button"
+        aria-label={`Delete page: ${title}`}
+        onClick={onDelete}
+        className={auiButtonClass({ variant: 'ghost', size: 'small' })}
+      >
+        Delete
+      </button>
+    </div>
+  );
 }
 
 function lineDates(line: MemoryPageLine): string | null {
@@ -43,53 +127,58 @@ function PageLineRow({
   const [section, setSection] = useState('Now');
   const dates = lineDates(line);
   return (
-    <li className="flex flex-col gap-1 rounded-md border border-border bg-card-bg px-3 py-2">
-      <span className="whitespace-pre-wrap break-words text-sm text-text-primary">{line.text}</span>
-      <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-text-secondary">
-        {unconfirmed ? <span className="font-medium">Not confirmed</span> : null}
-        <span>{line.sourceLabel}</span>
-        {dates === null ? null : <span>{dates}</span>}
-      </span>
-      {unconfirmed ? (
-        line.id === null ? (
-          <span className="text-xs text-text-secondary">Edit the page to change this line.</span>
-        ) : (
-          <span className="flex flex-wrap items-center gap-2">
-            {sections.length > 1 ? (
-              <select
-                aria-label={`Move to, for: ${line.text}`}
-                value={section}
-                onChange={event => setSection(event.target.value)}
-                className={INPUT_CLASS}
+    <li className="pl-1 marker:text-text-secondary">
+      <span className="flex flex-col gap-1">
+        <span className="whitespace-pre-wrap break-words text-sm text-text-primary">{line.text}</span>
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-text-secondary">
+          {unconfirmed ? <span className="font-medium">Not confirmed</span> : null}
+          <span>{line.sourceLabel}</span>
+          {dates === null ? null : <span>{dates}</span>}
+        </span>
+        {unconfirmed ? (
+          line.id === null ? (
+            <span className="text-xs text-text-secondary">Edit the page to change this line.</span>
+          ) : (
+            <span className="flex flex-wrap items-center gap-2">
+              {sections.length > 1 ? (
+                <select
+                  aria-label={`Move to, for: ${line.text}`}
+                  value={section}
+                  onChange={event => setSection(event.target.value)}
+                  className={INPUT_CLASS}
+                >
+                  {sections.map(name => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              ) : null}
+              <button
+                type="button"
+                aria-label={`Confirm: ${line.text}`}
+                onClick={() =>
+                  void state.confirmLine({
+                    factId: line.id ?? '',
+                    section: sections.includes(section) ? section : 'Now',
+                  })
+                }
+                className={auiButtonClass({ variant: 'secondary', size: 'small' })}
               >
-                {sections.map(name => (
-                  <option key={name} value={name}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-            ) : null}
-            <button
-              type="button"
-              aria-label={`Confirm: ${line.text}`}
-              onClick={() =>
-                void state.confirmLine({ factId: line.id ?? '', section: sections.includes(section) ? section : 'Now' })
-              }
-              className={auiButtonClass({ variant: 'secondary', size: 'small' })}
-            >
-              Confirm
-            </button>
-            <button
-              type="button"
-              aria-label={`Dismiss: ${line.text}`}
-              onClick={() => void state.dismissLine(line.id ?? '')}
-              className={auiButtonClass({ variant: 'ghost', size: 'small' })}
-            >
-              Dismiss
-            </button>
-          </span>
-        )
-      ) : null}
+                Confirm
+              </button>
+              <button
+                type="button"
+                aria-label={`Dismiss: ${line.text}`}
+                onClick={() => void state.dismissLine(line.id ?? '')}
+                className={auiButtonClass({ variant: 'ghost', size: 'small' })}
+              >
+                Dismiss
+              </button>
+            </span>
+          )
+        ) : null}
+      </span>
     </li>
   );
 }
@@ -134,7 +223,7 @@ function PageSections({ page, state }: { page: MemoryPageDetail; state: MemoryPa
     <div className="flex flex-col gap-4">
       {page.sections.map(section => {
         const list = (
-          <ul className="m-0 flex list-none flex-col gap-2 p-0">
+          <ul className="m-0 flex list-disc flex-col gap-2 py-0 pl-5 pr-0">
             {section.lines.map((line, index) => (
               <PageLineRow
                 key={`${line.id ?? 'typed'}-${String(index)}`}
@@ -230,9 +319,9 @@ function PageEditor({ page, state, onDone }: { page: MemoryPageDetail; state: Me
   );
 }
 
-/** One page: its sections, a text editor, and Delete page. Every line says where it came from. */
+/** One page: when it changed, its summary, its lines as bullets, then Copy, Edit and Delete. Every line says where it came from. */
 export function MemoryPageView({ page, state }: { page: MemoryPageDetail; state: MemoryPagesState }) {
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(state.openEditing);
   const heading = useRef<HTMLHeadingElement>(null);
 
   useEffect(() => {
@@ -241,6 +330,8 @@ export function MemoryPageView({ page, state }: { page: MemoryPageDetail; state:
 
   // A page with no summary of its own borrows its first line, which is already shown below.
   const repeated = page.sections.some(section => section.lines.some(line => line.text === page.summary));
+  const changedOn =
+    state.pages.find(listed => listed.kind === page.kind && listed.slug === page.slug)?.changedOn ?? null;
 
   return (
     <div className="flex flex-col gap-4">
@@ -249,36 +340,32 @@ export function MemoryPageView({ page, state }: { page: MemoryPageDetail; state:
           <h3 ref={heading} tabIndex={-1} className="text-base font-semibold text-text-primary outline-none">
             {page.title}
           </h3>
-          {page.summary === null || repeated ? null : <p className="text-sm text-text-secondary">{page.summary}</p>}
+          {changedOn === null ? null : <p className="text-xs text-text-secondary">Last updated {dayCopy(changedOn)}</p>}
           {page.otherNames.length === 0 ? null : (
             <p className="text-xs text-text-secondary">Also called: {page.otherNames.join(', ')}</p>
           )}
-        </div>
-        <div className="flex flex-wrap items-center gap-1">
-          {editing ? null : (
-            <button
-              type="button"
-              onClick={() => setEditing(true)}
-              className={auiButtonClass({ variant: 'secondary', size: 'small' })}
-            >
-              Edit page
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => state.deletePage({ kind: page.kind, slug: page.slug })}
-            className={auiButtonClass({ variant: 'ghost', size: 'small' })}
-          >
-            Delete page
-          </button>
         </div>
       </div>
       {editing ? (
         <PageEditor key={page.version} page={page} state={state} onDone={() => setEditing(false)} />
       ) : (
         <>
+          {page.summary === null || repeated ? null : (
+            <section aria-label="Summary" className="flex flex-col gap-1">
+              <h4 className="text-xs font-semibold text-text-secondary">Summary</h4>
+              <p className="text-sm text-text-primary">{page.summary}</p>
+            </section>
+          )}
           <DisagreementBlock pairs={page.disagreements} state={state} />
           <PageSections page={page} state={state} />
+          <div className="flex justify-end border-t border-border pt-2">
+            <PageActions
+              title={page.title}
+              loadPage={() => Promise.resolve(page)}
+              onEdit={() => setEditing(true)}
+              onDelete={() => state.deletePage({ kind: page.kind, slug: page.slug })}
+            />
+          </div>
         </>
       )}
     </div>
