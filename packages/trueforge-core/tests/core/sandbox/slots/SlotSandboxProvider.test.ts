@@ -360,9 +360,19 @@ describe('SlotSandboxProvider', () => {
         slot({ sessions: 1, create: 'full' }),
       ]);
       await expect(provider.createSandbox()).rejects.toThrow(
-        'The sandbox storage is almost full, so a new workspace could not be created. Free some disk space on this machine, then try again.',
+        'The sandbox storage is almost full, so a new workspace could not be created. Delete old chats you no longer need, or free some disk space on this machine, then try again.',
       );
       expect((await provider.getImageBuildStatus()).status).toBe('ready');
+    });
+
+    test('when every slot on its own disk answers storage full, the refusal says only to delete old chats', async () => {
+      const { provider } = await providerFor([
+        slot({ sessions: 0, diskMode: 'hard', workspaceBytes: 16 * GIB, create: 'full' }),
+        slot({ sessions: 1, diskMode: 'hard', workspaceBytes: 16 * GIB, create: 'full' }),
+      ]);
+      await expect(provider.createSandbox()).rejects.toThrow(
+        'The sandbox storage is almost full, so a new workspace could not be created. Delete old chats you no longer need, then try again.',
+      );
     });
 
     test('creation waits while the slot is busy, then goes through', async () => {

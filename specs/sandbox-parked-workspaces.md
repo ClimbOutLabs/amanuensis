@@ -43,8 +43,13 @@ The work lands in stages, each its own pull request against this spec:
    the slot agent to create the workspace, and the agent answers from
    the real free space on its storage, refusing only when the new
    workspace's size limit plus the free-space reserve does not fit. The
-   refusal reaches the person as one plain sentence: the storage is
-   almost full, free some disk space, then try again. A slot whose
+   same check runs whenever any call first makes a tree (a command or a
+   file write into a chat whose tree the idle sweep removed), so no path
+   makes a tree without it, and making an empty tree never waits for
+   another chat's running call. The refusal reaches the person as one
+   plain sentence: the storage is almost full, delete old chats, then try
+   again; where the workspaces share the machine's disk it also says that
+   freeing disk space helps. A slot whose
    storage is full never blocks a chat another slot has room for, and
    whether the sandbox reports ready no longer depends on how many
    chats exist, so chats that already hold a workspace keep working
@@ -108,7 +113,9 @@ plain sentence while the sandbox still reports ready, and creation waits
 out a busy slot), by contract and client tests for the create call, and
 by agent tests: a tree is created, creation is refused with no tree left
 behind when the storage cannot fit the quota plus the reserve, an
-existing tree needs no new room, and bad requests are refused. A live
+existing tree needs no new room, bad requests are refused, a command or
+file write that makes a tree is refused the same way, and a new chat's
+tree is made while another chat's call runs. A live
 check on an instance holding more chats than the old capacity is a
 manual check at the gate.
 

@@ -165,6 +165,7 @@ describe('SlotClient', () => {
       path: '/workspace/a.txt',
       content: Buffer.from('hi'),
       mode: 0o644,
+      diskMb: 10,
       signal: undefined,
     });
     expect(result.ok).toBe(true);
@@ -173,6 +174,7 @@ describe('SlotClient', () => {
       path: '/workspace/a.txt',
       content_base64: Buffer.from('hi').toString('base64'),
       mode: 0o644,
+      disk_mb: 10,
     });
   });
 });

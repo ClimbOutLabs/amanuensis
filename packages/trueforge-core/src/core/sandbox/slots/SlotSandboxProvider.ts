@@ -73,9 +73,15 @@ function noticeText(notices: readonly string[]): string {
 const STORAGE_FULL_MESSAGE =
   'The sandbox storage is almost full, so nothing was run. Free some disk space on this machine, then try again.';
 
-/** Said when every slot's agent answered that its storage has no room for a new chat's workspace. */
-const CREATE_STORAGE_FULL_MESSAGE =
-  'The sandbox storage is almost full, so a new workspace could not be created. Free some disk space on this machine, then try again.';
+/**
+ * Said when every slot's agent answered that its storage has no room for a new chat's workspace. On slots
+ * with their own fixed disks, space on the machine does not help; only removing old chats' workspaces does.
+ */
+const CREATE_STORAGE_FULL_OWN_DISK_MESSAGE =
+  'The sandbox storage is almost full, so a new workspace could not be created. Delete old chats you no longer need, then try again.';
+/** The same refusal where the workspaces share the machine's disk, so freeing space there helps too. */
+const CREATE_STORAGE_FULL_SHARED_DISK_MESSAGE =
+  'The sandbox storage is almost full, so a new workspace could not be created. Delete old chats you no longer need, or free some disk space on this machine, then try again.';
 
 function describeAgentError(error: SlotCallError): string {
   if (error.kind === 'agent' && error.code === 'isolation_refused') {
@@ -154,6 +160,7 @@ export class SlotSandboxProvider implements SandboxProvider {
     const lead = emptiest[Math.floor(Math.random() * emptiest.length)];
     const candidates = lead === undefined ? byLoad : [lead, ...byLoad.filter(slot => slot !== lead)];
     let storageFull = false;
+    let fullOnSharedDisk = false;
     let other: SlotCallError | undefined;
     for (const slot of candidates) {
       throwIfSignalAborted(params?.signal);
@@ -175,12 +182,15 @@ export class SlotSandboxProvider implements SandboxProvider {
       }
       if (result.error.kind === 'agent' && result.error.code === 'storage_full') {
         storageFull = true;
+        fullOnSharedDisk ||= !slot.ownDisk;
         continue;
       }
       other ??= result.error;
     }
     if (storageFull && other === undefined) {
-      throw new Error(CREATE_STORAGE_FULL_MESSAGE);
+      throw new Error(
+        fullOnSharedDisk ? CREATE_STORAGE_FULL_SHARED_DISK_MESSAGE : CREATE_STORAGE_FULL_OWN_DISK_MESSAGE,
+      );
     }
     if (other !== undefined) {
       throw new Error(describeAgentError(other));
@@ -277,6 +287,7 @@ export class SlotSandboxProvider implements SandboxProvider {
           path: posix.resolve(WORKSPACE_DIR, params.remotePath),
           content: params.content,
           mode: 0o644,
+          diskMb: this.treeDiskMb,
           signal: params.signal,
         }),
       signal: params.signal,
@@ -410,6 +421,7 @@ export class SlotSandboxProvider implements SandboxProvider {
               path: input.path,
               content: input.content,
               mode: 0o644,
+              diskMb: this.treeDiskMb,
               signal: input.signal,
             }),
           signal: input.signal,
@@ -472,9 +484,11 @@ export class SlotSandboxProvider implements SandboxProvider {
   }
 
   /** Every slot that answered and proved its isolation, with the problem each other slot reported. */
-  private async usableSlots(
-    signal: AbortSignal | undefined,
-  ): Promise<{ usable: { index: number; sessions: number }[]; problems: string[] }> {
+  private async usableSlots(signal: AbortSignal | undefined): Promise<{
+    /** `ownDisk`: the slot's workspaces live on its own fixed-size disk, which space on the machine does not reach. */
+    usable: { index: number; sessions: number; ownDisk: boolean }[];
+    problems: string[];
+  }> {
     const probes = await Promise.all(
       this.clients.map(async (client, index) => ({
         index,
@@ -482,7 +496,7 @@ export class SlotSandboxProvider implements SandboxProvider {
       })),
     );
     const problems: string[] = [];
-    const usable: { index: number; sessions: number }[] = [];
+    const usable: { index: number; sessions: number; ownDisk: boolean }[] = [];
     for (const { index, health } of probes) {
       if (!health.ok) {
         problems.push(`slot ${String(index + 1)} is not reachable`);
@@ -490,7 +504,11 @@ export class SlotSandboxProvider implements SandboxProvider {
       }
       const problem = attestationProblem(health.value.attestation, Date.now());
       if (problem === undefined) {
-        usable.push({ index, sessions: health.value.sessions });
+        usable.push({
+          index,
+          sessions: health.value.sessions,
+          ownDisk: health.value.attestation.facts.disk_mode === 'hard',
+        });
       } else {
         problems.push(`slot ${String(index + 1)} failed its checks (${problem})`);
       }

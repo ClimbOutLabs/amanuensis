@@ -136,8 +136,8 @@ func TestHealthReportsAttestation(t *testing.T) {
 func TestHealthCountsSessionTrees(t *testing.T) {
 	e := newEnv(t, true)
 	content := base64.StdEncoding.EncodeToString([]byte("x"))
-	e.do("POST", "/v1/fs_write", map[string]any{"session_id": sessionID, "path": "/workspace/a", "content_base64": content, "mode": 0o644})
-	e.do("POST", "/v1/fs_write", map[string]any{"session_id": runID, "path": "/workspace/a", "content_base64": content, "mode": 0o644})
+	e.do("POST", "/v1/fs_write", map[string]any{"session_id": sessionID, "path": "/workspace/a", "content_base64": content, "mode": 0o644, "disk_mb": 10})
+	e.do("POST", "/v1/fs_write", map[string]any{"session_id": runID, "path": "/workspace/a", "content_base64": content, "mode": 0o644, "disk_mb": 10})
 	rec := e.do("GET", "/v1/health", nil)
 	if !strings.Contains(rec.Body.String(), `"sessions":2`) {
 		t.Fatalf("%s", rec.Body.String())
@@ -382,7 +382,7 @@ func TestExecRefusesSkillsDirAtAnyOtherPath(t *testing.T) {
 func TestFilesRoundTripAndStayInsideTheTree(t *testing.T) {
 	e := newEnv(t, true)
 	content := base64.StdEncoding.EncodeToString([]byte("data"))
-	if rec := e.do("POST", "/v1/fs_write", map[string]any{"session_id": sessionID, "path": "/workspace/a/b.txt", "content_base64": content, "mode": 0o644}); rec.Code != 204 {
+	if rec := e.do("POST", "/v1/fs_write", map[string]any{"session_id": sessionID, "path": "/workspace/a/b.txt", "content_base64": content, "mode": 0o644, "disk_mb": 10}); rec.Code != 204 {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
 	rec := e.do("POST", "/v1/fs_read", map[string]any{"session_id": sessionID, "path": "/workspace/a/b.txt"})
@@ -393,18 +393,18 @@ func TestFilesRoundTripAndStayInsideTheTree(t *testing.T) {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
 	for _, p := range []string{"/etc/passwd", "/workspace/../x", "relative"} {
-		if rec := e.do("POST", "/v1/fs_write", map[string]any{"session_id": sessionID, "path": p, "content_base64": content, "mode": 0o644}); rec.Code != 400 {
+		if rec := e.do("POST", "/v1/fs_write", map[string]any{"session_id": sessionID, "path": p, "content_base64": content, "mode": 0o644, "disk_mb": 10}); rec.Code != 400 {
 			t.Errorf("%s: %d", p, rec.Code)
 		}
 	}
-	if rec := e.do("POST", "/v1/fs_write", map[string]any{"session_id": sessionID, "path": "/workspace/x", "content_base64": content, "mode": 0o4755}); rec.Code != 400 {
+	if rec := e.do("POST", "/v1/fs_write", map[string]any{"session_id": sessionID, "path": "/workspace/x", "content_base64": content, "mode": 0o4755, "disk_mb": 10}); rec.Code != 400 {
 		t.Errorf("setuid modes must be refused: %d", rec.Code)
 	}
 }
 
 func TestDestroySessionRemovesTheTree(t *testing.T) {
 	e := newEnv(t, true)
-	e.do("POST", "/v1/fs_write", map[string]any{"session_id": sessionID, "path": "/workspace/a", "content_base64": "", "mode": 0o644})
+	e.do("POST", "/v1/fs_write", map[string]any{"session_id": sessionID, "path": "/workspace/a", "content_base64": "", "mode": 0o644, "disk_mb": 10})
 	if rec := e.do("POST", "/v1/destroy_session", map[string]any{"session_id": sessionID}); rec.Code != 204 {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
@@ -451,6 +451,75 @@ func TestCreateSessionForAnExistingTreeNeedsNoNewRoom(t *testing.T) {
 	if rec := e.do("POST", "/v1/create_session", map[string]any{"session_id": sessionID, "disk_mb": 10}); rec.Code != 204 {
 		t.Fatalf("an existing tree must not be refused for room: %d %s", rec.Code, rec.Body.String())
 	}
+}
+
+func TestEveryCallThatMakesATreeChecksForRoom(t *testing.T) {
+	e := newEnv(t, true)
+	e.srv.MinFreeBytes = 1 << 60
+	content := base64.StdEncoding.EncodeToString([]byte("x"))
+	for _, call := range []struct {
+		path string
+		body any
+	}{
+		{"/v1/exec", execBody(nil)},
+		{"/v1/fs_write", map[string]any{"session_id": sessionID, "path": "/workspace/a", "content_base64": content, "mode": 0o644, "disk_mb": 10}},
+	} {
+		rec := e.do("POST", call.path, call.body)
+		if rec.Code != 507 || errCode(t, rec) != "storage_full" {
+			t.Fatalf("%s: %d %s", call.path, rec.Code, rec.Body.String())
+		}
+		if _, err := os.Stat(filepath.Join(e.srv.TreeDir, sessionID)); !os.IsNotExist(err) {
+			t.Fatalf("%s: a refused call must leave no tree", call.path)
+		}
+	}
+}
+
+func TestFileWritesToAnExistingTreeNeedNoNewRoom(t *testing.T) {
+	e := newEnv(t, true)
+	content := base64.StdEncoding.EncodeToString([]byte("x"))
+	write := map[string]any{"session_id": sessionID, "path": "/workspace/a", "content_base64": content, "mode": 0o644, "disk_mb": 10}
+	if rec := e.do("POST", "/v1/fs_write", write); rec.Code != 204 {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	e.srv.MinFreeBytes = 1 << 60
+	if rec := e.do("POST", "/v1/fs_write", write); rec.Code != 204 {
+		t.Fatalf("an existing tree must not be refused for room: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestFileWritesNeedTheSessionQuota(t *testing.T) {
+	e := newEnv(t, true)
+	content := base64.StdEncoding.EncodeToString([]byte("x"))
+	for _, diskMB := range []any{nil, 0, 8193} {
+		body := map[string]any{"session_id": sessionID, "path": "/workspace/a", "content_base64": content, "mode": 0o644}
+		if diskMB != nil {
+			body["disk_mb"] = diskMB
+		}
+		if rec := e.do("POST", "/v1/fs_write", body); rec.Code != 400 || errCode(t, rec) != "invalid_request" {
+			t.Errorf("disk_mb %v: %d %s", diskMB, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+func TestCreateSessionDoesNotWaitForAnotherChatsCall(t *testing.T) {
+	e := newEnv(t, true)
+	e.runner.hold = make(chan struct{})
+	done := make(chan struct{})
+	go func() { e.do("POST", "/v1/exec", execBody(nil)); close(done) }()
+	for {
+		e.runner.mu.Lock()
+		started := e.runner.spec.ID != ""
+		e.runner.mu.Unlock()
+		if started {
+			break
+		}
+	}
+	other := strings.Repeat("b", 32)
+	if rec := e.do("POST", "/v1/create_session", map[string]any{"session_id": other, "disk_mb": 10}); rec.Code != 204 {
+		t.Errorf("a new chat must not wait for another chat's call: %d %s", rec.Code, rec.Body.String())
+	}
+	close(e.runner.hold)
+	<-done
 }
 
 func TestCreateSessionValidatesItsRequest(t *testing.T) {
@@ -582,7 +651,7 @@ func TestSessionInUseAnswersBusyForFilesDestroyAndCreate(t *testing.T) {
 	content := base64.StdEncoding.EncodeToString([]byte("x"))
 	calls := map[string]map[string]any{
 		"/v1/fs_read":         {"session_id": sessionID, "path": "/workspace/a"},
-		"/v1/fs_write":        {"session_id": sessionID, "path": "/workspace/a", "content_base64": content, "mode": 0o644},
+		"/v1/fs_write":        {"session_id": sessionID, "path": "/workspace/a", "content_base64": content, "mode": 0o644, "disk_mb": 10},
 		"/v1/create_session":  {"session_id": sessionID, "disk_mb": 10},
 		"/v1/destroy_session": {"session_id": sessionID},
 	}
@@ -593,7 +662,7 @@ func TestSessionInUseAnswersBusyForFilesDestroyAndCreate(t *testing.T) {
 	}
 	// A different session on the same slot can still move files while the lease runs.
 	other := strings.Repeat("b", 32)
-	if rec := e.do("POST", "/v1/fs_write", map[string]any{"session_id": other, "path": "/workspace/a", "content_base64": content, "mode": 0o644}); rec.Code != 204 {
+	if rec := e.do("POST", "/v1/fs_write", map[string]any{"session_id": other, "path": "/workspace/a", "content_base64": content, "mode": 0o644, "disk_mb": 10}); rec.Code != 204 {
 		t.Errorf("other session: %d %s", rec.Code, rec.Body.String())
 	}
 	close(e.runner.hold)
@@ -605,7 +674,7 @@ func TestIdleSessionsAreSweptAndBusyOnesKept(t *testing.T) {
 	content := base64.StdEncoding.EncodeToString([]byte("x"))
 	old, fresh := strings.Repeat("c", 32), strings.Repeat("d", 32)
 	for _, id := range []string{old, fresh} {
-		e.do("POST", "/v1/fs_write", map[string]any{"session_id": id, "path": "/workspace/a", "content_base64": content, "mode": 0o644})
+		e.do("POST", "/v1/fs_write", map[string]any{"session_id": id, "path": "/workspace/a", "content_base64": content, "mode": 0o644, "disk_mb": 10})
 	}
 	past := time.Now().Add(-48 * time.Hour)
 	if err := os.Chtimes(filepath.Join(e.srv.TreeDir, old), past, past); err != nil {
@@ -948,8 +1017,8 @@ func sessionsOf(t *testing.T, rec *httptest.ResponseRecorder) sessionsBody {
 func TestSessionsListsTreesWithTheirSizes(t *testing.T) {
 	e := newEnv(t, true)
 	content := base64.StdEncoding.EncodeToString([]byte("hello"))
-	e.do("POST", "/v1/fs_write", map[string]any{"session_id": sessionID, "path": "/workspace/a.txt", "content_base64": content, "mode": 0o644})
-	e.do("POST", "/v1/fs_write", map[string]any{"session_id": runID, "path": "/workspace/b.txt", "content_base64": content, "mode": 0o644})
+	e.do("POST", "/v1/fs_write", map[string]any{"session_id": sessionID, "path": "/workspace/a.txt", "content_base64": content, "mode": 0o644, "disk_mb": 10})
+	e.do("POST", "/v1/fs_write", map[string]any{"session_id": runID, "path": "/workspace/b.txt", "content_base64": content, "mode": 0o644, "disk_mb": 10})
 	body := sessionsOf(t, e.do("GET", "/v1/sessions", nil))
 	if len(body.Sessions) != 2 {
 		t.Fatalf("got %d sessions, want 2", len(body.Sessions))
@@ -968,14 +1037,14 @@ func TestSessionsServesTheCachedWalkUntilItAges(t *testing.T) {
 	e := newEnv(t, true)
 	e.srv.SessionsMaxAge = time.Hour
 	content := base64.StdEncoding.EncodeToString([]byte("hello"))
-	e.do("POST", "/v1/fs_write", map[string]any{"session_id": sessionID, "path": "/workspace/a.txt", "content_base64": content, "mode": 0o644})
+	e.do("POST", "/v1/fs_write", map[string]any{"session_id": sessionID, "path": "/workspace/a.txt", "content_base64": content, "mode": 0o644, "disk_mb": 10})
 	first := sessionsOf(t, e.do("GET", "/v1/sessions", nil))
 	if len(first.Sessions) != 1 {
 		t.Fatalf("got %d sessions, want 1", len(first.Sessions))
 	}
 	// A larger write lands after the walk; the cached listing must not see it yet.
 	big := base64.StdEncoding.EncodeToString([]byte(strings.Repeat("x", 8192)))
-	e.do("POST", "/v1/fs_write", map[string]any{"session_id": sessionID, "path": "/workspace/big.bin", "content_base64": big, "mode": 0o644})
+	e.do("POST", "/v1/fs_write", map[string]any{"session_id": sessionID, "path": "/workspace/big.bin", "content_base64": big, "mode": 0o644, "disk_mb": 10})
 	second := sessionsOf(t, e.do("GET", "/v1/sessions", nil))
 	if len(second.Sessions) != 1 || second.Sessions[0].Bytes != first.Sessions[0].Bytes {
 		t.Fatalf("cached listing changed: first %+v, second %+v", first.Sessions, second.Sessions)
