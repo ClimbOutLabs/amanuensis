@@ -1,6 +1,12 @@
 /** Partial unique index on `session (tenant_id, external_id) WHERE external_id IS NOT NULL`. */
 export const SESSION_EXTERNAL_ID_UQ = 'session_external_id_uq';
 
+/** `session (private_expires_at)` partial WHERE is_incognito: the sweep that deletes expired private chats. */
+export const SESSION_PRIVATE_EXPIRY_IDX = 'session_private_expiry_idx';
+
+/** `deleted_chat_model_usage (tenant_id, created_by_subject_id, created_at)`: a person's usage reads. */
+export const DELETED_CHAT_MODEL_USAGE_OWNER_IDX = 'deleted_chat_model_usage_owner_idx';
+
 /** `(tenant_id, created_by_subject.subject_id)` on session. */
 export const SESSION_CREATED_BY_SUBJECT_ID_IDX = 'session_created_by_subject_id_idx';
 

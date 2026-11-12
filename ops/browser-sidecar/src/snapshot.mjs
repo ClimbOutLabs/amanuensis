@@ -9,6 +9,7 @@ const CHARS_PER_TOKEN = 4;
 const MAX_CHARS = TARGET_TOKENS * CHARS_PER_TOKEN;
 
 const CUT_NOTE = '\n…(cut; this page has more. Scroll, or ask a narrower question, to see the rest.)';
+const ABOVE_NOTE = '…(the part of the page above the view is left out; scroll up to see it.)\n';
 
 /** A sensitive field's value is never shown, however the page or the model asks for it. */
 export function sensitivityOf(node) {
@@ -41,14 +42,27 @@ function oneLine({ node, ref }) {
 }
 
 /**
+ * Where the view is on the page, so a scroll that moved it reads differently from one that did not,
+ * and the model can tell when it has reached the end.
+ */
+function viewLine({ top, bottom, height }) {
+  const end = bottom >= height ? ', the end of the page' : '';
+  return `In view: ${String(top)} to ${String(Math.min(bottom, height))} of ${String(height)} pixels down${end}\n`;
+}
+
+/**
  * Builds the snapshot text. `nodes` is the extractor's flat list of visible content in reading order; `refs` maps each actionable node to the short id it keeps for this page (stable
  * across re-reads of the same page, assigned once by the caller that tracks them).
  */
-export function renderSnapshot({ title, url, nodes, refs }) {
-  const header = `# ${title === '' ? '(untitled)' : title}\n${url}\n`;
-  const lines = nodes.map(node => oneLine({ node, ref: refs.get(node.id) ?? null }));
-  let body = lines.join('\n');
+export function renderSnapshot({ title, url, nodes, refs, view }) {
+  const header = `# ${title === '' ? '(untitled)' : title}\n${url}\n${view === undefined ? '' : viewLine(view)}`;
+  const render = shown => shown.map(node => oneLine({ node, ref: refs.get(node.id) ?? null })).join('\n');
+  let body = render(nodes);
   let truncated = false;
+  // A page too long for one read starts where the view is, so each scroll shows the next part.
+  if (header.length + body.length > MAX_CHARS && nodes.some(node => node.above_view === true)) {
+    body = `${ABOVE_NOTE}${render(nodes.filter(node => node.above_view !== true))}`;
+  }
   if (header.length + body.length > MAX_CHARS) {
     const budget = Math.max(0, MAX_CHARS - header.length - CUT_NOTE.length);
     body = body.slice(0, budget);

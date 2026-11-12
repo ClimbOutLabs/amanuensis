@@ -61,8 +61,8 @@ function wireStatus(manifest: TrueForgeApi.ScheduleManifest): ScheduleStatus {
 }
 
 /**
- * The Schedules page edits repeating tasks only. A one-time schedule has no repeating time, and a reminder lives in
- * the Reminders chat; saving either from the task form would turn it into something else.
+ * The Schedules page edits repeating tasks only. A one-time schedule has no repeating time, and a reminder belongs
+ * to the chat it was set in; saving either from the task form would turn it into something else.
  */
 function isRepeatingTask(wire: TrueForgeApi.Schedule): boolean {
   return typeof wire.manifest.cron === 'string' && Reflect.get(wire.manifest, 'kind') !== 'reminder';

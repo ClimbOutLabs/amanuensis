@@ -37,14 +37,16 @@ What it can do today:
   shell's installer in the setup container with https on this computer
   and daily backups. Then the steps the earlier commands added run in
   their order: the adopt step puts the command and the Start menu
-  entries in place, the folder Aman keeps on the PC is made private,
+  entries in place (Aman, which opens it, Check Aman, Update Aman,
+  Remove Aman and Backups), the folder Aman keeps on the PC is made private,
   Aman opens in the browser, and the home network is opened when the
   phone answer was yes. At the end a short getting started page opens
   in the browser; the page is also saved in the Amanuensis folder.
   `aman install --dry-run` prints what it would do and does nothing.
   Running Aman-Setup.exe with no command does what the computer in
   front of it needs: this install, the adopt step on a starter PC, or
-  the upgrade on an installed one.
+  the upgrade on an installed one. A copy the browser saved as
+  `Aman-Setup (1).exe` does the same.
 - `aman open`, on Windows, starts Docker if it needs to, waits for Aman
   to answer, and opens it in the browser. An Aman served over https on
   this computer opens at its https address, after this computer is set
@@ -74,8 +76,46 @@ What it can do today:
   choice in the state record and adds a Backups entry to the Start
   menu. On Windows the doctor's backup check looks for that task and
   reads the ages of the backups from the folder they land in.
+- `aman uninstall`, on Windows, removes Aman from the PC. It says what
+  goes and asks once before anything is deleted: the instances with all
+  their data (through the shell's own `instance remove --purge-data`, in
+  the setup container), the Aman volumes and images in Docker, the
+  shortcuts that point at Aman, the daily backup task, the resume entry,
+  the firewall rule (one Windows prompt), the PATH entry, the
+  certificate Aman added, the Amanuensis folder and the aman command
+  itself. A second question decides the backups: they are kept, with a
+  last backup made first, unless it is answered yes. Docker Desktop
+  stays installed, and the last line says how to remove it. A removal
+  that stops part way says why and can be run again. The steps that can
+  meet a Windows prompt (the firewall rule, the certificate) go before
+  the folder, the PATH entry and the Start menu entries, so a No leaves
+  everything a second run needs, and the message names the full path
+  to aman.exe. Once Docker is cleared a note beside the command says
+  so, and a second run finishes the Windows side without Docker
+  running; an install or a restore takes the note away when it starts. When Docker
+  Desktop was removed first, its own removal took Aman's Docker data,
+  and the command removes the Windows parts. The aman command is deleted only once everything else is
+  gone. The Start menu's Remove Aman entry runs it.
 - `aman backups`, on Windows, lists the backups kept on the PC,
   newest first. The Start menu's Backups entry opens the folder.
+- `aman restore`, on Windows, puts an instance back the way one of
+  those backups had it. It lists the backups newest first and asks
+  which number to use; a backup's name or `--latest` picks one without
+  the list, and an instance name picks the instance when there is more
+  than one. It asks once before anything changes, says the password
+  goes back too, and says so when the instance is running and will be
+  stopped. No answer changes nothing and exits 1. A yes deletes the
+  note an earlier removal left to say Docker is cleared. Then it runs the shell's own
+  restore in the setup container with the Backups folder on the PC
+  mounted where the shell reads backups. The shell checks the backup,
+  saves a copy of how the instance is now, puts the backup back, and
+  puts the copy back if anything fails. Opening the backup happens in
+  there too, so no tool it needs has to be on Windows.
+
+On Windows, a window that a double-click or a Start menu entry opened
+stays open at the end until the person presses Enter, so the result and
+any problem can be read; a successful `aman open` closes at once, and a
+terminal or the daily backup task never waits.
 
 Every sentence a person can read lives in `src/messages.ts`. A test checks
 each one for plain words and compares them all to the golden file in
@@ -86,3 +126,20 @@ lines are compared to golden files too.
 Build the single executable with `pnpm build:aman-installer` from the
 repository root. The bundle is made with esbuild and turned into one file
 with Node's single executable support and postject.
+
+## Releases
+
+Each release publishes the program for every system: `Aman-Setup.exe` and
+`aman-windows-x64.exe` (the same Windows program under two names),
+`aman-darwin-arm64` and `aman-linux-x64`, beside the source archive, the
+signed release record (`manifest.json` and `manifest.json.minisig`) and
+`SHA256SUMS`. The names live in `src/release/assetNames.ts`.
+
+`pnpm release:aman-installer <step>` runs the release tool
+(`src/release/tool.ts`): `stage` puts a built program into a folder under
+its release names, `build-manifest` and `assemble-manifest` make the record,
+`sign` signs it, `verify` checks a file against it, `checksums` writes
+`SHA256SUMS`, `notes` writes the published release page with the steps to
+check a download by hand, and `throwaway-key` makes a key for a dry run. The release
+workflows run these steps; `RELEASING.md` at the repository root describes
+the whole release.

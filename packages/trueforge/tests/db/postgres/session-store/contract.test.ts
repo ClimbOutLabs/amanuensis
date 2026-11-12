@@ -79,6 +79,8 @@ describePg('PostgresSessionStore (ISessionStore contract)', () => {
       metadata: {},
       agent: { type: 'inline', spec: makeAgentSpec() },
       custom: null,
+      is_incognito: false,
+      private_expires_at: null,
     });
     await db
       .updateTable('session')

@@ -44,7 +44,10 @@ export function usageEvent({
   };
 }
 
-/** A finished chat owned by `owner`, titled `title` (null for untitled), with the given usage events. */
+/**
+ * A finished chat owned by `owner`, titled `title` (null for untitled), with the given usage events.
+ * `privateUntil` makes it a private chat that expires then.
+ */
 export async function seedDoneChat({
   store,
   tenantId,
@@ -52,6 +55,7 @@ export async function seedDoneChat({
   owner,
   title,
   events,
+  privateUntil,
 }: {
   store: SqliteSessionStore;
   tenantId: string;
@@ -59,6 +63,7 @@ export async function seedDoneChat({
   owner: string;
   title: string | null;
   events: ModelUsagePersistedEvent[];
+  privateUntil?: Date | undefined;
 }): Promise<void> {
   const turnId = `${sessionId}-turn`;
   await store.createSession({
@@ -70,6 +75,8 @@ export async function seedDoneChat({
     metadata: {},
     agent: { type: 'inline', spec: makeAgentSpec() },
     custom: null,
+    is_incognito: privateUntil !== undefined,
+    private_expires_at: privateUntil ?? null,
   });
   if (title !== null) {
     await store.updateSession({
