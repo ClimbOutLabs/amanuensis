@@ -12,7 +12,7 @@ import {
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 
 /**
- * A read command dressed up to run something else: a wrapper that runs whatever it is handed, a
+ * A read command that would run something else: a wrapper that runs whatever it is handed, a
  * substitution, an environment prefix, or a git flag that writes or configures. None of these may
  * ever count as a free read, at the parser, at the read-only list, or at the classifier.
  */
@@ -85,7 +85,7 @@ function action(tool_name: string, canonical_params: Record<string, unknown>): S
   return { tool_name, canonical_params, tool_type: 'truefoundry-system', mcp_hints: {} };
 }
 
-describe('the classifier never lets a dressed-up command run as a free read', () => {
+describe('the classifier never lets a wrapped command run as a free read', () => {
   test('the plain allowlisted command still runs silently, as the control', async () => {
     const { services, cleanup } = servicesWithTempAllowlist();
     try {
