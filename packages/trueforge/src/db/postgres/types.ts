@@ -44,7 +44,9 @@ import type { ChatImageOrigin } from '../chatImageStore';
 import type { DeliveryAttemptTable, DeliveryTable } from '../deliveryStore';
 import type { LocalUserTable } from '../localUserStore';
 import type { OAuthClient, OAuthPendingAuthorizationData, OAuthServer, OAuthToken } from '../mcpServerStore';
+import type { NoticingCheckpointTable, NoticingEventTable, ReachLeaseTable } from '../noticingStore';
 import type { PushSubscriptionTable } from '../pushSubscriptionStore';
+import type { ReachSettingsTable } from '../reachSettingsStore';
 import type { RecallExclusionTable } from '../recallExclusionStore';
 
 /**
@@ -1005,6 +1007,10 @@ export interface Database {
   recall_exclusion: RecallExclusionTable;
   delivery: DeliveryTable;
   delivery_attempt: DeliveryAttemptTable;
+  reach_settings: ReachSettingsTable;
+  noticing_event: NoticingEventTable;
+  noticing_checkpoint: NoticingCheckpointTable;
+  reach_lease: ReachLeaseTable;
   push_subscription: PushSubscriptionTable;
   local_user: LocalUserTable;
   approval_token: ApprovalTokenTable;

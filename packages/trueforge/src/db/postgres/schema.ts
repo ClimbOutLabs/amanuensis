@@ -68,6 +68,10 @@ export const TABLES_TO_MOVE = [
   'recall_exclusion',
   'delivery',
   'delivery_attempt',
+  'reach_settings',
+  'noticing_event',
+  'noticing_checkpoint',
+  'reach_lease',
   'push_subscription',
   'local_user',
 ] as const;

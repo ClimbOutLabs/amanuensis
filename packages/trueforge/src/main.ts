@@ -82,7 +82,7 @@ import { sweepExpiredPrivateChats } from './apis/privateChats';
 import { createServerApp } from './app';
 import { TrueForgeAuthorizer, type Authorizer } from './auth/authorizer';
 import { createAuthenticator } from './auth/createAuthenticator';
-import { resolveRequestContext, type RequestContext } from './auth/identity';
+import { resolveRequestContext, STANDALONE_REQUEST_CONTEXT, type RequestContext } from './auth/identity';
 import { startOidcDiscovery } from './auth/oidc';
 import { McpCatalog } from './catalog/McpCatalog';
 import { ModelCatalog } from './catalog/ModelCatalog';
@@ -103,11 +103,13 @@ import type { IMcpServerStore, IMcpServerWithAuthStore } from './db/mcpServerSto
 import { McpServerWithAuthStore } from './db/McpServerWithAuthStore';
 import type { IMcpToolGrantStore } from './db/mcpToolGrantStore';
 import type { IModelProviderStore } from './db/modelProviderStore';
+import { NoticingStore, type INoticingStore } from './db/noticingStore';
 import type { IPersonalizationStore } from './db/personalizationStore';
 import type { IPersonaStore } from './db/personaStore';
 import type { PostgresAgentStore } from './db/postgres/agent-store/PostgresAgentStore';
 import type { Database as PostgresDatabase } from './db/postgres/types';
 import { PushSubscriptionStore, type IPushSubscriptionStore } from './db/pushSubscriptionStore';
+import { ReachSettingsStore, type IReachSettingsStore } from './db/reachSettingsStore';
 import { RecallExclusionStore, type IRecallExclusionStore } from './db/recallExclusionStore';
 import type { IRepositoryStore } from './db/repositoryStore';
 import type { ISandboxProviderStore } from './db/sandboxProviderStore';
@@ -130,6 +132,7 @@ import { PACKAGE_VERSION } from './packageVersion';
 import { closePersonaKnowledgeIndexers } from './personaKnowledge/knowledgeIndexer';
 import { ActiveTurnRegistry } from './runtime/activeTurns';
 import { registerCalendarConnectorForBoot } from './runtime/calendarAccount';
+import { assistantNameFor } from './runtime/chatAssistant';
 import { createChatImageService } from './runtime/chatImages/chatImageService';
 import { CHAT_IMAGE_RETENTION_DAYS } from './runtime/chatImages/limits';
 import { createImageReencoder } from './runtime/chatImages/reencodeInSandbox';
@@ -139,10 +142,19 @@ import { designateTavilyAtBoot, seedDefaultSearchProviderAtBoot } from './runtim
 import { createDeliveryService } from './runtime/delivery/deliveryService';
 import { createWebPushSender } from './runtime/delivery/webPushSender';
 import { EventSubscriptionRegistry } from './runtime/event-subscription';
+import { instanceOwnerSubjectId } from './runtime/instanceOwner';
 import { registerMailConnectorFromSavedAccountInBackground } from './runtime/mailAccount';
 import { prepareMailPolicyAtBoot, registerMailConnectorAtBoot } from './runtime/mailConnector';
 import { warmEmbeddingsAtBoot } from './runtime/memory/embeddingRetrieval';
 import { startNotesFolderIndexing } from './runtime/notesFolder/notesFolderRuntime';
+import { sessionApprovalSource } from './runtime/noticing/approvalSource';
+import { createGoogleNoticingSources, googleCalendarTimezoneFor } from './runtime/noticing/googleSources';
+import { createNoticingJudgeResolver } from './runtime/noticing/judgeFactory';
+import { createNoticingService } from './runtime/noticing/noticingService';
+import { personTimezoneFor } from './runtime/noticing/personTimezone';
+import { NO_PHONE_CHANNELS } from './runtime/noticing/reachChannels';
+import { createReminderReach } from './runtime/noticing/reminderReach';
+import { createSidecarNoticingSources } from './runtime/noticing/sidecarSources';
 import { createOutboundSecretSource } from './runtime/outboundSecrets';
 import { seedOwnerNameAtBoot } from './runtime/ownerName';
 import { createSentinelServices } from './runtime/sentinelServices';
@@ -217,6 +229,8 @@ interface ServerPersistence<TTransaction> {
   briefItemStore: IBriefItemCompletionStore;
   recallExclusionStore: IRecallExclusionStore;
   deliveryStore: IDeliveryStore;
+  reachSettingsStore: IReachSettingsStore;
+  noticingStore: INoticingStore;
   pushSubscriptionStore: IPushSubscriptionStore;
   approvalTokenStore: ApprovalTokenStore;
   destroyDb: () => Promise<void>;
@@ -461,6 +475,8 @@ async function createStandalonePersistence(options: {
     briefItemStore: new BriefItemCompletionStore(db),
     recallExclusionStore: new RecallExclusionStore(db),
     deliveryStore: new DeliveryStore(db),
+    reachSettingsStore: new ReachSettingsStore(db),
+    noticingStore: new NoticingStore(db),
     pushSubscriptionStore: new PushSubscriptionStore(db),
     approvalTokenStore: new SqliteApprovalTokenStore(db),
     modelProviderStore,
@@ -649,6 +665,8 @@ async function createDistributedPersistence(options: {
     briefItemStore: new BriefItemCompletionStore(db),
     recallExclusionStore: new RecallExclusionStore(db),
     deliveryStore: new DeliveryStore(db),
+    reachSettingsStore: new ReachSettingsStore(db),
+    noticingStore: new NoticingStore(db),
     pushSubscriptionStore: new PushSubscriptionStore(db),
     approvalTokenStore: new PostgresApprovalTokenStore(db),
     modelProviderStore,
@@ -694,6 +712,8 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     sentinelSettingsStore,
     briefItemStore,
     deliveryStore,
+    reachSettingsStore,
+    noticingStore,
     pushSubscriptionStore,
     approvalTokenStore,
     destroyDb,
@@ -825,6 +845,43 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     senders: [createWebPushSender({ subscriptions: pushSubscriptionStore, settings: configuration.WEB_PUSH })],
     audit: sentinelAuditStore,
     logger,
+  });
+  const noticingOwnerId = instanceOwnerSubjectId({
+    signInOff: getTrueForgeAuthMode(configuration) === TrueForgeAuthMode.Standalone,
+    defaultSubjectId: STANDALONE_REQUEST_CONTEXT.subject.id,
+    oidc: configuration.OIDC,
+  });
+  const noticingInstanceOwner =
+    noticingOwnerId === undefined ? undefined : { tenant_id: TENANT_ID, created_by: noticingOwnerId };
+  const noticingService = createNoticingService({
+    sources: createSidecarNoticingSources({
+      mailUrl: configuration.MAIL_SIDECAR_MCP_URL,
+      mailAgentUrl: configuration.MAIL_EMAIL_ACCOUNT_URL,
+      calendarUrl: configuration.CALENDAR_SIDECAR_MCP_URL,
+      primary: createGoogleNoticingSources({ connections: googleConnectionStore, fetchImpl: undefined, logger }),
+      instanceOwner: noticingInstanceOwner,
+      logger,
+    }),
+    approvals: sessionApprovalSource({ sessionStore, tenant_id: TENANT_ID }),
+    reachSettings: reachSettingsStore,
+    store: noticingStore,
+    deliveries: deliveryService,
+    history: deliveryStore,
+    judgeFor: createNoticingJudgeResolver({
+      resolveModelProviderStore: context => persistence.resolveModelProviderStore(context),
+      personalizationStore,
+      globalSettingsStore,
+      tokenFactoryBudget,
+      logger,
+    }),
+    budget: tokenFactoryBudget,
+    channels: () => NO_PHONE_CHANNELS,
+    logger,
+    assistantNameFor: async owner => await assistantNameFor({ personalizationStore, owner }),
+    timezoneFor: personTimezoneFor({
+      scheduleStore,
+      calendarTimezone: googleCalendarTimezoneFor({ connections: googleConnectionStore, fetchImpl: undefined }),
+    }),
   });
   const sentinelServices = createSentinelServices({
     demoMode: configuration.DEMO_MODE,
@@ -969,6 +1026,17 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     deliveryStore,
     pushSubscriptionStore,
     deliveryService,
+    reachSettingsStore,
+    noticingStore,
+    noticingService,
+    reminderReach: createReminderReach({
+      reachSettings: reachSettingsStore,
+      store: noticingStore,
+      history: deliveryStore,
+      channels: () => NO_PHONE_CHANNELS,
+      logger,
+    }),
+    reachChannels: () => NO_PHONE_CHANNELS,
     webPushPublicKey: configuration.WEB_PUSH?.publicKey,
     sessions,
     chatImages,

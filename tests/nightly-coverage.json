@@ -343,6 +343,10 @@
       "set": "chat",
       "tests": []
     },
+    "route:reach": {
+      "set": "reach",
+      "tests": []
+    },
     "route:recallExclusion": {
       "set": "memory",
       "tests": []
@@ -786,6 +790,7 @@
     "route:personaKnowledge",
     "route:personalization",
     "route:privateChat",
+    "route:reach",
     "route:recallExclusion",
     "route:repository",
     "route:runCode",

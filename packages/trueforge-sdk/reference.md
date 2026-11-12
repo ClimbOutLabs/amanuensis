@@ -7240,6 +7240,270 @@ await client.deliveries.get("delivery_id");
 </dl>
 </details>
 
+## Reach
+<details><summary><code>client.reach.<a href="/src/api/resources/reach/client/Client.ts">get</a>() -> TrueForge.GetReachResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Reads how the signed-in person wants to be reached, with which channels are set up on this server.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.reach.get();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `ReachClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.reach.<a href="/src/api/resources/reach/client/Client.ts">createOrUpdate</a>({ ...params }) -> TrueForge.GetReachResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Replaces how the signed-in person wants to be reached. Texts and calls cannot be turned on until set up.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.reach.createOrUpdate({
+    settings: {
+        alwaysImportant: [{
+                addedAt: "added_at",
+                address: "address",
+                source: "settings"
+            }],
+        approvalWaitMinutes: 1,
+        callForUrgentReminders: true,
+        callKinds: ["mail_always"],
+        channels: {
+            calls: true,
+            texts: true
+        },
+        dismissedSuggestions: ["dismissed_suggestions"],
+        maxNudgesPerDay: 1,
+        minHoursBetweenCalls: 1,
+        quietHours: {
+            enabled: true,
+            end: "end",
+            start: "start"
+        },
+        timezone: "timezone",
+        travelLeadMinutes: 1
+    }
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.UpdateReachRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `ReachClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.reach.<a href="/src/api/resources/reach/client/Client.ts">listSuggestions</a>() -> TrueForge.ListReachSuggestionsResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Lists senders the memory suggests. Nothing is added until the person accepts it in a saved update.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.reach.listSuggestions();
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**requestOptions:** `ReachClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+<details><summary><code>client.reach.<a href="/src/api/resources/reach/client/Client.ts">testChannel</a>({ ...params }) -> TrueForge.TestReachChannelResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Sends the signed-in person a test item on one channel. A channel that is not set up answers 409.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.reach.testChannel({
+    channel: "in_app"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.TestReachChannelRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `ReachClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
 ## Voice
 <details><summary><code>client.voice.<a href="/src/api/resources/voice/client/Client.ts">connect</a>({ ...params }) -> TrueForge.VoiceTicketResponse</code></summary>
 <dl>
@@ -8085,6 +8349,72 @@ await client.internal.metrics.getMeters({
 <dd>
 
 **requestOptions:** `MetricsClient.RequestOptions`
+
+</dd>
+</dl>
+</dd>
+</dl>
+
+
+</dd>
+</dl>
+</details>
+
+## Internal Noticing
+<details><summary><code>client.internal.noticing.<a href="/src/api/resources/internal/resources/noticing/client/Client.ts">run</a>({ ...params }) -> TrueForge.RunNoticingResponse</code></summary>
+<dl>
+<dd>
+
+#### 📝 Description
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+Runs one pass of one watcher for everyone it can watch.
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### 🔌 Usage
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+```typescript
+await client.internal.noticing.run({
+    watcher: "mail"
+});
+
+```
+</dd>
+</dl>
+</dd>
+</dl>
+
+#### ⚙️ Parameters
+
+<dl>
+<dd>
+
+<dl>
+<dd>
+
+**request:** `TrueForge.internal.RunNoticingRequest`
+
+</dd>
+</dl>
+
+<dl>
+<dd>
+
+**requestOptions:** `NoticingClient.RequestOptions`
 
 </dd>
 </dl>
