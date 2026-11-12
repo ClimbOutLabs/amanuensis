@@ -394,6 +394,7 @@ function sleep(ms: number): Promise<void> {
  */
 interface RequestTimeout {
   signal: AbortSignal;
+  /** The caller's own timeout, which a timeout failure names even when a retry ran on what was left of it. */
   timeoutMs: number;
 }
 
@@ -610,7 +611,7 @@ export class HindsightClient implements MemoryClient {
     if (remainingMs <= 0) {
       return fromConfig;
     }
-    const legacy = await this.getProfileLegacy(remainingMs);
+    const legacy = await this.getProfileLegacy({ timeoutMs: remainingMs, callerTimeoutMs: timeoutMs });
     if (legacy.ok) {
       return legacy;
     }
@@ -648,8 +649,8 @@ export class HindsightClient implements MemoryClient {
   }
 
   /** Legacy `/profile` endpoint for pre-0.10.0 servers (retired upstream in 0.10.0). */
-  private async getProfileLegacy(timeoutMs: number): Promise<GetProfileOutcome> {
-    const sent = await this.send({ path: '/profile', method: 'GET', timeoutMs });
+  private async getProfileLegacy(input: { timeoutMs: number; callerTimeoutMs: number }): Promise<GetProfileOutcome> {
+    const sent = await this.send({ path: '/profile', method: 'GET', ...input });
     if (!sent.ok) {
       return sent;
     }
@@ -783,10 +784,12 @@ export class HindsightClient implements MemoryClient {
     path: string;
     method: 'GET' | 'POST' | 'DELETE';
     timeoutMs: number;
+    /** Set when `timeoutMs` is only what is left of a longer budget, so a timeout names the budget the caller gave. */
+    callerTimeoutMs?: number;
     body?: unknown;
   }): Promise<SentRequest | MemoryFailure> {
     const timeoutSignal = AbortSignal.timeout(input.timeoutMs);
-    const timeout: RequestTimeout = { signal: timeoutSignal, timeoutMs: input.timeoutMs };
+    const timeout: RequestTimeout = { signal: timeoutSignal, timeoutMs: input.callerTimeoutMs ?? input.timeoutMs };
     try {
       const resolved = await Promise.race([resolveHeadersSafely(this.headers), rejectOnAbort(timeoutSignal)]);
       if (!resolved.ok) {
@@ -805,7 +808,7 @@ export class HindsightClient implements MemoryClient {
       return { ok: true, response, timeout };
     } catch (error) {
       if (isTimeoutError(error)) {
-        return timeoutFailure(input.timeoutMs);
+        return timeoutFailure(timeout.timeoutMs);
       }
       return {
         ok: false,
@@ -840,6 +843,7 @@ export class HindsightClient implements MemoryClient {
         path: input.path,
         method: input.method,
         timeoutMs: remainingMs,
+        callerTimeoutMs: input.timeoutMs,
         body: input.body,
       });
       if (!sent.ok || sent.response.status !== 503) {

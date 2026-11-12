@@ -214,6 +214,75 @@ describe("a site the assistant's own reply named", () => {
       card: null,
     });
   });
+
+  /** A chat where only the assistant's reply brought up the docs site and one search link on it. */
+  function chatWhereTheReplyNamedTheSite(options: { unattended?: boolean } = {}): ClassifyContext {
+    const ctx = makeCtx(options);
+    recordPersonText({ provenance: ctx.web_search.provenance, text: PROFILE });
+    recordPersonText({ provenance: ctx.web_search.provenance, text: 'Where are the Python docs?' });
+    recordReplyText({
+      provenance: ctx.web_search.provenance,
+      text: 'They are at https://docs.python.example/3/. You can search them at https://docs.python.example/3/search.html?q=asyncio.',
+    });
+    recordPersonText({ provenance: ctx.web_search.provenance, text: 'Thanks, have a look for me.' });
+    return ctx;
+  }
+
+  it('opens the exact link the reply wrote without asking, even with a part after a question mark', async () => {
+    const decision = await classifyTier(
+      openPage('https://docs.python.example/3/search.html?q=asyncio'),
+      chatWhereTheReplyNamedTheSite(),
+    );
+    expect(decision).toMatchObject({ tier: 1, card: null });
+  });
+
+  it('asks before opening a link there that adds a part after a question mark', async () => {
+    const decision = await classifyTier(
+      openPage('https://docs.python.example/3/search.html?q=gather'),
+      chatWhereTheReplyNamedTheSite(),
+    );
+    expect(decision).toMatchObject({ tier: 3, reason: 'mcp_search_steered' });
+    expect(decision.card?.plain_what).toMatch(
+      / You did not name this site\. Aman brought it up in an earlier reply, and this link adds details to it, so Aman is checking with you first\.$/,
+    );
+  });
+
+  it('asks before opening a link there that carries one of your own details', async () => {
+    const decision = await classifyTier(
+      openPage('https://docs.python.example/3/people/sam.rivers@example.com'),
+      chatWhereTheReplyNamedTheSite(),
+    );
+    expect(decision).toMatchObject({ tier: 3, reason: 'mcp_search_steered' });
+  });
+
+  it('skips such a link in a scheduled run, and says so in one line', async () => {
+    const decision = await classifyTier(
+      openPage('https://docs.python.example/3/search.html?q=gather'),
+      chatWhereTheReplyNamedTheSite({ unattended: true }),
+    );
+    expect(decision).toMatchObject({
+      auto_deny: 'steered_by_content',
+      owner_message: 'One lookup was skipped, because its link added details to a site you did not name.',
+    });
+  });
+
+  it('opens a link with a part after a question mark without asking once you named the site yourself', async () => {
+    const ctx = chatWhereTheReplyNamedTheSite();
+    recordPersonText({ provenance: ctx.web_search.provenance, text: 'Search docs.python.example for gather.' });
+    expect(await classifyTier(openPage('https://docs.python.example/3/search.html?q=gather'), ctx)).toMatchObject({
+      tier: 1,
+      card: null,
+    });
+  });
+
+  it('opens a link with a part after a question mark on a site nobody named, as before', async () => {
+    const ctx = makeCtx();
+    recordPersonText({ provenance: ctx.web_search.provenance, text: 'What is new in Python?' });
+    expect(await classifyTier(openPage('https://news.python.example/search?q=release'), ctx)).toMatchObject({
+      tier: 1,
+      card: null,
+    });
+  });
 });
 
 describe('sends and guest changes ask every time, with only Allow and Not now', () => {
@@ -252,7 +321,7 @@ describe('sends and guest changes ask every time, with only Allow and Not now', 
   it('still lets the chat-wide answer cover saving a draft, which sends nothing', async () => {
     const saved = await classifyTier({ ...sendDraft(draft({})), tool_name: 'draft_email' }, makeCtx());
     expect(saved.reason).toBe('gmail_draft');
-    expect(allowsChatApproval(gmailInfo('draft_email', saved.reason))).toBe(true);
+    expect(allowsChatApproval({ ...gmailInfo('draft_email', saved.reason), tier3_card: saved.card })).toBe(true);
   });
 
   it("asks as usual for a reply to the sender of the message it answers, read by the host from the person's mail", async () => {

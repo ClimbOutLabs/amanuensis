@@ -189,7 +189,9 @@ test('personalization API uses the Phase 1 profile routes', async () => {
       ['DELETE', '/api/v1/personalization/profile'],
     ],
   );
-  assert.deepEqual(await requests[1]!.json(), { profile, expected_revision: null });
+  const saveRequest = requests[1];
+  assert.ok(saveRequest !== undefined);
+  assert.deepEqual(await saveRequest.json(), { profile, expected_revision: null });
 });
 
 test('personalization API sends the revision it read beside the profile, never inside it', async () => {

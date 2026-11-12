@@ -286,6 +286,11 @@
       "reason": "Library documentation named in a code comment."
     },
     {
+      "host": "developer.1password.com",
+      "category": "docs_link",
+      "reason": "1Password command line install page, named in a message of the Gmail server."
+    },
+    {
       "host": "dexidp.io",
       "category": "docs_link",
       "reason": "Sign-in server documentation, linked from the Aman guide."
@@ -419,6 +424,11 @@
       "host": "json-schema.org",
       "category": "identifier",
       "reason": "JSON Schema version name in the release record schema."
+    },
+    {
+      "host": "mail.google.com",
+      "category": "identifier",
+      "reason": "Name of Google's full mailbox permission in the Gmail server's list of permissions."
     },
     {
       "host": "schemas.openxmlformats.org",
