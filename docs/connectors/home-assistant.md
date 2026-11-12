@@ -44,7 +44,7 @@ Aman works only with the entities you exposed. It cannot see or touch anything e
 
 A refused call says: "Aman does not control locks, alarms or garage doors. Do that in Home Assistant."
 
-When a card asks about a change, **Always allow** remembers your answer for that kind of device (all lights, all switches, all heating, all media players) or for the one device, the way mail remembers an address. You can see what you allowed, and take it back, under **Settings**, **Connectors**, on the Home Assistant connector's page.
+When a card asks about a change, **Always allow everywhere** remembers your answer for that kind of device (all lights, all switches, all heating, all media players) or for the one device, the way mail remembers an address. You can see what you allowed, and take it back, under **Settings**, **Connectors**, on the Home Assistant connector's page.
 
 If something Aman read, like an email, asks for a change to your home, the change is refused. Only you can ask for a change.
 
@@ -56,7 +56,7 @@ Aman: Yes. The garage door is closed, the front door is locked, and the heating 
 
 You: Turn the heating down to 19 for the night.
 
-Aman shows a card: "Set Hallway thermostat to 19 degrees", with **Allow**, **Always allow**, and **Not now**. You click **Allow**.
+Aman shows a card: "Set Hallway thermostat to 19 degrees", with **Allow**, **Always allow everywhere**, and **Not now**. You click **Allow**.
 
 Aman: Done. The hallway thermostat is set to 19 degrees.
 
