@@ -92,6 +92,9 @@ export function fakeWorkspaceAgent(
             },
           };
     }
+    if (request.path === '/v1/create_session') {
+      return { status: 204, body: undefined };
+    }
     if (request.path === '/v1/destroy_session') {
       return { status: 204, body: undefined };
     }

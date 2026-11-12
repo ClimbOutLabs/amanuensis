@@ -1,6 +1,6 @@
 # Sandbox full reason in capabilities
 
-Status: approved
+Status: approved; the full-sandbox part is superseded by stage 3 of [sandbox parked workspaces](sandbox-parked-workspaces.md), which removed the per-slot chat count, so the full reason and its log line no longer exist. The reason channel stays and carries every other reason the sandbox is off.
 
 ## Problem
 

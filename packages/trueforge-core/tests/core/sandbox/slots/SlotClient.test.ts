@@ -138,6 +138,26 @@ describe('SlotClient', () => {
     expect(result.ok).toBe(false);
   });
 
+  test('createSession sends the session and its quota and succeeds on 204', async () => {
+    const client = await clientFor(() => ({ status: 204, body: undefined }));
+    const result = await client.createSession({ sessionId: 'c'.repeat(32), diskMb: 512, signal: undefined });
+    expect(result.ok).toBe(true);
+    expect(agent?.requests.map(r => `${r.method} ${r.path}`)).toEqual(['POST /v1/create_session']);
+    expect(agent?.requests[0]?.body).toEqual({ session_id: 'c'.repeat(32), disk_mb: 512 });
+  });
+
+  test('createSession keeps a storage full refusal as an agent error', async () => {
+    const client = await clientFor(() => ({
+      status: 507,
+      body: errorBody('storage_full', 'the slot storage is almost full'),
+    }));
+    const result = await client.createSession({ sessionId: 'c'.repeat(32), diskMb: 512, signal: undefined });
+    expect(result).toEqual({
+      ok: false,
+      error: { kind: 'agent', code: 'storage_full', message: 'the slot storage is almost full' },
+    });
+  });
+
   test('fsWrite succeeds on 204 and sends base64 content', async () => {
     const client = await clientFor(() => ({ status: 204, body: undefined }));
     const result = await client.fsWrite({
@@ -145,6 +165,7 @@ describe('SlotClient', () => {
       path: '/workspace/a.txt',
       content: Buffer.from('hi'),
       mode: 0o644,
+      diskMb: 10,
       signal: undefined,
     });
     expect(result.ok).toBe(true);
@@ -153,6 +174,7 @@ describe('SlotClient', () => {
       path: '/workspace/a.txt',
       content_base64: Buffer.from('hi').toString('base64'),
       mode: 0o644,
+      disk_mb: 10,
     });
   });
 });

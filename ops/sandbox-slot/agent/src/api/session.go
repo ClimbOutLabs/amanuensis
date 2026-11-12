@@ -175,9 +175,8 @@ func (s *Server) exec(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer s.sessions.unlock(req.SessionID)
-	root, err := tree.Ensure(s.TreeDir, req.SessionID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, ErrInternal, "the session tree could not be prepared")
+	root, ok := s.ensureTree(w, req.SessionID, int64(req.DiskMB)<<20)
+	if !ok {
 		return
 	}
 	env := guestEnv(req.PackageMirrorToken)
@@ -262,6 +261,13 @@ type fsWriteRequest struct {
 	Path          string `json:"path"`
 	ContentBase64 string `json:"content_base64"`
 	Mode          int    `json:"mode"`
+	// DiskMB is the session's quota, checked for room only when this write makes the tree.
+	DiskMB int `json:"disk_mb"`
+}
+
+type createRequest struct {
+	SessionID string `json:"session_id"`
+	DiskMB    int    `json:"disk_mb"`
 }
 
 type destroyRequest struct {
@@ -305,6 +311,10 @@ func (s *Server) fsWrite(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, ErrInvalidRequest, "mode must be between 0400 and 0755")
 		return
 	}
+	if req.DiskMB < 1 || req.DiskMB > MaxDiskMB {
+		writeError(w, http.StatusBadRequest, ErrInvalidRequest, fmt.Sprintf("disk_mb must be 1 to %d", MaxDiskMB))
+		return
+	}
 	content, err := lease.DecodeBase64(req.ContentBase64)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, ErrInvalidRequest, "content_base64 is not canonical base64")
@@ -314,9 +324,8 @@ func (s *Server) fsWrite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer s.sessions.unlock(req.SessionID)
-	root, err := tree.Ensure(s.TreeDir, req.SessionID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, ErrInternal, "the session tree could not be prepared")
+	root, ok := s.ensureTree(w, req.SessionID, int64(req.DiskMB)<<20)
+	if !ok {
 		return
 	}
 	if err := tree.Write(root, req.Path, content, os.FileMode(req.Mode)); err != nil {
@@ -324,6 +333,56 @@ func (s *Server) fsWrite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// createSession answers POST /v1/create_session: it makes the session's empty tree, after checking
+// the volume has room for the tree's whole quota plus the free-space reserve. A tree that already
+// exists is a success without a new room check, so a caller retrying a lost answer is never refused
+// for room its tree already holds.
+func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
+	var req createRequest
+	if err := decodeStrict(r, w, &req, smallBodyBytes); err != nil {
+		writeError(w, http.StatusBadRequest, ErrInvalidRequest, err.Error())
+		return
+	}
+	if !tree.ValidSessionID(req.SessionID) {
+		writeError(w, http.StatusBadRequest, ErrInvalidRequest, "session_id must be 32 lowercase hex characters")
+		return
+	}
+	if req.DiskMB < 1 || req.DiskMB > MaxDiskMB {
+		writeError(w, http.StatusBadRequest, ErrInvalidRequest, fmt.Sprintf("disk_mb must be 1 to %d", MaxDiskMB))
+		return
+	}
+	// Making an empty tree touches no other session, so it does not wait for another chat's call.
+	if !s.lockSession(w, req.SessionID) {
+		return
+	}
+	defer s.sessions.unlock(req.SessionID)
+	if _, ok := s.ensureTree(w, req.SessionID, int64(req.DiskMB)<<20); !ok {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ensureTree returns the session's tree root, making the tree when it is missing. Whichever call
+// makes it, a new tree is made only when the volume has room for its whole quota plus the reserve;
+// an existing tree needs no new room. The caller holds the session's lock.
+func (s *Server) ensureTree(w http.ResponseWriter, sessionID string, quotaBytes int64) (string, bool) {
+	if _, err := os.Lstat(tree.Root(s.TreeDir, sessionID)); errors.Is(err, os.ErrNotExist) {
+		if err := checkCreateRoom(s.VolumeDir, s.MinFreeBytes, quotaBytes); err != nil {
+			writeStorageError(w, err)
+			return "", false
+		}
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, ErrInternal, "the session tree could not be checked")
+		return "", false
+	}
+	root, err := tree.Ensure(s.TreeDir, sessionID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, ErrInternal, "the session tree could not be prepared")
+		return "", false
+	}
+	return root, true
 }
 
 func (s *Server) destroySession(w http.ResponseWriter, r *http.Request) {

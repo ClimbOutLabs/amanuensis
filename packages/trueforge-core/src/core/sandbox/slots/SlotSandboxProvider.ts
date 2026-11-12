@@ -53,33 +53,6 @@ export interface SlotSandboxProviderOptions {
   sleepMs: ((ms: number) => Promise<void>) | undefined;
   /** Carries out network git on the host; without it, git commands that need the network simply fail offline. */
   gitBridge: GitBridge | undefined;
-  /**
-   * Remembers whether the slots were last seen full, so the warning is logged when that changes rather than on
-   * every check. A host that makes a provider per call passes one shared log; without it each provider keeps its own.
-   */
-  fullStateLog?: SlotFullStateLog | undefined;
-}
-
-/** Logs "every sandbox slot is full" once when the slots fill up, and again only after room came back. */
-export class SlotFullStateLog {
-  #full = false;
-
-  report(input: {
-    logger: Logger;
-    full: readonly { index: number; sessions: number; capacity: number }[] | null;
-  }): void {
-    if (input.full === null) {
-      this.#full = false;
-      return;
-    }
-    if (this.#full) {
-      return;
-    }
-    this.#full = true;
-    input.logger.warn('every sandbox slot is full', {
-      slots: input.full.map(slot => ({ slot: slot.index + 1, sessions: slot.sessions, capacity: slot.capacity })),
-    });
-  }
 }
 
 function parseSandboxId(sandboxId: string): { slot: number; sessionId: string } | undefined {
@@ -97,20 +70,18 @@ function noticeText(notices: readonly string[]): string {
   return notices.length === 0 ? '' : `\n${notices.map(notice => `[sandbox] ${notice}`).join('\n')}\n`;
 }
 
-/** How many chats' full quotas a slot's own disk holds, keeping 1 GiB free; undefined when the disk is not the slot's own. */
-export function chatCapacity(input: {
-  facts: { disk_mode: string; workspace_bytes: number };
-  treeDiskMb: number;
-}): number | undefined {
-  if (input.facts.disk_mode !== 'hard' || input.facts.workspace_bytes <= 0) {
-    return undefined;
-  }
-  const usable = input.facts.workspace_bytes - 1024 * 1024 * 1024;
-  return Math.max(1, Math.floor(usable / (input.treeDiskMb * 1024 * 1024)));
-}
-
 const STORAGE_FULL_MESSAGE =
   'The sandbox storage is almost full, so nothing was run. Free some disk space on this machine, then try again.';
+
+/**
+ * Said when every slot's agent answered that its storage has no room for a new chat's workspace. On slots
+ * with their own fixed disks, space on the machine does not help; only removing old chats' workspaces does.
+ */
+const CREATE_STORAGE_FULL_OWN_DISK_MESSAGE =
+  'The sandbox storage is almost full, so a new workspace could not be created. Delete old chats you no longer need, then try again.';
+/** The same refusal where the workspaces share the machine's disk, so freeing space there helps too. */
+const CREATE_STORAGE_FULL_SHARED_DISK_MESSAGE =
+  'The sandbox storage is almost full, so a new workspace could not be created. Delete old chats you no longer need, or free some disk space on this machine, then try again.';
 
 function describeAgentError(error: SlotCallError): string {
   if (error.kind === 'agent' && error.code === 'isolation_refused') {
@@ -144,7 +115,6 @@ export class SlotSandboxProvider implements SandboxProvider {
   private readonly logger: Logger;
   private readonly sleepMs: (ms: number) => Promise<void>;
   private readonly gitBridge: GitBridge | undefined;
-  private readonly fullStateLog: SlotFullStateLog;
   private gitToken: string | null = null;
   readonly hostGit: HostGitCapability | undefined;
 
@@ -156,7 +126,6 @@ export class SlotSandboxProvider implements SandboxProvider {
     this.logger = options.logger.child({ module: 'SlotSandboxProvider' });
     this.sleepMs = options.sleepMs ?? (ms => new Promise(resolve => setTimeout(resolve, ms)));
     this.gitBridge = options.gitBridge;
-    this.fullStateLog = options.fullStateLog ?? new SlotFullStateLog();
     this.hostGit = options.gitBridge === undefined ? undefined : this.createHostGit(options.gitBridge);
   }
 
@@ -172,15 +141,61 @@ export class SlotSandboxProvider implements SandboxProvider {
       : { status: 'failed', reason: slot.reason, metadata: null };
   }
 
+  /**
+   * Creation is a question the slot agent answers: the emptiest slot is asked first, then the rest in
+   * the same order, and the agent makes the tree only when its storage has room for it. One full slot
+   * never refuses a chat another slot has room for; when every slot answers that its storage is full,
+   * the refusal says so in plain words. How many chats a slot already holds never refuses a new one.
+   */
   async createSandbox(params?: SandboxCreateParams): Promise<{ sandboxId: string }> {
     throwIfSignalAborted(params?.signal);
-    const slot = await this.leastLoadedSlot(params?.signal);
-    if (!slot.ok) {
-      throw new Error(slot.reason);
+    const { usable, problems } = await this.usableSlots(params?.signal);
+    if (usable.length === 0) {
+      this.logger.warn('no sandbox slot is usable', { problems });
+      throw new Error(SLOT_NOT_READY_MESSAGE);
     }
-    const sandboxId = `s${String(slot.index + 1)}-${randomBytes(16).toString('hex')}`;
-    this.logger.debug('Sandbox created', { slot: slot.index + 1 });
-    return { sandboxId };
+    const byLoad = [...usable].sort((a, b) => a.sessions - b.sessions);
+    const fewest = byLoad[0]?.sessions;
+    const emptiest = byLoad.filter(slot => slot.sessions === fewest);
+    const lead = emptiest[Math.floor(Math.random() * emptiest.length)];
+    const candidates = lead === undefined ? byLoad : [lead, ...byLoad.filter(slot => slot !== lead)];
+    let storageFull = false;
+    let fullOnSharedDisk = false;
+    let other: SlotCallError | undefined;
+    for (const slot of candidates) {
+      throwIfSignalAborted(params?.signal);
+      const client = this.clients[slot.index];
+      if (client === undefined) {
+        continue;
+      }
+      const sessionId = randomBytes(16).toString('hex');
+      const result = await this.whileBusy({
+        call: () => client.createSession({ sessionId, diskMb: this.treeDiskMb, signal: params?.signal }),
+        signal: params?.signal,
+      });
+      if (result.ok) {
+        this.logger.debug('Sandbox created', { slot: slot.index + 1 });
+        return { sandboxId: `s${String(slot.index + 1)}-${sessionId}` };
+      }
+      if (result.error.kind === 'aborted' && params?.signal !== undefined) {
+        throw signalAbortError(params.signal);
+      }
+      if (result.error.kind === 'agent' && result.error.code === 'storage_full') {
+        storageFull = true;
+        fullOnSharedDisk ||= !slot.ownDisk;
+        continue;
+      }
+      other ??= result.error;
+    }
+    if (storageFull && other === undefined) {
+      throw new Error(
+        fullOnSharedDisk ? CREATE_STORAGE_FULL_SHARED_DISK_MESSAGE : CREATE_STORAGE_FULL_OWN_DISK_MESSAGE,
+      );
+    }
+    if (other !== undefined) {
+      throw new Error(describeAgentError(other));
+    }
+    throw new Error(SLOT_NOT_READY_MESSAGE);
   }
 
   async exec(params: SandboxExecParams): Promise<ExecResult> {
@@ -272,6 +287,7 @@ export class SlotSandboxProvider implements SandboxProvider {
           path: posix.resolve(WORKSPACE_DIR, params.remotePath),
           content: params.content,
           mode: 0o644,
+          diskMb: this.treeDiskMb,
           signal: params.signal,
         }),
       signal: params.signal,
@@ -405,6 +421,7 @@ export class SlotSandboxProvider implements SandboxProvider {
               path: input.path,
               content: input.content,
               mode: 0o644,
+              diskMb: this.treeDiskMb,
               signal: input.signal,
             }),
           signal: input.signal,
@@ -466,13 +483,12 @@ export class SlotSandboxProvider implements SandboxProvider {
     return { client, sessionId: parsed.sessionId };
   }
 
-  /**
-   * The attested slot holding the fewest chats, so one long command cannot block every chat. The slot is
-   * recorded in the sandbox id, which keeps a chat on the same slot across turns and restarts.
-   */
-  private async leastLoadedSlot(
-    signal: AbortSignal | undefined,
-  ): Promise<{ ok: true; index: number } | { ok: false; reason: string }> {
+  /** Every slot that answered and proved its isolation, with the problem each other slot reported. */
+  private async usableSlots(signal: AbortSignal | undefined): Promise<{
+    /** `ownDisk`: the slot's workspaces live on its own fixed-size disk, which space on the machine does not reach. */
+    usable: { index: number; sessions: number; ownDisk: boolean }[];
+    problems: string[];
+  }> {
     const probes = await Promise.all(
       this.clients.map(async (client, index) => ({
         index,
@@ -480,8 +496,7 @@ export class SlotSandboxProvider implements SandboxProvider {
       })),
     );
     const problems: string[] = [];
-    const full: { index: number; sessions: number; capacity: number }[] = [];
-    const usable: { index: number; sessions: number }[] = [];
+    const usable: { index: number; sessions: number; ownDisk: boolean }[] = [];
     for (const { index, health } of probes) {
       if (!health.ok) {
         problems.push(`slot ${String(index + 1)} is not reachable`);
@@ -489,32 +504,31 @@ export class SlotSandboxProvider implements SandboxProvider {
       }
       const problem = attestationProblem(health.value.attestation, Date.now());
       if (problem === undefined) {
-        // On a slot with its own fixed disk the chats' quotas must fit, or one slot filling up fails for all its chats.
-        const capacity = chatCapacity({ facts: health.value.attestation.facts, treeDiskMb: this.treeDiskMb });
-        if (capacity !== undefined && health.value.sessions >= capacity) {
-          full.push({ index, sessions: health.value.sessions, capacity });
-        } else {
-          usable.push({ index, sessions: health.value.sessions });
-        }
+        usable.push({
+          index,
+          sessions: health.value.sessions,
+          ownDisk: health.value.attestation.facts.disk_mode === 'hard',
+        });
       } else {
         problems.push(`slot ${String(index + 1)} failed its checks (${problem})`);
       }
     }
+    return { usable, problems };
+  }
+
+  /**
+   * The attested slot holding the fewest chats, so one long command cannot block every chat. The slot is
+   * recorded in the sandbox id, which keeps a chat on the same slot across turns and restarts.
+   */
+  private async leastLoadedSlot(
+    signal: AbortSignal | undefined,
+  ): Promise<{ ok: true; index: number } | { ok: false; reason: string }> {
+    const { usable, problems } = await this.usableSlots(signal);
     const fewest = Math.min(...usable.map(slot => slot.sessions));
     const emptiest = usable.filter(slot => slot.sessions === fewest);
     const chosen = emptiest[Math.floor(Math.random() * emptiest.length)];
     if (chosen !== undefined) {
-      this.fullStateLog.report({ logger: this.logger, full: null });
       return { ok: true, index: chosen.index };
-    }
-    if (problems.length === 0 && full.length > 0) {
-      this.fullStateLog.report({ logger: this.logger, full });
-      return {
-        ok: false,
-        reason: `The sandbox is full: every slot already holds as many chats as its disk fits (${full
-          .map(slot => `slot ${String(slot.index + 1)} holds ${String(slot.capacity)} chats`)
-          .join('; ')}). Delete old chats, then try again.`,
-      };
     }
     this.logger.warn('no sandbox slot is usable', { problems });
     return { ok: false, reason: SLOT_NOT_READY_MESSAGE };

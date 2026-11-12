@@ -42,6 +42,24 @@ func newDiskWatch(volume string, minFree, limit int64, dirs ...string) (*diskWat
 	return &diskWatch{dirs: dirs, limit: limit, volume: volume, startUsed: used}, nil
 }
 
+// checkCreateRoom answers whether a new session tree with this quota may be created on the volume:
+// its whole quota plus the free-space reserve must fit in what is free now. A quota is a promise, not
+// reserved bytes, so a tree that grows later is still stopped by its watcher and by the same reserve
+// checked before every call.
+func checkCreateRoom(volume string, minFree, quotaBytes int64) error {
+	if minFree == 0 {
+		minFree = defaultMinFreeBytes
+	}
+	_, free, err := lease.FilesystemUsedBytes(volume)
+	if err != nil {
+		return err
+	}
+	if free < quotaBytes+minFree {
+		return errStorageFull
+	}
+	return nil
+}
+
 // guard returns the termination cause when the guest is over its limit, or an empty string.
 func (d *diskWatch) guard() string {
 	bytes, entries := lease.Usage(d.dirs...)

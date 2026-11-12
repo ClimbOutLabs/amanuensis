@@ -7,11 +7,7 @@ import {
   SandboxPathIsDirectoryError,
 } from '../../../../src/core/sandbox/SandboxErrors';
 import { SLOT_NOT_READY_MESSAGE } from '../../../../src/core/sandbox/slots/SlotDriver';
-import {
-  chatCapacity,
-  SlotFullStateLog,
-  SlotSandboxProvider,
-} from '../../../../src/core/sandbox/slots/SlotSandboxProvider';
+import { SlotSandboxProvider } from '../../../../src/core/sandbox/slots/SlotSandboxProvider';
 import { makeSilentLogger } from '../../harnessMocks';
 import { attestation, bodyOf, errorBody, FakeAgent, type FakeHandler } from './fakeAgent';
 
@@ -22,7 +18,9 @@ function execResponse(overrides: Record<string, unknown> = {}): Record<string, u
 const healthy: FakeHandler = request =>
   request.path === '/v1/health'
     ? { status: 200, body: { busy: false, sessions: 0, attestation: attestation() } }
-    : { status: 200, body: execResponse() };
+    : request.path === '/v1/create_session'
+      ? { status: 204, body: undefined }
+      : { status: 200, body: execResponse() };
 
 describe('SlotSandboxProvider', () => {
   const agents: FakeAgent[] = [];
@@ -52,10 +50,10 @@ describe('SlotSandboxProvider', () => {
   test('createSandbox places a chat on the slot with the fewest chats, and spreads them', async () => {
     const withSessions =
       (sessions: number): FakeHandler =>
-      () => ({
-        status: 200,
-        body: { busy: false, sessions, attestation: attestation() },
-      });
+      request =>
+        request.path === '/v1/create_session'
+          ? { status: 204, body: undefined }
+          : { status: 200, body: { busy: false, sessions, attestation: attestation() } };
     const { provider } = await providerFor([withSessions(3), withSessions(0), withSessions(5)]);
     expect((await provider.createSandbox()).sandboxId).toMatch(/^s2-/);
 
@@ -68,13 +66,16 @@ describe('SlotSandboxProvider', () => {
   });
 
   test('a slot that is busy with a long command does not stop other slots from taking new chats', async () => {
-    const busySlot: FakeHandler = () => ({
-      status: 200,
-      body: { busy: true, sessions: 0, attestation: attestation() },
-    });
+    const busySlot: FakeHandler = request =>
+      request.path === '/v1/create_session'
+        ? { status: 204, body: undefined }
+        : { status: 200, body: { busy: true, sessions: 0, attestation: attestation() } };
     const { provider } = await providerFor([
       busySlot,
-      () => ({ status: 200, body: { busy: false, sessions: 4, attestation: attestation() } }),
+      request =>
+        request.path === '/v1/create_session'
+          ? { status: 204, body: undefined }
+          : { status: 200, body: { busy: false, sessions: 4, attestation: attestation() } },
     ]);
     // Both are placeable: busy is about the current call, load is about chats.
     expect((await provider.createSandbox()).sandboxId).toMatch(/^s1-/);
@@ -305,97 +306,97 @@ describe('SlotSandboxProvider', () => {
     });
   });
 
-  describe('chats per slot with a disk of its own', () => {
+  describe('creation is answered by the slot agents from real free space', () => {
     const GIB = 1024 ** 3;
-    const hard =
-      (sessions: number, gib = 5): FakeHandler =>
-      () => ({
-        status: 200,
-        body: { busy: false, sessions, attestation: attestation({ diskMode: 'hard', workspaceBytes: gib * GIB }) },
-      });
+    /** A slot reporting the given health, whose agent accepts creation or refuses it as storage full. */
+    const slot =
+      (input: {
+        sessions: number;
+        diskMode?: 'hard' | 'vm' | 'none';
+        workspaceBytes?: number;
+        create?: 'ok' | 'full';
+      }): FakeHandler =>
+      request => {
+        if (request.path === '/v1/create_session') {
+          return input.create === 'full'
+            ? { status: 507, body: errorBody('storage_full', 'the slot storage is almost full') }
+            : { status: 204, body: undefined };
+        }
+        return {
+          status: 200,
+          body: {
+            busy: false,
+            sessions: input.sessions,
+            attestation: attestation({ diskMode: input.diskMode ?? 'none', workspaceBytes: input.workspaceBytes ?? 0 }),
+          },
+        };
+      };
 
-    test('a slot stops taking new chats when their quotas would no longer fit its disk', async () => {
-      // 5 GiB disk, 1 GiB kept free, 2 GiB per chat: two chats fit.
-      const { provider } = await providerFor([hard(2), hard(1)]);
+    test('slots holding more chats than the old per-disk count still take new chats', async () => {
+      // A 16 GiB disk of its own once fit 7 chats of 2 GiB each; both slots already hold more than that.
+      const { provider, agents: started } = await providerFor([
+        slot({ sessions: 10, diskMode: 'hard', workspaceBytes: 16 * GIB }),
+        slot({ sessions: 8, diskMode: 'hard', workspaceBytes: 16 * GIB }),
+      ]);
+      const { sandboxId } = await provider.createSandbox();
+      expect(sandboxId).toMatch(/^s2-[0-9a-f]{32}$/);
+      const create = started[1]?.requests.find(request => request.path === '/v1/create_session');
+      expect(bodyOf(create, z.object({ session_id: z.string(), disk_mb: z.number() }))).toEqual({
+        session_id: sandboxId.slice(3),
+        disk_mb: 2048,
+      });
+      // Chats that already hold a workspace are unaffected: the sandbox still reports ready.
+      expect((await provider.getImageBuildStatus()).status).toBe('ready');
+    });
+
+    test('a slot whose storage is full does not refuse a chat another slot has room for', async () => {
+      const { provider } = await providerFor([slot({ sessions: 0, create: 'full' }), slot({ sessions: 3 })]);
       expect((await provider.createSandbox()).sandboxId).toMatch(/^s2-/);
     });
 
-    test('when every slot is at capacity the answer says to delete chats, not to run the doctor command', async () => {
-      const { provider } = await providerFor([hard(2), hard(2)]);
-      await expect(provider.createSandbox()).rejects.toThrow(/sandbox is full.*Delete old chats/);
+    test('when every slot answers storage full, creation refuses in plain words and readiness is unchanged', async () => {
+      const { provider } = await providerFor([
+        slot({ sessions: 0, create: 'full' }),
+        slot({ sessions: 1, create: 'full' }),
+      ]);
+      await expect(provider.createSandbox()).rejects.toThrow(
+        'The sandbox storage is almost full, so a new workspace could not be created. Delete old chats you no longer need, or free some disk space on this machine, then try again.',
+      );
+      expect((await provider.getImageBuildStatus()).status).toBe('ready');
     });
 
-    test('when every slot is at capacity the full state is logged once with each slot count', async () => {
-      const logger = makeSilentLogger();
-      const warn = jest.spyOn(logger, 'warn');
-      const started = [new FakeAgent(hard(2)), new FakeAgent(hard(2))];
-      agents.push(...started);
-      const socketPaths = await Promise.all(started.map(agent => agent.start()));
-      const provider = new SlotSandboxProvider({
-        socketPaths,
-        defaultExecTimeoutSeconds: 60,
-        treeDiskMb: 2048,
-        fileMaxBytesForDownload: 1024,
-        logger,
-        sleepMs: () => Promise.resolve(),
-        gitBridge: undefined,
+    test('when every slot on its own disk answers storage full, the refusal says only to delete old chats', async () => {
+      const { provider } = await providerFor([
+        slot({ sessions: 0, diskMode: 'hard', workspaceBytes: 16 * GIB, create: 'full' }),
+        slot({ sessions: 1, diskMode: 'hard', workspaceBytes: 16 * GIB, create: 'full' }),
+      ]);
+      await expect(provider.createSandbox()).rejects.toThrow(
+        'The sandbox storage is almost full, so a new workspace could not be created. Delete old chats you no longer need, then try again.',
+      );
+    });
+
+    test('creation waits while the slot is busy, then goes through', async () => {
+      let calls = 0;
+      const flaky: FakeHandler = request => {
+        if (request.path !== '/v1/create_session') {
+          return { status: 200, body: { busy: false, sessions: 0, attestation: attestation() } };
+        }
+        calls += 1;
+        return calls < 3 ? { status: 429, body: errorBody('busy', 'busy') } : { status: 204, body: undefined };
+      };
+      const { provider } = await providerFor([flaky]);
+      await expect(provider.createSandbox()).resolves.toMatchObject({
+        sandboxId: expect.stringMatching(/^s1-[0-9a-f]{32}$/),
       });
-      await expect(provider.createSandbox()).rejects.toThrow(/sandbox is full.*Delete old chats/);
-      expect(warn).toHaveBeenCalledTimes(1);
-      expect(warn).toHaveBeenCalledWith('every sandbox slot is full', {
-        slots: [
-          { slot: 1, sessions: 2, capacity: 2 },
-          { slot: 2, sessions: 2, capacity: 2 },
-        ],
-      });
+      expect(calls).toBe(3);
     });
 
-    test('a shared full-state log warns once while the slots stay full, across providers, and again after room came back', async () => {
-      const logger = makeSilentLogger();
-      const warn = jest.spyOn(logger, 'warn');
-      const fullStateLog = new SlotFullStateLog();
-      const started = [new FakeAgent(hard(2)), new FakeAgent(hard(2))];
-      agents.push(...started);
-      const socketPaths = await Promise.all(started.map(agent => agent.start()));
-      const makeProvider = () =>
-        new SlotSandboxProvider({
-          socketPaths,
-          defaultExecTimeoutSeconds: 60,
-          treeDiskMb: 2048,
-          fileMaxBytesForDownload: 1024,
-          logger,
-          sleepMs: () => Promise.resolve(),
-          gitBridge: undefined,
-          fullStateLog,
-        });
-
-      await makeProvider().getImageBuildStatus();
-      await makeProvider().getImageBuildStatus();
-      await expect(makeProvider().createSandbox()).rejects.toThrow(/sandbox is full/);
-      expect(warn).toHaveBeenCalledTimes(1);
-      expect(warn).toHaveBeenLastCalledWith('every sandbox slot is full', expect.anything());
-
-      fullStateLog.report({ logger, full: null });
-      await makeProvider().getImageBuildStatus();
-      expect(warn).toHaveBeenCalledTimes(2);
-      expect(warn).toHaveBeenLastCalledWith('every sandbox slot is full', expect.anything());
-    });
-
-    test('a shared disk (Docker VM or none) is not capped by chats', async () => {
-      const shared =
-        (diskMode: 'vm' | 'none'): FakeHandler =>
-        () => ({
-          status: 200,
-          body: { busy: false, sessions: 50, attestation: attestation({ diskMode, workspaceBytes: 250 * GIB }) },
-        });
-      const { provider } = await providerFor([shared('vm'), shared('none')]);
+    test('a shared disk (Docker VM or none) takes chats however many it already holds', async () => {
+      const { provider } = await providerFor([
+        slot({ sessions: 50, diskMode: 'vm', workspaceBytes: 250 * GIB }),
+        slot({ sessions: 50, diskMode: 'none', workspaceBytes: 250 * GIB }),
+      ]);
       await expect(provider.createSandbox()).resolves.toMatchObject({ sandboxId: expect.stringMatching(/^s[12]-/) });
-    });
-
-    test('capacity keeps 1 GiB free and never drops below one chat', () => {
-      expect(chatCapacity({ facts: { disk_mode: 'hard', workspace_bytes: 17 * GIB }, treeDiskMb: 2048 })).toBe(8);
-      expect(chatCapacity({ facts: { disk_mode: 'hard', workspace_bytes: 1 * GIB }, treeDiskMb: 2048 })).toBe(1);
-      expect(chatCapacity({ facts: { disk_mode: 'vm', workspace_bytes: 17 * GIB }, treeDiskMb: 2048 })).toBeUndefined();
     });
   });
 

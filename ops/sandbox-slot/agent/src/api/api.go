@@ -121,6 +121,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/exec", s.exec)
 	mux.HandleFunc("POST /v1/fs_read", s.fsRead)
 	mux.HandleFunc("POST /v1/fs_write", s.fsWrite)
+	mux.HandleFunc("POST /v1/create_session", s.createSession)
 	mux.HandleFunc("POST /v1/destroy_session", s.destroySession)
 	return mux
 }
