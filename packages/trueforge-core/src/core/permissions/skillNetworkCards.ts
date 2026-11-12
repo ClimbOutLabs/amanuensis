@@ -16,6 +16,7 @@
  * blaming the skill the answer is filed under.
  */
 import { domainToUnicode } from 'node:url';
+import { simpleCardCopy } from './cardCopy';
 import type { Tier3Card, Tier3SkillNetwork } from './tier';
 
 /**
@@ -62,8 +63,10 @@ export function buildSkillNetworkCard(input: {
   };
   const singleSite = input.hosts.length === 1 ? displaySiteName(input.hosts[0] ?? '') : null;
   if (input.reason === 'first_use') {
+    const plain_what = `Let the ${input.skill_name} skill reach ${sites}?`;
     return {
-      plain_what: `Let the ${input.skill_name} skill reach ${sites}?`,
+      plain_what,
+      copy: simpleCardCopy({ headline: plain_what, undo: null, reason: null }),
       plain_why: 'This skill names these sites as the ones it needs. It cannot reach any of them until you say yes.',
       cannot_be_undone: null,
       why_asked_again: null,
@@ -77,8 +80,10 @@ export function buildSkillNetworkCard(input: {
       skill_network,
     };
   }
+  const plain_what = `Allow a connection to ${sites} in this chat?`;
   return {
-    plain_what: `Allow a connection to ${sites} in this chat?`,
+    plain_what,
+    copy: simpleCardCopy({ headline: plain_what, undo: null, reason: null }),
     plain_why: `A command in this chat tried to reach ${sites}, which is not one of the sites approved for the skills in this chat, and the connection was refused. Aman cannot tell which skill, if any, made the attempt.`,
     cannot_be_undone: null,
     why_asked_again: null,

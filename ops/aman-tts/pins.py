@@ -52,7 +52,20 @@ MODEL_ASSET = PINNED_ASSETS[0]
 
 # American English voices baked into the image. The first is the default. The settings voice
 # picker in trueforge-ui (`SERVER_VOICES`) offers these same ids.
-VOICE_IDS: tuple[str, ...] = ("af_heart", "af_bella", "af_nicole", "af_sarah", "am_michael", "am_fenrir")
+VOICE_IDS: tuple[str, ...] = (
+    "af_heart",
+    "af_bella",
+    "af_nicole",
+    "af_sarah",
+    "af_alloy",
+    "af_aoede",
+    "af_kore",
+    "af_nova",
+    "af_sky",
+    "am_michael",
+    "am_fenrir",
+    "am_puck",
+)
 
 # Files the build writes into the asset directory.
 MODEL_FILE = "model.onnx"

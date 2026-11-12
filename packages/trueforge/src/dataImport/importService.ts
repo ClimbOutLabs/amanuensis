@@ -9,7 +9,7 @@
  * last: agents, folders and chats, persona knowledge files and memory files are
  * written one by one and recorded as they succeed, so a failure undoes exactly
  * what this run created; the remaining records (personas, personalization,
- * spaces, schedules, connectors, settings, artifacts) commit in one
+ * spaces, schedules, connectors, model providers, settings, artifacts) commit in one
  * transaction or not at all. A marker setting names the planned writes while
  * they run, and the transaction removes it, so a crash is cleaned up by the
  * next run.
@@ -18,6 +18,8 @@
  * links inside chats keep working. Schedules arrive switched off. Connectors
  * arrive unattached, without credentials, trust marks or search and memory roles;
  * the instance's untouched default web search connector stays as it is.
+ * Model providers arrive as setups without keys, and a persona whose model
+ * did not come over is pointed at a model that is here.
  * The recall and tool-output screen toggles come along; permission settings
  * and Always allow choices never do, so each tool asks again.
  */
@@ -38,6 +40,7 @@ import { sessionPartIndex, sessionPartName } from '../dataExport/sessionRecords'
 import { ZIP_MAX_ENTRIES } from '../dataExport/zipStreamWriter';
 import type { IDeliveryStore } from '../db/deliveryStore';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
+import type { IModelProviderStore } from '../db/modelProviderStore';
 import type { IReachSettingsStore } from '../db/reachSettingsStore';
 import type { ISentinelAuditStore } from '../db/sentinelAuditStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
@@ -112,6 +115,7 @@ import {
   ImportDeliveriesFileSchema,
   ImportFoldersFileSchema,
   ImportManifestSchema,
+  ImportModelProvidersFileSchema,
   ImportPersonalizationFileSchema,
   ImportPersonasFileSchema,
   ImportReachFileSchema,
@@ -130,6 +134,7 @@ import {
   type ImportDelivery,
   type ImportFolderRecord,
   type ImportManifest,
+  type ImportModelProviderRecord,
   type ImportPersonalizationFile,
   type ImportPersonasFile,
   type ImportScheduleRecord,
@@ -142,6 +147,12 @@ import {
 } from './importSchemas';
 import { writePersonaKnowledge, type KnowledgeEmbedder } from './knowledgeImport';
 import { countingLeftOut, isRecord, type LeftOutCounts } from './lenient';
+import {
+  planModelProviderImport,
+  planPersonaModelSwitches,
+  type ModelProviderImportPlan,
+  type PersonaModelSwitch,
+} from './modelProviderImport';
 import { repairPersonaNames } from './personaNames';
 import { startReachSwitchesAsNew } from './reachUpgrade';
 import { assembleSessionParts } from './sessionParts';
@@ -151,6 +162,8 @@ import { readZipArchive, ZipArchiveError, type ZipArchiveEntry } from './zipArch
 export interface DataImportDeps<TTransaction> extends PreflightDeps<TTransaction> {
   sessionStore: ISessionStore<SessionCustom, TurnCustom>;
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
+  /** Provider setups are restored in the same commit as the rest; keys never travel, so none are written from the archive. */
+  modelProviderStore: IModelProviderStore<TTransaction>;
   /** Permission history is imported with the same commit as the rest, and never removed again. */
   auditStore: Pick<ISentinelAuditStore, 'importRecords'>;
   /** The feed comes along with the same commit. Push devices never do. */
@@ -534,6 +547,10 @@ interface ArchiveContents {
   spaces: ImportSpacesFile;
   schedules: ImportScheduleRecord[];
   connectors: ImportConnectorRecord[];
+  /** Provider setups to restore; empty when the export carried none. */
+  modelProviders: ImportModelProviderRecord[];
+  /** False for exports made before provider setups travelled, which the summary words differently. */
+  modelProvidersSectionPresent: boolean;
   settings: ImportSettingsFile;
   audit: ImportAuditRecord[];
   deliveries: ImportDelivery[];
@@ -782,6 +799,11 @@ function loadArchive(input: {
     spaces: section('spaces.json', ImportSpacesFileSchema),
     schedules: section('schedules.json', ImportSchedulesFileSchema),
     connectors,
+    // Absent from exports made before provider setups travelled.
+    modelProviders: files.has('model_providers.json')
+      ? section('model_providers.json', ImportModelProvidersFileSchema)
+      : [],
+    modelProvidersSectionPresent: files.has('model_providers.json'),
     settings: section('settings.json', ImportSettingsFileSchema),
     // Absent from exports made before permission history travelled.
     audit: files.has('audit.json') ? section('audit.json', ImportAuditFileSchema) : [],
@@ -851,7 +873,7 @@ function checkSessions(
 }
 
 function validateCrossReferences(contents: ArchiveContents): void {
-  const { agents, personas, spaces, spaceFolders, schedules, connectors } = contents;
+  const { agents, personas, spaces, spaceFolders, schedules, connectors, modelProviders } = contents;
 
   const agentIds = new Set<string>();
   const agentNames = new Set<string>();
@@ -918,6 +940,14 @@ function validateCrossReferences(contents: ArchiveContents): void {
       throw damagedExportError(`connector ${connector.name} appears twice.`);
     }
     connectorNames.add(connector.name);
+  }
+
+  const providerNames = new Set<string>();
+  for (const provider of modelProviders) {
+    if (providerNames.has(provider.name)) {
+      throw damagedExportError(`model provider ${provider.name} appears twice.`);
+    }
+    providerNames.add(provider.name);
   }
 }
 
@@ -1080,6 +1110,42 @@ function pluralize(count: number, singular: string, plural: string): string {
   return `${String(count)} ${count === 1 ? singular : plural}`;
 }
 
+/** A name that holds something besides spaces, else null. */
+function presentName(value: string | null): string | null {
+  return value !== null && value.trim() !== '' ? value : null;
+}
+
+/**
+ * The names an imported profile is saved with. The installer's name stays
+ * where the archive has none, since the app offers it only once. The summary
+ * reads the same values, so what it says Aman will call the person is what
+ * the saved profile holds.
+ */
+function importedProfileNames(
+  personalization: { user_name: string | null; address_as: string | null },
+  installerName: string,
+): { user_name: string | null; address_as: string | null } {
+  const ownerName = presentName(installerName);
+  return {
+    user_name: presentName(personalization.user_name) ?? ownerName,
+    address_as: presentName(personalization.address_as) ?? ownerName,
+  };
+}
+
+/** What the summary reports about model providers: how many setups came over, and what still needs doing. */
+interface ModelProviderSummary {
+  /** Provider setups restored (or, on a dry run, that would be). */
+  restored: number;
+  /** Restored providers that still have no key, in the order the export listed them. */
+  needsKeyNames: string[];
+  /** False for exports made before provider setups travelled. */
+  sectionPresent: boolean;
+  /** Provider setups in the export that were not written because this instance's providers are managed elsewhere. */
+  notWrittenManaged: number;
+  /** Personas moved to a model that is here because their own did not come over. */
+  personaSwitches: readonly PersonaModelSwitch[];
+}
+
 function buildSummary({
   result,
   connectorNames,
@@ -1091,6 +1157,9 @@ function buildSummary({
   leftOut,
   personaChanges,
   trimmedSpaces,
+  callYouName,
+  nameNotIncluded,
+  modelProviders,
   dryRun,
 }: {
   result: Omit<ImportDataResult, 'summary' | 'schedules_off'>;
@@ -1108,11 +1177,19 @@ function buildSummary({
   /** Spaces whose history starts after revision 1 in the archive. */
   trimmedSpaces: number;
   filesLeftBehind: number;
+  /** How Aman will address the person, from the name that came over; null when none did. */
+  callYouName: string | null;
+  /** True when the import leaves Aman not knowing the person's name. */
+  nameNotIncluded: boolean;
+  modelProviders: ModelProviderSummary;
 }): string {
   const counts = [
     `  ${pluralize(result.chats, 'chat', 'chats')}`,
     `  ${pluralize(result.memories, 'memory', 'memories')}`,
     `  ${pluralize(result.personas, 'persona', 'personas')}`,
+    ...(modelProviders.restored > 0
+      ? [`  ${pluralize(modelProviders.restored, 'model provider', 'model providers')}`]
+      : []),
     `  ${pluralize(result.spaces, 'space', 'spaces')}`,
     `  ${pluralize(result.agents, 'agent', 'agents')}`,
     result.schedules === 0
@@ -1120,6 +1197,13 @@ function buildSummary({
       : `  ${pluralize(result.schedules, 'schedule', 'schedules')} (they will be off)`,
   ];
   const notes: string[] = [];
+  if (callYouName !== null) {
+    notes.push(`Aman will call you: ${callYouName}.`);
+  } else if (nameNotIncluded) {
+    notes.push(
+      'This export did not include your name, so Aman does not know it yet. Aman will ask in your first chat, or you can set it in Settings under Personalization.',
+    );
+  }
   if (trimmedSpaces > 0) {
     notes.push(
       trimmedSpaces === 1
@@ -1159,9 +1243,31 @@ function buildSummary({
   if (deliveryCount > 0) {
     notes.push(`${pluralize(deliveryCount, 'item', 'items')} from your feed came along.`);
   }
-  notes.push(
-    'Not brought over: model keys, connector sign-ins, your own skills.\n    Add your model again and sign in to your connectors.',
-  );
+  if (modelProviders.restored > 0) {
+    notes.push('Your model settings came over, but their keys never travel in an export.');
+    for (const name of modelProviders.needsKeyNames) {
+      notes.push(`Add the key for ${name} in Settings under Models, so its models can answer.`);
+    }
+  } else if (modelProviders.notWrittenManaged > 0) {
+    notes.push(
+      `Model settings did not come over, because this Aman's models are managed by TrueFoundry. Personas use the models it already has.`,
+    );
+  } else if (!modelProviders.sectionPresent) {
+    notes.push(
+      'Model settings are not in this export, because it was made by an older Aman. Add your model in Settings under Models.',
+    );
+  }
+  for (const personaSwitch of modelProviders.personaSwitches.slice(0, PERSONA_CHANGES_SHOWN)) {
+    notes.push(
+      `${personaSwitch.personaName} was set to a model that is not on this Aman, so it now uses ${personaSwitch.modelName}.`,
+    );
+  }
+  if (modelProviders.personaSwitches.length > PERSONA_CHANGES_SHOWN) {
+    notes.push(
+      `And ${String(modelProviders.personaSwitches.length - PERSONA_CHANGES_SHOWN)} more personas were moved to a model that is here.`,
+    );
+  }
+  notes.push('Not brought over: connector sign-ins and your own skills.\n    Sign in to your connectors again.');
   notes.push('Permissions start fresh, so each tool will ask again.');
 
   const sections: string[] = [[dryRun ? 'This export has:' : 'Imported:', ...counts].join('\n')];
@@ -1475,6 +1581,7 @@ async function importArchive<TTransaction>(
     deliveries,
     reach,
   } = contents;
+  const modelProviders = contents.modelProviders;
   // Each person's guide is installed from the bundled pack, so the archived copy is never written again.
   // Its memory still maps to the person's own guide, and the summary still counts it.
   const personas = archivedPersonas.filter(({ persona }) => !isAmanGuidePersona(persona));
@@ -1630,7 +1737,36 @@ async function importArchive<TTransaction>(
     });
   }
   const trimmedSpaces = spaces.filter(({ revisions }) => revisions.every(revision => revision.revision > 1)).length;
+  // The names the imported profile is saved with, and from them how Aman
+  // will address the person: the preferred form when there is one, else
+  // their name; null when neither the export nor the installer gave one,
+  // which the summary says plainly instead of guessing.
+  const profileNames = personalization === null ? null : importedProfileNames(personalization, deps.ownerName);
+  const callYouName =
+    [profileNames?.address_as, profileNames?.user_name]
+      .map(value => value?.trim())
+      .find(value => value !== undefined && value !== '') ?? null;
+  const providerSummaryOf = (
+    plan: ModelProviderImportPlan,
+    personaSwitches: PersonaModelSwitch[],
+  ): ModelProviderSummary => ({
+    restored: plan.writes.length,
+    needsKeyNames: plan.writes.filter(write => write.needsKey).map(write => write.name),
+    sectionPresent: contents.modelProvidersSectionPresent,
+    notWrittenManaged: deps.modelProviderStore.managedElsewhere ? modelProviders.length : 0,
+    personaSwitches,
+  });
   if (lock === undefined) {
+    const existingProviders = await deps.modelProviderStore.listProviders({ tenant_id: tenantId });
+    const currentDefault = await deps.globalSettingsStore.getSetting({ key: DEFAULT_CHAT_MODEL_SETTING_KEY });
+    const importedDefault = settings.instance.find(setting => setting.key === DEFAULT_CHAT_MODEL_SETTING_KEY)?.value;
+    const plan = planModelProviderImport({
+      imported: modelProviders,
+      existing: existingProviders,
+      defaultModel: currentDefault?.value ?? importedDefault,
+      managedElsewhere: deps.modelProviderStore.managedElsewhere,
+    });
+    const personaSwitches = planPersonaModelSwitches({ personas: personas.map(entry => entry.persona), plan });
     const result: Omit<ImportDataResult, 'summary'> = {
       chats: sessions.ids.length,
       memories: memoryCount,
@@ -1655,6 +1791,9 @@ async function importArchive<TTransaction>(
         leftOut,
         personaChanges: contents.personaRepairLines,
         trimmedSpaces,
+        callYouName,
+        nameNotIncluded: callYouName === null,
+        modelProviders: providerSummaryOf(plan, personaSwitches),
         dryRun: true,
       }),
     };
@@ -1753,6 +1892,13 @@ async function importArchive<TTransaction>(
     // --- Everything else commits in one transaction, together with the removal of the marker. ---
     let connectorsImported = 0;
     let filesLeftBehind = 0;
+    let modelProviderSummary: ModelProviderSummary = {
+      restored: 0,
+      needsKeyNames: [],
+      sectionPresent: contents.modelProvidersSectionPresent,
+      notWrittenManaged: 0,
+      personaSwitches: [],
+    };
     await lock.pauseRenewal();
     await deps.withTransaction(async tx => {
       for (const { persona } of personas) {
@@ -1780,10 +1926,8 @@ async function importArchive<TTransaction>(
         await deps.reachSettingsStore.importSettings({ tenant_id: tenantId, created_by: subjectId, settings }, tx);
       }
 
-      if (personalization !== null) {
+      if (personalization !== null && profileNames !== null) {
         // Replaces the empty profile the app creates on first sign-in; the emptiness check ruled out a filled one.
-        // The installer's name stays where the archive has none, since the app offers it only once.
-        const ownerName = deps.ownerName === '' ? null : deps.ownerName;
         await deps.personalizationStore.upsertProfile(
           {
             tenant_id: tenantId,
@@ -1791,8 +1935,8 @@ async function importArchive<TTransaction>(
             assistant_name: personalization.assistant_name,
             assistant_identity: personalization.assistant_identity,
             voice_guidance: personalization.voice_guidance,
-            user_name: personalization.user_name ?? ownerName,
-            address_as: personalization.address_as ?? ownerName,
+            user_name: profileNames.user_name,
+            address_as: profileNames.address_as,
             user_profile: personalization.user_profile,
             pinned_preferences: personalization.pinned_preferences,
             help_areas: personalization.help_areas,
@@ -1907,6 +2051,48 @@ async function importArchive<TTransaction>(
         }
       }
 
+      // Provider setups land with the settings, so a persona's model can be
+      // checked against what is actually here before the commit.
+      const existingProviders = await deps.modelProviderStore.listProviders({ tenant_id: tenantId }, tx);
+      const defaultModel = await deps.globalSettingsStore.getSetting({ key: DEFAULT_CHAT_MODEL_SETTING_KEY }, tx);
+      const providerPlan = planModelProviderImport({
+        imported: modelProviders,
+        existing: existingProviders,
+        defaultModel: defaultModel?.value,
+        managedElsewhere: deps.modelProviderStore.managedElsewhere,
+      });
+      for (const write of providerPlan.writes) {
+        await deps.modelProviderStore.upsertProvider(
+          { tenant_id: tenantId, name: write.name, manifest: write.manifest },
+          tx,
+        );
+      }
+      const personaSwitches = planPersonaModelSwitches({
+        personas: personas.map(entry => entry.persona),
+        plan: providerPlan,
+      });
+      const personaById = new Map(personas.map(entry => [entry.persona.id, entry.persona]));
+      for (const personaSwitch of personaSwitches) {
+        const persona = personaById.get(personaSwitch.personaId);
+        if (persona === undefined) {
+          continue;
+        }
+        await deps.personaStore.updatePersona(
+          {
+            tenant_id: tenantId,
+            created_by: subjectId,
+            id: persona.id,
+            display_name: persona.display_name,
+            aliases: persona.aliases,
+            instructions: persona.instructions,
+            model_name: personaSwitch.modelName,
+            updated_by: subjectId,
+          },
+          tx,
+        );
+      }
+      modelProviderSummary = providerSummaryOf(providerPlan, personaSwitches);
+
       for (const entry of sessions.entries()) {
         for (const activation of entry.persona_activations) {
           await deps.personaStore.recordPersonaActivation(
@@ -1996,6 +2182,9 @@ async function importArchive<TTransaction>(
         leftOut,
         personaChanges: contents.personaRepairLines,
         trimmedSpaces,
+        callYouName,
+        nameNotIncluded: callYouName === null,
+        modelProviders: modelProviderSummary,
         dryRun: false,
       }),
     };

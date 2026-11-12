@@ -183,6 +183,9 @@ export interface IToolSet {
    */
   resolveConnector?(params: CallToolRequest['params']): ConnectorBinding | undefined;
 
+  /** What an "Always allow" grant for this call binds to as of now (see `ToolGrantKey`); absent when none. */
+  resolveGrantBinding?(params: CallToolRequest['params']): string | undefined;
+
   /**
    * The canonical params an approval for this call is minted over, derived from the wire arguments the same way
    * classification derives them. Absent on tool sets whose wire arguments are already canonical.
@@ -217,6 +220,8 @@ export interface ToolSource {
   readonly description?: string | undefined;
   /** Host of the remote server's configured URL, shown on approval cards; absent for local sources. */
   readonly serverHost?: string | undefined;
+  /** What an "Always allow" grant on this source binds to (see `ToolGrantKey`); absent when the host set none. */
+  readonly grantBinding?: string | undefined;
 
   listTools(): Promise<ListToolsResolvedResponse | AuthRequiredResponse>;
 

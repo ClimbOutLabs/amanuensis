@@ -40,6 +40,8 @@ export const SCRIPTED_SCHEDULE = {
   days: ['friday'],
   time: '16:00',
   time_zone: 'Europe/London',
+  connectors: [],
+  skills: [],
 };
 /** What `run:draft_email` asks to save, so a test can check the card and the saved draft against it. */
 export const SCRIPTED_DRAFT = {

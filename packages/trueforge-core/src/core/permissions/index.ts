@@ -31,6 +31,16 @@ export {
 } from './browserToolNames';
 export type { BrowserToolName } from './browserToolNames';
 export {
+  browserCardCopy,
+  calendarCardCopy,
+  emailCardCopy,
+  fileCardCopy,
+  joinLine,
+  paymentCardCopy,
+  sandboxCardCopy,
+  simpleCardCopy,
+} from './cardCopy';
+export {
   approvalCardForGatedCall,
   canonicalShellForm,
   classifyHostToolCall,
@@ -70,6 +80,7 @@ export { buildSkillNetworkCard, skillNetworkAnswerFor } from './skillNetworkCard
 export type { SkillNetworkAnswer, SkillNetworkCardRequest } from './skillNetworkCards';
 export {
   AUTO_DENY_REASONS,
+  ApprovalCardCopySchema,
   TIER2_ACTION_KINDS,
   Tier3CardSchema,
   Tier3SkillNetworkSchema,
@@ -81,10 +92,12 @@ export {
   tier3Decision,
 } from './tier';
 export type {
+  ApprovalCardCopy,
   AutoDenyReason,
   Tier,
   Tier2ActionKind,
   Tier3Card,
+  Tier3Email,
   Tier3SkillNetwork,
   TierDecision,
   TrackedExecutionBinding,

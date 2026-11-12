@@ -135,9 +135,6 @@ export class ModelProvidersClient {
      * @example
      *     await client.settings.modelProviders.create({
      *         manifest: {
-     *             auth: {
-     *                 apiKey: "api_key"
-     *             },
      *             models: [{
      *                     modelId: "model_id",
      *                     name: "name",
@@ -270,9 +267,6 @@ export class ModelProvidersClient {
      * @example
      *     await client.settings.modelProviders.createOrUpdate({
      *         manifest: {
-     *             auth: {
-     *                 apiKey: "api_key"
-     *             },
      *             models: [{
      *                     modelId: "model_id",
      *                     name: "name",

@@ -13,6 +13,7 @@ import type { SentinelApprovalInfo } from '@/sentinel/types.js';
 
 const CARD = {
   plain_what: 'Send a note to Ana.',
+  copy: { headline: 'Send a note to Ana.', consequence: null, reason: null },
   plain_why: null,
   cannot_be_undone: null,
   why_asked_again: null,

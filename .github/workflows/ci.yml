@@ -1048,6 +1048,46 @@ jobs:
             [ "$arch" = arm64 ] || { echo "$key resolved to $arch, not arm64" >&2; exit 1; }
           done
 
+  # `docker compose up` from source, the documented way to run the full stack, on both architectures:
+  # every image must build and every service must report healthy.
+  compose-smoke:
+    name: Compose smoke (${{ matrix.arch }})
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x64, arm64]
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: No core pins in the checked-in compose files
+        run: pnpm test:default-compose
+
+      - name: Use the example settings
+        run: cp packages/trueforge/.env.example packages/trueforge/.env
+
+      - name: Start the stack and check it answers
+        run: pnpm smoke
+
+      - name: Show the stack's logs
+        if: failure()
+        run: pnpm smoke:logs --tail 100
+
+      - name: Stop the stack
+        if: always()
+        run: pnpm smoke:down -v
+
   # https://github.com/marketplace/actions/alls-green#why
   check:
     if: always()
@@ -1073,6 +1113,7 @@ jobs:
       - generated-contract-drift
       - arm64-build
       - arm64-images
+      - compose-smoke
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -1099,9 +1140,10 @@ jobs:
           GENERATED_CONTRACT_DRIFT: ${{ needs.generated-contract-drift.result }}
           ARM64_BUILD: ${{ needs.arm64-build.result }}
           ARM64_IMAGES: ${{ needs.arm64-images.result }}
+          COMPOSE_SMOKE: ${{ needs.compose-smoke.result }}
         run: |
           ok() { [ "$1" = success ] || [ "$1" = skipped ]; }
-          echo "detect-changes=$DETECT_CHANGES migration-order=$MIGRATION_ORDER typecheck-and-build=$TYPECHECK_AND_BUILD npx-smoke=$NPX_SMOKE package-checks=$PACKAGE_CHECKS screenshots=$SCREENSHOTS installer-shell=$INSTALLER_SHELL chart-checks=$CHART_CHECKS store-tests=$STORE_TESTS local-sandbox-contract=$LOCAL_SANDBOX_CONTRACT root-script-tests=$ROOT_SCRIPT_TESTS new-assertions=$NEW_ASSERTIONS repo-rules=$REPO_RULES dependency-licenses=$DEPENDENCY_LICENSES private-data-scan=$PRIVATE_DATA_SCAN help-guide=$HELP_GUIDE feature-coverage=$FEATURE_COVERAGE generated-contract-drift=$GENERATED_CONTRACT_DRIFT arm64-build=$ARM64_BUILD arm64-images=$ARM64_IMAGES"
+          echo "detect-changes=$DETECT_CHANGES migration-order=$MIGRATION_ORDER typecheck-and-build=$TYPECHECK_AND_BUILD npx-smoke=$NPX_SMOKE package-checks=$PACKAGE_CHECKS screenshots=$SCREENSHOTS installer-shell=$INSTALLER_SHELL chart-checks=$CHART_CHECKS store-tests=$STORE_TESTS local-sandbox-contract=$LOCAL_SANDBOX_CONTRACT root-script-tests=$ROOT_SCRIPT_TESTS new-assertions=$NEW_ASSERTIONS repo-rules=$REPO_RULES dependency-licenses=$DEPENDENCY_LICENSES private-data-scan=$PRIVATE_DATA_SCAN help-guide=$HELP_GUIDE feature-coverage=$FEATURE_COVERAGE generated-contract-drift=$GENERATED_CONTRACT_DRIFT arm64-build=$ARM64_BUILD arm64-images=$ARM64_IMAGES compose-smoke=$COMPOSE_SMOKE"
           [ "$DETECT_CHANGES" = success ] || exit 1
           [ "$MIGRATION_ORDER" = success ] || exit 1
           [ "$TYPECHECK_AND_BUILD" = success ] || exit 1
@@ -1123,3 +1165,4 @@ jobs:
           [ "$GENERATED_CONTRACT_DRIFT" = success ] || exit 1
           [ "$ARM64_BUILD" = success ] || exit 1
           [ "$ARM64_IMAGES" = success ] || exit 1
+          [ "$COMPOSE_SMOKE" = success ] || exit 1
