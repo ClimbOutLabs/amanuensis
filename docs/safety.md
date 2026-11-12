@@ -61,5 +61,6 @@ A scheduled run has nobody watching it, so it never sends anything by itself. Th
 - When you approve a held action, Aman checks it again first. If anything the card showed has changed since it was held, such as the guests of an event or the text of a message, nothing is done and Aman says to ask again in chat.
 - Held actions expire after 24 hours. Up to 20 are kept per chat; if more were held, the list says how many were not saved so you can ask again in chat.
 - A helper job inside a scheduled run cannot hold actions. Its actions are refused.
+- The run's chat stays careful when you open it and type there. That chat still holds what the run read. So your choices to let file writes, or code in the sandbox, run without asking do not apply in it. Each one shows a card. A new chat is not affected.
 
 See [Schedules](/schedules) for how schedules work, and [Privacy](/privacy) for what leaves your machine.
