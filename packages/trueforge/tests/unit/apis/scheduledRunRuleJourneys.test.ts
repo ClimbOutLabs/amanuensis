@@ -17,6 +17,7 @@ import { GetTurnResponseSchema, ListTurnsResponseSchema } from '../../../src/sch
 import { MODEL_FQN, startApprovalTestServer, type ApprovalTestServer } from '../../fixtures/approvalTestServer';
 import { INERT_SERVER_NAME, INERT_WRITE_TOOL, startInertMcpServer } from '../../fixtures/inertMcpServer';
 import { RUN_DIRECTIVE_PREFIX } from '../../fixtures/scriptedModelServer';
+import { StandInSandbox } from '../../fixtures/standInSandbox';
 
 const TURN_TIMEOUT_MS = 60_000;
 
@@ -124,7 +125,11 @@ const HeldCardsSchema = z.object({
                 .object({
                   id: z.string(),
                   held: z.boolean().optional(),
-                  tier3_card: z.object({ outbound_text: z.string().nullable() }).loose().nullable().optional(),
+                  tier3_card: z
+                    .object({ plain_what: z.string(), outbound_text: z.string().nullable() })
+                    .loose()
+                    .nullable()
+                    .optional(),
                 })
                 .loose(),
             )
@@ -334,6 +339,71 @@ describe('scheduled runs', () => {
         revision: 3,
         body: FIRST,
       });
+    },
+    TURN_TIMEOUT_MS,
+  );
+});
+
+describe('a scheduled run that wants to run code', () => {
+  let server: ApprovalTestServer;
+  let memoryDir: string;
+  const original = {
+    MEMORY_BACKEND: configuration.MEMORY_BACKEND,
+    MEMORY_MARKDOWN_DIR: configuration.MEMORY_MARKDOWN_DIR,
+    MEMORY_EMBEDDINGS_ENABLED: configuration.MEMORY_EMBEDDINGS_ENABLED,
+    MEMORY_SUMMARIZE: configuration.MEMORY_SUMMARIZE,
+  };
+
+  beforeAll(async () => {
+    memoryDir = await mkdtemp(join(tmpdir(), 'scheduled-run-code-'));
+    Object.assign(configuration, {
+      MEMORY_BACKEND: 'markdown',
+      MEMORY_MARKDOWN_DIR: memoryDir,
+      MEMORY_EMBEDDINGS_ENABLED: false,
+      MEMORY_SUMMARIZE: false,
+    });
+    // The sandbox has no network, where a chat with the switch on runs code without asking.
+    server = await startApprovalTestServer({ sandboxProvider: new StandInSandbox('none') });
+  }, TURN_TIMEOUT_MS);
+
+  afterAll(async () => {
+    await server.close();
+    Object.assign(configuration, original);
+    await rm(memoryDir, { recursive: true, force: true });
+  });
+
+  it(
+    'holds the code for the owner even with "run without asking" on',
+    async () => {
+      const saved = await server.request(
+        '/api/v1/user/settings/sentinel',
+        jsonInit({ sandbox_without_asking: true }, 'PATCH'),
+      );
+      expect(saved.status).toBe(200);
+      const agent = await new SqliteAgentStore(server.db()).createAgent({
+        host_managed: false,
+        tenant_id: 'default',
+        created_by_subject: OWNER_SUBJECT,
+        name: 'weekly-sums',
+        description: 'Scheduled agent with a sandbox, used by the scheduled-run rule tests.',
+        manifest: AgentSpecSchema.parse({
+          ...AGENT_SPEC,
+          config: { ...AGENT_SPEC.config, sandbox: { enabled: true } },
+        }),
+        external_id: 'weekly-sums-external-id',
+      });
+
+      server.model.next({ toolArguments: { code: 'print(1)', language: 'python' } });
+      const { chatId, turn } = await runScheduled({
+        server,
+        agent,
+        name: 'add-up-the-week',
+        task: `Add up the week. ${RUN_DIRECTIVE_PREFIX}run_code`,
+      });
+
+      expect(turn.state.status === 'done' && turn.state.required_actions).toEqual([]);
+      const held = await heldCards({ server, chatId });
+      expect(held.map(card => card.tier3_card?.plain_what)).toEqual(['Run code the assistant wrote in the sandbox?']);
     },
     TURN_TIMEOUT_MS,
   );

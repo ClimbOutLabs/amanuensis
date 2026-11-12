@@ -9,7 +9,6 @@ import configuration from '../../../src/config';
 import { TurnStreamingEventSchema } from '../../../src/schemas/events';
 import { GetTurnResponseSchema } from '../../../src/schemas/turn';
 import { MODEL_FQN, startApprovalTestServer, type ApprovalTestServer } from '../../fixtures/approvalTestServer';
-import { FakeSandboxProvider } from '../../fixtures/fakeSandboxProvider';
 import { INERT_SERVER_NAME, INERT_WRITE_TOOL } from '../../fixtures/inertMcpServer';
 import {
   RUN_DIRECTIVE_PREFIX,
@@ -17,6 +16,7 @@ import {
   SCRIPTED_PERSONA,
   SCRIPTED_SCHEDULE,
 } from '../../fixtures/scriptedModelServer';
+import { StandInSandbox } from '../../fixtures/standInSandbox';
 
 const TURN_TIMEOUT_MS = 60_000;
 
@@ -350,13 +350,6 @@ describe('an address with a sign-in name before the site', () => {
     TURN_TIMEOUT_MS,
   );
 });
-
-/** A sandbox that runs nothing for real; only whether it has a network matters here. */
-class StandInSandbox extends FakeSandboxProvider {
-  constructor(readonly network: 'none' | undefined) {
-    super(new Map());
-  }
-}
 
 const SANDBOX_AGENT_SPEC = { ...AGENT_SPEC, config: { ...AGENT_SPEC.config, sandbox: { enabled: true } } };
 
