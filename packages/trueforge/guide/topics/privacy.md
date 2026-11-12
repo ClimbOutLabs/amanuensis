@@ -13,7 +13,7 @@ Some things leave your computer, and only when needed:
 - The map service. Places and routes, after you approve the card.
 - Google. What a connected email or calendar action sends, after you approve it.
 
-Voice input runs on your computer. Memory search runs on your computer too.
+Voice input and voice mode run on your computer. Voice mode ends by itself after 2 minutes of quiet, so the microphone is not left open. Memory search runs on your computer too.
 
 Backups are written to a folder on your computer.
 

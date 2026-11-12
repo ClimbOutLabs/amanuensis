@@ -198,6 +198,38 @@ describe('Gmail write classification', () => {
       'The name was left off this address because it looked like an address.',
     );
     expect(decision.card?.email?.to).toEqual([{ name: '', address: 'other@example.org' }]);
+    expect(decision.card?.email).toMatchObject({ name_left_off: true });
+  });
+
+  it('puts nothing in the card sentence that the mail shape does not carry', async () => {
+    const cases = [
+      { fromName: 'PayPal Security', nameLeftOff: false },
+      { fromName: '', nameLeftOff: true },
+      { fromName: '', nameLeftOff: false },
+    ];
+    for (const { fromName, nameLeftOff } of cases) {
+      const decision = await classifyTier(
+        gmail('send_draft', { draft_id: 'd1' }, { mail_draft: { ...CONTENT, fromName, nameLeftOff } }),
+        makeCtx(),
+      );
+      const what = decision.card?.plain_what ?? '';
+      const email = decision.card?.email;
+      expect(what.includes(`Sent as "${fromName}"`)).toBe(email?.from_name != null);
+      expect(what.includes('The name was left off')).toBe(email?.name_left_off === true);
+    }
+  });
+
+  it('carries the name the mail is sent as in the card itself, so it can be read back', async () => {
+    const named = await classifyTier(
+      gmail('send_draft', { draft_id: 'd1' }, { mail_draft: { ...CONTENT, fromName: 'PayPal Security' } }),
+      makeCtx(),
+    );
+    expect(named.card?.email).toMatchObject({ from_name: 'PayPal Security', name_left_off: false });
+    const unnamed = await classifyTier(
+      gmail('send_draft', { draft_id: 'd1' }, { mail_draft: { ...CONTENT, fromName: '' } }),
+      makeCtx(),
+    );
+    expect(unnamed.card?.email).toMatchObject({ from_name: null });
   });
 
   it('shows a saved draft recipient with the name Gmail holds, and the real address in full', async () => {
