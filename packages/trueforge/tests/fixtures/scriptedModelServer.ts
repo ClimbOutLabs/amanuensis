@@ -96,6 +96,8 @@ const THINKING_CHUNK_INTERVAL_MS = 50;
  */
 export const JUDGE_REJECT_MARKER = 'judge_reject';
 const RELEVANCE_JUDGE_TAG = '<knowledge-relevance-judge';
+/** The host's request to name a new chat after its first reply. */
+const CHAT_TITLE_TAG = '<chat-title';
 
 export interface ScriptedModelServer {
   /** Value for a `custom` model provider `base_url`. */
@@ -196,6 +198,31 @@ function personText(content: unknown): string {
     }
   }
   return own.join(' ');
+}
+
+/**
+ * The answer to the host's request to name a new chat, or undefined for any other request. Like a
+ * model naming a chat by its subject, it answers with the person's first message, so a chat keeps
+ * the name its script gave it; the directives quoted inside that message are never acted on.
+ */
+function chatTitleAnswer(messages: ChatMessage[]): string | undefined {
+  if (!messages.some(message => message.role === 'system' && messageText(message.content).includes(CHAT_TITLE_TAG))) {
+    return undefined;
+  }
+  for (const message of messages) {
+    if (message.role !== 'user') {
+      continue;
+    }
+    try {
+      const payload: unknown = JSON.parse(messageText(message.content));
+      if (isRecord(payload) && typeof payload['first_message'] === 'string') {
+        return payload['first_message'];
+      }
+    } catch {
+      // Not the title payload; the next user message may be.
+    }
+  }
+  return undefined;
 }
 
 /** The advertised name for a directive, matched by substring so harness renaming still resolves. */
@@ -453,6 +480,36 @@ function completionBody({ text, toolCalls }: { text: string | null; toolCalls: S
   };
 }
 
+/**
+ * Waits for the detached chat-title call a chat's first turn leaves behind. It lands in the request
+ * log whenever it happens to arrive, so a test that counts requests waits for it first. The call is
+ * matched by the first message it was asked to title.
+ */
+export async function waitForChatTitleCall({
+  model,
+  fromIndex,
+  firstMessage,
+}: {
+  model: ScriptedModelServer;
+  fromIndex: number;
+  firstMessage: string;
+}): Promise<void> {
+  const deadline = Date.now() + 20_000;
+  for (;;) {
+    const landed = model
+      .requests()
+      .slice(fromIndex)
+      .some(request => chatTitleAnswer(request.messages)?.includes(firstMessage) === true);
+    if (landed) {
+      return;
+    }
+    if (Date.now() > deadline) {
+      throw new Error('The chat title call never reached the scripted model. Check that the first turn finished.');
+    }
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+}
+
 export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
   const requests: ChatCompletionRequest[] = [];
   // Stalled streams stay open until the caller hangs up or the fixture closes.
@@ -478,6 +535,26 @@ export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
       chatTemplateKwargs: isRecord(body) ? body['chat_template_kwargs'] : undefined,
     };
     requests.push(parsed);
+
+    const title = chatTitleAnswer(parsed.messages);
+    if (title !== undefined) {
+      if (!parsed.stream) {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(completionBody({ text: title, toolCalls: [] })));
+        return;
+      }
+      res.writeHead(200, {
+        'content-type': 'text/event-stream',
+        'cache-control': 'no-cache',
+        connection: 'keep-alive',
+      });
+      for (const chunk of textChunks(title)) {
+        res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+      }
+      res.write('data: [DONE]\n\n');
+      res.end();
+      return;
+    }
 
     const progress = directiveProgress(parsed.messages);
     const pending = pendingDirective(parsed.messages);
