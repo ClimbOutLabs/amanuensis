@@ -32,7 +32,11 @@ import {
 } from '../../../src/core/mcp/executeToolCalls';
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
 import { InternalEventType, type ContextMessage } from '../../../src/core/runtime/AgentThread.types';
-import { MAX_TOOL_CALLS_PER_REPLY, TOO_MANY_TOOL_CALLS_MESSAGE } from '../../../src/core/runtime/modelReplyGuard';
+import {
+  MAX_TOOL_CALLS_PER_REPLY,
+  REPLY_CALL_NOT_RUN_OWNER_MESSAGE,
+  TOO_MANY_TOOL_CALLS_MESSAGE,
+} from '../../../src/core/runtime/modelReplyGuard';
 import {
   OUTSIDE_ACTION_RETRY_RESULT,
   REPEATED_ACTION_RESULT,
@@ -252,6 +256,7 @@ function makeThread(input: {
   turnToolCallLedger?: TurnToolCallLedger | undefined;
   /** Research budget charged to web_search calls; absent means no budget. */
   searchBudget?: number;
+  assistantName?: string;
   /** Steps the reply may take; absent means the default. */
   stepBudget?: number;
 }) {
@@ -269,6 +274,7 @@ function makeThread(input: {
       modelId: undefined,
       configuredModels: undefined,
       instruction: 'test',
+      ...(input.assistantName === undefined ? {} : { identity: { assistantName: input.assistantName } }),
       toolSets: [input.toolSet],
       ...(input.searchBudget === undefined
         ? {}
@@ -626,6 +632,43 @@ describe('argument checking', () => {
     expect(results).toHaveLength(1);
     expect(results[0]?.content).toContain('arguments were not complete');
   });
+});
+
+describe('what the person reads when a call is refused', () => {
+  it.each([{ configured: undefined }, { configured: 'Juniper' }])(
+    'shows one plain line with no tool in it, whatever the assistant is called, while the model keeps its instruction',
+    async ({ configured }) => {
+      const toolSet = makeToolSet();
+      let round = 0;
+      const create = jest.fn((_request: LLMCreateParamsStreaming) => {
+        round += 1;
+        if (round === 1) {
+          return replyStream({
+            calls: [{ id: 'call-1', name: 'create_event', args: '{"title": "Dentist", "start": {"date_time": "2026' }],
+          });
+        }
+        return finalAnswerStream();
+      });
+      const thread = makeThread({
+        toolSet,
+        create,
+        ...(configured === undefined ? {} : { assistantName: configured }),
+      });
+      await drain(thread);
+      const content = toolResults(thread)[0]?.content;
+      const envelope: unknown = JSON.parse(content ?? '{}');
+      const outcome = isRecord(envelope) ? envelope['outcome'] : undefined;
+      const remediation = isRecord(outcome) ? outcome['remediation'] : undefined;
+      expect(remediation).toEqual({
+        reason_code: 'tool_pre_dispatch_failed',
+        message: REPLY_CALL_NOT_RUN_OWNER_MESSAGE,
+        suggested_action: 'contact_user',
+      });
+      expect(REPLY_CALL_NOT_RUN_OWNER_MESSAGE).not.toContain('create_event');
+      expect(refusalError(content)).toContain('arguments were not complete');
+      expect(refusalError(content)).toContain('create_event');
+    },
+  );
 });
 
 describe('duplicates, floods and dependent reads', () => {

@@ -121,6 +121,24 @@ describe('mail and calendar sidecars', () => {
     expect(service.environment?.['AMAN_MAIL_STATUS_FILE']).toBe('/mail-status/loaded.sha256');
   });
 
+  it('the mail wrapper records the send list only once the server answers on its port', () => {
+    const entrypoint = readFileSync(resolve(REPO_ROOT, 'ops/compose/mail-email/entrypoint.sh'), 'utf8');
+    const start = entrypoint.indexOf('start_server() {');
+    const body = entrypoint.slice(start, entrypoint.indexOf('\n}\n', start));
+    // A start clears the previous start's record before the new server is spawned, so a reader
+    // during the restart cannot take the old record for the new server's list.
+    expect(body.indexOf('rm -f "$status"')).toBeGreaterThan(-1);
+    expect(body.indexOf('rm -f "$status"')).toBeLessThan(body.indexOf('mcp-email-server'));
+    // The record is written only after the port probe passes, never at spawn time.
+    expect(body.indexOf('server_answers')).toBeGreaterThan(-1);
+    expect(body.indexOf('server_answers')).toBeLessThan(body.indexOf('record_loaded'));
+    // The one writer of the record, so no other path writes it before the server answers.
+    expect(entrypoint.split('>"$status.tmp"')).toHaveLength(2);
+    const writer = entrypoint.indexOf('record_loaded() {');
+    expect(entrypoint.indexOf('>"$status.tmp"')).toBeGreaterThan(writer);
+    expect(entrypoint.indexOf('>"$status.tmp"')).toBeLessThan(entrypoint.indexOf('\n}\n', writer));
+  });
+
   it('mail-email reads attachment content for the agent as data', () => {
     expect(serviceNamed('mail-email').environment?.['MCP_EMAIL_SERVER_ENABLE_ATTACHMENT_CONTENT']).toBe('true');
   });
