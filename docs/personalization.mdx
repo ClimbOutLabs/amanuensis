@@ -55,7 +55,7 @@ The pass is fire and forget. It never delays or fails the turn it learned from, 
 
 Every host write leaves an `aman.profile.learned` event on the completed turn's event log carrying the previous document, the new document, and the profile revision the write produced, so the change trail is auditable through the events API. When a memory provider is configured, a pass that reaches the end with learning still on also mirrors the current document into it under a per-user document id; an unchanged document deduplicates on the provider side.
 
-The document is part of the personalization profile: it renders in the model-facing `<personalization-context>` block after pinned preferences, with a preamble stating that it was learned from past conversations. You can read, edit, or clear it at any time in Settings under Memory, on the Learned profile tab, and it round-trips through the same profile `PUT`.
+The document is part of the personalization profile: it renders in the model-facing `<personalization-context>` block after pinned preferences, with a preamble stating that it was learned from past conversations. You can read, edit, or clear it at any time in Settings under Memory, on the Learned profile tab, and it round-trips through the same profile `PUT`. Clear all on the Personalization page empties only that page's fields and keeps the learned profile, its switch, and your Tour help areas.
 
 ## Deliberately not included yet
 
