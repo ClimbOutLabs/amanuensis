@@ -116,9 +116,9 @@ export interface SummarizeTurnContext {
   /** Read after a save to learn whether notes are sorted onto pages. */
   globalSettingsStore: IGlobalSettingsStore;
   /**
-   * The person's name from their personalization profile, so saved facts are written in their
-   * name. Undefined when the profile holds no name; the summarizer then writes its facts about
-   * "the person" instead.
+   * The person's name from their personalization profile. A saved fact leaves the person out and
+   * uses the name only where it would be unclear without it. Undefined when the profile holds no
+   * name; the summarizer then falls back on "the person".
    */
   personName?: string | undefined;
   /**

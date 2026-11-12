@@ -7,7 +7,7 @@ import { cn } from '@/atoms/lib/cn.js';
 import { Spinner } from '@/atoms/primitives/Spinner.js';
 import type { MemoryPageSummary } from '@/plugins/trueforge-agent-server-adapter/catalogs/memoryPagesCatalog.js';
 import { useAssistantDisplayName } from '../../components/PersonalizationContext.js';
-import { MemoryPageView } from './MemoryPageView.js';
+import { dayCopy, MemoryPageView } from './MemoryPageView.js';
 import { filterPages, useMemoryPagesState, type MemoryPagesState } from './useMemoryPagesState.js';
 
 const INPUT_CLASS = 'rounded-md border border-border bg-primary-bg px-2 py-1.5 text-sm text-text-primary';
@@ -24,12 +24,12 @@ function PageRow({ page, state }: { page: MemoryPageSummary; state: MemoryPagesS
         type="button"
         onClick={() => state.openPage({ kind: page.kind, slug: page.slug })}
         className={cn(
-          'flex w-full flex-col gap-0.5 rounded-xl border border-border bg-card-bg p-3 text-left',
+          'flex w-full flex-col gap-1 rounded-xl border border-border bg-card-bg p-3 text-left',
           'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring',
         )}
       >
         <span className="flex flex-wrap items-center gap-2 text-sm font-medium text-text-primary">
-          {page.title}
+          <span className="min-w-0 break-words">{page.title}</span>
           {page.unconfirmedCount > 0 ? (
             <span className="rounded-full border border-border px-2 text-xs font-normal text-text-secondary">
               {String(page.unconfirmedCount)} to confirm
@@ -40,6 +40,11 @@ function PageRow({ page, state }: { page: MemoryPageSummary; state: MemoryPagesS
               {String(page.disagreementCount)} {page.disagreementCount === 1 ? 'pair disagrees' : 'pairs disagree'}
             </span>
           ) : null}
+          {page.changedOn === null ? null : (
+            <span className="ml-auto whitespace-nowrap text-xs font-normal text-text-secondary">
+              Updated {dayCopy(page.changedOn)}
+            </span>
+          )}
         </span>
         {page.summary === null ? null : (
           <span className="line-clamp-2 text-sm text-text-secondary">{page.summary}</span>

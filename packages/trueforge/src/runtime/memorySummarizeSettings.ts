@@ -110,8 +110,8 @@ export interface ResolveTurnSummarizeContextParams {
   memoryClientPresent: boolean;
   /**
    * The person's name from their personalization profile, as loaded by the caller for this
-   * turn, so saved facts can be written in it. Optional: a caller without a profile resolves a
-   * context with no name, and the summarizer writes about "the person".
+   * turn, for the rare saved fact that is unclear without it. Optional: a caller without a
+   * profile resolves a context with no name, and the summarizer falls back on "the person".
    */
   personName?: string | undefined;
   /** Lines of the person's profile, so a summary that only repeats the profile is not saved. */

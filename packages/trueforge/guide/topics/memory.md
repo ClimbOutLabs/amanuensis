@@ -22,7 +22,7 @@ It is off by default. Turn it on in Settings, then Memory: "Let Aman search your
 
 Aman keeps a short page for each person and each matter in your life, such as your sister or a house move. Open Settings, then Memory, then **Pages** to read them. You only see this tab when memory is kept as Markdown files, which is the default.
 
-Pages are in two groups, People and Matters. Each row shows the name and one line about it. A small count says how many lines wait for you to confirm. Type in the search box to find a page by its name or another name it goes by.
+Pages are in two groups, People and Matters. Each row shows the name, one line about it and the day it last changed. A small count says how many lines wait for you to confirm. Type in the search box to find a page by its name or another name it goes by.
 
 Aman does not list your pages in every reply. When you ask about something and no page was shown for it, it can look at the list and open a page that looks relevant. A page with no line of your own is listed apart, and its name is marked "not confirmed by you", because Aman made it from something it read.
 

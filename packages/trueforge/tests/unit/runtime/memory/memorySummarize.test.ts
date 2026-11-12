@@ -93,34 +93,45 @@ describe('buildSummarizationMessages', () => {
     expect(system).toContain('Most turns hold nothing worth keeping');
   });
 
-  it("gives the model the person's name and asks for facts written in it, when a name is supplied", () => {
+  it("gives the model the person's name and asks for notes that leave the person out, when a name is supplied", () => {
     const system = buildSummarizationMessages({
       userText: 'hi',
       turnDate: TURN_DATE,
       personName: 'Priya',
     })[0]?.content;
     expect(system).toContain("The person's name is Priya.");
-    expect(system).toContain('with Priya as its subject');
-    expect(system).toContain('never use "the person" as the subject of a fact');
-    expect(system).not.toContain('in the third person, about "the person"');
+    expect(system).toContain('leave the person out of each fact');
+    expect(system).toContain("Write Priya's name only where a note would be unclear without it.");
+    expect(system).toContain('Never write "User", "Assistant" or "the person".');
+    expect(system).not.toContain('as its subject');
   });
 
-  it('writes the worked examples in the name style when a name is supplied', () => {
+  it('writes the worked examples without the person as their subject, with or without a name', () => {
+    for (const personName of ['Priya', undefined]) {
+      const system = buildSummarizationMessages({ userText: 'hi', turnDate: TURN_DATE, personName })[0]?.content;
+      expect(system).toContain('"Friend <name> has the book."');
+      expect(system).toContain('"Needs the car back on 2026-03-05."');
+      expect(system).toContain('"Neighbour <name> waters the plants every Tuesday while away."');
+      expect(system).toContain('"Dentist is Dr <name>."');
+      expect(system).not.toContain("Priya's friend");
+      expect(system).not.toContain("The person's friend");
+    }
+  });
+
+  it('describes the examples in the name when a name is supplied', () => {
     const system = buildSummarizationMessages({
       userText: 'hi',
       turnDate: TURN_DATE,
       personName: 'Priya',
     })[0]?.content;
-    expect(system).toContain('"Priya\'s friend <name> has their book."');
-    expect(system).toContain('"Priya needs the car back on 2026-03-05."');
-    expect(system).toContain('"Priya\'s neighbour <name> waters their plants every Tuesday while they are away."');
-    expect(system).toContain('"Priya\'s dentist is Dr <name>."');
+    expect(system).toContain('Priya says a friend named <name> has their book');
+    expect(system).toContain('Example 4. Priya pastes a long note.');
   });
 
   it('falls back to writing about "the person" when no name is supplied', () => {
     const system = buildSummarizationMessages({ userText: 'hi', turnDate: TURN_DATE })[0]?.content;
-    expect(system).toContain('Write each fact as one complete sentence in the third person, about "the person".');
-    expect(system).toContain('"The person\'s friend <name> has their book."');
+    expect(system).toContain('leave the person out of each fact');
+    expect(system).toContain('Write "the person" only where a note would be unclear without it.');
     expect(system).not.toContain("The person's name is");
   });
 
@@ -131,7 +142,7 @@ describe('buildSummarizationMessages', () => {
         turnDate: TURN_DATE,
         personName,
       })[0]?.content;
-      expect(system).toContain('in the third person, about "the person"');
+      expect(system).toContain('Write "the person" only where a note would be unclear without it.');
       expect(system).not.toContain("The person's name is");
     }
   });
@@ -608,9 +619,9 @@ describe('summarizeTurnContent', () => {
     expect(sent).toContain('Part of this long turn was left out.');
   });
 
-  it("sends a long paste with the person's name and returns exactly its two durable facts, written in the name, and nothing from the diary filler between them", async () => {
+  it("sends a long paste with the person's name and returns exactly its two durable facts, and nothing from the diary filler between them", async () => {
     const llm = fakeSummarizer(
-      '{"facts": ["Priya\'s neighbour Ana waters her plants every Tuesday while she is away.", "Priya\'s dentist is Dr Patel."]}',
+      '{"facts": ["Neighbour Ana waters the plants every Tuesday while away.", "Dentist is Dr Patel."]}',
     );
     const createNonStream = jest.spyOn(llm, 'createNonStream');
     const diaryDay = [
@@ -633,10 +644,7 @@ describe('summarizeTurnContent', () => {
     });
     expect(result).toEqual({
       status: 'summarized',
-      facts: [
-        "Priya's neighbour Ana waters her plants every Tuesday while she is away.",
-        "Priya's dentist is Dr Patel.",
-      ],
+      facts: ['Neighbour Ana waters the plants every Tuesday while away.', 'Dentist is Dr Patel.'],
     });
     const returned = result.status === 'summarized' ? result.facts.join(' ') : '';
     expect(returned).not.toContain('harbour');
@@ -646,7 +654,7 @@ describe('summarizeTurnContent', () => {
     expect(returned).not.toContain('lighthouse');
     const sent = JSON.stringify(createNonStream.mock.calls[0]?.[0]?.messages);
     expect(sent).toContain("The person's name is Priya.");
-    expect(sent).toContain('with Priya as its subject');
+    expect(sent).toContain("Write Priya's name only where a note would be unclear without it.");
     expect(sent).toContain('A fact at the start of a long message counts as much as one at the end');
     expect(sent).toContain('A request to remember never crowds out the rest');
     expect(sent).toContain('passing events, descriptions, and things the person only saw or did once');
@@ -664,7 +672,7 @@ describe('summarizeTurnContent', () => {
       facts: ['The person has a synthetic test robot named Bleep-Bloop.'],
     });
     const sent = JSON.stringify(createNonStream.mock.calls[0]?.[0]?.messages);
-    expect(sent).toContain('Write each fact as one complete sentence in the third person');
+    expect(sent).toContain('only where a note would be unclear without it. Never write');
     expect(sent).not.toContain("The person's name is");
   });
 

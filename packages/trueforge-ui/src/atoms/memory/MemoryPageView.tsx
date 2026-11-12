@@ -14,7 +14,7 @@ import type { MemoryPagesState } from './useMemoryPagesState.js';
 const INPUT_CLASS = 'rounded-md border border-border bg-primary-bg px-2 py-1.5 text-sm text-text-primary';
 
 /** A stored day such as 2026-11-11 as people write it; anything else is shown as stored. */
-function dayCopy(day: string): string {
+export function dayCopy(day: string): string {
   const date = /^\d{4}-\d{2}-\d{2}$/.test(day) ? new Date(`${day}T00:00:00`) : null;
   return date === null || Number.isNaN(date.getTime())
     ? day

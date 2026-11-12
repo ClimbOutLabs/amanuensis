@@ -207,6 +207,8 @@ describe('MemoryPagesPanel', () => {
     expect(within(people).getByText('Wendy')).toBeInTheDocument();
     expect(within(people).getByText('1 to confirm')).toBeInTheDocument();
     expect(within(screen.getByRole('region', { name: 'Matters' })).getByText('The Madrid move')).toBeInTheDocument();
+    expect(within(people).getByText('The owner’s wife.')).toBeInTheDocument();
+    expect(within(people).getByText(/^Updated .*2026/)).toBeInTheDocument();
 
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search pages' }), { target: { value: 'my wife' } });
     expect(screen.queryByText('The Madrid move')).not.toBeInTheDocument();

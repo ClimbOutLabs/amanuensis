@@ -77,7 +77,7 @@ Sorting at save time starts off. The person may switch it to `report` or `on` in
 
 A Pages tab sits beside Memories and Sharing in Settings, then Memory, and on the standalone Memory page. It shows only with the Markdown memory.
 
-- **List.** People and matters in two groups. Each row has the title, the summary line and a count of lines waiting to be confirmed. A search box matches the title and the other names. With no pages it says what a page is and that Aman fills pages as the person talks. Files in the page folders with names Aman cannot read are listed, with what to do.
+- **List.** People and matters in two groups. Each row has the title, the summary line, the day the page last changed and a count of lines waiting to be confirmed. A search box matches the title and the other names. With no pages it says what a page is and that Aman fills pages as the person talks. Files in the page folders with names Aman cannot read are listed, with what to do.
 - **One page.** The sections in order. The person's own lines are plain. The person's own lines say `From you`. A line that is not theirs says `External source:` and where it came from (`a message you sent`, `email`, `calendar`, `read content` or `Aman’s guess`), the same words a note uses. A line under Unconfirmed says it is not confirmed and has Confirm and Dismiss. Earlier is collapsed.
 - **Edit.** The page as Markdown text, with Save and Cancel. A save is one history entry and is treated exactly like a hand edit in the file. It is refused, with a message that says what to do, when the page changed since it was opened or when the text is not a page.
 - **Delete page.** Held for 10 seconds with Undo, then sent. The history keeps the page.
