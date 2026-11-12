@@ -10,9 +10,10 @@ import { SentinelStateProvider } from '@/sentinel/SentinelStateProvider.js';
 import type { SentinelApprovalCard } from '@/sentinel/types.js';
 import { RuntimeHarness } from './RuntimeHarness.js';
 
-const { pendingApprovals } = vi.hoisted(() => ({
-  pendingApprovals: { current: [] as Array<{ approvalId: string; threadId: string }> },
-}));
+const { pendingApprovals } = vi.hoisted(() => {
+  const current: { approvalId: string; threadId: string }[] = [];
+  return { pendingApprovals: { current } };
+});
 
 vi.mock('@truefoundry/assistant-ui-runtime', async importOriginal => {
   const actual = await importOriginal<typeof import('@truefoundry/assistant-ui-runtime')>();
