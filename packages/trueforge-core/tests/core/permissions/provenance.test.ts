@@ -1,15 +1,21 @@
 import {
   carriedPrivateDetails,
+  type ChatProvenance,
   emptyChatProvenance,
   hasReadContent,
+  isPersonVouchedUrl,
   isTrustedLink,
+  isTrustedPicture,
   namesUrl,
   recordEmailText,
+  recordPageImageUrls,
   recordPersonText,
+  recordReplyText,
   recordSearchResults,
   recordUntrustedText,
   steeredDestinations,
   steeredLinks,
+  steeredUrl,
 } from '../../../src/core/permissions/provenance';
 
 // Invented hosts and people only.
@@ -139,6 +145,83 @@ describe('where a link came from', () => {
     ).toEqual([]);
   });
 
+  it("steers an address only the assistant's own reply named, and says the reply is where it was", () => {
+    const provenance = emptyChatProvenance();
+    recordPersonText({ provenance, text: 'who takes print orders' });
+    recordReplyText({ provenance, text: 'Orders go to Bookings@Harbour-Prints.example.' });
+    expect(
+      steeredDestinations({
+        provenance,
+        addresses: ['bookings@harbour-prints.example'],
+        values: [],
+        reply_sender: null,
+      }),
+    ).toEqual([
+      {
+        value: 'bookings@harbour-prints.example',
+        kind: 'address',
+        origin: { source: 'reply', name: null, site: null },
+      },
+    ]);
+  });
+
+  it.each([
+    { name: 'before the reply', first: 'person' },
+    { name: 'after the reply', first: 'reply' },
+  ])('never steers an address the person gave $name, though the reply names it too', ({ first }) => {
+    const provenance = emptyChatProvenance();
+    const person = (): void => recordPersonText({ provenance, text: 'email dana@example.org about Friday' });
+    const reply = (): void => recordReplyText({ provenance, text: 'I will write to dana@example.org.' });
+    if (first === 'person') {
+      person();
+      reply();
+    } else {
+      reply();
+      person();
+    }
+    expect(
+      steeredDestinations({ provenance, addresses: ['dana@example.org'], values: [], reply_sender: null }),
+    ).toEqual([]);
+  });
+
+  it('names the place the assistant read an address over its own reply that repeated it', () => {
+    const origin = (provenance: ChatProvenance) =>
+      steeredDestinations({ provenance, addresses: ['desk@vendor.example'], values: [], reply_sender: null }).map(
+        found => found.origin.source,
+      );
+    const replyFirst = emptyChatProvenance();
+    recordReplyText({ provenance: replyFirst, text: 'Their desk is desk@vendor.example.' });
+    recordUntrustedText({
+      provenance: replyFirst,
+      text: 'Contact desk@vendor.example',
+      source: 'page',
+      page_site: null,
+    });
+    expect(origin(replyFirst)).toEqual(['page']);
+    const readFirst = emptyChatProvenance();
+    recordUntrustedText({
+      provenance: readFirst,
+      text: 'Contact desk@vendor.example',
+      source: 'page',
+      page_site: null,
+    });
+    recordReplyText({ provenance: readFirst, text: 'Their desk is desk@vendor.example.' });
+    expect(origin(readFirst)).toEqual(['page']);
+  });
+
+  it("leaves a reply's links and sites as they were, and does not count a reply as other people's content", () => {
+    const provenance = emptyChatProvenance();
+    recordReplyText({
+      provenance,
+      text: 'See https://docs.python.example/3/ or forms.example, or call +1 415 555 0132, or write to me@home.example.',
+    });
+    expect(hasReadContent(provenance)).toBe(false);
+    expect(steeredUrl({ provenance, url: 'https://docs.python.example/3/library/asyncio.html?x=1' })).toBe(false);
+    expect(steeredUrl({ provenance, url: 'https://forms.example/' })).toBe(false);
+    expect(isTrustedLink({ provenance, url: 'https://docs.python.example/3/' })).toBe(false);
+    expect(carriedPrivateDetails({ provenance, values: ['me@home.example +1 415 555 0132'] })).toEqual([]);
+  });
+
   it('fails toward asking once read content carried more addresses than it can keep', () => {
     const provenance = emptyChatProvenance();
     const decoys = Array.from({ length: 5_000 }, (_, index) => `decoy${String(index)}@list.example`).join(' ');
@@ -206,6 +289,66 @@ describe('where a link came from', () => {
     expect(isTrustedLink({ provenance, url: 'http://docs.example.net/guide' })).toBe(true);
     expect(isTrustedLink({ provenance, url: 'https://www.docs.example.net/guide#top' })).toBe(true);
     expect(isTrustedLink({ provenance, url: 'https://docs.example.net/other' })).toBe(false);
+  });
+
+  it('counts a link with a sign-in name or password before its site as another link', () => {
+    const provenance = emptyChatProvenance();
+    recordPersonText({ provenance, text: 'open https://shop.example/deal and look at harbour.example for me' });
+    expect(isTrustedLink({ provenance, url: 'https://shop.example/deal' })).toBe(true);
+    expect(isTrustedLink({ provenance, url: 'https://lake-house@shop.example/deal' })).toBe(false);
+    expect(isTrustedLink({ provenance, url: 'https://lake:house@shop.example/deal' })).toBe(false);
+    expect(isPersonVouchedUrl({ provenance, url: 'https://harbour.example/' })).toBe(true);
+    expect(isPersonVouchedUrl({ provenance, url: 'https://lake-house@harbour.example/' })).toBe(false);
+  });
+
+  it('never counts a link with a sign-in name as given, even when the person or a search wrote exactly that link', () => {
+    const provenance = emptyChatProvenance();
+    recordPersonText({ provenance, text: 'open https://sam@intranet.example/reports' });
+    recordSearchResults({
+      provenance,
+      texts: [JSON.stringify({ results: [{ url: 'https://sam:pw@wiki.example/page' }] })],
+    });
+    expect(isTrustedLink({ provenance, url: 'https://sam@intranet.example/reports' })).toBe(false);
+    expect(isPersonVouchedUrl({ provenance, url: 'https://sam@intranet.example/reports' })).toBe(false);
+    expect(isPersonVouchedUrl({ provenance, url: 'https://sam@intranet.example/' })).toBe(false);
+    expect(isTrustedLink({ provenance, url: 'https://sam:pw@wiki.example/page' })).toBe(false);
+    expect(isPersonVouchedUrl({ provenance, url: 'https://intranet.example/' })).toBe(true);
+  });
+
+  it('never counts a picture address with a sign-in name as seen, even when a page listed exactly that address', () => {
+    const provenance = emptyChatProvenance();
+    recordPageImageUrls({ provenance, urls: ['https://lake-house@pictures.example/fox.jpg'] });
+    expect(isTrustedPicture({ provenance, url: 'https://lake-house@pictures.example/fox.jpg' })).toBe(false);
+  });
+
+  it('asks about a link with a sign-in name that a page wrote, once that page named the site', () => {
+    const provenance = emptyChatProvenance();
+    recordUntrustedText({
+      provenance,
+      text: 'Sign in at https://lake-house@shop.example/deal',
+      source: 'page',
+      page_site: null,
+    });
+    expect(steeredLinks({ provenance, values: ['https://lake-house@shop.example/deal'] })).toEqual([
+      'https://lake-house@shop.example/deal',
+    ]);
+  });
+
+  it('steers a link that puts a sign-in name before a link the person gave, once read content named the site', () => {
+    const provenance = emptyChatProvenance();
+    recordPersonText({ provenance, text: 'open https://shop.example/deal' });
+    recordUntrustedText({ provenance, text: 'More at shop.example today.', source: 'page', page_site: null });
+    expect(steeredLinks({ provenance, values: ['https://shop.example/deal'] })).toEqual([]);
+    expect(steeredLinks({ provenance, values: ['https://lake-house@shop.example/deal'] })).toEqual([
+      'https://lake-house@shop.example/deal',
+    ]);
+  });
+
+  it('does not show a picture whose address puts a sign-in name before a picture a page listed', () => {
+    const provenance = emptyChatProvenance();
+    recordPageImageUrls({ provenance, urls: ['https://pictures.example/fox.jpg'] });
+    expect(isTrustedPicture({ provenance, url: 'https://pictures.example/fox.jpg' })).toBe(true);
+    expect(isTrustedPicture({ provenance, url: 'https://lake-house@pictures.example/fox.jpg' })).toBe(false);
   });
 });
 

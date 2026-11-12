@@ -86,8 +86,8 @@ test('the menu follows the docs home sections, subsections and first links', () 
     '| [Doctor](install.mdx#doctor) | skipped: a heading |',
     '## User guide',
     '**Everyday tasks**',
-    '| [Email](../packages/trueforge/guide/topics/email.md) | x |',
-    '| [Issues](https://github.com/x) | skipped: another site |',
+    '- [Email](../packages/trueforge/guide/topics/email.md): x',
+    '- [Issues](https://github.com/x): skipped, another site',
     '| [Security](../SECURITY.md) | skipped: on GitHub |',
   ].join('\n');
   assert.deepEqual(navFromDocsHome(home), [
@@ -131,29 +131,21 @@ test('the build lays out pages, topics and the menu', async () => {
 
 test('the website leaves out the parts for people working on the code', () => {
   const home = [
-    '| [Developer guide](#developer-guide) | x |',
-    '| [Project](#project) | x |',
+    '- [Getting started](#getting-started): x',
+    '- [Developer guide](#developer-guide): x',
+    '- [Project](#project): x',
+    '## Getting started',
+    '- [Try Aman](try-aman.md): x',
     '## Developer guide',
     '**Run from source**',
-    '| [Quickstart](quickstart.mdx) | x |',
-    '**The agent harness (TrueForge)**',
-    '| [Introduction](introduction.mdx) | x |',
-    '**Measuring changes**',
-    '| [Benchmarking](benchmarking.mdx) | x |',
+    '- [Quickstart](quickstart.mdx): x',
     '## Reference',
-    '| [SDK](api/quickstart.mdx) | x |',
+    '- [SDK](api/quickstart.mdx): x',
     '## Project',
-    '| [Changelog](CHANGELOG.md) | x |',
+    '- [Changelog](CHANGELOG.md): x',
   ].join('\n');
   assert.equal(
     siteDocsHome(home),
-    [
-      '| [Developer guide](#developer-guide) | x |',
-      '## Developer guide',
-      '**Run from source**',
-      '| [Quickstart](quickstart.mdx) | x |',
-      '## Reference',
-      '| [SDK](api/quickstart.mdx) | x |',
-    ].join('\n'),
+    ['- [Getting started](#getting-started): x', '## Getting started', '- [Try Aman](try-aman.md): x'].join('\n'),
   );
 });

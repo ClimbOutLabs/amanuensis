@@ -1,8 +1,8 @@
-import type { LLMUserMessage, RawToolCall } from '../../llm/LLMTypes';
+import type { LLMUserMessage, RawAssistantMessage, RawToolCall } from '../../llm/LLMTypes';
 import { parseToolCallArguments } from '../../mcp/toolArgumentCheck';
 import { collectOutboundStrings } from '../../permissions/outboundGuard';
 import type { ReadSource } from '../../permissions/provenance';
-import { recordPersonText, recordUntrustedText } from '../../permissions/provenance';
+import { recordPersonText, recordReplyText, recordUntrustedText } from '../../permissions/provenance';
 import {
   readSourceOf,
   recordToolResultProvenance,
@@ -51,6 +51,7 @@ const TOOL_RESULT_SOURCE_OF_READ: Record<ReadSource, ToolResultSource> = {
   browser_page: 'web',
   file: 'attachment',
   tool_result: 'other',
+  reply: 'other',
   other: 'other',
 };
 
@@ -86,11 +87,23 @@ function userTexts(content: LLMUserMessage['content']): string[] {
   return content.flatMap(part => (part.type === 'text' ? [part.text] : []));
 }
 
+/** The words of an assistant message; a refusal part is the model's own notice and names nothing. */
+function assistantTexts(content: RawAssistantMessage['content']): string[] {
+  if (content === null || content === undefined) {
+    return [];
+  }
+  if (typeof content === 'string') {
+    return [content];
+  }
+  return content.flatMap(part => (part.type === 'text' ? [part.text] : []));
+}
+
 /**
  * Records where the links and addresses of the chat so far came from, before every model step, so a call the model
  * makes is judged against everything it has read in this chat, earlier turns included. The person's own words are
  * theirs; file text, host notes such as an earlier summary, and tool results are data, except a search's result
- * links. Each message is read once. Root thread only: a sub-agent's results are recorded as they arrive.
+ * links. An address only the assistant's own reply named is data too. Each message is read once. Root thread only:
+ * a sub-agent's results are recorded as they arrive.
  */
 export function chatProvenanceCapability(input: { turn: WebSearchTurnState }): AgentCapability {
   const read = new WeakSet<object>();
@@ -122,6 +135,10 @@ export function chatProvenanceCapability(input: { turn: WebSearchTurnState }): A
           } else {
             recordPersonText({ provenance, text });
           }
+        }
+      } else if (message.role === 'assistant') {
+        for (const text of assistantTexts(message.content)) {
+          recordReplyText({ provenance, text });
         }
       } else if (message.role === 'tool') {
         const call = calls.get(message.tool_call_id);

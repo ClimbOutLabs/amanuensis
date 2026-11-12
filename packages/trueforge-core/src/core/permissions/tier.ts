@@ -16,12 +16,10 @@ export const TierSchema = z.union([z.literal(1), z.literal(2), z.literal(3)]).de
 
 /** Tier 1 reason codes for a command run in the sandbox without a card. Each one is written to the activity list. */
 export const SANDBOX_COMMAND_REASON = 'sandbox_command';
-export const SANDBOX_PACKAGE_INSTALL_REASON = 'sandbox_package_install';
 export const SANDBOX_FILE_WRITE_REASON = 'sandbox_file_write';
 export const SANDBOX_RUN_CODE_REASON = 'sandbox_run_code';
 export const SANDBOX_SILENT_REASONS: ReadonlySet<string> = new Set([
   SANDBOX_COMMAND_REASON,
-  SANDBOX_PACKAGE_INSTALL_REASON,
   SANDBOX_FILE_WRITE_REASON,
   SANDBOX_RUN_CODE_REASON,
 ]);
@@ -62,8 +60,9 @@ export const GRANT_BARRED_TIER_REASONS: ReadonlySet<string> = new Set([
 
 /**
  * Consequential actions a person may answer once for the whole chat with "Always allow this here". The chat grant
- * binds the tool and its destination, never a standing grant across chats. A send, a guest change and a steered call
- * are never among them: each of those asks every time.
+ * binds the tool and its destination, never a standing grant across chats, so it is offered only when the card
+ * names one. A send, a guest change, a steered call, and creating a schedule or a persona are never among them:
+ * each of those asks every time.
  */
 export const CHAT_GRANTABLE_CONSEQUENCE_REASONS: ReadonlySet<string> = new Set([
   'gmail_draft',
@@ -71,8 +70,6 @@ export const CHAT_GRANTABLE_CONSEQUENCE_REASONS: ReadonlySet<string> = new Set([
   'destructive_action',
   'mcp_destructive_hint',
   'mcp_open_world_hint',
-  'schedule_write',
-  'persona_write',
 ]);
 
 /**

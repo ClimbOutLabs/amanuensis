@@ -69,8 +69,8 @@ export function holdSay(assistant: string) {
   } as const;
 }
 
-/** The place an address or link was read, as a card names it. */
-const READ_PLACE: Record<ReadSource, string> = {
+/** The place an address or link was read, as a card names it. The assistant's own reply has its own sentence. */
+const READ_PLACE: Record<Exclude<ReadSource, 'reply'>, string> = {
   email_sender: 'an email',
   email: 'an email',
   event: 'a calendar event',
@@ -91,6 +91,10 @@ export function steeredDestinationSay(input: {
 }): string {
   const { assistant } = input;
   const sentences = input.destinations.map(({ who, kind, source }) => {
+    if (source === 'reply') {
+      const what = kind === 'link' ? 'which' : 'whose address';
+      return `This goes to ${who}, ${what} was only in an earlier reply from ${assistant}, not in your own words.`;
+    }
     if (kind === 'link') {
       return `This goes to ${who}, which was in ${READ_PLACE[source]} ${assistant} read.`;
     }

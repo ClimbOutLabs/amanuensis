@@ -11,7 +11,7 @@ Reading is free. Aman does not ask before it reads. It asks before it sends, sav
 ## The buttons on a card
 
 - **Allow** lets this one thing happen.
-- **Always allow this here** stops the questions for this kind of action in this chat. Only some cards show it.
+- **Always allow this here** stops the questions for this kind of action to the same place in this chat. Only a card that names who or where the action goes shows it. On a mail draft or a change to your own calendar, it covers every later one in this chat. Creating a schedule or a persona asks every time.
 - **Always allow this site** stops the questions for pages on one site in this chat. Only cards that open a page show it.
 - **Always allow this tool** lets Aman use one tool of a connector without asking, in every chat. Only some cards show it. You confirm once. Aman still asks when a call would send something that looks like a password, a key or a card number, or a lot of text.
 - **Change it** asks Aman to change the request first. Nothing runs now.
@@ -39,7 +39,7 @@ If you click **Not now** on one of these cards, that no lasts for the rest of th
 
 1. Click **More** in the left bar, click **Settings**, then click **Permissions**.
 2. Under **Always allow**, turn on **Write files** if you want Aman to write files without asking.
-3. Turn on **Web searches**, the maps switch or the **Sandbox** switch to stop those questions. Each one has its own switch.
+3. Turn on **Web searches**, the maps switch or the **Sandbox** switch to stop those questions. Each one has its own switch. The **Sandbox** switch covers new files and scripts Aman wrote in the same chat, and only where the sandbox has no network. Where you allowed package downloads, or a skill may reach its own sites, they still ask. Installing a package still asks.
 4. Sending email is not on this page. It always asks.
 
 To take back an always allowed tool, click **More**, then **Settings**, then **Connectors**. Open the connector and stop allowing the tool.
