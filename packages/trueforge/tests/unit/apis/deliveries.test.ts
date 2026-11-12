@@ -264,6 +264,35 @@ describe('links to chats that are gone', () => {
     expect(list.data).toEqual([]);
   });
 
+  it('takes an approval item out of the unread count once its chat is deleted', async () => {
+    const { json, give, giveApproval, makeChat, sessionStore, deliveryStore } = await build();
+    await makeChat('card-chat');
+    const approval = await giveApproval({ created_by: 'alice', text: 'waiting on you', session_id: 'card-chat' });
+    await give('alice', 'a reminder');
+    await expect((await json('/deliveries/unread-count')).json()).resolves.toEqual({ data: { unread_count: 2 } });
+
+    await sessionStore.deleteSession({ tenant_id: 'default', session_id: 'card-chat' });
+
+    await expect((await json('/deliveries/unread-count')).json()).resolves.toEqual({ data: { unread_count: 1 } });
+    const stored = await deliveryStore.get({ tenant_id: 'default', created_by: 'alice', id: approval.id });
+    expect(stored?.seen_at).not.toBeNull();
+  });
+
+  it('marks an approval item seen in the store when the feed leaves it out', async () => {
+    const { json, giveApproval, deliveryStore } = await build();
+    const approval = await giveApproval({
+      created_by: 'alice',
+      text: 'the card chat is gone',
+      session_id: 'gone-chat',
+    });
+
+    ListDeliveriesResponseSchema.parse(await (await json('/deliveries')).json());
+
+    expect(await deliveryStore.countUnread({ tenant_id: 'default', created_by: 'alice' })).toBe(0);
+    const stored = await deliveryStore.get({ tenant_id: 'default', created_by: 'alice', id: approval.id });
+    expect(stored?.seen_at).not.toBeNull();
+  });
+
   it('looks up chat ownership once for a whole page', async () => {
     const { json, giveLinked, makeChat, sessionStore } = await build();
     await makeChat('live-chat');

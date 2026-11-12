@@ -33,6 +33,9 @@ export interface PushRouterDeps {
 }
 
 /** The signed-in person's feed, mounted at /api/v1/user/deliveries. Every read and write is scoped to tenant and creator. */
+/** How many unread approval items one count checks for a chat that is gone. */
+const UNREAD_APPROVAL_CHECK_LIMIT = 500;
+
 export function createDeliveriesRouter(deps: DeliveriesRouterDeps) {
   const ownerOf = (c: Parameters<ResolveRequestContext>[0]) => {
     const context = deps.resolveRequestContext(c);
@@ -42,8 +45,9 @@ export function createDeliveriesRouter(deps: DeliveriesRouterDeps) {
   // A link to a chat that has since been deleted leads nowhere, and a link to someone else's chat
   // is not the viewer's to open, so the item is served without its link: the words stay in the
   // feed, and no Open is offered. Space links name no chat, so they are served as stored. An item
-  // waiting on an approval in a chat that is gone can never be answered, so it is resolved and
-  // leaves the feed. One ownership lookup covers the whole page.
+  // waiting on an approval in a chat that is gone can never be answered, so it leaves the feed and
+  // is marked seen in the store, which takes it out of the unread count too. One ownership lookup
+  // covers the whole page.
   const resolveChatLinks = async (
     deliveries: readonly Delivery[],
     owner: { tenant_id: string; created_by: string },
@@ -66,15 +70,34 @@ export function createDeliveriesRouter(deps: DeliveriesRouterDeps) {
       }),
     );
     const resolved: Delivery[] = [];
+    const answerless: string[] = [];
     for (const delivery of deliveries) {
       const link = delivery.link;
       if (link === null || link.type === 'space' || owned.has(link.session_id)) {
         resolved.push(delivery);
-      } else if (delivery.kind !== 'approval_waiting') {
+      } else if (delivery.kind === 'approval_waiting') {
+        if (delivery.seen_at === null) {
+          answerless.push(delivery.id);
+        }
+      } else {
         resolved.push({ ...delivery, link: null });
       }
     }
+    await deps.deliveryStore.markSeen({ ...owner, ids: answerless });
     return resolved;
+  };
+
+  // The unread count leaves out approval items whose chat is gone: they are checked first, the same
+  // way the feed checks them, so the bell never counts an item the feed does not show. Approval items
+  // are few (one per waiting request), so one bounded read covers them.
+  const countUnread = async (owner: { tenant_id: string; created_by: string }): Promise<number> => {
+    const approvals = await deps.deliveryStore.listUnread({
+      ...owner,
+      kinds: ['approval_waiting'],
+      limit: UNREAD_APPROVAL_CHECK_LIMIT,
+    });
+    await resolveChatLinks(approvals, owner);
+    return deps.deliveryStore.countUnread(owner);
   };
 
   const listHandler: RouteHandler<typeof listDeliveriesRoute> = async c => {
@@ -96,7 +119,7 @@ export function createDeliveriesRouter(deps: DeliveriesRouterDeps) {
   };
 
   const unreadHandler: RouteHandler<typeof getDeliveryUnreadCountRoute> = async c => {
-    const unread_count = await deps.deliveryStore.countUnread(ownerOf(c));
+    const unread_count = await countUnread(ownerOf(c));
     return c.json({ data: { unread_count } }, 200);
   };
 
@@ -104,14 +127,14 @@ export function createDeliveriesRouter(deps: DeliveriesRouterDeps) {
     const owner = ownerOf(c);
     const { ids } = c.req.valid('json');
     await deps.deliveryStore.markSeen({ ...owner, ids });
-    const unread_count = await deps.deliveryStore.countUnread(owner);
+    const unread_count = await countUnread(owner);
     return c.json({ data: { unread_count } }, 200);
   };
 
   const seenAllHandler: RouteHandler<typeof markAllDeliveriesSeenRoute> = async c => {
     const owner = ownerOf(c);
     await deps.deliveryStore.markAllSeen(owner);
-    const unread_count = await deps.deliveryStore.countUnread(owner);
+    const unread_count = await countUnread(owner);
     return c.json({ data: { unread_count } }, 200);
   };
 
