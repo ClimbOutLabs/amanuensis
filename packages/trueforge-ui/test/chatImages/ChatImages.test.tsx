@@ -52,7 +52,9 @@ function remoteImgCount(container: HTMLElement): number {
 
 describe('reply images in a chat turn', () => {
   it('never loads a web image in a reply until the person asks', async () => {
-    const { port, showTurnImages } = fakePort({ show: () => ({ status: 'ask', count: 1, host: 'example.com' }) });
+    const { port, showTurnImages } = fakePort({
+      show: () => ({ status: 'ask', count: 1, host: 'example.com', url: 'https://example.com/harbor.png' }),
+    });
     const { container } = renderInScope({ port, content: '![Harbor at dusk](https://example.com/harbor.png)' });
     expect(await screen.findByText('Image from example.com hidden')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Show image' })).toBeInTheDocument();
@@ -64,9 +66,20 @@ describe('reply images in a chat turn', () => {
     expect(showTurnImages).not.toHaveBeenCalledWith(expect.objectContaining({ approved: true }));
   });
 
+  it('shows the whole address the image would load, with everything it carries', async () => {
+    const address = 'https://example.com/p.png?who=maya%40example.com&ref=order%2042';
+    const { port } = fakePort({ show: () => ({ status: 'ask', count: 1, host: 'example.com', url: address }) });
+    const { container } = renderInScope({ port, content: `![p](${address})` });
+    expect(await screen.findByText('Image from example.com hidden')).toBeInTheDocument();
+    expect(screen.getByTestId('aui-chat-image-address')).toHaveTextContent(`Showing it loads this address: ${address}`);
+    expect(remoteImgCount(container)).toBe(0);
+    expect(container.querySelector('a')).toBeNull();
+  });
+
   it('loads the re-encoded copy only after Show image, never the link itself', async () => {
     const { port, showTurnImages } = fakePort({
-      show: input => (input.approved ? shown : { status: 'ask', count: 1, host: 'example.org' }),
+      show: input =>
+        input.approved ? shown : { status: 'ask', count: 1, host: 'example.org', url: 'https://example.org/chart.png' },
     });
     const { container } = renderInScope({ port, content: '![chart](https://example.org/chart.png)' });
     fireEvent.click(await screen.findByRole('button', { name: 'Show image' }));
@@ -204,10 +217,11 @@ describe('turn images', () => {
       show: input =>
         input.approved
           ? { status: 'done', images: [shownImage, { status: 'refused', reason: 'too_large' }] }
-          : { status: 'ask', count: 2, host: null },
+          : { status: 'ask', count: 2, host: null, url: null },
     });
     renderInScope({ port, turnImages: true });
     expect(await screen.findByText('5 images from your emails were not loaded.')).toBeInTheDocument();
+    expect(screen.queryByTestId('aui-chat-image-address')).not.toBeInTheDocument();
     expect(screen.getAllByTestId('aui-email-images-hidden')).toHaveLength(1);
     expect(screen.queryByRole('img')).not.toBeInTheDocument();
     expect(showTurnImages).not.toHaveBeenCalled();
@@ -363,7 +377,10 @@ describe('an answer that copied images from the emails it read', () => {
           : undefined;
       return Promise.resolve(
         Response.json({
-          data: link === asked ? { status: 'ask', count: 1, host: 'example.org' } : { status: 'done', images: [] },
+          data:
+            link === asked
+              ? { status: 'ask', count: 1, host: 'example.org', url: asked }
+              : { status: 'done', images: [] },
         }),
       );
     });

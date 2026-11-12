@@ -11,6 +11,7 @@ import {
   parseMemoryProviderCheck,
   type ConnectorChecks,
   type ConnectorConnectionFailureKind,
+  type HomeAssistantCheckPort,
   type MemoryProviderCheck,
 } from '../../../server/connectorChecks.js';
 
@@ -323,6 +324,7 @@ export type HarnessConnectorCatalog = ConnectorCatalogServer<
   UiUpdateConnectorRequest
 > &
   ConnectorChecks &
+  HomeAssistantCheckPort &
   ConnectorToolGrants &
   GoogleSetupPort &
   EmailSetupPort &
@@ -469,6 +471,10 @@ export function createConnectorCatalog(
       });
     },
     checkMemoryProvider: async req => requestMemoryProviderCheck({ name: req.id, options: clientOptions }),
+    checkHomeAssistant: async req => {
+      const result = await client.mcpServers.homeAssistantCheck(req.id);
+      return result.data;
+    },
     listToolGrants: async req =>
       parseToolGrants(
         await requestMcpServerRoute({

@@ -34,6 +34,8 @@ Alongside these, a **live view** lets the person finish a step only they can do.
   - Aman asks first when only content it read named the link
   - Aman asks first when the link carries a private detail
   - Aman asks first, after reading other people's content, when the person did not give the address
+  - an address with a sign-in name or password in front of the site (`https://name@site/`) is never an address the person gave, a search returned or a page listed, whoever wrote it
+  - the browser itself never opens an address with a sign-in name or password in front of the site, because it would hand them to the site; Aman says to ask for the address without that part
   - in scheduled runs, these cases are skipped instead of asked
 - **Browser pages are the person's.** A page read in the signed-in browser is treated like the person's mail: their details in it count as private.
 - **Screenshots go to the person, and to a model that reads images.** The person gets the plain picture in the chat. The model gets a copy with a red box and its ref on each control in view, so it can act on what it sees by ref instead of guessing a position.
@@ -59,7 +61,7 @@ In scope: the browser container and gateway, the browser tools, their permission
   - Logins and cookies are stored only in the person's browser profile, on a volume only the browser's container mounts.
   - The addresses Aman opens go to those sites, under the checks above.
 - **What stays on the device:** the profiles, the browser, the gateway and every page Aman reads. Nothing goes to a third-party service other than the sites themselves and the model provider.
-- **Password, payment and one-time-code fields never show their values in the page text.** A field counts as one by its type, its autocomplete hint, or the words in its name in any naming style (`otp_code`, `otpCode`, `cvv`, a card's security code, a field named `pin`, `mpin`, `tpin` or a transaction PIN, a row of unlabelled one-digit boxes however each is wrapped). A postal PIN code (`pincode`, `pin_code`, or a `pin` field marked as a postal code, India's postal code), a map pin, and labelled one-digit boxes such as a count of guests are not secrets and stay visible.
+- **Password, payment and one-time-code fields never show their values in the page text.** A field counts as one by its type, its autocomplete hint, or the words in its name in any naming style (`otp_code`, `otpCode`, `cvv`, a card's security code, a field named `pin`, `mpin`, `tpin` or a transaction PIN, a row of unlabelled one-digit boxes however each is wrapped). The same words count when they are in what the page calls the field: its label, its `aria-label` or its placeholder, so a field named `f1` under a "Card number" label is covered. A field named `pan` is a card field; a label that says "pan" is not enough, and a "PAN card number" label is India's tax ID, not a payment card. One named or labelled `card` alone is a card field when it takes only digits, so "Name on card" stays visible. One named or labelled `token` or `authcode` is a code when it holds ten characters or fewer, unless it is a promo, coupon, voucher or gift token. A label that says only "PIN" marks a code, except in a form that also asks for an address, where a box that can hold six digits is the postal code. A postal PIN code (`pincode`, `pin_code`, or a `pin` field marked as a postal code, India's postal code), a map pin, and labelled one-digit boxes such as a count of guests are not secrets and stay visible.
 
 ## Testing
 

@@ -17,9 +17,11 @@ import type {
   AgentCapability,
   AgentContextProcessorOutput,
   AgentThreadExecutionContext,
+  ChatProvenance,
   ContextMessage,
   JsonValue,
   PreLLMEphemeralAgentContextProcessor,
+  ReadSource,
 } from '@truefoundry/trueforge-core/core';
 import {
   contextHasOutsideToolResult,
@@ -30,6 +32,7 @@ import {
   newEventId,
   personMessageIndex,
   recordPersonText,
+  recordUntrustedText,
   type WebSearchTurnState,
 } from '@truefoundry/trueforge-core/core';
 import type { Logger } from 'winston';
@@ -57,7 +60,13 @@ import type {
   MemoryScreenRecord,
   MemoryScreenStats,
 } from './memoryEvents';
-import { ASSISTANT_RESPONSE_SOURCE, isNoteTooOld, noteProvenance, withoutNoteTrailer } from './memoryNotes';
+import {
+  ASSISTANT_RESPONSE_SOURCE,
+  isNoteTooOld,
+  noteProvenance,
+  withoutNoteTrailer,
+  type MemoryNoteSource,
+} from './memoryNotes';
 import { MEMORY_ORIGIN_METADATA_KEY, USER_STATED_ORIGIN, type AmanMemoryOrigin } from './memoryOrigin';
 import { retainOperationId, submitRetain } from './memoryRetain';
 import { decideMemoryRoute } from './memoryRouting';
@@ -535,16 +544,75 @@ function withLocalDay({ item, timeZone }: { item: RecallItem; timeZone: string |
  */
 function formatItemLine(item: RecallItem): string {
   const date = item.occurred_start ? sanitizeMemoryLine(item.occurred_start.slice(0, 10)) : 'undated';
-  const origin = item.metadata?.[MEMORY_ORIGIN_METADATA_KEY];
-  const note = noteProvenance({ metadata: item.metadata, text: item.text });
+  const from = recalledItemSource(item);
   // Only a fixed phrase is emitted for the origin, never the provider's own value.
   const source =
-    note !== undefined
-      ? `, ${note.source === ASSISTANT_RESPONSE_SOURCE ? ASSISTANT_REPLY_LABEL : FINDING_LABEL}`
-      : origin === undefined || origin === USER_STATED_ORIGIN
+    from.kind === 'note'
+      ? `, ${from.source === ASSISTANT_RESPONSE_SOURCE ? ASSISTANT_REPLY_LABEL : FINDING_LABEL}`
+      : from.kind === 'person'
         ? ''
         : `, ${READ_CONTENT_LABEL}`;
   return `[${date}${source}] ${sanitizeMemoryLine(withoutNoteTrailer(item.text))}`;
+}
+
+/** Whose words a recalled item is: the person's own, a note the assistant kept, or something it read. */
+type RecalledItemSource =
+  { kind: 'person' } | { kind: 'note'; source: MemoryNoteSource } | { kind: 'read'; origin: string };
+
+/** The one verdict on a recalled item's source, shared by the label the model sees and the chat's record of links. */
+function recalledItemSource(item: RecallItem): RecalledItemSource {
+  const note = noteProvenance({ metadata: item.metadata, text: item.text });
+  if (note !== undefined) {
+    return { kind: 'note', source: note.source };
+  }
+  const origin = item.metadata?.[MEMORY_ORIGIN_METADATA_KEY];
+  return origin === undefined || origin === USER_STATED_ORIGIN ? { kind: 'person' } : { kind: 'read', origin };
+}
+
+const READ_SOURCE_OF_NOTE: Record<MemoryNoteSource, ReadSource> = {
+  email: 'email',
+  calendar: 'event',
+  web: 'page',
+  attachment: 'file',
+  other: 'tool_result',
+  [ASSISTANT_RESPONSE_SOURCE]: 'tool_result',
+};
+
+/** Where a recalled item was read, or undefined when it is the person's own words. */
+function recalledReadSource(item: RecallItem): ReadSource | undefined {
+  const from = recalledItemSource(item);
+  if (from.kind === 'person') {
+    return undefined;
+  }
+  if (from.kind === 'note') {
+    return READ_SOURCE_OF_NOTE[from.source];
+  }
+  return from.origin === 'email' ? 'email' : 'tool_result';
+}
+
+/**
+ * Records where the links and addresses of an injected block came from. Only what the person said is
+ * theirs to use. An item the assistant read keeps that mark here as it does in the text, and the
+ * summary lines (profile, mental models, people, reflection) have no single source, so they count as read.
+ */
+function recordRecallProvenance(input: {
+  provenance: ChatProvenance;
+  items: readonly RecallItem[];
+  summaryLines: readonly string[];
+}): void {
+  const { provenance } = input;
+  for (const item of input.items) {
+    const text = formatItemLine(item);
+    const source = recalledReadSource(item);
+    if (source === undefined) {
+      recordPersonText({ provenance, text });
+    } else {
+      recordUntrustedText({ provenance, text, source });
+    }
+  }
+  for (const text of input.summaryLines) {
+    recordUntrustedText({ provenance, text, source: 'other' });
+  }
 }
 
 /**
@@ -1646,8 +1714,19 @@ export class HindsightMemoryProcessor implements PreLLMProcessor, PreLLMEphemera
     // the withholding instead of the block silently vanishing.
     this.cachedBlock = formatted.block;
     if (this.webSearch !== undefined) {
-      // What the assistant remembers of the person is theirs: a link or address in it is theirs to use.
-      recordPersonText({ provenance: this.webSearch.provenance, text: formatted.block });
+      // The block holds a leading run of what the screen let through, so the same runs are recorded.
+      const entitiesLine = formatEntitiesLine(screening.injectedEntities.slice(0, formatted.includedEntities));
+      recordRecallProvenance({
+        provenance: this.webSearch.provenance,
+        items: screening.injectedItems.slice(0, formatted.includedItems),
+        summaryLines: [
+          ...formatted.curatedLines,
+          ...(entitiesLine === undefined ? [] : [entitiesLine]),
+          ...(formatted.includedReflection && screening.injectedReflection !== undefined
+            ? [screening.injectedReflection]
+            : []),
+        ],
+      });
     }
     // Layer stats describe the block as injected, not as fetched: a line the screen withheld or the
     // budget dropped is counted as such, so the event never claims more than the block carries.

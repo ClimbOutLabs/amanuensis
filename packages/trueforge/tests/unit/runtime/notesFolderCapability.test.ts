@@ -1,3 +1,4 @@
+import { isAuthRequired } from '@truefoundry/trueforge-core/core/mcp/IMCPServer';
 import { NOOP_AGENT_TRACING } from '@truefoundry/trueforge-core/core/tracing/NoopAgentTracing';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -43,7 +44,7 @@ describe('the notes folder capability', () => {
       embedder: undefined,
       logger: createLogger({ silent: true }),
     });
-    const mount = () => notesFolderCapability({ service, tracing: NOOP_AGENT_TRACING });
+    const mount = () => notesFolderCapability({ service, tracing: NOOP_AGENT_TRACING, keepsNothing: false });
 
     expect(await mount()).toBeUndefined();
 
@@ -55,5 +56,29 @@ describe('the notes folder capability', () => {
 
     await rm(vault, { recursive: true, force: true });
     expect(await mount()).toBeUndefined();
+  });
+
+  it('offers an incognito chat the tools that read notes and not the ones that add to them', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'notes-capability-'));
+    const vault = path.join(root, 'vault');
+    await mkdir(vault, { recursive: true });
+    const settingsStore = makeSettingsStore();
+    const service = new NotesFolderService({
+      settings: settingsStore,
+      protectedDirs: [path.join(root, 'memory')],
+      indexDir: path.join(root, 'index'),
+      embedder: undefined,
+      logger: createLogger({ silent: true }),
+    });
+    await writeNotesFolderSettings(settingsStore, { folder_path: vault, inbox_file: 'Aman inbox.md' });
+    const offered = async (keepsNothing: boolean): Promise<string[]> => {
+      const capability = await notesFolderCapability({ service, tracing: NOOP_AGENT_TRACING, keepsNothing });
+      const listed = await capability?.systemToolSets?.[0]?.listTools();
+      return listed === undefined || isAuthRequired(listed) ? [] : listed.result.tools.map(tool => tool.name).sort();
+    };
+
+    expect(await offered(true)).toEqual(['read_note', 'search_notes']);
+    expect(await offered(false)).toEqual(['append_to_inbox', 'create_note', 'read_note', 'search_notes']);
+    await rm(root, { recursive: true, force: true });
   });
 });
