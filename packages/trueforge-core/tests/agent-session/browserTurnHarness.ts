@@ -70,7 +70,8 @@ async function drain(turn: { stream(): AsyncIterable<unknown> }): Promise<void> 
 
 let chatCount = 0;
 
-export async function setupBrowserChat() {
+/** A new chat; pass an earlier chat's store to open the new chat beside it, for the same person. */
+export async function setupBrowserChat(input: { store?: InMemorySessionStore } = {}) {
   chatCount += 1;
   const session_id = `browser-chat-${String(chatCount)}`;
   const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
@@ -164,7 +165,7 @@ export async function setupBrowserChat() {
       close: () => base.close(),
     };
   };
-  const store = new InMemorySessionStore();
+  const store = input.store ?? new InMemorySessionStore();
   const sessions = new Sessions({ sessionStore: store, sentinelServices: services });
   const session = await sessions.create({
     tenant_id: 't',

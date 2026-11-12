@@ -60,6 +60,32 @@ describe('a "no" to a browser open', () => {
     expect(record?.approval_refusals[0]).toContain('browser_open_unvouched');
   });
 
+  it('refuses another page on that site in the next message with no card, and a new site still asks', async () => {
+    const chat = await setupBrowserChat();
+    await refuseFirstOpen(chat);
+
+    // Turn 2: another page on the refused site gets no card and never reaches the browser.
+    chat.create
+      .mockImplementationOnce(() =>
+        toolStream({ id: 'call-open-2', name: 'browser_open', args: { url: 'https://news.example/second-story' } }),
+      )
+      .mockImplementation(() => browserTextStream('I will leave that site closed.'));
+    const second = await chat.run({ messages: say('Open the second story on that site') });
+    expect(await approvalCallIds(chat, second.id)).toEqual([]);
+    expect(openedUrls(chat)).toEqual([]);
+
+    // Turn 3: a page on another site still asks.
+    chat.create
+      .mockReset()
+      .mockImplementationOnce(() => toolStream({ id: 'call-read-3', name: 'browser_read', args: {} }))
+      .mockImplementationOnce(() =>
+        toolStream({ id: 'call-open-3', name: 'browser_open', args: { url: 'https://other.example/story' } }),
+      )
+      .mockImplementation(() => browserTextStream('Done.'));
+    const third = await chat.run({ messages: say('Read it again, then open the other piece') });
+    expect(await approvalCallIds(chat, third.id)).toEqual(['call-open-3']);
+  });
+
   it('refuses another page on that site in the next turn with no new card, and still asks on a new site', async () => {
     const chat = await setupBrowserChat();
     await refuseFirstOpen(chat);
@@ -95,7 +121,8 @@ describe('a "no" to a browser open', () => {
     const chat = await setupBrowserChat();
     await refuseFirstOpen(chat);
 
-    const fresh = await setupBrowserChat();
+    // The new chat lives in the same store, for the same person: only the refused chat keeps the "no".
+    const fresh = await setupBrowserChat({ store: chat.store });
     fresh.create
       .mockImplementationOnce(() => toolStream({ id: 'call-read', name: 'browser_read', args: {} }))
       .mockImplementationOnce(() =>
