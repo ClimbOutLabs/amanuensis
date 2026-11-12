@@ -116,6 +116,7 @@ describe('one-time schedule', () => {
       timezone: 'UTC',
       status: 'active',
       kind: 'task',
+      origin_session_id: null,
     });
   });
 });

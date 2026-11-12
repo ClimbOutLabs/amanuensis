@@ -47,15 +47,15 @@ services:
     build:
       context: ops/aman-stt
     image: amanuensis-aman-stt:latest
-    # Loopback-only. When SPEECH_SECRET is set in the shell it must match the one in
-    # packages/trueforge/.env, and every call must carry it; unset, no secret is checked.
+    # Loopback-only, and every call must carry SPEECH_SECRET: set it in the shell that runs
+    # `pnpm dev:infra` and the same value in packages/trueforge/.env.
     ports:
       - '127.0.0.1:8001:8001'
     mem_limit: 2g
     environment:
       AMAN_STT_CPU_THREADS: '4'
       AMAN_STT_MODEL_DIR: /data/stt-cache
-      SPEECH_SECRET: ${SPEECH_SECRET:-}
+      SPEECH_SECRET: ${SPEECH_SECRET:?set SPEECH_SECRET to a random value of 32 or more characters, for example from openssl rand -hex 32, and the same value in packages/trueforge/.env}
     volumes:
       # Project-scoped volume: this stack caches its own copy of the ~464 MB
       # model, separate from the smoke stack's.
@@ -77,7 +77,7 @@ services:
     mem_limit: 1g
     environment:
       AMAN_TTS_CPU_THREADS: '4'
-      SPEECH_SECRET: ${SPEECH_SECRET:-}
+      SPEECH_SECRET: ${SPEECH_SECRET:?set SPEECH_SECRET to a random value of 32 or more characters, for example from openssl rand -hex 32, and the same value in packages/trueforge/.env}
     restart: unless-stopped
 
 volumes:

@@ -1,9 +1,9 @@
 import { OpenAPIHono, type z } from '@hono/zod-openapi';
-import { extractErrorLogFields } from '@truefoundry/trueforge-core/core';
+import { extractErrorLogFields, SLOT_NOT_READY_MESSAGE } from '@truefoundry/trueforge-core/core';
 import type { Context } from 'hono';
 import type { Logger } from 'winston';
 import { hasAdminRole, type ResolveRequestContext } from '../auth/identity';
-import configuration, { UNSTAMPED_BUILD_REF } from '../config';
+import configuration, { getTrueForgeAuthMode, TrueForgeAuthMode, UNSTAMPED_BUILD_REF } from '../config';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
 import type { IMcpServerStore } from '../db/mcpServerStore';
 import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
@@ -40,12 +40,53 @@ type ToolOutputScreenCapabilityData = NonNullable<CapabilitiesData['tool_output_
 type MemoryEmbeddingsCapabilityData = z.infer<typeof MemoryEmbeddingsCapabilitySchema>;
 
 /**
- * Why skills are unavailable, keyed off the sandbox build status.
- * `pending` is transient (retry); everything else (no provider / failed / unknown) reads as not configured.
+ * What a person who does not run the server reads when the sandbox is off for a reason only the server's admin
+ * can fix. A hosted provider's own detail can name its internals, so it goes to admins only.
  */
-function skillDisabledReason(status: SandboxBuildStatus | undefined): string {
+export const SANDBOX_UNAVAILABLE_FOR_MEMBER =
+  'The sandbox is not working on this server right now. Ask the person who runs Aman to check it.';
+
+/**
+ * The reason a person is shown for a failed sandbox. The slot backend's reasons are written for people: a full
+ * sandbox tells anyone to delete old chats, which they can do, while "not set up yet" needs the admin. A hosted
+ * provider's stored reason is its raw build error, so only an admin sees it.
+ */
+function personFacingSandboxReason({
+  reason,
+  isAdmin,
+  backend,
+}: {
+  reason: string | null | undefined;
+  isAdmin: boolean;
+  backend: 'slots' | 'provider';
+}): string | null | undefined {
+  if (reason == null || reason === '' || isAdmin) {
+    return reason;
+  }
+  if (backend === 'slots' && reason !== SLOT_NOT_READY_MESSAGE) {
+    return reason;
+  }
+  return SANDBOX_UNAVAILABLE_FOR_MEMBER;
+}
+
+/**
+ * Why skills are unavailable, keyed off the sandbox build status.
+ * `pending` is transient (retry). A failed build that reported a reason carries that reason,
+ * so a person learns what is actually wrong; a failure with no reason, no provider, or an
+ * unknown status reads as not configured.
+ */
+function skillDisabledReason({
+  status,
+  reason,
+}: {
+  status: SandboxBuildStatus | undefined;
+  reason: string | undefined;
+}): string {
   if (status === 'pending') {
     return 'Skills run in a sandbox whose image is still being prepared — retry shortly.';
+  }
+  if (status === 'failed' && reason !== undefined) {
+    return reason;
   }
   return 'Skills run in a sandbox, which is not configured.';
 }
@@ -268,6 +309,20 @@ export async function readServerSandboxAvailable({
   }
 }
 
+/** The wire name for the running sign-in mode. */
+function signInModeName(): 'local' | 'oidc' | 'standalone' | 'truefoundry' {
+  switch (getTrueForgeAuthMode(configuration)) {
+    case TrueForgeAuthMode.Local:
+      return 'local';
+    case TrueForgeAuthMode.Oidc:
+      return 'oidc';
+    case TrueForgeAuthMode.TrueFoundry:
+      return 'truefoundry';
+    case TrueForgeAuthMode.Standalone:
+      return 'standalone';
+  }
+}
+
 /**
  * Maps a resolved sandbox build status plus a local (zero-egress) read of the memory-provider
  * settings to the capability flags. The memory-provider read is a local DB read only, so this
@@ -275,6 +330,7 @@ export async function readServerSandboxAvailable({
  */
 async function capabilitiesFromSandboxStatus({
   status,
+  reason,
   isAdmin,
   tenantId,
   mcpServerStore,
@@ -282,6 +338,8 @@ async function capabilitiesFromSandboxStatus({
   logger,
 }: {
   status: SandboxBuildStatus | undefined;
+  /** The detail for a failed build that this caller may read; see personFacingSandboxReason. */
+  reason: string | null | undefined;
   isAdmin: boolean;
   tenantId: string;
   mcpServerStore: IMcpServerStore;
@@ -289,11 +347,18 @@ async function capabilitiesFromSandboxStatus({
   logger: Logger;
 }): Promise<CapabilitiesData> {
   const sandboxEnabled = sandboxEnabledFromBuildStatus(status);
+  const failureReason = status === 'failed' && reason != null && reason !== '' ? reason : undefined;
   return {
-    sandbox: { enabled: sandboxEnabled },
+    sandbox: sandboxEnabled
+      ? { enabled: true }
+      : failureReason === undefined
+        ? { enabled: false }
+        : { enabled: false, reason: failureReason },
     // Skills run wherever the sandbox runs: on the slots backend the host copies the skill
     // files in and approved sites go through the skill network gateway.
-    skill: sandboxEnabled ? { enabled: true } : { enabled: false, reason: skillDisabledReason(status) },
+    skill: sandboxEnabled
+      ? { enabled: true }
+      : { enabled: false, reason: skillDisabledReason({ status, reason: failureReason }) },
     settings: { enabled: isAdmin },
     voice: { enabled: isVoiceAvailable() },
     memory_screen: await memoryScreenCapability({
@@ -305,6 +370,7 @@ async function capabilitiesFromSandboxStatus({
     memory_defaults: memoryDefaultsCapability(isAdmin),
     memory_embeddings: memoryEmbeddingsCapability(tenantId),
     sandbox_isolation: sandboxIsolationCapability(),
+    sign_in: { mode: signInModeName() },
     build: toBuildIdentity({ version: PACKAGE_VERSION, buildRef: configuration.BUILD_REF }),
   };
 }
@@ -321,10 +387,14 @@ export async function computeCapabilitiesData<TTransaction>(
   deps: ComputeCapabilitiesDataDeps<TTransaction>,
 ): Promise<CapabilitiesData> {
   let status: SandboxBuildStatus | undefined;
+  let reason: string | null | undefined;
   if (slotsBackendEnabled()) {
-    status = (await slotSandboxBuildStatus({ logger: deps.logger })).status;
+    const build = await slotSandboxBuildStatus({ logger: deps.logger });
+    status = build.status;
+    reason = personFacingSandboxReason({ reason: build.reason, isAdmin: deps.isAdmin, backend: 'slots' });
     return capabilitiesFromSandboxStatus({
       status,
+      reason,
       isAdmin: deps.isAdmin,
       tenantId: deps.tenantId ?? TENANT_ID,
       mcpServerStore: deps.mcpServerStore,
@@ -339,11 +409,17 @@ export async function computeCapabilitiesData<TTransaction>(
       logger: deps.logger,
     });
     status = refreshed?.status;
+    reason = personFacingSandboxReason({
+      reason: refreshed?.status_reason,
+      isAdmin: deps.isAdmin,
+      backend: 'provider',
+    });
   } catch (error) {
     deps.logger.warn('Sandbox image status check failed; reporting sandbox disabled', extractErrorLogFields(error));
   }
   return capabilitiesFromSandboxStatus({
     status,
+    reason,
     isAdmin: deps.isAdmin,
     tenantId: deps.tenantId ?? TENANT_ID,
     mcpServerStore: deps.mcpServerStore,
@@ -363,10 +439,14 @@ export async function readLocalCapabilitiesData<TTransaction>(
   deps: ComputeCapabilitiesDataDeps<TTransaction>,
 ): Promise<CapabilitiesData> {
   let status: SandboxBuildStatus | undefined;
+  let reason: string | null | undefined;
   if (slotsBackendEnabled()) {
-    status = (await slotSandboxBuildStatus({ logger: deps.logger })).status;
+    const build = await slotSandboxBuildStatus({ logger: deps.logger });
+    status = build.status;
+    reason = personFacingSandboxReason({ reason: build.reason, isAdmin: deps.isAdmin, backend: 'slots' });
     return capabilitiesFromSandboxStatus({
       status,
+      reason,
       isAdmin: deps.isAdmin,
       tenantId: deps.tenantId ?? TENANT_ID,
       mcpServerStore: deps.mcpServerStore,
@@ -380,11 +460,17 @@ export async function readLocalCapabilitiesData<TTransaction>(
       tenant_id: deps.tenantId ?? TENANT_ID,
     });
     status = persisted?.status;
+    reason = personFacingSandboxReason({
+      reason: persisted?.status_reason,
+      isAdmin: deps.isAdmin,
+      backend: 'provider',
+    });
   } catch (error) {
     deps.logger.warn('Sandbox status read failed; reporting sandbox disabled', extractErrorLogFields(error));
   }
   return capabilitiesFromSandboxStatus({
     status,
+    reason,
     isAdmin: deps.isAdmin,
     tenantId: deps.tenantId ?? TENANT_ID,
     mcpServerStore: deps.mcpServerStore,

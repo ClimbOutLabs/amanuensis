@@ -14,21 +14,33 @@ import type { Logger } from 'winston';
 
 import type { ResolveRequestContext } from '../auth/identity';
 import configuration from '../config';
-import { getVoiceStatusRoute, speakVoiceRoute, transcribeVoiceRoute } from '../routes/voiceRoutes';
+import { inProcessFetch } from '../http/tls';
+import { connectVoiceRoute, getVoiceStatusRoute, speakVoiceRoute, transcribeVoiceRoute } from '../routes/voiceRoutes';
 import {
   MAX_SPEAK_TEXT_CHARS,
   VoiceTranscriptionSchema,
   type VoiceStatus,
   type VoiceTranscription,
 } from '../schemas/voice';
-import { SpeechRateLimiter } from '../voice/speechRateLimit';
-import { probeSttHealth, sttBaseUrl } from '../voice/sttAvailability';
+import { VOICE_SOCKET_PROTOCOL, VOICE_STREAM_PATH } from '../voice/browserTransport';
+import { SpeechRateLimiter, speechLimiter as sharedSpeechLimiter } from '../voice/speechRateLimit';
+import { speechSecretHeaders } from '../voice/speechSecret';
+import { isVoiceAvailable, probeSttHealth } from '../voice/sttAvailability';
+import { forwardToSidecar } from '../voice/sttClient';
+import { probeTtsHealth, ttsBaseUrl } from '../voice/ttsClient';
+import { VadModelUnavailableError } from '../voice/vad/sileroVad';
+import { FORWARDED_HEADERS, readyVadModel, requestAs, type VoiceApp } from '../voice/voiceSocket';
+import { VoiceTicketsFullError, voiceTickets } from '../voice/voiceTickets';
 
 export interface VoiceRouterDeps {
   logger: Logger;
   resolveRequestContext: ResolveRequestContext;
+  /** This server's own app; voice mode calls it to check the chat is the person's. */
+  app: VoiceApp;
   /** Defaults to a fresh per-process limiter; tests inject one with a small budget. */
   speechLimiter?: SpeechRateLimiter;
+  /** How often one person may ask to open a voice line. */
+  connectLimiter?: SpeechRateLimiter;
 }
 
 /**
@@ -38,16 +50,6 @@ export interface VoiceRouterDeps {
  * while streaming the body, before the full upload is buffered.
  */
 const MAX_AUDIO_BYTES = 30 * 1024 * 1024;
-/** Backend-to-sidecar forward timeout; the browser-side timeout is 65s. */
-const STT_TRANSCRIBE_TIMEOUT_MS = 60_000;
-/**
- * An immediate 503 (sidecar up but the model not warm yet) is retried this many
- * times, spaced STT_RETRY_DELAY_MS apart, for a retry budget under 10s, well
- * inside the 65s client timeout. Every other outcome, including a forward
- * timeout, fails immediately with no retry.
- */
-const STT_TRANSCRIBE_MAX_ATTEMPTS = 3;
-const STT_RETRY_DELAY_MS = 2_000;
 /** Model label the sidecar serves; reported by /status while the probe succeeds. */
 const STT_MODEL_LABEL = 'whisper-small-int8';
 /**
@@ -62,21 +64,11 @@ class AudioTooLargeError extends Error {
   }
 }
 
-function errorJson<S extends 400 | 413 | 429 | 502 | 503>(
+function errorJson<S extends 400 | 404 | 413 | 429 | 502 | 503>(
   c: Context,
   { status, message, code }: { status: S; message: string; code: string },
 ) {
   return c.json({ error: { message, code } }, status);
-}
-
-function ttsBaseUrl(): string {
-  return configuration.TTS_URL.replace(/\/+$/, '');
-}
-
-/** The shared-secret header the speech sidecars check; sent only when a secret is configured. */
-function speechSecretHeaders(): Record<string, string> {
-  const secret = configuration.SPEECH_SECRET;
-  return secret === undefined ? {} : { 'x-speech-secret': secret };
 }
 
 const TTS_UNAVAILABLE: { status: 503; message: string; code: string } = {
@@ -133,37 +125,11 @@ async function probeStt(logger: Logger): Promise<VoiceStatus> {
   return healthy ? { stt_available: true, model: STT_MODEL_LABEL } : { stt_available: false, model: '' };
 }
 
-/** Resolves after the given delay; backs the bounded 503 retry backoff. */
-function delay(ms: number): Promise<void> {
-  return new Promise(resolve => {
-    setTimeout(resolve, ms);
-  });
-}
-
-/**
- * POSTs buffered audio to the sidecar's transcribe endpoint. Only immediate 503
- * responses are retried; a forward timeout or connection failure rejects and
- * the caller fails immediately with no retry.
- */
-async function forwardToSidecar(audio: Uint8Array): Promise<Response> {
-  const url = `${sttBaseUrl()}/v1/transcribe`;
-  for (let attempt = 1; ; attempt += 1) {
-    const upstream = await fetch(url, {
-      method: 'POST',
-      headers: { 'content-type': 'audio/wav', 'content-length': String(audio.byteLength), ...speechSecretHeaders() },
-      body: audio,
-      signal: AbortSignal.timeout(STT_TRANSCRIBE_TIMEOUT_MS),
-    });
-    if (upstream.status !== 503 || attempt >= STT_TRANSCRIBE_MAX_ATTEMPTS) {
-      return upstream;
-    }
-    await delay(STT_RETRY_DELAY_MS);
-  }
-}
-
 /** Voice router (mounted at `/api/v1/voice`). */
 export function createVoiceRouter(deps: VoiceRouterDeps) {
-  const speechLimiter = deps.speechLimiter ?? new SpeechRateLimiter();
+  const speechLimiter = deps.speechLimiter ?? sharedSpeechLimiter;
+  const connectLimiter =
+    deps.connectLimiter ?? new SpeechRateLimiter({ maxPerWindow: 10, maxInFlight: Number.POSITIVE_INFINITY });
 
   const getVoiceStatusHandler: RouteHandler<typeof getVoiceStatusRoute> = async c => {
     return c.json({ data: await probeStt(deps.logger) }, 200);
@@ -196,62 +162,81 @@ export function createVoiceRouter(deps: VoiceRouterDeps) {
       c.header('Retry-After', String(permit.retryAfterSeconds));
       return errorJson(c, {
         status: 429,
-        message: 'Too many transcription requests. Wait a few seconds, then try again.',
+        message: 'Too many voice requests. Wait a few seconds, then try again.',
         code: 'rate_limited',
       });
     }
     try {
-      let upstream: Response;
-      try {
-        upstream = await forwardToSidecar(audio);
-      } catch (error) {
-        deps.logger.warn('voice transcribe failed: sidecar unreachable', extractErrorLogFields(error));
-        return errorJson(c, { status: 503, message: 'Speech transcription is unavailable', code: 'stt_unavailable' });
-      }
-
-      const durationMs = Math.round(performance.now() - started);
-      if (upstream.status === 400 || upstream.status === 413) {
-        deps.logger.info('voice transcribe rejected', {
-          reason: 'sidecar_rejected',
-          stt_status: upstream.status,
-          audio_bytes: audio.byteLength,
-        });
-        return errorJson(c, {
-          status: upstream.status,
-          message: upstream.status === 413 ? 'Audio body is too large' : 'Audio could not be transcribed',
-          code: 'bad_audio',
-        });
-      }
-      if (upstream.status === 503) {
-        deps.logger.info('voice transcribe failed', { reason: 'stt_not_warm' });
-        return errorJson(c, { status: 503, message: 'Speech transcription is unavailable', code: 'stt_unavailable' });
-      }
-      if (!upstream.ok) {
-        deps.logger.warn('voice transcribe failed', { reason: 'stt_error', stt_status: upstream.status });
-        return errorJson(c, { status: 502, message: 'Speech transcription failed', code: 'stt_error' });
-      }
-      let transcription: VoiceTranscription;
-      try {
-        transcription = VoiceTranscriptionSchema.parse(await upstream.json());
-      } catch (error) {
-        deps.logger.warn('voice transcribe failed', {
-          reason: 'stt_bad_response',
-          ...extractErrorLogFields(error),
-        });
-        return errorJson(c, { status: 502, message: 'Speech transcription failed', code: 'stt_error' });
-      }
-      deps.logger.info('voice transcribe', {
-        duration_ms: durationMs,
-        audio_bytes: audio.byteLength,
-        stt_status: upstream.status,
-      });
-      return c.json({ data: transcription }, 200);
+      return await transcribeWithSidecar({ c, audio, started });
     } finally {
       permit.release();
     }
   };
 
+  const transcribeWithSidecar = async ({
+    c,
+    audio,
+    started,
+  }: {
+    c: Parameters<RouteHandler<typeof transcribeVoiceRoute>>[0];
+    audio: Uint8Array;
+    started: number;
+  }) => {
+    let upstream: Response;
+    try {
+      upstream = await forwardToSidecar(audio);
+    } catch (error) {
+      deps.logger.warn('voice transcribe failed: sidecar unreachable', extractErrorLogFields(error));
+      return errorJson(c, { status: 503, message: 'Speech transcription is unavailable', code: 'stt_unavailable' });
+    }
+
+    const durationMs = Math.round(performance.now() - started);
+    if (upstream.status === 400 || upstream.status === 413) {
+      deps.logger.info('voice transcribe rejected', {
+        reason: 'sidecar_rejected',
+        stt_status: upstream.status,
+        audio_bytes: audio.byteLength,
+      });
+      return errorJson(c, {
+        status: upstream.status,
+        message: upstream.status === 413 ? 'Audio body is too large' : 'Audio could not be transcribed',
+        code: 'bad_audio',
+      });
+    }
+    if (upstream.status === 503) {
+      deps.logger.info('voice transcribe failed', { reason: 'stt_not_warm' });
+      return errorJson(c, { status: 503, message: 'Speech transcription is unavailable', code: 'stt_unavailable' });
+    }
+    if (!upstream.ok) {
+      deps.logger.warn('voice transcribe failed', { reason: 'stt_error', stt_status: upstream.status });
+      return errorJson(c, { status: 502, message: 'Speech transcription failed', code: 'stt_error' });
+    }
+    let transcription: VoiceTranscription;
+    try {
+      transcription = VoiceTranscriptionSchema.parse(await upstream.json());
+    } catch (error) {
+      deps.logger.warn('voice transcribe failed', {
+        reason: 'stt_bad_response',
+        ...extractErrorLogFields(error),
+      });
+      return errorJson(c, { status: 502, message: 'Speech transcription failed', code: 'stt_error' });
+    }
+    deps.logger.info('voice transcribe', {
+      duration_ms: durationMs,
+      audio_bytes: audio.byteLength,
+      stt_status: upstream.status,
+    });
+    return c.json({ data: transcription }, 200);
+  };
+
   const speakVoiceHandler: RouteHandler<typeof speakVoiceRoute> = async c => {
+    if (!configuration.TTS_ENABLED) {
+      return errorJson(c, {
+        status: 503,
+        message: 'The voice on this computer is turned off. Turn the local voice on in the server settings.',
+        code: 'tts_disabled',
+      });
+    }
     const { text, voice } = c.req.valid('json');
     if (text.length > MAX_SPEAK_TEXT_CHARS) {
       return errorJson(c, {
@@ -344,7 +329,115 @@ export function createVoiceRouter(deps: VoiceRouterDeps) {
     }
   };
 
+  /**
+   * Asks to talk: checks voice mode can run and that the chat is the caller's, then hands out a ticket for
+   * the WebSocket. The socket itself is not described in the API document.
+   */
+  const connectHandler: RouteHandler<typeof connectVoiceRoute> = async c => {
+    if (!configuration.TTS_ENABLED) {
+      return errorJson(c, {
+        status: 503,
+        message:
+          'Voice mode is turned off on this computer. Ask whoever set up Aman to turn on the voice (the TTS_ENABLED setting), then try again.',
+        code: 'voice_mode_off',
+      });
+    }
+    const request = c.req.valid('json');
+    const { tenant_id, subject } = deps.resolveRequestContext(c);
+    // Counted per ask, not per open line: each ask costs a request to the chat and a model check.
+    const permit = connectLimiter.acquire(`${tenant_id}:${subject.id}`);
+    if (!permit.allowed) {
+      c.header('Retry-After', String(permit.retryAfterSeconds));
+      return errorJson(c, {
+        status: 429,
+        message: 'Voice mode was started too many times. Wait a few seconds, then try again.',
+        code: 'rate_limited',
+      });
+    }
+    permit.release();
+    if (!isVoiceAvailable()) {
+      return errorJson(c, {
+        status: 503,
+        message: 'Speech to text is not ready yet. Try again in a minute.',
+        code: 'stt_unavailable',
+      });
+    }
+    if (!(await probeTtsHealth())) {
+      return errorJson(c, {
+        status: 503,
+        message: 'The voice on this computer is not ready yet. Try again in a minute.',
+        code: 'tts_unavailable',
+      });
+    }
+    const headers: Record<string, string> = {};
+    for (const name of FORWARDED_HEADERS) {
+      const value = c.req.header(name);
+      if (value !== undefined) {
+        headers[name] = value;
+      }
+    }
+    const ticket = {
+      tenantId: tenant_id,
+      subjectId: subject.id,
+      sessionId: request.session_id,
+      headers,
+      timezone: request.client_timezone,
+      voice: request.voice,
+    };
+    // The chat's own route says whether this person may use it, so there is one rule for that.
+    const owned = await requestAs({ ticket, selfFetch: inProcessFetch(deps.app) })(
+      `/api/v1/sessions/${encodeURIComponent(request.session_id)}`,
+      { method: 'GET' },
+    );
+    if (!owned.ok) {
+      return errorJson(c, {
+        status: 404,
+        message: 'That chat could not be found. Reload the page, then try again.',
+        code: 'chat_not_found',
+      });
+    }
+    try {
+      await readyVadModel();
+    } catch (error) {
+      deps.logger.warn('voice model unavailable', extractErrorLogFields(error));
+      return errorJson(c, {
+        status: 503,
+        message:
+          error instanceof VadModelUnavailableError
+            ? error.message
+            : 'Voice mode could not load its listening model. Restart Aman, then try again.',
+        code: 'vad_unavailable',
+      });
+    }
+    let issued: ReturnType<typeof voiceTickets.issue>;
+    try {
+      issued = voiceTickets.issue(ticket);
+    } catch (error) {
+      if (error instanceof VoiceTicketsFullError) {
+        return errorJson(c, {
+          status: 503,
+          message: 'Voice mode is busy right now. Try again in a minute.',
+          code: 'voice_busy',
+        });
+      }
+      throw error;
+    }
+    return c.json(
+      {
+        data: {
+          ticket: issued.id,
+          expires_in_seconds: issued.expiresInSeconds,
+          protocol: VOICE_SOCKET_PROTOCOL,
+          path: VOICE_STREAM_PATH,
+        },
+      },
+      200,
+      { 'Cache-Control': 'private, no-store' },
+    );
+  };
+
   const router = new OpenAPIHono();
+  router.openapi(connectVoiceRoute, connectHandler);
   router.openapi(transcribeVoiceRoute, transcribeVoiceHandler);
   router.openapi(speakVoiceRoute, speakVoiceHandler);
   router.openapi(getVoiceStatusRoute, getVoiceStatusHandler);

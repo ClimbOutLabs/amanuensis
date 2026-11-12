@@ -1,0 +1,802 @@
+{
+  "_about": "Which test exercises each feature. scripts/check-nightly-coverage.mjs (pnpm run test:nightly-coverage) fails when a feature is missing here, when a named test does not exist or does not mention the feature, or when a feature with no test is not in not_yet. Features are read from the code by the help check; screens holds the ones it cannot see. Each feature set is also the folder its screenshots go in.",
+  "feature_sets": {
+    "account": "Sign-in and account",
+    "appearance": "Appearance",
+    "approvals": "Approvals",
+    "browser": "Browser",
+    "calendar": "Calendar",
+    "chat": "Chat",
+    "code": "Code and sandbox",
+    "connectors": "Connectors",
+    "data": "Export and import",
+    "email": "Email",
+    "help": "Help",
+    "home": "Home",
+    "install": "Install and upgrade",
+    "memory": "Memory",
+    "models": "Models",
+    "persona": "Persona",
+    "reach": "Reach me",
+    "reminders": "Reminders",
+    "safety": "Safety and audit",
+    "skills": "Skills",
+    "spaces": "Spaces",
+    "system": "Behind the scenes",
+    "voice": "Voice"
+  },
+  "screens": {
+    "screen:answer-details": "The details under an answer open and close.",
+    "screen:approval-card": "An approval card fits the chat and a phone, with every choice in reach.",
+    "screen:approval-ended": "An approval card whose request has ended can be cleared but never run.",
+    "screen:browser-live": "The live view of the browser Aman is using.",
+    "screen:chat-images": "Pictures in a chat.",
+    "screen:chat-layout": "The chat screen with its side panels, on a computer and a phone.",
+    "screen:chat-return": "Coming back to a chat while its reply is still running.",
+    "screen:first-run": "Home on a fresh install, with the first-run guide.",
+    "screen:help-chat": "The chat that \"Help, I'm stuck\" opens.",
+    "screen:home": "The Home screen and its More menu.",
+    "screen:memory-sharing": "The grid that sets which personas share which memories.",
+    "screen:phone-width": "Home, a chat and every Settings tab at phone widths, with nothing cut off at the side.",
+    "screen:settings-tabs": "The strip of Settings tabs.",
+    "screen:signed-in-journey": "Signing in on the built app, adding a model, chatting and signing out.",
+    "screen:space-pictures": "Pictures on a saved page."
+  },
+  "surfaces": {
+    "approval:calendar_event": {
+      "set": "approvals",
+      "tests": ["packages/frontend/tests/approvalKinds.browser.test.ts"]
+    },
+    "approval:email": {
+      "set": "approvals",
+      "tests": ["packages/frontend/tests/approvalKinds.browser.test.ts"]
+    },
+    "approval:persona": {
+      "set": "approvals",
+      "tests": ["packages/frontend/tests/approvalKinds.browser.test.ts"]
+    },
+    "approval:plain": {
+      "set": "approvals",
+      "tests": ["packages/frontend/tests/approvalKinds.browser.test.ts"]
+    },
+    "approval:schedule": {
+      "set": "approvals",
+      "tests": ["packages/frontend/tests/approvalKinds.browser.test.ts"]
+    },
+    "calendar-preset:fastmail": {
+      "set": "calendar",
+      "tests": []
+    },
+    "calendar-preset:gmx": {
+      "set": "calendar",
+      "tests": []
+    },
+    "calendar-preset:google": {
+      "set": "calendar",
+      "tests": []
+    },
+    "calendar-preset:other": {
+      "set": "calendar",
+      "tests": []
+    },
+    "calendar-preset:webde": {
+      "set": "calendar",
+      "tests": []
+    },
+    "calendar-preset:yahoo": {
+      "set": "calendar",
+      "tests": []
+    },
+    "command:adopt": {
+      "set": "install",
+      "tests": []
+    },
+    "command:backup": {
+      "set": "install",
+      "tests": []
+    },
+    "command:backups": {
+      "set": "install",
+      "tests": []
+    },
+    "command:doctor": {
+      "set": "install",
+      "tests": []
+    },
+    "command:import": {
+      "set": "install",
+      "tests": []
+    },
+    "command:install": {
+      "set": "install",
+      "tests": []
+    },
+    "command:migrate": {
+      "set": "install",
+      "tests": []
+    },
+    "command:network": {
+      "set": "install",
+      "tests": []
+    },
+    "command:open": {
+      "set": "install",
+      "tests": []
+    },
+    "command:password": {
+      "set": "install",
+      "tests": []
+    },
+    "command:restore": {
+      "set": "install",
+      "tests": []
+    },
+    "command:setup": {
+      "set": "install",
+      "tests": []
+    },
+    "command:status": {
+      "set": "install",
+      "tests": []
+    },
+    "command:uninstall": {
+      "set": "install",
+      "tests": []
+    },
+    "command:upgrade": {
+      "set": "install",
+      "tests": []
+    },
+    "command:verify": {
+      "set": "install",
+      "tests": []
+    },
+    "command:version": {
+      "set": "install",
+      "tests": []
+    },
+    "email-preset:aol": {
+      "set": "email",
+      "tests": []
+    },
+    "email-preset:fastmail": {
+      "set": "email",
+      "tests": []
+    },
+    "email-preset:gmail": {
+      "set": "email",
+      "tests": []
+    },
+    "email-preset:gmx": {
+      "set": "email",
+      "tests": []
+    },
+    "email-preset:icloud": {
+      "set": "email",
+      "tests": []
+    },
+    "email-preset:webde": {
+      "set": "email",
+      "tests": []
+    },
+    "email-preset:yahoo": {
+      "set": "email",
+      "tests": []
+    },
+    "email-preset:zoho": {
+      "set": "email",
+      "tests": []
+    },
+    "pill:behind": {
+      "set": "home",
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
+    },
+    "pill:coming_up": {
+      "set": "home",
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
+    },
+    "pill:help_me_think": {
+      "set": "home",
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
+    },
+    "pill:just_moved": {
+      "set": "home",
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
+    },
+    "pill:money": {
+      "set": "home",
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
+    },
+    "pill:someone_i_look_after": {
+      "set": "home",
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
+    },
+    "pill:write_hard": {
+      "set": "home",
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
+    },
+    "route:agent": {
+      "set": "persona",
+      "tests": []
+    },
+    "route:agentImport": {
+      "set": "persona",
+      "tests": []
+    },
+    "route:auditLog": {
+      "set": "safety",
+      "tests": []
+    },
+    "route:auth": {
+      "set": "account",
+      "tests": ["packages/frontend/tests/journeys/signedIn.journey.ts"]
+    },
+    "route:briefItem": {
+      "set": "home",
+      "tests": []
+    },
+    "route:bugReport": {
+      "set": "help",
+      "tests": []
+    },
+    "route:calendarAccount": {
+      "set": "calendar",
+      "tests": []
+    },
+    "route:capability": {
+      "set": "system",
+      "tests": []
+    },
+    "route:catalog": {
+      "set": "system",
+      "tests": []
+    },
+    "route:chatSearch": {
+      "set": "chat",
+      "tests": []
+    },
+    "route:connectorAccount": {
+      "set": "connectors",
+      "tests": []
+    },
+    "route:dataExport": {
+      "set": "data",
+      "tests": []
+    },
+    "route:dataImport": {
+      "set": "data",
+      "tests": []
+    },
+    "route:delivery": {
+      "set": "reach",
+      "tests": []
+    },
+    "route:emailAccount": {
+      "set": "email",
+      "tests": []
+    },
+    "route:firstRunGuide": {
+      "set": "home",
+      "tests": []
+    },
+    "route:google": {
+      "set": "connectors",
+      "tests": []
+    },
+    "route:help": {
+      "set": "help",
+      "tests": []
+    },
+    "route:mcpOAuth": {
+      "set": "connectors",
+      "tests": []
+    },
+    "route:mcpServer": {
+      "set": "connectors",
+      "tests": []
+    },
+    "route:memoryRecall": {
+      "set": "memory",
+      "tests": []
+    },
+    "route:memoryScreen": {
+      "set": "memory",
+      "tests": []
+    },
+    "route:memorySummarize": {
+      "set": "memory",
+      "tests": []
+    },
+    "route:memoryVault": {
+      "set": "memory",
+      "tests": []
+    },
+    "route:model": {
+      "set": "models",
+      "tests": []
+    },
+    "route:modelProvider": {
+      "set": "models",
+      "tests": ["packages/frontend/tests/journeys/signedIn.journey.ts"]
+    },
+    "route:notesFolder": {
+      "set": "connectors",
+      "tests": []
+    },
+    "route:permission": {
+      "set": "safety",
+      "tests": []
+    },
+    "route:persona": {
+      "set": "persona",
+      "tests": []
+    },
+    "route:personaKnowledge": {
+      "set": "persona",
+      "tests": []
+    },
+    "route:personalization": {
+      "set": "account",
+      "tests": []
+    },
+    "route:privateChat": {
+      "set": "chat",
+      "tests": []
+    },
+    "route:repository": {
+      "set": "code",
+      "tests": []
+    },
+    "route:runCode": {
+      "set": "code",
+      "tests": []
+    },
+    "route:sandboxProvider": {
+      "set": "code",
+      "tests": []
+    },
+    "route:schedule": {
+      "set": "reminders",
+      "tests": []
+    },
+    "route:sentinelSettings": {
+      "set": "safety",
+      "tests": []
+    },
+    "route:session": {
+      "set": "chat",
+      "tests": [
+        "packages/frontend/tests/chatLayout.browser.test.ts",
+        "packages/frontend/tests/journeys/signedIn.journey.ts"
+      ]
+    },
+    "route:sessionFolder": {
+      "set": "chat",
+      "tests": []
+    },
+    "route:sessionMetrics": {
+      "set": "system",
+      "tests": []
+    },
+    "route:skill": {
+      "set": "skills",
+      "tests": []
+    },
+    "route:space": {
+      "set": "spaces",
+      "tests": []
+    },
+    "route:spaceFolder": {
+      "set": "spaces",
+      "tests": []
+    },
+    "route:tokenFactoryUsage": {
+      "set": "models",
+      "tests": []
+    },
+    "route:toolOutputScreen": {
+      "set": "safety",
+      "tests": []
+    },
+    "route:turn": {
+      "set": "chat",
+      "tests": [
+        "packages/frontend/tests/chatLayout.browser.test.ts",
+        "packages/frontend/tests/journeys/signedIn.journey.ts"
+      ]
+    },
+    "route:voice": {
+      "set": "voice",
+      "tests": []
+    },
+    "screen:answer-details": {
+      "set": "chat",
+      "tests": ["packages/frontend/tests/answerDetails.browser.test.ts"]
+    },
+    "screen:approval-card": {
+      "set": "approvals",
+      "tests": [
+        "packages/frontend/tests/approvalCardLayout.browser.test.ts",
+        "packages/frontend/tests/approvalCardPhone.browser.test.ts",
+        "packages/frontend/tests/approvalCardType.browser.test.ts"
+      ]
+    },
+    "screen:approval-ended": {
+      "set": "approvals",
+      "tests": ["packages/frontend/tests/endedApprovalCard.browser.test.ts"]
+    },
+    "screen:browser-live": {
+      "set": "browser",
+      "tests": ["packages/frontend/tests/browserLive.browser.test.ts"]
+    },
+    "screen:chat-images": {
+      "set": "chat",
+      "tests": ["packages/frontend/tests/chatImages.browser.test.ts"]
+    },
+    "screen:chat-layout": {
+      "set": "chat",
+      "tests": [
+        "packages/frontend/tests/chatLayout.browser.test.ts",
+        "packages/frontend/tests/dockEdge.browser.test.ts",
+        "packages/frontend/tests/runtimeRail.browser.test.ts",
+        "packages/frontend/tests/composerMobile.browser.test.ts"
+      ]
+    },
+    "screen:chat-return": {
+      "set": "chat",
+      "tests": [
+        "packages/frontend/tests/chatReturn.browser.test.ts",
+        "packages/frontend/tests/reconnectAfterBackground.browser.test.ts"
+      ]
+    },
+    "screen:first-run": {
+      "set": "home",
+      "tests": [
+        "packages/frontend/tests/firstRunGuide.browser.test.ts",
+        "packages/frontend/tests/journeys/signedIn.journey.ts"
+      ]
+    },
+    "screen:help-chat": {
+      "set": "help",
+      "tests": ["packages/frontend/tests/helpStuck.browser.test.ts"]
+    },
+    "screen:home": {
+      "set": "home",
+      "tests": [
+        "packages/frontend/tests/homeAndMenu.browser.test.ts",
+        "packages/frontend/tests/homeColumn.browser.test.ts",
+        "packages/frontend/tests/homeCards.browser.test.ts"
+      ]
+    },
+    "screen:memory-sharing": {
+      "set": "memory",
+      "tests": ["packages/frontend/tests/memorySharing.browser.test.ts"]
+    },
+    "screen:phone-width": {
+      "set": "chat",
+      "tests": ["packages/frontend/tests/phoneWidth.browser.test.ts"]
+    },
+    "screen:settings-tabs": {
+      "set": "account",
+      "tests": ["packages/frontend/tests/settingsTabs.browser.test.ts"]
+    },
+    "screen:signed-in-journey": {
+      "set": "account",
+      "tests": ["packages/frontend/tests/journeys/signedIn.journey.ts"]
+    },
+    "screen:space-pictures": {
+      "set": "spaces",
+      "tests": ["packages/frontend/tests/spacePictures.browser.test.ts"]
+    },
+    "settings:about": {
+      "set": "account",
+      "tests": ["packages/frontend/tests/settingsPanels.browser.test.ts"]
+    },
+    "settings:account": {
+      "set": "account",
+      "tests": []
+    },
+    "settings:audit": {
+      "set": "safety",
+      "tests": ["packages/frontend/tests/settingsPanels.browser.test.ts"]
+    },
+    "settings:connectors": {
+      "set": "connectors",
+      "tests": ["packages/frontend/tests/settingsPanels.browser.test.ts"]
+    },
+    "settings:memory": {
+      "set": "memory",
+      "tests": ["packages/frontend/tests/settingsPanels.browser.test.ts"]
+    },
+    "settings:model-roles": {
+      "set": "models",
+      "tests": ["packages/frontend/tests/settingsPanels.browser.test.ts"]
+    },
+    "settings:models": {
+      "set": "models",
+      "tests": [
+        "packages/frontend/tests/journeys/signedIn.journey.ts",
+        "packages/frontend/tests/settingsPanels.browser.test.ts"
+      ]
+    },
+    "settings:permissions": {
+      "set": "safety",
+      "tests": ["packages/frontend/tests/settingsPanels.browser.test.ts"]
+    },
+    "settings:personalization": {
+      "set": "account",
+      "tests": ["packages/frontend/tests/settingsPanels.browser.test.ts"]
+    },
+    "settings:reach-me": {
+      "set": "reach",
+      "tests": ["packages/frontend/tests/settingsPanels.browser.test.ts"]
+    },
+    "settings:sandbox": {
+      "set": "code",
+      "tests": ["packages/frontend/tests/settingsPanels.browser.test.ts"]
+    },
+    "settings:skills": {
+      "set": "skills",
+      "tests": ["packages/frontend/tests/settingsPanels.browser.test.ts"]
+    },
+    "settings:themes": {
+      "set": "appearance",
+      "tests": ["packages/frontend/tests/settingsPanels.browser.test.ts"]
+    },
+    "tour:ask_for": {
+      "set": "home",
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
+    },
+    "tour:bill": {
+      "set": "home",
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
+    },
+    "tour:brief": {
+      "set": "home",
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
+    },
+    "tour:budget": {
+      "set": "home",
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
+    },
+    "tour:care": {
+      "set": "home",
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
+    },
+    "tour:chores": {
+      "set": "home",
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
+    },
+    "tour:company": {
+      "set": "home",
+      "tests": []
+    },
+    "tour:decide": {
+      "set": "home",
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
+    },
+    "tour:dinner": {
+      "set": "home",
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
+    },
+    "tour:doctor": {
+      "set": "home",
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
+    },
+    "tour:dropping": {
+      "set": "home",
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
+    },
+    "tour:explain": {
+      "set": "home",
+      "tests": []
+    },
+    "tour:follow_up": {
+      "set": "home",
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
+    },
+    "tour:forms": {
+      "set": "home",
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
+    },
+    "tour:fresh": {
+      "set": "home",
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
+    },
+    "tour:gathering": {
+      "set": "home",
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
+    },
+    "tour:hard_talk": {
+      "set": "home",
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
+    },
+    "tour:head": {
+      "set": "home",
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
+    },
+    "tour:kindly": {
+      "set": "home",
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
+    },
+    "tour:language": {
+      "set": "home",
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
+    },
+    "tour:letter": {
+      "set": "home",
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
+    },
+    "tour:locals_know": {
+      "set": "home",
+      "tests": []
+    },
+    "tour:meds": {
+      "set": "home",
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
+    },
+    "tour:money_due": {
+      "set": "home",
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
+    },
+    "tour:neighborhood": {
+      "set": "home",
+      "tests": []
+    },
+    "tour:next_meeting": {
+      "set": "home",
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
+    },
+    "tour:overcharged": {
+      "set": "home",
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
+    },
+    "tour:places": {
+      "set": "home",
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
+    },
+    "tour:remember": {
+      "set": "home",
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
+    },
+    "tour:say_no": {
+      "set": "home",
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
+    },
+    "tour:school": {
+      "set": "home",
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
+    },
+    "tour:sort_out": {
+      "set": "home",
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
+    },
+    "tour:start": {
+      "set": "home",
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
+    },
+    "tour:steps": {
+      "set": "home",
+      "tests": []
+    },
+    "tour:subscriptions": {
+      "set": "home",
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
+    },
+    "tour:talk": {
+      "set": "home",
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
+    },
+    "tour:thanks": {
+      "set": "home",
+      "tests": []
+    },
+    "tour:their_appointment": {
+      "set": "home",
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
+    },
+    "tour:thread": {
+      "set": "home",
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
+    },
+    "tour:today": {
+      "set": "home",
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
+    },
+    "tour:trip": {
+      "set": "home",
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
+    },
+    "tour:waiting": {
+      "set": "home",
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
+    },
+    "tour:week": {
+      "set": "home",
+      "tests": ["packages/frontend/tests/homeCards.browser.test.ts"]
+    }
+  },
+  "not_yet": [
+    "calendar-preset:fastmail",
+    "calendar-preset:gmx",
+    "calendar-preset:google",
+    "calendar-preset:other",
+    "calendar-preset:webde",
+    "calendar-preset:yahoo",
+    "command:adopt",
+    "command:backup",
+    "command:backups",
+    "command:doctor",
+    "command:import",
+    "command:install",
+    "command:migrate",
+    "command:network",
+    "command:open",
+    "command:password",
+    "command:restore",
+    "command:setup",
+    "command:status",
+    "command:uninstall",
+    "command:upgrade",
+    "command:verify",
+    "command:version",
+    "email-preset:aol",
+    "email-preset:fastmail",
+    "email-preset:gmail",
+    "email-preset:gmx",
+    "email-preset:icloud",
+    "email-preset:webde",
+    "email-preset:yahoo",
+    "email-preset:zoho",
+    "route:agent",
+    "route:agentImport",
+    "route:auditLog",
+    "route:briefItem",
+    "route:bugReport",
+    "route:calendarAccount",
+    "route:capability",
+    "route:catalog",
+    "route:chatSearch",
+    "route:connectorAccount",
+    "route:dataExport",
+    "route:dataImport",
+    "route:delivery",
+    "route:emailAccount",
+    "route:firstRunGuide",
+    "route:google",
+    "route:help",
+    "route:mcpOAuth",
+    "route:mcpServer",
+    "route:memoryRecall",
+    "route:memoryScreen",
+    "route:memorySummarize",
+    "route:memoryVault",
+    "route:model",
+    "route:notesFolder",
+    "route:permission",
+    "route:persona",
+    "route:personaKnowledge",
+    "route:personalization",
+    "route:privateChat",
+    "route:repository",
+    "route:runCode",
+    "route:sandboxProvider",
+    "route:schedule",
+    "route:sentinelSettings",
+    "route:sessionFolder",
+    "route:sessionMetrics",
+    "route:skill",
+    "route:space",
+    "route:spaceFolder",
+    "route:tokenFactoryUsage",
+    "route:toolOutputScreen",
+    "route:voice",
+    "settings:account",
+    "tour:company",
+    "tour:explain",
+    "tour:locals_know",
+    "tour:neighborhood",
+    "tour:steps",
+    "tour:thanks"
+  ]
+}

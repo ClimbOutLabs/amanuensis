@@ -4,9 +4,21 @@ const synthetic = {
   TRUEFORGE_API_KEY: 'synthetic-service-key-0001',
   NEBIUS_API_KEY: 'synthetic-nebius-key-0002',
   MEMORY_SCREEN_AUTH_TOKEN: 'synthetic-screen-token-0003',
+  SPEECH_SECRET: undefined,
 };
 
 describe('getConfiguredSecretValues', () => {
+  it('lists the speech secret', () => {
+    expect(
+      getConfiguredSecretValues({
+        STANDALONE: true,
+        ...synthetic,
+        OIDC: undefined,
+        SPEECH_SECRET: 'synthetic-speech-secret-0012',
+      }),
+    ).toContain('synthetic-speech-secret-0012');
+  });
+
   it('lists the credentials a standalone process holds and skips unset or empty ones', () => {
     expect(
       getConfiguredSecretValues({

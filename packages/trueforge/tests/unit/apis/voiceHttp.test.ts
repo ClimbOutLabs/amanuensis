@@ -64,6 +64,7 @@ describe('voice HTTP endpoints', () => {
         logger,
         resolveRequestContext,
         ...(speechLimiter === undefined ? {} : { speechLimiter }),
+        app: { fetch: () => new Response('{}') },
       }),
     );
     return app;

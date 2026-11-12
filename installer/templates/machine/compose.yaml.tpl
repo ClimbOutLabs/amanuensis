@@ -26,7 +26,7 @@ services:
       AMAN_STT_MODEL_DIR: /data/stt-cache
       # The shared secret every call must carry, from the machine settings file; each instance's app
       # holds a copy of the same value.
-      SPEECH_SECRET: ${SPEECH_SECRET}
+      SPEECH_SECRET: ${SPEECH_SECRET:?missing from .env}
     volumes:
       - stt-cache:/data/stt-cache
     networks:
@@ -53,7 +53,7 @@ services:
 @@IF_TTS@@    environment:
 @@IF_TTS@@      AMAN_TTS_CPU_THREADS: ${AMAN_TTS_CPU_THREADS:-4}
 @@IF_TTS@@      # The same shared secret as speech-to-text, from the machine settings file.
-@@IF_TTS@@      SPEECH_SECRET: ${SPEECH_SECRET}
+@@IF_TTS@@      SPEECH_SECRET: ${SPEECH_SECRET:?missing from .env}
 @@IF_TTS@@    networks:
 @@IF_TTS@@      - voice
 @@IF_TTS@@    restart: unless-stopped
