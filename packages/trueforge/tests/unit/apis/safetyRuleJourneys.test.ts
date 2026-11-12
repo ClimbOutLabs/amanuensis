@@ -10,7 +10,12 @@ import { TurnStreamingEventSchema } from '../../../src/schemas/events';
 import { GetTurnResponseSchema } from '../../../src/schemas/turn';
 import { MODEL_FQN, startApprovalTestServer, type ApprovalTestServer } from '../../fixtures/approvalTestServer';
 import { INERT_SERVER_NAME, INERT_WRITE_TOOL } from '../../fixtures/inertMcpServer';
-import { RUN_DIRECTIVE_PREFIX, SCRIPTED_PERSONA, SCRIPTED_SCHEDULE } from '../../fixtures/scriptedModelServer';
+import {
+  RUN_DIRECTIVE_PREFIX,
+  SCRIPTED_EVENT,
+  SCRIPTED_PERSONA,
+  SCRIPTED_SCHEDULE,
+} from '../../fixtures/scriptedModelServer';
 import { StandInSandbox } from '../../fixtures/standInSandbox';
 
 const TURN_TIMEOUT_MS = 60_000;
@@ -370,6 +375,77 @@ describe('running code in the sandbox', () => {
     async () => {
       const held = await runCode({ sandbox: new StandInSandbox('none'), withoutAsking: false });
       expect(held).toEqual({ asked: ['Run code the assistant wrote in the sandbox?'], letThrough: false });
+    },
+    TURN_TIMEOUT_MS,
+  );
+});
+
+describe("an event on the person's own calendar", () => {
+  let server: ApprovalTestServer;
+  const GUEST = 'lin.park@harbour.example';
+
+  /** How many events on the scripted day carry the scripted title. */
+  async function savedEvents(): Promise<number> {
+    const day = SCRIPTED_EVENT.start.slice(0, 10);
+    const found = await server.evalSources().calendar.listEvents({
+      timeMin: `${day}T00:00:00`,
+      timeMax: `${day}T23:59:59`,
+      query: SCRIPTED_EVENT.title,
+      maxResults: 10,
+      pageToken: undefined,
+      timeZone: SCRIPTED_EVENT.time_zone,
+    });
+    return found.events.length;
+  }
+
+  beforeAll(async () => {
+    server = await startApprovalTestServer();
+    server.setEvalMode(true);
+  });
+
+  afterAll(async () => {
+    await server.close();
+  });
+
+  it(
+    'with no guests offers "Always allow this here", and the answer covers the next one in that chat only',
+    async () => {
+      const before = await savedEvents();
+      const chatId = await createChat(server);
+      const card = onlyCard(await runTurn({ server, chatId, input: ask('create_event') }));
+      expect(card.can_chat_allow).toBe(true);
+
+      await runTurn({ server, chatId, input: answer({ card, scope: 'chat' }) });
+      expect(cards(await runTurn({ server, chatId, input: ask('create_event') }))).toEqual([]);
+      expect(await savedEvents()).toBe(before + 2);
+
+      const otherChatId = await createChat(server);
+      onlyCard(await runTurn({ server, chatId: otherChatId, input: ask('create_event') }));
+      expect(await savedEvents()).toBe(before + 2);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'with a guest asks every time, also after a chat-wide answer for events without guests',
+    async () => {
+      const before = await savedEvents();
+      const chatId = await createChat(server);
+      const plain = onlyCard(await runTurn({ server, chatId, input: ask('create_event') }));
+      await runTurn({ server, chatId, input: answer({ card: plain, scope: 'chat' }) });
+
+      server.model.next({ toolArguments: { ...SCRIPTED_EVENT, attendees: [GUEST], send_updates: 'none' } });
+      const withGuest = onlyCard(
+        await runTurn({
+          server,
+          chatId,
+          input: [{ type: 'user.message', content: `${RUN_DIRECTIVE_PREFIX}create_event and invite ${GUEST}` }],
+        }),
+      );
+      expect(withGuest.can_chat_allow).toBe(false);
+      const refused = await sendTurn({ server, chatId, input: answer({ card: withGuest, scope: 'chat' }) });
+      expect(refused.status).toBe(422);
+      expect(await savedEvents()).toBe(before + 1);
     },
     TURN_TIMEOUT_MS,
   );
