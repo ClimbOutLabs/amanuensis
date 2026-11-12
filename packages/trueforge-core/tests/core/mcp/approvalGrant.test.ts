@@ -30,6 +30,7 @@ import type { SentinelServices } from '../../../src/core/permissions/context';
 import { recordUntrustedText } from '../../../src/core/permissions/provenance';
 import { tier1Decision, type TierDecision } from '../../../src/core/permissions/tier';
 import { createWebSearchTurnState, recordToolResultProvenance } from '../../../src/core/permissions/webSearch';
+import { tier1Decision } from '../../../src/core/permissions/tier';
 import { sandboxCommandApprovalIdentity } from '../../../src/core/sandbox/Sandbox';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 
@@ -768,6 +769,35 @@ describe('calendar changes that reach guests never get a durable grant', () => {
       expect(admissions.get('call-1')).toEqual({ decision: undefined, admission_provenance: { source: 'automatic' } });
     },
   );
+});
+
+describe('Drive writes to the person own files can take a durable grant', () => {
+  it.each(['create_doc', 'append_rows'])('admits chat and always scope for %s', tool_name => {
+    const info: InternalToolCallInfo = {
+      type: 'truefoundry-system',
+      mcp_server_id: 'google_drive',
+      mcp_server_name: 'google_drive',
+      original_tool_name: tool_name,
+      is_approval_required: true,
+      tier: 3,
+      tier_reason: 'google_drive_write',
+    };
+    expect(allowsChatApproval(info)).toBe(true);
+    expect(allowsToolGrant(info)).toBe(true);
+  });
+
+  it('does not admit a Drive read, which never asks', () => {
+    const info: InternalToolCallInfo = {
+      type: 'truefoundry-system',
+      mcp_server_id: 'google_drive',
+      mcp_server_name: 'google_drive',
+      original_tool_name: 'list_files',
+      is_approval_required: false,
+      tier: 1,
+      tier_reason: 'google_drive_read',
+    };
+    expect(allowsToolGrant(info)).toBe(false);
+  });
 });
 
 /**
