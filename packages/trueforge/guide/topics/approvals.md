@@ -50,6 +50,6 @@ In voice mode, Aman reads an email, calendar or schedule card out loud and waits
 ## See what Aman did
 
 1. Click **More** in the left bar, click **Settings**, then click **Audit**.
-2. The list shows every action Aman took or asked about, newest first, with what you decided.
+2. The list shows every action Aman took or asked about, newest first, with what you decided. Each action is named in plain words, such as "Sent an email".
 3. To narrow it, pick what to **Show**, or pick a **From** and **To** day. Days follow your own clock, and both days are included.
 4. Click **Clear dates** to see everything again.

@@ -4254,10 +4254,15 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
       }
     }
     if (name === 'run_code' || name === 'submit_implementation_plan') {
+      // The card names the language when the call gives one; the code itself is shown under it.
+      const language = name === 'run_code' ? stringParam(action.canonical_params, 'language') : null;
+      const languageName = language === 'python' ? 'Python' : language === 'node' ? 'Node.js' : null;
       const plain_what =
-        name === 'run_code'
-          ? 'Run code the assistant wrote in the sandbox?'
-          : 'Submit this implementation plan for review?';
+        name !== 'run_code'
+          ? 'Submit this implementation plan for review?'
+          : languageName === null
+            ? 'Run code the assistant wrote in the sandbox?'
+            : `Run this ${languageName} code the assistant wrote?`;
       return tier3Decision({
         card: {
           plain_what,

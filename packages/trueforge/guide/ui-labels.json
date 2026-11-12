@@ -71,6 +71,7 @@
   "File on GitHub": "packages/trueforge-ui/src/atoms/BugReportButton.tsx",
   "Not now": "packages/trueforge-ui/src/sentinel/approvalCopy.ts",
   "Schedules": "packages/trueforge-ui/src/atoms/SchedulesButton.tsx",
+  "Reminders": "packages/trueforge-ui/src/atoms/RemindersButton.tsx",
   "New schedule": "packages/trueforge-ui/src/atoms/schedules/SchedulesPage.tsx",
   "Agent": "packages/trueforge-ui/src/atoms/schedules/ScheduleFormFields.tsx",
   "Task": "packages/trueforge-ui/src/atoms/schedules/ScheduleFormFields.tsx",
@@ -135,5 +136,10 @@
   "From": "packages/trueforge-ui/src/sentinel/AuditLogSettings.tsx",
   "To": "packages/trueforge-ui/src/sentinel/AuditLogSettings.tsx",
   "Clear dates": "packages/trueforge-ui/src/sentinel/AuditLogSettings.tsx",
+  "Chat text size": "packages/trueforge-ui/src/containers/SettingsBuilder/ThemeSettings.tsx",
+  "Smaller": "packages/trueforge-ui/src/utils/chatFontSizePreference.ts",
+  "Default": "packages/trueforge-ui/src/utils/chatFontSizePreference.ts",
+  "Larger": "packages/trueforge-ui/src/utils/chatFontSizePreference.ts",
+  "Largest": "packages/trueforge-ui/src/utils/chatFontSizePreference.ts",
   "Personas": "packages/trueforge-ui/src/containers/SettingsBuilder/ModelRoleSettings.tsx"
 }
