@@ -16,6 +16,8 @@ export * from "./memorySummarize/client/requests/index.js";
 export * as memorySummarize from "./memorySummarize/index.js";
 export * from "./modelProviders/client/requests/index.js";
 export * as modelProviders from "./modelProviders/index.js";
+export * from "./notes/client/requests/index.js";
+export * as notes from "./notes/index.js";
 export * as runCode from "./runCode/index.js";
 export * from "./sandboxProviders/client/requests/index.js";
 export * as sandboxProviders from "./sandboxProviders/index.js";

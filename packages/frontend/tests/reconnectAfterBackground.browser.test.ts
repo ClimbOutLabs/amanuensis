@@ -7,6 +7,7 @@ import { createServer } from 'vite';
 
 import { startApprovalTestServer } from '../../trueforge/tests/fixtures/approvalTestServer.ts';
 import { inProcessApi, pausedSession } from './support/approvalChat.ts';
+import { featureShotPath, saveFailureShots } from './support/featureShots.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
 import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
 import { privateViteCache } from './support/viteCache.ts';
@@ -95,6 +96,9 @@ test('the chat reconnects on its own after the page was in the background', { ti
     const baseline = await chatCounts(page);
     assert.ok(baseline.userMessages >= 1, 'the question is on screen');
     assert.ok(baseline.allowButtons >= 1, 'the approval card is on screen');
+    await page.screenshot({
+      path: await featureShotPath({ surface: 'screen:chat-return', step: 'phone-before-background' }),
+    });
     const marker = await pageLoadMarker(page);
 
     await test.test('hidden, then visible with the network down, then the network returns', async () => {
@@ -133,6 +137,9 @@ test('the chat reconnects on its own after the page was in the background', { ti
       assert.deepEqual(await chatCounts(page), baseline, 'the same messages and approval card, once each');
       assert.equal(await pageLoadMarker(page), marker, 'the page itself was not reloaded');
     });
+  } catch (error) {
+    await saveFailureShots({ browser, surface: 'screen:chat-return' });
+    throw error;
   } finally {
     await browser?.close();
     await vite.close();

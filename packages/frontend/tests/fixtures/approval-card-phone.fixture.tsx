@@ -9,7 +9,7 @@ const noop = () => {};
 
 // A held search with every choice a ticket card can show, the chat-wide one included.
 createRoot(rootElement).render(
-  <SlotsProvider theme={{ webFonts: false }}>
+  <SlotsProvider>
     <main style={{ maxWidth: '48rem', margin: '0 auto', padding: '1rem', display: 'grid', gap: '1rem' }}>
       <section data-testid="ticket-card">
         <PermissionApprovalCard

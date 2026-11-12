@@ -1,0 +1,259 @@
+name: Release
+
+# A version tag on main builds the release: the program for each system,
+# Aman-Setup.exe for Windows, the source archive, the release record
+# (manifest.json) and SHA256SUMS. It ends as a draft release. The owner
+# signs the record on their own machine, adds the signature to the
+# draft, and runs the "Publish release" workflow, which checks every
+# file against the signed record before the release goes public.
+#
+# A pull request that changes the release steps runs the same workflow
+# as a dry run: everything is built and checked with a key made for the
+# run and thrown away, and nothing is published.
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - '.github/workflows/release.yml'
+      - '.github/workflows/release-publish.yml'
+      - 'packages/aman-installer/package.json'
+      - 'packages/aman-installer/scripts/**'
+      - 'packages/aman-installer/src/release/**'
+      - 'installer/lib/release.sh'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Decide the release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      release: ${{ steps.decide.outputs.release }}
+      publish: ${{ steps.decide.outputs.publish }}
+    steps:
+      - name: Decide the release name and whether it is published
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          TAG: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+          RUN: ${{ github.run_number }}
+        run: |
+          if [ "$EVENT" != push ]; then
+            echo "release=v0.0.0-dry-run.$RUN" >> "$GITHUB_OUTPUT"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "This is a dry run. Nothing is published."
+            exit 0
+          fi
+          if ! printf '%s' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
+            echo "::error::The tag $TAG is not a version tag. Use the form v1.2.3."
+            exit 1
+          fi
+          # The tag must point at a commit main already has.
+          status=$(gh api "repos/$GITHUB_REPOSITORY/compare/$SHA...main" --jq .status)
+          if [ "$status" != ahead ] && [ "$status" != identical ]; then
+            echo "::error::The tag $TAG points at a commit that is not on main. Tag a commit on main."
+            exit 1
+          fi
+          published=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq "[.[] | select(.tag_name == \"$TAG\" and .draft == false)] | length")
+          if [ "$published" != 0 ]; then
+            echo "::error::Release $TAG is already published. Tag a new version."
+            exit 1
+          fi
+          echo "release=$TAG" >> "$GITHUB_OUTPUT"
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build (${{ matrix.system }})
+    needs: prepare
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: windows-latest
+            system: windows
+            exe: packages/aman-installer/dist/aman.exe
+          - os: macos-latest
+            system: mac
+            exe: packages/aman-installer/dist/aman
+          - os: ubuntu-latest
+            system: linux
+            exe: packages/aman-installer/dist/aman
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          # No cache: a release is built from the tagged source alone.
+          cache: ''
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the executable
+        run: pnpm build:aman-installer
+
+      - name: Run the executable
+        shell: bash
+        run: ${{ matrix.exe }} --version
+
+      - name: Stage the files this system publishes
+        shell: bash
+        run: pnpm release:aman-installer stage --exe "$GITHUB_WORKSPACE/${{ matrix.exe }}" --assets "$RUNNER_TEMP/assets"
+
+      - name: Keep the files for the release
+        uses: actions/upload-artifact@v7
+        with:
+          name: files-${{ matrix.system }}
+          path: ${{ runner.temp }}/assets/
+          if-no-files-found: error
+          retention-days: 7
+
+  assemble:
+    name: Assemble and check the release
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      RELEASE: ${{ needs.prepare.outputs.release }}
+      PUBLISH: ${{ needs.prepare.outputs.publish }}
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          # No cache: a release is built from the tagged source alone.
+          cache: ''
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The image names in the record come from this checkout. A changed
+      # file would give them a local-change mark no install could match.
+      - name: Check the checkout has no local changes
+        run: |
+          changes=$(git status --porcelain)
+          if [ -n "$changes" ]; then
+            echo "$changes"
+            echo "::error::The checkout has local changes after install, so its image names would not match the release. Fix whatever writes these files."
+            exit 1
+          fi
+
+      - name: Gather the built files
+        uses: actions/download-artifact@v8
+        with:
+          pattern: files-*
+          path: ${{ runner.temp }}/systems
+
+      - name: Make the source archive
+        run: |
+          mkdir -p "$RUNNER_TEMP/systems/source"
+          git archive --format=tar.gz --prefix="amanuensis-$RELEASE/" \
+            -o "$RUNNER_TEMP/systems/source/amanuensis-$RELEASE.tar.gz" HEAD
+
+      - name: Make one partial record per system and assemble the release record
+        run: |
+          mkdir -p "$RUNNER_TEMP/parts" "$RUNNER_TEMP/release"
+          for dir in "$RUNNER_TEMP"/systems/*/; do
+            name=$(basename "$dir")
+            pnpm -s release:aman-installer build-manifest --release "$RELEASE" --assets "$dir" \
+              --checkout "$GITHUB_WORKSPACE" --out "$RUNNER_TEMP/parts/manifest-$name.json"
+            cp "$dir"* "$RUNNER_TEMP/release/"
+          done
+          parts=()
+          for part in "$RUNNER_TEMP"/parts/*.json; do parts+=(--part "$part"); done
+          pnpm -s release:aman-installer assemble-manifest --release "$RELEASE" --checkout "$GITHUB_WORKSPACE" \
+            "${parts[@]}" --out "$RUNNER_TEMP/release/manifest.json"
+          cat "$RUNNER_TEMP/release/manifest.json"
+
+      - name: Dry run - sign with a throwaway key and check every file
+        if: env.PUBLISH != 'true'
+        run: |
+          key_out=$(pnpm -s release:aman-installer throwaway-key --out "$RUNNER_TEMP/throwaway.der")
+          key_num=$(printf '%s\n' "$key_out" | sed -n 's/^key-num=//p')
+          public_key=$(printf '%s\n' "$key_out" | sed -n 's/^public-key=//p')
+          pnpm -s release:aman-installer sign --manifest "$RUNNER_TEMP/release/manifest.json" \
+            --key "$RUNNER_TEMP/throwaway.der" --key-num "$key_num" --out "$RUNNER_TEMP/release/manifest.json.minisig"
+          rm "$RUNNER_TEMP/throwaway.der"
+          for name in $(jq -r '.files | keys[]' "$RUNNER_TEMP/release/manifest.json"); do
+            pnpm -s release:aman-installer verify --file "$RUNNER_TEMP/release/$name" --key "$public_key"
+          done
+
+      - name: Write SHA256SUMS and check it against the files
+        run: |
+          pnpm -s release:aman-installer checksums --dir "$RUNNER_TEMP/release"
+          cd "$RUNNER_TEMP/release"
+          cat SHA256SUMS
+          sha256sum --check --strict SHA256SUMS
+          # Every file but the list itself is in the list.
+          listed=$(wc -l < SHA256SUMS)
+          present=$(find . -maxdepth 1 -type f ! -name SHA256SUMS | wc -l)
+          [ "$listed" -eq "$present" ] || { echo "::error::SHA256SUMS lists $listed files, but the release has $present."; exit 1; }
+
+      - name: Keep the release files
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ env.RELEASE }}
+          path: ${{ runner.temp }}/release/
+          if-no-files-found: error
+          retention-days: 14
+
+  draft:
+    name: Put the files on a draft release
+    needs: [prepare, assemble]
+    if: needs.prepare.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE: ${{ needs.prepare.outputs.release }}
+
+    steps:
+      - name: Get the release files
+        uses: actions/download-artifact@v8
+        with:
+          name: release-${{ needs.prepare.outputs.release }}
+          path: ${{ runner.temp }}/release
+
+      - name: Create or refresh the draft release
+        run: |
+          cd "$RUNNER_TEMP/release"
+          draft=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq "[.[] | select(.tag_name == \"$RELEASE\" and .draft == true)] | length")
+          if [ "$draft" = 0 ]; then
+            gh release create "$RELEASE" --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
+              --title "$RELEASE" --notes "Release $RELEASE." ./*
+          else
+            gh release upload "$RELEASE" --repo "$GITHUB_REPOSITORY" --clobber ./*
+          fi
+          echo "::notice::Draft release $RELEASE is ready. Sign manifest.json, add manifest.json.minisig to the draft, then run the Publish release workflow. RELEASING.md has the steps."

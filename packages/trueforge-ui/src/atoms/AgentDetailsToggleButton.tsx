@@ -22,11 +22,14 @@ export function AgentDetailsToggleButton() {
       type="button"
       role="switch"
       aria-checked={detailsVisible}
+      aria-label="Agent details"
       title={detailsVisible ? 'Agent details are on' : 'Agent details are off'}
       className={headerActionClassName}
       onClick={() => void setVisibility(detailsVisible ? 'collapsed' : 'expanded')}
     >
-      Agent details
+      {/* The narrowest phones have no room for the full name beside the bell, Help and the menu. */}
+      <span className="min-[22.5rem]:hidden">Details</span>
+      <span className="hidden min-[22.5rem]:inline">Agent details</span>
       <span
         aria-hidden="true"
         data-state={detailsVisible ? 'on' : 'off'}

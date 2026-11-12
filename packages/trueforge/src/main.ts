@@ -9,7 +9,7 @@
  * (migrate, Redis, listen) are caught below and exit non-zero. SQLite vs
  * Postgres store modules stay dynamic so only the active engine is loaded.
  */
-import { extractErrorLogFields } from '@truefoundry/trueforge-core/core';
+import { configureOutboundFetches, extractErrorLogFields } from '@truefoundry/trueforge-core/core';
 import type { Context } from 'hono';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
@@ -50,6 +50,21 @@ try {
   process.exit(1);
 }
 
+configureOutboundFetches({
+  model: {
+    connectTimeoutMs: configuration.MODEL_HTTP_CONNECT_TIMEOUT_MS,
+    headersTimeoutMs: configuration.MODEL_HTTP_HEADERS_TIMEOUT_MS,
+    bodyTimeoutMs: configuration.MODEL_HTTP_BODY_TIMEOUT_MS,
+    maxRetries: configuration.MODEL_HTTP_MAX_RETRIES,
+  },
+  mcp: {
+    connectTimeoutMs: configuration.MCP_HTTP_CONNECT_TIMEOUT_MS,
+    headersTimeoutMs: configuration.MCP_HTTP_HEADERS_TIMEOUT_MS,
+    bodyTimeoutMs: configuration.MCP_HTTP_BODY_TIMEOUT_MS,
+    maxRetries: configuration.MCP_HTTP_MAX_RETRIES,
+  },
+});
+
 import { serve } from '@hono/node-server';
 import {
   CancellationReason,
@@ -63,10 +78,11 @@ import type { Kysely, Transaction } from 'kysely';
 import type { RedisClientType } from 'redis';
 import type { Logger } from 'winston';
 
+import { sweepExpiredPrivateChats } from './apis/privateChats';
 import { createServerApp } from './app';
 import { TrueForgeAuthorizer, type Authorizer } from './auth/authorizer';
 import { createAuthenticator } from './auth/createAuthenticator';
-import { resolveRequestContext, type RequestContext } from './auth/identity';
+import { resolveRequestContext, STANDALONE_REQUEST_CONTEXT, type RequestContext } from './auth/identity';
 import { startOidcDiscovery } from './auth/oidc';
 import { McpCatalog } from './catalog/McpCatalog';
 import { ModelCatalog } from './catalog/ModelCatalog';
@@ -76,20 +92,24 @@ import type { DistributedServerConfiguration } from './config';
 import { createController } from './controller';
 import type { AgentRecord, IAgentStore } from './db/agentStore';
 import { BriefItemCompletionStore, type IBriefItemCompletionStore } from './db/briefItemCompletionStore';
+import type { IChatDeletionStore } from './db/chatDeletionStore';
 import type { IChatImageStore } from './db/chatImageStore';
 import type { ICompletedTurnEventStore } from './db/completedTurnEvents';
 import { DeliveryStore, type IDeliveryStore } from './db/deliveryStore';
 import type { IGlobalSettingsStore } from './db/globalSettingsStore';
 import type { IGoogleConnectionStore } from './db/googleConnectionStore';
+import type { ILocalUserStore } from './db/localUserStore';
 import type { IMcpServerStore, IMcpServerWithAuthStore } from './db/mcpServerStore';
 import { McpServerWithAuthStore } from './db/McpServerWithAuthStore';
 import type { IMcpToolGrantStore } from './db/mcpToolGrantStore';
 import type { IModelProviderStore } from './db/modelProviderStore';
+import { NoticingStore, type INoticingStore } from './db/noticingStore';
 import type { IPersonalizationStore } from './db/personalizationStore';
 import type { IPersonaStore } from './db/personaStore';
 import type { PostgresAgentStore } from './db/postgres/agent-store/PostgresAgentStore';
 import type { Database as PostgresDatabase } from './db/postgres/types';
 import { PushSubscriptionStore, type IPushSubscriptionStore } from './db/pushSubscriptionStore';
+import { ReachSettingsStore, type IReachSettingsStore } from './db/reachSettingsStore';
 import type { IRepositoryStore } from './db/repositoryStore';
 import type { ISandboxProviderStore } from './db/sandboxProviderStore';
 import type { IScheduleStore } from './db/scheduleStore';
@@ -111,6 +131,7 @@ import { PACKAGE_VERSION } from './packageVersion';
 import { closePersonaKnowledgeIndexers } from './personaKnowledge/knowledgeIndexer';
 import { ActiveTurnRegistry } from './runtime/activeTurns';
 import { registerCalendarConnectorForBoot } from './runtime/calendarAccount';
+import { assistantNameFor } from './runtime/chatAssistant';
 import { createChatImageService } from './runtime/chatImages/chatImageService';
 import { CHAT_IMAGE_RETENTION_DAYS } from './runtime/chatImages/limits';
 import { createImageReencoder } from './runtime/chatImages/reencodeInSandbox';
@@ -120,9 +141,19 @@ import { designateTavilyAtBoot, seedDefaultSearchProviderAtBoot } from './runtim
 import { createDeliveryService } from './runtime/delivery/deliveryService';
 import { createWebPushSender } from './runtime/delivery/webPushSender';
 import { EventSubscriptionRegistry } from './runtime/event-subscription';
+import { instanceOwnerSubjectId } from './runtime/instanceOwner';
 import { registerMailConnectorFromSavedAccountInBackground } from './runtime/mailAccount';
 import { prepareMailPolicyAtBoot, registerMailConnectorAtBoot } from './runtime/mailConnector';
 import { warmEmbeddingsAtBoot } from './runtime/memory/embeddingRetrieval';
+import { startNotesFolderIndexing } from './runtime/notesFolder/notesFolderRuntime';
+import { sessionApprovalSource } from './runtime/noticing/approvalSource';
+import { createGoogleNoticingSources, googleCalendarTimezoneFor } from './runtime/noticing/googleSources';
+import { createNoticingJudgeResolver } from './runtime/noticing/judgeFactory';
+import { createNoticingService } from './runtime/noticing/noticingService';
+import { personTimezoneFor } from './runtime/noticing/personTimezone';
+import { NO_PHONE_CHANNELS } from './runtime/noticing/reachChannels';
+import { createReminderReach } from './runtime/noticing/reminderReach';
+import { createSidecarNoticingSources } from './runtime/noticing/sidecarSources';
 import { createOutboundSecretSource } from './runtime/outboundSecrets';
 import { seedOwnerNameAtBoot } from './runtime/ownerName';
 import { createSentinelServices } from './runtime/sentinelServices';
@@ -148,6 +179,7 @@ import { TrueFoundryServiceFoundryServerClient } from './truefoundry/TrueFoundry
 import { TrueFoundrySkillStore } from './truefoundry/TrueFoundrySkillStore';
 import { ensureWritableDataDir } from './utils/dataDir';
 import { startSttAvailabilityWatcher } from './voice/sttAvailability';
+import { attachVoiceSocket } from './voice/voiceSocket';
 
 /** Persistence + optional Redis wired for the selected topology. */
 interface ServerPersistence<TTransaction> {
@@ -181,6 +213,7 @@ interface ServerPersistence<TTransaction> {
   spaceStore: ISpaceStore<TTransaction>;
   repositoryStore: IRepositoryStore<TTransaction>;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
+  chatDeletionStore: IChatDeletionStore;
   chatImageStore: IChatImageStore<TTransaction>;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
@@ -188,10 +221,14 @@ interface ServerPersistence<TTransaction> {
   tokenFactoryUsageStore: ITokenFactoryUsageStore<TTransaction>;
   mcpToolGrantStore: IMcpToolGrantStore<TTransaction>;
   googleConnectionStore: IGoogleConnectionStore;
+  /** The one local user for local sign-in; the table exists in every topology, the mode decides use. */
+  localUserStore: ILocalUserStore;
   sentinelAuditStore: ISentinelAuditStore;
   sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
   briefItemStore: IBriefItemCompletionStore;
   deliveryStore: IDeliveryStore;
+  reachSettingsStore: IReachSettingsStore;
+  noticingStore: INoticingStore;
   pushSubscriptionStore: IPushSubscriptionStore;
   approvalTokenStore: ApprovalTokenStore;
   destroyDb: () => Promise<void>;
@@ -363,6 +400,8 @@ async function createStandalonePersistence(options: {
       import('./db/sqlite/approval-token-store/SqliteApprovalTokenStore'),
       import('./db/sqlite/mcp-tool-grant-store/SqliteMcpToolGrantStore'),
       import('./db/sqlite/google-connection-store/SqliteGoogleConnectionStore'),
+      import('./db/sqlite/local-user-store/SqliteLocalUserStore'),
+      import('./db/sqlite/chat-deletion-store/SqliteChatDeletionStore'),
     ]),
   ]);
   const [
@@ -387,6 +426,8 @@ async function createStandalonePersistence(options: {
     { SqliteApprovalTokenStore },
     { SqliteMcpToolGrantStore },
     { SqliteGoogleConnectionStore },
+    { SqliteLocalUserStore },
+    { SqliteChatDeletionStore },
   ] = sqliteStores;
 
   const db = createSqliteDb(sqlitePath);
@@ -404,6 +445,7 @@ async function createStandalonePersistence(options: {
   });
   const sandboxProviderStore = new SqliteSandboxProviderStore(db);
   const skillStore = new SqliteSkillStore(db);
+  const turnArtifactStore = new SqliteTurnArtifactStore(db);
   return {
     withTransaction: callback => db.transaction().execute(callback),
     skillStore,
@@ -418,16 +460,20 @@ async function createStandalonePersistence(options: {
     mcpOAuthStore: mcpServerStore,
     tokenStore,
     scheduleStore: new SqliteScheduleStore(db),
-    turnArtifactStore: new SqliteTurnArtifactStore(db),
+    turnArtifactStore,
+    chatDeletionStore: new SqliteChatDeletionStore({ db, turnArtifactStore }),
     chatImageStore: new SqliteChatImageStore(db),
     globalSettingsStore: new SqliteGlobalSettingsStore(db),
     tokenFactoryUsageStore: new SqliteTokenFactoryUsageStore(db),
     mcpToolGrantStore: new SqliteMcpToolGrantStore(db),
     googleConnectionStore: new SqliteGoogleConnectionStore(db),
+    localUserStore: new SqliteLocalUserStore(db),
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
     briefItemStore: new BriefItemCompletionStore(db),
     deliveryStore: new DeliveryStore(db),
+    reachSettingsStore: new ReachSettingsStore(db),
+    noticingStore: new NoticingStore(db),
     pushSubscriptionStore: new PushSubscriptionStore(db),
     approvalTokenStore: new SqliteApprovalTokenStore(db),
     modelProviderStore,
@@ -454,6 +500,7 @@ async function createDistributedPersistence(options: {
     DATABASE_POOL_MAX: databasePoolMax,
     POSTGRES_STATEMENT_TIMEOUT_MS: statementTimeoutMs,
     POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS: idleInTransactionSessionTimeoutMs,
+    POSTGRES_CONNECT_TIMEOUT_MS: connectionTimeoutMs,
     REDIS_URL: redisUrl,
     EXECUTOR_ID: executorId,
   } = configuration;
@@ -484,6 +531,8 @@ async function createDistributedPersistence(options: {
       import('./db/postgres/approval-token-store/PostgresApprovalTokenStore'),
       import('./db/postgres/mcp-tool-grant-store/PostgresMcpToolGrantStore'),
       import('./db/postgres/google-connection-store/PostgresGoogleConnectionStore'),
+      import('./db/postgres/local-user-store/PostgresLocalUserStore'),
+      import('./db/postgres/chat-deletion-store/PostgresChatDeletionStore'),
     ]),
   ]);
   const [
@@ -508,6 +557,8 @@ async function createDistributedPersistence(options: {
     { PostgresApprovalTokenStore },
     { PostgresMcpToolGrantStore },
     { PostgresGoogleConnectionStore },
+    { PostgresLocalUserStore },
+    { PostgresChatDeletionStore },
   ] = postgresStores;
 
   const db = createDb({
@@ -515,6 +566,13 @@ async function createDistributedPersistence(options: {
     poolMax: databasePoolMax,
     statementTimeoutMs,
     idleInTransactionSessionTimeoutMs,
+    connectionTimeoutMs,
+    onIdleClientError: error => {
+      logger.error(
+        'A Postgres connection in the pool broke; the next query opens a new one',
+        extractErrorLogFields(error),
+      );
+    },
   });
   await migrateToLatest(db);
   logger.info('Distributed mode: postgres');
@@ -533,6 +591,7 @@ async function createDistributedPersistence(options: {
   });
   const sandboxProviderStore = new PostgresSandboxProviderStore(db);
   const skillStore = new PostgresSkillStore(db);
+  const turnArtifactStore = new PostgresTurnArtifactStore(db);
   const agentStore = new PostgresAgentStore(db);
   const resolveModelProviderStore = buildResolveModelProviderStore({
     persistenceStore: modelProviderStore,
@@ -590,16 +649,20 @@ async function createDistributedPersistence(options: {
     mcpOAuthStore: mcpServerWithAuthStore,
     tokenStore,
     scheduleStore: new PostgresScheduleStore(db),
-    turnArtifactStore: new PostgresTurnArtifactStore(db),
+    turnArtifactStore,
+    chatDeletionStore: new PostgresChatDeletionStore({ db, turnArtifactStore }),
     chatImageStore: new PostgresChatImageStore(db),
     globalSettingsStore: new PostgresGlobalSettingsStore(db),
     tokenFactoryUsageStore: new PostgresTokenFactoryUsageStore(db),
     mcpToolGrantStore: new PostgresMcpToolGrantStore(db),
     googleConnectionStore: new PostgresGoogleConnectionStore(db),
+    localUserStore: new PostgresLocalUserStore(db),
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     sentinelSettingsStore: new PostgresSentinelSettingsStore(db),
     briefItemStore: new BriefItemCompletionStore(db),
     deliveryStore: new DeliveryStore(db),
+    reachSettingsStore: new ReachSettingsStore(db),
+    noticingStore: new NoticingStore(db),
     pushSubscriptionStore: new PushSubscriptionStore(db),
     approvalTokenStore: new PostgresApprovalTokenStore(db),
     modelProviderStore,
@@ -634,15 +697,19 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     spaceStore,
     repositoryStore,
     turnArtifactStore,
+    chatDeletionStore,
     chatImageStore,
     globalSettingsStore,
     tokenFactoryUsageStore,
     mcpToolGrantStore,
     googleConnectionStore,
+    localUserStore,
     sentinelAuditStore,
     sentinelSettingsStore,
     briefItemStore,
     deliveryStore,
+    reachSettingsStore,
+    noticingStore,
     pushSubscriptionStore,
     approvalTokenStore,
     destroyDb,
@@ -775,6 +842,43 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     audit: sentinelAuditStore,
     logger,
   });
+  const noticingOwnerId = instanceOwnerSubjectId({
+    signInOff: getTrueForgeAuthMode(configuration) === TrueForgeAuthMode.Standalone,
+    defaultSubjectId: STANDALONE_REQUEST_CONTEXT.subject.id,
+    oidc: configuration.OIDC,
+  });
+  const noticingInstanceOwner =
+    noticingOwnerId === undefined ? undefined : { tenant_id: TENANT_ID, created_by: noticingOwnerId };
+  const noticingService = createNoticingService({
+    sources: createSidecarNoticingSources({
+      mailUrl: configuration.MAIL_SIDECAR_MCP_URL,
+      mailAgentUrl: configuration.MAIL_EMAIL_ACCOUNT_URL,
+      calendarUrl: configuration.CALENDAR_SIDECAR_MCP_URL,
+      primary: createGoogleNoticingSources({ connections: googleConnectionStore, fetchImpl: undefined, logger }),
+      instanceOwner: noticingInstanceOwner,
+      logger,
+    }),
+    approvals: sessionApprovalSource({ sessionStore, tenant_id: TENANT_ID }),
+    reachSettings: reachSettingsStore,
+    store: noticingStore,
+    deliveries: deliveryService,
+    history: deliveryStore,
+    judgeFor: createNoticingJudgeResolver({
+      resolveModelProviderStore: context => persistence.resolveModelProviderStore(context),
+      personalizationStore,
+      globalSettingsStore,
+      tokenFactoryBudget,
+      logger,
+    }),
+    budget: tokenFactoryBudget,
+    channels: () => NO_PHONE_CHANNELS,
+    logger,
+    assistantNameFor: async owner => await assistantNameFor({ personalizationStore, owner }),
+    timezoneFor: personTimezoneFor({
+      scheduleStore,
+      calendarTimezone: googleCalendarTimezoneFor({ connections: googleConnectionStore, fetchImpl: undefined }),
+    }),
+  });
   const sentinelServices = createSentinelServices({
     demoMode: configuration.DEMO_MODE,
     demoSendAllowlist: configuration.DEMO_SEND_ALLOWLIST,
@@ -799,8 +903,14 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   });
 
   const oidc = isOidcConfigured(configuration) ? configuration.OIDC : undefined;
+  const localMode = getTrueForgeAuthMode(configuration) === TrueForgeAuthMode.Local;
   if (oidc) {
     logger.info('Auth is enabled', { issuer: oidc.OIDC_ISSUER_URL });
+  } else if (localMode) {
+    logger.info('Local sign-in is on; Aman asks for an email and password it keeps itself');
+    if (configuration.OIDC_SET_BUT_IGNORED) {
+      logger.info('OIDC settings are set but local sign-in is on, so they are not used');
+    }
   } else {
     logger.warn('Auth is disabled; browser login is off');
   }
@@ -820,6 +930,13 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     authorizer = new TrueFoundryAuthorizer(serviceFoundryClient);
   } else if (mode === TrueForgeAuthMode.Oidc) {
     authenticator = createAuthenticator({ mode: TrueForgeAuthMode.Oidc });
+    authorizer = new TrueForgeAuthorizer();
+  } else if (mode === TrueForgeAuthMode.Local) {
+    authenticator = createAuthenticator({
+      mode: TrueForgeAuthMode.Local,
+      localUserStore,
+      globalSettingsStore,
+    });
     authorizer = new TrueForgeAuthorizer();
   } else {
     authenticator = createAuthenticator({ mode: TrueForgeAuthMode.Standalone });
@@ -893,6 +1010,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     spaceStore,
     repositoryStore,
     turnArtifactStore,
+    chatDeletionStore,
     globalSettingsStore,
     tokenFactoryBudget,
     sessionStore,
@@ -903,6 +1021,17 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     deliveryStore,
     pushSubscriptionStore,
     deliveryService,
+    reachSettingsStore,
+    noticingStore,
+    noticingService,
+    reminderReach: createReminderReach({
+      reachSettings: reachSettingsStore,
+      store: noticingStore,
+      history: deliveryStore,
+      channels: () => NO_PHONE_CHANNELS,
+      logger,
+    }),
+    reachChannels: () => NO_PHONE_CHANNELS,
     webPushPublicKey: configuration.WEB_PUSH?.publicKey,
     sessions,
     chatImages,
@@ -913,6 +1042,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     eventSubscriptions,
     logger,
     oidcDiscovery,
+    localUserStore: localMode ? localUserStore : undefined,
     authenticator,
     authorizer,
     outboundSecrets,
@@ -923,6 +1053,24 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
       return controller.isRunning() ? 'running' : 'stopped';
     },
   });
+
+  // The notes folder index warms in the background: rebuilt on its schedule and when files
+  // change, so a chat's first search does not pay for the build. With no folder connected the
+  // service sits idle.
+  startNotesFolderIndexing({ settings: globalSettingsStore, logger });
+
+  // Private chats that expired while the server was down are deleted before it serves anyone.
+  try {
+    const deleted = await sweepExpiredPrivateChats(
+      { sessions, sessionStore, chatDeletionStore, activeTurns, turnDrains, redis, logger },
+      { now: new Date() },
+    );
+    if (deleted > 0) {
+      logger.info('Deleted expired private chats at startup', { deleted });
+    }
+  } catch (error) {
+    logger.error('Could not delete expired private chats at startup', extractErrorLogFields(error));
+  }
 
   return {
     activeTurns,
@@ -1236,6 +1384,9 @@ try {
       controller?.start();
     },
   );
+
+  // Voice mode's WebSocket: the upgrade is handled here because the app's own router cannot take one.
+  attachVoiceSocket({ server, app, logger, requireClientCertificate: tlsServe !== undefined });
 
   server.on('error', (error: unknown) => {
     console.error('Failed to start server:', error instanceof Error ? error.message : error);
