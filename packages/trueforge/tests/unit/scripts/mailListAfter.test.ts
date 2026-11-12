@@ -1,7 +1,7 @@
 import type { MailCursor } from '../../../src/db/noticingStore';
 import { imapAgent, imapMailboxValidity, type ListAfterAgent } from '../../../src/runtime/noticing/sidecarSources';
 import { MailLoginFailedError } from '../../../src/runtime/noticing/sources';
-import { startMailAgent, stored, type MailAgentHarness, type Stored, MAIL_AGENT_SECRET } from './mailAgentSupport';
+import { MAIL_AGENT_SECRET, startMailAgent, stored, type MailAgentHarness, type Stored } from './mailAgentSupport';
 
 const PASSWORD = 'CANARY-LIST-PASSWORD-4k2q';
 const PORT = 19775;
@@ -306,20 +306,24 @@ describe('the mail account agent lists new mail by number', () => {
   it.each([
     ['no secret', undefined],
     ['the wrong secret', 'Bearer test-mail-agent-secret-ffffffffffffffffffff'],
-  ])('lists nothing and names no mailbox for a caller with %s', async (_label, authorization) => {
-    const headers: Record<string, string> = { 'content-type': 'application/json' };
-    if (authorization !== undefined) {
-      headers['authorization'] = authorization;
-    }
-    const listed = await fetch(`${URL}/list_after`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ uidvalidity: null, last_uid: null, since: '2026-11-05T00:00:00Z', limit: 10 }),
-    });
-    expect(listed.status).toBe(401);
-    await expect(listed.json()).resolves.toEqual({ error: 'unauthorized' });
-    const mailbox = await fetch(`${URL}/mailbox`, { headers });
-    expect(mailbox.status).toBe(401);
-    await expect(mailbox.json()).resolves.toEqual({ error: 'unauthorized' });
-  }, 30_000);
+  ])(
+    'lists nothing and names no mailbox for a caller with %s',
+    async (_label, authorization) => {
+      const headers: Record<string, string> = { 'content-type': 'application/json' };
+      if (authorization !== undefined) {
+        headers['authorization'] = authorization;
+      }
+      const listed = await fetch(`${URL}/list_after`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ uidvalidity: null, last_uid: null, since: '2026-11-05T00:00:00Z', limit: 10 }),
+      });
+      expect(listed.status).toBe(401);
+      await expect(listed.json()).resolves.toEqual({ error: 'unauthorized' });
+      const mailbox = await fetch(`${URL}/mailbox`, { headers });
+      expect(mailbox.status).toBe(401);
+      await expect(mailbox.json()).resolves.toEqual({ error: 'unauthorized' });
+    },
+    30_000,
+  );
 });

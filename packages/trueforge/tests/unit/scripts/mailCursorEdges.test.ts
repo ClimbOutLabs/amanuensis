@@ -17,7 +17,7 @@ import {
 } from '../../../src/runtime/noticing/sidecarSources';
 import type { MailAccess, MailSource } from '../../../src/runtime/noticing/sources';
 import { defaultReachSettings, type NoticingEvent } from '../../../src/schemas/reach';
-import { startMailAgent, type MailAgentHarness, type Stored, MAIL_AGENT_SECRET } from './mailAgentSupport';
+import { MAIL_AGENT_SECRET, startMailAgent, type MailAgentHarness, type Stored } from './mailAgentSupport';
 
 const OWNER = { tenant_id: 'default', created_by: 'owner-1' };
 const NOW = new Date('2026-11-05T15:00:00.000Z');

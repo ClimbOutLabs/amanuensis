@@ -301,8 +301,7 @@ async function askAgent({
 }
 
 export function imapMailboxValidity({ url, secret, fetchImpl }: MailAgentAccess): MailboxValidity {
-  return async () =>
-    AgentMailboxSchema.parse(await askAgent({ url, secret, fetchImpl, path: '/mailbox' })).uidvalidity;
+  return async () => AgentMailboxSchema.parse(await askAgent({ url, secret, fetchImpl, path: '/mailbox' })).uidvalidity;
 }
 
 /**
