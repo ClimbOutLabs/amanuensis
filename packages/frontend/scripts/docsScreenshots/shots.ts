@@ -147,7 +147,12 @@ export const SHOTS: readonly Shot[] = [
     steps: [ask('incognito', { incognito: true }), see('Close and delete')],
     crop: ['main'],
   },
-  { name: 'calendar-event-card', world: 'full', steps: [ask('calendarEvent'), see(/to your calendar\?/)], crop: CARD },
+  {
+    name: 'calendar-event-card',
+    world: 'full',
+    steps: [ask('calendarEvent'), see(/to your Google Calendar on/)],
+    crop: CARD,
+  },
   { name: 'approvals-card', world: 'full', steps: [ask('deletePlants'), see('Allow')], crop: CARD },
   {
     name: 'getting-help-guide',
