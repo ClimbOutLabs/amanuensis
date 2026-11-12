@@ -37,7 +37,7 @@ import {
   MAIL_CONTENT_TOOL_NAME,
 } from '../email/mailConnector/toolContract';
 import { GOOGLE_SETUP_SERVER_ID, GOOGLE_SETUP_STATUS_TOOL_NAME } from '../google/setupToolContract';
-import type { BrowserClickReview, DocumentScope, MapsHosts } from '../llm/LLMTypes';
+import type { BrowserElementReview, DocumentScope, MapsHosts } from '../llm/LLMTypes';
 import {
   APPEND_TO_INBOX_TOOL_NAME,
   isNotesFolderReadToolName,
@@ -300,12 +300,12 @@ export interface SentinelAction {
    */
   reminder?: ReminderLine | undefined;
   /**
-   * Context for a browser_click call, read from the live page before the click: the site, the
-   * element's accessible name, whether it submits a form, and the form's values. Set by the browser
-   * tool set from the sidecar's read, never from model params. Undefined when the host could not
-   * read it, which fails the call closed to the generic Tier 3 path.
+   * Context for the element a browser click, type or select acts on, read from the live page first:
+   * the site, its name and role, whether it submits a form, the form's values, and its address when it
+   * is a plain link. Set by the browser tool set from the sidecar's read, never from model params.
+   * Undefined when the host could not read it, which refuses the call before any card.
    */
-  browser_click?: BrowserClickReview | undefined;
+  browser_element?: BrowserElementReview | undefined;
 }
 
 /** What a pause or resume card shows: which schedule, and when it runs, as the store holds it. */
