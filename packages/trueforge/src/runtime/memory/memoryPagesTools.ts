@@ -26,6 +26,7 @@ import { stat } from 'node:fs/promises';
 import type { Logger } from 'winston';
 import { z } from 'zod';
 
+import { redactSecretShapes } from '../../dataExport/secretScrub';
 import { loadAliasIndex, matchAliases, pagesNamed } from './aliasIndex';
 import { localDay } from './localDay';
 import { estimateTokens } from './markdownMemoryFiles';
@@ -156,6 +157,15 @@ interface Refusal {
 
 function refusal(message: string): Refusal {
   return { ok: false, message };
+}
+
+/** The sentence the model gets when a line or a new page name holds something shaped like a secret. */
+const LOOKS_SECRET_MESSAGE =
+  'Nothing was saved, because that looks like a password, a key or a card number. Tell the user in one plain line that you did not save it, because memory does not keep passwords, keys or card numbers.';
+
+/** Whether the text holds a credential shape; such text is never written to a page, whoever said it. */
+function looksSecret(text: string): boolean {
+  return redactSecretShapes(text) !== text;
 }
 
 /** The sentence the model gets in a private chat, where nothing is saved. */
@@ -598,6 +608,9 @@ export class MemoryPagesToolSet extends LocalToolMCP {
     if (!text.ok) {
       return { saved: false, message: text.message };
     }
+    if (looksSecret(text.text)) {
+      return { saved: false, message: LOOKS_SECRET_MESSAGE };
+    }
     // Words the person typed are saved as theirs. Anything else they ask to keep is saved too, as a line
     // marked as read content, so it never counts as their word or as an instruction.
     const ownText = this.#isOwn(text.text);
@@ -616,6 +629,9 @@ export class MemoryPagesToolSet extends LocalToolMCP {
             message:
               'Nothing was saved, because there is no page for that name yet. Ask the user whether it is a person or a matter, then try again with kind set.',
           };
+        }
+        if (found === undefined && looksSecret(title)) {
+          return { saved: false, message: LOOKS_SECRET_MESSAGE };
         }
         const section: PageSection = input.about_writing === true ? 'How you write to them' : 'Now';
         if (!kindHasSection({ kind, section })) {
@@ -670,6 +686,9 @@ export class MemoryPagesToolSet extends LocalToolMCP {
     }
     if (!after.ok) {
       return { saved: false, message: after.message };
+    }
+    if (looksSecret(after.text)) {
+      return { saved: false, message: LOOKS_SECRET_MESSAGE };
     }
     if (sameText({ a: before.text, b: after.text })) {
       return {
