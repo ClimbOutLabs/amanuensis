@@ -235,6 +235,9 @@ async function registerMemoryProvider({ app, mcp }: { app: OpenAPIHono; mcp: Ine
   }
 }
 
+/** The memory folder the test run was configured with, read before any test changes it. */
+const CONFIGURED_MEMORY_DIR = configuration.MEMORY_MARKDOWN_DIR;
+
 export async function startApprovalTestServer(options?: {
   sandboxProvider?: SandboxProvider | undefined;
   /** Also register the inert server as the memory provider, which makes that connector first-party. */
@@ -313,6 +316,12 @@ export async function startApprovalTestServer(options?: {
 
   const originalFirstPartyOrigins = configuration.FIRST_PARTY_MCP_ORIGINS;
   const originalEvalMode = configuration.AMAN_EVAL_MODE;
+  // Each server keeps its own memory, so one test's chats are never recalled into another's. A test that chose a
+  // memory folder itself keeps it.
+  const originalMemoryDir = configuration.MEMORY_MARKDOWN_DIR;
+  if (originalMemoryDir === CONFIGURED_MEMORY_DIR) {
+    configuration.MEMORY_MARKDOWN_DIR = join(directory, 'memory');
+  }
   configuration.FIRST_PARTY_MCP_ORIGINS = options?.memoryProvider === true ? [mcp.origin] : [];
 
   // One registry for the server's life, so close() can wait for turn drains the way main.ts does.
@@ -348,6 +357,7 @@ export async function startApprovalTestServer(options?: {
     close: async () => {
       configuration.FIRST_PARTY_MCP_ORIGINS = originalFirstPartyOrigins;
       configuration.AMAN_EVAL_MODE = originalEvalMode;
+      configuration.MEMORY_MARKDOWN_DIR = originalMemoryDir;
       // The guide installs, and the indexing they queue, write into directories removed below, so they finish first.
       await app.guidesSettled();
       await closePersonaKnowledgeIndexers();

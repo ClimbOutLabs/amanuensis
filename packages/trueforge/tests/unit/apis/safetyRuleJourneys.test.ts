@@ -4,7 +4,10 @@
  */
 import { z } from '@hono/zod-openapi';
 import type { Turn, TurnInputItem } from '@truefoundry/trueforge-core/agent-session';
+import { readdir, readFile } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
+import { join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import configuration from '../../../src/config';
 import { TurnStreamingEventSchema } from '../../../src/schemas/events';
 import { GetTurnResponseSchema } from '../../../src/schemas/turn';
@@ -396,6 +399,67 @@ describe('a page Aman opens in its browser', () => {
     },
     TURN_TIMEOUT_MS,
   );
+
+  describe('the note Aman keeps of its own reply', () => {
+    const summarize = configuration.MEMORY_SUMMARIZE;
+
+    beforeAll(() => {
+      // Replies are kept in full, so no model call stands between the reply and its note.
+      configuration.MEMORY_SUMMARIZE = false;
+    });
+
+    afterAll(() => {
+      configuration.MEMORY_SUMMARIZE = summarize;
+    });
+
+    /** The closing line of the saved note that holds these words, once the save has finished. */
+    async function closingLineOfNoteWith(words: string): Promise<string | undefined> {
+      for (let attempt = 0; attempt < 50; attempt += 1) {
+        const files = await readdir(configuration.MEMORY_MARKDOWN_DIR, { recursive: true });
+        for (const file of files.filter(name => name.endsWith('.md'))) {
+          const text = await readFile(join(configuration.MEMORY_MARKDOWN_DIR, file), 'utf8');
+          const entry = text.split(/\n(?=## )/).find(part => part.includes(words));
+          if (entry !== undefined) {
+            return entry.trimEnd().split('\n').at(-1);
+          }
+        }
+        await delay(100);
+      }
+      return undefined;
+    }
+
+    it(
+      'says nothing was read before it when no turn of the chat read anything from outside',
+      async () => {
+        const chatId = await createChat(server);
+        server.model.next({ reply: 'The tide tables are kept at the harbour office.' });
+        await runTurn({ server, chatId, input: [{ type: 'user.message', content: 'Where are the tide tables?' }] });
+        expect(await closingLineOfNoteWith('harbour office')).toBe(
+          '> External source: assistant reply, nothing read before it',
+        );
+      },
+      TURN_TIMEOUT_MS,
+    );
+
+    it(
+      'is a plain reply note when an earlier turn of the chat opened a page, though the turn of the reply read nothing',
+      async () => {
+        const chatId = await createChat(server);
+        server.model.next({ toolArguments: { url: 'https://site.example/account' } });
+        await runTurn({
+          server,
+          chatId,
+          input: [
+            { type: 'user.message', content: `${RUN_DIRECTIVE_PREFIX}browser_open https://site.example/account` },
+          ],
+        });
+        server.model.next({ reply: 'The ferry times are pinned by the ticket window.' });
+        await runTurn({ server, chatId, input: [{ type: 'user.message', content: 'Where are the ferry times?' }] });
+        expect(await closingLineOfNoteWith('ticket window')).toBe('> External source: assistant reply');
+      },
+      TURN_TIMEOUT_MS,
+    );
+  });
 
   it(
     'once a page has been read, the address the person gave still opens, and the same address with a sign-in name asks first',

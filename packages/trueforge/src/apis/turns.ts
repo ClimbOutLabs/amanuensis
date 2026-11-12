@@ -30,6 +30,7 @@ import {
   callResultSource,
   existingSandboxIdForProvider,
   extractErrorLogFields,
+  hasReadContent,
   HeldActionRefusedError,
   isAgentInputUserMessage,
   isFileContentPart,
@@ -1240,6 +1241,11 @@ export interface DrainTurnEventsInput {
         userText: string;
         /** The turn's input carried an attached file, whose extracted text reaches the model as data. */
         attachedFiles: boolean;
+        /**
+         * Whether the chat has read anything that is not the person's own words, asked when the turn is done.
+         * Left out, the chat counts as having read something.
+         */
+        chatHasReadContent?: (() => boolean) | undefined;
         /** The person's IANA time zone, so a summary writes dates as the day they lived. */
         timeZone?: string | undefined;
         /**
@@ -1533,6 +1539,7 @@ async function runTurnFollowUp(params: {
         completedAt: state.completed_at,
         timeZone: memory.timeZone,
         origin: ingestedToolOutput ? 'tool_ingested' : 'user_stated',
+        chatReadNothing: !ingestedToolOutput && memory.chatHasReadContent?.() === false,
         logger,
         toolResults,
         summarize: memory.summarize,
@@ -1932,7 +1939,7 @@ async function beginAcceptedTurnExecution(
   if (setup.status === 'could_not_start') {
     throw new TurnCouldNotStartError();
   }
-  const { turn, memorySummarize } = setup.value;
+  const { turn, resolver, memorySummarize } = setup.value;
 
   await armTurnExecution({ turnDrains: deps.turnDrains, sessionId, logger: deps.logger });
 
@@ -1984,6 +1991,7 @@ async function beginAcceptedTurnExecution(
               session: session.record,
               userText: extractUserMessageText(input ?? []),
               attachedFiles: inputAttachesFiles(input ?? []),
+              chatHasReadContent: () => hasReadContent(resolver.webSearchTurn.provenance),
               timeZone: deps.clientTimezone,
               summarize: memorySummarize,
             },
@@ -3161,6 +3169,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
                   session: session.record,
                   userText: extractUserMessageText(body.input),
                   attachedFiles: inputAttachesFiles(body.input ?? []),
+                  chatHasReadContent: () => hasReadContent(resolver.webSearchTurn.provenance),
                   timeZone: body.client_timezone,
                   // Resolved once on the create-turn path above; absent means verbatim.
                   summarize: memorySummarize,

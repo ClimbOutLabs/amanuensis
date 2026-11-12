@@ -224,6 +224,7 @@ export async function saveSentMail({
         text: labeledNoteText({ label: noteLabel({ source: SENT_MAIL_SOURCE, date, assistantName: undefined }), text }),
       },
       documentId: `aman-${sessionId}-${turnId}-sent-${threadId}-${callId}`,
+      chatReadNothing: false,
     });
     // A retry after a half-finished save replaces the copy that attempt wrote, so the note is never doubled.
     const item = { ...noteItem, metadata: { ...noteItem.metadata, [REPLACE_DOCUMENT_METADATA_KEY]: 'true' } };

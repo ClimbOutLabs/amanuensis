@@ -32,6 +32,7 @@ import {
   newEventId,
   personMessageIndex,
   recordPersonText,
+  recordReplyText,
   recordUntrustedText,
   type WebSearchTurnState,
 } from '@truefoundry/trueforge-core/core';
@@ -65,6 +66,7 @@ import type {
 import {
   ASSISTANT_RESPONSE_SOURCE,
   isNoteTooOld,
+  isReplyThatReadNothing,
   noteProvenance,
   SENT_MAIL_SOURCE,
   withoutNoteTrailer,
@@ -603,7 +605,8 @@ function recalledReadSource(item: RecallItem): ReadSource | undefined {
 
 /**
  * Records where the links and addresses of an injected block came from. Only what the person said is
- * theirs to use. An item the assistant read keeps that mark here as it does in the text, and the
+ * theirs to use. An item the assistant read keeps that mark here as it does in the text. A remembered reply
+ * that says its chat had read nothing counts as the assistant's own reply, and any other reply as read. The
  * summary lines (profile, mental models, people, reflection) have no single source, so they count as read.
  */
 function recordRecallProvenance(input: {
@@ -617,6 +620,9 @@ function recordRecallProvenance(input: {
     const source = recalledReadSource(item);
     if (source === undefined) {
       recordPersonText({ provenance, text });
+    } else if (isReplyThatReadNothing(item.metadata)) {
+      // The assistant's own reply from a chat that had read nothing: recorded as a reply in this chat is.
+      recordReplyText({ provenance, text });
     } else {
       recordUntrustedText({ provenance, text, source });
     }

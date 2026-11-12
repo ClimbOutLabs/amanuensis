@@ -20,13 +20,16 @@ import {
 } from '../../utils/dataDir';
 import type { RetainItem } from './hindsightClient';
 import {
+  ASSISTANT_RESPONSE_SOURCE,
   formatMarker,
   isMemoryNoteSource,
   isNoteTooOld,
+  isReplyThatReadNothing,
   NOTE_DATE_METADATA_KEY,
   NOTE_SOURCE_METADATA_KEY,
   noteProvenanceFromMetadata,
   parseMarker,
+  REPLY_READ_NOTHING_METADATA_KEY,
   withoutNoteTrailer,
   type MemoryNoteSource,
 } from './memoryNotes';
@@ -175,6 +178,12 @@ const NOTE_SOURCE_NAMES: Record<MemoryNoteSource, string> = {
   sent_mail: 'a message you sent',
 };
 
+/** How a reply names its source when its chat had read nothing from outside up to that reply. */
+const REPLY_READ_NOTHING_SOURCE_NAME = 'assistant reply, nothing read before it';
+
+/** The closing line only the save writes on such a reply. Body text that looks like it is escaped like any source line. */
+const REPLY_READ_NOTHING_SOURCE_LINE = `${EXTERNAL_SOURCE_LINE_PREFIX}${REPLY_READ_NOTHING_SOURCE_NAME}`;
+
 /** The source named for text from a turn that read an email, a page, a document or a tool result. */
 const READ_CONTENT_SOURCE_NAME = 'read content';
 
@@ -206,7 +215,9 @@ function isSourceLine(line: string): boolean {
 function sourceLineFor(metadata: Readonly<Record<string, string>>): string {
   const note = noteProvenanceFromMetadata(metadata);
   if (note !== undefined) {
-    return `${EXTERNAL_SOURCE_LINE_PREFIX}${NOTE_SOURCE_NAMES[note.source]}`;
+    return isReplyThatReadNothing(metadata)
+      ? REPLY_READ_NOTHING_SOURCE_LINE
+      : `${EXTERNAL_SOURCE_LINE_PREFIX}${NOTE_SOURCE_NAMES[note.source]}`;
   }
   if (isPersonOrigin(metadata)) {
     return FROM_YOU_SOURCE_LINE;
@@ -341,6 +352,13 @@ function splitEntryTrailers(text: string): EntryTrailers {
   }
   if (externalLine !== undefined) {
     metadata[MEMORY_ORIGIN_METADATA_KEY] = TOOL_INGESTED_ORIGIN;
+    // Both closing lines must agree: the hidden note line says it is a reply, and the source line says what it had read.
+    if (
+      externalLine === REPLY_READ_NOTHING_SOURCE_LINE &&
+      metadata[NOTE_SOURCE_METADATA_KEY] === ASSISTANT_RESPONSE_SOURCE
+    ) {
+      metadata[REPLY_READ_NOTHING_METADATA_KEY] = 'true';
+    }
   } else if (fromYou) {
     metadata[MEMORY_ORIGIN_METADATA_KEY] = USER_STATED_ORIGIN;
   }
@@ -553,7 +571,10 @@ export function withOriginalHiddenMarkers({ original, edited }: { original: stri
   if (noteSource !== undefined && isMemoryNoteSource(noteSource) && noteDate !== undefined) {
     trailers.push(formatMarker({ kind: 'note', source: noteSource, date: noteDate }));
   }
-  if (originalTrailers.externalLine !== undefined) {
+  if (originalTrailers.externalLine === REPLY_READ_NOTHING_SOURCE_LINE) {
+    // The new words are no longer the reply as it was written, so the note is a plain reply note again.
+    trailers.push(`${EXTERNAL_SOURCE_LINE_PREFIX}${NOTE_SOURCE_NAMES[ASSISTANT_RESPONSE_SOURCE]}`);
+  } else if (originalTrailers.externalLine !== undefined) {
     trailers.push(originalTrailers.externalLine);
   } else if (originalTrailers.fromYou) {
     trailers.push(FROM_YOU_SOURCE_LINE);

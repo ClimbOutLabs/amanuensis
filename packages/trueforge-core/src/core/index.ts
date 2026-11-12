@@ -539,10 +539,12 @@ export {
 export { checkOutboundStrings, collectOutboundStrings } from './permissions/outboundGuard';
 export type { OutboundGuardRule, OutboundGuardVerdict } from './permissions/outboundGuard';
 export {
+  hasReadContent,
   isTrustedLink,
   isTrustedPicture,
   recordPageImageUrls,
   recordPersonText,
+  recordReplyText,
   recordUntrustedText,
   searchResultUrls,
 } from './permissions/provenance';

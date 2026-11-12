@@ -124,6 +124,14 @@ for a note that closes with `> From you`, `tool_ingested` for any other, includi
 recall screen and the record of where links came from treat a person's own note the same way on both memory
 stores.
 
+A note of the assistant's reply can also carry `reply_read_nothing`. The save sets it only when the turn read
+nothing from outside and the chat's record says no earlier turn, recalled note or summary did either. The
+store writes it as the closing line `> External source: assistant reply, nothing read before it`, and reads it
+back only when the hidden note line also says the note is a reply. Body text that looks like either line is
+escaped, an edit turns the note back into a plain reply note, and an import never sets it. At recall such a
+note is recorded as the assistant's own earlier reply: its sites are the reply's own, its addresses count as
+read, and it does not mark the chat as having read outside content. Its origin stays `tool_ingested`.
+
 The event's `layers` field records, per turn, whether a profile line and how many mental models
 were injected (and how many candidates the bank returned), the route and the pattern that selected
 it, and the reflect outcome with its wall clock and the number of memories the provider said the

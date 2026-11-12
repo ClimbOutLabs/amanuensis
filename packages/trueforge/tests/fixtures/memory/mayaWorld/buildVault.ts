@@ -51,6 +51,7 @@ export function retainItemOf(entry: MayaEntry): RetainItem {
       }),
     },
     documentId: `aman-${entry.session}-${turnId}-note`,
+    chatReadNothing: false,
   });
 }
 

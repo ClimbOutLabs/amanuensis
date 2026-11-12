@@ -11,6 +11,20 @@ export const NOTE_DATE_METADATA_KEY = 'note_date';
 /** Stored source of a note that records what the assistant told the person. */
 export const ASSISTANT_RESPONSE_SOURCE = 'assistant_response';
 
+/**
+ * Metadata key (value `true`) on a reply note written when the chat had read nothing from outside up to that
+ * reply. Only the save sets it. A reply note without it may repeat something the assistant read.
+ */
+export const REPLY_READ_NOTHING_METADATA_KEY = 'reply_read_nothing';
+
+/** Whether a stored item is a reply note that says its chat had read nothing from outside. */
+export function isReplyThatReadNothing(metadata: Readonly<Record<string, string>> | undefined): boolean {
+  return (
+    metadata?.[NOTE_SOURCE_METADATA_KEY] === ASSISTANT_RESPONSE_SOURCE &&
+    metadata[REPLY_READ_NOTHING_METADATA_KEY] === 'true'
+  );
+}
+
 /** Stored source of a note that records a message the person sent through the assistant. */
 export const SENT_MAIL_SOURCE = 'sent_mail';
 

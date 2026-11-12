@@ -44,6 +44,7 @@ Every note ends with one line that says where it came from.
 
 - `> From you` means you said it in a chat.
 - `> External source: ...` means it came from somewhere else. The line names the source: `email`, `calendar`, `web page`, `attachment`, `tool result`, `assistant reply`, `a message you sent`, `read content` or `imported file`.
+- `> External source: assistant reply, nothing read before it` is a note of Aman's own reply from a chat where Aman had read nothing from outside up to that reply: no email, page, file, tool result or external memory. Aman treats it as its own earlier reply and not as other people's content. An email address in it still counts as something Aman read. If you edit the note, it becomes a plain `assistant reply` note.
 
 Aman treats a note as your own words only when it ends with `> From you`. Everything else counts as something Aman read. Aman still remembers it, but it asks you before it uses a link or an address from it. See [Safety](/safety).
 

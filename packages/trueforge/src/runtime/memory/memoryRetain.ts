@@ -29,10 +29,16 @@ import {
   NOTE_SOURCE_METADATA_KEY,
   noteLabel,
   noteRetainContent,
+  REPLY_READ_NOTHING_METADATA_KEY,
   type MemoryNoteSource,
 } from './memoryNotes';
 import { summarizeTurnNotes, type TurnToolResult } from './memoryNotesSummarize';
-import { MEMORY_ORIGIN_METADATA_KEY, TOOL_INGESTED_ORIGIN, type AmanMemoryOrigin } from './memoryOrigin';
+import {
+  MEMORY_ORIGIN_METADATA_KEY,
+  TOOL_INGESTED_ORIGIN,
+  USER_STATED_ORIGIN,
+  type AmanMemoryOrigin,
+} from './memoryOrigin';
 import {
   summarizeTurnContent,
   usablePersonName,
@@ -187,6 +193,12 @@ export interface SubmitRetainParams {
   timeZone?: string | undefined;
   /** Where the turn's text came from. The caller always says; nothing is assumed. */
   origin: AmanMemoryOrigin;
+  /**
+   * True only when the caller knows the chat had read nothing from outside when the reply was written:
+   * no tool result, file, recalled note or summary that is not the person's own words, in any turn.
+   * Left out, the chat counts as having read something.
+   */
+  chatReadNothing?: boolean | undefined;
   logger: Logger;
   outcomeLog?: RetainOutcomeLog | undefined;
   /** What the turn's tools returned, so concrete findings can be saved as labeled notes. */
@@ -448,6 +460,7 @@ function noteRetainItems({
       completedAt: params.completedAt,
       note,
       documentId: `aman-${params.sessionId}-${params.turnId}-note-${String(index)}`,
+      chatReadNothing: params.chatReadNothing === true && params.origin === USER_STATED_ORIGIN,
     }),
   );
 }
@@ -459,12 +472,15 @@ export function noteRetainItem({
   completedAt,
   note,
   documentId,
+  chatReadNothing,
 }: {
   sessionId: string;
   turnId: string;
   completedAt: string;
   note: LabeledNote;
   documentId: string;
+  /** Whether the chat had read nothing from outside when this note was made; it counts only on a reply note. */
+  chatReadNothing: boolean;
 }): RetainItem {
   return {
     content: noteRetainContent({ text: note.text, source: note.source, date: note.date }),
@@ -477,6 +493,9 @@ export function noteRetainItem({
       [MEMORY_ORIGIN_METADATA_KEY]: TOOL_INGESTED_ORIGIN,
       [NOTE_SOURCE_METADATA_KEY]: note.source,
       [NOTE_DATE_METADATA_KEY]: note.date,
+      ...(chatReadNothing && note.source === ASSISTANT_RESPONSE_SOURCE
+        ? { [REPLY_READ_NOTHING_METADATA_KEY]: 'true' }
+        : {}),
     },
   };
 }

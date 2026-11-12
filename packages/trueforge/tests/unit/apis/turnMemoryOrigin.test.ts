@@ -4,6 +4,11 @@ import winston from 'winston';
 import { drainTurnEvents } from '../../../src/apis/turns';
 import { EventSubscriptionRegistry } from '../../../src/runtime/event-subscription';
 import { HindsightClient, type RetainItem } from '../../../src/runtime/memory/hindsightClient';
+import {
+  ASSISTANT_RESPONSE_SOURCE,
+  isReplyThatReadNothing,
+  NOTE_SOURCE_METADATA_KEY,
+} from '../../../src/runtime/memory/memoryNotes';
 import { isPersonOrigin, MEMORY_ORIGIN_METADATA_KEY } from '../../../src/runtime/memory/memoryOrigin';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import { TurnExecutionDeadline } from '../../../src/runtime/turnExecutionDeadline';
@@ -80,6 +85,7 @@ async function retainedItems(input: {
   earlier?: TurnStreamingEvent[];
   userText?: string;
   reply?: string;
+  chatHasReadContent?: () => boolean;
 }): Promise<RetainItem[]> {
   const client = new HindsightClient({
     apiBase: 'https://hindsight.test.example',
@@ -108,6 +114,7 @@ async function retainedItems(input: {
       client,
       userText: input.userText ?? 'Please read this.',
       attachedFiles: input.attachedFiles,
+      chatHasReadContent: input.chatHasReadContent,
     },
   });
   return retain.mock.calls.flatMap(([params]) => params.items);
@@ -171,6 +178,36 @@ describe('drainTurnEvents memory origin', () => {
       reply: 'Noted.',
     });
     expect(ownItems(items).map(item => item.content)).toEqual([`User: ${OWN_STATEMENT}`]);
+  });
+
+  describe('the note of Aman’s reply', () => {
+    const replyNotes = (items: readonly RetainItem[]): RetainItem[] =>
+      items.filter(item => item.metadata[NOTE_SOURCE_METADATA_KEY] === ASSISTANT_RESPONSE_SOURCE);
+
+    it('says the chat had read nothing when no turn of the chat read anything from outside', async () => {
+      const items = await retainedItems({ attachedFiles: false, chatHasReadContent: () => false });
+      expect(replyNotes(items).map(item => isReplyThatReadNothing(item.metadata))).toEqual([true]);
+      expect(replyNotes(items).map(item => item.metadata[MEMORY_ORIGIN_METADATA_KEY])).toEqual(['tool_ingested']);
+    });
+
+    it('does not say so when an earlier turn of the chat read a mail, though this turn read nothing', async () => {
+      const items = await retainedItems({ attachedFiles: false, chatHasReadContent: () => true });
+      expect(replyNotes(items).map(item => isReplyThatReadNothing(item.metadata))).toEqual([false]);
+    });
+
+    it('does not say so when this turn read something from outside', async () => {
+      const items = await retainedItems({
+        attachedFiles: false,
+        earlier: toolRound({ id: 'c1', name: 'web_fetch' }),
+        chatHasReadContent: () => false,
+      });
+      expect(replyNotes(items).map(item => isReplyThatReadNothing(item.metadata))).toEqual([false]);
+    });
+
+    it('does not say so when nothing tells the save what the chat had read', async () => {
+      const items = await retainedItems({ attachedFiles: false });
+      expect(replyNotes(items).map(item => isReplyThatReadNothing(item.metadata))).toEqual([false]);
+    });
   });
 
   it('marks a turn whose wrapped call reaches a connector tool that shares a page reading name', async () => {
