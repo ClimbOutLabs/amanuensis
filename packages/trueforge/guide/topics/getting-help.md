@@ -25,7 +25,7 @@ The report leaves out passwords, memory and tool details. It sends nothing until
 
 ## Things you do in a terminal
 
-Settings has no button for these. In a terminal, type `aman doctor` to check each part of your install. Type `aman backup` to back up your data. Type `aman restore` to go back to a backup; it asks which one and waits for you to type yes. The password goes back to the one you had then, and devices may have to sign in again. Type `aman upgrade` to update Aman. Type `aman password` to set a new password.
+Settings has no button for these. In a terminal, type `aman doctor` to check each part of your install. Type `aman backup` to back up your data. Type `aman restore` to go back to a backup; it asks which one and waits for you to type yes. The password goes back to the one you had then, and devices may have to sign in again. Type `aman upgrade` to update Aman. It downloads Aman's parts ready-made when they match your version. When they do not, it builds them on this computer, which takes longer. Type `aman password` to set a new password.
 
 If you also use Tailscale serve on this computer, Aman keeps off the ports it uses. When an update has to move Aman's https port for this, it prints the new port. Open Aman with that port on each device.
 
