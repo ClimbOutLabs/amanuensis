@@ -173,10 +173,13 @@ describe('draft_email', () => {
         features: [...COMPOSE],
         routes: [route('/messages/orig', original), created],
       });
-      const response = await tools.callTool({
-        name: 'draft_email',
-        arguments: { subject: 'x', body: 'ok', in_reply_to: 'orig' },
-      });
+      const response = await tools.callTool(
+        {
+          name: 'draft_email',
+          arguments: { subject: 'x', body: 'ok', in_reply_to: 'orig' },
+        },
+        APPROVED,
+      );
       expect(JSON.parse(text(response))).toMatchObject({ draft_id: 'd8', action: 'drafted', thread_id: 't5' });
       const { mime, threadId } = sentDraft(google.bodies[0]);
       expect(threadId).toBe('t5');
@@ -204,10 +207,13 @@ describe('draft_email', () => {
         features: [...COMPOSE],
         routes: [route('/messages/orig', unreadable), created],
       });
-      const response = await tools.callTool({
-        name: 'draft_email',
-        arguments: { subject: 'x', body: 'ok', in_reply_to: 'orig' },
-      });
+      const response = await tools.callTool(
+        {
+          name: 'draft_email',
+          arguments: { subject: 'x', body: 'ok', in_reply_to: 'orig' },
+        },
+        APPROVED,
+      );
       expect(text(response)).toContain('no recipient');
       expect(google.urls).not.toContain('POST /gmail/v1/users/me/drafts');
     });
@@ -223,10 +229,13 @@ describe('draft_email', () => {
         features: [...COMPOSE],
         routes: [route('/messages/orig', bare), created],
       });
-      const response = await tools.callTool({
-        name: 'draft_email',
-        arguments: { subject: 'x', body: 'ok', in_reply_to: 'orig' },
-      });
+      const response = await tools.callTool(
+        {
+          name: 'draft_email',
+          arguments: { subject: 'x', body: 'ok', in_reply_to: 'orig' },
+        },
+        APPROVED,
+      );
       expect(text(response)).toContain('no recipient');
       expect(text(response)).toContain('the sender address of the message being answered could not be read');
       expect(google.urls).not.toContain('POST /gmail/v1/users/me/drafts');
@@ -244,10 +253,13 @@ describe('draft_email', () => {
         features: [...COMPOSE],
         routes: [route('/messages/orig', own), created],
       });
-      const response = await tools.callTool({
-        name: 'draft_email',
-        arguments: { subject: 'x', body: 'ok', in_reply_to: 'orig' },
-      });
+      const response = await tools.callTool(
+        {
+          name: 'draft_email',
+          arguments: { subject: 'x', body: 'ok', in_reply_to: 'orig' },
+        },
+        APPROVED,
+      );
       expect(text(response)).toContain('sent from this account');
       expect(text(response)).not.toContain('me@example.com');
       expect(google.urls).not.toContain('POST /gmail/v1/users/me/drafts');
@@ -265,10 +277,13 @@ describe('draft_email', () => {
         features: [...COMPOSE],
         routes: [route('/messages/orig', own), created],
       });
-      await tools.callTool({
-        name: 'draft_email',
-        arguments: { to: ['lin@example.com'], subject: 'x', body: 'ok', in_reply_to: 'orig' },
-      });
+      await tools.callTool(
+        {
+          name: 'draft_email',
+          arguments: { to: ['lin@example.com'], subject: 'x', body: 'ok', in_reply_to: 'orig' },
+        },
+        APPROVED,
+      );
       expect(sentDraft(google.bodies[0]).mime).toContain('To: lin@example.com');
     });
 
@@ -288,10 +303,13 @@ describe('draft_email', () => {
         features: [...COMPOSE],
         routes: [route('/messages/orig', withReplyTo('Lists <lists@example.org>')), created],
       });
-      const response = await tools.callTool({
-        name: 'draft_email',
-        arguments: { subject: 'x', body: 'ok', in_reply_to: 'orig' },
-      });
+      const response = await tools.callTool(
+        {
+          name: 'draft_email',
+          arguments: { subject: 'x', body: 'ok', in_reply_to: 'orig' },
+        },
+        APPROVED,
+      );
       expect(text(response)).toContain('no recipient');
       expect(text(response)).toContain('is from grace@example.com but asks for replies to go to lists@example.org');
       expect(google.urls).not.toContain('POST /gmail/v1/users/me/drafts');
@@ -302,10 +320,13 @@ describe('draft_email', () => {
         features: [...COMPOSE],
         routes: [route('/messages/orig', withReplyTo('a@example.org, b@example.org')), created],
       });
-      const response = await tools.callTool({
-        name: 'draft_email',
-        arguments: { subject: 'x', body: 'ok', in_reply_to: 'orig' },
-      });
+      const response = await tools.callTool(
+        {
+          name: 'draft_email',
+          arguments: { subject: 'x', body: 'ok', in_reply_to: 'orig' },
+        },
+        APPROVED,
+      );
       expect(text(response)).toContain('asks for replies to go to an address Aman cannot read');
       expect(text(response)).not.toContain('a@example.org');
       expect(google.urls).not.toContain('POST /gmail/v1/users/me/drafts');
@@ -316,10 +337,13 @@ describe('draft_email', () => {
         features: [...COMPOSE],
         routes: [route('/messages/orig', withReplyTo('GRACE@example.com')), created],
       });
-      await tools.callTool({
-        name: 'draft_email',
-        arguments: { subject: 'x', body: 'ok', in_reply_to: 'orig' },
-      });
+      await tools.callTool(
+        {
+          name: 'draft_email',
+          arguments: { subject: 'x', body: 'ok', in_reply_to: 'orig' },
+        },
+        APPROVED,
+      );
       expect(sentDraft(google.bodies[0]).mime).toContain('To: grace@example.com');
     });
 
@@ -328,10 +352,13 @@ describe('draft_email', () => {
         features: [...COMPOSE],
         routes: [route('/messages/orig', withReplyTo('lists@example.org')), created],
       });
-      await tools.callTool({
-        name: 'draft_email',
-        arguments: { to: ['lists@example.org'], subject: 'x', body: 'ok', in_reply_to: 'orig' },
-      });
+      await tools.callTool(
+        {
+          name: 'draft_email',
+          arguments: { to: ['lists@example.org'], subject: 'x', body: 'ok', in_reply_to: 'orig' },
+        },
+        APPROVED,
+      );
       expect(sentDraft(google.bodies[0]).mime).toContain('To: lists@example.org');
     });
 
@@ -354,10 +381,13 @@ describe('draft_email', () => {
         features: [...COMPOSE],
         routes: [route('/messages/orig', sender), created],
       });
-      const response = await tools.callTool({
-        name: 'draft_email',
-        arguments: { subject: 'x', body: 'ok', in_reply_to: 'orig' },
-      });
+      const response = await tools.callTool(
+        {
+          name: 'draft_email',
+          arguments: { subject: 'x', body: 'ok', in_reply_to: 'orig' },
+        },
+        APPROVED,
+      );
       expect(text(response)).toContain('no recipient');
       expect(text(response)).toContain('the sender address of the message being answered could not be read');
       expect(google.urls).not.toContain('POST /gmail/v1/users/me/drafts');
@@ -366,10 +396,13 @@ describe('draft_email', () => {
 
   it('refuses a plain draft with no recipient and says what to add', async () => {
     const { tools, google } = await build({ features: [...COMPOSE], routes: [] });
-    const response = await tools.callTool({
-      name: 'draft_email',
-      arguments: { subject: 'Lease', body: 'Thursday works.' },
-    });
+    const response = await tools.callTool(
+      {
+        name: 'draft_email',
+        arguments: { subject: 'Lease', body: 'Thursday works.' },
+      },
+      APPROVED,
+    );
     expect(text(response)).toContain('The draft has no recipient');
     expect(google.urls).toHaveLength(0);
   });
