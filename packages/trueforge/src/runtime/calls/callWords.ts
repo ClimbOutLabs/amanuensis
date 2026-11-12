@@ -112,23 +112,23 @@ function soundsLikeTheCall(text: string): boolean {
  * A delivery's words as a call may carry them: said aloud after a yes, or given to the call model. Whoever answers
  * hears them, and a model steered by a mail or a page can write a reminder, so they pass the texts' one check for
  * plain words: no number to call, no site and no address. They also must not sound like the call's own greeting,
- * opening or goodbye. Undefined when they do not, or are too long to say.
+ * opening or goodbye. `extra` holds the person's added words and the assistant's name, as for a text. Undefined when they do not, or are too long to say.
  */
-export function callWords(text: string): string | undefined {
+export function callWords(text: string, extra?: ReadonlySet<string>): string | undefined {
   if (soundsLikeTheCall(text)) {
     return undefined;
   }
   // The words are checked as the call will say them: as given, and again after the texts' cleaning, which drops
   // accents and signs a voice could say differently. What is returned is that cleaned form.
-  const words = checkedWords({ text: text.replace(/\s+/g, ' ').trim(), room: Number.MAX_SAFE_INTEGER });
+  const words = checkedWords({ text: text.replace(/\s+/g, ' ').trim(), room: Number.MAX_SAFE_INTEGER, extra });
   return words !== undefined && words !== '' && words.length <= CALL_WORDS_MAX && !soundsLikeTheCall(words)
     ? words
     : undefined;
 }
 
 /** The line said once the person said yes: what the call is about, or why it is not read out. */
-export function messageLine(delivery: Pick<Delivery, 'kind' | 'text'>): string {
-  const words = callWords(delivery.text);
+export function messageLine(delivery: Pick<Delivery, 'kind' | 'text'>, extra?: ReadonlySet<string>): string {
+  const words = callWords(delivery.text, extra);
   const reminder = delivery.kind === 'reminder';
   if (words === undefined) {
     return `Your ${reminder ? 'reminder' : 'message'} is not something I read out on the phone. It is in the app.`;

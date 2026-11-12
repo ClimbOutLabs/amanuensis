@@ -22,7 +22,7 @@ import type { DeliveryChannelSender } from '../delivery/deliveryChannel';
 import type { DeliveryService } from '../delivery/deliveryService';
 import { maskedTarget } from '../texts/smsSender';
 import { canText } from '../texts/textNumber';
-import { privatePhrase } from '../texts/textWords';
+import { allowedExtraWords, privatePhrase } from '../texts/textWords';
 import { callName } from './callName';
 import { CALL_LINES, CallTurns, type CallChat } from './callTurns';
 import { callVoiceProblem, type CallVoice } from './callVoiceReady';
@@ -95,6 +95,8 @@ type CallSpeaking = VoiceSessionDeps['tts'];
 export interface CallNames {
   assistant: string | undefined;
   person: string | undefined;
+  /** The words a call may say besides the word list, as for a text: the person's added words and the assistant's name. */
+  words: ReadonlySet<string>;
 }
 
 /** Opens the chat a call's conversation is written in, as the person, starting with the assistant's opening line. */
@@ -126,7 +128,7 @@ export interface PhoneCallService {
 interface PhoneCallDeps {
   store: IPhoneCallStore;
   deliveryStore: Pick<IDeliveryStore, 'get'>;
-  contacts: Pick<ITextContactStore, 'get' | 'claimTextSends' | 'forgetTextSends'>;
+  contacts: Pick<ITextContactStore, 'get' | 'listWords' | 'claimTextSends' | 'forgetTextSends'>;
   reachSettings: Pick<IReachSettingsStore, 'get'>;
   personalization: Pick<IPersonalizationStore, 'getProfile'>;
   /** Undefined when this server has no Twilio account. */
@@ -205,9 +207,11 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
   /** The same rule as a text: plain letters only, kept short, and never a name that holds a phone number. */
   async function namesFor(owner: { tenant_id: string; created_by: string }): Promise<CallNames> {
     const profile = await deps.personalization.getProfile(owner);
+    const assistant = callName(profile?.assistant_name);
     return {
-      assistant: callName(profile?.assistant_name),
+      assistant,
       person: callName(profile?.address_as ?? profile?.user_name),
+      words: await allowedExtraWords({ contacts: deps.contacts, owner, name: assistant ?? '' }),
     };
   }
 
@@ -618,7 +622,7 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
         );
       };
       const turns = new CallTurns({
-        message: delivery === undefined ? 'It is in the app for you to see.' : messageLine(delivery),
+        message: delivery === undefined ? 'It is in the app for you to see.' : messageLine(delivery, names.words),
         openChat: async () => {
           if (delivery === undefined) {
             return undefined;
@@ -628,7 +632,7 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
             names,
             delivery,
             call_id: call.id,
-            opening: `Hi, this is ${name}. ${messageLine(delivery)}`,
+            opening: `Hi, this is ${name}. ${messageLine(delivery, names.words)}`,
           });
           opened = chat;
           return chat;

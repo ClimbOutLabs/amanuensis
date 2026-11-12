@@ -589,6 +589,27 @@ describe('a call that ends while its line opens', () => {
     );
   });
 
+  it.each([
+    ['a word the person added is read out', 'Collect Zorblax at noon.', 'zorblax', 'Zorblax'],
+    ['an unknown word is not read out', 'Collect Quuxel at noon.', 'zorblax', undefined],
+    ['the assistant name is read out', 'Mannie will remind you at noon.', undefined, 'Mannie'],
+  ])('%s', async (_title, text, added, said) => {
+    h = await callsHarness({
+      chat: { turns: new FakeTurns({ message: [] }), begin: () => Promise.resolve('chat-1') },
+      listening: () => Promise.resolve({ vad: new LoudnessVad(), stt: new FakeStt('yes') }),
+    });
+    if (added !== undefined) {
+      await h.contacts.addWord({ ...ALICE, word: added, max: 50, now: new Date('2026-11-06T15:00:00.000Z') });
+    }
+    await h.readyToCall();
+    await h.callDelivery(text);
+    const media = await h.openMedia({ token: (await h.answer()).token });
+    await sayYes(media);
+    await h.waitFor(() => h.tts.sentences.join(' ').includes(said === undefined ? 'in the app' : said));
+    expect(h.tts.sentences.join(' ').includes('Quuxel')).toBe(false);
+    media.socket.close();
+  });
+
   it('does not say what was said is in the chat when no chat was written', async () => {
     h = await callsHarness({
       chat: { turns: new FakeTurns({ message: [] }), begin: () => Promise.resolve(undefined) },

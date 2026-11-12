@@ -7,6 +7,7 @@ import { migrateSqliteToLatest } from '../../../../src/db/migrateSqlite';
 import { createSqliteDb } from '../../../../src/db/sqlite/client';
 import { SqliteSessionStore } from '../../../../src/db/sqlite/session-store/SqliteSessionStore';
 import { createCallChats, PHONE_CALL_CHAT_TITLE, type CallAsk } from '../../../../src/runtime/calls/callChats';
+import type { CallNames } from '../../../../src/runtime/calls/phoneCalls';
 import type { Delivery } from '../../../../src/schemas/deliveries';
 
 type MdNode = { type: string; value?: string; children?: MdNode[] };
@@ -41,7 +42,7 @@ function delivery(link: Delivery['link']): Delivery {
 }
 
 const OWNER = { tenant_id: TENANT, created_by: 'dana' };
-const NAMES = { assistant: 'Mannie', person: 'Dana' };
+const NAMES = { assistant: 'Mannie', person: 'Dana', words: new Set(['mannie']) };
 
 /** Dana has a chat of her own unless `noChat`; a call chat borrows its assistant from her latest one. */
 async function setup({
@@ -75,7 +76,10 @@ async function setup({
   return { sessionStore, sessions, chats, asked };
 }
 
-async function opened(t: Awaited<ReturnType<typeof setup>>, input: { delivery: Delivery; call_id: string }) {
+async function opened(
+  t: Awaited<ReturnType<typeof setup>>,
+  input: { delivery: Delivery; call_id: string; names?: CallNames },
+) {
   const chat = await t.chats.open({ owner: OWNER, names: NAMES, opening: 'Hi, this is Mannie.', ...input });
   if (chat === undefined) {
     throw new Error('expected a conversation');
@@ -271,6 +275,19 @@ describe('what the assistant can do on a call', () => {
     expect(system).not.toContain('five five five');
     expect(system).not.toContain('dana@example.com');
     expect(system).toContain('Kind: reminder');
+  });
+
+  it('gives the call model an added word and the assistant name as the texts do, and no other unknown word', async () => {
+    const t = await setup();
+    const chat = await opened(t, {
+      delivery: { ...delivery(null), text: 'Collect Zorblax at noon', reason: 'Quuxel is waiting' },
+      call_id: 'call-12',
+      names: { ...NAMES, words: new Set(['mannie', 'zorblax']) },
+    });
+    await say(chat, 'what is it?');
+    const system = JSON.stringify(t.asked[0]?.messages[0]);
+    expect(system).toContain('Collect Zorblax at noon');
+    expect(system).not.toContain('Quuxel');
   });
 
   it('keeps what the delivery says as information: it cannot close the block it is in', async () => {

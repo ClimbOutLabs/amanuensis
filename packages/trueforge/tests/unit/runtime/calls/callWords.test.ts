@@ -79,6 +79,13 @@ describe('the words a call may carry', () => {
     expect(callWords('Dentist at noon')).toBeDefined();
   });
 
+  it('carries the words added for it, as a text does', () => {
+    const extra = new Set(['zxqvbn']);
+    expect(callWords('Zxqvbn at noon', extra)).toBe('Zxqvbn at noon');
+    expect(callWords('Zxqvbn at noon')).toBeUndefined();
+    expect(callWords('Hello Zxqvbn', extra)).toBeUndefined();
+  });
+
   it('carries nothing longer than 300 characters', () => {
     const sentence = 'The dog jumps over the lazy cat and ';
     expect(callWords(sentence.repeat(8).trim())).toBeDefined();

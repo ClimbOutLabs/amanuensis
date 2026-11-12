@@ -70,8 +70,8 @@ function callInstructions({ names, delivery }: { names: CallNames; delivery: Del
     'Answer in one to three short sentences, as speech: plain words, no lists, no links and no formatting.',
     '<about>',
     `Kind: ${delivery.kind}`,
-    `What: ${asData(callWords(delivery.text) ?? LEFT_OUT)}`,
-    `Why you called: ${asData(callWords(delivery.reason) ?? LEFT_OUT)}`,
+    `What: ${asData(callWords(delivery.text, names.words) ?? LEFT_OUT)}`,
+    `Why you called: ${asData(callWords(delivery.reason, names.words) ?? LEFT_OUT)}`,
     '</about>',
   ].join('\n');
 }
