@@ -105,6 +105,13 @@ describe('notes in Obsidian, reached through a connector the person adds by its 
     return { chatId, turn: await runTurn({ server, chatId, input }) };
   }
 
+  /** Everything the chat holds so far, tool results included. */
+  async function chatLog(chatId: string): Promise<string> {
+    const response = await server.request(`/api/v1/sessions/${chatId}/events`);
+    expect(response.status).toBe(200);
+    return response.text();
+  }
+
   beforeAll(async () => {
     server = await startApprovalTestServer();
     const added = await server.request(
@@ -144,9 +151,9 @@ describe('notes in Obsidian, reached through a connector the person adds by its 
     if (card === undefined) {
       throw new Error('the first search of the notes did not ask');
     }
-    expect(JSON.stringify(first.turn)).not.toContain(NOTE);
+    expect(await chatLog(first.chatId)).not.toContain(NOTE);
 
-    const approved = await runTurn({
+    await runTurn({
       server,
       chatId: first.chatId,
       input: [
@@ -158,10 +165,10 @@ describe('notes in Obsidian, reached through a connector the person adds by its 
         },
       ],
     });
-    expect(JSON.stringify(approved)).toContain(NOTE);
+    expect(await chatLog(first.chatId)).toContain(NOTE);
 
     const later = await useObsidian({ tool: SEARCH_TOOL, toolArguments: { query: NOTE_WORD } });
     expect(cards(later.turn)).toEqual([]);
-    expect(JSON.stringify(later.turn)).toContain(NOTE);
+    expect(await chatLog(later.chatId)).toContain(NOTE);
   });
 });
