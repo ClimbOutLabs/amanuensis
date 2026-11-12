@@ -161,6 +161,8 @@ export type SentinelApprovalCard = {
   schedule: SentinelApprovalSchedule | null;
   /** The whole persona when the action adds one, or null. */
   persona: SentinelApprovalPersona | null;
+  /** The skill when the action adds one, or null. */
+  skill: SentinelApprovalSkill | null;
   /** For a mail send to addresses not on the Email list: those addresses. Approving adds them. Otherwise null. */
   mail_new_recipients?: string[] | null;
   /** True when a card carrying mail_new_recipients approves saving a draft rather than sending. */
@@ -177,6 +179,21 @@ export type SentinelApprovalPersona = {
   instructions: string;
   /** The model the persona answers with. */
   model_name: string;
+};
+
+/** The skill a chat call adds, as the server read it from where it comes from. */
+export type SentinelApprovalSkill = {
+  name: string;
+  /** What the skill is for, as the skill itself says. */
+  description: string;
+  /** The repository the skill comes from, and the folder in it when there is one. */
+  source: string;
+  /** The exact commit that is added. */
+  version: string;
+  /** True when this is one of the starter skills that come with the app. */
+  starter: boolean;
+  /** The skill's own instruction file, or null for a starter skill. */
+  instructions: string | null;
 };
 
 /** What the server says about an action a scheduled run held for its owner instead of asking. */
@@ -560,6 +577,27 @@ function parsePersona(value: unknown): SentinelApprovalPersona | null {
   return { name, description, instructions, model_name };
 }
 
+/** A card missing any field is not shown as a skill, so a partial one is never approved as if it were whole. */
+function parseSkill(value: unknown): SentinelApprovalSkill | null {
+  if (!isRecord(value)) return null;
+  const name = optionalString(value, 'name');
+  const description = optionalString(value, 'description');
+  const source = optionalString(value, 'source');
+  const version = optionalString(value, 'version');
+  const { starter, instructions } = value;
+  if (
+    name === undefined ||
+    description === undefined ||
+    source === undefined ||
+    version === undefined ||
+    typeof starter !== 'boolean' ||
+    (instructions !== null && typeof instructions !== 'string')
+  ) {
+    return null;
+  }
+  return { name, description, source, version, starter, instructions };
+}
+
 /** A card missing any field is not shown as a schedule, so a partial schedule is never approved as if it were whole. */
 function parseSchedule(value: unknown): SentinelApprovalSchedule | null {
   if (!isRecord(value)) return null;
@@ -605,6 +643,7 @@ function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
     calendar_event: parseCalendarEvent(value.calendar_event ?? value.calendarEvent),
     schedule: parseSchedule(value.schedule),
     persona: parsePersona(value.persona),
+    skill: parseSkill(value.skill),
     mail_new_recipients: parseNewRecipients(value.mail_new_recipients ?? value.mailNewRecipients),
     mail_draft: cardFlag(value, { snake: 'mail_draft', camel: 'mailDraft' }),
   });

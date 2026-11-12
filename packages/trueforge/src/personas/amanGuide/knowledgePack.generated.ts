@@ -182,8 +182,8 @@ export const AMAN_GUIDE_TOPICS: readonly AmanGuideTopic[] = [
   {
     id: 'skills',
     title: 'Learning new skills',
-    covers: ['settings:skills', 'route:skill'],
-    body: 'Aman can learn a new skill. For example, ask it to learn how to turn a photo of a receipt into a line in your expense list.\n\nSkills run in the sandbox, so the sandbox must be set up first. Open Settings, then Skills to see the skills Aman has, to add one, or to turn one off.\n\nThe "Learn new skills" card only appears once the sandbox is ready.',
+    covers: ['settings:skills', 'route:skill', 'approval:skill'],
+    body: 'Aman can learn a new skill. For example, ask it to learn how to turn a photo of a receipt into a line in your expense list.\n\nSkills run in the sandbox, so the sandbox must be set up first. Open Settings, then Skills to see the skills Aman has, to add one, or to turn one off.\n\n## Adding a skill from a chat\n\nYou can also ask Aman in a chat to add a skill. Say which one, or paste the GitHub address of the skill, for example "add the skill at github.com/acme/skills/tree/main/skills/release-notes".\n\nAman shows a card before anything is added. The card names the skill, what it is for, where it comes from and the exact version. Aman reads the name and the description from the skill itself. A skill is instructions written by someone else, so add one only if you trust where it comes from. Nothing is added until you press **Allow**. This card asks every time.\n\nAfter you allow it, the skill is on for that chat from your next message. It also shows in Settings, under Skills, where you can remove it.\n\nSome things stay in Settings. Aman cannot change or remove a skill from a chat. A skill that asks to reach sites still needs your OK there. An incognito chat cannot add a skill. A scheduled run cannot add one either. Only skills in a public GitHub repository can be added from a chat.\n\nThe "Learn new skills" card only appears once the sandbox is ready.',
   },
   {
     id: 'spaces',
@@ -871,24 +871,30 @@ export const AMAN_GUIDE_TOPICS: readonly AmanGuideTopic[] = [
   },
   {
     id: 'docs-skills-3',
+    title: 'Setup Skills: Adding a skill from a chat',
+    covers: [],
+    body: "You can ask the assistant to add a skill for you: name one of the starter skills, or paste the address of a skill in a public GitHub repository.\n\n- The assistant reads the skill's `SKILL.md` on GitHub and settles the branch or tag to one exact commit. The skill is saved pinned to that commit, so a later change to the repository is not picked up.\n- An approval card shows the name, the description, the repository and folder, and the commit. For a skill read from GitHub it also shows the skill's own instructions. The name and description come from the skill's `SKILL.md`, not from the model. Nothing is saved until you allow it, and the card asks every time.\n- A starter skill is added as shipped, at the commit the catalog pins, with no lookup.\n- After you allow it, the skill is turned on for that chat and listed under **Settings → Skills**.\n\nFrom a chat the assistant can only add. Changing or removing a skill, and letting a skill reach sites, stay in **Settings → Skills**. Incognito chats and scheduled runs cannot add a skill. See the [safety story](/safety) for the rules behind this.\n\nPublic source: https://github.com/ClimbOutLabs/amanuensis/blob/main/docs/skills.mdx",
+  },
+  {
+    id: 'docs-skills-4',
     title: 'Setup Skills: What a skill contains',
     covers: [],
     body: '```text\ncustomer-support-skill/\n├── SKILL.md\n├── references/\n│   └── escalation-policy.md\n└── scripts/\n    └── classify_ticket.py\n```\n\n`SKILL.md` has YAML frontmatter (`name`, `description`) and a markdown body of instructions. The `description` is what the agent sees upfront; the full body and supporting files load only when the agent picks the skill (**progressive disclosure**).\n\nPublic source: https://github.com/ClimbOutLabs/amanuensis/blob/main/docs/skills.mdx',
   },
   {
-    id: 'docs-skills-4',
+    id: 'docs-skills-5',
     title: 'Setup Skills: Runtime requirements',
     covers: [],
     body: "Skills require the agent's [sandbox](/sandbox) to be enabled. The skill repository is cloned into the sandbox, and the\n  agent reads `SKILL.md` (and can run bundled scripts) there. Two skills cannot share the same name on one agent.\n\nAt runtime:\n\n1. The harness exposes each attached skill's name and description.\n2. When the model decides a skill is relevant, the repo is materialized under `/opt/tfy/skills/{name}`.\n3. The agent follows `SKILL.md` and uses supporting files as needed.\n\nPublic source: https://github.com/ClimbOutLabs/amanuensis/blob/main/docs/skills.mdx",
   },
   {
-    id: 'docs-skills-5',
+    id: 'docs-skills-6',
     title: 'Setup Skills: Skills + MCP tools',
     covers: [],
     body: '- **Skills** define _how_ to handle a task (procedure, decision logic, formatting).\n- **MCP tools** provide the _actions and data_ to execute it.\n\nExample: a CRM follow-up skill sets tone and escalation rules; MCP tools look up the record, update the ticket, and notify Slack.\n\nPublic source: https://github.com/ClimbOutLabs/amanuensis/blob/main/docs/skills.mdx',
   },
   {
-    id: 'docs-skills-6',
+    id: 'docs-skills-7',
     title: 'Setup Skills: Authoring tips',
     covers: [],
     body: '- Keep the `description` sharp — it is the only thing the model sees before loading the skill.\n- Write `SKILL.md` like instructions to a competent teammate.\n- Put heavy reference material in supporting files the skill links to.\n- Prefer several focused skills over one sprawling pack.\n\nPublic source: https://github.com/ClimbOutLabs/amanuensis/blob/main/docs/skills.mdx',

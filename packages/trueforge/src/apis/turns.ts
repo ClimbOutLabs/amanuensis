@@ -59,6 +59,7 @@ import type { Logger } from 'winston';
 import type { Authorizer } from '../auth/authorizer';
 import { createdBySubjectFromRequestContext, type ResolveRequestContext } from '../auth/identity';
 import type { McpCatalog } from '../catalog/McpCatalog';
+import type { SkillCatalog } from '../catalog/SkillCatalog';
 import configuration, { getRunCodeToolCallTimeoutMs, isTrueFoundryModeEnabled } from '../config';
 import type { AgentRecord, IAgentStore } from '../db/agentStore';
 import type { ICompletedTurnEventStore } from '../db/completedTurnEvents';
@@ -153,6 +154,7 @@ import {
   resolveSandboxProvider,
   withGatewayMetadataHeaders,
 } from '../runtime/sessionResources';
+import type { SkillTurnContext } from '../runtime/skillCapability';
 import { SPACE_WRITE_TOOL_ARGUMENT_LIMITS, SpaceTurnResourceResolver } from '../runtime/spaceCapability';
 import { TokenFactoryMeteredLLM, tokenFactoryRole, type TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
 import { resolveToolOutputScreenEnabled } from '../runtime/toolOutputScreenSettings';
@@ -279,6 +281,8 @@ export interface TurnsRouterDeps {
   resolveModelProviderStore: (c: Context, runAsAgent?: AgentRecord) => IModelProviderStore;
   resolveMcpServerStore: (c: Context, runAsAgent?: AgentRecord) => IMcpServerWithAuthStore;
   resolveSkillStore: (c: Context) => ISkillStore;
+  /** The starter skills a chat can add; absent, no skill tools mount. */
+  skillCatalog?: SkillCatalog | undefined;
   resolveAgentStore: (c: Context) => IAgentStore;
   /** Fork-only: not agent-scoped upstream, so these stay directly injected rather than resolved per-request. */
   tokenStore: IOAuthTokenStore;
@@ -453,6 +457,8 @@ function createTurnResolver(deps: {
   schedules?: ScheduleTurnContext | undefined;
   /** Chat turns that have a model to answer with; absent, no persona tool mounts. */
   personas?: PersonaTurnContext | undefined;
+  /** Chat turns where this app keeps the skills itself; absent, no skill tools mount. */
+  skills?: SkillTurnContext | undefined;
 }): SpaceTurnResourceResolver {
   const {
     mcpCatalog,
@@ -500,6 +506,7 @@ function createTurnResolver(deps: {
     modelUsage,
     schedules,
     personas,
+    skills,
   } = deps;
   const tenant_id = session.tenant_id;
   const sessionId = session.session_id;
@@ -980,6 +987,7 @@ function createTurnResolver(deps: {
       sessionId,
       schedules,
       personas,
+      skills,
       logger,
       startsAnswer,
     },
@@ -2732,6 +2740,11 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       memoryProvider?.settings,
       memoryScreenSetting.overridden ? memoryScreenSetting.enabled : undefined,
     );
+    const serverSandboxAvailable = await readServerSandboxAvailable({
+      store: sandboxProviderStore,
+      tenant_id: requestContext.tenant_id,
+      logger: deps.logger,
+    });
     const resolver = createTurnResolver({
       mcpCatalog: deps.mcpCatalog,
       chatDeletionStore: deps.chatDeletionStore,
@@ -2756,11 +2769,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       switchedByMessage: persona?.selection === 'direct',
       internalSourceState: internalSources.internalSourceState,
       boundRepository,
-      serverSandboxAvailable: await readServerSandboxAvailable({
-        store: sandboxProviderStore,
-        tenant_id: requestContext.tenant_id,
-        logger: deps.logger,
-      }),
+      serverSandboxAvailable,
       repositoryStore: deps.repositoryStore,
       sentinelSettingsStore: deps.sentinelSettingsStore,
       sessionStore: deps.sessionStore,
@@ -2793,6 +2802,17 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
               session_id: session.session_id,
               default_assistant_name: profile?.assistant_name ?? null,
               logger: deps.logger,
+            },
+      // A managed registry keeps its own skills, so there the tools stay off.
+      skills:
+        deps.skillCatalog === undefined || isTrueFoundryModeEnabled()
+          ? undefined
+          : {
+              store: skillStore,
+              tenant_id: requestContext.tenant_id,
+              catalog: deps.skillCatalog.list(),
+              sandboxReady: serverSandboxAvailable,
+              fetchImpl: fetch,
             },
       schedules:
         deps.schedules === undefined || chatRunner === undefined
