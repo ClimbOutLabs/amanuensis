@@ -137,15 +137,12 @@ describe('withoutAbilityNotes and stripAssistantAbilityNotes', () => {
       sessionId: 's1',
       turnId: 't3',
       userText: "I won't be able to check email on Friday.",
-      assistantText: 'Noted. I moved the reminder to Monday.',
       completedAt: '2026-09-19T12:00:00.000Z',
     });
     if (item === undefined) {
       throw new Error('expected a retain item');
     }
-    const result = stripAssistantAbilityNotes(item.content);
-    expect(result).toContain("I won't be able to check email on Friday.");
-    expect(result).toContain('I moved the reminder to Monday.');
+    expect(stripAssistantAbilityNotes(item.content)).toBe("User: I won't be able to check email on Friday.");
   });
 
   it('leaves a line with no ability note byte-identical, doubled spaces included', () => {
@@ -180,38 +177,19 @@ describe('withoutAbilityNotes and stripAssistantAbilityNotes', () => {
     expect(result[0]).not.toContain("can't read email");
   });
 
-  it('never filters what the person said in a verbatim turn, and filters only the assistant side', () => {
-    const item = buildRetainItem({
-      origin: 'user_stated',
-      sessionId: 's1',
-      turnId: 't1',
-      userText: "Please check my email. Also note I can't read my email at work, the firewall blocks it.",
-      assistantText:
-        "I can't read email right now because the sign-in failed. Your dentist appointment is on Friday at 10.",
-      completedAt: '2026-09-19T12:00:00.000Z',
-    });
-    if (item === undefined) {
-      throw new Error('expected a retain item');
-    }
-    const result = stripAssistantAbilityNotes(item.content);
+  it('never filters what the person said in a turn saved whole by an older version, and filters only the assistant side', () => {
+    const content = [
+      "User: Please check my email. Also note I can't read my email at work, the firewall blocks it.",
+      "Assistant: I can't read email right now because the sign-in failed. Your dentist appointment is on Friday at 10.",
+    ].join('\n\n');
+    const result = stripAssistantAbilityNotes(content);
     expect(result).toContain("I can't read my email at work");
     expect(result).toContain('Your dentist appointment is on Friday at 10.');
     expect(result).not.toContain("I can't read email right now");
   });
 
   it('keeps the person side when the whole assistant side is an ability note', () => {
-    const item = buildRetainItem({
-      origin: 'user_stated',
-      sessionId: 's1',
-      turnId: 't2',
-      userText: 'Please read my new email.',
-      assistantText: "I can't read email.",
-      completedAt: '2026-09-19T12:00:00.000Z',
-    });
-    if (item === undefined) {
-      throw new Error('expected a retain item');
-    }
-    const result = stripAssistantAbilityNotes(item.content);
+    const result = stripAssistantAbilityNotes("User: Please read my new email.\n\nAssistant: I can't read email.");
     expect(result).toContain('Please read my new email.');
     expect(result).not.toContain("can't read email");
   });

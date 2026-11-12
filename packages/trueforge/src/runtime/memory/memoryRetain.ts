@@ -16,13 +16,14 @@ import { readMemoryPageSortingSetting } from '../memoryPageSortingSettings';
 import type { TurnModelUsage } from '../modelUsage';
 import { sessionKeepsNothing } from '../privateChat';
 import type { TokenFactoryBudget } from '../tokenFactoryBudget';
-import { stripAssistantAbilityNotes, withoutAbilityNotes } from './assistantAbilityNotes';
+import { withoutAbilityNotes } from './assistantAbilityNotes';
 import type { RetainItem, WrittenEntry } from './hindsightClient';
 import { isOperationCompletedStatus, isOperationFailedStatus } from './hindsightClient';
 import { localDay } from './localDay';
 import { normalizedEntryBody, SESSION_ID_METADATA_KEY } from './markdownMemoryFiles';
 import type { MemoryClient } from './memoryClient';
 import {
+  ASSISTANT_RESPONSE_SOURCE,
   labeledNoteText,
   NOTE_DATE_METADATA_KEY,
   NOTE_SOURCE_METADATA_KEY,
@@ -48,13 +49,12 @@ export interface BuildRetainItemParams {
   sessionId: string;
   turnId: string;
   userText: string;
-  assistantText: string;
   completedAt: string;
   /** Where the turn's text came from. The caller always says; nothing is assumed. */
   origin: AmanMemoryOrigin;
   /**
-   * The text to store in place of the verbatim `User:`/`Assistant:` transcript: the durable
-   * facts, or the person's own words. Set only when `MEMORY_SUMMARIZE` is on for this turn.
+   * The text to store in place of the person's words as they wrote them: the durable facts.
+   * Set only when `MEMORY_SUMMARIZE` is on for this turn.
    *
    * Screening adjudication: it inherits the turn's origin unchanged. Summarization is not a
    * trust upgrade: facts from a tool_ingested turn stay tool_ingested (the summarizer treats
@@ -65,23 +65,21 @@ export interface BuildRetainItemParams {
 }
 
 /**
- * Returns undefined when there is nothing worth retaining (both sides empty, or blank `memoryText`).
+ * The item for the person's side of a turn: the facts, or their own words when the turn is kept in full.
+ * The reply is never part of it, because what the assistant said is not what the person said; a turn kept
+ * in full saves the reply as a note of its own. Returns undefined when that side holds nothing.
  *
  * Lossless by design: this never drops or gates a memory on its origin. It only stamps the origin
  * so the recall screen can decide, later and per turn, which recalled items reach the model.
  */
 export function buildRetainItem(params: BuildRetainItemParams): RetainItem | undefined {
   const userText = params.userText.trim();
-  const assistantText = params.assistantText.trim();
-  if (!userText && !assistantText) {
-    return undefined;
-  }
-  const memoryText = params.memoryText?.trim();
-  if (memoryText === '') {
+  const content = params.memoryText === undefined ? userText && `User: ${userText}` : params.memoryText.trim();
+  if (content === '') {
     return undefined;
   }
   const item: RetainItem = {
-    content: memoryText ?? `User: ${userText}\n\nAssistant: ${assistantText}`,
+    content,
     timestamp: params.completedAt,
     document_id: `aman-${params.sessionId}-${params.turnId}`,
     metadata: {
@@ -200,11 +198,14 @@ export async function submitRetain(params: SubmitRetainParams): Promise<void> {
 /** Outcome of one retain submission attempt; `skipped` means there was nothing to retain. */
 type RetainSubmissionResult = 'submitted' | 'failed' | 'skipped';
 
-/** What one turn adds to memory: text to store, the full exchange, or nothing at all. */
+/**
+ * What one turn adds to memory: text to store, notes alone, the turn in full, or nothing at all. A turn kept
+ * in full is the person's words plus the reply as a note.
+ */
 type TurnMemory =
   | { kind: 'text'; text: string; notes: readonly LabeledNote[] }
   | { kind: 'notes'; notes: readonly LabeledNote[] }
-  | { kind: 'exchange' }
+  | { kind: 'exchange'; notes: readonly LabeledNote[] }
   | { kind: 'nothing' };
 
 /** A finding or reply note ready to store: its source, its day, and its text with the label in front. */
@@ -265,11 +266,7 @@ async function decideNotes({
     modelUsage: summarize.modelUsage,
     logger: params.logger,
   });
-  const instant = new Date(params.completedAt);
-  const date = localDay({
-    instant: Number.isNaN(instant.getTime()) ? new Date() : instant,
-    timeZone: params.timeZone,
-  }).date;
+  const date = turnDay(params);
   const assistantName = usablePersonName(summarize.assistantName);
   return notes
     .filter(note => withoutAbilityNotes([note.text]).length > 0)
@@ -280,6 +277,26 @@ async function decideNotes({
     }));
 }
 
+/** The day the turn ended, as the person lived it. */
+function turnDay(params: SubmitRetainParams): string {
+  const instant = new Date(params.completedAt);
+  return localDay({
+    instant: Number.isNaN(instant.getTime()) ? new Date() : instant,
+    timeZone: params.timeZone,
+  }).date;
+}
+
+/** The whole reply of a turn kept in full, as a reply note; nothing when the reply only said what the assistant cannot do. */
+function fullReplyNotes(params: SubmitRetainParams): LabeledNote[] {
+  const [reply] = withoutAbilityNotes([params.assistantText.trim()]);
+  if (reply === undefined) {
+    return [];
+  }
+  const date = turnDay(params);
+  const label = noteLabel({ source: ASSISTANT_RESPONSE_SOURCE, date, assistantName: undefined });
+  return [{ source: ASSISTANT_RESPONSE_SOURCE, date, text: labeledNoteText({ label, text: reply }) }];
+}
+
 /** What the person said that is worth keeping, decided as it always was; notes are decided apart from it. */
 async function decidePersonFacts(params: SubmitRetainParams): Promise<TurnMemory> {
   const summarize = params.summarize;
@@ -288,7 +305,7 @@ async function decidePersonFacts(params: SubmitRetainParams): Promise<TurnMemory
       sessionId: params.sessionId,
       turnId: params.turnId,
     });
-    return { kind: 'exchange' };
+    return { kind: 'exchange', notes: fullReplyNotes(params) };
   }
   try {
     const result = await summarizeTurnContent({
@@ -534,24 +551,21 @@ async function attemptRetainSubmission(
     await params.client.completeOperation?.(retainOperationId({ sessionId: params.sessionId, turnId: params.turnId }));
     return 'skipped';
   }
-  const noteItems =
-    memory.kind === 'text' || memory.kind === 'notes' ? noteRetainItems({ params, notes: memory.notes }) : [];
+  const noteItems = noteRetainItems({ params, notes: memory.notes });
   const personItem =
     memory.kind === 'notes'
       ? undefined
       : buildRetainItem({ ...params, memoryText: memory.kind === 'text' ? memory.text : undefined });
-  const item = personItem ?? noteItems[0];
-  if (item === undefined) {
-    return 'skipped';
-  }
-  // Decided here, before any backend call, so every backend behaves the same. Returning
-  // 'skipped' also ends the verification pass, so this info line is logged once per turn.
-  // Summarized facts were already filtered, so only a kept exchange needs this check.
-  if (memory.kind === 'exchange' && stripAssistantAbilityNotes(item.content) === '') {
-    logTurnMemoryNotSaved(params, {
-      message: 'it only described what the assistant could not do',
-      reason: 'ability_notes_only',
-    });
+  if (personItem === undefined && noteItems.length === 0) {
+    // Decided here, before any backend call, so every backend behaves the same. Returning
+    // 'skipped' also ends the verification pass, so this info line is logged once per turn.
+    // Summarized facts were already filtered, so only a turn kept in full needs this line.
+    if (memory.kind === 'exchange' && params.assistantText.trim() !== '') {
+      logTurnMemoryNotSaved(params, {
+        message: 'it only described what the assistant could not do',
+        reason: 'ability_notes_only',
+      });
+    }
     return 'skipped';
   }
   const items = await withoutStoredCopies({

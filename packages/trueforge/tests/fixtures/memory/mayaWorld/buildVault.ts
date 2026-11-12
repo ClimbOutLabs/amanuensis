@@ -28,7 +28,6 @@ export function retainItemOf(entry: MayaEntry): RetainItem {
       sessionId: entry.session,
       turnId,
       userText: entry.content,
-      assistantText: 'Noted.',
       completedAt: entry.timestamp,
       memoryText: entry.content,
       origin: USER_STATED_ORIGIN,

@@ -811,7 +811,13 @@ describe('HindsightMemoryProcessor.processPreLLM', () => {
     expect(retain).toHaveBeenCalledTimes(1);
     expect(retain).toHaveBeenCalledWith(
       expect.objectContaining({
-        items: [expect.objectContaining({ content: 'User: previous question\n\nAssistant: previous answer' })],
+        items: [
+          expect.objectContaining({ content: 'User: previous question' }),
+          expect.objectContaining({
+            content: expect.stringContaining(': previous answer'),
+            metadata: expect.objectContaining({ origin: 'tool_ingested', note_source: 'assistant_response' }),
+          }),
+        ],
       }),
     );
 

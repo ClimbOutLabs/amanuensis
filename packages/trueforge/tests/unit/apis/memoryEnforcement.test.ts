@@ -501,14 +501,18 @@ describe('Host-enforced memory: wiring through the real HTTP API and session sto
       const retainBody = RetainRequestBodySchema.parse(retainRequest.body);
       expect(retainBody.async).toBe(true);
       expect(retainBody.operation_id.length).toBeGreaterThan(0);
-      const item = retainBody.items[0];
-      if (!item) {
-        throw new Error('expected the retain request to carry one item');
+      const [words, reply] = retainBody.items;
+      if (!words || !reply) {
+        throw new Error("expected the retain request to carry the person's words and the reply as two items");
       }
-      expect(item.content).toContain(USER_MESSAGE_1);
-      expect(item.content).toContain(FINAL_TEXT);
-      expect(item.document_id).toContain(sessionId);
-      expect(item.document_id).toContain(turn1.id);
+      expect(words.content).toContain(USER_MESSAGE_1);
+      expect(words.content).not.toContain(FINAL_TEXT);
+      expect(reply.content).toContain(FINAL_TEXT);
+      expect(reply.content).not.toContain(USER_MESSAGE_1);
+      for (const item of [words, reply]) {
+        expect(item.document_id).toContain(sessionId);
+        expect(item.document_id).toContain(turn1.id);
+      }
 
       turn1OperationId = retainBody.operation_id;
     },
