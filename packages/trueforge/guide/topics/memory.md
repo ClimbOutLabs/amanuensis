@@ -8,8 +8,6 @@ Aman remembers what matters to you. Ask "What do you remember about me so far?" 
 
 How to get there: Click **More** in the left bar, then **Settings**, then **Memory**.
 
-![The Memory page in Settings](../../../../docs/screenshots/app/settings-memory.png)
-
 Memory is on by default. It is stored as plain Markdown files on your own computer. Open Settings, then Memory, to read, change or delete what Aman remembers.
 
 Memory search uses a small model that runs on your computer. Nothing about it is sent away.

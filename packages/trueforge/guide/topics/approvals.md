@@ -10,8 +10,6 @@ Aman shows an approval card before it does something that matters. Nothing happe
 
 How to get there: Click **More** in the left bar, then **Settings**, then **Permissions**.
 
-![The Permissions page in Settings](../../../../docs/screenshots/app/settings-permissions.png)
-
 Reading is free. Aman does not ask before it reads. It asks before it sends, saves or changes something.
 
 ## The buttons on a card
