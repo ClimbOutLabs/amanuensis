@@ -10,6 +10,9 @@ export const MAX_SKILL_FILE_BYTES = 100 * 1024;
 
 const FULL_COMMIT = /^[0-9a-f]{40}$/;
 
+/** A lookup that takes longer is given up, so a slow GitHub cannot hold a chat's answer. */
+const LOOKUP_TIMEOUT_MS = 15_000;
+
 export type SkillSourceProblem =
   'not_github' | 'not_found' | 'no_skill_file' | 'unreadable_skill_file' | 'too_large' | 'rate_limited' | 'unavailable';
 
@@ -121,6 +124,7 @@ async function githubGet(input: { path: string; accept: string; fetchImpl: typeo
     response = await input.fetchImpl(`https://api.github.com${input.path}`, {
       headers: { accept: input.accept, 'user-agent': 'amanuensis', 'x-github-api-version': '2022-11-28' },
       redirect: 'manual',
+      signal: AbortSignal.timeout(LOOKUP_TIMEOUT_MS),
     });
   } catch (error) {
     throw new SkillSourceError('unavailable', { cause: error });
@@ -144,7 +148,13 @@ async function readCapped(response: Response): Promise<string> {
   const chunks: Uint8Array[] = [];
   let size = 0;
   for (;;) {
-    const { done, value } = await reader.read();
+    let step: Awaited<ReturnType<typeof reader.read>>;
+    try {
+      step = await reader.read();
+    } catch (error) {
+      throw new SkillSourceError('unavailable', { cause: error });
+    }
+    const { done, value } = step;
     if (done) {
       break;
     }
