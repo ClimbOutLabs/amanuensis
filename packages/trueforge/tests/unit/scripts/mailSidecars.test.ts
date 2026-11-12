@@ -104,8 +104,8 @@ describe('mail and calendar sidecars', () => {
     expect(body.indexOf('rm -f "$status"')).toBeGreaterThan(-1);
     expect(body.indexOf('rm -f "$status"')).toBeLessThan(body.indexOf('mcp-email-server'));
     // The record is written only after the port probe passes, never at spawn time.
-    expect(body.indexOf('port_answers')).toBeGreaterThan(-1);
-    expect(body.indexOf('port_answers')).toBeLessThan(body.indexOf('>"$status.tmp"'));
+    expect(body.indexOf('server_answers')).toBeGreaterThan(-1);
+    expect(body.indexOf('server_answers')).toBeLessThan(body.indexOf('>"$status.tmp"'));
   });
 
   it('mail-email reads attachment content for the agent as data', () => {

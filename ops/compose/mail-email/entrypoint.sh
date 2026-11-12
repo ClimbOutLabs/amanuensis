@@ -40,10 +40,68 @@ account_hash() {
   sha256sum "$account" 2>/dev/null | cut -d' ' -f1 || true
 }
 
-# True once the mail server answers on its port. A started process is not an answering server:
-# it can still be loading its account and index, and a connection in that window is refused.
-port_answers() {
-  python3 -c 'import socket, sys; probe = socket.socket(); probe.settimeout(1); answered = probe.connect_ex(("127.0.0.1", 9557)) == 0; probe.close(); sys.exit(0 if answered else 1)'
+# Where the started server listens, read from the --host and --port it is started with. A server
+# listening on every address is probed on this container's own loopback address.
+probe_host=127.0.0.1
+probe_port=9557
+read_listen_address() {
+  while [ "$#" -gt 0 ]; do
+    case $1 in
+      --host)
+        if [ "$#" -gt 1 ]; then
+          probe_host=$2
+          shift
+        fi
+        ;;
+      --host=*) probe_host=${1#--host=} ;;
+      --port)
+        if [ "$#" -gt 1 ]; then
+          probe_port=$2
+          shift
+        fi
+        ;;
+      --port=*) probe_port=${1#--port=} ;;
+    esac
+    shift
+  done
+  case $probe_host in
+    '' | 0.0.0.0) probe_host=127.0.0.1 ;;
+    '::' | '[::]') probe_host=::1 ;;
+  esac
+}
+
+# How long a start waits for the server to answer before it stops waiting, in seconds, counted
+# from the start and including each probe's own connect time. It stays well inside the app's
+# 45 second wait for the record.
+answer_wait=20
+
+# True once the started server answers on its port, within the answer wait. False as soon as the
+# server exits. A started process is not an answering server: it can still be loading its account
+# and index, and a connection in that window is refused.
+server_answers() {
+  python3 - "$child" "$probe_host" "$probe_port" "$answer_wait" <<'PY'
+import os
+import socket
+import sys
+import time
+
+pid, host, port, limit = int(sys.argv[1]), sys.argv[2], int(sys.argv[3]), float(sys.argv[4])
+deadline = time.monotonic() + limit
+while True:
+    left = deadline - time.monotonic()
+    if left <= 0:
+        sys.exit(1)
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        sys.exit(1)
+    try:
+        socket.create_connection((host, port), timeout=min(1.0, left)).close()
+        sys.exit(0)
+    except OSError:
+        pass
+    time.sleep(min(0.2, max(0.0, deadline - time.monotonic())))
+PY
 }
 
 child=
@@ -75,19 +133,10 @@ start_server() {
   # The list is recorded as loaded only once the server answers on its port. The wait is bounded
   # well inside the server's own wait for the record: a server that never answers simply never
   # gets a record, and the loop below keeps watching the one that was started.
-  waited=0
-  while [ "$waited" -lt 100 ]; do
-    if ! kill -0 "$child" 2>/dev/null; then
-      break
-    fi
-    if port_answers; then
-      printf '%s\n' "$loaded" >"$status.tmp"
-      mv "$status.tmp" "$status"
-      break
-    fi
-    sleep 0.2
-    waited=$((waited + 1))
-  done
+  if server_answers; then
+    printf '%s\n' "$loaded" >"$status.tmp"
+    mv "$status.tmp" "$status"
+  fi
   echo "mail server started (send list $loaded, account $loaded_account)"
   # A start that does not hold must be plain in the log, not a silent service: give the server a
   # moment, then say if it already stopped or if the loaded-list record is not what was written.
@@ -146,6 +195,8 @@ on_signal() {
   exit 0
 }
 trap on_signal TERM INT
+
+read_listen_address "$@"
 
 python3 "$agent" &
 agent_pid=$!
