@@ -106,6 +106,7 @@ import {
 } from '../runtime/chatTitle';
 import { StreamGoneError, type EventSubscription, type EventSubscriptionRegistry } from '../runtime/event-subscription';
 import { buildInternalSourceToolPolicy, type InternalSourceState } from '../runtime/internalSourceGuard';
+import { stampLatestAnswer, type LatestAnswerSessionStore } from '../runtime/latestAnswer';
 import { mailAccountDirectory } from '../runtime/mailConnector';
 import { createMemoryClient } from '../runtime/memory/createMemoryClient';
 import type { MemoryClient } from '../runtime/memory/memoryClient';
@@ -143,6 +144,7 @@ import {
 import { synchronizeRepositoryCommandProposals } from '../runtime/repositoryCommandProposals';
 import { validateSandboxFilePath } from '../runtime/sandboxFilePath';
 import type { ScheduleStoreAccess, ScheduleTurnContext } from '../runtime/scheduleCapability';
+import { scheduleAgentChoices } from '../runtime/scheduleTools';
 import {
   applyTokenFactoryRouting,
   buildGatewayMetadata,
@@ -657,6 +659,7 @@ function createTurnResolver(deps: {
             metadataHeaders,
           }),
           first_party: connection.first_party,
+          grant_binding: connection.grant_binding,
           search_provider:
             connection.search_provider === undefined
               ? undefined
@@ -1321,6 +1324,16 @@ export interface DrainTurnEventsInput {
       }
     | undefined;
   /**
+   * Present on every turn: where the finished turn's answer time is stamped, so the chat
+   * list can mark a chat whose latest answer the person has not opened yet.
+   */
+  answerMark?:
+    | {
+        sessionStore: LatestAnswerSessionStore;
+        tenantId: string;
+      }
+    | undefined;
+  /**
    * Present only on a chat's first turn, when that turn set the chat's working title
    * from the person's first message. The follow-up starts the subject-title step
    * detached; nothing in the drain waits for it.
@@ -1515,6 +1528,7 @@ async function runTurnFollowUp(params: {
     profileLearning,
     modelUsage,
     chatSearch,
+    answerMark,
     chatTitle,
   } = input;
   try {
@@ -1532,6 +1546,19 @@ async function runTurnFollowUp(params: {
       }
     } finally {
       markArtifactsCaptured();
+    }
+    if (answerMark !== undefined && state.output !== null) {
+      // The answer is in the chat now. Stamp when it landed so the chat list can show the
+      // unseen-answer dot until the person opens the chat. A turn that ended paused with no
+      // final message added no answer, so it earns no stamp. The stamp swallows its own
+      // failures, so this cannot fail the follow-up.
+      await stampLatestAnswer({
+        sessionStore: answerMark.sessionStore,
+        tenantId: answerMark.tenantId,
+        sessionId,
+        answeredAt: state.completed_at,
+        logger,
+      });
     }
     // Before the model calls below, so the answer's usage is visible before that slower work.
     const flushUsage = async () => {
@@ -1774,6 +1801,7 @@ export interface TurnEventDrainInput {
   modelUsage: ModelUsageDrainMember;
   memory?: DrainTurnEventsInput['memory'];
   chatSearch?: DrainTurnEventsInput['chatSearch'];
+  answerMark?: DrainTurnEventsInput['answerMark'];
   chatTitle?: DrainTurnEventsInput['chatTitle'];
   privateChat?: DrainTurnEventsInput['privateChat'];
 }
@@ -2013,6 +2041,7 @@ async function beginAcceptedTurnExecution(
       logger: deps.logger,
       turnDrains: deps.turnDrains,
       modelUsage: { ledger: modelUsage, eventStore: deps.sessionStore },
+      answerMark: { sessionStore: deps.sessionStore, tenantId: tenant_id },
       privateChat: privateChatDrainMember({ session, sessionStore: deps.sessionStore }),
       chatSearch:
         deps.chatSearchIndexer === undefined
@@ -2878,8 +2907,15 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
                 owner: scheduleOwner,
                 runner: chatRunner,
                 persona: persona?.kind === 'persona' ? persona.persona : undefined,
-                assistantName: profile?.assistant_name ?? null,
                 agentStore,
+                scheduleAgentChoices: scheduleAgentChoices({
+                  tenant_id: requestContext.tenant_id,
+                  modelProviderStore,
+                  mcpServerStore,
+                  skillStore,
+                  sandboxProviderStore,
+                  searchProviderPresetNames: deps.mcpCatalog.searchProviderPresetNames(),
+                }),
               }),
               runsAs: scheduleRunsAs({
                 tenant_id: requestContext.tenant_id,
@@ -3220,6 +3256,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           logger: deps.logger,
           turnDrains: deps.turnDrains,
           modelUsage: { ledger: modelUsage, eventStore: deps.sessionStore },
+          answerMark: { sessionStore: deps.sessionStore, tenantId: requestContext.tenant_id },
           chatTitle,
           privateChat: privateChatDrainMember({ session, sessionStore: deps.sessionStore }),
           memory:

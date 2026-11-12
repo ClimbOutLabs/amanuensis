@@ -23,9 +23,13 @@ A schedule repeats and does work for you. For a simple nudge at a set time, use 
 1. Click **Chats** in the left bar, then click **New chat**.
 2. Type what you want and how often, such as "Every weekday at 7:30, send me my morning brief". If the time is unclear, Aman asks.
 3. A card shows the schedule: its name, when it runs, who runs it, the next few runs, and what it will do each time. Check it.
-4. Click **Allow** to start it. Click **Change it** to reword it first, or **Not now** to drop it.
+4. The card also lists what the schedule may use: your **Connectors**, your **Skills**, **Run code** and **Memory**. Aman ticks the ones it thinks the task needs. Tick or untick any of them. A skill needs **Run code**, so that box stays ticked while a skill is ticked.
+5. If you changed a tick, click **Update the card**. Aman shows the card again with your choices.
+6. Click **Allow** to start it. Click **Change it** to reword it first, or **Not now** to drop it.
 
-A schedule you make in a chat runs as the same assistant, and keeps the persona you were using.
+Aman saves your choices as a new agent with the same name as the schedule. To change them later, click **Agents** in the left bar and open that agent. Deleting the schedule doesn't delete the agent. The schedule keeps the persona you were using.
+
+If you ask from a chat that already uses one of your agents, the schedule runs as that agent. The card then shows that agent's tools, with nothing to tick.
 
 ## Make a schedule on the Schedules page
 
