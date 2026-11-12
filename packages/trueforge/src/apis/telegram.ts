@@ -30,7 +30,7 @@ import {
   removeTelegramRoute,
   telegramWebhookRoute,
 } from '../routes/telegramRoutes';
-import { resolveChatAssistant } from '../runtime/chatAssistant';
+import { chatAssistantAgentName, getOrCreateChatAssistantAgent } from '../runtime/chatAssistant';
 import { resolveDefaultChatModel } from '../runtime/defaultChatModel';
 import { createMemoryClient } from '../runtime/memory/createMemoryClient';
 import { resolveMemoryProvider } from '../runtime/memory/memoryProvider';
@@ -104,19 +104,18 @@ async function telegramSession<TTransaction>(params: {
     tenant_id,
     logger: deps.logger,
   });
-  const profile = await deps.personalizationStore.getProfile({ tenant_id, created_by: owner.subject_id });
-  const assistant = resolveChatAssistant({
+  // The owner's plain-chat assistant agent, the same one a chat here with the default model runs as.
+  const spec = AgentSpecSchema.parse({
+    model: { name: modelName },
+    config: { sandbox: { enabled: sandboxAvailable } },
+  });
+  const agent = await getOrCreateChatAssistantAgent({
     tenant_id,
     owner,
-    runner: {
-      kind: 'plain',
-      spec: AgentSpecSchema.parse({ model: { name: modelName }, config: { sandbox: { enabled: sandboxAvailable } } }),
-    },
-    persona: undefined,
-    assistantName: profile?.assistant_name ?? null,
+    name: chatAssistantAgentName({ owner, spec }),
+    spec,
     agentStore: deps.agentStore,
   });
-  const agent = await assistant.agent();
   const { session, created } = await deps.sessions.getOrCreateByExternalId({
     tenant_id,
     external_id: telegramExternalId(owner.subject_id),

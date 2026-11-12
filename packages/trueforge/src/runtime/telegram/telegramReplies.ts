@@ -71,6 +71,16 @@ export function modelMessageText(output: ModelMessageEvent | null): string | und
   return undefined;
 }
 
+/** The connectors or skills a schedule runs with, as the card names them. */
+function switchedOnNames(choices: readonly { name: string; on: boolean }[]): string {
+  const names = choices.filter(choice => choice.on).map(choice => choice.name);
+  return names.length === 0 ? 'None' : names.join(', ');
+}
+
+/** The card's note on a new schedule: a run holds anything that would ask until the person is back. */
+const SCHEDULE_AWAY_LINE =
+  "While you're away it can only read and write to chat; anything risky is skipped and waits for your OK.";
+
 /** One email recipient as the cards show it: `Name (address)`, or the bare address when it has no name. */
 function mailboxLine(mailbox: { name: string; address: string }): string {
   return mailbox.name === '' ? mailbox.address : `${mailbox.name} (${mailbox.address})`;
@@ -146,6 +156,7 @@ export const TELEGRAM_SHOWN_SECTION_FIELDS = {
     'task',
     'runs_as',
     'next_runs',
+    'tools',
   ] as const satisfies readonly (keyof z.infer<typeof Tier3ScheduleSchema>)[],
   persona: ['name', 'description', 'instructions', 'model_name'] as const satisfies readonly (keyof z.infer<
     typeof Tier3PersonaSchema
@@ -324,6 +335,19 @@ function approvalCardLines(card: Tier3Card): string[] {
     }
     lines.push('What it will do each time:');
     lines.push(schedule.task);
+    const tools = schedule.tools ?? null;
+    if (tools !== null) {
+      if (tools.editable) {
+        lines.push(`These choices are saved as ${tools.agent_name}, and you can change them later.`);
+      }
+      lines.push(`Connectors: ${switchedOnNames(tools.connectors)}`);
+      lines.push(`Skills: ${switchedOnNames(tools.skills)}`);
+      lines.push(`Run code: ${tools.run_code ? 'On' : 'Off'}`);
+      lines.push(`Memory: ${tools.memory ? 'On' : 'Off'}`);
+    }
+    if (schedule.action === 'create') {
+      lines.push(SCHEDULE_AWAY_LINE);
+    }
   }
   const persona = card.persona ?? null;
   if (persona !== null) {

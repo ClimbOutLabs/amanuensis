@@ -329,6 +329,42 @@ describe('telegram pending replies', () => {
     expect(second.client.sent[0]?.inline_buttons).toBeDefined();
   });
 
+  it('sends what a new schedule runs with, and that a run holds what would ask', async () => {
+    const card = cardWith({
+      plain_what: 'Make a schedule.',
+      schedule: {
+        action: 'create',
+        name: 'Inbox tidy',
+        when: 'Every Monday at 8 in the morning',
+        time_zone: 'Europe/London',
+        task: 'Tidy the inbox.',
+        runs_as: 'inbox-tidy',
+        next_runs: ['Monday at 8:00 AM'],
+        tools: {
+          editable: true,
+          agent_name: 'inbox-tidy',
+          connectors: [
+            { name: 'gmail', on: true },
+            { name: 'github', on: false },
+          ],
+          skills: [{ name: 'pdf-tools', on: false }],
+          run_code: false,
+          memory: true,
+        },
+      },
+    });
+    const { client, deps } = harness(doneTurnWith(approvalAction(card)));
+    await deliverPendingTelegramReplies(deps);
+    const text = client.sent[0]?.text;
+    expect(text).toContain('These choices are saved as inbox-tidy, and you can change them later.');
+    expect(text).toContain('Connectors: gmail');
+    expect(text).toContain('Skills: None');
+    expect(text).toContain('Run code: Off');
+    expect(text).toContain('Memory: On');
+    expect(text).toContain("While you're away it can only read and write to chat");
+    expect(client.sent[0]?.inline_buttons).toBeDefined();
+  });
+
   it('sends a persona approval with its whole instructions', async () => {
     const persona = cardWith({
       plain_what: 'Add a persona.',
