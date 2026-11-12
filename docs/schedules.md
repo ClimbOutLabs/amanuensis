@@ -16,6 +16,7 @@ A schedule asks Aman to do the same job again and again, for example every weekd
 - Each schedule has a job to do (the **Task** field) and a repeat pattern. Runs are at least one hour apart.
 - Each run is saved as a chat, so you can open it and see what Aman found.
 - After you save a schedule, you can give it a test run.
+- You can pause or resume a schedule on the Schedules page, or by asking in a chat. In a chat, a card shows the schedule and when it runs, and waits for your OK every time.
 
 ## Reminders
 
@@ -25,7 +26,7 @@ When it is due, the reminder shows in the bell with the reason you got it. It al
 
 To mark a reminder urgent, say so when you ask, such as "Remind me at 5 pm to call the pharmacy, it's urgent". An urgent reminder can call you once phone calls are set up and you allow it.
 
-Reminders do not show on the Schedules page. To see or cancel them, ask in a chat, such as "What reminders do I have?".
+Reminders do not show on the Schedules page. To see or cancel them, ask in a chat, such as "What reminders do I have?". Before Aman cancels one, a card shows the reminder and waits for your OK. A cancelled reminder is gone for good.
 
 ## Scheduled runs do not interrupt you
 
@@ -35,4 +36,4 @@ A scheduled run sends no notice. Its results wait in its chat until you open it.
 
 Aman can think all day. Doing things needs your OK.
 
-A scheduled run can read and search, but it never sends or changes anything by itself. Anything that would need your OK in a chat is held, and the run's chat ends with a **Needs your OK** list. Approve or deny each item there. Held items expire after 24 hours. See [Safety story](/safety) for the details.
+A scheduled run can read and search, but it never sends anything by itself. The one thing of yours it changes by itself is a space. It can make and change any space without asking, so a list it keeps for you stays up to date. Every change keeps a version you can ask Aman to bring back. Aman cannot delete a space. A space only keeps a clickable link that you gave or that a search returned. A link that only an email or a web page supplied is kept as plain text. It also holds a few things a chat does without asking: running code in the sandbox and setting a reminder. Anything that would need your OK in a chat is held, and the run's chat ends with a **Needs your OK** list. Approve or deny each item there. Held items expire after 24 hours. See [Safety story](/safety) for the details.

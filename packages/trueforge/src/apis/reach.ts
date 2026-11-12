@@ -89,12 +89,18 @@ export function createReachRouter(deps: ReachRouterDeps) {
 
   const view = async (owner: ReturnType<typeof ownerOf>) => {
     const stored = await deps.reachStore.get(owner);
-    const checkpoint = await deps.noticingStore.getCheckpoint({ ...owner, watcher: 'mail' });
-    const calendar = await deps.noticingStore.getCheckpoint({ ...owner, watcher: 'calendar' });
+    const settings = stored ?? defaultReachSettings('UTC');
+    // With the checks off nothing is being checked, so there is no trouble or watched mailbox to show.
+    const checkpoint = settings.noticing_on
+      ? await deps.noticingStore.getCheckpoint({ ...owner, watcher: 'mail' })
+      : undefined;
+    const calendar = settings.noticing_on
+      ? await deps.noticingStore.getCheckpoint({ ...owner, watcher: 'calendar' })
+      : undefined;
     const problem = mailProblemOf({ checkpoint, now: now() });
     const calendarProblem = calendarProblemOf({ checkpoint: calendar, now: now() });
     return {
-      settings: stored ?? defaultReachSettings('UTC'),
+      settings,
       saved: stored !== undefined,
       availability: deps.channels({ viewer: deps.isInstanceOwner(owner) ? 'owner' : 'person' }),
       max_levels: KIND_MAX_LEVEL,

@@ -38,6 +38,8 @@ export type ReachSender = {
 };
 
 export type ReachSettings = {
+  /** Whether the assistant checks mail, the calendar and waiting approvals in the background. */
+  noticingOn: boolean;
   textsOn: boolean;
   callsOn: boolean;
   alwaysImportant: ReachSender[];

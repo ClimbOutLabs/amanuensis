@@ -146,7 +146,7 @@ import {
 import { writePersonaKnowledge, type KnowledgeEmbedder } from './knowledgeImport';
 import { countingLeftOut, isRecord, type LeftOutCounts } from './lenient';
 import { repairPersonaNames } from './personaNames';
-import { switchPhoneChannelsOff } from './reachUpgrade';
+import { startReachSwitchesAsNew } from './reachUpgrade';
 import { assembleSessionParts } from './sessionParts';
 import { replaySessions, restoreSessions, type SessionRestoreContext } from './sessionRestore';
 import { readZipArchive, ZipArchiveError, type ZipArchiveEntry } from './zipArchiveReader';
@@ -766,7 +766,7 @@ function loadArchive(input: {
       ? section('deliveries.json', ImportDeliveriesFileSchema, upgradeArchivedDeliveries)
       : [],
     // Absent from exports made before Reach me settings existed.
-    reach: files.has('reach.json') ? section('reach.json', ImportReachFileSchema, switchPhoneChannelsOff) : [],
+    reach: files.has('reach.json') ? section('reach.json', ImportReachFileSchema, startReachSwitchesAsNew) : [],
     // Absent from exports made before texts existed.
     texts: files.has('texts.json') ? section('texts.json', ImportTextsFileSchema) : [],
     files,

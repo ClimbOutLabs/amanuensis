@@ -35,6 +35,7 @@ describe("ReachClient", () => {
                     dismissed_suggestions: ["dismissed_suggestions"],
                     max_nudges_per_day: 1,
                     min_hours_between_calls: 1,
+                    noticing_on: true,
                     quiet_hours: { enabled: true, end: "end", start: "start" },
                     timezone: "timezone",
                     travel_lead_minutes: 1,
@@ -94,6 +95,7 @@ describe("ReachClient", () => {
                     dismissedSuggestions: ["dismissed_suggestions"],
                     maxNudgesPerDay: 1,
                     minHoursBetweenCalls: 1,
+                    noticingOn: true,
                     quietHours: {
                         enabled: true,
                         end: "end",
@@ -163,6 +165,7 @@ describe("ReachClient", () => {
                     dismissed_suggestions: ["dismissed_suggestions"],
                     max_nudges_per_day: 1,
                     min_hours_between_calls: 1,
+                    noticing_on: true,
                     quiet_hours: { enabled: true, end: "end", start: "start" },
                     timezone: "timezone",
                     travel_lead_minutes: 1,
@@ -256,6 +259,7 @@ describe("ReachClient", () => {
                     dismissedSuggestions: ["dismissed_suggestions"],
                     maxNudgesPerDay: 1,
                     minHoursBetweenCalls: 1,
+                    noticingOn: true,
                     quietHours: {
                         enabled: true,
                         end: "end",

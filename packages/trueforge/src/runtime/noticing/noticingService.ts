@@ -952,6 +952,11 @@ export function createNoticingService(deps: NoticingDeps): NoticingService {
       for (const owner of owners) {
         try {
           const settings = (await deps.reachSettings.get(owner)) ?? defaultReachSettings(await deps.timezoneFor(owner));
+          // With the checks off nothing is opened, read or asked: no source, no model and no delivery. What earlier
+          // passes stored, tracked bills and the place mail was read to among them, waits as it is.
+          if (!settings.noticing_on) {
+            continue;
+          }
           try {
             await look({ owner, watcher, settings, waiting: approvals.get(ownerKey(owner)) ?? [] });
           } catch (error) {

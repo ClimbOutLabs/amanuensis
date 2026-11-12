@@ -5,6 +5,20 @@ description: 'What Aman watches for, how loudly it tells you, and how to change 
 
 Aman can tell you about things without waiting for you to open a chat. You choose what may reach you and how, in **Settings, Reach me**.
 
+## Turn it on
+
+Aman watches for nothing until you turn it on. At the top of **Settings, Reach me**, switch on **Let Aman watch for things**. The switch saves at once. Where you connect your mail, in Settings, Connectors, the Google and Email panels say this too, with an **Open Reach me** button.
+
+- **On:** Aman checks your mail every 10 minutes, your calendar every 30 minutes, and waiting approvals every 5 minutes.
+- **Off:** Aman does not open your mail or calendar, does not look at approvals, and asks no model. Bills it was already following are kept. They are not checked while it is off.
+- Reminders you set reach you either way.
+
+The first time you turn it on, Aman starts from that moment. It looks only at mail from the last few minutes, so you do not get a flood of old mail.
+
+If you turn it off and on again within a day, Aman goes on from the mail it read last. Mail that came in while it was off is read then. After more than a day off, Aman does not read mail older than a day. It tells you once that it left that mail unread.
+
+While it is off, Reach me does not show mail or calendar trouble, because nothing is being checked.
+
 ## What Aman watches for
 
 - **Mail from people you marked always important.** It counts only when your mail server confirms the sender. Mail that only claims to be from them is treated as ordinary mail. A sender whose own mail domain does not ask servers to check it can never be confirmed. This needs a Google account. With the shared Email connector, senders cannot be confirmed yet, so their mail is treated as ordinary mail.

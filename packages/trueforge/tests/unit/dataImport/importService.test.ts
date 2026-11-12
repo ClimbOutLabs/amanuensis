@@ -3115,6 +3115,35 @@ describe('runDataImport keeps permission history and persona choices', () => {
     }
   });
 
+  it('brings the background checks in switched off, from an export made before the switch and from one with it on', async () => {
+    const { source, archive } = await seededArchive();
+    try {
+      const withSwitch = (noticing_on: boolean | undefined) =>
+        repack(archive, entries => {
+          const rows = listAt(parseJson(entries.get('reach.json'), 'reach.json'), 'reach.json').map(row => {
+            const { noticing_on: _dropped, ...rest } = recordAt(row, 'row');
+            return noticing_on === undefined ? rest : { ...rest, noticing_on };
+          });
+          entries.set('reach.json', Buffer.from(JSON.stringify(rows), 'utf8'));
+        });
+      for (const [name, value] of [
+        ['target-reach-before-switch', undefined],
+        ['target-reach-switch-on', true],
+      ] as const) {
+        const target = await makeInstance(name);
+        try {
+          await runDataImport(importDeps(target), importRequest(await withSwitch(value)));
+          const imported = await target.stores.reachSettingsStore.get({ tenant_id: TENANT, created_by: 'bob' });
+          expect(imported).toMatchObject({ noticing_on: false, max_nudges_per_day: 3 });
+        } finally {
+          await target.close();
+        }
+      }
+    } finally {
+      await source.close();
+    }
+  });
+
   it('still imports an export made before Reach me settings existed, leaving the person on the quiet defaults', async () => {
     const { source, archive } = await seededArchive();
     const target = await makeInstance('target-no-reach');

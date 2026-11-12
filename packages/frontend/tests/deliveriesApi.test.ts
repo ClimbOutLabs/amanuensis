@@ -137,6 +137,7 @@ test('push is off when the server sends no key, and a server error says what it 
 const WIRE_REACH = {
   data: {
     settings: {
+      noticing_on: true,
       channels: { texts: false, calls: false },
       always_important: [
         { address: 'dana@example.com', name: 'Dana', source: 'memory', added_at: '2026-11-01T00:00:00.000Z' },
@@ -172,6 +173,7 @@ test('reads Reach me settings into the app shape, dropping what it does not know
     { address: 'dana@example.com', name: 'Dana', source: 'memory', addedAt: '2026-11-01T00:00:00.000Z' },
   ]);
   assert.equal(view.settings.timezone, 'Europe/Paris');
+  assert.equal(view.settings.noticingOn, true);
   assert.deepEqual(view.maxLevels, { travel: 'call', bill_due: 'nudge' });
   assert.equal(view.availability.calls.note, 'Phone calls are not set up yet.');
   assert.equal(view.mailProblem, null);
@@ -269,6 +271,7 @@ test('saves Reach me settings in the wire shape and shows the server message whe
   const sent = typeof body === 'object' && body !== null && 'settings' in body ? body.settings : undefined;
   assert.ok(typeof sent === 'object' && sent !== null);
   assert.deepEqual('channels' in sent ? sent.channels : undefined, { texts: false, calls: false });
+  assert.equal('noticing_on' in sent ? sent.noticing_on : undefined, true);
   assert.deepEqual('call_kinds' in sent ? sent.call_kinds : undefined, ['travel']);
   assert.deepEqual('always_important' in sent ? sent.always_important : undefined, [
     { address: 'dana@example.com', name: 'Dana', source: 'memory', added_at: '2026-11-01T00:00:00.000Z' },

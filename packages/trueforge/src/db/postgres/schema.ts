@@ -75,6 +75,7 @@ export const TABLES_TO_MOVE = [
   'noticing_checkpoint',
   'reach_lease',
   'push_subscription',
+  'local_user',
 ] as const;
 
 /**

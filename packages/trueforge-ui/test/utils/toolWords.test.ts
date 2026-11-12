@@ -16,6 +16,15 @@ describe('toolWords', () => {
     expect(toolDoneWords('web_search')).toBe('Searched the web');
   });
 
+  it('reads Drive tools and their reasons in plain words', () => {
+    expect(toolDoingWords('list_files')).toBe('Checking your Google Drive files');
+    expect(toolDoneWords('read_drive_file')).toBe('Read your Google Drive files');
+    expect(toolDoneWords('google_drive_read')).toBe('Read your Google Drive files');
+    expect(toolDoingWords('create_doc')).toBe('Changing your Google Drive files');
+    expect(toolDoneWords('append_rows')).toBe('Changed your Google Drive files');
+    expect(toolDoneWords('google_drive_write')).toBe('Changed your Google Drive files');
+  });
+
   it('reads a Google setup check as checking the connection', () => {
     expect(toolDoingWords('google_setup_status')).toBe('Checking your Google connection');
     expect(toolDoneWords('google_setup_status')).toBe('Checked your Google connection');
