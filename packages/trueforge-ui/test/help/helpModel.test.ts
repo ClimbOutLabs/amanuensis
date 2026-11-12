@@ -162,6 +162,7 @@ describe('describeHelpScreen', () => {
     libraryOpen: false,
     sessionsOpen: false,
     schedulesOpen: false,
+    remindersOpen: false,
     spacesOpen: false,
   };
 
@@ -173,6 +174,7 @@ describe('describeHelpScreen', () => {
 
   it('names the other main screens and falls back to Chat', () => {
     expect(describeHelpScreen({ ...closed, schedulesOpen: true })).toBe('Schedules');
+    expect(describeHelpScreen({ ...closed, remindersOpen: true })).toBe('Reminders');
     expect(describeHelpScreen({ ...closed, libraryOpen: true })).toBe('Agent library');
     expect(describeHelpScreen(closed)).toBe('Chat');
     expect(describeHelpScreen(null)).toBe('Chat');

@@ -1,74 +1,78 @@
 ---
-title: 'Roles and Personas'
-sidebarTitle: 'Roles and Personas'
-description: 'Assign a model to each job the host does, and let one chat switch between named personas without starting a new conversation.'
+title: 'A model for each job'
+sidebarTitle: 'A model for each job'
+description: 'Choose which model answers you and which does background work, and see what each one did and cost.'
 ---
 
-**Settings → Models** manages provider connections, credentials, and which models exist.
-**Settings → Roles and Personas** decides which of those models does which job. The two are
-deliberately separate: one is inventory, the other is assignment.
+Aman can use a different model for each job: one to answer you, and others for background work such as summarizing long chats. This page explains each job, how to set it, and how to see which model did what.
 
-## Roles
+How to get there: Click **More** in the left bar, then **Settings**, then **Roles and Personas**.
 
-Three configurable roles cover the assistant's normal answer, delegation, and compaction work.
+Two Settings pages work together:
 
-| Role                       | What it runs                                                      | When unset                     |
-| -------------------------- | ----------------------------------------------------------------- | ------------------------------ |
-| **Main chat model**        | Answers you directly (`model` on the agent spec)                   | —                              |
-| **Coding / subagent model** | Sub-agent threads (`auxiliary_models.delegation`)                  | Inherits the main chat model   |
-| **Compaction model**       | Context summarization (`auxiliary_models.compaction`)              | Inherits the main chat model   |
+- **Settings → Models** connects model providers and lists the models you can use.
+- **Settings → Roles and Personas** decides which of those models does which job. It has two tabs: **Roles**, for the job assignments below, and **Personas**, for the named personas.
 
-Inheritance resolves when the role is used, not when it is saved, so changing the main
-chat model carries every inheriting role with it. Clearing a role removes it rather than
-freezing today's main model into it.
+## The jobs
 
-A sub-agent that explicitly asks for a model still gets that model — a configured default
-never overrides a deliberate request.
+| Job                         | What it does                                                         | When you leave it empty   |
+| --------------------------- | -------------------------------------------------------------------- | ------------------------- |
+| **Main chat model**         | Answers you directly (`model` on the agent spec).                     | You need to choose one.   |
+| **Coding / subagent model** | Runs the helper tasks Aman hands off (`auxiliary_models.delegation`). | Uses the main chat model. |
+| **Compaction model**        | Summarizes older parts of a long chat (`auxiliary_models.compaction`). | Uses the main chat model. |
+| **Summarization model**     | Condenses each turn before it goes into memory, when **Turn summaries** is on (`auxiliary_models.summarization`). | Uses the main chat model. |
 
-<Note>
-  Persona selection can make one short, tool-free control-plane call to the main chat model.
-  It is not a fourth role: the call only decides whether the user explicitly asked to change
-  speakers, and cannot answer the message or select an unconfigured model.
-</Note>
+- A job left empty follows the main chat model at the moment it runs. So when you change the main chat model, every job left empty changes with it.
+- Clearing a job removes its own choice. It does not copy today's main chat model into it.
+- A helper task that asks for a specific model still gets that model. Your default never overrides a deliberate request.
+- A poor compaction or summarization model hurts later answers and memories, so choose one you trust.
 
-### An assigned model that goes away
+!!! note "Short background checks"
 
-If a role names a model that is no longer configured, the turn fails and says so. It is
-never quietly answered by a different model: work attributed to a model that did not do it
-is worse than a visible error.
+    To decide whether you asked to switch personas, Aman can make one short call to the main chat model, with no tools. It is not a separate job. The call only decides whether you asked to change who answers. It can't answer your message or pick a model you haven't set up.
 
-## What each model did
+!!! note "Noticing"
 
-With **Show agent details** on for the chat, each answer's details start with a quiet line that names
-the model that answered, its provider, and the tokens and cost of the whole turn, with any helper
-calls folded into the total:
+    Noticing makes one short, tool-free call when it finds something new for you, such as a calendar clash or a bill due soon. The call goes to the model a new chat starts on. It only suggests how loudly to tell you, and your [Reach me](../packages/trueforge/guide/topics/reach-me.md) settings decide. It is not part of a chat, so it shows in no chat's details, but it counts toward the daily Token Factory cap. Nothing is called when nothing new is found.
+
+### If a chosen model goes away
+
+If a job names a model that is no longer set up, the turn stops and says so. Aman never quietly hands the work to a different model, because work credited to a model that didn't do it is worse than a clear error.
+
+## Seeing what each model did
+
+### The line under each answer
+
+Turn on **Agent details** in the chat. Each answer's details then start with a quiet line. It names the model that answered, its provider, and the tokens and cost of the whole turn, with any helper calls added in:
 
 ```text
 Nemotron 3 Super · Token Factory · 2,140 tokens (1,800 in, 340 out) · $0.0011 at list price · + 2 helper calls on Nemotron 3 Super
 ```
 
-With **Show agent details** on for the chat, each role that ran (the answer, sub-agents, compaction,
-turn summarization, profile learning, the library relevance check) is listed with its model, calls,
-tokens and cost. Token counts are the usage the provider reported for each call. A call whose
-provider reported none is shown as `usage not reported`, never as zero or an estimate.
+### Every job that ran
 
-Cost is an estimate from a price table in USD per million tokens, shown "at list price" because it
-is not your bill. Token Factory models have built-in list prices read on 2026-10-15; set
-`TOKEN_FACTORY_PRICES` to change them or to price a model on another provider. A model with no
-price shows tokens only. **Settings, Themes, Answers** hides the line and the helper rows
-for you without stopping usage from being counted, and **Settings, Models** shows today's tokens
-and cost per Token Factory model with the daily cap remaining.
+With **Agent details** on, each job that ran is listed with its model, calls, tokens and cost. The jobs are the answer, helper tasks, compaction, turn summarization, profile learning and the library relevance check.
 
-Compaction that inherits the chat model is counted with the chat calls. Set a compaction model to
-see it as its own row.
+Token counts are what the provider reported for each call. A call whose provider reported nothing shows `usage not reported`, never zero or a guess.
+
+Compaction that uses the main chat model is counted with the chat calls. Choose a separate compaction model to see it on its own row.
+
+### Cost
+
+Cost is an estimate from a price table, in US dollars per million tokens. It says "at list price" because it is not your bill.
+
+- Token Factory models have built-in list prices, read on 2026-10-15.
+- Set `TOKEN_FACTORY_PRICES` to change those prices or to price a model from another provider.
+- A model with no price shows tokens only.
+- **Settings → Models** shows today's tokens and cost for each Token Factory model, and how much of the daily limit is left.
+
+To hide the line and the helper rows, go to **Settings → Themes** and, under **Answers**, turn off **Show model and cost in answer details**. Usage is still counted.
 
 ## Personas
 
-A persona is a name, a concise role, and a model — configured under **Settings → Model
-roles → Personas**. The model is a real assignment you can see and change, not something
-buried in prompt text.
+A persona is a name, a short role and a model, set under **Settings → Roles and Personas → Personas**. Its model is a real setting you can see and change, not something hidden in its instructions. For making and using personas, see [Personas](../packages/trueforge/guide/topics/personas.md).
 
-### Invoking one
+### Calling a persona
 
 You can name a persona directly:
 
@@ -80,42 +84,36 @@ let me talk to Zara
 Could Zara answer this one?
 ```
 
-Direct address and the common lead-ins above use a deterministic fast path. Other wording that
-mentions a configured persona receives one short classification by the chat's main model. The
-classification sees only the current message, configured names and IDs, and the current speaker;
-it receives no persona instructions, tools, files, attachments, memory, or chat history. The host
-accepts only a valid structured selection naming a configured target with a complete, exact,
-unquoted request clause. It rejects a shorter identity that overlaps a longer configured name.
-Malformed, ambiguous, stale, or uncertain results keep the current speaker, and a newer selection
-made in the UI wins while the preflight is running. The preflight's model, finish reason, and usage
-are recorded separately from the answer completion.
+Addressing a persona directly, or starting with one of the common lead-ins above, switches at once, without a model call.
 
-Nothing infers a persona from what a message is *about*. A name in ordinary prose ("I was reading
-about Zara yesterday"), a quotation, a hypothetical, or a negated switch switches nothing.
+??? note "How other wording is checked"
 
-To return naturally to the default assistant, use the assistant name saved under Personalization
-(for example, "Can I talk to Mannie again?") or say "default assistant" / "main assistant". The
-header control remains the deterministic alternative.
+    Other wording that mentions a persona gets one short check by the chat's main model. The check sees only the current message, the persona names and ids, and who is answering now. It gets no persona instructions, tools, files, attachments, memory or chat history.
 
-### While a persona is active
+    Aman only accepts a clear answer that names a real persona, with the exact request that goes with it. It turns down a shorter name that overlaps a longer persona name.
 
-- Natural follow-ups keep answering as that persona, in the same conversation, with the
-  same history.
-- The chat header shows who is answering and on which model, with one control to return to
-  the default assistant.
-- Naming a different configured persona switches straight to it.
-- The chat's own **Main chat model** is never modified.
-- Compaction keeps using the compaction role (or the chat's model) — summarization for the
-  whole thread never follows a persona picked for a few turns.
-- Tools, approvals, workspace, and session boundaries are unchanged. A persona changes who
-  is answering, not what the assistant is allowed to do; its role text is one section of
-  the system prompt and cannot replace harness policy.
+    An unclear, outdated or unsure answer keeps the current speaker. If you pick a persona in the app while the check is running, your pick wins.
 
-Names and aliases must be unique across your personas. A duplicate is rejected when you
-save it, because an invocation that could mean two personas has no correct answer.
+    The check's model, finish reason and usage are recorded apart from the answer.
 
-If a persona's model is no longer configured, invoking it fails visibly and the assignment
-is kept, so you can point it at another model rather than losing it.
+Nothing picks a persona from what a message is about. A name in ordinary writing ("I was reading about Zara yesterday"), a quote, a "what if", or "don't switch to Zara" switches nothing.
+
+### Going back to the main assistant
+
+Use the assistant's name from **Settings → Personalization**, such as "Can I talk to Mannie again?" Or say "default assistant" or "main assistant". The button beside the message box always works too.
+
+### While a persona answers
+
+- Follow-up messages keep going to that persona, in the same chat, with the same history.
+- The chat shows who is answering and on which model, with one control to go back to the main assistant.
+- Naming a different persona switches straight to it.
+- The chat's own **Main chat model** never changes.
+- Compaction keeps using the compaction job (or the chat's model). Summarizing the whole chat never follows a persona picked for a few turns.
+- Tools, approvals, the workspace and the chat's limits stay the same. A persona changes who answers, not what Aman may do. Its role is one section of the instructions and can't override Aman's safety rules.
+
+Names and other names must be unique across your personas. A duplicate is refused when you save it, because a message could then mean two personas.
+
+If a persona's model is no longer set up, calling the persona fails with a clear message. The persona keeps its setting, so you can point it at another model instead of losing it.
 
 ## API
 
@@ -130,12 +128,8 @@ PUT    /api/v1/sessions/{session_id}/persona
 GET    /api/v1/sessions/{session_id}/persona-activations
 ```
 
-`GET /api/v1/personas/{persona_id}/context` returns the exact text a root thread receives
-when that persona answers, so nothing about the persona is hidden.
+- `GET /api/v1/personas/{persona_id}/context` returns the exact text the model gets when that persona answers, so nothing about the persona is hidden.
+- `persona-activations` lists, newest first, which persona answered this chat and why.
+- Entries with a `turn_id` record that turn's history. They survive deleting the persona, so a past turn can still say which persona and model answered it.
 
-`persona-activations` is the newest-first record of which persona answered this chat and
-why. Entries carrying a `turn_id` are that turn's provenance; they survive deleting the
-persona, so a past turn can still say which persona and model answered it.
-
-Existing installs with no personas configured behave exactly as before: no persona is
-resolved, no activation is recorded, and every turn runs on the chat's own model.
+An install with no personas works exactly as before: no persona is picked, nothing is recorded, and every turn uses the chat's own model.
