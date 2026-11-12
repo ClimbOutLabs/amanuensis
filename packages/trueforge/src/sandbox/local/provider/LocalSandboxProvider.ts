@@ -1,5 +1,5 @@
 /**
- * Local SRT SandboxProvider. Code Mode UDS is handle-scoped via {@link CodeModeUdsTransport}.
+ * Local SRT SandboxProvider.
  */
 import type {
   CodeModeTransport,
@@ -35,11 +35,7 @@ import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { Logger } from 'winston';
 import { newId } from '../../../utils/id';
-import {
-  assertCodeModeSocketParentPath,
-  CodeModeUdsTransport,
-  probeCodeModeUnixSocket,
-} from '../core/CodeModeUdsTransport.js';
+import { assertCodeModeSocketParentPath, probeCodeModeUnixSocket } from '../core/CodeModeUdsTransport.js';
 import {
   checkSrtHostDependencies,
   createSandbox,
@@ -833,10 +829,7 @@ export class LocalSandboxProvider implements SandboxProvider {
   }
 
   createCodeModeTransport(): CodeModeTransport {
-    return new CodeModeUdsTransport({
-      codeModeSocketParentPath: this.codeModeSocketParentPath,
-      clientRemotePath: () => join('mcp-client', 'mcp_client.py'),
-    });
+    throw new Error('Code Mode is not available in the sandbox used without Docker.');
   }
 
   /** Reset process-scoped SRT for this provider. */

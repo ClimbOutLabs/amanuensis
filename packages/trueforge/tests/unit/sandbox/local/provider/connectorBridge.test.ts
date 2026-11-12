@@ -21,15 +21,19 @@ describeUnix('the sandbox on a computer without Docker', () => {
     await rm(parent, { recursive: true, force: true });
   });
 
-  it('opens no bridge from sandbox code to connector tools', async () => {
+  async function makeProvider(): Promise<LocalSandboxProvider> {
     const codeModeSocketParentPath = join(tmpdir(), 'cm');
     await mkdir(codeModeSocketParentPath, { recursive: true, mode: 0o700 });
-    const provider = new LocalSandboxProvider({
+    return new LocalSandboxProvider({
       sandboxRootPathParent: parent,
       codeModeSocketParentPath,
       support: { supported: true, platform: 'darwin', shell: '/bin/bash', python: '/usr/bin/python3' },
       logger: createLogger({ silent: true }),
     });
+  }
+
+  it('opens no bridge from sandbox code to connector tools', async () => {
+    const provider = await makeProvider();
     const bridge = jest.spyOn(provider, 'createCodeModeTransport');
     const sandbox = new Sandbox({
       provider,
@@ -44,5 +48,10 @@ describeUnix('the sandbox on a computer without Docker', () => {
 
     expect(provider.supportsCodeMode).toBe(false);
     expect(bridge).not.toHaveBeenCalled();
+  });
+
+  it('refuses to build a bridge when asked for one directly', async () => {
+    const provider = await makeProvider();
+    expect(() => provider.createCodeModeTransport()).toThrow('Code Mode is not available');
   });
 });
