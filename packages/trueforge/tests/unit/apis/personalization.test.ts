@@ -32,7 +32,12 @@ describe('personalization router', () => {
     const db = createSqliteDb(':memory:');
     await migrateSqliteToLatest(db);
     const store = new SqlitePersonalizationStore(db);
-    const router = createPersonalizationRouter({ personalizationStore: store, resolveRequestContext: () => userA });
+    const router = createPersonalizationRouter({
+      personalizationStore: store,
+      resolveRequestContext: () => userA,
+      resolveMemoryClient: async () => undefined,
+      logger: winston.createLogger({ silent: true }),
+    });
     const page = {
       assistant_name: null,
       assistant_identity: null,

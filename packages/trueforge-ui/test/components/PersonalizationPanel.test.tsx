@@ -264,8 +264,8 @@ describe('PersonalizationPanel', () => {
 
     const toggle = await screen.findByRole('switch', { name: 'Learn from conversations' });
     await waitFor(() => expect(toggle).toHaveAttribute('aria-checked', 'true'));
-    expect(screen.getByText(/a local model updates this document/)).toBeInTheDocument();
-    expect(screen.getByText(/at most once an hour/)).toBeInTheDocument();
+    expect(screen.getByText(/adds no call of its own/)).toBeInTheDocument();
+    expect(screen.getByText(/the oldest facts move to your memories and nothing is lost/)).toBeInTheDocument();
   });
 
   it('shows no help-area picker in Settings and keeps the help areas already saved', async () => {
