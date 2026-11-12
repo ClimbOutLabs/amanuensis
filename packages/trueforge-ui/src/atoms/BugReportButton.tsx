@@ -13,10 +13,12 @@ import {
   type BugReportHandoffTarget,
 } from '../components/BugReportContext.js';
 import { Icon } from '../icons/Icon.js';
+import { useIsPrivateChat } from '../server/privateChatStore.js';
 import { buildHandoffTitle, buildIssuePrefillUrl, summarizeBundleForIssue } from '../utils/bugReportHandoff.js';
 import { getErrorMessage } from '../utils/getErrorMessage.js';
 import { auiButtonClass, railMenuRowClassName } from './lib/buttonClasses.js';
 import { auiInputClass } from './lib/inputClasses.js';
+import { menuTriggerFor } from './lib/menuTriggerFor.js';
 import { Button } from './primitives/Button.js';
 import { CenteredModal } from './primitives/CenteredModal.js';
 
@@ -58,13 +60,6 @@ function sessionBundleSummary(bundle: BugReportBundle): { turns: number; events:
   };
 }
 
-/** A menu row unmounts as it opens the dialog, so focus goes back to the menu's trigger instead. */
-function focusTargetFor(button: HTMLElement): HTMLElement {
-  const menuId = button.closest('[role="menu"]')?.id;
-  if (menuId == null || menuId === '') return button;
-  return document.querySelector<HTMLElement>(`[aria-controls="${CSS.escape(menuId)}"]`) ?? button;
-}
-
 /**
  * "Report a bug" button: an icon, or a labeled row for menus. Opens the app's bug report form.
  * Renders nothing when no host has wired a `BugReportProvider`.
@@ -90,7 +85,7 @@ export function BugReportButton({
           : auiButtonClass({ variant: 'ghost', size: 'icon' })
       }
       onClick={event => {
-        dialog.returnFocusRef.current = focusTargetFor(event.currentTarget);
+        dialog.returnFocusRef.current = menuTriggerFor(event.currentTarget);
         dialog.setOpen(true);
       }}
     >
@@ -114,7 +109,10 @@ export function BugReportDialog() {
 }
 
 function ConnectedBugReportDialog({ api, dialog }: { api: BugReportApi; dialog: BugReportDialogControl }) {
-  const sessionId = useAuiState(state => state.threadListItem.remoteId);
+  const activeSessionId = useAuiState(state => state.threadListItem.remoteId);
+  // A private chat never goes into a report: from one, the form sends the app report, which names no chat.
+  const isPrivateChat = useIsPrivateChat(activeSessionId);
+  const sessionId = isPrivateChat ? undefined : activeSessionId;
   const { open, setOpen, registerDialog, returnFocusRef } = dialog;
   useEffect(registerDialog, [registerDialog]);
   const [description, setDescription] = useState('');

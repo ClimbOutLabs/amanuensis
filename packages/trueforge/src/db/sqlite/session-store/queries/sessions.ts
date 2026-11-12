@@ -17,13 +17,17 @@ import {
 import type {
   CreateSessionInput,
   DeleteSessionInput,
+  ExpiredPrivateSession,
   GetOwnedIdsInput,
   GetSessionByExternalIdInput,
   GetSessionInput,
+  ListExpiredPrivateSessionsInput,
   ListSessionsInput,
+  SetPrivateExpiryInput,
   StampImportedSessionInput,
   UpdateSessionInput,
 } from '@truefoundry/trueforge-core/agent-session/store/ISessionStore';
+import { assertPrivateExpiryMatches } from '@truefoundry/trueforge-core/agent-session/store/privateSession';
 import {
   decodeSessionListPageToken,
   paginateSessionListRows,
@@ -78,6 +82,8 @@ function mapRowToSessionRecord(row: {
   approval_grants: string[];
   task_checklist: TaskChecklist | null;
   external_id: string | null;
+  is_incognito: number;
+  private_expires_at: string | null;
   custom: Record<string, unknown> | null;
   metadata: SessionMetadata;
   metrics: SessionMetrics;
@@ -104,6 +110,8 @@ function mapRowToSessionRecord(row: {
     approval_grants: row.approval_grants,
     task_checklist: parseStoredTaskChecklist(row.task_checklist),
     external_id: row.external_id,
+    is_incognito: row.is_incognito === 1,
+    private_expires_at: row.private_expires_at === null ? null : new Date(row.private_expires_at),
     custom: parseSessionCustom(row.custom),
     metadata: parseSessionMetadata(row.metadata),
     metrics: row.metrics,
@@ -130,6 +138,8 @@ function sessionSelectColumns() {
     jsonText<string[]>(sql.ref('approval_grants')).as('approval_grants'),
     jsonText<TaskChecklist | null>(sql.ref('task_checklist')).as('task_checklist'),
     'external_id' as const,
+    'is_incognito' as const,
+    'private_expires_at' as const,
     jsonText<Record<string, unknown> | null>(sql.ref('custom')).as('custom'),
     jsonText<SessionMetadata>(sql.ref('metadata')).as('metadata'),
     jsonText<SessionMetrics>(sql.ref('metrics')).as('metrics'),
@@ -140,6 +150,7 @@ function sessionSelectColumns() {
 }
 
 export async function createSession(db: Kysely<Database>, input: CreateSessionInput<SessionCustom>): Promise<void> {
+  assertPrivateExpiryMatches(input);
   const columns = sessionAgentToColumns(input.agent);
   const now = nowIso();
 
@@ -161,6 +172,8 @@ export async function createSession(db: Kysely<Database>, input: CreateSessionIn
         custom: input.custom !== null ? jsonbBind(input.custom) : null,
         metadata: jsonbBind(input.metadata),
         external_id: input.external_id,
+        is_incognito: input.is_incognito ? 1 : 0,
+        private_expires_at: input.private_expires_at === null ? null : input.private_expires_at.toISOString(),
         metrics: jsonbBind({
           total_duration_ms: 0,
           total_turns: 0,
@@ -228,6 +241,44 @@ export async function deleteSession(db: Kysely<Database>, input: DeleteSessionIn
     .deleteFrom('session')
     .where('tenant_id', '=', input.tenant_id)
     .where('session_id', '=', input.session_id)
+    .execute();
+}
+
+export async function setPrivateExpiry(db: Kysely<Database>, input: SetPrivateExpiryInput): Promise<void> {
+  const updated = await db
+    .updateTable('session')
+    .set({ private_expires_at: input.private_expires_at.toISOString() })
+    .where('tenant_id', '=', input.tenant_id)
+    .where('session_id', '=', input.session_id)
+    .where('is_incognito', '=', 1)
+    .executeTakeFirst();
+  if (Number(updated.numUpdatedRows) > 0) {
+    return;
+  }
+  const existing = await db
+    .selectFrom('session')
+    .select('session_id')
+    .where('tenant_id', '=', input.tenant_id)
+    .where('session_id', '=', input.session_id)
+    .executeTakeFirst();
+  if (existing === undefined) {
+    throw new SessionNotFoundError(input.session_id);
+  }
+  throw new SessionStoreInvariantError(`Session ${input.session_id} is not private; it has no deletion time`);
+}
+
+export async function listExpiredPrivateSessions(
+  db: Kysely<Database>,
+  input: ListExpiredPrivateSessionsInput,
+): Promise<ExpiredPrivateSession[]> {
+  return await db
+    .selectFrom('session')
+    .select(['tenant_id', 'session_id'])
+    .where('is_incognito', '=', 1)
+    .where('private_expires_at', '<=', input.now.toISOString())
+    .orderBy('private_expires_at', 'asc')
+    .orderBy('session_id', 'asc')
+    .limit(input.limit)
     .execute();
 }
 
@@ -336,6 +387,9 @@ export async function listSessions(
 
   let query = db.selectFrom('session').select(sessionSelectColumns).where('tenant_id', '=', input.tenant_id);
 
+  if (!input.include_private) {
+    query = query.where('is_incognito', '=', 0);
+  }
   if (input.agent_id !== undefined) {
     query = query.where('agent_id', '=', input.agent_id);
   }

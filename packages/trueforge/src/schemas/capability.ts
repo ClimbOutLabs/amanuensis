@@ -4,6 +4,10 @@ import { REFLECT_BUDGETS } from '@truefoundry/trueforge-core/core/memory/memoryS
 const SandboxCapabilitySchema = z
   .object({
     enabled: z.boolean().describe('Whether a sandbox provider is configured for this tenant.'),
+    reason: z
+      .string()
+      .optional()
+      .describe('Why the sandbox is off, in plain words; present only when it is off and a reason is known.'),
   })
   .openapi('SandboxCapability');
 
@@ -21,6 +25,16 @@ const SettingsCapabilitySchema = z
     enabled: z.boolean().describe('Whether the settings UI/API is enabled.'),
   })
   .openapi('SettingsCapability');
+
+export const SignInCapabilitySchema = z
+  .object({
+    mode: z
+      .enum(['local', 'oidc', 'standalone', 'truefoundry'])
+      .describe('How this instance signs people in. `local` means Aman keeps one email and password itself.'),
+  })
+  .openapi('SignInCapability');
+
+export type SignInCapability = z.infer<typeof SignInCapabilitySchema>;
 
 /**
  * Local voice input availability. `enabled` reflects the latest non-blocking
@@ -221,6 +235,7 @@ const CapabilitiesDataSchema = z
     memory_defaults: MemoryDefaultsCapabilitySchema,
     memory_embeddings: MemoryEmbeddingsCapabilitySchema,
     sandbox_isolation: SandboxIsolationCapabilitySchema,
+    sign_in: SignInCapabilitySchema,
     build: BuildIdentitySchema,
   })
   .openapi('CapabilitiesData');

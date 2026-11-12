@@ -11,7 +11,18 @@ import { TurnExecutionDeadline } from '../../../src/runtime/turnExecutionDeadlin
 const NOW = '2026-09-01T12:00:00.000Z';
 
 /** The model asks for one tool and the tool answers, as the turn stream carries them. */
-function toolRound({ id, name, args = '{}' }: { id: string; name: string; args?: string }): TurnStreamingEvent[] {
+function toolRound({
+  id,
+  name,
+  args = '{}',
+  connector,
+}: {
+  id: string;
+  name: string;
+  args?: string;
+  /** The connector whose tool this is; left out, the tool is one of the assistant's own. */
+  connector?: string;
+}): TurnStreamingEvent[] {
   return [
     {
       type: EventType.MODEL_MESSAGE,
@@ -20,7 +31,15 @@ function toolRound({ id, name, args = '{}' }: { id: string; name: string; args?:
       created_at: NOW,
       content: null,
       tool_calls: [
-        { id, type: 'function', function: { name, arguments: args }, tool_info: { type: 'truefoundry-system', name } },
+        {
+          id,
+          type: 'function',
+          function: { name, arguments: args },
+          tool_info:
+            connector === undefined
+              ? { type: 'truefoundry-system', name }
+              : { type: 'mcp', server_id: connector, server_name: connector, name },
+        },
       ],
     },
     {
@@ -81,7 +100,12 @@ async function retainedOrigin(input: { attachedFiles: boolean; earlier?: TurnStr
     executionDeadline,
     logger: winston.createLogger({ silent: true }),
     turnDrains: new TurnDrainRegistry(),
-    memory: { client, userText: 'Please read this.', attachedFiles: input.attachedFiles },
+    memory: {
+      session: { is_incognito: false },
+      client,
+      userText: 'Please read this.',
+      attachedFiles: input.attachedFiles,
+    },
   });
   const item = retain.mock.calls[0]?.[0].items[0];
   return item?.metadata?.[MEMORY_ORIGIN_METADATA_KEY];
@@ -136,6 +160,20 @@ describe('drainTurnEvents memory origin', () => {
     const args = JSON.stringify({ mcp_server: 'tasks', tool_name: 'record_finding', input: {} });
     const earlier = toolRound({ id: 'c1', name: 'call_tool', args });
     expect(await retainedOrigin({ attachedFiles: false, earlier })).toBe('user_stated');
+  });
+
+  it.each(['record_finding', 'replace_task_checklist', 'notes__record_finding'])(
+    'marks a turn in which a connector tool named %s answered',
+    async name => {
+      const earlier = toolRound({ id: 'c1', name, connector: 'notes' });
+      expect(await retainedOrigin({ attachedFiles: false, earlier })).toBe('tool_ingested');
+    },
+  );
+
+  it('marks a turn when the wrapper reaches a connector tool named like a task tool', async () => {
+    const args = JSON.stringify({ mcp_server: 'notes', tool_name: 'record_finding', input: {} });
+    const earlier = toolRound({ id: 'c1', name: 'call_tool', args, connector: 'notes' });
+    expect(await retainedOrigin({ attachedFiles: false, earlier })).toBe('tool_ingested');
   });
 
   it('marks a turn whose tool response has no matching call', async () => {

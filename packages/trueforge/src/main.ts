@@ -9,7 +9,7 @@
  * (migrate, Redis, listen) are caught below and exit non-zero. SQLite vs
  * Postgres store modules stay dynamic so only the active engine is loaded.
  */
-import { extractErrorLogFields } from '@truefoundry/trueforge-core/core';
+import { configureOutboundFetches, extractErrorLogFields } from '@truefoundry/trueforge-core/core';
 import type { Context } from 'hono';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
@@ -50,6 +50,21 @@ try {
   process.exit(1);
 }
 
+configureOutboundFetches({
+  model: {
+    connectTimeoutMs: configuration.MODEL_HTTP_CONNECT_TIMEOUT_MS,
+    headersTimeoutMs: configuration.MODEL_HTTP_HEADERS_TIMEOUT_MS,
+    bodyTimeoutMs: configuration.MODEL_HTTP_BODY_TIMEOUT_MS,
+    maxRetries: configuration.MODEL_HTTP_MAX_RETRIES,
+  },
+  mcp: {
+    connectTimeoutMs: configuration.MCP_HTTP_CONNECT_TIMEOUT_MS,
+    headersTimeoutMs: configuration.MCP_HTTP_HEADERS_TIMEOUT_MS,
+    bodyTimeoutMs: configuration.MCP_HTTP_BODY_TIMEOUT_MS,
+    maxRetries: configuration.MCP_HTTP_MAX_RETRIES,
+  },
+});
+
 import { serve } from '@hono/node-server';
 import {
   CancellationReason,
@@ -63,6 +78,7 @@ import type { Kysely, Transaction } from 'kysely';
 import type { RedisClientType } from 'redis';
 import type { Logger } from 'winston';
 
+import { sweepExpiredPrivateChats } from './apis/privateChats';
 import { createServerApp } from './app';
 import { TrueForgeAuthorizer, type Authorizer } from './auth/authorizer';
 import { createAuthenticator } from './auth/createAuthenticator';
@@ -76,11 +92,13 @@ import type { DistributedServerConfiguration } from './config';
 import { createController } from './controller';
 import type { AgentRecord, IAgentStore } from './db/agentStore';
 import { BriefItemCompletionStore, type IBriefItemCompletionStore } from './db/briefItemCompletionStore';
+import type { IChatDeletionStore } from './db/chatDeletionStore';
 import type { IChatImageStore } from './db/chatImageStore';
 import type { ICompletedTurnEventStore } from './db/completedTurnEvents';
 import { DeliveryStore, type IDeliveryStore } from './db/deliveryStore';
 import type { IGlobalSettingsStore } from './db/globalSettingsStore';
 import type { IGoogleConnectionStore } from './db/googleConnectionStore';
+import type { ILocalUserStore } from './db/localUserStore';
 import type { IMcpServerStore, IMcpServerWithAuthStore } from './db/mcpServerStore';
 import { McpServerWithAuthStore } from './db/McpServerWithAuthStore';
 import type { IMcpToolGrantStore } from './db/mcpToolGrantStore';
@@ -123,6 +141,7 @@ import { EventSubscriptionRegistry } from './runtime/event-subscription';
 import { registerMailConnectorFromSavedAccountInBackground } from './runtime/mailAccount';
 import { prepareMailPolicyAtBoot, registerMailConnectorAtBoot } from './runtime/mailConnector';
 import { warmEmbeddingsAtBoot } from './runtime/memory/embeddingRetrieval';
+import { startNotesFolderIndexing } from './runtime/notesFolder/notesFolderRuntime';
 import { createOutboundSecretSource } from './runtime/outboundSecrets';
 import { seedOwnerNameAtBoot } from './runtime/ownerName';
 import { createSentinelServices } from './runtime/sentinelServices';
@@ -148,6 +167,7 @@ import { TrueFoundryServiceFoundryServerClient } from './truefoundry/TrueFoundry
 import { TrueFoundrySkillStore } from './truefoundry/TrueFoundrySkillStore';
 import { ensureWritableDataDir } from './utils/dataDir';
 import { startSttAvailabilityWatcher } from './voice/sttAvailability';
+import { attachVoiceSocket } from './voice/voiceSocket';
 
 /** Persistence + optional Redis wired for the selected topology. */
 interface ServerPersistence<TTransaction> {
@@ -181,6 +201,7 @@ interface ServerPersistence<TTransaction> {
   spaceStore: ISpaceStore<TTransaction>;
   repositoryStore: IRepositoryStore<TTransaction>;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
+  chatDeletionStore: IChatDeletionStore;
   chatImageStore: IChatImageStore<TTransaction>;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
@@ -188,6 +209,8 @@ interface ServerPersistence<TTransaction> {
   tokenFactoryUsageStore: ITokenFactoryUsageStore<TTransaction>;
   mcpToolGrantStore: IMcpToolGrantStore<TTransaction>;
   googleConnectionStore: IGoogleConnectionStore;
+  /** The one local user for local sign-in; the table exists in every topology, the mode decides use. */
+  localUserStore: ILocalUserStore;
   sentinelAuditStore: ISentinelAuditStore;
   sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
   briefItemStore: IBriefItemCompletionStore;
@@ -363,6 +386,8 @@ async function createStandalonePersistence(options: {
       import('./db/sqlite/approval-token-store/SqliteApprovalTokenStore'),
       import('./db/sqlite/mcp-tool-grant-store/SqliteMcpToolGrantStore'),
       import('./db/sqlite/google-connection-store/SqliteGoogleConnectionStore'),
+      import('./db/sqlite/local-user-store/SqliteLocalUserStore'),
+      import('./db/sqlite/chat-deletion-store/SqliteChatDeletionStore'),
     ]),
   ]);
   const [
@@ -387,6 +412,8 @@ async function createStandalonePersistence(options: {
     { SqliteApprovalTokenStore },
     { SqliteMcpToolGrantStore },
     { SqliteGoogleConnectionStore },
+    { SqliteLocalUserStore },
+    { SqliteChatDeletionStore },
   ] = sqliteStores;
 
   const db = createSqliteDb(sqlitePath);
@@ -404,6 +431,7 @@ async function createStandalonePersistence(options: {
   });
   const sandboxProviderStore = new SqliteSandboxProviderStore(db);
   const skillStore = new SqliteSkillStore(db);
+  const turnArtifactStore = new SqliteTurnArtifactStore(db);
   return {
     withTransaction: callback => db.transaction().execute(callback),
     skillStore,
@@ -418,12 +446,14 @@ async function createStandalonePersistence(options: {
     mcpOAuthStore: mcpServerStore,
     tokenStore,
     scheduleStore: new SqliteScheduleStore(db),
-    turnArtifactStore: new SqliteTurnArtifactStore(db),
+    turnArtifactStore,
+    chatDeletionStore: new SqliteChatDeletionStore({ db, turnArtifactStore }),
     chatImageStore: new SqliteChatImageStore(db),
     globalSettingsStore: new SqliteGlobalSettingsStore(db),
     tokenFactoryUsageStore: new SqliteTokenFactoryUsageStore(db),
     mcpToolGrantStore: new SqliteMcpToolGrantStore(db),
     googleConnectionStore: new SqliteGoogleConnectionStore(db),
+    localUserStore: new SqliteLocalUserStore(db),
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
     briefItemStore: new BriefItemCompletionStore(db),
@@ -454,6 +484,7 @@ async function createDistributedPersistence(options: {
     DATABASE_POOL_MAX: databasePoolMax,
     POSTGRES_STATEMENT_TIMEOUT_MS: statementTimeoutMs,
     POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS: idleInTransactionSessionTimeoutMs,
+    POSTGRES_CONNECT_TIMEOUT_MS: connectionTimeoutMs,
     REDIS_URL: redisUrl,
     EXECUTOR_ID: executorId,
   } = configuration;
@@ -484,6 +515,8 @@ async function createDistributedPersistence(options: {
       import('./db/postgres/approval-token-store/PostgresApprovalTokenStore'),
       import('./db/postgres/mcp-tool-grant-store/PostgresMcpToolGrantStore'),
       import('./db/postgres/google-connection-store/PostgresGoogleConnectionStore'),
+      import('./db/postgres/local-user-store/PostgresLocalUserStore'),
+      import('./db/postgres/chat-deletion-store/PostgresChatDeletionStore'),
     ]),
   ]);
   const [
@@ -508,6 +541,8 @@ async function createDistributedPersistence(options: {
     { PostgresApprovalTokenStore },
     { PostgresMcpToolGrantStore },
     { PostgresGoogleConnectionStore },
+    { PostgresLocalUserStore },
+    { PostgresChatDeletionStore },
   ] = postgresStores;
 
   const db = createDb({
@@ -515,6 +550,13 @@ async function createDistributedPersistence(options: {
     poolMax: databasePoolMax,
     statementTimeoutMs,
     idleInTransactionSessionTimeoutMs,
+    connectionTimeoutMs,
+    onIdleClientError: error => {
+      logger.error(
+        'A Postgres connection in the pool broke; the next query opens a new one',
+        extractErrorLogFields(error),
+      );
+    },
   });
   await migrateToLatest(db);
   logger.info('Distributed mode: postgres');
@@ -533,6 +575,7 @@ async function createDistributedPersistence(options: {
   });
   const sandboxProviderStore = new PostgresSandboxProviderStore(db);
   const skillStore = new PostgresSkillStore(db);
+  const turnArtifactStore = new PostgresTurnArtifactStore(db);
   const agentStore = new PostgresAgentStore(db);
   const resolveModelProviderStore = buildResolveModelProviderStore({
     persistenceStore: modelProviderStore,
@@ -590,12 +633,14 @@ async function createDistributedPersistence(options: {
     mcpOAuthStore: mcpServerWithAuthStore,
     tokenStore,
     scheduleStore: new PostgresScheduleStore(db),
-    turnArtifactStore: new PostgresTurnArtifactStore(db),
+    turnArtifactStore,
+    chatDeletionStore: new PostgresChatDeletionStore({ db, turnArtifactStore }),
     chatImageStore: new PostgresChatImageStore(db),
     globalSettingsStore: new PostgresGlobalSettingsStore(db),
     tokenFactoryUsageStore: new PostgresTokenFactoryUsageStore(db),
     mcpToolGrantStore: new PostgresMcpToolGrantStore(db),
     googleConnectionStore: new PostgresGoogleConnectionStore(db),
+    localUserStore: new PostgresLocalUserStore(db),
     sentinelAuditStore: new SentinelAuditStore(db as Kysely<SentinelAuditDatabase>),
     sentinelSettingsStore: new PostgresSentinelSettingsStore(db),
     briefItemStore: new BriefItemCompletionStore(db),
@@ -634,11 +679,13 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     spaceStore,
     repositoryStore,
     turnArtifactStore,
+    chatDeletionStore,
     chatImageStore,
     globalSettingsStore,
     tokenFactoryUsageStore,
     mcpToolGrantStore,
     googleConnectionStore,
+    localUserStore,
     sentinelAuditStore,
     sentinelSettingsStore,
     briefItemStore,
@@ -799,8 +846,14 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
   });
 
   const oidc = isOidcConfigured(configuration) ? configuration.OIDC : undefined;
+  const localMode = getTrueForgeAuthMode(configuration) === TrueForgeAuthMode.Local;
   if (oidc) {
     logger.info('Auth is enabled', { issuer: oidc.OIDC_ISSUER_URL });
+  } else if (localMode) {
+    logger.info('Local sign-in is on; Aman asks for an email and password it keeps itself');
+    if (configuration.OIDC_SET_BUT_IGNORED) {
+      logger.info('OIDC settings are set but local sign-in is on, so they are not used');
+    }
   } else {
     logger.warn('Auth is disabled; browser login is off');
   }
@@ -820,6 +873,13 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     authorizer = new TrueFoundryAuthorizer(serviceFoundryClient);
   } else if (mode === TrueForgeAuthMode.Oidc) {
     authenticator = createAuthenticator({ mode: TrueForgeAuthMode.Oidc });
+    authorizer = new TrueForgeAuthorizer();
+  } else if (mode === TrueForgeAuthMode.Local) {
+    authenticator = createAuthenticator({
+      mode: TrueForgeAuthMode.Local,
+      localUserStore,
+      globalSettingsStore,
+    });
     authorizer = new TrueForgeAuthorizer();
   } else {
     authenticator = createAuthenticator({ mode: TrueForgeAuthMode.Standalone });
@@ -893,6 +953,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     spaceStore,
     repositoryStore,
     turnArtifactStore,
+    chatDeletionStore,
     globalSettingsStore,
     tokenFactoryBudget,
     sessionStore,
@@ -913,6 +974,7 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
     eventSubscriptions,
     logger,
     oidcDiscovery,
+    localUserStore: localMode ? localUserStore : undefined,
     authenticator,
     authorizer,
     outboundSecrets,
@@ -923,6 +985,24 @@ async function createServerRuntime<TTransaction>(persistence: ServerPersistence<
       return controller.isRunning() ? 'running' : 'stopped';
     },
   });
+
+  // The notes folder index warms in the background: rebuilt on its schedule and when files
+  // change, so a chat's first search does not pay for the build. With no folder connected the
+  // service sits idle.
+  startNotesFolderIndexing({ settings: globalSettingsStore, logger });
+
+  // Private chats that expired while the server was down are deleted before it serves anyone.
+  try {
+    const deleted = await sweepExpiredPrivateChats(
+      { sessions, sessionStore, chatDeletionStore, activeTurns, turnDrains, redis, logger },
+      { now: new Date() },
+    );
+    if (deleted > 0) {
+      logger.info('Deleted expired private chats at startup', { deleted });
+    }
+  } catch (error) {
+    logger.error('Could not delete expired private chats at startup', extractErrorLogFields(error));
+  }
 
   return {
     activeTurns,
@@ -1236,6 +1316,9 @@ try {
       controller?.start();
     },
   );
+
+  // Voice mode's WebSocket: the upgrade is handled here because the app's own router cannot take one.
+  attachVoiceSocket({ server, app, logger, requireClientCertificate: tlsServe !== undefined });
 
   server.on('error', (error: unknown) => {
     console.error('Failed to start server:', error instanceof Error ? error.message : error);
