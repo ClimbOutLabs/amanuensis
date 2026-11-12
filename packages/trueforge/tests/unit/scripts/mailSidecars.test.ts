@@ -13,7 +13,8 @@ const ServiceSchema = z
     command: z.array(z.string()).optional(),
     environment: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
     volumes: z.array(z.string()).optional(),
-    networks: z.array(z.string()).optional(),
+    // Compose takes either a list of names or a map of name to settings.
+    networks: z.union([z.array(z.string()), z.record(z.string(), z.unknown())]).optional(),
     env_file: z
       .array(z.union([z.string(), z.object({ path: z.string(), required: z.boolean().optional() })]))
       .optional(),
@@ -27,6 +28,12 @@ const ComposeSchema = z.object({
 });
 
 const compose = ComposeSchema.parse(parse(readFileSync(resolve(REPO_ROOT, 'docker-compose.yml'), 'utf8')));
+
+/** The networks a service joins, by name, whichever form the file uses. */
+function networksOf(service: z.infer<typeof ServiceSchema>): string[] {
+  const { networks } = service;
+  return networks === undefined ? [] : Array.isArray(networks) ? networks : Object.keys(networks);
+}
 
 const MAIL_SIDECARS = ['mail-email'];
 
@@ -54,10 +61,10 @@ describe('mail and calendar sidecars', () => {
   });
 
   it('mail-email sits on a network of its own that only the app shares', () => {
-    expect(serviceNamed('mail-email').networks).toEqual(['mail']);
-    expect(serviceNamed('loopback').networks).toContain('mail');
+    expect(networksOf(serviceNamed('mail-email'))).toEqual(['mail']);
+    expect(networksOf(serviceNamed('loopback'))).toContain('mail');
     const others = Object.entries(compose.services).filter(
-      ([name, service]) => name !== 'mail-email' && name !== 'loopback' && (service.networks ?? []).includes('mail'),
+      ([name, service]) => name !== 'mail-email' && name !== 'loopback' && networksOf(service).includes('mail'),
     );
     expect(others).toEqual([]);
     expect(compose.networks).toHaveProperty('mail');

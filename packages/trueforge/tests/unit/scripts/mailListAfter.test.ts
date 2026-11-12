@@ -98,7 +98,7 @@ describe('the mail account agent lists new mail by number', () => {
     });
     const response = await fetch(`${URL}/list_after`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { authorization: `Bearer ${MAIL_AGENT_SECRET}`, 'content-type': 'application/json' },
       body: JSON.stringify({ uidvalidity: null, last_uid: null, since: '2026-11-05T14:10:00.000Z', limit: 10 }),
     });
     const body: unknown = await response.json();
@@ -207,7 +207,7 @@ describe('the mail account agent lists new mail by number', () => {
     setMailbox({ uidvalidity: 15, messages });
     const response = await fetch(`${URL}/list_after`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { authorization: `Bearer ${MAIL_AGENT_SECRET}`, 'content-type': 'application/json' },
       body: JSON.stringify({ uidvalidity: 15, last_uid: 0, since: '2026-11-05T14:00:00.000Z', limit: 1000 }),
     });
     const body: unknown = await response.json();
@@ -296,10 +296,30 @@ describe('the mail account agent lists new mail by number', () => {
   it('refuses a request it cannot read', async () => {
     const response = await fetch(`${URL}/list_after`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { authorization: `Bearer ${MAIL_AGENT_SECRET}`, 'content-type': 'application/json' },
       body: JSON.stringify({ uidvalidity: null, last_uid: null, since: 'soon', limit: 10 }),
     });
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({ error: 'invalid' });
+  }, 30_000);
+
+  it.each([
+    ['no secret', undefined],
+    ['the wrong secret', 'Bearer test-mail-agent-secret-ffffffffffffffffffff'],
+  ])('lists nothing and names no mailbox for a caller with %s', async (_label, authorization) => {
+    const headers: Record<string, string> = { 'content-type': 'application/json' };
+    if (authorization !== undefined) {
+      headers['authorization'] = authorization;
+    }
+    const listed = await fetch(`${URL}/list_after`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ uidvalidity: null, last_uid: null, since: '2026-11-05T00:00:00Z', limit: 10 }),
+    });
+    expect(listed.status).toBe(401);
+    await expect(listed.json()).resolves.toEqual({ error: 'unauthorized' });
+    const mailbox = await fetch(`${URL}/mailbox`, { headers });
+    expect(mailbox.status).toBe(401);
+    await expect(mailbox.json()).resolves.toEqual({ error: 'unauthorized' });
   }, 30_000);
 });
