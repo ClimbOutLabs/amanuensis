@@ -90,6 +90,16 @@ export const SkillNetworkHostSchema = z
   .describe('One exact site name the skill needs to reach.');
 
 /**
+ * True when the value is a site name in the form above: an exact host name, never a bare
+ * address. Every place a host arrives from outside a skill's own declaration (a connection
+ * request, a card answer) is checked with this before the host is recorded, granted or
+ * connected to, so a bare address can never be named on a card or stored as an approval.
+ */
+export function isSkillNetworkHostName(value: string): boolean {
+  return SkillNetworkHostSchema.safeParse(value).success;
+}
+
+/**
  * The sites a skill declares it needs. Optional and backward compatible like `when_to_use`: a
  * skill that declares nothing gets no network, and nothing about it changes. Naming a site here
  * grants nothing by itself; the person approves the list in Settings first.
@@ -122,18 +132,28 @@ export function skillNetworkHostsCanSend(hosts: readonly string[]): boolean {
  * The sites a skill may reach right now, from what it declares and what the person approved.
  * Hosts removed from the declaration drop out on their own. A host added to the declaration is
  * not covered by an earlier approval, so nothing is granted until the person approves the new
- * full list: the approval counts only when it covers every declared site.
+ * list: the approval counts only when it covers every declared site. A site the person turned
+ * down is the one exception: it neither counts against the approval nor is granted by it, so
+ * turning one site down does not switch off the sites the person did approve. The turned-down
+ * site stays out, and since the stored approval never named it, clearing its denial grants
+ * nothing either: the list needs a fresh approval first.
  */
 export function effectiveSkillNetworkHosts(input: {
   declared: readonly string[] | undefined;
   approved: readonly string[] | null;
+  denied: readonly string[];
 }): readonly string[] | null {
   const declared = input.declared ?? [];
   if (input.approved === null || declared.length === 0) {
     return null;
   }
+  const denied = new Set(input.denied);
+  const inForce = declared.filter(host => !denied.has(host));
+  if (inForce.length === 0) {
+    return null;
+  }
   const approved = new Set(input.approved);
-  return declared.every(host => approved.has(host)) ? declared : null;
+  return inForce.every(host => approved.has(host)) ? inForce : null;
 }
 
 /**
@@ -151,7 +171,11 @@ export function grantedSkillNetworkHosts(input: {
 }): readonly string[] {
   const denied = new Set(input.denied);
   const hosts = new Set<string>();
-  const effective = effectiveSkillNetworkHosts({ declared: input.declared, approved: input.approved });
+  const effective = effectiveSkillNetworkHosts({
+    declared: input.declared,
+    approved: input.approved,
+    denied: input.denied,
+  });
   for (const host of effective ?? []) {
     hosts.add(host);
   }

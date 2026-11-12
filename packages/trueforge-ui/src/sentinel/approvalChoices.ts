@@ -4,10 +4,10 @@ import type { SentinelApprovalCard } from './types.js';
 /** The approval choices, in the order every approval surface shows them. */
 export const APPROVAL_CHOICES = {
   approve: { label: 'Approve', hint: 'Allow this one call only.' },
-  approveForChat: { label: 'Always allow this here', hint: "Don't ask again for this kind of action in this chat." },
-  alwaysAllow: { label: 'Always allow', hint: 'Remember this for every chat.' },
+  approveForChat: { label: 'Always allow in this chat', hint: "Don't ask again for this kind of action in this chat." },
+  alwaysAllow: { label: 'Always allow everywhere', hint: 'Remember this for every chat.' },
   alwaysAllowTool: {
-    label: 'Always allow this tool',
+    label: 'Always allow everywhere',
     hint: 'Run this tool on this connector without asking, in every chat, until you remove it in settings.',
   },
   changeIt: { label: 'Change it', hint: 'Ask the persona to change this first. Nothing runs now.' },
@@ -46,7 +46,10 @@ export const SAVE_DRAFT_OPTION_ID = 'save_draft';
  * until cleared in skill settings, and denying remembers the sites as turned down for the skill.
  */
 export const SKILL_NETWORK_CHOICES = {
-  approve: { label: 'Allow once', hint: 'Allow these sites for this chat only. The command runs again with them.' },
+  approve: {
+    label: 'Allow once',
+    hint: 'Allow these sites for this chat only. The command runs again with them, unless it needs an approval of its own.',
+  },
   alwaysAllow: {
     label: 'Always allow for this skill',
     hint: 'Let this skill reach these sites in every chat, until you remove it in skill settings.',

@@ -9,6 +9,7 @@ import type { IPersonaStore } from '../db/personaStore';
 import type { ISentinelSettingsStore } from '../db/sentinelSettingsStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { PersonaActivation } from '../personas/persona';
+import { sessionKeepsNothing } from './privateChat';
 
 /** Text the person typed, without attachments or text the host wrapped around the message. */
 function personText(text: string): string {
@@ -196,6 +197,14 @@ export class ChatSearchIndexer {
       if (!before.enabled) {
         return;
       }
+      // A private chat is never searchable; the pass skips it too, because it never lists one.
+      const session = await this.#deps.sessionStore.getSession({
+        tenant_id: input.tenant_id,
+        session_id: input.session_id,
+      });
+      if (session === undefined || sessionKeepsNothing({ session })) {
+        return;
+      }
       const turn = await this.#deps.sessionStore.getTurn({ session_id: input.session_id, turn_id: input.turn_id });
       if (turn === undefined || turn.state.status === 'running') {
         return;
@@ -363,6 +372,7 @@ export class ChatSearchIndexer {
         agent_id: undefined,
         folder_id: undefined,
         no_folder: false,
+        include_private: false,
         created_by_or_agent_ids: { created_by_subject_id: person.created_by, agent_ids: [] },
         metadata: undefined,
         source_type: undefined,

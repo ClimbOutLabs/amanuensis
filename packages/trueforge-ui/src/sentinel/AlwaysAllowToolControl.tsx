@@ -24,7 +24,7 @@ export type AlwaysAllowToolControlProps = {
   removeWhere?: string;
 };
 
-/** "Always allow this tool" and its confirm step, shared by every approval card that offers it. */
+/** "Always allow everywhere" and its confirm step, shared by every approval card that offers it. */
 export const AlwaysAllowToolControl: FC<AlwaysAllowToolControlProps> = ({
   description,
   size,
@@ -33,7 +33,7 @@ export const AlwaysAllowToolControl: FC<AlwaysAllowToolControlProps> = ({
   onConfirm,
   label = APPROVAL_CHOICES.alwaysAllowTool.label,
   hint = APPROVAL_CHOICES.alwaysAllowTool.hint,
-  title = 'Always allow this tool?',
+  title = 'Always allow everywhere?',
   removeWhere = 'connector settings',
 }) => {
   const [confirming, setConfirming] = useState(false);

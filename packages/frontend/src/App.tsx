@@ -9,6 +9,7 @@ import {
   getErrorMessage,
   HelpProvider,
   ImplementationPlanGrantProvider,
+  LocalAccountProvider,
   MemoryRecallProvider,
   ModelUsageProvider,
   PersonalizationProvider,
@@ -20,6 +21,7 @@ import {
   SpokenReplyProvider,
   ThemeProvider,
   TrueForgeUI,
+  useIsPrivateChat,
   useTheme,
   VoiceInputProvider,
   type AgentConfig,
@@ -55,7 +57,8 @@ import { createFirstRunGuideApi } from './firstRunGuideApi';
 import { GetStartedScreen } from './GetStartedScreen';
 import { createHelpApi } from './helpApi';
 import { createImplementationPlanGrantApi } from './implementationPlanGrantApi';
-import { LogoutButton } from './LogoutButton';
+import { createLocalAccountApi } from './localAccountApi';
+import { LogoutButton, SignOutConfirmProvider } from './LogoutButton';
 import { createMemoryRecallApi } from './memoryRecallApi';
 import { createModelUsageApi } from './modelUsageApi';
 import { createPersonaApi } from './personaApi';
@@ -237,6 +240,7 @@ function AmanShell({
   // Settings it opens. It starts shown, like the Settings button itself, which also
   // shows until capabilities say otherwise.
   const [settingsChromeEnabled, setSettingsChromeEnabled] = useState(true);
+  const activeChatIsPrivate = useIsPrivateChat(activeSessionId);
   return (
     <div className="aman-shell">
       <AmanChatSurface
@@ -258,6 +262,7 @@ function AmanShell({
         version={version}
         buildRef={buildRef}
         pendingApprovalIds={pendingApprovalIds}
+        privateChat={activeChatIsPrivate}
         auditFeed={activeSessionId === undefined ? undefined : <SentinelAuditFeed sessionId={activeSessionId} />}
         {...(settingsChromeEnabled ? { onOpenAudits: openAudits } : {})}
       />
@@ -452,6 +457,7 @@ export function App() {
     [guideDismissedLocally, boot],
   );
   const personalizationApi = useMemo(() => createPersonalizationApi(authAwareFetch), []);
+  const localAccountApi = useMemo(() => createLocalAccountApi(authAwareFetch), []);
   const personaApi = useMemo(() => createPersonaApi(authAwareFetch), []);
   const deliveriesApi = useMemo(() => createDeliveriesApi(authAwareFetch), []);
   const helpApi = useMemo(
@@ -540,50 +546,54 @@ export function App() {
       <ThemeProvider theme={AMAN_THEME}>
         <SentinelApiProvider api={sentinelApi}>
           <DeliveriesProvider api={deliveriesApi}>
-            <PersonalizationProvider api={personalizationApi}>
-              <ImplementationPlanGrantProvider api={implementationPlanGrantApi}>
-                <RepositoryWorkProvider api={repositoryWorkApi}>
-                  <BugReportProvider api={bugReportApi}>
-                    <VoiceInputProvider api={voiceInputApi}>
-                      <SpokenReplyProvider serverVoice={serverVoiceApi}>
-                        <RunCodeStatusProvider api={runCodeStatusApi}>
-                          <MemoryRecallProvider api={memoryRecallApi}>
-                            <ModelUsageProvider api={modelUsageApi}>
-                              <PersonaProvider api={personaApi}>
-                                <HelpProvider api={helpApi}>
-                                  <AmanSetupProvider
-                                    value={{
-                                      modelName: setup?.modelName ?? (boot.defaultAgentSpec.model.name || null),
-                                      hasChatted: setup === null ? boot.hasChatted : setup.hasChatted,
-                                      firstRunGuide,
-                                      settingsHref: '/settings',
-                                    }}
-                                  >
-                                    <ComposerDraftScopeProvider scope={draftScope}>
-                                      <AmanShell
-                                        defaultAgentSpec={boot.defaultAgentSpec}
-                                        openSettings={boot.openSettings}
-                                        displayName={session.displayName}
-                                        overrides={overrides}
-                                        modelName={
-                                          setup?.modelName ?? (boot.defaultAgentSpec.model.name || 'Choose a model')
-                                        }
-                                        version={boot.build?.version}
-                                        buildRef={boot.build?.ref}
-                                      />
-                                    </ComposerDraftScopeProvider>
-                                  </AmanSetupProvider>
-                                </HelpProvider>
-                              </PersonaProvider>
-                            </ModelUsageProvider>
-                          </MemoryRecallProvider>
-                        </RunCodeStatusProvider>
-                      </SpokenReplyProvider>
-                    </VoiceInputProvider>
-                  </BugReportProvider>
-                </RepositoryWorkProvider>
-              </ImplementationPlanGrantProvider>
-            </PersonalizationProvider>
+            <LocalAccountProvider api={localAccountApi}>
+              <PersonalizationProvider api={personalizationApi}>
+                <ImplementationPlanGrantProvider api={implementationPlanGrantApi}>
+                  <RepositoryWorkProvider api={repositoryWorkApi}>
+                    <BugReportProvider api={bugReportApi}>
+                      <VoiceInputProvider api={voiceInputApi}>
+                        <SpokenReplyProvider serverVoice={serverVoiceApi}>
+                          <RunCodeStatusProvider api={runCodeStatusApi}>
+                            <MemoryRecallProvider api={memoryRecallApi}>
+                              <ModelUsageProvider api={modelUsageApi}>
+                                <PersonaProvider api={personaApi}>
+                                  <HelpProvider api={helpApi}>
+                                    <AmanSetupProvider
+                                      value={{
+                                        modelName: setup?.modelName ?? (boot.defaultAgentSpec.model.name || null),
+                                        hasChatted: setup === null ? boot.hasChatted : setup.hasChatted,
+                                        firstRunGuide,
+                                        settingsHref: '/settings',
+                                      }}
+                                    >
+                                      <ComposerDraftScopeProvider scope={draftScope}>
+                                        <SignOutConfirmProvider>
+                                          <AmanShell
+                                            defaultAgentSpec={boot.defaultAgentSpec}
+                                            openSettings={boot.openSettings}
+                                            displayName={session.displayName}
+                                            overrides={overrides}
+                                            modelName={
+                                              setup?.modelName ?? (boot.defaultAgentSpec.model.name || 'Choose a model')
+                                            }
+                                            version={boot.build?.version}
+                                            buildRef={boot.build?.ref}
+                                          />
+                                        </SignOutConfirmProvider>
+                                      </ComposerDraftScopeProvider>
+                                    </AmanSetupProvider>
+                                  </HelpProvider>
+                                </PersonaProvider>
+                              </ModelUsageProvider>
+                            </MemoryRecallProvider>
+                          </RunCodeStatusProvider>
+                        </SpokenReplyProvider>
+                      </VoiceInputProvider>
+                    </BugReportProvider>
+                  </RepositoryWorkProvider>
+                </ImplementationPlanGrantProvider>
+              </PersonalizationProvider>
+            </LocalAccountProvider>
           </DeliveriesProvider>
         </SentinelApiProvider>
       </ThemeProvider>

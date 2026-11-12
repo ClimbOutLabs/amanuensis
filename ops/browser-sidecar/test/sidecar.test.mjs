@@ -25,10 +25,12 @@ let BrowserSidecar;
 let createHttpServer;
 let failureReason;
 let launchPersistentChromium;
+let pointerSteps;
 let browsersAvailable = true;
 const executablePath = process.env.BROWSER_CHROMIUM_PATH || undefined;
 try {
-  ({ BrowserSidecar, createHttpServer, failureReason, launchPersistentChromium } = await import('../src/server.mjs'));
+  ({ BrowserSidecar, createHttpServer, failureReason, launchPersistentChromium, pointerSteps } =
+    await import('../src/server.mjs'));
   const { chromium } = await import('playwright-core');
   const probe = await chromium.launch({ headless: false, chromiumSandbox: true, executablePath });
   await probe.close();
@@ -183,6 +185,29 @@ async function withWorld(run) {
       <input name="zip_code" value="94110" />
       <input name="pin_code" value="560001" /><input name="pincode" inputmode="numeric" maxlength="6" value="560002" />
       <input name="shippingPinCode" value="560003" /><input name="map_pin" value="Cubbon Park" />`),
+    // Card and code fields whose meaning is in what the page calls them, or in a short name sites use.
+    '/label-names': html(`<h1>Pay</h1>
+      <label for="f1">Card number</label><input id="f1" name="f1" value="4111111111111111" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" />
+      <input name="f2" aria-label="CVV" value="737" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" />
+      <input name="f3" placeholder="Security code" value="846" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" />
+      <span id="f4-label">One-time code</span><input name="f4" aria-labelledby="f4-label" value="551204" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" />
+      <label>Card <input name="f5" inputmode="numeric" value="5500005555555559" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" /></label>
+      <input name="pan" value="6011000990139424" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" />
+      <input name="card" type="tel" value="3530111333300000" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" />
+      <input name="token" maxlength="6" value="918273" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" />
+      <input name="authcode" maxlength="8" value="64738291" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" />
+      <label>PIN <input name="f6" value="4826" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" /></label>
+      <label for="holder">Name on card</label><input id="holder" name="holder" value="Ada Lovelace" />
+      <label>Gift card message <input name="note" value="Happy birthday" /></label>
+      <input name="token" value="long-session-token-shown" />
+      <label>PIN code <input name="f7" value="560004" /></label>
+      <label>PIN <input name="pincode" value="560005" /></label>
+      <label>Drop pin <input name="f8" value="Lalbagh Gate" /></label>
+      <label>Frying pan quantity <input name="f9" type="number" value="31" /></label>
+      <label>PAN card number <input name="f10" value="ABCDE1234F" /></label>
+      <label>Promo token <input name="f11" maxlength="8" value="SAVE20" /></label>
+      <form><label>City <input name="f12" value="Bengaluru" /></label><label>PIN <input name="f13" inputmode="numeric" maxlength="6" value="560006" /></label></form>
+      <form><label>Billing address <input name="f14" value="12 Lake Road" /></label><label>PIN <input name="f15" inputmode="numeric" maxlength="4" value="7391" style="display:block;width:300px;height:40px;background:#00ff00;color:#00ff00;border:0" /></label></form>`),
     '/code-boxes': html(`<h1>Enter the code</h1>
       ${[1, 2, 3].map(() => '<input maxlength="1" inputmode="numeric" value="7" style="width:60px;height:60px;background:#00ff00;color:#00ff00;border:0" />').join('')}`),
     // A page that watches for anything added to it and says so in its title.
@@ -365,6 +390,19 @@ test('a redirect that stays on the site is followed', { skip: !browsersAvailable
     assert.match(result.text, /Streaming Account/);
   });
 });
+
+test(
+  'refuses to open an address with a sign-in name before the site, and the site hears nothing',
+  { skip: !browsersAvailable },
+  async () => {
+    await withWorld(async ({ sidecar, siteA }) => {
+      const hitsBefore = siteA.hits.length;
+      const result = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://lake-house@site-a.test/' });
+      assert.deepEqual(result, { status: 'refused', reason: 'sign_in_in_address' });
+      assert.equal(siteA.hits.length, hitsBefore);
+    });
+  },
+);
 
 test('refuses to open a private address before the browser is touched', { skip: !browsersAvailable }, async () => {
   await withWorld(async ({ sidecar, internalUrl, internal }) => {
@@ -833,6 +871,43 @@ test('code and card fields are found whatever naming style the site uses', { ski
   });
 });
 
+test('card and code fields are found by what the page calls them', { skip: !browsersAvailable }, async () => {
+  await withWorld(async ({ sidecar }) => {
+    const opened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/label-names' });
+    for (const secret of [
+      '4111111111111111',
+      '737',
+      '846',
+      '551204',
+      '5500005555555559',
+      '6011000990139424',
+      '3530111333300000',
+      '918273',
+      '64738291',
+      '4826',
+      '7391',
+    ]) {
+      assert.doesNotMatch(opened.text, new RegExp(secret), 'a card number or a code is a secret');
+    }
+    for (const shown of ['Ada Lovelace', 'Happy birthday', 'long-session-token-shown']) {
+      assert.match(opened.text, new RegExp(shown), 'a field that only mentions a card or a token is not a secret');
+    }
+    for (const shown of ['560004', '560005', '560006', 'Lalbagh Gate']) {
+      assert.match(opened.text, new RegExp(shown), 'a postal PIN code or a map pin is not a secret');
+    }
+    for (const shown of [': 31$', 'ABCDE1234F', 'SAVE20']) {
+      assert.match(
+        opened.text,
+        new RegExp(shown, 'm'),
+        'a pan count, a tax ID and a promo token are not payment secrets',
+      );
+    }
+    const shot = await sidecar.screenshot({ owner: 'owner-1', tab: 'chat-1' });
+    assert.ok(pixelsOf(shot.png_base64, [0, 0xff, 0]) > 1000, "the person's picture shows the fields");
+    assert.equal(pixelsOf(shot.model_png_base64, [0, 0xff, 0]), 0, "none of them shows in the model's copy");
+  });
+});
+
 test('taking a screenshot changes nothing a page can see', { skip: !browsersAvailable }, async () => {
   await withWorld(async ({ sidecar }) => {
     await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'http://site-a.test/watching' });
@@ -1055,11 +1130,14 @@ async function fakeSidecar() {
   let fileFields = 0;
   let launches = 0;
   let shotsToFail = 0;
+  let pageTitle = 'Account';
+  let frameUrls = ['https://site-a.test/account'];
   const mainFrame = { name: 'main' };
   const page = {
     mainFrame: () => mainFrame,
     url: () => 'https://site-a.test/account',
-    title: async () => 'Account',
+    title: async () => pageTitle,
+    frames: () => frameUrls.map(url => ({ url: () => url })),
     goto: async () => undefined,
     evaluate: async () => [],
     screenshot: async options => {
@@ -1074,6 +1152,15 @@ async function fakeSidecar() {
     mouse: {
       click: async (x, y) => {
         acts.push({ click: [x, y] });
+      },
+      move: async (x, y, options) => {
+        acts.push({ move: [x, y], steps: options?.steps });
+      },
+      down: async () => {
+        acts.push({ down: true });
+      },
+      up: async () => {
+        acts.push({ up: true });
       },
       wheel: async (dx, dy) => {
         acts.push({ wheel: [dx, dy] });
@@ -1164,6 +1251,14 @@ async function fakeSidecar() {
     failShots: count => {
       shotsToFail = count;
     },
+    /** A human check appears on the page: its widget frame, served from the check's own host. */
+    showChallenge: () => {
+      frameUrls = [...frameUrls, 'https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/g/widget'];
+    },
+    /** The page itself becomes the full-page human check, which carries its own title. */
+    showChallengePage: () => {
+      pageTitle = 'Just a moment...';
+    },
   };
 }
 
@@ -1189,6 +1284,8 @@ test('the live view lists, frames and drives a tab through a stand-in page', asy
       jpeg_base64: Buffer.from('frame-bytes').toString('base64'),
       width: 1280,
       height: 800,
+      takeover: false,
+      challenge: false,
     });
     assert.deepEqual(acts.at(-1), { screenshot: { type: 'jpeg', quality: 60 } });
 
@@ -1222,6 +1319,117 @@ test('the live view lists, frames and drives a tab through a stand-in page', asy
   }
 });
 
+test('pointer steps keep a streamed move to short hops, and cap a long one', () => {
+  if (pointerSteps === undefined) {
+    return;
+  }
+  assert.equal(pointerSteps(0), 1);
+  assert.equal(pointerSteps(40), 4);
+  assert.equal(pointerSteps(10_000), 50);
+});
+
+test('takeover streams the pointer in steps, holds the model out, and hands the tab back', async () => {
+  if (BrowserSidecar === undefined) {
+    return;
+  }
+  const { sidecar, acts, gateway } = await fakeSidecar();
+  try {
+    await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'https://site-a.test/account' });
+
+    // A chat with no tab cannot be taken over.
+    assert.deepEqual(await sidecar.liveTakeover({ owner: 'owner-1', tab: 'chat-9', on: true }), { status: 'closed' });
+
+    assert.deepEqual(await sidecar.liveTakeover({ owner: 'owner-1', tab: 'chat-1', on: true }), {
+      status: 'ok',
+      takeover: true,
+    });
+    assert.equal((await sidecar.liveFrame({ owner: 'owner-1', tab: 'chat-1' })).takeover, true);
+
+    // While the person holds the tab, the model's own steps on it are refused.
+    for (const step of [
+      () => sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'https://site-a.test/account' }),
+      () => sidecar.scroll({ owner: 'owner-1', tab: 'chat-1', direction: 'down' }),
+      () => sidecar.back({ owner: 'owner-1', tab: 'chat-1' }),
+    ]) {
+      assert.deepEqual(await step(), { status: 'refused', reason: 'takeover' });
+    }
+
+    // The person's press travels instead of landing from nowhere: a press where their hand came
+    // down, a long move applied in steps, and a release where it ended. Points read from a frame
+    // half the viewport's size land at twice the point, like a click.
+    acts.length = 0;
+    const send = input => sidecar.liveInput({ owner: 'owner-1', tab: 'chat-1', input });
+    await send({ kind: 'down', x: 100, y: 50, imageWidth: 640, imageHeight: 400 });
+    await send({ kind: 'move', x: 420, y: 250, imageWidth: 640, imageHeight: 400 });
+    await send({ kind: 'up', x: 420, y: 250, imageWidth: 640, imageHeight: 400 });
+    assert.deepEqual(acts, [
+      { move: [200, 100], steps: 1 },
+      { down: true },
+      { move: [840, 500], steps: 50 },
+      { move: [840, 500], steps: 1 },
+      { up: true },
+    ]);
+
+    // Handback releases the tab: the model can open it again.
+    assert.deepEqual(await sidecar.liveTakeover({ owner: 'owner-1', tab: 'chat-1', on: false }), {
+      status: 'ok',
+      takeover: false,
+    });
+    const reopened = await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'https://site-a.test/account' });
+    assert.equal(reopened.status, 'ok');
+  } finally {
+    gateway.close();
+    await sidecar.close();
+  }
+});
+
+test('under takeover the model cannot click, type or select, and can again after handback', async () => {
+  await withFakeSidecar(async ({ sidecar }) => {
+    await sidecar.liveTakeover({ owner: 'owner-1', tab: 'chat-1', on: true });
+    for (const step of [
+      () => sidecar.click({ owner: 'owner-1', tab: 'chat-1', ref: 'e1' }),
+      () => sidecar.type({ owner: 'owner-1', tab: 'chat-1', ref: 'e1', text: 'hello' }),
+      () => sidecar.select({ owner: 'owner-1', tab: 'chat-1', ref: 'e1', option: 'x' }),
+    ]) {
+      assert.deepEqual(await step(), { status: 'refused', reason: 'takeover' });
+    }
+    await sidecar.liveTakeover({ owner: 'owner-1', tab: 'chat-1', on: false });
+    const typed = await sidecar.type({ owner: 'owner-1', tab: 'chat-1', ref: 'e1', text: 'hello' });
+    assert.equal(typed.status, 'ok');
+  });
+});
+
+test('a frame says when the tab is showing a human check', async () => {
+  if (BrowserSidecar === undefined) {
+    return;
+  }
+  const { sidecar, gateway, showChallenge } = await fakeSidecar();
+  try {
+    await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'https://site-a.test/account' });
+    assert.equal((await sidecar.liveFrame({ owner: 'owner-1', tab: 'chat-1' })).challenge, false);
+    showChallenge();
+    assert.equal((await sidecar.liveFrame({ owner: 'owner-1', tab: 'chat-1' })).challenge, true);
+  } finally {
+    gateway.close();
+    await sidecar.close();
+  }
+});
+
+test('the full-page human check is reported too, by its title', async () => {
+  if (BrowserSidecar === undefined) {
+    return;
+  }
+  const { sidecar, gateway, showChallengePage } = await fakeSidecar();
+  try {
+    await sidecar.open({ owner: 'owner-1', tab: 'chat-1', url: 'https://site-a.test/account' });
+    showChallengePage();
+    assert.equal((await sidecar.liveFrame({ owner: 'owner-1', tab: 'chat-1' })).challenge, true);
+  } finally {
+    gateway.close();
+    await sidecar.close();
+  }
+});
+
 test('the live routes answer over HTTP, and listing them needs no tab', async () => {
   if (BrowserSidecar === undefined || createHttpServer === undefined) {
     return;
@@ -1247,6 +1455,14 @@ test('the live routes answer over HTTP, and listing them needs no tab', async ()
     const badInput = await post('/live/input', { owner: 'owner-1', tab: 'chat-1', kind: 'dance' });
     assert.equal(badInput.status, 200);
     assert.deepEqual(await badInput.json(), { status: 'bad_input' });
+
+    const badTakeover = await post('/live/takeover', { owner: 'owner-1', tab: 'chat-1', on: 'yes' });
+    assert.equal(badTakeover.status, 200);
+    assert.deepEqual(await badTakeover.json(), { status: 'bad_input' });
+
+    const takeoverWithNoTab = await post('/live/takeover', { owner: 'owner-1', tab: 'chat-1', on: true });
+    assert.equal(takeoverWithNoTab.status, 200);
+    assert.deepEqual(await takeoverWithNoTab.json(), { status: 'closed' });
   } finally {
     server.close();
     gateway.close();

@@ -1,5 +1,6 @@
 import { swaggerUI } from '@hono/swagger-ui';
 import type { OpenAPIHono } from '@hono/zod-openapi';
+import type { MiddlewareHandler } from 'hono';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import getSwaggerUiDistPath from 'swagger-ui-dist/absolute-path.js';
@@ -21,8 +22,13 @@ const API_DOCS_CSP =
 /**
  * Interactive API docs at `/api/v1/docs`. Swagger UI's script and stylesheet are served from the
  * installed package rather than a CDN, and the spec validator (a call to swagger.io) is off.
+ * The page and its files sit behind sign-in like the rest of the API, so `authMiddleware` gates
+ * both routes; the browser carries the session cookie for the page, its files and the spec.
  */
-export function mountApiDocs(app: OpenAPIHono, options: { uiBasePath: string; openApiSpecPath: string }): void {
+export function mountApiDocs(
+  app: OpenAPIHono,
+  options: { uiBasePath: string; openApiSpecPath: string; authMiddleware: MiddlewareHandler },
+): void {
   const cache = new Map<string, Uint8Array>();
   const page = swaggerUI({
     url: options.openApiSpecPath,
@@ -30,13 +36,13 @@ export function mountApiDocs(app: OpenAPIHono, options: { uiBasePath: string; op
     validatorUrl: 'none',
   });
 
-  app.get(API_DOCS_PATH, async (c, next) => {
+  app.get(API_DOCS_PATH, options.authMiddleware, async (c, next) => {
     c.header('Content-Security-Policy', API_DOCS_CSP);
     c.header('Referrer-Policy', 'no-referrer');
     return page(c, next);
   });
 
-  app.get(`${ASSETS_PATH}/swagger-ui-dist/:file`, c => {
+  app.get(`${ASSETS_PATH}/swagger-ui-dist/:file`, options.authMiddleware, c => {
     const file = c.req.param('file');
     const contentType = Object.hasOwn(SWAGGER_UI_FILES, file) ? SWAGGER_UI_FILES[file] : undefined;
     if (contentType === undefined) {

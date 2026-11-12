@@ -47,6 +47,10 @@
             "pages": ["safety", "privacy", "browser", "schedules", "backup"]
           },
           {
+            "group": "Connectors",
+            "pages": ["connectors/notes-folder"]
+          },
+          {
             "group": "TrueForge Harness",
             "pages": [
               {
@@ -56,6 +60,7 @@
                   "models",
                   "model-roles",
                   "mcp-servers",
+                  "connectors/home-assistant",
                   "google",
                   "skills",
                   "sandbox",

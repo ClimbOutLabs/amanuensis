@@ -8,7 +8,12 @@
 import { InvalidAgentSendInputError } from '../errors';
 import type { InternalEnrichedAssistantMessage, InternalEnrichedToolCall, InternalToolCallInfo } from '../llm/LLMTypes';
 import { gitRemotesMatch } from '../sandbox/gitRemoteObservation';
-import { approvalTokenExpiry, type ApprovalTokenScope, type ApprovalTokenStore } from './approvalTokens';
+import {
+  approvalTokenExpiry,
+  stableStringify,
+  type ApprovalTokenScope,
+  type ApprovalTokenStore,
+} from './approvalTokens';
 import type { Tier3Card } from './tier';
 
 /** Most actions one chat holds; past this a call is refused instead of queued. */
@@ -160,14 +165,57 @@ function heldRemotesUnchanged(input: { held: InternalToolCallInfo; fresh: Intern
     : gitRemotesMatch({ approved, current });
 }
 
-/** The card fields a person reads before approving; free text such as the reason is not compared. */
-function sameCardTargets(held: Tier3Card, fresh: Tier3Card): boolean {
+/** A value with every empty part dropped, so "nothing to show" reads the same however it was stored. */
+function withoutEmptyParts(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(withoutEmptyParts);
+  }
+  if (typeof value === 'object' && value !== null) {
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([, part]) => part !== null && part !== undefined)
+        .map(([key, part]) => [key, withoutEmptyParts(part)]),
+    );
+  }
+  return value;
+}
+
+/**
+ * Everything a person reads on a card before approving. The two free-text reason lines are left out, and so is
+ * a schedule's list of next runs, which moves with the clock.
+ */
+function partsRead(card: Tier3Card): Record<string, unknown> {
+  return {
+    ...card,
+    plain_why: null,
+    why_asked_again: null,
+    schedule: card.schedule == null ? null : { ...card.schedule, next_runs: null },
+  };
+}
+
+function asComparableText(parts: Record<string, unknown>): string {
+  return stableStringify(withoutEmptyParts(parts));
+}
+
+/**
+ * Whether a card reads today as it read when the call was held. One difference is expected: approving a mail to
+ * new addresses puts them on the Email list, so a later try no longer carries the new-recipient notice. The
+ * sentence after that notice, and every other part, must still be what the owner read.
+ */
+function readsAsHeld(input: { held: Tier3Card; fresh: Tier3Card }): boolean {
+  const { held, fresh } = input;
+  if (asComparableText(partsRead(held)) === asComparableText(partsRead(fresh))) {
+    return true;
+  }
+  const noticedThen = held.mail_new_recipients ?? [];
+  const noticedNow = fresh.mail_new_recipients ?? [];
+  if (noticedThen.length === 0 || noticedNow.length > 0 || !held.plain_what.endsWith(` ${fresh.plain_what}`)) {
+    return false;
+  }
+  const withoutNotice = { plain_what: fresh.plain_what, mail_new_recipients: null, mail_draft: null };
   return (
-    held.recipient === fresh.recipient &&
-    held.destination === fresh.destination &&
-    held.destination_host === fresh.destination_host &&
-    held.outbound_text === fresh.outbound_text &&
-    held.parsed_command === fresh.parsed_command
+    asComparableText({ ...partsRead(held), ...withoutNotice }) ===
+    asComparableText({ ...partsRead(fresh), ...withoutNotice })
   );
 }
 
@@ -202,19 +250,27 @@ export async function checkHeldReplay(input: {
       return { ok: false, reason: 'changed' };
     }
   }
+  // A skill network card holds no approval token of its own: the person answered a question
+  // about a skill's sites, and the card never showed this call. When the call as classified
+  // now asks for an approval of its own, the network answer cannot stand in for it, so the
+  // replay is refused and the call can be asked about on its own card instead. A call that
+  // does not ask on its own (the standing-grant case these cards are built for) still runs.
+  if (held.skill_network != null && heldTokenId === null && fresh.is_approval_required === true) {
+    return { ok: false, reason: 'changed' };
+  }
   if (!heldRemotesUnchanged({ held, fresh })) {
     return { ok: false, reason: 'changed' };
   }
   const heldCard = held.tier3_card ?? undefined;
   const freshCard = fresh.tier3_card ?? undefined;
-  // A skill network card asks about the skill's sites, not about this call, so its card targets
-  // are not compared with the fresh call's card: the fresh classification governs the call
+  // A skill network card asks about the skill's sites, not about this call, so what its card
+  // shows is not compared with the fresh call's card: the fresh classification governs the call
   // itself, and the network answer was recorded against the skill before the replay.
   if (
     held.skill_network == null &&
     heldCard !== undefined &&
     freshCard !== undefined &&
-    !sameCardTargets(heldCard, freshCard)
+    !readsAsHeld({ held: heldCard, fresh: freshCard })
   ) {
     return { ok: false, reason: 'changed' };
   }

@@ -38,7 +38,7 @@ export type HeldActionStatus =
 export type HeldActionCardProps = {
   card: SentinelApprovalCard;
   status: HeldActionStatus;
-  /** Show "Always allow this tool": the server only accepts it for some tools. */
+  /** Show "Always allow everywhere": the server only accepts it for some tools. */
   alwaysAllowOffered: boolean;
   /** Lets a person who cannot manage this chat read the card without answering it. */
   disabled?: boolean;
@@ -146,6 +146,20 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
         : newRecipients
           ? NEW_RECIPIENT_CHOICES.cancel
           : APPROVAL_CHOICES.deny;
+  // A card for a refused site cannot say which skill reached for the site, but its answers are
+  // filed under one skill, so that card's Always choice names the skill it is filed under.
+  const alwaysAllowChoice =
+    skillNetwork !== null && skillNetwork.reason === 'undeclared_host'
+      ? {
+          label: `Always allow for the ${skillNetwork.skill_name} skill`,
+          hint: `Let the ${skillNetwork.skill_name} skill reach these sites in every chat, until you remove it in skill settings.`,
+          title: `Always allow for the ${skillNetwork.skill_name} skill?`,
+        }
+      : {
+          label: SKILL_NETWORK_CHOICES.alwaysAllow.label,
+          hint: SKILL_NETWORK_CHOICES.alwaysAllow.hint,
+          title: 'Always allow for this skill?',
+        };
 
   return (
     <li className="list-none rounded-lg border border-border bg-primary-bg" data-role="held-action">
@@ -216,9 +230,9 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
               <AlwaysAllowToolControl
                 size="large"
                 disabled={disabled}
-                label={SKILL_NETWORK_CHOICES.alwaysAllow.label}
-                hint={SKILL_NETWORK_CHOICES.alwaysAllow.hint}
-                title="Always allow for this skill?"
+                label={alwaysAllowChoice.label}
+                hint={alwaysAllowChoice.hint}
+                title={alwaysAllowChoice.title}
                 removeWhere="skill settings"
                 description={`${assistant} will let ${skillNetwork.skill_name} reach ${skillNetwork.hosts.join(', ')} without asking, in every chat.`}
                 onConfirm={onAlwaysAllow}

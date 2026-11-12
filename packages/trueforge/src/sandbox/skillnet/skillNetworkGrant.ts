@@ -2,6 +2,7 @@ import { resolveGitSkillObjectId } from '@truefoundry/trueforge-core/core';
 import type { ISkillStore, SkillRecord } from '../../db/skillStore';
 import {
   grantedSkillNetworkHosts,
+  isSkillNetworkHostName,
   parseGitSkill,
   parseTrueFoundryRegistrySkill,
   type SkillManifest,
@@ -357,8 +358,13 @@ export async function drainSkillNetworkCards(input: {
   if (refused.length > 0) {
     // A refused site is charged to the first mounted skill, in the order the chat mounted them,
     // that declares sites and has neither granted nor denied it: the gateway sees only the union
-    // of the chat's grants, so it cannot tell which mounted skill reached for the site.
+    // of the chat's grants, so it cannot tell which mounted skill reached for the site. A refused
+    // host that is not a site name at all (a bare address, say) raises no card: no answer could
+    // ever allow it, so there is nothing to ask about.
     for (const host of refused) {
+      if (!isSkillNetworkHostName(host)) {
+        continue;
+      }
       for (const record of records) {
         const manifest = parseGitSkill(record.manifest);
         const declared = manifest?.network_hosts ?? [];
@@ -398,7 +404,10 @@ export async function drainSkillNetworkCards(input: {
  * none yet, so allowances are bound to the code the same way approvals are. Deny stores the
  * sites as turned down for the skill, which also ends their first-use card. Every answer
  * clears the raised mark, so a later change can raise a card again. Storing an answer is
- * refused, recording nothing, when the skill's code version cannot be read.
+ * refused, recording nothing, when the skill's code version cannot be read. A host that is not
+ * a site name is dropped before anything is stored: an answer can never create a grant for a
+ * bare address, and nothing lands in the records that Settings would then be unable to show
+ * or clear.
  */
 export async function recordSkillNetworkAnswer(input: {
   store: ISkillStore;
@@ -412,6 +421,7 @@ export async function recordSkillNetworkAnswer(input: {
   answer: 'allow_once' | 'always_allow' | 'deny';
   resolveCodeSha?: SkillCodeResolver | undefined;
 }): Promise<void> {
+  const hosts = input.hosts.filter(host => isSkillNetworkHostName(host));
   if (input.answer === 'always_allow' && input.reason !== 'undeclared_host') {
     // Approving pins the approval to the code as it stands now, so the pin is read before
     // anything is recorded: a code version that cannot be read refuses the whole answer.
@@ -437,9 +447,9 @@ export async function recordSkillNetworkAnswer(input: {
       // the kind it was.
       const denied = new Set(record.network_denied_hosts);
       const named = new Set<string>([...(record.network_approval ?? []), ...record.network_allowed_hosts]);
-      const hosts = new Set<string>();
+      const approved = new Set<string>();
       const restored: string[] = [];
-      for (const host of input.hosts) {
+      for (const host of hosts) {
         if (denied.has(host)) {
           continue;
         }
@@ -447,18 +457,18 @@ export async function recordSkillNetworkAnswer(input: {
           restored.push(host);
           continue;
         }
-        hosts.add(host);
+        approved.add(host);
       }
       for (const host of declared) {
         if (named.has(host) && !denied.has(host)) {
-          hosts.add(host);
+          approved.add(host);
         }
       }
-      if (input.reason !== 'code_changed' || hosts.size > 0) {
+      if (input.reason !== 'code_changed' || approved.size > 0) {
         await input.store.setSkillNetworkApproval({
           tenant_id: input.tenant_id,
           name: input.skill_name,
-          hosts: [...hosts],
+          hosts: [...approved],
           code_sha,
         });
       }
@@ -470,7 +480,7 @@ export async function recordSkillNetworkAnswer(input: {
           decision: 'allowed',
         });
       }
-      if (hosts.size === 0 && restored.length > 0) {
+      if (approved.size === 0 && restored.length > 0) {
         // The answer restored only allowances, so no approval write stored the pin: store
         // it now, or the allowances would sit outside the pin again.
         await input.store.setSkillNetworkCodePin({
@@ -504,7 +514,7 @@ export async function recordSkillNetworkAnswer(input: {
     }
     input.registry.clearCardRaised({ session_id: input.session_id, skill_name: input.skill_name });
     input.registry.clearCodeChanged({ session_id: input.session_id, skill_name: input.skill_name });
-    for (const host of input.hosts) {
+    for (const host of hosts) {
       await input.store.setSkillNetworkHostDecision({
         tenant_id: input.tenant_id,
         name: input.skill_name,
@@ -537,18 +547,20 @@ export async function recordSkillNetworkAnswer(input: {
         code_sha = null;
       }
     }
-    input.registry.addSessionHosts({
-      tenant_id: input.tenant_id,
-      created_by: input.created_by,
-      session_id: input.session_id,
-      skill_name: input.skill_name,
-      hosts: input.hosts,
-      code_sha,
-    });
+    if (hosts.length > 0) {
+      input.registry.addSessionHosts({
+        tenant_id: input.tenant_id,
+        created_by: input.created_by,
+        session_id: input.session_id,
+        skill_name: input.skill_name,
+        hosts,
+        code_sha,
+      });
+    }
     return;
   }
   // The only answer left is deny.
-  for (const host of input.hosts) {
+  for (const host of hosts) {
     await input.store.setSkillNetworkHostDecision({
       tenant_id: input.tenant_id,
       name: input.skill_name,
