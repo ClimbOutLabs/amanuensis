@@ -15,9 +15,20 @@ function ownerLabel(memory: ExplorerMemory): string {
   return memory.owner === 'you' ? 'You' : 'Shared topic';
 }
 
+/** The time of day a memory was saved; its day is the heading it sits under. */
 function savedLabel(timestamp: string): string {
   const date = new Date(timestamp);
-  return Number.isNaN(date.getTime()) ? timestamp : date.toLocaleString();
+  return Number.isNaN(date.getTime())
+    ? timestamp
+    : date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+}
+
+const SOURCE_LINE_PATTERN = /\n+> (From you|External source: [^\n]+)\s*$/;
+
+/** A memory's text without its closing "where it came from" line, and that line's words when it has one. */
+export function splitSourceLine(text: string): { body: string; source: string | null } {
+  const match = SOURCE_LINE_PATTERN.exec(text);
+  return match === null ? { body: text, source: null } : { body: text.slice(0, match.index), source: match[1] ?? null };
 }
 
 /** One memory: formatted text, select, edit in place, copy, and forget. Forgetting is undone from the list. */
@@ -31,6 +42,7 @@ export function MemoryVaultEntryRow(props: {
   onForget: (id: string) => void;
 }) {
   const { entry } = props;
+  const shown = splitSourceLine(entry.text);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(entry.text);
   const [busy, setBusy] = useState(false);
@@ -75,7 +87,7 @@ export function MemoryVaultEntryRow(props: {
   }
 
   return (
-    <li className="flex gap-3 rounded-xl border border-border bg-card-bg p-4">
+    <li className="flex gap-3 px-4 py-3">
       <input
         type="checkbox"
         checked={props.selected}
@@ -125,9 +137,10 @@ export function MemoryVaultEntryRow(props: {
           </div>
         ) : (
           <>
-            <Markdown content={entry.text} highlight={props.highlight} readOnly />
+            <Markdown content={shown.body} highlight={props.highlight} readOnly className="text-sm" />
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-xs text-text-secondary">
+                {shown.source === null ? '' : `${shown.source} · `}
                 {ownerLabel(entry)} · {savedLabel(entry.timestamp)}
               </span>
               <div className="flex flex-wrap items-center gap-1">

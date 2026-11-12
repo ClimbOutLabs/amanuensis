@@ -2,7 +2,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { MemoryVaultEntryRow } from '@/atoms/memory/MemoryVaultEntry.js';
+import { MemoryVaultEntryRow, splitSourceLine } from '@/atoms/memory/MemoryVaultEntry.js';
 import type { ExplorerMemory } from '@/atoms/memory/memoryExplorer.js';
 import { copyText } from '@/utils/copyText.js';
 
@@ -30,7 +30,44 @@ function renderRow(overrides: Partial<Parameters<typeof MemoryVaultEntryRow>[0]>
   return props;
 }
 
+describe('splitSourceLine', () => {
+  it('takes the closing line that says where a memory came from off its text', () => {
+    expect(splitSourceLine('Likes tea.\n\n> From you')).toEqual({ body: 'Likes tea.', source: 'From you' });
+    expect(splitSourceLine('- A\n- B\n\n> External source: email\n')).toEqual({
+      body: '- A\n- B',
+      source: 'External source: email',
+    });
+  });
+
+  it('leaves a memory with no such closing line, or with a quote of another kind, as it is', () => {
+    expect(splitSourceLine('Likes tea.')).toEqual({ body: 'Likes tea.', source: null });
+    expect(splitSourceLine('She said:\n\n> see you soon')).toEqual({
+      body: 'She said:\n\n> see you soon',
+      source: null,
+    });
+    expect(splitSourceLine('> From you\n\nLikes tea.')).toEqual({ body: '> From you\n\nLikes tea.', source: null });
+  });
+});
+
 describe('MemoryVaultEntryRow', () => {
+  it('shows where the memory came from as a small label beside the time, and keeps it in the text being edited', () => {
+    const text = 'Sister Lexie is allergic to shellfish.\n\n> From you';
+    const { container } = render(
+      <MemoryVaultEntryRow
+        entry={{ ...ENTRY, text }}
+        highlight=""
+        selected={false}
+        onToggleSelected={vi.fn()}
+        onSave={vi.fn(async () => {})}
+        onForget={vi.fn()}
+      />,
+    );
+    expect(container.querySelector('blockquote')).toBeNull();
+    expect(screen.getByText(/^From you · You · /)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    expect(screen.getByRole('textbox', { name: 'Edit memory' })).toHaveValue(text);
+  });
+
   it('renders the memory as formatted text, not as raw markdown', () => {
     renderRow({ entry: { ...ENTRY, text: 'Drinks **tea** every morning' } });
 
