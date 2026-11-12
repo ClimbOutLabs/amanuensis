@@ -127,5 +127,10 @@
   "Show": "packages/trueforge-ui/src/sentinel/AuditLogSettings.tsx",
   "From": "packages/trueforge-ui/src/sentinel/AuditLogSettings.tsx",
   "To": "packages/trueforge-ui/src/sentinel/AuditLogSettings.tsx",
-  "Clear dates": "packages/trueforge-ui/src/sentinel/AuditLogSettings.tsx"
+  "Clear dates": "packages/trueforge-ui/src/sentinel/AuditLogSettings.tsx",
+  "Allow once": "packages/trueforge-ui/src/sentinel/approvalChoices.ts",
+  "Always allow for this skill": "packages/trueforge-ui/src/sentinel/approvalChoices.ts",
+  "Deny": "packages/trueforge-ui/src/sentinel/approvalChoices.ts",
+  "Remove network access": "packages/trueforge-ui/src/containers/SettingsBuilder/SkillSettings.tsx",
+  "Clear": "packages/trueforge-ui/src/containers/SettingsBuilder/SkillSettings.tsx"
 }
