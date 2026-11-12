@@ -192,7 +192,6 @@ async function main(): Promise<void> {
       for (const shot of inWorld) {
         // Both sizes of one shot are taken together, so a step that changes the world changes it for both.
         for (const size of SIZES) {
-          if (shot.computerOnly === true && size.phone) continue;
           const context = await newContext({ browser, origin, owner, size });
           const page = await context.newPage();
           const failures: string[] = [];

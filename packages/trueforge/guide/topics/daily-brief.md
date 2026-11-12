@@ -83,6 +83,7 @@ If your calendar isn't connected, tell Aman what is on your day.
 
 ## Good to know
 
+- If some items, or the whole brief, couldn't be shown, a line under it says so. Ask for your brief again.
 - The brief only reads. It offers next steps, but it never sends or saves anything without asking you first.
 - Web addresses in a brief show as a site name only, not as a link. A brief is written from mail anyone can send you.
 - If Aman could not read something, the first sentence says so. It doesn't guess.

@@ -17,7 +17,6 @@ import {
   openMoreMenu,
   press,
   rowButton,
-  scrollTo,
   see,
   settingsTab,
   type Step,
@@ -40,8 +39,6 @@ export interface Shot {
    * keep the whole window.
    */
   crop?: readonly string[];
-  /** Only the computer size, for a screen that doesn't fit a phone yet. */
-  computerOnly?: boolean;
 }
 
 const SETTINGS_PANEL = ['[role="tabpanel"]'];
@@ -81,23 +78,9 @@ export const SHOTS: readonly Shot[] = [
     crop: ['[data-testid="aman-brief"]'],
   },
   { name: 'schedules-page', world: 'full', steps: [open('/schedules'), see('morning-brief')] },
-  {
-    name: 'reminders-bell',
-    world: 'full',
-    steps: [openChat('dinner'), press(/^Notifications/), see('Call the pharmacy')],
-    crop: ['button[aria-label^="Notifications"]', '[role="dialog"][aria-label="Notifications"]'],
-    // On a phone the panel runs off the left edge of the screen.
-    computerOnly: true,
-  },
   { name: 'spaces-list', world: 'full', steps: [open('/spaces'), see('Kitchen refresh')] },
   { name: 'memory-list', world: 'full', steps: [settingsTab('Memory'), see('Sam is vegetarian and loves Thai food.')] },
   { name: 'personalization-page', world: 'full', steps: [settingsTab('Personalization')], crop: SETTINGS_PANEL },
-  {
-    name: 'personas-list',
-    world: 'full',
-    steps: [settingsTab('Roles and Personas'), scrollTo('Add persona')],
-    crop: SETTINGS_PANEL,
-  },
   { name: 'agents-build', world: 'full', steps: [open('/'), openMoreMenu, press('Start new agent')] },
   {
     name: 'skills-page',

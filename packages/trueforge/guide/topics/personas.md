@@ -8,26 +8,19 @@ A persona is a helper with its own name, role and model that can answer in any c
 
 How to get there: Click **More** in the left bar, then **Settings**, then **Roles and Personas**.
 
-=== "Computer"
-
-    ![The Roles and Personas page in Settings, with a persona named Zara in the list](../../../../docs/screenshots/app/personas-list-desktop.png)
-
-=== "Phone"
-
-    ![The Roles and Personas page in Settings, with a persona named Zara in the list](../../../../docs/screenshots/app/personas-list-phone.png)
-
 !!! note "Persona or agent?"
 
     A persona talks with you in your chats, the way Aman does. An [agent](agents.md) is a saved setup for a job, such as a weekly report, that you try on its own or run on a schedule. If you want someone to chat with, make a persona.
 
 ## Make a persona
 
-1. Click **Add persona**.
-2. In **Name**, type the name you will call it by, such as Zara.
-3. In **Also answers to**, type any other names for it, with commas between them, such as "Z, Zara Quinn". You can skip this.
-4. In **Model**, pick the model the persona should use.
-5. In **Role**, describe how it should answer, such as "You are a travel planner. Suggest two options and say what each costs."
-6. Click **Create persona**.
+1. Click the **Personas** tab.
+2. Click **Add persona**.
+3. In **Name**, type the name you will call it by, such as Zara.
+4. In **Also answers to**, type any other names for it, with commas between them, such as "Z, Zara Quinn". You can skip this.
+5. In **Model**, pick the model the persona should use.
+6. In **Role**, describe how it should answer, such as "You are a travel planner. Suggest two options and say what each costs."
+7. Click **Create persona**.
 
 Each name must be different from every other persona's names.
 
