@@ -607,6 +607,20 @@ describe('held actions', () => {
     expect(info?.alwaysAllowOffered).toBe(true);
   });
 
+  it('reads that the every-chat answer on a maps card turns maps on, and leaves it unset on any other card', () => {
+    const card = { tier: 3, can_always_allow: true, tier3_card: { plain_what: 'Show a map of Lisbon?' } };
+    const parsed = extractSentinelFromEvent({
+      type: 'tool.approval_required',
+      tool_calls: [
+        { ...card, id: 'call-map', always_allow_covers: 'maps' },
+        { ...card, id: 'call-sdk', alwaysAllowCovers: 'maps' },
+        { ...card, id: 'call-plain' },
+        { ...card, id: 'call-other', always_allow_covers: 'everything' },
+      ],
+    });
+    expect(parsed.map(info => info.alwaysAllowCovers)).toEqual(['maps', 'maps', undefined, undefined]);
+  });
+
   it('leaves an ordinary approval without a held marker, and never offers always-allow it did not get', () => {
     const [ordinary] = extractSentinelFromEvent({
       type: 'tool.approval_required',

@@ -1,12 +1,13 @@
 import type { Logger } from 'winston';
 import { Controller } from './controller/Controller';
+import { noticingLoops } from './controller/noticingLoops';
 import { privateChatSweepLoop } from './controller/privateChatSweep';
 import { scheduleDispatchLoop } from './controller/scheduleDispatch';
 import type { IScheduleStore } from './db/scheduleStore';
 import type { WithTransaction } from './db/transaction';
 
 /**
- * Controller whose loops (schedule runs, the expired private chat sweep) hand work to the server over HTTP
+ * Controller whose loops (schedule runs, noticing, the expired private chat sweep) hand work to the server over HTTP
  * (`SERVER_URL` + `TRUEFORGE_API_KEY` from process config). Standalone uses
  * loopback; distributed uses the dedicated controller against the server Service.
  */
@@ -22,6 +23,7 @@ export function createController<TTransaction>(params: {
         withTransaction: params.withTransaction,
         logger: params.logger,
       }),
+      ...noticingLoops({ logger: params.logger }),
       privateChatSweepLoop({ logger: params.logger }),
     ],
     logger: params.logger,
