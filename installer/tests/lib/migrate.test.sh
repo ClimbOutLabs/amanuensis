@@ -82,6 +82,8 @@ test_migrate_exports_from_copies_and_cleans_up() {
   assert_eq "$(cat "$SB_STATE/export_stdin")" "$OLD_ENV_TEXT"
   assert_not_contains "$(cat "$STUB_LOG")" "invented-model-key" "the old keys never reach a command line"
   assert_flat_contains "$OUT" "The old Aman was not changed, and the temporary copies are removed."
+  assert_flat_contains "$OUT" "Exporting the chats of Sam Example from the copy"
+  assert_not_contains "$OUT" "Exporting the chats of trueforge-default"
   assert_flat_contains "$OUT" "Next: aman import $file --display-name 'Sam Example'"
   assert_cleaned_and_old_untouched
   sandbox_drop
