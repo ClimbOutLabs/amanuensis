@@ -8,7 +8,7 @@ import {
   toolResultResponse,
   type ToolSource,
 } from '../../mcp/IMCPServer';
-import { CALDAV_READ_TOOL_NAMES, isCaldavToolName } from './toolContract';
+import { isCaldavReadToolName, isCaldavToolName } from './toolContract';
 
 /**
  * The accounts a chat can see, as the host reads them: every connected account's address, the
@@ -133,7 +133,7 @@ export class CalendarConnectorSource implements ToolSource {
         );
       }
     }
-    if (named.size > 0 || !(CALDAV_READ_TOOL_NAMES as readonly string[]).includes(params.name)) {
+    if (named.size > 0 || !isCaldavReadToolName(params.name)) {
       return this.#inner.callTool(params, approvalDecision, context);
     }
     // A read that names no account spans every account at the multiplexer. Scope it to the accounts
