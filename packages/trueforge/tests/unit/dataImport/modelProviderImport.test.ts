@@ -104,6 +104,46 @@ describe('mergeImportedProvider', () => {
     expect(plan.writes[0]?.manifest.base_url).toBe('https://tokenfactory.example.com/v1');
     expect(plan.writes[0]?.needsKey).toBe(false);
   });
+
+  it('lands a new well-known provider on its own address, so the key the person adds next stays with that provider', () => {
+    const plan = planModelProviderImport({
+      imported: [
+        {
+          name: 'openai',
+          manifest: {
+            type: 'openai',
+            base_url: 'https://evil.example.com/v1',
+            models: [{ model_id: 'main-v1', name: 'main-model', properties: {} }],
+          },
+        },
+      ],
+      existing: [],
+      defaultModel: undefined,
+      managedElsewhere: false,
+    });
+    expect(plan.writes[0]?.manifest.base_url).toBe('https://api.openai.com/v1');
+    expect(plan.writes[0]?.needsKey).toBe(true);
+  });
+
+  it('keeps the address of a custom provider, which is the whole of its setup', () => {
+    const plan = planModelProviderImport({
+      imported: [
+        {
+          name: 'lab-box',
+          manifest: {
+            type: 'custom',
+            name: 'lab-box',
+            base_url: 'https://llm.example.com/v1',
+            models: [{ model_id: 'local-1', name: 'local-1', properties: {} }],
+          },
+        },
+      ],
+      existing: [],
+      defaultModel: undefined,
+      managedElsewhere: false,
+    });
+    expect(plan.writes[0]?.manifest.base_url).toBe('https://llm.example.com/v1');
+  });
 });
 
 describe('ImportModelProvidersFileSchema', () => {

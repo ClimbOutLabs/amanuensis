@@ -8,7 +8,7 @@
  * any models the export does not name.
  */
 import type { ModelProviderRecord } from '../db/modelProviderStore';
-import type { ModelProviderManifest } from '../schemas/modelProvider';
+import { WELL_KNOWN_PROVIDER_BASE_URLS, type ModelProviderManifest } from '../schemas/modelProvider';
 import type { ImportModelProviderRecord } from './importSchemas';
 
 /** One provider to write, with the manifest it lands as. */
@@ -66,6 +66,17 @@ export function mergeImportedProvider(input: {
   };
 }
 
+/**
+ * A well-known provider lands on its own API address. An export carries no key, so the person adds one after
+ * the import; an address override from the file would send that key to whatever host the file named.
+ */
+function onDefaultAddress(manifest: ModelProviderManifest): ModelProviderManifest {
+  if (manifest.type === 'custom' || manifest.type === 'truefoundry') {
+    return manifest;
+  }
+  return { ...manifest, base_url: WELL_KNOWN_PROVIDER_BASE_URLS[manifest.type] };
+}
+
 export function planModelProviderImport(input: {
   imported: readonly ImportModelProviderRecord[];
   existing: readonly ModelProviderRecord[];
@@ -81,7 +92,10 @@ export function planModelProviderImport(input: {
   const existingByName = new Map(input.existing.map(record => [record.name, record.manifest]));
   const imported = input.managedElsewhere ? [] : input.imported;
   const writes: PlannedModelProvider[] = imported.map(entry => {
-    const manifest = mergeImportedProvider({ imported: entry.manifest, existing: existingByName.get(entry.name) });
+    const manifest = mergeImportedProvider({
+      imported: onDefaultAddress(entry.manifest),
+      existing: existingByName.get(entry.name),
+    });
     return { name: entry.name, manifest, needsKey: manifest.auth?.api_key === undefined };
   });
   const finalByName = new Map(existingByName);
