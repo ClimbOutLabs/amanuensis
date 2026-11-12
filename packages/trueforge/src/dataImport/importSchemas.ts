@@ -52,6 +52,7 @@ import { ModelProviderManifestSchema, modelProviderName } from '../schemas/model
 import { PersonaActivationSchema, PersonaSchema, validatePersonaContentNames } from '../schemas/persona';
 import { PersonaKnowledgeDocumentSchema } from '../schemas/personaKnowledge';
 import { PersonalizationProfileSchema, validatePersonalizationContent } from '../schemas/personalization';
+import { ReachSettingsSchema } from '../schemas/reach';
 import { ScheduleManifestSchema, ScheduleStatusSchema } from '../schemas/schedule';
 import { SentinelAuditRecordSchema } from '../schemas/sentinelAudit';
 import { SentinelUserSettingsSchema } from '../schemas/sentinelSettings';
@@ -644,3 +645,6 @@ export const ImportAuditFileSchema = z.array(ImportAuditRecordSchema);
 /** The feed an export carries. Push devices belong to a device, so they are never in an export. */
 export const ImportDeliveriesFileSchema = z.array(DeliverySchema);
 export type ImportDelivery = z.infer<typeof DeliverySchema>;
+
+/** The person's Reach me settings, as a list of none or one. The text and call switches are always off on import. */
+export const ImportReachFileSchema = z.array(ReachSettingsSchema);

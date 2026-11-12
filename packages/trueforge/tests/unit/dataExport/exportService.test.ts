@@ -10,6 +10,7 @@ import { makeCreateTurnInput, makeModelMessageEvent } from '../../../../trueforg
 import { runDataExport, type DataExportDeps, type MemoryExportSource } from '../../../src/dataExport/exportService';
 import { DeliveryStore } from '../../../src/db/deliveryStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
+import { ReachSettingsStore } from '../../../src/db/reachSettingsStore';
 import { SentinelAuditStore } from '../../../src/db/sentinelAuditStore';
 import type { SessionCustom, TurnCustom } from '../../../src/db/sessionCustom';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
@@ -67,6 +68,7 @@ async function makeDeps(
     sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
     auditStore: new SentinelAuditStore(db),
     deliveryStore: new DeliveryStore(db),
+    reachSettingsStore: new ReachSettingsStore(db),
     turnArtifactStore: new SqliteTurnArtifactStore(db),
     mcpServerStore: new SqliteMcpServerStore(db),
     modelProviderStore,

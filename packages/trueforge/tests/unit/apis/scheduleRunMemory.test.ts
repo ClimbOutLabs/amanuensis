@@ -145,6 +145,7 @@ describe('scheduled run memory wiring', () => {
         scheduleStore,
         briefItemStore: new BriefItemCompletionStore(db),
         deliveryService: deliveryDeps(db).deliveryService,
+        reminderReach: deliveryDeps(db).reminderReach,
         sessions: new Sessions<SessionCustom, TurnCustom>({ sessionStore }),
         agentStore,
         personaStore: {

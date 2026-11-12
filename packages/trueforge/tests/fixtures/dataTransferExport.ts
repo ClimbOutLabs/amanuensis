@@ -55,6 +55,7 @@ export async function exportInstanceArchive<TTransaction>({
     sentinelSettingsStore: stores.sentinelSettingsStore,
     auditStore: stores.auditStore,
     deliveryStore: stores.deliveryStore,
+    reachSettingsStore: stores.reachSettingsStore,
     turnArtifactStore: stores.turnArtifactStore,
     mcpServerStore: stores.mcpServerStore,
     modelProviderStore: stores.modelProviderStore,

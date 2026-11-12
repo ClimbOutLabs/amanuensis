@@ -12,4 +12,6 @@ export interface ScheduleManifest {
     /** First user message sent to the agent on every run. */
     task: string;
     timezone?: TrueForge.Timezone;
+    /** For a reminder: the person marked it urgent, so it may call if they allowed that. */
+    urgent?: boolean;
 }
