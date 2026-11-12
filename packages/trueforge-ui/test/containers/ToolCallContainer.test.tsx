@@ -335,10 +335,8 @@ describe('ToolCallContainer', () => {
       ToolCallCard,
     });
 
-    const truncatedReason = `${rejectionText.slice(0, 139)}…`;
-    expect(ToolCallCard.mock.calls[0]?.[0]).toEqual(
-      expect.objectContaining({ outcomeText: `Execution failed: ${truncatedReason}` }),
-    );
+    // A step that ran and failed shows the reason itself, in full, with no label in front of it.
+    expect(ToolCallCard.mock.calls[0]?.[0]).toEqual(expect.objectContaining({ outcomeText: rejectionText }));
     expect(screen.queryByText('Execution failed', { exact: true })).not.toBeInTheDocument();
     // The rest of the reason is still available, expanded, in the response block.
     const responseSlot = ToolCallCard.mock.calls[0]?.[0]?.responseSlot as { props: { content: string } } | undefined;
@@ -387,7 +385,7 @@ describe('ToolCallContainer', () => {
     });
 
     expect(ToolCallCard.mock.calls[0]?.[0]).toEqual(
-      expect.objectContaining({ outcomeText: `Execution failed: ${errorText}`, status: 'error' }),
+      expect.objectContaining({ outcomeText: errorText, status: 'error' }),
     );
   });
 

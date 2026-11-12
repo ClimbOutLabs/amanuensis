@@ -123,20 +123,11 @@ function pluralize(count: number, singular: string): string {
   return `${String(count)} ${singular}${count === 1 ? '' : 's'}`;
 }
 
-function buildInternalsSummary({
-  toolCount,
-  thinkingCount,
-  helperCalls,
-}: {
-  toolCount: number;
-  thinkingCount: number;
-  helperCalls: number;
-}): string {
+function buildInternalsSummary({ toolCount, thinkingCount }: { toolCount: number; thinkingCount: number }): string {
   const segments: string[] = [];
   const steps = toolCount + thinkingCount;
   if (steps > 0) segments.push(pluralize(steps, 'step'));
   if (toolCount > 0) segments.push(pluralize(toolCount, 'tool'));
-  if (helperCalls > 0) segments.push(pluralize(helperCalls, 'helper call'));
   // An answer with nothing else to list still gets a toggle for its model usage.
   return segments.length > 0 ? segments.join(' · ') : 'Details';
 }
@@ -299,7 +290,6 @@ export function AssistantMessageContainer() {
         summary={buildInternalsSummary({
           toolCount: run.toolCount,
           thinkingCount: run.thinkingCount,
-          helperCalls: isHost ? (helperUsage?.helperCalls ?? 0) : 0,
         })}
         isRunning={isLive}
         attention={attention}
