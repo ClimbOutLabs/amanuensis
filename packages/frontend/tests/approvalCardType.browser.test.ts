@@ -33,7 +33,10 @@ test(
       await server.listen();
       const address = server.httpServer?.address();
       if (address == null || typeof address === 'string') throw new Error('Vite did not bind a TCP port');
-      browser = await chromium.launch({ executablePath: findChromiumExecutable(), headless: true });
+      browser = await chromium.launch({
+        executablePath: findChromiumExecutable(chromium.executablePath()),
+        headless: true,
+      });
       for (const theme of ['light', 'dark'] as const) {
         const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
         await page.goto(`http://127.0.0.1:${address.port}/tests/fixtures/approval-cards.fixture.html?theme=${theme}`, {
