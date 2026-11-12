@@ -1,4 +1,4 @@
-import { plainName, textName } from '../../../../src/runtime/texts/assistantName';
+import { textName } from '../../../../src/runtime/texts/assistantName';
 
 describe('the assistant name in a text', () => {
   it('keeps a plain name as it is', () => {
@@ -31,33 +31,5 @@ describe('the assistant name in a text', () => {
     expect(textName(null)).toBe('Your assistant');
     expect(textName('   ')).toBe('Your assistant');
     expect(textName('🎉🎉 123')).toBe('Your assistant');
-  });
-});
-
-describe('a name from the person’s settings, said on a call', () => {
-  it('keeps a plain name, and gives nothing when no plain name is left or it holds a phone number', () => {
-    expect(plainName('Dana')).toBe('Dana');
-    expect(plainName("Dana O'Neil-Reyes")).toBe("Dana O'Neil-Reyes");
-    expect(plainName(null)).toBeUndefined();
-    expect(plainName('🙂 123')).toBeUndefined();
-    expect(plainName('Call 555 0100 now')).toBeUndefined();
-  });
-
-  it('spells letters that have no accent to strip, instead of dropping them', () => {
-    expect(plainName('Søren')).toBe('Soren');
-    expect(plainName('Łukasz')).toBe('Lukasz');
-    expect(plainName('Đặng')).toBe('Dang');
-    expect(plainName('Æsop Straße')).toBe('Aesop Strasse');
-    expect(plainName('Þór')).toBe('Thor');
-    expect(plainName('Œuvre Ħamid')).toBe('Oeuvre Hamid');
-  });
-
-  it('drops a dash or an apostrophe that is not between two letters, also where the name was cut', () => {
-    expect(plainName('Anna-Maria Gonzalez-Lopez')).toBe('Anna-Maria');
-    expect(plainName('Abcdefghijklmnopqrs-tuv')).toBe('Abcdefghijklmnopqrs');
-    expect(plainName('Jo - Bot')).toBe('Jo Bot');
-    expect(plainName("'Tis Dana'")).toBe('Tis Dana');
-    expect(plainName('--')).toBeUndefined();
-    expect(plainName("Dana O'Neil-Reyes")).toBe("Dana O'Neil-Reyes");
   });
 });

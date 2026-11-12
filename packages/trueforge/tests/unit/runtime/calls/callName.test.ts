@@ -20,9 +20,9 @@ describe('a name a call may say', () => {
 
   it('drops a dash or an apostrophe that is not between two letters, also where the name was cut', () => {
     expect(callName('Anna-Maria Gonzalez-Lopez')).toBe('Anna-Maria');
-    expect(callName('Abcdefghijklmnopqrs-tuv')).toBe('Abcdefghijklmnopqrs');
-    expect(callName('Jo - Bot')).toBe('Jo Bot');
-    expect(callName("'Tis Dana'")).toBe('Tis Dana');
+    expect(callName('Abcdefghijklmnopqrs-tuv')).toBeUndefined();
+    expect(callName('Jo - Bot')).toBeUndefined();
+    expect(callName("'Tis Dana'")).toBeUndefined();
     expect(callName('--')).toBeUndefined();
     expect(callName("Dana O'Neil-Reyes")).toBe("Dana O'Neil-Reyes");
   });

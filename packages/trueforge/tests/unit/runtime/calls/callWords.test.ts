@@ -63,19 +63,24 @@ describe('the words a call may carry', () => {
   });
 
   it('carries words that only contain such letters inside other words', () => {
-    expect(callWords('Bring the hybrid bike back at 4')).toBeDefined();
+    expect(callWords('Bring the hybrid book back at 4')).toBeDefined();
     expect(callWords('Heyday of the high street, shipping at noon')).toBeDefined();
     expect(callWords('Order the paint, they are also long overdue')).toBeDefined();
   });
 
   it('says the cleaned form of the words, and refuses what only the cleaned form gives away', () => {
-    expect(callWords('Dentist at 2:30 p.m. – bring the forms')).toBe('Dentist at 2:30 p.m. - bring the forms');
+    expect(callWords('Don’t forget the forms at 2:30 p.m.')).toBe("Don't forget the forms at 2:30 p.m.");
     expect(callWords('Visit evil.example')).toBeUndefined();
     expect(callWords('Visit evil\u200b.example')).toBeUndefined();
   });
 
+  it('refuses a word the texts word list does not know, as texts do', () => {
+    expect(callWords('Zxqvbn at noon')).toBeUndefined();
+    expect(callWords('Dentist at noon')).toBeDefined();
+  });
+
   it('carries nothing longer than 300 characters', () => {
-    const sentence = 'The fox jumps over the lazy dog and ';
+    const sentence = 'The dog jumps over the lazy cat and ';
     expect(callWords(sentence.repeat(8).trim())).toBeDefined();
     expect(callWords(sentence.repeat(9).trim())).toBeUndefined();
   });

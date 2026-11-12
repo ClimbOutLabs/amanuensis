@@ -32,7 +32,7 @@ function delivery(link: Delivery['link']): Delivery {
     kind: 'nudge',
     level: 'call',
     text: 'Your 3pm clashes with the school pickup.',
-    reason: 'Two things at the same time.',
+    reason: 'Your plans overlap at the same time.',
     created_at: '2026-11-06T15:00:00.000Z',
     seen_at: null,
     attempts: [],
@@ -245,7 +245,7 @@ describe('what the assistant can do on a call', () => {
     expect(system?.role).toBe('system');
     const prompt = JSON.stringify(request.messages);
     expect(prompt).toContain('Your 3pm clashes with the school pickup.');
-    expect(prompt).toContain('Two things at the same time.');
+    expect(prompt).toContain('Your plans overlap at the same time.');
     expect(prompt).toContain('cannot see their mail, calendar, memories, files');
     expect(prompt).toContain('open the app');
     expect(prompt).not.toContain('Bank password');

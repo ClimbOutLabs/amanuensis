@@ -201,7 +201,7 @@ export async function callsHarness({
     await reachSettings.put({ ...ALICE, settings: { ...settings, channels: { texts: textsOn, calls: true } } });
   }
 
-  function callDelivery(text = 'Your 3pm with Dana Reyes clashes with the school pickup.') {
+  function callDelivery(text = 'Your 3pm clashes with the school pickup.') {
     return deliveries.deliver({
       ...ALICE,
       kind: 'nudge',
