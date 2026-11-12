@@ -2701,6 +2701,89 @@ export function runStoreContractSuite<
       expect(renamed).not.toHaveProperty('title_source');
     });
 
+    it('replaceSessionTitleIfCurrent swaps the title only while it still matches', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await store.createTurn(
+        makeCreateTurnInput({ sessionId, turnId: 'turn-1', update_session_title_if_not_exist: 'Working title' }),
+      );
+
+      const replaced = await store.replaceSessionTitleIfCurrent({
+        tenant_id: tenant,
+        session_id: sessionId,
+        current_title: 'Working title',
+        title: 'Subject title',
+      });
+      expect(replaced).toBe(true);
+      const session = mustGet(await store.getSession({ tenant_id: tenant, session_id: sessionId }));
+      expect(session.title).toBe('Subject title');
+    });
+
+    it('replaceSessionTitleIfCurrent leaves a renamed title alone and reports false', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await store.createTurn(
+        makeCreateTurnInput({ sessionId, turnId: 'turn-1', update_session_title_if_not_exist: 'Working title' }),
+      );
+      await store.updateSession({
+        tenant_id: tenant,
+        session_id: sessionId,
+        agent: undefined,
+        title: 'Renamed by me',
+        metadata: undefined,
+      });
+
+      const replaced = await store.replaceSessionTitleIfCurrent({
+        tenant_id: tenant,
+        session_id: sessionId,
+        current_title: 'Working title',
+        title: 'Subject title',
+      });
+      expect(replaced).toBe(false);
+      const session = mustGet(await store.getSession({ tenant_id: tenant, session_id: sessionId }));
+      expect(session.title).toBe('Renamed by me');
+    });
+
+    it('replaceSessionTitleIfCurrent reports false for an untitled or missing session', async () => {
+      const store = createStore();
+      await seedSession(store);
+
+      const untitled = await store.replaceSessionTitleIfCurrent({
+        tenant_id: tenant,
+        session_id: sessionId,
+        current_title: 'Working title',
+        title: 'Subject title',
+      });
+      expect(untitled).toBe(false);
+      const missing = await store.replaceSessionTitleIfCurrent({
+        tenant_id: tenant,
+        session_id: 'no-such-session',
+        current_title: 'Working title',
+        title: 'Subject title',
+      });
+      expect(missing).toBe(false);
+      const session = mustGet(await store.getSession({ tenant_id: tenant, session_id: sessionId }));
+      expect(session.title).toBeNull();
+    });
+
+    it('replaceSessionTitleIfCurrent does not count as chat activity', async () => {
+      const store = createStore();
+      await seedSession(store);
+      await store.createTurn(
+        makeCreateTurnInput({ sessionId, turnId: 'turn-1', update_session_title_if_not_exist: 'Working title' }),
+      );
+      const before = mustGet(await store.getSession({ tenant_id: tenant, session_id: sessionId }));
+      await new Promise(r => setTimeout(r, 5));
+      await store.replaceSessionTitleIfCurrent({
+        tenant_id: tenant,
+        session_id: sessionId,
+        current_title: 'Working title',
+        title: 'Subject title',
+      });
+      const after = mustGet(await store.getSession({ tenant_id: tenant, session_id: sessionId }));
+      expect(after.last_activity_timestamp_ms).toBe(before.last_activity_timestamp_ms);
+    });
+
     it('fork from any existing turn succeeds and advances tip', async () => {
       const store = createStore();
       await seedSession(store);
