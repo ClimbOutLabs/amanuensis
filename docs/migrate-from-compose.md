@@ -8,9 +8,9 @@ Do one person at a time. The short way is two commands (see "The one command" be
 
 ## What moves and what does not
 
-Moves: chats with their original dates, the files uploaded to them, folders, agents and their instructions, personas and their knowledge documents, memories, spaces with their current content, schedules (all switched off), connector entries (unused: no agent is attached to them), and your permission history. Imported chats never carry live approvals or approval grants: a chat that was waiting for an answer comes over with that request expired, and "Always allow this here" choices start over.
+Moves: chats with their original dates, the files uploaded to them, folders, agents and their instructions, personas and their knowledge documents, memories, spaces with their current content, schedules (all switched off), connector entries (unused: no agent is attached to them), model settings without their keys (each provider's type, address and models), and your permission history. Imported chats never carry live approvals or approval grants: a chat that was waiting for an answer comes over with that request expired, and "Always allow in this chat" choices start over.
 
-The recall and tool-output checks of Settings, Memory come along. Permission settings (offline mode, web search without asking) and Always allow choices start fresh, so each tool asks again; re-asking is the safe default.
+The recall and tool-output checks of Settings, Memory come along. Permission settings (offline mode, web search without asking) and "Always allow everywhere" choices start fresh, so each tool asks again; re-asking is the safe default.
 
 Does not move: model keys, connector sign-ins and saved credentials, and your own skills and registered repositories. A connector that points at a value on the server, such as an environment variable or a file, is refused. Step 7 lists what to redo by hand.
 
@@ -224,11 +224,11 @@ Only that person's data should be there. If the old stack held more than one per
 
 ## 7. What to redo by hand
 
-- Model keys and the model server address: Settings, Models. Keys are never exported.
+- Model keys: Settings, Models. Keys are never exported. The provider, its address and its models come over, and the import summary names each provider that needs its key. An export from an older Aman has no model settings, so add your model there too. On an instance whose models TrueFoundry manages, model settings do not come over, and personas use the models already there.
 - Connector sign-ins: a connector that signs in through its own website arrives with a "sign in" button; click it. A connector that used a header token or a fixed client id and secret arrives without those values: open it in Settings, Connectors, and enter them again.
 - Imported connectors: each one arrives unused, with no agent attached. Attach the ones you want to your agents again. If you ran a web search or memory connector, set that role again too.
 - Permission settings: in Settings, open Permissions and set offline mode and web search again if you want them. The recall and tool-output checks came along.
-- "Always allow" choices: each tool asks again the first time, which is the safe default, and you can pick Always allow once more.
+- "Always allow everywhere" choices: each tool asks again the first time, which is the safe default, and you can pick it once more.
 - Schedules: they arrive switched off. Review each one and switch on the ones you want.
 
 ## 8. Roll back

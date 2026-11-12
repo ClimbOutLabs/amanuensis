@@ -43,7 +43,7 @@
     {
       "host": "api.github.com",
       "category": "connector",
-      "reason": "GitHub API, for repositories the person connects."
+      "reason": "GitHub API, for repositories the person connects and skills they ask Aman to add."
     },
     {
       "host": "api.githubcopilot.com",

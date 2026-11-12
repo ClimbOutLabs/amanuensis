@@ -60,6 +60,24 @@ export type UpdateSessionInput<TSessionCustom extends object = Record<string, ne
   metadata: SessionRecord<TSessionCustom>['metadata'] | undefined;
 };
 
+/** One metadata key to set on an existing session, merged atomically by the store. */
+export interface MergeSessionMetadataInput {
+  tenant_id: string;
+  session_id: string;
+  key: string;
+  value: string;
+}
+
+/** Input for {@link ISessionStore.replaceSessionTitleIfCurrent}. */
+export interface ReplaceSessionTitleIfCurrentInput {
+  tenant_id: string;
+  session_id: string;
+  /** The title the caller expects the session to still carry. */
+  current_title: string;
+  /** The title stored when the stored title still equals `current_title`. */
+  title: string;
+}
+
 /** Archived timestamps and metrics for a session that data import has just replayed. */
 export interface StampImportedSessionInput {
   tenant_id: string;
@@ -667,6 +685,25 @@ export interface ISessionStore<
    * Bumps `last_activity_timestamp_ms` (= now) in the same update.
    */
   updateSession(input: UpdateSessionInput<TSessionCustom>): Promise<void>;
+
+  /**
+   * Sets one metadata key atomically, leaving every other key as it is: the merge
+   * happens inside the store's update, never as a caller read-modify-write, so a
+   * concurrent session update cannot be clobbered or silently lose keys.
+   * Throws `SessionNotFoundError` when the session is absent.
+   * Bumps `last_activity_timestamp_ms` (= now) in the same update, like `updateSession`.
+   */
+  mergeSessionMetadata(input: MergeSessionMetadataInput): Promise<void>;
+
+  /**
+   * Atomically replaces the session title only when the stored title still equals
+   * `current_title`; returns whether the replacement happened. A title that no longer
+   * matches (a rename landed first, or the session is gone) is left untouched and the
+   * call resolves `false` rather than throwing for a missing session. Bumps
+   * `updated_at`; does **not** bump `last_activity_timestamp_ms`, because the caller is
+   * background work, not chat activity.
+   */
+  replaceSessionTitleIfCurrent(input: ReplaceSessionTitleIfCurrentInput): Promise<boolean>;
 
   /** Creates an owner-scoped folder. The caller supplies its globally unique id. */
   createSessionFolder(input: CreateSessionFolderInput): Promise<SessionFolderRecord>;

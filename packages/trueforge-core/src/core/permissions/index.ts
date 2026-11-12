@@ -44,6 +44,7 @@ export {
   classifyContextFor,
   createSentinelHostContext,
   defaultSentinelServices,
+  forIncognitoChat,
   forUnattendedRun,
   toDispatchSentinelContext,
   withoutRelaxations,

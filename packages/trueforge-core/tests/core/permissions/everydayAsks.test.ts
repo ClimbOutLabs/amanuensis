@@ -14,7 +14,11 @@ import {
 import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
 import { defaultSentinelServices, forUnattendedRun } from '../../../src/core/permissions/context';
 import { recordPersonText, recordReplyText } from '../../../src/core/permissions/provenance';
-import { createWebSearchTurnState, recordToolResultProvenance } from '../../../src/core/permissions/webSearch';
+import {
+  createWebSearchTurnState,
+  hostToolStamp,
+  recordToolResultProvenance,
+} from '../../../src/core/permissions/webSearch';
 
 function makeCtx(options: { unattended?: boolean; secrets?: readonly string[] } = {}): ClassifyContext {
   const base = {
@@ -55,6 +59,7 @@ function read(ctx: ClassifyContext, input: { tool_name: string; args: string[]; 
   recordToolResultProvenance({
     state: ctx.web_search,
     tool_name: input.tool_name,
+    stamp: hostToolStamp({ type: 'mcp', search_provider_call: true }),
     argument_values: input.args,
     texts: [input.text],
   });

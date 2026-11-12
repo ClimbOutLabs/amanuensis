@@ -39,6 +39,7 @@ function cardWith(emailOverrides: Partial<SentinelApprovalEmail> = {}): Sentinel
     calendar_event: null,
     schedule: null,
     persona: null,
+    skill: null,
   };
 }
 
@@ -302,7 +303,7 @@ describe('EmailApprovalCard actions', () => {
   it('never offers Always allow on a mail card', () => {
     renderEmail();
     expect(screen.queryByText(/Always allow/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Always allow this here/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Always allow in this chat/)).not.toBeInTheDocument();
   });
 });
 

@@ -2611,7 +2611,8 @@ describe('recall query with an attached document', () => {
 });
 
 describe('extractPreviousExchange origin', () => {
-  function exchangeWithTool(name: string): ContextMessage[] {
+  /** One earlier exchange in which a tool ran: one of the assistant's own, or a tool of the named connector. */
+  function exchangeWithTool(name: string, connector?: string): ContextMessage[] {
     return [
       { role: 'user', content: 'first question' },
       {
@@ -2623,9 +2624,9 @@ describe('extractPreviousExchange origin', () => {
             type: 'function',
             function: { name, arguments: '{}' },
             tool_info: {
-              type: 'truefoundry-system',
-              mcp_server_id: '',
-              mcp_server_name: '',
+              type: connector === undefined ? 'truefoundry-system' : 'mcp',
+              mcp_server_id: connector ?? '',
+              mcp_server_name: connector ?? '',
               original_tool_name: name,
             },
           },
@@ -2648,6 +2649,11 @@ describe('extractPreviousExchange origin', () => {
 
   it('leaves the exchange as the person own when only a task tool ran', () => {
     expect(extractPreviousExchange(exchangeWithTool('record_finding'))?.origin).toBe('user_stated');
+  });
+
+  it('marks the exchange as read content when a connector tool named like a task tool ran', () => {
+    expect(extractPreviousExchange(exchangeWithTool('record_finding', 'notes'))?.origin).toBe('tool_ingested');
+    expect(extractPreviousExchange(exchangeWithTool('replace_task_checklist', 'notes'))?.origin).toBe('tool_ingested');
   });
 });
 

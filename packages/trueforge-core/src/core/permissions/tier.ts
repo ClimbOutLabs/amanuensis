@@ -7,6 +7,7 @@ import { z } from '@hono/zod-openapi';
 
 import { APPROVAL_EXPIRED_REASON_CODE } from './approvalExpiry';
 import type { ShellApprovalBinding } from './approvalTokens.js';
+import { MAPS_HOLD_REASON } from './mapsToolNames';
 import { Tier3MailboxSchema } from './tierMailbox';
 
 /** Sentinel permission tier: 1 silent, 2 asks unless the user relaxed its kind, 3 always asks. */
@@ -60,16 +61,18 @@ export const GRANT_BARRED_TIER_REASONS: ReadonlySet<string> = new Set([
   'connector_calendar_write',
   'schedule_write',
   'persona_write',
+  'skill_install',
   REMINDER_CANCEL_REASON,
   SCHEDULE_STATUS_REASON,
   CONTENT_STEERED_REASON,
   CONNECTOR_READ_GUARD_REASON,
+  MAPS_HOLD_REASON,
 ]);
 
 /**
- * Consequential actions a person may answer once for the whole chat with "Always allow this here". The chat grant
+ * Consequential actions a person may answer once for the whole chat with "Always allow in this chat". The chat grant
  * binds the tool and its destination, never a standing grant across chats, so it is offered only when the card
- * names one. A send, a mail draft, a guest change, a steered call, and creating a schedule or a persona are never
+ * names one. A send, a mail draft, a guest change, a steered call, creating a schedule or a persona, and adding a skill are never
  * among them: each of those asks every time.
  */
 export const CHAT_GRANTABLE_CONSEQUENCE_REASONS: ReadonlySet<string> = new Set([
@@ -81,14 +84,14 @@ export const CHAT_GRANTABLE_CONSEQUENCE_REASONS: ReadonlySet<string> = new Set([
 
 /**
  * Calendar changes that touch only the person's own calendar: no guest is invited, reached or cancelled.
- * Only these may get an "Always allow" or chat grant. Anything that cannot be shown guest-free is a guest change.
+ * Only these may get a chat grant, and none gets a grant for every chat. Anything that cannot be shown guest-free
+ * is a guest change.
  */
 export const OWN_CALENDAR_CHANGE_REASONS: ReadonlySet<string> = new Set(['calendar_write', 'caldav_calendar_change']);
 
 /**
  * Drive writes touch only the person's own files: a new Doc, or rows added to their own Sheet. Nothing is
- * sent to anyone and nothing is shared, so only these may get an "Always allow" or chat grant, as an
- * own-calendar change may.
+ * sent to anyone and nothing is shared, so only these may get an "Always allow" or chat grant.
  */
 export const OWN_DRIVE_WRITE_REASONS: ReadonlySet<string> = new Set(['google_drive_write']);
 
@@ -100,6 +103,7 @@ export type Tier2ActionKind = (typeof TIER2_ACTION_KINDS)[number];
 export const AUTO_DENY_REASONS = [
   APPROVAL_EXPIRED_REASON_CODE,
   'destination_unverifiable',
+  'incognito_chat',
   'incomplete_send_card',
   'lookup_limit',
   'offline_mode',
@@ -195,6 +199,26 @@ export const Tier3CalendarEventSchema = z
   .describe('The calendar event a write adds or changes, shown in full.')
   .openapi('Tier3CalendarEvent');
 
+/** One connector or skill a new schedule may run with, and whether it is turned on. */
+export const Tier3ScheduleToolChoiceSchema = z
+  .object({
+    name: z.string().describe('Connector or skill name.'),
+    on: z.boolean().describe('True when the schedule runs with it.'),
+  })
+  .openapi('Tier3ScheduleToolChoice');
+
+/** What a new schedule runs with, as it will be saved. */
+export const Tier3ScheduleToolsSchema = z
+  .object({
+    editable: z.boolean().describe('True when the person may ask for other choices before approving.'),
+    agent_name: z.string().describe('The agent the schedule runs as.'),
+    connectors: z.array(Tier3ScheduleToolChoiceSchema).describe('Connectors the person may pick from.'),
+    skills: z.array(Tier3ScheduleToolChoiceSchema).describe('Skills the person may pick from.'),
+    run_code: z.boolean().describe('True when runs may run code.'),
+    memory: z.boolean().describe('True when runs recall memories.'),
+  })
+  .openapi('Tier3ScheduleTools');
+
 /** A schedule that a chat call creates or deletes, shown in full. */
 export const Tier3ScheduleSchema = z
   .object({
@@ -207,6 +231,9 @@ export const Tier3ScheduleSchema = z
     next_runs: z
       .array(z.string())
       .describe('The next three runs in plain words for a new schedule; empty for a delete.'),
+    tools: Tier3ScheduleToolsSchema.nullable()
+      .optional()
+      .describe('What a new schedule runs with; absent for a delete and on an older card.'),
   })
   .describe('The schedule a chat call creates or deletes, shown in full.')
   .openapi('Tier3Schedule');
@@ -221,6 +248,22 @@ export const Tier3PersonaSchema = z
   })
   .describe('The persona a chat call adds, shown in full.')
   .openapi('Tier3Persona');
+
+/** A skill that a chat call adds, as the host read it from where it comes from. */
+export const Tier3SkillSchema = z
+  .object({
+    name: z.string().describe('Skill name.'),
+    description: z.string().describe('What the skill is for, as the skill itself says.'),
+    source: z.string().describe('The repository the skill comes from, and the folder in it when there is one.'),
+    version: z.string().describe('The exact commit that is added. A later change to the repository is not picked up.'),
+    starter: z.boolean().describe('True when this is one of the starter skills that come with the app.'),
+    instructions: z
+      .string()
+      .nullable()
+      .describe("The skill's own instruction file as the host read it, or null for a starter skill."),
+  })
+  .describe('The skill a chat call adds, shown in full.')
+  .openapi('Tier3Skill');
 
 /**
  * Server-rendered approval card for Tier 3 actions and for Tier 2 actions that ask. Destination/recipient/amount come from
@@ -260,6 +303,7 @@ export const Tier3CardSchema = z
     calendar_event: Tier3CalendarEventSchema.nullable().optional(),
     schedule: Tier3ScheduleSchema.nullable().optional(),
     persona: Tier3PersonaSchema.nullable().optional(),
+    skill: Tier3SkillSchema.nullable().optional(),
     mail_new_recipients: z
       .array(z.string())
       .nullable()
@@ -274,7 +318,9 @@ export const Tier3CardSchema = z
 
 export type Tier3Card = z.infer<typeof Tier3CardSchema>;
 export type Tier3Schedule = z.infer<typeof Tier3ScheduleSchema>;
+export type Tier3ScheduleTools = z.infer<typeof Tier3ScheduleToolsSchema>;
 export type Tier3Persona = z.infer<typeof Tier3PersonaSchema>;
+export type Tier3Skill = z.infer<typeof Tier3SkillSchema>;
 
 /** Machine-readable classifier verdict attached to every classified action. */
 export interface TierDecision {
@@ -317,8 +363,8 @@ export interface TierDecision {
    * is stamped as inspection, so the grant and chat scope both apply to it.
    */
   inspection: boolean;
-  /** Host of the connector the call goes to; a standing grant the user records on this ask binds to it. */
-  grant_host: string | null;
+  /** The connector setup the call goes to (see `ToolGrantKey`); a standing grant the user records on this ask binds to it. */
+  grant_binding: string | null;
   /**
    * Tool name a standing grant for this call is recorded under, when the grant covers a scope
    * wider than the one tool (a Home Assistant domain, say). Null records under the tool's own name.
@@ -363,7 +409,7 @@ export function failClosedDecision(input: { reason_detail: string | null }): Tie
     audit_description: null,
     shell_binding: null,
     inspection: false,
-    grant_host: null,
+    grant_binding: null,
     grant_tool_name: null,
     secret_path_read: false,
     mail_send: false,
@@ -384,7 +430,7 @@ function baseDecision(): Omit<TierDecision, 'tier' | 'reason' | 'reason_detail'>
     audit_description: null,
     shell_binding: null,
     inspection: false,
-    grant_host: null,
+    grant_binding: null,
     grant_tool_name: null,
     secret_path_read: false,
     mail_send: false,
@@ -446,7 +492,7 @@ export function tier3Decision(input: {
   approval_token_id?: string | null | undefined;
   shell_binding?: ShellApprovalBinding | null | undefined;
   inspection?: boolean | undefined;
-  grant_host?: string | null | undefined;
+  grant_binding?: string | null | undefined;
   grant_tool_name?: string | null | undefined;
   secret_path_read?: boolean | undefined;
   mail_send?: boolean | undefined;
@@ -464,7 +510,7 @@ export function tier3Decision(input: {
     approval_token_id: input.approval_token_id ?? null,
     shell_binding: input.shell_binding ?? null,
     inspection: input.inspection === true,
-    grant_host: input.grant_host ?? null,
+    grant_binding: input.grant_binding ?? null,
     grant_tool_name: input.grant_tool_name ?? null,
     secret_path_read: input.secret_path_read === true,
     mail_send: input.mail_send === true,

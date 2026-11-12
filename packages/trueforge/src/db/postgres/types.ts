@@ -326,14 +326,14 @@ export interface ChatSearchDocumentTable {
 }
 
 /** Global key/value settings shared across tenants (e.g. persisted feature overrides). PRIMARY KEY (key). */
-/** "Always allow this tool" grant. PRIMARY KEY (tenant_id, created_by, mcp_server_name, tool_name). */
+/** "Always allow everywhere" grant. PRIMARY KEY (tenant_id, created_by, mcp_server_name, tool_name). */
 export interface McpToolGrantTable {
   tenant_id: string;
   created_by: string;
   mcp_server_name: string;
   tool_name: string;
-  /** Connector host the grant was given for; null for a connector with no URL. */
-  mcp_server_host: string | null;
+  /** What the grant binds to: the connector's setup digest (`connectorGrantBinding`), or null for a source with none. */
+  connector_binding: string | null;
   created_at: Date;
 }
 
