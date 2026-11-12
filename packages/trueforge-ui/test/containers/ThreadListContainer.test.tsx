@@ -399,6 +399,34 @@ describe('ThreadListContainer', () => {
     expect(container.querySelector('[data-slot="aui_thread-list-viewport"]')).toHaveClass('aui-scrollbar-hidden');
   });
 
+  it('keeps the chat list at its full height in the scrolling panel, so a long list scrolls instead of spilling over what follows', () => {
+    const { container } = renderThreadList({
+      adapter: {
+        threadId: 'draft-1',
+        threads: [
+          {
+            status: 'regular',
+            id: 'draft-1',
+            remoteId: 'session-draft-1',
+            title: 'Draft chat',
+            custom: { isMutable: true },
+          },
+          {
+            status: 'regular',
+            id: 'named-1',
+            remoteId: 'session-named-1',
+            title: 'Named chat',
+            custom: { isMutable: false },
+          },
+        ],
+      },
+      variant: 'recent-history',
+    });
+
+    const viewport = container.querySelector('[data-slot="aui_thread-list-viewport"]');
+    expect(viewport?.firstElementChild).toHaveClass('shrink-0');
+  });
+
   it('uses filter intent to distinguish Try Agent from a filtered agent session', () => {
     const server = createMockAgentUIServer({
       searchAgents: async () => [{ name: 'Support Agent', agentId: 'support-id' }],
