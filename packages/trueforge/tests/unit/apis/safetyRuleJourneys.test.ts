@@ -262,6 +262,42 @@ describe('an email address the person never gave', () => {
   );
 });
 
+describe('saving a mail draft', () => {
+  let server: ApprovalTestServer;
+
+  beforeAll(async () => {
+    server = await startApprovalTestServer();
+    server.setEvalMode(true);
+  });
+
+  afterAll(async () => {
+    await server.close();
+  });
+
+  it(
+    'asks every time with only Approve and Deny, and an answer for one draft does not cover the next',
+    async () => {
+      const draftsBefore = await draftCount(server);
+      const chatId = await createChat(server);
+      const first = onlyCard(await runTurn({ server, chatId, input: ask('draft_email') }));
+      expect(first.can_chat_allow).toBe(false);
+      expect(first.can_always_allow).toBe(false);
+
+      const chatWide = await sendTurn({ server, chatId, input: answer({ card: first, scope: 'chat' }) });
+      expect(chatWide.status).toBe(422);
+      expect(await draftCount(server)).toBe(draftsBefore);
+
+      await runTurn({ server, chatId, input: answer({ card: first, scope: 'once' }) });
+      expect(await draftCount(server)).toBe(draftsBefore + 1);
+
+      const second = onlyCard(await runTurn({ server, chatId, input: ask('draft_email') }));
+      expect(second.can_chat_allow).toBe(false);
+      expect(await draftCount(server)).toBe(draftsBefore + 1);
+    },
+    TURN_TIMEOUT_MS,
+  );
+});
+
 const GUIDE_SITE = 'https://guide.example/camping/';
 
 describe('a page Aman opens in its browser', () => {
