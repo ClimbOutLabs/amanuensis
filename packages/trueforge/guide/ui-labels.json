@@ -139,5 +139,6 @@
   "Show": "packages/trueforge-ui/src/sentinel/AuditLogSettings.tsx",
   "From": "packages/trueforge-ui/src/sentinel/AuditLogSettings.tsx",
   "To": "packages/trueforge-ui/src/sentinel/AuditLogSettings.tsx",
-  "Clear dates": "packages/trueforge-ui/src/sentinel/AuditLogSettings.tsx"
+  "Clear dates": "packages/trueforge-ui/src/sentinel/AuditLogSettings.tsx",
+  "Personas": "packages/trueforge-ui/src/containers/SettingsBuilder/ModelRoleSettings.tsx"
 }

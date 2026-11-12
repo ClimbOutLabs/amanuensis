@@ -204,6 +204,7 @@ import {
   CALENDAR_PASSWORD_PROMPT,
   CHECK_BEFORE_ASKING_PROMPT,
   createSourceDiscoveryContract,
+  createSourceOffPrompt,
   DEMO_EMAIL_PROMPT,
   EMAIL_PASSWORD_PROMPT,
   EMPTY_ANSWER_NUDGE_MESSAGE,
@@ -2213,6 +2214,15 @@ export class AgentThread {
         capabilities.addSection('sandbox-off', SANDBOX_OFF_PROMPT);
       } else {
         capabilities.addSection('no-sandbox', NO_SANDBOX_PROMPT);
+      }
+    }
+    if (!this.definition.readOnly) {
+      const sourceOff = createSourceOffPrompt({
+        attachedConnectorNames: (this.definition.toolSets ?? []).map(toolSet => toolSet.name),
+        setUpConnectorNames: this.definition.setUpConnectorNames,
+      });
+      if (sourceOff !== undefined) {
+        capabilities.addSection('sources-off', sourceOff);
       }
     }
     this.toolBundles?.buildInstruction(capabilities);

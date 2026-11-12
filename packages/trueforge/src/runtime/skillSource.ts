@@ -3,12 +3,18 @@
  * the skill itself, so the name and description on the approval card are the skill's own and not the
  * model's words. Only public GitHub repositories are read, and nothing here writes anywhere.
  */
+import type { fetch as undiciFetch } from 'undici';
 import { parse } from 'yaml';
+
+import { readCappedBody } from './mapsUpstream';
+import { fetchPublicUrl, PublicFetchError, type ResolveAddresses } from './publicFetch';
 
 /** A SKILL.md larger than this is refused: it could not be shown in full on the card. */
 export const MAX_SKILL_FILE_BYTES = 100 * 1024;
 
 const FULL_COMMIT = /^[0-9a-f]{40}$/;
+
+const GITHUB_API_HOST = 'api.github.com';
 
 /** A lookup that takes longer is given up, so a slow GitHub cannot hold a chat's answer. */
 const LOOKUP_TIMEOUT_MS = 15_000;
@@ -118,87 +124,103 @@ function encodePath(path: string): string {
     .join('/');
 }
 
-async function githubGet(input: { path: string; accept: string; fetchImpl: typeof fetch }): Promise<Response> {
-  let response: Response;
+/** How a lookup reaches GitHub; a test passes its own. */
+export interface SkillLookupDeps {
+  fetchImpl: typeof undiciFetch | undefined;
+  resolveAddresses: ResolveAddresses | undefined;
+}
+
+function isGitHubApi(url: URL): boolean {
+  return url.protocol === 'https:' && url.hostname === GITHUB_API_HOST && url.port === '';
+}
+
+/**
+ * Asks GitHub one thing through the app's guard for outside addresses, and hands the answer to `read`.
+ * A repository that moved answers with a redirect: the address the person gave is no longer the
+ * skill's own, so a redirect is never followed.
+ */
+async function githubGet<T>(input: {
+  path: string;
+  accept: string;
+  deps: SkillLookupDeps;
+  read: (response: Response) => Promise<T>;
+}): Promise<T> {
+  let fetched: Awaited<ReturnType<typeof fetchPublicUrl>>;
   try {
-    response = await input.fetchImpl(`https://api.github.com${input.path}`, {
+    fetched = await fetchPublicUrl(`https://${GITHUB_API_HOST}${input.path}`, {
+      fetchImpl: input.deps.fetchImpl,
+      resolveAddresses: input.deps.resolveAddresses,
+      timeoutMs: LOOKUP_TIMEOUT_MS,
+      maxRedirects: 0,
       headers: { accept: input.accept, 'user-agent': 'amanuensis', 'x-github-api-version': '2022-11-28' },
-      redirect: 'manual',
-      signal: AbortSignal.timeout(LOOKUP_TIMEOUT_MS),
+      allowHop: isGitHubApi,
+      describe: problem => `Skill lookup stopped: ${problem.kind}`,
     });
   } catch (error) {
-    throw new SkillSourceError('unavailable', { cause: error });
+    const moved = error instanceof PublicFetchError && error.problem.kind === 'too_many_redirects';
+    throw new SkillSourceError(moved ? 'not_found' : 'unavailable', { cause: error });
   }
-  // A repository that moved answers with a redirect: the address the person gave is no longer the skill's own.
-  if (response.status >= 300 && response.status < 400) {
-    throw new SkillSourceError('not_found');
+  try {
+    const { status } = fetched.response;
+    if (status >= 300 && status < 400) {
+      throw new SkillSourceError('not_found');
+    }
+    if (status === 403 || status === 429) {
+      throw new SkillSourceError('rate_limited');
+    }
+    return await input.read(fetched.response);
+  } finally {
+    await fetched.release();
   }
-  if (response.status === 403 || response.status === 429) {
-    throw new SkillSourceError('rate_limited');
-  }
-  return response;
 }
 
 /** The response body as text, refused once it passes the size limit so a huge file is never held in memory. */
-async function readCapped(response: Response): Promise<string> {
-  if (response.body === null) {
-    return '';
+async function readSkillText(response: Response): Promise<string> {
+  let body: Uint8Array | null;
+  try {
+    body = await readCappedBody({ response, maxBytes: MAX_SKILL_FILE_BYTES });
+  } catch (error) {
+    throw new SkillSourceError('unavailable', { cause: error });
   }
-  const reader: ReadableStreamDefaultReader<Uint8Array> = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for (;;) {
-    let step: Awaited<ReturnType<typeof reader.read>>;
-    try {
-      step = await reader.read();
-    } catch (error) {
-      throw new SkillSourceError('unavailable', { cause: error });
-    }
-    const { done, value } = step;
-    if (done) {
-      break;
-    }
-    size += value.byteLength;
-    if (size > MAX_SKILL_FILE_BYTES) {
-      await reader.cancel();
-      throw new SkillSourceError('too_large');
-    }
-    chunks.push(value);
+  if (body === null) {
+    throw new SkillSourceError('too_large');
   }
-  return Buffer.concat(chunks).toString('utf8');
+  return Buffer.from(body).toString('utf8');
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-async function resolveCommit(input: { address: SkillAddress; fetchImpl: typeof fetch }): Promise<string> {
+async function resolveCommit(input: { address: SkillAddress; deps: SkillLookupDeps }): Promise<string> {
   const { owner, repo, ref } = input.address;
   if (ref !== undefined && FULL_COMMIT.test(ref)) {
     return ref;
   }
-  const response = await githubGet({
+  return githubGet({
     path: `/repos/${owner}/${repo}/commits/${encodePath(ref ?? 'HEAD')}`,
     accept: 'application/vnd.github+json',
-    fetchImpl: input.fetchImpl,
+    deps: input.deps,
+    read: async response => {
+      if (response.status === 404 || response.status === 422) {
+        throw new SkillSourceError('not_found');
+      }
+      if (!response.ok) {
+        throw new SkillSourceError('unavailable');
+      }
+      let body: unknown;
+      try {
+        body = await response.json();
+      } catch (error) {
+        throw new SkillSourceError('unavailable', { cause: error });
+      }
+      const sha = isRecord(body) ? body['sha'] : undefined;
+      if (typeof sha !== 'string' || !FULL_COMMIT.test(sha)) {
+        throw new SkillSourceError('unavailable');
+      }
+      return sha;
+    },
   });
-  if (response.status === 404 || response.status === 422) {
-    throw new SkillSourceError('not_found');
-  }
-  if (!response.ok) {
-    throw new SkillSourceError('unavailable');
-  }
-  let body: unknown;
-  try {
-    body = await response.json();
-  } catch (error) {
-    throw new SkillSourceError('unavailable', { cause: error });
-  }
-  const sha = isRecord(body) ? body['sha'] : undefined;
-  if (typeof sha !== 'string' || !FULL_COMMIT.test(sha)) {
-    throw new SkillSourceError('unavailable');
-  }
-  return sha;
 }
 
 /** Splits a SKILL.md into the name and description of its opening block and the instructions after it. */
@@ -235,21 +257,24 @@ export function parseSkillFile(text: string): Omit<PublishedSkill, 'commit'> {
  */
 export async function readPublishedSkill(input: {
   address: SkillAddress;
-  fetchImpl: typeof fetch;
+  deps: SkillLookupDeps;
 }): Promise<PublishedSkill> {
-  const { address, fetchImpl } = input;
-  const commit = await resolveCommit({ address, fetchImpl });
+  const { address, deps } = input;
+  const commit = await resolveCommit({ address, deps });
   const file = address.path === undefined ? 'SKILL.md' : `${encodePath(address.path)}/SKILL.md`;
-  const response = await githubGet({
+  const text = await githubGet({
     path: `/repos/${address.owner}/${address.repo}/contents/${file}?ref=${commit}`,
     accept: 'application/vnd.github.raw+json',
-    fetchImpl,
+    deps,
+    read: async response => {
+      if (response.status === 404) {
+        throw new SkillSourceError('no_skill_file');
+      }
+      if (!response.ok) {
+        throw new SkillSourceError('unavailable');
+      }
+      return readSkillText(response);
+    },
   });
-  if (response.status === 404) {
-    throw new SkillSourceError('no_skill_file');
-  }
-  if (!response.ok) {
-    throw new SkillSourceError('unavailable');
-  }
-  return { commit, ...parseSkillFile(await readCapped(response)) };
+  return { commit, ...parseSkillFile(text) };
 }
