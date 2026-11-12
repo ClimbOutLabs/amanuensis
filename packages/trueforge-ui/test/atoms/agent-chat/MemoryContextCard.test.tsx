@@ -41,6 +41,25 @@ describe('MemoryContextCard', () => {
     expect(screen.getAllByText('2 items')).toHaveLength(2);
   });
 
+  it('counts a page as recalled memory when no note was recalled', () => {
+    const pages = { candidates: 1, loaded: 1, droppedOverCount: 0, droppedOverBudget: 0, withheld: 0 };
+    const { rerender } = render(
+      <MemoryContextCard
+        recall={{ ...recallEvent, stats: { ...recallEvent.stats, items: 0, outcome: 'empty' }, layers: { pages } }}
+      />,
+    );
+    expect(screen.getByText('1 page')).toBeInTheDocument();
+    expect(screen.queryByText('No memory recalled')).not.toBeInTheDocument();
+
+    rerender(<MemoryContextCard recall={{ ...recallEvent, layers: { pages: { ...pages, loaded: 2 } } }} />);
+    expect(screen.getByText('1 item, 2 pages')).toBeInTheDocument();
+
+    rerender(
+      <MemoryContextCard recall={{ ...recallEvent, stats: { ...recallEvent.stats, items: 0, outcome: 'empty' } }} />,
+    );
+    expect(screen.getByText('No memory recalled')).toBeInTheDocument();
+  });
+
   it('shows an actionable unavailable state instead of rendering as if nothing happened', () => {
     const onRetry = vi.fn();
     render(<MemoryContextCard unavailable onRetry={onRetry} />);
