@@ -76,7 +76,7 @@ text that was checked is the text that is heard. The check needs no model.
 ### `GET /healthz`
 
 Returns `{"status": "ok", "model_loaded": true, "model_error": null,
-"voices": ["af_heart", "af_bella", "af_nicole", "af_sarah", "am_michael", "am_fenrir"], "default_voice": "af_heart"}`.
+"voices": ["af_heart", "af_bella", "af_nicole", "af_sarah", "af_alloy", "af_aoede", "af_kore", "af_nova", "af_sky", "am_michael", "am_fenrir", "am_puck"], "default_voice": "af_heart"}`.
 The agent backend probes it, and the Docker health check asserts `model_loaded`.
 
 No auth: like `aman-stt`, the service is reachable only inside the compose
@@ -103,16 +103,16 @@ that rare words and names are sounded out from their spelling.
 
 All pins live in `pins.py`. `build_assets.py` runs in the first build stage:
 it downloads each pinned file, refuses any whose size or SHA-256 differs, and
-writes the model, the six baked voices and the word lists to
+writes the model, the twelve baked voices and the word lists to
 `/opt/aman-tts/assets`. The service verifies the model hash again before
 loading it, so a tampered file fails closed and `/healthz` reports why.
 
-| Asset                                                                             | Source                                 | License    |
-| --------------------------------------------------------------------------------- | -------------------------------------- | ---------- |
-| Kokoro-82M v1.0 int8 ONNX model                                                   | kokoro-onnx `model-files-v1.0` release | Apache-2.0 |
-| Voices `af_heart`, `af_bella`, `af_nicole`, `af_sarah`, `am_michael`, `am_fenrir` | same release, `voices-v1.0.bin`        | Apache-2.0 |
-| `us_gold.json`, `us_silver.json`                                                  | misaki 0.9.4 wheel (data files only)   | Apache-2.0 |
-| `kokoro_vocab.json`                                                               | Kokoro-82M model config (phoneme ids)  | Apache-2.0 |
+| Asset                                                                                                                                                | Source                                 | License    |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- | ---------- |
+| Kokoro-82M v1.0 int8 ONNX model                                                                                                                      | kokoro-onnx `model-files-v1.0` release | Apache-2.0 |
+| Voices `af_heart`, `af_bella`, `af_nicole`, `af_sarah`, `af_alloy`, `af_aoede`, `af_kore`, `af_nova`, `af_sky`, `am_michael`, `am_fenrir`, `am_puck` | same release, `voices-v1.0.bin`        | Apache-2.0 |
+| `us_gold.json`, `us_silver.json`                                                                                                                     | misaki 0.9.4 wheel (data files only)   | Apache-2.0 |
+| `kokoro_vocab.json`                                                                                                                                  | Kokoro-82M model config (phoneme ids)  | Apache-2.0 |
 
 To move to new assets: change the URL, size and SHA-256 in `pins.py`, rebuild,
 and run the tests.
