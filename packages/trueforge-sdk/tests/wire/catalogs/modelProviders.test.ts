@@ -5,54 +5,64 @@ import { TrueForge } from "../../../src/Client";
 import { mockServerPool } from "../../mock-server/MockServerPool";
 
 describe("ModelProvidersClient", () => {
-    
     test("list (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { "data" : [ { "base_url" : "base_url" , "logo" : "logo" , "models" : [ { "model_id" : "model_id" , "name" : "name" , "properties" : { } } ] , "type" : "openai" } ] };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = {
+            data: [
+                {
+                    base_url: "base_url",
+                    logo: "logo",
+                    models: [{ model_id: "model_id", name: "name", properties: {} }],
+                    type: "openai",
+                },
+            ],
+        };
+
         server
             .mockEndpoint()
-            .get("/api/v1/catalogs/model-providers").respondWith()
-            .statusCode(200).jsonBody(rawResponseBody)
-                .build();
+            .get("/api/v1/catalogs/model-providers")
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-                        
-                                const response = await client.catalogs.modelProviders.list();
-                                expect(response).toEqual({
-    data: [{
-            baseUrl: "base_url",
-            logo: "logo",
-            models: [{
-                    modelId: "model_id",
-                    name: "name",
-                    properties: {}
-                }],
-            type: "openai"
-        }]
-});
-                              
-                    
+        const response = await client.catalogs.modelProviders.list();
+        expect(response).toEqual({
+            data: [
+                {
+                    baseUrl: "base_url",
+                    logo: "logo",
+                    models: [
+                        {
+                            modelId: "model_id",
+                            name: "name",
+                            properties: {},
+                        },
+                    ],
+                    type: "openai",
+                },
+            ],
+        });
     });
-          
+
     test("list (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .get("/api/v1/catalogs/model-providers").respondWith()
-            .statusCode(401).jsonBody(rawResponseBody)
-                .build();
+            .get("/api/v1/catalogs/model-providers")
+            .respondWith()
+            .statusCode(401)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.catalogs.modelProviders.list()
-            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+        await expect(async () => {
+            return await client.catalogs.modelProviders.list();
+        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
-          
 });

@@ -2,11 +2,11 @@
 
 /** Server-classified effect of this tool call. */
 export const McpToolInfoEffect = {
-        Inspect: "inspect",
-        Edit: "edit",
-        Verify: "verify",
-        Commit: "commit",
-        Push: "push",
-        Execute: "execute"
-    } as const;
-export type McpToolInfoEffect = typeof McpToolInfoEffect[keyof typeof McpToolInfoEffect];
+    Inspect: "inspect",
+    Edit: "edit",
+    Verify: "verify",
+    Commit: "commit",
+    Push: "push",
+    Execute: "execute",
+} as const;
+export type McpToolInfoEffect = (typeof McpToolInfoEffect)[keyof typeof McpToolInfoEffect];

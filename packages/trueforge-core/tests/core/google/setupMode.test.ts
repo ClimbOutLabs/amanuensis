@@ -9,6 +9,9 @@ describe('publicHttpsBase', () => {
   it.each([
     ['https://aman.example.org', 'https://aman.example.org'],
     ['https://aman.example.org/app/', 'https://aman.example.org/app'],
+    // A Tailscale name is a real domain name, so Google accepts an https return address on it.
+    ['https://box.tailnet-name.ts.net', 'https://box.tailnet-name.ts.net'],
+    ['https://ts.net', 'https://ts.net'],
   ])('accepts %s', (input, expected) => {
     expect(publicHttpsBase(input)).toBe(expected);
   });
@@ -25,8 +28,6 @@ describe('publicHttpsBase', () => {
     'https://files.example.internal',
     'https://aman.internal',
     'https://aman.home.arpa',
-    'https://box.tailnet-name.ts.net',
-    'https://ts.net',
   ])('refuses %s', input => {
     expect(publicHttpsBase(input)).toBeNull();
   });
@@ -66,12 +67,53 @@ describe('resolveGoogleSetup', () => {
     ).toMatchObject({ mode: 'loopback' });
   });
 
-  it('asks for a pasted address when the public address is a Tailscale name', () => {
+  it('uses a Web client and the exact callback when the public address is a Tailscale name', () => {
     expect(
       resolveGoogleSetup({
         public_base_url: 'https://box.tailnet-name.ts.net',
         request_url: 'https://box.tailnet-name.ts.net/x',
         callback_path: GOOGLE_CALLBACK_PATH,
+      }),
+    ).toEqual({
+      mode: 'web',
+      client_type: 'web',
+      redirect_uri: `https://box.tailnet-name.ts.net${GOOGLE_CALLBACK_PATH}`,
+    });
+  });
+
+  it('uses the recorded Tailscale address when the public address is the loopback default', () => {
+    expect(
+      resolveGoogleSetup({
+        public_base_url: 'http://127.0.0.1:8791',
+        request_url: 'https://box.tailnet-name.ts.net:8443/x',
+        callback_path: GOOGLE_CALLBACK_PATH,
+        recorded_origins: ['http://127.0.0.1:8791', 'https://box.tailnet-name.ts.net:8443'],
+      }),
+    ).toEqual({
+      mode: 'web',
+      client_type: 'web',
+      redirect_uri: `https://box.tailnet-name.ts.net:8443${GOOGLE_CALLBACK_PATH}`,
+    });
+  });
+
+  it('does not use a recorded address for a browser that reached Aman some other way', () => {
+    expect(
+      resolveGoogleSetup({
+        public_base_url: 'http://127.0.0.1:8791',
+        request_url: 'http://192.168.1.5:8791/x',
+        callback_path: GOOGLE_CALLBACK_PATH,
+        recorded_origins: ['https://box.tailnet-name.ts.net:8443'],
+      }),
+    ).toEqual({ mode: 'paste', client_type: 'desktop', redirect_uri: PASTE_REDIRECT_URI });
+  });
+
+  it('gives no web return for a recorded address that is not a public https name', () => {
+    expect(
+      resolveGoogleSetup({
+        public_base_url: 'http://127.0.0.1:8791',
+        request_url: 'http://192.168.1.5:8791/x',
+        callback_path: GOOGLE_CALLBACK_PATH,
+        recorded_origins: ['http://192.168.1.5:8791', 'http://100.64.5.5:8791'],
       }),
     ).toEqual({ mode: 'paste', client_type: 'desktop', redirect_uri: PASTE_REDIRECT_URI });
   });

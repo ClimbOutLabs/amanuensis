@@ -38,7 +38,7 @@ export function manualRunName(): string {
 export interface ScheduleRecord {
   id: string;
   tenant_id: string;
-  /** Immutable FK to `agent.id`. */
+  /** FK to `agent.id`; changes only when the schedule's tools are changed (see `UpdateScheduleInput.agent`). */
   agent_id: string;
   /** Create-time snapshot of registry agent name. */
   agent_name: string;
@@ -149,6 +149,8 @@ export interface UpdateScheduleInput {
   id: string;
   name: string;
   manifest: ScheduleManifest;
+  /** Runs the schedule as this agent from now on; omitted keeps the current one. */
+  agent?: { agent_id: string; agent_name: string };
   /**
    * Instant used to compute the next pending run when a sync runs (status/cron/timezone
    * change) and the schedule is active.

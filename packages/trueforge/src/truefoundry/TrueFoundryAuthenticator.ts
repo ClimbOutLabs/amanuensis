@@ -36,6 +36,9 @@ export class TrueFoundryAuthenticator implements Authenticator {
       },
       roles: session.user.roles,
       user_credential: token,
+      ...(session.public_base_url !== undefined && session.public_base_url.trim() !== ''
+        ? { public_base_url: session.public_base_url }
+        : {}),
     });
   }
 }

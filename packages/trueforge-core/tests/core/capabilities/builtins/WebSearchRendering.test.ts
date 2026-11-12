@@ -363,3 +363,94 @@ describe('WebSearchRenderingProcessor + LargeToolResponseProcessor ordering', ()
     expect(result.message.content).toContain('were not seen');
   });
 });
+
+describe('pictures the model is shown', () => {
+  const FETCH_PAGE = `# Dogs\n<img src="https://cdn.dogs.example/one.jpg" alt="Beagle">\n![Pug](https://cdn.dogs.example/two.jpg)\n<img src="http://cdn.dogs.example/plain.jpg">`;
+
+  function fetchEnvelope(content: string): string {
+    return JSON.stringify({
+      schema_version: 'tool.response.v2',
+      outcome: { disposition: 'executed_ok' },
+      result: {
+        results: [{ url: 'https://dogs.example/apartment', title: 'Apartment Dogs', content }],
+        warnings: null,
+      },
+    });
+  }
+
+  it('ends a fetched page with the https pictures it shows, under a host heading, and leaves http ones out', async () => {
+    const rawJson = fetchEnvelope(FETCH_PAGE);
+    const result = makeToolResult({
+      rawContent: rawJson,
+      dispatchedFunctionName: 'web_fetch',
+      underlyingToolName: 'web_fetch',
+    });
+
+    await new WebSearchRenderingProcessor().process([result]);
+
+    expect(result.message.content).toContain('Apartment Dogs');
+    expect(
+      result.message.content.endsWith(
+        'Pictures on this page:\n- https://cdn.dogs.example/two.jpg (Pug)\n- https://cdn.dogs.example/one.jpg (Beagle)',
+      ),
+    ).toBe(true);
+    const section = result.message.content.slice(result.message.content.indexOf('Pictures on this page:'));
+    expect(section).not.toContain('http://cdn.dogs.example/plain.jpg');
+    expect(result.outputTransform).toBe('replaced');
+    expect(result.rawContent).toBe(rawJson);
+  });
+
+  it('adds no picture section to a page without pictures', async () => {
+    const result = makeToolResult({
+      rawContent: fetchEnvelope('Just words about dogs.'),
+      dispatchedFunctionName: 'web_fetch',
+      underlyingToolName: 'web_fetch',
+    });
+    await new WebSearchRenderingProcessor().process([result]);
+    expect(result.message.content).toContain('Just words about dogs.');
+    expect(result.message.content).not.toContain('Pictures on this page');
+  });
+
+  it('appends the picture list to a page reader whose result is not re-rendered', async () => {
+    const rawJson = JSON.stringify({ pages: [{ url: 'https://dogs.example/a', text: FETCH_PAGE }] });
+    const result = makeToolResult({
+      rawContent: rawJson,
+      dispatchedFunctionName: 'tavily_extract',
+      underlyingToolName: 'tavily_extract',
+    });
+    await new WebSearchRenderingProcessor().process([result]);
+    expect(result.message.content.startsWith(rawJson)).toBe(true);
+    expect(result.message.content).toContain(
+      'Pictures on this page:\n- https://cdn.dogs.example/two.jpg (Pug)\n- https://cdn.dogs.example/one.jpg (Beagle)',
+    );
+    expect(result.outputTransform).toBe('replaced');
+  });
+
+  it('shows a Pictures line for a search result that lists pictures', () => {
+    const rendered = renderWebSearchResultsMarkdown(
+      JSON.stringify({
+        schema_version: 'tool.response.v2',
+        outcome: { disposition: 'executed_ok' },
+        result: {
+          results: [
+            {
+              url: 'https://dogs.example/pug',
+              title: 'Pug',
+              excerpts: ['A small dog.'],
+              images: [
+                'https://cdn.dogs.example/pug1.jpg',
+                { url: 'https://cdn.dogs.example/pug2.jpg' },
+                'http://cdn.dogs.example/plain.jpg',
+              ],
+            },
+            { url: 'https://dogs.example/beagle', title: 'Beagle', excerpts: ['A hound.'] },
+          ],
+          warnings: null,
+        },
+      }),
+    );
+    expect(rendered).toContain('   Pictures: https://cdn.dogs.example/pug1.jpg https://cdn.dogs.example/pug2.jpg');
+    expect(rendered).not.toContain('http://cdn.dogs.example/plain.jpg');
+    expect(rendered?.match(/Pictures:/g)).toHaveLength(1);
+  });
+});

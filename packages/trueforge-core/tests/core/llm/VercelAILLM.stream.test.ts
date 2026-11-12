@@ -24,8 +24,10 @@ import {
   ModelStreamFault,
   normalizeUsage,
   rawChunkProgressField,
+  toolCallPieceOf,
   toStreamError,
 } from '../../../src/core/llm/VercelAILLM';
+import { MAX_TOOL_CALL_STREAM_PARTS, MAX_TOOL_CALLS_PER_REPLY } from '../../../src/core/runtime/modelReplyGuard';
 
 // ─────────── Helpers ───────────
 
@@ -784,6 +786,46 @@ describe('mapStreamToChunks', () => {
     expect(final.finish_reason).toBe('tool_calls');
   });
 
+  it('stops reading at one call over the stream ceiling and marks the reply cut, so a flood of calls cannot hold the step open', async () => {
+    const parts: TextStreamPart<ToolSet>[] = Array.from({ length: MAX_TOOL_CALL_STREAM_PARTS + 1 }, (_, index) => ({
+      type: 'tool-input-start' as const,
+      id: `call-${String(index)}`,
+      toolName: 'search',
+    }));
+    // Nothing after the cut is read: a finish step that never arrives is not waited for.
+    const neverRead = jest.fn();
+    async function* floodStream(): AsyncGenerator<TextStreamPart<ToolSet>> {
+      for (const part of parts) yield part;
+      neverRead();
+      yield makeFinishStep('tool-calls');
+    }
+    const { final } = await drainStream(mapStreamToChunks({ stream: floodStream(), chunkMeta: CHUNK_META }));
+
+    expect(MAX_TOOL_CALL_STREAM_PARTS).toBe(40);
+    expect(final.tool_call_count_cut).toBe(true);
+    expect(final.output.tool_calls).toHaveLength(MAX_TOOL_CALL_STREAM_PARTS);
+    expect(neverRead).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['exactly the stream ceiling', MAX_TOOL_CALL_STREAM_PARTS],
+    ['22 calls, over the reply cap but a batch the reply guard may still merge or hold', 22],
+    ['exactly the reply cap', MAX_TOOL_CALLS_PER_REPLY],
+  ])('reads a reply of %s whole and leaves it unmarked', async (_label, count) => {
+    const parts: TextStreamPart<ToolSet>[] = Array.from({ length: count }, (_, index) => ({
+      type: 'tool-input-start' as const,
+      id: `call-${String(index)}`,
+      toolName: 'search',
+    }));
+    const { final } = await drainStream(
+      mapStreamToChunks({ stream: makeStream([...parts, makeFinishStep('tool-calls')]), chunkMeta: CHUNK_META }),
+    );
+
+    expect(final.tool_call_count_cut).toBeUndefined();
+    expect(final.output.tool_calls).toHaveLength(count);
+    expect(final.finish_reason).toBe('tool_calls');
+  });
+
   it('captures google thoughtSignature from tool-input-start providerMetadata into provider_specific_fields', async () => {
     const providerMetadata: ProviderMetadata = { google: { thoughtSignature: 'google-sig-abc' } };
     const { final } = await drainStream(
@@ -1031,6 +1073,77 @@ describe('mapStreamToChunks', () => {
 });
 
 // ─────────── chunkHasSubstance ───────────
+
+describe('mapStreamToChunks tool argument size limits', () => {
+  it('stops reading the stream when a call runs past its limit, and names the call on the result', async () => {
+    let pulled = 0;
+    const parts: TextStreamPart<ToolSet>[] = [
+      { type: 'tool-input-start', id: 'call-1', toolName: 'create_space' },
+      { type: 'tool-input-delta', id: 'call-1', delta: '{"body":"' },
+      { type: 'tool-input-delta', id: 'call-1', delta: 'a row of the table that keeps going well past the limit' },
+      { type: 'tool-input-delta', id: 'call-1', delta: ' and more rows after that' },
+      { type: 'text-delta', id: 't1', text: 'this text comes after the cut and must not appear' },
+      makeFinishStep('tool-calls'),
+    ];
+    async function* countingStream(): AsyncGenerator<TextStreamPart<ToolSet>> {
+      for (const part of parts) {
+        pulled += 1;
+        yield part;
+      }
+    }
+    const { final } = await drainStream(
+      mapStreamToChunks({
+        stream: countingStream(),
+        chunkMeta: CHUNK_META,
+        toolArgumentLimits: new Map([['create_space', 30]]),
+      }),
+    );
+    expect(final.size_cut_tool_calls).toEqual(['call-1']);
+    // The stream was abandoned at the cut: the parts after it were never pulled.
+    expect(pulled).toBe(3);
+    const toolCalls = final.output.tool_calls;
+    expect(toolCalls).toHaveLength(1);
+    expect(toolCalls?.[0]?.function.name).toBe('create_space');
+    // The partial arguments stay on the call, so it can resolve as never ran.
+    expect(toolCalls?.[0]?.function.arguments.length).toBeGreaterThan(30);
+    expect(final.output.content ?? '').not.toContain('must not appear');
+  });
+
+  it('lets a call under its limit finish untouched', async () => {
+    const { final } = await drainStream(
+      mapStreamToChunks({
+        stream: makeStream([
+          { type: 'tool-input-start', id: 'call-1', toolName: 'create_space' },
+          { type: 'tool-input-delta', id: 'call-1', delta: '{"body":"short"}' },
+          { type: 'tool-input-end', id: 'call-1' },
+          makeFinishStep('tool-calls'),
+        ]),
+        chunkMeta: CHUNK_META,
+        toolArgumentLimits: new Map([['create_space', 30]]),
+      }),
+    );
+    expect(final.size_cut_tool_calls).toBeUndefined();
+    expect(final.output.tool_calls?.[0]?.function.arguments).toBe('{"body":"short"}');
+  });
+
+  it('applies no limit to a tool the host did not list', async () => {
+    const bigArguments = `{"body":"${'x'.repeat(5_000)}"}`;
+    const { final } = await drainStream(
+      mapStreamToChunks({
+        stream: makeStream([
+          { type: 'tool-input-start', id: 'call-1', toolName: 'some_other_tool' },
+          { type: 'tool-input-delta', id: 'call-1', delta: bigArguments },
+          { type: 'tool-input-end', id: 'call-1' },
+          makeFinishStep('tool-calls'),
+        ]),
+        chunkMeta: CHUNK_META,
+        toolArgumentLimits: new Map([['create_space', 30]]),
+      }),
+    );
+    expect(final.size_cut_tool_calls).toBeUndefined();
+    expect(final.output.tool_calls?.[0]?.function.arguments).toBe(bigArguments);
+  });
+});
 
 describe('isContextLengthError', () => {
   it.each([
@@ -1288,6 +1401,87 @@ describe('enforceStreamDeadlines', () => {
       message: expect.stringMatching(/^chunk/i),
     });
     await expect(outcome).resolves.toMatchObject({ name: 'TimeoutError' });
+  });
+
+  describe('while a tool call is open', () => {
+    const toolCalls = { chunkMs: 180, pieceOf: toolCallPieceOf };
+    const opened: TextStreamPart<ToolSet> = { type: 'tool-input-start', id: 'c1', toolName: 'update_space' };
+    const argumentsArrived: TextStreamPart<ToolSet> = { type: 'tool-input-delta', id: 'c1', delta: '{"a":1}' };
+    const completed: TextStreamPart<ToolSet> = { type: 'tool-input-end', id: 'c1' };
+
+    function guarded({ gapMs, first }: { gapMs: number; first: TextStreamPart<ToolSet> }): {
+      deadlineController: AbortController;
+      outcome: Promise<unknown>;
+    } {
+      async function* stream() {
+        yield first;
+        await new Promise(resolve => setTimeout(resolve, gapMs));
+        yield argumentsArrived;
+        yield completed;
+      }
+      const deadlineController = new AbortController();
+      const outcome = collect(
+        enforceStreamDeadlines({
+          stream: stream(),
+          timeout: { firstChunkMs: 1000, chunkMs: 60 },
+          hasSubstance: chunkHasSubstance,
+          substanceField: chunkSubstanceField,
+          toolCalls,
+          deadlineController,
+        }),
+      ).then(
+        parts => parts,
+        (error: unknown) => error,
+      );
+      return { deadlineController, outcome };
+    }
+
+    it('waits the tool-call allowance for the next piece, not the ordinary bound', async () => {
+      const { deadlineController, outcome } = guarded({ gapMs: 150, first: opened });
+      await jest.advanceTimersByTimeAsync(160);
+      await expect(outcome).resolves.toHaveLength(3);
+      expect(deadlineController.signal.aborted).toBe(false);
+    });
+
+    it('still times out once the silence passes the tool-call allowance', async () => {
+      const { deadlineController, outcome } = guarded({ gapMs: 500, first: opened });
+      await jest.advanceTimersByTimeAsync(190);
+      await expect(outcome).resolves.toMatchObject({ name: 'TimeoutError' });
+      expect(deadlineController.signal.reason).toMatchObject({ message: expect.stringContaining('180ms') });
+    });
+
+    it('keeps the ordinary bound when the silence comes before any tool piece', async () => {
+      const text: TextStreamPart<ToolSet> = { type: 'text-delta', id: 't1', text: 'a' };
+      const { deadlineController, outcome } = guarded({ gapMs: 150, first: text });
+      await jest.advanceTimersByTimeAsync(70);
+      await expect(outcome).resolves.toMatchObject({ name: 'TimeoutError' });
+      expect(deadlineController.signal.reason).toMatchObject({ message: expect.stringContaining('60ms') });
+    });
+
+    it('goes back to the ordinary bound once the call has completed', async () => {
+      async function* stream(): AsyncGenerator<TextStreamPart<ToolSet>> {
+        yield opened;
+        yield completed;
+        yield { type: 'tool-call', toolCallId: 'c1', toolName: 'update_space', input: {} };
+        await new Promise(() => undefined);
+      }
+      const deadlineController = new AbortController();
+      const outcome = collect(
+        enforceStreamDeadlines({
+          stream: stream(),
+          timeout: { firstChunkMs: 1000, chunkMs: 60 },
+          hasSubstance: chunkHasSubstance,
+          substanceField: chunkSubstanceField,
+          toolCalls,
+          deadlineController,
+        }),
+      ).then(
+        () => 'finished',
+        (error: unknown) => error,
+      );
+      await jest.advanceTimersByTimeAsync(70);
+      await expect(outcome).resolves.toMatchObject({ name: 'TimeoutError' });
+    });
   });
 });
 

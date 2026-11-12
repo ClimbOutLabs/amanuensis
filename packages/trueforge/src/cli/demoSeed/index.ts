@@ -1,6 +1,8 @@
 import type { CalendarDay } from '@truefoundry/trueforge-core/core/util/calendarDay';
 import { isValidTimezone } from '@truefoundry/trueforge-core/core/util/clientTimezone';
 import { parseArgs } from 'node:util';
+import { DEFAULT_TOKEN_FACTORY_MODEL } from '../../runtime/tokenFactoryDefaults';
+import { envManagedDefaultModelName } from '../../runtime/tokenFactoryProvider';
 import type { Command } from '../command';
 import { UsageError, type CliIo } from '../io';
 import type { DemoSeedSession } from './session';
@@ -10,7 +12,7 @@ import { DEFAULT_DEMO_TIME_ZONE, DEFAULT_DEMO_USER } from './world';
 const USAGE = `Usage: aman demo-seed [--reset | --fresh] [--user <email>] [--timezone <iana>] [--today <YYYY-MM-DD>] [--model <provider/model>]
 
 Seeds one synthetic demo world for the demo user: Maya, a fictional designer who moved to Lisbon. It writes
-two personas with knowledge libraries, memory notes, a Tasks space, and a Morning brief schedule. Her email and calendar are not seeded here; they live in her connected Google account. Nothing
+two personas with knowledge libraries, memory notes, a Tasks space, and a Morning brief schedule. Her email and calendar are not seeded here; they live in her connected email and calendar accounts. Nothing
 the assistant reads says she is made up. Every date in her world is counted from "today", so the tasks, notes and her
 mail (made with pnpm demo:import-mailbox) always line up with the day. Re-running it rewrites the Tasks space to that
 day's list; --reset removes the synthetic records. --fresh removes everything the demo user made, then seeds again. Needs DEMO_MODE=true.
@@ -20,7 +22,7 @@ day's list; --reset removes the synthetic records. --fresh removes everything th
   --user <email>       Demo user's login (default: ${DEFAULT_DEMO_USER})
   --timezone <iana>    Time zone that defines "today" (default: ${DEFAULT_DEMO_TIME_ZONE})
   --today <day>        Treat this day as "today", such as 2026-10-19 (default: the real today in the time zone)
-  --model <p/model>    Model for the personas and agent (default: first configured model)
+  --model <p/model>    Model for the personas and agent (default: the Super model when configured, else the first configured model)
 `;
 
 /** The `--today` day, or undefined when the flag is absent. */
@@ -82,6 +84,11 @@ function pickModel({ requested, available }: { requested: string | undefined; av
       throw new UsageError(`Unknown model "${requested}". Configured models: ${available.join(', ') || 'none'}.`);
     }
     return requested;
+  }
+  // The demo is tuned for the Token Factory Super model; fall back to the first configured one.
+  const superModel = envManagedDefaultModelName(DEFAULT_TOKEN_FACTORY_MODEL);
+  if (available.includes(superModel)) {
+    return superModel;
   }
   const [first] = available;
   if (first === undefined) {

@@ -29,6 +29,7 @@ function defaultPaths(repoRoot) {
   return {
     tourPath: path.join(repoRoot, 'packages/trueforge-ui/src/components/tourPrompts.ts'),
     topicsDir: path.join(repoRoot, 'packages/trueforge/guide/topics'),
+    docsDir: path.join(repoRoot, 'docs'),
     requiredCardsPath: path.join(repoRoot, 'packages/trueforge/guide/required-cards.json'),
     outPath: path.join(repoRoot, 'packages/trueforge/src/personas/amanGuide/knowledgePack.generated.ts'),
   };
@@ -64,7 +65,7 @@ function propertyMap(objectLiteral) {
 }
 
 /** Reads the Tour cards from the card table in tourPrompts.ts source, without running the UI. */
-function readTour(source, fileName) {
+export function readTour(source, fileName) {
   const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const capabilityKeys = new Set();
   const declarations = new Map();
@@ -143,7 +144,10 @@ function capabilityList(node, where) {
   return node.elements.map(element => literalText(element, where));
 }
 
-/** Parses the `---` front matter block: id, title and a comma list of Tour cards the page covers. */
+/**
+ * Parses the `---` front matter block: id, title and a comma list of what the page covers. A bare
+ * word is a Tour card key; a `kind:name` entry names another surface, checked by check-help-coverage.mjs.
+ */
 function parseTopic(text, fileName) {
   const match = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/.exec(text);
   if (match === null) {
@@ -172,13 +176,169 @@ function parseTopic(text, fileName) {
   return { id, title, covers, body };
 }
 
-async function readTopics(topicsDir) {
+export async function readTopics(topicsDir) {
   const names = (await readdir(topicsDir)).filter(name => name.endsWith('.md')).sort();
   const topics = [];
   for (const name of names) {
     topics.push(parseTopic(await readFile(path.join(topicsDir, name), 'utf8'), name));
   }
   return topics;
+}
+
+/** The public repository path a docs page is read from, named in every chunk so the guide can link to it. */
+const DOCS_PUBLIC_BASE = 'https://github.com/ClimbOutLabs/amanuensis/blob/main/docs';
+
+/** Longest body one knowledge entry may carry; longer sections are packed at paragraph breaks. */
+const DOCS_CHUNK_MAX = 6000;
+
+/** Front matter fields of a docs page, with the quotes Mintlify writes around values removed. */
+function parseFrontMatter(text, fileName) {
+  const match = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/.exec(text);
+  if (match === null) {
+    throw new AmanGuideBuildError(`${fileName} must start with a front matter block between --- lines.`);
+  }
+  const fields = new Map();
+  for (const line of match[1].split('\n')) {
+    const separator = line.indexOf(':');
+    if (separator > 0) {
+      const value = line.slice(separator + 1).trim();
+      const unquoted =
+        (value.startsWith("'") && value.endsWith("'")) || (value.startsWith('"') && value.endsWith('"'))
+          ? value.slice(1, -1)
+          : value;
+      fields.set(line.slice(0, separator).trim(), unquoted);
+    }
+  }
+  return { fields, body: match[2] };
+}
+
+/**
+ * A docs page stays out of the pack when it is generated reference material: an
+ * `openapi` field in its front matter, or a reference step in its path.
+ */
+function isApiReferencePage({ fields, fileName }) {
+  if (fields.has('openapi')) {
+    return true;
+  }
+  return fileName.split('/').some(segment => segment === 'reference' || segment === 'api-reference');
+}
+
+/** Drops the lines only MDX can read: imports, exports and lines that are nothing but a component tag. */
+function proseLines(body) {
+  const kept = [];
+  let inFence = false;
+  for (const line of body.split('\n')) {
+    if (line.trimStart().startsWith('```')) {
+      inFence = !inFence;
+      kept.push(line);
+      continue;
+    }
+    if (inFence) {
+      kept.push(line);
+      continue;
+    }
+    const trimmed = line.trim();
+    if (/^(import|export)\s/.test(trimmed)) {
+      continue;
+    }
+    if (/^<\/?[A-Za-z][^>]*>$/.test(trimmed)) {
+      continue;
+    }
+    kept.push(line);
+  }
+  return kept;
+}
+
+/** Splits a page body at its ## headings, then packs paragraphs so no chunk passes the size cap. */
+function chunkDocsBody(body) {
+  const sections = [];
+  let heading = null;
+  let lines = [];
+  let inFence = false;
+  const flush = () => {
+    const text = lines.join('\n').trim();
+    if (text !== '') {
+      sections.push({ heading, text });
+    }
+    lines = [];
+  };
+  for (const line of proseLines(body)) {
+    if (line.trimStart().startsWith('```')) {
+      inFence = !inFence;
+    }
+    if (!inFence && line.startsWith('## ')) {
+      flush();
+      heading = line.slice(3).trim();
+      continue;
+    }
+    lines.push(line);
+  }
+  flush();
+  const chunks = [];
+  for (const section of sections) {
+    if (section.text.length <= DOCS_CHUNK_MAX) {
+      chunks.push(section);
+      continue;
+    }
+    let packed = '';
+    for (const paragraph of section.text.split('\n\n')) {
+      const candidate = packed === '' ? paragraph : `${packed}\n\n${paragraph}`;
+      if (candidate.length > DOCS_CHUNK_MAX && packed !== '') {
+        chunks.push({ heading: section.heading, text: packed });
+        packed = paragraph;
+      } else {
+        packed = candidate;
+      }
+    }
+    if (packed !== '') {
+      chunks.push({ heading: section.heading, text: packed });
+    }
+  }
+  return chunks;
+}
+
+/**
+ * Reads the public docs pages into knowledge entries. Each entry names the page
+ * it came from, so an answer built on it can carry the link. Docs entries cover
+ * no Tour cards; the coverage check stays about the hand-written pages.
+ */
+export async function readDocs(docsDir) {
+  let names;
+  try {
+    names = (await readdir(docsDir)).filter(name => name.endsWith('.mdx')).sort();
+  } catch (error) {
+    if (error !== null && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+      return [];
+    }
+    throw error;
+  }
+  const entries = [];
+  for (const name of names) {
+    const { fields, body } = parseFrontMatter(await readFile(path.join(docsDir, name), 'utf8'), name);
+    if (isApiReferencePage({ fields, fileName: name })) {
+      continue;
+    }
+    const title = fields.get('title') ?? fields.get('sidebarTitle') ?? '';
+    if (title === '') {
+      throw new AmanGuideBuildError(`Docs page "${name}" needs a title in its front matter.`);
+    }
+    const slug =
+      name
+        .replace(/\.mdx$/, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-') || 'page';
+    const sourceLine = `Public source: ${DOCS_PUBLIC_BASE}/${name}`;
+    const chunks = chunkDocsBody(body);
+    chunks.forEach((chunk, index) => {
+      entries.push({
+        id: index === 0 ? `docs-${slug}` : `docs-${slug}-${index + 1}`,
+        title: chunk.heading === null || (index === 0 && chunks.length === 1) ? title : `${title}: ${chunk.heading}`,
+        covers: [],
+        body: `${chunk.text}\n\n${sourceLine}`,
+      });
+    });
+  }
+  return entries;
 }
 
 /** The Tour card keys that must have a guide page. The build fails if one of them does not. */
@@ -195,6 +355,11 @@ async function readRequiredCards(requiredCardsPath) {
   return parsed;
 }
 
+/** A cover with a `kind:` prefix names a surface other than a Tour card. */
+export function isTourCardCover(cover) {
+  return !cover.includes(':');
+}
+
 /**
  * Fails on a broken page or a required card with no page. Returns the Tour cards
  * that have no page yet; those are warnings, not errors.
@@ -206,13 +371,13 @@ function checkTopics({ topics, cards, requiredKeys }) {
       throw new AmanGuideBuildError(`Duplicate guide topic id "${topic.id}".`);
     }
     ids.add(topic.id);
-    for (const key of topic.covers) {
+    for (const key of topic.covers.filter(isTourCardCover)) {
       if (!cards.has(key)) {
         throw new AmanGuideBuildError(`Guide topic "${topic.id}" names "${key}", which is not a Tour card.`);
       }
     }
   }
-  const covered = new Set(topics.flatMap(topic => topic.covers));
+  const covered = new Set(topics.flatMap(topic => topic.covers.filter(isTourCardCover)));
   for (const key of requiredKeys) {
     if (!cards.has(key)) {
       throw new AmanGuideBuildError(`required-cards.json lists "${key}", which is not a Tour card.`);
@@ -230,7 +395,7 @@ async function render({ topics, repoRoot, outPath }) {
       `  { id: ${JSON.stringify(topic.id)}, title: ${JSON.stringify(topic.title)}, covers: ${JSON.stringify(topic.covers)}, body: ${JSON.stringify(topic.body)} },`,
   );
   const source = [
-    '// Generated by scripts/build-aman-guide.mjs from packages/trueforge/guide/topics and the Tour cards. Do not edit by hand.',
+    '// Generated by scripts/build-aman-guide.mjs from packages/trueforge/guide/topics, the public docs pages and the Tour cards. Do not edit by hand.',
     "import type { AmanGuideTopic } from './topic';",
     '',
     'export const AMAN_GUIDE_TOPICS: readonly AmanGuideTopic[] = [',
@@ -250,7 +415,9 @@ export async function buildAmanGuide(options = {}) {
   const repoRoot = options.repoRoot ?? DEFAULT_REPO_ROOT;
   const paths = { ...defaultPaths(repoRoot), ...pickDefined(options) };
   const tour = readTour(await readFile(paths.tourPath, 'utf8'), paths.tourPath);
-  const topics = await readTopics(paths.topicsDir);
+  const pages = await readTopics(paths.topicsDir);
+  const docsEntries = await readDocs(paths.docsDir);
+  const topics = [...pages, ...docsEntries];
   const requiredKeys = await readRequiredCards(paths.requiredCardsPath);
   const uncoveredKeys = checkTopics({ topics, cards: tour.cards, requiredKeys });
   const output = await render({ topics, repoRoot, outPath: paths.outPath });
@@ -258,7 +425,7 @@ export async function buildAmanGuide(options = {}) {
   await writeFile(paths.outPath, output);
   return {
     outPath: paths.outPath,
-    topics: topics.map(({ id, covers }) => ({ id, covers })),
+    topics: topics.map(({ id, title, covers }) => ({ id, title, covers })),
     tourKeys: [...tour.cards.keys()],
     uncoveredKeys,
   };
@@ -266,7 +433,7 @@ export async function buildAmanGuide(options = {}) {
 
 function pickDefined(options) {
   return Object.fromEntries(
-    ['tourPath', 'topicsDir', 'requiredCardsPath', 'outPath']
+    ['tourPath', 'topicsDir', 'docsDir', 'requiredCardsPath', 'outPath']
       .filter(key => options[key] !== undefined)
       .map(key => [key, options[key]]),
   );

@@ -35,6 +35,24 @@ function setup() {
 }
 
 describe('SqlitePersonaKnowledgeRepository (brute-force path)', () => {
+  it('keeps the id a caller chooses for its own document', () => {
+    const { repo, close } = setup();
+    try {
+      const created = repo.createDocument({
+        id: 'guide-doc-0123456789ab',
+        title: 'Guide page',
+        titleExplicit: true,
+        source_kind: 'text',
+        source_label: 'Guide',
+        source_url: null,
+      });
+      expect(created.id).toBe('guide-doc-0123456789ab');
+      expect(repo.getDocument({ documentId: 'guide-doc-0123456789ab' })?.title).toBe('Guide page');
+    } finally {
+      close();
+    }
+  });
+
   it('creates, reads, lists, and updates documents', () => {
     const { repo, close } = setup();
     try {

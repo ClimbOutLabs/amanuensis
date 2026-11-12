@@ -3,7 +3,7 @@ import type { Kysely } from 'kysely';
 import type { Database } from '../../db/sqlite/types';
 import { wipeUserData, type FreshReport } from './fresh';
 import type { DemoKnowledgeLibrary } from './knowledgeLibrary';
-import { resetDemoWorld, seedDemoWorld, type ResetReport, type SeedReport } from './seed';
+import { resetDemoWorld, seedDemoWorld, type DemoSeedConnectors, type ResetReport, type SeedReport } from './seed';
 import { createSqliteDemoSeedStores } from './stores';
 import { dayInZone } from './storyDays.mjs';
 import { buildDemoWorld } from './world';
@@ -32,12 +32,14 @@ export function buildDemoSession({
   memoryDir,
   models,
   knowledge,
+  connectors,
 }: {
   db: Kysely<Database>;
   tenantId: string;
   memoryDir: string;
   models: readonly string[];
   knowledge: DemoKnowledgeLibrary;
+  connectors: DemoSeedConnectors;
 }): DemoSeedSession {
   const stores = createSqliteDemoSeedStores({ db, memoryDir, tenantId, knowledge });
   return {
@@ -48,6 +50,7 @@ export function buildDemoSession({
         scope: { tenantId, userId },
         world: buildDemoWorld({ today: today ?? dayInZone({ now, timeZone }), timeZone, modelName }),
         now,
+        connectors,
       }),
     reset: ({ userId }) => resetDemoWorld({ stores, scope: { tenantId, userId } }),
     fresh: ({ userId }) => wipeUserData({ stores, scope: { tenantId, userId } }),

@@ -39,6 +39,8 @@ export type ScheduleFormFieldsProps = {
   onAgentPicked?: (agent: AgentLibraryEntry) => void;
   agentPickerDisabled?: boolean;
   onBuildAgent?: () => void;
+  /** Set when editing a saved schedule: who it runs as, shown in plain words in place of the agent picker. */
+  runsAs?: string;
 };
 
 export function ScheduleFormFields({
@@ -50,6 +52,7 @@ export function ScheduleFormFields({
   onAgentPicked,
   agentPickerDisabled = false,
   onBuildAgent,
+  runsAs,
 }: ScheduleFormFieldsProps) {
   const cron = valuesToCron(values);
   const cadence = formatCadenceSummary({ cron, timezone: values.timezone });
@@ -67,19 +70,26 @@ export function ScheduleFormFields({
 
   return (
     <div className="flex flex-col gap-4 px-5 py-4">
-      <div className="block">
-        <span className="mb-1.5 block text-sm font-medium">Agent</span>
-        <AgentSearchPicker
-          aria-label="Agent"
-          placeholder="Search agent"
-          value={agentId}
-          selectedLabel={agentLabel}
-          onValueChange={value => onAgentIdChange?.(value)}
-          onAgentPicked={onAgentPicked}
-          disabled={agentPickerDisabled || onAgentIdChange == null}
-          onBuildAgent={onBuildAgent}
-        />
-      </div>
+      {runsAs === undefined ? (
+        <div className="block">
+          <span className="mb-1.5 block text-sm font-medium">Agent</span>
+          <AgentSearchPicker
+            aria-label="Agent"
+            placeholder="Search agent"
+            value={agentId}
+            selectedLabel={agentLabel}
+            onValueChange={value => onAgentIdChange?.(value)}
+            onAgentPicked={onAgentPicked}
+            disabled={agentPickerDisabled || onAgentIdChange == null}
+            onBuildAgent={onBuildAgent}
+          />
+        </div>
+      ) : (
+        <div className="block">
+          <span className="mb-1.5 block text-sm font-medium">Runs as</span>
+          <p className="text-sm">{runsAs}</p>
+        </div>
+      )}
 
       <label className="block">
         <span className="mb-1.5 block text-sm font-medium">Name</span>

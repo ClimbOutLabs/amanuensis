@@ -7,7 +7,9 @@ import {
 import type { ApprovalDecision } from '@truefoundry/trueforge-core/core/events/schema';
 import { InstructionBuilder } from '@truefoundry/trueforge-core/core/InstructionBuilder';
 import type { InternalEnrichedAssistantMessage } from '@truefoundry/trueforge-core/core/llm/LLMTypes';
+import { allowsChatApproval } from '@truefoundry/trueforge-core/core/mcp/approvalGrant';
 import { createToolCallMemoState, executeToolCalls } from '@truefoundry/trueforge-core/core/mcp/executeToolCalls';
+import { isCallToolResponseResult } from '@truefoundry/trueforge-core/core/mcp/IMCPServer';
 import { classifyUnstampedToolCall } from '@truefoundry/trueforge-core/core/runtime/AgentThread';
 import { NOOP_AGENT_TRACING } from '@truefoundry/trueforge-core/core/tracing/NoopAgentTracing';
 import winston from 'winston';
@@ -21,6 +23,7 @@ import { activateSessionPersona } from '../../../src/personas/sessionPersona';
 import type { ChatRunner } from '../../../src/runtime/chatAssistant';
 import { chatModelName } from '../../../src/runtime/chatAssistant';
 import { PersonaToolSet, personaCapability, personaContentFor } from '../../../src/runtime/personaCapability';
+import { PersonaSwitchLog } from '../../../src/runtime/personaSwitchClaim';
 import { resolveTurnPersona } from '../../../src/runtime/turnPersona';
 
 const OWNER: CreatedBySubject = { subject_id: 'owner-1', subject_type: 'user', subject_display_name: 'Test Owner' };
@@ -36,7 +39,7 @@ const TRAVEL_PLANNER = {
 const CHAT_SESSION_ID = 'chat-1';
 
 /** The card prompt's own call: a persona the chat answers with, on the chat's model. */
-async function setup(input: { existing?: string[] } = {}) {
+async function setup(input: { existing?: string[]; defaultAssistantName?: string } = {}) {
   const db = createSqliteDb(':memory:');
   await migrateSqliteToLatest(db);
   const modelProviderStore = new SqliteModelProviderStore(db);
@@ -82,6 +85,7 @@ async function setup(input: { existing?: string[] } = {}) {
     created_by: OWNER.subject_id,
     conversation_id: 'chat-1',
   });
+  const switches = new PersonaSwitchLog();
   const options = {
     tracing: NOOP_AGENT_TRACING,
     store,
@@ -90,6 +94,8 @@ async function setup(input: { existing?: string[] } = {}) {
     owner_id: OWNER.subject_id,
     model_name: chatModelName(runner),
     session_id: CHAT_SESSION_ID,
+    default_assistant_name: input.defaultAssistantName ?? null,
+    switches,
     logger: winston.createLogger({ silent: true }),
     sentinel,
   };
@@ -97,7 +103,7 @@ async function setup(input: { existing?: string[] } = {}) {
   const listAll = () => store.listPersonas({ tenant_id: 'default', created_by: OWNER.subject_id });
   const activeChatPersona = () =>
     store.getLatestManualSessionPersona({ tenant_id: TENANT_ID, session_id: CHAT_SESSION_ID });
-  return { tools, options, sentinel, store, modelProviderStore, listAll, activeChatPersona };
+  return { tools, options, switches, sentinel, store, modelProviderStore, listAll, activeChatPersona };
 }
 
 type Setup = Awaited<ReturnType<typeof setup>>;
@@ -152,6 +158,13 @@ function resultText(result: Awaited<ReturnType<typeof dispatch>>['result']): str
 }
 
 describe('create_persona', () => {
+  it('asks every time: its card never offers the chat-wide answer', async () => {
+    const built = await setup();
+    const info = await built.tools.toolCallInfo({ name: 'create_persona', arguments: TRAVEL_PLANNER });
+    expect(info).toMatchObject({ tier_reason: 'persona_write', is_approval_required: true });
+    expect(allowsChatApproval(info)).toBe(false);
+  });
+
   it('shows one card with the whole persona, then saves it on approval', async () => {
     const built = await setup();
     const info = await built.tools.toolCallInfo({ name: 'create_persona', arguments: TRAVEL_PLANNER });
@@ -313,6 +326,31 @@ describe('reusing a persona', () => {
   });
 });
 
+describe('switching from a persona', () => {
+  it('switches to another persona and records that a switch ran', async () => {
+    const built = await setup({ existing: ['Theo', 'June'] });
+    await dispatch({ built, args: { name: 'Theo' }, name: 'use_persona' });
+    const { result } = await dispatch({ built, args: { name: 'June' }, name: 'use_persona' });
+    expect(resultText(result)).toContain('Now talking with June.');
+    expect(await built.activeChatPersona()).toMatchObject({ persona_name: 'June' });
+    expect(built.switches.switched).toBe(true);
+  });
+
+  it('switches back to the main assistant by its name', async () => {
+    const built = await setup({ existing: ['Theo'], defaultAssistantName: 'Mina' });
+    await dispatch({ built, args: { name: 'Theo' }, name: 'use_persona' });
+    const { result } = await dispatch({ built, args: { name: 'mina' }, name: 'use_persona' });
+    expect(resultText(result)).toContain('Now talking with Mina.');
+    expect(await built.activeChatPersona()).toMatchObject({ persona_id: null, source: 'default' });
+  });
+
+  it('does not record a switch when the name matches nobody', async () => {
+    const built = await setup({ existing: ['Theo'] });
+    await dispatch({ built, args: { name: 'June' }, name: 'use_persona' });
+    expect(built.switches.switched).toBe(false);
+  });
+});
+
 describe('the chat after a switch', () => {
   it('answers from the persona next, and switching back returns to the default assistant', async () => {
     const built = await setup({ existing: ['Zara'] });
@@ -376,6 +414,31 @@ describe('persona tools through the route a chat classifies them on', () => {
     const built = await setup();
     const created = await classified(built, { name: 'create_persona', arguments: TRAVEL_PLANNER });
     expect(created).toMatchObject({ tier: 3, tier_reason: 'persona_write', is_approval_required: true });
+  });
+});
+
+describe('in an incognito chat', () => {
+  it('can list personas and switch to one, but not add one', async () => {
+    const built = await setup({ existing: ['Travel'] });
+    const tools = new PersonaToolSet({ ...built.options, keepsNothing: true });
+    expect((await tools.listTools()).result.tools.map(tool => tool.name).sort()).toEqual([
+      'list_personas',
+      'use_persona',
+    ]);
+    const refused = await tools.callTool({ name: 'create_persona', arguments: TRAVEL_PLANNER });
+    expect(isCallToolResponseResult(refused) && refused.result.isError).toBe(true);
+    expect((await built.listAll()).map(persona => persona.display_name)).toEqual(['Travel']);
+  });
+
+  it('tells the model it cannot add a persona here', async () => {
+    const built = await setup();
+    const instruction = new InstructionBuilder('system-prompt');
+    for (const build of personaCapability({ ...built.options, keepsNothing: true }).instructionBuilders ?? []) {
+      build(instruction);
+    }
+    const text = instruction.build();
+    expect(text).toContain('This incognito chat cannot add a persona.');
+    expect(text).not.toContain('create_persona');
   });
 });
 

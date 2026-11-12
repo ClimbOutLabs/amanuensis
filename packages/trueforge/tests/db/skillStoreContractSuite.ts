@@ -212,4 +212,65 @@ export function runSkillStoreContractSuite(getStore: () => ISkillStore): void {
       message: 'Skill "algorithmic-art": preload is not supported for git skills',
     });
   });
+
+  it('a new skill has no network approval', async () => {
+    const store = getStore();
+    const created = await store.createSkill({
+      tenant_id: TENANT,
+      name: 'algorithmic-art',
+      manifest: manifest({ network_hosts: ['github.com', 'api.github.com'] }),
+    });
+    expect(created.network_approval).toBeNull();
+  });
+
+  it('setSkillNetworkApproval stores the exact list, and null takes it back', async () => {
+    const store = getStore();
+    await store.upsertSkill({
+      tenant_id: TENANT,
+      name: 'algorithmic-art',
+      manifest: manifest({ network_hosts: ['github.com', 'api.github.com'] }),
+    });
+    const approved = await store.setSkillNetworkApproval({
+      tenant_id: TENANT,
+      name: 'algorithmic-art',
+      hosts: ['github.com', 'api.github.com'],
+    });
+    expect(approved?.network_approval).toEqual(['github.com', 'api.github.com']);
+    const [listed] = await store.listSkills({ tenant_id: TENANT, names: ['algorithmic-art'] });
+    expect(listed?.network_approval).toEqual(['github.com', 'api.github.com']);
+
+    const cleared = await store.setSkillNetworkApproval({
+      tenant_id: TENANT,
+      name: 'algorithmic-art',
+      hosts: null,
+    });
+    expect(cleared?.network_approval).toBeNull();
+  });
+
+  it('setSkillNetworkApproval on a missing skill returns undefined', async () => {
+    const store = getStore();
+    await expect(
+      store.setSkillNetworkApproval({ tenant_id: TENANT, name: 'nope', hosts: ['github.com'] }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('replacing the manifest keeps the stored approval beside it', async () => {
+    const store = getStore();
+    await store.upsertSkill({
+      tenant_id: TENANT,
+      name: 'algorithmic-art',
+      manifest: manifest({ network_hosts: ['github.com', 'api.github.com'] }),
+    });
+    await store.setSkillNetworkApproval({
+      tenant_id: TENANT,
+      name: 'algorithmic-art',
+      hosts: ['github.com', 'api.github.com'],
+    });
+    const replaced = await store.upsertSkill({
+      tenant_id: TENANT,
+      name: 'algorithmic-art',
+      manifest: manifest({ description: 'Updated description for algorithmic art.' }),
+    });
+    expect(replaced.network_approval).toEqual(['github.com', 'api.github.com']);
+  });
 }

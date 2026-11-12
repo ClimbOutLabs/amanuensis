@@ -1,0 +1,30 @@
+diff --git a/dist/index.cjs b/dist/index.cjs
+index 08a4ceea2b592f6c42d53aece283ac6e37c0f4a2..1d0cd53bbe381de42713324c442d06639b5ec63a 100644
+--- a/dist/index.cjs
++++ b/dist/index.cjs
+@@ -15,7 +15,9 @@ let _openuidev_lang_core = require("@openuidev/lang-core");
+ * in package.json's `sideEffects` so bundlers preserve the side effect while
+ * the rest of the package stays tree-shakeable.
+ */
+-if (process.env.NODE_ENV === "development") {
++// Aman: never auto-mount OpenUI Inspect. It imports its widget from cdn.jsdelivr.net at runtime
++// and floats over the app's own controls in dev and in the browser tests.
++if (false) {
+ 	const AUTO_MOUNT_FLAG = Symbol.for("openui.devtools.autoMount");
+ 	const flags = globalThis;
+ 	if (!flags[AUTO_MOUNT_FLAG]) {
+diff --git a/dist/index.mjs b/dist/index.mjs
+index 55fd270b0e3c2da7aba8931dc0e37094beb8a9b8..0d167693a8919007777268aac64f0073a4a1e296 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -13,7 +13,9 @@ import { A as useTriggerAction, C as useFormName, D as useRenderNode, E as useIs
+ * in package.json's `sideEffects` so bundlers preserve the side effect while
+ * the rest of the package stays tree-shakeable.
+ */
+-if (process.env.NODE_ENV === "development") {
++// Aman: never auto-mount OpenUI Inspect. It imports its widget from cdn.jsdelivr.net at runtime
++// and floats over the app's own controls in dev and in the browser tests.
++if (false) {
+ 	const AUTO_MOUNT_FLAG = Symbol.for("openui.devtools.autoMount");
+ 	const flags = globalThis;
+ 	if (!flags[AUTO_MOUNT_FLAG]) {

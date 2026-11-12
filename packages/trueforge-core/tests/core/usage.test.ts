@@ -1,5 +1,5 @@
 import { CompletionUsageSchema, getEmptyUsage } from '../../src/core/llm/LLMTypes';
-import { mergeUsage } from '../../src/core/llm/usage';
+import { CHARS_PER_TOKEN, describeContentSize, estimateTokensForString, mergeUsage } from '../../src/core/llm/usage';
 import {
   addAgentThreadMetrics,
   createEmptyAgentThreadMetrics,
@@ -32,6 +32,21 @@ describe('CompletionUsage', () => {
       output_tokens: 0,
       total_tokens: 0,
     });
+  });
+});
+
+describe('CHARS_PER_TOKEN', () => {
+  it('is the shared characters-per-token figure behind the token estimate', () => {
+    expect(CHARS_PER_TOKEN).toBe(4);
+    expect(estimateTokensForString('x'.repeat(8))).toBe(2);
+    expect(estimateTokensForString('x'.repeat(CHARS_PER_TOKEN))).toBe(1);
+  });
+});
+
+describe('describeContentSize', () => {
+  it('formats characters with thousands separators', () => {
+    expect(describeContentSize('x'.repeat(50_000))).toBe('50,000 characters');
+    expect(describeContentSize('')).toBe('0 characters');
   });
 });
 

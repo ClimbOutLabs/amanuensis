@@ -9,6 +9,7 @@ import {
   type GetSkillInput,
   type ISkillStore,
   type ListSkillsInput,
+  type SetSkillNetworkApprovalInput,
   type SkillRecord,
   type UpsertSkillInput,
 } from '../../skillStore';
@@ -22,6 +23,7 @@ function recordColumns(eb: ExpressionBuilder<Database, 'skill'>) {
     'tenant_id' as const,
     'name' as const,
     jsonText<SkillManifest>(eb.ref('manifest')).as('manifest'),
+    jsonText<readonly string[] | null>(eb.ref('network_approval')).as('network_approval'),
     'created_at' as const,
     'updated_at' as const,
   ];
@@ -56,6 +58,7 @@ export class SqliteSkillStore implements ISkillStore<Transaction<Database>> {
           tenant_id: input.tenant_id,
           name: input.name,
           manifest: jsonbBind(input.manifest),
+          network_approval: null,
           created_at: timestamp,
           updated_at: timestamp,
         })
@@ -78,6 +81,7 @@ export class SqliteSkillStore implements ISkillStore<Transaction<Database>> {
         tenant_id: input.tenant_id,
         name: input.name,
         manifest: jsonbBind(input.manifest),
+        network_approval: null,
         created_at: timestamp,
         updated_at: timestamp,
       })
@@ -89,6 +93,23 @@ export class SqliteSkillStore implements ISkillStore<Transaction<Database>> {
       )
       .returning(recordColumns)
       .executeTakeFirstOrThrow();
+  }
+
+  async setSkillNetworkApproval(
+    input: SetSkillNetworkApprovalInput,
+    transaction?: Transaction<Database>,
+  ): Promise<SkillRecord | undefined> {
+    const db = transaction ?? this.#db;
+    return await db
+      .updateTable('skill')
+      .set({
+        network_approval: input.hosts === null ? null : jsonbBind([...input.hosts]),
+        updated_at: nowIso(),
+      })
+      .where('tenant_id', '=', input.tenant_id)
+      .where('name', '=', input.name)
+      .returning(recordColumns)
+      .executeTakeFirst();
   }
 
   async deleteSkill(input: GetSkillInput, transaction?: Transaction<Database>): Promise<boolean> {

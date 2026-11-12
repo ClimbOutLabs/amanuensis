@@ -11,13 +11,16 @@ import {
   parseMemoryProviderCheck,
   type ConnectorChecks,
   type ConnectorConnectionFailureKind,
+  type HomeAssistantCheckPort,
   type MemoryProviderCheck,
 } from '../../../server/connectorChecks.js';
 
+import type { CalendarSetupPort } from '../../../server/calendarSetup.js';
 import { parseToolGrants, type ConnectorToolGrants } from '../../../server/connectorToolGrants.js';
 import type { EmailSetupPort } from '../../../server/emailSetup.js';
 import type { GoogleSetupPort } from '../../../server/googleSetup.js';
 import type { MemoryProviderFields } from '../../../server/memoryProviderTypes.js';
+import type { NotesFolderSetupPort } from '../../../server/notesFolderSetup.js';
 import type { SearchProviderFields } from '../../../server/searchProviderTypes.js';
 import type {
   ConnectorAuth,
@@ -29,11 +32,13 @@ import type {
   ToolBase,
   UpdateConnectorRequest,
 } from '../../../server/types.js';
-import { toSameOriginCatalogLogoUrl } from '../../../utils/catalogLogo.js';
+import { catalogLogoSrc, withLogo } from '../../../utils/catalogLogo.js';
 import { getErrorMessage } from '../../../utils/getErrorMessage.js';
 import type { CreateTrueForgeClientOptions } from '../client.js';
+import { createCalendarSetupApi } from './calendarSetup.js';
 import { createEmailSetupApi } from './emailSetup.js';
 import { createGoogleSetupApi } from './googleSetup.js';
+import { createNotesFolderSetupApi } from './notesFolderSetup.js';
 
 export type UiConnectorAuth = ConnectorAuth;
 export type UiConnectorAuthPublic = ConnectorAuthPublic;
@@ -216,9 +221,7 @@ export function toUiCatalogEntry(
     name: server.name,
     url: server.url,
     description: server.description,
-    ...(server.logo === undefined
-      ? {}
-      : { logo: toSameOriginCatalogLogoUrl({ logo: server.logo, baseUrl: options.baseUrl ?? '/' }) }),
+    ...withLogo(catalogLogoSrc({ logo: server.logo, kind: 'mcp', name: server.name, baseUrl: options.baseUrl ?? '/' })),
     auth: toUiAuthPublic(server.auth),
     ...(server.searchProvider === undefined ? {} : { searchProvider: server.searchProvider }),
   };
@@ -278,6 +281,8 @@ export function toUiConnectorFromReadEntry(server: TrueForgeApi.AvailableMcpServ
     auth,
     requiresAuth: server.authStatus.status === 'auth_required',
     authenticated: server.authStatus.status !== 'auth_required',
+    // The chat list names the search provider; the SDK type does not declare the field yet.
+    ...(Reflect.get(server, 'searchProvider') === true ? { searchProvider: true } : {}),
   };
 }
 
@@ -319,9 +324,12 @@ export type HarnessConnectorCatalog = ConnectorCatalogServer<
   UiUpdateConnectorRequest
 > &
   ConnectorChecks &
+  HomeAssistantCheckPort &
   ConnectorToolGrants &
   GoogleSetupPort &
-  EmailSetupPort;
+  EmailSetupPort &
+  CalendarSetupPort &
+  NotesFolderSetupPort;
 
 /** Settings connector port for `createTrueFoundryServer`. Delete omitted; disconnect unsupported. */
 export function createConnectorCatalog(
@@ -374,6 +382,8 @@ export function createConnectorCatalog(
   return {
     ...createGoogleSetupApi(client),
     ...createEmailSetupApi(clientOptions),
+    ...createCalendarSetupApi(clientOptions),
+    ...createNotesFolderSetupApi(clientOptions),
     getConnectorCatalog: async () => {
       const body = await client.catalogs.mcpServers.list();
       return body.data.map(server => toUiCatalogEntry(server, { baseUrl: clientOptions.baseUrl }));
@@ -461,6 +471,10 @@ export function createConnectorCatalog(
       });
     },
     checkMemoryProvider: async req => requestMemoryProviderCheck({ name: req.id, options: clientOptions }),
+    checkHomeAssistant: async req => {
+      const result = await client.mcpServers.homeAssistantCheck(req.id);
+      return result.data;
+    },
     listToolGrants: async req =>
       parseToolGrants(
         await requestMcpServerRoute({

@@ -201,27 +201,37 @@ describe('PersonalizationPanel', () => {
     expect(screen.getByText(/at most once an hour/)).toBeInTheDocument();
   });
 
-  it('saves the help areas picked in Settings, in the order picked, and shows the saved choice', async () => {
+  it('shows no help-area picker in Settings and keeps the help areas already saved', async () => {
+    // The "What would help you most?" picker lives on the New Chat home, not in Settings.
+    // Areas a person already picked stay on their profile: a Settings save carries them
+    // through unchanged rather than dropping them with the removed section.
     const updateProfile = vi.fn(async (profile: PersonalizationProfile) => ({ ...profile }));
     render(
       <PersonalizationProvider
-        api={{ getProfile: async () => initialProfile, updateProfile, deleteProfile: async () => {} }}
+        api={{
+          getProfile: async () => ({ ...initialProfile, help_areas: ['new_country', 'family'] }),
+          updateProfile,
+          deleteProfile: async () => {},
+        }}
       >
         <PersonalizationPanel />
       </PersonalizationProvider>,
     );
 
     await screen.findByDisplayValue('Mira');
-    fireEvent.click(screen.getByRole('checkbox', { name: 'I just moved here' }));
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Someone I look after' }));
+    expect(screen.queryByText('What would help you most?')).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: 'I just moved here' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: 'Someone I look after' })).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Sage' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save personalization' }));
 
     await waitFor(() =>
-      expect(updateProfile).toHaveBeenCalledWith(expect.objectContaining({ help_areas: ['new_country', 'family'] })),
+      expect(updateProfile).toHaveBeenCalledWith(
+        expect.objectContaining({ assistant_name: 'Sage', help_areas: ['new_country', 'family'] }),
+      ),
     );
     expect(await screen.findByRole('status')).toHaveTextContent('Personalization saved.');
-    expect(screen.getByRole('checkbox', { name: 'I just moved here' })).toBeChecked();
-    expect(screen.getByRole('checkbox', { name: 'Someone I look after' })).toBeChecked();
   });
 
   it('persists the learning switch through the ordinary save flow', async () => {

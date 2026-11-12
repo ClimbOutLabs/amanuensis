@@ -42,6 +42,14 @@ describe('FoldedChatGroup', () => {
     localStorage.clear();
   });
 
+  it('sizes the date-group heading on the --text-xs scale step, not a one-off literal', () => {
+    renderGroup();
+
+    const heading = screen.getByRole('button', { name: 'Earlier' });
+    expect(heading).toHaveClass('text-xs');
+    expect(heading.className).not.toMatch(/text-\[0\.75rem\]/);
+  });
+
   it('Earlier starts closed, and its heading opens it', () => {
     renderGroup();
 

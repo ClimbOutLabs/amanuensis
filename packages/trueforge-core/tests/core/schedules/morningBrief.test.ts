@@ -1,7 +1,10 @@
 import {
   briefItemKey,
   isMorningBriefPrompt,
+  isMorningBriefSchedule,
+  MORNING_BRIEF_CARD_PROMPT,
   MORNING_BRIEF_PROMPT,
+  MORNING_BRIEF_SCHEDULE_NAME,
   parseMorningBrief,
 } from '../../../src/core/schedules/morningBrief';
 
@@ -29,6 +32,12 @@ function answer(payload: unknown): string {
 }
 
 describe('MORNING_BRIEF_PROMPT', () => {
+  it('is the contract, word for word: schedules and the demo seed depend on this exact text', () => {
+    expect(MORNING_BRIEF_PROMPT).toBe(
+      'Give me my morning brief. 1. Read everything new since my last brief, or the last 24 hours: all of it, page by page, not just the first few. Then today\'s and the next 7 days\' calendar, the lists in my spaces, and what you remember about me. 2. Write one plain-words digest sentence, then the items, most urgent first. Each item is one thing I can act on. Put anything that may be wrong (a conflict, a likely typo, a date or time that does not match) under check_first. Put replies and choices waiting on me under decision. Put calendar items under coming_up, with their start time. Put a due date under deadline only when it is not already a decision. Each item gets one next step: a label and a target, where the target is a prompt for me to send. 3. Give the answer as one JSON object in a ```json code block, shaped as {"digest": string, "items": [{"section": "check_first" | "decision" | "coming_up" | "deadline", "title": string, "subtitle": [string, ...], "source": "email" | "calendar" | "web" | "memory" | "space", "when": ISO 8601 time with offset (coming_up only), "action": {"label": string, "target": {"kind": "prompt", "text": string}}}]}. Keep titles and subtitle parts short, in plain text with no markdown. Say where each item came from in its source. Offer next steps, but do not send or save anything without asking me. 4. If something could not be read, leave it out and say so in the digest instead of guessing.',
+    );
+  });
+
   it('is the one brief prompt: numbered steps that ask for sources and never send or save', () => {
     expect(
       MORNING_BRIEF_PROMPT.startsWith('Give me my morning brief. 1. Read everything new since my last brief'),
@@ -51,6 +60,35 @@ describe('MORNING_BRIEF_PROMPT', () => {
   it('asks only for prompt next steps, never web links', () => {
     expect(MORNING_BRIEF_PROMPT).not.toContain('"link"');
     expect(MORNING_BRIEF_PROMPT).not.toContain('https link');
+  });
+});
+
+describe('MORNING_BRIEF_CARD_PROMPT', () => {
+  it('opens with the line every brief prompt shares, so the chat recognises it as a brief', () => {
+    expect(MORNING_BRIEF_CARD_PROMPT.startsWith('Give me my morning brief.')).toBe(true);
+    expect(isMorningBriefPrompt(MORNING_BRIEF_CARD_PROMPT)).toBe(true);
+  });
+
+  it('carries no output format: no JSON, no section names, no field wording', () => {
+    for (const contractWord of ['JSON', '```', 'check_first', 'coming_up', 'deadline', '"digest"', 'ISO 8601']) {
+      expect(MORNING_BRIEF_CARD_PROMPT).not.toContain(contractWord);
+    }
+    expect(MORNING_BRIEF_CARD_PROMPT).not.toBe(MORNING_BRIEF_PROMPT);
+  });
+
+  it('asks for the same things as the contract, in plain words', () => {
+    for (const ask of [
+      'since my last brief',
+      'my email',
+      "today's and the next 7 days' calendar",
+      'the lists in my spaces',
+      'what you remember about me',
+      'most urgent first',
+      'the replies and choices waiting on me',
+      'do not send or save anything without asking me',
+    ]) {
+      expect(MORNING_BRIEF_CARD_PROMPT).toContain(ask);
+    }
   });
 });
 
@@ -166,5 +204,21 @@ describe('briefItemKey', () => {
     expect(briefItemKey({ section: 'decision', title: 'Reply' })).not.toBe(
       briefItemKey({ section: 'deadline', title: 'Reply' }),
     );
+  });
+});
+
+describe('isMorningBriefSchedule', () => {
+  it('knows the brief by its name, whatever task the owner wrote', () => {
+    expect(isMorningBriefSchedule({ name: MORNING_BRIEF_SCHEDULE_NAME, task: 'My own brief, from my home.' })).toBe(
+      true,
+    );
+  });
+
+  it('knows the brief by its task under any name', () => {
+    expect(isMorningBriefSchedule({ name: 'weekday-digest', task: MORNING_BRIEF_PROMPT })).toBe(true);
+  });
+
+  it('leaves other schedules out', () => {
+    expect(isMorningBriefSchedule({ name: 'water-plants', task: 'Remind me to water the plants.' })).toBe(false);
   });
 });

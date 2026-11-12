@@ -169,6 +169,7 @@ export class TurnResourceResolver<
       }>;
       mcpRequestTimeoutMs: number;
       mcpConnectTimeoutMs: number;
+      mcpMaxResponseBytes?: number | undefined;
       /** One sandbox type per runtime. Omit = no sandbox support. */
       sandboxProvider?: TurnSandboxFactory | undefined;
       /**
@@ -214,6 +215,8 @@ export class TurnResourceResolver<
       modelFirstResponseTimeoutMs?: number | undefined;
       /** See ITurnResourceResolver.modelIdleTimeoutMs. */
       modelIdleTimeoutMs?: number | undefined;
+      /** See ITurnResourceResolver.modelToolCallIdleTimeoutMs. */
+      modelToolCallIdleTimeoutMs?: number | undefined;
       /**
        * Per-run host policy over tool calls. See ITurnResourceResolver.toolCallPolicy.
        */
@@ -224,6 +227,8 @@ export class TurnResourceResolver<
       serverSandboxAvailable?: boolean | undefined;
       /** IANA timezone name the client sent with this turn. See ITurnResourceResolver.clientTimezone. */
       clientTimezone?: string | undefined;
+      /** See ITurnResourceResolver.spokenReply. */
+      spokenReply?: boolean | undefined;
       /**
        * Host-configured model catalog for the model-identity section's
        * host-owned-facts list (e.g. IModelProviderStore.listModels, mapped and
@@ -263,6 +268,15 @@ export class TurnResourceResolver<
       return undefined;
     });
     return this.#setUpConnectorNamesPromise;
+  }
+
+  /**
+   * Names of every connector set up for this tenant, or undefined when that could not be
+   * read. The same single-flight read the deferred-tool wording uses, exposed so host
+   * resolvers can offer the set-up sources by default without a second read of the store.
+   */
+  get setUpConnectorNames(): Promise<readonly string[] | undefined> {
+    return this.#resolveSetUpConnectorNames();
   }
 
   #configuredModelsPromise?: Promise<readonly ConfiguredModelSummary[]> | undefined;
@@ -308,6 +322,10 @@ export class TurnResourceResolver<
     return this.deps.modelIdleTimeoutMs;
   }
 
+  get modelToolCallIdleTimeoutMs(): number | undefined {
+    return this.deps.modelToolCallIdleTimeoutMs;
+  }
+
   get toolCallPolicy(): HostToolCallPolicy | undefined {
     return this.deps.toolCallPolicy;
   }
@@ -322,6 +340,10 @@ export class TurnResourceResolver<
 
   get clientTimezone(): string | undefined {
     return this.deps.clientTimezone;
+  }
+
+  get spokenReply(): boolean | undefined {
+    return this.deps.spokenReply;
   }
 
   /** Default: no-op tracing. Override to plug in a real tracer. */
@@ -471,6 +493,9 @@ export class TurnResourceResolver<
               sessionId: previousTurn?.snapshot.mcp_servers?.[entry.name]?.session_id,
               requestTimeoutMs: this.deps.mcpRequestTimeoutMs,
               connectTimeoutMs: this.deps.mcpConnectTimeoutMs,
+              ...(this.deps.mcpMaxResponseBytes !== undefined
+                ? { maxResponseBytes: this.deps.mcpMaxResponseBytes }
+                : {}),
               // A vouched-for or designated connector must not hand its trust to wherever it redirects.
               refuseRedirects: first_party === true || search_provider !== undefined,
               logger: this.deps.logger,
@@ -490,6 +515,7 @@ export class TurnResourceResolver<
                   read: () => readMailAccountNames(remote),
                 }),
               now: () => new Date(),
+              timeZone: this.deps.clientTimezone,
             });
           },
         });
@@ -575,6 +601,7 @@ export class TurnResourceResolver<
         configuredModels,
         modelProperties: resolvedModel.modelProperties,
         clientTimezone: this.deps.clientTimezone,
+        spokenReply: this.deps.spokenReply,
         // Sub-agents receive the delegated task as a user message; their system
         // prompt is SUB_AGENT_IDENTITY (added by AgentThread), not user instructions.
         instruction: agentInfo ? undefined : spec.instructions,

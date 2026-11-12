@@ -2,8 +2,8 @@
 
 /** web: this install has a public https address and a Web client returns to it. loopback: the browser is on this machine. paste: the user pastes the address Google sends the browser to. */
 export const GoogleSetupInfoMode = {
-        Web: "web",
-        Loopback: "loopback",
-        Paste: "paste"
-    } as const;
-export type GoogleSetupInfoMode = typeof GoogleSetupInfoMode[keyof typeof GoogleSetupInfoMode];
+    Web: "web",
+    Loopback: "loopback",
+    Paste: "paste",
+} as const;
+export type GoogleSetupInfoMode = (typeof GoogleSetupInfoMode)[keyof typeof GoogleSetupInfoMode];

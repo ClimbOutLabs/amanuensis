@@ -1,10 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
-import { sessionIsCreateAgent } from '../atoms/lib/sessionCreateAgent.js';
 import { findAgentByName } from '../atoms/lib/useSearchAgentsList.js';
+import { useOpenChatById } from '../hooks/useOpenChatById.js';
 import {
   useOptionalAgentSessionsServer,
   useOptionalCatalogServer,
@@ -91,45 +91,13 @@ export function ShellRouteSync({
   const bootedRef = useRef(false);
   const bootPlaceRef = useRef<RoutePlace | null>(null);
   const bootHistoryAgentRef = useRef<HistoryAgentSearch | null>(null);
-  // Latest session id the URL asked for, so slower lookups cannot bind over it.
-  const requestedSessionRef = useRef<string | null>(null);
   const requestedHistoryAgentRef = useRef<string | null>(null);
   // Boot owns the first URL; the ongoing effects skip their initial commit so
   // they do not fight boot with the stale first-render place.
   const shellSyncStartedRef = useRef(false);
   const urlSyncStartedRef = useRef(false);
 
-  /**
-   * A URL carries only the id, so ask the server whether it names a mutable
-   * draft or an agent chat; guessing "mutable" opens an agent session as a
-   * blank draft. `requestedSessionRef` drops replies a later place superseded.
-   */
-  const openSession = useCallback(
-    (sessionId: string) => {
-      requestedSessionRef.current = sessionId;
-      if (server == null) {
-        shell.openHistorySession({ sessionId });
-        return;
-      }
-      void server
-        .getSession({ sessionId })
-        .then(session => {
-          if (requestedSessionRef.current !== sessionId) return;
-          shell.openHistorySession({
-            sessionId,
-            isMutable: session.isMutable,
-            isCreateAgent: sessionIsCreateAgent(session),
-            ...(session.agentName != null ? { agentName: session.agentName } : {}),
-          });
-        })
-        .catch(() => {
-          if (requestedSessionRef.current !== sessionId) return;
-          // Unreachable session: bind by id alone rather than stranding the shell.
-          shell.openHistorySession({ sessionId });
-        });
-    },
-    [server, shell],
-  );
+  const openSession = useOpenChatById();
 
   const applyHistoryAgentSearch = useCallback(
     (next: HistoryAgentSearch | null) => {
@@ -368,12 +336,29 @@ export function ShellRouteSync({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [placeKey, routeGatesKey, shell.historyAgentFilter?.agentName, shell.historyAgentFilter?.intent]);
 
+  // Back/Forward can land before React renders the shell's own last navigation. The router then
+  // commits the popped entry as if nothing moved, so the location alone cannot show the pop.
+  const [popCount, setPopCount] = useState(0);
+  const handledPopCountRef = useRef(0);
+  useEffect(() => {
+    const onPop = () => setPopCount(count => count + 1);
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
   // URL -> shell: apply on genuine location changes (Back/Forward, manual edits).
   useEffect(() => {
     if (!bootedRef.current) return;
     if (!urlSyncStartedRef.current) {
       urlSyncStartedRef.current = true;
+      handledPopCountRef.current = popCount;
       return;
+    }
+    if (handledPopCountRef.current !== popCount) {
+      handledPopCountRef.current = popCount;
+      // A pop is never the shell's own navigation, and the place to leave is the one on screen.
+      selfNavPathRef.current = null;
+      appliedUrlPlaceRef.current = place;
     }
     if (selfNavPathRef.current === location.pathname) {
       selfNavPathRef.current = null;
@@ -424,7 +409,7 @@ export function ShellRouteSync({
       applyHistoryAgentSearch(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.pathname, location.search]);
+  }, [location.pathname, location.search, popCount]);
 
   return null;
 }

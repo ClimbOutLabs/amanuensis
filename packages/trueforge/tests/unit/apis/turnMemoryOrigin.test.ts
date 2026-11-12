@@ -8,7 +8,55 @@ import { MEMORY_ORIGIN_METADATA_KEY } from '../../../src/runtime/memory/memoryOr
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import { TurnExecutionDeadline } from '../../../src/runtime/turnExecutionDeadline';
 
-async function* doneStream(): AsyncGenerator<TurnStreamingEvent> {
+const NOW = '2026-09-01T12:00:00.000Z';
+
+/** The model asks for one tool and the tool answers, as the turn stream carries them. */
+function toolRound({
+  id,
+  name,
+  args = '{}',
+  connector,
+}: {
+  id: string;
+  name: string;
+  args?: string;
+  /** The connector whose tool this is; left out, the tool is one of the assistant's own. */
+  connector?: string;
+}): TurnStreamingEvent[] {
+  return [
+    {
+      type: EventType.MODEL_MESSAGE,
+      id: `evt_call_${id}`,
+      thread_id: 'main',
+      created_at: NOW,
+      content: null,
+      tool_calls: [
+        {
+          id,
+          type: 'function',
+          function: { name, arguments: args },
+          tool_info:
+            connector === undefined
+              ? { type: 'truefoundry-system', name }
+              : { type: 'mcp', server_id: connector, server_name: connector, name },
+        },
+      ],
+    },
+    {
+      type: EventType.TOOL_RESPONSE_V2,
+      id: `evt_response_${id}`,
+      thread_id: 'main',
+      created_at: NOW,
+      tool_call_id: id,
+      content: '{"ok": true}',
+      disposition: 'executed_ok',
+      admission_provenance: { source: 'internal' },
+    },
+  ];
+}
+
+async function* doneStream(earlier: TurnStreamingEvent[]): AsyncGenerator<TurnStreamingEvent> {
+  yield* earlier;
   yield {
     type: EventType.TURN_DONE,
     id: 'evt_done',
@@ -29,7 +77,7 @@ async function* doneStream(): AsyncGenerator<TurnStreamingEvent> {
   };
 }
 
-async function retainedOrigin(input: { attachedFiles: boolean }): Promise<unknown> {
+async function retainedOrigin(input: { attachedFiles: boolean; earlier?: TurnStreamingEvent[] }): Promise<unknown> {
   const client = new HindsightClient({
     apiBase: 'https://hindsight.test.example',
     bank: 'aman',
@@ -45,14 +93,19 @@ async function retainedOrigin(input: { attachedFiles: boolean }): Promise<unknow
   });
   executionDeadline.arm();
   await drainTurnEvents({
-    trackedStream: doneStream(),
+    trackedStream: doneStream(input.earlier ?? []),
     turnEventStream: new EventSubscriptionRegistry<TurnStreamingEvent>(undefined).get('stream-1'),
     sessionId: 's1',
     turnId: 't1',
     executionDeadline,
     logger: winston.createLogger({ silent: true }),
     turnDrains: new TurnDrainRegistry(),
-    memory: { client, userText: 'Please read this.', sessionTitle: undefined, attachedFiles: input.attachedFiles },
+    memory: {
+      session: { is_incognito: false },
+      client,
+      userText: 'Please read this.',
+      attachedFiles: input.attachedFiles,
+    },
   });
   const item = retain.mock.calls[0]?.[0].items[0];
   return item?.metadata?.[MEMORY_ORIGIN_METADATA_KEY];
@@ -65,5 +118,66 @@ describe('drainTurnEvents memory origin', () => {
 
   it('labels a turn with only the user text user_stated', async () => {
     expect(await retainedOrigin({ attachedFiles: false })).toBe('user_stated');
+  });
+
+  it('does not mark a turn that only kept task state', async () => {
+    const earlier = [
+      ...toolRound({ id: 'c1', name: 'record_finding' }),
+      ...toolRound({ id: 'c2', name: 'replace_task_checklist' }),
+    ];
+    expect(await retainedOrigin({ attachedFiles: false, earlier })).toBe('user_stated');
+  });
+
+  it.each([
+    'web_fetch',
+    'web_search',
+    'Email__get_emails_content',
+    'gmail__read_email',
+    'list_events',
+    'Notion__search_pages',
+    'exec',
+    'run_code',
+    'get_weather',
+    'edit_space',
+    'get_space',
+    'revert_space',
+    'list_blocks',
+    'list_reminders',
+    'list_schedules',
+    'create_schedule',
+  ])('marks a turn that read outside content with %s', async name => {
+    const earlier = [...toolRound({ id: 'c1', name: 'record_finding' }), ...toolRound({ id: 'c2', name })];
+    expect(await retainedOrigin({ attachedFiles: false, earlier })).toBe('tool_ingested');
+  });
+
+  it('marks a turn whose tool call went through the call_tool wrapper to an unknown tool', async () => {
+    const args = JSON.stringify({ mcp_server: 'Notion', tool_name: 'search_pages', input: {} });
+    const earlier = toolRound({ id: 'c1', name: 'call_tool', args });
+    expect(await retainedOrigin({ attachedFiles: false, earlier })).toBe('tool_ingested');
+  });
+
+  it('does not mark a turn when the wrapper reaches a host task tool', async () => {
+    const args = JSON.stringify({ mcp_server: 'tasks', tool_name: 'record_finding', input: {} });
+    const earlier = toolRound({ id: 'c1', name: 'call_tool', args });
+    expect(await retainedOrigin({ attachedFiles: false, earlier })).toBe('user_stated');
+  });
+
+  it.each(['record_finding', 'replace_task_checklist', 'notes__record_finding'])(
+    'marks a turn in which a connector tool named %s answered',
+    async name => {
+      const earlier = toolRound({ id: 'c1', name, connector: 'notes' });
+      expect(await retainedOrigin({ attachedFiles: false, earlier })).toBe('tool_ingested');
+    },
+  );
+
+  it('marks a turn when the wrapper reaches a connector tool named like a task tool', async () => {
+    const args = JSON.stringify({ mcp_server: 'notes', tool_name: 'record_finding', input: {} });
+    const earlier = toolRound({ id: 'c1', name: 'call_tool', args, connector: 'notes' });
+    expect(await retainedOrigin({ attachedFiles: false, earlier })).toBe('tool_ingested');
+  });
+
+  it('marks a turn whose tool response has no matching call', async () => {
+    const earlier = toolRound({ id: 'c1', name: 'record_finding' }).slice(1);
+    expect(await retainedOrigin({ attachedFiles: false, earlier })).toBe('tool_ingested');
   });
 });

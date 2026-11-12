@@ -268,7 +268,9 @@ describe('AgentThread pre-model document ingestion streaming', () => {
       'ok.pdf:finished',
     ]);
     const failed = ingestion.find(e => e.file_name === 'broken.pdf' && e.phase === 'failed');
-    expect(failed?.issue).toContain('OCR backend unavailable');
+    // The raw failure stays in the server log; the person gets a fixed sentence with a next step.
+    expect(failed?.issue).toContain('Try again');
+    expect(failed?.issue).not.toContain('OCR backend unavailable');
   });
 });
 

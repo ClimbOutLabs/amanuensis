@@ -249,9 +249,10 @@ describe('Memory explorer with several collections', () => {
     model_name: 'anthropic/haiku',
   };
 
-  const SHARED_PENDING_LINE = "Couldn't make a summary of the latest chat. A later chat will make a new summary.";
+  const SHARED_PENDING_LINE =
+    "Couldn't make a summary of the latest chat, so nothing from it was saved. In your next chat, ask to remember anything important again.";
   const ZARA_PENDING_LINE =
-    "Couldn't make a summary of the latest chat with Zara. A later chat with Zara will make a new summary.";
+    "Couldn't make a summary of the latest chat with Zara, so nothing from it was saved. In your next chat with Zara, ask to remember anything important again.";
 
   function personaApi(): PersonaApi {
     return {
@@ -360,7 +361,7 @@ describe('Memory explorer with several collections', () => {
 
     const line = await screen.findByText(SHARED_PENDING_LINE);
     expect(line.textContent).not.toMatch(/try again|retry/i);
-    expect(line.textContent).toMatch(/new summary/);
+    expect(line.textContent).toMatch(/ask to remember/);
   });
 
   it('shows no pending line when every summary was made', async () => {

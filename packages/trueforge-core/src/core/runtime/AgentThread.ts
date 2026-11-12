@@ -1,6 +1,7 @@
 import type { ChatCompletionContentPart, ChatCompletionMessageParam, ChatCompletionTool } from 'openai/resources/chat';
 import type { Logger } from 'winston';
 import { createDocumentExtractionBudget, type DocumentFileProgress } from '../../documents/documentExtraction';
+import { CALDAV_SERVER_NAME } from '../calendar/caldav/toolContract';
 import type { AgentCapability, CapabilityState, UntrustedTextScreen } from '../capabilities/AgentCapability';
 import type {
   AgentContextProcessorOutput,
@@ -16,12 +17,13 @@ import { extractDocumentsFromSandbox } from '../capabilities/builtins/DocumentTo
 import { SUB_AGENT_IDENTITY } from '../capabilities/builtins/DynamicSubAgents';
 import { TOKEN_BUDGET_SAFETY_MARGIN } from '../capabilities/builtins/tokenBudgetConstants';
 import type { ToolResponseProcessor } from '../capabilities/ToolResponseProcessor';
-import { isMailSend, NEW_RECIPIENT_REFUSED, SEND_LIST_STILL_UPDATING } from '../email/mailConnector/sendListApproval';
+import { NEW_RECIPIENT_REFUSED, SEND_LIST_STILL_UPDATING } from '../email/mailConnector/sendListApproval';
 import { MAIL_CONNECTOR_NAME } from '../email/mailConnector/toolContract';
 import {
   AgentHarnessError,
   InvalidAgentSendInputError,
   McpConnectionError,
+  McpRedirectRefusedError,
   ToolPolicyBlockedError,
   ToolPreDispatchError,
 } from '../errors';
@@ -49,12 +51,14 @@ import {
   type ToolExecutionStartedEvent,
   type ToolResponseEventV2,
   type ToolResponseRequiredEvent,
+  type ToolResultDisposition,
   type UserToolApprovalMessage,
   type UserToolResponseMessage,
 } from '../events/schema';
 import { InstructionBuilder, rootAgentIdentity } from '../InstructionBuilder';
 import type { LLMCreateParamsStreaming } from '../llm/ILLM';
 import {
+  UNKNOWN_TOOL_NAME,
   type CompletionUsage,
   type ExtendedChatCompletionChunk,
   type FinishReason,
@@ -71,12 +75,22 @@ import {
 } from '../llm/LLMTypes';
 import { resolveMaxOutputTokens } from '../llm/maxOutputTokens';
 import { buildModelWaitingEvent } from '../llm/modelWaitingEvent';
+import { describeTurnFailure } from '../llm/plainFailureMessages';
 import { noticeAfter, REPEAT_STOP_NOTE, TOOL_MARKUP_NOTICE, UNBACKED_CLAIM_NOTES } from '../llm/replyNotices';
 import { toOpenAIResponseFormat } from '../llm/responseFormat';
-import { streamDeadlineDetailsOf, type StreamDeadlineDetails } from '../llm/streamDeadline';
+import {
+  DEFAULT_MODEL_TOOL_CALL_IDLE_TIMEOUT_MS,
+  streamDeadlineDetailsOf,
+  type StreamDeadlineDetails,
+} from '../llm/streamDeadline';
 import { toOpenAIChatMessage } from '../llm/toOpenAIChatMessage';
 import { estimateTokensForString } from '../llm/usage';
-import { isContextLengthError, ModelOutputRepetitionError, ModelStreamFault } from '../llm/VercelAILLM';
+import {
+  isContextLengthError,
+  isRetryableProviderError,
+  ModelOutputRepetitionError,
+  ModelStreamFault,
+} from '../llm/VercelAILLM';
 import {
   allowsChatApproval,
   allowsToolGrant,
@@ -84,6 +98,7 @@ import {
   awaitsApproval,
   effectiveApprovalDecisions,
   effectiveToolAdmissions,
+  mapsCardTakesLastingAnswer,
 } from '../mcp/approvalGrant';
 import { convertMCPServersToTools, type ConvertToolsResult, type MappedMCPTool } from '../mcp/convertMCPServers';
 import {
@@ -96,7 +111,7 @@ import {
   FAILED_BATCH_STOP_AT,
   IDENTICAL_CALL_NUDGE_AT,
   IDENTICAL_CALL_STOP_AT,
-  isHostVouchedRead,
+  IDENTICAL_MOVE_STOP_AT,
   isReadOnlyCall,
   MAX_TOOL_MARKUP_RETRIES_PER_TURN,
   MAX_WRITE_CALLS_PER_TURN,
@@ -105,6 +120,8 @@ import {
   POLICY_BLOCKED_NUDGE_AT,
   POLICY_BLOCKED_STOP_AT,
   prepareSideEffectToolCalls,
+  REPEAT_LIMIT_OTHER_TOOLS,
+  REPEAT_LIMIT_READ_TOOLS,
   selectRepeatedActionStopMessage,
   shouldStopAfterMemoizedReplay,
   toolCallSignature,
@@ -117,7 +134,7 @@ import {
 } from '../mcp/executeToolCalls';
 import { isGithubFileRead } from '../mcp/githubFileContents';
 import type { IToolSet, MCPAuthRequired } from '../mcp/IMCPServer';
-import { stepNotFinishedNotice } from '../mcp/ownerRefusalNotice';
+import { transportFailureDetail } from '../mcp/remoteMcpClient';
 import { stampSentinelDecision } from '../mcp/ToolSet';
 import type { SentinelHostContext } from '../permissions';
 import {
@@ -129,7 +146,9 @@ import {
 import { isExpiredApproval } from '../permissions/approvalExpiry';
 import type { ConnectorBinding } from '../permissions/approvalTokens';
 import { recordHeldActionAudit, recordNotPreparedRefusals } from '../permissions/audit';
+import { movesBrowserPage } from '../permissions/browserToolNames';
 import { isChangeRequestReason } from '../permissions/changeRequest';
+import { isHostVouchedReadReason } from '../permissions/connectorTrust';
 import {
   checkHeldReplay,
   HELD_DENIED_NOTE,
@@ -141,9 +160,17 @@ import {
 } from '../permissions/heldActions';
 import type { Tier, Tier3Card } from '../permissions/tier';
 import { assistantDisplayName } from '../personas/assistantName';
-import type { Sandbox, SandboxInfo } from '../sandbox/Sandbox';
+import {
+  SANDBOX_EXEC_TOOL_NAME,
+  SANDBOX_MCP_SERVER_ID,
+  SANDBOX_RUN_CODE_TOOL_NAME,
+  type Sandbox,
+  type SandboxInfo,
+} from '../sandbox/Sandbox';
+import { spaceClosingLine, spaceWriteSavedNothing, spaceWritesThisTurn } from '../spaces/turnSpaceWrites';
 import type { AgentTracing } from '../tracing/AgentTracing';
-import { awaitWithAbort, throwIfSignalAborted } from '../util/abort';
+import { awaitWithAbort, onSignalAbort, throwIfSignalAborted } from '../util/abort';
+import { weekdayNameOf } from '../util/calendarDay';
 import { resolveLocalTime } from '../util/clientTimezone';
 import { describeUnknownError, extractErrorLogFields } from '../util/errorLogFields';
 import type { AbnormalHandoff, AbnormalHandoffCause, AbnormalHandoffEvidence } from './AbnormalHandoff';
@@ -174,8 +201,10 @@ import {
   ABILITY_BOUNDARIES_PROMPT,
   approvalDecisionBinding,
   assistantMessageContentToStringForSubAgent,
+  CALENDAR_PASSWORD_PROMPT,
   CHECK_BEFORE_ASKING_PROMPT,
   createSourceDiscoveryContract,
+  DEMO_EMAIL_PROMPT,
   EMAIL_PASSWORD_PROMPT,
   EMPTY_ANSWER_NUDGE_MESSAGE,
   emptyInspectionNudgeMessage,
@@ -203,8 +232,11 @@ import {
   NO_SANDBOX_PROMPT,
   NO_TASK_NO_TOOLS_PROMPT,
   noProgressNudgeMessage,
+  personMessageIndex,
   PLAIN_SPEECH_PROMPT,
   policyBlockedNudgeMessage,
+  remapToolCallIdSet,
+  removedToolKey,
   SANDBOX_OFF_PROMPT,
   scanApprovalDecisions,
   toEnrichedToolCall,
@@ -213,7 +245,7 @@ import {
   WEB_IMAGES_PROMPT,
   withHostUniqueToolCallIds,
 } from './contextUtils';
-import { CALL_TOOL_NAME, DeferredTool, tryUnwrapCallToolInput } from './DeferredTool';
+import { CALL_TOOL_NAME, DeferredTool, tryParseCallToolWrapper, tryUnwrapCallToolInput } from './DeferredTool';
 import { applyHostToolCallPolicy, type HostToolCallPolicy, type HostToolCallPolicyLogger } from './HostToolCallPolicy';
 import {
   createEmptyAgentThreadMetrics,
@@ -226,7 +258,9 @@ import {
   guardModelReply,
   LENGTH_CUT_OFF_MESSAGE,
   MAX_TOOL_CALLS_PER_REPLY,
+  REPLY_CALL_NOT_RUN_OWNER_MESSAGE,
   TOO_MANY_TOOL_CALLS_MESSAGE,
+  type ReplyGuardSandboxToolNames,
 } from './modelReplyGuard';
 import {
   getClosableOpenToolCallOutcomes,
@@ -238,25 +272,37 @@ import {
 import {
   BLOCKED_CALLS_PARENT_MESSAGE,
   blockedCallsStopMessage,
+  browserPageSeen,
+  changesSeenBy,
+  changesState,
+  countsTowardWriteCap,
   findUnbackedClaim,
+  isSandboxFileEditTool,
+  OUTSIDE_ACTION_RETRY_RESULT,
+  REPEATED_ACTION_OWNER_MESSAGE,
   REPEATED_ACTION_RESULT,
   repetitionStopMessage,
   stepKindsOf,
   TOOL_MARKUP_RETRY_MESSAGE,
   WRITE_CAP_BLOCKED_RESULT,
+  WRITE_CAP_OWNER_MESSAGE,
   WRITE_CAP_STOP_MESSAGE,
   type UnbackedClaimKind,
 } from './replyActionChecks';
 import {
   clearUnfinished,
-  DEFAULT_REPLY_STEP_BUDGET,
+  connectorUnreachableText,
+  EMPTY_AFTER_TOOLS_MESSAGE,
+  progressRefundFor,
   recordUnfinished,
   REMOVED_TOOL_RESULT,
   REMOVED_TOOL_STREAK_MESSAGE,
   REMOVED_TOOL_STREAK_STOP_AT,
   removedToolMessage,
+  replyStepBudgetFor,
   retryIsDue,
   settleRetry,
+  STEP_BUDGET_SPENT_AFTER_SPACE_WRITE_MESSAGE,
   STEP_BUDGET_SPENT_MESSAGE,
   stepBudgetFor,
   toolResultKind,
@@ -267,6 +313,8 @@ import {
   type ToolResultKind,
   type UnfinishedKind,
 } from './replyBudget';
+import { messageAsksForJson, repairToolResultDump, turnToolResultShapes } from './replyToolDumpRepair';
+import { silentTurnEndLine, turnToolRuns } from './silentTurnEnd';
 import {
   admitToolCallsForBudget,
   cloneTaskState,
@@ -318,6 +366,21 @@ export const DEFAULT_MODEL_IDLE_TIMEOUT_MS = 60_000;
 /** Shown when a model call goes silent; the steps done so far are kept. */
 export const MODEL_STOPPED_ANSWERING_MESSAGE =
   'The model stopped answering, so this reply stopped. Send your message again to retry.';
+
+/**
+ * Waits before each retry of the forced answer when the model service says to try again later.
+ * The forced answer is the reply's last step, so a lost call there loses everything the turn
+ * gathered; two short waits cover a brief provider hiccup without holding the turn open long.
+ */
+export const FORCED_ANSWER_RETRY_BACKOFF_MS: readonly number[] = [2_000, 5_000];
+
+/** Shown when the model service kept refusing the forced answer; the steps already done are kept. */
+export const MODEL_SERVICE_UNAVAILABLE_MESSAGE =
+  'The model service did not answer after three tries, so this reply stopped. Wait a minute, then send your message again or run the task again.';
+
+/** Shown when a turn stops at its step limit; the steps already done stay done. */
+export const ITERATION_LIMIT_MESSAGE =
+  'This reply stopped because it took too many steps. Nothing further was done. Ask again, or split your request into smaller parts.';
 
 /**
  * Default bound on the pre-LLM context processor phase producing progress before
@@ -500,6 +563,88 @@ function mechanicalHandoffEvidence(): AbnormalHandoffEvidence {
   };
 }
 
+/** Longest error text kept on a tool call log line: enough to hold a refusal, short enough to scan. */
+export const TOOL_CALL_LOG_ERROR_MAX_LENGTH = 300;
+
+/**
+ * The error text for a failed tool call's log line: what the tool answered, or the guidance
+ * recorded with the result when the answer carries no error text of its own. Argument and
+ * result bodies are never logged; only this error text, cut to
+ * {@link TOOL_CALL_LOG_ERROR_MAX_LENGTH}. When a screen or an output transform replaced what
+ * the model saw, the model-facing text is used, never the original provider bytes.
+ */
+export function toolCallOutcomeErrorText(result: ToolCallResult): string | undefined {
+  if (result.disposition === 'executed_ok') {
+    return undefined;
+  }
+  const content =
+    result.screen === undefined && result.outputTransform === undefined ? result.rawContent : result.message.content;
+  const text = errorTextFromToolContent(content) ?? result.remediation?.message;
+  return text === undefined ? undefined : text.slice(0, TOOL_CALL_LOG_ERROR_MAX_LENGTH);
+}
+
+function errorTextFromToolContent(content: string): string | undefined {
+  const trimmed = content.trim();
+  if (trimmed.length === 0) {
+    return undefined;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return trimmed;
+  }
+  if (typeof parsed === 'string') {
+    return parsed;
+  }
+  if (typeof parsed !== 'object' || parsed === null) {
+    return undefined;
+  }
+  const error: unknown = Reflect.get(parsed, 'error');
+  if (typeof error === 'string' && error.length > 0) {
+    return error;
+  }
+  const message: unknown = Reflect.get(parsed, 'message');
+  if (typeof message === 'string' && message.length > 0) {
+    return message;
+  }
+  return undefined;
+}
+
+/**
+ * One log line per completed tool call, so a turn's tool story can be found in the app log by
+ * tool name, by the word error, or by the session and turn ids the logger already carries.
+ * Successes log at info, the level the app keeps; anything else logs at warn with its error
+ * text. Names, the outcome, and error text only: never argument or result bodies. The one
+ * exception is a call to a tool that is not in the mapping: that case already drew the
+ * canonical unknown-tool warning where the call was first seen, so its outcome line logs at
+ * info, keeping the call's ids, outcome and error text while the case carries exactly one
+ * warning in total.
+ */
+export function logToolCallOutcome(logger: Logger, input: { toolName: string; result: ToolCallResult }): void {
+  const { result } = input;
+  const fields = {
+    toolCallId: result.message.tool_call_id,
+    toolName: input.toolName,
+    disposition: result.disposition,
+    ...(result.memoized ? { memoized: true } : {}),
+  };
+  if (result.disposition === 'executed_ok') {
+    logger.info(`Tool call ${input.toolName}: ${result.disposition}`, fields);
+    return;
+  }
+  const error = toolCallOutcomeErrorText(result);
+  const failureFields = {
+    ...fields,
+    ...(error === undefined ? {} : { error }),
+  };
+  if (result.remediation?.reason_code === 'unknown_tool') {
+    logger.info(`Tool call ${input.toolName}: ${result.disposition}`, failureFields);
+    return;
+  }
+  logger.warn(`Tool call ${input.toolName}: ${result.disposition}`, failureFields);
+}
+
 /** The single runtime boundary that turns an executed host result into its public v2 event. */
 export function buildCanonicalToolCallResult(threadId: string, result: ToolCallResult) {
   // A processor that mutates message.content without going through the security screen still
@@ -674,6 +819,8 @@ interface StepLLMCallResult {
   outcome: StepOutcome;
   modelMessageEventId: string;
   retryModelMessageEventId: string | undefined;
+  /** Set when the step ended with no words after tools ran: the next step must be the no-tools answer. */
+  answerNext?: true;
 }
 
 const VALID_TRANSITIONS: Record<AgentThreadState, AgentThreadState[]> = {
@@ -1037,6 +1184,16 @@ function getPendingApprovalToolCalls(input: {
   );
 }
 
+/** Whether the card offers the every-chat answer, and what that answer covers when it is not one tool. */
+function alwaysAllowFields(
+  info: InternalToolCallInfo,
+): Pick<ToolApprovalRequiredEvent['tool_calls'][number], 'can_always_allow' | 'always_allow_covers'> {
+  const offered = allowsToolGrant(info);
+  return offered && mapsCardTakesLastingAnswer(info)
+    ? { can_always_allow: true, always_allow_covers: 'maps' }
+    : { can_always_allow: offered };
+}
+
 /**
  * The tier and card an approval request carries. Every approval the user is asked for gets a card:
  * one that Sentinel did not card (a call a selector gates though it let it through) is described
@@ -1061,6 +1218,8 @@ function approvalCardFields(toolCall: InternalEnrichedToolCall): { tier?: Tier; 
         canonical_params: unwrapped,
         tool_type: tool_info.type,
         mcp_server_name: tool_info.mcp_server_name,
+        // The host's own verdict on the call, not the connector's claim: only its own sidecars read as mail or calendar.
+        mcp_first_party: isHostVouchedReadReason(tool_info.tier_reason),
         mcp_hints: {},
       },
     }),
@@ -1228,11 +1387,36 @@ async function resolveToolCallInfo({
     return await toolInfo.toolSet.toolCallInfo(params, resolveUnderlyingTool);
   } catch (error) {
     const unavailableMcp = findUnavailableMcpCause(error);
+    // A server that cannot be reached cannot run anything, so no card is raised. A deferred
+    // call_tool names its inner server and tool; only that pair is withheld, never the wrapper.
+    if (isConnectorUnreachable(error)) {
+      const wrapped =
+        toolInfo.originalToolName === CALL_TOOL_NAME && params.arguments !== undefined
+          ? tryParseCallToolWrapper(params.arguments)
+          : undefined;
+      // The name comes from the resolved server, never from the model's own text.
+      const inner =
+        wrapped !== undefined && toolInfo.toolSet instanceof DeferredTool
+          ? toolInfo.toolSet.resolvedServer(wrapped.mcp_server)
+          : undefined;
+      const serverName = wrapped === undefined ? toolInfo.toolSet.name : inner?.name;
+      return {
+        type: 'mcp',
+        mcp_server_id: wrapped === undefined ? toolInfo.toolSet.id : (inner?.id ?? UNKNOWN_TOOL_NAME),
+        mcp_server_name: serverName ?? UNKNOWN_TOOL_NAME,
+        original_tool_name: wrapped?.tool_name ?? toolInfo.originalToolName,
+        is_approval_required: false,
+        is_client_side: false,
+        ...(wrapped !== undefined && { is_deferred: true }),
+        description: `Tool metadata unavailable: ${describeUnknownError(error)}`,
+        pre_dispatch_failure: {
+          kind: 'connector_unreachable',
+          message: connectorUnreachableText(serverName),
+        },
+      };
+    }
     if (unavailableMcp !== undefined) {
-      // Metadata discovery can reach the remote MCP server. An unavailable
-      // connector must not kill the turn or be mistaken for a host policy
-      // denial. Fail closed by requiring approval, then let dispatch record
-      // the actual terminal execution disposition if the user proceeds.
+      // Any other server failure fails closed: ask the person, and let dispatch record what happens.
       return {
         type: 'mcp',
         mcp_server_id: toolInfo.toolSet.id,
@@ -1319,6 +1503,24 @@ async function enforceRegisteredCommandApprovalIdentity({
   return checked;
 }
 
+/** A real connection failure, read from the typed cause chain; a server that answered with an error is not one. */
+function isConnectorUnreachable(error: unknown): boolean {
+  return transportFailureDetail(error) !== undefined && !hasRedirectRefusal(error);
+}
+
+function hasRedirectRefusal(error: unknown): boolean {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (current instanceof Error && !seen.has(current)) {
+    seen.add(current);
+    if (current instanceof McpRedirectRefusedError) {
+      return true;
+    }
+    current = current.cause;
+  }
+  return false;
+}
+
 function findUnavailableMcpCause(error: unknown): McpConnectionError | undefined {
   const seen = new Set<unknown>();
   let current: unknown = error;
@@ -1379,6 +1581,7 @@ export async function classifyUnstampedToolCall(input: {
     sentinel,
     repository_id: null,
     workspace_cwd: sentinel.workspace_cwd,
+    path_resolution: info.path_resolution ?? info.document_scope?.path_resolution ?? undefined,
     action: {
       tool_name: info.original_tool_name,
       canonical_params: effectiveParams,
@@ -1397,6 +1600,8 @@ export async function classifyUnstampedToolCall(input: {
         open_world_hint: info.open_world_hint,
       },
       maps_hosts: info.maps_hosts,
+      document_scope: info.document_scope,
+      browser_click: info.browser_click,
     },
   });
   return { ...info, ...stampSentinelDecision({ decision }) };
@@ -1421,6 +1626,58 @@ function hostVouchedReadToolNames({
     }
   }
   return vouched;
+}
+
+/** Whether the call's own server says it stays inside that server's contained workspace. */
+function callStaysInWorkspace({
+  call,
+  toolMapping,
+}: {
+  call: Pick<InternalEnrichedToolCall, 'function'>;
+  toolMapping: Map<string, MappedMCPTool>;
+}): boolean {
+  const mapped = toolMapping.get(call.function.name);
+  return (
+    mapped?.toolSet.staysInWorkspace?.({ name: mapped.originalToolName, argumentsText: call.function.arguments }) ===
+    true
+  );
+}
+
+/** Whether the call goes to one of the sandbox's own file tools, looked up by the tool it maps to. */
+function isSandboxFileEditCall({
+  call,
+  toolMapping,
+}: {
+  call: Pick<InternalEnrichedToolCall, 'function'>;
+  toolMapping: Map<string, MappedMCPTool>;
+}): boolean {
+  const mapped = toolMapping.get(call.function.name);
+  return (
+    mapped !== undefined &&
+    isSandboxFileEditTool({ serverName: mapped.toolSet.name, toolName: mapped.originalToolName })
+  );
+}
+
+/** Whether a call reached its tool, whatever it answered. Refused, blocked and unsent calls did not. */
+function toolCallWasAttempted(disposition: ToolResultDisposition): boolean {
+  return disposition !== 'denied' && disposition !== 'policy_blocked' && disposition !== 'never_ran';
+}
+
+/** The names the model sees for the sandbox's run_code and exec tools; undefined when a tool is not offered. */
+function sandboxToolNamesFor(toolMapping: Map<string, MappedMCPTool>): ReplyGuardSandboxToolNames {
+  let runCode: string | undefined;
+  let exec: string | undefined;
+  for (const [name, mapped] of toolMapping) {
+    if (mapped.toolSet.name !== SANDBOX_MCP_SERVER_ID) {
+      continue;
+    }
+    if (mapped.originalToolName === SANDBOX_RUN_CODE_TOOL_NAME) {
+      runCode = name;
+    } else if (mapped.originalToolName === SANDBOX_EXEC_TOOL_NAME) {
+      exec = name;
+    }
+  }
+  return { runCode, exec };
 }
 
 async function enrichAssistantMessage({
@@ -1625,14 +1882,20 @@ export class AgentThread {
   /** Provider-reported input tokens of this thread's latest main model call; null before the first. */
   private lastCallInputTokens: number | null = null;
   private tfyManagedServerNames = new Set<string>();
+  /** Servers left out of this turn's tool list because they could not be reached. */
+  private unreachableServerNames: ReadonlySet<string> = new Set();
 
   private contextBusy = false;
   private preSendRanThisTurn = false;
+  // True only while execute() prepares a thread that goes straight to its tool step, with no new message.
+  private resumingIntoToolStep = false;
   // One AgentThread instance lives for one turn (a fresh instance is built per
   // turn by the harness), so this needs no snapshot/restore: it starts false
   // for every turn and latches true the first time the grounding nudge fires,
   // so a turn gets at most one.
   private groundingNudgeSentThisTurn = false;
+  // The closing line goes on the turn's first final message only, so a nudged second answer does not repeat it.
+  private spaceClosingLineWritten = false;
   // When a loop guard fires, the turn gets one bounded recovery pass: a host
   // note telling the model to write its final answer from gathered results
   // instead of ending with no answer. This latches true so a second guard
@@ -1662,11 +1925,14 @@ export class AgentThread {
   private readonly runCodeToolCallTimeoutMs?: number | undefined;
   private readonly modelFirstResponseTimeoutMs: number;
   private readonly modelIdleTimeoutMs: number;
+  private readonly modelToolCallIdleTimeoutMs: number;
+  private readonly forcedAnswerRetryBackoffMs: readonly number[];
   private readonly toolCallPolicy: HostToolCallPolicy | undefined;
   private readonly preLLMProcessorsTimeoutMs: number;
   private readonly sandboxRefreshTimeoutMs: number;
   private readonly sentinel?: SentinelHostContext | undefined;
   private readonly stopAfterToolResponse: boolean;
+  private readonly withheldTools: readonly string[];
   private implementationPlanGrants: ReadonlySet<string> = new Set();
   // One user request may span several execute() calls while approvals are
   // resolved. Keep orchestration limits across those continuations; reset only
@@ -1715,6 +1981,11 @@ export class AgentThread {
     this.runCodeToolCallTimeoutMs = input.runCodeToolCallTimeoutMs;
     this.modelFirstResponseTimeoutMs = input.modelFirstResponseTimeoutMs ?? DEFAULT_MODEL_FIRST_RESPONSE_TIMEOUT_MS;
     this.modelIdleTimeoutMs = input.modelIdleTimeoutMs ?? DEFAULT_MODEL_IDLE_TIMEOUT_MS;
+    this.modelToolCallIdleTimeoutMs = Math.max(
+      input.modelToolCallIdleTimeoutMs ?? DEFAULT_MODEL_TOOL_CALL_IDLE_TIMEOUT_MS,
+      this.modelIdleTimeoutMs,
+    );
+    this.forcedAnswerRetryBackoffMs = input.forcedAnswerRetryBackoffMs ?? FORCED_ANSWER_RETRY_BACKOFF_MS;
     this.toolCallPolicy = input.toolCallPolicy;
     this.preLLMProcessorsTimeoutMs = input.preLLMProcessorsTimeoutMs ?? DEFAULT_PRE_LLM_PROCESSORS_TIMEOUT_MS;
     this.sandboxRefreshTimeoutMs = input.sandboxRefreshTimeoutMs ?? DEFAULT_SANDBOX_REFRESH_TIMEOUT_MS;
@@ -1724,6 +1995,7 @@ export class AgentThread {
       input.sentinel.web_search.assistantName = assistantDisplayName(input.definition.identity?.assistantName);
     }
     this.stopAfterToolResponse = input.stopAfterToolResponse === true;
+    this.withheldTools = input.withheldTools ?? [];
     this.toolCallMemo = createToolCallMemoState(input.toolCallMemo);
     // A sub-agent counts into the ledger of the turn that started it, not a fresh one.
     if (input.turnToolCallLedger !== undefined) {
@@ -1779,7 +2051,10 @@ export class AgentThread {
     const capabilityPreSend = capabilities.flatMap(c => c.preSendProcessors ?? []);
     // OpenToolCallCloser is fixed core before contributed preSend processors.
     this.preSendContextProcessors = [
-      new OpenToolCallCloser(() => this.toolCallMemo.deniedApprovalIdentities),
+      new OpenToolCallCloser({
+        deniedApprovalIdentities: () => this.toolCallMemo.deniedApprovalIdentities,
+        resuming: () => this.resumingIntoToolStep,
+      }),
       ...capabilityPreSend,
     ];
 
@@ -1833,11 +2108,18 @@ export class AgentThread {
     const local = resolveLocalTime(this.replyDate, this.definition.clientTimezone);
     const localDateClause = local.isFallback
       ? ''
-      : ` The user's local date is ${local.date} (${local.zone}, UTC${local.utcOffset}).`;
+      : ` The user's local date is ${local.date} (${weekdayNameOf(local.date)}, ${local.zone}, UTC${local.utcOffset}).`;
+    // The weekday is stated, not left to the model: models often name the wrong day for a date.
     builder.addSection(
       'current-date',
-      `Today's date is ${dateUtc} (UTC).${localDateClause} Reason about past and future relative to this date, not to your training data.`,
+      `Today's date is ${dateUtc} (${weekdayNameOf(dateUtc)}, UTC).${localDateClause} Reason about past and future relative to this date, not to your training data.`,
     );
+    if (!this.parent && this.definition.spokenReply === true) {
+      builder.addSection(
+        'spoken-reply',
+        'The person spoke this message, and the app reads your reply aloud in a voice. Answer in a few short, plain sentences, with no lists, tables, headings, links or code. Never say you cannot speak or have no voice.',
+      );
+    }
     const personName = this.parent ? undefined : this.definition.identity?.personName?.trim();
     if (personName) {
       // Escaped: the name is user-authored text, so it cannot close the wrapping tag.
@@ -1917,6 +2199,12 @@ export class AgentThread {
     capabilities.addSection('plain-speech', PLAIN_SPEECH_PROMPT);
     if (this.definition.setUpConnectorNames?.includes(MAIL_CONNECTOR_NAME)) {
       capabilities.addSection('email-passwords', EMAIL_PASSWORD_PROMPT);
+      if (this.sentinel?.services.demoSendAllowlist != null) {
+        capabilities.addSection('demo-email', DEMO_EMAIL_PROMPT);
+      }
+    }
+    if (this.definition.setUpConnectorNames?.includes(CALDAV_SERVER_NAME)) {
+      capabilities.addSection('calendar-passwords', CALENDAR_PASSWORD_PROMPT);
     }
     // A chat with no sandbox object has no exec tool. Whether to say the sandbox is off or that the server has none
     // comes from the host's server status, never from this chat alone.
@@ -2059,13 +2347,20 @@ export class AgentThread {
             this.sentinel !== undefined &&
             allowsToolGrant(pending.tool_info)
           ) {
-            await this.sentinel.services.tool_grants.recordToolGrant({
-              tenant_id: this.sentinel.tenant_id,
-              created_by: this.sentinel.created_by,
-              mcp_server_name: pending.tool_info.mcp_server_name,
-              tool_name: pending.tool_info.original_tool_name,
-              mcp_server_host: pending.tool_info.grant_host ?? null,
-            });
+            if (mapsCardTakesLastingAnswer(pending.tool_info)) {
+              await this.sentinel.services.allowMapsWithoutAsking({
+                tenant_id: this.sentinel.tenant_id,
+                created_by: this.sentinel.created_by,
+              });
+            } else {
+              await this.sentinel.services.tool_grants.recordToolGrant({
+                tenant_id: this.sentinel.tenant_id,
+                created_by: this.sentinel.created_by,
+                mcp_server_name: pending.tool_info.mcp_server_name,
+                tool_name: pending.tool_info.grant_tool_name ?? pending.tool_info.original_tool_name,
+                mcp_server_host: pending.tool_info.grant_host ?? null,
+              });
+            }
           }
         }
         const pendingClientCalls = new Map(getPendingClientSideToolCalls(this.context).map(call => [call.id, call]));
@@ -2177,7 +2472,7 @@ export class AgentThread {
 
   private async auditHeld(input: {
     info: InternalToolCallInfo;
-    outcome: 'logged' | 'approved' | 'denied';
+    outcome: 'logged' | 'approved' | 'denied' | 'auto_denied';
     note: string;
   }): Promise<void> {
     if (this.sentinel === undefined) {
@@ -2195,9 +2490,23 @@ export class AgentThread {
   }
 
   /**
-   * An approved mail send first makes the sidecar run the server's Email list. New addresses come only from the
-   * approved card, and the sidecar must load the list before the send, on the first try and on a retry. Any failure
-   * throws before the approval is recorded, so the draft stays pending.
+   * Records that an approved send stopped while its addresses were being prepared, so the stopped
+   * attempt shows in the activity log. The throw that follows each call is unchanged, so a failed
+   * write is dropped rather than replacing the plain message the person is shown.
+   */
+  private async auditMailPrepareFailure(input: { info: InternalToolCallInfo; note: string }): Promise<void> {
+    try {
+      await this.auditHeld({ info: input.info, outcome: 'auto_denied', note: input.note });
+    } catch {
+      // The activity log being unavailable never changes what the person is told.
+    }
+  }
+
+  /**
+   * An approved mail send, or an approved draft card carrying new addresses, first makes the sidecar run the
+   * server's Email list. New addresses come only from the approved card, and the sidecar must load the list
+   * before the call goes out, on the first try and on a retry. Any failure throws before the approval is
+   * recorded, so the draft stays pending.
    */
   private async prepareMailRecipientAdds(input: {
     approvals: readonly UserToolApprovalMessage[];
@@ -2214,25 +2523,39 @@ export class AgentThread {
         continue;
       }
       const call = input.pendingById.get(approval.tool_call_id) ?? input.heldById.get(approval.tool_call_id);
-      if (
-        call === undefined ||
-        !isMailSend({
-          mcp_server_name: call.tool_info.mcp_server_name,
-          tool_name: call.tool_info.original_tool_name,
-        })
-      ) {
+      const added = call?.tool_info.tier3_card?.mail_new_recipients ?? [];
+      if (call === undefined) {
+        // No call behind the approval: the check below would skip it too (no send, no new
+        // addresses), so leaving here changes nothing and keeps the call in hand below.
         continue;
       }
-      const added = call.tool_info.tier3_card?.mail_new_recipients ?? [];
+      // Only a send the host itself judged to go through its own Email sidecar, or a card carrying new
+      // addresses for one, touches the Email list, however the card was later reworded. A send's addresses
+      // still come only from its own card.
+      if (call.tool_info.mail_send !== true && added.length === 0) {
+        continue;
+      }
       if (added.length > 0) {
         const result = await sentinel.services.mail_add_recipients(ctx, added);
         if (result === 'refused') {
+          await this.auditMailPrepareFailure({
+            info: call.tool_info,
+            note: 'The address could not be added to the Email list',
+          });
           throw new InvalidAgentSendInputError(NEW_RECIPIENT_REFUSED);
         }
         if (result === 'not_loaded') {
+          await this.auditMailPrepareFailure({
+            info: call.tool_info,
+            note: 'The Email list did not load in time',
+          });
           throw new InvalidAgentSendInputError(SEND_LIST_STILL_UPDATING);
         }
       } else if ((await sentinel.services.mail_list_loaded(ctx)) === 'not_loaded') {
+        await this.auditMailPrepareFailure({
+          info: call.tool_info,
+          note: 'The Email list did not load in time',
+        });
         throw new InvalidAgentSendInputError(SEND_LIST_STILL_UPDATING);
       }
     }
@@ -2715,13 +3038,16 @@ export class AgentThread {
     // Order is the cache order: static instruction, history, then this reply's fixed block
     // and the ephemeral recall block, both just before the current message. The history and
     // the static instruction therefore stay one reusable prefix across replies and steps.
-    messages.splice(currentMessageIndex(messages), 0, {
+    messages.splice(replyInsertIndex(messages), 0, {
       role: 'system',
       content: this.replyContext,
     });
 
     for (const processor of this.preEphemeralLLMContextProcessors) {
-      messages = processor.processPreLLMEphemeral(messages) ?? messages;
+      messages =
+        processor.processPreLLMEphemeral(messages, {
+          modelSupportsVision: this.definition.modelSupportsVision === true,
+        }) ?? messages;
     }
 
     // Host-owned task state: re-injected fresh on EVERY model call, after
@@ -2982,6 +3308,12 @@ export class AgentThread {
       });
       tfyManagedServers.push(this.taskStateToolSet);
     }
+    // The guide's one live tool: a host-owned exception to readOnly, set only by the
+    // host for the guide persona. It joins the managed servers so the model is
+    // offered exactly this tool set and no other.
+    if (this.definition.guideSearchToolSet !== undefined) {
+      tfyManagedServers.push(this.definition.guideSearchToolSet);
+    }
     if (this.sandbox) {
       tfyManagedServers.push(this.sandbox);
     }
@@ -2990,11 +3322,14 @@ export class AgentThread {
     }
     const userServers = this.definition.readOnly ? [] : [...(this.definition.toolSets ?? [])];
 
-    const { convertedTools, initializationInfo, authRequirementInfo } = await convertMCPServersToTools({
-      tfyManagedServers,
-      userServers,
-    });
+    const { convertedTools, initializationInfo, authRequirementInfo, unavailableInfo } = await convertMCPServersToTools(
+      {
+        tfyManagedServers,
+        userServers,
+      },
+    );
     this.convertedTools = convertedTools;
+    this.unreachableServerNames = new Set(unavailableInfo.map(info => info.name));
     this.tfyManagedServerNames = new Set(tfyManagedServers.map(s => s.name));
     if (this.toolBundles !== undefined) {
       this.toolBundles.load({
@@ -3006,6 +3341,24 @@ export class AgentThread {
       this.instruction = this.buildInstruction(this.definition.instruction);
     }
     return { initializationInfo, authRequirementInfo };
+  }
+
+  /** Built-in tools the run was told not to offer are left out of the request; user servers keep their own tools. */
+  private withoutWithheldTools(
+    tools: ConvertToolsResult['tools'],
+    toolMapping: Map<string, MappedMCPTool>,
+  ): ConvertToolsResult['tools'] {
+    if (this.withheldTools.length === 0) {
+      return tools;
+    }
+    return tools.filter(tool => {
+      const info = tool.type === 'function' ? toolMapping.get(tool.function.name) : undefined;
+      return (
+        info === undefined ||
+        !this.tfyManagedServerNames.has(info.toolSet.name) ||
+        !this.withheldTools.includes(info.originalToolName)
+      );
+    });
   }
 
   /**
@@ -3476,6 +3829,9 @@ export class AgentThread {
     // behind it stay in the history the retry sends, and a partial tool call never runs because
     // calls only execute from a completed step. Only a second silence ends the step.
     let silenceRetried = false;
+    // Retries of the forced answer after the provider said to try again later (see
+    // FORCED_ANSWER_RETRY_BACKOFF_MS); never counts toward the stream-fault attempts.
+    let providerRetries = 0;
     // Per-model request limit: take this model's place before the request is created, so the
     // silence deadlines in the loop only ever measure a request that was actually sent. While
     // the step waits, the chat shows the waiting line once.
@@ -3529,6 +3885,9 @@ export class AgentThread {
           // goes quiet ends the step with a plain message instead of holding the turn open.
           // Which bound the pending wait is on, so a silence can name the deadline that fired.
           let awaitedDeadline: 'first_chunk' | 'chunk' = 'first_chunk';
+          // A tool call is open from its first piece until the step finishes. A server may hold a
+          // call's arguments back and send them in a few large pieces, so this wait is longer.
+          let toolCallOpen = false;
           let attemptResult = await nextModelChunkWithin({
             iterator: llmStream,
             signal,
@@ -3540,7 +3899,14 @@ export class AgentThread {
             attemptResult !== MODEL_STREAM_SILENT &&
             !attemptResult.done
           ) {
-            const chunk = attemptResult.value;
+            const chunk = forcedAnswer !== null ? chunkWithoutToolCalls(attemptResult.value) : attemptResult.value;
+            const choice = chunk.choices[0];
+            if (choice?.delta.tool_calls?.length) {
+              toolCallOpen = true;
+            }
+            if (choice?.finish_reason) {
+              toolCallOpen = false;
+            }
             if (chunk.usage) {
               modelMessageUsage = this.computeAssistantMessageUsage({
                 requestBody,
@@ -3550,7 +3916,7 @@ export class AgentThread {
             }
             // On the forced answer no tool call is shown, since none of its calls will run.
             const event = await buildModelMessageDeltaEvent({
-              chunk: forcedAnswer !== null ? chunkWithoutToolCalls(chunk) : chunk,
+              chunk,
               threadId: this.threadId,
               toolMapping,
               usage: modelMessageUsage,
@@ -3572,7 +3938,7 @@ export class AgentThread {
               iterator: llmStream,
               signal,
               requestClose: requestLLMStreamClose,
-              timeoutMs: this.modelIdleTimeoutMs,
+              timeoutMs: toolCallOpen ? this.modelToolCallIdleTimeoutMs : this.modelIdleTimeoutMs,
             });
           }
           if (attemptResult === ASYNC_ITERATOR_ABORTED) {
@@ -3634,10 +4000,46 @@ export class AgentThread {
             });
             return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
           }
-          if (signal?.aborted || !(error instanceof ModelStreamFault)) {
+          if (signal?.aborted) {
             throw error;
           }
-          if (attempt >= MAX_MODEL_STREAM_FAULT_ATTEMPTS) {
+          if (!(error instanceof ModelStreamFault)) {
+            // A definite "try again later" from the provider (5xx, 429) on the forced answer is
+            // retried after a short wait, since this step is the only one left and failing it
+            // throws away everything the turn gathered. Ordinary steps keep the outer
+            // fatal_error path: the model can pick up from its tool results on the next turn.
+            if (forcedAnswer === null || !isRetryableProviderError(error)) {
+              throw error;
+            }
+            const backoffMs = this.forcedAnswerRetryBackoffMs[providerRetries];
+            if (backoffMs === undefined) {
+              this.logger.warn('Model service kept refusing the forced answer; ending the step', {
+                ...extractErrorLogFields(error),
+                attempt,
+                step: this.metrics.iterations,
+              });
+              yield this.generateErrorEvent(MODEL_SERVICE_UNAVAILABLE_MESSAGE, undefined, 'model_stream_fault');
+              return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
+            }
+            providerRetries++;
+            this.logger.warn('Model service refused the forced answer; retrying after a short wait', {
+              ...extractErrorLogFields(error),
+              attempt,
+              backoffMs,
+              step: this.metrics.iterations,
+            });
+            const waited = await awaitWithTimeout(
+              new Promise<void>(resolve => {
+                onSignalAbort(signal, resolve);
+              }),
+              backoffMs,
+            );
+            if (waited !== OPERATION_TIMEOUT || signal?.aborted) {
+              return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
+            }
+            continue;
+          }
+          if (attempt - providerRetries >= MAX_MODEL_STREAM_FAULT_ATTEMPTS) {
             // A repetition fault gets its own actionable guidance, and only a context-length
             // fault is blamed on the chat's length; anything else would mislead the user.
             const message =
@@ -3809,6 +4211,21 @@ export class AgentThread {
           content: withNotice,
         };
       }
+      // A reply can carry one of this turn's tool results pasted as raw data instead of words.
+      // The reply has already streamed, so this repairs only what is saved: the dump is swapped
+      // for the result's own written line when it has one, and taken out when it has none.
+      const dumpRepair = repairToolResultDump({
+        text: assistantMessageContentToStringForSubAgent(result.value.output.content),
+        results: turnToolResultShapes(this.context),
+        personAskedForJson: messageAsksForJson(lastUserMessageText(this.context) ?? ''),
+      });
+      if (dumpRepair !== undefined) {
+        result.value.output.content = dumpRepair.text;
+        this.logger.info('Repaired a saved reply that carried a tool result as raw data', {
+          threadId: this.threadId,
+          tool: dumpRepair.toolName,
+        });
+      }
     }
 
     // The reply guard: arguments checked against each tool's schema (with safe repairs),
@@ -3818,21 +4235,57 @@ export class AgentThread {
     // every call, but calls that will be held for the owner's approval do not count toward
     // the cap there, and which ones those are is only known once each call is classified.
     const unattended = this.sentinel?.services.unattended === true;
+    const providerToolCalls = result.value.output.tool_calls;
+    const uniqueToolCalls =
+      providerToolCalls === undefined
+        ? undefined
+        : withHostUniqueToolCallIds({ calls: providerToolCalls, context: this.context });
     const replyGuard = guardModelReply({
       message: {
         ...result.value.output,
-        ...(result.value.output.tool_calls === undefined
-          ? {}
-          : {
-              tool_calls: withHostUniqueToolCallIds({ calls: result.value.output.tool_calls, context: this.context }),
-            }),
+        ...(uniqueToolCalls === undefined ? {} : { tool_calls: uniqueToolCalls }),
       },
       // Every tool's schema, not only the ones this step sent.
       tools: this.getConvertedTools().tools,
       knownEventIds: collectKnownEventIds(this.context),
-      readOnlyTools: hostVouchedReadToolNames({ calls: result.value.output.tool_calls ?? [], toolMapping }),
+      readOnlyTools: hostVouchedReadToolNames({ calls: providerToolCalls ?? [], toolMapping }),
+      sandboxToolNames: sandboxToolNamesFor(this.getConvertedTools().toolMapping),
+      // The stream recorded the size-cut calls by their provider ids; carry the set across
+      // the id remap above, or a remapped call loses its flag and the guard misses it.
+      sizeCutCalls:
+        providerToolCalls === undefined || uniqueToolCalls === undefined
+          ? new Set(result.value.size_cut_tool_calls ?? [])
+          : remapToolCallIdSet({
+              before: providerToolCalls,
+              after: uniqueToolCalls,
+              ids: new Set(result.value.size_cut_tool_calls ?? []),
+            }),
+      callCountCut: result.value.tool_call_count_cut === true,
     });
-    if (replyGuard.tooManyCalls && !unattended) {
+    // Keys and reason only: argument values can hold the person's content.
+    for (const flagged of replyGuard.flaggedCalls) {
+      this.logger.warn('Reply guard stopped a tool call before it ran', {
+        threadId: this.threadId,
+        tool: flagged.toolName,
+        toolCallId: flagged.callId,
+        argumentKeys: flagged.argumentKeys,
+        reason: flagged.reason,
+      });
+    }
+    if (replyGuard.tooManyCalls) {
+      // Names only, and only the first few: argument values can hold the person's content.
+      const names = (replyGuard.message.tool_calls ?? []).map(call => call.function.name);
+      this.logger.warn('Reply asked for too many tool calls at once', {
+        threadId: this.threadId,
+        toolCallCount: names.length,
+        cap: MAX_TOOL_CALLS_PER_REPLY,
+        firstToolNames: names.slice(0, 5),
+        streamCut: result.value.tool_call_count_cut === true,
+      });
+    }
+    // An unattended run recounts below, once held calls are known; a reply the stream stopped
+    // reading is incomplete and stops either way.
+    if (replyGuard.tooManyCalls && (!unattended || result.value.tool_call_count_cut === true)) {
       await this.recordDroppedCallRefusals(replyGuard.message.tool_calls);
       yield this.generateErrorEvent(TOO_MANY_TOOL_CALLS_MESSAGE, undefined, 'model_stream_fault');
       return { outcome: 'exit', modelMessageEventId, retryModelMessageEventId: undefined };
@@ -3866,7 +4319,7 @@ export class AgentThread {
         tool_calls: assistantMessage.tool_calls.map(call => {
           // A repeat of a "no" keeps its card identity, so the run refuses it as that same "no" and ends the turn.
           if (
-            removedTools.includes(call.tool_info.original_tool_name) &&
+            removedTools.includes(removedToolKey(call.tool_info)) &&
             !this.toolCallMemo.deniedApprovalIdentities.has(approvalGrantKey(call.tool_info))
           ) {
             return {
@@ -3892,7 +4345,7 @@ export class AgentThread {
               pre_dispatch_failure: {
                 kind: 'pre_dispatch_failed',
                 message: problem,
-                owner_message: stepNotFinishedNotice(assistantDisplayName(this.definition.identity?.assistantName)),
+                owner_message: REPLY_CALL_NOT_RUN_OWNER_MESSAGE,
               },
             },
           };
@@ -3955,6 +4408,20 @@ export class AgentThread {
       emptyTerminalFallback !== undefined &&
       !hasToolCalls(assistantMessage) &&
       assistantMessageContentToStringForSubAgent(assistantMessage.content).trim().length === 0;
+    // A step that ended with no words after tools ran. The first time, one no-tools answer step is
+    // asked for; if that step is also empty, the host writes the line from how the tools ended.
+    const toolRunsThisTurn = turnToolRuns(this.context);
+    const silentAfterTools =
+      finishReason === 'stop' &&
+      !shouldNudgeForEmptyReasoning &&
+      !emptyTerminalFailure &&
+      !hasToolCalls(assistantMessage) &&
+      assistantMessageContentToStringForSubAgent(assistantMessage.content).trim().length === 0 &&
+      this.heldSentences.length === 0 &&
+      toolRunsThisTurn.length > 0;
+    if (silentAfterTools && forcedAnswer !== null) {
+      assistantMessage.content = silentTurnEndLine(toolRunsThisTurn);
+    }
     // A run that ends with actions waiting for its owner says so in its own last message.
     if (
       finishReason === 'stop' &&
@@ -3965,6 +4432,31 @@ export class AgentThread {
     ) {
       const prior = typeof assistantMessage.content === 'string' ? assistantMessage.content.trim() : '';
       assistantMessage.content = [prior, heldActionsNote(this.heldSentences)].filter(part => part !== '').join('\n\n');
+    }
+    // A reply that wrote spaces without naming them gets the host's own closing line, saved with the
+    // reply like the held-actions note above, so the person always learns which page changed.
+    if (
+      finishReason === 'stop' &&
+      !hasToolCalls(assistantMessage) &&
+      !emptyTerminalFailure &&
+      !shouldNudgeForEmptyReasoning &&
+      this.parent === undefined &&
+      !this.spaceClosingLineWritten &&
+      (typeof assistantMessage.content === 'string' || assistantMessage.content === null)
+    ) {
+      const writes = spaceWritesThisTurn(this.context);
+      const prior = assistantMessage.content?.trim() ?? '';
+      const lowerPrior = prior.toLowerCase();
+      if (writes.length > 0 && !writes.some(write => lowerPrior.includes(write.name.toLowerCase()))) {
+        const unfinished = this.toolCallMemo.turn.unfinishedByThread.get(this.threadId);
+        const closing = spaceClosingLine({
+          writes,
+          unfinished,
+          noticeShown: (['budget', 'failed'] as const).some(kind => prior.includes(unfinishedNotice(kind))),
+        });
+        this.spaceClosingLineWritten = true;
+        assistantMessage.content = [prior, closing].filter(part => part !== '').join('\n\n');
+      }
     }
     const agentAssistantMessage = buildModelMessageEvent({
       // The terminal model event is authoritative. By this point the complete tool
@@ -4025,6 +4517,23 @@ export class AgentThread {
       // start/deltas landing under the same id is what keeps a live client's view consistent
       // with what a reload reconstructs from durable output.
       return { outcome: 'continue', modelMessageEventId, retryModelMessageEventId: modelMessageEventId };
+    }
+
+    // Like the nudge above, the empty step is not saved; only the request for the answer is.
+    if (silentAfterTools && forcedAnswer === null) {
+      yield* this.appendToContext({
+        context: [internalSystemMessage(EMPTY_AFTER_TOOLS_MESSAGE)],
+        output: [],
+        currentContextUsage: undefined,
+        usage: result.value.usage,
+      });
+      this.currentState = null;
+      return {
+        outcome: 'continue',
+        modelMessageEventId,
+        retryModelMessageEventId: modelMessageEventId,
+        answerNext: true,
+      };
     }
 
     let completion: SubAgentCompletionMarker | undefined;
@@ -4153,26 +4662,45 @@ export class AgentThread {
 
   /**
    * Host-owned per-turn loop guard, run before dispatch, on counts shared by the whole turn. A call
-   * whose exact arguments already ran or were refused earlier in the turn is not run again. A tier 3
-   * call past MAX_WRITE_CALLS_PER_TURN is not run either, unless the host vouches it is a read
-   * (isHostVouchedRead). Both end the turn after their batch resolves, and the repeat also ends it when the same
-   * call comes straight after the one before.
+   * whose exact arguments already ran or were refused earlier in the turn is not run again, unless a
+   * change has run since. An action outside the sandbox workspace past MAX_WRITE_CALLS_PER_TURN is not
+   * run either (countsTowardWriteCap). Both end the turn after their batch resolves, and the repeat also
+   * ends it when the same call comes straight after the one before.
    */
-  private applyToolCallLoopGuard({ calls, turn }: { calls: InternalEnrichedToolCall[]; turn: TurnToolCallLedger }): {
+  private applyToolCallLoopGuard({
+    calls,
+    turn,
+    toolMapping,
+  }: {
+    calls: InternalEnrichedToolCall[];
+    turn: TurnToolCallLedger;
+    toolMapping: Map<string, MappedMCPTool>;
+  }): {
     calls: InternalEnrichedToolCall[];
     writeCapHit: boolean;
     repeatStop: boolean;
+    repeatedCallIds: ReadonlySet<string>;
   } {
     const seenInBatch = new Set<string>();
+    const repeatedCallIds = new Set<string>();
     let previous = turn.lastCallSignature;
     let writeCapBlocked = 0;
+    let admittedCappedInBatch = 0;
     let repeatedBlocked = 0;
     let repeatStop = false;
-    const blocked = (call: InternalEnrichedToolCall, message: string): InternalEnrichedToolCall => ({
+    const blocked = ({
+      call,
+      message,
+      ownerMessage,
+    }: {
+      call: InternalEnrichedToolCall;
+      message: string;
+      ownerMessage: string;
+    }): InternalEnrichedToolCall => ({
       ...call,
       tool_info: {
         ...call.tool_info,
-        pre_dispatch_failure: { kind: 'pre_dispatch_failed' as const, message },
+        pre_dispatch_failure: { kind: 'pre_dispatch_failed' as const, message, owner_message: ownerMessage },
       },
     });
     const guarded = calls.map(call => {
@@ -4182,33 +4710,46 @@ export class AgentThread {
       const signature = toolCallSignature(call);
       const consecutive = signature === previous;
       previous = signature;
-      // An identical call may run again once a write has run since it last ran, since the state may have changed.
+      // An identical call may run again once something changed since it last ran, so tests can run
+      // again after an edit. An outside action never does: a send is the same send whatever changed.
       // A retryable error gets its one retry, whatever has run since.
+      const countsTowardCap = countsTowardWriteCap(call.tool_info, {
+        staysInWorkspace: callStaysInWorkspace({ call, toolMapping }),
+      });
+      // An outside action gets no automatic retry either: one that reported an error may still
+      // have gone out, so the model is told to check first.
       const lastRun = turn.callSignatures.get(signature);
       const alreadySeen =
         seenInBatch.has(signature) ||
         (lastRun !== undefined &&
-          !retryIsDue({ lastKind: lastRun.lastKind, retried: lastRun.retried }) &&
-          lastRun.writesAtLastRun >= turn.writeCallsThisTurn);
+          (countsTowardCap ||
+            (!retryIsDue({ lastKind: lastRun.lastKind, retried: lastRun.retried }) &&
+              lastRun.writesAtLastRun >= changesSeenBy(call.tool_info, turn))));
+      const duplicateInStep = seenInBatch.has(signature);
       seenInBatch.add(signature);
       if (alreadySeen) {
         repeatedBlocked += 1;
-        repeatStop = repeatStop || consecutive;
-        return blocked(call, REPEATED_ACTION_RESULT);
+        repeatedCallIds.add(call.id);
+        // A read gets a few identical calls in a row; a duplicate in one step is skipped and never counts.
+        const readOnly = isReadOnlyCall(call.tool_info);
+        const limit = readOnly ? REPEAT_LIMIT_READ_TOOLS : REPEAT_LIMIT_OTHER_TOOLS;
+        const overLimit = duplicateInStep ? !readOnly : (lastRun?.count ?? 0) >= limit;
+        repeatStop = repeatStop || (consecutive && overLimit);
+        const mayHaveGoneOut = countsTowardCap && lastRun !== undefined && lastRun.lastKind !== 'ok';
+        return blocked({
+          call,
+          message: mayHaveGoneOut ? OUTSIDE_ACTION_RETRY_RESULT : REPEATED_ACTION_RESULT,
+          ownerMessage: REPEATED_ACTION_OWNER_MESSAGE,
+        });
       }
-      // Every tier 3 call counts except a read the host itself vouches for: a search or page read
-      // leaves the computer but has its own limits. A server's read-only claim is not enough. A write
-      // held for the owner in an unattended run does not run now.
-      if (
-        call.tool_info.tier === 3 &&
-        !isHostVouchedRead(call.tool_info) &&
-        call.tool_info.held_for_owner === undefined
-      ) {
-        if (turn.writeCallsThisTurn >= MAX_WRITE_CALLS_PER_TURN) {
+      // Only actions that can reach past the sandbox count (see countsTowardWriteCap), once they ran;
+      // the calls admitted in this batch are reserved so one batch cannot overshoot the cap.
+      if (countsTowardCap) {
+        if (turn.writeCallsThisTurn + admittedCappedInBatch >= MAX_WRITE_CALLS_PER_TURN) {
           writeCapBlocked += 1;
-          return blocked(call, WRITE_CAP_BLOCKED_RESULT);
+          return blocked({ call, message: WRITE_CAP_BLOCKED_RESULT, ownerMessage: WRITE_CAP_OWNER_MESSAGE });
         }
-        turn.writeCallsThisTurn += 1;
+        admittedCappedInBatch += 1;
       }
       return call;
     });
@@ -4223,7 +4764,7 @@ export class AgentThread {
         repeatStop,
       });
     }
-    return { calls: guarded, writeCapHit, repeatStop };
+    return { calls: guarded, writeCapHit, repeatStop, repeatedCallIds };
   }
 
   /**
@@ -4368,7 +4909,7 @@ export class AgentThread {
     // executeToolCalls can reach a provider. The tool-call budget admission
     // runs first, so an over-budget batch is capped deterministically before
     // any provider is reached.
-    const loopGuard = this.applyToolCallLoopGuard({ calls: executionCalls, turn: toolCallMemo.turn });
+    const loopGuard = this.applyToolCallLoopGuard({ calls: executionCalls, turn: toolCallMemo.turn, toolMapping });
     const budgetAdmittedCalls = this.applyToolCallBudgetAdmission(loopGuard.calls);
     const callsForDispatch = signal?.aborted
       ? budgetAdmittedCalls.map(call =>
@@ -4453,6 +4994,7 @@ export class AgentThread {
       runCodeToolCallTimeoutMs: this.runCodeToolCallTimeoutMs,
       logger: this.logger,
       sentinel: toDispatchSentinelContext(this.sentinel),
+      unreachableServerNames: this.unreachableServerNames,
     });
     const resultsById = new Map(executedToolCallResults.map(result => [result.message.tool_call_id, result]));
     const toolCallResults = openCalls.flatMap(call => {
@@ -4509,7 +5051,18 @@ export class AgentThread {
     }
     for (const result of toolCallResults) {
       const toolCall = openCalls.find(call => call.id === result.message.tool_call_id);
-      if (toolCall && !toolMapping.has(toolCall.function.name)) {
+      if (
+        toolCall &&
+        !toolMapping.has(toolCall.function.name) &&
+        this.unreachableServerNames.has(toolCall.tool_info.mcp_server_name)
+      ) {
+        // The person may have approved a card for a tool whose connector has since dropped off.
+        this.logger.warn(
+          `Tool call ${toolCall.function.name} was not run because ${toolCall.tool_info.mcp_server_name} is not reachable`,
+          { threadId: this.threadId, toolCallId: toolCall.id },
+        );
+        result.message.content = connectorUnreachableText(toolCall.tool_info.mcp_server_name);
+      } else if (toolCall && !toolMapping.has(toolCall.function.name)) {
         result.message.content = `Tool ${toolCall.function.name} is unavailable in this conversation. Do not call it again. Use only the tools provided in the request, or continue without a tool.`;
       }
     }
@@ -4517,6 +5070,8 @@ export class AgentThread {
     if (approvalRequiredToolCalls.length > 0) {
       throw new Error('Unreachable');
     }
+    // The calls whose run changed something, so a call that changed only itself can tell (see below).
+    const changedByCallId = new Set<string>();
     for (const result of toolCallResults) {
       const toolCall = openCalls.find(call => call.id === result.message.tool_call_id);
       recordToolCallResult(this.metrics, {
@@ -4524,11 +5079,38 @@ export class AgentThread {
         disposition: result.disposition,
         reasonCode: result.remediation?.reason_code ?? null,
       });
+      logToolCallOutcome(this.logger, { toolName: toolCall?.function.name ?? 'unknown_tool', result });
       // Calls with no metadata count as writes, as isReadOnlyCall treats them.
       const writes = result.toolCallInfo === undefined || !isReadOnlyCall(result.toolCallInfo);
+      const countsTowardCap =
+        toolCall !== undefined &&
+        countsTowardWriteCap(toolCall.tool_info, {
+          staysInWorkspace: callStaysInWorkspace({ call: toolCall, toolMapping }),
+        });
+      // An outside action counts once it was attempted, whatever it reported: a send can arrive and
+      // still answer with an error. Only a call that never ran (refused, blocked, never sent) is free.
+      if (countsTowardCap && toolCallWasAttempted(result.disposition)) {
+        nextToolCallMemo.turn.writeCallsThisTurn += 1;
+      }
       if (result.disposition === 'executed_ok' && !result.failure) {
         if (writes) {
           nextToolCallMemo.turn.successfulWritesThisTurn += 1;
+        }
+        if (toolCall !== undefined && changesState(toolCall.tool_info, { countsTowardCap })) {
+          nextToolCallMemo.turn.changesThisTurn += 1;
+        }
+        // The browser's page has a count of its own: a step counts only when it reaches a page not
+        // seen before in this turn, so a scroll at the bottom of a page, or back and forth between
+        // two pages, moved nothing new.
+        if (toolCall !== undefined) {
+          const page = browserPageSeen({ info: toolCall.tool_info, text: result.message.content });
+          if (page !== undefined && !nextToolCallMemo.turn.browserPagesSeen.includes(page.digest)) {
+            nextToolCallMemo.turn.browserPagesSeen.push(page.digest);
+            if (page.moves) {
+              nextToolCallMemo.turn.browserPageChangesThisTurn += 1;
+              changedByCallId.add(toolCall.id);
+            }
+          }
         }
         if (result.toolCallInfo !== undefined) {
           for (const kind of stepKindsOf(result.toolCallInfo)) {
@@ -4846,7 +5428,7 @@ export class AgentThread {
     // blocked did not run, so it leaves its call's record alone.
     const replyTurn = nextToolCallMemo.turn;
     const settledByCallId = new Map<string, { kind: ToolResultKind; retried: boolean }>();
-    const removalNotices: { toolName: string; reason: 'declined' | 'unavailable' }[] = [];
+    const removalNotices: { toolName: string; removalKey: string; reason: 'declined' | 'unavailable' }[] = [];
     let removedCallsThisBatch = 0;
     let lastKindThisBatch: ToolResultKind | undefined;
     for (const result of toolCallResults) {
@@ -4856,7 +5438,8 @@ export class AgentThread {
         continue;
       }
       const toolName = call.tool_info.original_tool_name;
-      const wasRemoved = replyTurn.removedTools.includes(toolName);
+      const removalKey = removedToolKey(call.tool_info);
+      const wasRemoved = replyTurn.removedTools.includes(removalKey);
       if (wasRemoved) {
         removedCallsThisBatch += 1;
       }
@@ -4864,7 +5447,8 @@ export class AgentThread {
       const kind = toolResultKind({
         disposition: result.disposition,
         failure: result.failure,
-        unavailable: !toolMapping.has(call.function.name),
+        unavailable:
+          !toolMapping.has(call.function.name) || call.tool_info.pre_dispatch_failure?.kind === 'connector_unreachable',
         removed: wasRemoved,
         expired: isExpiredApproval(decision),
       });
@@ -4875,12 +5459,12 @@ export class AgentThread {
         lastKindThisBatch = kind;
       }
       if (!wasRemoved && !changeRequested && (kind === 'declined' || kind === 'unavailable')) {
-        if (!removalNotices.some(notice => notice.toolName === toolName)) {
-          removalNotices.push({ toolName, reason: kind });
+        if (!removalNotices.some(notice => notice.removalKey === removalKey)) {
+          removalNotices.push({ toolName, removalKey, reason: kind });
         }
       }
       const previous = replyTurn.callSignatures.get(toolCallSignature(call));
-      if (call.tool_info.pre_dispatch_failure?.message !== REPEATED_ACTION_RESULT) {
+      if (!loopGuard.repeatedCallIds.has(call.id)) {
         settledByCallId.set(
           call.id,
           settleRetry({ previousKind: previous?.lastKind ?? null, previousRetried: previous?.retried ?? false, kind }),
@@ -4895,8 +5479,36 @@ export class AgentThread {
         this.noteUnfinished(unfinished);
       }
     }
+    // A step that landed a space write or a sandbox file edit is progress, not spent budget; a build in
+    // parts needs many such steps.
+    const refundsSoFar = replyTurn.progressRefundsByThread.get(this.threadId) ?? 0;
+    const refund = progressRefundFor({
+      refundsSoFar,
+      results: toolCallResults.flatMap(result => {
+        const call = openCalls.find(candidate => candidate.id === result.message.tool_call_id);
+        // A call held for the owner has not run, so it earns no refund.
+        return call === undefined || call.tool_info.held_for_owner !== undefined
+          ? []
+          : [
+              {
+                toolName: call.tool_info.original_tool_name,
+                disposition: result.disposition,
+                failure: result.failure,
+                savedNothing: spaceWriteSavedNothing(result.message.content),
+                sandboxFileEdit: isSandboxFileEditCall({ call, toolMapping }),
+              },
+            ];
+      }),
+    });
+    if (refund > 0) {
+      replyTurn.progressRefundsByThread.set(this.threadId, refundsSoFar + refund);
+      replyTurn.stepsByThread.set(
+        this.threadId,
+        Math.max(0, (replyTurn.stepsByThread.get(this.threadId) ?? 0) - refund),
+      );
+    }
     for (const notice of removalNotices) {
-      replyTurn.removedTools.push(notice.toolName);
+      replyTurn.removedTools.push(notice.removalKey);
       this.noteUnfinished(notice.reason);
     }
     const removedStreakBefore = replyTurn.removedToolRejectionStreaks.get(this.threadId) ?? 0;
@@ -4915,6 +5527,7 @@ export class AgentThread {
     // independently.
     const callsToNudge: { call: InternalEnrichedToolCall; signature: string }[] = [];
     const nudgedSignaturesThisBatch = new Set<string>();
+    const readsCountedThisBatch = new Set<string>();
     for (const callId of countedCallIds) {
       const call = openCalls.find(candidate => candidate.id === callId);
       // A call held for the owner has not run or been refused; its approved replay must not count as a repeat.
@@ -4922,21 +5535,36 @@ export class AgentThread {
         continue;
       }
       const signature = toolCallSignature(call);
+      // A read repeated inside one step is one call to the guard, however many times it is written.
+      if (isReadOnlyCall(call.tool_info)) {
+        if (readsCountedThisBatch.has(signature)) {
+          continue;
+        }
+        readsCountedThisBatch.add(signature);
+      }
       // Durable count: kept for the persistence contract and any other consumer of the
       // snapshot, but not used for the stop/nudge decisions below (see callSignatureCountsThisTurn).
       const previousRecord = nextToolCallMemo.turn.callSignatures.get(signature);
       const settled = settledByCallId.get(callId);
+      // A browser step that moved the page starts from where it left it, so its own move does not
+      // count against it: the same scroll may run again, and is no loop. One that moved nothing is.
+      // A step that keeps moving still has a higher stop of its own (IDENTICAL_MOVE_STOP_AT) and no nudge.
+      const movedPage = movesBrowserPage(call.tool_info) && changedByCallId.has(callId);
       nextToolCallMemo.turn.callSignatures.set(signature, {
         count: (previousRecord?.count ?? 0) + 1,
-        writesAtLastRun: nextToolCallMemo.turn.writeCallsThisTurn,
+        writesAtLastRun: changesSeenBy(call.tool_info, nextToolCallMemo.turn) - (movedPage ? 1 : 0),
         lastKind: settled?.kind ?? previousRecord?.lastKind ?? null,
         retried: settled?.retried ?? previousRecord?.retried ?? false,
       });
       const thisTurnCount = (this.callSignatureCountsThisTurn.get(signature) ?? 0) + 1;
       this.callSignatureCountsThisTurn.set(signature, thisTurnCount);
-      if (thisTurnCount >= IDENTICAL_CALL_STOP_AT && repeatedSignature === undefined) {
+      if (
+        thisTurnCount >= (movedPage ? IDENTICAL_MOVE_STOP_AT : IDENTICAL_CALL_STOP_AT) &&
+        repeatedSignature === undefined
+      ) {
         repeatedSignature = call;
       } else if (
+        !movedPage &&
         thisTurnCount >= IDENTICAL_CALL_NUDGE_AT &&
         !nudgedSignaturesThisBatch.has(signature) &&
         !hasSentHostNoteThisTurn(this.context, 'identical_call', signature)
@@ -4987,7 +5615,9 @@ export class AgentThread {
         ),
         ...guardNotesToSendNow.map(candidate => internalSystemMessage(candidate.message)),
         // Sent once, in the same append as the results that removed the tool.
-        ...removalNotices.map(notice => internalSystemMessage(removedToolMessage(notice))),
+        ...removalNotices.map(notice =>
+          internalSystemMessage(removedToolMessage({ toolName: notice.toolName, reason: notice.reason })),
+        ),
       ],
       output: [],
       currentContextUsage: undefined,
@@ -5246,7 +5876,7 @@ export class AgentThread {
           // Tier and card ride on the approval event because the wire tool_info omits them.
           ...approvalCardFields(toolCall),
           can_chat_allow: allowsChatApproval(toolCall.tool_info),
-          can_always_allow: allowsToolGrant(toolCall.tool_info),
+          ...alwaysAllowFields(toolCall.tool_info),
         })),
       };
       yield event;
@@ -5284,11 +5914,16 @@ export class AgentThread {
       }
 
       if (!this.preSendRanThisTurn) {
-        for await (const event of this.executeContextProcessors('preSend', signal)) {
-          if (signal?.aborted) {
-            return;
+        this.resumingIntoToolStep = true;
+        try {
+          for await (const event of this.executeContextProcessors('preSend', signal)) {
+            if (signal?.aborted) {
+              return;
+            }
+            yield event;
           }
-          yield event;
+        } finally {
+          this.resumingIntoToolStep = false;
         }
         if (signal?.aborted) {
           return;
@@ -5324,6 +5959,8 @@ export class AgentThread {
       // Set only when the previous stepLLMCall ended in the empty-answer nudge, so the next call
       // reuses that id instead of a fresh one (see stepLLMCall's retryModelMessageEventId param).
       let pendingRetryModelMessageEventId: string | undefined;
+      // Set when the last step said nothing after tools ran: the next step is the no-tools answer.
+      let answerNext = false;
       // Per execute() call: a new user turn gets one fresh correction, while an
       // unavailable tool repeated in this turn cannot consume the iteration budget.
       const unavailableToolsSeen = new Set<string>();
@@ -5371,11 +6008,18 @@ export class AgentThread {
               return;
             }
             if (this.metrics.iterations >= iterationLimit) {
-              yield this.generateErrorEvent(
-                `You have reached iteration limit of ${String(iterationLimit)}, please request again`,
-                undefined,
-                'iteration_limit',
-              );
+              // The person reads the plain stop message. A sub-agent's parent model reads the
+              // original instruction instead, so its next step is unchanged.
+              const done = this.generateErrorEvent(ITERATION_LIMIT_MESSAGE, undefined, 'iteration_limit');
+              yield done.send_to_parent === undefined
+                ? done
+                : {
+                    ...done,
+                    send_to_parent: {
+                      ...done.send_to_parent,
+                      content: `You have reached iteration limit of ${String(iterationLimit)}, please request again`,
+                    },
+                  };
               return;
             }
             this.metrics.iterations++;
@@ -5392,7 +6036,10 @@ export class AgentThread {
             // phase here is exact. This is the structural answer to
             // non-convergent research loops: stopping is host-owned, not
             // model-owned.
-            const available = await this.withoutOfflineBlockedTools(allTools, toolMapping);
+            const available = await this.withoutOfflineBlockedTools(
+              this.withoutWithheldTools(allTools, toolMapping),
+              toolMapping,
+            );
             const tools = this.toolBundles?.requestTools(available) ?? available;
             const taskBudget = this.definition.toolCallBudget;
             const finalAnswerPhase = taskBudget !== undefined && this.taskState.phase === 'final_answer';
@@ -5422,20 +6069,31 @@ export class AgentThread {
               stepsSoFar >=
               stepBudgetFor({
                 isSubAgent: this.parent !== undefined,
-                budget: this.definition.stepBudget ?? DEFAULT_REPLY_STEP_BUDGET,
+                budget: replyStepBudgetFor({
+                  definitionBudget: this.definition.stepBudget,
+                  unattended: this.sentinel?.services.unattended === true,
+                }),
               });
             const removedStreak = replyLedger.removedToolRejectionStreaks.get(this.threadId) ?? 0;
-            const forcedAnswer: ForcedAnswer | null = budgetSpent
-              ? 'budget'
-              : removedStreak >= REMOVED_TOOL_STREAK_STOP_AT
-                ? 'removed_streak'
-                : null;
+            const forcedAnswer: ForcedAnswer | null = answerNext
+              ? 'empty_after_tools'
+              : budgetSpent
+                ? 'budget'
+                : removedStreak >= REMOVED_TOOL_STREAK_STOP_AT
+                  ? 'removed_streak'
+                  : null;
+            answerNext = false;
             replyLedger.stepsByThread.set(this.threadId, stepsSoFar + 1);
-            if (forcedAnswer !== null) {
+            // The request for this answer was saved by the step that came back empty.
+            if (forcedAnswer !== null && forcedAnswer !== 'empty_after_tools') {
               yield* this.appendToContext({
                 context: [
                   internalSystemMessage(
-                    forcedAnswer === 'budget' ? STEP_BUDGET_SPENT_MESSAGE : REMOVED_TOOL_STREAK_MESSAGE,
+                    forcedAnswer === 'budget'
+                      ? (replyLedger.progressRefundsByThread.get(this.threadId) ?? 0) > 0
+                        ? STEP_BUDGET_SPENT_AFTER_SPACE_WRITE_MESSAGE
+                        : STEP_BUDGET_SPENT_MESSAGE
+                      : REMOVED_TOOL_STREAK_MESSAGE,
                   ),
                 ],
                 output: [],
@@ -5453,7 +6111,7 @@ export class AgentThread {
                         toolMapping.get(tool.function.name)?.originalToolName ?? tool.function.name,
                       ),
                   );
-            const llmResult = yield* this.stepLLMCall(sentTools, toolMapping, signal, {
+            const llmResult: StepLLMCallResult = yield* this.stepLLMCall(sentTools, toolMapping, signal, {
               emptyTerminalFallback: undefined,
               retryModelMessageEventId: pendingRetryModelMessageEventId,
               forcedAnswer,
@@ -5461,6 +6119,7 @@ export class AgentThread {
             outcome = llmResult.outcome;
             currentModelMessageEventId = llmResult.modelMessageEventId;
             pendingRetryModelMessageEventId = llmResult.retryModelMessageEventId;
+            answerNext = llmResult.answerNext === true;
             break;
           }
           case 'tool-response-required': {
@@ -5497,7 +6156,9 @@ export class AgentThread {
       // Providers / transports often reject with plain objects; instanceof Error would
       // otherwise collapse those into an opaque "Unknown error occurred" in Agent Steps.
       this.logger.error('Agent thread execution failed', extractErrorLogFields(error));
-      yield this.generateErrorEvent(describeUnknownError(error), undefined, 'fatal_error');
+      // The chat gets plain words; the details above stay in the log.
+      const message = error instanceof RequestOverLimitError ? CHAT_TOO_LONG_MESSAGE : describeTurnFailure(error);
+      yield this.generateErrorEvent(message, undefined, 'fatal_error');
     } finally {
       this.contextBusy = false;
     }
@@ -5559,14 +6220,10 @@ function estimateRawContextTextLength(context: readonly ContextMessage[]): numbe
   return total;
 }
 
-/** Index of the latest user message, the one a reply answers. Appends when there is none. */
-function currentMessageIndex(messages: readonly ChatCompletionMessageParam[]): number {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    if (messages[i]?.role === 'user') {
-      return i;
-    }
-  }
-  return messages.length;
+/** Where per-reply host context goes: just before the person's message, or at the end when there is none. */
+function replyInsertIndex(messages: readonly ChatCompletionMessageParam[]): number {
+  const index = personMessageIndex(messages);
+  return index === -1 ? messages.length : index;
 }
 
 function assertUniqueStateKeys(capabilities: readonly AgentCapability[]): void {

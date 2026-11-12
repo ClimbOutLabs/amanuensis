@@ -238,7 +238,9 @@ describe('pre-recall gate in processPreLLM', () => {
     expect(event.injected_block).toBeNull();
     expect('screen' in event).toBe(false);
     expect('layers' in event).toBe(false);
-    expect(ephemeralProcessor.processPreLLMEphemeral([{ role: 'user', content: 'hey' }])).toBeUndefined();
+    expect(
+      ephemeralProcessor.processPreLLMEphemeral([{ role: 'user', content: 'hey' }], { modelSupportsVision: false }),
+    ).toBeUndefined();
   });
 
   it('still sweeps pending retain ops on a skipped turn', async () => {

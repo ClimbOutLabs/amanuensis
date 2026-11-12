@@ -294,6 +294,64 @@ describe('internal source tool policy', () => {
       ).toBeDefined();
     });
 
+    it('blocks a Parallel-shaped call carrying a private detail in search_queries', () => {
+      const state = createInternalSourceState();
+      noteRecallContent(state, ['QA rig v4.2.1 quality assurance version']);
+      const policy = buildInternalSourceToolPolicy(state);
+
+      expect(
+        policy({
+          functionName: 'mcp__web__web_search',
+          underlyingToolName: 'web_search',
+          args: {
+            objective: 'Find general background',
+            search_queries: ['weather today', 'quality assurance version'],
+          },
+        }),
+      ).toBeDefined();
+    });
+
+    it('blocks a Parallel-shaped call carrying a private detail in objective', () => {
+      const state = createInternalSourceState();
+      noteRecallContent(state, ['QA rig v4.2.1 quality assurance version']);
+      const policy = buildInternalSourceToolPolicy(state);
+
+      expect(
+        policy({
+          functionName: 'mcp__web__web_search',
+          underlyingToolName: 'web_search',
+          args: { objective: 'Look up the quality assurance version', search_queries: ['weather today'] },
+        }),
+      ).toBeDefined();
+    });
+
+    it('allows a clean Parallel-shaped call without logging a missing query', () => {
+      const warnings: string[] = [];
+      const state = createInternalSourceState();
+      noteRecallContent(state, ['QA rig v4.2.1 quality assurance version']);
+      const policy = buildInternalSourceToolPolicy(state, {
+        warn: (message: string) => warnings.push(message),
+      });
+
+      expect(
+        policy({
+          functionName: 'mcp__web__web_search',
+          underlyingToolName: 'web_search',
+          args: { objective: 'Find the weather forecast', search_queries: ['weather today', 'rain tomorrow'] },
+        }),
+      ).toBeUndefined();
+      expect(warnings).toEqual([]);
+    });
+
+    it('still reads the plain query shape', () => {
+      const state = createInternalSourceState();
+      noteRecallContent(state, ['QA rig v4.2.1 quality assurance version']);
+      const policy = buildInternalSourceToolPolicy(state);
+
+      expect(policy(webSearchCall('quality assurance version'))).toBeDefined();
+      expect(policy(webSearchCall('weather today'))).toBeUndefined();
+    });
+
     it('skips calls with no usable query argument', () => {
       const state = createInternalSourceState();
       noteRecallContent(state, ['QA rig v4.2.1 quality assurance version']);

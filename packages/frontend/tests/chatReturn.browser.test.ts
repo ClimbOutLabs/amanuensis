@@ -14,7 +14,10 @@ import {
   STALLED_ANSWER_START,
 } from '../../trueforge/tests/fixtures/scriptedModelServer.ts';
 import { inProcessApi } from './support/approvalChat.ts';
+import { featureShotPath, saveFailureShots } from './support/featureShots.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
+import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
+import { privateViteCache } from './support/viteCache.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
 /** A name the person chose, so the lines below prove they use it rather than a built-in one. */
@@ -106,7 +109,7 @@ async function send({ page, text }: { page: Page; text: string }): Promise<void>
 
 /** A chat with one finished reply, made the way a person makes one. */
 async function finishedChat({ page, origin, text }: { page: Page; origin: string; text: string }): Promise<string> {
-  await page.goto(`${origin}/`, { waitUntil: 'domcontentloaded', timeout: RENDER_TIMEOUT_MS });
+  await page.goto(`${origin}/`, { waitUntil: 'domcontentloaded', timeout: FIRST_LOAD_TIMEOUT_MS });
   await composer(page).waitFor({ timeout: RENDER_TIMEOUT_MS });
   await send({ page, text });
   await page.locator('main').getByText(FINAL_TEXT).first().waitFor({ timeout: RENDER_TIMEOUT_MS });
@@ -147,10 +150,12 @@ async function cancelStopsReply({
   await waitForTurnStatus({ api, sessionId, ready: status => status !== 'running' });
 }
 
-test('a chat left while its reply runs comes back live', { timeout: 900_000 }, async () => {
+test('a chat left while its reply runs comes back live', { timeout: 900_000 }, async t => {
   const api = await startApprovalTestServer();
   let turnStartDelayMs = 0;
+  const viteCache = privateViteCache('chat-return');
   const vite = await createServer({
+    cacheDir: viteCache.cacheDir,
     root: fileURLToPath(new URL('../', import.meta.url)),
     logLevel: 'error',
     plugins: [
@@ -201,7 +206,18 @@ test('a chat left while its reply runs comes back live', { timeout: 900_000 }, a
     const filed = await api.request(`/api/v1/sessions/${charlie}/folder`, jsonInit({ folder_id: folderId }, 'PUT'));
     assert.equal(filed.status, 200, await filed.text());
 
-    await test.test(
+    // The scripted model answers one request at a time, so a reply a failed case left running would
+    // hold every later case's reply. Each case still stops its own reply through the UI.
+    t.afterEach(async () => {
+      for (const sessionId of [alpha, bravo, charlie]) {
+        if ((await latestTurnStatus({ api, sessionId })) !== 'running') continue;
+        const cancelled = await api.request(`/api/v1/sessions/${sessionId}/cancel`, { method: 'POST' });
+        assert.equal(cancelled.status, 200, await cancelled.text());
+        await waitForTurnStatus({ api, sessionId, ready: status => status !== 'running' });
+      }
+    });
+
+    await t.test(
       'leaving by the sidebar list and coming back while the server is slow to start the reply',
       async () => {
         await page.goto(`${origin}/`, { waitUntil: 'domcontentloaded', timeout: RENDER_TIMEOUT_MS });
@@ -227,7 +243,7 @@ test('a chat left while its reply runs comes back live', { timeout: 900_000 }, a
       },
     );
 
-    await test.test('leaving and coming back by a folder row', async () => {
+    await t.test('leaving and coming back by a folder row', async () => {
       await page.goto(`${origin}/`, { waitUntil: 'domcontentloaded', timeout: RENDER_TIMEOUT_MS });
       const folderRow = page
         .getByRole('region', { name: 'Work' })
@@ -250,11 +266,14 @@ test('a chat left while its reply runs comes back live', { timeout: 900_000 }, a
         turnStartDelayMs = 0;
       }
       await expectLiveReply({ page, message });
+      await page.screenshot({
+        path: await featureShotPath({ surface: 'screen:chat-return', step: 'reply-live-after-return' }),
+      });
       assert.deepEqual(await userMessages(page), await reloadedUserMessages({ page, message }));
       await cancelStopsReply({ page, api, sessionId: charlie });
     });
 
-    await test.test('leaving by the sidebar and coming back with the browser back button', async () => {
+    await t.test('leaving by the sidebar and coming back with the browser back button', async () => {
       // Opened by its address, as a link or a reload opens it.
       await page.goto(`${origin}/sessions/${bravo}`, { waitUntil: 'domcontentloaded', timeout: RENDER_TIMEOUT_MS });
       await page.locator('main').getByText(FINAL_TEXT).first().waitFor({ timeout: RENDER_TIMEOUT_MS });
@@ -273,49 +292,46 @@ test('a chat left while its reply runs comes back live', { timeout: 900_000 }, a
       await cancelStopsReply({ page, api, sessionId: bravo });
     });
 
-    await test.test(
-      'a send refused because the last reply still runs keeps the text and shows that reply',
-      async () => {
-        await page.goto(`${origin}/sessions/${charlie}`, { waitUntil: 'domcontentloaded', timeout: RENDER_TIMEOUT_MS });
-        await page.locator('main').getByText(FINAL_TEXT).first().waitFor({ timeout: RENDER_TIMEOUT_MS });
-        const before = await userMessages(page);
-        // A reply started somewhere this page does not know about, such as another tab.
-        const started = await api.request(
-          `/api/v1/sessions/${charlie}/turns`,
-          jsonInit({ input: [{ type: 'user.message', content: slowMessage('elsewhere') }], stream: true }),
-        );
-        assert.equal(started.status, 200);
-        // Read like the tab that sent it would: the server moves a reply along as its stream is read.
-        const reader = started.body?.getReader();
-        const drained = (async () => {
-          while (reader !== undefined && !(await reader.read()).done) {
-            /* keep reading */
-          }
-        })().catch(() => undefined);
-        try {
-          await waitForTurnStatus({ api, sessionId: charlie, ready: status => status === 'running' });
-
-          // The server answers one message at a time, so it refuses this send while that reply runs.
-          const followUp = 'one more thing';
-          await send({ page, text: followUp });
-          await chatNotice(page).filter({ hasText: STILL_WORKING }).waitFor({ timeout: RENDER_TIMEOUT_MS });
-          await expectLiveReply({ page, message: slowMessage('elsewhere') });
-          assert.equal(await composer(page).inputValue(), followUp, 'the typed text is still in the composer');
-          assert.deepEqual(
-            await userMessages(page),
-            [...before, slowMessage('elsewhere')],
-            'the refused message is not shown',
-          );
-          assert.equal(await page.getByText(/Request failed/).count(), 0, 'no raw error');
-          await cancelStopsReply({ page, api, sessionId: charlie });
-        } finally {
-          await reader?.cancel();
-          await drained;
+    await t.test('a send refused because the last reply still runs keeps the text and shows that reply', async () => {
+      await page.goto(`${origin}/sessions/${charlie}`, { waitUntil: 'domcontentloaded', timeout: RENDER_TIMEOUT_MS });
+      await page.locator('main').getByText(FINAL_TEXT).first().waitFor({ timeout: RENDER_TIMEOUT_MS });
+      const before = await userMessages(page);
+      // A reply started somewhere this page does not know about, such as another tab.
+      const started = await api.request(
+        `/api/v1/sessions/${charlie}/turns`,
+        jsonInit({ input: [{ type: 'user.message', content: slowMessage('elsewhere') }], stream: true }),
+      );
+      assert.equal(started.status, 200);
+      // Read like the tab that sent it would: the server moves a reply along as its stream is read.
+      const reader = started.body?.getReader();
+      const drained = (async () => {
+        while (reader !== undefined && !(await reader.read()).done) {
+          /* keep reading */
         }
-      },
-    );
+      })().catch(() => undefined);
+      try {
+        await waitForTurnStatus({ api, sessionId: charlie, ready: status => status === 'running' });
 
-    await test.test('a send whose reply could not start keeps the text and says so in one line', async () => {
+        // The server answers one message at a time, so it refuses this send while that reply runs.
+        const followUp = 'one more thing';
+        await send({ page, text: followUp });
+        await chatNotice(page).filter({ hasText: STILL_WORKING }).waitFor({ timeout: RENDER_TIMEOUT_MS });
+        await expectLiveReply({ page, message: slowMessage('elsewhere') });
+        assert.equal(await composer(page).inputValue(), followUp, 'the typed text is still in the composer');
+        assert.deepEqual(
+          await userMessages(page),
+          [...before, slowMessage('elsewhere')],
+          'the refused message is not shown',
+        );
+        assert.equal(await page.getByText(/Request failed/).count(), 0, 'no raw error');
+        await cancelStopsReply({ page, api, sessionId: charlie });
+      } finally {
+        await reader?.cancel();
+        await drained;
+      }
+    });
+
+    await t.test('a send whose reply could not start keeps the text and says so in one line', async () => {
       await page.goto(`${origin}/sessions/${alpha}`, { waitUntil: 'domcontentloaded', timeout: RENDER_TIMEOUT_MS });
       await page.locator('main').getByText(FINAL_TEXT).first().waitFor({ timeout: RENDER_TIMEOUT_MS });
       const before = await userMessages(page);
@@ -342,7 +358,7 @@ test('a chat left while its reply runs comes back live', { timeout: 900_000 }, a
       assert.equal(await page.getByText(/Request failed/).count(), 0, 'no raw error');
     });
 
-    await test.test('a reply running when the server restarts ends with one plain line', async () => {
+    await t.test('a reply running when the server restarts ends with one plain line', async () => {
       await page.goto(`${origin}/sessions/${alpha}`, { waitUntil: 'domcontentloaded', timeout: RENDER_TIMEOUT_MS });
       await page.locator('main').getByText(FINAL_TEXT).first().waitFor({ timeout: RENDER_TIMEOUT_MS });
       const message = slowMessage('before the restart');
@@ -364,9 +380,13 @@ test('a chat left while its reply runs comes back live', { timeout: 900_000 }, a
       assert.equal(await chatNotice(page).filter({ hasText: STILL_WORKING }).count(), 0);
       await cancelStopsReply({ page, api, sessionId: alpha });
     });
+  } catch (error) {
+    await saveFailureShots({ browser, surface: 'screen:chat-return' });
+    throw error;
   } finally {
     await browser?.close();
     await vite.close();
+    viteCache.remove();
     await api.close();
   }
 });

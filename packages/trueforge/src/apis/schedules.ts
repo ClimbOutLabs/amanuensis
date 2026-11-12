@@ -8,7 +8,13 @@ import {
   type Sessions,
   type TurnStreamingEvent,
 } from '@truefoundry/trueforge-core/agent-session';
+import type { AuditLogWriter } from '@truefoundry/trueforge-core/core';
+import {
+  CREATE_SCHEDULE_TOOL_NAME,
+  SET_REMINDER_TOOL_NAME,
+} from '@truefoundry/trueforge-core/core/schedules/toolContract';
 import type { Context } from 'hono';
+import { HTTPException } from 'hono/http-exception';
 import type { Logger } from 'winston';
 import type { Authorizer } from '../auth/authorizer';
 import {
@@ -26,6 +32,7 @@ import {
   SchedulePersonaNotFoundError,
   scheduleRunFailureReason,
   ScheduleRunNotFoundError,
+  scheduleWithheldTools,
   startScheduleRun,
 } from '../controller/scheduleDispatch';
 import type { AgentRecord, IAgentStore } from '../db/agentStore';
@@ -48,6 +55,7 @@ import {
   type ScheduleRecord,
   type ScheduleRunRecord,
 } from '../db/scheduleStore';
+import type { ISentinelSettingsStore } from '../db/sentinelSettingsStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { ISkillStore } from '../db/skillStore';
 import type { ISpaceStore } from '../db/spaceStore';
@@ -61,20 +69,32 @@ import {
   deleteScheduleRoute,
   executeScheduleRunRoute,
   getScheduleRoute,
+  getScheduleToolsRoute,
   listScheduleRunsRoute,
   listSchedulesRoute,
   putScheduleRoute,
+  putScheduleToolsRoute,
 } from '../routes/scheduleRoutes';
 import type { ActiveTurnRegistry } from '../runtime/activeTurns';
-import { scheduleRunsAs } from '../runtime/chatAssistant';
+import {
+  chatAssistantAgentName,
+  ChatAssistantUnavailableError,
+  getOrCreateChatAssistantAgent,
+  scheduleRunsAs,
+} from '../runtime/chatAssistant';
+import type { ChatSearchIndexer } from '../runtime/chatSearchIndexing';
 import { validateManifest } from '../runtime/cron';
+import type { DeliveryService } from '../runtime/delivery/deliveryService';
 import type { EventSubscriptionRegistry } from '../runtime/event-subscription';
 import { createMemoryClient } from '../runtime/memory/createMemoryClient';
 import { resolveMemoryProvider } from '../runtime/memory/memoryProvider';
-import { deliverReminder, ReminderAgentNotFoundError } from '../runtime/reminderDelivery';
-import { resolveSandboxProvider } from '../runtime/sessionResources';
+import type { ReminderReach } from '../runtime/noticing/reminderReach';
+import { deliverReminder } from '../runtime/reminderDelivery';
+import { scheduleToolsOf, specWithTools } from '../runtime/scheduleTools';
+import { resolveSandboxProvider, validateAgentSpec } from '../runtime/sessionResources';
 import type { TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
 import type { TurnDrainRegistry } from '../runtime/turnDrains';
+import type { DeletedChatUsageReader } from '../runtime/usageSummaryCapability';
 import type { Schedule, ScheduleRun } from '../schemas/schedule';
 import { agentIfAccessible, canReadAgentBoundResource, resolveManagedAgentIds } from './agentAccess';
 import { getTurnExecutionError, startTurnInProcess } from './turns';
@@ -85,6 +105,10 @@ export interface ScheduleTurnExecutionDeps<TTransaction> {
   scheduleStore: IScheduleStore<TTransaction>;
   /** A morning brief run leaves out the items the owner already marked done. */
   briefItemStore: IBriefItemCompletionStore;
+  /** A due reminder is also put in the person's feed, and pushed to their devices, through this. */
+  deliveryService: DeliveryService;
+  /** Settles how loud a due reminder is, by the person's Reach me rules. */
+  reminderReach: ReminderReach;
   sessions: Sessions<SessionCustom, TurnCustom>;
   activeTurns: ActiveTurnRegistry;
   /** Tracks in-flight turn event drains so shutdown can wait for them. */
@@ -108,6 +132,8 @@ export interface ScheduleTurnExecutionDeps<TTransaction> {
    */
   tokenStore: IOAuthTokenStore<TTransaction>;
   repositoryStore: IRepositoryStore<TTransaction>;
+  /** Per-person settings, so a scheduled run's chats resolve the package download allowance like a chat turn. */
+  sentinelSettingsStore?: ISentinelSettingsStore<TTransaction> | undefined;
   sessionStore: ISessionStore<SessionCustom, TurnCustom> & ICompletedTurnEventStore;
   spaceStore: ISpaceStore<TTransaction>;
   /** Per-user Google logins; absent, no Gmail tools mount. */
@@ -120,6 +146,12 @@ export interface ScheduleTurnExecutionDeps<TTransaction> {
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
   /** Scheduled runs on Token Factory count against the same daily cap as chat turns. */
   tokenFactoryBudget: TokenFactoryBudget;
+  /** The usage counts deleted chats left, for the usage tool. */
+  chatDeletionStore: DeletedChatUsageReader;
+  /** A scheduled run joins the past-chat search like any chat; absent, it is not added. */
+  chatSearchIndexer?: ChatSearchIndexer | undefined;
+  /** The activity log a firing is written to; absent, firings run exactly as before and are not recorded. */
+  audit?: AuditLogWriter | null | undefined;
 }
 
 export interface SchedulesRouterDeps<TTransaction> extends ScheduleTurnExecutionDeps<TTransaction> {
@@ -127,6 +159,42 @@ export interface SchedulesRouterDeps<TTransaction> extends ScheduleTurnExecution
   withTransaction: WithTransaction<TTransaction>;
   resolveRequestContext: ResolveRequestContext;
   authorizer: Authorizer;
+}
+
+/**
+ * One activity log row for a firing, keyed on the chat the run belongs to, so a schedule that ran
+ * is visible beside the actions taken in chats. A failed write is only logged: it never changes
+ * the run, which has already started.
+ */
+async function recordScheduleFiring(input: {
+  audit: AuditLogWriter | null | undefined;
+  logger: Logger;
+  item: ScheduleDispatchItem;
+  session_id: string;
+  tool_name: string;
+  description: string;
+}): Promise<void> {
+  if (input.audit === undefined || input.audit === null) {
+    return;
+  }
+  try {
+    await input.audit.record({
+      tenant_id: input.item.schedule.tenant_id,
+      created_by: input.item.schedule.created_by_subject.subject_id,
+      conversation_id: input.session_id,
+      tier: 1,
+      tool_name: input.tool_name,
+      description: input.description,
+      outcome: 'logged',
+      auto_deny_reason: null,
+    });
+  } catch (error) {
+    input.logger.warn('Could not record a schedule firing in the activity log', {
+      schedule_id: input.item.schedule.id,
+      run_id: input.item.run.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 /**
@@ -141,13 +209,31 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
 }): Promise<void> {
   const { c, item, deps } = params;
   if (item.schedule.manifest.kind === 'reminder') {
-    // A reminder needs no model: the host writes its line into the Reminders chat itself.
-    await deliverReminder({
+    // A reminder needs no model: the host puts it in the feed and writes its line into the chat it was set in.
+    const delivered = await deliverReminder({
       item,
-      sessions: deps.sessions,
       sessionStore: deps.sessionStore,
-      agentStore: deps.agentStore,
       now: new Date(),
+      deliveries: deps.deliveryService,
+      reach: deps.reminderReach,
+      logger: deps.logger,
+      // A reminder line is a finished turn like any other, so it joins the past-chat search once it is written.
+      onLineWritten: async line => {
+        await deps.chatSearchIndexer?.indexFinishedTurn({
+          tenant_id: item.schedule.tenant_id,
+          created_by: item.schedule.created_by_subject.subject_id,
+          session_id: line.session_id,
+          turn_id: line.turn_id,
+        });
+      },
+    });
+    await recordScheduleFiring({
+      audit: deps.audit,
+      logger: deps.logger,
+      item,
+      session_id: delivered.session_id ?? '',
+      tool_name: SET_REMINDER_TOOL_NAME,
+      description: `The reminder ran: ${item.schedule.manifest.task}`,
     });
     return;
   }
@@ -161,6 +247,14 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
   if (prepared === undefined) {
     return;
   }
+  await recordScheduleFiring({
+    audit: deps.audit,
+    logger: deps.logger,
+    item,
+    session_id: prepared.session.session_id,
+    tool_name: CREATE_SCHEDULE_TOOL_NAME,
+    description: `The schedule "${item.schedule.name}" ran.`,
+  });
   const personalizationProfile = await deps.personalizationStore.getProfile({
     tenant_id: item.schedule.tenant_id,
     created_by: prepared.userRef,
@@ -208,6 +302,7 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
     userRef: prepared.userRef,
     // Nobody watches a scheduled run, so it holds what would ask instead of stopping at a card.
     unattended: true,
+    withheldTools: scheduleWithheldTools({ name: item.schedule.name, task: item.schedule.manifest.task }),
     deps: {
       mcpCatalog: deps.mcpCatalog,
       activeTurns: deps.activeTurns,
@@ -220,6 +315,7 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
       skillStore: deps.resolveSkillStore(c),
       tokenStore: deps.tokenStore,
       repositoryStore: deps.repositoryStore,
+      sentinelSettingsStore: deps.sentinelSettingsStore,
       sessionStore: deps.sessionStore,
       spaceStore: deps.spaceStore,
       googleConnectionStore: deps.googleConnectionStore,
@@ -227,6 +323,8 @@ export async function startScheduleRunOnRequest<TTransaction>(params: {
       sandboxProviderResolver: deps.sandboxProviderResolver,
       globalSettingsStore: deps.globalSettingsStore,
       tokenFactoryBudget: deps.tokenFactoryBudget,
+      chatDeletionStore: deps.chatDeletionStore,
+      chatSearchIndexer: deps.chatSearchIndexer,
       personalizationProfile,
       personaContext: prepared.persona === undefined ? undefined : buildPersonaContext(prepared.persona),
       memoryClient,
@@ -322,8 +420,7 @@ export function createScheduleExecutionRouter<TTransaction>(deps: ScheduleTurnEx
         error instanceof ScheduleRunNotFoundError ||
         error instanceof ScheduleNotFoundError ||
         error instanceof ScheduleAgentNotFoundError ||
-        error instanceof SchedulePersonaNotFoundError ||
-        error instanceof ReminderAgentNotFoundError
+        error instanceof SchedulePersonaNotFoundError
       ) {
         return c.json({ error: { message: error.message } }, 404);
       }
@@ -469,8 +566,7 @@ export function createSchedulesRouter<TTransaction>(deps: SchedulesRouterDeps<TT
         error instanceof ScheduleRunNotFoundError ||
         error instanceof ScheduleNotFoundError ||
         error instanceof ScheduleAgentNotFoundError ||
-        error instanceof SchedulePersonaNotFoundError ||
-        error instanceof ReminderAgentNotFoundError
+        error instanceof SchedulePersonaNotFoundError
       ) {
         return c.json({ error: { message: error.message } }, 404);
       }
@@ -514,7 +610,8 @@ export function createSchedulesRouter<TTransaction>(deps: SchedulesRouterDeps<TT
             agent_name: agent.name,
             name: body.name,
             persona_id: null,
-            manifest: body.manifest,
+            // Only a reminder set in a chat records the chat it lands in; see ScheduleToolSet.
+            manifest: { ...body.manifest, origin_session_id: null },
             created_by_subject: createdBySubjectFromRequestContext(requestContext),
             runFrom: new Date(),
           },
@@ -595,7 +692,8 @@ export function createSchedulesRouter<TTransaction>(deps: SchedulesRouterDeps<TT
             tenant_id: requestContext.tenant_id,
             id: scheduleId,
             name: body.name,
-            manifest: body.manifest,
+            // An edit keeps the chat the reminder was set in; callers cannot move it to another chat.
+            manifest: { ...body.manifest, origin_session_id: existing.manifest.origin_session_id },
             runFrom: new Date(),
           },
           transaction,
@@ -616,6 +714,142 @@ export function createSchedulesRouter<TTransaction>(deps: SchedulesRouterDeps<TT
       return c.json({ error: { message: `Schedule not found: ${scheduleId}` } }, 404);
     }
     return c.json({ data: await toWireOneSchedule({ record, tenant_id: requestContext.tenant_id, deps }) }, 200);
+  };
+
+  /** The agent a schedule is bound to, which holds the tools it runs with. */
+  const scheduleAgent = async (record: ScheduleRecord): Promise<AgentRecord | undefined> =>
+    deps.agentStore.getAgent({ tenant_id: record.tenant_id, id: record.agent_id });
+
+  const getToolsHandler: RouteHandler<typeof getScheduleToolsRoute> = async c => {
+    const { schedule_id: scheduleId } = c.req.valid('param');
+    const requestContext = deps.resolveRequestContext(c);
+    const record = await deps.scheduleStore.getSchedule({ tenant_id: requestContext.tenant_id, id: scheduleId });
+    if (record === undefined) {
+      return c.json({ error: { message: `Schedule not found: ${scheduleId}` } }, 404);
+    }
+    if (
+      !(await canReadAgentBoundResource({
+        store: deps.resolveAgentStore(c),
+        context: requestContext,
+        authorizer: deps.authorizer,
+        agent_id: record.agent_id,
+        created_by_subject_id: record.created_by_subject.subject_id,
+      }))
+    ) {
+      return c.json({ error: { message: FORBIDDEN_SCHEDULE_ACCESS } }, 403);
+    }
+    const agent = await scheduleAgent(record);
+    if (agent === undefined) {
+      return c.json({ error: { message: `Agent not found: ${record.agent_name}` } }, 404);
+    }
+    return c.json({ data: scheduleToolsOf({ schedule: record, agent }) }, 200);
+  };
+
+  /**
+   * Gives the schedule its own agent built from its current one with only the tools swapped, then points the
+   * schedule at it. A saved agent is never edited, because other chats and schedules use it. The agent is made
+   * the way a chat schedule's is, so schedules with the same setup share it.
+   */
+  const putToolsHandler: RouteHandler<typeof putScheduleToolsRoute> = async c => {
+    const { schedule_id: scheduleId } = c.req.valid('param');
+    const tools = c.req.valid('json');
+    const requestContext = deps.resolveRequestContext(c);
+    const existing = await deps.scheduleStore.getSchedule({ tenant_id: requestContext.tenant_id, id: scheduleId });
+    if (existing === undefined) {
+      return c.json({ error: { message: `Schedule not found: ${scheduleId}` } }, 404);
+    }
+    if (!isScheduleOwner(requestContext, existing.created_by_subject.subject_id)) {
+      return c.json({ error: { message: FORBIDDEN_SCHEDULE_ACCESS } }, 403);
+    }
+    const current = await scheduleAgent(existing);
+    if (current === undefined) {
+      return c.json({ error: { message: `Agent not found: ${existing.agent_name}` } }, 404);
+    }
+    if (scheduleToolsOf({ schedule: existing, agent: current }).source === 'saved_agent') {
+      return c.json(
+        {
+          error: {
+            message: `The tools of this schedule come from the agent ${current.name}. Change them on that agent's page.`,
+          },
+        },
+        409,
+      );
+    }
+    if (tools.skills.length > 0 && !tools.sandbox_enabled) {
+      return c.json({ error: { message: 'Skills need the sandbox. Turn the sandbox on or remove the skills.' } }, 422);
+    }
+    const next = specWithTools({ spec: current.manifest, tools });
+    if (!next.ok) {
+      return c.json({ error: { message: next.message } }, 422);
+    }
+    try {
+      await validateAgentSpec({
+        spec: next.spec,
+        tenant_id: requestContext.tenant_id,
+        modelProviderStore: deps.resolveModelProviderStore(c, current),
+        mcpServerStore: deps.resolveMcpServerStore(c, current),
+        skillStore: deps.resolveSkillStore(c),
+        sandboxProviderStore: deps.resolveSandboxProviderStore(c),
+        searchProviderPresetNames: deps.mcpCatalog.searchProviderPresetNames(),
+      });
+    } catch (error) {
+      if (error instanceof HTTPException && error.status === 422) {
+        return c.json(
+          { error: { message: `${error.message}. Pick from the tools the form lists, then save again.` } },
+          422,
+        );
+      }
+      throw error;
+    }
+    let agent: AgentRecord;
+    try {
+      agent = await getOrCreateChatAssistantAgent({
+        tenant_id: requestContext.tenant_id,
+        owner: existing.created_by_subject,
+        name: chatAssistantAgentName({ owner: existing.created_by_subject, spec: next.spec }),
+        spec: next.spec,
+        agentStore: deps.agentStore,
+      });
+    } catch (error) {
+      if (error instanceof ChatAssistantUnavailableError) {
+        return c.json({ error: { message: error.message } }, 409);
+      }
+      throw error;
+    }
+
+    let record: ScheduleRecord | undefined;
+    try {
+      record = await deps.withTransaction(async transaction => {
+        const result = await deps.scheduleStore.updateScheduleAndRun(
+          {
+            tenant_id: requestContext.tenant_id,
+            id: scheduleId,
+            name: existing.name,
+            manifest: existing.manifest,
+            agent: { agent_id: agent.id, agent_name: agent.name },
+            runFrom: new Date(),
+          },
+          transaction,
+        );
+        return result?.schedule;
+      });
+    } catch (error) {
+      if (error instanceof ScheduleNameConflictError) {
+        return c.json(
+          {
+            error: {
+              message: 'You already have a schedule with this name and these tools. Rename one, then try again.',
+            },
+          },
+          409,
+        );
+      }
+      throw error;
+    }
+    if (record === undefined) {
+      return c.json({ error: { message: `Schedule not found: ${scheduleId}` } }, 404);
+    }
+    return c.json({ data: scheduleToolsOf({ schedule: record, agent }) }, 200);
   };
 
   const deleteHandler: RouteHandler<typeof deleteScheduleRoute> = async c => {
@@ -645,6 +879,8 @@ export function createSchedulesRouter<TTransaction>(deps: SchedulesRouterDeps<TT
   router.openapi(createScheduleRoute, createHandler);
   router.openapi(getScheduleRoute, getHandler);
   router.openapi(putScheduleRoute, putHandler);
+  router.openapi(getScheduleToolsRoute, getToolsHandler);
+  router.openapi(putScheduleToolsRoute, putToolsHandler);
   router.openapi(deleteScheduleRoute, deleteHandler);
   return router;
 }

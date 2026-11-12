@@ -23,7 +23,11 @@ async function freePort(): Promise<number> {
   return port;
 }
 
-/** Plain http request, because fetch will not let a caller override the Host header. */
+/**
+ * Plain http request, because fetch will not let a caller override the Host header. It dials
+ * `localhost`, the HOST the server was started with: the server binds the first address localhost
+ * resolves to, which is ::1 on hosts with IPv6 loopback (the CI runners), so 127.0.0.1 is refused there.
+ */
 function statusOf(options: {
   port: number;
   method: string;
@@ -32,7 +36,7 @@ function statusOf(options: {
 }): Promise<number> {
   return new Promise((resolve, reject) => {
     const req = request(
-      { host: '127.0.0.1', port: options.port, method: options.method, path: options.path, headers: options.headers },
+      { host: 'localhost', port: options.port, method: options.method, path: options.path, headers: options.headers },
       res => {
         res.resume();
         resolve(res.statusCode ?? 0);

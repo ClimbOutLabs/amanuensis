@@ -2,10 +2,11 @@
 
 /** calendar_unavailable: Gmail answered but Google Calendar did not, usually because its API is off. */
 export const TestGoogleConnectionResultResult = {
-        Ok: "ok",
-        NotConnected: "not_connected",
-        NeedsReconnect: "needs_reconnect",
-        Unreachable: "unreachable",
-        CalendarUnavailable: "calendar_unavailable"
-    } as const;
-export type TestGoogleConnectionResultResult = typeof TestGoogleConnectionResultResult[keyof typeof TestGoogleConnectionResultResult];
+    Ok: "ok",
+    NotConnected: "not_connected",
+    NeedsReconnect: "needs_reconnect",
+    Unreachable: "unreachable",
+    CalendarUnavailable: "calendar_unavailable",
+} as const;
+export type TestGoogleConnectionResultResult =
+    (typeof TestGoogleConnectionResultResult)[keyof typeof TestGoogleConnectionResultResult];

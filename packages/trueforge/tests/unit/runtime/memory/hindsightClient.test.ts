@@ -14,7 +14,7 @@ describe('HindsightClient', () => {
     it('maps a successful response into results and entities', async () => {
       const fetchImpl = jest.fn().mockResolvedValue(
         jsonResponse({
-          results: [{ id: '1', text: 'Alex likes tea', type: 'world', occurred_start: '2026-08-14T00:00:00Z' }],
+          results: [{ id: '1', text: 'Alex likes tea', occurred_start: '2026-08-14T00:00:00Z' }],
           entities: {
             Robin: { canonical_name: 'Robin', observations: [{ text: 'is Alex’s wife', mentioned_at: '2026-08-01' }] },
           },
@@ -37,7 +37,7 @@ describe('HindsightClient', () => {
 
       expect(outcome).toEqual({
         ok: true,
-        results: [{ id: '1', text: 'Alex likes tea', type: 'world', occurred_start: '2026-08-14T00:00:00Z' }],
+        results: [{ id: '1', text: 'Alex likes tea', occurred_start: '2026-08-14T00:00:00Z' }],
         entities: [
           {
             name: 'Robin',
@@ -56,6 +56,42 @@ describe('HindsightClient', () => {
         prefer_observations: true,
         include: { entities: { max_tokens: 512 } },
       });
+    });
+
+    it('leaves out items retained from the current chat and keeps other chats', async () => {
+      const fetchImpl = jest.fn().mockImplementation(async () =>
+        jsonResponse({
+          results: [
+            { id: '1', text: 'Discussed a follow-up', metadata: { session_id: 'chat-now' } },
+            {
+              id: '2',
+              text: 'Landlord was told about the heater',
+
+              metadata: { session_id: 'chat-old' },
+            },
+            { id: '3', text: 'Older note with no chat recorded' },
+          ],
+          entities: {},
+        }),
+      );
+      const client = new HindsightClient({
+        apiBase: 'https://hindsight.example',
+        bank: 'aman',
+        headers: {},
+        fetchImpl,
+      });
+      const params = {
+        query: 'follow-up',
+        maxTokens: 2048,
+        entityTokens: 0,
+        queryTimestamp: '2026-10-26T00:00:00Z',
+        timeoutMs: 2500,
+      };
+
+      const during = await client.recall({ ...params, currentSessionId: 'chat-now' });
+      expect(during.ok && during.results.map(item => item.id)).toEqual(['2', '3']);
+      const elsewhere = await client.recall({ ...params, currentSessionId: 'chat-3' });
+      expect(elsewhere.ok && elsewhere.results.map(item => item.id)).toEqual(['1', '2', '3']);
     });
 
     it('returns ok:false on timeout', async () => {
@@ -85,7 +121,7 @@ describe('HindsightClient', () => {
 
     it('returns ok:false when the response exceeds the configured byte cap', async () => {
       const oversizedBody = JSON.stringify({
-        results: Array.from({ length: 50 }, () => ({ id: 'x', text: 'x'.repeat(50), type: 'world' })),
+        results: Array.from({ length: 50 }, () => ({ id: 'x', text: 'x'.repeat(50) })),
       });
       const fetchImpl = jest.fn().mockResolvedValue(
         new Response(oversizedBody, {
@@ -382,12 +418,7 @@ describe('HindsightClient', () => {
     it('drops malformed result entries and entity observations, sanitizing the ones that survive', async () => {
       const fetchImpl = jest.fn().mockResolvedValue(
         jsonResponse({
-          results: [
-            null,
-            42,
-            { id: 'x', type: 'world' },
-            { id: 'y', text: 'valid text', type: 'world', occurred_start: 12345 },
-          ],
+          results: [null, 42, { id: 'x' }, { id: 'y', text: 'valid text', occurred_start: 12345 }],
           entities: {
             Robin: {
               canonical_name: 'Robin',
@@ -413,7 +444,7 @@ describe('HindsightClient', () => {
 
       expect(outcome).toEqual({
         ok: true,
-        results: [{ id: 'y', text: 'valid text', type: 'world' }],
+        results: [{ id: 'y', text: 'valid text' }],
         entities: [{ name: 'Robin', canonical_name: 'Robin', observations: [{ text: 'is Alex’s wife' }] }],
       });
     });
@@ -422,10 +453,10 @@ describe('HindsightClient', () => {
       const fetchImpl = jest.fn().mockResolvedValue(
         jsonResponse({
           results: [
-            { id: '1', text: 'scored high', type: 'world', score: 0.92 },
-            { id: '2', text: 'scored low', type: 'world', score: 0.1 },
-            { id: '3', text: 'not a number', type: 'world', score: 'high' },
-            { id: '4', text: 'not finite', type: 'world', score: Number.NaN },
+            { id: '1', text: 'scored high', score: 0.92 },
+            { id: '2', text: 'scored low', score: 0.1 },
+            { id: '3', text: 'not a number', score: 'high' },
+            { id: '4', text: 'not finite', score: Number.NaN },
           ],
           entities: {
             Acme: { canonical_name: 'Acme', observations: [{ text: 'is a company' }], score: 0.7 },
@@ -451,10 +482,10 @@ describe('HindsightClient', () => {
       expect(outcome).toEqual({
         ok: true,
         results: [
-          { id: '1', text: 'scored high', type: 'world', score: 0.92 },
-          { id: '2', text: 'scored low', type: 'world', score: 0.1 },
-          { id: '3', text: 'not a number', type: 'world' },
-          { id: '4', text: 'not finite', type: 'world' },
+          { id: '1', text: 'scored high', score: 0.92 },
+          { id: '2', text: 'scored low', score: 0.1 },
+          { id: '3', text: 'not a number' },
+          { id: '4', text: 'not finite' },
         ],
         entities: [
           { name: 'Acme', canonical_name: 'Acme', observations: [{ text: 'is a company' }], score: 0.7 },
@@ -486,6 +517,38 @@ describe('HindsightClient', () => {
       });
 
       expect(outcome).toEqual({ ok: true, results: [], entities: [] });
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+    });
+
+    it('names the timeout the caller asked for when a retry runs out of time', async () => {
+      const fetchImpl = jest
+        .fn()
+        .mockImplementationOnce(async () => {
+          // The first answer takes a moment, so the retry has less than the full time left.
+          await new Promise(resolve => setTimeout(resolve, 10));
+          return jsonResponse({ detail: 'lane saturated' }, { status: 503, headers: { 'retry-after': '0' } });
+        })
+        .mockImplementationOnce(() => {
+          const error = new Error('The operation was aborted');
+          error.name = 'TimeoutError';
+          return Promise.reject(error);
+        });
+      const client = new HindsightClient({
+        apiBase: 'https://hindsight.example',
+        bank: 'aman',
+        headers: {},
+        fetchImpl,
+      });
+
+      const outcome = await client.recall({
+        query: 'q',
+        maxTokens: 100,
+        entityTokens: 10,
+        queryTimestamp: '2026-08-30T00:00:00Z',
+        timeoutMs: 5000,
+      });
+
+      expect(outcome).toEqual({ ok: false, code: 'timeout', reason: 'request timed out after 5000ms' });
       expect(fetchImpl).toHaveBeenCalledTimes(2);
     });
 
@@ -579,27 +642,33 @@ describe('HindsightClient', () => {
       }
     });
 
-    it('stops retrying once the caller timeout is exhausted and reports the 503', async () => {
-      const fetchImpl = jest
-        .fn()
-        .mockResolvedValue(jsonResponse({ detail: 'busy' }, { status: 503, headers: { 'retry-after': '30' } }));
-      const client = new HindsightClient({
-        apiBase: 'https://hindsight.example',
-        bank: 'aman',
-        headers: {},
-        fetchImpl,
-      });
+    it('reports the 503 without waiting when Retry-After outlasts the caller timeout', async () => {
+      jest.useFakeTimers();
+      try {
+        const fetchImpl = jest
+          .fn()
+          .mockResolvedValueOnce(jsonResponse({ detail: 'busy' }, { status: 503, headers: { 'retry-after': '30' } }));
+        const client = new HindsightClient({
+          apiBase: 'https://hindsight.example',
+          bank: 'aman',
+          headers: {},
+          fetchImpl,
+        });
 
-      const outcome = await client.recall({
-        query: 'q',
-        maxTokens: 100,
-        entityTokens: 10,
-        queryTimestamp: '2026-08-30T00:00:00Z',
-        timeoutMs: 100,
-      });
+        // No timers are advanced, so this resolves only if the client does not sleep.
+        const outcome = await client.recall({
+          query: 'q',
+          maxTokens: 100,
+          entityTokens: 10,
+          queryTimestamp: '2026-08-30T00:00:00Z',
+          timeoutMs: 100,
+        });
 
-      expect(outcome).toMatchObject({ ok: false, code: 'http_error', httpStatus: 503 });
-      expect(fetchImpl).toHaveBeenCalledTimes(1);
+        expect(outcome).toMatchObject({ ok: false, code: 'http_error', httpStatus: 503 });
+        expect(fetchImpl).toHaveBeenCalledTimes(1);
+      } finally {
+        jest.useRealTimers();
+      }
     });
   });
 
@@ -789,6 +858,25 @@ describe('HindsightClient', () => {
       expect(String(fetchImpl.mock.calls[1]?.[0])).toBe('https://hindsight.example/v1/default/banks/aman/profile');
     });
 
+    it('names the timeout the caller asked for when the legacy read runs out of time', async () => {
+      const fetchImpl = jest
+        .fn()
+        .mockImplementationOnce(async () => {
+          await new Promise(resolve => setTimeout(resolve, 10));
+          return jsonResponse({ detail: 'Bank configuration API is disabled' }, { status: 404 });
+        })
+        .mockImplementationOnce(() => {
+          const error = new Error('The operation was aborted');
+          error.name = 'TimeoutError';
+          return Promise.reject(error);
+        });
+
+      const outcome = await makeProfileClient(fetchImpl).getProfile(5000);
+
+      expect(outcome).toEqual({ ok: false, code: 'timeout', reason: 'request timed out after 5000ms' });
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+    });
+
     it('reports the config 404 when the legacy endpoint is also gone (410)', async () => {
       const fetchImpl = jest
         .fn()
@@ -968,6 +1056,42 @@ describe('HindsightClient', () => {
 
       expect(outcome).toEqual({ ok: true, text: 'done', basedOn: 0 });
       expect(fetchImpl).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('deleteDocument', () => {
+    function clientWith(fetchImpl: jest.Mock): HindsightClient {
+      return new HindsightClient({ apiBase: 'https://hindsight.example', bank: 'aman', headers: {}, fetchImpl });
+    }
+
+    it('sends a DELETE for the encoded document id', async () => {
+      const fetchImpl = jest.fn().mockResolvedValue(new Response(null, { status: 204 }));
+
+      const outcome = await clientWith(fetchImpl).deleteDocument({
+        documentId: 'aman-learned/profile',
+        timeoutMs: 1000,
+      });
+
+      expect(outcome).toEqual({ ok: true });
+      const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe('https://hindsight.example/v1/default/banks/aman/documents/aman-learned%2Fprofile');
+      expect(init.method).toBe('DELETE');
+    });
+
+    it('reads a 404 as done and says the document was already gone', async () => {
+      const fetchImpl = jest.fn().mockResolvedValue(jsonResponse({ detail: 'missing' }, { status: 404 }));
+
+      const outcome = await clientWith(fetchImpl).deleteDocument({ documentId: 'gone', timeoutMs: 1000 });
+
+      expect(outcome).toEqual({ ok: true, reason: 'document not found' });
+    });
+
+    it('reports a server error as a failure', async () => {
+      const fetchImpl = jest.fn().mockResolvedValue(jsonResponse({ detail: 'broken' }, { status: 500 }));
+
+      const outcome = await clientWith(fetchImpl).deleteDocument({ documentId: 'doc', timeoutMs: 1000 });
+
+      expect(outcome.ok).toBe(false);
     });
   });
 });

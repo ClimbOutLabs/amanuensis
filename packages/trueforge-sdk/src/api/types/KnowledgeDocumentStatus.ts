@@ -2,10 +2,10 @@
 
 /** Where the document is in the background indexing pipeline. */
 export const KnowledgeDocumentStatus = {
-        Pending: "pending",
-        Parsing: "parsing",
-        Indexing: "indexing",
-        Ready: "ready",
-        Failed: "failed"
-    } as const;
-export type KnowledgeDocumentStatus = typeof KnowledgeDocumentStatus[keyof typeof KnowledgeDocumentStatus];
+    Pending: "pending",
+    Parsing: "parsing",
+    Indexing: "indexing",
+    Ready: "ready",
+    Failed: "failed",
+} as const;
+export type KnowledgeDocumentStatus = (typeof KnowledgeDocumentStatus)[keyof typeof KnowledgeDocumentStatus];

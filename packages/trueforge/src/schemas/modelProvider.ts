@@ -232,6 +232,7 @@ export function refineModelProviderManifest(
 }
 
 export type ModelProperties = z.infer<typeof ModelPropertiesSchema>;
+export type ConfiguredModel = z.infer<typeof ConfiguredModelSchema>;
 
 /**
  * Configured provider jsonb (`model_provider.manifest`). Only `custom` carries a name, so the

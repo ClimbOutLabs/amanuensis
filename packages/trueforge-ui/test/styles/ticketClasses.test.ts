@@ -54,4 +54,17 @@ describe('B2 look styles', () => {
   it('no longer defines the retired approval banner tokens', () => {
     expect(css).not.toContain('approval-banner');
   });
+
+  it('sizes the row when/meta/action text and the chip on the --text-xs scale step', () => {
+    const ruleOf = (selector: string): string => {
+      const start = b2Section.indexOf(`\n${selector} {`);
+      expect(start, selector).toBeGreaterThanOrEqual(0);
+      return b2Section.slice(start, b2Section.indexOf('}', start) + 1);
+    };
+    expect(ruleOf('.aui-row > .when')).toMatch(/font-size: var\(--text-xs\);/);
+    expect(ruleOf('.aui-row > .text .meta')).toMatch(/font-size: var\(--text-xs\);/);
+    expect(ruleOf('.aui-row > .action')).toMatch(/font-size: var\(--text-xs\);/);
+    expect(ruleOf('.aui-chip')).toMatch(/font-size: var\(--text-xs\);/);
+    expect(b2Section).not.toMatch(/font-size:\s*0\.7[0-9]*rem/);
+  });
 });

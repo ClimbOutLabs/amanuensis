@@ -1,0 +1,9 @@
+{
+  "schema": "1",
+  "source_ref": "abc123def4567890",
+  "app_image": "aman-app:abc123def456",
+  "stt_image": "aman-stt:abc123def456",
+  "calendar_image": "aman-calendar-caldav:abc123def456",
+  "dex_image": "ghcr.io/example/dex@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "mail_email_image": "ghcr.io/example/mail@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+}

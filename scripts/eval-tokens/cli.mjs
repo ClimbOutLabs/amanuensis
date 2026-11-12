@@ -53,9 +53,11 @@ export class UsageProblem extends Error {
 
 /**
  * pnpm passes a leading `--` through to the script, so it is dropped here.
+ * `--keep` is accepted only for runners that leave things behind to clean up (`pnpm eval:spaces`).
  * @param {readonly string[]} argv
+ * @param {{ allowKeep?: boolean }} [options]
  */
-export function parseRunnerArgs(argv) {
+export function parseRunnerArgs(argv, { allowKeep = false } = {}) {
   let parsed;
   try {
     parsed = parseArgs({
@@ -70,6 +72,7 @@ export function parseRunnerArgs(argv) {
         temperature: { type: 'string' },
         set: { type: 'string' },
         out: { type: 'string' },
+        ...(allowKeep ? { keep: { type: 'boolean' } } : {}),
         help: { type: 'boolean', short: 'h' },
       },
     });
@@ -115,6 +118,7 @@ export function parseRunnerArgs(argv) {
     temperature,
     setPath: values.set,
     outDir: values.out,
+    keep: values.keep === true,
   };
 }
 

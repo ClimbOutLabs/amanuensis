@@ -123,6 +123,7 @@ describe('drainTurnEvents awaits the TURN_DONE submissions', () => {
       const personalizationStore = new SqlitePersonalizationStore(db);
       await seedProfile({ store: personalizationStore });
       const profileLearning: ProfileLearningDrainMember = {
+        session: { is_incognito: false },
         config: passConfig(),
         personalizationStore,
         eventStore: new RecordingEventStore(),
@@ -186,7 +187,7 @@ describe('drainTurnEvents awaits the TURN_DONE submissions', () => {
         executionDeadline,
         logger: winston.createLogger({ silent: true }),
         turnDrains,
-        memory: { client: memoryClient, userText: 'hi', attachedFiles: false, sessionTitle: undefined },
+        memory: { session: { is_incognito: false }, client: memoryClient, userText: 'hi', attachedFiles: false },
         profileLearning,
         artifacts: {
           turnArtifactStore: new SqliteTurnArtifactStore(db),
@@ -295,7 +296,7 @@ describe('drainTurnEvents awaits the TURN_DONE submissions', () => {
       logger: winston.createLogger({ silent: true }),
       turnDrains: new TurnDrainRegistry(),
       modelUsage: { ledger, eventStore },
-      memory: { client: memoryClient, userText: 'hi', attachedFiles: false, sessionTitle: undefined },
+      memory: { session: { is_incognito: false }, client: memoryClient, userText: 'hi', attachedFiles: false },
     });
 
     expect(appendsWhenRetainStarted).toEqual([1]);

@@ -10,6 +10,7 @@ import {
   TextRun,
   WidthType,
 } from 'docx';
+import { ReportInputError } from './reportInputError';
 
 export type StructuredReportRowStatus = 'included' | 'conflict' | 'uncertain' | 'info';
 
@@ -57,26 +58,26 @@ function compactLimitMessage(): string {
 
 function assertReportBounds(report: StructuredDocumentReport, mode: DocumentReportMode): void {
   if (report.title.trim().length === 0 || report.title.length > 120) {
-    throw new Error('Report title must contain 1-120 characters');
+    throw new ReportInputError('Report title must contain 1-120 characters');
   }
   if (report.summary.length > 500) {
-    throw new Error('Report summary exceeds 500 characters');
+    throw new ReportInputError('Report summary exceeds 500 characters');
   }
   if (mode === 'compact') {
     if (report.sections.length > DOCUMENT_REPORT_MAX_SECTIONS || report.notes.length > DOCUMENT_REPORT_MAX_NOTES) {
-      throw new Error(compactLimitMessage());
+      throw new ReportInputError(compactLimitMessage());
     }
     const rowCount = report.sections.reduce((count, section) => count + section.rows.length, 0);
     if (rowCount > DOCUMENT_REPORT_MAX_ROWS) {
-      throw new Error(compactLimitMessage());
+      throw new ReportInputError(compactLimitMessage());
     }
   }
   if (report.notes.some(note => note.length > DOCUMENT_REPORT_MAX_NOTE_LENGTH)) {
-    throw new Error('Report note exceeds the bounded renderer contract');
+    throw new ReportInputError(`Report note exceeds ${String(DOCUMENT_REPORT_MAX_NOTE_LENGTH)} characters`);
   }
   for (const section of report.sections) {
     if (section.heading.length > 80) {
-      throw new Error('Report section heading exceeds 80 characters');
+      throw new ReportInputError('Report section heading exceeds 80 characters');
     }
     for (const row of section.rows) {
       if (
@@ -85,7 +86,9 @@ function assertReportBounds(report: StructuredDocumentReport, mode: DocumentRepo
         row.sources.length > 8 ||
         row.sources.some(source => source.length > DOCUMENT_REPORT_MAX_SOURCE_LENGTH)
       ) {
-        throw new Error('Report row exceeds the bounded renderer contract');
+        throw new ReportInputError(
+          `Report row exceeds its caps: label 160 characters, value 240, at most 8 sources of ${String(DOCUMENT_REPORT_MAX_SOURCE_LENGTH)} characters each`,
+        );
       }
     }
   }

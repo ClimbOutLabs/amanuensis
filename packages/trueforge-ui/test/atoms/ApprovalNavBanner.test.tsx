@@ -31,6 +31,15 @@ describe('ApprovalNavBanner', () => {
 
     expect(onFocusCurrent).toHaveBeenCalledOnce();
   });
+
+  it('sets the card title apart by weight, at the banner size, with no serif and no size jump', () => {
+    render(<ApprovalNavBanner total={1} assistantName="Mannie" title="Send this reply?" onFocusCurrent={() => {}} />);
+
+    const title = screen.getByText('Send this reply?');
+    expect(title).toHaveClass('font-semibold');
+    expect(title).not.toHaveClass('font-serif');
+    expect(title.className).not.toMatch(/text-\[|font-serif/);
+  });
 });
 
 describe('approvalBannerLabel', () => {

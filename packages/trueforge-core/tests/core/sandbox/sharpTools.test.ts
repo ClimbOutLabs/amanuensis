@@ -248,9 +248,11 @@ describe('T8 sharp sandbox tools', () => {
     expect(script.content.toString('utf-8')).toContain('os.O_EXCL');
     expect(script.content.toString('utf-8')).toContain('os.link');
     expect(script.content.toString('utf-8')).toContain('os.fsync(parent_fd)');
+    // Every folder on the path, including the workspace itself, is opened without following links.
     expect(script.content.toString('utf-8')).toContain(
-      'os.open(workspace_cwd, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)',
+      'DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW',
     );
+    expect(script.content.toString('utf-8')).toContain('os.open(workspace_cwd, DIRECTORY_FLAGS)');
     const writeCalls = exec.mock.calls.filter(callArgs => callArgs[0].command.startsWith('python3 '));
     expect(writeCalls).toHaveLength(1);
     expect(writeCalls[0]?.[0].cwd).toBeUndefined();

@@ -12,9 +12,11 @@ import {
   DeleteScheduleResponseSchema,
   ExecuteScheduleRunRequestSchema,
   GetScheduleResponseSchema,
+  GetScheduleToolsResponseSchema,
   ListScheduleRunsResponseSchema,
   ListSchedulesResponseSchema,
   UpdateScheduleRequestSchema,
+  UpdateScheduleToolsRequestSchema,
 } from '../schemas/schedule';
 import { TOKEN_PAGINATION } from './fernExtensions';
 import { OpenApiTag } from './openapiTags';
@@ -298,6 +300,72 @@ export const putScheduleRoute = createRoute({
     404: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
       description: 'Not found.',
+    },
+  },
+});
+
+export const getScheduleToolsRoute = createRoute({
+  method: 'get',
+  path: '/{schedule_id}/tools',
+  tags: [OpenApiTag.SCHEDULES],
+  summary: 'Get what a schedule runs with',
+  description:
+    'The connectors, skills and sandbox a schedule runs with, and whether they are its own or come from a saved agent.',
+  'x-fern-sdk-group-name': ['schedules'],
+  'x-fern-sdk-method-name': 'get_tools',
+  request: { params: ScheduleIdParamsSchema },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: GetScheduleToolsResponseSchema } },
+      description: 'The schedule tools.',
+    },
+    403: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'The caller cannot read the schedule.',
+    },
+    404: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Not found.',
+    },
+  },
+});
+
+export const putScheduleToolsRoute = createRoute({
+  method: 'put',
+  path: '/{schedule_id}/tools',
+  tags: [OpenApiTag.SCHEDULES],
+  summary: 'Change what a schedule runs with',
+  description:
+    'Replace the connectors, skills and sandbox of a schedule with its own tools. Refused for a schedule that runs as a saved agent.',
+  'x-fern-sdk-group-name': ['schedules'],
+  'x-fern-sdk-method-name': 'update_tools',
+  request: {
+    params: ScheduleIdParamsSchema,
+    body: {
+      content: { 'application/json': { schema: UpdateScheduleToolsRequestSchema } },
+      required: true,
+    },
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: GetScheduleToolsResponseSchema } },
+      description: 'The updated schedule tools.',
+    },
+    403: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'The caller is not the schedule creator.',
+    },
+    404: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Not found.',
+    },
+    409: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'The schedule runs as a saved agent, or another schedule already has this name with these tools.',
+    },
+    422: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'A connector or skill is not available, or skills are chosen without the sandbox.',
     },
   },
 });

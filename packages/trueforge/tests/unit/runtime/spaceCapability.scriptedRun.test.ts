@@ -11,11 +11,11 @@ import {
   EDIT_SPACE_TOOL_NAME,
   GET_SPACE_TOOL_NAME,
   LIST_SPACES_TOOL_NAME,
-  UPDATE_SPACE_TOOL_NAME,
 } from '@truefoundry/trueforge-core/core/spaces/toolContract';
 import type { SpaceRecord } from '../../../src/db/spaceStore';
 import { spaceCapability, type SpaceToolStore } from '../../../src/runtime/spaceCapability';
 import { isRecord } from '../../fixtures/jsonGuards';
+import { noSpaceFolders } from './spaceFolderStoreFake';
 
 /**
  * The owner's Oct 21 request, run as a scripted model: the calls a well-behaved model makes,
@@ -159,6 +159,7 @@ function makeStore(): SpaceToolStore {
       throw new Error('not used in this run');
     },
     getSpace: async input => rows.get(input.space_id),
+    ...noSpaceFolders,
     getSpaceRevision: async () => undefined,
     listSpacesWithAggregate: async () => ({
       records: [...rows.values()],
@@ -169,8 +170,27 @@ function makeStore(): SpaceToolStore {
   };
 }
 
+/** The fingerprints the get_space outline shows, by anchor: what a model's edits name back. */
+async function outlineFingerprints(
+  call: (name: string, args: Record<string, unknown>) => Promise<CallToolResponse>,
+  spaceName: string,
+): Promise<Map<string, string>> {
+  const read = parsedObject(textOf(await call(GET_SPACE_TOOL_NAME, { space_name: spaceName })));
+  const blocks = read['blocks'];
+  if (!Array.isArray(blocks)) {
+    throw new Error('expected a blocks list in the get_space result');
+  }
+  const fingerprints = new Map<string, string>();
+  for (const block of blocks) {
+    if (isRecord(block)) {
+      fingerprints.set(stringField(block, 'anchor'), stringField(block, 'fingerprint'));
+    }
+  }
+  return fingerprints;
+}
+
 describe('scripted run: top ten dog breeds', () => {
-  it('creates a skeleton, fills each block first try, reads it back, then replaces it with a full table first try', async () => {
+  it('creates a skeleton, fills each block first try, reads it back, then turns it into a full table first try', async () => {
     const capability = spaceCapability({
       store: makeStore(),
       authority: AUTHORITY,
@@ -206,15 +226,21 @@ describe('scripted run: top ten dog breeds', () => {
     expect(createdText).not.toContain('"id"');
     expect(createdText).not.toContain('(id:');
 
-    // Step 3: one block per edit_space call, all addressed by the exact name, each succeeding first try.
+    // Step 3: one block per edit_space call, all addressed by the exact name, each
+    // succeeding first try. The outline from the create revision supplies every
+    // block's fingerprint; each call names the revision its read showed.
+    const skeletonFingerprints = await outlineFingerprints(call, 'Dog breeds');
     for (const [index, breed] of BREEDS.entries()) {
       const revision = index + 2;
+      const anchor = `breed-${String(index + 1)}`;
       const updateResponse = await call(EDIT_SPACE_TOOL_NAME, {
         space_name: 'Dog breeds',
+        expected_revision: index + 1,
         edits: [
           {
             type: 'block',
-            anchor: `breed-${String(index + 1)}`,
+            anchor,
+            fingerprint: skeletonFingerprints.get(anchor) ?? '',
             new_content: [`## ${String(index + 1)}. ${breed}`, `- Intelligence rank: ${String(index + 1)} of 10`].join(
               '\n',
             ),
@@ -237,25 +263,29 @@ describe('scripted run: top ten dog breeds', () => {
     });
     expect(stringField(read, 'body')).not.toContain('(to fill)');
 
-    // Step 5: read the space, then replace it wholesale with a full table, first try:
-    // no refusal, no retry. A full-body update_space call carries the whole new body
-    // as one string, with name, purpose, and status required.
-    const tableBody = [
-      '# Dog breeds',
-      '',
-      'Top ten by working and obedience intelligence.',
-      '',
+    // Step 5: turn the filled sections into a summary table in ONE edit_space call at
+    // the revision the read showed: the first section's block becomes the table and
+    // the other nine are deleted in the same call, first try, no refusal, no retry.
+    // There is no whole-body tool and no search entry: blocks are the only way in.
+    const tableText = [
       '| Rank | Breed |',
       '| --- | --- |',
       ...BREEDS.map((breed, index) => `| ${String(index + 1)} | ${breed} |`),
     ].join('\n');
-    const replacedResponse = await call(UPDATE_SPACE_TOOL_NAME, {
+    const filledFingerprints = await outlineFingerprints(call, 'Dog breeds');
+    const replacedResponse = await call(EDIT_SPACE_TOOL_NAME, {
       space_name: 'Dog breeds',
-      name: 'Dog breeds',
       purpose: 'Top ten dog breeds by intelligence, with other traits.',
-      status: 'active',
-      format: 'markdown',
-      body: tableBody,
+      expected_revision: BREEDS.length + 1,
+      edits: BREEDS.map((_breed, index) => {
+        const anchor = `breed-${String(index + 1)}`;
+        return {
+          type: 'block',
+          anchor,
+          fingerprint: filledFingerprints.get(anchor) ?? '',
+          new_content: index === 0 ? tableText : '',
+        };
+      }),
     });
     expect(isErrorResponse(replacedResponse)).toBe(false);
     const replacedText = textOf(replacedResponse);
@@ -264,18 +294,22 @@ describe('scripted run: top ten dog breeds', () => {
     expect(replacedText).not.toContain('"id"');
     expect(replacedText).not.toContain('(id:');
 
-    // Step 6: read it back again: the table is the whole body now.
+    // Step 6: read it back again: the preamble and the one remaining marker frame the
+    // table; every filled section is gone.
     const reread = fieldObject(
       parsedObject(textOf(await call(GET_SPACE_TOOL_NAME, { space_name: 'Dog breeds' }))),
       'space',
     );
     expect(numberField(reread, 'revision')).toBe(BREEDS.length + 2);
-    expect(stringField(reread, 'body')).toBe(tableBody);
+    const finalBody = stringField(reread, 'body');
+    expect(finalBody.startsWith('# Dog breeds\n\nTop ten by working and obedience intelligence.')).toBe(true);
     BREEDS.forEach((breed, index) => {
-      expect(stringField(reread, 'body')).toContain(`| ${String(index + 1)} | ${breed} |`);
+      expect(finalBody).toContain(`| ${String(index + 1)} | ${breed} |`);
     });
-    expect(stringField(reread, 'body')).not.toContain('(to fill)');
-    expect(stringField(reread, 'body')).not.toContain('<!-- @block:');
+    expect(finalBody).not.toContain('(to fill)');
+    expect(finalBody).not.toContain('Intelligence rank:');
+    expect(finalBody).toContain('<!-- @block:breed-1 -->');
+    expect(finalBody).not.toContain('@block:breed-2');
 
     // Step 7: the final reply is plain prose with no markup in it.
     const finalReply = `I made "Dog breeds" with the top ten by intelligence. The Border Collie ranks first.`;
@@ -283,5 +317,59 @@ describe('scripted run: top ten dog breeds', () => {
       expect(finalReply).not.toContain(marker);
       expect(stringField(reread, 'body')).not.toContain(marker);
     }
+  });
+});
+
+describe('scripted run: a 40-row table built by create plus appends', () => {
+  it('completes with no reads, no fingerprints, and no refused call', async () => {
+    const capability = spaceCapability({
+      store: makeStore(),
+      authority: AUTHORITY,
+      tracing: NOOP_TRACING,
+      webSearch: createWebSearchTurnState(),
+    });
+    const toolSet = capability.systemToolSets?.[0];
+    if (toolSet === undefined) {
+      throw new Error('expected space tool set');
+    }
+    const calls: string[] = [];
+    const call = (name: string, args: Record<string, unknown>) => {
+      calls.push(name);
+      return toolSet.callTool({ name, arguments: args });
+    };
+    const rowFor = (number: number) => `| Breed ${String(number).padStart(2, '0')} | Calm | Moderate | Good |`;
+    const rows = Array.from({ length: 40 }, (_unused, index) => rowFor(index + 1));
+    const header = ['# Smart dogs', '', '| Breed | Temperament | Exercise | Apartment |', '| --- | --- | --- | --- |'];
+
+    const created = await call(CREATE_SPACE_TOOL_NAME, {
+      name: 'Smart dogs',
+      purpose: 'Forty smart dog breeds.',
+      status: 'active',
+      format: 'markdown',
+      body: [...header, ...rows.slice(0, 10)].join('\n'),
+    });
+    expect(isErrorResponse(created)).toBe(false);
+
+    // Each append names only the revision the last result showed and the new rows.
+    let revision = numberField(fieldObject(parsedObject(textOf(created)), 'space'), 'revision');
+    for (let start = 10; start < 40; start += 10) {
+      const appended = await call(EDIT_SPACE_TOOL_NAME, {
+        space_name: 'Smart dogs',
+        expected_revision: revision,
+        edits: [{ type: 'append', new_content: rows.slice(start, start + 10).join('\n') }],
+      });
+      expect(isErrorResponse(appended)).toBe(false);
+      revision = numberField(fieldObject(parsedObject(textOf(appended)), 'space'), 'revision');
+    }
+
+    expect(calls).toEqual([CREATE_SPACE_TOOL_NAME, EDIT_SPACE_TOOL_NAME, EDIT_SPACE_TOOL_NAME, EDIT_SPACE_TOOL_NAME]);
+    // The check read goes around `call` so it is not counted as part of the model's run.
+    const read = fieldObject(
+      parsedObject(
+        textOf(await toolSet.callTool({ name: GET_SPACE_TOOL_NAME, arguments: { space_name: 'Smart dogs' } })),
+      ),
+      'space',
+    );
+    expect(stringField(read, 'body')).toBe([...header, ...rows].join('\n'));
   });
 });

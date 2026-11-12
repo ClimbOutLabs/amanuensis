@@ -112,6 +112,8 @@ describe('createEmailSetupApi', () => {
 
   it('a reply of the wrong shape is dropped, not trusted', async () => {
     const { api } = apiWith(async () => reply({ data: { password: CANARY } }));
-    await expect(api.getEmailStatus()).rejects.toThrow('unexpected email payload');
+    await expect(api.getEmailStatus()).rejects.toThrow(
+      'The server answered in a way this page cannot read. Reload the page, then try again.',
+    );
   });
 });

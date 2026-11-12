@@ -5,61 +5,94 @@ import { TrueForge } from "../../src/Client";
 import { mockServerPool } from "../mock-server/MockServerPool";
 
 describe("HelpClient", () => {
-    
     test("get_health_check (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { "data" : { "checked_at" : "checked_at" , "host_report" : { "checked_at" : "checked_at" , "message" : "message" , "next_step" : "next_step" , "state" : "ok" } , "items" : [ { "id" : "id" , "message" : "message" , "name" : "name" , "next_step" : null , "status" : "pass" } ] , "model_ready" : true } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = {
+            data: {
+                checked_at: "checked_at",
+                host_report: { checked_at: "checked_at", message: "message", next_step: "next_step", state: "ok" },
+                items: [{ id: "id", message: "message", name: "name", next_step: null, status: "pass" }],
+                model_ready: true,
+                state: {
+                    app_version: "app_version",
+                    build_ref: "build_ref",
+                    connectors: [{ connected: true, last_error: null, name: "name" }],
+                    google_login: "answered",
+                    sandbox_ready: true,
+                    setup_steps: [{ done: true, id: "model" }],
+                },
+            },
+        };
+
         server
             .mockEndpoint()
-            .get("/api/v1/help/health-check").respondWith()
-            .statusCode(200).jsonBody(rawResponseBody)
-                .build();
+            .get("/api/v1/help/health-check")
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-                        
-                                const response = await client.help.getHealthCheck();
-                                expect(response).toEqual({
-    data: {
-        checkedAt: "checked_at",
-        hostReport: {
-            checkedAt: "checked_at",
-            message: "message",
-            nextStep: "next_step",
-            state: "ok"
-        },
-        items: [{
-                id: "id",
-                message: "message",
-                name: "name",
-                nextStep: null,
-                status: "pass"
-            }],
-        modelReady: true
-    }
-});
-                              
-                    
+        const response = await client.help.getHealthCheck();
+        expect(response).toEqual({
+            data: {
+                checkedAt: "checked_at",
+                hostReport: {
+                    checkedAt: "checked_at",
+                    message: "message",
+                    nextStep: "next_step",
+                    state: "ok",
+                },
+                items: [
+                    {
+                        id: "id",
+                        message: "message",
+                        name: "name",
+                        nextStep: null,
+                        status: "pass",
+                    },
+                ],
+                modelReady: true,
+                state: {
+                    appVersion: "app_version",
+                    buildRef: "build_ref",
+                    connectors: [
+                        {
+                            connected: true,
+                            lastError: null,
+                            name: "name",
+                        },
+                    ],
+                    googleLogin: "answered",
+                    sandboxReady: true,
+                    setupSteps: [
+                        {
+                            done: true,
+                            id: "model",
+                        },
+                    ],
+                },
+            },
+        });
     });
-          
+
     test("get_health_check (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .get("/api/v1/help/health-check").respondWith()
-            .statusCode(401).jsonBody(rawResponseBody)
-                .build();
+            .get("/api/v1/help/health-check")
+            .respondWith()
+            .statusCode(401)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.help.getHealthCheck()
-            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+        await expect(async () => {
+            return await client.help.getHealthCheck();
+        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
-          
 });

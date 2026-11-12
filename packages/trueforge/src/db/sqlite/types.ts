@@ -44,7 +44,12 @@ import type { ScheduleManifest, ScheduleRunStatus, ScheduleStatus } from '../../
 import type { SkillManifest } from '../../schemas/skill';
 import type { BriefItemCompletionTable } from '../briefItemCompletionStore';
 import type { ChatImageOrigin } from '../chatImageStore';
+import type { DeliveryAttemptTable, DeliveryTable } from '../deliveryStore';
+import type { LocalUserTable } from '../localUserStore';
 import type { OAuthClient, OAuthPendingAuthorizationData, OAuthServer, OAuthToken } from '../mcpServerStore';
+import type { NoticingCheckpointTable, NoticingEventTable, ReachLeaseTable } from '../noticingStore';
+import type { PushSubscriptionTable } from '../pushSubscriptionStore';
+import type { ReachSettingsTable } from '../reachSettingsStore';
 
 /**
  * Trace-level state for one thread at one turn (`turn_thread.checkpoint`).
@@ -103,6 +108,10 @@ export interface SessionTable {
   task_checklist: JsonbColumn<TaskChecklist> | null;
   /** Optional unique key within `tenant_id` when set. */
   external_id: string | null;
+  /** 1 for a private chat, fixed at create. */
+  is_incognito: number;
+  /** When a private chat is deleted; null exactly when `is_incognito` is 0. */
+  private_expires_at: string | null;
   custom: JsonbColumn<Record<string, unknown>> | null;
   metadata: JsonbColumn<SessionMetadata>;
   metrics: JsonbColumn<SessionMetrics>;
@@ -160,6 +169,27 @@ export interface SpaceRevisionTable {
   created_at: string;
 }
 
+/** An owner's space folder. PRIMARY KEY (tenant_id, created_by, id). */
+export interface SpaceFolderTable {
+  tenant_id: string;
+  created_by: string;
+  id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Which folder a space sits in, kept apart from `space` so a move is not a content edit.
+ * PRIMARY KEY (tenant_id, created_by, space_id); both references cascade on delete.
+ */
+export interface SpaceFolderAssignmentTable {
+  tenant_id: string;
+  created_by: string;
+  space_id: string;
+  folder_id: string;
+}
+
 /**
  * Append-only Sentinel permission audit log. One row per classified tool call,
  * written before the action executes. PRIMARY KEY (id).
@@ -203,6 +233,9 @@ export interface SentinelUserSettingsTable {
   maps_without_asking: number;
   /** SQLite's 0/1 integer boolean. */
   sandbox_without_asking: number;
+  /** SQLite's 0/1 integer boolean. */
+  chat_search_enabled: number;
+  package_downloads_without_project_allowed: number;
   created_at: string;
   updated_at: string;
 }
@@ -263,8 +296,29 @@ export interface ApprovalDismissalTable {
   dismissed_at: string;
 }
 
+/**
+ * One searchable message of a finished turn in the past-chat search index.
+ * PRIMARY KEY (tenant_id, session_id, turn_id, message_id). The FTS5 table that searches
+ * `body` is a virtual table and is not part of the Kysely schema.
+ */
+export interface ChatSearchDocumentTable {
+  /** Stable row id the FTS5 table points at; VACUUM never renumbers an INTEGER PRIMARY KEY. */
+  doc_id: Generated<number>;
+  tenant_id: string;
+  session_id: string;
+  turn_id: string;
+  message_id: string;
+  role: string;
+  /** The persona the turn ran under; null for the main assistant. */
+  persona_id: string | null;
+  body: string;
+  /** The message's searchable words, space-separated, built by the shared matching rule. */
+  search_words: string;
+  created_at: string;
+}
+
 /** Global key/value settings shared across tenants (e.g. persisted feature overrides). PRIMARY KEY (key). */
-/** "Always allow this tool" grant. PRIMARY KEY (tenant_id, created_by, mcp_server_name, tool_name). */
+/** "Always allow everywhere" grant. PRIMARY KEY (tenant_id, created_by, mcp_server_name, tool_name). */
 export interface McpToolGrantTable {
   tenant_id: string;
   created_by: string;
@@ -315,6 +369,19 @@ export interface TokenFactoryUsageTable {
   usage_date: string;
   used_tokens: number;
   updated_at: string;
+}
+
+/** Token counts of a deleted chat's model calls; no session id, no words. PRIMARY KEY (tenant_id, event_id). */
+export interface DeletedChatModelUsageTable {
+  tenant_id: string;
+  event_id: string;
+  created_by_subject_id: string;
+  model_id: string;
+  display_name: string;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number | null;
+  created_at: string;
 }
 
 /** One row per UTC day and upstream model id; not tenant-scoped. */
@@ -462,6 +529,8 @@ export interface SkillTable {
   name: string;
   /** SkillManifest document; replaced whole on every upsert */
   manifest: JsonbColumn<SkillManifest>;
+  /** The person's approved site list for this skill's network access, or null when not approved */
+  network_approval: JsonbColumn<string[]> | null;
   created_at: string;
   updated_at: string;
 }
@@ -755,8 +824,18 @@ export interface Database {
   space_aggregate: SpaceAggregateTable;
   space: SpaceTable;
   space_revision: SpaceRevisionTable;
+  space_folder: SpaceFolderTable;
+  space_folder_assignment: SpaceFolderAssignmentTable;
   sentinel_audit: SentinelAuditTable;
   brief_item_completion: BriefItemCompletionTable;
+  delivery: DeliveryTable;
+  delivery_attempt: DeliveryAttemptTable;
+  reach_settings: ReachSettingsTable;
+  noticing_event: NoticingEventTable;
+  noticing_checkpoint: NoticingCheckpointTable;
+  reach_lease: ReachLeaseTable;
+  push_subscription: PushSubscriptionTable;
+  local_user: LocalUserTable;
   approval_token: ApprovalTokenTable;
   sentinel_user_settings: SentinelUserSettingsTable;
   implementation_plan_grant: ImplementationPlanGrantTable;
@@ -792,7 +871,9 @@ export interface Database {
   turn_artifact: TurnArtifactTable;
   chat_image: ChatImageTable;
   approval_dismissal: ApprovalDismissalTable;
+  chat_search_document: ChatSearchDocumentTable;
   global_settings: GlobalSettingsTable;
   token_factory_usage: TokenFactoryUsageTable;
   token_factory_model_usage: TokenFactoryModelUsageTable;
+  deleted_chat_model_usage: DeletedChatModelUsageTable;
 }

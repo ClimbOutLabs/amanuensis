@@ -62,7 +62,7 @@ export function FoldedChatGroup<T extends RecentChat>({
       <button
         type="button"
         aria-expanded={expanded}
-        className="flex w-full items-center gap-1 border-0 bg-transparent px-2.5 pt-2 pb-1 text-left text-[0.75rem] font-normal text-text-secondary hover:text-text-primary"
+        className="flex w-full items-center gap-1 border-0 bg-transparent px-2.5 pt-2 pb-1 text-left text-xs font-normal text-text-secondary hover:text-text-primary"
         onClick={toggle}
       >
         <Icon name="chevron-down" className={cn('size-3 shrink-0 transition-transform', !expanded && '-rotate-90')} />

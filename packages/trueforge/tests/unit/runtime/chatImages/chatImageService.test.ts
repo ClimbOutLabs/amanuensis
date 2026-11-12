@@ -4,6 +4,7 @@ import { Response as UndiciResponse } from 'undici';
 
 import { ChatImageNotFoundError, createChatImageService } from '../../../../src/runtime/chatImages/chatImageService';
 import type { ReencodeOutcome } from '../../../../src/runtime/chatImages/reencodeInSandbox';
+import type { TurnImagesResult } from '../../../../src/schemas/chatImages';
 import { EXAMPLE_COM_ADDRESS } from '../../../fixtures/exampleComAddress';
 import { FakeChatImageStore } from '../../../fixtures/fakeChatImageStore';
 import { FakeTurnArtifactStore } from '../../../fixtures/fakeTurnArtifactStore';
@@ -204,6 +205,101 @@ describe('local images', () => {
   });
 });
 
+describe('uploads across turns', () => {
+  const FIRST = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 1]);
+  const SECOND = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 2, 2]);
+  const uploadRequest = { source: { kind: 'upload' as const, index: 0 }, approved: false };
+
+  function turnCreatedFor(turnId: string, data: Buffer): PersistedTurnEvent {
+    return {
+      type: 'turn.created',
+      id: `e-${turnId}`,
+      turn_id: turnId,
+      previous_turn_id: null,
+      input: [
+        {
+          type: 'user.message',
+          content: [
+            { type: 'text', text: 'look' },
+            { type: 'file' as const, name: 'a.png', data: `data:image/png;base64,${data.toString('base64')}` },
+          ],
+        },
+      ],
+      state: { status: 'running' },
+      created_at: CREATED,
+      thread_id: null,
+    };
+  }
+
+  function setupTwoTurns() {
+    const eventsByTurn = new Map<string, PersistedTurnEvent[]>([
+      ['t1', [turnCreatedFor('t1', FIRST)]],
+      ['t2', [turnCreatedFor('t2', SECOND)]],
+    ]);
+    const store = new FakeChatImageStore();
+    let reencodes = 0;
+    const service = createChatImageService({
+      store,
+      sessionStore: {
+        listTurnEvents: input =>
+          Promise.resolve({ data: eventsByTurn.get(input.turn_id) ?? [], pagination: { limit: 200 } }),
+      },
+      turnArtifactStore: new FakeTurnArtifactStore(),
+      // Keeps the uploaded bytes, so a test can tell one turn's picture from another's.
+      reencode: (input: { bytes: Buffer }) => {
+        reencodes += 1;
+        return Promise.resolve({ ok: true, image: { bytes: input.bytes, type: 'png', width: 3, height: 2 } });
+      },
+      sentinel: {
+        audit: { record: () => Promise.resolve() },
+        isOffline: () => Promise.resolve(false),
+        outboundSecrets: () => Promise.resolve([]),
+      },
+      fetchDeps: {
+        fetchImpl: async () => new UndiciResponse(PNG, { status: 200, headers: { 'content-type': 'image/png' } }),
+        resolveAddresses: () => Promise.resolve([EXAMPLE_COM_ADDRESS]),
+      },
+    });
+    return { service, store, reencodes: () => reencodes };
+  }
+
+  function shownImageId(result: TurnImagesResult): string {
+    if (result.status !== 'done') {
+      throw new Error('expected the images to be shown');
+    }
+    const image = result.images[0];
+    if (image === undefined || image.status !== 'shown') {
+      throw new Error('expected a shown image');
+    }
+    return image.image_id;
+  }
+
+  it('shows each turn its own upload when two turns attach a picture at the same position', async () => {
+    const env = setupTwoTurns();
+    const firstId = shownImageId(await env.service.showTurnImages({ ...ref, request: uploadRequest }));
+    const secondId = shownImageId(
+      await env.service.showTurnImages({ owner, session_id: 's1', turn_id: 't2', request: uploadRequest }),
+    );
+    expect(secondId).not.toBe(firstId);
+    expect(env.reencodes()).toBe(2);
+    expect(env.store.images.size).toBe(2);
+    const first = await env.service.getImage({ tenant_id: 'default', session_id: 's1', image_id: firstId });
+    const second = await env.service.getImage({ tenant_id: 'default', session_id: 's1', image_id: secondId });
+    expect(first?.data).toEqual(FIRST);
+    expect(second?.data).toEqual(SECOND);
+    expect(second?.turn_id).toBe('t2');
+  });
+
+  it('reuses the stored image when the same turn shows its upload again', async () => {
+    const env = setupTwoTurns();
+    const first = await env.service.showTurnImages({ ...ref, request: uploadRequest });
+    const second = await env.service.showTurnImages({ ...ref, request: uploadRequest });
+    expect(second).toEqual(first);
+    expect(env.reencodes()).toBe(1);
+    expect(env.store.images.size).toBe(1);
+  });
+});
+
 describe('email images', () => {
   const events = [
     modelMessage({ id: 'e1', content: '', calls: [{ id: 'mail-1', name: 'read_email' }] }),
@@ -217,7 +313,7 @@ describe('email images', () => {
         ...ref,
         request: { source: { kind: 'email', tool_call_id: 'mail-1' }, approved: false },
       }),
-    ).resolves.toEqual({ status: 'ask', count: 2, host: null });
+    ).resolves.toEqual({ status: 'ask', count: 2, host: null, url: null });
     expect(env.fetched).toEqual([]);
   });
 
@@ -317,6 +413,7 @@ describe('reply images', () => {
       status: 'ask',
       count: 1,
       host: 'example.com',
+      url: returned,
     });
     expect(env.fetched).toEqual([]);
     expect(env.audits).toEqual([]);
@@ -349,6 +446,21 @@ describe('reply images', () => {
     const results = await Promise.all(links.map(url => env.service.showTurnImages(asking(url))));
     expect(results.every(result => result.status === 'ask')).toBe(true);
     expect(env.fetched).toEqual([]);
+  });
+
+  it('names the whole address a reply image would load, the same one it then loads', async () => {
+    const written = 'https://EXAMPLE.com/p.png?who=maya@example.com&ref=order-42';
+    const env = setup({ events: [modelMessage({ id: 'e1', content: `![x](${written})` })] });
+    const asked = await env.service.showTurnImages(asking(written));
+    expect(asked).toEqual({
+      status: 'ask',
+      count: 1,
+      host: 'example.com',
+      url: 'https://example.com/p.png?who=maya@example.com&ref=order-42',
+    });
+    expect(env.fetched).toEqual([]);
+    await env.service.showTurnImages({ ...ref, request: { source: { kind: 'reply', url: written }, approved: true } });
+    expect(env.fetched).toEqual([asked.status === 'ask' ? asked.url : undefined]);
   });
 
   it('blocks a link that carries a server secret, even after approval', async () => {

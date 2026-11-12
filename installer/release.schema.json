@@ -19,6 +19,11 @@
       "type": "string",
       "pattern": "^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[a-f0-9]{64}$"
     },
+    "setup_image": {
+      "description": "Helper image the Windows state commands run against the aman_home volume, pinned by multi-arch index digest.",
+      "type": "string",
+      "pattern": "^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[a-f0-9]{64}$"
+    },
     "source_ref": {
       "description": "Commit of the checkout the local images were built from.",
       "type": "string"
@@ -31,9 +36,26 @@
       "description": "Local tag of the speech-to-text image built from ops/aman-stt, aman-stt:<source id>.",
       "type": "string"
     },
+    "tts_image": {
+      "description": "Local tag of the text-to-speech image built from ops/aman-tts, aman-tts:<source id>. Absent in releases from before it.",
+      "type": "string"
+    },
     "calendar_image": {
       "description": "Local tag of the calendar sidecar image built from ops/calendar-sidecar, aman-calendar-caldav:<source id>.",
       "type": "string"
+    },
+    "browser_image": {
+      "description": "Local tag of Aman's browser image built from ops/browser-sidecar, aman-browser:<source id>.",
+      "type": "string"
+    },
+    "browser_gateway_image": {
+      "description": "Local tag of the browser's gateway image built from ops/browser-sidecar/Dockerfile.gateway, aman-browser-gateway:<source id>.",
+      "type": "string"
+    },
+    "caddy_image": {
+      "description": "Web server image that serves an instance over https on the local network, pinned by multi-arch index digest.",
+      "type": "string",
+      "pattern": "^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[a-f0-9]{64}$"
     },
     "broker_image": {
       "description": "Reserved for the sandbox broker, absent until it ships.",

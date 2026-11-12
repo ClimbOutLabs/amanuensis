@@ -8,13 +8,33 @@ export const SLOT_AGENT_SOCKET_NAME = 'agent.sock';
 export const SLOT_MIRROR_SOCKET_NAME = 'mirror.sock';
 
 /**
+ * Socket file name of the skill network gateway, in the same per-slot mirror directory as the mirror
+ * socket: that directory exists to carry gateway sockets between the app and the slot agent, so the
+ * second gateway needs no new mount.
+ */
+export const SLOT_SKILL_NETWORK_SOCKET_NAME = 'skillnet.sock';
+
+/**
  * Loopback port the slot agent's mirror forwarder listens on inside the slot. A guest with a package
  * mirror grant reaches the mirrors only through this port, at `/m/<token>/<ecosystem>/...`.
  */
 export const SLOT_MIRROR_GUEST_PORT = 18771;
 
-/** A package mirror token is 16 random bytes as lowercase hex, the same shape as a session id. */
-export const SlotPackageMirrorTokenSchema = z.string().regex(/^[0-9a-f]{32}$/);
+/**
+ * Loopback port the slot agent's skill network forwarder listens on inside the slot. A guest with a
+ * skill network grant is given this port as its HTTPS proxy; the forwarder carries CONNECT calls
+ * only, to the skill network gateway, under the call's token.
+ */
+export const SLOT_SKILL_NETWORK_GUEST_PORT = 18772;
+
+/** A grant token is 16 random bytes as lowercase hex, the same shape as a session id. */
+const slotGrantTokenSchema = z.string().regex(/^[0-9a-f]{32}$/);
+
+/** A package mirror token: one grant token, issued for one repository in one chat. */
+export const SlotPackageMirrorTokenSchema = slotGrantTokenSchema;
+
+/** A skill network token: one grant token, issued for the approved skill sites of one chat. */
+export const SlotSkillNetworkTokenSchema = slotGrantTokenSchema;
 
 /** Control socket of each slot agent, `<dir>/<n>/agent.sock` for n = 1..count: the layout the slots compose project mounts. */
 export function slotSocketPathsIn({ dir, count }: { dir: string; count: number }): string[] {
@@ -26,11 +46,18 @@ export function slotMirrorSocketPathsIn({ dir, count }: { dir: string; count: nu
   return Array.from({ length: count }, (_, index) => join(dir, String(index + 1), 'mirror', SLOT_MIRROR_SOCKET_NAME));
 }
 
+/** Skill network socket of each slot, `<dir>/<n>/mirror/skillnet.sock`: where the slot agent reaches the skill network gateway. */
+export function slotSkillNetworkSocketPathsIn({ dir, count }: { dir: string; count: number }): string[] {
+  return Array.from({ length: count }, (_, index) =>
+    join(dir, String(index + 1), 'mirror', SLOT_SKILL_NETWORK_SOCKET_NAME),
+  );
+}
+
 /** Disk quota of one chat's workspace on a slot, MiB, when the server is not told otherwise. */
 export const DEFAULT_SESSION_DISK_MB = 2048;
 
 /** The agent build and gVisor release this server was written against; a slot reporting others is refused. */
-export const SLOT_AGENT_VERSION = '0.4.0';
+export const SLOT_AGENT_VERSION = '0.6.0';
 export const SLOT_RUNSC_VERSION = 'runsc version release-20260928.0';
 export const SLOT_PLATFORM = 'systrap';
 
@@ -89,6 +116,8 @@ export const SlotAttestationSchema = z.object({
     disk_mode: z.enum(['hard', 'vm', 'none']),
     /** Size of the filesystem the workspace is on, bytes. */
     workspace_bytes: z.number().int().nonnegative(),
+    /** Free bytes on the filesystem the workspaces are on: the room new or growing workspaces can still take. */
+    store_free_bytes: z.number().int().nonnegative(),
   }),
 });
 export type SlotAttestation = z.infer<typeof SlotAttestationSchema>;
@@ -100,6 +129,23 @@ export const SlotHealthResponseSchema = z.object({
   attestation: SlotAttestationSchema,
 });
 export type SlotHealthResponse = z.infer<typeof SlotHealthResponseSchema>;
+
+/** One session tree on a slot, as the sessions listing reports it. */
+export const SlotSessionSchema = z.object({
+  session_id: z.string().regex(/^[0-9a-f]{32}$/),
+  /** Space the tree's files occupy on disk, bytes. */
+  bytes: z.number().int().nonnegative(),
+  /** Files and folders in the tree, the tree's own root counted. */
+  entries: z.number().int().nonnegative(),
+  /** When the tree was last used, ISO 8601, as the agent reports it. */
+  last_used: z.string(),
+});
+export type SlotSession = z.infer<typeof SlotSessionSchema>;
+
+export const SlotSessionsResponseSchema = z.object({
+  sessions: z.array(SlotSessionSchema),
+});
+export type SlotSessionsResponse = z.infer<typeof SlotSessionsResponseSchema>;
 
 export const SLOT_TERMINATIONS = [
   'completed',
@@ -151,6 +197,13 @@ export const SlotExecRequestSchema = z.object({
    * forwarder for the duration of the call. Absent means the guest stays fully offline.
    */
   package_mirror_token: SlotPackageMirrorTokenSchema.optional(),
+  /**
+   * Grants this call the approved skill network: the agent gives the guest the proxy variables that
+   * point at its loopback skill network forwarder for the duration of the call, and the forwarder
+   * carries CONNECT calls only, under this token. Absent means no proxy variables are set. Run code
+   * has no such field on purpose: it stays fully offline.
+   */
+  skill_network_token: SlotSkillNetworkTokenSchema.optional(),
 });
 export type SlotExecRequest = z.infer<typeof SlotExecRequestSchema>;
 

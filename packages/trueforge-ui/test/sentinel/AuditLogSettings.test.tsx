@@ -35,6 +35,8 @@ function stubApi(listUserAuditEntries: SentinelApi['listUserAuditEntries']): Sen
       search_without_asking: true,
       maps_without_asking: false,
       sandbox_without_asking: true,
+      chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
     })),
     updateUserSettings: vi.fn(async () => ({
       offline_mode: false,
@@ -42,6 +44,8 @@ function stubApi(listUserAuditEntries: SentinelApi['listUserAuditEntries']): Sen
       search_without_asking: true,
       maps_without_asking: false,
       sandbox_without_asking: true,
+      chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
     })),
     listSentinelSessionContext: vi.fn(async () => ({ approvals: [] })),
   };
@@ -105,6 +109,91 @@ describe('AuditLogSettings', () => {
     expect(screen.getByText('First page entry')).toBeInTheDocument();
     expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ pageToken: 'page-2' }));
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Load more' })).toBeNull());
+  });
+
+  it('sends the picked dates as the start of the first day and the start of the day after the last', async () => {
+    const list = vi.fn<SentinelApi['listUserAuditEntries']>(async () => ({ entries: [makeEntry({})] }));
+    renderPage(stubApi(list));
+
+    await screen.findByText('Sent an email to the plumber');
+    const first = list.mock.calls[0]?.[0];
+    expect(first?.from).toBeUndefined();
+    expect(first?.to).toBeUndefined();
+
+    fireEvent.change(screen.getByLabelText('From'), { target: { value: '2026-10-01' } });
+    fireEvent.change(screen.getByLabelText('To'), { target: { value: '2026-10-03' } });
+
+    await waitFor(() => {
+      const last = list.mock.calls.at(-1)?.[0];
+      expect(last?.from).toBe(new Date(2026, 9, 1).toISOString());
+      expect(last?.to).toBe(new Date(2026, 9, 4).toISOString());
+    });
+  });
+
+  it('keeps entries from the first moment of the From day to the last moment of the To day', async () => {
+    const all = [
+      makeEntry({
+        id: 'before',
+        description: 'Just before the From day',
+        created_at: new Date(2026, 8, 30, 23, 59, 59, 999).toISOString(),
+      }),
+      makeEntry({
+        id: 'first-moment',
+        description: 'First moment of the From day',
+        created_at: new Date(2026, 9, 1, 0, 0, 0, 0).toISOString(),
+      }),
+      makeEntry({
+        id: 'last-moment',
+        description: 'Last moment of the To day',
+        created_at: new Date(2026, 9, 3, 23, 59, 59, 999).toISOString(),
+      }),
+      makeEntry({
+        id: 'after',
+        description: 'First moment after the To day',
+        created_at: new Date(2026, 9, 4, 0, 0, 0, 0).toISOString(),
+      }),
+    ];
+    // The stub narrows like the server does: at or after from, before to.
+    const list = vi.fn<SentinelApi['listUserAuditEntries']>(async ({ from, to }) => ({
+      entries: all.filter(
+        entry => (from === undefined || entry.created_at >= from) && (to === undefined || entry.created_at < to),
+      ),
+    }));
+    renderPage(stubApi(list));
+
+    await screen.findByText('Just before the From day');
+    fireEvent.change(screen.getByLabelText('From'), { target: { value: '2026-10-01' } });
+    fireEvent.change(screen.getByLabelText('To'), { target: { value: '2026-10-03' } });
+
+    await screen.findByText('First moment of the From day');
+    expect(screen.getByText('Last moment of the To day')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByText('Just before the From day')).toBeNull();
+      expect(screen.queryByText('First moment after the To day')).toBeNull();
+    });
+  });
+
+  it('names the dates when the filter leaves nothing, and clearing shows everything again', async () => {
+    const list = vi.fn<SentinelApi['listUserAuditEntries']>(async ({ from }) => ({
+      entries: from === undefined ? [makeEntry({})] : [],
+    }));
+    renderPage(stubApi(list));
+
+    await screen.findByText('Sent an email to the plumber');
+    fireEvent.change(screen.getByLabelText('From'), { target: { value: '2026-10-01' } });
+
+    expect(await screen.findByText('Nothing in the audit log for those dates.')).toBeInTheDocument();
+    const clearButtons = screen.getAllByRole('button', { name: 'Clear dates' });
+    const clear = clearButtons[0];
+    if (clear === undefined) throw new Error('no Clear dates button rendered');
+    fireEvent.click(clear);
+
+    expect(await screen.findByText('Sent an email to the plumber')).toBeInTheDocument();
+    await waitFor(() => {
+      const last = list.mock.calls.at(-1)?.[0];
+      expect(last?.from).toBeUndefined();
+      expect(last?.to).toBeUndefined();
+    });
   });
 
   it('reloads from the first page when the outcome filter changes', async () => {

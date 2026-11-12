@@ -20,28 +20,36 @@ import {
   TurnAlreadyExistsError,
   withoutClearedApprovals,
   type SessionHandle,
+  type SessionRecord,
   type TurnHandle,
   type TurnInputItem,
   type TurnRecordWithoutSnapshot,
 } from '@truefoundry/trueforge-core/agent-session';
 import {
   AgentHarnessError,
+  callResultSource,
+  callReturnsOutsideContent,
   existingSandboxIdForProvider,
   extractErrorLogFields,
   HeldActionRefusedError,
   isAgentInputUserMessage,
   isFileContentPart,
+  isHostWrappedText,
   McpConnectionError,
   newEventId,
+  PromiseTimeoutError,
   rawSandboxId,
   redisKey,
   SandboxError,
   SandboxFileNotFoundError,
   SandboxNotAvailableError,
   VercelAILLM,
+  withTimeout,
   type BoundRepository,
   type HeldRefusalReason,
+  type ToolResultSource,
 } from '@truefoundry/trueforge-core/core';
+import { readTurnedOffConnectorKeys } from '@truefoundry/trueforge-core/core/connectors/chatConnectorChoice';
 import { upgradeStoredTurnState } from '@truefoundry/trueforge-core/core/permissions/storedCards';
 import type { Context } from 'hono';
 import { HTTPException } from 'hono/http-exception';
@@ -62,6 +70,7 @@ import type { IPersonalizationStore } from '../db/personalizationStore';
 import type { IPersonaStore } from '../db/personaStore';
 import type { IRepositoryStore } from '../db/repositoryStore';
 import type { ISandboxProviderStore } from '../db/sandboxProviderStore';
+import type { ISentinelSettingsStore } from '../db/sentinelSettingsStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { ISkillStore } from '../db/skillStore';
 import type { ISpaceStore } from '../db/spaceStore';
@@ -69,8 +78,9 @@ import type { ITurnArtifactStore } from '../db/turnArtifactStore';
 import { gateEvalApprovals } from '../eval/approvalGate';
 import { evalPageFixtures } from '../eval/pageFixtures';
 import type { IOAuthTokenStore } from '../mcp/auth/types';
+import { setUpConnectorNamesOf } from '../mcp/hostConnectors';
 import type { PersonaKnowledgeHit } from '../personaKnowledge/knowledgeRetrieval';
-import type { PersonalizationProfile } from '../personalization/profile';
+import { personalizationFactLines, type PersonalizationProfile } from '../personalization/profile';
 import type { PersonaContext } from '../personas/persona';
 import {
   createAndExecuteTurnRoute,
@@ -85,13 +95,14 @@ import type { ActiveTurnRegistry, TurnAdmission } from '../runtime/activeTurns';
 import { findTurnArtifact } from '../runtime/artifacts/findTurnArtifact';
 import { submitArtifactPersistence } from '../runtime/artifacts/persistTurnArtifacts';
 import { chatModelName, resolveChatAssistant, scheduleRunsAs, type ChatRunner } from '../runtime/chatAssistant';
+import type { ChatSearchIndexer } from '../runtime/chatSearchIndexing';
+import { readChatSearchEnabled } from '../runtime/chatSearchSettings';
 import { StreamGoneError, type EventSubscription, type EventSubscriptionRegistry } from '../runtime/event-subscription';
-import { envManagedHelperModelFqn } from '../runtime/helperModelRouting';
 import { buildInternalSourceToolPolicy, type InternalSourceState } from '../runtime/internalSourceGuard';
 import { mailAccountDirectory } from '../runtime/mailConnector';
-import { chatTitleContext } from '../runtime/memory/chatTitleContext';
 import { createMemoryClient } from '../runtime/memory/createMemoryClient';
 import type { MemoryClient } from '../runtime/memory/memoryClient';
+import type { TurnToolResult } from '../runtime/memory/memoryNotesSummarize';
 import { resolveMemoryProvider } from '../runtime/memory/memoryProvider';
 import {
   submitRetainWithVerification,
@@ -99,6 +110,7 @@ import {
   type SummarizeTurnContext,
 } from '../runtime/memory/memoryRetain';
 import { applyMemorySettings } from '../runtime/memory/memorySettings';
+import { readMemoryRecallSetting } from '../runtime/memoryRecallSettings';
 import { applyMemoryScreenOverride, readMemoryScreenSetting } from '../runtime/memoryScreenSettings';
 import { resolveTurnSummarizeContext } from '../runtime/memorySummarizeSettings';
 import { resolveModelContextLength } from '../runtime/modelContextLength';
@@ -110,9 +122,11 @@ import {
   type ModelUsageDrainMember,
   type TurnModelUsage,
 } from '../runtime/modelUsage';
+import { notesFolderServiceDeps, sharedNotesFolderService } from '../runtime/notesFolder/notesFolderRuntime';
 import { mintPeeredTurnId } from '../runtime/peeringIds';
 import type { PersonaTurnContext } from '../runtime/personaCapability';
 import type { PersonaSwitchNotice } from '../runtime/PersonaTurnResourceResolver';
+import { privateChatExpiry, sessionKeepsNothing } from '../runtime/privateChat';
 import {
   profileLearningPassConfig,
   resolveTurnModelFqn,
@@ -139,7 +153,7 @@ import {
   resolveSandboxProvider,
   withGatewayMetadataHeaders,
 } from '../runtime/sessionResources';
-import { SpaceTurnResourceResolver } from '../runtime/spaceCapability';
+import { SPACE_WRITE_TOOL_ARGUMENT_LIMITS, SpaceTurnResourceResolver } from '../runtime/spaceCapability';
 import { TokenFactoryMeteredLLM, tokenFactoryRole, type TokenFactoryBudget } from '../runtime/tokenFactoryBudget';
 import { resolveToolOutputScreenEnabled } from '../runtime/toolOutputScreenSettings';
 import type { TurnDrainRegistry } from '../runtime/turnDrains';
@@ -152,21 +166,14 @@ import {
   TurnCouldNotStartError,
   TurnStartBound,
 } from '../runtime/turnStartBound';
+import type { DeletedChatUsageReader } from '../runtime/usageSummaryCapability';
 import { packageMirrorTokens } from '../sandbox/mirrors/packageMirrorTokens';
 import { checkSnapshotStatus } from '../sandbox/providerUtils';
+import { resolveSkillNetworkGrant } from '../sandbox/skillnet/skillNetworkGrant';
+import { skillNetworkTokens } from '../sandbox/skillnet/skillNetworkTokens';
 import type { MemoryProviderSettings } from '../schemas/mcpServer';
-import { canReadAgentBoundResource } from './agentAccess';
+import { canReadSession } from './agentAccess';
 import { readServerSandboxAvailable } from './capabilities';
-
-/** The small model helper jobs run on while a turn is on Token Factory; undefined when none is registered. */
-function turnHelperModelFqn(): string | undefined {
-  return envManagedHelperModelFqn({
-    apiKey: configuration.NEBIUS_API_KEY,
-    managedByTrueFoundry: isTrueFoundryModeEnabled(),
-    model: configuration.TOKEN_FACTORY_MODEL,
-    cheaperModel: configuration.TOKEN_FACTORY_CHEAPER_MODEL,
-  });
-}
 
 export function toWireTurn<TCustom extends object>(record: TurnRecordWithoutSnapshot<TCustom>): Turn {
   return {
@@ -284,8 +291,17 @@ export interface TurnsRouterDeps {
   turnArtifactStore: ITurnArtifactStore;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
   globalSettingsStore: IGlobalSettingsStore;
+  /**
+   * Per-person settings, for the past-chat search switch and the package download allowance of
+   * chats without a project. Absent, the search tool stays off and those chats get no download wiring.
+   */
+  sentinelSettingsStore?: ISentinelSettingsStore | undefined;
+  /** Adds finished turns to the past-chat search for people who turned it on; absent, nothing is added. */
+  chatSearchIndexer?: ChatSearchIndexer | undefined;
   /** Per-instance daily Token Factory counters; refuses new turns past `TOKEN_FACTORY_DAILY_TOKEN_CAP`. */
   tokenFactoryBudget: TokenFactoryBudget;
+  /** The usage counts deleted chats left, for the usage tool. */
+  chatDeletionStore: DeletedChatUsageReader;
   /** Resumable live turn-event transport: create-turn writes, subscribe polls. */
   eventSubscriptions: EventSubscriptionRegistry<TurnStreamingEvent>;
   resolveSandboxProviderStore: (c: Context) => ISandboxProviderStore;
@@ -315,6 +331,7 @@ export type BeginTurnExecutionDeps = Pick<
   | 'globalSettingsStore'
   | 'mcpCatalog'
   | 'tokenFactoryBudget'
+  | 'chatDeletionStore'
 > & {
   agentStore: IAgentStore;
   modelProviderStore: IModelProviderStore;
@@ -328,6 +345,15 @@ export type BeginTurnExecutionDeps = Pick<
   spaceStore: ISpaceStore;
   /** Per-user Google logins; absent, no Gmail tools mount. */
   googleConnectionStore?: IGoogleConnectionStore | undefined;
+  /**
+   * Per-person settings, for the past-chat search switch and the package download allowance of
+   * chats without a project. Absent, the search tool stays off and those chats get no download wiring.
+   */
+  sentinelSettingsStore?: ISentinelSettingsStore | undefined;
+  /** Lists the person's personas for the past-chat search; absent, the search tool stays off. */
+  personaStore?: Pick<IPersonaStore, 'listPersonas'> | undefined;
+  /** Adds finished turns to the past-chat search for people who turned it on; absent, nothing is added. */
+  chatSearchIndexer?: ChatSearchIndexer | undefined;
   /** persists run_code's harvested result files as turn artifacts at harvest time. */
   turnArtifactStore: ITurnArtifactStore;
   /** Same override point as the chat path's `TurnsRouterDeps.sandboxProviderResolver`; defaults to {@link resolveSandboxProvider}. */
@@ -340,9 +366,10 @@ export type BeginTurnExecutionDeps = Pick<
   memoryProviderServerName?: string | undefined;
   memorySettings?: MemoryProviderSettings | undefined;
   previousTurnId?: string | null;
-  sessionTitle?: string | undefined;
   /** From CreateTurnRequest.client_timezone, or a schedule's own time zone for its runs. */
   clientTimezone?: string | undefined;
+  /** From CreateTurnRequest.spoken_reply. */
+  spokenReply?: boolean | undefined;
 };
 
 /**
@@ -370,12 +397,19 @@ function createTurnResolver(deps: {
   personaKnowledgeBlock?: string | undefined;
   personaKnowledgeHits?: readonly PersonaKnowledgeHit[] | undefined;
   switchNotice?: PersonaSwitchNotice | undefined;
+  /** The person's own message already switched the chat before the model ran, so a reply may say so. */
+  switchedByMessage?: boolean | undefined;
   /** Per-turn internal-source state shared by the knowledge lookup, recall, and the web_search policy. */
   internalSourceState: InternalSourceState;
   boundRepository?: BoundRepository | undefined;
   /** Whether this server has a sandbox at all, from the persisted sandbox status. See readServerSandboxAvailable. */
   serverSandboxAvailable: boolean;
   repositoryStore: IRepositoryStore;
+  /**
+   * Per-person settings, for the package download allowance of chats without a project. Absent,
+   * those chats get no download wiring, exactly as before this allowance existed.
+   */
+  sentinelSettingsStore?: ISentinelSettingsStore | undefined;
   sessionStore: ISessionStore<SessionCustom, TurnCustom>;
   memoryClient?: MemoryClient | undefined;
   memoryProviderServerName?: string | undefined;
@@ -383,12 +417,23 @@ function createTurnResolver(deps: {
   /** No person watches this turn (a scheduled run): recall stays off, so a recalled earlier task cannot fingerprint-block the run's own searches. Retain and summarize still run. */
   unattended?: boolean | undefined;
   previousTurnId?: string | null;
-  sessionTitle?: string | undefined;
+  /** Present when summaries are on for the turn, so a recovered earlier turn is summarized, never stored raw. */
+  memorySummarize: SummarizeTurnContext | undefined;
+  /** The person's "use memories in replies" switch when they set it; absent, the agent's own setting applies. */
+  memoryRecallEnabled: boolean | undefined;
+  /** The person's past-chat search switch for this turn; off, the search tool is not offered. */
+  chatSearchEnabled: boolean;
+  /** Lists the person's personas, so the search keeps to the chats this persona may recall; absent, the tool is not offered. */
+  personaStore: Pick<IPersonaStore, 'listPersonas'> | undefined;
   spaceStore: ISpaceStore;
   /** Per-user Google logins; absent, no Gmail tools mount. */
   googleConnectionStore?: IGoogleConnectionStore | undefined;
+  /** The instance's global settings, where the notes folder choice lives; absent, no notes tools mount. */
+  globalSettingsStore?: IGlobalSettingsStore | undefined;
   /** From CreateTurnRequest.client_timezone. See ITurnResourceResolver.clientTimezone. */
   clientTimezone?: string | undefined;
+  /** From CreateTurnRequest.spoken_reply. See ITurnResourceResolver.spokenReply. */
+  spokenReply?: boolean | undefined;
   /** persists run_code's harvested result files as turn artifacts at harvest time. */
   turnArtifactStore: ITurnArtifactStore;
   /**
@@ -400,6 +445,8 @@ function createTurnResolver(deps: {
   toolOutputScreenEnabled: boolean;
   /** Limits and counts the turn's Token Factory calls against the daily cap. */
   tokenFactoryBudget: TokenFactoryBudget;
+  /** The usage counts deleted chats left, for the usage tool. */
+  chatDeletionStore: DeletedChatUsageReader;
   /** Receives every model call the turn makes, for the usage shown under the answer. */
   modelUsage: TurnModelUsage;
   /** Chat turns where schedules run; absent, no schedule tools mount. */
@@ -427,22 +474,29 @@ function createTurnResolver(deps: {
     personaKnowledgeBlock,
     personaKnowledgeHits,
     switchNotice,
+    switchedByMessage,
     internalSourceState,
     boundRepository,
     serverSandboxAvailable,
     repositoryStore,
+    sentinelSettingsStore,
     sessionStore,
     memoryClient,
     memoryProviderServerName,
     memorySettings,
     previousTurnId,
-    sessionTitle,
+    memorySummarize,
+    memoryRecallEnabled,
+    chatSearchEnabled,
+    personaStore,
     spaceStore,
     googleConnectionStore,
     turnArtifactStore,
     clientTimezone,
+    spokenReply,
     toolOutputScreenEnabled,
     tokenFactoryBudget,
+    chatDeletionStore,
     modelUsage,
     schedules,
     personas,
@@ -452,7 +506,7 @@ function createTurnResolver(deps: {
   const metadataHeaders = isTrueFoundryModeEnabled()
     ? gatewayMetadataHeaders(buildGatewayMetadata({ session, turnId }))
     : {};
-  return new SpaceTurnResourceResolver(
+  const resolver = new SpaceTurnResourceResolver(
     {
       llm: async (name, role) => {
         const resolved = await getModelDetails({
@@ -497,6 +551,8 @@ function createTurnResolver(deps: {
             logger,
             signal,
             streamTimeout: resolved.streamTimeout,
+            toolCallChunkMs: configuration.MODEL_STREAM_TOOL_CALL_IDLE_TIMEOUT_MS,
+            toolArgumentLimits: SPACE_WRITE_TOOL_ARGUMENT_LIMITS,
           });
           return new UsageRecordingLLM({
             llm: client,
@@ -583,10 +639,11 @@ function createTurnResolver(deps: {
         };
       },
       setUpConnectorNames: async () =>
-        (await mcpServerStore.listServers({ tenant_id, names: undefined })).map(server => server.name),
+        setUpConnectorNamesOf(await mcpServerStore.listServers({ tenant_id, names: undefined })),
       mailAccounts: mailAccountDirectory,
       mcpRequestTimeoutMs: configuration.MCP_REQUEST_TIMEOUT_MS,
       mcpConnectTimeoutMs: configuration.MCP_CONNECT_TIMEOUT_MS,
+      mcpMaxResponseBytes: configuration.MCP_TOOL_CALL_MAX_RESPONSE_BYTES,
       pageFixtures: configuration.AMAN_EVAL_MODE ? evalPageFixtures() : undefined,
       sandboxProvider: async ({ spec, existingSandboxId, tracing, sentinel }) => {
         const provider = await sandboxProviderResolver({
@@ -661,7 +718,7 @@ function createTurnResolver(deps: {
                   });
                 },
           loadPackageMirrorToken:
-            boundRepository === undefined
+            boundRepository === undefined && sentinelSettingsStore === undefined
               ? undefined
               : async () => {
                   const currentSession = await sessionStore.getSession({
@@ -670,6 +727,20 @@ function createTurnResolver(deps: {
                   });
                   if (currentSession?.created_by_subject.subject_id !== userRef) {
                     return undefined;
+                  }
+                  if (boundRepository === undefined) {
+                    // No project: the person's own allowance is the scope, and its tokens carry
+                    // no repository. Taking the allowance back ends them here as well.
+                    const settings = await sentinelSettingsStore?.get({ tenant_id, created_by: userRef });
+                    if (settings?.package_downloads_without_project_allowed !== true) {
+                      packageMirrorTokens.revokePersonWithoutRepository({ tenant_id, created_by: userRef });
+                      return undefined;
+                    }
+                    return packageMirrorTokens.issue({
+                      tenant_id,
+                      created_by: userRef,
+                      session_id: sessionId,
+                    });
                   }
                   const repository = await repositoryStore.getRepository({
                     tenant_id,
@@ -694,8 +765,25 @@ function createTurnResolver(deps: {
                     repository_id: repository.id,
                   });
                 },
+          loadSkillNetworkGrant: async () => {
+            const currentSession = await sessionStore.getSession({
+              tenant_id,
+              session_id: sessionId,
+            });
+            if (currentSession?.created_by_subject.subject_id !== userRef) {
+              return undefined;
+            }
+            return resolveSkillNetworkGrant({
+              store: skillStore,
+              registry: skillNetworkTokens,
+              tenant_id,
+              created_by: userRef,
+              session_id: sessionId,
+              skillNames: (spec.skills ?? []).map(skill => skill.name),
+            });
+          },
           loadPackageDownloadsAllowed:
-            boundRepository === undefined
+            boundRepository === undefined && sentinelSettingsStore === undefined
               ? undefined
               : async () => {
                   const currentSession = await sessionStore.getSession({
@@ -705,6 +793,10 @@ function createTurnResolver(deps: {
                   if (currentSession?.created_by_subject.subject_id !== userRef) {
                     return false;
                   }
+                  if (boundRepository === undefined) {
+                    const settings = await sentinelSettingsStore?.get({ tenant_id, created_by: userRef });
+                    return settings?.package_downloads_without_project_allowed ?? false;
+                  }
                   const repository = await repositoryStore.getRepository({
                     tenant_id,
                     created_by: userRef,
@@ -713,7 +805,7 @@ function createTurnResolver(deps: {
                   return repository?.package_downloads_allowed ?? false;
                 },
           allowPackageDownloads:
-            boundRepository === undefined
+            boundRepository === undefined && sentinelSettingsStore === undefined
               ? undefined
               : async () => {
                   const currentSession = await sessionStore.getSession({
@@ -721,6 +813,20 @@ function createTurnResolver(deps: {
                     session_id: sessionId,
                   });
                   if (currentSession?.created_by_subject.subject_id !== userRef) {
+                    return;
+                  }
+                  if (boundRepository === undefined) {
+                    await sentinelSettingsStore?.patch({
+                      tenant_id,
+                      created_by: userRef,
+                      offline_mode: undefined,
+                      tier2_auto_allow: undefined,
+                      search_without_asking: undefined,
+                      maps_without_asking: undefined,
+                      sandbox_without_asking: undefined,
+                      chat_search_enabled: undefined,
+                      package_downloads_without_project_allowed: true,
+                    });
                     return;
                   }
                   await repositoryStore.setPackageDownloadsAllowed({
@@ -766,6 +872,7 @@ function createTurnResolver(deps: {
       boundRepository,
       serverSandboxAvailable,
       clientTimezone,
+      spokenReply,
       compactionThresholdTokensDefault: configuration.CONTEXT_COMPACTION_THRESHOLD_TOKENS,
       toolDispatchMaxConcurrency: configuration.TOOL_DISPATCH_MAX_CONCURRENCY,
       toolCallTimeoutMs: configuration.TOOL_CALL_TIMEOUT_MS,
@@ -775,6 +882,7 @@ function createTurnResolver(deps: {
       searchCallTimeoutMs: configuration.SEARCH_CALL_TIMEOUT_MS,
       modelFirstResponseTimeoutMs: configuration.MODEL_FIRST_RESPONSE_TIMEOUT_MS,
       modelIdleTimeoutMs: configuration.MODEL_STREAM_IDLE_TIMEOUT_MS,
+      modelToolCallIdleTimeoutMs: configuration.MODEL_STREAM_TOOL_CALL_IDLE_TIMEOUT_MS,
       // Host-owned facts, capped and named-only, for the model-identity
       // section: what the host actually has configured, not what the model
       // is asked to believe about itself.
@@ -832,15 +940,21 @@ function createTurnResolver(deps: {
       }),
       sessionId,
       previousTurnId: previousTurnId ?? null,
-      sessionTitle,
       providerServerName: memoryProviderServerName,
+      keepsNothing: sessionKeepsNothing({ session: session.record }),
       searchProviderServerName: async () => {
         const servers = await mcpServerStore.listServers({ tenant_id, names: undefined });
         return servers.find(server => server.manifest.type === 'remote' && server.manifest.search_provider === true)
           ?.name;
       },
-      // An explicit false wins over the spec in resolveAgentDefinition: unattended runs do not recall.
-      recallEnabled: deps.unattended ? false : undefined,
+      searchProviderPresetNames: () => mcpCatalog.searchProviderPresetNames(),
+      // The connectors the person turned off for this chat stay off on every turn of it.
+      turnedOffConnectorKeys: readTurnedOffConnectorKeys(session.record.metadata),
+      // An explicit value wins over the spec in resolveAgentDefinition: unattended runs do not recall,
+      // and the person's switch applies to every agent, saved ones included.
+      recallEnabled: deps.unattended ? false : memoryRecallEnabled,
+      summarize: memorySummarize,
+      clientTimezone,
       internalSourceState,
     },
     {
@@ -856,6 +970,12 @@ function createTurnResolver(deps: {
     {
       store: spaceStore,
       googleConnections: googleConnectionStore,
+      notesFolder:
+        deps.globalSettingsStore === undefined
+          ? undefined
+          : {
+              service: sharedNotesFolderService(notesFolderServiceDeps({ settings: deps.globalSettingsStore, logger })),
+            },
       authority: { tenantId: tenant_id, userRef },
       sessionId,
       schedules,
@@ -864,8 +984,29 @@ function createTurnResolver(deps: {
       startsAnswer,
     },
     { store: turnArtifactStore, tenantId: tenant_id, sessionId, turnId, logger },
-    { sessionStore, budget: tokenFactoryBudget, authority: { tenantId: tenant_id, userRef } },
+    {
+      sessionStore,
+      deletedChats: chatDeletionStore,
+      budget: tokenFactoryBudget,
+      authority: { tenantId: tenant_id, userRef },
+    },
+    chatSearchEnabled && personaStore !== undefined
+      ? {
+          sessionStore,
+          personaStore,
+          memoryDir: configuration.MEMORY_MARKDOWN_DIR,
+          scope:
+            deps.personaContext === undefined
+              ? undefined
+              : { personaName: deps.personaContext.persona_name, personaId: deps.personaContext.persona_id },
+          authority: { tenantId: tenant_id, userRef },
+        }
+      : undefined,
   );
+  if (switchedByMessage === true) {
+    resolver.switches.markSwitched();
+  }
+  return resolver;
 }
 
 const MAX_SESSION_TITLE_LENGTH = 50;
@@ -945,6 +1086,7 @@ export function extractUserMessageText(input: TurnInputItem[] | undefined): stri
         : message.content
             .filter(part => !isFileContentPart(part))
             .map(part => part.text)
+            .filter(text => !isHostWrappedText(text))
             .join(' '),
     )
     .join('\n\n');
@@ -1127,10 +1269,13 @@ export interface DrainTurnEventsInput {
   memory?:
     | {
         client: MemoryClient;
+        /** The chat the turn belongs to; a private chat's turn is never retained. */
+        session: Pick<SessionRecord, 'is_incognito'>;
         userText: string;
         /** The turn's input carried an attached file, whose extracted text reaches the model as data. */
         attachedFiles: boolean;
-        sessionTitle: string | undefined;
+        /** The person's IANA time zone, so a summary writes dates as the day they lived. */
+        timeZone?: string | undefined;
         /**
          * Present only when turn summarization is enabled (the Settings toggle's
          * persisted override, else the `MEMORY_SUMMARIZE` env default); the retain path
@@ -1159,6 +1304,32 @@ export interface DrainTurnEventsInput {
         tenantId: string;
       }
     | undefined;
+  /** Present only in a private chat: each finished turn pushes back when the chat is deleted. */
+  privateChat?: PrivateChatDrainMember | undefined;
+  /** The finished turn joins the past-chat search in the follow-up when its owner has the search on. */
+  chatSearch?:
+    | {
+        indexer: ChatSearchIndexer;
+        tenantId: string;
+        /** Whose chat this is: the switch and the index are that person's. */
+        createdBy: string;
+      }
+    | undefined;
+}
+
+export interface PrivateChatDrainMember {
+  sessionStore: Pick<ISessionStore<SessionCustom, TurnCustom>, 'setPrivateExpiry'>;
+  tenantId: string;
+}
+
+/** The drain member for a private chat, or undefined for any other chat. */
+function privateChatDrainMember(input: {
+  session: SessionHandle<SessionCustom, TurnCustom>;
+  sessionStore: PrivateChatDrainMember['sessionStore'];
+}): PrivateChatDrainMember | undefined {
+  return sessionKeepsNothing({ session: input.session.record })
+    ? { sessionStore: input.sessionStore, tenantId: input.session.tenant_id }
+    : undefined;
 }
 
 /** Events that show a turn reached the model. Connector startup, memory recall and a new sandbox are still setup. */
@@ -1190,6 +1361,35 @@ export async function drainTurnEvents(input: DrainTurnEventsInput): Promise<void
   return drain;
 }
 
+/** A private chat lives until a day after its latest turn ends. Never throws: the sweep uses the older time. */
+async function renewPrivateChatExpiry(input: {
+  privateChat: PrivateChatDrainMember;
+  sessionId: string;
+  logger: Logger;
+}): Promise<void> {
+  try {
+    await input.privateChat.sessionStore.setPrivateExpiry({
+      tenant_id: input.privateChat.tenantId,
+      session_id: input.sessionId,
+      private_expires_at: privateChatExpiry({ from: new Date() }),
+    });
+  } catch (error) {
+    input.logger.warn('Could not push back when a private chat is deleted', {
+      sessionId: input.sessionId,
+      ...extractErrorLogFields(error),
+    });
+  }
+}
+
+/** Tool results and text kept per turn for the memory note pass; the pass cuts what it sends to the model further. */
+const TURN_TOOL_RESULTS_KEPT = 20;
+const TURN_TOOL_RESULT_CHARACTERS_KEPT = 30_000;
+
+/** A refused or unrun call returned no content, so it cannot have brought anything in. */
+function toolRanOrMayHave(disposition: string): boolean {
+  return disposition !== 'denied' && disposition !== 'policy_blocked' && disposition !== 'never_ran';
+}
+
 async function runTurnEventDrain(params: {
   input: DrainTurnEventsInput;
   markArtifactsCaptured: () => void;
@@ -1197,31 +1397,63 @@ async function runTurnEventDrain(params: {
   const { input, markArtifactsCaptured } = params;
   const { trackedStream, turnEventStream, sessionId, turnId, executionDeadline, startBound, logger, onEvent, memory } =
     input;
-  // Provenance for the memory the retain below writes. All tool output is untrusted data (the
-  // host says so in the system prompt), and the retained assistant reply is produced after seeing
-  // it, so a turn that ingested any tool result is stamped `tool_ingested` and held to the recall
-  // screen's stricter posture. Text extracted from an attached file is just as untrusted, so a
-  // turn that attached one starts out tainted. A turn with neither is the user's own voice:
-  // `user_stated`.
+  // Provenance for the memory the retain below writes. Tool output may hold text from outside the
+  // chat (a web page, mail, a connector, a shell command), and the retained assistant reply is
+  // produced after seeing it, so a turn with any tool result is stamped `tool_ingested` and held to
+  // the recall screen's stricter posture. Only host tools known to return nothing from outside
+  // (spaces, task state, schedules) leave a turn unmarked. Text extracted from an attached file is just as untrusted, so a turn that
+  // attached one starts out tainted. A turn with neither is the user's own voice: `user_stated`.
   let ingestedToolOutput = memory?.attachedFiles === true;
+  const callReturnsOutside = new Map<string, boolean>();
+  const callSources = new Map<string, ToolResultSource>();
+  const toolResults: TurnToolResult[] = [];
   let followUp: Promise<void> | undefined;
   try {
     for await (const event of trackedStream) {
       if (MODEL_WORK_EVENT_TYPES.has(event.type)) {
         startBound?.markStarted();
       }
-      if (event.type === EventType.TOOL_RESPONSE || event.type === EventType.TOOL_RESPONSE_V2) {
+      if (event.type === EventType.MODEL_MESSAGE) {
+        for (const call of event.tool_calls ?? []) {
+          callReturnsOutside.set(call.id, callReturnsOutsideContent(call));
+          callSources.set(call.id, callResultSource(call));
+        }
+      }
+      if (
+        (event.type === EventType.TOOL_RESPONSE ||
+          (event.type === EventType.TOOL_RESPONSE_V2 && toolRanOrMayHave(event.disposition))) &&
+        (callReturnsOutside.get(event.tool_call_id) ?? true)
+      ) {
         ingestedToolOutput = true;
+        // Kept for the note pass; a result that did not run cleanly holds no finding.
+        if (
+          (event.type === EventType.TOOL_RESPONSE || event.disposition === 'executed_ok') &&
+          toolResults.length < TURN_TOOL_RESULTS_KEPT
+        ) {
+          toolResults.push({
+            source: callSources.get(event.tool_call_id) ?? 'other',
+            text: event.content.slice(0, TURN_TOOL_RESULT_CHARACTERS_KEPT),
+          });
+        }
       }
       // Dual-write before any client sink so subscribers can resume after disconnect.
       const sequenceNumber = await turnEventStream.put(event, {
         streamTTLSeconds: streamTTLSecondsFor(event),
       });
       await onEvent?.(event, sequenceNumber);
+      if (event.type === EventType.TURN_DONE && input.privateChat !== undefined) {
+        await renewPrivateChatExpiry({ privateChat: input.privateChat, sessionId, logger });
+      }
       if (event.type === EventType.TURN_DONE && event.state.status === 'done') {
         // Not awaited here: the stream must finish now, so the chat's next turn waits only on
         // the artifact step. The drain awaits the rest below, up to its time limit.
-        followUp = runTurnFollowUp({ input, state: event.state, ingestedToolOutput, markArtifactsCaptured });
+        followUp = runTurnFollowUp({
+          input,
+          state: event.state,
+          ingestedToolOutput,
+          toolResults,
+          markArtifactsCaptured,
+        });
       }
     }
     if (followUp !== undefined) {
@@ -1258,10 +1490,12 @@ async function runTurnFollowUp(params: {
   input: DrainTurnEventsInput;
   state: Extract<TerminalTurnState, { status: 'done' }>;
   ingestedToolOutput: boolean;
+  toolResults: readonly TurnToolResult[];
   markArtifactsCaptured: () => void;
 }): Promise<void> {
-  const { input, state, ingestedToolOutput, markArtifactsCaptured } = params;
-  const { turnEventStream, sessionId, turnId, logger, memory, artifacts, profileLearning, modelUsage } = input;
+  const { input, state, ingestedToolOutput, toolResults, markArtifactsCaptured } = params;
+  const { turnEventStream, sessionId, turnId, logger, memory, artifacts, profileLearning, modelUsage, chatSearch } =
+    input;
   try {
     // First, and never behind a model call: the chat's next turn reuses the sandbox and waits
     // on this step, so its tools cannot change a file before this turn has saved it.
@@ -1289,14 +1523,16 @@ async function runTurnFollowUp(params: {
       // Awaited so the verification pass inside can retry a failed retain once.
       const stored = await submitRetainWithVerification({
         client: memory.client,
+        session: memory.session,
         sessionId,
         turnId,
         userText: memory.userText,
         assistantText: formatAssistantMessageText(state.output?.content),
         completedAt: state.completed_at,
-        sessionTitle: memory.sessionTitle,
+        timeZone: memory.timeZone,
         origin: ingestedToolOutput ? 'tool_ingested' : 'user_stated',
         logger,
+        toolResults,
         summarize: memory.summarize,
         outcomeLog: memory.outcomeLog,
       });
@@ -1324,6 +1560,15 @@ async function runTurnFollowUp(params: {
     await flushUsage();
   } catch (error) {
     logger.error('Turn follow-up work failed', { sessionId, turnId, ...extractErrorLogFields(error) });
+  }
+  if (chatSearch !== undefined) {
+    // Outside the steps above, so a failure there never keeps the turn out of the search. It never throws.
+    await chatSearch.indexer.indexFinishedTurn({
+      tenant_id: chatSearch.tenantId,
+      created_by: chatSearch.createdBy,
+      session_id: sessionId,
+      turn_id: turnId,
+    });
   }
 }
 
@@ -1493,6 +1738,8 @@ export interface TurnEventDrainInput {
   turnDrains: TurnDrainRegistry;
   modelUsage: ModelUsageDrainMember;
   memory?: DrainTurnEventsInput['memory'];
+  chatSearch?: DrainTurnEventsInput['chatSearch'];
+  privateChat?: DrainTurnEventsInput['privateChat'];
 }
 
 /**
@@ -1507,6 +1754,8 @@ export async function beginTurnExecution(params: {
   deps: BeginTurnExecutionDeps;
   /** No person watches this turn (a scheduled run): what would ask is held for the owner. */
   unattended?: boolean | undefined;
+  /** Built-in tool names this turn does not offer. */
+  withheldTools?: readonly string[] | undefined;
 }): Promise<{ turn: TurnHandle<TurnCustom>; drainInput: TurnEventDrainInput }> {
   const clocks = startTurnClocks({ sessionId: params.session.session_id, logger: params.deps.logger });
   try {
@@ -1551,7 +1800,21 @@ async function beginAcceptedTurnExecution(
         personaModelName: deps.personaContext?.model_name,
         sessionAgent: session.record.agent,
         memoryClientPresent: deps.memoryClient !== undefined,
-        helperFqn: turnHelperModelFqn(),
+        personName: deps.personalizationProfile?.user_name ?? undefined,
+        profileLines: deps.personalizationProfile ? personalizationFactLines(deps.personalizationProfile) : undefined,
+        assistantName: deps.personaContext?.persona_name ?? deps.personalizationProfile?.assistant_name ?? undefined,
+      });
+      // The person's memory switch, read once per turn like the settings around it.
+      const memoryRecallEnabled = await readMemoryRecallSetting({
+        globalSettingsStore: deps.globalSettingsStore,
+        logger: deps.logger,
+      });
+      // The person's past-chat search switch, read once per turn the same way.
+      const chatSearchEnabled = await readChatSearchEnabled({
+        sentinelSettingsStore: deps.sentinelSettingsStore,
+        tenant_id,
+        created_by: userRef,
+        logger: deps.logger,
       });
       // Same one-read-per-turn contract for the recall screen: the Settings toggle's
       // persisted override wins when stored, otherwise the MEMORY_SCREEN_ENABLED env default.
@@ -1576,11 +1839,11 @@ async function beginAcceptedTurnExecution(
         modelProviderStore: deps.modelProviderStore,
         tokenFactoryBudget: deps.tokenFactoryBudget,
         modelUsage,
-        helperFqn: turnHelperModelFqn(),
         logger: deps.logger,
       });
       const resolver = createTurnResolver({
         mcpCatalog: deps.mcpCatalog,
+        chatDeletionStore: deps.chatDeletionStore,
         mcpServerStore: deps.mcpServerStore,
         tokenStore: deps.tokenStore,
         skillStore: deps.skillStore,
@@ -1589,9 +1852,11 @@ async function beginAcceptedTurnExecution(
         agentStore: deps.agentStore,
         modelProviderStore: deps.modelProviderStore,
         repositoryStore: deps.repositoryStore,
+        sentinelSettingsStore: deps.sentinelSettingsStore,
         sessionStore: deps.sessionStore,
         spaceStore: deps.spaceStore,
         googleConnectionStore: deps.googleConnectionStore,
+        globalSettingsStore: deps.globalSettingsStore,
         logger: deps.logger,
         signal: abortController.signal,
         userRef,
@@ -1614,8 +1879,12 @@ async function beginAcceptedTurnExecution(
         memorySettings: effectiveMemorySettings,
         unattended: params.unattended,
         previousTurnId: deps.previousTurnId ?? null,
-        sessionTitle: deps.sessionTitle,
+        memorySummarize,
+        memoryRecallEnabled,
+        chatSearchEnabled,
+        personaStore: deps.personaStore,
         clientTimezone: deps.clientTimezone,
+        spokenReply: deps.spokenReply,
         toolOutputScreenEnabled,
         turnArtifactStore: deps.turnArtifactStore,
         tokenFactoryBudget: deps.tokenFactoryBudget,
@@ -1639,6 +1908,7 @@ async function beginAcceptedTurnExecution(
         },
         command_execution_owner_id: configuration.EXECUTOR_ID,
         unattended: params.unattended,
+        withheld_tools: params.withheldTools,
       });
       return { turn, resolver, memorySummarize };
     },
@@ -1685,14 +1955,24 @@ async function beginAcceptedTurnExecution(
       logger: deps.logger,
       turnDrains: deps.turnDrains,
       modelUsage: { ledger: modelUsage, eventStore: deps.sessionStore },
+      privateChat: privateChatDrainMember({ session, sessionStore: deps.sessionStore }),
+      chatSearch:
+        deps.chatSearchIndexer === undefined
+          ? undefined
+          : {
+              indexer: deps.chatSearchIndexer,
+              tenantId: tenant_id,
+              createdBy: session.record.created_by_subject.subject_id,
+            },
       memory:
         deps.memoryClient === undefined
           ? undefined
           : {
               client: deps.memoryClient,
+              session: session.record,
               userText: extractUserMessageText(input ?? []),
               attachedFiles: inputAttachesFiles(input ?? []),
-              sessionTitle: deps.sessionTitle,
+              timeZone: deps.clientTimezone,
               summarize: memorySummarize,
             },
     },
@@ -1710,6 +1990,7 @@ export async function startTurnInProcess(params: {
   userRef: string;
   deps: BeginTurnExecutionDeps;
   unattended?: boolean | undefined;
+  withheldTools?: readonly string[] | undefined;
 }): Promise<TurnHandle<TurnCustom>> {
   const { turn, drainInput } = await beginTurnExecution(params);
 
@@ -1849,12 +2130,11 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       return c.json({ error: { message: `Session not found: ${sessionId}` } }, 404);
     }
     if (
-      !(await canReadAgentBoundResource({
+      !(await canReadSession({
         store: deps.resolveAgentStore(c),
         context: requestContext,
         authorizer: deps.authorizer,
-        agent_id: session.record.agent.type === 'reference' ? session.record.agent.id : undefined,
-        created_by_subject_id: session.record.created_by_subject.subject_id,
+        record: session.record,
       }))
     ) {
       return c.json({ error: { message: FORBIDDEN_SESSION_ACCESS } }, 403);
@@ -1885,12 +2165,11 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       return c.json({ error: { message: `Session not found: ${sessionId}` } }, 404);
     }
     if (
-      !(await canReadAgentBoundResource({
+      !(await canReadSession({
         store: deps.resolveAgentStore(c),
         context: requestContext,
         authorizer: deps.authorizer,
-        agent_id: session.record.agent.type === 'reference' ? session.record.agent.id : undefined,
-        created_by_subject_id: session.record.created_by_subject.subject_id,
+        record: session.record,
       }))
     ) {
       return c.json({ error: { message: FORBIDDEN_SESSION_ACCESS } }, 403);
@@ -1931,12 +2210,11 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       return c.json({ error: { message: `Session not found: ${sessionId}` } }, 404);
     }
     if (
-      !(await canReadAgentBoundResource({
+      !(await canReadSession({
         store: deps.resolveAgentStore(c),
         context: requestContext,
         authorizer: deps.authorizer,
-        agent_id: session.record.agent.type === 'reference' ? session.record.agent.id : undefined,
-        created_by_subject_id: session.record.created_by_subject.subject_id,
+        record: session.record,
       }))
     ) {
       return c.json({ error: { message: FORBIDDEN_SESSION_ACCESS } }, 403);
@@ -2086,12 +2364,11 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       return c.json({ error: { message: `Session not found: ${sessionId}` } }, 404);
     }
     if (
-      !(await canReadAgentBoundResource({
+      !(await canReadSession({
         store: deps.resolveAgentStore(c),
         context: requestContext,
         authorizer: deps.authorizer,
-        agent_id: session.record.agent.type === 'reference' ? session.record.agent.id : undefined,
-        created_by_subject_id: session.record.created_by_subject.subject_id,
+        record: session.record,
       }))
     ) {
       return c.json({ error: { message: FORBIDDEN_SESSION_ACCESS } }, 403);
@@ -2157,13 +2434,18 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       return c.json({ error: { message: FORBIDDEN_CREATE_TURN } }, 403);
     }
 
+    // The turn this one follows: the chat's last turn unless the caller named one or asked for none.
+    const requestedParent = submitted.previous_turn_id;
+    const previousTurnId =
+      requestedParent === 'none' ? null : requestedParent === 'auto' ? session.record.last_turn_id : requestedParent;
+
     // Eval instances approve only their fixture-backed tools; any other approval is declined here, whatever the runner sent.
     const body = configuration.AMAN_EVAL_MODE
       ? {
           ...submitted,
           input: await gateEvalApprovals({
             session,
-            previous_turn_id: submitted.previous_turn_id,
+            previous_turn_id: previousTurnId,
             input: submitted.input,
           }),
         }
@@ -2232,9 +2514,6 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       throw error;
     }
 
-    const requestedParent = body.previous_turn_id;
-    const previousTurnId =
-      requestedParent === 'none' ? null : requestedParent === 'auto' ? session.record.last_turn_id : requestedParent;
     const previousTurn = previousTurnId === null ? undefined : await session.getTurn(previousTurnId);
     if (previousTurnId !== null && previousTurn === undefined) {
       return c.json({ error: { message: `Turn not found: ${previousTurnId}` } }, 404);
@@ -2294,7 +2573,6 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       modelProviderStore,
       tokenFactoryBudget: deps.tokenFactoryBudget,
       modelUsage,
-      helperFqn: turnHelperModelFqn(),
       logger: deps.logger,
     });
     const turnCustom: TurnCustom = {
@@ -2362,23 +2640,6 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           }
         : undefined,
     });
-    // The title comes from the session's first message, so it may only ride along in the vault
-    // that first turn ran under; in any other vault it would carry that turn's text across.
-    const firstTurn =
-      session.record.last_turn_id === null ? undefined : (await session.listTurns({ limit: 1 })).data[0];
-    const titleSharesVault =
-      session.record.last_turn_id === null ||
-      (firstTurn !== undefined &&
-        (firstTurn.custom?.persona?.persona_name ?? null) === (vaultScope?.personaName ?? null));
-    const sessionTitleForMemory = chatTitleContext({
-      title: titleSharesVault ? (session.record.title ?? deriveSessionTitle(body.input)) : undefined,
-      assistantNames: [
-        profile?.assistant_name,
-        ...(await deps.personaStore.listPersonas({ tenant_id: requestContext.tenant_id, created_by: userRef })).flatMap(
-          candidate => [candidate.display_name, ...candidate.aliases],
-        ),
-      ],
-    });
 
     // Resolved before the turn exists, like the memory provider above: the pass itself runs
     // after TURN_DONE (awaited by the tracked drain) and every failure inside it silently
@@ -2394,6 +2655,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
     if (profile?.learning_enabled === true) {
       try {
         profileLearning = {
+          session: session.record,
           config: profileLearningPassConfig(),
           personalizationStore: deps.personalizationStore,
           eventStore: deps.sessionStore,
@@ -2404,7 +2666,6 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           tenantId: requestContext.tenant_id,
           createdBy: userRef,
           userText: extractUserMessageText(body.input),
-          helperFqn: turnHelperModelFqn(),
           turnModelFqn: await resolveTurnModelFqn({
             tenantId: requestContext.tenant_id,
             personaModelName: persona?.kind === 'persona' ? persona.persona.model_name : undefined,
@@ -2436,13 +2697,30 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       personaModelName: persona?.kind === 'persona' ? persona.persona.model_name : undefined,
       sessionAgent: session.record.agent,
       memoryClientPresent: memoryClient !== undefined,
-      helperFqn: turnHelperModelFqn(),
+      personName: profile?.user_name ?? undefined,
+      profileLines: profile ? personalizationFactLines(profile) : undefined,
+      assistantName:
+        (persona?.kind === 'persona' ? persona.persona.display_name : undefined) ??
+        profile?.assistant_name ??
+        undefined,
     });
 
     const turnId = mintPeeredTurnId(configuration.EXECUTOR_ID);
     // One read per turn: the persisted override (or env default) applies to the whole turn.
     const toolOutputScreenEnabled = await resolveToolOutputScreenEnabled({
       globalSettingsStore: deps.globalSettingsStore,
+      logger: deps.logger,
+    });
+    // The person's memory switch, read once per turn like the settings around it.
+    const memoryRecallEnabled = await readMemoryRecallSetting({
+      globalSettingsStore: deps.globalSettingsStore,
+      logger: deps.logger,
+    });
+    // The person's past-chat search switch, read once per turn the same way.
+    const chatSearchEnabled = await readChatSearchEnabled({
+      sentinelSettingsStore: deps.sentinelSettingsStore,
+      tenant_id: requestContext.tenant_id,
+      created_by: userRef,
       logger: deps.logger,
     });
     // Same one-read-per-turn contract for the recall screen.
@@ -2456,6 +2734,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
     );
     const resolver = createTurnResolver({
       mcpCatalog: deps.mcpCatalog,
+      chatDeletionStore: deps.chatDeletionStore,
       mcpServerStore,
       tokenStore: deps.tokenStore,
       skillStore,
@@ -2474,6 +2753,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       personaKnowledgeBlock: internalSources.personaKnowledgeBlock,
       personaKnowledgeHits: internalSources.personaKnowledgeHits,
       switchNotice: persona?.switchNotice,
+      switchedByMessage: persona?.selection === 'direct',
       internalSourceState: internalSources.internalSourceState,
       boundRepository,
       serverSandboxAvailable: await readServerSandboxAvailable({
@@ -2482,15 +2762,21 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
         logger: deps.logger,
       }),
       repositoryStore: deps.repositoryStore,
+      sentinelSettingsStore: deps.sentinelSettingsStore,
       sessionStore: deps.sessionStore,
       memoryClient,
       memoryProviderServerName: memoryProvider?.serverName,
       memorySettings: effectiveMemorySettings,
       previousTurnId: memoryPreviousTurnId,
-      sessionTitle: sessionTitleForMemory,
+      memorySummarize,
+      memoryRecallEnabled,
+      chatSearchEnabled,
+      personaStore: deps.personaStore,
       spaceStore: deps.spaceStore,
       googleConnectionStore: deps.googleConnectionStore,
+      globalSettingsStore: deps.globalSettingsStore,
       clientTimezone: body.client_timezone,
+      spokenReply: body.spoken_reply,
       toolOutputScreenEnabled,
       turnArtifactStore: deps.turnArtifactStore,
       tokenFactoryBudget: deps.tokenFactoryBudget,
@@ -2505,6 +2791,7 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
               owner_id: userRef,
               model_name: chatModelName(chatRunner),
               session_id: session.session_id,
+              default_assistant_name: profile?.assistant_name ?? null,
               logger: deps.logger,
             },
       schedules:
@@ -2530,6 +2817,8 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
                 personalizationStore: deps.personalizationStore,
               }),
               logger: deps.logger,
+              // A reminder set in this chat fires back into this chat.
+              session_id: session.session_id,
             },
     });
 
@@ -2840,14 +3129,16 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           logger: deps.logger,
           turnDrains: deps.turnDrains,
           modelUsage: { ledger: modelUsage, eventStore: deps.sessionStore },
+          privateChat: privateChatDrainMember({ session, sessionStore: deps.sessionStore }),
           memory:
             memoryClient === undefined
               ? undefined
               : {
                   client: memoryClient,
+                  session: session.record,
                   userText: extractUserMessageText(body.input),
                   attachedFiles: inputAttachesFiles(body.input ?? []),
-                  sessionTitle: sessionTitleForMemory,
+                  timeZone: body.client_timezone,
                   // Resolved once on the create-turn path above; absent means verbatim.
                   summarize: memorySummarize,
                   outcomeLog: {
@@ -2857,6 +3148,14 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
                   },
                 },
           profileLearning,
+          chatSearch:
+            deps.chatSearchIndexer === undefined
+              ? undefined
+              : {
+                  indexer: deps.chatSearchIndexer,
+                  tenantId: requestContext.tenant_id,
+                  createdBy: session.record.created_by_subject.subject_id,
+                },
           artifacts: {
             turnArtifactStore: deps.turnArtifactStore,
             sandboxProviderStore,
@@ -2888,21 +3187,39 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
           return c.json({ data: toWireTurn(createdTurn.record) }, 200);
         }
 
-        let shouldWriteToSSEStream = true;
+        // Stream: same engine; a hung SSE write is timed out so drain/dual-write continue.
+        let writesStopped = false;
         return streamSSE(c, async stream => {
           stream.onAbort(() => {
-            shouldWriteToSSEStream = false;
+            // Our own abort after a failed write already logged why; only a client leaving is news here.
+            if (!writesStopped) {
+              writesStopped = true;
+              deps.logger.info('Create-turn SSE client disconnected, continuing drain without writing', {
+                sessionId,
+                turnId: drainInput.turnId,
+              });
+            }
           });
           await drainTurnEvents({
             ...drainInput,
             onEvent: async (event, sequenceNumber) => {
-              if (!stream.closed && !stream.aborted && shouldWriteToSSEStream) {
-                try {
-                  await stream.writeSSE(turnEventSsePayload(event, sequenceNumber));
-                } catch (error) {
-                  deps.logger.error('SSE stream write error', extractErrorLogFields(error));
-                  shouldWriteToSSEStream = false;
-                }
+              if (stream.closed || stream.aborted || writesStopped) {
+                return;
+              }
+              try {
+                await withTimeout(
+                  stream.writeSSE(turnEventSsePayload(event, sequenceNumber)),
+                  configuration.TURN_SSE_STREAM_WRITE_TIMEOUT_MS,
+                );
+              } catch (error) {
+                writesStopped = true;
+                deps.logger.error(
+                  error instanceof PromiseTimeoutError ? 'SSE stream write timed out' : 'SSE stream write error',
+                  { ...extractErrorLogFields(error), sessionId, turnId: drainInput.turnId },
+                );
+                // End the response now, not when the turn finishes: a client that stops reading
+                // sees the stream close and reconnects through the subscribe route.
+                stream.abort();
               }
             },
           });
@@ -2971,12 +3288,11 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
       return c.json({ error: { message: `Session not found: ${sessionId}` } }, 404);
     }
     if (
-      !(await canReadAgentBoundResource({
+      !(await canReadSession({
         store: deps.resolveAgentStore(c),
         context: requestContext,
         authorizer: deps.authorizer,
-        agent_id: session.record.agent.type === 'reference' ? session.record.agent.id : undefined,
-        created_by_subject_id: session.record.created_by_subject.subject_id,
+        record: session.record,
       }))
     ) {
       return c.json({ error: { message: FORBIDDEN_SESSION_ACCESS } }, 403);

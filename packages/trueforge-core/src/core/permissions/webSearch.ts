@@ -2,11 +2,14 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
 import { EXTRACT_DOCUMENT_TEXT_TOOL_NAME } from '../../documents/toolContract';
 import { CALENDAR_READ_TOOL_NAMES } from '../calendar/toolContract';
-import { htmlImageLinks } from '../email/gmail/htmlText';
+import { htmlImages } from '../email/gmail/htmlText';
 import { isGmailReadToolName } from '../email/gmail/toolContract';
 import { isMailReadToolName } from '../email/mailConnector/toolContract';
+import type { InternalToolCallInfo } from '../llm/LLMTypes';
 import { DEFAULT_ASSISTANT_NAME } from '../personas/assistantName';
+import { REPLACE_TASK_CHECKLIST_TOOL_NAME, TASK_STATE_TOOL_NAME } from '../runtime/taskState';
 import { isPageReaderTool, isSearchResultTool } from '../search/fetchedPages';
+import { BROWSER_OPEN_SILENT_REASON, BROWSER_OPEN_TOOL_NAME, isBrowserToolName } from './browserToolNames';
 import {
   emptyChatProvenance,
   namesUrl,
@@ -29,12 +32,26 @@ export const SILENT_SEARCH_LIMIT = 20;
 /** Reason code for a search or page read the designated provider ran without asking. */
 export const SEARCH_SILENT_REASON = 'mcp_search_provider';
 
+/**
+ * Whether a call that ran without asking counts toward the turn's silent lookup limit: a search or page read of the
+ * designated provider, or a page the browser opened.
+ */
+export function countsAsSilentLookup(input: { tool_name: string; reason: string }): boolean {
+  return (
+    isSilentSearchReason(input.reason) ||
+    (baseToolName(input.tool_name) === BROWSER_OPEN_TOOL_NAME && input.reason === BROWSER_OPEN_SILENT_REASON)
+  );
+}
+
 /** Whether a decision reason is a search that ran without asking. */
 export function isSilentSearchReason(reason: string): boolean {
   return reason === SEARCH_SILENT_REASON;
 }
 
-/** Reason code for a lookup held because read content chose its link and the link carries more than it gave. */
+/**
+ * Reason code for a lookup held because its link carries more than its source gave: read content chose the link, or
+ * only the assistant's own reply brought up the site.
+ */
 export const SEARCH_STEERED_REASON = 'mcp_search_steered';
 
 /** Reason code for a lookup held because it carries a private detail of the person's, in a chat that read other content. */
@@ -118,70 +135,171 @@ export function resultTexts(result: CallToolResult): string[] {
 }
 
 /** A markdown picture: `![alt](url)` with an optional title after the link. */
-const MARKDOWN_IMAGE = /!\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+(?:"[^"]*"|'[^']*'))?\s*\)/g;
+const MARKDOWN_IMAGE = /!\[([^\]]*)\]\(\s*<?([^)\s>]+)>?(?:\s+(?:"[^"]*"|'[^']*'))?\s*\)/g;
 
 /** Cap on image links taken from one page read, so a gallery page cannot grow host memory without bound. */
 const MAX_PAGE_IMAGE_URLS = 200;
 
+/** Most pictures the model is shown from one page read; the list is a hint, not the page's whole gallery. */
+const PAGE_PICTURES_SHOWN_MAX = 8;
+
+/** Longest description shown beside a picture link; a page's alt text can run to a paragraph. */
+const PICTURE_ALT_MAX_CHARS = 120;
+
+/** The name of the host-added picture list under a page read; the refusal for a made up picture names it. */
+export const PAGE_PICTURES_LABEL = 'Pictures on this page';
+
+const PAGE_PICTURES_HEADING = `${PAGE_PICTURES_LABEL}:`;
+
+/** One picture a page shows: its link and, when the page gives one, the words that describe it. */
+export interface PagePicture {
+  url: string;
+  alt: string | undefined;
+}
+
 /**
- * The picture links a page read returned, from markdown pictures and raw `<img>` tags. Tracking
- * pixels are left out by the HTML reader, and a data: picture is not a link out, so only web
- * picture links are returned.
+ * The pictures a page read returned, from markdown pictures and raw `<img>` tags, once each and in
+ * order. Tracking pixels are left out by the HTML reader, and a data: picture is not a link out, so
+ * only web picture links are returned. This is the one reader of a page's pictures: the provenance
+ * record and the list the model is shown both come from it.
  */
-export function pageImageUrls(text: string): string[] {
-  const urls: string[] = [];
-  const add = (raw: string): void => {
+export function pagePictures(text: string): PagePicture[] {
+  const pictures: PagePicture[] = [];
+  const add = ({ url: raw, alt }: PagePicture): void => {
     const url = raw.trim();
-    if (/^https?:\/\//i.test(url) && url.length <= 2048 && !urls.includes(url)) {
-      urls.push(url);
+    if (/^https?:\/\//i.test(url) && url.length <= 2048 && !pictures.some(picture => picture.url === url)) {
+      pictures.push({ url, alt });
     }
   };
   for (const match of text.matchAll(MARKDOWN_IMAGE)) {
-    if (match[1] !== undefined) {
-      add(match[1]);
+    if (match[2] !== undefined) {
+      const alt = match[1]?.trim() ?? '';
+      add({ url: match[2], alt: alt === '' ? undefined : alt });
     }
   }
-  for (const url of htmlImageLinks({ source: text, max: MAX_PAGE_IMAGE_URLS })) {
-    add(url);
+  for (const image of htmlImages({ source: text, max: MAX_PAGE_IMAGE_URLS })) {
+    add(image);
   }
-  return urls;
+  return pictures;
 }
 
-/** The kind of content a tool's result is, so a card can say where an address was read. */
-function readSourceOf(input: { baseName: string; opensPage: boolean }): ReadSource {
-  if (input.opensPage) {
-    return 'page';
-  }
-  if (CALENDAR_READ_TOOL_NAMES.some(name => name === input.baseName)) {
-    return 'event';
-  }
-  return input.baseName === EXTRACT_DOCUMENT_TEXT_TOOL_NAME ? 'file' : 'tool_result';
+/** The picture links a page read returned, as `pagePictures` finds them. */
+export function pageImageUrls(text: string): string[] {
+  return pagePictures(text).map(picture => picture.url);
 }
 
 /**
- * Records where the links and addresses of one tool result came from, before the model reads it. A search's results
- * are the person's to open; every other text is data, the headers of their own mail and their events' guests too.
+ * The short list of a page's pictures the model is shown under a page read, or undefined when the
+ * tool is not a page reader or the page has no https picture. It is a host-added list, kept apart
+ * from the page text so the page's own words stay framed as untrusted data. A space only accepts an
+ * https picture, so an http one is left out rather than offered and then refused.
+ */
+export function pagePicturesNote(input: { tool_name: string; text: string }): string | undefined {
+  if (!isPageReaderTool(baseToolName(input.tool_name))) {
+    return undefined;
+  }
+  const shown = pagePictures(input.text)
+    .filter(picture => /^https:\/\//i.test(picture.url))
+    .slice(0, PAGE_PICTURES_SHOWN_MAX);
+  if (shown.length === 0) {
+    return undefined;
+  }
+  const lines = shown.map(picture => {
+    const alt = picture.alt?.replace(/\s+/g, ' ').trim().slice(0, PICTURE_ALT_MAX_CHARS) ?? '';
+    return alt === '' ? `- ${picture.url}` : `- ${picture.url} (${alt})`;
+  });
+  return [PAGE_PICTURES_HEADING, ...lines].join('\n');
+}
+
+/** A tool's own name, without the server prefix a connector adds. */
+function baseToolName(toolName: string): string {
+  const separator = toolName.lastIndexOf('__');
+  return separator < 0 ? toolName : toolName.slice(separator + 2);
+}
+
+/**
+ * Host tools whose results never contain stored or outside text: the finding recorder answers with a fixed
+ * line, and the task checklist writer answers with the checklist the model just wrote. Spaces, schedules and
+ * reminders are not here: their results echo stored bodies, names and tasks that may hold page text saved in
+ * an earlier turn. This is the only list; any tool not on it, including every connector, shell tool and
+ * unknown name, counts as bringing in outside content.
+ */
+const HOST_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set([TASK_STATE_TOOL_NAME, REPLACE_TASK_CHECKLIST_TOOL_NAME]);
+
+/**
+ * What the host itself recorded about the tool that ran a call. A connector chooses its tools' names, so a
+ * name alone never earns a tool the standing of one of the assistant's own tools or of the search provider.
+ */
+export interface HostToolStamp {
+  /** The call ran one of the assistant's own built-in tools, not a connector's. */
+  host_tool: boolean;
+  /** The call went to the connector the person designated as the search provider. */
+  search_provider: boolean;
+}
+
+/** The stamp of a call the host recorded nothing about: it earns no standing. */
+export const NO_HOST_STAMP: HostToolStamp = { host_tool: false, search_provider: false };
+
+/** Reads the host's stamp from the call info it wrote; a call with no info earns no standing. */
+export function hostToolStamp(
+  info: Pick<InternalToolCallInfo, 'type' | 'search_provider_call'> | undefined,
+): HostToolStamp {
+  return info === undefined
+    ? NO_HOST_STAMP
+    : { host_tool: info.type === 'truefoundry-system', search_provider: info.search_provider_call === true };
+}
+
+/**
+ * Whether a tool's result may hold text written outside the chat: true for every tool except the assistant's
+ * own host-only tools. A connector's tool with one of their names still brings in outside content.
+ */
+export function toolReturnsOutsideContent(input: { tool_name: string; stamp: HostToolStamp }): boolean {
+  return !(input.stamp.host_tool && HOST_ONLY_TOOL_NAMES.has(baseToolName(input.tool_name)));
+}
+
+/** The kind of content a tool's result is, so a card or a memory note can say where something was read. */
+export function readSourceOf(toolName: string): ReadSource {
+  const baseName = baseToolName(toolName);
+  if (isBrowserToolName(baseName)) {
+    return 'browser_page';
+  }
+  if (isSearchResultTool(baseName) || isPageReaderTool(baseName)) {
+    return 'page';
+  }
+  if (isGmailReadToolName(baseName) || isMailReadToolName(baseName)) {
+    return 'email';
+  }
+  if (CALENDAR_READ_TOOL_NAMES.some(name => name === baseName)) {
+    return 'event';
+  }
+  return baseName === EXTRACT_DOCUMENT_TEXT_TOOL_NAME ? 'file' : 'tool_result';
+}
+
+/**
+ * Records where the links and addresses of one tool result came from, before the model reads it. The search
+ * provider's results are the person's to open; every other text is data, the headers of their own mail and their
+ * events' guests too, and so is the result of any other connector's tool that only shares a search tool's name.
  * `argument_values` are the call's own strings, so a search that names a link counts as opening a page.
  */
 export function recordToolResultProvenance(input: {
   state: WebSearchTurnState;
   tool_name: string;
+  /** What the host recorded about the tool: only the search provider's results are the person's to open. */
+  stamp: HostToolStamp;
   argument_values: readonly string[];
   texts: readonly string[];
 }): void {
   const { provenance } = input.state;
-  const separator = input.tool_name.lastIndexOf('__');
-  const baseName = separator < 0 ? input.tool_name : input.tool_name.slice(separator + 2);
-  const searchTool = isSearchResultTool(baseName);
+  const baseName = baseToolName(input.tool_name);
+  const searchTool = input.stamp.search_provider && isSearchResultTool(baseName);
   if (searchTool && !namesUrl(input.argument_values)) {
     recordSearchResults({ provenance, texts: input.texts });
     return;
   }
-  const mail = !searchTool && (isGmailReadToolName(baseName) || isMailReadToolName(baseName));
-  const pageReader = isPageReaderTool(baseName);
-  const source = readSourceOf({ baseName, opensPage: searchTool || pageReader });
+  const source = readSourceOf(baseName);
+  const pageReader = input.stamp.search_provider && isPageReaderTool(baseName);
   for (const text of input.texts) {
-    if (mail) {
+    if (source === 'email') {
       recordEmailText({ provenance, text });
     } else {
       recordUntrustedText({ provenance, text, source });

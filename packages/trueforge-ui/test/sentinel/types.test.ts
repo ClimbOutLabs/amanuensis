@@ -76,6 +76,26 @@ describe('extractSentinelFromEvent', () => {
     expect(other?.card.mail_new_recipients).toBeNull();
   });
 
+  it('reads the draft mark on a new-recipient card, and no mark on a send card', () => {
+    const [draft, send] = extractSentinelFromEvent({
+      type: 'tool.approval_required',
+      tool_calls: [
+        {
+          tool_call_id: 'call-draft',
+          tier: 3,
+          tier3_card: { plain_what: 'Save.', mail_new_recipients: ['stranger@example.net'], mail_draft: true },
+        },
+        {
+          tool_call_id: 'call-send',
+          tier: 3,
+          tier3_card: { plain_what: 'Send.', mail_new_recipients: ['stranger@example.net'] },
+        },
+      ],
+    });
+    expect(draft?.card.mail_draft).toBe(true);
+    expect(send?.card.mail_draft).toBe(false);
+  });
+
   it('parses per-tool-call approval cards with the backend field names', () => {
     const approvals = extractSentinelFromEvent(approvalEvent);
     expect(approvals).toHaveLength(2);
@@ -292,6 +312,49 @@ describe('extractSentinelFromEvent', () => {
       reply_in_thread: null,
       reply_to: null,
     });
+  });
+
+  it('keeps the name a mail is sent as and its name-left-off note, and leaves them off an older card', () => {
+    const card = (extra: Record<string, unknown>) =>
+      extractSentinelFromEvent({
+        type: 'tool.approval_required',
+        tool_calls: [
+          {
+            id: 'call-14',
+            tier: 3,
+            tier3_card: {
+              plain_what: 'Do it',
+              email: { action: 'send', to: [], cc: [], bcc: [], subject: 's', body: 'b', ...extra },
+            },
+          },
+        ],
+      })[0]?.card.email;
+    expect(card({ from_name: 'PayPal Security', name_left_off: true })).toMatchObject({
+      from_name: 'PayPal Security',
+      name_left_off: true,
+    });
+    expect(card({ from_name: null })).toMatchObject({ from_name: null });
+    expect(card({})).not.toHaveProperty('from_name');
+    expect(card({})).not.toHaveProperty('name_left_off');
+  });
+
+  it('keeps the duplicate and multi-day warnings of an event', () => {
+    const event = (extra: Record<string, unknown>) =>
+      extractSentinelFromEvent({
+        type: 'tool.approval_required',
+        tool_calls: [
+          {
+            id: 'call-15',
+            tier: 3,
+            tier3_card: { plain_what: 'Do it', calendar_event: { ...CALENDAR_EVENT, ...extra } },
+          },
+        ],
+      })[0]?.card.calendar_event;
+    expect(event({ already_created: true, span_days: 3 })).toMatchObject({ already_created: true, span_days: 3 });
+    expect(event({})).not.toHaveProperty('span_days');
+    for (const span_days of [0, -2, 1.5, '3']) {
+      expect(event({ span_days })).toBeNull();
+    }
   });
 
   const CALENDAR_EVENT = {
@@ -544,6 +607,20 @@ describe('held actions', () => {
     expect(info?.alwaysAllowOffered).toBe(true);
   });
 
+  it('reads that the every-chat answer on a maps card turns maps on, and leaves it unset on any other card', () => {
+    const card = { tier: 3, can_always_allow: true, tier3_card: { plain_what: 'Show a map of Lisbon?' } };
+    const parsed = extractSentinelFromEvent({
+      type: 'tool.approval_required',
+      tool_calls: [
+        { ...card, id: 'call-map', always_allow_covers: 'maps' },
+        { ...card, id: 'call-sdk', alwaysAllowCovers: 'maps' },
+        { ...card, id: 'call-plain' },
+        { ...card, id: 'call-other', always_allow_covers: 'everything' },
+      ],
+    });
+    expect(parsed.map(info => info.alwaysAllowCovers)).toEqual(['maps', 'maps', undefined, undefined]);
+  });
+
   it('leaves an ordinary approval without a held marker, and never offers always-allow it did not get', () => {
     const [ordinary] = extractSentinelFromEvent({
       type: 'tool.approval_required',
@@ -687,6 +764,8 @@ describe('parseUserSettings', () => {
       search_without_asking: true,
       maps_without_asking: true,
       sandbox_without_asking: true,
+      chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
     };
     expect(parseUserSettings(null)).toEqual(defaults);
     expect(parseUserSettings({})).toEqual(defaults);
@@ -707,6 +786,8 @@ describe('parseUserSettings', () => {
       search_without_asking: true,
       maps_without_asking: true,
       sandbox_without_asking: true,
+      chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
     });
   });
 
@@ -726,6 +807,18 @@ describe('parseUserSettings', () => {
     expect(parseUserSettings({ data: { sandbox_without_asking: 'no' } }).sandbox_without_asking).toBe(true);
   });
 
+  it('reads the download allowance for chats without a project, and falls back to off when it is not a boolean', () => {
+    expect(
+      parseUserSettings({ data: { package_downloads_without_project_allowed: true } })
+        .package_downloads_without_project_allowed,
+    ).toBe(true);
+    expect(parseUserSettings({ data: {} }).package_downloads_without_project_allowed).toBe(false);
+    expect(
+      parseUserSettings({ data: { package_downloads_without_project_allowed: 'yes' } })
+        .package_downloads_without_project_allowed,
+    ).toBe(false);
+  });
+
   it('does not read a bare settings object', () => {
     expect(parseUserSettings({ offline_mode: true, tier2_auto_allow: ['file_write'] })).toEqual({
       offline_mode: false,
@@ -733,6 +826,8 @@ describe('parseUserSettings', () => {
       search_without_asking: true,
       maps_without_asking: true,
       sandbox_without_asking: true,
+      chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
     });
   });
 });

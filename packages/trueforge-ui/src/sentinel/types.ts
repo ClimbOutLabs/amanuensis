@@ -65,6 +65,10 @@ export type SentinelApprovalEmail = {
   reply_in_thread: { subject: string; from: string } | null;
   /** The address replies go to when it is not the sender, or null when replies go to the sender. */
   reply_to: string | null;
+  /** The display name the message is sent as, null when none is set; absent on a card from before it was carried. */
+  from_name?: string | null;
+  /** True when a name was left off an address because it looked like an address; absent on an older card. */
+  name_left_off?: boolean;
 };
 
 const APPROVAL_CALENDAR_ACTIONS = ['create', 'change'] as const;
@@ -90,6 +94,10 @@ export type SentinelApprovalCalendarEvent = {
   guests_emailed: boolean;
   /** True when a change touches one date of a repeating event. */
   one_of_repeating: boolean;
+  /** True when the same event was created in this chat a few minutes ago; absent on an older card. */
+  already_created?: boolean;
+  /** How many days the event runs over; absent on an older card. */
+  span_days?: number;
   /** The event as it is now, for a change; null for a new event. */
   before: { title: string; when: string; duration: string; location: string } | null;
 };
@@ -155,6 +163,8 @@ export type SentinelApprovalCard = {
   persona: SentinelApprovalPersona | null;
   /** For a mail send to addresses not on the Email list: those addresses. Approving adds them. Otherwise null. */
   mail_new_recipients?: string[] | null;
+  /** True when a card carrying mail_new_recipients approves saving a draft rather than sending. */
+  mail_draft?: boolean | undefined;
 };
 
 /** The whole persona a chat call adds, in plain words. */
@@ -188,6 +198,8 @@ export type SentinelApprovalInfo = {
   chatAllowOffered?: boolean | undefined;
   /** True when the server lets the owner always allow this tool; the server refuses it for other tools. */
   alwaysAllowOffered?: boolean | undefined;
+  /** Set when the every-chat answer on this card lets maps run without asking, instead of allowing one tool. */
+  alwaysAllowCovers?: 'maps' | undefined;
   /** Present only for an action a scheduled run held; such a card never pauses the chat. */
   held?: HeldActionInfo | undefined;
   /** Present only for an action a scheduled run could not save for the owner, and why. */
@@ -280,6 +292,13 @@ export type SentinelUserSettings = {
   maps_without_asking: boolean;
   /** While on, code, commands and workspace files in the sandbox run without asking. Default: on. */
   sandbox_without_asking: boolean;
+  /** While on, the assistant can search your own past chats when you ask. Default: off. */
+  chat_search_enabled: boolean;
+  /**
+   * While on, the sandbox may download packages in chats that are not working on a project, through
+   * the download-only mirrors. The allowance also covers scheduled runs. Default: off.
+   */
+  package_downloads_without_project_allowed: boolean;
 };
 
 /**
@@ -287,7 +306,7 @@ export type SentinelUserSettings = {
  * server's HTTP API plus the SDK client; trueforge-ui only declares the contract.
  *
  * - `GET /api/v1/sessions/{sessionId}/audit-log?limit=N` -> `{ entries: [...] }`
- * - `GET /api/v1/user/audit-log?limit=N&page_token=T&outcome=O` -> `{ data: [...], pagination }`
+ * - `GET /api/v1/user/audit-log?limit=N&page_token=T&outcome=O&from=ISO&to=ISO` -> `{ data: [...], pagination }`
  * - `GET /api/v1/user/settings/sentinel` -> `{ data: settings }`
  * - `PATCH /api/v1/user/settings/sentinel` with a settings patch -> `{ data: settings }`
  * - `GET /api/v1/user/brief-items/completions` -> `{ data: [{ item_key, ... }] }`
@@ -300,6 +319,10 @@ export type SentinelApi = {
     limit?: number;
     pageToken?: string | undefined;
     outcome?: SentinelAuditOutcome | undefined;
+    /** Start of the shown days, as an ISO instant; no start bound when undefined. */
+    from?: string | undefined;
+    /** End of the shown days, as an ISO instant; entries before it show. No end bound when undefined. */
+    to?: string | undefined;
   }) => Promise<SentinelUserAuditPage>;
   getUserSettings: () => Promise<SentinelUserSettings>;
   updateUserSettings: (patch: Partial<SentinelUserSettings>) => Promise<SentinelUserSettings>;
@@ -433,6 +456,11 @@ function parseEmail(value: unknown): SentinelApprovalEmail | null {
   const threadFrom = isRecord(thread) ? optionalString(thread, 'from') : undefined;
   // A card from before this field existed has no reply address, so it replies to the sender as it did then.
   const replyTo = optionalString(value, 'reply_to') ?? optionalString(value, 'replyTo') ?? null;
+  const fromName =
+    value.from_name === null || value.fromName === null
+      ? null
+      : (optionalString(value, 'from_name') ?? optionalString(value, 'fromName'));
+  const nameLeftOff = optionalBoolean(value, 'name_left_off') ?? optionalBoolean(value, 'nameLeftOff');
   return {
     action,
     to,
@@ -445,6 +473,8 @@ function parseEmail(value: unknown): SentinelApprovalEmail | null {
     reply_in_thread:
       threadSubject === undefined || threadFrom === undefined ? null : { subject: threadSubject, from: threadFrom },
     reply_to: replyTo,
+    ...(fromName === undefined ? {} : { from_name: fromName }),
+    ...(nameLeftOff === undefined ? {} : { name_left_off: nameLeftOff }),
   };
 }
 
@@ -476,6 +506,14 @@ function parseCalendarEvent(value: unknown): SentinelApprovalCalendarEvent | nul
   const attendees = stringList(value.attendees);
   const guests_emailed = optionalBoolean(value, 'guests_emailed') ?? optionalBoolean(value, 'guestsEmailed');
   const one_of_repeating = optionalBoolean(value, 'one_of_repeating') ?? optionalBoolean(value, 'oneOfRepeating');
+  const alreadyCreated = optionalBoolean(value, 'already_created') ?? optionalBoolean(value, 'alreadyCreated');
+  const rawSpanDays = value.span_days ?? value.spanDays;
+  // The server only sends whole days of at least one; anything else is not a card this reader can trust.
+  const spanDays =
+    typeof rawSpanDays === 'number' && Number.isInteger(rawSpanDays) && rawSpanDays >= 1 ? rawSpanDays : undefined;
+  if (rawSpanDays !== undefined && spanDays === undefined) {
+    return null;
+  }
   if (
     action === undefined ||
     calendar === undefined ||
@@ -503,6 +541,8 @@ function parseCalendarEvent(value: unknown): SentinelApprovalCalendarEvent | nul
     attendees,
     guests_emailed,
     one_of_repeating,
+    ...(alreadyCreated === undefined ? {} : { already_created: alreadyCreated }),
+    ...(spanDays === undefined ? {} : { span_days: spanDays }),
     before: parseCalendarBefore(value.before),
   };
 }
@@ -566,6 +606,7 @@ function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
     schedule: parseSchedule(value.schedule),
     persona: parsePersona(value.persona),
     mail_new_recipients: parseNewRecipients(value.mail_new_recipients ?? value.mailNewRecipients),
+    mail_draft: cardFlag(value, { snake: 'mail_draft', camel: 'mailDraft' }),
   });
 }
 
@@ -606,6 +647,7 @@ function parseApprovalInfo(
   const notSaved = parseNotSaved(ref);
   const chatAllowOffered = ref.can_chat_allow ?? ref.canChatAllow;
   const alwaysAllowOffered = ref.can_always_allow ?? ref.canAlwaysAllow;
+  const alwaysAllowCovers = ref.always_allow_covers ?? ref.alwaysAllowCovers;
   return {
     toolCallId,
     tier,
@@ -613,6 +655,7 @@ function parseApprovalInfo(
     ...origin,
     ...(typeof chatAllowOffered === 'boolean' ? { chatAllowOffered } : {}),
     ...(typeof alwaysAllowOffered === 'boolean' ? { alwaysAllowOffered } : {}),
+    ...(alwaysAllowCovers === 'maps' ? { alwaysAllowCovers } : {}),
     ...(held === undefined ? {} : { held }),
     ...(notSaved === undefined ? {} : { notSaved }),
   };
@@ -762,6 +805,8 @@ export function parseUserSettings(body: unknown): SentinelUserSettings {
       search_without_asking: true,
       maps_without_asking: true,
       sandbox_without_asking: true,
+      chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
     };
   }
   return {
@@ -770,5 +815,8 @@ export function parseUserSettings(body: unknown): SentinelUserSettings {
     search_without_asking: optionalBoolean(settings, 'search_without_asking') ?? true,
     maps_without_asking: optionalBoolean(settings, 'maps_without_asking') ?? true,
     sandbox_without_asking: optionalBoolean(settings, 'sandbox_without_asking') ?? true,
+    chat_search_enabled: optionalBoolean(settings, 'chat_search_enabled') ?? false,
+    package_downloads_without_project_allowed:
+      optionalBoolean(settings, 'package_downloads_without_project_allowed') ?? false,
   };
 }

@@ -15,8 +15,12 @@ interface ProvenanceValues {
   overflowed: boolean;
 }
 
-/** Where the assistant read a value: as the sender of an email, or the kind of content it appeared in. */
-export type ReadSource = 'email_sender' | 'email' | 'event' | 'page' | 'file' | 'tool_result' | 'other';
+/**
+ * Where the assistant read a value: as the sender of an email, or the kind of content it appeared in. `reply` is
+ * the assistant's own earlier reply, which can repeat what it read in a turn whose record is gone.
+ */
+export type ReadSource =
+  'email_sender' | 'email' | 'event' | 'page' | 'browser_page' | 'file' | 'tool_result' | 'reply' | 'other';
 
 export interface ReadOrigin {
   source: ReadSource;
@@ -27,8 +31,18 @@ export interface ReadOrigin {
 export interface ChatProvenance {
   /** From the person's messages, profile and memory, and search results. */
   trusted: ProvenanceValues;
-  /** Seen in content the assistant read: web pages, mail (headers too), files, tool output, earlier summaries. */
+  /**
+   * Seen in content the assistant read: web pages, mail (headers too), files, tool output, earlier summaries.
+   * Addresses the assistant's own earlier replies named are here too.
+   */
   untrusted: ProvenanceValues;
+  /**
+   * Links and sites the assistant's own earlier replies wrote. Not read content and not the person's say: a site
+   * that is only here is one the assistant brought up itself.
+   */
+  reply: ProvenanceValues;
+  /** Exact picture URLs from pages the chat opened. Pictures only: never a link, and never steering-trusted. */
+  page_pictures: ProvenanceValues;
   /** Where each address (`address:`) and site (`site:`) on the read side was first read, so a card can say so. */
   read_from: Map<string, ReadOrigin>;
   /** The person's own details seen in this chat: addresses and phone numbers from their words, mail and events. */
@@ -53,6 +67,8 @@ export function emptyChatProvenance(): ChatProvenance {
   return {
     trusted: emptyValues(),
     untrusted: emptyValues(),
+    reply: emptyValues(),
+    page_pictures: emptyValues(),
     read_from: new Map(),
     own_details: new Set(),
     own_details_overflowed: false,
@@ -111,7 +127,15 @@ function hostKey(host: string): string {
   return host.toLowerCase().replace(/^www\./, '');
 }
 
-/** One page however it is spelled: http or https, host case, `www.`, one trailing slash, and the fragment fold away. */
+/** Whether a link carries a sign-in name or password before its site. Both are sent to the site when it is opened. */
+function carriesSignIn(url: URL): boolean {
+  return url.username !== '' || url.password !== '';
+}
+
+/**
+ * One page however it is spelled: http or https, host case, `www.`, one trailing slash, and the fragment fold away.
+ * A sign-in name or password before the site stays in the key, so a link that adds one never matches a recorded link.
+ */
 function urlKey(value: string): string | undefined {
   const url = parsedUrl(value);
   if (url === undefined || url.hostname === '') {
@@ -119,7 +143,8 @@ function urlKey(value: string): string | undefined {
   }
   const path = url.pathname.length > 1 && url.pathname.endsWith('/') ? url.pathname.slice(0, -1) : url.pathname;
   const port = url.port === '' ? '' : `:${url.port}`;
-  return `${hostKey(url.hostname)}${port}${path === '/' ? '' : path}${url.search}`;
+  const signIn = carriesSignIn(url) ? `${url.username}:${url.password}@` : '';
+  return `${signIn}${hostKey(url.hostname)}${port}${path === '/' ? '' : path}${url.search}`;
 }
 
 function add(input: { side: ProvenanceValues; kind: 'urls' | 'hosts' | 'addresses'; value: string }): void {
@@ -140,16 +165,21 @@ function untrustedHas(input: { provenance: ChatProvenance; kind: 'urls' | 'hosts
   return side.overflowed || side[input.kind].has(input.value);
 }
 
-/** Records one link; returns its site, or undefined when it is not a link. */
+/**
+ * Records one link; returns its site, or undefined when it is not a link. A link with a sign-in name or password
+ * before its site is never recorded as a link, whoever wrote it: only its site is noted.
+ */
 function recordUrl(side: ProvenanceValues, value: string): string | undefined {
   const key = urlKey(value);
-  const host = parsedUrl(value)?.hostname;
-  if (key === undefined || host === undefined) {
+  const url = parsedUrl(value);
+  if (key === undefined || url === undefined) {
     return undefined;
   }
-  add({ side, kind: 'urls', value: key });
-  add({ side, kind: 'hosts', value: hostKey(host) });
-  return hostKey(host);
+  if (!carriesSignIn(url)) {
+    add({ side, kind: 'urls', value: key });
+  }
+  add({ side, kind: 'hosts', value: hostKey(url.hostname) });
+  return hostKey(url.hostname);
 }
 
 /** Records the links, sites and addresses in a text; returns the `site:` and `address:` keys it found. */
@@ -172,8 +202,11 @@ function recordText(side: ProvenanceValues, text: string): string[] {
   return found;
 }
 
-/** A phone number as written, with its spaces and marks: `+1 (415) 555-0132`. A few marks may sit between digits. */
-const PHONE_CANDIDATE = /\+?\d(?:[\s().-]{0,3}\d){6,}/g;
+/**
+ * A phone number as written, with its spaces and marks: `+1 (415) 555-0132`. A few marks may sit between digits: any
+ * dash, a slash, an underscore or a middle dot. Digits of other scripts are folded to these before it is matched.
+ */
+const PHONE_CANDIDATE = /\+?\d(?:[\s().\p{Pd}/_\u00b7]{0,3}\d){6,}/gu;
 /** Fewest digits a phone number has, when written with a leading plus sign. */
 const MIN_INTERNATIONAL_PHONE_DIGITS = 8;
 /** Fewest digits a phone number has when written without one. Shorter runs are postal codes and dates. */
@@ -196,6 +229,136 @@ function phoneDetails(text: string): string[] {
     }
   }
   return found;
+}
+
+/** Fewest digits a short local phone number has, such as `555-0100`. */
+const MIN_LOCAL_PHONE_DIGITS = 7;
+
+/**
+ * Times, dates and amounts written the usual ways, which are not phone numbers: `14:00-15:00`, `3:30 pm`,
+ * `2026-11-07`, `11/06/2026`, `Nov 6, 2026`, `6 November` and `$1,250.00`.
+ */
+const MONTH = '(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\\.?';
+const KNOWN_NUMBER_SHAPES = [
+  /\b\d{4}-\d{2}-\d{2}(?:T[\d:.]+(?:Z|[+-]\d{2}:?\d{2})?)?/g,
+  /\b(?:[01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d)?(?:\s?[ap]\.?m\b\.?)?/gi,
+  /\b[0-3]?\d[/.-][0-3]?\d[/.-](?:19|20)\d{2}\b/g,
+  new RegExp(`\\b${MONTH}\\s+[0-3]?\\d(?:st|nd|rd|th)?\\b(?:,?\\s+(?:19|20)\\d{2}\\b)?`, 'gi'),
+  new RegExp(`\\b[0-3]?\\d(?:st|nd|rd|th)?\\s+${MONTH}(?:,?\\s+(?:19|20)\\d{2}\\b)?`, 'gi'),
+  /[$\u20ac\u00a3\u00a5\u20b9]\s?(?:\d{1,3}(?:,\d{3})+|\d{1,6})(?:\.\d{2})?(?![\d,])/g,
+];
+
+/** A word made only of digits and the letters that pass for them in a number: `O` and `o`, `I` and `l`, `S` and `Z`. */
+const NUMBER_LIKE_WORD = /^[\dOoIlSZ]+$/;
+/** Words people write between the parts of a number instead of a mark. */
+const SPOKEN_SEPARATOR = /^(?:dash|hyphen|space|ext|extension)$/i;
+/** A digit read out as a word, which counts as one digit next to written ones, as in `five five five 0100`. */
+const SPOKEN_DIGIT = /^(?:zero|oh|one|two|three|four|five|six|seven|eight|nine)$/i;
+
+/**
+ * Whether a text holds a run of digits as long as a short phone number, however the parts are kept apart: any marks
+ * or spaces, a spoken `dash`, or letters that look like digits.
+ */
+function holdsPhoneDigits(text: string): boolean {
+  // Words are split at anything that is not a letter or a digit, so two words with only marks or spaces between
+  // them read as one number, and a word of other letters ends it.
+  let digits = 0;
+  let pendingLookalike = 0;
+  for (const [word] of text.matchAll(/[\p{L}\p{N}]+/gu)) {
+    if (SPOKEN_SEPARATOR.test(word)) {
+      continue;
+    }
+    if (SPOKEN_DIGIT.test(word)) {
+      digits += 1 + pendingLookalike;
+      pendingLookalike = 0;
+    } else if (!NUMBER_LIKE_WORD.test(word)) {
+      digits = 0;
+      pendingLookalike = 0;
+      continue;
+    } else if (/\d/.test(word)) {
+      digits += word.length + pendingLookalike;
+      pendingLookalike = 0;
+    } else if (digits > 0) {
+      digits += word.length;
+    } else {
+      // Letters alone, such as `OlOO`, count only once a real digit sits next to them.
+      pendingLookalike += word.length;
+    }
+    if (digits >= MIN_LOCAL_PHONE_DIGITS) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Letters from other scripts that look the same as Latin ones, as in a Cyrillic `.\u0441\u043em`. */
+const LATIN_LOOKALIKES: Record<string, string> = {
+  '\u0430': 'a',
+  '\u0435': 'e',
+  '\u043e': 'o',
+  '\u0440': 'p',
+  '\u0441': 'c',
+  '\u0443': 'y',
+  '\u0445': 'x',
+  '\u0456': 'i',
+  '\u0458': 'j',
+  '\u0455': 's',
+  '\u043c': 'm',
+  '\u03bf': 'o',
+  '\u03b1': 'a',
+};
+/** Dots that are not a full stop: middle dots, bullets, a one-dot leader, and the ideographic dot and its half-width form. */
+const OTHER_DOTS = /[\u00b7\u2022\u2024\u2027\u30fb\u3002\uff61]/g;
+/** Math minus signs and other dashes that are not in the dash class. */
+const OTHER_DASHES = /[\u2212\u2043\u2010\u2011\u2012\ufe63\uff0d]/g;
+/** The mark that turns a digit into a keycap picture, `5\ufe0f\u20e3`. */
+const KEYCAP = /\u20e3/g;
+
+/** A text as it reads to an eye for contact details: lookalike letters, dots and dashes folded to the plain ones. */
+function contactSpelling(text: string): string {
+  return foldSpelling(text)
+    .replace(KEYCAP, '')
+    .replace(OTHER_DOTS, '.')
+    .replace(OTHER_DASHES, '-')
+    .replace(/[\u0370-\u03ff\u0400-\u04ff]/g, char => LATIN_LOOKALIKES[char] ?? char);
+}
+
+/** A site with its dot written out or bracketed, such as `evil[.]com`, `evil dot com` or `evil d0t com`. */
+const SPELLED_DOT =
+  /[\p{L}\p{N}]\s*(?:\[\s*(?:\.|d[o0]t)\s*\]|\(\s*(?:\.|d[o0]t)\s*\)|\{\s*(?:\.|d[o0]t)\s*\}|\s+d[o0]t\s+)\s*[\p{L}\p{N}]/iu;
+/** A site with spaces around its dot, such as `evil-pay .com`, for the endings sites use most. */
+const SPACED_DOT =
+  /[\p{L}\p{N}-](?:\s+\.\s*|\s*\.\s+)(?:com|net|org|info|biz|io|ai|gg|dev|tv|cc|ly|co|app|xyz|top|site|online|link|shop|me|us|uk|ru|cn)\b/iu;
+/** An address with its at sign bracketed, such as `ceo [at] evil`. */
+const SPELLED_AT = /[\p{L}\p{N}]\s*(?:\[\s*at\s*\]|\(\s*at\s*\)|\{\s*at\s*\})\s*[\p{L}\p{N}]/iu;
+/** A number read out word by word, such as `five five five oh one oh oh` or `five-five-five, zero-one-hundred`. */
+const SPELLED_DIGITS =
+  /\b(?:(?:zero|oh|one|two|three|four|five|six|seven|eight|nine|hundred|thousand|double|triple|dash)\b[\s,-]*){6,}/i;
+/** A bare IPv4 address, dotted or as one hex number such as `0x7f000001`, which opens a site as well as a name does. */
+const IPV4 = /(?<![\d.])\d{1,3}(?:\.\d{1,3}){3}(?![\d.])|\b0x[\da-f]{8}\b/i;
+
+/**
+ * Whether any value carries a phone number, a site or an address in any spelling: short local numbers kept apart
+ * by any marks, digits of any script or as lookalike letters, bare sites and IP addresses, and spelled-out dots and at
+ * signs. Times, dates and amounts written the usual ways do not count. Far looser than the checks that tell whose
+ * detail something is, for text that should carry no contact detail at all.
+ */
+export function namesContactDetail(values: readonly string[]): boolean {
+  return values.some(value => {
+    const spelled = contactSpelling(value);
+    const numbers = KNOWN_NUMBER_SHAPES.reduce((text, shape) => text.replace(shape, ' '), spelled);
+    return (
+      spelled.includes('@') ||
+      urlsInText(spelled).length > 0 ||
+      [...spelled.matchAll(BARE_HOST)].length > 0 ||
+      IPV4.test(spelled) ||
+      SPELLED_DOT.test(spelled) ||
+      SPACED_DOT.test(spelled) ||
+      SPELLED_AT.test(spelled) ||
+      SPELLED_DIGITS.test(spelled) ||
+      holdsPhoneDigits(numbers)
+    );
+  });
 }
 
 const MAX_DECODE_ROUNDS = 3;
@@ -232,7 +395,20 @@ function foldSpelling(text: string): string {
     }
     folded = next;
   }
-  return folded.replace(/\s*@\s*/g, '@');
+  return asciiDigits(folded).replace(/\s*@\s*/g, '@');
+}
+
+/** Digits of any script, written as the digits 0 to 9 they stand for, so a number reads the same however it is written. */
+function asciiDigits(text: string): string {
+  return text.replace(/\p{Nd}/gu, digit => {
+    const code = digit.codePointAt(0) ?? 0;
+    // Each script's digits are ten code points in a row, from zero to nine.
+    let zero = code;
+    while (zero > 0 && /\p{Nd}/u.test(String.fromCodePoint(zero - 1))) {
+      zero -= 1;
+    }
+    return String((code - zero) % 10);
+  });
 }
 
 /** A mailbox however it is addressed: lower case, with a `+tag` dropped from the part before the at sign. */
@@ -263,7 +439,10 @@ function recordDetails(provenance: ChatProvenance, text: string): void {
   }
 }
 
-/** Notes where a value was first read. An email's sender wins over any plainer place, since it says who they are. */
+/**
+ * Notes where a value was first read. An email's sender wins over any plainer place, since it says who they are,
+ * and any place the assistant read it wins over its own reply, which only repeated it.
+ */
 function noteOrigin(input: { provenance: ChatProvenance; key: string; origin: ReadOrigin }): void {
   const known = input.provenance.read_from.get(input.key);
   if (known === undefined) {
@@ -272,7 +451,10 @@ function noteOrigin(input: { provenance: ChatProvenance; key: string; origin: Re
     }
     return;
   }
-  if (known.source !== 'email_sender' && input.origin.source === 'email_sender') {
+  const saysMore =
+    (known.source !== 'email_sender' && input.origin.source === 'email_sender') ||
+    (known.source === 'reply' && input.origin.source !== 'reply');
+  if (saysMore) {
     input.provenance.read_from.set(input.key, input.origin);
   }
 }
@@ -288,12 +470,32 @@ export function recordUntrustedText(input: { provenance: ChatProvenance; text: s
   if (input.text.trim() !== '') {
     input.provenance.read_content = true;
   }
-  if (input.source === 'event' || input.source === 'file' || input.source === 'other') {
-    // The person's own events, their files and the host's notes on their chat hold their details too.
+  if (
+    input.source === 'event' ||
+    input.source === 'browser_page' ||
+    input.source === 'file' ||
+    input.source === 'other'
+  ) {
+    // The person's own events, the pages their signed-in browser shows, their files and the host's notes on
+    // their chat hold their details too.
     recordDetails(input.provenance, input.text);
   }
   for (const key of recordText(input.provenance.untrusted, input.text)) {
     noteOrigin({ provenance: input.provenance, key, origin: { source: input.source, name: null } });
+  }
+}
+
+/**
+ * Text of the assistant's own earlier reply. An address it names is not the person's say: the reply may repeat
+ * one the assistant read, so it counts as read. Its links and sites are kept apart, as the reply's own. A reply is
+ * not other people's content, so it does not mark the chat as having read any.
+ */
+export function recordReplyText(input: { provenance: ChatProvenance; text: string }): void {
+  for (const key of recordText(input.provenance.reply, input.text)) {
+    if (key.startsWith('address:')) {
+      add({ side: input.provenance.untrusted, kind: 'addresses', value: key.slice('address:'.length) });
+      noteOrigin({ provenance: input.provenance, key, origin: { source: 'reply', name: null } });
+    }
   }
 }
 
@@ -361,11 +563,44 @@ export function recordEmailText(input: { provenance: ChatProvenance; text: strin
 }
 
 /** Keys whose contents describe a result or what it links to, never the result's own link. */
-const NON_RESULT_KEYS = new Set(['links', 'metadata', 'images', 'favicon', 'excerpts', 'content', 'raw_content']);
+const NON_RESULT_KEYS = new Set(['links', 'metadata', 'favicon', 'excerpts', 'content', 'raw_content']);
+/** Keys under which a result lists its own pictures: one picture, or a list of them. */
+const RESULT_PICTURE_KEYS = new Set(['images', 'image', 'thumbnail', 'image_url']);
 const MAX_RESULT_DEPTH = 3;
 
-/** The `url` field of each result object in a provider's JSON; text inside a result is never read for links. */
-function collectResultUrls(node: unknown, into: string[], depth: number): void {
+/** The links and pictures a search's result objects list, read apart so a picture never counts as a link. */
+export interface SearchResultUrls {
+  links: string[];
+  pictures: string[];
+}
+
+/** One listed picture: its address as a string, or an object whose `url` or `src` is the address. */
+function pictureUrlOf(value: unknown): string | undefined {
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (typeof value === 'object' && value !== null) {
+    const url = 'url' in value ? value.url : 'src' in value ? value.src : undefined;
+    return typeof url === 'string' ? url : undefined;
+  }
+  return undefined;
+}
+
+/** The pictures under one picture key: the value itself or each entry of a list, https only. */
+function collectResultPictures(node: unknown, into: string[]): void {
+  for (const entry of Array.isArray(node) ? node : [node]) {
+    const url = pictureUrlOf(entry);
+    if (url !== undefined && /^https:\/\//i.test(url)) {
+      into.push(url);
+    }
+  }
+}
+
+/**
+ * The `url` field of each result object in a provider's JSON, and the pictures a result lists under its
+ * picture keys; text inside a result is never read for either.
+ */
+function collectResultUrls(node: unknown, into: SearchResultUrls, depth: number): void {
   if (depth > MAX_RESULT_DEPTH) {
     return;
   }
@@ -376,7 +611,9 @@ function collectResultUrls(node: unknown, into: string[], depth: number): void {
   } else if (typeof node === 'object' && node !== null) {
     for (const [key, child] of Object.entries(node)) {
       if (key === 'url' && typeof child === 'string') {
-        into.push(child);
+        into.links.push(child);
+      } else if (RESULT_PICTURE_KEYS.has(key)) {
+        collectResultPictures(child, into.pictures);
       } else if (!NON_RESULT_KEYS.has(key)) {
         collectResultUrls(child, into, depth + 1);
       }
@@ -384,9 +621,17 @@ function collectResultUrls(node: unknown, into: string[], depth: number): void {
   }
 }
 
+/** The links and pictures the result objects in a provider's parsed JSON list. */
+export function searchResultUrls(node: unknown): SearchResultUrls {
+  const found: SearchResultUrls = { links: [], pictures: [] };
+  collectResultUrls(node, found, 0);
+  return found;
+}
+
 /**
- * A search's results: each result's own link is the person's to open. The rest of the result text is neither side,
- * so a site an excerpt mentions neither steers nor vouches for a later call.
+ * A search's results: each result's own link is the person's to open, and a picture a result lists was seen
+ * the way a picture on an opened page is. The rest of the result text is neither side, so a site an excerpt
+ * mentions neither steers nor vouches for a later call.
  */
 export function recordSearchResults(input: { provenance: ChatProvenance; texts: readonly string[] }): void {
   for (const text of input.texts) {
@@ -396,29 +641,38 @@ export function recordSearchResults(input: { provenance: ChatProvenance; texts: 
     } catch {
       continue;
     }
-    const urls: string[] = [];
-    collectResultUrls(parsed, urls, 0);
-    for (const url of urls) {
+    const found = searchResultUrls(parsed);
+    for (const url of found.links) {
       recordUrl(input.provenance.trusted, url);
     }
+    recordPageImageUrls({ provenance: input.provenance, urls: found.pictures });
   }
 }
 
 /**
- * Picture links from a page the chat opened: opening the page saw them, so a space may use a
- * picture file no search result named. Only the page's own pictures count; a link the page
- * merely points at is not a picture on it.
+ * Pictures the chat saw: on a page it opened, or listed by a search result. Seeing them lets a
+ * space show a picture file no result's own link named. A page can name any URL as a picture, so
+ * these are kept apart from trusted links and never vouch for a link, a site or a destination.
  */
 export function recordPageImageUrls(input: { provenance: ChatProvenance; urls: readonly string[] }): void {
   for (const url of input.urls) {
-    recordUrl(input.provenance.trusted, url);
+    const key = urlKey(url);
+    const parsed = parsedUrl(url);
+    if (key !== undefined && parsed !== undefined && !carriesSignIn(parsed)) {
+      add({ side: input.provenance.page_pictures, kind: 'urls', value: key });
+    }
   }
 }
 
-/** Whether a link names only a site, with no path or query: it adds nothing to the site, so the site's trust holds. */
+/** Whether a link names only a site, with no path, query or sign-in: it adds nothing, so the site's trust holds. */
 function isBareSite(url: string): boolean {
   const parsed = parsedUrl(url);
-  return parsed !== undefined && (parsed.pathname === '' || parsed.pathname === '/') && parsed.search === '';
+  return (
+    parsed !== undefined &&
+    (parsed.pathname === '' || parsed.pathname === '/') &&
+    parsed.search === '' &&
+    !carriesSignIn(parsed)
+  );
 }
 
 /**
@@ -427,7 +681,7 @@ function isBareSite(url: string): boolean {
  * its site: a shared site (a forms host, a link shortener) serves anyone's page, so the person naming the site once
  * does not vouch for a page on it that read content chose.
  */
-function steeredUrl(input: { provenance: ChatProvenance; url: string }): boolean {
+export function steeredUrl(input: { provenance: ChatProvenance; url: string }): boolean {
   const { provenance } = input;
   const key = urlKey(input.url);
   const host = parsedUrl(input.url)?.hostname;
@@ -451,6 +705,35 @@ export function steeredLinks(input: { provenance: ChatProvenance; values: readon
     urlsOf(value).filter(url => {
       const key = urlKey(url);
       return key !== undefined && !provenance.untrusted.urls.has(key) && steeredUrl({ provenance, url });
+    }),
+  );
+}
+
+/**
+ * Links on a site only the assistant's own earlier reply named that carry more than the reply wrote: a query the
+ * reply never wrote, or one of the person's own details. The exact link the reply wrote and a plain deeper page on
+ * that site send nothing new, so they are not listed. A site the person named, a search returned or read content
+ * named is left to the other checks.
+ */
+export function replyLinksWithAddedData(input: { provenance: ChatProvenance; values: readonly string[] }): string[] {
+  const { provenance } = input;
+  return input.values.flatMap(value =>
+    urlsOf(value).filter(url => {
+      const key = urlKey(url);
+      const parsed = parsedUrl(url);
+      if (key === undefined || parsed === undefined) {
+        return false;
+      }
+      const site = hostKey(parsed.hostname);
+      const onlyReplyNamed =
+        (provenance.reply.overflowed || provenance.reply.hosts.has(site)) &&
+        !provenance.trusted.hosts.has(site) &&
+        !untrustedHas({ provenance, kind: 'hosts', value: site });
+      if (!onlyReplyNamed) {
+        return false;
+      }
+      const addedQuery = parsed.search !== '' && !provenance.reply.urls.has(key);
+      return addedQuery || carriedPrivateDetails({ provenance, values: [url] }).length > 0;
     }),
   );
 }
@@ -517,6 +800,24 @@ export function isTrustedLink(input: { provenance: ChatProvenance; url: string }
   return key !== undefined && input.provenance.trusted.urls.has(key);
 }
 
+/**
+ * Whether the person vouched for a link: they gave it (or a search returned it) exactly, or it names only a site, with
+ * no path or query, that the person named. Such a link carries nothing but what the person already chose.
+ */
+export function isPersonVouchedUrl(input: { provenance: ChatProvenance; url: string }): boolean {
+  if (isTrustedLink(input)) {
+    return true;
+  }
+  const host = parsedUrl(input.url)?.hostname;
+  return host !== undefined && isBareSite(input.url) && input.provenance.trusted.hosts.has(hostKey(host));
+}
+
+/** Whether a picture may be shown: a trusted link, or exactly a picture an opened page or a search result listed. */
+export function isTrustedPicture(input: { provenance: ChatProvenance; url: string }): boolean {
+  const key = urlKey(input.url);
+  return isTrustedLink(input) || (key !== undefined && input.provenance.page_pictures.urls.has(key));
+}
+
 /** Whether this chat has read content that is not the person's own words. */
 export function hasReadContent(provenance: ChatProvenance): boolean {
   return provenance.read_content;
@@ -524,7 +825,7 @@ export function hasReadContent(provenance: ChatProvenance): boolean {
 
 /**
  * The person's own details a call's text carries: an address or a phone number the chat saw in the person's
- * words, their own mail or their events. Pages, files and tool output do not count: a detail only they named is
+ * words, their own mail, their events or a page in their signed-in browser. Other pages, files and tool output do not count: a detail only they named is
  * that content's own value, and sending it back to its source is ordinary. Mail does count even when a stranger
  * wrote it, because the mailbox is the person's; the cost is an extra question, never a leak. Each value is
  * folded the same way the record was, so a detail counts however the value spells it.

@@ -22,6 +22,11 @@ export type CaldavToolName = (typeof CALDAV_TOOL_NAMES)[number];
 /** The reads that change nothing and run without a card. */
 export const CALDAV_READ_TOOL_NAMES = ['list_calendars', 'list_events', 'get_event', 'search_events'] as const;
 
+/** Whether the tool only reads the calendar. */
+export function isCaldavReadToolName(tool_name: string): boolean {
+  return CALDAV_READ_TOOL_NAMES.some(name => name === tool_name);
+}
+
 /**
  * Every argument a change tool acts on, as the connector names them. The approval card shows each
  * of them; a call with any other argument gets the generic card instead.

@@ -5,19 +5,24 @@ import { fileURLToPath } from 'node:url';
 import { chromium, type Browser } from 'playwright-core';
 import { createServer, defaultClientConditions } from 'vite';
 
+import { DEV_OPTIMIZE_DEPS } from '../src/devPrebundle.ts';
+import { featureShotPath, saveFailureShots } from './support/featureShots.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
+import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
+import { privateViteCache } from './support/viteCache.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
 const KINDS = ['email', 'calendar', 'shell', 'space', 'connector'] as const;
-/** 1.125rem at 1rem = 16px. */
-const TITLE_MAX_PX = 18;
 
 test(
-  'every approval card is set in the body font, with a title no larger than 1.125rem',
+  'every approval card is set in the body font, with a title at the chat body size',
   { timeout: 180_000 },
   async () => {
+    const viteCache = privateViteCache('approval-card-type');
     const server = await createServer({
+      cacheDir: viteCache.cacheDir,
       configFile: false,
+      optimizeDeps: DEV_OPTIMIZE_DEPS,
       root: fileURLToPath(new URL('../', import.meta.url)),
       logLevel: 'silent',
       resolve: { conditions: ['trueforge-dev', ...defaultClientConditions] },
@@ -33,9 +38,13 @@ test(
         const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
         await page.goto(`http://127.0.0.1:${address.port}/tests/fixtures/approval-cards.fixture.html?theme=${theme}`, {
           waitUntil: 'domcontentloaded',
-          timeout: RENDER_TIMEOUT_MS,
+          timeout: FIRST_LOAD_TIMEOUT_MS,
         });
         await page.locator('[data-card="connector"] h3').waitFor({ timeout: RENDER_TIMEOUT_MS });
+        await page.screenshot({
+          path: await featureShotPath({ surface: 'screen:approval-card', step: `every-kind-${theme}` }),
+          fullPage: true,
+        });
 
         const chat = await page.locator('[data-role="chat-line"]').evaluate(el => {
           const style = getComputedStyle(el);
@@ -76,7 +85,7 @@ test(
             };
           });
 
-          assert.ok(card.title.size <= TITLE_MAX_PX, `${kind} (${theme}): title is ${card.title.size}px`);
+          assert.equal(`${card.title.size}px`, chat.size, `${kind} (${theme}): title is the chat's body size`);
           assert.equal(card.title.weight, '600', `${kind} (${theme}): title is semibold`);
           assert.equal(card.title.family, chat.family, `${kind} (${theme}): title uses the body font`);
           for (const line of card.text) {
@@ -88,9 +97,13 @@ test(
         }
         await page.close();
       }
+    } catch (error) {
+      await saveFailureShots({ browser, surface: 'screen:approval-card' });
+      throw error;
     } finally {
       await browser?.close();
       await server.close();
+      viteCache.remove();
     }
   },
 );

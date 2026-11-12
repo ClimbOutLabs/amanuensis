@@ -16,8 +16,8 @@ import { readAgentCapabilities, withAgentCapabilities } from './draft/agentCapab
 import { useOptionalAgentConfigInstructions } from './draft/AgentConfigInstructionsContext.js';
 import { DraftCapabilitiesPanel } from './draft/DraftCapabilitiesPanel.js';
 import { DraftCatalogProvider, useDraftCatalog } from './draft/DraftCatalogProvider.js';
-import { CatalogRow, ConnectorConnectButton, isUnauthenticatedDcrConnector } from './draft/DraftCompositeSelector.js';
 import { displayModelLabel, DraftModelCatalogPanel, ProviderMark } from './draft/DraftModelCatalogPanel.js';
+import { CatalogRow, ConnectorConnectButton, isUnauthenticatedDcrConnector } from './draft/DraftToolPicker.js';
 import { modelPatchWithReasoningEffort } from './draft/reasoningEffort.js';
 import { auiButtonClass } from './lib/buttonClasses.js';
 import { cn } from './lib/cn.js';

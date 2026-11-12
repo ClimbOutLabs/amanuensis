@@ -7,12 +7,15 @@ import { createHarnessAgentMetricsServer } from './agentMetricsServer.js';
 import { createHarnessAgentSessionsServer } from './agentSessionsServer.js';
 import { createHarnessBuilderServer } from './builderServer.js';
 import { createChatImagesCatalog } from './catalogs/chatImagesCatalog.js';
+import { createChatSearchCatalog } from './catalogs/chatSearchCatalog.js';
 import { createConnectorCatalog } from './catalogs/connectorCatalog.js';
+import { createMemoryRecallCatalog } from './catalogs/memoryRecallCatalog.js';
 import { createMemoryScreenCatalog } from './catalogs/memoryScreenCatalog.js';
 import { createMemorySummarizeCatalog } from './catalogs/memorySummarizeCatalog.js';
 import { createMemoryVaultCatalog } from './catalogs/memoryVaultCatalog.js';
 import { createModelProviderCatalog } from './catalogs/modelProviderCatalog.js';
 import { createSandboxProviderCatalog } from './catalogs/sandboxProviderCatalog.js';
+import { createScheduleToolsCatalog } from './catalogs/scheduleToolsCatalog.js';
 import { createSkillCatalog } from './catalogs/skillCatalog.js';
 import { createTokenFactoryUsageCatalog } from './catalogs/tokenFactoryUsageCatalog.js';
 import { createToolOutputScreenCatalog } from './catalogs/toolOutputScreenCatalog.js';
@@ -106,7 +109,7 @@ export function createTrueForgeAgentUIServer(options: CreateTrueForgeAgentUIServ
     ({
       modelCatalog: createModelProviderCatalog(client, clientOptions),
       connectorCatalog: createConnectorCatalog(client, clientOptions),
-      skillCatalog: createSkillCatalog(client),
+      skillCatalog: createSkillCatalog(client, clientOptions),
       sandboxCatalog: createSandboxProviderCatalog(client),
     } satisfies CatalogServer);
 
@@ -125,9 +128,12 @@ export function createTrueForgeAgentUIServer(options: CreateTrueForgeAgentUIServ
   // reports "not supported" on other servers.
   return {
     ...server,
+    scheduleTools: createScheduleToolsCatalog(clientOptions),
     toolOutputScreen: createToolOutputScreenCatalog(clientOptions),
     chatImages: createChatImagesCatalog(clientOptions),
     memoryScreen: createMemoryScreenCatalog(clientOptions),
+    memoryRecall: createMemoryRecallCatalog(clientOptions),
+    chatSearch: createChatSearchCatalog(clientOptions),
     memorySummarize: createMemorySummarizeCatalog(clientOptions),
     memoryVault: createMemoryVaultCatalog(clientOptions),
     tokenFactoryUsage: createTokenFactoryUsageCatalog(client),

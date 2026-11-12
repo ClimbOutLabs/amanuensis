@@ -32,6 +32,8 @@ function stubApi(entries: SentinelAuditEntry[]): SentinelApi {
       search_without_asking: true,
       maps_without_asking: false,
       sandbox_without_asking: true,
+      chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
     })),
     updateUserSettings: vi.fn(async () => ({
       offline_mode: false,
@@ -39,6 +41,8 @@ function stubApi(entries: SentinelAuditEntry[]): SentinelApi {
       search_without_asking: true,
       maps_without_asking: false,
       sandbox_without_asking: true,
+      chat_search_enabled: false,
+      package_downloads_without_project_allowed: false,
     })),
     listSentinelSessionContext: vi.fn(async () => ({ approvals: [] })),
   };
@@ -70,7 +74,7 @@ describe('SentinelAuditFeed', () => {
       makeEntry({ id: 'entry-1', action_type: 'list_events', outcome: 'ran', created_at: '2026-09-29T10:03:00.000Z' }),
       makeEntry({
         id: 'entry-2',
-        action_type: 'update_space',
+        action_type: 'edit_space',
         outcome: 'approved',
         created_at: '2026-09-29T10:02:00.000Z',
       }),

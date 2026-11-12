@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { EXTRACT_DOCUMENT_TEXT_TOOL_NAME } from '../../../documents/toolContract';
 import type { AgentThreadExecutionContext } from '../../capabilities/AgentContextProcessor';
 import type { ToolResponseProcessor, ToolResponseProcessorResult } from '../../capabilities/ToolResponseProcessor';
 import { InvalidFileInputError } from '../../errors';
@@ -100,7 +101,7 @@ export class MailAttachmentProcessor implements ToolResponseProcessor {
           size: bytes.length,
           path: staged.path,
           untrusted_content: UNTRUSTED_NOTICE,
-          note: 'The file is in the sandbox workspace at this path; read it with the document tools.',
+          note: `The file is in the sandbox workspace at this path. To read it, call ${EXTRACT_DOCUMENT_TEXT_TOOL_NAME} with this path.`,
         }),
         sandboxCreated: staged.sandboxCreated,
       };

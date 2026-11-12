@@ -42,6 +42,10 @@ vi.mock('@/containers/SettingsBuilder/MemorySection.js', () => ({
   default: () => <div>Memory settings content</div>,
 }));
 
+vi.mock('@/containers/SettingsBuilder/AboutSettings.js', () => ({
+  default: () => <div>About settings content</div>,
+}));
+
 vi.mock('@/containers/SettingsBuilder/PersonaSettings.js', () => ({
   default: () => <div>Persona settings content</div>,
 }));
@@ -333,6 +337,7 @@ describe('TruefoundrySettingsBuilder', () => {
       { tab: 'Skills', content: 'Skill settings content' },
       { tab: 'Sandbox', content: 'Sandbox settings content' },
       { tab: 'Personalization', content: 'Personalization settings content' },
+      { tab: 'About', content: 'About settings content' },
     ];
     for (const { tab, content } of cases) {
       fireEvent.click(screen.getByRole('tab', { name: tab }));
@@ -386,9 +391,9 @@ describe('TruefoundrySettingsBuilder', () => {
     expect(screen.getByRole('tab', { name: 'Roles and Personas' })).toHaveFocus();
 
     fireEvent.keyDown(screen.getByRole('tab', { name: 'Roles and Personas' }), { key: 'End' });
-    expect(screen.getByRole('tab', { name: 'Themes' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'About' })).toHaveAttribute('aria-selected', 'true');
 
-    fireEvent.keyDown(screen.getByRole('tab', { name: 'Themes' }), { key: 'ArrowRight' });
+    fireEvent.keyDown(screen.getByRole('tab', { name: 'About' }), { key: 'ArrowRight' });
     expect(screen.getByRole('tab', { name: 'Models' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('tab', { name: 'Models' })).toHaveFocus();
   });

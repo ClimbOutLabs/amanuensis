@@ -24,7 +24,7 @@ export type VoiceRecorder = {
   cancel: () => void;
 };
 
-function audioContextCtor(): typeof AudioContext | undefined {
+export function audioContextCtor(): typeof AudioContext | undefined {
   if (typeof window === 'undefined') {
     return undefined;
   }
@@ -60,6 +60,21 @@ export function resampleLinear(
   return out;
 }
 
+/** Writes mono float samples as 16-bit little-endian integers, starting at `offset`. */
+function writePcm16({ view, offset, samples }: { view: DataView; offset: number; samples: Float32Array }): void {
+  for (let i = 0; i < samples.length; i++) {
+    const clamped = Math.max(-1, Math.min(1, samples[i] ?? 0));
+    view.setInt16(offset + i * 2, Math.round(clamped * 32767), true);
+  }
+}
+
+/** Mono float samples as the 16-bit little-endian bytes the server reads. */
+export function floatToPcm16(samples: Float32Array): ArrayBuffer {
+  const buffer = new ArrayBuffer(samples.length * 2);
+  writePcm16({ view: new DataView(buffer), offset: 0, samples });
+  return buffer;
+}
+
 /** Encodes mono float32 samples as a 16-bit PCM WAV blob. */
 export function encodeWav(samples: Float32Array, sampleRate: number): Blob {
   const dataSize = samples.length * 2;
@@ -83,10 +98,7 @@ export function encodeWav(samples: Float32Array, sampleRate: number): Blob {
   view.setUint16(34, 16, true);
   writeAscii(36, 'data');
   view.setUint32(40, dataSize, true);
-  for (let i = 0; i < samples.length; i++) {
-    const clamped = Math.max(-1, Math.min(1, samples[i] ?? 0));
-    view.setInt16(44 + i * 2, Math.round(clamped * 32767), true);
-  }
+  writePcm16({ view, offset: 44, samples });
   return new Blob([buffer], { type: 'audio/wav' });
 }
 
@@ -155,7 +167,8 @@ export async function startVoiceRecording(options: StartVoiceRecordingOptions = 
     if (settled) {
       return;
     }
-    chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)));
+    const chunk = new Float32Array(event.inputBuffer.getChannelData(0));
+    chunks.push(chunk);
   };
   source.connect(processor);
   processor.connect(mute);

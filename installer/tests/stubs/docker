@@ -418,6 +418,21 @@ case "$cmd" in
         script=$(printf '%s' "$last" | sed "s#/tls#$tls_dir#g; s#/pki.mjs#$pki#g")
         PATH="$(dirname "$STUB_REAL_NODE"):/usr/bin:/bin" exec sh -c "$script"
         ;;
+      *"/push-keys.mjs"*)
+        # The push key script, run for real with the host's Node.js.
+        echo "$*" >>"$S/push_keys_runs"
+        [ -n "${STUB_PUSH_KEYS_FAIL:-}" ] && { echo "key failed" >&2; exit 1; }
+        [ -n "${STUB_REAL_NODE:-}" ] || { echo "the test host has no Node.js" >&2; exit 1; }
+        script=
+        prev=
+        for a in "$@"; do
+          if [ "$prev" = -v ]; then
+            case "$a" in *:/push-keys.mjs:ro) script=${a%:/push-keys.mjs:ro} ;; esac
+          fi
+          prev=$a
+        done
+        exec "$STUB_REAL_NODE" "$script"
+        ;;
       *"/qr.mjs"*)
         echo "$*" >>"$S/qr_runs"
         [ -n "${STUB_REAL_NODE:-}" ] || exit 1
@@ -546,6 +561,28 @@ case "$cmd" in
           '  • Permissions start fresh, so each tool will ask again.'
         exit 0
         ;;
+      *"aman backup-check"*)
+        # Models the CLI on a database streamed in: one a newer version updated holds NEWER, one it cannot read BROKEN.
+        echo "backup-check" >>"$S/backup_checks"
+        db=$(cat)
+        # An app image from before the check was added does not list it.
+        if [ -f "$S/image_without_backup_check" ]; then
+          printf '{"check":"none"}\n'
+          exit 0
+        fi
+        case "$db" in
+          *BROKEN*) echo "file is not a database" >&2; exit 1 ;;
+          *NEWER*) printf '{"newer":true,"unknown_migrations":["29990101_000001_later"]}\n' ;;
+          *) printf '{"newer":false,"unknown_migrations":[]}\n' ;;
+        esac
+        exit 0
+        ;;
+      *"rm -f /data/db/db.sqlite /data/db"*)
+        # Empties an instance's database, as undoing a restore does when the instance had none.
+        rm -f "$S/restored_$vol"
+        echo "cleared $vol" >>"$S/restores"
+        exit 0
+        ;;
       *"aman backup"*)
         # Models the CLI: refuses a missing --target, writes db.sqlite, memory/, persona-knowledge/ and a manifest there.
         echo "$*" >>"$S/backup_runs"
@@ -554,7 +591,10 @@ case "$cmd" in
         [ -n "$scratch_vol" ] || exit 2
         out=$S/scratchfs/$scratch_vol
         mkdir -p "$out/memory" "$out/persona-knowledge"
-        printf 'SQLITE-OF-%s\n' "$data_vol" >"$out/db.sqlite"
+        # $S/db_gen stands for what the instance holds now, so a test can change it between two backups.
+        gen=$(cat "$S/db_gen" 2>/dev/null || true)
+        printf 'SQLITE-OF-%s%s\n' "$data_vol" "${gen:+-$gen}" >"$out/db.sqlite"
+        printf 'memory-%s\n' "${gen:-none}" >"$out/memory/note.md"
         printf '{"version":1,"files":[]}\n' >"$out/manifest.json"
         printf '{"target":"/backup","manifest":"manifest.json","files":1,"bytes":1}\n'
         exit 0
@@ -569,11 +609,25 @@ case "$cmd" in
         [ -f "$S/unreadable/$vol" ] && exit 1
         exit 0
         ;;
+      *"tar -x"*)
+        # A restore into a volume: the folder named by the second to last argument is emptied, then the stream is unpacked.
+        args=("$@")
+        path=${args[${#args[@]} - 2]}
+        echo "restore-tar $vol $path $*" >>"$S/restore_runs"
+        case " ${STUB_RESTORE_FAIL:-} " in *" $vol "*) cat >/dev/null; echo "restore failed" >&2; exit 1 ;; esac
+        rm -rf "${S:?}/volfs/$vol$path"
+        mkdir -p "$S/volfs/$vol$path"
+        tar -x -C "$S/volfs/$vol$path" -f -
+        exit $?
+        ;;
       *" tar "*)
         if [ -d "$S/scratchfs/$vol" ]; then
           tar -C "$S/scratchfs/$vol" -cf - .
         else
-          printf 'TAR-OF-%s\n' "$vol"
+          # A real archive of one file, so a restore can unpack it.
+          mkdir -p "$S/tarsrc"
+          printf 'dex-%s\n' "$(cat "$S/db_gen" 2>/dev/null || true)" >"$S/tarsrc/TAR-OF-$vol"
+          tar -C "$S/tarsrc" -cf - "TAR-OF-$vol"
         fi
         exit 0
         ;;
@@ -622,6 +676,11 @@ case "$cmd" in
         if [ -n "${STUB_UP_FAIL_LOG:-}" ] && [ "$proj" != aman-machine ]; then
           mkdir -p "$S/failed"
           : >"$S/failed/$proj"
+          echo "dependency failed to start: container ${proj}-app-1 is unhealthy" >&2
+          exit 1
+        fi
+        if [ -n "${STUB_UP_FAIL_ONCE:-}" ] && [ "$proj" != aman-machine ] && [ ! -f "$S/up_failed_once" ]; then
+          : >"$S/up_failed_once"
           echo "dependency failed to start: container ${proj}-app-1 is unhealthy" >&2
           exit 1
         fi
@@ -685,27 +744,46 @@ case "$cmd" in
         exit 0
         ;;
       run)
-        # The connector's account agent, run one-off: it reads the account from stdin or empties
-        # it, in the named volume the compose project owns. The service must exist in the file,
-        # as in Compose. The account text arrives on stdin only, never in the logged command.
+        # A connector's account agent, run one-off: it reads the account from stdin, empties it, or checks
+        # it, in the named volume the compose project owns. The service must exist in the file, as in
+        # Compose. The account text arrives on stdin only, never in the logged command. The calendar agent
+        # can be made to refuse an address (STUB_CALENDAR_REFUSES) or to report a sign-in answer
+        # (STUB_CALENDAR_CHECK, default ok).
         svc=
         while [ "$#" -gt 0 ]; do
           case "$1" in
-            --rm) shift ;;
+            --rm | --no-deps) shift ;;
             --entrypoint) shift 2 ;;
             *) svc=$1; break ;;
           esac
         done
         [ -n "$svc" ] || exit 1
         grep -q "^  $svc:" "$file" 2>/dev/null || { echo "no such service: $svc" >&2; exit 1; }
+        case "$svc" in
+          calendar-caldav) store="$S/calendar-account-$proj" ;;
+          *) store="$S/mail-account-$proj" ;;
+        esac
         case "$*" in
           *--write-stdin*)
-            cat >"$S/mail-account-$proj"
+            if [ "$svc" = calendar-caldav ] && [ -n "${STUB_CALENDAR_REFUSES:-}" ]; then
+              cat >/dev/null
+              exit 3
+            fi
+            text=$(cat)
+            # The calendar agent refuses text that does not hold all four settings.
+            if [ "$svc" = calendar-caldav ] && [ "$(printf '%s\n' "$text" | grep -c '^CALDAV_\(URL\|USERNAME\|PASSWORD\|USER_EMAIL\)=.')" -lt 4 ]; then
+              exit 2
+            fi
+            printf '%s\n' "$text" >"$store"
             echo "saved"
             ;;
           *--remove*)
-            : >"$S/mail-account-$proj"
+            : >"$store"
             echo "removed"
+            ;;
+          *--check*)
+            # STUB_CALENDAR_CHECK=silent models a check that printed nothing.
+            if [ -s "$store" ]; then [ "${STUB_CALENDAR_CHECK:-ok}" = silent ] || echo "${STUB_CALENDAR_CHECK:-ok}"; else echo none; fi
             ;;
         esac
         exit 0

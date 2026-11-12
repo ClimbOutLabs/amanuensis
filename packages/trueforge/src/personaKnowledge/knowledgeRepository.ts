@@ -43,6 +43,8 @@ export interface KnowledgeSearchHit {
 }
 
 export interface NewKnowledgeDocument {
+  /** Set by programs that own and refresh their documents, so a run can find its own; defaults to a new ULID. */
+  id?: string;
   title: string;
   /** True when the caller supplied the title explicitly. */
   titleExplicit: boolean;

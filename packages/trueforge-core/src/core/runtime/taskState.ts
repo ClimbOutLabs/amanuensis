@@ -30,6 +30,9 @@ import { z } from 'zod';
 /** Canonical (original) tool name of the host-owned finding recorder. */
 export const TASK_STATE_TOOL_NAME = 'record_finding';
 
+/** Canonical tool name of the host-owned task checklist writer. */
+export const REPLACE_TASK_CHECKLIST_TOOL_NAME = 'replace_task_checklist';
+
 /** Upper bound on findings banked per user request. The tool rejects beyond this. */
 export const MAX_TASK_FINDINGS = 100;
 

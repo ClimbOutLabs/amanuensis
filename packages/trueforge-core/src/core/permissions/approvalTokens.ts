@@ -101,6 +101,10 @@ export interface ShellApprovalBinding {
   env_overrides: Record<string, string>;
   /** sha256 per executable-relevant file operand, keyed by resolved path. */
   file_hashes: Record<string, string>;
+  /** Workspace root the canonical form was built against, stamped so dispatch replays the approved environment. */
+  workspace_cwd: string | null;
+  /** Path resolution the canonical form was built with; null when none was in force at approval time. */
+  path_resolution: PathResolution | null;
 }
 
 export const ShellApprovalBindingSchema = z
@@ -120,6 +124,10 @@ export const ShellApprovalBindingSchema = z
     cwd_resolved: z.string().nullable(),
     env_overrides: z.record(z.string(), z.string()),
     file_hashes: z.record(z.string(), z.string()),
+    // Bindings persisted before the environment was stamped parse with no stamp;
+    // dispatch replays that as no resolution in force and the live workspace.
+    workspace_cwd: z.string().nullable().default(null),
+    path_resolution: z.enum(['host', 'remote']).nullable().default(null),
   })
   .describe('Host-only parsed shell binding for Tier 3 shell approvals.');
 

@@ -48,6 +48,9 @@ describe('the Email send list add', () => {
       demoMode: false,
       demoSendAllowlist: [],
       ...paths,
+      // The production wait covers a full sidecar restart (45 s); a not-loaded answer here only needs
+      // to prove the wait gives up, so it gets a short deadline.
+      mailPolicyLoadTimeoutMs: 2_000,
       audit: new SentinelAuditStore(db),
       settings: new SqliteSentinelSettingsStore(db),
       approvalTokens: new SqliteApprovalTokenStore(db),
@@ -93,7 +96,7 @@ describe('the Email send list add', () => {
     } finally {
       await close();
     }
-  }, 30_000);
+  });
 
   it('reports not loaded when no send list is configured', async () => {
     const { services, close } = await servicesWith({ mailPolicyPath: undefined, mailPolicyStatusPath: undefined });

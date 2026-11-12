@@ -8,10 +8,16 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
   && npm cache clean --force
 
-# The node user is built into the base image; the sidecar needs no root.
+# The account agent and the supervisor that starts the tool server while an account is saved.
+COPY account.mjs signin.mjs agent.mjs entrypoint.mjs ./
+
+# The account folder is made here, owned by the node user, so the volume Compose mounts on it starts
+# out owned by the sidecar and by nobody else. The node user is built into the base image; no root.
+RUN mkdir /account && chown node:node /account
 USER node
 
-EXPOSE 9558
+EXPOSE 9558 9560
 
-# Tool names and calendar credentials come from the Compose service, never from this image.
-CMD ["node", "/app/node_modules/supergateway/dist/index.js", "--stdio", "node /app/node_modules/@ni-c/caldav-mcp/dist/index.js", "--outputTransport", "streamableHttp", "--host", "0.0.0.0", "--port", "9558", "--streamableHttpPath", "/mcp", "--logLevel", "warn"]
+# Tool names come from the Compose service. The calendar login is read from the account file in the
+# sidecar's own volume, never from this image or from the service's environment.
+CMD ["node", "/app/entrypoint.mjs"]

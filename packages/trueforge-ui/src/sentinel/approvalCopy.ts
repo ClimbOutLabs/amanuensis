@@ -1,4 +1,9 @@
-import { isNewRecipientCard, NEW_RECIPIENT_CHOICES } from './approvalChoices.js';
+import {
+  isNewRecipientCard,
+  isNewRecipientDraftCard,
+  NEW_RECIPIENT_CHOICES,
+  NEW_RECIPIENT_DRAFT_CHOICES,
+} from './approvalChoices.js';
 import type { SentinelApprovalCard, SentinelApprovalEmail, SentinelApprovalMailbox } from './types.js';
 
 /**
@@ -39,15 +44,17 @@ export function approvalQuestion(card: SentinelApprovalCard): string {
   return card.plain_what;
 }
 
-/** The verb on the primary button: Allow for every card, except a new-recipient send, which says it adds its addresses. */
+/** The verb on the primary button: Allow for every card, except a new-recipient card, which says it adds its addresses. */
 export function approveVerb(card: SentinelApprovalCard): string {
-  // Approving a new-recipient send adds its addresses to the send list, so it says so.
+  // Approving a new-recipient card adds its addresses to the send list, so it says so, in send or draft words.
+  if (isNewRecipientDraftCard(card)) return NEW_RECIPIENT_DRAFT_CHOICES.approve.label;
   if (isNewRecipientCard(card)) return NEW_RECIPIENT_CHOICES.approve.label;
   return 'Allow';
 }
 
-/** The verb on the quiet button that says no: Not now, except a new-recipient send, which says Don't send. */
+/** The verb on the quiet button that says no: Not now, except a new-recipient card, which says what will not happen. */
 export function declineVerb(card: SentinelApprovalCard): string {
+  if (isNewRecipientDraftCard(card)) return NEW_RECIPIENT_DRAFT_CHOICES.cancel.label;
   if (isNewRecipientCard(card)) return NEW_RECIPIENT_CHOICES.cancel.label;
   return 'Not now';
 }

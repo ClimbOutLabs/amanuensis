@@ -273,6 +273,12 @@ export class DeferredTool extends LocalToolMCP {
     });
   }
 
+  /** The id and display name of the connector a `call_tool` wrapper names, or undefined when it names none. */
+  resolvedServer(name: string): { id: string; name: string } | undefined {
+    const server = this.resolveServer(name);
+    return server === undefined ? undefined : { id: server.id, name: server.name };
+  }
+
   private resolveServer(name: string): IToolSet | undefined {
     return this.serverMap.get(name);
   }

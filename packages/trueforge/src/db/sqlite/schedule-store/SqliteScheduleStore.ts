@@ -209,6 +209,7 @@ export class SqliteScheduleStore implements IScheduleStore<Transaction<Database>
           name: input.name,
           manifest: jsonbBind(input.manifest),
           status: input.manifest.status,
+          ...(input.agent === undefined ? {} : { agent_id: input.agent.agent_id, agent_name: input.agent.agent_name }),
           updated_at: nowIso(),
         })
         .where('tenant_id', '=', input.tenant_id)
@@ -218,7 +219,7 @@ export class SqliteScheduleStore implements IScheduleStore<Transaction<Database>
     } catch (error) {
       if (isUniqueViolation(error)) {
         throw new ScheduleNameConflictError(
-          { tenant_id: input.tenant_id, agent_name: previous.agent_name, name: input.name },
+          { tenant_id: input.tenant_id, agent_name: input.agent?.agent_name ?? previous.agent_name, name: input.name },
           { cause: error },
         );
       }

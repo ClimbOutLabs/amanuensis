@@ -5,6 +5,13 @@
  * turn's one log line can say which deadline fired, after which progress, and how long ago.
  */
 
+/**
+ * Default bound on silence between a model's chunks while one of its tool calls is open. Some
+ * servers hold a call's arguments back and send them in a few large pieces, so a long call needs
+ * more room than ordinary answering. Three minutes.
+ */
+export const DEFAULT_MODEL_TOOL_CALL_IDLE_TIMEOUT_MS = 180_000;
+
 export interface StreamDeadlineDetails {
   /** The deadline that fired: waiting for the first progress, or for the next progress after some arrived. */
   deadline: 'first_chunk' | 'chunk';

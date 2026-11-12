@@ -1,0 +1,24 @@
+
+Checking this computer
+Docker 28.4.0 is running and Compose 2.29.1 is available.
+All 3 images are ready.
+Docker keeps its data inside a virtual machine here; free space is checked per instance. (disk)
+Docker has 16.0 GB of memory.
+This machine and Docker agree on the time.
+Daily backups are on; the last one is 1 day old.
+All 1 sandbox slots are running and healthy.
+
+Checking instance main
+The app is running.
+Sign-in is ready.
+The database answers.
+Plenty of space.
+The clocks agree.
+Code running is ready.
+Attachments are ready.
+Skipped: the demo is off. (demo)
+The model is slow to answer.
+Next: Run aman doctor model --fix
+
+1 warning.
+Run the Next command for each, then run aman doctor again.

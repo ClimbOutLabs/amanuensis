@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 
 import { useToasterOptional } from '../../containers/ToasterContainer.js';
+import { useOpenScheduleRunSession } from '../../hooks/useOpenScheduleRunSession.js';
 import { useResourcePermissions } from '../../hooks/useResourcePermissions.js';
 import { Icon } from '../../icons/Icon.js';
 import { useScheduleServer, useServer } from '../../server/ServerContext.js';
@@ -154,6 +155,7 @@ export function SchedulesPage({ agentId }: SchedulesPageProps) {
   const scheduleServer = useScheduleServer();
   const server = useServer();
   const toaster = useToasterOptional();
+  const openRunSession = useOpenScheduleRunSession();
 
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const { allows } = useResourcePermissions({
@@ -323,6 +325,12 @@ export function SchedulesPage({ agentId }: SchedulesPageProps) {
   // Key off page data, not client filters — filtering must not toggle the column.
   const showCreatedByColumn = hasCreatedBySubject(schedules);
   const hasPageNav = prevTokenStack.length > 0 || nextPageToken != null;
+  const emptyPageHint =
+    nextPageToken != null
+      ? 'None on this page. Try the next page.'
+      : prevTokenStack.length > 0
+        ? 'None on this page. Go back to see your schedules.'
+        : 'Create one to get started.';
 
   const handleTogglePause = async (schedule: Schedule) => {
     if (!allows(schedule.id, 'MANAGE')) return;
@@ -339,8 +347,9 @@ export function SchedulesPage({ agentId }: SchedulesPageProps) {
     if (!allows(schedule.id, 'MANAGE')) return;
     setRunningScheduleIds(prev => new Set(prev).add(schedule.id));
     try {
-      await scheduleServer.createScheduleRun({ scheduleId: schedule.id });
+      const started = await scheduleServer.createScheduleRun({ scheduleId: schedule.id });
       toaster?.showSuccess({ title: 'Run started' });
+      await openRunSession({ scheduleId: schedule.id, runId: started.id });
       const runs = await scheduleServer.listScheduleRuns({ scheduleId: schedule.id });
       setRunsByScheduleId(prev => ({ ...prev, [schedule.id]: runs }));
     } catch (caught) {
@@ -445,7 +454,26 @@ export function SchedulesPage({ agentId }: SchedulesPageProps) {
         ) : error != null ? (
           <p className="text-failure-bg px-3 py-8 text-center text-sm">{error}</p>
         ) : schedules.length === 0 ? (
-          <EmptyScreen title="No Schedules Found" description="Create one to get started." className="min-h-full" />
+          <div className="flex min-h-full flex-col">
+            <EmptyScreen title="No Schedules Found" description={emptyPageHint} className="flex-1" />
+            {hasPageNav ? (
+              <TableTokenPagination
+                pageSize={pageSize}
+                rowCount={0}
+                canPrev={prevTokenStack.length > 0}
+                canNext={nextPageToken != null}
+                onPrev={goPrev}
+                onNext={goNext}
+                pageSizeOptions={SCHEDULES_PAGE_SIZE_OPTIONS}
+                onPageSizeChange={size => {
+                  const next = clampPageSize(size);
+                  setPageSize(next);
+                  setPageToken(undefined);
+                  setPrevTokenStack([]);
+                }}
+              />
+            ) : null}
+          </div>
         ) : filtered.length === 0 ? (
           <div className="flex min-h-full flex-col">
             <EmptyScreen title="No Schedules Found" description="No schedules match your filters." className="flex-1" />

@@ -1,4 +1,5 @@
 import { z } from '@hono/zod-openapi';
+import { ConnectorAccountStateSchema } from './connectorAccount';
 
 const MailServerModeSchema = z
   .enum(['ssl', 'starttls'])
@@ -27,9 +28,7 @@ export const EmailAccountStatusSchema = z
     available: z
       .boolean()
       .describe('Whether this instance has the Email connector at all; when false, no card is shown.'),
-    state: z
-      .enum(['connected', 'not_connected', 'sign_in_stopped'])
-      .describe('Connected, not connected, or connected but the saved sign-in no longer works.'),
+    state: ConnectorAccountStateSchema,
     address: z.string().nullable().describe('The connected account address; null when none is connected.'),
     provider_key: z
       .string()

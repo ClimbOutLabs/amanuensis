@@ -257,6 +257,72 @@ describe('RunCodeService', () => {
     await single.dispose().catch(() => undefined);
   });
 
+  it('caps a cold-start burst that piles up while the image is provisioning', async () => {
+    const capped = new RunCodeService({
+      driver,
+      dataDir,
+      defaultTimeoutSeconds: 120,
+      maxTimeoutSeconds: 600,
+      memoryMb: 512,
+      diskMb: 1024,
+      outputCapKb: 256,
+      maxConcurrentRuns: 2,
+      imagePullTimeoutSeconds: 120,
+      harvestGraceMs: 2000,
+      logger: makeSilentLogger(),
+      now: undefined,
+      sleepMs: () => new Promise<void>(resolve => setTimeout(resolve, 25)),
+    });
+    // Cold instance: the image is missing, so every call waits on the one
+    // shared pull. Hold the pull open until the whole burst is waiting on it.
+    driver.readiness = { ready: false, error_code: 'image_missing', error: 'image not pulled yet' };
+    let releasePull: () => void = () => undefined;
+    const pullGate = new Promise<void>(resolve => {
+      releasePull = resolve;
+    });
+    driver.provision = (): Promise<void> =>
+      pullGate.then(() => {
+        driver.readiness = { ready: true };
+      });
+    // Count how many runs are actually executing at the same moment.
+    let runningNow = 0;
+    let runningPeak = 0;
+    let releaseRuns: () => void = () => undefined;
+    const runGate = new Promise<void>(resolve => {
+      releaseRuns = resolve;
+    });
+    driver.runBehavior = async () => {
+      runningNow += 1;
+      runningPeak = Math.max(runningPeak, runningNow);
+      await runGate;
+      runningNow -= 1;
+      return { ...OK_RESULT };
+    };
+    const burst = Array.from({ length: 5 }, () => capped.runCode(VALID_INPUT));
+    // Every call passes the first cap check while the counter is still 0 and
+    // piles onto the shared pull.
+    await new Promise(resolve => setTimeout(resolve, 100));
+    releasePull();
+    // Let the released calls reach the driver before opening the run gate,
+    // so any over-cap runs are already counted in the peak.
+    await new Promise(resolve => setTimeout(resolve, 100));
+    releaseRuns();
+    const results = await Promise.all(burst);
+    expect(runningPeak).toBe(2);
+    let okCount = 0;
+    let refusedCount = 0;
+    for (const result of results) {
+      if (result.status === 'ok') {
+        okCount += 1;
+      } else if (result.error_code === 'concurrency_exceeded') {
+        refusedCount += 1;
+      }
+    }
+    expect(okCount).toBe(2);
+    expect(refusedCount).toBe(3);
+    await capped.dispose().catch(() => undefined);
+  });
+
   it('runs the happy path with a curated environment and clamped timeout', async () => {
     const result = await service.runCode({ ...VALID_INPUT, timeout_seconds: 30 });
     expect(result.status).toBe('ok');

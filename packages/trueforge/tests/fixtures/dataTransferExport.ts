@@ -54,12 +54,14 @@ export async function exportInstanceArchive<TTransaction>({
     globalSettingsStore: stores.globalSettingsStore,
     sentinelSettingsStore: stores.sentinelSettingsStore,
     auditStore: stores.auditStore,
+    deliveryStore: stores.deliveryStore,
+    reachSettingsStore: stores.reachSettingsStore,
     turnArtifactStore: stores.turnArtifactStore,
     mcpServerStore: stores.mcpServerStore,
     listAgents: async () =>
       (
         await stores.agentStore.listAgents({
-          include_host_managed: false,
+          include_host_managed: true,
           tenant_id: tenantId,
           agent_name: undefined,
           limit: undefined,

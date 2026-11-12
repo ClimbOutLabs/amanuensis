@@ -34,6 +34,18 @@ describe('UserAvatar', () => {
     expect(avatar).toHaveClass('w-14.5');
   });
 
+  it("sizes the name label on the --text-xs scale step, matching the rail's other nav labels", () => {
+    render(
+      <CurrentUserProvider currentUser={{ displayName: 'Ada Lovelace' }}>
+        <UserAvatar labeled />
+      </CurrentUserProvider>,
+    );
+
+    const label = screen.getByText('Ada Lovelace', { selector: 'span' });
+    expect(label).toHaveClass('text-xs');
+    expect(label.className).not.toMatch(/text-\[0\.625rem\]/);
+  });
+
   it('renders nothing without a non-empty display name', () => {
     const { container, rerender } = render(<UserAvatar />);
     expect(container).toBeEmptyDOMElement();

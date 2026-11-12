@@ -2,7 +2,8 @@
 
 /** Process-isolation backend behind the run_code tool (`SANDBOX_ISOLATION_DRIVER`). */
 export const SandboxIsolationCapabilityIsolationDriver = {
-        Docker: "docker",
-        Firecracker: "firecracker"
-    } as const;
-export type SandboxIsolationCapabilityIsolationDriver = typeof SandboxIsolationCapabilityIsolationDriver[keyof typeof SandboxIsolationCapabilityIsolationDriver];
+    Docker: "docker",
+    Firecracker: "firecracker",
+} as const;
+export type SandboxIsolationCapabilityIsolationDriver =
+    (typeof SandboxIsolationCapabilityIsolationDriver)[keyof typeof SandboxIsolationCapabilityIsolationDriver];

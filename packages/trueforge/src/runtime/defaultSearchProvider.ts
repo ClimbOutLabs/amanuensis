@@ -14,7 +14,7 @@ export const TAVILY_CONNECTOR_NAME = 'tavily';
 /** Global-settings key whose presence means the default search provider was already offered once. */
 export const DEFAULT_SEARCH_PROVIDER_SEEDED_KEY = 'default_search_provider_seeded';
 
-type DefaultSearchProviderOutcome = 'already_offered' | 'added' | 'kept_existing' | 'no_preset';
+export type DefaultSearchProviderOutcome = 'already_offered' | 'added' | 'kept_existing' | 'no_preset';
 
 /**
  * Adds the keyless search preset as the web search provider, once per instance. The marker is

@@ -17,6 +17,7 @@ import { toolResultResponse } from '../../src/core/mcp/IMCPServer';
 import { ToolSet } from '../../src/core/mcp/ToolSet';
 import { createSentinelHostContext, defaultSentinelServices } from '../../src/core/permissions';
 import { WRITE_CAP_STOP_MESSAGE } from '../../src/core/runtime/replyActionChecks';
+import { EDIT_SPACE_TOOL_NAME } from '../../src/core/spaces/toolContract';
 import { makeAgentSpec, makeMockILLM, makeTestResolver, mintTestTurnId } from './testHelpers';
 
 // Guard tests run longer replies than the production step budget, and so would stop at it before the
@@ -96,7 +97,15 @@ function scriptedModel(script: Reply[]) {
   return create;
 }
 
-async function setup({ cards, script }: { cards: boolean; script: Reply[] }) {
+async function setup({
+  cards,
+  script,
+  toolName = 'send_note',
+}: {
+  cards: boolean;
+  script: Reply[];
+  toolName?: string;
+}) {
   const callTool = jest.fn(() => Promise.resolve(toolResultResponse({ text: 'sent' })));
   const source: ToolSource = {
     name: 'mail',
@@ -106,7 +115,7 @@ async function setup({ cards, script }: { cards: boolean; script: Reply[] }) {
         result: {
           tools: [
             {
-              name: 'send_note',
+              name: toolName,
               description: 'Send a note',
               inputSchema: { type: 'object' as const, properties: {} },
               preload: true,
@@ -289,5 +298,25 @@ describe('turn-wide tool limits across approval pauses in a full session', () =>
     expect(rootCard?.snapshot.threads[MAIN_THREAD_ID]?.tool_call_memo?.write_calls_this_turn).toBe(1);
     expect(finished?.snapshot.threads[MAIN_THREAD_ID]?.tool_call_memo?.write_calls_this_turn).toBe(2);
     expect(fixture.callTool).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the refunds for landed space writes across approval resumes', async () => {
+    // Each write waits for a card. The refund count is saved at each pause and must survive the resume.
+    const fixture = await setup({
+      cards: true,
+      toolName: EDIT_SPACE_TOOL_NAME,
+      script: [
+        { id: 'edit-1', name: EDIT_SPACE_TOOL_NAME, args: noteArgs('Part 1') },
+        { id: 'edit-2', name: EDIT_SPACE_TOOL_NAME, args: noteArgs('Part 2') },
+      ],
+    });
+    const firstCard = await startTurn(fixture);
+    const secondCard = await approveOnce(fixture, firstCard);
+    const finished = await approveAll(fixture, secondCard);
+
+    const refunds = (turn: StoredTurn) =>
+      turn?.snapshot.threads[MAIN_THREAD_ID]?.tool_call_memo?.progress_refunds_by_thread;
+    expect(refunds(secondCard)).toEqual([{ thread_id: MAIN_THREAD_ID, refunds: 1 }]);
+    expect(refunds(finished)).toEqual([{ thread_id: MAIN_THREAD_ID, refunds: 2 }]);
   });
 });

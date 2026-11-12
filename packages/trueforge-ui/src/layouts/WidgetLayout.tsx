@@ -1,10 +1,10 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 
 import { auiButtonClass } from '../atoms/lib/buttonClasses.js';
 import { cn } from '../atoms/lib/cn.js';
-import { CompactLayoutProvider } from '../atoms/lib/CompactLayoutContext.js';
+import { CompactLayoutProvider, useCompactContainerRef } from '../atoms/lib/CompactLayoutContext.js';
 import { Icon } from '../icons/Icon.js';
 import { useSlot } from '../theme/SlotsProvider.js';
 import { StackChatPanel } from './StackChatPanel.js';
@@ -15,7 +15,15 @@ export function WidgetLayout({ className }: { className?: string }) {
   const BrandLogo = useSlot('BrandLogo');
   const { open, setOpen } = useWidgetVisibility();
   const fabRef = useRef<HTMLButtonElement>(null);
-  const dialogRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const registerCompactContainer = useCompactContainerRef();
+  const setDialogNode = useCallback(
+    (node: HTMLDivElement | null) => {
+      dialogRef.current = node;
+      registerCompactContainer(node);
+    },
+    [registerCompactContainer],
+  );
   const wasOpen = useRef(false);
 
   useEffect(() => {
@@ -45,7 +53,7 @@ export function WidgetLayout({ className }: { className?: string }) {
     <div className={cn('pointer-events-none relative h-full min-h-0 w-full', className)}>
       {open ? (
         <div
-          ref={dialogRef}
+          ref={setDialogNode}
           data-aui-compact-layout
           className="pointer-events-auto absolute right-[max(1.25rem,env(safe-area-inset-right,0px))] bottom-[calc(5.25rem+env(safe-area-inset-bottom,0px))] z-[19] flex h-[min(560px,calc(100%-6.5rem-env(safe-area-inset-bottom,0px)))] max-h-[calc(100%-6.5rem)] w-[min(380px,calc(100%-2.5rem))] flex-col overflow-hidden rounded-xl border border-border bg-primary-bg shadow-[0_16px_48px_color-mix(in_oklab,var(--shadow-color)_14%,transparent)] outline-none"
           role="dialog"

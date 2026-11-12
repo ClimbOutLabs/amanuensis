@@ -19,7 +19,11 @@ import { actionIdFor } from '../../../src/core/permissions/approvalTokens';
 import type { AuditRecordInput } from '../../../src/core/permissions/audit';
 import { forUnattendedRun, type SentinelServices } from '../../../src/core/permissions/context';
 import { recordPersonText, recordUntrustedText } from '../../../src/core/permissions/provenance';
-import { recordToolResultProvenance, SILENT_SEARCH_LIMIT } from '../../../src/core/permissions/webSearch';
+import {
+  hostToolStamp,
+  recordToolResultProvenance,
+  SILENT_SEARCH_LIMIT,
+} from '../../../src/core/permissions/webSearch';
 import { toToolCallInfo } from '../../../src/core/runtime/contextUtils';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 
@@ -586,6 +590,7 @@ describe('links and where they came from', () => {
     recordToolResultProvenance({
       state: h.host.web_search,
       tool_name: input.tool_name,
+      stamp: hostToolStamp({ type: 'mcp', search_provider_call: true }),
       argument_values: input.args,
       texts: [input.text],
     });

@@ -1,18 +1,23 @@
 import { z } from '@hono/zod-openapi';
 import dedent from 'dedent';
 import { randomUUID } from 'node:crypto';
-import { basename } from 'node:path';
+import { basename, extname, isAbsolute, join, posix } from 'node:path';
+import type { Logger } from 'winston';
 import {
   createDocumentExtractionBudget,
   createSessionDocumentExtractionBudget,
   extractDocumentText,
+  isSupportedDocumentExtension,
   MAX_BYTES_PER_DOCUMENT,
   MAX_PAGES_PER_DOCUMENT,
+  unsupportedDocumentTypeIssue,
   type DocumentExtraction,
   type DocumentExtractionBudget,
   type DocumentFileProgress,
   type DocumentPageRange,
+  type ExtractedDocument,
 } from '../../../documents/documentExtraction';
+import { DocumentReadError } from '../../../documents/documentReadError';
 import {
   createStructuredDocumentDocx,
   DOCUMENT_REPORT_MAX_NOTE_LENGTH,
@@ -27,20 +32,32 @@ import {
   summarizeNetWorth,
   type NetWorthObservationInput,
 } from '../../../documents/netWorthReport';
-import { EXTRACT_DOCUMENT_TEXT_TOOL_NAME } from '../../../documents/toolContract';
+import { ReportInputError } from '../../../documents/reportInputError';
+import { DOCUMENTS_SERVER_ID, EXTRACT_DOCUMENT_TEXT_TOOL_NAME } from '../../../documents/toolContract';
 import type { ApprovalDecision } from '../../events/schema';
 import { InstructionBuilder } from '../../InstructionBuilder';
+import type { DocumentScope } from '../../llm/LLMTypes';
 import { toolResultResponse } from '../../mcp/IMCPServer';
 import { defineTool, LocalToolMCP, type ToolDefinition } from '../../mcp/LocalToolMCP';
+import { isInsideWorkspace, isPathUnderDir } from '../../permissions/trackedExecutables';
+import { assertAttachmentBatch, stageAttachment } from '../../runtime/attachmentStaging';
 import type { ToolBundleName } from '../../runtime/toolBundleCatalog';
-import type { Sandbox, SandboxDocumentSnapshot } from '../../sandbox/Sandbox';
+import type { BoundRepository, Sandbox, SandboxDocumentSnapshot } from '../../sandbox/Sandbox';
+import {
+  SandboxFileNotFoundError,
+  SandboxFileTooLargeError,
+  SandboxPathIsDirectoryError,
+} from '../../sandbox/SandboxErrors';
 import type { AgentTracing } from '../../tracing/AgentTracing';
 import { throwIfSignalAborted } from '../../util/abort';
 import type { AgentCapability } from '../AgentCapability';
-
-export const DOCUMENTS_SERVER_ID = 'documents';
 export const CREATE_DOCUMENT_REPORT_TOOL_NAME = 'create_document_report';
 export const SUMMARIZE_NET_WORTH_TOOL_NAME = 'summarize_net_worth';
+/** The tools that render a downloadable report, for a run whose answer is not a file. */
+export const DOCUMENT_REPORT_TOOL_NAMES: readonly string[] = [
+  CREATE_DOCUMENT_REPORT_TOOL_NAME,
+  SUMMARIZE_NET_WORTH_TOOL_NAME,
+];
 export const DOCUMENTS_INSTRUCTION_SECTION = 'documents';
 
 const filePathListSchema = z
@@ -48,7 +65,9 @@ const filePathListSchema = z
   .min(1)
   .max(32)
   .refine(paths => new Set(paths).size === paths.length, 'Document paths must be unique')
-  .describe('Paths from the Uploaded files announcement.');
+  .describe(
+    'Paths from the Uploaded files announcement, the staged path of a file placed in the sandbox (such as a path given in an attachment note in a tool result), or the path of a file in the project folder. A file outside the project folder asks first.',
+  );
 
 /**
  * Page-range schema for extract_document_text. Both ends are optional:
@@ -60,13 +79,13 @@ const filePathListSchema = z
 const extractDocumentTextSchema = z
   .object({
     file_paths: filePathListSchema,
-    page_start: z.number().int().positive().optional().describe('First PDF page to read (1-based). Defaults to 1.'),
+    page_start: z.number().int().positive().optional().describe('First page to read (1-based). Defaults to 1.'),
     page_end: z
       .number()
       .int()
       .positive()
       .optional()
-      .describe('Last PDF page to read (inclusive). Defaults to a full window past page_start.'),
+      .describe('Last page to read (inclusive). Defaults to a full window past page_start.'),
   })
   .strict()
   .refine(data => data.page_end === undefined || data.page_start === undefined || data.page_end >= data.page_start, {
@@ -91,6 +110,63 @@ function resolvePageRange(input: ExtractDocumentTextInput): DocumentPageRange | 
   const page_start = input.page_start ?? 1;
   const page_end = input.page_end ?? page_start + MAX_PAGES_PER_DOCUMENT - 1;
   return { page_start, page_end };
+}
+
+/** The mime type a bridged file is staged under, from the reader's supported types. */
+function documentMime(filename: string): string {
+  switch (extname(filename).toLowerCase()) {
+    case '.pdf':
+      return 'application/pdf';
+    case '.png':
+      return 'image/png';
+    case '.jpg':
+    case '.jpeg':
+      return 'image/jpeg';
+    case '.gif':
+      return 'image/gif';
+    case '.bmp':
+      return 'image/bmp';
+    case '.tif':
+    case '.tiff':
+      return 'image/tiff';
+    case '.webp':
+      return 'image/webp';
+    default:
+      return 'application/octet-stream';
+  }
+}
+
+/** A per-file result for a document that could not be read, in the extraction result's own shape. */
+function failedDocument(filePath: string, issue: string): ExtractedDocument {
+  return { filename: basename(filePath), path: filePath, sha256: '', extraction_mode: null, pages: [], issue };
+}
+
+/** Shown when files together are more than one read may hold. */
+const TOO_MUCH_AT_ONCE =
+  'together with the other files, this is more than can be read at once. Ask for this file on its own.';
+
+/** The next step for a failure with no plain reason of its own. */
+const SANDBOX_NEXT_STEP = 'Try again; if it keeps failing, check that the sandbox is ready under Settings, Sandbox.';
+
+/**
+ * Why a project file could not be read, told apart by error type. Raw errors are never shown: they can carry
+ * sandbox paths or provider text.
+ */
+function readFailureIssue(error: unknown, filename: string): string {
+  if (error instanceof SandboxFileNotFoundError) {
+    return `Could not read ${filename}: the file could not be found. Check the path and try again.`;
+  }
+  if (error instanceof SandboxPathIsDirectoryError) {
+    return `Could not read ${filename}: that path is a folder, not a file. Name a file and try again.`;
+  }
+  if (error instanceof SandboxFileTooLargeError) {
+    return tooLargeIssue(filename);
+  }
+  return `Could not read ${filename}. ${SANDBOX_NEXT_STEP}`;
+}
+
+function tooLargeIssue(filename: string): string {
+  return `Could not read ${filename}: the file is too large to read. Send a smaller file or only the part you need.`;
 }
 
 const sourceSchema = z
@@ -201,11 +277,18 @@ function compactNetWorthDocumentReport(report: StructuredDocumentReport): Struct
   };
 }
 
-export function buildDocumentsInstruction(builder: InstructionBuilder): void {
+export function buildDocumentsInstruction(
+  builder: InstructionBuilder,
+  options: { withheldTools?: readonly string[] | undefined } = {},
+): void {
+  // A report tool the run does not offer is not mentioned, so the model never reaches for it.
+  const reportGuidance = (options.withheldTools ?? []).includes(CREATE_DOCUMENT_REPORT_TOOL_NAME)
+    ? ''
+    : ` For a generic report, pass a structured report to documents/${CREATE_DOCUMENT_REPORT_TOOL_NAME}: compact mode (default) is a bounded digest of ${String(DOCUMENT_REPORT_MAX_SECTIONS)} sections, ${String(DOCUMENT_REPORT_MAX_ROWS)} rows, ${String(DOCUMENT_REPORT_MAX_NOTES)} notes, while full mode renders a multi-page report with no row or section cap for long reports such as financial plans. For the explicit net-worth mode only, cite exact spans from the extraction result in documents/${SUMMARIZE_NET_WORTH_TOOL_NAME}; the host validates those spans and computes totals.`;
   builder.addSection(
     DOCUMENTS_INSTRUCTION_SECTION,
     dedent`
-      Supported PDF and raster-image attachments are staged in the sandbox, listed in the Uploaded files announcement, and their text is already placed in the message that follows (native PDF text first, local OCR fallback for scanned pages and images), so it does not need to be fetched to be read. Use documents/${EXTRACT_DOCUMENT_TEXT_TOOL_NAME} only to re-extract with page/line-addressable provenance for citation, or when the inline text was truncated or reported unavailable. For a generic report, pass a structured report to documents/${CREATE_DOCUMENT_REPORT_TOOL_NAME}: compact mode (default) is a bounded digest of ${String(DOCUMENT_REPORT_MAX_SECTIONS)} sections, ${String(DOCUMENT_REPORT_MAX_ROWS)} rows, ${String(DOCUMENT_REPORT_MAX_NOTES)} notes, while full mode renders a multi-page report with no row or section cap for long reports such as financial plans. For the explicit net-worth mode only, cite exact spans from the extraction result in documents/${SUMMARIZE_NET_WORTH_TOOL_NAME}; the host validates those spans and computes totals. Unreadable or unsupported files produce issues, never guesses. Do not use the language model as a PDF/OCR parser or invent missing values.
+      Supported attachments (PDF, images, Word .docx/.doc, Excel .xlsx/.xls, CSV, PowerPoint .pptx, OpenDocument, RTF, HTML, e-mails saved as .eml or .msg, and text files) are staged in the sandbox, listed in the Uploaded files announcement, and their text is already placed in the message that follows (native PDF text first, local OCR fallback for scanned pages and images; office, e-mail and text files are read as they are, a spreadsheet row by row with cells separated by " | ", and an e-mail with the text of its attachments), so it does not need to be fetched to be read. Use documents/${EXTRACT_DOCUMENT_TEXT_TOOL_NAME} only to re-extract with page/line-addressable provenance for citation, or when the inline text was truncated or reported unavailable. A file staged from an email or chat attachment is read with documents/${EXTRACT_DOCUMENT_TEXT_TOOL_NAME} using its staged path, the same as an announced upload. A file in the project folder can be read by its project path; it is staged and read the same as an upload. A file outside the project folder asks the person first.${reportGuidance} Unreadable or unsupported files produce issues, never guesses. Do not use the language model as a PDF/OCR parser or invent missing values.
     `.trim(),
   );
 }
@@ -238,7 +321,7 @@ export async function extractDocumentsFromSandbox(
   let remainingSnapshotBytes = budget.maxTotalBytes - budget.totalBytes;
   for (const path of file_paths) {
     if (remainingSnapshotBytes < 1) {
-      snapshots.set(path, new Error(`Document aggregate byte limit of ${String(budget.maxTotalBytes)} exceeded`));
+      snapshots.set(path, new DocumentReadError(TOO_MUCH_AT_ONCE));
       continue;
     }
     try {
@@ -277,6 +360,10 @@ export async function extractDocumentsFromSandbox(
         runNativePdfText: input => {
           throwIfSignalAborted(signal);
           return sandbox.runDocumentText({ ...input, filePath: snapshotFor(input.filePath).filePath, signal });
+        },
+        runTextReader: input => {
+          throwIfSignalAborted(signal);
+          return sandbox.runTextDocumentReader({ ...input, filePath: snapshotFor(input.filePath).filePath, signal });
         },
         onFileProgress,
         budget,
@@ -325,20 +412,43 @@ export class DocumentTools extends LocalToolMCP {
    */
   private readonly sessionBudget: DocumentExtractionBudget = createSessionDocumentExtractionBudget();
 
-  constructor(
-    private readonly sandbox: Sandbox,
-    tracing: AgentTracing,
-  ) {
-    super({ tracing });
+  /** The session's bound project folder, when one is bound; document paths inside it read freely. */
+  private readonly boundRepository: BoundRepository | undefined;
+
+  private readonly sandbox: Sandbox;
+  private readonly logger: Logger;
+  private readonly withheldTools: readonly string[];
+
+  constructor(options: {
+    sandbox: Sandbox;
+    tracing: AgentTracing;
+    logger: Logger;
+    boundRepository?: BoundRepository | undefined;
+    withheldTools?: readonly string[] | undefined;
+  }) {
+    super({ tracing: options.tracing });
+    this.sandbox = options.sandbox;
+    this.logger = options.logger.child({ module: 'DocumentTools' });
+    this.boundRepository = options.boundRepository;
+    this.withheldTools = options.withheldTools ?? [];
   }
 
-  private readonly tools: ToolDefinition[] = [
+  /** Logs a failure's raw detail, which is never shown, and returns the fixed sentence that is. */
+  private loggedFailure({ step, error, shown }: { step: string; error: unknown; shown: string }): string {
+    this.logger.warn('Document tool step failed', {
+      step,
+      error: error instanceof Error ? `${error.name}: ${error.message}`.slice(0, 2000) : String(error).slice(0, 2000),
+    });
+    return shown;
+  }
+
+  private readonly allTools: ToolDefinition[] = [
     defineTool({
       name: EXTRACT_DOCUMENT_TEXT_TOOL_NAME,
       description:
-        'Extract page- and line-addressable text from PDF/image attachments. Native PDF text first, local OCR fallback. Returns per-file issues and SHA-256 provenance; never infers unreadable content. For long PDFs, page with page_start/page_end; each result names the exact next range.',
+        'Extract page- and line-addressable text from attachments: PDF, images, Word (.docx, .doc), Excel (.xlsx, .xls), CSV, PowerPoint (.pptx), OpenDocument, RTF, HTML, e-mails (.eml, .msg) and text files. Native PDF text first, local OCR fallback. Returns per-file issues and SHA-256 provenance; never infers unreadable content. For long files, page with page_start/page_end; each result names the exact next range.',
       schema: extractDocumentTextSchema,
-      handler: input => this.extractText(input),
+      handler: (input, approvalDecision) => this.extractText(input, approvalDecision),
     }),
     defineTool({
       name: CREATE_DOCUMENT_REPORT_TOOL_NAME,
@@ -361,13 +471,16 @@ export class DocumentTools extends LocalToolMCP {
   ];
 
   protected getTools(): ToolDefinition[] {
-    return this.tools;
+    return this.allTools.filter(tool => !this.withheldTools.includes(tool.name));
   }
 
   override async toolCallInfo(params: Parameters<LocalToolMCP['toolCallInfo']>[0], resolveUnderlyingTool?: boolean) {
     const info = await super.toolCallInfo(params, resolveUnderlyingTool);
     const createsArtifact =
       params.name === CREATE_DOCUMENT_REPORT_TOOL_NAME || params.name === SUMMARIZE_NET_WORTH_TOOL_NAME;
+    // Only the extraction tool carries the document scope: it is the one call whose
+    // classification depends on where its paths live. The report tools keep theirs as today.
+    const scope = params.name === EXTRACT_DOCUMENT_TEXT_TOOL_NAME ? this.documentScope() : undefined;
     return {
       ...info,
       effect: createsArtifact ? ('edit' as const) : ('inspect' as const),
@@ -375,26 +488,178 @@ export class DocumentTools extends LocalToolMCP {
       destructive_hint: false,
       open_world_hint: false,
       is_approval_required: createsArtifact,
+      ...(scope === undefined
+        ? {}
+        : {
+            document_scope: scope,
+            ...(scope.path_resolution === null ? {} : { path_resolution: scope.path_resolution }),
+          }),
     };
   }
 
-  private async extractText(input: ExtractDocumentTextInput) {
+  /** The folders this call may read without asking, from the sandbox and the session binding. */
+  private documentScope(): DocumentScope {
+    const sandboxScope = this.sandbox.documentReadScope();
+    return {
+      staged_uploads_dir: sandboxScope.staged_uploads_dir,
+      workspace_cwd: this.boundRepository?.workspace_cwd ?? sandboxScope.workspace_cwd,
+      path_resolution: sandboxScope.path_resolution,
+    };
+  }
+
+  private isStagedPath(filePath: string, scope: DocumentScope): boolean {
+    const dir = scope.staged_uploads_dir;
+    return (
+      dir !== null && isPathUnderDir({ p: filePath, dir, cwd: '/', resolution: scope.path_resolution ?? undefined })
+    );
+  }
+
+  private isInWorkspace(filePath: string, scope: DocumentScope): boolean {
+    const root = scope.workspace_cwd;
+    return (
+      root !== null &&
+      isInsideWorkspace({
+        p: filePath,
+        cwd: root,
+        workspace_root: root,
+        resolution: scope.path_resolution ?? undefined,
+      })
+    );
+  }
+
+  /** A relative document path is read from the project folder, the call's working directory. */
+  private resolveDocumentPath(filePath: string, scope: DocumentScope): string {
+    const root = scope.workspace_cwd;
+    if (root === null || posix.isAbsolute(filePath) || isAbsolute(filePath)) {
+      return filePath;
+    }
+    return scope.path_resolution === 'remote' ? posix.join(root, filePath) : join(root, filePath);
+  }
+
+  private async extractText(input: ExtractDocumentTextInput, approvalDecision?: ApprovalDecision) {
     try {
-      return toolResultResponse({
-        text: JSON.stringify(
-          await extractDocumentsFromSandbox(
-            this.sandbox,
-            input.file_paths,
-            undefined,
-            undefined,
-            this.sessionBudget,
-            resolvePageRange(input),
-          ),
-        ),
+      const scope = this.documentScope();
+      // The bridge: a path that is not already staged is read and staged first, then extracted
+      // from the staged copy exactly as an upload. A path outside the project folder needs the
+      // approval the classifier asked for, bound to these exact paths; without it, nothing is
+      // staged and nothing is read.
+      const outside = input.file_paths.filter(
+        filePath => !this.isStagedPath(filePath, scope) && !this.isInWorkspace(filePath, scope),
+      );
+      if (outside.length > 0 && approvalDecision?.status !== 'allow') {
+        const names = outside.map(filePath => basename(filePath)).join(', ');
+        return toolResultResponse({
+          text: JSON.stringify({
+            error:
+              `Nothing was read. ${names} ${outside.length === 1 ? 'is' : 'are'} outside the project folder, ` +
+              `and reading ${outside.length === 1 ? 'it' : 'them'} needs your approval first. ` +
+              'Ask for that approval, then try again.',
+          }),
+          isError: true,
+        });
+      }
+      const results = new Map<number, ExtractedDocument>();
+      const readable: { index: number; originalPath: string; extractPath: string }[] = [];
+      const bridgeBytes = new Map<number, Buffer>();
+      for (const [index, filePath] of input.file_paths.entries()) {
+        if (this.isStagedPath(filePath, scope)) {
+          readable.push({ index, originalPath: filePath, extractPath: filePath });
+          continue;
+        }
+        if (!isSupportedDocumentExtension(filePath)) {
+          results.set(index, failedDocument(filePath, unsupportedDocumentTypeIssue(basename(filePath))));
+          continue;
+        }
+        try {
+          bridgeBytes.set(
+            index,
+            await this.sandbox.downloadDocumentSourceFile(this.resolveDocumentPath(filePath, scope)),
+          );
+        } catch (error) {
+          const issue = readFailureIssue(error, basename(filePath));
+          results.set(
+            index,
+            failedDocument(filePath, this.loggedFailure({ step: 'read project file', error, shown: issue })),
+          );
+        }
+      }
+      if (bridgeBytes.size > 0) {
+        try {
+          assertAttachmentBatch([...bridgeBytes.values()].map(bytes => bytes.length));
+        } catch (error) {
+          this.loggedFailure({ step: 'check project files', error, shown: TOO_MUCH_AT_ONCE });
+          for (const index of bridgeBytes.keys()) {
+            const filePath = input.file_paths[index];
+            if (filePath !== undefined) {
+              results.set(index, failedDocument(filePath, `Could not read ${basename(filePath)}: ${TOO_MUCH_AT_ONCE}`));
+            }
+          }
+          bridgeBytes.clear();
+        }
+      }
+      for (const [index, bytes] of bridgeBytes) {
+        const filePath = input.file_paths[index];
+        if (filePath === undefined) {
+          continue;
+        }
+        if (bytes.length === 0) {
+          results.set(
+            index,
+            failedDocument(
+              filePath,
+              `Could not read ${basename(filePath)}: the file is empty. Check that it is the right file.`,
+            ),
+          );
+          continue;
+        }
+        if (bytes.length > MAX_BYTES_PER_DOCUMENT) {
+          results.set(index, failedDocument(filePath, tooLargeIssue(basename(filePath))));
+          continue;
+        }
+        try {
+          const staged = await stageAttachment({
+            sandbox: this.sandbox,
+            filename: basename(filePath),
+            bytes,
+            mime: documentMime(filePath),
+            ordinal: index + 1,
+          });
+          readable.push({ index, originalPath: filePath, extractPath: staged.path });
+        } catch (error) {
+          const issue = readFailureIssue(error, basename(filePath));
+          results.set(
+            index,
+            failedDocument(filePath, this.loggedFailure({ step: 'stage project file', error, shown: issue })),
+          );
+        }
+      }
+      if (readable.length > 0) {
+        readable.sort((a, b) => a.index - b.index);
+        const extraction = await extractDocumentsFromSandbox(
+          this.sandbox,
+          readable.map(entry => entry.extractPath),
+          undefined,
+          undefined,
+          this.sessionBudget,
+          resolvePageRange(input),
+        );
+        for (const [position, entry] of readable.entries()) {
+          const document = extraction.documents[position];
+          if (document !== undefined) {
+            // Provenance names the file the person pointed at, not the staged copy of it.
+            results.set(entry.index, { ...document, filename: basename(entry.originalPath), path: entry.originalPath });
+          }
+        }
+      }
+      const documents = input.file_paths.flatMap((_, index) => {
+        const document = results.get(index);
+        return document === undefined ? [] : [document];
       });
+      return toolResultResponse({ text: JSON.stringify({ documents }) });
     } catch (error) {
+      const shown = `Nothing was read. ${SANDBOX_NEXT_STEP}`;
       return toolResultResponse({
-        text: JSON.stringify({ error: error instanceof Error ? error.message : String(error) }),
+        text: JSON.stringify({ error: this.loggedFailure({ step: 'read documents', error, shown }) }),
         isError: true,
       });
     }
@@ -413,10 +678,7 @@ export class DocumentTools extends LocalToolMCP {
       const content = await createStructuredDocumentDocx(report, { mode });
       return await this.storeArtifact(content, { report });
     } catch (error) {
-      return toolResultResponse({
-        text: JSON.stringify({ error: error instanceof Error ? error.message : String(error) }),
-        isError: true,
-      });
+      return this.reportFailure(error);
     }
   }
 
@@ -449,11 +711,21 @@ export class DocumentTools extends LocalToolMCP {
       const content = await createStructuredDocumentDocx(documentReport);
       return await this.storeArtifact(content, { report });
     } catch (error) {
-      return toolResultResponse({
-        text: JSON.stringify({ error: error instanceof Error ? error.message : String(error) }),
-        isError: true,
-      });
+      return this.reportFailure(error);
     }
+  }
+
+  /** A report input the renderer refused is shown so the model can fix it; anything else is logged and replaced. */
+  private reportFailure(error: unknown) {
+    const shown =
+      error instanceof ReportInputError
+        ? error.message
+        : this.loggedFailure({
+            step: 'make report',
+            error,
+            shown: `The report could not be made. ${SANDBOX_NEXT_STEP}`,
+          });
+    return toolResultResponse({ text: JSON.stringify({ error: shown }), isError: true });
   }
 
   private async storeArtifact(content: Buffer, payload: { report: unknown }) {
@@ -468,10 +740,29 @@ export class DocumentTools extends LocalToolMCP {
   }
 }
 
-export function documentCapability(options: { sandbox: Sandbox; tracing: AgentTracing }): AgentCapability {
+export function documentCapability(options: {
+  sandbox: Sandbox;
+  tracing: AgentTracing;
+  logger: Logger;
+  boundRepository?: BoundRepository | undefined;
+  /** Tool names this run does not offer. */
+  withheldTools?: readonly string[] | undefined;
+}): AgentCapability {
   return {
-    systemToolSets: [new DocumentTools(options.sandbox, options.tracing)],
-    instructionBuilders: [buildDocumentsInstruction],
+    systemToolSets: [
+      new DocumentTools({
+        sandbox: options.sandbox,
+        tracing: options.tracing,
+        logger: options.logger,
+        boundRepository: options.boundRepository,
+        withheldTools: options.withheldTools,
+      }),
+    ],
+    instructionBuilders: [
+      builder => {
+        buildDocumentsInstruction(builder, { withheldTools: options.withheldTools });
+      },
+    ],
     bundle: 'documents',
   };
 }

@@ -151,8 +151,11 @@ export async function addAllowedRecipients({
   return next;
 }
 
-/** How long a send waits for the sidecar to load a new list before it gives up and keeps the draft. */
-export const SIDECAR_LOAD_TIMEOUT_MS = 15_000;
+/**
+ * How long a send waits for the sidecar to load a new list before it gives up and keeps the draft. It covers a
+ * full sidecar restart: the wrapper checks the list every 2 seconds and gives the old server 5 seconds to stop.
+ */
+export const SIDECAR_LOAD_TIMEOUT_MS = 45_000;
 
 /**
  * Waits until the sidecar's status file names `hash`. The file is written by the sidecar's wrapper after
@@ -185,9 +188,11 @@ export async function waitForSidecarLoadedHash({
 export async function waitForCurrentSidecarList({
   path,
   statusPath,
+  timeoutMs = SIDECAR_LOAD_TIMEOUT_MS,
 }: {
   path: string;
   statusPath: string;
+  timeoutMs?: number;
 }): Promise<boolean> {
   let text: string;
   try {
@@ -195,7 +200,7 @@ export async function waitForCurrentSidecarList({
   } catch {
     return false;
   }
-  return waitForSidecarLoadedHash({ statusPath, hash: allowedRecipientsFileHash(text) });
+  return waitForSidecarLoadedHash({ statusPath, hash: allowedRecipientsFileHash(text), timeoutMs });
 }
 
 async function sidecarLoadedHash(statusPath: string): Promise<string | null> {

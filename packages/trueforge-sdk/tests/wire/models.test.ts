@@ -5,52 +5,41 @@ import { TrueForge } from "../../src/Client";
 import { mockServerPool } from "../mock-server/MockServerPool";
 
 describe("ModelsClient", () => {
-    
     test("list (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { "data" : [ { "model_id" : "model_id" , "name" : "name" , "properties" : { } , "provider" : { "name" : "name" } } ] };
-        
-        server
-            .mockEndpoint()
-            .get("/api/v1/models").respondWith()
-            .statusCode(200).jsonBody(rawResponseBody)
-                .build();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
 
-        
-                        
-                                const response = await client.models.list();
-                                expect(response).toEqual({
-    data: [{
-            modelId: "model_id",
-            name: "name",
-            properties: {},
-            provider: {
-                name: "name"
-            }
-        }]
-});
-                              
-                    
+        const rawResponseBody = {
+            data: [{ model_id: "model_id", name: "name", properties: {}, provider: { name: "name" } }],
+        };
+
+        server.mockEndpoint().get("/api/v1/models").respondWith().statusCode(200).jsonBody(rawResponseBody).build();
+
+        const response = await client.models.list();
+        expect(response).toEqual({
+            data: [
+                {
+                    modelId: "model_id",
+                    name: "name",
+                    properties: {},
+                    provider: {
+                        name: "name",
+                    },
+                },
+            ],
+        });
     });
-          
+
     test("list (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
-        server
-            .mockEndpoint()
-            .get("/api/v1/models").respondWith()
-            .statusCode(401).jsonBody(rawResponseBody)
-                .build();
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
 
-        
-            await expect(async () => {
-                return await client.models.list()
-            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+        const rawResponseBody = { error: { message: "message" } };
+
+        server.mockEndpoint().get("/api/v1/models").respondWith().statusCode(401).jsonBody(rawResponseBody).build();
+
+        await expect(async () => {
+            return await client.models.list();
+        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
-          
 });

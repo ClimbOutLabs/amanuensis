@@ -2,9 +2,9 @@
 
 /** Whether the last full check from the computer can be read and is recent. */
 export const HelpHostReportState = {
-        Ok: "ok",
-        Missing: "missing",
-        Invalid: "invalid",
-        Stale: "stale"
-    } as const;
-export type HelpHostReportState = typeof HelpHostReportState[keyof typeof HelpHostReportState];
+    Ok: "ok",
+    Missing: "missing",
+    Invalid: "invalid",
+    Stale: "stale",
+} as const;
+export type HelpHostReportState = (typeof HelpHostReportState)[keyof typeof HelpHostReportState];

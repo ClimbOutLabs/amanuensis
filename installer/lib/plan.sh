@@ -334,7 +334,7 @@ plan_build() {
   INSTALL_UPGRADE=0
   PLAN_UPGRADE_NOTE=
   if [ "$have_release" = 1 ] && release_load "$RELEASE_DIR/release.json"; then
-    if [ "$CUR_APP_TAG" != "$REL_APP_TAG" ] || [ "$CUR_STT_TAG" != "$REL_STT_TAG" ] || [ "$CUR_CALENDAR_TAG" != "$REL_CALENDAR_TAG" ] || [ "$CUR_DEX_IMAGE" != "$REL_DEX_IMAGE" ] || [ "$CUR_MAIL_EMAIL_IMAGE" != "$REL_MAIL_EMAIL_IMAGE" ]; then
+    if [ "$CUR_APP_TAG" != "$REL_APP_TAG" ] || [ "$CUR_STT_TAG" != "$REL_STT_TAG" ] || [ "$CUR_TTS_TAG" != "$REL_TTS_TAG" ] || [ "$CUR_CALENDAR_TAG" != "$REL_CALENDAR_TAG" ] || [ "$CUR_BROWSER_TAG" != "$REL_BROWSER_TAG" ] || [ "$CUR_BROWSER_GATEWAY_TAG" != "$REL_BROWSER_GATEWAY_TAG" ] || [ "$CUR_DEX_IMAGE" != "$REL_DEX_IMAGE" ] || [ "$CUR_MAIL_EMAIL_IMAGE" != "$REL_MAIL_EMAIL_IMAGE" ]; then
       # A re-run never quietly reuses older images: this checkout is what gets installed.
       INSTALL_UPGRADE=1
       PLAN_UPGRADE_NOTE="This copy of Aman is newer than the installed one, so it will be updated."
@@ -344,9 +344,11 @@ plan_build() {
     fi
   fi
 
-  plan_image "$REL_APP_TAG" "The Aman app is built" "Build the Aman app" app-base app-deps dockerfile-frontend
+  plan_image "$REL_APP_TAG" "The Aman app is built" "Build the Aman app" app-base app-deps vad-model dockerfile-frontend
   plan_image "$REL_STT_TAG" "The speech-to-text service is built" "Build the speech-to-text service" stt-base stt-deps
+  plan_image "$REL_TTS_TAG" "The voice that reads replies aloud is built" "Build the voice that reads replies aloud" tts-deps tts-voice
   plan_image "$REL_CALENDAR_TAG" "The calendar connector is built" "Build the calendar connector"
+  plan_image "$REL_BROWSER_TAG $REL_BROWSER_GATEWAY_TAG" "Aman's browser is built" "Build Aman's browser" browser-base browser-deps browser-gateway-base
   plan_image "$REL_DEX_IMAGE" "The sign-in service is downloaded" "Download the sign-in service" dex
   plan_image "$REL_MAIL_EMAIL_IMAGE" "The email connector is downloaded" "Download the email connector" mail-email
   plan_tls
@@ -401,6 +403,9 @@ plan_build() {
     else
       plan_add todo "$(demo_plan_text "$name" "$(reg_get "$name" owner_email)")"
     fi
+    if [ -n "$AMAN_TAVILY_KEY" ] || { [ "$DRY_RUN" = 1 ] && [ "$OPT_TAVILY_KEY_STDIN" = 1 ]; }; then
+      plan_add todo "Use Tavily for web search on instance $name" "The key is saved only in the settings file of this instance."
+    fi
   fi
   if ! need_new_instance && [ "$OPT_TF_KEY_STDIN" = 1 ]; then
     plan_add todo "Replace the Token Factory key of instance $(tf_rotation_name) and restart its app" "The key is saved only in the settings file of that instance."
@@ -424,7 +429,7 @@ plan_aman_command() {
 }
 
 # An instance from before addresses were listed is opened on the network like a new one, unless --local-only says not to.
-# One already open on the network changes between https and plain http when --tls says so, or moves to https by default.
+# One already open on the network is served over https; an older record that still says plain http moves to https.
 plan_existing_addresses() { # name
   local name=$1 hosts port
   port=$(reg_get "$name" app_port)
@@ -439,15 +444,9 @@ plan_existing_addresses() { # name
   fi
   # shellcheck disable=SC2086 # the extra hosts are checked hosts without spaces
   hosts=$(network_origin_list "$port" '' ${OPT_ADDRESSES:-$(reg_get "$name" extra_hosts)} | sed "s|http://||g; s|:$port||g; s|,|, |g")
-  if [ "$(tls_target "$name")" = local ]; then
-    plan_add todo "Serve instance $name over https on your network" \
-      "It will open at: $hosts, with a certificate Aman makes on this computer. The old plain http address sends devices to https." \
-      "Each device trusts that certificate once. Its data and sign-in stay as they are."
-    return 0
-  fi
-  plan_add todo "Open instance $name on your network" \
-    "It will open at: $hosts. Sign-in works from each. Only devices on your private network can reach it." \
-    "Its data and sign-in stay as they are."
+  plan_add todo "Serve instance $name over https on your network" \
+    "It will open at: $hosts, with a certificate Aman makes on this computer. The old plain http address sends devices to https." \
+    "Each device trusts that certificate once. Its data and sign-in stay as they are."
 }
 
 # The https front end and the local authority, when an instance is about to be served over https.
@@ -456,7 +455,7 @@ plan_tls() {
   if need_new_instance && [ -n "${I_TLS_PORT:-}" ]; then need=1; fi
   for name in $(reg_names); do
     change=$(instance_address_change "$name")
-    if tls_active "$name" || { [ -n "$change" ] && [ "$change" != close ] && [ "$(tls_target "$name")" = local ]; }; then need=1; fi
+    if tls_active "$name" || { [ -n "$change" ] && [ "$change" != close ]; }; then need=1; fi
   done
   if tls_authority_needs_replacing && [ -n "$(tls_instances)" ]; then
     plan_add todo "Make this computer's root certificate again" \
@@ -504,10 +503,19 @@ docker_available_for_probes() {
 }
 
 # plan_image TAG TEXT download-ids...
-plan_image() { # tag, have text, todo text, download ids...
-  local tag=$1 have=$2 text=$3 dl
+plan_image() { # tags (one, or several built by the same step, space separated), have text, todo text, download ids...
+  local tags=$1 have=$2 text=$3 dl tag built=1
   shift 3
-  if docker_available_for_probes && docker_image_exists "$tag"; then
+  # A step with no image to look for would otherwise always read as done.
+  [ -n "${tags// /}" ] || die "The installer could not name the images for this step: $text. Run the installer from a complete copy of the Aman code."
+  if docker_available_for_probes; then
+    for tag in $tags; do
+      docker_image_exists "$tag" || built=0
+    done
+  else
+    built=0
+  fi
+  if [ "$built" = 1 ]; then
     plan_add have "$have"
   else
     plan_add todo "$text"
@@ -591,6 +599,8 @@ install_execute() {
   ensure_private_dir "$MACHINE_DIR"
   ensure_private_dir "$INSTANCES_DIR"
   install_doctor_shim
+  # Before the build and the backup, so a port Tailscale would take stops the run with nothing changed.
+  for name in $(reg_names); do instance_tailscale_port_check "$name"; done
   if need_new_instance && [ -z "$AMAN_PASSWORD" ]; then
     ui_hint "Asked now so the rest of the setup runs on its own."
     ask_password AMAN_PASSWORD
@@ -610,14 +620,14 @@ install_execute() {
   for name in $(reg_names); do
     change=$(instance_address_change "$name")
     if [ -n "$change" ]; then
-      instance_apply_addresses "$name" "$change"
+      instance_apply_addresses "$name" "$change" "$REL_APP_TAG"
       ADDRESS_CHANGED="$ADDRESS_CHANGED $name "
     fi
   done
   if [ "$INSTALL_UPGRADE" = 1 ]; then
     upgrade_switch
   else
-    machine_up "$REL_STT_TAG"
+    machine_up "$REL_STT_TAG" "$REL_TTS_TAG"
     for name in $(reg_names); do
       recreate=
       case "$ADDRESS_CHANGED" in *" $name "*) recreate=recreate ;; esac
@@ -636,7 +646,7 @@ install_execute() {
     instance_create
     AMAN_PASSWORD=
   fi
-  if [ -n "$CAL_TARGET" ] && [ -n "$CAL_EMAIL" ] && [ -z "$CAL_SKIP" ]; then calendar_apply "$CAL_TARGET"; fi
+  if [ -n "$CAL_TARGET" ] && [ -n "$CAL_EMAIL" ]; then calendar_apply "$CAL_TARGET"; fi
   if [ -n "$EM_TARGET" ] && [ -n "$EM_ADDRESS" ] && [ -z "$EM_SKIP" ]; then email_apply "$EM_TARGET"; fi
   tf_rotation_apply
   if tls_authority_needs_replacing && [ -n "$(tls_instances)" ]; then

@@ -30,6 +30,17 @@ const MAILBOX = [1, 2, 9, 12, 20, 45, 90].map(daysAgo => ({
   date: new Date(NOW - daysAgo * DAY_MS).toISOString(),
 }));
 
+/** The account's folders as the real sidecar lists them: one JSON text block per folder, with special-use marks. */
+const FOLDERS = [
+  { name: 'INBOX', delimiter: '/', flags: ['\\HasNoChildren'] },
+  { name: '[Gmail]/Sent Mail', delimiter: '/', flags: ['\\HasNoChildren', '\\Sent'] },
+  { name: '[Gmail]/Drafts', delimiter: '/', flags: ['\\Drafts', '\\HasNoChildren'] },
+];
+
+/** The real sidecar's words when the mail server rejects a request, such as a folder it does not have. */
+const PROVIDER_FAILURE =
+  'Error executing tool list_emails_metadata: provider_failure: metadata provider request failed';
+
 const readAnnotations = { readOnlyHint: true, openWorldHint: false };
 const accountProperty = { type: 'string', description: 'The name of the email account.' };
 /** Like the real sidecar, which declares its dates as `datetime | None`, so null is valid input. */
@@ -55,6 +66,22 @@ const SIDECAR_TOOLS = [
     annotations: readAnnotations,
   },
   {
+    name: 'get_emails_content',
+    description: 'Read email bodies.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: { account_name: accountProperty, mailbox: { type: 'string', description: 'The mailbox.' } },
+      required: ['account_name'],
+    },
+    annotations: readAnnotations,
+  },
+  {
+    name: 'get_attachment_content',
+    description: 'Fetch one attachment.',
+    inputSchema: { type: 'object' as const, properties: { account_name: accountProperty }, required: ['account_name'] },
+    annotations: readAnnotations,
+  },
+  {
     name: 'list_mailboxes',
     description: 'List mailboxes.',
     inputSchema: { type: 'object' as const, properties: { account_name: accountProperty }, required: ['account_name'] },
@@ -66,6 +93,20 @@ const SIDECAR_TOOLS = [
     inputSchema: {
       type: 'object' as const,
       properties: { account_name: accountProperty, recipients: { type: 'array' }, subject: { type: 'string' } },
+      required: ['account_name', 'recipients', 'subject'],
+    },
+  },
+  {
+    name: 'save_draft',
+    description: 'Save a draft email.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        account_name: accountProperty,
+        recipients: { type: 'array' },
+        subject: { type: 'string' },
+        body: { type: 'string' },
+      },
       required: ['account_name', 'recipients', 'subject'],
     },
   },
@@ -88,9 +129,13 @@ function text(value: unknown, isError = false): CallToolResult {
 function scriptedSidecar({
   accountList,
   known = () => ['default'],
+  draftResult = () => text({ ok: true, draft_id: 'draft-1' }),
+  mailboxListFails = false,
 }: {
   accountList: () => CallToolResult;
+  mailboxListFails?: boolean;
   known?: () => readonly string[];
+  draftResult?: () => CallToolResult;
 }) {
   const calls: Record<string, unknown>[] = [];
   const callTool = (params: CallToolRequest['params']): Promise<CallToolResult> => {
@@ -103,10 +148,24 @@ function scriptedSidecar({
       return Promise.resolve(text(`Account ${String(args['account_name'])} was not found`, true));
     }
     if (params.name === 'list_mailboxes') {
-      return Promise.resolve(text({ mailboxes: ['INBOX', 'Sent'] }));
+      return Promise.resolve(
+        mailboxListFails
+          ? text('provider_failure: mailbox list failed', true)
+          : { content: FOLDERS.map(folder => ({ type: 'text' as const, text: JSON.stringify(folder) })) },
+      );
+    }
+    const mailbox = args['mailbox'];
+    if (typeof mailbox === 'string' && mailbox.toUpperCase() !== 'INBOX' && !FOLDERS.some(f => f.name === mailbox)) {
+      return Promise.resolve(text(PROVIDER_FAILURE, true));
+    }
+    if (params.name === 'get_emails_content') {
+      return Promise.resolve(text({ emails: [] }));
     }
     if (params.name === 'send_email') {
       return Promise.resolve(text({ sent: true }));
+    }
+    if (params.name === 'save_draft') {
+      return Promise.resolve(draftResult());
     }
     const since = args['since'];
     if (since === undefined || since === null) {
@@ -132,8 +191,9 @@ function scriptedSidecar({
   return { calls };
 }
 
-function makeResolver(mailAccounts: MailAccountDirectory) {
+function makeResolver(mailAccounts: MailAccountDirectory, clientTimezone?: string) {
   return new TurnResourceResolver({
+    clientTimezone,
     llm: () =>
       Promise.resolve({
         modelClient: makeMockILLM(),
@@ -154,7 +214,17 @@ function makeSpec(): AgentSpec {
     model: { name: 'test-provider/test-model' },
     instructions: 'test',
     mcp_servers: [
-      { name: MAIL_CONNECTOR_NAME, enable_tools: ['list_emails_metadata', 'list_mailboxes', 'send_email'] },
+      {
+        name: MAIL_CONNECTOR_NAME,
+        enable_tools: [
+          'list_emails_metadata',
+          'get_emails_content',
+          'get_attachment_content',
+          'list_mailboxes',
+          'send_email',
+          'save_draft',
+        ],
+      },
     ],
     config: {
       ask_user_questions: { enabled: false },
@@ -346,6 +416,62 @@ describe('Email connector account name', () => {
   });
 });
 
+describe('Email connector drafts', () => {
+  beforeEach(() => {
+    mockConnect.mockReset();
+  });
+
+  it('tells the model a draft keeps the recipients the person named', async () => {
+    scriptedSidecar({ accountList: oneAccount });
+    const toolSet = await emailToolSet(makeResolver(new MailAccountDirectory()));
+
+    const listed = await toolSet.listTools();
+    if (!('result' in listed)) {
+      throw new Error('Expected a tool list');
+    }
+    const draft = listed.result.tools.find(tool => tool.name === 'save_draft');
+    expect(draft?.description).toContain('Recipients the person named must stay on the call');
+    expect(draft?.description).toContain('an approval card shown to the person');
+    expect(draft?.description).toContain('a draft with no recipient is refused');
+    expect(draft?.description ?? '').not.toContain('allowlist');
+  });
+
+  it('answers the sidecar recipient refusal in plain words, naming the card as the route', async () => {
+    scriptedSidecar({
+      accountList: oneAccount,
+      draftResult: () => text('Error executing tool save_draft: recipient policy denied one or more addresses', true),
+    });
+    const toolSet = await emailToolSet(makeResolver(new MailAccountDirectory()));
+
+    const { text: said, isError } = resultText(
+      await toolSet.callTool(
+        { name: 'save_draft', arguments: { recipients: ['new@example.com'], subject: 'Hi', body: 'Hello' } },
+        APPROVED,
+      ),
+    );
+
+    expect(isError).toBe(true);
+    expect(said).not.toContain('recipient policy denied');
+    expect(said).toContain('Nothing was saved or sent');
+    expect(said).toContain('so the person can be asked on a card');
+  });
+
+  it('passes a saved draft result through as it came', async () => {
+    scriptedSidecar({ accountList: oneAccount });
+    const toolSet = await emailToolSet(makeResolver(new MailAccountDirectory()));
+
+    const { text: said, isError } = resultText(
+      await toolSet.callTool(
+        { name: 'save_draft', arguments: { recipients: ['friend@example.com'], subject: 'Hi' } },
+        APPROVED,
+      ),
+    );
+
+    expect(isError).toBe(false);
+    expect(JSON.parse(said)).toEqual({ ok: true, draft_id: 'draft-1' });
+  });
+});
+
 describe('Email connector newest messages', () => {
   beforeEach(() => {
     mockConnect.mockReset();
@@ -423,6 +549,30 @@ describe('Email connector newest messages', () => {
     expect(listCalls.map(call => call['since'])).toEqual([since]);
   });
 
+  it('reads a since with no offset in the turn time zone, so the sidecar never refuses it', async () => {
+    const sidecar = scriptedSidecar({ accountList: oneAccount });
+    const toolSet = await emailToolSet(makeResolver(new MailAccountDirectory(), 'Asia/Kolkata'));
+
+    await toolSet.callTool({ name: 'list_emails_metadata', arguments: { since: '2026-10-28T08:00:00' } });
+    await toolSet.callTool({ name: 'list_emails_metadata', arguments: { since: '2026-10-28' } });
+
+    const listCalls = sidecar.calls.filter(call => call['tool'] === 'list_emails_metadata');
+    expect(listCalls.map(call => call['since'])).toEqual(['2026-10-28T02:30:00.000Z', '2026-10-27T18:30:00.000Z']);
+  });
+
+  it('refuses a since that is not a date before it reaches the sidecar', async () => {
+    const sidecar = scriptedSidecar({ accountList: oneAccount });
+    const toolSet = await emailToolSet(makeResolver(new MailAccountDirectory()));
+
+    const { text: said, isError } = resultText(
+      await toolSet.callTool({ name: 'list_emails_metadata', arguments: { since: 'last tuesday' } }),
+    );
+
+    expect(isError).toBe(true);
+    expect(said).toContain('since is not a date.');
+    expect(sidecar.calls.filter(call => call['tool'] === 'list_emails_metadata')).toEqual([]);
+  });
+
   it('says in the tool description that results are newest first within the window', async () => {
     scriptedSidecar({ accountList: oneAccount });
     const toolSet = await emailToolSet(makeResolver(new MailAccountDirectory()));
@@ -433,5 +583,111 @@ describe('Email connector newest messages', () => {
     }
     const listTool = listed.result.tools.find(tool => tool.name === 'list_emails_metadata');
     expect(listTool?.description).toContain('Results are newest first within that window.');
+  });
+});
+
+describe('Email connector attachments', () => {
+  beforeEach(() => {
+    mockConnect.mockReset();
+  });
+
+  it('tells the model to fetch an attachment first and read the returned path, not the file name', async () => {
+    scriptedSidecar({ accountList: oneAccount });
+    const toolSet = await emailToolSet(makeResolver(new MailAccountDirectory()));
+
+    const listed = await toolSet.listTools();
+    if (!('result' in listed)) {
+      throw new Error('Expected a tool list');
+    }
+    for (const name of ['get_emails_content', 'get_attachment_content']) {
+      const tool = listed.result.tools.find(entry => entry.name === name);
+      expect(tool?.description).toContain('first call get_attachment_content');
+      expect(tool?.description).toContain('call extract_document_text with that path');
+      expect(tool?.description).toContain("Never pass an attachment's file name as the path");
+    }
+  });
+});
+
+describe('Email connector folders', () => {
+  beforeEach(() => {
+    mockConnect.mockReset();
+  });
+
+  const since = new Date(NOW - 7 * DAY_MS).toISOString();
+
+  it("reads sent mail when the model names the folder 'Sent' and the account calls it something else", async () => {
+    const sidecar = scriptedSidecar({ accountList: oneAccount });
+    const toolSet = await emailToolSet(makeResolver(new MailAccountDirectory()));
+
+    const listed = resultText(
+      await toolSet.callTool({ name: 'list_emails_metadata', arguments: { mailbox: 'Sent', since } }),
+    );
+    const read = resultText(
+      await toolSet.callTool({ name: 'get_emails_content', arguments: { mailbox: 'sent items', email_ids: ['1'] } }),
+    );
+
+    expect(listed.isError).toBe(false);
+    expect(read.isError).toBe(false);
+    const reads = sidecar.calls.filter(
+      call => call['tool'] !== 'list_mailboxes' && call['tool'] !== 'list_available_accounts',
+    );
+    expect(reads.map(call => call['mailbox'])).toEqual(['[Gmail]/Sent Mail', '[Gmail]/Sent Mail']);
+  });
+
+  it('leaves the inbox and an exact folder name as given', async () => {
+    const sidecar = scriptedSidecar({ accountList: oneAccount });
+    const toolSet = await emailToolSet(makeResolver(new MailAccountDirectory()));
+
+    await toolSet.callTool({ name: 'list_emails_metadata', arguments: { mailbox: 'inbox', since } });
+    await toolSet.callTool({ name: 'list_emails_metadata', arguments: { mailbox: '[Gmail]/Drafts', since } });
+
+    const listCalls = sidecar.calls.filter(call => call['tool'] === 'list_emails_metadata');
+    expect(listCalls.map(call => call['mailbox'])).toEqual(['inbox', '[Gmail]/Drafts']);
+    // The inbox needs no folder list.
+    expect(sidecar.calls.filter(call => call['tool'] === 'list_mailboxes')).toHaveLength(1);
+  });
+
+  it('refuses a folder the account does not have, naming the folders it has, and sends nothing', async () => {
+    const sidecar = scriptedSidecar({ accountList: oneAccount });
+    const toolSet = await emailToolSet(makeResolver(new MailAccountDirectory()));
+
+    const { text: said, isError } = resultText(
+      await toolSet.callTool({ name: 'list_emails_metadata', arguments: { mailbox: 'Taxes', since } }),
+    );
+
+    expect(isError).toBe(true);
+    expect(JSON.parse(said)).toEqual({
+      error:
+        "This Email account has no folder named 'Taxes', so nothing was read or changed. Try again with one of its folders: 'INBOX', '[Gmail]/Sent Mail', '[Gmail]/Drafts'.",
+    });
+    expect(sidecar.calls.filter(call => call['tool'] === 'list_emails_metadata')).toEqual([]);
+  });
+
+  it("says what to do next when the mail server fails a read, instead of the server's bare words", async () => {
+    scriptedSidecar({ accountList: oneAccount, mailboxListFails: true });
+    const toolSet = await emailToolSet(makeResolver(new MailAccountDirectory()));
+
+    const { text: said, isError } = resultText(
+      await toolSet.callTool({ name: 'list_emails_metadata', arguments: { mailbox: 'Sent', since } }),
+    );
+
+    expect(isError).toBe(true);
+    expect(said).not.toContain('provider_failure');
+    expect(JSON.parse(said)).toEqual({
+      error:
+        'The mail server did not finish this request, so nothing was read. Try the same call once more. If it fails again, tell the person their mail server is not answering and to check the Email account in Settings.',
+    });
+  });
+
+  it('tells the model that common folder names are matched to the account', async () => {
+    scriptedSidecar({ accountList: oneAccount });
+    const toolSet = await emailToolSet(makeResolver(new MailAccountDirectory()));
+
+    const listed = await toolSet.listTools();
+    if (!('result' in listed)) {
+      throw new Error('Expected a tool list');
+    }
+    const tool = listed.result.tools.find(entry => entry.name === 'get_emails_content');
+    expect(JSON.stringify(tool?.inputSchema.properties?.['mailbox'])).toContain('Sent, Drafts, Trash or Spam');
   });
 });

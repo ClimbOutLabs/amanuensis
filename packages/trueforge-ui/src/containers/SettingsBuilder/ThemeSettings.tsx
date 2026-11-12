@@ -2,6 +2,7 @@
 
 import { cn } from '@/atoms/lib/cn.js';
 import { Switch } from '@/atoms/primitives/Switch.js';
+import { VoiceInputSettings, VoiceReplySettings } from '@/components/VoiceReplySettings.js';
 import { useTheme } from '@/theme/ThemeProvider.js';
 import { PRESETS } from '@/theme/presets/index.js';
 import { THEME_PRESET_IDS, type ThemePreset } from '@/theme/types.js';
@@ -11,7 +12,7 @@ import { useModelUsageVisible } from '@/utils/modelUsageDisplayPreference.js';
 const PRESET_META: Record<ThemePreset, { label: string; description: string }> = {
   paper: { label: 'Paper', description: 'Warm paper, ink and gold' },
   forest: { label: 'Forest', description: 'Calm greens, natural tones' },
-  midnight: { label: 'Midnight', description: 'Deep blue-grays, navy accents' },
+  midnight: { label: 'Midnight', description: 'Deep blue-grays, ice blue accents' },
   'high-contrast': { label: 'High contrast', description: 'Maximum legibility, stark surfaces' },
 };
 
@@ -83,6 +84,8 @@ const ThemeSettings = () => {
             aria-describedby="model-usage-display-hint"
           />
         </div>
+        <VoiceInputSettings />
+        <VoiceReplySettings />
       </div>
 
       <div>

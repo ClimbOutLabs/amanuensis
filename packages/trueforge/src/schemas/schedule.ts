@@ -75,7 +75,7 @@ export const ScheduleTaskSchema = z
 /** `done`: a one-time schedule that has run and will never run again. */
 export const ScheduleStatusSchema = z.enum(['active', 'paused', 'done']).openapi('ScheduleStatus');
 
-/** `reminder`: the host writes the text into the Reminders chat itself, with no model call. */
+/** `reminder`: the host writes the text into the chat the reminder was set in itself, with no model call. */
 export const ScheduleKindSchema = z.enum(['task', 'reminder']).openapi('ScheduleKind');
 
 export const RunAtSchema = z.iso
@@ -96,13 +96,34 @@ export const ScheduleManifestObjectSchema = z
     timezone: TimezoneSchema.default('UTC'),
     status: ScheduleStatusSchema.default('active'),
     kind: ScheduleKindSchema.default('task'),
+    urgent: z
+      .boolean()
+      .default(false)
+      .describe('For a reminder: the person marked it urgent, so it may call if they allowed that.'),
+    origin_session_id: z
+      .string()
+      .nullable()
+      .default(null)
+      .describe(
+        'The chat a reminder was set in, so its line lands in that chat when it fires. Null for tasks, for reminders set outside a chat, and for reminders saved before this was recorded.',
+      ),
   })
   .strict();
 
+const ONE_OF_CRON_OR_RUN_AT = 'set either cron (repeats) or run_at (runs once), not both and not neither';
+
 export const ScheduleManifestSchema = ScheduleManifestObjectSchema.refine(
   manifest => (manifest.cron === null) !== (manifest.run_at === null),
-  { message: 'set either cron (repeats) or run_at (runs once), not both and not neither' },
+  { message: ONE_OF_CRON_OR_RUN_AT },
 ).openapi('ScheduleManifest');
+
+/**
+ * The manifest a caller sends. The chat a reminder lands in is recorded by the server when the reminder is set in
+ * that chat, so callers cannot name it.
+ */
+export const ScheduleManifestInputSchema = ScheduleManifestObjectSchema.omit({ origin_session_id: true })
+  .refine(manifest => (manifest.cron === null) !== (manifest.run_at === null), { message: ONE_OF_CRON_OR_RUN_AT })
+  .openapi('ScheduleManifestInput');
 
 /** List/get/create/update response item. */
 export const ScheduleSchema = z
@@ -123,7 +144,7 @@ export const CreateScheduleRequestSchema = z
   .object({
     agent_name: NameSchema,
     name: NameSchema,
-    manifest: ScheduleManifestSchema,
+    manifest: ScheduleManifestInputSchema,
   })
   .strict()
   .openapi('CreateScheduleRequest');
@@ -131,10 +152,40 @@ export const CreateScheduleRequestSchema = z
 export const UpdateScheduleRequestSchema = z
   .object({
     name: NameSchema,
-    manifest: ScheduleManifestSchema,
+    manifest: ScheduleManifestInputSchema,
   })
   .strict()
   .openapi('UpdateScheduleRequest');
+
+/**
+ * `schedule`: the schedule has its own tools, which can be changed here.
+ * `saved_agent`: it runs as an agent the person saved, so its tools are set on that agent.
+ */
+export const ScheduleToolsSourceSchema = z.enum(['schedule', 'saved_agent']).openapi('ScheduleToolsSource');
+
+const ScheduleToolsFields = {
+  connectors: z.array(z.string().min(1)).max(100).describe('Names of the connectors it can use.'),
+  skills: z.array(z.string().min(1)).max(50).describe('Names of the skills it can use.'),
+  sandbox_enabled: z.boolean().describe('Whether it can use the sandbox. Skills need the sandbox.'),
+};
+
+export const ScheduleToolsSchema = z
+  .object({
+    source: ScheduleToolsSourceSchema,
+    agent_name: NameSchema,
+    ...ScheduleToolsFields,
+  })
+  .strict()
+  .openapi('ScheduleTools');
+
+export const UpdateScheduleToolsRequestSchema = z
+  .object(ScheduleToolsFields)
+  .strict()
+  .openapi('UpdateScheduleToolsRequest');
+
+export const GetScheduleToolsResponseSchema = z
+  .object({ data: ScheduleToolsSchema })
+  .openapi('GetScheduleToolsResponse');
 
 export const GetScheduleResponseSchema = z.object({ data: ScheduleSchema }).openapi('GetScheduleResponse');
 export const ListSchedulesResponseSchema = z
@@ -203,7 +254,10 @@ export type ScheduleKind = z.infer<typeof ScheduleKindSchema>;
 export type ScheduleStatus = z.infer<typeof ScheduleStatusSchema>;
 export type ScheduleRunStatus = z.infer<typeof ScheduleRunStatusSchema>;
 export type ScheduleManifest = z.infer<typeof ScheduleManifestSchema>;
+export type ScheduleManifestInput = z.infer<typeof ScheduleManifestInputSchema>;
 export type Schedule = z.infer<typeof ScheduleSchema>;
+export type ScheduleTools = z.infer<typeof ScheduleToolsSchema>;
+export type UpdateScheduleToolsRequest = z.infer<typeof UpdateScheduleToolsRequestSchema>;
 export type ScheduleRun = z.infer<typeof ScheduleRunSchema>;
 export type ExecuteScheduleRunRequest = z.infer<typeof ExecuteScheduleRunRequestSchema>;
 export type CreateScheduleRequest = z.infer<typeof CreateScheduleRequestSchema>;

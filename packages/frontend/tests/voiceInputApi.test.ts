@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { createVoiceInputApi } from '../src/voiceInputApi';
+import { ServerVoiceRefusal } from '@truefoundry/trueforge-ui';
+
+import { createServerVoiceApi, createVoiceInputApi } from '../src/voiceInputApi';
 
 const transcription = {
   text: 'hello world',
@@ -195,4 +197,98 @@ test('transcribe aborts a hanging request at the client timeout', async () => {
   const api = createVoiceInputApi(hanging, { transcribeTimeoutMs: 30 });
 
   await assert.rejects(api.transcribe({ audio: new Blob(['x']) }), /timed out/);
+});
+
+test('server voice posts the reply text and the chosen voice, and returns the audio', async () => {
+  const calls: { url: string; init: RequestInit | undefined }[] = [];
+  const fetcher: typeof fetch = async (url, init) => {
+    calls.push({ url: String(url), init });
+    return new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { 'content-type': 'audio/wav' } });
+  };
+
+  const audio = await createServerVoiceApi(fetcher).speak({ text: 'Hello there.', voice: 'am_michael' });
+
+  assert.equal(audio.size, 3);
+  assert.equal(calls.length, 1);
+  assert.match(calls[0]?.url ?? '', /\/api\/v1\/voice\/speak$/);
+  assert.equal(calls[0]?.init?.method, 'POST');
+  assert.equal(calls[0]?.init?.body, JSON.stringify({ text: 'Hello there.', voice: 'am_michael' }));
+});
+
+test('server voice rejects with the server message when the voice is off', async () => {
+  const fetcher: typeof fetch = async () =>
+    jsonResponse(
+      { error: { message: 'The voice on this computer is not available right now.', code: 'tts_unavailable' } },
+      503,
+    );
+
+  await assert.rejects(
+    createServerVoiceApi(fetcher).speak({ text: 'Hi.', voice: 'af_heart' }),
+    /not available right now/,
+  );
+});
+
+test('server voice reports a refused piece as a refusal, not an outage', async () => {
+  const cases: [number, string][] = [
+    [400, 'nothing_to_say'],
+    [413, 'too_long'],
+    [429, 'busy'],
+  ];
+  for (const [status, reason] of cases) {
+    const fetcher: typeof fetch = async () => jsonResponse({ error: { message: 'refused', code: 'x' } }, status);
+    await assert.rejects(
+      createServerVoiceApi(fetcher).speak({ text: 'Hi.' }),
+      (error: unknown) => error instanceof ServerVoiceRefusal && error.reason === reason,
+    );
+  }
+});
+
+test('server voice rejects an answer that is not audio', async () => {
+  const fetcher: typeof fetch = async () => jsonResponse({}, 200);
+
+  await assert.rejects(createServerVoiceApi(fetcher).speak({ text: 'Hi.', voice: 'af_heart' }), /not audio/);
+});
+
+test('connect asks for a voice line for the chat and builds the secure address with the ticket as a protocol', async () => {
+  const capture: { url?: string; init?: RequestInit } = {};
+  const answer = {
+    data: { ticket: 'abc', expires_in_seconds: 30, protocol: 'aman-voice.v1', path: '/api/v1/voice/stream' },
+  };
+  const api = createVoiceInputApi(transcribeFetcher(jsonResponse(answer, 200), capture));
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  Object.defineProperty(globalThis, 'window', {
+    value: { location: { href: 'https://aman.test/chat/1' } },
+    configurable: true,
+  });
+  try {
+    const connection = await api.connect({ sessionId: 'chat-1' });
+    assert.equal(connection.url, 'wss://aman.test/api/v1/voice/stream');
+    assert.deepEqual(connection.protocols, ['aman-voice.v1', 'ticket.abc']);
+  } finally {
+    if (original === undefined) Reflect.deleteProperty(globalThis, 'window');
+    else Object.defineProperty(globalThis, 'window', original);
+  }
+  assert.ok(capture.url?.endsWith('/api/v1/voice/connect'));
+  assert.equal(capture.init?.method, 'POST');
+  const sent: unknown = JSON.parse(String(capture.init?.body));
+  assert.ok(typeof sent === 'object' && sent !== null && 'session_id' in sent && sent.session_id === 'chat-1');
+});
+
+test('connect passes the server message on when the line is refused', async () => {
+  const api = createVoiceInputApi(
+    transcribeFetcher(jsonResponse({ error: { message: 'Voice mode is turned off on this computer.' } }, 503), {}),
+  );
+  await assert.rejects(api.connect({ sessionId: 'chat-1' }), /turned off on this computer/);
+});
+
+test('connect says what to do when the answer is not a voice line', async () => {
+  const api = createVoiceInputApi(transcribeFetcher(jsonResponse({ data: {} }, 200), {}));
+  await assert.rejects(api.connect({ sessionId: 'chat-1' }), /Reload the page, then try again\./);
+});
+
+test('connect says what to do when the refusal carries no message', async () => {
+  const api = createVoiceInputApi(transcribeFetcher(new Response('<html>bad gateway</html>', { status: 502 }), {}));
+  await assert.rejects(api.connect({ sessionId: 'chat-1' }), /status 502\. Reload the page, then try again\./);
+  const empty = createVoiceInputApi(transcribeFetcher(jsonResponse({}, 500), {}));
+  await assert.rejects(empty.connect({ sessionId: 'chat-1' }), /status 500\. Reload the page, then try again\./);
 });

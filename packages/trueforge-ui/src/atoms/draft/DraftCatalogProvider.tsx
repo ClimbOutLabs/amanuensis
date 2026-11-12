@@ -18,6 +18,12 @@ type DraftCatalogValue = {
   connectors: ConnectorState[];
   /** Connector logo URL keyed by connector name, sourced from the discovery catalog. */
   connectorLogos: Record<string, string>;
+  /**
+   * True once the configured-connector list has been read at least once, even if another list
+   * failed. A failed read never sets it: an empty list from a failure must not read as
+   * "nothing is configured".
+   */
+  connectorsLoaded: boolean;
   loaded: boolean;
   loading: boolean;
   error: string | null;
@@ -61,6 +67,7 @@ function DraftCatalogStore({ server, children }: { server: AgentUIServer | null;
   const [models, setModels] = useState<ModelSelection[]>([]);
   const [skills, setSkills] = useState<AgentSkill[]>([]);
   const [connectors, setConnectors] = useState<ConnectorState[]>([]);
+  const [connectorsLoaded, setConnectorsLoaded] = useState(false);
   const [connectorLogos, setConnectorLogos] = useState<Record<string, string>>(EMPTY_LOGOS);
   const [completedEpoch, setCompletedEpoch] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
@@ -80,6 +87,7 @@ function DraftCatalogStore({ server, children }: { server: AgentUIServer | null;
     setError(null);
     try {
       setConnectors(await server.getMcp());
+      setConnectorsLoaded(true);
     } catch (reason: unknown) {
       setError(getErrorMessage(reason, 'Failed to load connectors.'));
     } finally {
@@ -116,6 +124,7 @@ function DraftCatalogStore({ server, children }: { server: AgentUIServer | null;
       }
       if (mcpResult.status === 'fulfilled') {
         setConnectors(mcpResult.value);
+        setConnectorsLoaded(true);
       } else {
         errors.push(getErrorMessage(mcpResult.reason, 'Failed to load connectors.'));
       }
@@ -136,6 +145,7 @@ function DraftCatalogStore({ server, children }: { server: AgentUIServer | null;
       skills,
       connectors,
       connectorLogos,
+      connectorsLoaded,
       loaded,
       loading,
       error,
@@ -149,6 +159,7 @@ function DraftCatalogStore({ server, children }: { server: AgentUIServer | null;
       skills,
       connectors,
       connectorLogos,
+      connectorsLoaded,
       loaded,
       loading,
       error,
@@ -169,6 +180,7 @@ export function useDraftCatalog(): DraftCatalogValue {
       skills: [],
       connectors: [],
       connectorLogos: EMPTY_LOGOS,
+      connectorsLoaded: false,
       loaded: false,
       loading: false,
       error: null,

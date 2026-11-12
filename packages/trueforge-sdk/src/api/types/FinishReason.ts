@@ -2,10 +2,10 @@
 
 /** Why the model stopped generating. */
 export const FinishReason = {
-        Stop: "stop",
-        Length: "length",
-        ToolCalls: "tool_calls",
-        ContentFilter: "content_filter",
-        FunctionCall: "function_call"
-    } as const;
-export type FinishReason = typeof FinishReason[keyof typeof FinishReason];
+    Stop: "stop",
+    Length: "length",
+    ToolCalls: "tool_calls",
+    ContentFilter: "content_filter",
+    FunctionCall: "function_call",
+} as const;
+export type FinishReason = (typeof FinishReason)[keyof typeof FinishReason];

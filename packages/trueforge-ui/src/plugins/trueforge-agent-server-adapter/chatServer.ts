@@ -14,7 +14,6 @@
 import type { TrueForge, TrueForgeApi } from '@truefoundry/trueforge-sdk';
 import { readSessionAgentDetails, type AgentDetailsVisibility } from '../../atoms/lib/sessionAgentDetails.js';
 import { readSessionIsCreateAgent } from '../../atoms/lib/sessionCreateAgent.js';
-import { readSessionReminders, type RemindersMarker } from '../../atoms/lib/sessionReminders.js';
 import type { MemoryTurnContext } from '../../components/MemoryRecallContext.js';
 import type { ModelUsageTurnContext } from '../../components/ModelUsageContext.js';
 import { applyHeldPersona, awaitPendingPersonaMutation } from '../../personaMutationGate.js';
@@ -24,6 +23,7 @@ import type {
   AgentChatServer,
   CreateSessionRequest,
   ListResult,
+  ListSessionsParams,
   Session,
   SessionEventItem,
   Turn,
@@ -35,7 +35,9 @@ import type {
 import { publishContextCompaction } from '../../utils/contextCompactionLive.js';
 import { LiveConnectionLostError, ReplyStoppedByRestartError } from '../../utils/liveConnection.js';
 import type { ModelUsageEvent } from '../../utils/modelUsage.js';
+import { isSpokenSend } from '../../utils/voiceTurn.js';
 import { createTrueForgeClient, type CreateTrueForgeClientOptions } from './client.js';
+import { createPrivateChatExtensions, type PrivateChatServerExtensions } from './privateChats.js';
 import { createSessionResyncExtensions, type HarnessChatServerExtensions } from './sessionResync.js';
 import {
   isCompatibleSessionEvent,
@@ -158,12 +160,21 @@ export type HarnessUiSession = Session<HarnessAgentSpec> & {
   isCreateAgent: boolean;
   /** "Agent details" preference (session metadata `agent_details`); undefined = unset. */
   agentDetails?: AgentDetailsVisibility;
-  /** Set only on the Reminders chat: what it last received and when. */
-  reminders?: RemindersMarker;
+  /** The session's metadata, so a write that replaces it can keep every key it does not change. */
+  metadata: Record<string, string>;
+  /** A private chat: Aman keeps nothing from it, and it is deleted when it closes. */
+  isIncognito: boolean;
 };
 
 export type HarnessCreateSessionRequest = CreateSessionRequest<HarnessAgentSpec> & {
   metadata?: Record<string, string>;
+  /** Start a private chat. It can only be chosen here, when the chat is created. */
+  isIncognito?: boolean;
+};
+
+export type HarnessListSessionsParams = ListSessionsParams & {
+  /** Include the caller's own private chats, which are left out by default. */
+  includePrivate?: boolean;
 };
 
 function toUiMcpServer(server: TrueForgeApi.McpServer): HarnessMcpServerMount {
@@ -224,11 +235,12 @@ export function toUiAgentSpec(spec: TrueForgeApi.AgentSpec): HarnessAgentSpec {
 
 function toUiSession(session: TrueForgeApi.Session): HarnessUiSession {
   const agentDetails = readSessionAgentDetails(session.metadata);
-  const reminders = readSessionReminders(session.metadata);
   return {
     id: session.id,
     isMutable: session.agent.type === 'inline',
     isCreateAgent: readSessionIsCreateAgent(session.metadata),
+    metadata: { ...session.metadata },
+    isIncognito: session.isIncognito,
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
     ...(session.title === null ? {} : { title: session.title }),
@@ -237,7 +249,6 @@ function toUiSession(session: TrueForgeApi.Session): HarnessUiSession {
     ...(session.agent.type === 'reference' && session.agent.name !== null ? { agentName: session.agent.name } : {}),
     ...(session.agent.type === 'inline' ? { agentSpec: toUiAgentSpec(session.agent.spec) } : {}),
     ...(agentDetails === undefined ? {} : { agentDetails }),
-    ...(reminders === null ? {} : { reminders }),
   };
 }
 
@@ -499,6 +510,14 @@ interface TurnStreamCursor {
 type TurnStreamItem = { sequenceNumber: number; event: TurnStreamingEvent };
 
 /**
+ * A finished turn needs no closing event, but a failed one does: the runtime shows the failure and Retry from a
+ * failed `turn.done`, so dropping it hid the error until the chat was reloaded.
+ */
+function failedTurnDoneEvent(done: TrueForgeApi.TurnStreamingEvent): TurnStreamingEvent | undefined {
+  return done.type === 'turn.done' && done.state.status === 'error' ? toUiStreamingEvent(done) : undefined;
+}
+
+/**
  * Streams one connection attempt of a turn's live events via
  * `subscribeToTurn`, advancing `cursor` as it goes so a subsequent reconnect
  * resumes exactly after the last event this attempt saw — no duplicates, no
@@ -531,6 +550,10 @@ async function* subscribeTurnOnce(
     tapSentinelStreamEvent(item.data);
     if (item.data.type === 'turn.done') {
       seenTurnDone.done = true;
+      const failure = failedTurnDoneEvent(item.data);
+      if (failure !== undefined) {
+        yield { sequenceNumber: seq, event: failure };
+      }
       return;
     }
     const event = toUiStreamingEvent(item.data);
@@ -681,6 +704,17 @@ function toHarnessContent(content: UserMessageContent): TrueForgeApi.UserMessage
   });
 }
 
+/** The text the person typed or spoke in this turn's messages. */
+function userMessageText(input: TurnInputItem[] | undefined): string {
+  return (input ?? [])
+    .map(item => {
+      if (item.type !== 'user.message') return '';
+      if (typeof item.content === 'string') return item.content;
+      return item.content.map(part => (part.type === 'text' ? part.text : '')).join('');
+    })
+    .join('');
+}
+
 function toHarnessInput(input: TurnInputItem[]): TrueForgeApi.TurnInputItem[] {
   return input.map(item =>
     item.type === 'user.message' ? { ...item, content: toHarnessContent(item.content) } : item,
@@ -689,11 +723,14 @@ function toHarnessInput(input: TurnInputItem[]): TrueForgeApi.TurnInputItem[] {
 
 export function createHarnessChatServer(
   options: CreateHarnessChatServerOptions = {},
-): AgentChatServer<HarnessAgentSpec, HarnessUiSession, HarnessCreateSessionRequest> & HarnessChatServerExtensions {
+): AgentChatServer<HarnessAgentSpec, HarnessUiSession, HarnessCreateSessionRequest, HarnessListSessionsParams> &
+  HarnessChatServerExtensions &
+  PrivateChatServerExtensions {
   const client = options.client ?? createTrueForgeClient(options);
   return {
     // Foreground delta probe + pending-approval escape hatch (see sessionResync.ts).
     ...createSessionResyncExtensions(client),
+    ...createPrivateChatExtensions(client),
 
     // The sandbox is resolved server-side from the turn, so `sandboxId` is accepted for parity
     // with hosts that address sandboxes directly and deliberately not forwarded.
@@ -704,10 +741,12 @@ export function createHarnessChatServer(
 
     async createSession(request) {
       const metadata = createSessionMetadata(request);
+      const privacy = request.isIncognito === true ? { isIncognito: true } : {};
       if (request.agentName !== undefined && request.agentName.length > 0) {
         const created = await client.sessions.create({
           agent: { name: request.agentName },
           ...(metadata === undefined ? {} : { metadata }),
+          ...privacy,
         });
         return toUiSession(created.data);
       }
@@ -715,6 +754,7 @@ export function createHarnessChatServer(
         const created = await client.sessions.create({
           agent: { spec: toHarnessAgentSpec(request.agentSpec) },
           ...(metadata === undefined ? {} : { metadata }),
+          ...privacy,
         });
         return toUiSession(created.data);
       }
@@ -728,6 +768,7 @@ export function createHarnessChatServer(
         ...(request.pageToken === undefined ? {} : { pageToken: request.pageToken }),
         ...(request.agentId === undefined || request.agentId.length === 0 ? {} : { agentId: request.agentId }),
         ...(request.createdByMe === undefined ? {} : { createdByMe: request.createdByMe }),
+        ...(request.includePrivate === true ? { includePrivate: true } : {}),
       });
       return toListResult(page, toUiSession);
     },
@@ -771,12 +812,15 @@ export function createHarnessChatServer(
       let turnId: string | undefined;
       try {
         const clientTimezone = resolveClientTimezone();
+        // The reply to a voice message is read aloud, so the model is told to keep it speakable.
+        const spokenReply = isSpokenSend(userMessageText(input));
         const stream = await client.sessions.createTurnStream(
           sessionId,
           {
             ...(input === undefined ? {} : { input: toHarnessInput(input) }),
             ...(previousTurnId === undefined ? {} : { previousTurnId }),
             ...(clientTimezone === undefined ? {} : { clientTimezone }),
+            ...(spokenReply ? { spokenReply } : {}),
           },
           abortSignal === undefined ? undefined : { abortSignal },
         );
@@ -798,6 +842,10 @@ export function createHarnessChatServer(
           tapSentinelStreamEvent(item.data);
           if (item.data.type === 'turn.done') {
             seenTurnDone.done = true;
+            const failure = failedTurnDoneEvent(item.data);
+            if (failure !== undefined) {
+              yield { sequenceNumber: seq, event: failure };
+            }
             return;
           }
           const event = toUiStreamingEvent(item.data);

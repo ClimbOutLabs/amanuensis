@@ -34,6 +34,10 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
+import {
+  CALDAV_READ_TOOL_NAMES,
+  CALDAV_TOOL_NAMES,
+} from '@truefoundry/trueforge-core/core/calendar/caldav/toolContract';
 import { randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { z } from 'zod';
@@ -41,6 +45,10 @@ import { z } from 'zod';
 export const INERT_SERVER_NAME = 'inert';
 export const INERT_ECHO_TOOL = 'inert_echo';
 export const INERT_READ_TOOL = 'inert_read';
+/** Opt-in (`pageById: true`): reads one page by its id, next to an optional parent id. Read-only and non-open-world. */
+export const INERT_GET_PAGE_TOOL = 'inert_get_page';
+/** Opt-in (`messageSearch: true`): a search whose name alone says it only looks things up. */
+export const INERT_SEARCH_MESSAGES_TOOL = 'search_messages';
 export const INERT_WRITE_TOOL = 'inert_write';
 export const INERT_UNANNOTATED_TOOL = 'inert_unannotated';
 export const INERT_ASK_MEMORY_TOOL = 'ask_memory';
@@ -51,6 +59,9 @@ export const INERT_WEB_SEARCH_TOOL = 'web_search';
 export const INERT_WEB_FETCH_TOOL = 'web_fetch';
 /** Opt-in (`startInertMcpServer({ mail: true })`): the Email sidecar's tool names, unannotated, answering with no mail. */
 export const INERT_MAIL_TOOLS = ['list_emails_metadata', 'get_emails_content', 'list_mailboxes', 'send_email'] as const;
+
+/** Opt-in (`startInertMcpServer({ calendar: true })`): the Calendar sidecar's tool names, the reads annotated read-only, answering with nothing. */
+export const INERT_CALENDAR_TOOLS = CALDAV_TOOL_NAMES;
 
 /** Bank in `memoryProviderUrl`; the fixture answers a recall for any bank, so a URL can move between them. */
 const INERT_MEMORY_BANK = 'aman';
@@ -109,6 +120,8 @@ export interface InertMcpServer {
   writeInvocations: () => number;
   echoInvocations: () => number;
   readInvocations: () => number;
+  getPageInvocations: () => number;
+  searchMessagesInvocations: () => number;
   unannotatedInvocations: () => number;
   askMemoryInvocations: () => number;
   searchMemoryInvocations: () => number;
@@ -161,6 +174,8 @@ export interface InertMcpServer {
 interface Counters {
   echo: number;
   read: number;
+  getPage: number;
+  searchMessages: number;
   write: number;
   unannotated: number;
   askMemory: number;
@@ -228,6 +243,9 @@ function buildMcpServer({
   webSearch,
   searchProvider,
   mail,
+  calendar,
+  pageById,
+  messageSearch,
 }: {
   counters: Counters;
   gates: WriteGate[];
@@ -236,6 +254,9 @@ function buildMcpServer({
   webSearch: boolean;
   searchProvider: boolean;
   mail: boolean;
+  calendar: boolean;
+  pageById: boolean;
+  messageSearch: boolean;
 }): McpServer {
   const server = new McpServer({ name: 'inert-connector', version: '0.0.0' });
 
@@ -266,6 +287,36 @@ function buildMcpServer({
       return textResult(text);
     },
   );
+
+  if (pageById) {
+    server.registerTool(
+      INERT_GET_PAGE_TOOL,
+      {
+        description: 'Returns the page with this id. Read-only and non-open-world.',
+        inputSchema: { page_id: z.string(), parent_id: z.string().optional() },
+        annotations: { readOnlyHint: true, openWorldHint: false },
+      },
+      ({ page_id }) => {
+        counters.getPage += 1;
+        return textResult(`page ${page_id}`);
+      },
+    );
+  }
+
+  if (messageSearch) {
+    server.registerTool(
+      INERT_SEARCH_MESSAGES_TOOL,
+      {
+        description: 'Searches the messages on this connector. Read-only and non-open-world.',
+        inputSchema: { query: z.string() },
+        annotations: { readOnlyHint: true, openWorldHint: false },
+      },
+      ({ query }) => {
+        counters.searchMessages += 1;
+        return textResult(`no messages match ${query}`);
+      },
+    );
+  }
 
   server.registerTool(
     INERT_WRITE_TOOL,
@@ -407,6 +458,23 @@ function buildMcpServer({
     }
   }
 
+  if (calendar) {
+    for (const name of INERT_CALENDAR_TOOLS) {
+      server.registerTool(
+        name,
+        {
+          description: `Pretends to ${name.replace(/_/g, ' ')}. Never reaches a calendar.`,
+          inputSchema: {},
+          // The reads declare themselves read-only and closed-world; the changes publish nothing.
+          ...(CALDAV_READ_TOOL_NAMES.some(read => read === name)
+            ? { annotations: { readOnlyHint: true, openWorldHint: false } }
+            : {}),
+        },
+        () => textResult('[]'),
+      );
+    }
+  }
+
   return server;
 }
 
@@ -461,16 +529,25 @@ export async function startInertMcpServer(options?: {
   /** Adds `web_search` and `web_fetch` in the search provider's argument shape; excludes `webSearch`. */
   searchProvider?: boolean;
   mail?: boolean;
+  /** Adds the Calendar sidecar's tool names; the reads declare read-only and closed-world. */
+  calendar?: boolean;
+  /** Adds `inert_get_page`, a read by id. */
+  pageById?: boolean;
+  /** Adds `search_messages`, a search known as a lookup by its name. */
+  messageSearch?: boolean;
 }): Promise<InertMcpServer> {
   const webSearch = options?.webSearch === true;
   const searchProvider = options?.searchProvider === true;
   const mail = options?.mail === true;
+  const calendar = options?.calendar === true;
   if (webSearch && searchProvider) {
     throw new Error('inert MCP fixture offers one web_search: pick webSearch or searchProvider');
   }
   const counters: Counters = {
     echo: 0,
     read: 0,
+    getPage: 0,
+    searchMessages: 0,
     write: 0,
     unannotated: 0,
     askMemory: 0,
@@ -544,9 +621,18 @@ export async function startInertMcpServer(options?: {
         transports.delete(id);
       }
     };
-    await buildMcpServer({ counters, gates, memoryModes, searchResults, webSearch, searchProvider, mail }).connect(
-      asTransport(transport),
-    );
+    await buildMcpServer({
+      counters,
+      gates,
+      memoryModes,
+      searchResults,
+      webSearch,
+      searchProvider,
+      mail,
+      calendar,
+      pageById: options?.pageById === true,
+      messageSearch: options?.messageSearch === true,
+    }).connect(asTransport(transport));
     await transport.handleRequest(req, res, body);
   }
 
@@ -613,6 +699,8 @@ export async function startInertMcpServer(options?: {
     writeInvocations: () => counters.write,
     echoInvocations: () => counters.echo,
     readInvocations: () => counters.read,
+    getPageInvocations: () => counters.getPage,
+    searchMessagesInvocations: () => counters.searchMessages,
     unannotatedInvocations: () => counters.unannotated,
     askMemoryInvocations: () => counters.askMemory,
     searchMemoryInvocations: () => counters.searchMemory,

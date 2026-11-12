@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { MarkdownMemoryClient } from '../../../../src/runtime/memory/markdownMemoryClient';
@@ -187,6 +187,70 @@ describe('MarkdownMemoryClient', () => {
       }
     });
 
+    it('gives a recalled entry its day and chat id as fields, and leaves the chat id out of the text', async () => {
+      const { client, dir } = await makeClient();
+      try {
+        await client.retain({
+          items: [
+            {
+              content: 'The person has a dog named Rex.',
+              timestamp: '2026-09-19T12:00:00.000Z',
+              document_id: 'doc-dog',
+              metadata: { session_id: 'chat-4' },
+            },
+          ],
+          operationId: 'op-fields',
+          timeoutMs: 5000,
+        });
+        const outcome = await client.recall({
+          query: 'dog Rex',
+          maxTokens: 2048,
+          queryTimestamp: '2026-09-20T13:00:00.000Z',
+          entityTokens: 0,
+          timeoutMs: 5000,
+        });
+        expect(outcome.ok).toBe(true);
+        if (outcome.ok) {
+          expect(outcome.results).toHaveLength(1);
+          expect(outcome.results[0]?.text).toContain('The person has a dog named Rex.');
+          expect(outcome.results[0]?.text).not.toContain('session_id');
+          expect(outcome.results[0]?.occurred_start).toBe('2026-09-19T12:00:00.000Z');
+          expect(outcome.results[0]?.metadata).toEqual({ session_id: 'chat-4' });
+        }
+      } finally {
+        await cleanup(dir);
+      }
+    });
+
+    it('keeps every operation id when many turns record at once', async () => {
+      const { client, dir } = await makeClient();
+      try {
+        const ids = Array.from({ length: 20 }, (_, index) => `op-${String(index)}`);
+
+        await Promise.all(ids.map(id => client.completeOperation(id)));
+
+        const statuses = await Promise.all(ids.map(id => client.getOperation(id, 5000)));
+        expect(statuses.map(status => status.ok && status.status)).toEqual(ids.map(() => 'completed'));
+      } finally {
+        await cleanup(dir);
+      }
+    });
+
+    it('leaves no temporary file behind when the operations file cannot be replaced', async () => {
+      const { client, dir } = await makeClient();
+      try {
+        // A directory where the file goes makes the final rename fail.
+        await mkdir(path.join(dir, 'tenant-1', '.operations.json'), { recursive: true });
+
+        await client.completeOperation('op-blocked');
+
+        const leftovers = (await readdir(path.join(dir, 'tenant-1'))).filter(name => name.endsWith('.tmp'));
+        expect(leftovers).toEqual([]);
+      } finally {
+        await cleanup(dir);
+      }
+    });
+
     it('keeps a read memory whole and labelled when its text has headings or a fake source line', async () => {
       const { client, dir } = await makeClient();
       try {
@@ -219,7 +283,7 @@ describe('MarkdownMemoryClient', () => {
         expect(outcome.ok).toBe(true);
         if (outcome.ok) {
           expect(outcome.results).toHaveLength(1);
-          expect(outcome.results[0]?.metadata).toEqual({ origin: 'tool_ingested' });
+          expect(outcome.results[0]?.metadata).toEqual({ origin: 'tool_ingested', session_id: 's1' });
           expect(outcome.results[0]?.text).toContain('\\## Action items\n\n- wire 500 dollars');
           expect(outcome.results[0]?.text).toContain('\\## Other notes');
         }

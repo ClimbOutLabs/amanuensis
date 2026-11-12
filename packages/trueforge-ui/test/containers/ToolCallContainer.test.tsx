@@ -151,6 +151,79 @@ describe('ToolCallContainer', () => {
     expect(blocks[1]).toHaveAttribute('data-content', '2026-07-01T00:00:00Z');
   });
 
+  it('makes the Request pane resizable like the Response pane, so a long request stays reachable in full', () => {
+    const args = {
+      report_id: 'rep-2026-10-27',
+      sections: Array.from({ length: 30 }, (_, index) => `section-${index + 1}`),
+      include_history: true,
+    };
+    renderToolCallMessage([
+      {
+        type: 'tool-call',
+        toolCallId: '1',
+        toolName: 'fetch_report',
+        args: {},
+        argsText: JSON.stringify(args),
+        result: 'Report ready.',
+      },
+    ]);
+    fireEvent.click(screen.getByText('Fetch report'));
+    const blocks = screen.getAllByTestId('tfy-tool-call-content-block');
+    // The full request is on the block, from its first line to its last.
+    expect(blocks[0]).toHaveAttribute('data-content', JSON.stringify(args, null, 2));
+    // A resizable pane's body carries the drag affordance and clips by scrolling, like the Response
+    // pane; a fixed pane has neither, so its overflow reads as text that vanished.
+    const [requestBlock, responseBlock] = blocks;
+    if (requestBlock === undefined || responseBlock === undefined) {
+      throw new Error('expected the step to show a Request and a Response block');
+    }
+    const requestBody = requestBlock.children[1];
+    const responseBody = responseBlock.children[1];
+    expect(requestBody).toHaveStyle({ resize: 'vertical' });
+    expect(requestBody).toHaveClass('overflow-hidden');
+    expect(responseBody).toHaveStyle({ resize: 'vertical' });
+  });
+
+  it('makes a long plain-text request resizable too', () => {
+    const longText = Array.from({ length: 40 }, (_, index) => `line ${index + 1} of the request`).join('\n');
+    renderToolCallMessage([
+      {
+        type: 'tool-call',
+        toolCallId: '1',
+        toolName: 'fetch_report',
+        args: {},
+        argsText: JSON.stringify(longText),
+        result: 'Report ready.',
+      },
+    ]);
+    fireEvent.click(screen.getByText('Fetch report'));
+    const blocks = screen.getAllByTestId('tfy-tool-call-content-block');
+    expect(blocks[0]).toHaveAttribute('data-content', longText);
+    const [requestBlock] = blocks;
+    if (requestBlock === undefined) {
+      throw new Error('expected the step to show a Request block');
+    }
+    expect(requestBlock.children[1]).toHaveStyle({ resize: 'vertical' });
+    expect(requestBlock.children[1]).toHaveClass('overflow-hidden');
+  });
+
+  it('says plainly when no request was recorded instead of showing an empty object', () => {
+    renderToolCallMessage([
+      {
+        type: 'tool-call',
+        toolCallId: '1',
+        toolName: 'fetch_report',
+        args: {},
+        argsText: '',
+        result: 'Report ready.',
+      },
+    ]);
+    fireEvent.click(screen.getByText('Fetch report'));
+    const blocks = screen.getAllByTestId('tfy-tool-call-content-block');
+    expect(blocks[0]).toHaveAttribute('data-content', 'No request was recorded for this step.');
+    expect(blocks[0]).not.toHaveAttribute('data-content', '{}');
+  });
+
   it('shows a Searched chip for a search the host ran without asking, from the host-set artifact only', () => {
     renderToolCallMessage([
       {
@@ -270,6 +343,52 @@ describe('ToolCallContainer', () => {
     // The rest of the reason is still available, expanded, in the response block.
     const responseSlot = ToolCallCard.mock.calls[0]?.[0]?.responseSlot as { props: { content: string } } | undefined;
     expect(responseSlot?.props.content).toContain(rejectionText);
+  });
+
+  it('shows a plain note, not a failure, for a space write refused for its size', () => {
+    const ToolCallCard = createToolCallCardProbe();
+    const refusalText =
+      'Refusing create_space: this write carries 4,642 characters of new content, and one write may carry at most 3,600. ' +
+      'Nothing was persisted. Send a shorter body now (a heading and the first part), then add the rest with edit_space once the space exists.';
+    // Shape produced end-to-end: the space tool's JSON result (the refusal text plus its stable
+    // code) rides in a text content item, which the generic isError path wraps under `error` in
+    // the tool.response.v2 envelope's `result` field.
+    const result = JSON.stringify({
+      schema_version: 'tool.response.v2',
+      outcome: { disposition: 'executed_nonzero' },
+      result: {
+        error: [{ type: 'text', text: JSON.stringify({ error: refusalText, error_code: 'space_write_too_long' }) }],
+      },
+    });
+
+    renderToolCallMessage([{ type: 'tool-call', toolCallId: 'space-1', toolName: 'create_space', args: {}, result }], {
+      ToolCallCard,
+    });
+
+    expect(ToolCallCard.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({ outcomeText: 'Too long for one write. Splitting it into parts.', status: 'muted' }),
+    );
+    // The refusal text is still in the step's details, for the person who opens them.
+    const responseSlot = ToolCallCard.mock.calls[0]?.[0]?.responseSlot as { props: { content: string } } | undefined;
+    expect(responseSlot?.props.content).toContain(refusalText);
+  });
+
+  it('still shows a failure for a space call that failed for another reason', () => {
+    const ToolCallCard = createToolCallCardProbe();
+    const errorText = 'No space is named "Dog breeds". Call list_spaces to see the spaces you have.';
+    const result = JSON.stringify({
+      schema_version: 'tool.response.v2',
+      outcome: { disposition: 'executed_nonzero' },
+      result: { error: [{ type: 'text', text: JSON.stringify({ error: errorText }) }] },
+    });
+
+    renderToolCallMessage([{ type: 'tool-call', toolCallId: 'space-2', toolName: 'edit_space', args: {}, result }], {
+      ToolCallCard,
+    });
+
+    expect(ToolCallCard.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({ outcomeText: `Execution failed: ${errorText}`, status: 'error' }),
+    );
   });
 
   it('shows the host remediation message next to a policy-blocked tool step', () => {
@@ -646,7 +765,7 @@ describe('ToolCallContainer', () => {
     );
 
     expectNewCardOnly();
-    expect(screen.getByRole('button', { name: 'Always allow this here' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Always allow in this chat' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Allow' })).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
     expect(respondToToolApproval).toHaveBeenCalledWith(
@@ -721,7 +840,7 @@ describe('ToolCallContainer', () => {
     );
   });
 
-  it('preserves the chat scope option when Always allow this here is clicked', () => {
+  it('preserves the chat scope option when Always allow in this chat is clicked', () => {
     respondToToolApproval.mockClear();
     const onRespondToToolApproval = vi.fn();
     renderPendingApprovalMessage(
@@ -746,7 +865,7 @@ describe('ToolCallContainer', () => {
       { onRespondToToolApproval },
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Always allow this here' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Always allow in this chat' }));
     expect(respondToToolApproval).toHaveBeenCalledWith(
       expect.objectContaining({ approvalId: 'approval-1', approved: true, optionId: 'allow-chat' }),
     );
@@ -779,7 +898,7 @@ describe('ToolCallContainer', () => {
     expect(screen.queryByText('Execution details')).not.toBeInTheDocument();
     expectNewCardOnly();
     expect(screen.getByRole('button', { name: 'Allow' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Always allow this here' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Always allow in this chat' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Not now' })).toBeInTheDocument();
   });
 
@@ -982,6 +1101,8 @@ describe('ToolCallContainer', () => {
           search_without_asking: true,
           maps_without_asking: false,
           sandbox_without_asking: true,
+          chat_search_enabled: false,
+          package_downloads_without_project_allowed: false,
         })),
         updateUserSettings: vi.fn(async () => ({
           offline_mode: false,
@@ -989,6 +1110,8 @@ describe('ToolCallContainer', () => {
           search_without_asking: true,
           maps_without_asking: false,
           sandbox_without_asking: true,
+          chat_search_enabled: false,
+          package_downloads_without_project_allowed: false,
         })),
         listSentinelSessionContext: vi.fn(async () => ({
           approvals: [approval('old', 'old.example.com'), approval('now', 'now.example.com')],
@@ -1067,6 +1190,8 @@ describe('ToolCallContainer: held search request', () => {
         search_without_asking: true,
         maps_without_asking: false,
         sandbox_without_asking: true,
+        chat_search_enabled: false,
+        package_downloads_without_project_allowed: false,
       })),
       updateUserSettings: vi.fn(async () => ({
         offline_mode: false,
@@ -1074,6 +1199,8 @@ describe('ToolCallContainer: held search request', () => {
         search_without_asking: true,
         maps_without_asking: false,
         sandbox_without_asking: true,
+        chat_search_enabled: false,
+        package_downloads_without_project_allowed: false,
       })),
       listSentinelSessionContext: vi.fn(async () => ({ approvals: [info] })),
     };

@@ -68,6 +68,7 @@ test_first_install() {
   assert_file "$AMAN_HOME/state/installed"
   assert_log_has "docker build -f $REPO/Dockerfile.dev"
   assert_log_has "docker build -t aman-stt:"
+  assert_log_has "docker build -t aman-tts:"
   assert_log_has "ghcr.io/dexidp/dex@sha256:"
   assert_log_lacks "docker push"
   assert_log_lacks "docker.sock"
@@ -84,6 +85,8 @@ test_first_install() {
   assert_contains "$env" "OIDC_ALLOWED_EMAILS=owner@example.invalid"
   assert_contains "$env" "SQLITE_PATH=/data/db/db.sqlite"
   assert_contains "$env" "STT_URL=http://aman-stt:8001"
+  assert_contains "$env" "TTS_URL=http://aman-tts:8002"
+  assert_contains "$(cat "$AMAN_HOME/machine/.env")" "AMAN_TTS_CPU_THREADS="
   assert_contains "$env" "AUTH_COOKIE_SUFFIX="
   assert_not_contains "$env" "DEX_USER_PASSWORD_HASH" "the app container never gets the login password hash"
   assert_not_contains "$env" "\$2a\$10\$"
@@ -180,19 +183,17 @@ test_partial_instance_dir_is_replaced() {
 }
 
 test_concurrent_run_blocked_and_stale_lock_taken_over() {
-  t_begin "a live lock blocks a run and a dead one is replaced"
+  t_begin "a lock with a fresh beat blocks a run and one whose beat stopped is replaced"
   sandbox_new
   mkdir -p "$AMAN_HOME/state/lock"
-  sleep 30 &
-  local pid=$!
-  printf '%s\n' "$pid" >"$AMAN_HOME/state/lock/pid"
+  printf 'other-run\n' >"$AMAN_HOME/state/lock/owner"
+  date +%s >"$AMAN_HOME/state/lock/beat"
   with_input "$SENTINEL_PASSWORD
 "
   run_install --yes --password-stdin --email owner@example.invalid
   assert_rc 1
   assert_flat_contains "$ERR" "Another install is running right now"
-  kill "$pid" 2>/dev/null || true
-  wait "$pid" 2>/dev/null || true
+  printf '%s\n' $(($(date +%s) - 3600)) >"$AMAN_HOME/state/lock/beat"
   with_input "$SENTINEL_PASSWORD
 "
   run_install --yes --password-stdin --email owner@example.invalid

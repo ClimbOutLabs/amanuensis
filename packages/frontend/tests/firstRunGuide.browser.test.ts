@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { chromium, type Browser, type Page } from 'playwright-core';
 import { createServer, defaultClientConditions } from 'vite';
+
+import { DEV_OPTIMIZE_DEPS } from '../src/devPrebundle.ts';
+import { featureShotPath, saveFailureShots } from './support/featureShots.ts';
+import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
+import { privateViteCache } from './support/viteCache.ts';
 
 function findChromiumExecutable(): string {
   const candidates = [
@@ -50,15 +52,6 @@ const EXPECTED = {
   skipped: { ticket: null, firstRun: false },
 } as const;
 
-async function screenshotDir(): Promise<string> {
-  const configured = process.env.AMAN_SCREENSHOT_DIR;
-  if (configured != null && configured !== '') {
-    await mkdir(configured, { recursive: true });
-    return configured;
-  }
-  return await mkdtemp(join(tmpdir(), 'aman-first-run-'));
-}
-
 async function checkHome(page: Page, state: keyof typeof EXPECTED) {
   const expected = EXPECTED[state];
   assert.match(await page.getByRole('heading', { level: 1, name: GREETING }).innerText(), GREETING);
@@ -91,8 +84,11 @@ async function checkSizes(page: Page) {
 
 test('home screens render in light and dark at desktop and phone width', { timeout: 300_000 }, async () => {
   const frontendRoot = fileURLToPath(new URL('../', import.meta.url));
+  const viteCache = privateViteCache('first-run-guide');
   const server = await createServer({
+    cacheDir: viteCache.cacheDir,
     configFile: false,
+    optimizeDeps: DEV_OPTIMIZE_DEPS,
     root: frontendRoot,
     logLevel: 'silent',
     // The published ui dist leaves core modules external, so resolve them from source like the app does.
@@ -100,7 +96,6 @@ test('home screens render in light and dark at desktop and phone width', { timeo
     server: { host: '127.0.0.1', port: 0 },
   });
   let browser: Browser | undefined;
-  const outDir = await screenshotDir();
 
   try {
     await server.listen();
@@ -120,7 +115,7 @@ test('home screens render in light and dark at desktop and phone width', { timeo
         const open = async (state: string) => {
           await page.goto(`${fixtureUrl}?state=${state}&theme=${theme}`, {
             waitUntil: 'domcontentloaded',
-            timeout: RENDER_TIMEOUT_MS,
+            timeout: FIRST_LOAD_TIMEOUT_MS,
           });
           await page.locator(`[data-fixture-state="${state}"]`).waitFor({ timeout: RENDER_TIMEOUT_MS });
           await page.getByRole('heading', { level: 1, name: GREETING }).waitFor({ timeout: RENDER_TIMEOUT_MS });
@@ -134,7 +129,10 @@ test('home screens render in light and dark at desktop and phone width', { timeo
             (await page.evaluate(() => document.documentElement.scrollWidth)) <= viewport.width,
             `${state} overflows horizontally at ${viewport.name}`,
           );
-          await page.screenshot({ path: join(outDir, `${state}-${viewport.name}-${theme}.png`), fullPage: true });
+          await page.screenshot({
+            path: await featureShotPath({ surface: 'screen:first-run', step: `${state}-${viewport.name}-${theme}` }),
+            fullPage: true,
+          });
         };
 
         for (const state of ['fresh', 'half', 'done', 'skipped'] as const) {
@@ -169,12 +167,16 @@ test('home screens render in light and dark at desktop and phone width', { timeo
         assert.equal(new Set(cardLefts).size, 2, 'the cards sit in a two-column grid');
 
         // Three groups that read apart: 1rem under the composer, and at least as much before the cards.
+        // The pill group starts at its prompt line on a first run, so measure from the group's first line.
         const gaps = await page.evaluate(() => {
           const composer = document.querySelector('[data-slot="aui_composer-shell"]')?.getBoundingClientRect();
-          const pills = document.querySelector('ul[aria-label="What would help you most?"]')?.getBoundingClientRect();
+          const pillList = document.querySelector('ul[aria-label="What would help you most?"]');
+          const groupTop = pillList?.parentElement?.firstElementChild?.getBoundingClientRect().top;
+          const pills = pillList?.getBoundingClientRect();
           const cards = document.getElementById('aman-home-cards-heading')?.getBoundingClientRect();
-          if (composer === undefined || pills === undefined || cards === undefined) return null;
-          return { underComposer: pills.top - composer.bottom, beforeCards: cards.top - pills.bottom };
+          if (composer === undefined || groupTop === undefined || pills === undefined || cards === undefined)
+            return null;
+          return { underComposer: groupTop - composer.bottom, beforeCards: cards.top - pills.bottom };
         });
         assert.ok(gaps !== null, 'the composer, the pills and the cards are all on screen');
         assert.ok(gaps.underComposer >= 15.5, `the pills sit 1rem under the composer, got ${gaps.underComposer}px`);
@@ -197,9 +199,12 @@ test('home screens render in light and dark at desktop and phone width', { timeo
       }
       await context.close();
     }
-    console.log(`home screenshots written to ${outDir}`);
+  } catch (error) {
+    await saveFailureShots({ browser, surface: 'screen:first-run' });
+    throw error;
   } finally {
     await browser?.close();
     await server.close();
+    viteCache.remove();
   }
 });

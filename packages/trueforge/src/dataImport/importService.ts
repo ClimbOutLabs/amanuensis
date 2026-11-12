@@ -36,34 +36,54 @@ import { CommonChatExportFileSchema } from '../dataExport/commonChatFormat';
 import { EXPORT_SCHEMA_VERSION } from '../dataExport/exportService';
 import { sessionPartIndex, sessionPartName } from '../dataExport/sessionRecords';
 import { ZIP_MAX_ENTRIES } from '../dataExport/zipStreamWriter';
+import type { IDeliveryStore } from '../db/deliveryStore';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
+import type { IReachSettingsStore } from '../db/reachSettingsStore';
 import type { ISentinelAuditStore } from '../db/sentinelAuditStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { WithTransaction } from '../db/transaction';
 import type { ITurnArtifactStore } from '../db/turnArtifactStore';
+import { isReservedConnectorName } from '../mcp/firstParty';
+import { isHostOwnConnector } from '../mcp/hostConnectors';
 import { personaKnowledgeLocation } from '../personaKnowledge/knowledgePaths';
 import { amanGuidePersonaId, isAmanGuidePersona, isAnyAmanGuideId } from '../personas/amanGuide/identity';
 import { PERSISTED_ARTIFACT_MIME } from '../runtime/artifacts/persistTurnArtifacts';
+import { requestChatSearchBackfill } from '../runtime/chatSearchIndexing';
 import type { RetainItem } from '../runtime/memory/hindsightClient';
 import {
   applyVaultTombstones,
   CURATED_MEMORY_FILE,
   dailyLogEntries,
   dailyLogFileAt,
+  DOCUMENT_ID_METADATA_KEY,
+  entryMetadata,
+  hiddenContext,
   latestTombstonesByEntry,
   parseVaultTombstones,
   personaVaultNamespace,
+  SESSION_ID_METADATA_KEY,
+  upgradeLegacyEntries,
   VAULT_TOMBSTONES_FILE,
   vaultEntryTimestamp,
   vaultFilesystemNamespace,
+  withoutHiddenMarkers,
 } from '../runtime/memory/markdownMemoryFiles';
+import {
+  isMemoryNoteSource,
+  NOTE_DATE_METADATA_KEY,
+  NOTE_SOURCE_METADATA_KEY,
+  noteRetainContent,
+} from '../runtime/memory/memoryNotes';
+import { MEMORY_RECALL_ENABLED_SETTING_KEY } from '../runtime/memoryRecallSettings';
 import { MEMORY_SCREEN_ENABLED_SETTING_KEY } from '../runtime/memoryScreenSettings';
 import { MEMORY_SUMMARIZE_SETTING_KEY } from '../runtime/memorySummarizeSettings';
 import { DEFAULT_CHAT_MODEL_SETTING_KEY } from '../runtime/tokenFactoryProvider';
 import { TOOL_OUTPUT_SCREEN_ENABLED_SETTING_KEY } from '../runtime/toolOutputScreenSettings';
 import type { ImportDataResult } from '../schemas/dataImport';
+import type { ReachSettings } from '../schemas/reach';
 import { newId } from '../utils/id';
 import { detachConnectors, normalizeImportedConnectors, withoutKeptConnector } from './connectorImport';
+import { upgradeArchivedDeliveries } from './deliveryUpgrade';
 import { damagedExportError, DataImportError } from './importError';
 import {
   compensate,
@@ -89,10 +109,12 @@ import {
   ImportAgentsFileSchema,
   ImportAuditFileSchema,
   ImportConnectorsFileSchema,
+  ImportDeliveriesFileSchema,
   ImportFoldersFileSchema,
   ImportManifestSchema,
   ImportPersonalizationFileSchema,
   ImportPersonasFileSchema,
+  ImportReachFileSchema,
   ImportSchedulesFileSchema,
   ImportSessionEntrySchema,
   ImportSessionPartRecordSchema,
@@ -105,6 +127,7 @@ import {
   type ImportAgentRecord,
   type ImportAuditRecord,
   type ImportConnectorRecord,
+  type ImportDelivery,
   type ImportFolderRecord,
   type ImportManifest,
   type ImportPersonalizationFile,
@@ -120,6 +143,7 @@ import {
 import { writePersonaKnowledge, type KnowledgeEmbedder } from './knowledgeImport';
 import { countingLeftOut, isRecord, type LeftOutCounts } from './lenient';
 import { repairPersonaNames } from './personaNames';
+import { startReachSwitchesAsNew } from './reachUpgrade';
 import { assembleSessionParts } from './sessionParts';
 import { replaySessions, restoreSessions, type SessionRestoreContext } from './sessionRestore';
 import { readZipArchive, ZipArchiveError, type ZipArchiveEntry } from './zipArchiveReader';
@@ -129,6 +153,10 @@ export interface DataImportDeps<TTransaction> extends PreflightDeps<TTransaction
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
   /** Permission history is imported with the same commit as the rest, and never removed again. */
   auditStore: Pick<ISentinelAuditStore, 'importRecords'>;
+  /** The feed comes along with the same commit. Push devices never do. */
+  deliveryStore: Pick<IDeliveryStore, 'importDeliveries'>;
+  /** Reach me settings come along with the same commit, with texts and calls switched off. */
+  reachSettingsStore: Pick<IReachSettingsStore, 'importSettings'>;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   withTransaction: WithTransaction<TTransaction>;
   personaKnowledgeDir: string;
@@ -214,6 +242,7 @@ function leftOutName(name: string): string {
 /** Instance-wide settings an import may fill in; the permission settings in the archive are never applied. */
 const IMPORTABLE_GLOBAL_SETTING_KEYS: ReadonlySet<string> = new Set<string>([
   DEFAULT_CHAT_MODEL_SETTING_KEY,
+  MEMORY_RECALL_ENABLED_SETTING_KEY,
   MEMORY_SCREEN_ENABLED_SETTING_KEY,
   MEMORY_SUMMARIZE_SETTING_KEY,
   TOOL_OUTPUT_SCREEN_ENABLED_SETTING_KEY,
@@ -466,6 +495,7 @@ interface ArchiveContents {
   manifest: ImportManifest;
   sessions: ArchiveSessions;
   folders: ImportFolderRecord[];
+  spaceFolders: ImportFolderRecord[];
   agents: ImportAgentRecord[];
   personas: ImportPersonasFile;
   personalization: ImportPersonalizationFile;
@@ -474,6 +504,8 @@ interface ArchiveContents {
   connectors: ImportConnectorRecord[];
   settings: ImportSettingsFile;
   audit: ImportAuditRecord[];
+  deliveries: ImportDelivery[];
+  reach: ReachSettings[];
   files: ReadonlyMap<string, Buffer>;
   sourceTenantId: string;
   /** Internal details from an older version that were repaired or left out, filled in as sections are read. */
@@ -584,7 +616,7 @@ function readSessionEntries(input: {
       logger,
       leftOut,
     });
-    return () => entries;
+    return () => withoutPrivateChats({ entries, logger });
   }
   if (partNames.length === 0) {
     throw new DataImportError(
@@ -616,7 +648,26 @@ function readSessionEntries(input: {
       yield* last.records;
     }
   }
-  return () => assembleSessionParts(records());
+  return () => withoutPrivateChats({ entries: assembleSessionParts(records()), logger });
+}
+
+/**
+ * Exports never hold a private chat, since nothing of one is kept. An archive that claims one
+ * anyway does not bring it back: restoring it would keep the chat its owner meant to forget.
+ */
+function* withoutPrivateChats(input: {
+  entries: Iterable<ImportSessionEntry>;
+  logger: DataImportDeps<never>['logger'];
+}): Generator<ImportSessionEntry> {
+  for (const entry of input.entries) {
+    if (entry.session.is_incognito) {
+      input.logger.warn('Data import skipped a private chat found in the archive', {
+        sessionId: entry.session.session_id,
+      });
+      continue;
+    }
+    yield entry;
+  }
 }
 
 function loadArchive(input: {
@@ -690,6 +741,8 @@ function loadArchive(input: {
     manifest,
     sessions: { ...checkSessions(sessionEntries(), folders), entries: sessionEntries },
     folders,
+    // Absent from exports made before spaces had folders.
+    spaceFolders: files.has('space_folders.json') ? section('space_folders.json', ImportFoldersFileSchema) : [],
     agents: section('agents.json', ImportAgentsFileSchema),
     personas: section('personas.json', ImportPersonasFileSchema, json => {
       const repaired = repairPersonaNames(json);
@@ -703,6 +756,12 @@ function loadArchive(input: {
     settings: section('settings.json', ImportSettingsFileSchema),
     // Absent from exports made before permission history travelled.
     audit: files.has('audit.json') ? section('audit.json', ImportAuditFileSchema) : [],
+    // Absent from exports made before the feed existed.
+    deliveries: files.has('deliveries.json')
+      ? section('deliveries.json', ImportDeliveriesFileSchema, upgradeArchivedDeliveries)
+      : [],
+    // Absent from exports made before Reach me settings existed.
+    reach: files.has('reach.json') ? section('reach.json', ImportReachFileSchema, startReachSwitchesAsNew) : [],
     files,
     sourceTenantId: manifest.tenant_id,
     leftOutReport: leftOut,
@@ -763,7 +822,7 @@ function checkSessions(
 }
 
 function validateCrossReferences(contents: ArchiveContents): void {
-  const { agents, personas, spaces, schedules, connectors } = contents;
+  const { agents, personas, spaces, spaceFolders, schedules, connectors } = contents;
 
   const agentIds = new Set<string>();
   const agentNames = new Set<string>();
@@ -783,7 +842,18 @@ function validateCrossReferences(contents: ArchiveContents): void {
     personaIds.add(persona.id);
   }
 
-  for (const { space, revisions } of spaces) {
+  const spaceFolderIds = new Set<string>();
+  for (const folder of spaceFolders) {
+    if (spaceFolderIds.has(folder.folder_id)) {
+      throw damagedExportError(`space folder ${folder.folder_id} appears twice.`);
+    }
+    spaceFolderIds.add(folder.folder_id);
+  }
+
+  for (const { space, revisions, folder_id } of spaces) {
+    if (folder_id !== null && !spaceFolderIds.has(folder_id)) {
+      throw damagedExportError(`space ${space.id} points at a folder that is not in the export.`);
+    }
     // Older versions pruned a space's early revisions, so the run may start late; it must still be unbroken.
     const numbers = revisions.map(revision => revision.revision).sort((a, b) => a - b);
     const first = numbers[0] ?? 0;
@@ -935,20 +1005,42 @@ function buildRetainItems(
         const newline = body.indexOf('\n');
         body = newline < 0 ? '' : body.slice(newline + 1).replace(/^\n+/, '');
       }
+      const trailers = entryMetadata(body);
+      const sessionId = trailers?.[SESSION_ID_METADATA_KEY];
+      const noteSource = trailers?.[NOTE_SOURCE_METADATA_KEY];
+      const noteDate = trailers?.[NOTE_DATE_METADATA_KEY];
+      // The page text drops an id-shaped context line, so it is read before the body is cleaned.
+      entryContext = hiddenContext(body);
+      body = withoutHiddenMarkers(body);
       const contextMatch = /\n\n> ([^\n]*)$/.exec(body);
       if (contextMatch !== null) {
         const contextValue = contextMatch[1];
         if (contextValue !== undefined) {
-          entryContext = contextValue;
+          entryContext ??= contextValue;
           body = body.slice(0, contextMatch.index);
         }
       }
       const itemContext = vaultContext ?? entryContext;
       items.push({
-        content: body,
+        // A note's marker rides inside its text, so a backend that drops metadata still hands it back.
+        content:
+          noteSource !== undefined && isMemoryNoteSource(noteSource) && noteDate !== undefined
+            ? noteRetainContent({ text: body, source: noteSource, date: noteDate })
+            : body,
         timestamp: entry.timestamp,
-        document_id: documentIdFor(entry.id),
+        // A replaceable entry keeps its document id, so a later update replaces it instead of adding a copy.
+        document_id: trailers?.[DOCUMENT_ID_METADATA_KEY] ?? documentIdFor(entry.id),
         ...(itemContext === undefined ? {} : { context: itemContext }),
+        ...(sessionId === undefined && noteSource === undefined
+          ? {}
+          : {
+              metadata: {
+                ...(sessionId === undefined ? {} : { [SESSION_ID_METADATA_KEY]: sessionId }),
+                ...(noteSource === undefined || noteDate === undefined
+                  ? {}
+                  : { [NOTE_SOURCE_METADATA_KEY]: noteSource, [NOTE_DATE_METADATA_KEY]: noteDate }),
+              },
+            }),
       });
     }
   }
@@ -962,7 +1054,9 @@ function pluralize(count: number, singular: string, plural: string): string {
 function buildSummary({
   result,
   connectorNames,
+  leftOutConnectorNames,
   auditEntries,
+  deliveryCount,
   standInAgentNames,
   filesLeftBehind,
   leftOut,
@@ -972,7 +1066,10 @@ function buildSummary({
 }: {
   result: Omit<ImportDataResult, 'summary' | 'schedules_off'>;
   connectorNames: string[];
+  /** Email or Calendar copies from the export that are not this computer's own; it sets those up in Settings. */
+  leftOutConnectorNames: string[];
   auditEntries: number;
+  deliveryCount: number;
   standInAgentNames: string[];
   /** Rows of the left-out table: internal details from an older version that did not come over. */
   leftOut: readonly LeftOutRow[];
@@ -1004,6 +1101,11 @@ function buildSummary({
   if (connectorNames.length > 0) {
     notes.push(`Connectors (${connectorNames.join(', ')}) come without an agent. Attach them on the Agents page.`);
   }
+  if (leftOutConnectorNames.length > 0) {
+    notes.push(
+      `${leftOutConnectorNames.join(' and ')} ${leftOutConnectorNames.length === 1 ? 'was' : 'were'} left out. This computer sets up its own Email and Calendar. Connect ${leftOutConnectorNames.length === 1 ? 'it' : 'them'} in Settings.`,
+    );
+  }
   if (standInAgentNames.length === 1) {
     notes.push(
       `A stand-in agent (${standInAgentNames[0] ?? ''}) was made because a chat or schedule names an agent that is not in the export. Give it a model on the Agents page before you use it.`,
@@ -1022,6 +1124,9 @@ function buildSummary({
   notes.push('Approvals given for one chat only do not carry over.');
   if (auditEntries > 0) {
     notes.push(`${pluralize(auditEntries, 'past permission decision', 'past permission decisions')} came along.`);
+  }
+  if (deliveryCount > 0) {
+    notes.push(`${pluralize(deliveryCount, 'item', 'items')} from your feed came along.`);
   }
   notes.push(
     'Not brought over: model keys, connector sign-ins, your own skills.\n    Add your model again and sign in to your connectors.',
@@ -1144,6 +1249,10 @@ function planMarkdownMemory(
       // so edits and deletes still apply under the new tenant.
       const text = data.toString('utf8').split(`md:${sourceSeg}:`).join(`md:${targetSeg}:`);
       bytes = Buffer.from(text, 'utf8');
+    }
+    if (dailyLogFileAt(inner) !== undefined) {
+      // Entries written before facts-only memory carried a "Turn summary:" prefix and a chat title line.
+      bytes = Buffer.from(upgradeLegacyEntries(data.toString('utf8')), 'utf8');
     }
     planned.push({ targetPath: path.join(markdownDir, targetSeg, inner), bytes });
   }
@@ -1328,15 +1437,28 @@ async function importArchive<TTransaction>(
     personas: archivedPersonas,
     personalization,
     spaces,
+    spaceFolders,
     schedules,
     settings,
     audit,
+    deliveries,
+    reach,
   } = contents;
   // Each person's guide is installed from the bundled pack, so the archived copy is never written again.
   // Its memory still maps to the person's own guide, and the summary still counts it.
   const personas = archivedPersonas.filter(({ persona }) => !isAmanGuidePersona(persona));
-  const connectors = normalizeImportedConnectors(contents.connectors);
-  const connectorNames = new Set(connectors.map(connector => connector.name));
+  const exportedConnectors = normalizeImportedConnectors(contents.connectors);
+  // This computer sets up its own Email and Calendar, so the export's copy of one that is not at this host's address
+  // is left out. Everything else comes along, and nothing from an import is ever first-party.
+  const connectors = exportedConnectors.filter(
+    connector =>
+      !isReservedConnectorName(connector.name) ||
+      isHostOwnConnector({ name: connector.name, url: connector.manifest.url }),
+  );
+  const leftOutConnectorNames = exportedConnectors
+    .filter(connector => !connectors.includes(connector))
+    .map(connector => connector.name);
+  const connectorNames = new Set(exportedConnectors.map(connector => connector.name));
   const importerSubject: CreatedBySubject = {
     subject_id: subjectId,
     subject_type: 'user',
@@ -1360,6 +1482,7 @@ async function importArchive<TTransaction>(
       folderIds: folders.map(folder => folder.folder_id),
       personas: personas.map(entry => entry.persona),
       spaceIds: spaces.map(entry => entry.space.id),
+      spaceFolderIds: spaceFolders.map(folder => folder.folder_id),
       scheduleIds: schedules.map(schedule => schedule.id),
       agents: [...agentPlan.archived, ...agentPlan.placeholders],
     },
@@ -1493,7 +1616,9 @@ async function importArchive<TTransaction>(
       summary: buildSummary({
         result,
         connectorNames: newConnectors.map(connector => connector.name),
+        leftOutConnectorNames,
         auditEntries: audit.length,
+        deliveryCount: deliveries.length,
         standInAgentNames: agentPlan.placeholders.map(placeholder => placeholder.name),
         filesLeftBehind: 0,
         leftOut,
@@ -1619,6 +1744,10 @@ async function importArchive<TTransaction>(
         throw new Error('The import transaction is not a database transaction.');
       }
       await deps.auditStore.importRecords({ tenant_id: tenantId, created_by: subjectId, records: audit }, tx);
+      await deps.deliveryStore.importDeliveries({ tenant_id: tenantId, created_by: subjectId, deliveries }, tx);
+      for (const settings of reach) {
+        await deps.reachSettingsStore.importSettings({ tenant_id: tenantId, created_by: subjectId, settings }, tx);
+      }
 
       if (personalization !== null) {
         // Replaces the empty profile the app creates on first sign-in; the emptiness check ruled out a filled one.
@@ -1644,7 +1773,14 @@ async function importArchive<TTransaction>(
         );
       }
 
-      for (const { space, revisions } of spaces) {
+      for (const folder of spaceFolders) {
+        await deps.spaceStore.createSpaceFolder(
+          { tenant_id: tenantId, created_by: subjectId, id: folder.folder_id, name: folder.name },
+          tx,
+        );
+      }
+
+      for (const { space, revisions, folder_id } of spaces) {
         const sorted = [...revisions].sort((a, b) => a.revision - b.revision);
         const first = sorted[0];
         if (first === undefined) {
@@ -1668,6 +1804,12 @@ async function importArchive<TTransaction>(
           },
           tx,
         );
+        if (folder_id !== null) {
+          await deps.spaceStore.setSpaceFolder(
+            { tenant_id: tenantId, created_by: subjectId, space_id: space.id, folder_id },
+            tx,
+          );
+        }
         // A run that starts after revision 1 lands renumbered from 1, since a new space starts there.
         for (const [index, revision] of sorted.slice(1).entries()) {
           aggregate = await deps.spaceStore.getAggregate({ tenant_id: tenantId, created_by: subjectId }, tx);
@@ -1791,6 +1933,13 @@ async function importArchive<TTransaction>(
       await lock.removeIn(tx);
     });
     lock.committed();
+    // The restored chats join the past-chat search through one pass, which runs only if the person turns the search on.
+    if (sessions.ids.length > 0) {
+      await requestChatSearchBackfill({
+        globalSettingsStore: deps.globalSettingsStore,
+        person: { tenant_id: tenantId, created_by: subjectId },
+      });
+    }
 
     const result: Omit<ImportDataResult, 'summary'> = {
       chats: sessions.ids.length,
@@ -1808,7 +1957,9 @@ async function importArchive<TTransaction>(
       summary: buildSummary({
         result,
         connectorNames: newConnectors.map(connector => connector.name),
+        leftOutConnectorNames,
         auditEntries: audit.length,
+        deliveryCount: deliveries.length,
         standInAgentNames: agentPlan.placeholders.map(placeholder => placeholder.name),
         filesLeftBehind,
         leftOut,

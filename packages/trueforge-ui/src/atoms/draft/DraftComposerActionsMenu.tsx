@@ -32,7 +32,7 @@ export function DraftComposerActionsMenu({ actions, disabled }: DraftComposerAct
           className={auiButtonClass({
             variant: 'ghost',
             size: 'small',
-            className: 'h-8 gap-1 rounded-full border border-border px-2.5 text-[0.8125rem] font-normal',
+            className: 'h-8 gap-1 rounded-full border border-border px-2.5 text-sm font-normal',
           })}
         >
           <Icon name="plus" className="size-4" />
@@ -43,7 +43,7 @@ export function DraftComposerActionsMenu({ actions, disabled }: DraftComposerAct
       {actions.map(action => (
         <DropdownMenuItem key={action.id} onClick={action.onSelect}>
           <Icon name={action.icon} className="text-text-secondary size-4 shrink-0" />
-          <span className="text-[0.8125rem]">{action.label}</span>
+          <span className="text-sm">{action.label}</span>
         </DropdownMenuItem>
       ))}
     </DropdownMenu>

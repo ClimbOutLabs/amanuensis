@@ -72,7 +72,7 @@ function renderSelector({
   workOnRepo?: { open: () => void };
   getCapabilities?: () => Promise<{
     data: {
-      sandbox: { enabled: boolean };
+      sandbox: { enabled: boolean; reason?: string };
       skill: { enabled: boolean; reason?: string };
       settings?: { enabled: boolean };
     };
@@ -207,6 +207,15 @@ describe('DraftCompositeSelector', () => {
     const selected = screen.getByText(/^Selected \(\d+\)$/);
     expect(selected).not.toHaveClass('uppercase');
     expect(screen.getByText(/^Available \(\d+\)$/)).not.toHaveClass('uppercase');
+  });
+
+  it('sizes the section headings on the --text-xs scale step, not a one-off literal', async () => {
+    renderSelector();
+    openAddOns();
+
+    const heading = await screen.findByText(/^Selected \(\d+\)$/);
+    expect(heading).toHaveClass('text-xs');
+    expect(heading.className).not.toMatch(/text-\[0\.75rem\]/);
   });
 
   it('opens the add-ons picker downward from a composer near the top, inside the screen', async () => {
@@ -472,6 +481,24 @@ describe('DraftCompositeSelector', () => {
     const sandboxSwitch = await screen.findByRole('switch', { name: 'Sandbox' });
     expect(sandboxSwitch).toBeDisabled();
     expect(screen.getByText('The sandbox is not available on this server')).toBeInTheDocument();
+  });
+
+  it('says why the sandbox is off when the server gives a reason', async () => {
+    const reason =
+      'The sandbox is full: every slot already holds as many chats as its disk fits. Delete old chats, then try again.';
+    renderSelector({
+      getCapabilities: async () => ({
+        data: {
+          sandbox: { enabled: false, reason },
+          skill: { enabled: false, reason },
+        },
+      }),
+    });
+    openAddOns();
+
+    expect(await screen.findByRole('switch', { name: 'Sandbox' })).toBeDisabled();
+    expect(screen.getByText(reason)).toBeInTheDocument();
+    expect(screen.queryByText('The sandbox is not available on this server')).not.toBeInTheDocument();
   });
 
   it('does not offer sandbox settings when the sandbox settings section is unavailable', async () => {

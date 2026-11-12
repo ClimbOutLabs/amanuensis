@@ -5,49 +5,46 @@ import { TrueForge } from "../../../src/Client";
 import { mockServerPool } from "../../mock-server/MockServerPool";
 
 describe("RunCodeClient", () => {
-    
     test("get_status (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { "data" : { "backend" : "docker" , "detail" : "detail" , "state" : "ready" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { data: { backend: "docker", detail: "detail", state: "ready" } };
+
         server
             .mockEndpoint()
-            .get("/api/v1/settings/run-code/status").respondWith()
-            .statusCode(200).jsonBody(rawResponseBody)
-                .build();
+            .get("/api/v1/settings/run-code/status")
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-                        
-                                const response = await client.settings.runCode.getStatus();
-                                expect(response).toEqual({
-    data: {
-        backend: "docker",
-        detail: "detail",
-        state: "ready"
-    }
-});
-                              
-                    
+        const response = await client.settings.runCode.getStatus();
+        expect(response).toEqual({
+            data: {
+                backend: "docker",
+                detail: "detail",
+                state: "ready",
+            },
+        });
     });
-          
+
     test("get_status (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .get("/api/v1/settings/run-code/status").respondWith()
-            .statusCode(500).jsonBody(rawResponseBody)
-                .build();
+            .get("/api/v1/settings/run-code/status")
+            .respondWith()
+            .statusCode(500)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.settings.runCode.getStatus()
-            }).rejects.toThrow(TrueForgeTypes.InternalServerError);
+        await expect(async () => {
+            return await client.settings.runCode.getStatus();
+        }).rejects.toThrow(TrueForgeTypes.InternalServerError);
     });
-          
 });

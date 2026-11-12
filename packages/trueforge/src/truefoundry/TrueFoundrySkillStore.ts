@@ -7,6 +7,7 @@ import type {
   GetSkillInput,
   ISkillStore,
   ListSkillsInput,
+  SetSkillNetworkApprovalInput,
   SkillRecord,
   UpsertSkillInput,
 } from '../db/skillStore';
@@ -40,6 +41,7 @@ function toRegistryRecord(tenant_id: string, skill: SfyRegistrySkill): SkillReco
     tenant_id,
     name: skill.name,
     manifest,
+    network_approval: null,
     created_at: now,
     updated_at: now,
   };
@@ -145,6 +147,15 @@ export class TrueFoundrySkillStore<TTransaction = never>
   }
 
   deleteSkill(input: GetSkillInput, transaction?: TTransaction): Promise<boolean> {
+    void input;
+    void transaction;
+    return trueFoundryManaged();
+  }
+
+  setSkillNetworkApproval(
+    input: SetSkillNetworkApprovalInput,
+    transaction?: TTransaction,
+  ): Promise<SkillRecord | undefined> {
     void input;
     void transaction;
     return trueFoundryManaged();

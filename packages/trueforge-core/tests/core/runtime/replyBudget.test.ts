@@ -2,11 +2,16 @@ import { createTurnToolCallLedger, mergeTurnToolCallLedgers } from '../../../src
 import {
   clearUnfinished,
   DEFAULT_REPLY_STEP_BUDGET,
+  MAX_PROGRESS_STEP_REFUNDS,
+  progressRefundFor,
   recordUnfinished,
   REMOVED_TOOL_RESULT,
   removedToolMessage,
+  replyStepBudgetFor,
   retryIsDue,
+  SCHEDULE_REPLY_STEP_BUDGET,
   settleRetry,
+  STEP_BUDGET_SPENT_AFTER_SPACE_WRITE_MESSAGE,
   stepBudgetFor,
   toolResultKind,
   ToolResultKindSchema,
@@ -68,6 +73,16 @@ describe('toolResultKind', () => {
     ] as const) {
       expect(ToolResultKindSchema.safeParse(toolResultKind({ ...ok, disposition })).success).toBe(true);
     }
+  });
+});
+
+describe('replyStepBudgetFor', () => {
+  it('gives a scheduled run its larger budget and a chat the default, unless the definition sets one', () => {
+    expect(replyStepBudgetFor({ definitionBudget: undefined, unattended: false })).toBe(DEFAULT_REPLY_STEP_BUDGET);
+    expect(replyStepBudgetFor({ definitionBudget: undefined, unattended: true })).toBe(SCHEDULE_REPLY_STEP_BUDGET);
+    expect(SCHEDULE_REPLY_STEP_BUDGET.main).toBeGreaterThan(DEFAULT_REPLY_STEP_BUDGET.main);
+    const own = { main: 2, sub: 1 };
+    expect(replyStepBudgetFor({ definitionBudget: own, unattended: true })).toBe(own);
   });
 });
 
@@ -190,5 +205,57 @@ describe('ledger', () => {
     expect(merged.removedToolRejectionStreaks.get('sub-1')).toBe(2);
     expect(merged.unfinishedByThread.get('main')).toBe('failed');
     expect(merged.unfinishedByThread.get('sub-1')).toBe('blocked');
+  });
+});
+
+describe('progressRefundFor', () => {
+  const landed = { toolName: 'edit_space', disposition: 'executed_ok', failure: false, savedNothing: false } as const;
+
+  it('refunds one step when a space write landed', () => {
+    expect(progressRefundFor({ results: [landed], refundsSoFar: 0 })).toBe(1);
+    expect(progressRefundFor({ results: [{ ...landed, toolName: 'lookup' }, landed], refundsSoFar: 3 })).toBe(1);
+  });
+
+  it('refunds nothing for a refused or failed write, or a batch with no space write', () => {
+    expect(progressRefundFor({ results: [{ ...landed, failure: true }], refundsSoFar: 0 })).toBe(0);
+    expect(progressRefundFor({ results: [{ ...landed, disposition: 'policy_blocked' }], refundsSoFar: 0 })).toBe(0);
+    expect(progressRefundFor({ results: [{ ...landed, toolName: 'get_space' }], refundsSoFar: 0 })).toBe(0);
+    expect(progressRefundFor({ results: [], refundsSoFar: 0 })).toBe(0);
+  });
+
+  it('refunds nothing for moving a space into a folder', () => {
+    expect(progressRefundFor({ results: [{ ...landed, toolName: 'move_space' }], refundsSoFar: 0 })).toBe(0);
+  });
+
+  it('refunds one step when a sandbox file edit landed, and nothing when it failed', () => {
+    const fileEdit = { ...landed, toolName: 'write_file', sandboxFileEdit: true };
+    expect(progressRefundFor({ results: [fileEdit], refundsSoFar: 0 })).toBe(1);
+    expect(progressRefundFor({ results: [{ ...fileEdit, failure: true }], refundsSoFar: 0 })).toBe(0);
+    // A connector tool that happens to be named write_file is not the sandbox's.
+    expect(progressRefundFor({ results: [{ ...landed, toolName: 'write_file' }], refundsSoFar: 0 })).toBe(0);
+  });
+
+  it('refunds nothing for a write that saved nothing new, such as an append already at the end', () => {
+    expect(progressRefundFor({ results: [{ ...landed, savedNothing: true }], refundsSoFar: 0 })).toBe(0);
+  });
+
+  it('stops at the cap', () => {
+    expect(progressRefundFor({ results: [landed], refundsSoFar: MAX_PROGRESS_STEP_REFUNDS - 1 })).toBe(1);
+    expect(progressRefundFor({ results: [landed], refundsSoFar: MAX_PROGRESS_STEP_REFUNDS })).toBe(0);
+  });
+
+  it('keeps the largest refund count per thread when ledgers merge', () => {
+    const root = createTurnToolCallLedger();
+    root.progressRefundsByThread.set('main', 2);
+    const child = createTurnToolCallLedger();
+    child.progressRefundsByThread.set('main', 5);
+    expect(mergeTurnToolCallLedgers([root, child]).progressRefundsByThread.get('main')).toBe(5);
+  });
+});
+
+describe('STEP_BUDGET_SPENT_AFTER_SPACE_WRITE_MESSAGE', () => {
+  it('asks what changed, a space or sandbox files, and says they can ask you to continue exactly once', () => {
+    expect(STEP_BUDGET_SPENT_AFTER_SPACE_WRITE_MESSAGE).toContain('which space, or which files in the sandbox');
+    expect(STEP_BUDGET_SPENT_AFTER_SPACE_WRITE_MESSAGE.split('they can ask you to continue')).toHaveLength(2);
   });
 });

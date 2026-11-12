@@ -1,6 +1,6 @@
 import dedent from 'dedent';
 import type { Logger } from 'winston';
-import { estimateTokensForString } from '../../llm/usage';
+import { CHARS_PER_TOKEN, describeContentSize, estimateTokensForString } from '../../llm/usage';
 import type { ToolCallResult } from '../../mcp/executeToolCalls';
 import type { ContextMessage } from '../../runtime/AgentThread.types';
 import type { Sandbox, SandboxInfo } from '../../sandbox/Sandbox';
@@ -195,9 +195,15 @@ function sandboxRawOutputStorageGuidance(content: string): string {
  * Ingestion budgets. Each one bounds what a tool result contributes to the history the model
  * resends on every later step. The full result is never changed upstream: grounding records fetched
  * page text in ToolSet before this pass runs. Space bodies are not budgeted: a shortened body could be
- * written back over the whole space by update_space.
+ * written back over the whole space by a later edit.
  */
 export const PAGE_READ_TOKEN_BUDGET = 2_500;
+/**
+ * What all the pages of one extract result share. It stays under the single-result threshold with room
+ * for the JSON around the pages, so a read of two or three pages reaches the model instead of being
+ * saved to a file it can only open by running a command.
+ */
+export const EXTRACT_READ_TOKEN_BUDGET = DEFAULT_INDIVIDUAL_TOOL_TOKEN_THRESHOLD - 1_000;
 export const SANDBOX_OUTPUT_EDGE_LINES = 40;
 
 const EXEC_OUTPUT_HINT =
@@ -238,9 +244,9 @@ function mentionsRequest(block: string, request: ReadonlySet<string>): boolean {
   return wordsOf(block).some(word => request.has(word));
 }
 
-/** Cuts text to about maxTokens. estimateTokensForString counts four characters per token. */
+/** Cuts text to about maxTokens, at CHARS_PER_TOKEN characters per token. */
 function cutToTokens(text: string, maxTokens: number): string {
-  return text.slice(0, Math.floor(maxTokens * 4));
+  return text.slice(0, Math.floor(maxTokens * CHARS_PER_TOKEN));
 }
 
 /**
@@ -297,7 +303,10 @@ export function budgetPageText(input: { text: string; request: ReadonlySet<strin
   return `${body}\n\n(Only part of this page is shown: about ${String(omitted)} more tokens were left out, and no tool can show them.)`;
 }
 
-/** Trims each page's text in a Tavily extract result to the page budget. The JSON shape stays. */
+/**
+ * Trims each page's text in a Tavily extract result to an equal share of the extract budget, and never
+ * more than the page budget. The JSON shape stays.
+ */
 export function budgetExtractPages(input: { content: string; request: ReadonlySet<string> }): string | undefined {
   let parsed: unknown;
   try {
@@ -308,6 +317,8 @@ export function budgetExtractPages(input: { content: string; request: ReadonlySe
   if (!isRecord(parsed) || !Array.isArray(parsed['pages'])) {
     return undefined;
   }
+  const textPages = parsed['pages'].filter(page => isRecord(page) && typeof page['text'] === 'string').length;
+  const maxTokens = Math.min(PAGE_READ_TOKEN_BUDGET, Math.floor(EXTRACT_READ_TOKEN_BUDGET / Math.max(1, textPages)));
   const pages: unknown[] = [];
   let changed = false;
   for (const page of parsed['pages']) {
@@ -316,7 +327,7 @@ export function budgetExtractPages(input: { content: string; request: ReadonlySe
       pages.push(page);
       continue;
     }
-    const text = budgetPageText({ text: original, request: input.request, maxTokens: PAGE_READ_TOKEN_BUDGET });
+    const text = budgetPageText({ text: original, request: input.request, maxTokens });
     changed ||= text !== original;
     pages.push({ ...page, text });
   }
@@ -450,10 +461,23 @@ export class LargeToolResponseProcessor implements ToolResponseProcessor {
     this.logger = param.logger.child({ module: 'LargeToolResponse' });
   }
 
+  // The thresholds are set in tokens, estimated at CHARS_PER_TOKEN characters per token; the
+  // reason states them in characters, which is what the model can plan against. An entry at or
+  // over the individual threshold was blocked for its own size; a smaller one was blocked only
+  // because the batch as a whole went over the total threshold.
+  private blockReasonDescription(entry: ToolResultWithInfo): string {
+    const perResult = (this.individualTokenThreshold * CHARS_PER_TOKEN).toLocaleString('en-US');
+    const combined = (this.totalTokenThreshold * CHARS_PER_TOKEN).toLocaleString('en-US');
+    return entry.originalTokens >= this.individualTokenThreshold
+      ? `this result is over the ${perResult}-character limit for a single tool result`
+      : `the results in this batch together are over the ${combined}-character combined limit`;
+  }
+
   private createLargeToolResponseGuidance(options: {
     sandbox: Sandbox | undefined;
     toolName: string | undefined;
     serverId: string | undefined;
+    entry: ToolResultWithInfo;
   }): string {
     // The first step is driven by the fetch-semantics registry (keyed by the
     // tool's original name), never by sniffing the result content.
@@ -475,18 +499,25 @@ export class LargeToolResponseProcessor implements ToolResponseProcessor {
       steps.push(createDynamicSubAgentLargeToolResponseGuidance());
     }
 
-    return `The Agent has not seen this tool result. Do not present anything as if it came from this result.\n\nContent too big. To handle a large tool call the Agent can do the following:\n${steps
+    return `The Agent has not seen this tool result. Do not present anything as if it came from this result.\n\nContent too big (${this.blockReasonDescription(options.entry)}). To handle a large tool call the Agent can do the following:\n${steps
       .map((step, index) => `${String(index + 1)}. ${step}`)
       .join(
         '\n',
       )}\n\nIf the Agent cannot reduce the output or re-run the tool with a narrower request, it must tell the user the result was too large to use and answer only from what it actually has, saying so.`;
   }
 
-  private createFileDumpMessage(params: { filePath: string; preview: string; originalContent: string }): string {
-    const { filePath, preview, originalContent } = params;
+  private createFileDumpMessage(params: {
+    filePath: string;
+    preview: string;
+    originalContent: string;
+    size: string;
+    reason: string;
+  }): string {
+    const { filePath, preview, originalContent, size, reason } = params;
     const steps: string[] = [
       dedent`Use sandbox to read parts of the file or extract data.
-      Use ${SANDBOX_SCHEMA_INFER_TAG} to undertand the schema.`,
+      Use ${SANDBOX_SCHEMA_INFER_TAG} to understand the schema.
+      The file's total size is given above. Plan reads against it, for example extract fields with a script or read sized ranges, instead of probing with small incremental reads.`,
     ];
 
     if (this.dynamicSubAgentsPresent) {
@@ -502,7 +533,7 @@ export class LargeToolResponseProcessor implements ToolResponseProcessor {
     const structuralSummary = jsonStructuralSummary(originalContent);
     const structureSection = structuralSummary === undefined ? '' : `\n\nStructure:\n${structuralSummary}`;
 
-    return `The Agent has not seen this tool result. Do not present anything as if it came from this result.\n\nContent too large. Result saved to: ${filePath}.\n\n${guidance}${structureSection}\n\nIf the Agent cannot read the saved file, it must tell the user the result was too large to use and answer only from what it actually has, saying so.\n\nPreview (first and last ${String(this.previewNumberOfCharacters)} chars):\n${preview}`;
+    return `The Agent has not seen this tool result. Do not present anything as if it came from this result.\n\nContent too large (${size}; ${reason}). Result saved to: ${filePath}.\n\n${guidance}${structureSection}\n\nIf the Agent cannot read the saved file, it must tell the user the result was too large to use and answer only from what it actually has, saying so.\n\nPreview (first and last ${String(this.previewNumberOfCharacters)} chars):\n${preview}`;
   }
 
   private buildResultsWithInfo(results: ToolCallResult[], sandbox: Sandbox | undefined): ToolResultWithInfo[] {
@@ -651,7 +682,7 @@ export class LargeToolResponseProcessor implements ToolResponseProcessor {
             content: entry.originalContent,
           }),
         });
-        newContent = `${this.createLargeToolResponseGuidance({ sandbox, toolName, serverId })}\n\nPreview (first and last ${String(this.previewNumberOfCharacters)} chars):\n${preview}`;
+        newContent = `${this.createLargeToolResponseGuidance({ sandbox, toolName, serverId, entry })}\n\nPreview (first and last ${String(this.previewNumberOfCharacters)} chars):\n${preview}`;
         if (sandbox) {
           queueSandboxDump = true;
         }
@@ -702,6 +733,8 @@ export class LargeToolResponseProcessor implements ToolResponseProcessor {
         filePath: stored.filePath,
         preview,
         originalContent: entry.originalContent,
+        size: describeContentSize(entry.originalContent),
+        reason: this.blockReasonDescription(entry),
       });
       entry.toolCallResult.isStructuredContent = false;
       return stored.sandboxCreated;

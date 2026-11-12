@@ -14,6 +14,7 @@ import {
   toUserContent,
   VERCEL_AI_PROVIDER_NAMES,
 } from '../../../src/core/llm/VercelAILLM';
+import { hostPictureMessage, internalSystemTag, untrustedDocumentTag } from '../../../src/core/runtime/contextUtils';
 
 // ─────────── parseMimeFromDataUri ───────────
 
@@ -385,7 +386,7 @@ describe('convertMessages', () => {
     expect(instructions).toBeUndefined();
   });
 
-  it('a later system message is per-reply context on the current user message, not instructions', () => {
+  it('a later system message is per-reply context in its own message before the current one, not instructions', () => {
     const { instructions, messages: result } = convertMessages({
       messages: [
         { role: 'system', content: 'Static instruction' },
@@ -398,13 +399,76 @@ describe('convertMessages', () => {
       providerName: 'openai',
     });
     expect(instructions).toBe('Static instruction');
-    expect(result[result.length - 1]).toEqual({
-      role: 'user',
-      content: [
-        { type: 'text', text: 'Host context for this reply.' },
-        { type: 'text', text: 'current question' },
-      ],
+    expect(result.slice(-2)).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Host context for this reply.' },
+          { type: 'text', text: expect.stringContaining("Answer the person's own message") },
+        ],
+      },
+      { role: 'user', content: 'current question' },
+    ]);
+  });
+
+  it("host context stays on the person's message when a picture the host attached follows a tool result", () => {
+    const picture = hostPictureMessage({
+      note: 'The browser screenshot you took. It shows a web page.',
+      imageUrl: 'data:image/png;base64,AAAA',
     });
+    const { messages: result } = convertMessages({
+      messages: [
+        { role: 'system', content: 'Static instruction' },
+        { role: 'system', content: 'Host context for this reply.' },
+        { role: 'user', content: 'Book me the 9am slot' },
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [{ id: 'call-1', type: 'function', function: { name: 'browser_screenshot', arguments: '{}' } }],
+        },
+        { role: 'tool', tool_call_id: 'call-1', content: '{"status":"ok"}' },
+        picture,
+      ],
+      provider: 'openai',
+      providerName: 'openai',
+    });
+    const contextAt = result.findIndex(
+      message =>
+        Array.isArray(message.content) && JSON.stringify(message.content).includes('Host context for this reply.'),
+    );
+    expect(result[contextAt + 1]).toEqual({ role: 'user', content: 'Book me the 9am slot' });
+    expect(result.at(-1)?.role).toBe('user');
+    expect(JSON.stringify(result.at(-1))).toContain('[host-picture]');
+  });
+
+  it("host context goes before the person's message, not before attached file text that follows it", () => {
+    const fileText = untrustedDocumentTag('Extracted text for notes.pdf: the invoice total is 40.');
+    const nudge = internalSystemTag('Answer the person now.');
+    const { messages: result } = convertMessages({
+      messages: [
+        { role: 'system', content: 'Static instruction' },
+        { role: 'system', content: 'Host context for this reply.' },
+        { role: 'user', content: 'What is the total?' },
+        { role: 'user', content: [{ type: 'text', text: fileText }] },
+        { role: 'user', content: nudge },
+      ],
+      provider: 'openai',
+      providerName: 'openai',
+    });
+    expect(result).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Host context for this reply.' },
+          { type: 'text', text: expect.stringContaining("Answer the person's own message") },
+        ],
+      },
+      { role: 'user', content: 'What is the total?' },
+      { role: 'user', content: [{ type: 'text', text: fileText }] },
+      { role: 'user', content: nudge },
+    ]);
+    // The host context makes no claim about which message follows, and calls none of it the person's message.
+    expect(JSON.stringify(result[0])).not.toContain('comes next');
   });
 
   it('the static instruction is never a later system message, even with no history', () => {
@@ -423,9 +487,10 @@ describe('convertMessages', () => {
         role: 'user',
         content: [
           { type: 'text', text: 'Host context for this reply.' },
-          { type: 'text', text: 'hi' },
+          { type: 'text', text: expect.stringContaining("Answer the person's own message") },
         ],
       },
+      { role: 'user', content: 'hi' },
     ]);
   });
 
@@ -548,14 +613,18 @@ describe.each(VERCEL_AI_PROVIDER_NAMES)('convertMessages on %s', provider => {
     });
     expect(instructions).toBe(STATIC_INSTRUCTION);
     expect(result.some(message => message.role === 'system')).toBe(false);
-    expect(result[result.length - 1]).toEqual({
-      role: 'user',
-      content: [
-        { type: 'text', text: REPLY_CONTEXT },
-        { type: 'text', text: RECALLED_BLOCK },
-        { type: 'text', text: 'current question' },
-      ],
-    });
+    // The person's words are the last message, alone and unchanged; the recalled block sits before it.
+    expect(result.slice(-2)).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: REPLY_CONTEXT },
+          { type: 'text', text: RECALLED_BLOCK },
+          { type: 'text', text: expect.stringContaining("Answer the person's own message") },
+        ],
+      },
+      { role: 'user', content: 'current question' },
+    ]);
   });
 
   it('two consecutive replies send byte-identical instructions', () => {

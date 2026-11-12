@@ -5,6 +5,10 @@ import {
   DEFAULT_MAPS_TRAVEL_MODE,
   MapsRouteResultSchema,
 } from '@truefoundry/trueforge-core/core/permissions/mapsRouteSchemas';
+import {
+  SPACE_WRITE_TOO_LONG_ERROR_CODE,
+  SPACE_WRITE_TOO_LONG_NOTE,
+} from '@truefoundry/trueforge-core/core/spaces/toolContract';
 import { parse as parsePartialJson } from 'partial-json';
 
 import type { ToolCallStatus } from '../atoms/ToolCallCard.js';
@@ -294,6 +298,53 @@ export function getToolFailureReason(
   const envelope = parseToolResultEnvelope(content);
   const visibleResult = envelope?.result ?? content;
   return findErrorText(visibleResult, 0);
+}
+
+/**
+ * Hunts a parsed tool-result payload for an `error_code` field, unwrapping the same shapes
+ * findErrorText unwraps: stringified JSON and MCP content items along the way.
+ */
+function findErrorCode(value: unknown, depth: number): string | undefined {
+  if (depth > MAX_ERROR_TEXT_SEARCH_DEPTH) return undefined;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed[0] !== '{' && trimmed[0] !== '[') return undefined;
+    try {
+      return findErrorCode(JSON.parse(trimmed), depth + 1);
+    } catch {
+      return undefined;
+    }
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const nested = findErrorCode(item, depth + 1);
+      if (nested) return nested;
+    }
+    return undefined;
+  }
+  if (isUnknownRecord(value)) {
+    if (typeof value.error_code === 'string') return value.error_code;
+    for (const key of ['error', 'content', 'text', 'message'] as const) {
+      if (key in value) {
+        const nested = findErrorCode(value[key], depth + 1);
+        if (nested) return nested;
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The plain note to show for a space write the tool layer refused for carrying too much new
+ * content in one call, or undefined for any other result. A size refusal is a normal step in
+ * building a space in parts, not a failure, so the step shows this note in place of the
+ * refusal text, which is written for the model. The refusal is told apart by the stable code
+ * its result carries, never by its wording.
+ */
+export function parseSpaceWriteTooLongNote(content: unknown): string | undefined {
+  const envelope = parseToolResultEnvelope(content);
+  const visibleResult = envelope?.result ?? content;
+  return findErrorCode(visibleResult, 0) === SPACE_WRITE_TOO_LONG_ERROR_CODE ? SPACE_WRITE_TOO_LONG_NOTE : undefined;
 }
 
 /** Truncates a failure reason to a single inline line, for display next to the outcome label. */

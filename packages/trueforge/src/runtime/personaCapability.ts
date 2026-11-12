@@ -30,6 +30,8 @@ import { createPersonaForOwner } from '../personas/createPersona';
 import { personaMatchKey, personaNameKeys, type Persona, type PersonaContent } from '../personas/persona';
 import { activateSessionPersona } from '../personas/sessionPersona';
 import { PersonaContentSchema, PersonaNameSchema } from '../schemas/persona';
+import type { PersonaSwitchLog } from './personaSwitchClaim';
+import { toolsForChat } from './privateChat';
 
 /** A description is one line in the card and in the persona list. */
 const PERSONA_DESCRIPTION_MAX_LENGTH = 160;
@@ -88,13 +90,22 @@ export interface PersonaTurnContext {
   model_name: string;
   /** The chat the persona takes over; the switch is recorded on it. */
   session_id: string;
+  /** The main assistant's name, so a persona can hand the chat back to it. Null when it has none. */
+  default_assistant_name: string | null;
   logger: Logger;
 }
 
 interface PersonaToolSetOptions extends PersonaTurnContext {
+  /** Told when a switch really happens, so the turn can tell a real switch from a claimed one. */
+  switches: PersonaSwitchLog;
   tracing: AgentTracing;
   sentinel: SentinelHostContext;
+  /** True in an incognito chat: personas can be listed and switched to, but none can be added. */
+  keepsNothing?: boolean | undefined;
 }
+
+/** Switching persona changes this chat and nothing that outlives it. */
+const CHAT_ONLY_PERSONA_TOOLS: ReadonlySet<string> = new Set([USE_PERSONA_TOOL_NAME]);
 
 type Prepared<T> = { ok: true; value: T } | { ok: false; message: string };
 
@@ -114,6 +125,11 @@ function createdMessage(name: string): string {
 /** Reusing a persona says so plainly, then switches the chat to it the same way. */
 function reusedMessage(name: string): string {
   return `Tell the user in one plain line: "Using your existing ${name}." Then tell them in one more plain line: "Now talking with ${name}." Do not say the current request was handed to them.`;
+}
+
+/** Handing the chat back to the main assistant says so the same way. */
+function handedBackMessage(name: string): string {
+  return `Tell the user in one plain line: "Now talking with ${name}." Do not say the current request was handed to them.`;
 }
 
 /** A persona's first line is its one-line description: the description leads the stored instructions. */
@@ -170,7 +186,7 @@ export class PersonaToolSet extends LocalToolMCP {
       defineTool({
         name: USE_PERSONA_TOOL_NAME,
         description:
-          "Switch this chat to one of the user's existing personas by name. Use it instead of create_persona when a persona already fits. Nothing is saved or changed.",
+          "Switch this chat to one of the user's existing personas by name, or back to the main assistant by its name. Works from any persona too. Use it instead of create_persona when a persona already fits. Nothing is saved or changed. Say a switch happened only after this call succeeds.",
         schema: UsePersonaToolSchema,
         annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
         handler: input => this.#use(input),
@@ -179,7 +195,11 @@ export class PersonaToolSet extends LocalToolMCP {
   }
 
   protected getTools(): ToolDefinition[] {
-    return this.#tools;
+    return toolsForChat({
+      tools: this.#tools,
+      keepsNothing: this.#options.keepsNothing ?? false,
+      chatOnly: CHAT_ONLY_PERSONA_TOOLS,
+    });
   }
 
   /**
@@ -302,11 +322,16 @@ export class PersonaToolSet extends LocalToolMCP {
     });
   }
 
-  /** Switches this chat to an existing persona. Nothing is saved, so no card is shown. */
+  /** Switches this chat to an existing persona, or back to the main assistant. Nothing is saved, so no card is shown. */
   async #use(input: UsePersonaToolInput) {
     const key = personaMatchKey(input.name);
     const persona = (await this.#ownerPersonas()).find(candidate => personaNameKeys(candidate).includes(key));
     if (persona === undefined) {
+      const assistantName = this.#options.default_assistant_name;
+      if (assistantName !== null && personaMatchKey(assistantName) === key) {
+        await this.#switchChat(undefined);
+        return jsonResult({ using: { name: assistantName }, next: handedBackMessage(assistantName) });
+      }
       return errorResult(
         `Nothing was changed because the user has no persona named "${input.name}". Call list_personas to see the names, or create_persona to add one.`,
       );
@@ -315,13 +340,14 @@ export class PersonaToolSet extends LocalToolMCP {
     return jsonResult({ using: { name: persona.display_name }, next: reusedMessage(persona.display_name) });
   }
 
-  #switchChat(persona: Persona) {
-    return activateSessionPersona({
+  async #switchChat(persona: Persona | undefined) {
+    await activateSessionPersona({
       store: this.#options.store,
       tenant_id: this.#options.tenant_id,
       session_id: this.#options.session_id,
       persona,
     });
+    this.#options.switches.markSwitched();
   }
 
   #duplicateMessage(name: string): string {
@@ -368,7 +394,17 @@ function buildPersonaInstruction(builder: InstructionBuilder): void {
   builder.addSection(PERSONA_INSTRUCTION_SECTION, PERSONA_INSTRUCTION);
 }
 
+const PERSONA_SWITCH_INSTRUCTION =
+  'To switch persona, call list_personas, then use_persona. This incognito chat cannot add a persona.';
+
+function buildPersonaSwitchInstruction(builder: InstructionBuilder): void {
+  builder.addSection(PERSONA_INSTRUCTION_SECTION, PERSONA_SWITCH_INSTRUCTION);
+}
+
 /** Attaches the persona tool to one chat turn's root thread. */
 export function personaCapability(options: PersonaToolSetOptions): AgentCapability {
-  return { systemToolSets: [new PersonaToolSet(options)], instructionBuilders: [buildPersonaInstruction] };
+  return {
+    systemToolSets: [new PersonaToolSet(options)],
+    instructionBuilders: [options.keepsNothing === true ? buildPersonaSwitchInstruction : buildPersonaInstruction],
+  };
 }

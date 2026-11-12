@@ -1,9 +1,9 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
-import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
+import { MORNING_BRIEF_CARD_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AmanTour, greetingLine, greetingParts, type AmanTourProps } from '@/components/AmanTour.js';
-import { CARDS, HOME_TOPICS, SHARED_RULES } from '@/components/tourPrompts.js';
+import { CARDS, HOME_TOPICS, RUN_BRIEF_CARD } from '@/components/tourPrompts.js';
 
 const noCapabilities = { email: false, calendar: false, sandbox: false, maps: true };
 const connected = { email: true, calendar: true, sandbox: false, maps: true };
@@ -137,21 +137,38 @@ describe('AmanTour home', () => {
     }
   });
 
-  it('sends the card prompt with the shared rules under it, and fills nothing', () => {
+  it('sends the card prompt on its own, and fills nothing', () => {
     const { props } = renderTour();
 
     expect(screen.getByRole('heading', { name: 'Some things Mannie can do' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /I can't get started/ }));
-    expect(props.onSend).toHaveBeenLastCalledWith(`${CARDS.start.prompt}\n\n${SHARED_RULES}`);
+    expect(props.onSend).toHaveBeenLastCalledWith(CARDS.start.prompt);
     expect(props.onFill).not.toHaveBeenCalled();
   });
 
-  it('sends only the morning brief prompt, with no rules, from the brief card', () => {
+  it('sends only the morning brief card prompt from the brief card', () => {
     const { props } = renderTour({ capabilities: connected });
 
     fireEvent.click(screen.getByRole('button', { name: /Your morning brief/ }));
     expect(props.onSend).toHaveBeenCalledTimes(1);
-    expect(props.onSend).toHaveBeenLastCalledWith(MORNING_BRIEF_PROMPT);
+    expect(props.onSend).toHaveBeenLastCalledWith(MORNING_BRIEF_CARD_PROMPT);
+  });
+
+  it('leaves the run my daily brief card out when there is no brief schedule to run', () => {
+    renderTour({ capabilities: connected });
+
+    expect(screen.queryByRole('button', { name: new RegExp(RUN_BRIEF_CARD.title) })).not.toBeInTheDocument();
+  });
+
+  it('runs the brief schedule from its card next to the morning brief card, and sends no prompt', () => {
+    const onRunBrief = vi.fn();
+    const { props } = renderTour({ capabilities: connected, onRunBrief });
+
+    expect(cardTitles().slice(0, 2)).toEqual([CARDS.brief.title, RUN_BRIEF_CARD.title]);
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(RUN_BRIEF_CARD.title) }));
+    expect(onRunBrief).toHaveBeenCalledTimes(1);
+    expect(props.onSend).not.toHaveBeenCalled();
+    expect(props.onFill).not.toHaveBeenCalled();
   });
 
   it('puts the same card under two pills, sent the same way', () => {
@@ -180,11 +197,30 @@ describe('AmanTour home', () => {
     expect(screen.queryByRole('button', { name: 'Skip the tour' })).not.toBeInTheDocument();
   });
 
+  it('places the setup ticket between the greeting and the tour body', () => {
+    const { container } = renderTour({ firstRun: true, onSkip: vi.fn() });
+
+    const heading = screen.getByRole('heading', { level: 1 });
+    const ticket = screen.getByText('Setup ticket');
+    const body = container.querySelector('.order-1');
+    if (body === null) {
+      throw new Error('the tour body is missing');
+    }
+    // The ticket is not inside the body that holds the pills and the cards, so the composer the
+    // thread renders after this component lands between the ticket and the pills.
+    expect(body.contains(ticket)).toBe(false);
+    expect(heading.compareDocumentPosition(ticket) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    expect(
+      ticket.compareDocumentPosition(screen.getByRole('list', { name: 'What would help you most?' })) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).not.toBe(0);
+  });
+
   it('only fills the composer from a card when no model is set, so nothing is sent', () => {
     const { props } = renderTour({ canSend: false });
 
     fireEvent.click(screen.getByRole('button', { name: /I can't get started/ }));
-    expect(props.onFill).toHaveBeenLastCalledWith(`${CARDS.start.prompt}\n\n${SHARED_RULES}`);
+    expect(props.onFill).toHaveBeenLastCalledWith(CARDS.start.prompt);
     expect(props.onSend).not.toHaveBeenCalled();
   });
 

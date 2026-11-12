@@ -10,7 +10,19 @@ import type { Persona } from '../personas/persona';
 export const CHAT_ASSISTANT_DESCRIPTION = 'Runs the schedules you make in a chat.';
 
 const CHAT_ASSISTANT_NAME_PREFIX = 'assistant-';
-const UNNAMED_ASSISTANT = 'Your assistant';
+export const UNNAMED_ASSISTANT = 'Your assistant';
+
+/** The name a person gave their assistant, or the plain default when they gave none. */
+export async function assistantNameFor({
+  personalizationStore,
+  owner,
+}: {
+  personalizationStore: Pick<IPersonalizationStore, 'getProfile'>;
+  owner: { tenant_id: string; created_by: string };
+}): Promise<string> {
+  const profile = await personalizationStore.getProfile({ tenant_id: owner.tenant_id, created_by: owner.created_by });
+  return profile?.assistant_name ?? UNNAMED_ASSISTANT;
+}
 
 /** Who a schedule made in one chat runs as, settled by the host so the model never names it. */
 export interface ChatAssistant {
@@ -37,19 +49,20 @@ export class ChatAssistantUnavailableError extends Error {
   }
 }
 
-function isChatAssistantAgent(input: { agent: AgentRecord; owner: CreatedBySubject }): boolean {
+/** An agent the host made for its owner's schedules, as opposed to one the person saved and named. */
+export function isChatAssistantAgent(input: { agent: AgentRecord; owner: CreatedBySubject }): boolean {
   return input.agent.host_managed && input.agent.created_by_subject.subject_id === input.owner.subject_id;
 }
 
 /** One name per owner and setup, so chats set up alike share one stored agent and a changed setup gets its own. */
-function chatAssistantAgentName(input: { owner: CreatedBySubject; spec: AgentSpec }): string {
+export function chatAssistantAgentName(input: { owner: CreatedBySubject; spec: AgentSpec }): string {
   const digest = createHash('sha256')
     .update(JSON.stringify({ owner: input.owner.subject_id, spec: input.spec }))
     .digest('hex');
   return `${CHAT_ASSISTANT_NAME_PREFIX}${digest.slice(0, 16)}`;
 }
 
-async function getOrCreateChatAssistantAgent(input: {
+export async function getOrCreateChatAssistantAgent(input: {
   tenant_id: string;
   owner: CreatedBySubject;
   name: string;

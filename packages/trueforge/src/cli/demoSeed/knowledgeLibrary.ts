@@ -10,7 +10,7 @@ import {
 } from '../../personaKnowledge/sqliteKnowledgeRepository';
 import { EMBEDDING_DIMENSIONS } from '../../runtime/memory/embeddingModel';
 import type { KnowledgeDocumentStatus } from '../../schemas/personaKnowledge';
-import { DEMO_MARKER } from './world';
+import { DEMO_ID_PREFIX } from './world';
 
 const SETTLE_POLL_MS = 500;
 const SETTLED_STATUSES: readonly KnowledgeDocumentStatus[] = ['ready', 'failed'];
@@ -26,8 +26,14 @@ export interface KnowledgeDocumentSummary {
 /** What the seed needs from a persona's knowledge library; the real one is the persona knowledge repository. */
 export interface DemoKnowledgeLibrary {
   listDocuments(input: { personaId: string }): Promise<KnowledgeDocumentSummary[]>;
-  /** Saves pasted text as a document and queues it for indexing. */
-  addTextDocument(input: { personaId: string; title: string; text: string; sourceLabel: string }): Promise<void>;
+  /** Saves pasted text as a document and queues it for indexing; `documentId` lets the seed choose the id. */
+  addTextDocument(input: {
+    personaId: string;
+    documentId?: string;
+    title: string;
+    text: string;
+    sourceLabel: string;
+  }): Promise<void>;
   deleteDocument(input: { personaId: string; documentId: string }): Promise<void>;
   /** Removes the persona's whole library, database and queued files included. */
   deleteLibrary(input: { personaId: string }): Promise<void>;
@@ -35,9 +41,13 @@ export interface DemoKnowledgeLibrary {
   settle(input: { personaId: string; timeoutMs: number }): Promise<KnowledgeDocumentSummary[]>;
 }
 
-/** The label a seeded document carries; the hash lets a changed text replace the old document. */
-export function knowledgeSourceLabel(text: string): string {
-  return `${DEMO_MARKER}:${createHash('sha256').update(text).digest('hex').slice(0, 12)}`;
+/**
+ * The id a seeded document carries. The hash lets a changed title or text replace the old document, and it lives
+ * in the id because the source label is printed in the "Sources:" footer, where a person must never see an id.
+ */
+export function knowledgeDocumentId({ title, text }: { title: string; text: string }): string {
+  const hash = createHash('sha256').update(`${title}\n${text}`).digest('hex').slice(0, 12);
+  return `${DEMO_ID_PREFIX}-doc-${hash}`;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -86,11 +96,12 @@ export function createKnowledgeLibrary({
   return {
     listDocuments: ({ personaId }) => list(personaId),
 
-    async addTextDocument({ personaId, title, text, sourceLabel }) {
+    async addTextDocument({ personaId, documentId: wantedId, title, text, sourceLabel }) {
       const documentId = await withRepository(
         personaId,
         repo =>
           repo.createDocument({
+            ...(wantedId === undefined ? {} : { id: wantedId }),
             title,
             titleExplicit: true,
             source_kind: 'text',

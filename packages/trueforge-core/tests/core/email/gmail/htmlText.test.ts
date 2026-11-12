@@ -49,6 +49,11 @@ describe('htmlToText content', () => {
     expect(htmlToText('<table><tr><td>Rent</td><td>1200</td></tr><tr><td>Fee</td><td>50</td></tr></table>')).toBe(
       'Rent 1200\nFee 50',
     );
+    expect(
+      htmlToText('<table><tr><th>Item</th><th>Cost</th></tr><tr><td>Rent</td><td>1200</td></tr></table>', {
+        cellSeparator: ', ',
+      }),
+    ).toBe('Item, Cost\nRent, 1200');
   });
 
   it('turns zero-width entities and no-break spaces into nothing visible or a plain space', () => {

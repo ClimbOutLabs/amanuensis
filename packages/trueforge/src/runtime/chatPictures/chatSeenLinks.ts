@@ -1,5 +1,10 @@
 import type { ISessionStore, PersistedTurnEvent } from '@truefoundry/trueforge-core/agent-session';
-import { isPageReaderTool, isSearchResultTool, pageImageUrls } from '@truefoundry/trueforge-core/core';
+import {
+  isPageReaderTool,
+  isSearchResultTool,
+  pageImageUrls,
+  searchResultUrls,
+} from '@truefoundry/trueforge-core/core';
 
 import { replyImageUrls } from '../chatImages/imageLinks';
 
@@ -8,10 +13,6 @@ const PAGE_SIZE = 200;
 /** Pages walked before giving up, so one picture check never scans a whole long chat. */
 const MAX_PAGES = 10;
 
-/** Keys whose contents describe a result or what it links to, never the result itself. */
-const NON_RESULT_KEYS = new Set(['links', 'metadata', 'images', 'favicon', 'excerpts', 'content', 'raw_content']);
-const MAX_RESULT_DEPTH = 3;
-
 /** Comparable form of a link: the parsed URL, so encoding differences between turns do not matter. */
 export function normalizeSeenLink(url: string): string | undefined {
   try {
@@ -19,26 +20,6 @@ export function normalizeSeenLink(url: string): string | undefined {
     return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.href : undefined;
   } catch {
     return undefined;
-  }
-}
-
-/** The `url` field of each result object in a provider's JSON; text inside a result is never read for links. */
-function collectResultUrls(node: unknown, into: string[], depth: number): void {
-  if (depth > MAX_RESULT_DEPTH) {
-    return;
-  }
-  if (Array.isArray(node)) {
-    for (const child of node) {
-      collectResultUrls(child, into, depth + 1);
-    }
-  } else if (typeof node === 'object' && node !== null) {
-    for (const [key, child] of Object.entries(node)) {
-      if (key === 'url' && typeof child === 'string') {
-        into.push(child);
-      } else if (!NON_RESULT_KEYS.has(key)) {
-        collectResultUrls(child, into, depth + 1);
-      }
-    }
   }
 }
 
@@ -105,8 +86,8 @@ function toolResponseText(event: PersistedTurnEvent): string | undefined {
 }
 
 /**
- * Whether one picture link was seen in this chat: a search result's own link, a picture on a page
- * the chat opened, or a picture the reply itself showed. Nothing here comes from the client: every
+ * Whether one picture link was seen in this chat: a search result's own link or a picture it listed,
+ * a picture on a page the chat opened, or a picture the reply itself showed. Nothing here comes from the client: every
  * candidate is read back from the chat's stored turn events, and a tool result only counts when
  * the call that produced it is named as a search or page reader by the model's own message, ran
  * to completion, and was not screened (a screened result's stored text is not what the model saw).
@@ -188,9 +169,8 @@ export async function isChatSeenLink(input: {
     }
     const payload = toolResultPayload(text);
     if (isSearchResultTool(name)) {
-      const urls: string[] = [];
-      collectResultUrls(payload, urls, 0);
-      for (const url of urls) {
+      const found = searchResultUrls(payload);
+      for (const url of [...found.links, ...found.pictures]) {
         add(url);
       }
     } else if (isPageReaderTool(name)) {
