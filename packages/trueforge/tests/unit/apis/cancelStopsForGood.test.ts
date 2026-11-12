@@ -9,7 +9,11 @@ import type * as internalSources from '../../../src/runtime/turnInternalSources'
 import { GetTurnResponseSchema, ListTurnsResponseSchema } from '../../../src/schemas/turn';
 import { MODEL_FQN, startApprovalTestServer, type ApprovalTestServer } from '../../fixtures/approvalTestServer';
 import { INERT_SERVER_NAME } from '../../fixtures/inertMcpServer';
-import { RUN_DIRECTIVE_PREFIX, THINK_AFTER_WRITE_DIRECTIVE } from '../../fixtures/scriptedModelServer';
+import {
+  RUN_DIRECTIVE_PREFIX,
+  THINK_AFTER_WRITE_DIRECTIVE,
+  waitForChatTitleCall,
+} from '../../fixtures/scriptedModelServer';
 
 /**
  * Before a turn exists the server checks the persona's library, which can ask the chat's own model to
@@ -123,12 +127,13 @@ async function denyHeldWrite(
   release: Promise<unknown>,
 ): Promise<{ sessionId: string; held: Promise<void>; resumedStream: Promise<string> }> {
   const sessionId = await createSession(server);
-  const ask: TurnInputItem[] = [
-    { type: 'user.message', content: `${RUN_DIRECTIVE_PREFIX}${THINK_AFTER_WRITE_DIRECTIVE}` },
-  ];
+  const askText = `${RUN_DIRECTIVE_PREFIX}${THINK_AFTER_WRITE_DIRECTIVE}`;
+  const ask: TurnInputItem[] = [{ type: 'user.message', content: askText }];
   const asked = await server.request(`/api/v1/sessions/${sessionId}/turns`, jsonInit({ input: ask, stream: true }));
   expect(asked.status).toBe(200);
   await asked.text();
+  // The first turn names the chat in a detached call; it must land before the stop is measured.
+  await waitForChatTitleCall({ model: server.model, fromIndex: 0, firstMessage: askText });
   const denial: TurnInputItem[] = [
     {
       type: 'user.tool_approval',
