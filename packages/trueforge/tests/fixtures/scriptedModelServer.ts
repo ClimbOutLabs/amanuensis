@@ -471,6 +471,36 @@ function completionBody({ text, toolCalls }: { text: string | null; toolCalls: S
   };
 }
 
+/**
+ * Waits for the detached chat-title call a chat's first turn leaves behind. It lands in the request
+ * log whenever it happens to arrive, so a test that counts requests waits for it first. The call is
+ * matched by the first message it was asked to title.
+ */
+export async function waitForChatTitleCall({
+  model,
+  fromIndex,
+  firstMessage,
+}: {
+  model: ScriptedModelServer;
+  fromIndex: number;
+  firstMessage: string;
+}): Promise<void> {
+  const deadline = Date.now() + 20_000;
+  for (;;) {
+    const landed = model
+      .requests()
+      .slice(fromIndex)
+      .some(request => chatTitleAnswer(request.messages)?.includes(firstMessage) === true);
+    if (landed) {
+      return;
+    }
+    if (Date.now() > deadline) {
+      throw new Error('The chat title call never reached the scripted model. Check that the first turn finished.');
+    }
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+}
+
 export async function startScriptedModelServer(): Promise<ScriptedModelServer> {
   const requests: ChatCompletionRequest[] = [];
   // Stalled streams stay open until the caller hangs up or the fixture closes.

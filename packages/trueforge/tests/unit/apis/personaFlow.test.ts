@@ -16,6 +16,7 @@ import {
   startApprovalTestServer,
   type ApprovalTestServer,
 } from '../../fixtures/approvalTestServer';
+import { waitForChatTitleCall } from '../../fixtures/scriptedModelServer';
 
 const TURN_TIMEOUT_MS = 60_000;
 
@@ -166,41 +167,6 @@ function lastCompletion(server: ApprovalTestServer) {
     throw new Error('the scripted model endpoint was never called');
   }
   return completionAt(server, requests.length - 1);
-}
-
-/**
- * A chat's first turn leaves a detached chat-title call behind: once the turn
- * finishes, the follow-up asks the summarization model for a subject title.
- * That call lands in the same request log this suite judges by, whenever it
- * happens to arrive, so a test that counts requests or reads the latest one
- * must first wait for the title call of the turn it just ran to land. The
- * wait matches the call by the first message it was asked to title.
- */
-async function settleChatTitleCall(server: ApprovalTestServer, fromIndex: number, firstMessage: string): Promise<void> {
-  const deadline = Date.now() + 20_000;
-  for (;;) {
-    const landed = server.model
-      .requests()
-      .slice(fromIndex)
-      .some(request => {
-        const system = request.messages
-          .filter(message => message.role === 'system')
-          .map(message => (typeof message.content === 'string' ? message.content : ''))
-          .join('\n');
-        const user = request.messages
-          .filter(message => message.role === 'user')
-          .map(message => (typeof message.content === 'string' ? message.content : ''))
-          .join('\n');
-        return system.includes('<chat-title') && user.includes(firstMessage);
-      });
-    if (landed) {
-      return;
-    }
-    if (Date.now() > deadline) {
-      throw new Error('the chat title call never reached the scripted model endpoint');
-    }
-    await new Promise(resolve => setTimeout(resolve, 25));
-  }
 }
 
 async function activePersona(server: ApprovalTestServer, sessionId: string) {
@@ -423,7 +389,11 @@ describe('persona switching inside one conversation', () => {
       expect(negation.system).not.toContain('<persona-name>');
       // Wait for that title call to land so the counts below measure turns
       // only; exactly one title call follows a first turn.
-      await settleChatTitleCall(server, beforeNegation, "Vega, don't answer this.");
+      await waitForChatTitleCall({
+        model: server.model,
+        fromIndex: beforeNegation,
+        firstMessage: "Vega, don't answer this.",
+      });
       expect(server.model.requests()).toHaveLength(beforeNegation + 2);
       expect(await activePersona(server, sessionId)).toBeNull();
 
@@ -458,7 +428,11 @@ describe('persona switching inside one conversation', () => {
       const twoClauses = completionAt(server, beforeTwoClauses);
       expect(twoClauses.model).toBe('scripted-model');
       expect(twoClauses.system).not.toContain('<persona-name>');
-      await settleChatTitleCall(server, beforeTwoClauses, 'Vega, answer. Lyra, answer.');
+      await waitForChatTitleCall({
+        model: server.model,
+        fromIndex: beforeTwoClauses,
+        firstMessage: 'Vega, answer. Lyra, answer.',
+      });
       expect(server.model.requests()).toHaveLength(beforeTwoClauses + 2);
       expect(await activePersona(server, twoClauseSessionId)).toBeNull();
 
@@ -468,7 +442,11 @@ describe('persona switching inside one conversation', () => {
       const cancelled = completionAt(server, beforeCancellation);
       expect(cancelled.model).toBe('scripted-model');
       expect(cancelled.system).not.toContain('<persona-name>');
-      await settleChatTitleCall(server, beforeCancellation, 'Vega, answer. Actually, never mind.');
+      await waitForChatTitleCall({
+        model: server.model,
+        fromIndex: beforeCancellation,
+        firstMessage: 'Vega, answer. Actually, never mind.',
+      });
       expect(server.model.requests()).toHaveLength(beforeCancellation + 2);
       expect(await activePersona(server, cancelledSessionId)).toBeNull();
 
@@ -478,7 +456,11 @@ describe('persona switching inside one conversation', () => {
       const sameClauseCancellation = completionAt(server, beforeSameClauseCancellation);
       expect(sameClauseCancellation.model).toBe('scripted-model');
       expect(sameClauseCancellation.system).not.toContain('<persona-name>');
-      await settleChatTitleCall(server, beforeSameClauseCancellation, 'Vega, never mind.');
+      await waitForChatTitleCall({
+        model: server.model,
+        fromIndex: beforeSameClauseCancellation,
+        firstMessage: 'Vega, never mind.',
+      });
       expect(server.model.requests()).toHaveLength(beforeSameClauseCancellation + 2);
       expect(await activePersona(server, sameClauseCancellationSessionId)).toBeNull();
 
@@ -488,7 +470,11 @@ describe('persona switching inside one conversation', () => {
       const politeCancellation = completionAt(server, beforePoliteCancellation);
       expect(politeCancellation.model).toBe('scripted-model');
       expect(politeCancellation.system).not.toContain('<persona-name>');
-      await settleChatTitleCall(server, beforePoliteCancellation, 'Vega, please never mind.');
+      await waitForChatTitleCall({
+        model: server.model,
+        fromIndex: beforePoliteCancellation,
+        firstMessage: 'Vega, please never mind.',
+      });
       expect(server.model.requests()).toHaveLength(beforePoliteCancellation + 2);
       expect(await activePersona(server, politeCancellationSessionId)).toBeNull();
 
@@ -498,7 +484,11 @@ describe('persona switching inside one conversation', () => {
       const conversationalCancellation = completionAt(server, beforeConversationalCancellation);
       expect(conversationalCancellation.model).toBe('scripted-model');
       expect(conversationalCancellation.system).not.toContain('<persona-name>');
-      await settleChatTitleCall(server, beforeConversationalCancellation, 'Vega, okay, never mind.');
+      await waitForChatTitleCall({
+        model: server.model,
+        fromIndex: beforeConversationalCancellation,
+        firstMessage: 'Vega, okay, never mind.',
+      });
       expect(server.model.requests()).toHaveLength(beforeConversationalCancellation + 2);
       expect(await activePersona(server, conversationalCancellationSessionId)).toBeNull();
     },
