@@ -1,7 +1,7 @@
 ---
 id: skills
 title: Skills
-covers: settings:skills, route:skill
+covers: settings:skills, route:skill, approval:skill
 ---
 
 A skill is a set of step-by-step instructions that teaches Aman a particular job, such as writing release notes or following a checklist. Turn on the skills you want, then switch them on in the chats that need them.
@@ -43,6 +43,22 @@ When a skill is on for a chat, Aman reads its instructions when the job comes up
 6. Click **Import**.
 
 You need to fill in every box.
+
+## Add a skill from a chat
+
+You can also ask Aman in a chat to add a skill.
+
+1. In a chat, say which skill you want, or paste its GitHub address, such as "add the skill at github.com/acme/skills/tree/main/skills/release-notes".
+2. A card shows the skill before anything is added: its name, what it's for, where it comes from and the exact version. Aman reads the name and description from the skill itself.
+3. Click **Allow** to add it, or **Not now** to skip it. This card asks every time.
+
+After you allow it, the skill is on for that chat from your next message. It also shows in Settings, under Skills, where you can remove it.
+
+!!! warning "Add only skills you trust"
+
+    A skill is instructions written by someone else. Add one only if you trust where it comes from.
+
+From a chat, Aman can only add a skill. It can't change or remove one, and a skill that wants to reach sites still needs your OK in Settings. Only skills in a public GitHub repository can be added from a chat. An incognito chat can't add a skill, and neither can a scheduled run.
 
 ## Turn a skill off
 

@@ -59,6 +59,10 @@ For a short overview, see [Your privacy](../packages/trueforge/guide/topics/priv
 
     Whatever a connector call sends, such as an email you approved. Calls that send or change something show a card first. See [Safety rules in detail](safety.md).
 
+??? note "To GitHub, when you ask Aman in a chat to add a skill"
+
+    The address of that skill and a request to read it. Nothing about you is in it. GitHub also sees this computer's internet address.
+
 ??? note "To package sources, when a skill you approved installs packages"
 
     The names and versions of those packages go to the package sources: npm, PyPI, Go and Rust.

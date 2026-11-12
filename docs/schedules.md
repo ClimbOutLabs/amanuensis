@@ -17,7 +17,7 @@ Reminders
 : A note Aman gives you at a set time. It only ever reaches you.
 
 Skills
-: Instructions that teach Aman how to do a kind of job. Add them under **Settings**, **Skills**.
+: Instructions that teach Aman how to do a kind of job. Add them under **Settings**, **Skills**, or ask Aman in a chat to add one.
 
 ## How a schedule runs
 

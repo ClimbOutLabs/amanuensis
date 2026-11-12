@@ -70,7 +70,7 @@ These ask every time, so their cards offer only a yes or a no:
 
 Deletes and other actions with real effects also offer **Always allow in this chat** when the card names who or where the action goes. Aman then stops asking for that kind of action, to that same place, for the rest of the chat. It asks again in any other chat.
 
-A card that names no such place offers only a yes or a no, because there's nothing to tie a lasting answer to. Making a schedule or a persona asks every time for the same reason.
+A card that names no such place offers only a yes or a no, because there's nothing to tie a lasting answer to. Making a schedule or a persona asks every time for the same reason. Adding a skill asks every time too.
 
 A change to your own calendar that reaches no guests also offers **Always allow in this chat**. That answer covers every later change to your own calendar in that chat. It's the only lasting answer on a calendar card, so a calendar change asks again in every new chat.
 
@@ -85,6 +85,18 @@ In Settings, under Permissions, the **Maps** switch decides whether a map asks f
 With the switch off, each map shows a card that names the places and the map service they go to. The card offers two lasting answers. **Always allow in this chat** stops the question for the rest of that chat. **Always allow everywhere** turns the **Maps** switch on, so maps stop asking in every chat and in scheduled runs.
 
 A scheduled run never waits for you on a map. With the switch on, its maps run. With the switch off, the run leaves the map out and tells you in one line to turn on **Maps**. A map that would send something that looks like a password or key is left out of a scheduled run too, and the run says so in one line.
+
+### Adding a skill
+
+A skill is a set of instructions, sometimes with scripts, that someone else wrote and that Aman follows. You can ask Aman in a chat to add one from a public GitHub repository.
+
+Aman always shows a card first. Aman itself reads the skill on GitHub, so the name and description on the card are the skill's own, not words the model chose. The card also shows the repository, the folder and the exact version. The skill's own instructions sit under **Details**. A starter skill that comes with Aman is added as shipped, and its card says so. The card offers only a yes or a no, and no earlier answer covers it.
+
+What you approve is what is added. The skill is saved at the exact version on the card, so a later change to the repository isn't picked up. If the repository changes between the card and your answer, nothing is added and Aman asks again.
+
+Adding a skill gives it nothing else. Its scripts run in the sandbox under the same rules as any other code. A skill that wants to reach sites still needs your OK in Settings, under Skills. From a chat, Aman can only add a skill. It can't change or remove one.
+
+An incognito chat can't add a skill. A scheduled run can't add one either, because the tool isn't there.
 
 ### Commands in the sandbox
 
