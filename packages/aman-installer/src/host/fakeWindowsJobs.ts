@@ -92,6 +92,7 @@ export class FakeWindowsJobs implements WindowsJobs {
   dockerDesktopStarts = 0;
   backupTask: boolean;
   backupNames: string[];
+  readonly backupHolds: Map<string, readonly string[]>;
   firewallOpen = false;
   firewallPorts: readonly number[] = [];
   readonly ops: string[] = [];
@@ -120,6 +121,9 @@ export class FakeWindowsJobs implements WindowsJobs {
     // backups folder, as a test scripts them.
     backupTask?: boolean;
     backups?: readonly string[];
+    // The instances each backup has a folder for; a backup not named
+    // here holds every instance.
+    backupHolds?: ReadonlyMap<string, readonly string[]>;
     // Who the saved Docker Desktop installer's signature names, as a
     // test scripts it; the default is Docker Inc.
     installerSigner?: string | null;
@@ -159,6 +163,7 @@ export class FakeWindowsJobs implements WindowsJobs {
     this.acls = new Map(options.acls ?? []);
     this.backupTask = options.backupTask ?? false;
     this.backupNames = [...(options.backups ?? [])];
+    this.backupHolds = new Map(options.backupHolds ?? []);
     this.fromExplorer = options.startedFromExplorer ?? false;
     this.dockerRemovedMark = options.dockerRemovedMark ?? false;
   }
@@ -277,9 +282,12 @@ export class FakeWindowsJobs implements WindowsJobs {
     return Promise.resolve(this.backupTask);
   }
 
-  listBackups(): Promise<readonly string[]> {
+  listBackups(options?: { holding?: string }): Promise<readonly string[]> {
     this.step('backupsList');
-    return Promise.resolve([...this.backupNames]);
+    const holding = options?.holding;
+    return Promise.resolve(
+      this.backupNames.filter(name => holding === undefined || (this.backupHolds.get(name)?.includes(holding) ?? true)),
+    );
   }
 
   ensurePhoneShortcut(): Promise<void> {

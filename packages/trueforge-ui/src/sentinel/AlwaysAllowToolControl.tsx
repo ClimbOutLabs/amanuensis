@@ -4,11 +4,11 @@ import { useState, type FC } from 'react';
 
 import { Button } from '../atoms/primitives/Button.js';
 import { CenteredModal } from '../atoms/primitives/CenteredModal.js';
-import { APPROVAL_CHOICES } from './approvalChoices.js';
+import { APPROVAL_CHOICES, type AlwaysAllowConfirm } from './approvalChoices.js';
 
 export type AlwaysAllowToolControlProps = {
-  /** Says which call the standing grant covers, in the confirm step. */
-  description: string;
+  /** Says what the every-chat answer covers and where to undo it. */
+  confirm: AlwaysAllowConfirm;
   size: 'small' | 'large';
   className?: string;
   disabled?: boolean;
@@ -16,9 +16,9 @@ export type AlwaysAllowToolControlProps = {
   onConfirm: () => void;
 };
 
-/** "Always allow this tool" and its confirm step, shared by every approval card that offers it. */
+/** "Always allow everywhere" and its confirm step, shared by every approval card that offers it. */
 export const AlwaysAllowToolControl: FC<AlwaysAllowToolControlProps> = ({
-  description,
+  confirm,
   size,
   className,
   disabled = false,
@@ -30,7 +30,7 @@ export const AlwaysAllowToolControl: FC<AlwaysAllowToolControlProps> = ({
       <Button
         variant="secondary"
         size={size}
-        title={APPROVAL_CHOICES.alwaysAllowTool.hint}
+        title={confirm.hint}
         onClick={() => {
           setConfirming(true);
         }}
@@ -44,15 +44,13 @@ export const AlwaysAllowToolControl: FC<AlwaysAllowToolControlProps> = ({
         onOpenChange={open => {
           if (!open) setConfirming(false);
         }}
-        title="Always allow this tool?"
-        description={description}
+        title="Always allow everywhere?"
+        description={confirm.description}
         contentSized
-        aria-label="Confirm always allowing this tool"
+        aria-label="Confirm always allowing this"
       >
         <div className="flex flex-col gap-4 px-5 py-4">
-          <p className="font-sans text-sm leading-relaxed text-text-primary">
-            You can remove this later in connector settings.
-          </p>
+          <p className="font-sans text-sm leading-relaxed text-text-primary">{confirm.undo}</p>
           <div className="flex items-center justify-end gap-2">
             <Button
               type="button"
