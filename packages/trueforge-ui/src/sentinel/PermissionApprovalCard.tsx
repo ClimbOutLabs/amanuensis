@@ -22,6 +22,7 @@ import { CalendarEventDetails } from './CalendarEventDetails.js';
 import { ChangeRequestBox } from './ChangeRequestBox.js';
 import { PersonaDetails } from './PersonaDetails.js';
 import { ScheduleDetails } from './ScheduleDetails.js';
+import { SkillDetails } from './SkillDetails.js';
 import { WAITING_FOR_YOU_LABEL, type SentinelApprovalCard } from './types.js';
 
 /** Characters shown before a long value is folded behind "Show all". */
@@ -180,7 +181,7 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
     card.parsed_command !== null ||
     card.destination_host !== null;
 
-  const { calendar_event: calendarEvent, schedule, persona } = card;
+  const { calendar_event: calendarEvent, schedule, persona, skill } = card;
   // A new-recipient send never offers a standing grant or a chat-wide allow: approving it adds addresses.
   const newRecipients = isNewRecipientCard(card);
   const stub = approvalStub(card);
@@ -265,6 +266,8 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
         {schedule !== null && <ScheduleDetails schedule={schedule} />}
 
         {persona !== null && <PersonaDetails persona={persona} />}
+
+        {skill !== null && <SkillDetails skill={skill} />}
 
         {outboundOpen && outboundShown !== null && (
           <OutboundBlock text={outboundShown} truncated={card.outbound_truncated} />
