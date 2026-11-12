@@ -43,6 +43,7 @@ How to get there: Click **More** in the left bar, then **Settings**, then **Audi
 ## Good to know
 
 - The log stays when you delete a chat. Those lines say "In: a deleted chat" instead of a link.
+- An action that never had a chat, such as a reminder set outside one, names no chat.
 - The log only shows what happened. You can't change or delete lines here.
 - Each change a scheduled run makes to a space is a line in the log too.
 - The log keeps a short line about each action, even from an incognito chat. That line can repeat words from the action, such as the address an email went to.

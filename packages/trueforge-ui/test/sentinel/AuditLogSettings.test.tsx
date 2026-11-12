@@ -107,6 +107,28 @@ describe('AuditLogSettings', () => {
     expect(within(row).getByRole('link', { name: 'In: Untitled chat' }).getAttribute('href')).toContain('chat-1');
   });
 
+  it('names no chat for an action that never had one, such as a reminder set outside a chat', async () => {
+    renderPage(
+      stubApi(async () => ({
+        entries: [
+          makeEntry({
+            id: 'no-chat',
+            session_id: '',
+            chat_exists: false,
+            session_title: null,
+            description: 'The reminder ran: Call the pharmacy',
+          }),
+        ],
+      })),
+    );
+
+    const row = (await screen.findByText('The reminder ran: Call the pharmacy')).closest('li');
+    if (row === null) throw new Error('audit row did not render as a list item');
+
+    expect(within(row).queryByText(/^In:/)).toBeNull();
+    expect(within(row).queryByRole('link')).toBeNull();
+  });
+
   it('keeps a whitespace-only title as Untitled chat', async () => {
     renderPage(
       stubApi(async () => ({

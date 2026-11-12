@@ -64,6 +64,7 @@ function chatTitle(sessionTitle: string | null): string {
   return title === '' ? 'Untitled chat' : title;
 }
 
+// A row with no chat id never had a chat (a reminder set outside one), so it names no chat at all.
 const AuditRow: FC<{ entry: SentinelUserAuditEntry; chatHref: string | null }> = ({ entry, chatHref }) => {
   const title = chatTitle(entry.session_title);
   return (
@@ -77,7 +78,7 @@ const AuditRow: FC<{ entry: SentinelUserAuditEntry; chatHref: string | null }> =
       <p className="text-sm text-text-primary">{entry.description}</p>
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-xs text-text-secondary">
         <span className="min-w-0 truncate">{toolDoneWords(entry.action_type)}</span>
-        {!entry.chat_exists ? (
+        {entry.session_id === '' ? null : !entry.chat_exists ? (
           <span className="min-w-0 max-w-full">In: a deleted chat</span>
         ) : chatHref !== null ? (
           <a
