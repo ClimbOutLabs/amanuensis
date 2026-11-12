@@ -121,6 +121,7 @@ import {
   hasReadContent,
   isPersonVouchedUrl,
   namesUrl,
+  replyLinksWithAddedData,
   steeredDestinations,
   steeredLinks,
   steeredUrl,
@@ -1978,6 +1979,9 @@ async function classifySearchProviderTool(input: {
   if (steeredLinks({ provenance: ctx.web_search.provenance, values: sentValues }).length > 0) {
     return ctx.services.unattended ? steeredSkipped(ctx) : held(SEARCH_STEERED_REASON, say.steered);
   }
+  if (replyLinksWithAddedData({ provenance: ctx.web_search.provenance, values: sentValues }).length > 0) {
+    return ctx.services.unattended ? replyLinkSkipped(ctx) : held(SEARCH_STEERED_REASON, say.reply_link);
+  }
   // The detail is the person's own, but a chat that has read other people's content asks before sending one:
   // what prompted putting it in a lookup may not have been the person.
   if (
@@ -2064,6 +2068,9 @@ async function classifyBrowserOpen(input: { action: SentinelAction; ctx: Classif
           guests: [],
         });
   }
+  if (replyLinksWithAddedData({ provenance, values: [url] }).length > 0) {
+    return ctx.services.unattended ? replyLinkSkipped(ctx) : ask(BROWSER_OPEN_UNVOUCHED_REASON, say.reply_link);
+  }
   if (hasReadContent(provenance)) {
     if (carriedPrivateDetails({ provenance, values: [url] }).length > 0) {
       return ctx.services.unattended
@@ -2099,6 +2106,17 @@ function steeredSkipped(ctx: ClassifyContext): TierDecision {
     reason: 'steered_by_content',
     reason_detail: `A link or address in something ${assistant} read chose this, not you.`,
     owner_message: `One step was skipped, because something ${assistant} read asked for it, not you.`,
+    sensitive_read: false,
+  });
+}
+
+/** A link that adds details to a site only the assistant's own reply named, skipped in a scheduled run. */
+function replyLinkSkipped(ctx: ClassifyContext): TierDecision {
+  const assistant = ctx.web_search.assistantName;
+  return autoDenyDecision({
+    reason: 'steered_by_content',
+    reason_detail: `Its link added details to a site that only ${assistant}'s own earlier reply named.`,
+    owner_message: `One lookup was skipped, because its link added details to a site you did not name.`,
     sensitive_read: false,
   });
 }
