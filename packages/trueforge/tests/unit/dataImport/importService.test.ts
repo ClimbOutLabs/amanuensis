@@ -582,7 +582,7 @@ describe('runDataImport', () => {
     const target = await makeInstance('target-older-refusals');
     try {
       // Today's export carries the field, so taking it out really is the older format.
-      const exported = legacySessionsOf(archive);
+      const exported = legacySessionsOf(readZipEntries(archive));
       const exportedMain = exported
         .map(entry => recordAt(entry, 'chat'))
         .find(entry => recordAt(entry['session'], 'session')['session_id'] === SEED_IDS.sessionMain);
