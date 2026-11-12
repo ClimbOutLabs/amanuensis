@@ -29,6 +29,7 @@ import {
   SCRIPTED_EVENT,
   SCRIPTED_PERSONA,
   SCRIPTED_SCHEDULE,
+  SCRIPTED_SKILL,
 } from '../../fixtures/scriptedModelServer';
 import { StandInSandbox } from '../../fixtures/standInSandbox';
 
@@ -201,6 +202,29 @@ describe('"Always allow in this chat" is offered only when the card names who or
 
       await runTurn({ server, chatId, input: answer({ card: first, scope: 'once' }) });
       expect(await savedNames({ server, path: '/api/v1/personas' })).toContain(SCRIPTED_PERSONA.name);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'adding a skill takes no lasting answer, and shows where the skill comes from',
+    async () => {
+      const chatId = await createChat(server);
+      const first = onlyCard(await runTurn({ server, chatId, input: ask('install_skill') }));
+      expect(first.can_chat_allow).toBe(false);
+      expect(first.can_always_allow).toBe(false);
+      expect(first.tier3_card?.skill).toMatchObject({
+        name: SCRIPTED_SKILL.name,
+        source: 'github.com/anthropics/skills, folder skills/algorithmic-art',
+        starter: true,
+      });
+
+      const refused = await sendTurn({ server, chatId, input: answer({ card: first, scope: 'chat' }) });
+      expect(refused.status).toBe(422);
+      expect(await savedNames({ server, path: '/api/v1/settings/skills' })).not.toContain(SCRIPTED_SKILL.name);
+
+      await runTurn({ server, chatId, input: answer({ card: first, scope: 'once' }) });
+      expect(await savedNames({ server, path: '/api/v1/settings/skills' })).toContain(SCRIPTED_SKILL.name);
     },
     TURN_TIMEOUT_MS,
   );

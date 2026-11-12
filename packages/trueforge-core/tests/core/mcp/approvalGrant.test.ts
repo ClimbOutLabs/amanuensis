@@ -365,7 +365,7 @@ describe('a chat grant is tied to the target the card names', () => {
     expect(effective.get('second')).toEqual({ decision: undefined, admission_provenance: { source: 'automatic' } });
   });
 
-  it.each(['schedule_write', 'persona_write'])('offers no chat scope for a %s card', reason => {
+  it.each(['schedule_write', 'persona_write', 'skill_install'])('offers no chat scope for a %s card', reason => {
     expect(allowsChatApproval({ ...consequence(reason), tier3_card: card({}) })).toBe(false);
   });
 

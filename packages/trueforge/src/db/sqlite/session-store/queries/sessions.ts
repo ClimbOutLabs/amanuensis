@@ -23,6 +23,7 @@ import type {
   GetSessionInput,
   ListExpiredPrivateSessionsInput,
   ListSessionsInput,
+  ReplaceSessionTitleIfCurrentInput,
   SetPrivateExpiryInput,
   StampImportedSessionInput,
   UpdateSessionInput,
@@ -372,6 +373,23 @@ export async function updateSession(db: Kysely<Database>, input: UpdateSessionIn
   if (numUpdatedRows === 0) {
     throw new SessionNotFoundError(input.session_id);
   }
+}
+
+export async function replaceSessionTitleIfCurrent(
+  db: Kysely<Database>,
+  input: ReplaceSessionTitleIfCurrentInput,
+): Promise<boolean> {
+  const result = await db
+    .updateTable('session')
+    .set({
+      title: input.title,
+      updated_at: nowIso(),
+    })
+    .where('tenant_id', '=', input.tenant_id)
+    .where('session_id', '=', input.session_id)
+    .where('title', '=', input.current_title)
+    .executeTakeFirst();
+  return Number(result.numUpdatedRows) > 0;
 }
 
 export async function listSessions(
