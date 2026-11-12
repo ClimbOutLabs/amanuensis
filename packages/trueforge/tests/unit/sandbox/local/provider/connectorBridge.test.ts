@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createLogger } from 'winston';
+import type { SandboxProvider } from '../../../../../../trueforge-core/src/core/sandbox/provider/Provider';
 import { Sandbox } from '../../../../../../trueforge-core/src/core/sandbox/Sandbox';
 import { NOOP_AGENT_TRACING } from '../../../../../../trueforge-core/src/core/tracing/NoopAgentTracing';
 import { makeMockIMCPServer } from '../../../../../../trueforge-core/tests/core/harnessMocks';
@@ -48,6 +49,11 @@ describeUnix('the sandbox on a computer without Docker', () => {
 
     expect(provider.supportsCodeMode).toBe(false);
     expect(bridge).not.toHaveBeenCalled();
+  });
+
+  it('does not say it is cut off from the network, so code there asks before each run', async () => {
+    const provider: SandboxProvider = await makeProvider();
+    expect(provider.network).toBeUndefined();
   });
 
   it('refuses to build a bridge when asked for one directly', async () => {
