@@ -61,6 +61,7 @@ import {
   SET_REMINDER_TOOL_NAME,
 } from '../schedules/toolContract';
 import { tavilyApprovalWhat } from '../search/tavilyCardText';
+import { isSkillWriteToolName, LIST_SKILLS_TOOL_NAME, SKILL_SERVER_ID } from '../skills/toolContract';
 import {
   isSpaceReadToolName,
   isSpaceWriteToolName,
@@ -183,6 +184,7 @@ import {
   type Tier3Card,
   type Tier3Persona,
   type Tier3Schedule,
+  type Tier3Skill,
   type TierDecision,
   type TrackedExecutionBinding,
 } from './tier';
@@ -291,6 +293,8 @@ export interface SentinelAction {
   schedule_write?: Tier3Schedule | undefined;
   /** The persona a create would add, settled by the persona tool set from the request and the owner's personas. */
   persona_write?: Tier3Persona | undefined;
+  /** The skill an install would add, settled by the skill tool set from the place the skill comes from. */
+  skill_install?: Tier3Skill | undefined;
   /** The schedule a pause or resume would change, settled by the schedule tool set from the store. */
   schedule_status?: ScheduleStatusReview | undefined;
   /**
@@ -2978,6 +2982,64 @@ async function classifyPersonaTool(action: SentinelAction, ctx: ClassifyContext)
   });
 }
 
+function skillInstallCard(input: { review: Tier3Skill; assistant: string; agent_intent: string | null }): Tier3Card {
+  const { review } = input;
+  const show = (text: string) => escapeDisplayText(text);
+  return {
+    plain_what: `Add the skill ${cardSubject(review.name)}? ${input.assistant} will follow its instructions when a task calls for it.`,
+    plain_why: plainWhy(input.agent_intent),
+    cannot_be_undone: null,
+    why_asked_again: null,
+    destination: null,
+    recipient: null,
+    amount: null,
+    parsed_command: null,
+    outbound_text: null,
+    destination_host: null,
+    outbound_truncated: false,
+    skill: {
+      name: show(review.name),
+      description: show(review.description),
+      source: show(review.source),
+      version: show(review.version),
+      starter: review.starter,
+      instructions:
+        review.instructions === null ? null : escapeDisplayText(review.instructions, { keepNewlines: true }),
+    },
+  };
+}
+
+/**
+ * Adding a skill always asks, with where it comes from and the exact version. Reading the list runs without
+ * asking. Any other skill tool name fails closed.
+ */
+async function classifySkillTool(action: SentinelAction, ctx: ClassifyContext): Promise<TierDecision> {
+  if (action.tool_name === LIST_SKILLS_TOOL_NAME) {
+    return tier1Decision({ reason: 'skill_read', reason_detail: 'Read your skills.', sensitive_read: false });
+  }
+  if (!isSkillWriteToolName(action.tool_name)) {
+    return failClosedDecision({ reason_detail: 'Unknown skill tool.' });
+  }
+  if (action.skill_install === undefined) {
+    return autoDenyDecision({
+      reason: 'destination_unverifiable',
+      reason_detail: 'The skill could not be checked, so it was not offered.',
+      sensitive_read: false,
+    });
+  }
+  return tier3Decision({
+    card: skillInstallCard({
+      review: action.skill_install,
+      assistant: ctx.web_search.assistantName,
+      agent_intent: ctx.agent_intent,
+    }),
+    reason: 'skill_install',
+    reason_detail: 'Adding a skill always asks.',
+    sensitive_read: false,
+    approval_token_id: await mintPlainToken({ ctx, tool_name: action.tool_name, params: action.canonical_params }),
+  });
+}
+
 /** A card that asks with one sentence and carries nothing else to check. */
 function sentenceCard(input: {
   plain_what: string;
@@ -3929,7 +3991,7 @@ function incognitoRefusal(): TierDecision {
 
 /**
  * A call on one of the assistant's own lasting things that is not a known read of it: a schedule, a reminder, a
- * persona, a space or the notes folder. Switching this chat's persona changes only the chat.
+ * persona, a skill, a space or the notes folder. Switching this chat's persona changes only the chat.
  */
 function changesOwnLastingThing(action: SentinelAction): boolean {
   if (action.tool_type !== 'truefoundry-system') {
@@ -3941,6 +4003,8 @@ function changesOwnLastingThing(action: SentinelAction): boolean {
       return name !== LIST_SCHEDULES_TOOL_NAME && name !== LIST_REMINDERS_TOOL_NAME;
     case PERSONA_SERVER_ID:
       return name !== LIST_PERSONAS_TOOL_NAME && name !== USE_PERSONA_TOOL_NAME;
+    case SKILL_SERVER_ID:
+      return name !== LIST_SKILLS_TOOL_NAME;
     case SPACE_SERVER_ID:
       return !isSpaceReadToolName(name);
     case NOTES_FOLDER_SERVER_ID:
@@ -3978,6 +4042,9 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
   }
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === PERSONA_SERVER_ID) {
     return classifyPersonaTool(action, ctx);
+  }
+  if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === SKILL_SERVER_ID) {
+    return classifySkillTool(action, ctx);
   }
   if (action.tool_type === 'truefoundry-system' && action.mcp_server_name === SPACE_SERVER_ID) {
     return classifySpaceTool(action);

@@ -61,6 +61,7 @@ export const GRANT_BARRED_TIER_REASONS: ReadonlySet<string> = new Set([
   'connector_calendar_write',
   'schedule_write',
   'persona_write',
+  'skill_install',
   REMINDER_CANCEL_REASON,
   SCHEDULE_STATUS_REASON,
   CONTENT_STEERED_REASON,
@@ -71,7 +72,7 @@ export const GRANT_BARRED_TIER_REASONS: ReadonlySet<string> = new Set([
 /**
  * Consequential actions a person may answer once for the whole chat with "Always allow in this chat". The chat grant
  * binds the tool and its destination, never a standing grant across chats, so it is offered only when the card
- * names one. A send, a mail draft, a guest change, a steered call, and creating a schedule or a persona are never
+ * names one. A send, a mail draft, a guest change, a steered call, creating a schedule or a persona, and adding a skill are never
  * among them: each of those asks every time.
  */
 export const CHAT_GRANTABLE_CONSEQUENCE_REASONS: ReadonlySet<string> = new Set([
@@ -236,6 +237,22 @@ export const Tier3PersonaSchema = z
   .describe('The persona a chat call adds, shown in full.')
   .openapi('Tier3Persona');
 
+/** A skill that a chat call adds, as the host read it from where it comes from. */
+export const Tier3SkillSchema = z
+  .object({
+    name: z.string().describe('Skill name.'),
+    description: z.string().describe('What the skill is for, as the skill itself says.'),
+    source: z.string().describe('The repository the skill comes from, and the folder in it when there is one.'),
+    version: z.string().describe('The exact commit that is added. A later change to the repository is not picked up.'),
+    starter: z.boolean().describe('True when this is one of the starter skills that come with the app.'),
+    instructions: z
+      .string()
+      .nullable()
+      .describe("The skill's own instruction file as the host read it, or null for a starter skill."),
+  })
+  .describe('The skill a chat call adds, shown in full.')
+  .openapi('Tier3Skill');
+
 /**
  * Server-rendered approval card for Tier 3 actions and for Tier 2 actions that ask. Destination/recipient/amount come from
  * the server-side extractor registry over canonical params, never agent text.
@@ -274,6 +291,7 @@ export const Tier3CardSchema = z
     calendar_event: Tier3CalendarEventSchema.nullable().optional(),
     schedule: Tier3ScheduleSchema.nullable().optional(),
     persona: Tier3PersonaSchema.nullable().optional(),
+    skill: Tier3SkillSchema.nullable().optional(),
     mail_new_recipients: z
       .array(z.string())
       .nullable()
@@ -289,6 +307,7 @@ export const Tier3CardSchema = z
 export type Tier3Card = z.infer<typeof Tier3CardSchema>;
 export type Tier3Schedule = z.infer<typeof Tier3ScheduleSchema>;
 export type Tier3Persona = z.infer<typeof Tier3PersonaSchema>;
+export type Tier3Skill = z.infer<typeof Tier3SkillSchema>;
 
 /** Machine-readable classifier verdict attached to every classified action. */
 export interface TierDecision {

@@ -29,7 +29,7 @@ function recipientsText(recipients: readonly SentinelApprovalMailbox[]): string 
 
 /** The question a ticket asks, one sentence the person can answer with a verb. */
 export function approvalQuestion(card: SentinelApprovalCard): string {
-  const { email, calendar_event: event, schedule, persona } = card;
+  const { email, calendar_event: event, schedule, persona, skill } = card;
   if (email !== null) return emailQuestion(email);
   if (event !== null) {
     return event.action === 'create'
@@ -42,6 +42,7 @@ export function approvalQuestion(card: SentinelApprovalCard): string {
       : `Delete the schedule "${schedule.name}"?`;
   }
   if (persona !== null) return `Add the persona "${persona.name}"?`;
+  if (skill !== null) return `Add the skill "${skill.name}"?`;
   return card.plain_what;
 }
 
@@ -97,18 +98,20 @@ export type ApprovalStub = {
 };
 
 function stubWhat(card: SentinelApprovalCard): string {
-  const { calendar_event: event, schedule, persona } = card;
+  const { calendar_event: event, schedule, persona, skill } = card;
   if (event !== null) return event.action === 'create' ? 'New event' : 'Changed event';
   if (schedule !== null) return schedule.action === 'create' ? 'New schedule' : 'Delete schedule';
   if (persona !== null) return 'New persona';
+  if (skill !== null) return 'New skill';
   return 'Action';
 }
 
 function stubDetail(card: SentinelApprovalCard): string {
-  const { calendar_event: event, schedule, persona } = card;
+  const { calendar_event: event, schedule, persona, skill } = card;
   if (event !== null) return event.title;
   if (schedule !== null) return schedule.name;
   if (persona !== null) return persona.name;
+  if (skill !== null) return skill.name;
   return card.destination ?? card.recipient ?? 'Open Details to see what it does';
 }
 

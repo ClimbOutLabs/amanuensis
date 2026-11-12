@@ -64,6 +64,7 @@ import type {
   RecoverRunningCommandExecutionsInput,
   RemoveThreadsInput,
   RenewCommandExecutionLeaseInput,
+  ReplaceSessionTitleIfCurrentInput,
   ReplaceTaskChecklistInput,
   RevokeImplementationPlanGrantInput,
   RevokeImplementationPlanGrantResult,
@@ -750,6 +751,19 @@ export class InMemorySessionStore<
     stored.record.updated_at = new Date(now);
     stored.record.last_activity_timestamp_ms = now;
     return;
+  }
+
+  async replaceSessionTitleIfCurrent(input: ReplaceSessionTitleIfCurrentInput): Promise<boolean> {
+    const stored = this.sessions.get(sessionKey(input.session_id));
+    if (stored?.record.tenant_id !== input.tenant_id) {
+      return false;
+    }
+    if (stored.record.title !== input.current_title) {
+      return false;
+    }
+    stored.record.title = input.title;
+    stored.record.updated_at = new Date();
+    return true;
   }
 
   async createSessionFolder(input: CreateSessionFolderInput): Promise<SessionFolderRecord> {
