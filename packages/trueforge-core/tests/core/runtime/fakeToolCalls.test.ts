@@ -24,6 +24,7 @@ import { toolResultResponse, type IToolSet } from '../../../src/core/mcp/IMCPSer
 import {
   createToolCallMemoState,
   createTurnToolCallLedger,
+  IDENTICAL_MOVE_STOP_AT,
   MAX_TOOL_MARKUP_RETRIES_PER_TURN,
   MAX_WRITE_CALLS_PER_TURN,
   mergeTurnToolCallLedgers,
@@ -31,7 +32,11 @@ import {
 } from '../../../src/core/mcp/executeToolCalls';
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
 import { InternalEventType, type ContextMessage } from '../../../src/core/runtime/AgentThread.types';
-import { MAX_TOOL_CALLS_PER_REPLY, TOO_MANY_TOOL_CALLS_MESSAGE } from '../../../src/core/runtime/modelReplyGuard';
+import {
+  MAX_TOOL_CALLS_PER_REPLY,
+  REPLY_CALL_NOT_RUN_OWNER_MESSAGE,
+  TOO_MANY_TOOL_CALLS_MESSAGE,
+} from '../../../src/core/runtime/modelReplyGuard';
 import {
   OUTSIDE_ACTION_RETRY_RESULT,
   REPEATED_ACTION_RESULT,
@@ -251,6 +256,9 @@ function makeThread(input: {
   turnToolCallLedger?: TurnToolCallLedger | undefined;
   /** Research budget charged to web_search calls; absent means no budget. */
   searchBudget?: number;
+  assistantName?: string;
+  /** Steps the reply may take; absent means the default. */
+  stepBudget?: number;
 }) {
   return new AgentThread({
     threadId: 'main',
@@ -266,10 +274,12 @@ function makeThread(input: {
       modelId: undefined,
       configuredModels: undefined,
       instruction: 'test',
+      ...(input.assistantName === undefined ? {} : { identity: { assistantName: input.assistantName } }),
       toolSets: [input.toolSet],
       ...(input.searchBudget === undefined
         ? {}
         : { toolCallBudget: input.searchBudget, budgetedTools: ['web_search'] }),
+      ...(input.stepBudget === undefined ? {} : { stepBudget: { main: input.stepBudget, sub: 4 } }),
     },
     context: input.context ?? [{ role: 'user', content: 'Please add the appointment.' }],
   });
@@ -622,6 +632,43 @@ describe('argument checking', () => {
     expect(results).toHaveLength(1);
     expect(results[0]?.content).toContain('arguments were not complete');
   });
+});
+
+describe('what the person reads when a call is refused', () => {
+  it.each([{ configured: undefined }, { configured: 'Juniper' }])(
+    'shows one plain line with no tool in it, whatever the assistant is called, while the model keeps its instruction',
+    async ({ configured }) => {
+      const toolSet = makeToolSet();
+      let round = 0;
+      const create = jest.fn((_request: LLMCreateParamsStreaming) => {
+        round += 1;
+        if (round === 1) {
+          return replyStream({
+            calls: [{ id: 'call-1', name: 'create_event', args: '{"title": "Dentist", "start": {"date_time": "2026' }],
+          });
+        }
+        return finalAnswerStream();
+      });
+      const thread = makeThread({
+        toolSet,
+        create,
+        ...(configured === undefined ? {} : { assistantName: configured }),
+      });
+      await drain(thread);
+      const content = toolResults(thread)[0]?.content;
+      const envelope: unknown = JSON.parse(content ?? '{}');
+      const outcome = isRecord(envelope) ? envelope['outcome'] : undefined;
+      const remediation = isRecord(outcome) ? outcome['remediation'] : undefined;
+      expect(remediation).toEqual({
+        reason_code: 'tool_pre_dispatch_failed',
+        message: REPLY_CALL_NOT_RUN_OWNER_MESSAGE,
+        suggested_action: 'contact_user',
+      });
+      expect(REPLY_CALL_NOT_RUN_OWNER_MESSAGE).not.toContain('create_event');
+      expect(refusalError(content)).toContain('arguments were not complete');
+      expect(refusalError(content)).toContain('create_event');
+    },
+  );
 });
 
 describe('duplicates, floods and dependent reads', () => {
@@ -1225,6 +1272,72 @@ describe('turn-wide counts across threads', () => {
  * A stand-in for an offline sandbox: every call asks (tier 3), like an unrelaxed sandbox, and every
  * call but a push stays in its workspace. `failing` tools return an error.
  */
+/**
+ * Aman's browser as the runtime sees it: reads and scrolls are read-only, typing is a prepare step.
+ * A long page of `screens` screens: each scroll down shows the next one until the last, and typing
+ * changes what the page shows. `page_notes` is a read of something else, in the same tool set.
+ */
+function makeBrowserToolSet(input: { screens?: number; failingScroll?: boolean; ticking?: boolean } = {}) {
+  const screens = input.screens ?? 10;
+  let at = 0;
+  let tick = 0;
+  let typed = '';
+  const toolSet = makeMockIMCPServer({
+    name: 'browser',
+    preload: true,
+    tools: ['browser_read', 'browser_scroll', 'browser_type', 'browser_click', 'browser_back', 'page_notes'].map(
+      name => ({
+        name,
+        description: name,
+        inputSchema: { type: 'object' as const, properties: {} },
+        preload: true,
+      }),
+    ),
+  });
+  jest.mocked(toolSet.toolCallInfo).mockImplementation((params: CallToolRequest['params']) =>
+    Promise.resolve({
+      type: 'truefoundry-system' as const,
+      mcp_server_id: toolSet.id,
+      mcp_server_name: 'browser',
+      original_tool_name: params.name,
+      is_approval_required: false,
+      tier: 1 as const,
+      tier_reason: params.name === 'browser_type' ? 'browser_prepare' : 'browser_explore',
+      read_only_hint: params.name !== 'browser_type',
+      open_world_hint: params.name !== 'browser_type',
+    }),
+  );
+  toolSet.staysInWorkspace = () => true;
+  jest.mocked(toolSet.callTool).mockImplementation((params: CallToolRequest['params']) => {
+    if (params.name === 'page_notes') {
+      return Promise.resolve(toolResultResponse({ text: 'notes' }));
+    }
+    if (params.name === 'browser_scroll') {
+      if (input.failingScroll === true) {
+        return Promise.resolve(toolResultResponse({ text: '{"status":"error"}', isError: true }));
+      }
+      at = Math.min(at + 1, screens - 1);
+    }
+    if (params.name === 'browser_type') {
+      typed = 'Ada';
+    }
+    // A link to another page, and back: two pages a step can go between.
+    if (params.name === 'browser_click') {
+      at = 100;
+    }
+    if (params.name === 'browser_back') {
+      at = 0;
+    }
+    // A page with a clock on it reads differently every time.
+    tick += 1;
+    const clock = input.ticking === true ? `\nUpdated ${String(tick)} seconds ago` : '';
+    return Promise.resolve(
+      toolResultResponse({ text: `# Page, screen ${String(at)}\n[e3] textbox Name: ${typed}${clock}` }),
+    );
+  });
+  return toolSet;
+}
+
 function makeSandboxToolSet(input: { failing?: readonly string[]; networked?: boolean } = {}) {
   const toolSet = makeMockIMCPServer({
     name: 'sandbox',
@@ -1314,6 +1427,133 @@ describe('write cap leaves work inside the sandbox workspace alone', () => {
     await drain(thread);
 
     expect(callToolNames(toolSet)).toEqual(['exec', 'write_file', 'exec']);
+    expect(toolResults(thread).at(-1)?.content).toContain(REPEATED_ACTION_RESULT);
+  });
+
+  it('scrolls a long page again and again, and reads it again after the page moved', async () => {
+    const toolSet = makeBrowserToolSet();
+    const scroll = { name: 'browser_scroll', args: { direction: 'down' } };
+    const read = { name: 'browser_read', args: {} };
+    const thread = makeThread({
+      toolSet,
+      create: scriptedArgs([
+        [read],
+        [scroll],
+        [scroll],
+        [scroll],
+        [read],
+        [{ name: 'browser_type', args: { ref: 'e3', text: 'Ada' } }],
+        [read],
+      ]),
+    });
+    const events = await drain(thread);
+
+    expect(callToolNames(toolSet)).toEqual([
+      'browser_read',
+      'browser_scroll',
+      'browser_scroll',
+      'browser_scroll',
+      'browser_read',
+      'browser_type',
+      'browser_read',
+    ]);
+    expect(toolResults(thread).some(result => result.content.includes(REPEATED_ACTION_RESULT))).toBe(false);
+    expect(events.at(-1)).toMatchObject({ type: InternalEventType.AGENT_DONE, status: 'done' });
+  });
+
+  it('scrolls a long page past the repeat budget while each scroll shows something new', async () => {
+    const toolSet = makeBrowserToolSet({ screens: 20 });
+    const scroll = { name: 'browser_scroll', args: { direction: 'down' } };
+    const thread = makeThread({ toolSet, create: scriptedArgs(Array.from({ length: 6 }, () => [scroll])) });
+    const events = await drain(thread);
+
+    expect(callToolNames(toolSet)).toEqual(Array(6).fill('browser_scroll'));
+    expect(events.at(-1)).toMatchObject({ type: InternalEventType.AGENT_DONE, status: 'done' });
+  });
+
+  it('stops a scroll that keeps landing on the same screen at the bottom of the page', async () => {
+    const toolSet = makeBrowserToolSet({ screens: 2 });
+    const scroll = { name: 'browser_scroll', args: { direction: 'down' } };
+    const thread = makeThread({ toolSet, create: scriptedArgs([[scroll], [scroll], [scroll], [scroll]]) });
+    await drain(thread);
+
+    // The first scroll reached the bottom, the second showed the same screen, the third is a loop.
+    expect(callToolNames(toolSet)).toEqual(['browser_scroll', 'browser_scroll']);
+    expect(toolResults(thread).some(result => result.content.includes(REPEATED_ACTION_RESULT))).toBe(true);
+  });
+
+  it('ends the reply when the model keeps scrolling at the bottom of the page', async () => {
+    const toolSet = makeBrowserToolSet({ screens: 2 });
+    const scroll = { name: 'browser_scroll', args: { direction: 'down' } };
+    const thread = makeThread({ toolSet, create: scriptedArgs(Array.from({ length: 12 }, () => [scroll])) });
+    const events = await drain(thread);
+
+    expect(callToolNames(toolSet)).toEqual(['browser_scroll', 'browser_scroll']);
+    // The guard ended the reply before the model's twelve steps ran out.
+    expect(toolResults(thread).length).toBeLessThan(12);
+    expect(events.at(-1)).not.toMatchObject({ output: { content: 'Done.' } });
+  });
+
+  it('still stops the same scroll on a page whose text changes on every read', async () => {
+    const toolSet = makeBrowserToolSet({ screens: 2, ticking: true });
+    const scroll = { name: 'browser_scroll', args: { direction: 'down' } };
+    const thread = makeThread({
+      toolSet,
+      stepBudget: 30,
+      create: scriptedArgs(Array.from({ length: 20 }, () => [scroll])),
+    });
+    const events = await drain(thread);
+
+    expect(callToolNames(toolSet).length).toBeLessThan(12);
+    expect(callToolNames(toolSet).length).toBeGreaterThanOrEqual(IDENTICAL_MOVE_STOP_AT);
+    expect(events.at(-1)).toMatchObject({ type: InternalEventType.AGENT_DONE, handoff_cause: 'loop_detected' });
+  });
+
+  it('stops going back and forth between two pages', async () => {
+    const toolSet = makeBrowserToolSet();
+    const click = { name: 'browser_click', args: { ref: 'e3' } };
+    const back = { name: 'browser_back', args: {} };
+    const thread = makeThread({
+      toolSet,
+      create: scriptedArgs(Array.from({ length: 12 }, (_, index) => [index % 2 === 0 ? click : back])),
+    });
+    const events = await drain(thread);
+
+    // Each page is new once; after that the same two steps only go between pages already seen.
+    expect(callToolNames(toolSet)).toEqual(['browser_click', 'browser_back', 'browser_click', 'browser_back']);
+    // The guard ended the reply before the model's twelve steps ran out.
+    expect(toolResults(thread).length).toBeLessThan(12);
+    expect(events.at(-1)).not.toMatchObject({ output: { content: 'Done.' } });
+  });
+
+  it('does not count a scroll that failed as a move', async () => {
+    const toolSet = makeBrowserToolSet({ failingScroll: true });
+    const read = { name: 'browser_read', args: {} };
+    const scroll = { name: 'browser_scroll', args: { direction: 'down' } };
+    const thread = makeThread({ toolSet, create: scriptedArgs([[read], [scroll], [read]]) });
+    await drain(thread);
+
+    expect(callToolNames(toolSet)).toEqual(['browser_read', 'browser_scroll']);
+    expect(toolResults(thread).at(-1)?.content).toContain(REPEATED_ACTION_RESULT);
+  });
+
+  it('lets no other tool repeat because the browser page moved', async () => {
+    const toolSet = makeBrowserToolSet();
+    const notes = { name: 'page_notes', args: {} };
+    const scroll = { name: 'browser_scroll', args: { direction: 'down' } };
+    const thread = makeThread({ toolSet, create: scriptedArgs([[notes], [scroll], [notes]]) });
+    await drain(thread);
+
+    expect(callToolNames(toolSet)).toEqual(['page_notes', 'browser_scroll']);
+  });
+
+  it('still refuses to read an unchanged page twice in a row', async () => {
+    const toolSet = makeBrowserToolSet();
+    const read = { name: 'browser_read', args: {} };
+    const thread = makeThread({ toolSet, create: scriptedArgs([[read], [read]]) });
+    await drain(thread);
+
+    expect(callToolNames(toolSet)).toEqual(['browser_read']);
     expect(toolResults(thread).at(-1)?.content).toContain(REPEATED_ACTION_RESULT);
   });
 

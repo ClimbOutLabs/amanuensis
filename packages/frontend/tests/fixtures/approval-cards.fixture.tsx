@@ -24,6 +24,7 @@ const blank: SentinelApprovalCard = {
   calendar_event: null,
   schedule: null,
   persona: null,
+  skill: null,
 };
 
 const cards: { kind: string; card: SentinelApprovalCard }[] = [

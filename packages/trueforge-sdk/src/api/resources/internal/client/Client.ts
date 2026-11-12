@@ -11,6 +11,8 @@ import * as serializers from "../../../../serialization/index.js";
 import * as TrueForge from "../../../index.js";
 import { AgentsClient } from "../resources/agents/client/Client.js";
 import { MetricsClient } from "../resources/metrics/client/Client.js";
+import { NoticingClient } from "../resources/noticing/client/Client.js";
+import { PrivateChatsClient } from "../resources/privateChats/client/Client.js";
 import { SchedulesClient } from "../resources/schedules/client/Client.js";
 import { SessionsClient } from "../resources/sessions/client/Client.js";
 
@@ -23,6 +25,8 @@ export declare namespace InternalClient {
 export class InternalClient {
     protected readonly _options: NormalizedClientOptionsWithAuth<InternalClient.Options>;
     protected _metrics: MetricsClient | undefined;
+    protected _noticing: NoticingClient | undefined;
+    protected _privateChats: PrivateChatsClient | undefined;
     protected _schedules: SchedulesClient | undefined;
     protected _sessions: SessionsClient | undefined;
     protected _agents: AgentsClient | undefined;
@@ -33,6 +37,14 @@ export class InternalClient {
 
     public get metrics(): MetricsClient {
         return (this._metrics ??= new MetricsClient(this._options));
+    }
+
+    public get noticing(): NoticingClient {
+        return (this._noticing ??= new NoticingClient(this._options));
+    }
+
+    public get privateChats(): PrivateChatsClient {
+        return (this._privateChats ??= new PrivateChatsClient(this._options));
     }
 
     public get schedules(): SchedulesClient {

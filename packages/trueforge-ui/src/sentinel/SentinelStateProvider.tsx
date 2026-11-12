@@ -1,13 +1,18 @@
 'use client';
 
-import { toolInvocationRawId } from '@truefoundry/assistant-ui-runtime';
 import { createContext, useContext, useEffect, useMemo, useState, type FC, type ReactNode } from 'react';
 
 import { useAuiState } from '../assistant-ui.js';
 
 import { useOptionalSentinelApi } from './SentinelApiContext.js';
 import { subscribeToSendReceipts, subscribeToSentinelEvents } from './sentinelEvents.js';
-import type { ApprovalAnswer, SentinelApprovalInfo, SentinelSendReceipt } from './types.js';
+import {
+  approvalKey,
+  entryForPart,
+  type ApprovalAnswer,
+  type SentinelApprovalInfo,
+  type SentinelSendReceipt,
+} from './types.js';
 
 export type SentinelState = {
   /**
@@ -53,7 +58,7 @@ export const SentinelStateProvider: FC<{ children: ReactNode }> = ({ children })
   const savedCardsRead = api == null || sessionId == null || readSessionId === sessionId;
 
   useEffect(() => {
-    return subscribeToSentinelEvents(info => setApprovals(previous => new Map(previous).set(info.toolCallId, info)));
+    return subscribeToSentinelEvents(info => setApprovals(previous => new Map(previous).set(approvalKey(info), info)));
   }, []);
 
   useEffect(() => {
@@ -77,8 +82,8 @@ export const SentinelStateProvider: FC<{ children: ReactNode }> = ({ children })
         // A live card that arrived while this read was in flight is newer than what it saw, so it wins:
         // replacing the map would turn a card the user is looking at back into the generic bar.
         setApprovals(previous => {
-          const merged = new Map(context.approvals.map(info => [info.toolCallId, info]));
-          for (const [toolCallId, info] of previous) merged.set(toolCallId, info);
+          const merged = new Map(context.approvals.map(info => [approvalKey(info), info]));
+          for (const [key, info] of previous) merged.set(key, info);
           return merged;
         });
         setAnswers(previous => new Map([...Object.entries(context.answers ?? {}), ...previous]));
@@ -101,20 +106,20 @@ export const SentinelStateProvider: FC<{ children: ReactNode }> = ({ children })
   const state = useMemo<SentinelState>(
     () => ({
       savedCardsRead,
-      // Entries are keyed by the server tool call id; chat parts pass the runtime's invocation key.
-      approvalFor: toolCallId => approvals.get(toolInvocationRawId(toolCallId)),
+      // Entries are filed by `approvalKey`, the same key the runtime gives a chat part, so a call id a model reuses
+      // in a later message never shows or answers an earlier call's card. Chat parts pass that key.
+      approvalFor: toolCallId => entryForPart(approvals, toolCallId),
       heldFor: toolCallId => {
-        const info = approvals.get(toolInvocationRawId(toolCallId));
+        const info = entryForPart(approvals, toolCallId);
         return info?.held === undefined ? undefined : info;
       },
-      wasNotSaved: toolCallId => approvals.get(toolInvocationRawId(toolCallId))?.notSaved !== undefined,
-      answerFor: toolCallId => answers.get(toolInvocationRawId(toolCallId)),
-      recordAnswer: (toolCallId, answer) =>
-        setAnswers(previous => new Map(previous).set(toolInvocationRawId(toolCallId), answer)),
-      changeRequestFor: toolCallId => changeRequests.get(toolInvocationRawId(toolCallId)),
+      wasNotSaved: toolCallId => entryForPart(approvals, toolCallId)?.notSaved !== undefined,
+      answerFor: toolCallId => entryForPart(answers, toolCallId),
+      recordAnswer: (toolCallId, answer) => setAnswers(previous => new Map(previous).set(toolCallId, answer)),
+      changeRequestFor: toolCallId => entryForPart(changeRequests, toolCallId),
       recordChangeRequest: (toolCallId, words) =>
-        setChangeRequests(previous => new Map(previous).set(toolInvocationRawId(toolCallId), words)),
-      receiptFor: toolCallId => receipts.get(toolInvocationRawId(toolCallId)),
+        setChangeRequests(previous => new Map(previous).set(toolCallId, words)),
+      receiptFor: toolCallId => entryForPart(receipts, toolCallId),
     }),
     [savedCardsRead, approvals, answers, changeRequests, receipts],
   );

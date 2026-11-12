@@ -12,4 +12,8 @@ export interface ListAuditLogRequest {
     pageToken?: string;
     /** Only entries with this outcome. */
     outcome?: TrueForge.personalization.ListAuditLogRequestOutcome;
+    /** Only entries at or after this time. The caller sends the start of a day in its own timezone. */
+    from?: Date;
+    /** Only entries before this time. The caller sends the start of the day after its last shown day. */
+    to?: Date;
 }

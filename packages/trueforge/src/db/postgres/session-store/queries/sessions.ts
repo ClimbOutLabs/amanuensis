@@ -17,13 +17,18 @@ import {
 import type {
   CreateSessionInput,
   DeleteSessionInput,
+  ExpiredPrivateSession,
   GetOwnedIdsInput,
   GetSessionByExternalIdInput,
   GetSessionInput,
+  ListExpiredPrivateSessionsInput,
   ListSessionsInput,
+  ReplaceSessionTitleIfCurrentInput,
+  SetPrivateExpiryInput,
   StampImportedSessionInput,
   UpdateSessionInput,
 } from '@truefoundry/trueforge-core/agent-session/store/ISessionStore';
+import { assertPrivateExpiryMatches } from '@truefoundry/trueforge-core/agent-session/store/privateSession';
 import {
   decodeSessionListPageToken,
   paginateSessionListRows,
@@ -79,6 +84,8 @@ function mapRowToSessionRecord(row: {
   approval_grants: string[];
   task_checklist: TaskChecklist;
   external_id: string | null;
+  is_incognito: boolean;
+  private_expires_at: Date | null;
   custom: Record<string, unknown> | null;
   metadata: SessionMetadata;
   metrics: SessionMetrics;
@@ -105,6 +112,8 @@ function mapRowToSessionRecord(row: {
     approval_grants: row.approval_grants,
     task_checklist: parseStoredTaskChecklist(row.task_checklist),
     external_id: row.external_id,
+    is_incognito: row.is_incognito,
+    private_expires_at: row.private_expires_at,
     custom: parseSessionCustom(row.custom),
     metadata: parseSessionMetadata(row.metadata),
     metrics: row.metrics,
@@ -115,6 +124,7 @@ function mapRowToSessionRecord(row: {
 }
 
 export async function createSession(db: Kysely<Database>, input: CreateSessionInput<SessionCustom>): Promise<void> {
+  assertPrivateExpiryMatches(input);
   const columns = sessionAgentToColumns(input.agent);
   const nowMs = Date.now();
 
@@ -138,6 +148,8 @@ export async function createSession(db: Kysely<Database>, input: CreateSessionIn
         custom: input.custom !== null ? json(input.custom) : null,
         metadata: json(input.metadata),
         external_id: input.external_id,
+        is_incognito: input.is_incognito,
+        private_expires_at: input.private_expires_at,
         metrics: json({
           total_duration_ms: 0,
           total_turns: 0,
@@ -195,6 +207,44 @@ export async function deleteSession(db: Kysely<Database>, input: DeleteSessionIn
     .deleteFrom('session')
     .where('tenant_id', '=', input.tenant_id)
     .where('session_id', '=', input.session_id)
+    .execute();
+}
+
+export async function setPrivateExpiry(db: Kysely<Database>, input: SetPrivateExpiryInput): Promise<void> {
+  const updated = await db
+    .updateTable('session')
+    .set({ private_expires_at: input.private_expires_at })
+    .where('tenant_id', '=', input.tenant_id)
+    .where('session_id', '=', input.session_id)
+    .where('is_incognito', '=', true)
+    .executeTakeFirst();
+  if (Number(updated.numUpdatedRows) > 0) {
+    return;
+  }
+  const existing = await db
+    .selectFrom('session')
+    .select('session_id')
+    .where('tenant_id', '=', input.tenant_id)
+    .where('session_id', '=', input.session_id)
+    .executeTakeFirst();
+  if (existing === undefined) {
+    throw new SessionNotFoundError(input.session_id);
+  }
+  throw new SessionStoreInvariantError(`Session ${input.session_id} is not private; it has no deletion time`);
+}
+
+export async function listExpiredPrivateSessions(
+  db: Kysely<Database>,
+  input: ListExpiredPrivateSessionsInput,
+): Promise<ExpiredPrivateSession[]> {
+  return await db
+    .selectFrom('session')
+    .select(['tenant_id', 'session_id'])
+    .where('is_incognito', '=', true)
+    .where('private_expires_at', '<=', input.now)
+    .orderBy('private_expires_at', 'asc')
+    .orderBy('session_id', 'asc')
+    .limit(input.limit)
     .execute();
 }
 
@@ -297,6 +347,23 @@ export async function updateSession(db: Kysely<Database>, input: UpdateSessionIn
   }
 }
 
+export async function replaceSessionTitleIfCurrent(
+  db: Kysely<Database>,
+  input: ReplaceSessionTitleIfCurrentInput,
+): Promise<boolean> {
+  const result = await db
+    .updateTable('session')
+    .set({
+      title: input.title,
+      updated_at: sql<Date>`now()`,
+    })
+    .where('tenant_id', '=', input.tenant_id)
+    .where('session_id', '=', input.session_id)
+    .where('title', '=', input.current_title)
+    .executeTakeFirst();
+  return Number(result.numUpdatedRows) > 0;
+}
+
 export async function listSessions(
   db: Kysely<Database>,
   input: ListSessionsInput,
@@ -316,6 +383,9 @@ export async function listSessions(
     )
     .where('tenant_id', '=', input.tenant_id);
 
+  if (!input.include_private) {
+    query = query.where('is_incognito', '=', false);
+  }
   if (input.agent_id !== undefined) {
     query = query.where('agent_id', '=', input.agent_id);
   }

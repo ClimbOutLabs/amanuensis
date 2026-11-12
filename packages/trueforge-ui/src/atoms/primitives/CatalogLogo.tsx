@@ -3,7 +3,7 @@
 import { useEffect, useState, type ImgHTMLAttributes } from 'react';
 
 import { useThemeMode } from '../../theme/SlotsProvider.js';
-import { resolveCatalogLogoSrc } from '../../utils/catalogLogo.js';
+import { bundledCatalogLogo, resolveCatalogLogoSrc } from '../../utils/catalogLogo.js';
 
 export type CatalogLogoProps = Omit<ImgHTMLAttributes<HTMLImageElement>, 'src'> & {
   src: string;
@@ -13,6 +13,7 @@ export type CatalogLogoProps = Omit<ImgHTMLAttributes<HTMLImageElement>, 'src'> 
  * Catalog logo with mode-matched siblings:
  * - `…/icon.png` in dark mode → try `…/icon-dark.png`, else catalog URL
  * - `…/icon-dark.png` in light mode → try `…/icon.png`, else catalog URL
+ * A bundled logo (see `catalogLogoSrc`) draws inline in the text colour, so it needs no sibling.
  */
 export function CatalogLogo({ src, alt = '', onError, ...props }: CatalogLogoProps) {
   const mode = useThemeMode();
@@ -25,6 +26,19 @@ export function CatalogLogo({ src, alt = '', onError, ...props }: CatalogLogoPro
 
   const canFallback = preferred !== src;
   const resolved = failedPreferred && canFallback ? src : preferred;
+
+  const Bundled = bundledCatalogLogo(src);
+  if (Bundled !== undefined) {
+    return (
+      <Bundled
+        className={props.className}
+        style={props.style}
+        role="img"
+        aria-label={alt === '' ? undefined : alt}
+        aria-hidden={alt === '' ? true : undefined}
+      />
+    );
+  }
 
   return (
     <img

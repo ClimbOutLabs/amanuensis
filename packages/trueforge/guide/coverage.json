@@ -1,0 +1,86 @@
+{
+  "covers": {
+    "command:import": ["docs-install"],
+    "command:migrate": ["docs-install"],
+    "command:install": ["docs-install"],
+    "route:mcpServer": ["docs-mcp-servers"],
+    "route:voice": ["docs-voice-input"]
+  },
+  "exempt": {
+    "command:adopt": "No topic yet: the Windows installer taking over an install made from source.",
+    "command:backups": "No topic yet: the Windows command that lists saved backups.",
+    "command:network": "No topic yet: the Windows command that sets which address other devices use.",
+    "command:open": "No topic yet: the Windows command that opens Aman in the browser.",
+    "command:setup": "What opening Aman-Setup.exe runs; it picks install, upgrade or adopt, each with its own row.",
+    "command:status": "No topic yet: the Windows command that lists installs and whether they run.",
+    "command:verify": "No topic yet: checking a downloaded release before installing it.",
+    "command:version": "Prints the installer's version; the help check reports the app version.",
+    "pill:behind": "A Home pill only changes which example cards show; each card has its own row.",
+    "pill:coming_up": "A Home pill only changes which example cards show; each card has its own row.",
+    "pill:help_me_think": "A Home pill only changes which example cards show; each card has its own row.",
+    "pill:just_moved": "A Home pill only changes which example cards show; each card has its own row.",
+    "pill:money": "A Home pill only changes which example cards show; each card has its own row.",
+    "pill:someone_i_look_after": "A Home pill only changes which example cards show; each card has its own row.",
+    "pill:write_hard": "A Home pill only changes which example cards show; each card has its own row.",
+    "route:auth": "Sign-in and sign-out; the help button shows only after sign-in, and a lost password is command:password.",
+    "route:capability": "Not a screen: tells the app which features this server has.",
+    "route:catalog": "Not a screen: fills the pickers on other screens.",
+    "route:dataExport": "No topic yet: exporting your data to a file.",
+    "route:dataImport": "No topic yet: importing data exported from another Aman.",
+    "route:mcpOAuth": "Not a screen: the sign-in step a connector's own login comes back through.",
+    "route:repository": "No topic yet: letting a chat work on a code project.",
+    "route:sessionMetrics": "Not a screen: internal numbers for the operator.",
+    "route:spaceFolder": "No topic yet: putting saved pages in folders.",
+    "settings:about": "No topic yet: the About panel shows the version and build; the help check also reports it."
+  },
+  "questions": [
+    {
+      "question": "Docker says it needs a restart",
+      "topic": "getting-help"
+    },
+    {
+      "question": "My calendar card says Other",
+      "topic": "connect-mail-calendar"
+    },
+    {
+      "question": "The approval card won't go away",
+      "topic": "approvals"
+    },
+    {
+      "question": "Aman does not answer anything I type",
+      "topic": "first-steps"
+    },
+    {
+      "question": "How do I connect my Gmail?",
+      "topic": "connect-mail-calendar"
+    },
+    {
+      "question": "Google says it has not checked the app",
+      "topic": "connect-mail-calendar"
+    },
+    {
+      "question": "Where do I tell Aman my name?",
+      "topic": "first-steps"
+    },
+    {
+      "question": "It says the sandbox is not ready",
+      "topic": "code"
+    },
+    {
+      "question": "How do I back up my data?",
+      "topic": "getting-help"
+    },
+    {
+      "question": "A scheduled run is waiting for my OK",
+      "topic": "schedules"
+    },
+    {
+      "question": "How do I switch to the dark look?",
+      "topic": "appearance"
+    },
+    {
+      "question": "How do I report a bug?",
+      "topic": "getting-help"
+    }
+  ]
+}

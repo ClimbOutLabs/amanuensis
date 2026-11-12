@@ -12,6 +12,8 @@
  * each tick until the schema is present. The loops call the server over HTTP(S) at
  * `SERVER_URL` (mutual TLS when `TRUEFORGE_MTLS_ENABLED`), so no Redis peering is wired here.
  */
+import { extractErrorLogFields } from '@truefoundry/trueforge-core/core';
+
 import configuration, { isPlaceholderTrueForgeApiKey } from './config';
 import { runController } from './controller';
 import { createDb } from './db/postgres/client';
@@ -39,6 +41,13 @@ try {
     poolMax: configuration.DATABASE_POOL_MAX,
     statementTimeoutMs: configuration.POSTGRES_STATEMENT_TIMEOUT_MS,
     idleInTransactionSessionTimeoutMs: configuration.POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS,
+    connectionTimeoutMs: configuration.POSTGRES_CONNECT_TIMEOUT_MS,
+    onIdleClientError: error => {
+      logger.error(
+        'A Postgres connection in the pool broke; the next query opens a new one',
+        extractErrorLogFields(error),
+      );
+    },
   });
 
   if (isPlaceholderTrueForgeApiKey(configuration.TRUEFORGE_API_KEY)) {

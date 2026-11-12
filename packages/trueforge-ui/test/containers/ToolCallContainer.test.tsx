@@ -337,10 +337,8 @@ describe('ToolCallContainer', () => {
       ToolCallCard,
     });
 
-    const truncatedReason = `${rejectionText.slice(0, 139)}…`;
-    expect(ToolCallCard.mock.calls[0]?.[0]).toEqual(
-      expect.objectContaining({ outcomeText: `Execution failed: ${truncatedReason}` }),
-    );
+    // A step that ran and failed shows the reason itself, in full, with no label in front of it.
+    expect(ToolCallCard.mock.calls[0]?.[0]).toEqual(expect.objectContaining({ outcomeText: rejectionText }));
     expect(screen.queryByText('Execution failed', { exact: true })).not.toBeInTheDocument();
     // The rest of the reason is still available, expanded, in the response block.
     const responseSlot = ToolCallCard.mock.calls[0]?.[0]?.responseSlot as { props: { content: string } } | undefined;
@@ -389,7 +387,7 @@ describe('ToolCallContainer', () => {
     });
 
     expect(ToolCallCard.mock.calls[0]?.[0]).toEqual(
-      expect.objectContaining({ outcomeText: `Execution failed: ${errorText}`, status: 'error' }),
+      expect.objectContaining({ outcomeText: errorText, status: 'error' }),
     );
   });
 
@@ -767,7 +765,7 @@ describe('ToolCallContainer', () => {
     );
 
     expectNewCardOnly();
-    expect(screen.getByRole('button', { name: 'Always allow this here' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Always allow in this chat' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Allow' })).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
     expect(respondToToolApproval).toHaveBeenCalledWith(
@@ -842,7 +840,7 @@ describe('ToolCallContainer', () => {
     );
   });
 
-  it('preserves the chat scope option when Always allow this here is clicked', () => {
+  it('preserves the chat scope option when Always allow in this chat is clicked', () => {
     respondToToolApproval.mockClear();
     const onRespondToToolApproval = vi.fn();
     renderPendingApprovalMessage(
@@ -867,7 +865,7 @@ describe('ToolCallContainer', () => {
       { onRespondToToolApproval },
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Always allow this here' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Always allow in this chat' }));
     expect(respondToToolApproval).toHaveBeenCalledWith(
       expect.objectContaining({ approvalId: 'approval-1', approved: true, optionId: 'allow-chat' }),
     );
@@ -900,7 +898,7 @@ describe('ToolCallContainer', () => {
     expect(screen.queryByText('Execution details')).not.toBeInTheDocument();
     expectNewCardOnly();
     expect(screen.getByRole('button', { name: 'Allow' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Always allow this here' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Always allow in this chat' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Not now' })).toBeInTheDocument();
   });
 
@@ -1083,6 +1081,7 @@ describe('ToolCallContainer', () => {
         calendar_event: null,
         schedule: null,
         persona: null,
+        skill: null,
       });
       const approval = (toolCallId: string, host: string): SentinelApprovalInfo => ({
         toolCallId,
@@ -1178,6 +1177,7 @@ describe('ToolCallContainer: held search request', () => {
       calendar_event: null,
       schedule: null,
       persona: null,
+      skill: null,
     };
     const info: SentinelApprovalInfo = { toolCallId: 'search-1', tier: 3, card, eventId: null, threadId: null };
     const api: SentinelApi = {
@@ -1296,6 +1296,7 @@ describe('a send that has ended', () => {
         calendar_event: null,
         schedule: null,
         persona: null,
+        skill: null,
       },
       eventId: null,
       threadId: null,

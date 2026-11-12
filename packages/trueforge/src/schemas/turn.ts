@@ -33,10 +33,14 @@ export const SubscribeTurnQuerySchema = z
   })
   .openapi('SubscribeTurnQuery');
 
-/** Intentionally empty — cancel takes no body fields. */
 export const CancelSessionRequestSchema = z
-  .object({})
-  .describe('Empty request body. Cancel identifies the session via the path only.')
+  .object({
+    turn_id: z
+      .string()
+      .optional()
+      .describe('Cancel only this turn, and nothing else running in the session. Omit to cancel the last turn.'),
+  })
+  .describe('Optional request body. The session comes from the path.')
   .openapi('CancelSessionRequest');
 /** Intentionally empty — success is signaled by HTTP 200 with `{}`. */
 export const CancelSessionResponseSchema = z

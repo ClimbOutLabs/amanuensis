@@ -37,10 +37,12 @@ import { migrateSqliteToLatest } from '../../src/db/migrateSqlite';
 import { SentinelAuditStore } from '../../src/db/sentinelAuditStore';
 import { SqliteAgentStore } from '../../src/db/sqlite/agent-store/SqliteAgentStore';
 import { SqliteApprovalTokenStore } from '../../src/db/sqlite/approval-token-store/SqliteApprovalTokenStore';
+import { SqliteChatDeletionStore } from '../../src/db/sqlite/chat-deletion-store/SqliteChatDeletionStore';
 import { SqliteChatImageStore } from '../../src/db/sqlite/chat-image-store/SqliteChatImageStore';
 import { createSqliteDb } from '../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
 import { SqliteGoogleConnectionStore } from '../../src/db/sqlite/google-connection-store/SqliteGoogleConnectionStore';
+import { SqliteLocalUserStore } from '../../src/db/sqlite/local-user-store/SqliteLocalUserStore';
 import { SqliteMcpServerStore } from '../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
 import { SqliteMcpToolGrantStore } from '../../src/db/sqlite/mcp-tool-grant-store/SqliteMcpToolGrantStore';
 import { SqliteModelProviderStore } from '../../src/db/sqlite/model-provider-store/SqliteModelProviderStore';
@@ -56,6 +58,7 @@ import { SqliteSkillStore } from '../../src/db/sqlite/skill-store/SqliteSkillSto
 import { SqliteSpaceStore } from '../../src/db/sqlite/space-store/SqliteSpaceStore';
 import { SqliteOAuthTokenStore } from '../../src/db/sqlite/token-store/SqliteOAuthTokenStore';
 import { SqliteTurnArtifactStore } from '../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
+import { evalSources, type EvalSources } from '../../src/eval/fixtures';
 import { closePersonaKnowledgeIndexers } from '../../src/personaKnowledge/knowledgeIndexer';
 import { ActiveTurnRegistry } from '../../src/runtime/activeTurns';
 import { createChatImageService } from '../../src/runtime/chatImages/chatImageService';
@@ -94,6 +97,13 @@ export interface ApprovalTestServer {
   db: () => SqliteDb;
   /** Replaces the operator's first-party origin list, as booting with another `FIRST_PARTY_MCP_ORIGINS` would. */
   setFirstPartyOrigins: (origins: string[]) => void;
+  /**
+   * Turns eval mode on or off, as booting with another `AMAN_EVAL_MODE` would. While on, Gmail and Google Calendar
+   * are the invented inbox and calendar, and only their cards can be allowed.
+   */
+  setEvalMode: (on: boolean) => void;
+  /** The invented inbox and calendar eval mode reads and writes, so a test can see what a turn saved. */
+  evalSources: () => EvalSources;
   close: () => Promise<void>;
 }
 
@@ -101,9 +111,11 @@ function buildApp(input: {
   db: SqliteDb;
   sandboxProvider: SandboxProvider | undefined;
   authenticator: Authenticator;
+  /** Signs the one owner in with an email and password, as `TRUEFORGE_AUTH_MODE=local` does. */
+  localSignIn: boolean;
   turnDrains: TurnDrainRegistry;
 }): ReturnType<typeof createServerApp> {
-  const { db, sandboxProvider, authenticator, turnDrains } = input;
+  const { db, sandboxProvider, turnDrains } = input;
   const sessionStore = new SqliteSessionStore(db);
   const tokenStore = new SqliteOAuthTokenStore(db);
   const agentStore = new SqliteAgentStore(db);
@@ -141,7 +153,13 @@ function buildApp(input: {
     outboundSecrets,
   });
   const personaStore = new SqlitePersonaStore(db);
+  const localUserStore = input.localSignIn ? new SqliteLocalUserStore(db) : undefined;
+  const authenticator =
+    localUserStore === undefined
+      ? input.authenticator
+      : createAuthenticator({ mode: TrueForgeAuthMode.Local, localUserStore, globalSettingsStore });
   return createServerApp({
+    chatDeletionStore: new SqliteChatDeletionStore({ db, turnArtifactStore: new SqliteTurnArtifactStore(db) }),
     chatSearchIndexer: new ChatSearchIndexer({
       sessionStore,
       globalSettingsStore,
@@ -191,6 +209,7 @@ function buildApp(input: {
     eventSubscriptions: new EventSubscriptionRegistry<TurnStreamingEvent>(undefined),
     logger: createLogger({ silent: true }),
     oidcDiscovery: undefined,
+    localUserStore,
     authenticator,
     authorizer: new TrueForgeAuthorizer(),
     outboundSecrets,
@@ -232,9 +251,20 @@ export async function startApprovalTestServer(options?: {
   authenticator?: Authenticator | undefined;
   /** Adds the inert connector's opt-in `web_search` tool. */
   inertWebSearch?: boolean | undefined;
+  /** Adds the inert connector's opt-in read of one page by its id. */
+  inertPageById?: boolean | undefined;
+  /** Adds the inert connector's opt-in `search_messages` lookup. */
+  inertMessageSearch?: boolean | undefined;
+  /** Runs local sign-in instead of the standalone user: the first request must create the owner's sign-in. */
+  localSignIn?: boolean | undefined;
 }): Promise<ApprovalTestServer> {
+  const localSignIn = options?.localSignIn === true;
   const authenticator = options?.authenticator ?? createAuthenticator({ mode: TrueForgeAuthMode.Standalone });
-  const mcp = await startInertMcpServer({ webSearch: options?.inertWebSearch === true });
+  const mcp = await startInertMcpServer({
+    webSearch: options?.inertWebSearch === true,
+    pageById: options?.inertPageById === true,
+    messageSearch: options?.inertMessageSearch === true,
+  });
   const model = await startScriptedModelServer();
   const directory = await mkdtemp(join(tmpdir(), 'tfy-approval-'));
   const databaseFile = join(directory, 'approvals.sqlite');
@@ -272,7 +302,13 @@ export async function startApprovalTestServer(options?: {
         {
           model_id: 'scripted-model',
           name: 'scripted-model',
-          properties: { context_length: 128000, max_output_tokens: 4096, reasoning_efforts: ['none'] },
+          // A custom model takes one request at a time by default; a test that holds two chats' turns open needs two.
+          properties: {
+            context_length: 128000,
+            max_output_tokens: 4096,
+            reasoning_efforts: ['none'],
+            max_concurrent_requests: 2,
+          },
         },
         {
           model_id: 'scripted-alt-model',
@@ -296,11 +332,16 @@ export async function startApprovalTestServer(options?: {
   });
 
   const originalFirstPartyOrigins = configuration.FIRST_PARTY_MCP_ORIGINS;
+  const originalEvalMode = configuration.AMAN_EVAL_MODE;
+  const originalAuthMode = configuration.TRUEFORGE_AUTH_MODE;
+  if (localSignIn) {
+    configuration.TRUEFORGE_AUTH_MODE = 'local';
+  }
   configuration.FIRST_PARTY_MCP_ORIGINS = options?.memoryProvider === true ? [mcp.origin] : [];
 
   // One registry for the server's life, so close() can wait for turn drains the way main.ts does.
   const turnDrains = new TurnDrainRegistry();
-  let app = buildApp({ db, sandboxProvider: options?.sandboxProvider, authenticator, turnDrains });
+  let app = buildApp({ db, sandboxProvider: options?.sandboxProvider, authenticator, localSignIn, turnDrains });
   if (options?.memoryProvider === true) {
     await registerMemoryProvider({ app, mcp });
   }
@@ -314,7 +355,7 @@ export async function startApprovalTestServer(options?: {
       // A restart stands in for the process going away, so running replies are cut off, not drained.
       await db.destroy();
       db = createSqliteDb(databaseFile);
-      app = buildApp({ db, sandboxProvider: options?.sandboxProvider, authenticator, turnDrains });
+      app = buildApp({ db, sandboxProvider: options?.sandboxProvider, authenticator, localSignIn, turnDrains });
     },
     mcp,
     model,
@@ -324,8 +365,14 @@ export async function startApprovalTestServer(options?: {
     setFirstPartyOrigins: origins => {
       configuration.FIRST_PARTY_MCP_ORIGINS = origins;
     },
+    setEvalMode: on => {
+      configuration.AMAN_EVAL_MODE = on;
+    },
+    evalSources,
     close: async () => {
       configuration.FIRST_PARTY_MCP_ORIGINS = originalFirstPartyOrigins;
+      configuration.AMAN_EVAL_MODE = originalEvalMode;
+      configuration.TRUEFORGE_AUTH_MODE = originalAuthMode;
       // The guide installs, and the indexing they queue, write into directories removed below, so they finish first.
       await app.guidesSettled();
       await closePersonaKnowledgeIndexers();

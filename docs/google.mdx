@@ -1,109 +1,286 @@
 ---
-title: 'Google'
-sidebarTitle: 'Google'
-description: 'Connect your own Google account so Aman can read your email and calendar and, with your approval, send email and add events.'
+title: 'Connect Google'
+sidebarTitle: 'Connect Google'
+description: 'Connect your own Google account so Aman can read your email and calendar, work with the Drive files it created or you opened with it and, with your approval, send email, add events and create Docs.'
 ---
 
-Aman can read and search your Gmail, read events on your Google Calendar, and, if you allow it, save drafts, send email and add events to your calendar. Reading is quiet. Every draft, every send and every new or changed event asks you first, and the approval card shows exactly what will be sent or saved.
+Connect your Google account so Aman can read and search your Gmail and look at your Google Calendar. If you allow it, Aman can also save drafts, send email, add events and work with some of your Google Drive files.
 
-You connect your own Google account through a Google Cloud project that you create yourself. Aman does not use a shared project, so no verification or security review by Google is needed for your own use. The setup takes about ten minutes, once.
+How to get there: Click **More** in the left bar, then **Settings**, then **Connectors**, then **Connect** on the **Google** card.
 
-## Connect
+=== "Computer"
 
-Open Settings, then Connectors, then Google, and select Connect. The panel walks you through the steps in Google Cloud:
+    ![The Google panel with its numbered setup steps](screenshots/app/google-setup-desktop.png)
 
-1. Create a project, or use one you already have.
-2. Turn on the Gmail API.
-3. Set up the consent screen. Choose External and fill in an app name and your email address.
-4. On the Audience page, add the Gmail address you will connect as under Test users. Without this, Google shows an Access blocked page when you sign in.
-5. Create a client. Aman tells you which application type to choose for your install.
-6. Download the client file, then drop it into the panel, or paste the client ID and secret.
+=== "Phone"
 
-Select Check my client to catch common mistakes before you sign in, then select Connect Google. A Google window opens. Google may say it hasn't verified the app. That is because you made the app yourself. Choose Advanced, then continue, and allow access.
+    ![The Google panel with its numbered setup steps](screenshots/app/google-setup-phone.png)
 
-If your browser cannot reach Aman directly, the panel tells you to copy the address from the page that fails to load and paste it back. In Safari on a Mac, click the address bar, choose Select All (Cmd+A), then Copy, because Safari hides the start of the address.
+## What Aman can do
 
-By default Aman asks only to read your email. Tick the box to also allow drafts and sending, or add it later from the panel with Allow drafts and sending.
+| Part     | Reads on its own                                                | Asks you first                         |
+| -------- | --------------------------------------------------------------- | -------------------------------------- |
+| Gmail    | Reads and searches your mail                                    | Every draft and every send             |
+| Calendar | Reads your events                                               | Every new or changed event             |
+| Drive    | Reads the files it created, or files you opened with Aman       | Every new Doc, every set of rows added to a Sheet |
 
-## Testing or Published
+The approval card shows exactly what will be sent or saved.
 
-A new Google project starts in Testing. You can choose either:
+!!! tip "Only need your calendar?"
 
-- **Testing.** Nothing more to do. Google signs you out every 7 days, so you reconnect once a week.
-- **Published.** On the Audience page, select Publish app. Google then keeps you signed in. Google shows the unverified app screen once; choose Advanced, then continue. After you publish, reconnect once so the saved sign-in is issued in Published mode.
+    The **Calendar** card connects Google Calendar with an app password, without a Google Cloud project. See [Connect your calendar with an app password](#connect-google-calendar-with-an-app-password).
 
-## Attachments
+## Before you start
 
-Ask Aman to open an attachment and it reads the file in the sandbox: PDFs (including scanned pages), images, Word (`.docx`, `.doc`), Excel (`.xlsx`, `.xls`), CSV, PowerPoint (`.pptx`), OpenDocument (`.odt`, `.ods`, `.odp`), RTF, HTML, forwarded emails saved as `.eml` or `.msg` (with the text of their own attachments), calendar invites and text files. See [Document attachments](/sandbox#document-attachments) for how each is read. This needs the sandbox to be on; without it, Aman tells you attachments cannot be opened. Text from an attachment is treated as untrusted, like the email itself.
+!!! note "Why you make your own Google project"
 
-## Calendar
+    Aman connects through a Google Cloud project that you make yourself, in your own Google account. Aman doesn't use a shared project. So Google doesn't need to check or review anything for your own use.
 
-Calendar is separate from mail and is off until you connect it. Once it is on, ask Aman things like "Any birthdays coming up?" or "What is on my calendar Thursday?". Aman can list events in a date range, search them by words, and open one event to see its guests, place, description and how it repeats. Reading never changes anything, and Aman never replies to an invite.
+    It's free and takes about ten minutes, once.
 
-To connect Calendar, finish the mail setup first, then:
+You need:
 
-1. In the Calendar section of the Google panel, open the Calendar API link and click Enable. Without this, Aman says the Google Calendar API isn't turned on.
-2. Select Connect Calendar and leave the calendar box ticked on Google's screen. Aman reuses the client you already saved, so there is nothing to retype.
+- the Google account you want to connect
+- a computer with a browser, because the Google Cloud pages are hard to use on a phone
 
-Select Test connection to check both mail and calendar. If mail works but Calendar does not, the panel says so and points back to the Calendar API link.
+If Aman is in offline mode, turn it off first. Click **More**, then **Settings**, then **Permissions**, and turn off **Offline mode**.
 
-Times are shown in the time zone of your device. If the device doesn't say, Aman uses the time zone of your calendar. All-day events such as birthdays are shown as dates, without a time zone shift. A very large event is shortened, and Aman says that some details were left out.
+## Connect Gmail
 
-Event text, including titles and descriptions, can be written by anyone who invites you, so it is treated as untrusted, like an email. Text inside an event cannot change what Aman does or skip an approval.
+The Google panel in Aman lists these steps, each with a link you can copy. Keep the panel open in one tab and do each step in another.
 
-### Adding events
+1.  **Make a Google Cloud project.**
+    Open the project link in the panel. Use a project you already have, if you like.
 
-When an email or a chat mentions something like a dentist appointment, Aman can put it on your calendar for you instead of handing you a file to download. This is off until you turn it on: in the Calendar section of the Google panel, select Allow Aman to add events, and allow it on Google's screen. Aman only gets permission to work with events, not your calendar settings or sharing.
+2.  **Turn on the Gmail API.**
+    Open the Gmail API link and click Enable.
 
-Aman can add an event to your main calendar, and move or rename an event you made. For a repeating event it changes one date at a time, never the whole series. It cannot delete events, and it cannot change an event someone else organizes or one whose guest list Google does not show in full.
+3.  **Set up the consent screen.**
+    Open the consent screen link. Choose External, then type an app name and your email address.
 
-Nothing is saved until you approve it. The approval card shows, in plain words:
+4.  **Add yourself as a test user.**
+    Open the Audience page link. Under Test users, click Add users and add the Gmail address you will connect.
 
-- which calendar, the title, the day and time, the time zone, and how long it lasts
-- the place and the description, when there are any
-- every guest, and whether Google will email them
-- for a change, the event as it is now and as it will be
+    !!! warning "Don't skip this step"
 
-Inviting guests means Google emails them an invitation, the same as if you sent it yourself, so the card always says whether that will happen. If the guests would also get something the card cannot show, such as a video call link or attached files, Aman does not offer the change. Aman also refuses to email event text that contains a password or key. On a demo instance, every guest must be one of the demo's own addresses, even when Google would not email them, because the invite still lands on their calendar. If you approve and then anything changes, such as the details Aman asked to save or the event itself in your calendar, nothing is saved and Aman asks again.
+        Without it, Google shows an "Access blocked" page when you sign in.
 
-Times are read in the time zone of your device, or the time zone you name. If neither is known, Aman uses your calendar's time zone, and if that is unknown too it asks you instead of guessing.
+5.  **Choose Testing or Production.** See [Testing or Production](#testing-or-production) below. If you're not sure, leave it on Testing for now.
 
-A scheduled run, such as a morning brief, never adds or changes an event by itself. It puts the proposed event on the Needs your OK list in that chat, with the same card, and nothing happens until you approve it there.
+6.  **Make the client.**
+    Open the credentials link and make a client. For the application type, choose the one the panel names: Desktop app on most installs.
 
-Every event you approve is recorded in the permissions log. When Aman then goes on to save it, the log also says whether Google saved it, or why it was not saved. A change refused before that point, such as one whose details changed after you approved it, shows only your approval. That record is kept on your Aman server even if you delete the chat. An approval that runs out before it is used never saves anything.
+    ??? note "If the panel says Web application"
 
-## Reconnect
+        An install with a public address uses Web application. The panel then shows a Redirect URI. Add that exact address under authorized redirect URIs.
 
-If Google no longer accepts the saved sign-in, the panel says Reconnect needed, and mail and calendar are paused. Everything else in Aman keeps working. Select Reconnect and sign in again. Aman reuses the client you already saved, so there is nothing to retype.
+    Click Create, then Download JSON.
 
-## Disconnect
+7.  **Give the client to Aman.**
+    Drop the downloaded file onto the panel, or choose it with the file picker. Or type the **Client ID** and **Client secret** yourself.
 
-Select Disconnect, then confirm. This turns off both mail and calendar. Aman asks Google to revoke its access and deletes the saved sign-in. If Google doesn't confirm, Aman still removes the connection and tells you; you can also remove access in your Google account settings. Emails already sent stay in Gmail.
+    The file is read in your browser. Your client secret goes to Aman once, to start sign-in, and is never shown again.
 
-## Demo instances
+8.  **Click Check my client.**
+    It catches common mistakes before you sign in. Fix anything it lists. When it says "No problems found with this client", go on.
 
-On a demo instance (`DEMO_MODE=true`), Google works and Aman can read mail and calendar events and save drafts, but it can only send to addresses you list. Set these in the instance's `.env`, then restart:
+9.  **Choose what Aman may do.**
+    By default Aman only reads your email. To let Aman save drafts and send email, tick the box about drafts and sending. Every draft and every send still asks you first.
 
-- `DEMO_GOOGLE_ACCOUNT`: the one Google account the demo accepts, for example `DEMO_GOOGLE_ACCOUNT=maya@example.com`. Left empty, no Google account can be connected.
-- `DEMO_SEND_ALLOWLIST`: the only addresses a demo may send to, comma-separated, for example `DEMO_SEND_ALLOWLIST=maya@example.com,friend@example.com`. Capital letters and extra spaces do not matter. Left empty, a demo sends nothing at all.
+10. **Click Connect Google.**
+    A Google window opens. If nothing opens, allow pop-ups for this site, or click the "open Google sign-in here" link in the panel.
 
-How it behaves:
+11. **Allow access on Google's screen.**
+    Google says it hasn't verified the app. That's because you made the app yourself. Click Advanced, then Go to your app, then Continue, and allow access.
 
-- Connect the demo's Google account once, before visitors arrive, signed in as the same Aman user the visitors will use. Only the account named in `DEMO_GOOGLE_ACCOUNT` is accepted, and the demo asks Google for every feature at once. After that nobody can reconnect or disconnect it from the panel, and the panel says so. If a feature was left out when you signed in, the panel stays open so the named account can connect again and add it.
-- The send list covers To, Cc and Bcc. If any recipient is not on it, the send is refused before an approval card appears, and again at the moment of sending.
-- The demo refuses sends it can't fully check. Connected services other than Gmail can't be used for anything that is not read-only.
-- An entry that is not a plain email address stops Aman from starting.
-- Outside demo mode both settings are ignored.
+The panel then says "Google is connected" and shows your Google address.
 
-If the Google project is in Testing mode, Google signs the account out every 7 days and mail stops until it is reconnected. Publish the project to avoid this. To recover, sign in as the demo user, open Settings, Connectors, Google, and select Reconnect with the account named in `DEMO_GOOGLE_ACCOUNT`.
+### If the page "can't be reached"
 
-## What to know
+On some installs, Google sends your browser back to a page that won't load, such as "This site can't be reached". That's expected. The address of that page finishes the sign-in.
 
-- Email content is treated as untrusted. Text inside a message cannot change what Aman does or skip an approval.
-- A reply stays in its conversation. Aman reads the thread from Gmail itself, and the approval card says which thread it is for ("Reply in the thread", with the original subject and sender). A reply whose thread links do not match that thread is refused. If a send is refused, nothing is sent, and any new or changed draft asks for a new approval.
-- A send card shows a short check code, such as A7F39C. Once Gmail accepts the send, the card turns into a receipt: the same recipients, subject, text and check code, with "Sent at 09:12, exactly as approved". Until then the card says Sending. If the send did not go out, the card says why in plain words and never shows a receipt. If Gmail did not answer, the card says the message may have gone through, so check your Sent folder before you try again.
-- Scheduled runs can read your email and calendar but never draft or send email. A scheduled run that wants to add an event asks you on the Needs your OK list instead.
-- After Aman reads your email, calendar, a document or an attachment in a conversation, a web search or map in that conversation runs without asking only if it doesn't copy anything from what it read: a sender's name, an email address, a phone number, a long number, or a run of five or more words. Line breaks and extra spaces don't hide a copy. Aman also checks what a command printed after such a read. The check does not catch a reworded copy. If it cannot check a result in full, it asks you first. In a scheduled run it skips that lookup and tells you.
-- Offline mode turns Gmail and Calendar off, because they need the network.
-- Your client secret and sign-in are stored on your Aman server, in its data folder. They are not encrypted there, so keep that folder private.
+1. Copy the whole address from the address bar of that page.
+2. Paste it into **Address from the address bar** in the panel.
+3. Click **Finish connecting**.
+
+=== "Safari on a Mac"
+
+    Click the address bar, then choose Select All (++cmd+a++) and Copy (++cmd+c++). Safari hides the start of the address, so this makes sure you copy all of it.
+
+=== "iPhone or iPad"
+
+    Tap the address bar, choose Select All, then Copy, so you get the whole address.
+
+The address works once, for this sign-in only.
+
+## Testing or Production
+
+A new Google project starts in Testing. You can keep it there or publish it.
+
+=== "Testing"
+
+    Nothing more to do. Google signs you out every 7 days, so you reconnect once a week.
+
+=== "Production"
+
+    1. In Google Cloud, open the Audience page and click Publish app.
+    2. Google shows the "unverified app" screen once. Click Advanced, then continue.
+    3. Back in Aman, reconnect once, so the saved sign-in is issued in production mode.
+
+    Google then keeps you signed in.
+
+## Connect your calendar
+
+Calendar is separate from mail, and stays off until you connect it. Finish the Gmail steps first.
+
+1. In the Google panel, find the Calendar part.
+2. Open the Calendar API link and click Enable. Without this, Aman says the Google Calendar API isn't turned on.
+3. Click **Connect Calendar**. On Google's screen, leave the calendar box ticked and continue.
+
+Aman reuses the client you already saved, so there's nothing to type again.
+
+Once it's on, ask things like "Any birthdays coming up?" or "What's on my calendar Thursday?"
+
+### Let Aman add events
+
+When an email or a chat mentions something like a dentist appointment, Aman can put it on your calendar. It doesn't hand you a file to download.
+
+This is off until you turn it on. In the Calendar part of the Google panel, click the button that starts with "Allow" and ends with "to add events", and allow it on Google's screen. Aman only gets permission to work with events, not your calendar settings or sharing.
+
+### Connect Google Calendar with an app password
+
+This is the simpler way to connect Google Calendar only. It doesn't connect Gmail, and needs no Google Cloud project.
+
+1. Turn on 2-Step Verification for your Google account, if it's not on yet. Google only offers app passwords after that.
+2. Open myaccount.google.com/apppasswords, type a name such as Aman, and select Create.
+3. Copy the 16-letter password Google shows. Google shows it only once.
+4. In Aman, open **Settings**, then **Connectors**. Find **Calendar** and click **Connect**.
+5. Pick Google, type your Gmail address (for example, yourusername@gmail.com), and leave the login name empty.
+6. Paste the app password and click **Connect**.
+
+Aman fills in the calendar address from your email address: `https://calendar.google.com/calendar/dav/yourusername%40gmail.com/`.
+
+If a Google Workspace admin has turned app passwords off for your account, use the Google panel instead.
+
+## Connect Google Drive
+
+Drive is separate from mail and calendar, and stays off until you connect it. Finish the Gmail steps first.
+
+1. In the Google panel, find the Drive part.
+2. Open the Drive API, Docs API and Sheets API links, and click Enable on each page. All three are needed:
+    - The Drive API lists your files.
+    - The Docs API reads a Doc.
+    - The Sheets API reads a Sheet and adds rows to it.
+3. Click **Connect Google Drive**. On Google's screen, leave the Drive box ticked and continue.
+
+Without those APIs, Aman says the API isn't turned on and points you back to these links. Aman reuses the client you already saved, so there's nothing to type again.
+
+## Check, reconnect or disconnect
+
+- **Check it:** click **Test connection**. It checks both mail and calendar. If mail works but Calendar doesn't, the panel says so and points back to the Calendar API link.
+- **Allow drafts later:** click **Allow drafts and sending**.
+- **Reconnect:** if Google no longer accepts the saved sign-in, the panel says "Reconnect needed". Mail, calendar and Drive files pause, and everything else in Aman keeps working. Click **Reconnect** and sign in again. There's nothing to type again.
+- **Disconnect:** click **Disconnect**, then **Disconnect Google**. This turns off mail, calendar and Drive.
+
+When you disconnect, Aman asks Google to take back its access and deletes the saved sign-in. If Google doesn't confirm, Aman still removes the connection and tells you. You can also remove access in your Google account settings. Emails already sent stay in Gmail.
+
+## Good to know
+
+### Email
+
+- Email is treated as untrusted. Text inside a message can't change what Aman does or skip an approval.
+- A reply stays in its conversation. Aman reads the thread from Gmail itself. The approval card says which thread it's for ("Reply in the thread", with the original subject and sender).
+- A reply whose thread links don't match that thread is refused. If a send is refused, nothing is sent, and any new or changed draft asks for a new approval.
+- A send card shows a short check code, such as A7F39C. Once Gmail accepts the send, the card turns into a receipt. It shows the same recipients, subject, text and check code, with "Sent at 09:12, exactly as approved".
+- Until Gmail accepts it, the card says Sending. If the send didn't go out, the card says why in plain words and never shows a receipt.
+- If Gmail didn't answer, the card says the message may have gone through. Check your Sent folder before you try again.
 - Aman connects one Google account per person.
+
+### Attachments
+
+Ask Aman to open an attachment and it reads the file in the sandbox. This needs the sandbox to be on. Without it, Aman tells you attachments can't be opened. Aman can read:
+
+- PDFs (including scanned pages) and images
+- Word (`.docx`, `.doc`), Excel (`.xlsx`, `.xls`), CSV and PowerPoint (`.pptx`)
+- OpenDocument (`.odt`, `.ods`, `.odp`), RTF and HTML
+- forwarded emails saved as `.eml` or `.msg` (with the text of their own attachments)
+- calendar invites and text files
+
+Text from an attachment is treated as untrusted, like the email itself. See [Document attachments](sandbox.mdx#document-attachments) for how each kind is read.
+
+### Calendar
+
+- Aman can list events in a date range, search events by words, and open one event to see its guests, place, description and how it repeats.
+- Reading never changes anything, and Aman never replies to an invite.
+- With the app password, Aman reads only your own calendar. Calendars other people share with you, and holiday calendars, are left out on purpose, because other people can write into them.
+- Times show in your device's time zone. If the device doesn't say, Aman uses your calendar's time zone.
+- All-day events such as birthdays show as dates, without a time zone shift. A very large event is shortened, and Aman says that some details were left out.
+- Anyone who invites you can write event text, including titles and descriptions. So it's treated as untrusted, like an email. Text inside an event can't change what Aman does or skip an approval.
+
+??? note "Adding and changing events: the details"
+
+    **What Aman can change.** Aman can add an event to your main calendar. It can also move or rename an event you made. For a repeating event it changes one date at a time, never the whole series. Aman can't delete events. It can't change an event someone else organizes, or one whose guest list Google doesn't show in full.
+
+    **What you approve.** Nothing is saved until you approve it. The approval card shows, in plain words:
+
+    - which calendar, the title, the day and time, the time zone, and how long it lasts
+    - the place and the description, when there are any
+    - every guest, and whether Google will email them
+    - for a change, the event as it is now and as it will be
+
+    **Guests.** Inviting guests means Google emails them an invitation, the same as if you sent it yourself. So the card always says whether that will happen. If the guests would also get something the card can't show, such as a video call link or attached files, Aman doesn't offer the change. Aman also refuses to email event text that contains a password or key.
+
+    If you approve and then anything changes, nothing is saved and Aman asks again. This covers the details Aman asked to save, and the event itself in your calendar.
+
+    **Times.** Times are read in your device's time zone, or the time zone you name. If neither is known, Aman uses your calendar's time zone. If that's unknown too, it asks you instead of guessing.
+
+    **Record of approvals.** Every event you approve is recorded in the permissions log. When Aman then saves it, the log also says whether Google saved it, or why it wasn't saved. A change refused before that point, such as one whose details changed after you approved it, shows only your approval. That record stays on your Aman server even if you delete the chat. An approval that runs out before it's used never saves anything.
+
+### Drive
+
+- Google only ever shows Aman the files Aman created itself, or files you opened with Aman. Everything else in your Drive isn't listed and can't be read.
+- With those files, Aman can list and search them, read a Google Doc, read the rows of a Google Sheet, create a new Doc, and add rows to a Sheet.
+- Creating a Doc and adding rows to a Sheet ask you first. The card shows the whole text of the Doc, or every row that will be added.
+- Aman can't delete a file, and can't change who a file is shared with.
+- Anyone the file is shared with can write text inside a Doc or a Sheet. So it's treated as untrusted, like an email. Text inside a file can't change what Aman does or skip an approval.
+
+### Scheduled runs
+
+- Scheduled runs, such as a morning brief, can read your email, calendar and Drive files.
+- They never draft or send email, and never create a Doc or add rows to a Sheet.
+- A scheduled run that wants to add or change an event puts it on the **Needs your OK** list in that chat, with the same card. Nothing happens until you approve it there.
+
+### Privacy
+
+- After Aman reads your email, calendar, a document or an attachment in a conversation, a web search or map in that conversation runs without asking only if it doesn't copy anything from what it read. That means a sender's name, an email address, a phone number, a long number, or a run of five or more words. Line breaks and extra spaces don't hide a copy.
+- Aman also checks what a command printed after such a read. The check doesn't catch a reworded copy. If it can't check a result in full, it asks you first. In a scheduled run it skips that lookup and tells you.
+- Offline mode turns Gmail, Calendar and Drive off, because they need the internet.
+- Your client secret and sign-in are stored on your Aman server, in its data folder. They aren't encrypted there, so keep that folder private.
+
+## Advanced: demo instances
+
+??? note "Running a demo instance with Google"
+
+    On a demo instance (`DEMO_MODE=true`), Google works and Aman can read mail and calendar events and save drafts, but it can only send to addresses you list. The Google card then says the demo uses a sample Google account. Set these in the instance's `.env`, then restart:
+
+    - `DEMO_GOOGLE_ACCOUNT`: the one Google account the demo accepts, for example `DEMO_GOOGLE_ACCOUNT=maya@example.com`. Left empty, no Google account can be connected.
+    - `DEMO_SEND_ALLOWLIST`: the only addresses a demo may send to, comma-separated, for example `DEMO_SEND_ALLOWLIST=maya@example.com,friend@example.com`. Capital letters and extra spaces don't matter. Left empty, a demo sends nothing at all.
+
+    How it behaves:
+
+    - Connect the demo's Google account once, before visitors arrive. Sign in as the same Aman user the visitors will use.
+    - Only the account named in `DEMO_GOOGLE_ACCOUNT` is accepted. The demo asks Google for every feature at once.
+    - After that nobody can reconnect or disconnect it from the panel, and the panel says so. If a feature was left out when you signed in, the panel stays open so the named account can connect again and add it.
+    - The send list covers To, Cc and Bcc. If any recipient isn't on it, the send is refused before an approval card appears, and again at the moment of sending.
+    - Calendar guests must be the demo's own addresses too. This holds even when Google wouldn't email them, because the invite still lands on their calendar.
+    - The demo refuses sends it can't fully check. Connected services other than Gmail can't be used for anything that isn't read-only.
+    - An entry that isn't a plain email address stops Aman from starting.
+    - Outside demo mode both settings are ignored.
+
+    If the Google project is in Testing mode, Google signs the account out every 7 days and mail stops until it's reconnected. Publish the project to avoid this. To recover, sign in as the demo user, open **Settings**, **Connectors**, **Google**, and click **Reconnect** with the account named in `DEMO_GOOGLE_ACCOUNT`.
+
+## Related
+
+- [Connect email and calendar](../packages/trueforge/guide/topics/connect-mail-calendar.md): which card to pick.
+- [Email](../packages/trueforge/guide/topics/email.md)
+- [Calendar](../packages/trueforge/guide/topics/calendar.md)

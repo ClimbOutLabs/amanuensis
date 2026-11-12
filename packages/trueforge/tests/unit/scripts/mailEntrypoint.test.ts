@@ -12,6 +12,37 @@ const EMAIL_CHECK = resolve(__dirname, '../../../../../ops/compose/mail-email/em
 const LIST_V1 = 'db_location = "/data/db.sqlite3"\nallowed_recipients = ["dana@example.com"]\n';
 const LIST_V2 = 'db_location = "/data/db.sqlite3"\nallowed_recipients = ["dana@example.com", "sam@example.com"]\n';
 
+/**
+ * Writes the port holder every stand-in server runs. The wrapper records the send list as loaded
+ * only once the started server answers on its port, so a stand-in that never binds the port is a
+ * server that never answers: no record is ever written for it. The holder binds the mail port the
+ * wrapper probes and then sleeps, like the real server. Run with "ignore-stop" it also ignores
+ * the stop signal, for the stand-ins whose whole point is refusing to stop.
+ */
+async function writePortHolder(bin: string): Promise<string> {
+  const holder = join(bin, 'hold-mail-port.py');
+  await writeFile(
+    holder,
+    [
+      'import signal',
+      'import socket',
+      'import sys',
+      'import time',
+      '',
+      'if len(sys.argv) > 1 and sys.argv[1] == "ignore-stop":',
+      '    signal.signal(signal.SIGTERM, signal.SIG_IGN)',
+      '',
+      'sock = socket.socket()',
+      'sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)',
+      'sock.bind(("127.0.0.1", 9557))',
+      'sock.listen(1)',
+      'time.sleep(3600)',
+      '',
+    ].join('\n'),
+  );
+  return holder;
+}
+
 /** Waits until `check` passes, polling. Fails the test when it never does. */
 async function eventually(check: () => Promise<boolean>, timeoutMs = 12_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
@@ -50,12 +81,14 @@ describe('mail-email entrypoint wrapper', () => {
     await writeFile(policy, LIST_V1);
     await writeFile(accountFile, '');
     await mkdir(join(dir, 'status'));
-    // A stand-in server: it logs each start and then runs as the only process, so a signal reaches it.
+    // A stand-in server: it logs each start, binds the mail port like the real server, and then
+    // runs as the only process, so a signal reaches it.
     const bin = join(dir, 'bin');
     await mkdir(bin);
+    const holder = await writePortHolder(bin);
     await writeFile(
       join(bin, 'mcp-email-server'),
-      `#!/bin/sh\necho start >> "${starts}"\necho "\${MCP_EMAIL_SERVER_ALLOWED_RECIPIENTS-unset}" >> "${envLog}"\necho "addr:\${MCP_EMAIL_SERVER_EMAIL_ADDRESS-unset}" >> "${envLog}"\nexec sleep 1000\n`,
+      `#!/bin/sh\necho start >> "${starts}"\necho "\${MCP_EMAIL_SERVER_ALLOWED_RECIPIENTS-unset}" >> "${envLog}"\necho "addr:\${MCP_EMAIL_SERVER_EMAIL_ADDRESS-unset}" >> "${envLog}"\nexec python3 "${holder}"\n`,
     );
     await chmod(join(bin, 'mcp-email-server'), 0o755);
   });
@@ -244,9 +277,10 @@ describe('mail-email entrypoint bounded stop', () => {
   async function writeStub(stubborn: boolean): Promise<void> {
     const bin = join(dir, 'bin');
     await mkdir(bin);
+    const holder = await writePortHolder(bin);
     const body = stubborn
-      ? `#!/bin/sh\necho start >> "${starts}"\necho $$ >> "${pidsFile}"\ntrap '' TERM\nwhile :; do sleep 1; done\n`
-      : `#!/bin/sh\necho start >> "${starts}"\necho $$ >> "${pidsFile}"\nexec sleep 1000\n`;
+      ? `#!/bin/sh\necho start >> "${starts}"\necho $$ >> "${pidsFile}"\nexec python3 "${holder}" ignore-stop\n`
+      : `#!/bin/sh\necho start >> "${starts}"\necho $$ >> "${pidsFile}"\nexec python3 "${holder}"\n`;
     await writeFile(join(bin, 'mcp-email-server'), body);
     await chmod(join(bin, 'mcp-email-server'), 0o755);
   }
@@ -258,7 +292,8 @@ describe('mail-email entrypoint bounded stop', () => {
   async function writeWorkerStub(leaderExitsOnStop = false): Promise<void> {
     const bin = join(dir, 'bin');
     await mkdir(bin);
-    const body = `#!/bin/sh\necho start >> "${starts}"\necho $$ >> "${pidsFile}"\ntrap ${leaderExitsOnStop ? "'exit 0'" : "''"} TERM\nsh -c 'trap "" TERM; echo $$ >> "${workerPidsFile}"; while :; do sleep 1; done' &\nwait\n`;
+    const holder = await writePortHolder(bin);
+    const body = `#!/bin/sh\necho start >> "${starts}"\necho $$ >> "${pidsFile}"\ntrap ${leaderExitsOnStop ? "'exit 0'" : "''"} TERM\nsh -c 'echo $$ >> "${workerPidsFile}"; exec python3 "${holder}" ignore-stop' &\nwait\n`;
     await writeFile(join(bin, 'mcp-email-server'), body);
     await chmod(join(bin, 'mcp-email-server'), 0o755);
   }
@@ -317,6 +352,8 @@ describe('mail-email entrypoint bounded stop', () => {
     await writeStub(true);
     startWrapperCaptured({ AMAN_MAIL_STOP_GRACE_SECONDS: '2' });
     await eventually(async () => (await readOrEmpty(status)) === allowedRecipientsFileHash(LIST_V1));
+    // The wrapper records the list before the server it started has written its pid, so wait for both.
+    await eventually(async () => (await serverPids()).length > 0);
     const firstPid = (await serverPids())[0];
     if (firstPid === undefined) throw new Error('the stand-in server never recorded its pid');
 

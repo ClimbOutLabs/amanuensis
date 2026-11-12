@@ -17,9 +17,16 @@ import {
   type InternalEnrichedAssistantMessage,
   type RawAssistantMessageWithUsage,
 } from '@truefoundry/trueforge-core/core/llm/LLMTypes';
+import { allowsChatApproval, allowsToolGrant } from '@truefoundry/trueforge-core/core/mcp/approvalGrant';
 import { createToolCallMemoState, executeToolCalls } from '@truefoundry/trueforge-core/core/mcp/executeToolCalls';
 import { isCallToolResponseResult } from '@truefoundry/trueforge-core/core/mcp/IMCPServer';
 import { approvalExpiredReason } from '@truefoundry/trueforge-core/core/permissions/approvalExpiry';
+import { forUnattendedRun } from '@truefoundry/trueforge-core/core/permissions/context';
+import {
+  checkHeldReplay,
+  HELD_RESULT_TEXT,
+  holdApprovalCalls,
+} from '@truefoundry/trueforge-core/core/permissions/heldActions';
 import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import { NOOP_AGENT_TRACING } from '@truefoundry/trueforge-core/core/tracing/NoopAgentTracing';
 import winston from 'winston';
@@ -138,6 +145,7 @@ async function setup(
     }),
     runsAs: scheduleRunsAs({ tenant_id: 'default', agentStore, personaStore, personalizationStore }),
     logger: winston.createLogger({ silent: true }),
+    session_id: 'chat-1',
     timeZone: 'timeZone' in input ? input.timeZone : 'America/New_York',
     sentinel,
     now: () => NOW,
@@ -158,15 +166,21 @@ async function setup(
 
 type Setup = Awaited<ReturnType<typeof setup>>;
 
-/** Classifies a call as the chat would, then dispatches it with the user's answer (none for a call that never asks). */
+type CallInfo = Awaited<ReturnType<ScheduleToolSet['toolCallInfo']>>;
+
+/**
+ * Classifies a call as the chat would, then dispatches it with the user's answer (none for a call that never asks).
+ * A card the person saw earlier can be passed in, to dispatch the call some time after it was shown.
+ */
 async function dispatch(input: {
   built: Setup;
   name: string;
   args: Record<string, unknown>;
   decision?: ApprovalDecision | undefined;
+  shown?: CallInfo | undefined;
 }) {
   const { tools, sentinel } = input.built;
-  const info = await tools.toolCallInfo({ name: input.name, arguments: input.args });
+  const info = input.shown ?? (await tools.toolCallInfo({ name: input.name, arguments: input.args }));
   const message: InternalEnrichedAssistantMessage = {
     role: 'assistant',
     content: null,
@@ -207,6 +221,20 @@ function resultText(result: Awaited<ReturnType<typeof dispatch>>['result']): str
 }
 
 describe('create_schedule', () => {
+  it('asks every time: its card never offers the chat-wide answer, for a create or a delete', async () => {
+    const built = await setup();
+    const create = await built.tools.toolCallInfo({ name: 'create_schedule', arguments: MORNING_BRIEF });
+    expect(create).toMatchObject({ tier_reason: 'schedule_write', is_approval_required: true });
+    expect(allowsChatApproval(create)).toBe(false);
+    await dispatch({ built, name: 'create_schedule', args: MORNING_BRIEF, decision: { status: 'allow' } });
+    const remove = await built.tools.toolCallInfo({
+      name: 'delete_schedule',
+      arguments: { schedule: 'morning-brief' },
+    });
+    expect(remove).toMatchObject({ tier_reason: 'schedule_write', is_approval_required: true });
+    expect(allowsChatApproval(remove)).toBe(false);
+  });
+
   it("shows a card first, then on approval saves an active schedule that runs as the plain chat's assistant", async () => {
     const built = await setup();
     const info = await built.tools.toolCallInfo({ name: 'create_schedule', arguments: MORNING_BRIEF });
@@ -345,6 +373,13 @@ describe('create_schedule', () => {
     const { result } = await built.tools.listTools();
     const create = result.tools.find(tool => tool.name === 'create_schedule');
     expect(Object.keys(create?.inputSchema.properties ?? {})).not.toContain('agent');
+  });
+
+  it('says in its description that a schedule is not a calendar event', async () => {
+    const built = await setup();
+    const { result } = await built.tools.listTools();
+    const create = result.tools.find(tool => tool.name === 'create_schedule');
+    expect(create?.description).toContain('not a calendar event');
   });
 
   it('still reports other unknown details as a fixable error', async () => {
@@ -548,10 +583,18 @@ describe.each([
     });
   });
 
-  it('pauses and resumes by name without asking, and records each in the activity log', async () => {
+  it('pauses and resumes only after the person approves a card that shows the schedule', async () => {
     const built = await withMorningBrief();
-    const paused = await dispatch({ built, name: 'pause_schedule', args: { schedule: 'morning-brief' } });
-    expect(paused.info).toMatchObject({ tier: 1, is_approval_required: false });
+    const pause = { built, name: 'pause_schedule', args: { schedule: 'morning-brief' } };
+    const asked = await built.tools.toolCallInfo({ name: pause.name, arguments: pause.args });
+    expect(asked).toMatchObject({ tier: 3, tier_reason: 'schedule_status', is_approval_required: true });
+    expect(asked.tier3_card?.plain_what).toBe(
+      'Pause the schedule "Morning brief"? It runs every weekday at 8:00 AM (America/New_York) and will not run again until it is resumed.',
+    );
+    await dispatch({ ...pause, decision: { status: 'deny', reason: 'keep it running' } });
+    expect((await built.listAll())[0]?.status).toBe('active');
+
+    const paused = await dispatch({ ...pause, decision: { status: 'allow' } });
     expect(JSON.parse(resultText(paused.result))).toMatchObject({ paused: { status: 'paused', next_run: null } });
     const [schedule] = await built.listAll();
     expect(schedule?.status).toBe('paused');
@@ -559,19 +602,70 @@ describe.each([
       await built.store.getScheduledRunFor({ tenant_id: 'default', schedule_id: schedule?.id ?? '' }),
     ).toBeUndefined();
 
-    const resumed = await dispatch({ built, name: 'resume_schedule', args: { schedule: schedule?.id ?? '' } });
+    const resume = { built, name: 'resume_schedule', args: { schedule: schedule?.id ?? '' } };
+    const askedAgain = await built.tools.toolCallInfo({ name: resume.name, arguments: resume.args });
+    expect(askedAgain).toMatchObject({ tier: 3, tier_reason: 'schedule_status', is_approval_required: true });
+    expect(askedAgain.tier3_card?.plain_what).toBe(
+      'Resume the schedule "Morning brief"? It runs every weekday at 8:00 AM (America/New_York) and starts again as soon as you approve.',
+    );
+    await dispatch({ ...resume, decision: { status: 'deny', reason: 'not yet' } });
+    expect((await built.listAll())[0]?.status).toBe('paused');
+
+    const resumed = await dispatch({ ...resume, decision: { status: 'allow' } });
     expect(JSON.parse(resultText(resumed.result))).toMatchObject({
       resumed: { status: 'active', next_run: 'Monday, October 19 at 8:00 AM' },
     });
-    expect(built.audit.map(row => [row.tool_name, row.description, row.outcome])).toEqual([
-      [
-        'create_schedule',
-        'Create the schedule "Morning brief"? It runs every weekday at 8:00 AM (America/New_York) and starts as soon as you approve.',
-        'approved',
-      ],
-      ['pause_schedule', 'Paused the schedule "morning-brief".', 'ran'],
-      ['resume_schedule', 'Resumed the schedule "morning-brief".', 'ran'],
-    ]);
+    expect((await built.listAll())[0]?.status).toBe('active');
+  });
+
+  it('asks every time for a pause or a resume: no answer covers the next one', async () => {
+    const built = await withMorningBrief();
+    const asked = await built.tools.toolCallInfo({ name: 'pause_schedule', arguments: { schedule: 'morning-brief' } });
+    expect(allowsChatApproval(asked)).toBe(false);
+    expect(allowsToolGrant(asked)).toBe(false);
+    await dispatch({
+      built,
+      name: 'pause_schedule',
+      args: { schedule: 'morning-brief' },
+      shown: asked,
+      decision: { status: 'allow' },
+    });
+    const askedResume = await built.tools.toolCallInfo({
+      name: 'resume_schedule',
+      arguments: { schedule: 'morning-brief' },
+    });
+    expect(askedResume).toMatchObject({ tier: 3, is_approval_required: true });
+    expect(allowsChatApproval(askedResume)).toBe(false);
+    expect(allowsToolGrant(askedResume)).toBe(false);
+  });
+
+  it('does not pause a different schedule that took the name after the card was shown', async () => {
+    const built = await withMorningBrief();
+    const pause = { built, name: 'pause_schedule', args: { schedule: 'morning-brief' } };
+    const shown = await built.tools.toolCallInfo({ name: pause.name, arguments: pause.args });
+    const [first] = await built.listAll();
+    await built.store.deleteSchedule({ tenant_id: 'default', id: first?.id ?? '' });
+    await dispatch({ built, name: 'create_schedule', args: MORNING_BRIEF, decision: { status: 'allow' } });
+
+    await dispatch({ ...pause, shown, decision: { status: 'allow' } });
+    const [second] = await built.listAll();
+    expect(second?.id).not.toBe(first?.id);
+    expect(second?.status).toBe('active');
+  });
+
+  it('answers a pause that would change nothing with the reason, and shows no card', async () => {
+    const built = await withMorningBrief();
+    await dispatch({
+      built,
+      name: 'pause_schedule',
+      args: { schedule: 'morning-brief' },
+      decision: { status: 'allow' },
+    });
+    const again = await built.tools.toolCallInfo({ name: 'pause_schedule', arguments: { schedule: 'morning-brief' } });
+    expect(again.tier3_card).toBeUndefined();
+    expect(again.pre_dispatch_failure?.message).toBe(
+      'Nothing was changed because the schedule "morning-brief" is already paused.',
+    );
   });
 
   it('tells the model when there is no such schedule', async () => {
@@ -620,6 +714,32 @@ describe('the schedule rule in the system prompt', () => {
 
 const MEDICINE = { what: 'Take the medicine', at: '2026-10-19T18:00:00-04:00' };
 
+describe('in an incognito chat', () => {
+  it('only lists schedules and reminders: anything set here would outlive the chat', async () => {
+    const built = await setup();
+    const tools = new ScheduleToolSet({ ...built.options, keepsNothing: true });
+    expect((await tools.listTools()).result.tools.map(tool => tool.name).sort()).toEqual([
+      'list_reminders',
+      'list_schedules',
+    ]);
+    const refused = await tools.callTool({ name: 'set_reminder', arguments: MEDICINE });
+    expect(isCallToolResponseResult(refused) && refused.result.isError).toBe(true);
+    expect(await built.listAll()).toEqual([]);
+    expect(built.audit).toEqual([]);
+  });
+
+  it('tells the model it cannot set or change one here', async () => {
+    const built = await setup();
+    const prompt = InstructionBuilder.createSystemPrompt('test');
+    for (const build of scheduleCapability({ ...built.options, keepsNothing: true }).instructionBuilders ?? []) {
+      build(prompt);
+    }
+    const text = prompt.build();
+    expect(text).toContain('This incognito chat cannot set, change or cancel a schedule or a reminder.');
+    expect(text).not.toContain('use set_reminder');
+  });
+});
+
 describe('reminder tools', () => {
   it('sets a one-time reminder without a card, records it, and tells the activity log in plain words', async () => {
     const built = await setup();
@@ -643,6 +763,7 @@ describe('reminder tools', () => {
         run_at: '2026-10-19T18:00:00-04:00',
         kind: 'reminder',
         timezone: 'America/New_York',
+        origin_session_id: 'chat-1',
       },
     });
     const pending = await built.store.getScheduledRunFor({ tenant_id: 'default', schedule_id: saved?.id ?? '' });
@@ -650,6 +771,14 @@ describe('reminder tools', () => {
     expect(built.audit.map(row => [row.tool_name, row.description, row.outcome])).toEqual([
       ['set_reminder', 'Set a reminder for Monday, October 19 at 6:00 PM: Take the medicine', 'ran'],
     ]);
+  });
+
+  it('records no origin chat when a reminder is set outside a chat', async () => {
+    const built = await setup();
+    const outsideChat = { ...built, tools: new ScheduleToolSet({ ...built.options, session_id: null }) };
+    await dispatch({ built: outsideChat, name: 'set_reminder', args: MEDICINE });
+    const [saved] = await built.listAll();
+    expect(saved?.manifest).toMatchObject({ kind: 'reminder', origin_session_id: null });
   });
 
   it('refuses a time in the past with a message that says what to do next', async () => {
@@ -676,7 +805,7 @@ describe('reminder tools', () => {
     expect(saved?.manifest).toMatchObject({ cron: '30 8 * * 1-5', run_at: null, kind: 'reminder' });
   });
 
-  it('lists upcoming reminders apart from schedules, and cancels one by id without asking', async () => {
+  it('lists upcoming reminders apart from schedules without asking', async () => {
     const built = await setup();
     await dispatch({ built, name: 'set_reminder', args: MEDICINE });
     const schedules = await dispatch({ built, name: 'list_schedules', args: {} });
@@ -684,22 +813,248 @@ describe('reminder tools', () => {
 
     const listed = await dispatch({ built, name: 'list_reminders', args: {} });
     expect(listed.info).toMatchObject({ tier: 1, tier_reason: 'reminder_read', is_approval_required: false });
-    const { reminders } = JSON.parse(resultText(listed.result));
-    expect(reminders).toHaveLength(1);
+    expect(JSON.parse(resultText(listed.result)).reminders).toHaveLength(1);
+  });
 
-    const cancelled = await dispatch({ built, name: 'cancel_reminder', args: { reminder: reminders[0].id } });
-    expect(cancelled.info).toMatchObject({ tier: 1, tier_reason: 'reminder_write', is_approval_required: false });
+  it('cancels a reminder only after the person approves a card that shows it', async () => {
+    const built = await setup();
+    await dispatch({ built, name: 'set_reminder', args: MEDICINE });
+    const [reminder] = await built.listAll();
+    const cancel = { built, name: 'cancel_reminder', args: { reminder: reminder?.id ?? '' } };
+    const asked = await built.tools.toolCallInfo({ name: cancel.name, arguments: cancel.args });
+    expect(asked).toMatchObject({ tier: 3, tier_reason: 'reminder_cancel', is_approval_required: true });
+    expect(asked.tier3_card?.plain_what).toBe(
+      'Cancel the reminder "Take the medicine", set for Monday, October 19 at 6:00 PM?',
+    );
+    expect(asked.tier3_card?.cannot_be_undone).toBe('Once cancelled, the reminder is gone for good.');
+    expect(allowsChatApproval(asked)).toBe(false);
+    expect(allowsToolGrant(asked)).toBe(false);
+
+    await dispatch({ ...cancel, decision: { status: 'deny', reason: 'keep it' } });
+    expect(await built.listAll()).toHaveLength(1);
+
+    const cancelled = await dispatch({ ...cancel, decision: { status: 'allow' } });
     expect(JSON.parse(resultText(cancelled.result))).toMatchObject({ cancelled: { what: 'Take the medicine' } });
     expect(await built.listAll()).toEqual([]);
   });
 
-  it('cancels by the exact words, and says what to do when none matches', async () => {
+  it('asks again for the next reminder: one answer never covers another cancel', async () => {
+    const built = await setup();
+    await dispatch({ built, name: 'set_reminder', args: MEDICINE });
+    await dispatch({ built, name: 'set_reminder', args: { what: 'Call the clinic', at: '2026-10-20T09:00:00-04:00' } });
+    await dispatch({
+      built,
+      name: 'cancel_reminder',
+      args: { reminder: 'Take the medicine' },
+      decision: { status: 'allow' },
+    });
+    const next = await built.tools.toolCallInfo({
+      name: 'cancel_reminder',
+      arguments: { reminder: 'Call the clinic' },
+    });
+    expect(next).toMatchObject({ tier: 3, tier_reason: 'reminder_cancel', is_approval_required: true });
+    expect(next.tier3_card?.plain_what).toBe(
+      'Cancel the reminder "Call the clinic", set for Tuesday, October 20 at 9:00 AM?',
+    );
+    expect((await built.listAll()).map(row => row.manifest.task)).toEqual(['Call the clinic']);
+  });
+
+  it('shows when a repeating reminder runs on the cancel card', async () => {
+    const built = await setup();
+    await dispatch({
+      built,
+      name: 'set_reminder',
+      args: { what: 'Take the medicine', at: '2026-10-19T08:30:00-04:00', repeat: 'weekdays' },
+    });
+    const asked = await built.tools.toolCallInfo({
+      name: 'cancel_reminder',
+      arguments: { reminder: 'Take the medicine' },
+    });
+    expect(asked.tier3_card?.plain_what).toBe(
+      'Cancel the reminder "Take the medicine", set for every weekday at 8:30 AM?',
+    );
+  });
+
+  it('does not cancel a different reminder that has the same words after the card was shown', async () => {
+    const built = await setup();
+    await dispatch({ built, name: 'set_reminder', args: MEDICINE });
+    const cancel = { built, name: 'cancel_reminder', args: { reminder: 'Take the medicine' } };
+    const shown = await built.tools.toolCallInfo({ name: cancel.name, arguments: cancel.args });
+    const [first] = await built.listAll();
+    await built.store.deleteSchedule({ tenant_id: 'default', id: first?.id ?? '' });
+    await dispatch({ built, name: 'set_reminder', args: { ...MEDICINE, at: '2026-10-21T07:00:00-04:00' } });
+
+    await dispatch({ ...cancel, shown, decision: { status: 'allow' } });
+    const left = await built.listAll();
+    expect(left).toHaveLength(1);
+    expect(left[0]?.id).not.toBe(first?.id);
+  });
+
+  it('says what to do when no reminder matches, and shows no card', async () => {
     const built = await setup();
     await dispatch({ built, name: 'set_reminder', args: MEDICINE });
     const missing = await dispatch({ built, name: 'cancel_reminder', args: { reminder: 'Walk the dog' } });
+    expect(missing.info.tier3_card).toBeUndefined();
     expect(resultText(missing.result)).toContain('Call list_reminders');
-    await dispatch({ built, name: 'cancel_reminder', args: { reminder: 'take the medicine' } });
+    expect(await built.listAll()).toHaveLength(1);
+  });
+
+  it('sets a reminder without a card after a cancel was approved or refused', async () => {
+    const built = await setup();
+    await dispatch({ built, name: 'set_reminder', args: MEDICINE });
+    await dispatch({
+      built,
+      name: 'cancel_reminder',
+      args: { reminder: 'Take the medicine' },
+      decision: { status: 'deny', reason: 'keep it' },
+    });
+    const { info } = await dispatch({
+      built,
+      name: 'set_reminder',
+      args: { what: 'Call the clinic', at: '2026-10-20T09:00:00-04:00' },
+    });
+    expect(info).toMatchObject({ tier: 1, is_approval_required: false, tier3_card: null });
+    expect(await built.listAll()).toHaveLength(2);
+  });
+});
+
+/** The same tools as `built`, in a run a schedule started with nobody watching. */
+function inScheduledRun(built: Setup): Setup {
+  const sentinel = { ...built.sentinel, services: forUnattendedRun(built.sentinel.services) };
+  return { ...built, sentinel, tools: new ScheduleToolSet({ ...built.options, sentinel }) };
+}
+
+/** Classifies a call as a scheduled run would, holds it if it asks, and dispatches what is left. */
+async function dispatchUnattended(input: { built: Setup; name: string; args: Record<string, unknown> }) {
+  const run = inScheduledRun(input.built);
+  const info = await run.tools.toolCallInfo({ name: input.name, arguments: input.args });
+  const { message } = holdApprovalCalls({
+    message: {
+      role: 'assistant',
+      content: null,
+      tool_calls: [
+        {
+          id: 'call-1',
+          type: 'function',
+          function: { name: input.name, arguments: JSON.stringify(input.args) },
+          tool_info: info,
+        },
+      ],
+    },
+    alreadyHeld: 0,
+    isSubAgent: false,
+    browserEditWaiting: false,
+  });
+  const result = await executeToolCalls({
+    assistantMessage: message,
+    toolMapping: new Map([[input.name, { toolSet: run.tools, originalToolName: input.name }]]),
+    threadId: 'main',
+    approvalDecisions: new Map(),
+    memoState: createToolCallMemoState(),
+    sentinel: {
+      services: run.sentinel.services,
+      web_search: run.sentinel.web_search,
+      identity: {
+        tenant_id: run.sentinel.tenant_id,
+        created_by: run.sentinel.created_by,
+        conversation_id: run.sentinel.conversation_id,
+        repository_id: null,
+        workspace_cwd: null,
+        agent_intent: null,
+      },
+    },
+  });
+  return { info, result };
+}
+
+describe('in a scheduled run, a change to a reminder or a schedule waits for the owner', () => {
+  it('holds a new reminder: the card says when and what, and nothing is saved', async () => {
+    const built = await setup();
+    const { info, result } = await dispatchUnattended({ built, name: 'set_reminder', args: MEDICINE });
+    expect(info).toMatchObject({ tier: 3, is_approval_required: true });
+    expect(info.tier3_card?.plain_what).toBe('Set a reminder for Monday, October 19 at 6:00 PM: Take the medicine?');
+    expect(resultText(result)).toBe(HELD_RESULT_TEXT);
     expect(await built.listAll()).toEqual([]);
+  });
+
+  it('holds a cancel: the card names the reminder, and the reminder stays', async () => {
+    const built = await setup();
+    await dispatch({ built, name: 'set_reminder', args: MEDICINE });
+    const { info, result } = await dispatchUnattended({
+      built,
+      name: 'cancel_reminder',
+      args: { reminder: 'Take the medicine' },
+    });
+    expect(info).toMatchObject({ tier: 3, is_approval_required: true });
+    expect(info.tier3_card?.plain_what).toBe(
+      'Cancel the reminder "Take the medicine", set for Monday, October 19 at 6:00 PM?',
+    );
+    expect(resultText(result)).toBe(HELD_RESULT_TEXT);
+    expect(await built.listAll()).toHaveLength(1);
+  });
+
+  it('holds a pause and a resume: the card names the schedule, and its state stays', async () => {
+    const built = await setup();
+    await dispatch({ built, name: 'create_schedule', args: MORNING_BRIEF, decision: { status: 'allow' } });
+    const paused = await dispatchUnattended({ built, name: 'pause_schedule', args: { schedule: 'morning-brief' } });
+    expect(paused.info).toMatchObject({ tier: 3, is_approval_required: true });
+    expect(paused.info.tier3_card?.plain_what).toBe(
+      'Pause the schedule "Morning brief"? It runs every weekday at 8:00 AM (America/New_York) and will not run again until it is resumed.',
+    );
+    expect(resultText(paused.result)).toBe(HELD_RESULT_TEXT);
+    expect((await built.listAll())[0]?.status).toBe('active');
+
+    await dispatch({
+      built,
+      name: 'pause_schedule',
+      args: { schedule: 'morning-brief' },
+      decision: { status: 'allow' },
+    });
+    const resumed = await dispatchUnattended({ built, name: 'resume_schedule', args: { schedule: 'morning-brief' } });
+    expect(resumed.info.tier3_card?.plain_what).toBe(
+      'Resume the schedule "Morning brief"? It runs every weekday at 8:00 AM (America/New_York) and starts again as soon as you approve.',
+    );
+    expect((await built.listAll())[0]?.status).toBe('paused');
+  });
+
+  it('does not let a held pause reach a different schedule that took the name before the owner approved', async () => {
+    const built = await setup();
+    await dispatch({ built, name: 'create_schedule', args: MORNING_BRIEF, decision: { status: 'allow' } });
+    const pause = { name: 'pause_schedule', args: { schedule: 'morning-brief' } };
+    const held = await dispatchUnattended({ built, ...pause });
+    const scope = { tenant_id: 'default', created_by: OWNER.subject_id };
+    const check = async () =>
+      checkHeldReplay({
+        held: { ...held.info, held_for_owner: { expires_at: new Date(Date.now() + 60_000).toISOString() } },
+        fresh: await built.tools.toolCallInfo({ name: pause.name, arguments: pause.args }),
+        tokens: built.sentinel.services.token_store,
+        scope,
+      });
+    expect(await check()).toMatchObject({ ok: true });
+
+    const [first] = await built.listAll();
+    await built.store.deleteSchedule({ tenant_id: 'default', id: first?.id ?? '' });
+    await dispatch({ built, name: 'create_schedule', args: MORNING_BRIEF, decision: { status: 'allow' } });
+    expect(await check()).toEqual({ ok: false, reason: 'changed' });
+  });
+
+  it('still lists schedules and reminders without asking', async () => {
+    const built = await setup();
+    await dispatch({ built, name: 'set_reminder', args: MEDICINE });
+    const schedules = await dispatchUnattended({ built, name: 'list_schedules', args: {} });
+    const reminders = await dispatchUnattended({ built, name: 'list_reminders', args: {} });
+    expect(schedules.info).toMatchObject({ tier: 1, is_approval_required: false });
+    expect(reminders.info).toMatchObject({ tier: 1, is_approval_required: false });
+    expect(JSON.parse(resultText(reminders.result)).reminders).toHaveLength(1);
+  });
+
+  it('runs the held reminder once the owner approves it in the chat', async () => {
+    const built = await setup();
+    await dispatchUnattended({ built, name: 'set_reminder', args: MEDICINE });
+    // Approving replays the same call in the chat the owner is in, where it is classified again.
+    const { info } = await dispatch({ built, name: 'set_reminder', args: MEDICINE });
+    expect(info).toMatchObject({ tier: 1, is_approval_required: false });
+    expect(await built.listAll()).toHaveLength(1);
   });
 });
 
