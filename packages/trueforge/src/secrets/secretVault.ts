@@ -1,25 +1,8 @@
-import { randomBytes } from 'node:crypto';
-
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
+import { checkMasterKey } from './keyCheck';
 import type { KeyProvider } from './keyProvider';
-import {
-  MASTER_KEY_BYTES,
-  SecretDecryptError,
-  SecretKeyMismatchError,
-  decryptSecret,
-  encryptSecret,
-  type SecretContext,
-} from './secretCipher';
-
-/** Global setting that holds the key check value for this instance's database. */
-export const KEY_CHECK_SETTING = 'secrets_key_check';
-
-const KEY_CHECK_PLAINTEXT = 'aman secrets key check';
-const KEY_CHECK_CONTEXT: SecretContext = {
-  table: 'global_settings',
-  primary_key: KEY_CHECK_SETTING,
-  field: 'value',
-};
+import { recoverMasterKey } from './recoveryKey';
+import { decryptSecret, encryptSecret, type SecretContext } from './secretCipher';
 
 /**
  * Why secrets are locked. `no_key`: the host has not delivered a key yet. `not_set_up`: this
@@ -32,13 +15,6 @@ export class SecretsLockedError extends Error {
   constructor(options?: ErrorOptions) {
     super('Saved secrets are locked. Enter your recovery key or finish setup to unlock them.', options);
     this.name = 'SecretsLockedError';
-  }
-}
-
-export class SecretsAlreadySetUpError extends Error {
-  constructor() {
-    super('Secrets are already set up for this database. Use your recovery key instead of making a new key.');
-    this.name = 'SecretsAlreadySetUpError';
   }
 }
 
@@ -70,24 +46,27 @@ export class SecretVault {
     if (loaded.status === 'unavailable') {
       return this.#lock('no_key', loaded.reason);
     }
-    const check = await this.#settings.getSetting({ key: KEY_CHECK_SETTING });
-    if (check === undefined) {
-      return this.#lock('not_set_up', 'This database has no key check value');
-    }
-    try {
-      const plaintext = decryptSecret({ key: loaded.key, value: check.value, context: KEY_CHECK_CONTEXT });
-      if (plaintext !== KEY_CHECK_PLAINTEXT) {
-        return this.#lock('wrong_key', 'The key check value does not match');
-      }
-    } catch (caught) {
-      if (caught instanceof SecretKeyMismatchError || caught instanceof SecretDecryptError) {
-        return this.#lock('wrong_key', 'The key does not match this database');
-      }
-      throw caught;
+    const match = await checkMasterKey({ settings: this.#settings, key: loaded.key });
+    if (match !== 'match') {
+      return this.#lock(
+        match,
+        match === 'not_set_up' ? 'This database has no key check value' : 'The key does not match this database',
+      );
     }
     this.#key = loaded.key;
     this.#state = { status: 'unlocked' };
     return this.#state;
+  }
+
+  /**
+   * Unlocks with the recovery key when the host has no usable key (cleared TPM, new machine).
+   * Returns the master key so the caller can protect it again on this machine.
+   */
+  async unlockWithRecoveryKey(recoveryKey: string): Promise<Buffer> {
+    const key = await recoverMasterKey({ settings: this.#settings, recoveryKey });
+    this.#key = key;
+    this.#state = { status: 'unlocked' };
+    return key;
   }
 
   encrypt({ plaintext, context }: { plaintext: string; context: SecretContext }): string {
@@ -109,28 +88,5 @@ export class SecretVault {
     this.#key = undefined;
     this.#state = { status: 'locked', reason, detail };
     return this.#state;
-  }
-}
-
-/** A new random master key. Only setup calls this, and it saves the key before recording its check value. */
-export function createMasterKey(): Buffer {
-  return randomBytes(MASTER_KEY_BYTES);
-}
-
-/**
- * Records the key check value for a key that setup has already saved on the host. It only writes
- * when this database has none, so an existing setup is never replaced by a new key.
- */
-export async function recordKeyCheck({
-  settings,
-  key,
-}: {
-  settings: IGlobalSettingsStore;
-  key: Buffer;
-}): Promise<void> {
-  const value = encryptSecret({ key, plaintext: KEY_CHECK_PLAINTEXT, context: KEY_CHECK_CONTEXT });
-  const wrote = await settings.compareAndSetSetting({ key: KEY_CHECK_SETTING, expected: null, value });
-  if (!wrote) {
-    throw new SecretsAlreadySetUpError();
   }
 }
