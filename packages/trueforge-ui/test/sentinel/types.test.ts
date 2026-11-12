@@ -3,7 +3,11 @@ import { changeRequestReason } from '@truefoundry/trueforge-core/core/permission
 import { ToolApprovalRequiredEvent } from '@truefoundry/trueforge-sdk/serialization';
 import { describe, expect, it } from 'vitest';
 
+import { toolInvocationKey } from '@truefoundry/assistant-ui-runtime';
+
 import {
+  approvalKey,
+  entryForPart,
   extractSentinelFromEvent,
   extractSentinelSessionContext,
   parseAuditEntries,
@@ -314,6 +318,49 @@ describe('extractSentinelFromEvent', () => {
     });
   });
 
+  it('keeps the name a mail is sent as and its name-left-off note, and leaves them off an older card', () => {
+    const card = (extra: Record<string, unknown>) =>
+      extractSentinelFromEvent({
+        type: 'tool.approval_required',
+        tool_calls: [
+          {
+            id: 'call-14',
+            tier: 3,
+            tier3_card: {
+              plain_what: 'Do it',
+              email: { action: 'send', to: [], cc: [], bcc: [], subject: 's', body: 'b', ...extra },
+            },
+          },
+        ],
+      })[0]?.card.email;
+    expect(card({ from_name: 'PayPal Security', name_left_off: true })).toMatchObject({
+      from_name: 'PayPal Security',
+      name_left_off: true,
+    });
+    expect(card({ from_name: null })).toMatchObject({ from_name: null });
+    expect(card({})).not.toHaveProperty('from_name');
+    expect(card({})).not.toHaveProperty('name_left_off');
+  });
+
+  it('keeps the duplicate and multi-day warnings of an event', () => {
+    const event = (extra: Record<string, unknown>) =>
+      extractSentinelFromEvent({
+        type: 'tool.approval_required',
+        tool_calls: [
+          {
+            id: 'call-15',
+            tier: 3,
+            tier3_card: { plain_what: 'Do it', calendar_event: { ...CALENDAR_EVENT, ...extra } },
+          },
+        ],
+      })[0]?.card.calendar_event;
+    expect(event({ already_created: true, span_days: 3 })).toMatchObject({ already_created: true, span_days: 3 });
+    expect(event({})).not.toHaveProperty('span_days');
+    for (const span_days of [0, -2, 1.5, '3']) {
+      expect(event({ span_days })).toBeNull();
+    }
+  });
+
   const CALENDAR_EVENT = {
     action: 'change',
     calendar: 'ada@example.com',
@@ -500,6 +547,82 @@ describe('extractSentinelSessionContext', () => {
     expect(context.approvals[0]?.card.plain_what).toBe('Second');
     expect(context.approvals[0]?.tier).toBe(3);
   });
+
+  it('keeps a call id that two source events reuse as two records', () => {
+    const context = extractSentinelSessionContext([
+      {
+        type: 'tool.approval_required',
+        tool_calls: [{ id: 'call-1', source_event_id: 'evt-1', tier: 3, tier3_card: { plain_what: 'First' } }],
+      },
+      {
+        type: 'tool.approval_required',
+        tool_calls: [{ id: 'call-1', source_event_id: 'evt-2', tier: 3, tier3_card: { plain_what: 'Second' } }],
+      },
+    ]);
+    expect(context.approvals.map(info => info.card.plain_what)).toEqual(['First', 'Second']);
+  });
+
+  it('files an answer under the card it answered, so a later call that reuses the id is still waiting', () => {
+    const context = extractSentinelSessionContext([
+      {
+        type: 'tool.approval_required',
+        tool_calls: [{ id: 'call-1', source_event_id: 'evt-1', tier: 3, tier3_card: { plain_what: 'First' } }],
+      },
+      {
+        type: 'turn.created',
+        input: [{ type: 'user.tool_approval', tool_call_id: 'call-1', approval: { status: 'allow' } }],
+      },
+      {
+        type: 'tool.approval_required',
+        tool_calls: [{ id: 'call-1', source_event_id: 'evt-2', tier: 3, tier3_card: { plain_what: 'Second' } }],
+      },
+    ]);
+    const first = toolInvocationKey({ sourceEventId: 'evt-1', toolCallId: 'call-1' });
+    const second = toolInvocationKey({ sourceEventId: 'evt-2', toolCallId: 'call-1' });
+    expect(context.answers).toEqual({ [first]: 'approved' });
+    const answers = new Map(Object.entries(context.answers ?? {}));
+    expect(entryForPart(answers, first)).toBe('approved');
+    expect(entryForPart(answers, second)).toBeUndefined();
+  });
+
+  it('learns the source event of a card that does not name it from the model message that asked for the call', () => {
+    const card = (what: string) => ({
+      type: 'tool.approval_required',
+      tool_calls: [{ id: 'call-1', tier: 3, tier3_card: { plain_what: what } }],
+    });
+    const context = extractSentinelSessionContext([
+      { type: 'model.message', id: 'evt-1', tool_calls: [{ id: 'call-1', name: 'send' }] },
+      card('First'),
+      {
+        type: 'turn.created',
+        input: [{ type: 'user.tool_approval', tool_call_id: 'call-1', approval: { status: 'allow' } }],
+      },
+      { type: 'model.message', id: 'evt-2', tool_calls: [{ id: 'call-1', name: 'send' }] },
+      card('Second'),
+    ]);
+    const first = toolInvocationKey({ sourceEventId: 'evt-1', toolCallId: 'call-1' });
+    const second = toolInvocationKey({ sourceEventId: 'evt-2', toolCallId: 'call-1' });
+    expect(context.approvals.map(info => [info.card.plain_what, info.sourceEventId])).toEqual([
+      ['First', 'evt-1'],
+      ['Second', 'evt-2'],
+    ]);
+    expect(context.answers).toEqual({ [first]: 'approved' });
+    const answers = new Map(Object.entries(context.answers ?? {}));
+    expect(entryForPart(answers, second)).toBeUndefined();
+  });
+
+  it('files an answer whose card is not among the events under the call the model asked for', () => {
+    const context = extractSentinelSessionContext([
+      { type: 'model.message', id: 'evt-1', tool_calls: [{ id: 'call-1', name: 'send' }] },
+      {
+        type: 'turn.created',
+        input: [{ type: 'user.tool_approval', tool_call_id: 'call-1', approval: { status: 'deny' } }],
+      },
+    ]);
+    expect(context.answers).toEqual({
+      [toolInvocationKey({ sourceEventId: 'evt-1', toolCallId: 'call-1' })]: 'denied',
+    });
+  });
 });
 
 describe('held actions', () => {
@@ -562,6 +685,20 @@ describe('held actions', () => {
     const [info] = extractSentinelFromEvent(parsed);
     expect(info?.held).toEqual({ expiresAt: '2026-10-17T07:00:00.000Z' });
     expect(info?.alwaysAllowOffered).toBe(true);
+  });
+
+  it('reads that the every-chat answer on a maps card turns maps on, and leaves it unset on any other card', () => {
+    const card = { tier: 3, can_always_allow: true, tier3_card: { plain_what: 'Show a map of Lisbon?' } };
+    const parsed = extractSentinelFromEvent({
+      type: 'tool.approval_required',
+      tool_calls: [
+        { ...card, id: 'call-map', always_allow_covers: 'maps' },
+        { ...card, id: 'call-sdk', alwaysAllowCovers: 'maps' },
+        { ...card, id: 'call-plain' },
+        { ...card, id: 'call-other', always_allow_covers: 'everything' },
+      ],
+    });
+    expect(parsed.map(info => info.alwaysAllowCovers)).toEqual(['maps', 'maps', undefined, undefined]);
   });
 
   it('leaves an ordinary approval without a held marker, and never offers always-allow it did not get', () => {
@@ -784,5 +921,34 @@ describe('chat scope offer', () => {
     expect(read({ can_chat_allow: false })?.chatAllowOffered).toBe(false);
     expect(read({ canChatAllow: true })?.chatAllowOffered).toBe(true);
     expect(read({})).not.toHaveProperty('chatAllowOffered');
+  });
+});
+
+describe('entryForPart', () => {
+  const first = toolInvocationKey({ sourceEventId: 'evt-1', toolCallId: 'call-1' });
+  const second = toolInvocationKey({ sourceEventId: 'evt-2', toolCallId: 'call-1' });
+
+  it('files a card with its source event under the runtime key, and one without under its call id', () => {
+    expect(approvalKey({ toolCallId: 'call-1', sourceEventId: 'evt-1' })).toBe(first);
+    expect(approvalKey({ toolCallId: 'call-1' })).toBe('call-1');
+  });
+
+  it('matches a keyed part exactly and never takes another event card for the same call id', () => {
+    const entries = new Map([[first, 'First']]);
+    expect(entryForPart(entries, first)).toBe('First');
+    expect(entryForPart(entries, second)).toBeUndefined();
+  });
+
+  it('lets a keyed part fall back to an entry filed by call id alone', () => {
+    expect(entryForPart(new Map([['call-1', 'Bare']]), second)).toBe('Bare');
+  });
+
+  it('gives a bare call id the newest entry for it', () => {
+    const entries = new Map([
+      [first, 'First'],
+      [second, 'Second'],
+      ['call-2', 'Other'],
+    ]);
+    expect(entryForPart(entries, 'call-1')).toBe('Second');
   });
 });

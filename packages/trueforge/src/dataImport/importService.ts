@@ -38,6 +38,7 @@ import { sessionPartIndex, sessionPartName } from '../dataExport/sessionRecords'
 import { ZIP_MAX_ENTRIES } from '../dataExport/zipStreamWriter';
 import type { IDeliveryStore } from '../db/deliveryStore';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
+import type { IReachSettingsStore } from '../db/reachSettingsStore';
 import type { ISentinelAuditStore } from '../db/sentinelAuditStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { WithTransaction } from '../db/transaction';
@@ -79,6 +80,7 @@ import { MEMORY_SUMMARIZE_SETTING_KEY } from '../runtime/memorySummarizeSettings
 import { DEFAULT_CHAT_MODEL_SETTING_KEY } from '../runtime/tokenFactoryProvider';
 import { TOOL_OUTPUT_SCREEN_ENABLED_SETTING_KEY } from '../runtime/toolOutputScreenSettings';
 import type { ImportDataResult } from '../schemas/dataImport';
+import type { ReachSettings } from '../schemas/reach';
 import { newId } from '../utils/id';
 import { detachConnectors, normalizeImportedConnectors, withoutKeptConnector } from './connectorImport';
 import { upgradeArchivedDeliveries } from './deliveryUpgrade';
@@ -112,6 +114,7 @@ import {
   ImportManifestSchema,
   ImportPersonalizationFileSchema,
   ImportPersonasFileSchema,
+  ImportReachFileSchema,
   ImportSchedulesFileSchema,
   ImportSessionEntrySchema,
   ImportSessionPartRecordSchema,
@@ -140,6 +143,7 @@ import {
 import { writePersonaKnowledge, type KnowledgeEmbedder } from './knowledgeImport';
 import { countingLeftOut, isRecord, type LeftOutCounts } from './lenient';
 import { repairPersonaNames } from './personaNames';
+import { startReachSwitchesAsNew } from './reachUpgrade';
 import { assembleSessionParts } from './sessionParts';
 import { replaySessions, restoreSessions, type SessionRestoreContext } from './sessionRestore';
 import { readZipArchive, ZipArchiveError, type ZipArchiveEntry } from './zipArchiveReader';
@@ -151,6 +155,8 @@ export interface DataImportDeps<TTransaction> extends PreflightDeps<TTransaction
   auditStore: Pick<ISentinelAuditStore, 'importRecords'>;
   /** The feed comes along with the same commit. Push devices never do. */
   deliveryStore: Pick<IDeliveryStore, 'importDeliveries'>;
+  /** Reach me settings come along with the same commit, with texts and calls switched off. */
+  reachSettingsStore: Pick<IReachSettingsStore, 'importSettings'>;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   withTransaction: WithTransaction<TTransaction>;
   personaKnowledgeDir: string;
@@ -255,6 +261,34 @@ const REQUIRED_SECTIONS = [
   'settings.json',
 ] as const;
 
+/** The person's words for what one export part holds, never its file name. */
+const SECTION_PLAIN_NAMES: Readonly<Record<string, string>> = {
+  'manifest.json': "the export's own description",
+  'chats.json': 'the list of your chats',
+  'folders.json': 'your folders',
+  'agents.json': 'your agents',
+  'personas.json': 'your personas',
+  'personalization.json': 'your name and preferences',
+  'spaces.json': 'your spaces',
+  'schedules.json': 'your schedules',
+  'connectors.json': 'your connectors',
+  'settings.json': 'your settings',
+  'audit.json': 'your permission history',
+  'model_providers.json': 'your model setup',
+};
+
+function sectionPlainName(name: string): string {
+  if (name === 'sessions.json' || name.startsWith('sessions/')) {
+    return 'your chats';
+  }
+  return SECTION_PLAIN_NAMES[name] ?? 'some of your data';
+}
+
+/** Said when an export part is not there: which part it is, and the one thing to do. */
+function missingSectionMessage(name: string): string {
+  return `This export is missing the part that holds ${sectionPlainName(name)}, so nothing was imported. Export again from the Aman it came from, then import the new file.`;
+}
+
 /** `[3].turns[0].events` style location of a Zod issue; keys and indices only, never the data under them. */
 function formatIssuePath(issuePath: readonly PropertyKey[]): string {
   let out = '';
@@ -311,15 +345,17 @@ type LeftOutReport = Map<string, LeftOutByOwner>;
 function readSectionJson({ files, name }: { files: ReadonlyMap<string, Buffer>; name: string }): unknown {
   const data = files.get(name);
   if (data === undefined) {
-    throw new DataImportError(`This export is missing its ${name} section, so nothing was imported.`, 400);
+    throw new DataImportError(missingSectionMessage(name), 400);
   }
   try {
     const json: unknown = JSON.parse(data.toString('utf8'));
     return json;
   } catch (cause) {
-    throw new DataImportError(`The ${name} section of this export is damaged, so nothing was imported.`, 400, {
-      cause,
-    });
+    throw new DataImportError(
+      `The part of this export that holds ${sectionPlainName(name)} is damaged, so nothing was imported. Export again from the Aman it came from, then import the new file.`,
+      400,
+      { cause },
+    );
   }
 }
 
@@ -335,11 +371,13 @@ function rejectSection({
   logger: DataImportDeps<never>['logger'];
 }): never {
   logRejectedSection({ name, json, error, logger });
-  const [first] = error.issues;
-  const where = first === undefined ? '' : ` at ${formatIssuePath(first.path)} (${first.code})`;
-  throw new DataImportError(`The ${name} section of this export is damaged${where}, so nothing was imported.`, 400, {
-    cause: error,
-  });
+  // The log keeps the exact place and kind of the damage; the person hears which part
+  // it is and what to do, in plain words.
+  throw new DataImportError(
+    `The part of this export that holds ${sectionPlainName(name)} could not be read, so nothing was imported. Export again from the Aman it came from, then import the new file.`,
+    400,
+    { cause: error },
+  );
 }
 
 /** Where a section failed, by path and issue kind only: the archive's own values never reach the log. */
@@ -499,6 +537,7 @@ interface ArchiveContents {
   settings: ImportSettingsFile;
   audit: ImportAuditRecord[];
   deliveries: ImportDelivery[];
+  reach: ReachSettings[];
   files: ReadonlyMap<string, Buffer>;
   sourceTenantId: string;
   /** Internal details from an older version that were repaired or left out, filled in as sections are read. */
@@ -516,7 +555,7 @@ function sessionPartNames(files: ReadonlyMap<string, Buffer>): string[] {
   return indices.map((index, position) => {
     const expected = sessionPartName(position + 1);
     if (index !== position + 1) {
-      throw new DataImportError(`This export is missing its ${expected} section, so nothing was imported.`, 400);
+      throw new DataImportError(missingSectionMessage(expected), 400);
     }
     return expected;
   });
@@ -609,13 +648,10 @@ function readSessionEntries(input: {
       logger,
       leftOut,
     });
-    return () => entries;
+    return () => withoutPrivateChats({ entries, logger });
   }
   if (partNames.length === 0) {
-    throw new DataImportError(
-      `This export is missing its ${sessionPartName(1)} section, so nothing was imported.`,
-      400,
-    );
+    throw new DataImportError(missingSectionMessage(sessionPartName(1)), 400);
   }
   // The last file read is kept, so an export with one sessions/ file is parsed once for every pass.
   let last: { name: string; records: ImportSessionPartRecord[] } | undefined;
@@ -641,7 +677,26 @@ function readSessionEntries(input: {
       yield* last.records;
     }
   }
-  return () => assembleSessionParts(records());
+  return () => withoutPrivateChats({ entries: assembleSessionParts(records()), logger });
+}
+
+/**
+ * Exports never hold a private chat, since nothing of one is kept. An archive that claims one
+ * anyway does not bring it back: restoring it would keep the chat its owner meant to forget.
+ */
+function* withoutPrivateChats(input: {
+  entries: Iterable<ImportSessionEntry>;
+  logger: DataImportDeps<never>['logger'];
+}): Generator<ImportSessionEntry> {
+  for (const entry of input.entries) {
+    if (entry.session.is_incognito) {
+      input.logger.warn('Data import skipped a private chat found in the archive', {
+        sessionId: entry.session.session_id,
+      });
+      continue;
+    }
+    yield entry;
+  }
 }
 
 function loadArchive(input: {
@@ -669,7 +724,7 @@ function loadArchive(input: {
   const files = new Map(entries.map(entry => [entry.name, entry.data]));
   for (const name of REQUIRED_SECTIONS) {
     if (!files.has(name)) {
-      throw new DataImportError(`This export is missing its ${name} section, so nothing was imported.`, 400);
+      throw new DataImportError(missingSectionMessage(name), 400);
     }
   }
   const leftOut: LeftOutReport = new Map();
@@ -734,6 +789,8 @@ function loadArchive(input: {
     deliveries: files.has('deliveries.json')
       ? section('deliveries.json', ImportDeliveriesFileSchema, upgradeArchivedDeliveries)
       : [],
+    // Absent from exports made before Reach me settings existed.
+    reach: files.has('reach.json') ? section('reach.json', ImportReachFileSchema, startReachSwitchesAsNew) : [],
     files,
     sourceTenantId: manifest.tenant_id,
     leftOutReport: leftOut,
@@ -1093,9 +1150,11 @@ function buildSummary({
     );
   }
   notes.push('Chats keep their dates and totals. Personas, spaces, folders and schedules show the time of the import.');
-  notes.push('Approvals given for one chat only do not carry over.');
+  notes.push("'Approve for this chat' choices do not carry over.");
   if (auditEntries > 0) {
-    notes.push(`${pluralize(auditEntries, 'past permission decision', 'past permission decisions')} came along.`);
+    notes.push(
+      `Your permission history came along, with ${pluralize(auditEntries, 'past choice', 'past choices')} in it.`,
+    );
   }
   if (deliveryCount > 0) {
     notes.push(`${pluralize(deliveryCount, 'item', 'items')} from your feed came along.`);
@@ -1414,6 +1473,7 @@ async function importArchive<TTransaction>(
     settings,
     audit,
     deliveries,
+    reach,
   } = contents;
   // Each person's guide is installed from the bundled pack, so the archived copy is never written again.
   // Its memory still maps to the person's own guide, and the summary still counts it.
@@ -1716,6 +1776,9 @@ async function importArchive<TTransaction>(
       }
       await deps.auditStore.importRecords({ tenant_id: tenantId, created_by: subjectId, records: audit }, tx);
       await deps.deliveryStore.importDeliveries({ tenant_id: tenantId, created_by: subjectId, deliveries }, tx);
+      for (const settings of reach) {
+        await deps.reachSettingsStore.importSettings({ tenant_id: tenantId, created_by: subjectId, settings }, tx);
+      }
 
       if (personalization !== null) {
         // Replaces the empty profile the app creates on first sign-in; the emptiness check ruled out a filled one.

@@ -45,6 +45,8 @@ async function createChat(env: SentinelAuditStoreContractEnv, sessionId: string)
     metadata: {},
     agent: { type: 'inline', spec: makeAgentSpec() },
     custom: null,
+    is_incognito: false,
+    private_expires_at: null,
   });
 }
 
@@ -189,6 +191,55 @@ export function runSentinelAuditStoreContractSuite(getEnv: () => SentinelAuditSt
 
     expect(pages).toBe(3);
     expect(seen).toEqual(['e', 'd', 'c', 'b', 'a']);
+  });
+
+  it('listForUser filters by a from and to time', async () => {
+    const { store } = getEnv();
+    await recordInOrder(store, [entry({ tool_name: 'tool_0' }), entry({ tool_name: 'tool_1' })]);
+    const past = new Date(Date.now() - 60_000).toISOString();
+    const future = new Date(Date.now() + 60_000).toISOString();
+
+    const inRange = await store.listForUser({ ...forUser, from: past, to: future, limit: 10 });
+    expect(inRange.entries.map(row => row.tool_name)).toEqual(['tool_1', 'tool_0']);
+
+    const afterAll = await store.listForUser({ ...forUser, from: future, limit: 10 });
+    expect(afterAll.entries).toEqual([]);
+
+    const beforeAll = await store.listForUser({ ...forUser, to: past, limit: 10 });
+    expect(beforeAll.entries).toEqual([]);
+  });
+
+  it('listForUser places an imported row saved with an offset at its real instant', async () => {
+    const { store } = getEnv();
+    const imported = (tool_name: string, created_at: string) => ({
+      id: tool_name,
+      conversation_id: 's1',
+      tier: 1,
+      tool_name,
+      description: 'Read a file',
+      outcome: 'logged' as const,
+      auto_deny_reason: null,
+      created_at,
+    });
+    await store.importRecords({
+      tenant_id: 't1',
+      created_by: 'u1',
+      records: [
+        imported('before', '2026-10-01T03:29:59.999Z'),
+        imported('with_offset', '2026-10-01T09:00:00+05:30'),
+        imported('after', '2026-10-01T03:30:00.001Z'),
+      ],
+    });
+
+    const exact = await store.listForUser({
+      ...forUser,
+      from: '2026-10-01T03:30:00.000Z',
+      to: '2026-10-01T03:30:00.001Z',
+      limit: 10,
+    });
+    expect(exact.entries.map(row => [row.tool_name, row.created_at])).toEqual([
+      ['with_offset', '2026-10-01T03:30:00.000Z'],
+    ]);
   });
 
   it('listForUser filters by outcome', async () => {

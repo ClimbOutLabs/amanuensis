@@ -14,7 +14,6 @@ describe("AgentsClient", () => {
                 base_url: "base_url",
                 snippets: [
                     {
-                        icon: "icon",
                         label_name: "label_name",
                         language: "language",
                         sample_code: { non_stream: "non_stream", stream: "stream" },
@@ -37,7 +36,6 @@ describe("AgentsClient", () => {
                 baseUrl: "base_url",
                 snippets: [
                     {
-                        icon: "icon",
                         labelName: "label_name",
                         language: "language",
                         sampleCode: {

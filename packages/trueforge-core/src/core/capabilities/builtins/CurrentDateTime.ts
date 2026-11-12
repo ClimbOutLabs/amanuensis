@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { type CallToolResponse, toolResultResponse } from '../../mcp/IMCPServer';
 import { defineTool, LocalToolMCP, type ToolDefinition } from '../../mcp/LocalToolMCP';
 import type { AgentTracing } from '../../tracing/AgentTracing';
+import { weekdayNameOf } from '../../util/calendarDay';
 import { resolveLocalTime } from '../../util/clientTimezone';
 import type { AgentCapability } from '../AgentCapability';
 
@@ -26,7 +27,7 @@ export class CurrentDateTime extends LocalToolMCP {
     defineTool({
       name: GET_CURRENT_DATETIME_TOOL_NAME,
       description:
-        'Returns the current datetime. Reports the local date, time, IANA zone and UTC offset when the ' +
+        'Returns the current datetime. Reports the local date, weekday, time, IANA zone and UTC offset when the ' +
         "client's timezone is known, and always also reports UTC in ISO-8601 and unix epoch MS format.",
       schema: inputSchema,
       annotations: { readOnlyHint: true, openWorldHint: false },
@@ -48,6 +49,8 @@ export class CurrentDateTime extends LocalToolMCP {
       // (isFallback: true) when the client did not send a timezone.
       local: {
         date: local.date,
+        // Stated so the model never has to work out the day of the week itself.
+        weekday: weekdayNameOf(local.date),
         time: local.time,
         zone: local.zone,
         utcOffset: local.utcOffset,

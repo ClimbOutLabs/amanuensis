@@ -28,6 +28,7 @@ const SEARCH_CARD: SentinelApprovalCard = {
   calendar_event: null,
   schedule: null,
   persona: null,
+  skill: null,
 };
 
 function renderSearch(onApproveForChat = vi.fn()) {
@@ -45,9 +46,9 @@ function renderSearch(onApproveForChat = vi.fn()) {
 }
 
 describe('PermissionApprovalCard for a held search', () => {
-  it('offers the one chat-wide choice, "Always allow this here", when the server allows it', () => {
+  it('offers the one chat-wide choice, "Always allow in this chat", when the server allows it', () => {
     const { onApproveForChat } = renderSearch();
-    fireEvent.click(screen.getByRole('button', { name: 'Always allow this here' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Always allow in this chat' }));
     expect(onApproveForChat).toHaveBeenCalledTimes(1);
   });
 

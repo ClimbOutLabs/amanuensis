@@ -106,18 +106,29 @@ export const DocumentScopeSchema = z
   })
   .describe('Host-derived folders the document reader may read without asking. Never model-authored.');
 
-export const BrowserClickReviewSchema = z
+export const BrowserElementReviewSchema = z
   .object({
-    site: z.string().describe('Host of the page the click would happen on.'),
-    accessible_name: z.string().describe("The clicked element's accessible name, read from the live page."),
+    site: z.string().describe('Host of the page the element is on.'),
+    accessible_name: z.string().describe("The element's name as a person reads it on the live page."),
+    // A read stored before this field existed matches no live element, so acting on it is refused.
+    role: z
+      .string()
+      .default('')
+      .describe('What kind of control the element is: link, button, textbox, combobox and so on.'),
     is_form_submit: z
       .boolean()
       .describe('True when the element submits a form: type=submit, or a plain button inside a form.'),
     form_values: z
       .record(z.string(), z.string())
-      .describe("Named field values on the clicked element's form, sensitive ones already masked."),
+      .describe("Named field values on the element's form, sensitive ones already masked."),
+    // A read stored before this field existed counts as not a plain link, so it asks first.
+    link_url: z
+      .string()
+      .nullable()
+      .default(null)
+      .describe('The http or https address the element is a plain link to, or null for anything else.'),
   })
-  .describe('Host-read context for a browser click, used to classify it and to build its approval card.');
+  .describe('Host-read context for the element a browser action acts on, used to classify it and build its card.');
 
 export const InternalToolCallInfoSchema = z.object({
   type: z.enum(['truefoundry-system', 'mcp']).describe('Whether the tool is a system tool or MCP tool.'),
@@ -189,8 +200,8 @@ export const InternalToolCallInfoSchema = z.object({
   document_scope: DocumentScopeSchema.optional().describe(
     'Host-derived folders the document reader may read without asking. Never model-authored or client supplied.',
   ),
-  browser_click: BrowserClickReviewSchema.optional().describe(
-    'Host-read context for a browser_click call, read from the live page before the click. Never model-authored.',
+  browser_element: BrowserElementReviewSchema.optional().describe(
+    'Host-read context for the element a browser click, type or select acts on, read from the live page first. Never model-authored.',
   ),
   // Sentinel host-only classification. Populated by the classifier in
   // ToolSet/Sandbox; always present on classified calls, never wire-visible.
@@ -222,6 +233,12 @@ export const InternalToolCallInfoSchema = z.object({
     .optional()
     .describe(
       'Connector host a standing grant for this call binds to, set on a grant-eligible ask. Never model-authored.',
+    ),
+  grant_tool_name: z
+    .string()
+    .optional()
+    .describe(
+      'Scope key a standing grant for this call is recorded under, when it covers more than the one tool. Never model-authored.',
     ),
   audit_description: z
     .string()
@@ -389,7 +406,7 @@ export type RedactedThinkingBlock = z.infer<typeof RedactedThinkingBlockSchema>;
 export type ToolEffectHints = z.infer<typeof ToolEffectHintsSchema>;
 export type MapsHosts = z.infer<typeof MapsHostsSchema>;
 export type DocumentScope = z.infer<typeof DocumentScopeSchema>;
-export type BrowserClickReview = z.infer<typeof BrowserClickReviewSchema>;
+export type BrowserElementReview = z.infer<typeof BrowserElementReviewSchema>;
 export type InternalToolCallInfo = z.infer<typeof InternalToolCallInfoSchema>;
 export type RegisteredCommandExecution = z.infer<typeof RegisteredCommandExecutionSchema>;
 export type TrueFoundrySystemToolInfo = z.infer<typeof TrueFoundrySystemToolInfoSchema>;
