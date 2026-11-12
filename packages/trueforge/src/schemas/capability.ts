@@ -26,6 +26,16 @@ const SettingsCapabilitySchema = z
   })
   .openapi('SettingsCapability');
 
+export const SignInCapabilitySchema = z
+  .object({
+    mode: z
+      .enum(['local', 'oidc', 'standalone', 'truefoundry'])
+      .describe('How this instance signs people in. `local` means Aman keeps one email and password itself.'),
+  })
+  .openapi('SignInCapability');
+
+export type SignInCapability = z.infer<typeof SignInCapabilitySchema>;
+
 /**
  * Local voice input availability. `enabled` reflects the latest non-blocking
  * STT sidecar `/healthz` probe: true only once the sidecar answered with a
@@ -225,6 +235,7 @@ const CapabilitiesDataSchema = z
     memory_defaults: MemoryDefaultsCapabilitySchema,
     memory_embeddings: MemoryEmbeddingsCapabilitySchema,
     sandbox_isolation: SandboxIsolationCapabilitySchema,
+    sign_in: SignInCapabilitySchema,
     build: BuildIdentitySchema,
   })
   .openapi('CapabilitiesData');

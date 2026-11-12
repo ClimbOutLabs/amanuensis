@@ -329,7 +329,7 @@ describe('the first download always asks, even when sandbox work runs without as
     rmSync(workspace, { recursive: true, force: true });
   });
 
-  it('shows the card for the first install in a chat without a project, then lets later installs run', async () => {
+  it('shows the download card for the first install in a chat without a project, and the ordinary card for later installs', async () => {
     const execCalls: SandboxExecParams[] = [];
     let allowed = false;
     const allowPackageDownloads = jest.fn(async () => {
@@ -370,11 +370,14 @@ describe('the first download always asks, even when sandbox work runs without as
     expect(approved.result.isError).toBe(false);
     expect(allowPackageDownloads).toHaveBeenCalledTimes(1);
 
+    // Once downloads are allowed the download card is gone, because the allowance is recorded.
+    // The install itself still asks on its ordinary card, every time.
     const secondInfo = await sandbox.toolCallInfo(npmCall);
-    expect(secondInfo.is_approval_required).toBe(false);
-    const second = await sandbox.callTool(npmCall);
+    expect(secondInfo.is_approval_required).toBe(true);
+    expect(secondInfo.tier3_card?.plain_what).toBe('Run this command?');
+    const second = await sandbox.callTool(npmCall, { status: 'allow' });
     if (!isCallToolResponseResult(second)) {
-      throw new Error('Expected the second install to run without a card');
+      throw new Error('Expected the approved second install to run');
     }
     expect(second.result.isError).toBe(false);
     expect(allowPackageDownloads).toHaveBeenCalledTimes(1);
@@ -382,15 +385,12 @@ describe('the first download always asks, even when sandbox work runs without as
     expect(runs).toHaveLength(2);
     expect(runs.every(params => params.packageMirrorToken === 'mirror-token')).toBe(true);
 
-    // A pip install still shows its ordinary card once downloads are allowed: pip runs the
-    // package's own code, so it is never a silent run. What changed is only that the download
-    // card is gone, because the allowance is recorded.
     const pipInfo = await sandbox.toolCallInfo(PIP_CALL);
     expect(pipInfo.is_approval_required).toBe(true);
     expect(pipInfo.tier3_card?.plain_what).toBe('Run this command?');
   });
 
-  it('shows the card for the first install in a repo, then lets later installs run', async () => {
+  it('shows the download card for the first install in a repo, and the ordinary card for later installs', async () => {
     const execCalls: SandboxExecParams[] = [];
     let allowed = false;
     const allowPackageDownloads = jest.fn(async () => {
@@ -427,7 +427,8 @@ describe('the first download always asks, even when sandbox work runs without as
     expect(allowPackageDownloads).toHaveBeenCalledTimes(1);
 
     const secondInfo = await sandbox.toolCallInfo(npmCall);
-    expect(secondInfo.is_approval_required).toBe(false);
+    expect(secondInfo.is_approval_required).toBe(true);
+    expect(secondInfo.tier3_card?.plain_what).toBe('Run this command?');
   });
 });
 

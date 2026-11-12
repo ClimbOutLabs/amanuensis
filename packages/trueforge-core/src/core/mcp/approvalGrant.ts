@@ -4,6 +4,7 @@ import {
   CHAT_GRANTABLE_CONSEQUENCE_REASONS,
   GRANT_BARRED_TIER_REASONS,
   OWN_CALENDAR_CHANGE_REASONS,
+  OWN_DRIVE_WRITE_REASONS,
 } from '../permissions/tier';
 import {
   SANDBOX_APPLY_PATCH_TOOL_NAME,
@@ -76,10 +77,11 @@ export function effectiveToolAdmissions(input: {
 }
 
 /**
- * Server-owned eligibility for "Always allow this here", the one chat-scoped grant. This only gates which calls may
+ * Server-owned eligibility for "Always allow in this chat", the one chat-scoped grant. This only gates which calls may
  * *receive* chat scope; the scope's binding lives in the grant key: the tool and its destination, and for sandbox
  * exec an invocation digest over (purpose, command, cwd, env), so approving one command in a chat never authorizes a
- * different one or reaches another chat. A consequential action qualifies; a send and a steered call never do.
+ * different one or reaches another chat. A consequential action qualifies only when its card names a target for
+ * the grant to be tied to; a send, a mail draft and a steered call never do.
  */
 export function allowsChatApproval(info: InternalToolCallInfo): boolean {
   if (secretPathReadBarsDurableGrant(info)) {
@@ -91,15 +93,34 @@ export function allowsChatApproval(info: InternalToolCallInfo): boolean {
   if (isOwnCalendarChange(info)) {
     return true;
   }
-  if (info.tier_reason !== undefined && CHAT_GRANTABLE_CONSEQUENCE_REASONS.has(info.tier_reason)) {
+  if (isOwnDriveWrite(info)) {
     return true;
   }
+  if (info.tier_reason !== undefined && CHAT_GRANTABLE_CONSEQUENCE_REASONS.has(info.tier_reason)) {
+    return cardNamesTarget(info);
+  }
   return !tierBarsDurableGrant(info) && (info.effect === 'inspect' || info.effect === 'verify');
+}
+
+/**
+ * Whether the card names who or where the action goes: a destination or a recipient. An action whose card names
+ * none has nothing for a chat grant to be tied to: the grant would cover any later call of the tool, whatever it
+ * carries. The connector's own address does not count: it is the same on every call to that connector, so it
+ * tells one action from another no better than the tool name.
+ */
+function cardNamesTarget(info: InternalToolCallInfo): boolean {
+  const card = info.tier3_card ?? null;
+  return [card?.destination, card?.recipient].some(target => typeof target === 'string' && target.trim() !== '');
 }
 
 /** A change to the person's own calendar with no guests; a guest change never qualifies, whatever its effect. */
 function isOwnCalendarChange(info: InternalToolCallInfo): boolean {
   return info.tier_reason !== undefined && OWN_CALENDAR_CHANGE_REASONS.has(info.tier_reason);
+}
+
+/** A Drive write to the person's own files; it sends nothing to anyone, so it qualifies like an own-calendar change. */
+function isOwnDriveWrite(info: InternalToolCallInfo): boolean {
+  return info.tier_reason !== undefined && OWN_DRIVE_WRITE_REASONS.has(info.tier_reason);
 }
 
 /** A send, destructive, install or hint-escalated call is never covered by an argument-blind grant. */
@@ -120,8 +141,11 @@ function secretPathReadBarsDurableGrant(info: InternalToolCallInfo): boolean {
 }
 
 /**
- * Server-owned eligibility for a standing "Always allow this tool" grant: only a connector tool
- * that is read-only inspection, for the same argument-blindness reason as a chat grant.
+ * Server-owned eligibility for a standing "Always allow everywhere" grant: only a connector tool
+ * that is read-only inspection, for the same argument-blindness reason as a chat grant. A call the
+ * classifier stamped with a grant scope key is the one exception: the key itself is the scope
+ * (a Home Assistant domain or the one entity), so the grant is never wider than the key says.
+ * A change to the person's own calendar is answered per chat, so it never gets one.
  */
 export function allowsToolGrant(info: InternalToolCallInfo): boolean {
   // A grant has no effect on the designated search provider, which has its own guarded path.
@@ -133,7 +157,11 @@ export function allowsToolGrant(info: InternalToolCallInfo): boolean {
   ) {
     return false;
   }
-  return isOwnCalendarChange(info) || (info.type === 'mcp' && info.effect === 'inspect');
+  return (
+    isOwnDriveWrite(info) ||
+    (info.type === 'mcp' && info.effect === 'inspect') ||
+    (info.type === 'mcp' && info.grant_tool_name !== undefined)
+  );
 }
 
 /**
