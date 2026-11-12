@@ -38,11 +38,11 @@ The sandbox is what keeps this work contained. Aman also looks at a script befor
 
 A map sends the places it looks up to the map service that Aman is set up to use. Nothing else gets them.
 
-In Settings, under Permissions, the **Maps** switch decides whether a map asks first. The switch starts on, so maps run without asking, wherever the place came from. A map that would send something that looks like a password, a key or a payment card number still shows a card, as described below. That card offers only **Approve** and **Deny**, and no earlier answer covers it.
+In Settings, under Permissions, the **Maps** switch decides whether a map asks first. The switch starts on, so maps run without asking, wherever the place came from. In a chat, a map that would send something that looks like a password, a key or a payment card number still shows a card, as described below. That card offers only **Approve** and **Deny**, and no earlier answer covers it.
 
 With the switch off, each map shows a card that names the places and the map service they go to. The card offers two lasting answers. **Always allow in this chat** stops the question for the rest of that chat. **Always allow everywhere** turns the **Maps** switch on, so maps stop asking in every chat and in scheduled runs.
 
-A scheduled run never waits for you on a map. With the switch on, its maps run. With the switch off, the run leaves the map out and tells you in one line to turn on **Maps**.
+A scheduled run never waits for you on a map. With the switch on, its maps run. With the switch off, the run leaves the map out and tells you in one line to turn on **Maps**. A map that would send something that looks like a password or key is left out of a scheduled run too, and the run says so in one line.
 
 ### When Aman holds something it would normally do
 
