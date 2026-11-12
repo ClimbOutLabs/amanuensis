@@ -5,252 +5,279 @@ import { TrueForge } from "../../src/Client";
 import { mockServerPool } from "../mock-server/MockServerPool";
 
 describe("RepositoryCommandProposalsClient", () => {
-    
     test("list (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { "data" : { "proposals" : [ { "command" : "command" , "created_at" : "2024-01-15T09:30:00Z" , "id" : "id" , "purpose" : "build" , "source_fingerprint" : "source_fingerprint" , "source_kind" : "agents_md" , "source_path" : "source_path" } ] , "repository_revision" : 1 } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = {
+            data: {
+                proposals: [
+                    {
+                        command: "command",
+                        created_at: "2024-01-15T09:30:00Z",
+                        id: "id",
+                        purpose: "build",
+                        source_fingerprint: "source_fingerprint",
+                        source_kind: "agents_md",
+                        source_path: "source_path",
+                    },
+                ],
+                repository_revision: 1,
+            },
+        };
+
         server
             .mockEndpoint()
-            .get("/api/v1/repositories/repository_id/command-proposals").respondWith()
-            .statusCode(200).jsonBody(rawResponseBody)
-                .build();
+            .get("/api/v1/repositories/repository_id/command-proposals")
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-                        
-                                const response = await client.repositoryCommandProposals.list("repository_id");
-                                expect(response).toEqual({
-    data: {
-        proposals: [{
-                command: "command",
-                createdAt: new Date("2024-01-15T09:30:00.000Z"),
-                id: "id",
-                purpose: "build",
-                sourceFingerprint: "source_fingerprint",
-                sourceKind: "agents_md",
-                sourcePath: "source_path"
-            }],
-        repositoryRevision: 1
-    }
-});
-                              
-                    
+        const response = await client.repositoryCommandProposals.list("repository_id");
+        expect(response).toEqual({
+            data: {
+                proposals: [
+                    {
+                        command: "command",
+                        createdAt: new Date("2024-01-15T09:30:00.000Z"),
+                        id: "id",
+                        purpose: "build",
+                        sourceFingerprint: "source_fingerprint",
+                        sourceKind: "agents_md",
+                        sourcePath: "source_path",
+                    },
+                ],
+                repositoryRevision: 1,
+            },
+        });
     });
-          
+
     test("list (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .get("/api/v1/repositories/repository_id/command-proposals").respondWith()
-            .statusCode(401).jsonBody(rawResponseBody)
-                .build();
+            .get("/api/v1/repositories/repository_id/command-proposals")
+            .respondWith()
+            .statusCode(401)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.repositoryCommandProposals.list("repository_id")
-            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+        await expect(async () => {
+            return await client.repositoryCommandProposals.list("repository_id");
+        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
-          
+
     test("list (3)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .get("/api/v1/repositories/repository_id/command-proposals").respondWith()
-            .statusCode(404).jsonBody(rawResponseBody)
-                .build();
+            .get("/api/v1/repositories/repository_id/command-proposals")
+            .respondWith()
+            .statusCode(404)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.repositoryCommandProposals.list("repository_id")
-            }).rejects.toThrow(TrueForgeTypes.NotFoundError);
+        await expect(async () => {
+            return await client.repositoryCommandProposals.list("repository_id");
+        }).rejects.toThrow(TrueForgeTypes.NotFoundError);
     });
-          
+
     test("delete (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = {};
+
         server
             .mockEndpoint()
-            .delete("/api/v1/repositories/repository_id/command-proposals/proposal_id").respondWith()
-            .statusCode(200).jsonBody(rawResponseBody)
-                .build();
+            .delete("/api/v1/repositories/repository_id/command-proposals/proposal_id")
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-                        
-                                const response = await client.repositoryCommandProposals.delete("repository_id", "proposal_id");
-                                expect(response).toEqual({});
-                              
-                    
+        const response = await client.repositoryCommandProposals.delete("repository_id", "proposal_id");
+        expect(response).toEqual({});
     });
-          
+
     test("delete (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .delete("/api/v1/repositories/repository_id/command-proposals/proposal_id").respondWith()
-            .statusCode(401).jsonBody(rawResponseBody)
-                .build();
+            .delete("/api/v1/repositories/repository_id/command-proposals/proposal_id")
+            .respondWith()
+            .statusCode(401)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.repositoryCommandProposals.delete("repository_id", "proposal_id")
-            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+        await expect(async () => {
+            return await client.repositoryCommandProposals.delete("repository_id", "proposal_id");
+        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
-          
+
     test("delete (3)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .delete("/api/v1/repositories/repository_id/command-proposals/proposal_id").respondWith()
-            .statusCode(404).jsonBody(rawResponseBody)
-                .build();
+            .delete("/api/v1/repositories/repository_id/command-proposals/proposal_id")
+            .respondWith()
+            .statusCode(404)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.repositoryCommandProposals.delete("repository_id", "proposal_id")
-            }).rejects.toThrow(TrueForgeTypes.NotFoundError);
+        await expect(async () => {
+            return await client.repositoryCommandProposals.delete("repository_id", "proposal_id");
+        }).rejects.toThrow(TrueForgeTypes.NotFoundError);
     });
-          
+
     test("confirm (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        const rawRequestBody = { "command_id" : "command_id" , "timeout_ms" : 1 };
-        const rawResponseBody = { "data" : { "command" : "command" , "command_id" : "command_id" , "created_at" : "2024-01-15T09:30:00Z" , "purpose" : "build" , "repository_revision" : 1 , "timeout_ms" : 1 , "updated_at" : "2024-01-15T09:30:00Z" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { command_id: "command_id", timeout_ms: 1 };
+        const rawResponseBody = {
+            data: {
+                command: "command",
+                command_id: "command_id",
+                created_at: "2024-01-15T09:30:00Z",
+                purpose: "build",
+                repository_revision: 1,
+                timeout_ms: 1,
+                updated_at: "2024-01-15T09:30:00Z",
+            },
+        };
+
         server
             .mockEndpoint()
-            .post("/api/v1/repositories/repository_id/command-proposals/proposal_id/confirm").jsonBody(rawRequestBody)
-                .respondWith()
-            .statusCode(200).jsonBody(rawResponseBody)
-                .build();
+            .post("/api/v1/repositories/repository_id/command-proposals/proposal_id/confirm")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-                        
-                                const response = await client.repositoryCommandProposals.confirm("repository_id", "proposal_id", {
-    commandId: "command_id",
-    timeoutMs: 1
-});
-                                expect(response).toEqual({
-    data: {
-        command: "command",
-        commandId: "command_id",
-        createdAt: new Date("2024-01-15T09:30:00.000Z"),
-        purpose: "build",
-        repositoryRevision: 1,
-        timeoutMs: 1,
-        updatedAt: new Date("2024-01-15T09:30:00.000Z")
-    }
-});
-                              
-                    
+        const response = await client.repositoryCommandProposals.confirm("repository_id", "proposal_id", {
+            commandId: "command_id",
+            timeoutMs: 1,
+        });
+        expect(response).toEqual({
+            data: {
+                command: "command",
+                commandId: "command_id",
+                createdAt: new Date("2024-01-15T09:30:00.000Z"),
+                purpose: "build",
+                repositoryRevision: 1,
+                timeoutMs: 1,
+                updatedAt: new Date("2024-01-15T09:30:00.000Z"),
+            },
+        });
     });
-          
+
     test("confirm (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        const rawRequestBody = { "command_id" : "x" , "timeout_ms" : 1 };
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { command_id: "x", timeout_ms: 1 };
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .post("/api/v1/repositories/repository_id/command-proposals/proposal_id/confirm").jsonBody(rawRequestBody)
-                .respondWith()
-            .statusCode(400).jsonBody(rawResponseBody)
-                .build();
+            .post("/api/v1/repositories/repository_id/command-proposals/proposal_id/confirm")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(400)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.repositoryCommandProposals.confirm("repository_id", "proposal_id", {
-    commandId: "x",
-    timeoutMs: 1
-})
-            }).rejects.toThrow(TrueForgeTypes.BadRequestError);
+        await expect(async () => {
+            return await client.repositoryCommandProposals.confirm("repository_id", "proposal_id", {
+                commandId: "x",
+                timeoutMs: 1,
+            });
+        }).rejects.toThrow(TrueForgeTypes.BadRequestError);
     });
-          
+
     test("confirm (3)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        const rawRequestBody = { "command_id" : "x" , "timeout_ms" : 1 };
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { command_id: "x", timeout_ms: 1 };
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .post("/api/v1/repositories/repository_id/command-proposals/proposal_id/confirm").jsonBody(rawRequestBody)
-                .respondWith()
-            .statusCode(401).jsonBody(rawResponseBody)
-                .build();
+            .post("/api/v1/repositories/repository_id/command-proposals/proposal_id/confirm")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(401)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.repositoryCommandProposals.confirm("repository_id", "proposal_id", {
-    commandId: "x",
-    timeoutMs: 1
-})
-            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+        await expect(async () => {
+            return await client.repositoryCommandProposals.confirm("repository_id", "proposal_id", {
+                commandId: "x",
+                timeoutMs: 1,
+            });
+        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
-          
+
     test("confirm (4)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        const rawRequestBody = { "command_id" : "x" , "timeout_ms" : 1 };
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { command_id: "x", timeout_ms: 1 };
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .post("/api/v1/repositories/repository_id/command-proposals/proposal_id/confirm").jsonBody(rawRequestBody)
-                .respondWith()
-            .statusCode(404).jsonBody(rawResponseBody)
-                .build();
+            .post("/api/v1/repositories/repository_id/command-proposals/proposal_id/confirm")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(404)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.repositoryCommandProposals.confirm("repository_id", "proposal_id", {
-    commandId: "x",
-    timeoutMs: 1
-})
-            }).rejects.toThrow(TrueForgeTypes.NotFoundError);
+        await expect(async () => {
+            return await client.repositoryCommandProposals.confirm("repository_id", "proposal_id", {
+                commandId: "x",
+                timeoutMs: 1,
+            });
+        }).rejects.toThrow(TrueForgeTypes.NotFoundError);
     });
-          
+
     test("confirm (5)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        const rawRequestBody = { "command_id" : "x" , "timeout_ms" : 1 };
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { command_id: "x", timeout_ms: 1 };
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .post("/api/v1/repositories/repository_id/command-proposals/proposal_id/confirm").jsonBody(rawRequestBody)
-                .respondWith()
-            .statusCode(409).jsonBody(rawResponseBody)
-                .build();
+            .post("/api/v1/repositories/repository_id/command-proposals/proposal_id/confirm")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(409)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.repositoryCommandProposals.confirm("repository_id", "proposal_id", {
-    commandId: "x",
-    timeoutMs: 1
-})
-            }).rejects.toThrow(TrueForgeTypes.ConflictError);
+        await expect(async () => {
+            return await client.repositoryCommandProposals.confirm("repository_id", "proposal_id", {
+                commandId: "x",
+                timeoutMs: 1,
+            });
+        }).rejects.toThrow(TrueForgeTypes.ConflictError);
     });
-          
 });

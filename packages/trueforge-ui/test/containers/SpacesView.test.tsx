@@ -15,6 +15,7 @@ import { SPACE_PAGE_BASE_STYLE } from '@/containers/spacePageBase.js';
 import { takeComposerPrefill } from '@/hooks/useComposerDraft.js';
 import { ShellModeProvider, useShellMode } from '@/server/ShellModeContext.js';
 import { SpaceProvider, type Space, type SpaceStore } from '@/server/SpaceContext.js';
+import { noSpaceFolders } from '../server/noSpaceFolders.js';
 
 // jsdom does not implement HTMLDialogElement.showModal()/close(); CenteredModal (used for the
 // delete-space confirmation) calls both, so it needs the same minimal polyfill the CenteredModal
@@ -65,6 +66,7 @@ const SPAIN_HOUSES: Space = {
     '| Calle Sol 2 |  | |',
   ].join('\n'),
   format: 'markdown',
+  folder_id: null,
   revision: 2,
   created_at: '2026-09-01T00:00:00.000Z',
   updated_at: '2026-09-10T00:00:00.000Z',
@@ -77,6 +79,7 @@ const ARCHIVED_TRIP: Space = {
   status: 'archived',
   body: '## Day 1\nArrive in Reykjavik.',
   format: 'markdown',
+  folder_id: null,
   revision: 5,
   created_at: '2026-08-01T00:00:00.000Z',
   updated_at: '2026-08-20T00:00:00.000Z',
@@ -89,6 +92,7 @@ const DESIGNED_TRACKER: Space = {
   status: 'active',
   body: '<style>body{background:#111}</style><h1>Launch tracker</h1><p>Ready to ship.</p>',
   format: 'html',
+  folder_id: null,
   revision: 1,
   created_at: '2026-09-05T00:00:00.000Z',
   updated_at: '2026-09-12T00:00:00.000Z',
@@ -113,6 +117,7 @@ function mockStore(backing: Space[]): SpaceStore {
       if (index === -1) throw new Error(`Space not found: ${spaceId}`);
       backing.splice(index, 1);
     }),
+    ...noSpaceFolders,
   };
 }
 

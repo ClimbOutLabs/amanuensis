@@ -58,10 +58,6 @@
       "AgentCodeSnippet": {
         "additionalProperties": false,
         "properties": {
-          "icon": {
-            "format": "uri",
-            "type": "string"
-          },
           "label_name": {
             "minLength": 1,
             "type": "string"
@@ -77,7 +73,6 @@
         "required": [
           "label_name",
           "language",
-          "icon",
           "sample_code"
         ],
         "type": "object"
@@ -257,6 +252,40 @@
         ],
         "type": "object"
       },
+      "AlwaysImportantSender": {
+        "properties": {
+          "added_at": {
+            "description": "When the person added this sender, ISO 8601 UTC.",
+            "type": "string"
+          },
+          "address": {
+            "description": "The sender address, lower case.",
+            "maxLength": 254,
+            "pattern": "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$",
+            "type": "string"
+          },
+          "name": {
+            "description": "What the person calls them. Left out when they gave no name.",
+            "maxLength": 120,
+            "minLength": 1,
+            "type": "string"
+          },
+          "source": {
+            "description": "Whether the person typed this sender or accepted it from a memory suggestion.",
+            "enum": [
+              "settings",
+              "memory"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "address",
+          "source",
+          "added_at"
+        ],
+        "type": "object"
+      },
       "AnthropicModelProvider": {
         "additionalProperties": false,
         "properties": {
@@ -391,6 +420,13 @@
       },
       "ApprovalToolCallRef": {
         "properties": {
+          "always_allow_covers": {
+            "description": "Set when the lasting answer lets maps run without asking, instead of allowing one tool.",
+            "enum": [
+              "maps"
+            ],
+            "type": "string"
+          },
           "can_always_allow": {
             "description": "Whether the owner may allow this tool for good.",
             "type": "boolean"
@@ -467,6 +503,68 @@
         ],
         "type": "object"
       },
+      "ApprovalWaitingDelivery": {
+        "properties": {
+          "attempts": {
+            "description": "Each channel tried, oldest first.",
+            "items": {
+              "$ref": "#/components/schemas/DeliveryAttempt"
+            },
+            "type": "array"
+          },
+          "created_at": {
+            "description": "When the delivery was made, ISO 8601 UTC.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Delivery id.",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "approval_waiting"
+            ],
+            "type": "string"
+          },
+          "level": {
+            "$ref": "#/components/schemas/DeliveryLevel"
+          },
+          "link": {
+            "$ref": "#/components/schemas/DeliveryApprovalLink"
+          },
+          "reason": {
+            "description": "Why this reached the person, in plain words.",
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          },
+          "seen_at": {
+            "description": "When the person first saw it on any device, or null while unread.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "text": {
+            "description": "What the person reads.",
+            "maxLength": 2000,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "link",
+          "id",
+          "level",
+          "text",
+          "reason",
+          "created_at",
+          "seen_at",
+          "attempts"
+        ],
+        "type": "object"
+      },
       "AskUserQuestionsConfig": {
         "default": {
           "enabled": true
@@ -506,6 +604,10 @@
           },
           "name": {
             "$ref": "#/components/schemas/ResourceName"
+          },
+          "search_provider": {
+            "description": "True for the connector chosen for web search. Every chat uses it unless the person turns it off.",
+            "type": "boolean"
           },
           "url": {
             "description": "URL of the remote MCP server.",
@@ -1154,9 +1256,156 @@
         ],
         "type": "object"
       },
+      "CalendarAccountStatus": {
+        "properties": {
+          "available": {
+            "description": "Whether this instance has the Calendar connector at all; when false, no card is shown.",
+            "type": "boolean"
+          },
+          "calendar_url": {
+            "description": "The calendar address of the connected account; null when none.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "email": {
+            "description": "The email address of the connected account; null when none is connected.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provider_key": {
+            "description": "The provider of the connected account, worked out from its address; the picker default otherwise.",
+            "type": "string"
+          },
+          "providers": {
+            "description": "The provider picker table, in display order.",
+            "items": {
+              "$ref": "#/components/schemas/CalendarProvider"
+            },
+            "type": "array"
+          },
+          "state": {
+            "description": "Connected, not connected, connected but the saved sign-in no longer works, or saved but the server cannot be reached right now.",
+            "enum": [
+              "connected",
+              "not_connected",
+              "sign_in_stopped",
+              "not_working"
+            ],
+            "type": "string"
+          },
+          "username": {
+            "description": "The login name of the connected account; never the password.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "available",
+          "state",
+          "email",
+          "username",
+          "calendar_url",
+          "provider_key",
+          "providers"
+        ],
+        "type": "object"
+      },
+      "CalendarProblem": {
+        "description": "Set when the calendar has not been checked for about an hour. Null when calendar checks work.",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/CalendarProblemKind"
+          },
+          "since": {
+            "description": "When calendar checks first failed, with none succeeding since, ISO 8601 UTC.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "since",
+          "kind"
+        ],
+        "type": [
+          "object",
+          "null"
+        ]
+      },
+      "CalendarProblemKind": {
+        "description": "Why the calendar could not be checked: Google needs signing in again, or something else went wrong.",
+        "enum": [
+          "google_sign_in",
+          "other"
+        ],
+        "type": "string"
+      },
+      "CalendarProvider": {
+        "properties": {
+          "account_url_template": {
+            "description": "A built-in calendar address made from the email address; null when the provider does not use one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "help_hint": {
+            "description": "One plain sentence on how to get an app password.",
+            "type": "string"
+          },
+          "help_url": {
+            "description": "The provider's own help page for making an app password; null when none could be checked.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "key": {
+            "description": "Stable provider key, such as google or other.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The name the person sees in the provider picker.",
+            "type": "string"
+          },
+          "server_url": {
+            "description": "The built-in calendar address; null when it depends on the email domain, the email address or is typed.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "setup_steps": {
+            "description": "Plain steps to show before the form; empty when the hint is enough.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "server_url",
+          "account_url_template",
+          "help_url",
+          "help_hint",
+          "setup_steps"
+        ],
+        "type": "object"
+      },
       "CancelSessionRequest": {
-        "description": "Empty request body. Cancel identifies the session via the path only.",
-        "properties": {},
+        "description": "Optional request body. The session comes from the path.",
+        "properties": {
+          "turn_id": {
+            "description": "Cancel only this turn, and nothing else running in the session. Omit to cancel the last turn.",
+            "type": "string"
+          }
+        },
         "type": "object"
       },
       "CancelSessionResponse": {
@@ -1187,6 +1436,9 @@
           "settings": {
             "$ref": "#/components/schemas/SettingsCapability"
           },
+          "sign_in": {
+            "$ref": "#/components/schemas/SignInCapability"
+          },
           "skill": {
             "$ref": "#/components/schemas/SkillCapability"
           },
@@ -1206,6 +1458,7 @@
           "memory_defaults",
           "memory_embeddings",
           "sandbox_isolation",
+          "sign_in",
           "build"
         ],
         "type": "object"
@@ -1376,6 +1629,17 @@
           },
           "name": {
             "$ref": "#/components/schemas/ResourceName"
+          },
+          "network_hosts": {
+            "description": "Exact site names the skill needs to reach. The person approves this list in Settings.",
+            "items": {
+              "description": "One exact site name the skill needs to reach.",
+              "maxLength": 253,
+              "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
+              "type": "string"
+            },
+            "maxItems": 20,
+            "type": "array"
           },
           "path": {
             "description": "Path to the skill directory within the repository. Omit to use the repository root.",
@@ -1581,6 +1845,26 @@
         ],
         "type": "object"
       },
+      "ChatPrivacy": {
+        "properties": {
+          "hosted_providers": {
+            "description": "Providers off this machine that may answer this chat; empty when it stays here.",
+            "items": {
+              "$ref": "#/components/schemas/HostedModelProvider"
+            },
+            "type": "array"
+          },
+          "leaves_machine": {
+            "description": "True when a model that may answer this chat runs off this machine.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "leaves_machine",
+          "hosted_providers"
+        ],
+        "type": "object"
+      },
       "CheckGoogleClientRequest": {
         "properties": {
           "client": {
@@ -1772,6 +2056,31 @@
         "required": [
           "command_id",
           "timeout_ms"
+        ],
+        "type": "object"
+      },
+      "ConnectVoiceRequest": {
+        "properties": {
+          "client_timezone": {
+            "description": "IANA time zone of the person talking.",
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string"
+          },
+          "session_id": {
+            "description": "The chat to talk in.",
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "voice": {
+            "description": "Voice id for spoken replies. Defaults to the server voice.",
+            "pattern": "^[a-z]{2}_[a-z]+$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id"
         ],
         "type": "object"
       },
@@ -2020,6 +2329,30 @@
         ],
         "type": "object"
       },
+      "CreatePushSubscriptionRequest": {
+        "properties": {
+          "endpoint": {
+            "description": "The push service address the browser gave this device. It must start with https.",
+            "format": "uri",
+            "maxLength": 2048,
+            "type": "string"
+          },
+          "keys": {
+            "$ref": "#/components/schemas/PushKeys"
+          },
+          "label": {
+            "description": "A short name for this device.",
+            "maxLength": 80,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "endpoint",
+          "keys"
+        ],
+        "type": "object"
+      },
       "CreateRepositoryPayload": {
         "additionalProperties": false,
         "properties": {
@@ -2068,7 +2401,7 @@
             "$ref": "#/components/schemas/ResourceName"
           },
           "manifest": {
-            "$ref": "#/components/schemas/ScheduleManifest"
+            "$ref": "#/components/schemas/ScheduleManifestInput"
           },
           "name": {
             "$ref": "#/components/schemas/ResourceName"
@@ -2164,6 +2497,10 @@
           "agent": {
             "$ref": "#/components/schemas/CreateSessionAgent"
           },
+          "is_incognito": {
+            "description": "True starts a private chat: nothing from it is remembered, and it is deleted when closed.",
+            "type": "boolean"
+          },
           "metadata": {
             "$ref": "#/components/schemas/SessionMetadata"
           }
@@ -2182,6 +2519,21 @@
         },
         "required": [
           "manifest"
+        ],
+        "type": "object"
+      },
+      "CreateSpaceFolderRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "description": "Folder name, trimmed to 1 through 64 characters.",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
         ],
         "type": "object"
       },
@@ -2229,6 +2581,10 @@
           },
           "previous_turn_id": {
             "$ref": "#/components/schemas/PreviousTurnIdInput"
+          },
+          "spoken_reply": {
+            "description": "True when the person spoke this message and the client reads the reply aloud. The reply is then kept short and plain.",
+            "type": "boolean"
           },
           "stream": {
             "default": true,
@@ -2365,6 +2721,24 @@
         "properties": {},
         "type": "object"
       },
+      "DeletePushSubscriptionRequest": {
+        "properties": {
+          "endpoint": {
+            "description": "The push service address of the device to remove.",
+            "format": "uri",
+            "maxLength": 2048,
+            "type": "string"
+          }
+        },
+        "required": [
+          "endpoint"
+        ],
+        "type": "object"
+      },
+      "DeletePushSubscriptionResponse": {
+        "properties": {},
+        "type": "object"
+      },
       "DeleteScheduleResponse": {
         "properties": {},
         "type": "object"
@@ -2377,7 +2751,15 @@
         "properties": {},
         "type": "object"
       },
+      "DeleteSkillNetworkApprovalResponse": {
+        "properties": {},
+        "type": "object"
+      },
       "DeleteSkillResponse": {
+        "properties": {},
+        "type": "object"
+      },
+      "DeleteSpaceFolderResponse": {
         "properties": {},
         "type": "object"
       },
@@ -2392,6 +2774,182 @@
       },
       "DeleteVerifyCommandResponse": {
         "properties": {},
+        "type": "object"
+      },
+      "Delivery": {
+        "discriminator": {
+          "mapping": {
+            "approval_waiting": "#/components/schemas/ApprovalWaitingDelivery",
+            "note": "#/components/schemas/NoteDelivery",
+            "nudge": "#/components/schemas/NudgeDelivery",
+            "reminder": "#/components/schemas/ReminderDelivery"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/ReminderDelivery"
+          },
+          {
+            "$ref": "#/components/schemas/NoteDelivery"
+          },
+          {
+            "$ref": "#/components/schemas/NudgeDelivery"
+          },
+          {
+            "$ref": "#/components/schemas/ApprovalWaitingDelivery"
+          }
+        ]
+      },
+      "DeliveryApprovalLink": {
+        "properties": {
+          "approval_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "session_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "approval"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "session_id",
+          "approval_id"
+        ],
+        "type": "object"
+      },
+      "DeliveryAttempt": {
+        "properties": {
+          "attempted_at": {
+            "description": "When the attempt was made, ISO 8601 UTC.",
+            "type": "string"
+          },
+          "channel": {
+            "$ref": "#/components/schemas/DeliveryChannel"
+          },
+          "detail": {
+            "description": "A short plain-words note about the outcome, or null.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/DeliveryAttemptOutcome"
+          },
+          "target": {
+            "description": "The device or address tried, or null for the app itself.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "channel",
+          "outcome",
+          "detail",
+          "target",
+          "attempted_at"
+        ],
+        "type": "object"
+      },
+      "DeliveryAttemptOutcome": {
+        "enum": [
+          "sent",
+          "failed",
+          "gone",
+          "skipped"
+        ],
+        "type": "string"
+      },
+      "DeliveryChannel": {
+        "enum": [
+          "in_app",
+          "web_push"
+        ],
+        "type": "string"
+      },
+      "DeliveryChatLink": {
+        "properties": {
+          "session_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "chat"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "session_id"
+        ],
+        "type": "object"
+      },
+      "DeliveryLevel": {
+        "enum": [
+          "note",
+          "nudge",
+          "call"
+        ],
+        "type": "string"
+      },
+      "DeliveryLink": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/DeliveryChatLink"
+          },
+          {
+            "$ref": "#/components/schemas/DeliveryApprovalLink"
+          },
+          {
+            "$ref": "#/components/schemas/DeliverySpaceLink"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "DeliverySpaceLink": {
+        "properties": {
+          "space_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "space"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "space_id"
+        ],
+        "type": "object"
+      },
+      "DeliveryUnreadCount": {
+        "properties": {
+          "unread_count": {
+            "description": "Deliveries not yet seen on any device.",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "unread_count"
+        ],
         "type": "object"
       },
       "DisconnectGoogleResponse": {
@@ -2524,11 +3082,12 @@
             "type": "array"
           },
           "state": {
-            "description": "Connected, not connected, or connected but the saved sign-in no longer works.",
+            "description": "Connected, not connected, connected but the saved sign-in no longer works, or saved but the server cannot be reached right now.",
             "enum": [
               "connected",
               "not_connected",
-              "sign_in_stopped"
+              "sign_in_stopped",
+              "not_working"
             ],
             "type": "string"
           }
@@ -2809,10 +3368,54 @@
         ],
         "type": "object"
       },
+      "GetCalendarAccountResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CalendarAccountStatus"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "GetCapabilitiesResponse": {
         "properties": {
           "data": {
             "$ref": "#/components/schemas/CapabilitiesData"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "GetChatPrivacyResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ChatPrivacy"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "GetDeliveryResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/Delivery"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "GetDeliveryUnreadCountResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/DeliveryUnreadCount"
           }
         },
         "required": [
@@ -2956,6 +3559,17 @@
         ],
         "type": "object"
       },
+      "GetMemoryRecallResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MemoryRecall"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "GetMemoryScreenResponse": {
         "properties": {
           "data": {
@@ -3036,6 +3650,17 @@
         ],
         "type": "object"
       },
+      "GetNotesFolderResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/NotesFolderStatus"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "GetOrCreateSessionByExternalIdRequest": {
         "additionalProperties": false,
         "properties": {
@@ -3095,6 +3720,39 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/PersonalizationProfile"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "GetPushConfigResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PushConfig"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "GetPushSubscriptionResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PushSubscription"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "GetReachResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ReachView"
           }
         },
         "required": [
@@ -3314,10 +3972,32 @@
         ],
         "type": "object"
       },
+      "GetSkillNetworkApprovalResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SkillNetworkApproval"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "GetSkillResponse": {
         "properties": {
           "data": {
             "$ref": "#/components/schemas/ConfiguredSkill"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "GetSpaceFolderResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SpaceFolder"
           }
         },
         "required": [
@@ -3392,6 +4072,17 @@
           },
           "name": {
             "$ref": "#/components/schemas/ResourceName"
+          },
+          "network_hosts": {
+            "description": "Exact site names the skill needs to reach. The person approves this list in Settings.",
+            "items": {
+              "description": "One exact site name the skill needs to reach.",
+              "maxLength": 253,
+              "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
+              "type": "string"
+            },
+            "maxItems": 20,
+            "type": "array"
           },
           "path": {
             "description": "Path to the skill directory within the repository. Omit to use the repository root.",
@@ -3695,7 +4386,8 @@
           "gmail_read",
           "gmail_compose",
           "calendar_read",
-          "calendar_write"
+          "calendar_write",
+          "drive_files"
         ],
         "type": "string"
       },
@@ -3788,6 +4480,41 @@
         ],
         "type": "object"
       },
+      "HelpConnectorState": {
+        "properties": {
+          "connected": {
+            "description": "Whether the connector answered this check with its tools.",
+            "type": "boolean"
+          },
+          "last_error": {
+            "description": "One plain sentence on why it did not answer this check, or null.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "description": "The connector name. Never a token or address.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "connected",
+          "last_error"
+        ],
+        "type": "object"
+      },
+      "HelpGoogleLoginState": {
+        "description": "The built-in Google login: answered, needs connecting again, did not answer, or not set up.",
+        "enum": [
+          "answered",
+          "needs_reconnect",
+          "no_answer",
+          "not_set_up"
+        ],
+        "type": "string"
+      },
       "HelpHealthCheck": {
         "properties": {
           "checked_at": {
@@ -3807,13 +4534,17 @@
           "model_ready": {
             "description": "Whether the default model answered the test call.",
             "type": "boolean"
+          },
+          "state": {
+            "$ref": "#/components/schemas/HelpState"
           }
         },
         "required": [
           "checked_at",
           "model_ready",
           "items",
-          "host_report"
+          "host_report",
+          "state"
         ],
         "type": "object"
       },
@@ -3905,6 +4636,170 @@
           "stale"
         ],
         "type": "string"
+      },
+      "HelpSetupStep": {
+        "properties": {
+          "done": {
+            "description": "Whether this setup step is done.",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "model: a default model is chosen. about_you: your name is saved in Personalization.",
+            "enum": [
+              "model",
+              "about_you"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "done"
+        ],
+        "type": "object"
+      },
+      "HelpState": {
+        "properties": {
+          "app_version": {
+            "description": "The version of Aman this server runs.",
+            "type": "string"
+          },
+          "build_ref": {
+            "description": "The build this server runs, or null when the build was not stamped.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "connectors": {
+            "description": "Each connector, whether it answered, and why not.",
+            "items": {
+              "$ref": "#/components/schemas/HelpConnectorState"
+            },
+            "type": "array"
+          },
+          "google_login": {
+            "$ref": "#/components/schemas/HelpGoogleLoginState"
+          },
+          "sandbox_ready": {
+            "description": "Whether the sandbox that reads files and runs code is ready.",
+            "type": "boolean"
+          },
+          "setup_steps": {
+            "description": "The first-run setup steps and whether each is done.",
+            "items": {
+              "$ref": "#/components/schemas/HelpSetupStep"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "setup_steps",
+          "connectors",
+          "google_login",
+          "sandbox_ready",
+          "app_version",
+          "build_ref"
+        ],
+        "type": "object"
+      },
+      "HomeAssistantCheckFailureCode": {
+        "description": "Why Home Assistant could not be connected: `unreachable` (nothing answered at the address), `token_refused` (Home Assistant refused the token), `integration_missing` (the Model Context Protocol Server integration is not installed), `certificate` (the address uses a certificate that cannot be checked), or `error` (anything else).",
+        "enum": [
+          "unreachable",
+          "token_refused",
+          "integration_missing",
+          "certificate",
+          "error"
+        ],
+        "type": "string"
+      },
+      "HomeAssistantCheckResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/HomeAssistantCheckResult"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "HomeAssistantCheckResult": {
+        "description": "Outcome of one Home Assistant connection check.",
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "entity_count": {
+                "description": "How many exposed entities the live-context tool named, or null when it is not offered.",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "status": {
+                "description": "Home Assistant answered the handshake and the live-context read.",
+                "enum": [
+                  "ok"
+                ],
+                "type": "string"
+              },
+              "tool_count": {
+                "description": "How many tools the server offers.",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "status",
+              "tool_count",
+              "entity_count"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/HomeAssistantCheckFailureCode"
+              },
+              "reason": {
+                "description": "One plain line saying what to fix.",
+                "type": "string"
+              },
+              "status": {
+                "description": "Home Assistant could not be connected.",
+                "enum": [
+                  "failed"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "code",
+              "reason"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "HostedModelProvider": {
+        "properties": {
+          "name": {
+            "description": "The provider name as configured.",
+            "type": "string"
+          },
+          "type": {
+            "description": "Provider type, for example `anthropic` or `custom`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "name"
+        ],
+        "type": "object"
       },
       "ImplementationPlan": {
         "additionalProperties": false,
@@ -4777,6 +5672,25 @@
         ],
         "type": "object"
       },
+      "ListDeliveriesResponse": {
+        "properties": {
+          "data": {
+            "description": "Deliveries for the signed-in person, newest first.",
+            "items": {
+              "$ref": "#/components/schemas/Delivery"
+            },
+            "type": "array"
+          },
+          "next_page_token": {
+            "description": "Pass as page_token to get older items; absent on the last page.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "ListGithubRepositoriesResponse": {
         "additionalProperties": false,
         "properties": {
@@ -4957,6 +5871,21 @@
         ],
         "type": "object"
       },
+      "ListReachSuggestionsResponse": {
+        "properties": {
+          "data": {
+            "description": "Senders memory suggests. Nothing is added until accepted.",
+            "items": {
+              "$ref": "#/components/schemas/ReachSuggestion"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "ListRepositoriesResponse": {
         "properties": {
           "data": {
@@ -5108,6 +6037,20 @@
         ],
         "type": "object"
       },
+      "ListSpaceFoldersResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/SpaceFolder"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "ListSpacesData": {
         "additionalProperties": false,
         "properties": {
@@ -5241,6 +6184,31 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/VerifyCommandsData"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "LookupPushSubscriptionRequest": {
+        "properties": {
+          "endpoint": {
+            "description": "The push service address this browser has for notices.",
+            "format": "uri",
+            "maxLength": 2048,
+            "type": "string"
+          }
+        },
+        "required": [
+          "endpoint"
+        ],
+        "type": "object"
+      },
+      "LookupPushSubscriptionResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PushSubscriptionLookup"
           }
         },
         "required": [
@@ -5728,6 +6696,48 @@
         ],
         "type": "object"
       },
+      "MailProblem": {
+        "description": "Set when mail has not been checked for about an hour. Null when mail checks work.",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/MailProblemKind"
+          },
+          "since": {
+            "description": "When mail checks first failed, with none succeeding since, ISO 8601 UTC.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "since",
+          "kind"
+        ],
+        "type": [
+          "object",
+          "null"
+        ]
+      },
+      "MailProblemKind": {
+        "description": "Why mail could not be checked: the mail server answered too slowly, Google needs signing in again, the shared Email connector could not log in, or something else went wrong.",
+        "enum": [
+          "too_slow",
+          "google_sign_in",
+          "email_password",
+          "other"
+        ],
+        "type": "string"
+      },
+      "MailSourceKind": {
+        "description": "Where mail is read from. Null until mail has been checked once.",
+        "enum": [
+          "google",
+          "email_connector",
+          null
+        ],
+        "type": [
+          "string",
+          "null"
+        ]
+      },
       "MarkBriefItemDoneRequest": {
         "properties": {
           "item_key": {
@@ -5775,6 +6785,24 @@
         ],
         "type": "object"
       },
+      "MarkDeliveriesSeenRequest": {
+        "properties": {
+          "ids": {
+            "description": "Deliveries to mark seen.",
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "type": "object"
+      },
       "Me": {
         "properties": {
           "roles": {
@@ -5804,10 +6832,11 @@
         "type": "object"
       },
       "MeSessionType": {
-        "description": "`oidc-connected` when the process is running with browser OIDC login; `default` for standalone or TrueFoundry token auth.",
+        "description": "`oidc-connected` when the process is running with browser OIDC login; `local-connected` for local sign-in (`TRUEFORGE_AUTH_MODE=local`); `default` for standalone or TrueFoundry token auth.",
         "enum": [
           "default",
-          "oidc-connected"
+          "oidc-connected",
+          "local-connected"
         ],
         "type": "string"
       },
@@ -6110,6 +7139,21 @@
             "type": "boolean"
           }
         },
+        "type": "object"
+      },
+      "MemoryRecall": {
+        "properties": {
+          "enabled": {
+            "description": "Whether replies use saved memories. `null` when not set, so each agent follows its own memory setting.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "enabled"
+        ],
         "type": "object"
       },
       "MemoryRecallCurated": {
@@ -7101,14 +8145,15 @@
         "type": "object"
       },
       "ModelUsageRole": {
-        "description": "Job the model did: chat answers, sub-agent work, compaction, turn summarization, profile learning, or the knowledge relevance check.",
+        "description": "Job the model did: chat answers, sub-agent work, compaction, turn summarization, profile learning, the knowledge relevance check, or deciding how loudly to tell the person about something noticed.",
         "enum": [
           "chat",
           "delegation",
           "compaction",
           "summarization",
           "profile_learning",
-          "relevance_judge"
+          "relevance_judge",
+          "noticing"
         ],
         "type": "string"
       },
@@ -7179,6 +8224,188 @@
         ],
         "type": "object"
       },
+      "NoteDelivery": {
+        "properties": {
+          "attempts": {
+            "description": "Each channel tried, oldest first.",
+            "items": {
+              "$ref": "#/components/schemas/DeliveryAttempt"
+            },
+            "type": "array"
+          },
+          "created_at": {
+            "description": "When the delivery was made, ISO 8601 UTC.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Delivery id.",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "note"
+            ],
+            "type": "string"
+          },
+          "level": {
+            "$ref": "#/components/schemas/DeliveryLevel"
+          },
+          "link": {
+            "$ref": "#/components/schemas/DeliveryLink"
+          },
+          "reason": {
+            "description": "Why this reached the person, in plain words.",
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          },
+          "seen_at": {
+            "description": "When the person first saw it on any device, or null while unread.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "text": {
+            "description": "What the person reads.",
+            "maxLength": 2000,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "link",
+          "id",
+          "level",
+          "text",
+          "reason",
+          "created_at",
+          "seen_at",
+          "attempts"
+        ],
+        "type": "object"
+      },
+      "NotesFolderStatus": {
+        "properties": {
+          "folder_path": {
+            "description": "The folder of notes the person connected; null when no folder is connected.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "inbox_file": {
+            "description": "The file inside the folder that inbox entries are added to; the default name until one is picked.",
+            "type": "string"
+          },
+          "note_count": {
+            "description": "How many notes the folder holds; null when no folder is connected or it cannot be read right now.",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "state": {
+            "description": "Connected, not connected, connected but the saved sign-in no longer works, or saved but the server cannot be reached right now.",
+            "enum": [
+              "connected",
+              "not_connected",
+              "sign_in_stopped",
+              "not_working"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "folder_path",
+          "inbox_file",
+          "note_count"
+        ],
+        "type": "object"
+      },
+      "NoticingKind": {
+        "description": "A kind of event the assistant watches for.",
+        "enum": [
+          "mail_always",
+          "calendar_clash",
+          "travel",
+          "bill_due",
+          "approval_waiting"
+        ],
+        "type": "string"
+      },
+      "NoticingWatcher": {
+        "enum": [
+          "mail",
+          "calendar",
+          "approvals"
+        ],
+        "type": "string"
+      },
+      "NudgeDelivery": {
+        "properties": {
+          "attempts": {
+            "description": "Each channel tried, oldest first.",
+            "items": {
+              "$ref": "#/components/schemas/DeliveryAttempt"
+            },
+            "type": "array"
+          },
+          "created_at": {
+            "description": "When the delivery was made, ISO 8601 UTC.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Delivery id.",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "nudge"
+            ],
+            "type": "string"
+          },
+          "level": {
+            "$ref": "#/components/schemas/DeliveryLevel"
+          },
+          "link": {
+            "$ref": "#/components/schemas/DeliveryLink"
+          },
+          "reason": {
+            "description": "Why this reached the person, in plain words.",
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          },
+          "seen_at": {
+            "description": "When the person first saw it on any device, or null while unread.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "text": {
+            "description": "What the person reads.",
+            "maxLength": 2000,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "link",
+          "id",
+          "level",
+          "text",
+          "reason",
+          "created_at",
+          "seen_at",
+          "attempts"
+        ],
+        "type": "object"
+      },
       "OpenAIModelProvider": {
         "additionalProperties": false,
         "properties": {
@@ -7213,6 +8440,35 @@
           "auth",
           "models",
           "type"
+        ],
+        "type": "object"
+      },
+      "OwnChatSearchHit": {
+        "properties": {
+          "matched_at": {
+            "description": "When the matching message was written.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "snippet": {
+            "description": "Part of the matching message, at most 300 characters.",
+            "type": "string"
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "session_id",
+          "title",
+          "snippet",
+          "matched_at"
         ],
         "type": "object"
       },
@@ -7944,6 +9200,99 @@
         ],
         "type": "object"
       },
+      "PushConfig": {
+        "properties": {
+          "public_key": {
+            "description": "The key a browser needs to turn notices on, or null when push is off.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "public_key"
+        ],
+        "type": "object"
+      },
+      "PushKeys": {
+        "properties": {
+          "auth": {
+            "description": "The device auth secret: 16 bytes, base64url.",
+            "maxLength": 256,
+            "type": "string"
+          },
+          "p256dh": {
+            "description": "The device public key: a P-256 point, base64url.",
+            "maxLength": 256,
+            "type": "string"
+          }
+        },
+        "required": [
+          "p256dh",
+          "auth"
+        ],
+        "type": "object"
+      },
+      "PushSubscription": {
+        "properties": {
+          "created_at": {
+            "description": "When this device turned notices on, ISO 8601 UTC.",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "PushSubscriptionLookup": {
+        "properties": {
+          "saved": {
+            "description": "Whether this device still gets notices. False once it was turned off, replaced or went away.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "saved"
+        ],
+        "type": "object"
+      },
+      "QuietHours": {
+        "properties": {
+          "enabled": {
+            "description": "Whether calls are held back during quiet hours.",
+            "type": "boolean"
+          },
+          "end": {
+            "description": "When quiet hours end, in the time zone below.",
+            "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+            "type": "string"
+          },
+          "start": {
+            "description": "When quiet hours start, in the time zone below.",
+            "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled",
+          "start",
+          "end"
+        ],
+        "type": "object"
+      },
       "RawToolCall": {
         "allOf": [
           {
@@ -7959,6 +9308,240 @@
             "type": "object"
           }
         ]
+      },
+      "ReachAvailability": {
+        "properties": {
+          "calls": {
+            "$ref": "#/components/schemas/ReachChannelAvailability"
+          },
+          "texts": {
+            "$ref": "#/components/schemas/ReachChannelAvailability"
+          }
+        },
+        "required": [
+          "texts",
+          "calls"
+        ],
+        "type": "object"
+      },
+      "ReachChannelAvailability": {
+        "properties": {
+          "available": {
+            "description": "Whether this channel can be used on this server now.",
+            "type": "boolean"
+          },
+          "note": {
+            "description": "A plain-words line about the channel, shown beside its switch.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "available",
+          "note"
+        ],
+        "type": "object"
+      },
+      "ReachChannels": {
+        "properties": {
+          "calls": {
+            "description": "Whether phone calls may be used. Off until phone calls are set up.",
+            "type": "boolean"
+          },
+          "texts": {
+            "description": "Whether texts may be used. Off until text messages are set up.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "texts",
+          "calls"
+        ],
+        "type": "object"
+      },
+      "ReachSettings": {
+        "description": "How the person wants to be reached. Quiet hours and \"today\" are read in `timezone`.",
+        "properties": {
+          "always_important": {
+            "description": "Senders whose mail the assistant tells the person about, once the mail server vouches for them.",
+            "items": {
+              "$ref": "#/components/schemas/AlwaysImportantSender"
+            },
+            "maxItems": 200,
+            "type": "array"
+          },
+          "approval_wait_minutes": {
+            "description": "How long an approval may wait before the assistant says so. A request expires after 30 minutes.",
+            "maximum": 20,
+            "minimum": 5,
+            "type": "integer"
+          },
+          "call_for_urgent_reminders": {
+            "description": "Whether a reminder marked urgent may call.",
+            "type": "boolean"
+          },
+          "call_kinds": {
+            "description": "The kinds of event the person allows a phone call for. Empty means none.",
+            "items": {
+              "$ref": "#/components/schemas/NoticingKind"
+            },
+            "maxItems": 5,
+            "type": "array"
+          },
+          "channels": {
+            "$ref": "#/components/schemas/ReachChannels"
+          },
+          "dismissed_suggestions": {
+            "description": "Addresses the person turned down as always-important, so they are not suggested again.",
+            "items": {
+              "maxLength": 254,
+              "type": "string"
+            },
+            "maxItems": 500,
+            "type": "array"
+          },
+          "max_nudges_per_day": {
+            "description": "Most nudges in one day. Past it, events become notes.",
+            "maximum": 50,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "min_hours_between_calls": {
+            "description": "Fewest hours between two calls.",
+            "maximum": 72,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "noticing_on": {
+            "default": false,
+            "description": "Whether the assistant checks mail, the calendar and waiting approvals in the background. Reminders work either way.",
+            "type": "boolean"
+          },
+          "quiet_hours": {
+            "$ref": "#/components/schemas/QuietHours"
+          },
+          "timezone": {
+            "$ref": "#/components/schemas/Timezone"
+          },
+          "travel_lead_minutes": {
+            "description": "How long before an event with a place the person wants to hear about leaving.",
+            "maximum": 1440,
+            "minimum": 15,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "channels",
+          "always_important",
+          "dismissed_suggestions",
+          "call_kinds",
+          "call_for_urgent_reminders",
+          "quiet_hours",
+          "timezone",
+          "max_nudges_per_day",
+          "min_hours_between_calls",
+          "travel_lead_minutes",
+          "approval_wait_minutes"
+        ],
+        "type": "object"
+      },
+      "ReachSuggestion": {
+        "properties": {
+          "address": {
+            "description": "A sender address found in a memory.",
+            "type": "string"
+          },
+          "memory": {
+            "description": "The memory it came from, so the person can judge it.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "address",
+          "memory"
+        ],
+        "type": "object"
+      },
+      "ReachTestChannel": {
+        "description": "The channel to try.",
+        "enum": [
+          "in_app",
+          "push",
+          "text",
+          "call"
+        ],
+        "type": "string"
+      },
+      "ReachTestResult": {
+        "properties": {
+          "delivery_id": {
+            "description": "The test item, now in the feed.",
+            "type": "string"
+          },
+          "devices_reached": {
+            "description": "Devices a push notice went to.",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "delivery_id",
+          "devices_reached"
+        ],
+        "type": "object"
+      },
+      "ReachView": {
+        "properties": {
+          "availability": {
+            "$ref": "#/components/schemas/ReachAvailability"
+          },
+          "calendar_problem": {
+            "$ref": "#/components/schemas/CalendarProblem"
+          },
+          "mail_problem": {
+            "$ref": "#/components/schemas/MailProblem"
+          },
+          "mail_source": {
+            "$ref": "#/components/schemas/MailSourceKind"
+          },
+          "max_levels": {
+            "description": "The highest level each kind of event can ever reach, whatever the model says.",
+            "properties": {
+              "approval_waiting": {
+                "$ref": "#/components/schemas/DeliveryLevel"
+              },
+              "bill_due": {
+                "$ref": "#/components/schemas/DeliveryLevel"
+              },
+              "calendar_clash": {
+                "$ref": "#/components/schemas/DeliveryLevel"
+              },
+              "mail_always": {
+                "$ref": "#/components/schemas/DeliveryLevel"
+              },
+              "travel": {
+                "$ref": "#/components/schemas/DeliveryLevel"
+              }
+            },
+            "type": "object"
+          },
+          "saved": {
+            "description": "False until the person saves once. While false, the settings are the quiet defaults.",
+            "type": "boolean"
+          },
+          "settings": {
+            "$ref": "#/components/schemas/ReachSettings"
+          }
+        },
+        "required": [
+          "settings",
+          "saved",
+          "availability",
+          "max_levels",
+          "mail_problem",
+          "calendar_problem",
+          "mail_source"
+        ],
+        "type": "object"
       },
       "ReasoningEffort": {
         "enum": [
@@ -8008,6 +9591,68 @@
           "command",
           "cwd",
           "timeout_ms"
+        ],
+        "type": "object"
+      },
+      "ReminderDelivery": {
+        "properties": {
+          "attempts": {
+            "description": "Each channel tried, oldest first.",
+            "items": {
+              "$ref": "#/components/schemas/DeliveryAttempt"
+            },
+            "type": "array"
+          },
+          "created_at": {
+            "description": "When the delivery was made, ISO 8601 UTC.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Delivery id.",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "reminder"
+            ],
+            "type": "string"
+          },
+          "level": {
+            "$ref": "#/components/schemas/DeliveryLevel"
+          },
+          "link": {
+            "$ref": "#/components/schemas/DeliveryLink"
+          },
+          "reason": {
+            "description": "Why this reached the person, in plain words.",
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          },
+          "seen_at": {
+            "description": "When the person first saw it on any device, or null while unread.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "text": {
+            "description": "What the person reads.",
+            "maxLength": 2000,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "link",
+          "id",
+          "level",
+          "text",
+          "reason",
+          "created_at",
+          "seen_at",
+          "attempts"
         ],
         "type": "object"
       },
@@ -8066,10 +9711,32 @@
         ],
         "type": "object"
       },
+      "RemoveCalendarAccountResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CalendarAccountStatus"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "RemoveEmailAccountResponse": {
         "properties": {
           "data": {
             "$ref": "#/components/schemas/EmailAccountStatus"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "RemoveNotesFolderResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/NotesFolderStatus"
           }
         },
         "required": [
@@ -8369,6 +10036,47 @@
           "null"
         ]
       },
+      "RunNoticingRequest": {
+        "properties": {
+          "watcher": {
+            "$ref": "#/components/schemas/NoticingWatcher"
+          }
+        },
+        "required": [
+          "watcher"
+        ],
+        "type": "object"
+      },
+      "RunNoticingResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/RunNoticingResult"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "RunNoticingResult": {
+        "properties": {
+          "owners": {
+            "description": "People checked.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "raised": {
+            "description": "New events turned into notes or nudges.",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "owners",
+          "raised"
+        ],
+        "type": "object"
+      },
       "RuntimeConfig": {
         "default": {
           "ask_user_questions": {
@@ -8445,6 +10153,10 @@
           "enabled": {
             "description": "Whether a sandbox provider is configured for this tenant.",
             "type": "boolean"
+          },
+          "reason": {
+            "description": "Why the sandbox is off, in plain words; present only when it is off and a reason is known.",
+            "type": "string"
           }
         },
         "required": [
@@ -8631,6 +10343,47 @@
         ],
         "type": "object"
       },
+      "SaveCalendarAccountRequest": {
+        "properties": {
+          "calendar_url": {
+            "description": "The https calendar address, only for the other provider.",
+            "type": "string"
+          },
+          "email": {
+            "description": "The email address of the calendar account.",
+            "type": "string"
+          },
+          "password": {
+            "description": "The app password. Write-only: it is checked and passed to the sidecar, never stored or returned.",
+            "type": "string"
+          },
+          "provider_key": {
+            "description": "The picked provider key, or other for a typed calendar address.",
+            "type": "string"
+          },
+          "username": {
+            "description": "The login name, when it is not the email address.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider_key",
+          "email",
+          "password"
+        ],
+        "type": "object"
+      },
+      "SaveCalendarAccountResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CalendarAccountStatus"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "SaveEmailAccountRequest": {
         "properties": {
           "address": {
@@ -8673,6 +10426,33 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/EmailAccountStatus"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "SaveNotesFolderRequest": {
+        "properties": {
+          "folder_path": {
+            "description": "The path of the folder of Markdown notes, on the computer Aman runs on.",
+            "type": "string"
+          },
+          "inbox_file": {
+            "description": "The file in the folder that inbox entries are added to; the default name when left out.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "folder_path"
+        ],
+        "type": "object"
+      },
+      "SaveNotesFolderResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/NotesFolderStatus"
           }
         },
         "required": [
@@ -8740,6 +10520,14 @@
           "kind": {
             "$ref": "#/components/schemas/ScheduleKind"
           },
+          "origin_session_id": {
+            "default": null,
+            "description": "The chat a reminder was set in, so its line lands in that chat when it fires. Null for tasks, for reminders set outside a chat, and for reminders saved before this was recorded.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "run_at": {
             "$ref": "#/components/schemas/RunAt"
           },
@@ -8753,6 +10541,45 @@
           },
           "timezone": {
             "$ref": "#/components/schemas/Timezone"
+          },
+          "urgent": {
+            "default": false,
+            "description": "For a reminder: the person marked it urgent, so it may call if they allowed that.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "task"
+        ],
+        "type": "object"
+      },
+      "ScheduleManifestInput": {
+        "additionalProperties": false,
+        "properties": {
+          "cron": {
+            "$ref": "#/components/schemas/CronExpression"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ScheduleKind"
+          },
+          "run_at": {
+            "$ref": "#/components/schemas/RunAt"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ScheduleStatus"
+          },
+          "task": {
+            "description": "First user message sent to the agent on every run.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "timezone": {
+            "$ref": "#/components/schemas/Timezone"
+          },
+          "urgent": {
+            "default": false,
+            "description": "For a reminder: the person marked it urgent, so it may call if they allowed that.",
+            "type": "boolean"
           }
         },
         "required": [
@@ -8883,6 +10710,34 @@
         ],
         "type": "string"
       },
+      "SearchOwnChatsResponse": {
+        "properties": {
+          "data": {
+            "properties": {
+              "hits": {
+                "description": "Newest match first, one per chat.",
+                "items": {
+                  "$ref": "#/components/schemas/OwnChatSearchHit"
+                },
+                "type": "array"
+              },
+              "search_enabled": {
+                "description": "False while past-chat search is off in Settings; nothing is indexed then and hits is empty.",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "search_enabled",
+              "hits"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "SentinelAuditRecord": {
         "properties": {
           "auto_deny_reason": {
@@ -8936,12 +10791,20 @@
       },
       "SentinelUserSettings": {
         "properties": {
+          "chat_search_enabled": {
+            "description": "While on, the assistant can search your own past chats when you ask. Off means it cannot.",
+            "type": "boolean"
+          },
           "maps_without_asking": {
             "description": "While on, map requests run without asking. Off asks for each one.",
             "type": "boolean"
           },
           "offline_mode": {
             "description": "While on, actions that reach outside this machine are denied automatically.",
+            "type": "boolean"
+          },
+          "package_downloads_without_project_allowed": {
+            "description": "While on, the sandbox may download packages in your chats that are not working on a project, through the download-only mirrors. The allowance also covers scheduled runs. Off, the first download in such a chat asks.",
             "type": "boolean"
           },
           "sandbox_without_asking": {
@@ -8968,7 +10831,9 @@
           "tier2_auto_allow",
           "search_without_asking",
           "maps_without_asking",
-          "sandbox_without_asking"
+          "sandbox_without_asking",
+          "chat_search_enabled",
+          "package_downloads_without_project_allowed"
         ],
         "type": "object"
       },
@@ -8978,7 +10843,7 @@
             "$ref": "#/components/schemas/SessionAgent"
           },
           "approval_grants": {
-            "description": "Server-derived grants created by \"Always allow this here\" for one kind of action in this chat.",
+            "description": "Server-derived grants created by \"Always allow in this chat\" for one kind of action in this chat.",
             "items": {
               "type": "string"
             },
@@ -9002,11 +10867,22 @@
             "description": "Unique session id.",
             "type": "string"
           },
+          "is_incognito": {
+            "description": "True for a private chat: nothing from it is remembered, and it is deleted when it is closed.",
+            "type": "boolean"
+          },
           "metadata": {
             "$ref": "#/components/schemas/SessionMetadata"
           },
           "metrics": {
             "$ref": "#/components/schemas/SessionMetrics"
+          },
+          "private_expires_at": {
+            "description": "ISO 8601 time a private chat is deleted if it is not closed first; null for other chats.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "source": {
             "$ref": "#/components/schemas/SessionSource"
@@ -9034,7 +10910,9 @@
           "approval_grants",
           "metrics",
           "metadata",
-          "source"
+          "source",
+          "is_incognito",
+          "private_expires_at"
         ],
         "type": "object"
       },
@@ -9802,6 +11680,24 @@
         ],
         "type": "object"
       },
+      "SetSpaceFolderRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "folder_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "folder_id"
+        ],
+        "type": "object"
+      },
+      "SetSpaceFolderResponse": {
+        "properties": {},
+        "type": "object"
+      },
       "SettingsCapability": {
         "properties": {
           "enabled": {
@@ -9811,6 +11707,24 @@
         },
         "required": [
           "enabled"
+        ],
+        "type": "object"
+      },
+      "SignInCapability": {
+        "properties": {
+          "mode": {
+            "description": "How this instance signs people in. `local` means Aman keeps one email and password itself.",
+            "enum": [
+              "local",
+              "oidc",
+              "standalone",
+              "truefoundry"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode"
         ],
         "type": "object"
       },
@@ -9866,6 +11780,44 @@
             "$ref": "#/components/schemas/TrueFoundryRegistrySkill"
           }
         ]
+      },
+      "SkillNetworkApproval": {
+        "additionalProperties": false,
+        "properties": {
+          "approved_hosts": {
+            "items": {
+              "description": "One exact site name the skill needs to reach.",
+              "maxLength": 253,
+              "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "declared_hosts": {
+            "description": "Exact site names the skill needs to reach. The person approves this list in Settings.",
+            "items": {
+              "description": "One exact site name the skill needs to reach.",
+              "maxLength": 253,
+              "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
+              "type": "string"
+            },
+            "maxItems": 20,
+            "type": "array"
+          },
+          "send_capable": {
+            "description": "True when a declared site can send mail or change a calendar.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "declared_hosts",
+          "approved_hosts",
+          "send_capable"
+        ],
+        "type": "object"
       },
       "SkillUsedPersistedEvent": {
         "properties": {
@@ -9946,6 +11898,15 @@
             "format": "date-time",
             "type": "string"
           },
+          "folder_id": {
+            "description": "The folder the space sits in, or null when it is not in one.",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "format": {
             "$ref": "#/components/schemas/SpaceFormat"
           },
@@ -9982,6 +11943,7 @@
           "purpose",
           "status",
           "body",
+          "folder_id",
           "revision",
           "created_at",
           "updated_at"
@@ -10017,6 +11979,37 @@
           "purpose",
           "status",
           "body"
+        ],
+        "type": "object"
+      },
+      "SpaceFolder": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "description": "ISO 8601 creation timestamp.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Immutable server-generated folder identifier.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "name": {
+            "description": "Folder name, trimmed to 1 through 64 characters.",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "ISO 8601 last-update timestamp.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "created_at",
+          "updated_at"
         ],
         "type": "object"
       },
@@ -10073,6 +12066,25 @@
           "archived"
         ],
         "type": "string"
+      },
+      "SpeakVoiceRequest": {
+        "properties": {
+          "text": {
+            "description": "Reply text to read aloud, up to 4000 characters.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "voice": {
+            "description": "Voice id, e.g. `af_heart`. Omit for the default voice.",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "type": "object"
       },
       "StartRepositoryWorkData": {
         "additionalProperties": false,
@@ -10143,6 +12155,19 @@
         ],
         "type": "object"
       },
+      "SweepPrivateChatsResponse": {
+        "properties": {
+          "deleted": {
+            "description": "Private chats deleted because they expired.",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "deleted"
+        ],
+        "type": "object"
+      },
       "TaskStateConfig": {
         "default": {},
         "properties": {
@@ -10200,6 +12225,28 @@
         "required": [
           "result",
           "account_email"
+        ],
+        "type": "object"
+      },
+      "TestReachChannelRequest": {
+        "properties": {
+          "channel": {
+            "$ref": "#/components/schemas/ReachTestChannel"
+          }
+        },
+        "required": [
+          "channel"
+        ],
+        "type": "object"
+      },
+      "TestReachChannelResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ReachTestResult"
+          }
+        },
+        "required": [
+          "data"
         ],
         "type": "object"
       },
@@ -10372,6 +12419,10 @@
             ],
             "type": "string"
           },
+          "already_created": {
+            "description": "True when the same event was already created in this chat a few minutes ago.",
+            "type": "boolean"
+          },
           "attendees": {
             "description": "Every guest on the event.",
             "items": {
@@ -10405,6 +12456,11 @@
           "one_of_repeating": {
             "description": "True when this changes one date of a repeating event.",
             "type": "boolean"
+          },
+          "span_days": {
+            "description": "How many days the event runs over; 1 for an ordinary event.",
+            "minimum": 1,
+            "type": "integer"
           },
           "time_zone": {
             "description": "IANA time zone the times are in.",
@@ -10504,6 +12560,10 @@
           },
           "email": {
             "$ref": "#/components/schemas/Tier3Email"
+          },
+          "mail_draft": {
+            "description": "True when a card carrying mail_new_recipients approves saving a draft rather than sending.",
+            "type": "boolean"
           },
           "mail_new_recipients": {
             "description": "For a mail send to addresses not yet on the Email list: those addresses, lowercased. Otherwise null.",
@@ -10616,6 +12676,17 @@
               "$ref": "#/components/schemas/Tier3Mailbox"
             },
             "type": "array"
+          },
+          "from_name": {
+            "description": "The display name the message is sent as, or null when none is set.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name_left_off": {
+            "description": "True when a name was left off an address because it looked like an address.",
+            "type": "boolean"
           },
           "replaces": {
             "description": "The saved draft a change replaces, or null.",
@@ -12819,6 +14890,24 @@
         ],
         "type": "object"
       },
+      "UpdateMemoryRecallRequest": {
+        "example": {
+          "enabled": false
+        },
+        "properties": {
+          "enabled": {
+            "description": "`true` or `false` sets the switch for every chat. `null` clears it back to each agent setting.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "type": "object"
+      },
       "UpdateMemoryScreenRequest": {
         "example": {
           "enabled": true
@@ -12939,6 +15028,17 @@
         ],
         "type": "object"
       },
+      "UpdateReachRequest": {
+        "properties": {
+          "settings": {
+            "$ref": "#/components/schemas/ReachSettings"
+          }
+        },
+        "required": [
+          "settings"
+        ],
+        "type": "object"
+      },
       "UpdateSandboxProviderRequest": {
         "additionalProperties": false,
         "properties": {
@@ -12955,7 +15055,7 @@
         "additionalProperties": false,
         "properties": {
           "manifest": {
-            "$ref": "#/components/schemas/ScheduleManifest"
+            "$ref": "#/components/schemas/ScheduleManifestInput"
           },
           "name": {
             "$ref": "#/components/schemas/ResourceName"
@@ -13002,12 +15102,20 @@
       },
       "UpdateSentinelUserSettingsRequest": {
         "properties": {
+          "chat_search_enabled": {
+            "description": "New past-chat search setting; omitted keeps the current value.",
+            "type": "boolean"
+          },
           "maps_without_asking": {
             "description": "New maps setting; omitted keeps the current value.",
             "type": "boolean"
           },
           "offline_mode": {
             "description": "New offline mode value; omitted keeps the current value.",
+            "type": "boolean"
+          },
+          "package_downloads_without_project_allowed": {
+            "description": "New package download setting for chats without a project; omitted keeps the current value.",
             "type": "boolean"
           },
           "sandbox_without_asking": {
@@ -13052,6 +15160,10 @@
           "agent": {
             "$ref": "#/components/schemas/SessionAgentSpecBody"
           },
+          "is_incognito": {
+            "description": "Set only when a chat is created. A value that differs from the chat is refused.",
+            "type": "boolean"
+          },
           "metadata": {
             "$ref": "#/components/schemas/SessionMetadata"
           },
@@ -13064,6 +15176,37 @@
         },
         "type": "object"
       },
+      "UpdateSkillNetworkApprovalRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "hosts": {
+            "description": "Exact site names the skill needs to reach. The person approves this list in Settings.",
+            "items": {
+              "description": "One exact site name the skill needs to reach.",
+              "maxLength": 253,
+              "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
+              "type": "string"
+            },
+            "maxItems": 20,
+            "type": "array"
+          }
+        },
+        "required": [
+          "hosts"
+        ],
+        "type": "object"
+      },
+      "UpdateSkillNetworkApprovalResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SkillNetworkApproval"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "UpdateSkillRequest": {
         "additionalProperties": false,
         "properties": {
@@ -13073,6 +15216,21 @@
         },
         "required": [
           "manifest"
+        ],
+        "type": "object"
+      },
+      "UpdateSpaceFolderRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "description": "Folder name, trimmed to 1 through 64 characters.",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
         ],
         "type": "object"
       },
@@ -13548,6 +15706,44 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/VoiceStatus"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "VoiceTicket": {
+        "properties": {
+          "expires_in_seconds": {
+            "description": "Seconds the ticket stays valid.",
+            "type": "integer"
+          },
+          "path": {
+            "description": "WebSocket path to open on this server.",
+            "type": "string"
+          },
+          "protocol": {
+            "description": "Sub-protocol name to ask for on the WebSocket.",
+            "type": "string"
+          },
+          "ticket": {
+            "description": "Single-use ticket to open the voice line. Send it as the `ticket.<id>` sub-protocol.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticket",
+          "expires_in_seconds",
+          "protocol",
+          "path"
+        ],
+        "type": "object"
+      },
+      "VoiceTicketResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/VoiceTicket"
           }
         },
         "required": [
@@ -14039,6 +16235,98 @@
           "metrics"
         ],
         "x-fern-sdk-method-name": "get_meters"
+      }
+    },
+    "/api/internal/noticing/run": {
+      "post": {
+        "description": "Runs one pass of one watcher for everyone it can watch.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunNoticingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunNoticingResponse"
+                }
+              }
+            },
+            "description": "The pass finished."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid service credential."
+          }
+        },
+        "summary": "Run a noticing pass",
+        "tags": [
+          "Internal"
+        ],
+        "x-fern-sdk-group-name": [
+          "internal",
+          "noticing"
+        ],
+        "x-fern-sdk-method-name": "run"
+      }
+    },
+    "/api/internal/private-chats/sweep": {
+      "post": {
+        "description": "Delete private chats whose expiry time has passed. Safe to call any time.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SweepPrivateChatsResponse"
+                }
+              }
+            },
+            "description": "Sweep finished."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid service credential."
+          }
+        },
+        "summary": "Delete expired private chats",
+        "tags": [
+          "Internal"
+        ],
+        "x-fern-sdk-group-name": [
+          "internal",
+          "private_chats"
+        ],
+        "x-fern-sdk-method-name": "sweep"
       }
     },
     "/api/internal/schedules/runs/execute": {
@@ -14686,7 +16974,7 @@
     },
     "/api/v1/auth/me": {
       "get": {
-        "description": "Returns the authenticated caller identity (`type`, `tenant_id`, `subject`, `roles`) wrapped as `{ data }`. `type` is `oidc-connected` when browser OIDC is enabled, otherwise `default`. When auth is enabled this requires a valid `id_token` cookie or `Authorization: Bearer` token (401 otherwise). When auth is disabled, returns the standalone default identity.",
+        "description": "Returns the authenticated caller identity (`type`, `tenant_id`, `subject`, `roles`) wrapped as `{ data }`. `type` is `oidc-connected` when browser OIDC is enabled, `local-connected` for local sign-in, otherwise `default`. When auth is enabled this requires a valid `id_token` cookie or `Authorization: Bearer` token (401 otherwise). When auth is disabled, returns the standalone default identity.",
         "responses": {
           "200": {
             "content": {
@@ -15511,6 +17799,54 @@
           "mcpServers"
         ],
         "x-fern-sdk-method-name": "authorize"
+      }
+    },
+    "/api/v1/mcp-servers/{name}/home-assistant-check": {
+      "post": {
+        "description": "Runs the MCP handshake against the saved connector, lists its tools, and reads the live-context tool once, so the answer says how many tools and exposed entities Aman can see, or the one thing to fix. Read-only: the connector is never modified, and a failed check is a 200 carrying the reason.",
+        "parameters": [
+          {
+            "description": "MCP server name.",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "MCP server name.",
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HomeAssistantCheckResponse"
+                }
+              }
+            },
+            "description": "The check ran; the result says whether Home Assistant answered and why not."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "MCP server not found."
+          }
+        },
+        "summary": "Check a Home Assistant connector",
+        "tags": [
+          "MCP Servers"
+        ],
+        "x-fern-sdk-group-name": [
+          "mcpServers"
+        ],
+        "x-fern-sdk-method-name": "home_assistant_check"
       }
     },
     "/api/v1/mcp-servers/{name}/memory-check": {
@@ -18948,6 +21284,16 @@
             }
           },
           {
+            "description": "When true, your own open private chats are included. They are left out by default.",
+            "in": "query",
+            "name": "include_private",
+            "required": false,
+            "schema": {
+              "description": "When true, your own open private chats are included. They are left out by default.",
+              "type": "boolean"
+            }
+          },
+          {
             "description": "When true, only sessions created by the authenticated subject.",
             "in": "query",
             "name": "created_by_me",
@@ -19425,6 +21771,16 @@
               }
             },
             "description": "Session not found."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The chat is private, so no report is made from it."
           }
         },
         "summary": "Generate a redacted bug-report bundle for a session",
@@ -19439,7 +21795,7 @@
     },
     "/api/v1/sessions/{session_id}/cancel": {
       "post": {
-        "description": "Cancel the running last turn for a session. Only the session creator may cancel.",
+        "description": "Cancel the running last turn for a session, or only the turn named by `turn_id`. Only the session creator may cancel.",
         "parameters": [
           {
             "description": "Session identifier.",
@@ -19762,6 +22118,16 @@
               }
             },
             "description": "Session or owner-scoped folder not found."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Private chats cannot be filed in a folder."
           }
         },
         "summary": "Assign a session to a folder",
@@ -20127,6 +22493,65 @@
           "session-personas"
         ],
         "x-fern-sdk-method-name": "list_activations"
+      }
+    },
+    "/api/v1/sessions/{session_id}/privacy": {
+      "get": {
+        "description": "Whether the models that may answer this chat run on this machine, and which providers run elsewhere.",
+        "parameters": [
+          {
+            "description": "Session identifier.",
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "description": "Session identifier.",
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetChatPrivacyResponse"
+                }
+              }
+            },
+            "description": "Where the chat is answered."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Caller is not the session creator."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Session not found."
+          }
+        },
+        "summary": "Where a chat is answered",
+        "tags": [
+          "Agent Sessions"
+        ],
+        "x-fern-sdk-group-name": [
+          "sessions"
+        ],
+        "x-fern-sdk-method-name": "get_privacy"
       }
     },
     "/api/v1/sessions/{session_id}/repository": {
@@ -21842,6 +24267,116 @@
         "x-fern-sdk-method-name": "get"
       }
     },
+    "/api/v1/settings/memory-recalls": {
+      "get": {
+        "description": "Whether replies use saved memories for every chat. `enabled` is null when the switch was never set.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetMemoryRecallResponse"
+                }
+              }
+            },
+            "description": "The stored memory recall switch."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Admin access required."
+          }
+        },
+        "summary": "Get the memory recall switch",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "memoryRecalls"
+        ],
+        "x-fern-sdk-method-name": "get"
+      },
+      "put": {
+        "description": "Sets whether replies use saved memories in every chat, including chats with a saved agent. `null` clears the switch so each agent follows its own setting.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMemoryRecallRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetMemoryRecallResponse"
+                }
+              }
+            },
+            "description": "The stored memory recall switch after the update."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request body."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Admin access required."
+          }
+        },
+        "summary": "Create, replace, or clear the memory recall switch",
+        "tags": [
+          "Capabilities"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "memoryRecalls"
+        ],
+        "x-fern-sdk-method-name": "create_or_update"
+      }
+    },
     "/api/v1/settings/memory-screens": {
       "get": {
         "description": "The persisted override for the recall screen, or the `MEMORY_SCREEN_ENABLED` env default when none is stored.",
@@ -22705,6 +25240,190 @@
         "x-fern-sdk-method-name": "delete"
       }
     },
+    "/api/v1/settings/skills/{name}/network-approval": {
+      "delete": {
+        "description": "Clears the stored approval. The skill keeps no network access from the next run on.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ResourceName"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteSkillNetworkApprovalResponse"
+                }
+              }
+            },
+            "description": "Approval removed."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No skill with this name"
+          },
+          "424": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Unsupported because skills are managed by an external system."
+          }
+        },
+        "summary": "Remove a skill network approval",
+        "tags": [
+          "Skills"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "skills"
+        ],
+        "x-fern-sdk-method-name": "delete_network_approval"
+      },
+      "get": {
+        "description": "The sites the skill declares, the approved list in force, and whether a declared site can send.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ResourceName"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetSkillNetworkApprovalResponse"
+                }
+              }
+            },
+            "description": "The skill network approval state."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No skill with this name"
+          }
+        },
+        "summary": "Get a skill network approval",
+        "tags": [
+          "Skills"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "skills"
+        ],
+        "x-fern-sdk-method-name": "get_network_approval"
+      },
+      "put": {
+        "description": "Stores the approval for exactly the sites the skill declares. A list that differs from the declaration is refused.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ResourceName"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSkillNetworkApprovalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateSkillNetworkApprovalResponse"
+                }
+              }
+            },
+            "description": "The stored approval state."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request body."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "No skill with this name"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The list sent is not the list the skill declares."
+          },
+          "424": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Unsupported because skills are managed by an external system."
+          }
+        },
+        "summary": "Approve a skill network site list",
+        "tags": [
+          "Skills"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "skills"
+        ],
+        "x-fern-sdk-method-name": "create_or_update_network_approval"
+      }
+    },
     "/api/v1/settings/token-factory-usage": {
       "get": {
         "description": "Tokens and cost per model counted today (UTC), and the daily cap with what is left under it. Counts come from the usage the provider reported.",
@@ -22952,6 +25671,177 @@
           "skills"
         ],
         "x-fern-sdk-method-name": "list_versions"
+      }
+    },
+    "/api/v1/space-folders": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListSpaceFoldersResponse"
+                }
+              }
+            },
+            "description": "The authenticated user's space folders, ordered by name."
+          }
+        },
+        "summary": "List space folders",
+        "tags": [
+          "Spaces"
+        ],
+        "x-fern-sdk-group-name": [
+          "space-folders"
+        ],
+        "x-fern-sdk-method-name": "list"
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSpaceFolderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetSpaceFolderResponse"
+                }
+              }
+            },
+            "description": "The created folder."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid folder name."
+          }
+        },
+        "summary": "Create a space folder",
+        "tags": [
+          "Spaces"
+        ],
+        "x-fern-sdk-group-name": [
+          "space-folders"
+        ],
+        "x-fern-sdk-method-name": "create"
+      }
+    },
+    "/api/v1/space-folders/{folder_id}": {
+      "delete": {
+        "description": "Deletes the folder and leaves its spaces without a folder.",
+        "parameters": [
+          {
+            "description": "Immutable space folder identifier.",
+            "in": "path",
+            "name": "folder_id",
+            "required": true,
+            "schema": {
+              "description": "Immutable space folder identifier.",
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteSpaceFolderResponse"
+                }
+              }
+            },
+            "description": "Folder deleted or already absent."
+          }
+        },
+        "summary": "Delete a space folder",
+        "tags": [
+          "Spaces"
+        ],
+        "x-fern-sdk-group-name": [
+          "space-folders"
+        ],
+        "x-fern-sdk-method-name": "delete"
+      },
+      "put": {
+        "parameters": [
+          {
+            "description": "Immutable space folder identifier.",
+            "in": "path",
+            "name": "folder_id",
+            "required": true,
+            "schema": {
+              "description": "Immutable space folder identifier.",
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSpaceFolderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetSpaceFolderResponse"
+                }
+              }
+            },
+            "description": "The renamed folder."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid folder name."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Folder not found for this user."
+          }
+        },
+        "summary": "Rename a space folder",
+        "tags": [
+          "Spaces"
+        ],
+        "x-fern-sdk-group-name": [
+          "space-folders"
+        ],
+        "x-fern-sdk-method-name": "update"
       }
     },
     "/api/v1/spaces": {
@@ -23339,6 +26229,107 @@
         "x-fern-sdk-method-name": "update"
       }
     },
+    "/api/v1/spaces/{space_id}/folder": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetSpaceFolderResponse"
+                }
+              }
+            },
+            "description": "Space is no longer in a folder."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Space not found for this user."
+          }
+        },
+        "summary": "Take a space out of its folder",
+        "tags": [
+          "Spaces"
+        ],
+        "x-fern-sdk-group-name": [
+          "spaces"
+        ],
+        "x-fern-sdk-method-name": "clear_folder"
+      },
+      "put": {
+        "description": "Placement is not an edit: the space revision and timestamps stay as they were.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetSpaceFolderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetSpaceFolderResponse"
+                }
+              }
+            },
+            "description": "Space moved."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Space or folder not found for this user."
+          }
+        },
+        "summary": "Move a space into a folder",
+        "tags": [
+          "Spaces"
+        ],
+        "x-fern-sdk-group-name": [
+          "spaces"
+        ],
+        "x-fern-sdk-method-name": "set_folder"
+      }
+    },
     "/api/v1/spaces/{space_id}/revert": {
       "post": {
         "description": "Restores a historical revision’s content as a new current revision. The pre-revert content stays recoverable, and stale revision guards return 409 like PUT.",
@@ -23428,7 +26419,7 @@
     },
     "/api/v1/user/audit-log": {
       "get": {
-        "description": "Lists the authenticated user’s Sentinel audit entries from every chat, newest first, including chats that were deleted. Read-only and paged.",
+        "description": "Lists the authenticated user’s Sentinel audit entries from every chat, newest first, including chats that were deleted. Can be narrowed by outcome and by a from and to time. Read-only and paged.",
         "parameters": [
           {
             "in": "query",
@@ -23465,6 +26456,28 @@
                 "denied",
                 "auto_denied"
               ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only entries at or after this time. The caller sends the start of a day in its own timezone.",
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "description": "Only entries at or after this time. The caller sends the start of a day in its own timezone.",
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only entries before this time. The caller sends the start of the day after its last shown day.",
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "description": "Only entries before this time. The caller sends the start of the day after its last shown day.",
+              "format": "date-time",
               "type": "string"
             }
           }
@@ -23627,6 +26640,16 @@
               }
             },
             "description": "The chat was not found."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The chat is private, so it has no brief items."
           }
         },
         "summary": "Mark a morning brief item done",
@@ -23700,6 +26723,917 @@
         "x-fern-sdk-method-name": "undo"
       }
     },
+    "/api/v1/user/chat-search": {
+      "get": {
+        "description": "Finds your own chats with a message holding every search word, newest match first, with a short excerpt. Returns nothing while past-chat search is off.",
+        "parameters": [
+          {
+            "description": "Words to look for. A chat matches when one message holds every word.",
+            "in": "query",
+            "name": "query",
+            "required": true,
+            "schema": {
+              "description": "Words to look for. A chat matches when one message holds every word.",
+              "maxLength": 500,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Most chats to return.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "Most chats to return.",
+              "maximum": 20,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchOwnChatsResponse"
+                }
+              }
+            },
+            "description": "Matching chats."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The search was blank or too long."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "Search the words inside your own chats",
+        "tags": [
+          "Agent Sessions"
+        ],
+        "x-fern-sdk-group-name": [
+          "sessions"
+        ],
+        "x-fern-sdk-method-name": "search_own_chats"
+      }
+    },
+    "/api/v1/user/deliveries": {
+      "get": {
+        "description": "Lists what was sent to the signed-in person, newest first, a page at a time.",
+        "parameters": [
+          {
+            "description": "Most items to return.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "description": "Most items to return.",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Token from the previous page; omit for the newest items.",
+            "in": "query",
+            "name": "page_token",
+            "required": false,
+            "schema": {
+              "description": "Token from the previous page; omit for the newest items.",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListDeliveriesResponse"
+                }
+              }
+            },
+            "description": "One page of deliveries."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "List deliveries",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "deliveries"
+        ],
+        "x-fern-sdk-method-name": "list"
+      }
+    },
+    "/api/v1/user/deliveries/seen": {
+      "post": {
+        "description": "Marks deliveries seen for the signed-in person on every device. Ids that are not theirs are ignored.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkDeliveriesSeenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetDeliveryUnreadCountResponse"
+                }
+              }
+            },
+            "description": "The unread count after marking."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "Mark deliveries seen",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "deliveries"
+        ],
+        "x-fern-sdk-method-name": "mark_seen"
+      }
+    },
+    "/api/v1/user/deliveries/seen-all": {
+      "post": {
+        "description": "Marks every unread delivery of the signed-in person seen on every device.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetDeliveryUnreadCountResponse"
+                }
+              }
+            },
+            "description": "The unread count after marking."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "Mark every delivery seen",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "deliveries"
+        ],
+        "x-fern-sdk-method-name": "mark_all_seen"
+      }
+    },
+    "/api/v1/user/deliveries/unread-count": {
+      "get": {
+        "description": "Counts deliveries the signed-in person has not seen on any device.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetDeliveryUnreadCountResponse"
+                }
+              }
+            },
+            "description": "The unread count."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "Count unread deliveries",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "deliveries"
+        ],
+        "x-fern-sdk-method-name": "get_unread_count"
+      }
+    },
+    "/api/v1/user/deliveries/{delivery_id}": {
+      "get": {
+        "description": "Reads one delivery of the signed-in person.",
+        "parameters": [
+          {
+            "description": "Delivery id.",
+            "in": "path",
+            "name": "delivery_id",
+            "required": true,
+            "schema": {
+              "description": "Delivery id.",
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetDeliveryResponse"
+                }
+              }
+            },
+            "description": "The delivery."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The delivery was not found."
+          }
+        },
+        "summary": "Get a delivery",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "deliveries"
+        ],
+        "x-fern-sdk-method-name": "get"
+      }
+    },
+    "/api/v1/user/push/config": {
+      "get": {
+        "description": "Returns the public key a browser needs to turn notices on, or null when push is off.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetPushConfigResponse"
+                }
+              }
+            },
+            "description": "The push settings."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "Get the push settings",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "deliveries",
+          "push"
+        ],
+        "x-fern-sdk-method-name": "get_config"
+      }
+    },
+    "/api/v1/user/push/subscriptions": {
+      "delete": {
+        "description": "Removes a device. Removing one that is not saved is not an error.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeletePushSubscriptionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeletePushSubscriptionResponse"
+                }
+              }
+            },
+            "description": "The device no longer gets notices."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "Turn notices off for a device",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "deliveries",
+          "push"
+        ],
+        "x-fern-sdk-method-name": "delete_subscription"
+      },
+      "post": {
+        "description": "Saves a device so due reminders and nudges reach it. A person keeps up to 10 devices; another drops the oldest.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePushSubscriptionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetPushSubscriptionResponse"
+                }
+              }
+            },
+            "description": "The saved device."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "This device address belongs to another person. Subscribe again for a new address."
+          }
+        },
+        "summary": "Turn notices on for a device",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "deliveries",
+          "push"
+        ],
+        "x-fern-sdk-method-name": "create_subscription"
+      }
+    },
+    "/api/v1/user/push/subscriptions/lookup": {
+      "post": {
+        "description": "Says whether this device is still saved for the signed-in person. A device drops off when 10 newer ones are saved or its push service says it is gone.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LookupPushSubscriptionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LookupPushSubscriptionResponse"
+                }
+              }
+            },
+            "description": "Whether the device is saved."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "Check whether a device gets notices",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "deliveries",
+          "push"
+        ],
+        "x-fern-sdk-method-name": "lookup_subscription"
+      }
+    },
+    "/api/v1/user/reach": {
+      "get": {
+        "description": "Reads how the signed-in person wants to be reached, with which channels are set up on this server.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetReachResponse"
+                }
+              }
+            },
+            "description": "The settings."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "Get Reach me settings",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "reach"
+        ],
+        "x-fern-sdk-method-name": "get"
+      },
+      "put": {
+        "description": "Replaces how the signed-in person wants to be reached. Texts and calls cannot be turned on until set up.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateReachRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetReachResponse"
+                }
+              }
+            },
+            "description": "The saved settings."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "Save Reach me settings",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "reach"
+        ],
+        "x-fern-sdk-method-name": "create_or_update"
+      }
+    },
+    "/api/v1/user/reach/suggestions": {
+      "get": {
+        "description": "Lists senders the memory suggests. Nothing is added until the person accepts it in a saved update.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListReachSuggestionsResponse"
+                }
+              }
+            },
+            "description": "The suggestions."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          }
+        },
+        "summary": "List always-important suggestions",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "reach"
+        ],
+        "x-fern-sdk-method-name": "list_suggestions"
+      }
+    },
+    "/api/v1/user/reach/test": {
+      "post": {
+        "description": "Sends the signed-in person a test item on one channel. A channel that is not set up answers 409.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestReachChannelRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestReachChannelResponse"
+                }
+              }
+            },
+            "description": "The test item."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "That channel is not set up yet."
+          }
+        },
+        "summary": "Try a channel",
+        "tags": [
+          "Deliveries"
+        ],
+        "x-fern-sdk-group-name": [
+          "reach"
+        ],
+        "x-fern-sdk-method-name": "test_channel"
+      }
+    },
+    "/api/v1/user/settings/calendar": {
+      "delete": {
+        "description": "Deletes the saved account and its app password from the sidecar for good.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemoveCalendarAccountResponse"
+                }
+              }
+            },
+            "description": "The account is removed."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The calendar connector could not be reached."
+          }
+        },
+        "summary": "Remove the calendar account",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "calendar"
+        ],
+        "x-fern-sdk-method-name": "remove_account"
+      },
+      "post": {
+        "description": "Checks the sign-in with the calendar server first and saves the account only when it passes. The password goes to the sidecar only and is never stored by the app or returned.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveCalendarAccountRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SaveCalendarAccountResponse"
+                }
+              }
+            },
+            "description": "The account is connected."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The details could not be used, the address is not allowed, the password was refused, or the server could not be reached."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The calendar connector could not be reached."
+          }
+        },
+        "summary": "Connect a calendar account",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "calendar"
+        ],
+        "x-fern-sdk-method-name": "save_account"
+      }
+    },
+    "/api/v1/user/settings/calendar/status": {
+      "get": {
+        "description": "Returns whether a calendar account is connected, its email, login and calendar address, and the provider table for the picker. The app password is never returned.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetCalendarAccountResponse"
+                }
+              }
+            },
+            "description": "The account status and the provider table."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The calendar connector could not be reached."
+          }
+        },
+        "summary": "Get the calendar account status",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "calendar"
+        ],
+        "x-fern-sdk-method-name": "get_status"
+      }
+    },
     "/api/v1/user/settings/email": {
       "delete": {
         "description": "Deletes the saved account and its app password from the sidecar for good.",
@@ -23732,7 +27666,7 @@
                 }
               }
             },
-            "description": "The request did not come from Aman, so nothing was done."
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
           },
           "502": {
             "content": {
@@ -23806,7 +27740,7 @@
                 }
               }
             },
-            "description": "The request did not come from Aman, so nothing was done."
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
           },
           "502": {
             "content": {
@@ -23853,6 +27787,16 @@
               }
             },
             "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
           },
           "502": {
             "content": {
@@ -24257,6 +28201,162 @@
         "x-fern-sdk-method-name": "test_connection"
       }
     },
+    "/api/v1/user/settings/notes-folder": {
+      "delete": {
+        "description": "Forgets the folder. Nothing inside the folder is changed or removed.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemoveNotesFolderResponse"
+                }
+              }
+            },
+            "description": "The folder is disconnected."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
+          }
+        },
+        "summary": "Remove the notes folder",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "notes"
+        ],
+        "x-fern-sdk-method-name": "remove_folder"
+      },
+      "post": {
+        "description": "Checks the folder first and saves it only when it can be used: it must be there, be a folder, and not be where Aman keeps its own memory.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveNotesFolderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SaveNotesFolderResponse"
+                }
+              }
+            },
+            "description": "The folder is connected."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The folder could not be used, and the message says what to pick instead."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
+          }
+        },
+        "summary": "Connect a notes folder",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "notes"
+        ],
+        "x-fern-sdk-method-name": "save_folder"
+      }
+    },
+    "/api/v1/user/settings/notes-folder/status": {
+      "get": {
+        "description": "Returns whether a notes folder is connected, the folder, the inbox file name, and how many notes the folder holds.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetNotesFolderResponse"
+                }
+              }
+            },
+            "description": "The notes folder status."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "OIDC is configured and the request has no valid session cookie."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The caller is not an admin, or the request did not come from this app, so nothing was done."
+          }
+        },
+        "summary": "Get the notes folder status",
+        "tags": [
+          "Personalization"
+        ],
+        "x-fern-sdk-group-name": [
+          "settings",
+          "notes"
+        ],
+        "x-fern-sdk-method-name": "get_status"
+      }
+    },
     "/api/v1/user/settings/sentinel": {
       "get": {
         "description": "Returns the authenticated user’s offline mode, the Tier 2 action kinds that run without asking, and whether web searches run without asking.",
@@ -24343,6 +28443,187 @@
           "personalization"
         ],
         "x-fern-sdk-method-name": "update_sentinel_settings"
+      }
+    },
+    "/api/v1/voice/connect": {
+      "post": {
+        "description": "Checks that the chat belongs to the caller and voice mode is ready, then returns a single-use ticket for the voice WebSocket. The WebSocket itself is not described here.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectVoiceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceTicketResponse"
+                }
+              }
+            },
+            "description": "A ticket and the path of the voice WebSocket."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The request is missing the chat."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The chat was not found."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Too many requests; wait for the Retry-After seconds."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Voice mode is off, or speech to text, the voice or the listening model is not ready."
+          }
+        },
+        "summary": "Open a live voice conversation",
+        "tags": [
+          "Agent Sessions"
+        ],
+        "x-fern-sdk-group-name": [
+          "voice"
+        ],
+        "x-fern-sdk-method-name": "connect"
+      }
+    },
+    "/api/v1/voice/speak": {
+      "post": {
+        "description": "Turns reply text into speech with the voice running on this computer and returns WAV audio. Text over 4000 characters is refused. Each person may make a limited number of requests per minute.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SpeakVoiceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "audio/wav": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Spoken audio, 24 kHz mono 16-bit WAV."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The text is empty, has nothing to read aloud, or names an unknown voice."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The text is over the 4000 character limit."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "Too many requests; wait for the Retry-After seconds."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The voice service returned an unexpected response."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestErrorResponse"
+                }
+              }
+            },
+            "description": "The voice on this computer is off or still starting."
+          }
+        },
+        "summary": "Read reply text aloud",
+        "tags": [
+          "Agent Sessions"
+        ],
+        "x-fern-sdk-group-name": [
+          "voice"
+        ],
+        "x-fern-sdk-method-name": "speak"
       }
     },
     "/api/v1/voice/status": {
@@ -24482,6 +28763,9 @@
     },
     {
       "name": "Personalization"
+    },
+    {
+      "name": "Deliveries"
     },
     {
       "name": "Personas"

@@ -12,6 +12,14 @@ describe('Avatar', () => {
     expect(avatar).toHaveAttribute('data-size', 'lg');
     expect(avatar).toHaveClass('h-10', 'w-10', 'host-avatar');
   });
+
+  it('sizes the small fallback glyph on the --text-xs scale step, not a one-off literal', () => {
+    render(<Avatar size="sm" aria-label="Small avatar" />);
+
+    const avatar = screen.getByLabelText('Small avatar');
+    expect(avatar).toHaveClass('text-xs');
+    expect(avatar.className).not.toMatch(/text-\[0\.625rem\]/);
+  });
 });
 
 describe('AvatarImage', () => {

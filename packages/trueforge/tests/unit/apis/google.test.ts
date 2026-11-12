@@ -18,6 +18,7 @@ const COMPOSE = 'https://www.googleapis.com/auth/gmail.compose';
 const EVERY_SCOPE = scopesForFeatures(GOOGLE_FEATURES).join(' ');
 const CALENDAR = 'https://www.googleapis.com/auth/calendar.events.readonly';
 const CALENDAR_WRITE = 'https://www.googleapis.com/auth/calendar.events';
+const DRIVE = 'https://www.googleapis.com/auth/drive.file';
 const LAN = 'http://192.168.1.20:8791';
 const BASE = '/api/v1/user/settings/google';
 const BeginResponse = z.object({ data: z.object({ authorization_url: z.string() }) });
@@ -176,10 +177,34 @@ describe('Google connection API', () => {
     expect(JSON.parse(text).data.setup.mode).toBe('paste');
   });
 
-  it('uses a pasted address when the public address is a Tailscale name', async () => {
+  it('asks for a Web client when the public address is a Tailscale name', async () => {
     configuration.PUBLIC_BASE_URL = 'https://box.tailnet-name.ts.net';
     const { text } = await call({ method: 'GET', path: '/status', origin: 'https://box.tailnet-name.ts.net' });
-    expect(JSON.parse(text).data.setup.mode).toBe('paste');
+    expect(JSON.parse(text).data.setup).toEqual({
+      mode: 'web',
+      client_type: 'web',
+      redirect_uri: 'https://box.tailnet-name.ts.net/api/v1/user/settings/google/oauth/callback',
+    });
+  });
+
+  it('uses the recorded Tailscale address when the public address is the loopback default', async () => {
+    const originalOrigins = configuration.ALLOWED_ORIGINS;
+    configuration.PUBLIC_BASE_URL = 'http://127.0.0.1:8791';
+    configuration.ALLOWED_ORIGINS = ['http://127.0.0.1:8791', 'https://box.tailnet-name.ts.net:8443'];
+    try {
+      const { text } = await call({
+        method: 'GET',
+        path: '/status',
+        origin: 'https://box.tailnet-name.ts.net:8443',
+      });
+      expect(JSON.parse(text).data.setup).toEqual({
+        mode: 'web',
+        client_type: 'web',
+        redirect_uri: 'https://box.tailnet-name.ts.net:8443/api/v1/user/settings/google/oauth/callback',
+      });
+    } finally {
+      configuration.ALLOWED_ORIGINS = originalOrigins;
+    }
   });
 
   describe('on a demo instance', () => {
@@ -457,6 +482,7 @@ describe('Google connection API', () => {
       expect.objectContaining({ feature: 'gmail_compose', granted: false }),
       expect.objectContaining({ feature: 'calendar_read', granted: false }),
       expect.objectContaining({ feature: 'calendar_write', granted: false }),
+      expect.objectContaining({ feature: 'drive_files', granted: false }),
     ]);
     const statusText = (await call({ method: 'GET', path: '/status' })).text;
     for (const body of [text, statusText]) {
@@ -492,6 +518,7 @@ describe('Google connection API', () => {
       expect.objectContaining({ feature: 'gmail_compose', granted: true }),
       expect.objectContaining({ feature: 'calendar_read', granted: false }),
       expect.objectContaining({ feature: 'calendar_write', granted: false }),
+      expect.objectContaining({ feature: 'drive_files', granted: false }),
     ]);
     expect(calls.some(entry => entry.includes('/revoke'))).toBe(false);
   });
@@ -513,6 +540,33 @@ describe('Google connection API', () => {
       expect.objectContaining({ feature: 'gmail_compose', granted: false }),
       expect.objectContaining({ feature: 'calendar_read', granted: true }),
       expect.objectContaining({ feature: 'calendar_write', granted: false }),
+      expect.objectContaining({ feature: 'drive_files', granted: false }),
+    ]);
+    expect(calls.some(entry => entry.includes('/revoke'))).toBe(false);
+  });
+
+  it('adds Drive later as a second consent on the saved client, keeping mail and never revoking', async () => {
+    await connect();
+    granted = `${READ} ${DRIVE}`;
+    const begin = await call({ method: 'POST', path: '/oauth/begin', body: { features: ['drive_files'] } });
+    expect(begin.status).toBe(201);
+    const url = new URL(JSON.parse(begin.text).data.authorization_url);
+    expect(url.searchParams.get('scope')).toBe(`${READ} ${DRIVE}`);
+    const done = await call({
+      method: 'POST',
+      path: '/oauth/complete',
+      body: { address: `http://127.0.0.1:53682/callback?state=${url.searchParams.get('state') ?? ''}&code=abc` },
+    });
+    expect(JSON.parse(done.text).data.features).toEqual([
+      expect.objectContaining({ feature: 'gmail_read', granted: true }),
+      expect.objectContaining({ feature: 'gmail_compose', granted: false }),
+      expect.objectContaining({ feature: 'calendar_read', granted: false }),
+      expect.objectContaining({ feature: 'calendar_write', granted: false }),
+      expect.objectContaining({
+        feature: 'drive_files',
+        granted: true,
+        label: 'Read and add to Drive files Aman created or you opened with Aman',
+      }),
     ]);
     expect(calls.some(entry => entry.includes('/revoke'))).toBe(false);
   });
@@ -546,8 +600,20 @@ describe('Google connection API', () => {
       expect.objectContaining({ feature: 'gmail_compose', granted: false }),
       expect.objectContaining({ feature: 'calendar_read', granted: true }),
       expect.objectContaining({ feature: 'calendar_write', granted: true, label: 'Add and change events you approve' }),
+      expect.objectContaining({ feature: 'drive_files', granted: false }),
     ]);
     expect(calls.some(entry => entry.includes('/revoke'))).toBe(false);
+  });
+
+  it('asks Drive-only callers to connect mail first, in plain words', async () => {
+    const begin = await call({
+      method: 'POST',
+      path: '/oauth/begin',
+      body: { client: { client_id: ID, client_secret: SECRET, client_type: 'desktop' }, features: ['drive_files'] },
+    });
+    expect(begin.status).toBe(400);
+    expect(JSON.parse(begin.text).error).toMatchObject({ type: 'invalid_features' });
+    expect(JSON.parse(begin.text).error.message).toContain('Connect Google first, then add Drive');
   });
 
   it('asks Calendar-only callers to connect mail first, in plain words', async () => {

@@ -4,9 +4,15 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { FetchLike } from '@modelcontextprotocol/sdk/shared/transport.js';
-import type { CallToolRequest, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import {
+  ErrorCode,
+  McpError,
+  type CallToolRequest,
+  type CallToolResult,
+} from '@modelcontextprotocol/sdk/types.js';
 import { context, propagation } from '@opentelemetry/api';
-import { McpConnectionError } from '../errors';
+import { McpConnectionError, McpRedirectRefusedError } from '../errors';
+import { currentMcpOutboundFetchOptions, mcpOutboundBaseFetch, withOutboundHttpRetries } from '../util/outboundFetch';
 import { withTimeout } from '../util/promiseUtils';
 import { isRedirectStatus, redirectTargetOrigin } from '../util/redirects';
 import type { ToolSchema } from './IMCPServer';
@@ -30,6 +36,37 @@ type McpTransport = StreamableHTTPClientTransport | SSEClientTransport;
 
 const CLIENT_INFO = { name: 'tfy-agent-mcp-client', version: '1.0.0' } as const;
 const TRANSPORT_PROBE_ORDER: RemoteMcpTransportType[] = ['streamable-http', 'sse'];
+
+export const DEFAULT_MAX_MCP_RESPONSE_BYTES = 50 * 1024 * 1024;
+
+/** GET SSE is long-lived and uncapped; every other body aborts at `maxBytes`. */
+export function withMaxResponseBytes(fetchFn: FetchLike, maxBytes: number): FetchLike {
+  return async (url, init) => {
+    const response = await fetchFn(url, init);
+    const isGetSse =
+      (init?.method ?? 'GET').toUpperCase() === 'GET' &&
+      (response.headers.get('content-type') ?? '').toLowerCase().includes('text/event-stream');
+    if (isGetSse || !response.body) {
+      return response;
+    }
+    let seen = 0;
+    return new Response(
+      response.body.pipeThrough(
+        new TransformStream<Uint8Array, Uint8Array>({
+          transform(chunk, controller) {
+            seen += chunk.byteLength;
+            if (seen > maxBytes) {
+              controller.error(new Error(`MCP response exceeded max ${String(maxBytes)} bytes`));
+              return;
+            }
+            controller.enqueue(chunk);
+          },
+        }),
+      ),
+      { status: response.status, statusText: response.statusText, headers: response.headers },
+    );
+  };
+}
 
 class McpClientWithTimeout extends Client {
   constructor(private readonly requestTimeoutMs: number) {
@@ -107,7 +144,7 @@ function createRedirectGuardFetch({ sameOriginOnly }: { sameOriginOnly: boolean 
       let currentUrl: string | URL = requestUrl;
       let currentInit = init;
       for (let hop = 0; ; hop += 1) {
-        const response = await fetch(currentUrl, { ...currentInit, redirect: 'manual' });
+        const response = await mcpOutboundBaseFetch(currentUrl, { ...currentInit, redirect: 'manual' });
         if (!isRedirectStatus(response.status)) {
           return response;
         }
@@ -120,7 +157,7 @@ function createRedirectGuardFetch({ sameOriginOnly }: { sameOriginOnly: boolean 
           await response.body?.cancel().catch(() => {
             /* no-op */
           });
-          throw new McpConnectionError(redirectRefusedMessage(refused), 502);
+          throw new McpRedirectRefusedError(redirectRefusedMessage(refused));
         }
         await response.body?.cancel().catch(() => {
           /* no-op */
@@ -148,6 +185,91 @@ export function isSessionExpiredError(error: unknown): boolean {
     error.message.toLowerCase().includes('session') ||
     isNotInitializedServerError(error.message)
   );
+}
+
+/** Node network failure codes that mean the request never reached the server. */
+const TRANSPORT_ERROR_CODES: ReadonlySet<string> = new Set([
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'ECONNABORTED',
+  'ETIMEDOUT',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'EPIPE',
+]);
+
+/**
+ * Failures that mean the host itself cannot be reached. Another transport at the same address
+ * would fail the same way, so the probe stops instead of doubling the wait.
+ */
+const HOST_UNREACHABLE_CODES: ReadonlySet<string> = new Set([
+  'ECONNREFUSED',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'UND_ERR_CONNECT_TIMEOUT',
+]);
+
+function isHostUnreachable(error: unknown): boolean {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (current instanceof Error && !seen.has(current)) {
+    seen.add(current);
+    const code: unknown = Reflect.get(current, 'code');
+    if (typeof code === 'string' && HOST_UNREACHABLE_CODES.has(code)) {
+      return true;
+    }
+    current = current.cause;
+  }
+  return false;
+}
+
+/** The SDK's JSON-RPC code for a transport that closed under a request. */
+const CONNECTION_CLOSED_CODE: number = ErrorCode.ConnectionClosed;
+
+function networkErrorCode(error: Error): string | undefined {
+  const code: unknown = Reflect.get(error, 'code');
+  return typeof code === 'string' && TRANSPORT_ERROR_CODES.has(code) ? code : undefined;
+}
+
+/**
+ * A plain-words reason when a failure is the transport itself (the request never reached the
+ * server), or undefined for anything else: an answer the server gave, an auth refusal, a bug.
+ * The fetch layer reports these as a bare "fetch failed" and hides the real reason one level
+ * down, on the error's cause, which for a refused connection carries the code and the address;
+ * the chain is walked for the first link that names a network failure.
+ */
+export function transportFailureDetail(error: unknown): string | undefined {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  let sawFetchFailure = false;
+  while (current instanceof Error && !seen.has(current)) {
+    seen.add(current);
+    if (current instanceof TypeError && current.message === 'fetch failed') {
+      sawFetchFailure = true;
+    }
+    if (current instanceof McpError && current.code === CONNECTION_CLOSED_CODE) {
+      return 'the connection closed';
+    }
+    const code = networkErrorCode(current);
+    if (code !== undefined) {
+      if (code === 'ECONNREFUSED') {
+        const address: unknown = Reflect.get(current, 'address');
+        const port: unknown = Reflect.get(current, 'port');
+        if (typeof address === 'string' && typeof port === 'number') {
+          return `connection refused at ${address}:${String(port)}`;
+        }
+      }
+      return current.message.length > 0 ? current.message : code;
+    }
+    current = current.cause;
+  }
+  // A bare fetch failure with no coded cause is still the transport failing, just with
+  // nothing more specific to say about why.
+  return sawFetchFailure ? 'the connection failed' : undefined;
 }
 
 /**
@@ -262,6 +384,7 @@ export async function connectRemoteMcp(params: {
   knownTransportType?: RemoteMcpTransportType | undefined;
   requestTimeoutMs: number;
   connectTimeoutMs: number;
+  maxResponseBytes?: number | undefined;
   signal: AbortSignal;
   /**
    * Answer any redirect with an error. Set for a connection the host marked first-party; every other
@@ -274,10 +397,19 @@ export async function connectRemoteMcp(params: {
   const url = new URL(params.url);
   const requestOptions = { signal: params.signal };
   const redirectRefusal = createRedirectGuardFetch({ sameOriginOnly: params.refuseRedirects !== true });
+  // Retries sit outside the guard and the size cap: a retry replays the whole request, and
+  // only ever for a failure that means the server never answered (tool calls are not
+  // replayable once upstream may have received them, so the MCP options are not idempotent).
+  const fetchFn = withOutboundHttpRetries(
+    withMaxResponseBytes(redirectRefusal.fetch, params.maxResponseBytes ?? DEFAULT_MAX_MCP_RESPONSE_BYTES),
+    currentMcpOutboundFetchOptions(),
+  );
   const candidates = params.knownTransportType
     ? [params.knownTransportType, ...TRANSPORT_PROBE_ORDER.filter(t => t !== params.knownTransportType)]
     : TRANSPORT_PROBE_ORDER;
   const failures: { transport: RemoteMcpTransportType; error: string }[] = [];
+  // Kept so a caller can tell a server that cannot be reached from one that answered with a failure.
+  let transportCause: unknown;
 
   for (const transportType of candidates) {
     const transport = createTransport({
@@ -285,26 +417,33 @@ export async function connectRemoteMcp(params: {
       url,
       headers: params.headers,
       sessionId: params.sessionId,
-      fetchFn: redirectRefusal.fetch,
+      fetchFn,
     });
     const client = new McpClientWithTimeout(params.requestTimeoutMs);
+    // withTimeout races client.connect() and does not abort it, so timed-out connects can leak
+    // sockets until GC. Abort this controller on timeout so the handshake is cancelled.
+    // AbortSignal.timeout cannot be cleared, and the SDK keeps the signal on initialize, so it
+    // would still fire connectTimeoutMs later and cancel the live client.
+    const timeout = new AbortController();
+    const connectOptions = { signal: AbortSignal.any([params.signal, timeout.signal]) };
     try {
       stampTraceHeaders(params.headers);
       await withTimeout(
         // Concrete transports use sessionId: string|undefined; Transport uses an optional
         // property — exactOptionalPropertyTypes rejects assignability without this cast.
-        client.connect(transport as Parameters<Client['connect']>[0], requestOptions),
+        client.connect(transport as Parameters<Client['connect']>[0], connectOptions),
         params.connectTimeoutMs,
         transportType,
       );
     } catch (error) {
+      timeout.abort();
       await client.close().catch(() => {
         /* no-op */
       });
       // A refused redirect is final: the URL does not serve MCP itself, so another transport on it would fare no better.
       const refused = redirectRefusal.refusal();
       if (refused !== undefined) {
-        throw new McpConnectionError(redirectRefusedMessage(refused), 502, { cause: error });
+        throw new McpRedirectRefusedError(redirectRefusedMessage(refused), { cause: error });
       }
       if (isAuthError(error)) {
         throw toConnectError(error);
@@ -314,7 +453,13 @@ export async function connectRemoteMcp(params: {
       if (params.sessionId && isSessionExpiredError(error)) {
         throw toConnectError(error);
       }
+      if (transportCause === undefined && transportFailureDetail(error) !== undefined) {
+        transportCause = error;
+      }
       failures.push({ transport: transportType, error: describeTransportError(error) });
+      if (isHostUnreachable(error)) {
+        break;
+      }
       continue;
     }
 
@@ -325,5 +470,9 @@ export async function connectRemoteMcp(params: {
     return buildConnection(client, transport, transportType, params.headers, requestOptions);
   }
 
-  throw new McpConnectionError(`failed to connect (tried ${candidates.join(', ')}): ${JSON.stringify(failures)}`, 502);
+  throw new McpConnectionError(
+    `failed to connect (tried ${failures.map(failure => failure.transport).join(', ')}): ${JSON.stringify(failures)}`,
+    502,
+    transportCause === undefined ? undefined : { cause: transportCause },
+  );
 }

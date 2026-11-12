@@ -8,13 +8,17 @@ import { createRoute } from '@hono/zod-openapi';
 import { RequestErrorResponseSchema } from '../schemas/errors';
 import {
   CreateSkillRequestSchema,
+  DeleteSkillNetworkApprovalResponseSchema,
   DeleteSkillResponseSchema,
+  GetSkillNetworkApprovalResponseSchema,
   GetSkillResponseSchema,
   ListAvailableSkillsResponseSchema,
   ListSkillVersionsRequestQuerySchema,
   ListSkillVersionsResponseSchema,
   ListSkillsResponseSchema,
   SkillNameParamsSchema,
+  UpdateSkillNetworkApprovalRequestSchema,
+  UpdateSkillNetworkApprovalResponseSchema,
   UpdateSkillRequestSchema,
 } from '../schemas/skill';
 import { OpenApiTag } from './openapiTags';
@@ -170,6 +174,96 @@ export const deleteSkillRoute = createRoute({
     404: {
       content: { 'application/json': { schema: RequestErrorResponseSchema } },
       description: 'No skill with this name',
+    },
+  },
+});
+
+export const getSkillNetworkApprovalRoute = createRoute({
+  method: 'get',
+  path: '/{name}/network-approval',
+  tags: [OpenApiTag.SKILLS],
+  summary: 'Get a skill network approval',
+  description: 'The sites the skill declares, the approved list in force, and whether a declared site can send.',
+  'x-fern-sdk-group-name': ['settings', 'skills'],
+  'x-fern-sdk-method-name': 'get_network_approval',
+  request: {
+    params: SkillNameParamsSchema,
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: GetSkillNetworkApprovalResponseSchema } },
+      description: 'The skill network approval state.',
+    },
+    404: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'No skill with this name',
+    },
+  },
+});
+
+export const updateSkillNetworkApprovalRoute = createRoute({
+  method: 'put',
+  path: '/{name}/network-approval',
+  tags: [OpenApiTag.SKILLS],
+  summary: 'Approve a skill network site list',
+  description:
+    'Stores the approval for exactly the sites the skill declares. A list that differs from the declaration is refused.',
+  'x-fern-sdk-group-name': ['settings', 'skills'],
+  'x-fern-sdk-method-name': 'create_or_update_network_approval',
+  request: {
+    params: SkillNameParamsSchema,
+    body: {
+      content: { 'application/json': { schema: UpdateSkillNetworkApprovalRequestSchema } },
+      required: true,
+    },
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: UpdateSkillNetworkApprovalResponseSchema } },
+      description: 'The stored approval state.',
+    },
+    400: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Invalid request body.',
+    },
+    404: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'No skill with this name',
+    },
+    422: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'The list sent is not the list the skill declares.',
+    },
+    424: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Unsupported because skills are managed by an external system.',
+    },
+  },
+});
+
+export const deleteSkillNetworkApprovalRoute = createRoute({
+  method: 'delete',
+  path: '/{name}/network-approval',
+  tags: [OpenApiTag.SKILLS],
+  summary: 'Remove a skill network approval',
+  description: 'Clears the stored approval. The skill keeps no network access from the next run on.',
+  'x-fern-sdk-group-name': ['settings', 'skills'],
+  'x-fern-sdk-method-name': 'delete_network_approval',
+  request: {
+    params: SkillNameParamsSchema,
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: DeleteSkillNetworkApprovalResponseSchema } },
+      description: 'Approval removed.',
+    },
+    404: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'No skill with this name',
+    },
+    424: {
+      content: { 'application/json': { schema: RequestErrorResponseSchema } },
+      description: 'Unsupported because skills are managed by an external system.',
     },
   },
 });

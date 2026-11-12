@@ -17,6 +17,8 @@ export type ThreadListRowProps = {
   lastMessageAt?: Date;
   /** Something new came in that the person has not opened yet. */
   unread?: boolean;
+  /** The incognito chat open in this tab; it leaves the list when it closes. */
+  isPrivate?: boolean;
   /** Overflow actions (e.g. delete menu) — rendered as a sibling of the title button. */
   actions?: ReactNode;
   className?: string;
@@ -29,6 +31,7 @@ export function ThreadListRow({
   agentName,
   lastMessageAt,
   unread,
+  isPrivate,
   actions,
   className,
 }: ThreadListRowProps) {
@@ -72,6 +75,14 @@ export function ThreadListRow({
             >
               {title}
             </span>
+            {isPrivate === true ? (
+              <span
+                data-slot="aui_thread-list-item-private"
+                className="border-text-primary text-text-primary shrink-0 rounded-full border px-1.5 text-xs leading-4"
+              >
+                Incognito
+              </span>
+            ) : null}
             {unread === true ? (
               <span
                 role="img"
@@ -82,7 +93,7 @@ export function ThreadListRow({
             ) : null}
           </span>
           {agentName != null ? (
-            <span className="mt-0.5 flex min-w-0 items-center gap-1 text-[0.75rem] text-text-secondary">
+            <span className="mt-0.5 flex min-w-0 items-center gap-1 text-xs text-text-secondary">
               <Icon name="bot" className="shrink-0" />
               <span className="truncate">{agentName}</span>
             </span>

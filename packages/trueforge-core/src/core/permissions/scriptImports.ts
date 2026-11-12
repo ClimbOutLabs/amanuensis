@@ -52,6 +52,25 @@ export function scriptFileLoadsOnlyStandardCode(input: {
   }
 }
 
+/**
+ * The text of a script file for an approval card, so the person can read the code they are being
+ * asked to let run. Null when the file cannot be read or is larger than the checked-script bound;
+ * the card still asks either way, it just shows no code.
+ */
+export function scriptFileText(input: { file: string; resolution: PathResolution | undefined }): string | null {
+  if (input.resolution === 'remote') {
+    return null;
+  }
+  try {
+    if (statSync(input.file).size > MAX_CHECKED_SCRIPT_BYTES) {
+      return null;
+    }
+    return readFileSync(input.file, 'utf8');
+  } catch {
+    return null;
+  }
+}
+
 function pythonLoadsOnlyStandard(source: string): boolean {
   if (/\b__import__\b|\bos\.(?:system|popen|exec\w*|spawn\w*|posix_spawn\w*)\b/u.test(source)) {
     return false;

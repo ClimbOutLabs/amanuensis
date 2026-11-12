@@ -5,180 +5,180 @@ import { TrueForge } from "../../../src/Client";
 import { mockServerPool } from "../../mock-server/MockServerPool";
 
 describe("MemoryScreensClient", () => {
-    
     test("get (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { "data" : { "default_enabled" : true , "enabled" : true , "overridden" : true } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { data: { default_enabled: true, enabled: true, overridden: true } };
+
         server
             .mockEndpoint()
-            .get("/api/v1/settings/memory-screens").respondWith()
-            .statusCode(200).jsonBody(rawResponseBody)
-                .build();
+            .get("/api/v1/settings/memory-screens")
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-                        
-                                const response = await client.settings.memoryScreens.get();
-                                expect(response).toEqual({
-    data: {
-        defaultEnabled: true,
-        enabled: true,
-        overridden: true
-    }
-});
-                              
-                    
+        const response = await client.settings.memoryScreens.get();
+        expect(response).toEqual({
+            data: {
+                defaultEnabled: true,
+                enabled: true,
+                overridden: true,
+            },
+        });
     });
-          
+
     test("get (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .get("/api/v1/settings/memory-screens").respondWith()
-            .statusCode(401).jsonBody(rawResponseBody)
-                .build();
+            .get("/api/v1/settings/memory-screens")
+            .respondWith()
+            .statusCode(401)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.settings.memoryScreens.get()
-            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+        await expect(async () => {
+            return await client.settings.memoryScreens.get();
+        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
-          
+
     test("get (3)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .get("/api/v1/settings/memory-screens").respondWith()
-            .statusCode(403).jsonBody(rawResponseBody)
-                .build();
+            .get("/api/v1/settings/memory-screens")
+            .respondWith()
+            .statusCode(403)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.settings.memoryScreens.get()
-            }).rejects.toThrow(TrueForgeTypes.ForbiddenError);
+        await expect(async () => {
+            return await client.settings.memoryScreens.get();
+        }).rejects.toThrow(TrueForgeTypes.ForbiddenError);
     });
-          
+
     test("create_or_update (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        const rawRequestBody = { "enabled" : true };
-        const rawResponseBody = { "data" : { "default_enabled" : true , "enabled" : true , "overridden" : true } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { enabled: true };
+        const rawResponseBody = { data: { default_enabled: true, enabled: true, overridden: true } };
+
         server
             .mockEndpoint()
-            .put("/api/v1/settings/memory-screens").jsonBody(rawRequestBody)
-                .respondWith()
-            .statusCode(200).jsonBody(rawResponseBody)
-                .build();
+            .put("/api/v1/settings/memory-screens")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-                        
-                                const response = await client.settings.memoryScreens.createOrUpdate({
-    enabled: true
-});
-                                expect(response).toEqual({
-    data: {
-        defaultEnabled: true,
-        enabled: true,
-        overridden: true
-    }
-});
-                              
-                    
+        const response = await client.settings.memoryScreens.createOrUpdate({
+            enabled: true,
+        });
+        expect(response).toEqual({
+            data: {
+                defaultEnabled: true,
+                enabled: true,
+                overridden: true,
+            },
+        });
     });
-          
+
     test("create_or_update (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        const rawRequestBody = { "enabled" : null };
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { enabled: null };
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .put("/api/v1/settings/memory-screens").jsonBody(rawRequestBody)
-                .respondWith()
-            .statusCode(400).jsonBody(rawResponseBody)
-                .build();
+            .put("/api/v1/settings/memory-screens")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(400)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.settings.memoryScreens.createOrUpdate({
-    enabled: null
-})
-            }).rejects.toThrow(TrueForgeTypes.BadRequestError);
+        await expect(async () => {
+            return await client.settings.memoryScreens.createOrUpdate({
+                enabled: null,
+            });
+        }).rejects.toThrow(TrueForgeTypes.BadRequestError);
     });
-          
+
     test("create_or_update (3)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        const rawRequestBody = { "enabled" : null };
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { enabled: null };
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .put("/api/v1/settings/memory-screens").jsonBody(rawRequestBody)
-                .respondWith()
-            .statusCode(401).jsonBody(rawResponseBody)
-                .build();
+            .put("/api/v1/settings/memory-screens")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(401)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.settings.memoryScreens.createOrUpdate({
-    enabled: null
-})
-            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+        await expect(async () => {
+            return await client.settings.memoryScreens.createOrUpdate({
+                enabled: null,
+            });
+        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
-          
+
     test("create_or_update (4)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        const rawRequestBody = { "enabled" : null };
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { enabled: null };
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .put("/api/v1/settings/memory-screens").jsonBody(rawRequestBody)
-                .respondWith()
-            .statusCode(403).jsonBody(rawResponseBody)
-                .build();
+            .put("/api/v1/settings/memory-screens")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(403)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.settings.memoryScreens.createOrUpdate({
-    enabled: null
-})
-            }).rejects.toThrow(TrueForgeTypes.ForbiddenError);
+        await expect(async () => {
+            return await client.settings.memoryScreens.createOrUpdate({
+                enabled: null,
+            });
+        }).rejects.toThrow(TrueForgeTypes.ForbiddenError);
     });
-          
+
     test("create_or_update (5)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        const rawRequestBody = { "enabled" : null };
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+        const rawRequestBody = { enabled: null };
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .put("/api/v1/settings/memory-screens").jsonBody(rawRequestBody)
-                .respondWith()
-            .statusCode(409).jsonBody(rawResponseBody)
-                .build();
+            .put("/api/v1/settings/memory-screens")
+            .jsonBody(rawRequestBody)
+            .respondWith()
+            .statusCode(409)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.settings.memoryScreens.createOrUpdate({
-    enabled: null
-})
-            }).rejects.toThrow(TrueForgeTypes.ConflictError);
+        await expect(async () => {
+            return await client.settings.memoryScreens.createOrUpdate({
+                enabled: null,
+            });
+        }).rejects.toThrow(TrueForgeTypes.ConflictError);
     });
-          
 });

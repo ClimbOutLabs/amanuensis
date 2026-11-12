@@ -26,8 +26,71 @@ export type CommandRunner = (input: {
 
 export class CommandNotFoundError extends Error {}
 
-export const SLOT_COUNT = 4;
+export const SLOT_COUNT = 2;
+/**
+ * Installs from before had four slots. The slots past SLOT_COUNT, with their volumes and disks, are removed on
+ * the next run, so an upgrade frees what they held.
+ */
+export const RETIRED_SLOTS: readonly number[] = [3, 4];
+/**
+ * Moves the chat folders of one retired slot into the slot that takes its chats over. Run with `sh -c`
+ * inside a throwaway container: the first argument is the retired slot's workspace, the second the staying
+ * slot's workspace, and the rest are the session ids to move. A move between slot disks is a copy, so each
+ * folder is copied to a temporary name and only renamed into place once the copy has finished; a copy that
+ * runs out of room or is stopped leaves the chat where it was and no partial folder at the destination.
+ * Leftover temporary copies of an earlier stopped move are removed first, and the run stops before it
+ * starts when the folders to move need more room than the staying slot's disk has free.
+ */
+export const MOVE_RETIRED_SESSIONS_SCRIPT = [
+  'from=$1',
+  'to=$2',
+  'shift 2',
+  'sessions=$to/sessions',
+  'mkdir -p "$sessions" || exit 1',
+  'for stale in "$sessions"/.aman-move-*; do',
+  '  if [ -e "$stale" ]; then rm -rf "$stale"; fi',
+  'done',
+  'need_kb=0',
+  'for id in "$@"; do',
+  '  src=$from/sessions/$id',
+  '  dst=$sessions/$id',
+  '  if [ -d "$src" ] && [ ! -e "$dst" ]; then',
+  '    size_kb=$(du -sk "$src" | awk \'{print $1}\')',
+  '    case $size_kb in \'\'|*[!0-9]*) echo "could not tell how much room a chat needs" >&2; exit 1 ;; esac',
+  '    need_kb=$((need_kb + size_kb))',
+  '  fi',
+  'done',
+  'if [ "$need_kb" -gt 0 ]; then',
+  '  free_kb=$(df -Pk "$sessions" | awk \'NR == 2 {print $4}\')',
+  '  case $free_kb in \'\'|*[!0-9]*) echo "could not tell how much room is left" >&2; exit 1 ;; esac',
+  '  if [ "$need_kb" -gt "$free_kb" ]; then',
+  '    echo "not enough room on the disk the chats move to" >&2',
+  '    exit 1',
+  '  fi',
+  'fi',
+  'for id in "$@"; do',
+  '  src=$from/sessions/$id',
+  '  dst=$sessions/$id',
+  '  tmp=$sessions/.aman-move-$id',
+  '  if [ ! -d "$src" ] || [ -e "$dst" ]; then continue; fi',
+  '  if ! cp -a "$src" "$tmp"; then',
+  '    rm -rf "$tmp"',
+  '    echo "a chat could not be copied, so it was left where it was" >&2',
+  '    exit 1',
+  '  fi',
+  '  if ! mv "$tmp" "$dst"; then',
+  '    rm -rf "$tmp"',
+  '    echo "a chat could not be moved into place, so it was left where it was" >&2',
+  '    exit 1',
+  '  fi',
+  '  rm -rf "$src"',
+  'done',
+].join('\n');
+/** A removal deletes the disks of every slot an install may have, retired ones included. */
+const MOST_SLOTS_EVER = Math.max(SLOT_COUNT, ...RETIRED_SLOTS);
 export const SLOT_IMAGE = 'amanuensis-sandbox-slot:local';
+/** The user the app runs as; it binds its package mirror sockets inside the mirror volumes. */
+const APP_USER = '10001:10001';
 export const APPARMOR_PROFILE = 'aman-sandbox-slot';
 /** Names the Compose project and volumes, so two installs on one Docker host never share slots. */
 export const DEFAULT_INSTANCE = 'aman';
@@ -52,7 +115,7 @@ const UP_TIMEOUT_SECONDS = 300;
 /** What a run does: `up` builds and starts, `build` only builds the image, `check` only reads. */
 export type SlotsMode = 'up' | 'build' | 'check';
 
-export type SlotsStep = 'docker' | 'compose' | 'apparmor' | 'disk' | 'packs' | 'build' | 'start' | 'attest';
+export type SlotsStep = 'docker' | 'compose' | 'apparmor' | 'disk' | 'retire' | 'packs' | 'build' | 'start' | 'attest';
 
 /** The parts of a run, in order, for a front end that shows progress; a part with nothing to do is still announced. */
 export type SlotsStage = 'docker' | 'image' | 'profile' | 'disks' | 'start' | 'attest';
@@ -188,6 +251,8 @@ class Slots {
   /** Set once the disks are mounted; from then on every compose call carries the disk file. */
   private disksReady = false;
   private packs: PackName[] = [];
+  /** True when the disks of the retired slots were left in place (no --fix, or the person said no). */
+  private retiredDisksLeft = false;
   private rootAsked = false;
   /** True once sudo works without a password prompt, so root steps can run with their output captured. */
   private rootCached = false;
@@ -306,12 +371,14 @@ class Slots {
           await this.ensureProfile();
         }
         this.stage('disks');
+        await this.retireSlots();
         if (this.diskMode === 'hard') {
           await this.ensureDisks();
         }
       }
       if (mode === 'up') {
         this.stage('start');
+        await this.repairMirrorVolumes();
         await this.start();
       }
       if (mode !== 'build') {
@@ -394,12 +461,18 @@ class Slots {
 
   /** Linux with a native Docker engine can give each slot its own disk; a Docker VM already bounds the disk. */
   private warnings(): string[] {
+    const warnings: string[] = [];
     if (this.options.platform === 'linux' && this.diskMode === 'off') {
-      return [
+      warnings.push(
         `The sandboxes have no disk of their own, so a runaway program could fill this computer's disk. Run ${this.options.command} --fix to give each sandbox a fixed-size disk.`,
-      ];
+      );
     }
-    return [];
+    if (this.retiredDisksLeft) {
+      warnings.push(
+        `The disks of the extra sandboxes of an older version were left in place under ${diskRoot(this.options.instance)}. Run ${this.options.command} --fix to remove them.`,
+      );
+    }
+    return warnings;
   }
 
   private async detectDiskMode(): Promise<DiskMode> {
@@ -472,6 +545,73 @@ class Slots {
     return stale;
   }
 
+  /**
+   * Mirror volumes created before the slot image carried the mirror folder started out owned by
+   * root, and the app cannot bind its mirror socket in them; the folder holds only that socket, so
+   * handing it to the app user loses nothing. One throwaway container that may only change owners
+   * does it for every mirror volume that exists; a volume that does not exist yet is left alone, so
+   * the slot image seeds it with the right owner when the slots create it.
+   */
+  private async repairMirrorVolumes(): Promise<void> {
+    const existing: string[] = [];
+    for (let slot = 1; slot <= SLOT_COUNT; slot += 1) {
+      const name = `${this.options.instance}_slot_mirror_${String(slot)}`;
+      const inspect = await this.run({ args: ['volume', 'inspect', name] });
+      if (inspect.exitCode === 0) {
+        existing.push(name);
+      }
+    }
+    if (existing.length === 0) {
+      return;
+    }
+    const mounts: string[] = [];
+    const folders: string[] = [];
+    existing.forEach((name, index) => {
+      const folder = `/mirror-${String(index + 1)}`;
+      mounts.push('-v', `${name}:${folder}`);
+      folders.push(folder);
+    });
+    const repaired = await this.run({
+      args: [
+        'run',
+        '--rm',
+        '--user',
+        '0:0',
+        '--network',
+        'none',
+        '--cap-drop',
+        'ALL',
+        '--cap-add',
+        'CHOWN',
+        '--read-only',
+        ...mounts,
+        '--entrypoint',
+        'chown',
+        SLOT_IMAGE,
+        APP_USER,
+        ...folders,
+      ],
+    });
+    if (repaired.exitCode !== 0) {
+      const failed = withDetail({
+        sentence: 'The package mirror folders could not be handed to the app user',
+        detail: tail(repaired.stderr),
+      });
+      throw new StepFailure(
+        'start',
+        failed.message,
+        `Make sure Docker is running, then run ${this.options.command} --fix again. Package downloads stay off until the folders belong to the app user.`,
+        undefined,
+        failed.detail,
+      );
+    }
+    this.record({
+      step: 'start',
+      status: 'ok',
+      message: 'The package mirror folders belong to the app user, so the app can open its mirror sockets in them',
+    });
+  }
+
   private async runDiskScript(args: string[]): Promise<CommandResult> {
     const script = join(this.options.repoRoot, DISK_SCRIPT);
     await this.prepareRoot();
@@ -481,6 +621,239 @@ class Slots {
       interactive: this.rootNeedsTerminal,
       echo: true,
     });
+  }
+
+  /**
+   * Removes the slots an older install had past SLOT_COUNT: their containers, their volumes and, on Linux, their
+   * disks. A chat's files live in a folder named by its session id under its slot's workspace, and a chat keeps
+   * its old slot in its sandbox id, so the folders of the retired slots are moved into the slots that stay
+   * (slot 3 into slot 1, slot 4 into slot 2, the same mapping the app resolves old ids with) before anything
+   * is removed. A control or mirror volume the instance's app still mounts stays until the app is started
+   * again without it; the installer removes it then. A read-only check only reports what is left. Removing
+   * the retired disks is cleanup, not setup: without --fix, or when the person says no, the disks stay, the
+   * run carries on, and the result warns about them; a later check reports them again.
+   */
+  private async retireSlots(): Promise<void> {
+    const project = slotsProject(this.options.instance);
+    const containers: string[] = [];
+    for (const slot of RETIRED_SLOTS) {
+      const found = await this.run({
+        args: [
+          'ps',
+          '-aq',
+          '--filter',
+          `label=com.docker.compose.project=${project}`,
+          '--filter',
+          `label=com.docker.compose.service=sandbox-${String(slot)}`,
+        ],
+      });
+      containers.push(...found.stdout.split(/\s+/).filter(id => id !== ''));
+    }
+    const disks = this.diskMode === 'hard' ? await this.retiredDisks() : [];
+    const sessions = await this.retiredSessions();
+    if (containers.length === 0 && disks.length === 0 && sessions.length === 0) {
+      await this.removeRetiredVolumes();
+      return;
+    }
+    if (this.options.mode !== 'up') {
+      throw new StepFailure(
+        'retire',
+        `This computer still has the extra sandboxes of an older version of Aman, which now uses ${String(SLOT_COUNT)}.`,
+        `Run ${this.options.command} --fix to remove them.`,
+      );
+    }
+    if (containers.length > 0) {
+      const removed = await this.run({ args: ['rm', '--force', ...containers], echo: true });
+      if (removed.exitCode !== 0) {
+        const failed = withDetail({
+          sentence: 'The extra sandboxes could not be removed',
+          detail: tail(removed.stderr),
+        });
+        throw new StepFailure(
+          'start',
+          failed.message,
+          `Make sure Docker is running, then run ${this.options.command} --fix again.`,
+          undefined,
+          failed.detail,
+        );
+      }
+    }
+    // The retired containers are gone, so nothing can write to their workspaces while the folders move.
+    await this.moveRetiredSessions(sessions);
+    await this.removeRetiredVolumes();
+    if (disks.length > 0) {
+      await this.retireDisks();
+    }
+    this.record({
+      step: 'start',
+      status: 'ok',
+      message: this.retiredDisksLeft
+        ? `Removed the extra sandboxes of an older version; their disks were left in place`
+        : `Removed the extra sandboxes of an older version; ${String(SLOT_COUNT)} sandboxes are enough`,
+    });
+  }
+
+  /** The slot a retired slot's chats move to: slot 3 to slot 1, slot 4 to slot 2. */
+  private retiredTarget(slot: number): number {
+    return ((slot - 1) % SLOT_COUNT) + 1;
+  }
+
+  /**
+   * The chats still on the retired slots, read with one throwaway container per workspace volume that
+   * exists: the session ids are the folder names under the volume's sessions folder. Read-only.
+   */
+  private async retiredSessions(): Promise<{ slot: number; sessionIds: string[] }[]> {
+    // Only a full run looks inside the workspaces: a read-only check runs no container and inspects no volume,
+    // and the containers or disks it does report are what an older install leaves behind in practice.
+    if (this.options.mode !== 'up') {
+      return [];
+    }
+    const found: { slot: number; sessionIds: string[] }[] = [];
+    for (const slot of RETIRED_SLOTS) {
+      const name = `${this.options.instance}_slot_ws_${String(slot)}`;
+      const inspect = await this.run({ args: ['volume', 'inspect', name] });
+      if (inspect.exitCode !== 0) {
+        continue;
+      }
+      const listed = await this.run({
+        args: [
+          'run',
+          '--rm',
+          '--network',
+          'none',
+          '--read-only',
+          '-v',
+          `${name}:/from:ro`,
+          '--entrypoint',
+          'ls',
+          SLOT_IMAGE,
+          '/from/sessions',
+        ],
+      });
+      if (listed.exitCode !== 0) {
+        continue;
+      }
+      const sessionIds = listed.stdout.split(/\s+/).filter(id => /^[0-9a-f]{32}$/.test(id));
+      if (sessionIds.length > 0) {
+        found.push({ slot, sessionIds });
+      }
+    }
+    return found;
+  }
+
+  /**
+   * Moves each retired slot's chat folders into the workspace of the slot that takes its chats over, with
+   * one throwaway container per retired slot. A folder the target already has is left where it is. The
+   * container runs MOVE_RETIRED_SESSIONS_SCRIPT, which copies through a temporary name, so a move that
+   * fails partway never leaves a partial folder where the finished one would go.
+   */
+  private async moveRetiredSessions(sessions: { slot: number; sessionIds: string[] }[]): Promise<void> {
+    for (const { slot, sessionIds } of sessions) {
+      const moved = await this.run({
+        args: [
+          'run',
+          '--rm',
+          '--network',
+          'none',
+          '--read-only',
+          '-v',
+          `${this.options.instance}_slot_ws_${String(slot)}:/from`,
+          '-v',
+          `${this.options.instance}_slot_ws_${String(this.retiredTarget(slot))}:/to`,
+          '--entrypoint',
+          'sh',
+          SLOT_IMAGE,
+          '-c',
+          MOVE_RETIRED_SESSIONS_SCRIPT,
+          'move-sessions',
+          '/from',
+          '/to',
+          ...sessionIds,
+        ],
+        echo: true,
+      });
+      if (moved.exitCode !== 0) {
+        const failed = withDetail({
+          sentence: 'The chats of the extra sandboxes could not be moved, so nothing was removed',
+          detail: tail(moved.stderr),
+        });
+        throw new StepFailure(
+          'start',
+          failed.message,
+          `Make sure Docker is running, then run ${this.options.command} --fix again.`,
+          undefined,
+          failed.detail,
+        );
+      }
+    }
+  }
+
+  /** The volumes of retired slots that still exist and that no container uses; the rest are left as they are. */
+  private async removeRetiredVolumes(): Promise<void> {
+    if (this.options.mode !== 'up') {
+      return;
+    }
+    const names = RETIRED_SLOTS.flatMap(slot =>
+      ['ws', 'ctl', 'mirror'].map(kind => `${this.options.instance}_slot_${kind}_${String(slot)}`),
+    );
+    for (const name of names) {
+      const inspect = await this.run({ args: ['volume', 'inspect', name] });
+      if (inspect.exitCode !== 0) {
+        continue;
+      }
+      // Fails while the app still mounts it; the installer removes it after the app starts without it.
+      await this.run({ args: ['volume', 'rm', name] });
+    }
+  }
+
+  /** Disk files or mount points of retired slots under the instance's disk folder. */
+  private async retiredDisks(): Promise<string[]> {
+    const root = diskRoot(this.options.instance);
+    const tests = RETIRED_SLOTS.flatMap(slot => [`ws-${String(slot)}`, `ws-${String(slot)}.img`]).flatMap(
+      (name, index) => (index === 0 ? ['-name', name] : ['-o', '-name', name]),
+    );
+    let found: CommandResult;
+    try {
+      // A missing folder means no disks at all; find then prints nothing.
+      found = await this.run({ command: 'find', args: [root, '-maxdepth', '1', '(', ...tests, ')', '-print'] });
+    } catch (error: unknown) {
+      if (error instanceof CommandNotFoundError) {
+        return [];
+      }
+      throw error;
+    }
+    return found.stdout.split('\n').filter(line => line.trim() !== '');
+  }
+
+  /**
+   * Removes the retired slots' disks with the root disk script. Cleanup only: without --fix, or when the
+   * person says no, the disks stay and the run carries on with a warning, so an upgrade is never undone
+   * over them. A later check reports the disks again.
+   */
+  private async retireDisks(): Promise<void> {
+    const root = diskRoot(this.options.instance);
+    if (!this.mayFix) {
+      this.retiredDisksLeft = true;
+      return;
+    }
+    const agreed = await this.options.confirm(
+      `This will remove the disks of the extra sandboxes an older version of Aman made under ${root}, and their lines in /etc/fstab. It needs root.`,
+    );
+    if (!agreed) {
+      this.retiredDisksLeft = true;
+      return;
+    }
+    const retired = await this.runDiskScript(['retire', root, String(SLOT_COUNT)]);
+    if (retired.exitCode !== 0) {
+      const failed = withDetail({ sentence: 'Removing the old sandbox disks failed', detail: tail(retired.stderr) });
+      throw new StepFailure(
+        'retire',
+        failed.message,
+        `Make sure your account may use sudo, then run ${this.options.command} --fix again.`,
+        undefined,
+        failed.detail,
+      );
+    }
   }
 
   private async ensureDisks(): Promise<void> {
@@ -501,7 +874,7 @@ class Slots {
       throw new StepFailure(
         'disk',
         "The sandbox workspaces do not have a disk limit of their own yet, so a runaway program could fill this computer's disk.",
-        `Run ${this.options.command} --fix. It asks first, then your password once, to create four fixed-size disk files that fill only as they are used.`,
+        `Run ${this.options.command} --fix. It asks first, then your password once, to create ${String(SLOT_COUNT)} fixed-size disk files that fill only as they are used.`,
       );
     }
     const staleNote =
@@ -785,6 +1158,8 @@ export async function stopSandboxSlots(options: {
       '-f',
       join(options.repoRoot, SLOTS_COMPOSE_FILE),
       'down',
+      // Also stops the extra slots of an install from before SLOT_COUNT dropped.
+      '--remove-orphans',
       ...(options.purge ? ['--volumes'] : []),
     ],
     cwd: options.repoRoot,
@@ -793,7 +1168,23 @@ export async function stopSandboxSlots(options: {
     env,
   });
   const root = diskRoot(options.instance);
-  if (!options.purge || options.platform !== 'linux' || down.exitCode !== 0) {
+  if (!options.purge || down.exitCode !== 0) {
+    return down;
+  }
+  // The compose file no longer names the volumes of retired slots, so --volumes leaves them.
+  for (const slot of RETIRED_SLOTS) {
+    for (const kind of ['ws', 'ctl', 'mirror']) {
+      await options.run({
+        command: 'docker',
+        args: ['volume', 'rm', '--force', `${options.instance}_slot_${kind}_${String(slot)}`],
+        cwd: options.repoRoot,
+        echo: false,
+        interactive: false,
+        env,
+      });
+    }
+  }
+  if (options.platform !== 'linux') {
     return down;
   }
   const present = await options.run({
@@ -811,8 +1202,8 @@ export async function stopSandboxSlots(options: {
   return options.run({
     command: options.isRoot ? 'sh' : 'sudo',
     args: options.isRoot
-      ? [script, 'remove', root, String(SLOT_COUNT)]
-      : ['sh', script, 'remove', root, String(SLOT_COUNT)],
+      ? [script, 'remove', root, String(MOST_SLOTS_EVER)]
+      : ['sh', script, 'remove', root, String(MOST_SLOTS_EVER)],
     cwd: options.repoRoot,
     echo: true,
     interactive: !options.isRoot,

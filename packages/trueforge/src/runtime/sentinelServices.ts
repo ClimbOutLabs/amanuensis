@@ -10,6 +10,7 @@ import type { ISentinelSettingsStore } from '../db/sentinelSettingsStore';
 import {
   addAllowedRecipients,
   readAllowedRecipientsFile,
+  SIDECAR_LOAD_TIMEOUT_MS,
   waitForCurrentSidecarList,
   waitForSidecarLoadedHash,
 } from './mailAllowedRecipients';
@@ -34,7 +35,10 @@ export function createSentinelServices(stores: {
   mailPolicyPath: string | undefined;
   /** Where the sidecar records the list it loaded; the server waits on it after a change. */
   mailPolicyStatusPath: string | undefined;
+  /** How long to wait for the sidecar to load a list; defaults to a full sidecar restart. */
+  mailPolicyLoadTimeoutMs?: number;
 }): SentinelServices {
+  const loadTimeoutMs = stores.mailPolicyLoadTimeoutMs ?? SIDECAR_LOAD_TIMEOUT_MS;
   return {
     ...defaultSentinelServices({ pinned_path: DEFAULT_PINNED_PATH }),
     audit: stores.audit,
@@ -57,14 +61,20 @@ export function createSentinelServices(stores: {
       } catch {
         return 'refused';
       }
-      return (await waitForSidecarLoadedHash({ statusPath: mailPolicyStatusPath, hash })) ? 'loaded' : 'not_loaded';
+      return (await waitForSidecarLoadedHash({ statusPath: mailPolicyStatusPath, hash, timeoutMs: loadTimeoutMs }))
+        ? 'loaded'
+        : 'not_loaded';
     },
     mail_list_loaded: async () => {
       const { mailPolicyPath, mailPolicyStatusPath } = stores;
       if (mailPolicyPath === undefined || mailPolicyStatusPath === undefined) {
         return 'not_loaded';
       }
-      return (await waitForCurrentSidecarList({ path: mailPolicyPath, statusPath: mailPolicyStatusPath }))
+      return (await waitForCurrentSidecarList({
+        path: mailPolicyPath,
+        statusPath: mailPolicyStatusPath,
+        timeoutMs: loadTimeoutMs,
+      }))
         ? 'loaded'
         : 'not_loaded';
     },

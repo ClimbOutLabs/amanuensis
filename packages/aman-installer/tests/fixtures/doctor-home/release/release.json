@@ -1,0 +1,7 @@
+{
+  "app_image": "aman-app:test1",
+  "dex_image": "aman-dex:test1",
+  "schema": "1",
+  "source_ref": "abc123",
+  "stt_image": "aman-stt:test1"
+}

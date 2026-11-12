@@ -334,8 +334,10 @@ async function listAllSchedulesForAgents({
 }): Promise<Schedule[]> {
   if (agentIds.length === 0) return [];
   const rows: Schedule[] = [];
+  // A token seen before means the server is going round in a circle, so reading stops there.
+  const seenTokens = new Set<string>();
   let pageToken: string | undefined;
-  do {
+  for (;;) {
     const page = await listSchedules({
       agentIds,
       limit: 25,
@@ -343,8 +345,9 @@ async function listAllSchedulesForAgents({
     });
     rows.push(...page.data);
     pageToken = page.nextPageToken;
-  } while (pageToken != null && pageToken !== '');
-  return rows;
+    if (pageToken == null || pageToken === '' || seenTokens.has(pageToken)) return rows;
+    seenTokens.add(pageToken);
+  }
 }
 
 export function AgentsLibrary({ onSelectAgent }: AgentsLibraryProps) {
@@ -399,14 +402,19 @@ export function AgentsLibrary({ onSelectAgent }: AgentsLibraryProps) {
     resourceIds: permissionAgentIds,
   });
 
+  // The schedules are read for these agents. A reload that returns the same agents in a new array must not
+  // restart the read, or the counts blink back to unavailable and the earlier answer is thrown away.
+  const agentIdsKey = agents.map(libraryAgentId).join('\n');
+  const hasAgents = agents.length > 0;
+
   useEffect(() => {
-    if (!open || scheduleServer == null || agents.length === 0) {
+    if (!open || scheduleServer == null || !hasAgents) {
       setScheduleByAgent(null);
       return;
     }
     let cancelled = false;
     setScheduleByAgent(null);
-    const agentIds = agents.map(libraryAgentId);
+    const agentIds = agentIdsKey.split('\n');
     void listAllSchedulesForAgents({ listSchedules: scheduleServer.listSchedules, agentIds })
       .then(rows => {
         if (!cancelled) setScheduleByAgent(summarizeSchedulesByAgent(rows));
@@ -417,7 +425,7 @@ export function AgentsLibrary({ onSelectAgent }: AgentsLibraryProps) {
     return () => {
       cancelled = true;
     };
-  }, [agents, open, scheduleServer, agentsListEpoch]);
+  }, [agentIdsKey, hasAgents, open, scheduleServer, agentsListEpoch]);
 
   const openSchedulesForAgent = ({ agentId, isNew }: { agentId: string; isNew?: boolean }) => {
     replaceScheduleShareSearch({

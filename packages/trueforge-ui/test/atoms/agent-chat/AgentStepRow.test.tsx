@@ -26,6 +26,14 @@ function TestSubject(props: Omit<AgentStepRowProps, 'icon'>) {
 }
 
 describe('AgentStepRow', () => {
+  it('sizes the title on the --text-xs scale step, not a one-off literal', () => {
+    render(<TestSubject title="Fetch deployment" dataTestPrefix="fetch" />);
+
+    const title = screen.getByTestId('fetch-title');
+    expect(title).toHaveClass('text-xs');
+    expect(title.className).not.toMatch(/text-\[0\.75rem\]/);
+  });
+
   it('exposes its controlled expansion and propagates only intended row clicks', () => {
     const onToggle = vi.fn();
     const { rerender } = render(

@@ -369,6 +369,8 @@ export interface SessionRepositoryRouterDeps {
   resolveMcpServerStore: (c: Context, referencedAgent?: AgentRecord) => IMcpServerStore;
   /** The sandbox workspace directory a new checkout lives under, or undefined when no sandbox is set up. */
   resolveWorkspaceDir: (input: { c: Context; session_id: string }) => Promise<string | undefined>;
+  /** Whether a checkout already exists at the workspace path in that chat's sandbox. */
+  resolveCheckoutExists: (input: { c: Context; session_id: string; workspace_cwd: string }) => Promise<boolean>;
   /** GitHub reads for the repo picker; injectable so tests never reach the network. */
   fetchGithub?: typeof fetch | undefined;
 }
@@ -646,6 +648,17 @@ export function createSessionRepositoryRouter(deps: SessionRepositoryRouterDeps)
     }
     const checkoutName = details.name.replace(/[^A-Za-z0-9._-]+/g, '-');
     const workspaceCwd = `${workspaceDir.replace(/\/+$/, '')}/${checkoutName}`;
+    const checkoutExists = await deps.resolveCheckoutExists({ c, session_id: sessionId, workspace_cwd: workspaceCwd });
+    if (!checkoutExists) {
+      return c.json(
+        {
+          error: {
+            message: `There is no copy of ${details.name} on this computer yet, so this chat can't be connected to it. Ask in this chat to clone it first, then try again.`,
+          },
+        },
+        422,
+      );
+    }
     try {
       const binding = await deps.repositoryStore.bindSession({
         ...owner,

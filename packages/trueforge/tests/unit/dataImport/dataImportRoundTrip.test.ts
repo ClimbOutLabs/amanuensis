@@ -18,6 +18,7 @@ import { createLogger } from 'winston';
 import { McpCatalog } from '../../../src/catalog/McpCatalog';
 import { sessionPartIndex } from '../../../src/dataExport/sessionRecords';
 import { runDataImport, type DataImportDeps } from '../../../src/dataImport/importService';
+import { DeliveryStore } from '../../../src/db/deliveryStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { PostgresAgentStore } from '../../../src/db/postgres/agent-store/PostgresAgentStore';
 import { PostgresGlobalSettingsStore } from '../../../src/db/postgres/global-settings-store/PostgresGlobalSettingsStore';
@@ -30,6 +31,7 @@ import { PostgresSessionStore } from '../../../src/db/postgres/session-store/Pos
 import { PostgresSpaceStore } from '../../../src/db/postgres/space-store/PostgresSpaceStore';
 import { PostgresTurnArtifactStore } from '../../../src/db/postgres/turn-artifact-store/PostgresTurnArtifactStore';
 import type { Database as PgDatabase } from '../../../src/db/postgres/types';
+import { ReachSettingsStore } from '../../../src/db/reachSettingsStore';
 import { SentinelAuditStore } from '../../../src/db/sentinelAuditStore';
 import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgentStore';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
@@ -80,6 +82,8 @@ async function makeSqliteInstance(label: string): Promise<Instance<SqliteTx>> {
     globalSettingsStore: new SqliteGlobalSettingsStore(db),
     sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
     auditStore: new SentinelAuditStore(db),
+    deliveryStore: new DeliveryStore(db),
+    reachSettingsStore: new ReachSettingsStore(db),
     turnArtifactStore: new SqliteTurnArtifactStore(db),
     mcpServerStore: new SqliteMcpServerStore(db),
   };
@@ -113,6 +117,8 @@ async function makePostgresInstance(label: string): Promise<Instance<PgTx> | und
     globalSettingsStore: new PostgresGlobalSettingsStore(db),
     sentinelSettingsStore: new PostgresSentinelSettingsStore(db),
     auditStore: new SentinelAuditStore(db),
+    deliveryStore: new DeliveryStore(db),
+    reachSettingsStore: new ReachSettingsStore(db),
     turnArtifactStore: new PostgresTurnArtifactStore(db),
     mcpServerStore: new PostgresMcpServerStore(db),
   };
@@ -142,6 +148,8 @@ async function importArchive<Tx>(instance: Instance<Tx>, archive: Buffer, userId
     scheduleStore: instance.stores.scheduleStore,
     globalSettingsStore: instance.stores.globalSettingsStore,
     auditStore: instance.stores.auditStore,
+    deliveryStore: instance.stores.deliveryStore,
+    reachSettingsStore: instance.stores.reachSettingsStore,
     turnArtifactStore: instance.stores.turnArtifactStore,
     mcpServerStore: instance.stores.mcpServerStore,
     agentStore: instance.stores.agentStore,
@@ -227,7 +235,7 @@ function normalizeSection(name: string, parsed: unknown): unknown {
     );
     for (const entry of entries) {
       const session = recordAt(entry['session'], 'session');
-      // Import never carries Always allow this here choices; expectNoApprovalGrants checks the target side.
+      // Import never carries Always allow in this chat choices; expectNoApprovalGrants checks the target side.
       session['approval_grants'] = '<never imported>';
       entry['artifacts'] = sortBy(recordsAt(entry['artifacts'], 'artifacts'), artifact =>
         stringAt(artifact['path'], 'path'),

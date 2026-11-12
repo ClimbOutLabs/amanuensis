@@ -55,11 +55,13 @@ export function holdSay(assistant: string) {
     search_setting: `Searches are set to ask, so ${assistant} is checking with you first.`,
     search_limit: `${assistant} stopped looking things up, because it already looked up a lot in this reply. Ask again to keep going.`,
     steered: `${assistant} found this link in something it read, and opening it would send more than the link said.`,
+    reply_link: `You did not name this site. ${assistant} brought it up in an earlier reply, and this link adds details to it, so ${assistant} is checking with you first.`,
     private_detail: `This would send a private detail of yours, in a chat where ${assistant} has read things written by other people, so ${assistant} is checking with you first.`,
     secret: SECRET_SAY,
     card_number: 'This sends something that looks like a payment card number.',
     encoded: 'This sends a long block of coded text.',
     long: `This is a long search, so ${assistant} is checking with you first.`,
+    long_read: `This sends a lot of text, so ${assistant} is checking with you first.`,
     unreadable: `This has more text than ${assistant} can check.`,
     generic: `${assistant} is checking with you first.`,
     maps_always: `Maps are set to ask, so ${assistant} is checking with you first.`,
@@ -67,12 +69,13 @@ export function holdSay(assistant: string) {
   } as const;
 }
 
-/** The place an address or link was read, as a card names it. */
-const READ_PLACE: Record<ReadSource, string> = {
+/** The place an address or link was read, as a card names it. The assistant's own reply has its own sentence. */
+const READ_PLACE: Record<Exclude<ReadSource, 'reply'>, string> = {
   email_sender: 'an email',
   email: 'an email',
   event: 'a calendar event',
   page: 'a page',
+  browser_page: 'a page',
   file: 'a file',
   tool_result: 'a tool result',
   other: 'something',
@@ -88,6 +91,10 @@ export function steeredDestinationSay(input: {
 }): string {
   const { assistant } = input;
   const sentences = input.destinations.map(({ who, kind, source }) => {
+    if (source === 'reply') {
+      const what = kind === 'link' ? 'which' : 'whose address';
+      return `This goes to ${who}, ${what} was only in an earlier reply from ${assistant}, not in your own words.`;
+    }
     if (kind === 'link') {
       return `This goes to ${who}, which was in ${READ_PLACE[source]} ${assistant} read.`;
     }

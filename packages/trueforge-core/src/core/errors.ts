@@ -7,6 +7,20 @@ export type AgentHarnessErrorCode =
   | 'capability_state_error'
   | 'compaction_summary_invalid';
 
+/**
+ * The model service answered a request with a failure (an HTTP status). The message holds the service's own
+ * words for the log; the chat shows a plain message instead (see `describeTurnFailure`).
+ */
+export class ProviderRequestError extends Error {
+  readonly statusCode: number;
+
+  constructor(message: string, options: { statusCode: number; cause?: unknown }) {
+    super(message, options.cause === undefined ? undefined : { cause: options.cause });
+    this.name = 'ProviderRequestError';
+    this.statusCode = options.statusCode;
+  }
+}
+
 export class AgentHarnessError extends Error {
   constructor(
     readonly code: AgentHarnessErrorCode,
@@ -95,6 +109,19 @@ export class ToolPreDispatchError extends McpConnectionError {
   constructor(message: string, options?: ErrorOptions) {
     super(message, 502, options);
     this.name = 'ToolPreDispatchError';
+  }
+}
+
+/**
+ * The server answered with a redirect this connection refuses to follow. A deliberate
+ * refusal, not a transport failure: the server was reached and answered, so this must
+ * never be read as the server being unavailable. Carries 502 to match how the refusal
+ * has always been reported.
+ */
+export class McpRedirectRefusedError extends McpConnectionError {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, 502, options);
+    this.name = 'McpRedirectRefusedError';
   }
 }
 

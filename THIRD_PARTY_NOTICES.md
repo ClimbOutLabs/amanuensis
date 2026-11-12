@@ -11,8 +11,10 @@ Amanuensis (Aman) is licensed under the Mozilla Public License 2.0 (see `LICENSE
 5. Vendored Apache-2.0 code
 6. mcp/gmail (MIT)
 7. Llama Prompt Guard 2 (Llama 4 Community License)
-8. Dependencies with no declared license
-9. Mail and calendar connector sidecars (BSD-3-Clause, MIT)
+8. Mail and calendar connector sidecars (BSD-3-Clause, MIT)
+9. Local voice for spoken replies (Apache-2.0, MIT, BSD)
+10. Service logos and the API docs page (MIT, CC0-1.0, Apache-2.0)
+11. Voice mode: speech detection (MIT)
 
 ## 1. sharp and libvips (LGPL-3.0-or-later)
 
@@ -682,16 +684,7 @@ Llama 4 is licensed under the Llama 4 Community License, Copyright © Meta Platf
 
 The license text is available at https://github.com/meta-llama/llama-models/blob/main/models/llama4/LICENSE, and its Acceptable Use Policy at https://www.llama.com/llama4/use-policy. Section 1.b.iii of the license requires the attribution notice above, quoted verbatim, to be retained in a `Notice` text file distributed with copies of the Llama Materials; section 1.b.i requires a copy of the license to accompany any distributed Llama Materials and "Built with Llama" to be displayed on related documentation. If you redistribute the model weights, for example by baking them into an image, include the license text and this notice with them.
 
-## 8. Dependencies with no declared license
-
-The following transitive dependencies (via `bash-parser`, which is MIT) ship no license file and declare no license in their package metadata. No license is granted by their authors, so they are listed here rather than relicensed:
-
-| Package         | Version | Status                            |
-| --------------- | ------- | --------------------------------- |
-| curry           | 1.2.0   | no license declared by the author |
-| filter-iterator | 0.0.1   | no license declared by the author |
-
-## 9. Mail and calendar connector sidecars (BSD-3-Clause, MIT)
+## 8. Mail and calendar connector sidecars (BSD-3-Clause, MIT)
 
 The built-in Email and Calendar connectors run these components in their own private containers. Aman does not copy their code.
 
@@ -746,6 +739,57 @@ The four packages share this license text, reproduced once.
 MIT License
 
 Copyright (c) 2026 Willi Thiel
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+## 9. Local voice for spoken replies (Apache-2.0, MIT, BSD)
+
+The `ops/aman-tts` image reads replies aloud on the person's own computer. Its build downloads these files, pinned by SHA-256 in `ops/aman-tts/pins.py`, and the image contains them unmodified except that only six American English voices are kept.
+
+| Component                                   | License      | Copyright                                            | Source                                                                 |
+| ------------------------------------------- | ------------ | ---------------------------------------------------- | ---------------------------------------------------------------------- |
+| Kokoro-82M v1.0 model and voices            | Apache-2.0   | hexgrad                                              | https://huggingface.co/hexgrad/Kokoro-82M                              |
+| Kokoro int8 ONNX export and voice archive   | Apache-2.0   | hexgrad, exported by thewh1teagle (kokoro-onnx, MIT) | https://github.com/thewh1teagle/kokoro-onnx (release model-files-v1.0) |
+| misaki 0.9.4 English word lists (data only) | Apache-2.0   | hexgrad                                              | https://github.com/hexgrad/misaki                                      |
+| onnxruntime                                 | MIT          | Microsoft Corporation                                | https://github.com/microsoft/onnxruntime                               |
+| numpy                                       | BSD-3-Clause | NumPy Developers                                     | https://github.com/numpy/numpy                                         |
+
+`ops/aman-tts/kokoro_vocab.json` is the phoneme table from the Kokoro-82M model configuration (Apache-2.0). The Apache-2.0 license text is in `ops/aman-tts/LICENSE.Apache-2.0`, and the image carries misaki's copy at `/opt/aman-tts/assets/LICENSE.misaki`. The image installs no GPL or LGPL text-to-speech component: espeak-ng, phonemizer and num2words are deliberately not used. The numpy wheel bundles OpenBLAS (BSD-3-Clause) and the GCC runtime libraries (GPL-3.0 with the GCC Runtime Library Exception).
+
+## 10. Service logos and the API docs page (MIT, CC0-1.0, Apache-2.0)
+
+The model provider and MCP server logos in `packages/trueforge-ui/src/icons/catalog/` and the TypeScript mark in `packages/trueforge-ui/src/icons/typescript.svg` are bundled so the browser never loads them from another site. Each name and logo is a trademark of its owner and is shown only to label that service.
+
+- The OpenAI, Anthropic, Gemini, Fireworks, Z.ai, Moonshot, Alibaba, Together, Notion, Exa, GitHub and Tavily marks come from [Lobe Icons](https://github.com/lobehub/lobe-icons) (`@lobehub/icons-static-svg` 1.102.0), MIT License, Copyright (c) 2023 LobeHub. The MIT License text is reproduced in section 8.
+- The Linear, Sentry, Supabase, Stripe, Confluence, Jira, PostHog and TypeScript marks come from [Simple Icons](https://github.com/simple-icons/simple-icons) 16.36.0, released under CC0-1.0, which asks for no notice.
+
+The interactive API docs at `/api/v1/docs` serve [Swagger UI](https://github.com/swagger-api/swagger-ui) (`swagger-ui-dist`, Apache-2.0, Copyright SmartBear Software) from the server itself. Its package depends on `@scarf/scarf`, an install-time analytics script; `pnpm-workspace.yaml` keeps that script from running.
+
+## 11. Voice mode: speech detection (MIT)
+
+Voice mode finds where speech starts and ends with the Silero VAD model, version 5.1.2 (MIT, Copyright (c) 2020-present Silero Team). The image build fetches `silero_vad.onnx` from https://github.com/snakers4/silero-vad (tag v5.1.2), fails unless its SHA-256 matches, and the server loads it only if its size (2,327,524 bytes) and SHA-256 (`2623a2953f6ff3d2c1e61740c6cdb7168133479b267dfef114a4a3cc5bdd788f`) match the pin in `packages/trueforge/src/voice/vad/sileroVad.ts`. Setup scripts fetch it from `packages/trueforge/scripts/lib/vadModelDownload.ts`. It runs in the server process through onnxruntime (MIT). The browser connection uses `ws` (MIT, Copyright (c) Einar Otto Stangvik and contributors).
+
+```text
+MIT License
+
+Copyright (c) 2020-present Silero Team
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

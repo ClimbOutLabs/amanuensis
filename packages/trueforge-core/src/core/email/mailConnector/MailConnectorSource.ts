@@ -1,4 +1,5 @@
 import type { CallToolRequest } from '@modelcontextprotocol/sdk/types.js';
+import { EXTRACT_DOCUMENT_TEXT_TOOL_NAME } from '../../../documents/toolContract';
 import type { ApprovalDecision } from '../../events/schema';
 import type { InternalToolCallInfo } from '../../llm/LLMTypes';
 import {
@@ -12,13 +13,22 @@ import {
   type ToolSource,
 } from '../../mcp/IMCPServer';
 import { isRecord } from '../../util/records';
-import { accountNamesOfResult, emailsOfResult } from './mailToolResults';
+import { isInboxName, resolveMailboxName, unknownMailboxText } from './mailboxNames';
+import { resolveMailDates } from './mailDates';
+import { accountNamesOfResult, emailsOfResult, mailboxesOfResult } from './mailToolResults';
+import { isRecipientRefusal, RECIPIENT_NOT_LISTED } from './recipientRefusal';
 import {
+  isMailComposeToolName,
   isMailReadToolName,
   MAIL_ACCOUNT_ARGUMENT,
   MAIL_ACCOUNT_LIST_TOOL_NAME,
+  MAIL_ATTACHMENT_TOOL_NAME,
   MAIL_CONNECTOR_TOOL_NAMES,
+  MAIL_CONTENT_TOOL_NAME,
+  MAIL_DRAFT_TOOL_NAME,
   MAIL_LIST_TOOL_NAME,
+  MAIL_MAILBOX_ARGUMENTS,
+  MAIL_MAILBOX_LIST_TOOL_NAME,
 } from './toolContract';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -33,7 +43,17 @@ const MAX_CACHED_CHATS = 1000;
 const ACCOUNTS_UNREADABLE =
   'The list of Email accounts could not be read, so nothing was done. Try again in a minute, and tell the person if it keeps failing.';
 const ACCOUNT_NOTE = 'Leave it out when there is one account; it is filled in for you.';
-const RECENT_WINDOW_NOTE = `With no since date, this looks at the ${String(RECENT_WINDOW_DAYS)} days up to before (or up to now), then ${String(WIDER_WINDOW_DAYS)} days if fewer messages than asked for come back. Results are newest first within that window. Set since to look further back.`;
+const MAILBOX_NOTE = `A name from ${MAIL_MAILBOX_LIST_TOOL_NAME}. A common name such as Sent, Drafts, Trash or Spam is matched to this account's own folder.`;
+/** The sidecar's catch-all for a mail server request that failed; its own words say nothing about what to do. */
+const PROVIDER_FAILURE_WORDS = 'provider_failure';
+const PROVIDER_FAILURE =
+  'The mail server did not finish this request, so nothing was read. Try the same call once more. If it fails again, tell the person their mail server is not answering and to check the Email account in Settings.';
+const DRAFT_RECIPIENT_NOTE =
+  'Recipients the person named must stay on the call: a recipient who is not on the Email list is handled by an approval card shown to the person, and a draft with no recipient is refused. Never leave recipients off to get past a refusal.';
+const RECENT_WINDOW_NOTE = `With no since date, this looks at the ${String(RECENT_WINDOW_DAYS)} days up to before (or up to now), then ${String(WIDER_WINDOW_DAYS)} days if fewer messages than asked for come back. Results are newest first within that window. Set since to look further back. A since or before with no time zone offset is read in the user's time zone.`;
+
+// A file name alone is not a path the document reader can open without asking, so the model must fetch first.
+const ATTACHMENT_NOTE = `To read an attachment, first call ${MAIL_ATTACHMENT_TOOL_NAME} for it. That saves the file in the sandbox and returns its path. Then call ${EXTRACT_DOCUMENT_TEXT_TOOL_NAME} with that path. Never pass an attachment's file name as the path.`;
 
 function isMailConnectorTool(name: string): boolean {
   return MAIL_CONNECTOR_TOOL_NAMES.some(tool => tool === name);
@@ -62,7 +82,13 @@ function withHostFilledAccount(tool: AgentToolSchema): AgentToolSchema {
   const { properties, required } = tool.inputSchema;
   const account = properties?.[MAIL_ACCOUNT_ARGUMENT];
   const description =
-    tool.name === MAIL_LIST_TOOL_NAME ? `${tool.description ?? ''} ${RECENT_WINDOW_NOTE}`.trim() : tool.description;
+    tool.name === MAIL_LIST_TOOL_NAME
+      ? `${tool.description ?? ''} ${RECENT_WINDOW_NOTE}`.trim()
+      : tool.name === MAIL_DRAFT_TOOL_NAME
+        ? `${tool.description ?? ''} ${DRAFT_RECIPIENT_NOTE}`.trim()
+        : tool.name === MAIL_CONTENT_TOOL_NAME || tool.name === MAIL_ATTACHMENT_TOOL_NAME
+          ? `${tool.description ?? ''} ${ATTACHMENT_NOTE}`.trim()
+          : tool.description;
   if (properties === undefined || !isRecord(account)) {
     return { ...tool, description };
   }
@@ -74,6 +100,16 @@ function withHostFilledAccount(tool: AgentToolSchema): AgentToolSchema {
       ...tool.inputSchema,
       properties: {
         ...properties,
+        ...Object.fromEntries(
+          MAIL_MAILBOX_ARGUMENTS.flatMap(key => {
+            const mailbox = properties[key];
+            if (!isRecord(mailbox)) {
+              return [];
+            }
+            const said = typeof mailbox['description'] === 'string' ? `${mailbox['description']} ` : '';
+            return [[key, { ...mailbox, description: `${said}${MAILBOX_NOTE}` }]];
+          }),
+        ),
         [MAIL_ACCOUNT_ARGUMENT]: { ...account, description: `${accountDescription}${ACCOUNT_NOTE}` },
       },
       ...(required === undefined ? {} : { required: required.filter(name => name !== MAIL_ACCOUNT_ARGUMENT) }),
@@ -83,6 +119,27 @@ function withHostFilledAccount(tool: AgentToolSchema): AgentToolSchema {
 
 function refusal(text: string): CallToolResponse {
   return toolResultResponse({ text: JSON.stringify({ error: text }), isError: true });
+}
+
+/** The words of a call's error result, or undefined when it did not fail. */
+function errorText(response: CallToolResponse): string | undefined {
+  if (!isCallToolResponseResult(response) || response.result.isError !== true) {
+    return undefined;
+  }
+  return response.result.content.map(block => (block.type === 'text' ? block.text : '')).join('\n');
+}
+
+/**
+ * A read the mail server failed comes back as the sidecar's bare catch-all. It becomes a plain error that
+ * says what to do next. Only reads: trying a send again could send it twice.
+ */
+function plainReadFailure(response: CallToolResponse): CallToolResponse {
+  return errorText(response)?.includes(PROVIDER_FAILURE_WORDS) === true ? refusal(PROVIDER_FAILURE) : response;
+}
+
+/** The sidecar's raw recipient refusal, in whichever text block it arrived, becomes the plain stop. */
+function plainRecipientRefusal(response: CallToolResponse): CallToolResponse {
+  return isRecipientRefusal(response) ? refusal(RECIPIENT_NOT_LISTED) : response;
 }
 
 /**
@@ -145,20 +202,25 @@ export class MailConnectorSource implements ToolSource {
   readonly #inner: ToolSource;
   readonly #accounts: (options: { fresh: boolean }) => Promise<readonly string[]>;
   readonly #now: () => Date;
+  readonly #timeZone: string | undefined;
 
   constructor({
     inner,
     accounts,
     now,
+    timeZone,
   }: {
     inner: ToolSource;
     /** The account names; `fresh` reads them again instead of using a kept list. */
     accounts: (options: { fresh: boolean }) => Promise<readonly string[]>;
     now: () => Date;
+    /** The user's IANA time zone, in which a date the model gives without an offset is read; UTC when unknown. */
+    timeZone: string | undefined;
   }) {
     this.#inner = inner;
     this.#accounts = accounts;
     this.#now = now;
+    this.#timeZone = timeZone;
   }
 
   get name(): string {
@@ -205,11 +267,26 @@ export class MailConnectorSource implements ToolSource {
     if ('refused' in account) {
       return refusal(account.refused);
     }
-    const args = withoutNullDates({ ...given, [MAIL_ACCOUNT_ARGUMENT]: account.name });
-    const send = (sent: Record<string, unknown>) =>
-      this.#inner.callTool({ ...params, arguments: sent }, approvalDecision, context);
+    const dated = resolveMailDates({
+      args: withoutNullDates({ ...given, [MAIL_ACCOUNT_ARGUMENT]: account.name }),
+      time_zone: this.#timeZone,
+    });
+    if (!dated.ok) {
+      return refusal(dated.error);
+    }
+    const foldered = await this.#withAccountFolders(dated.args);
+    if ('refused' in foldered) {
+      return refusal(foldered.refused);
+    }
+    const { args } = foldered;
+    const readsOnly = isMailReadToolName(params.name);
+    const send = async (sent: Record<string, unknown>) => {
+      const response = await this.#inner.callTool({ ...params, arguments: sent }, approvalDecision, context);
+      return readsOnly ? plainReadFailure(response) : response;
+    };
     if (params.name !== MAIL_LIST_TOOL_NAME || args['since'] !== undefined) {
-      return send(args);
+      const sent = await send(args);
+      return isMailComposeToolName(params.name) ? plainRecipientRefusal(sent) : sent;
     }
     const before = args['before'];
     const parsedBefore = typeof before === 'string' ? Date.parse(before) : Number.NaN;
@@ -225,6 +302,40 @@ export class MailConnectorSource implements ToolSource {
       return first;
     }
     return send({ ...recent, since: daysBefore(WIDER_WINDOW_DAYS) });
+  }
+
+  /**
+   * Puts the account's own name for each folder the call names. Providers name standard folders differently,
+   * and the server fails on a name it does not have. When the folder list cannot be read, the call goes as given.
+   */
+  async #withAccountFolders(
+    args: Record<string, unknown>,
+  ): Promise<{ args: Record<string, unknown> } | { refused: string }> {
+    const named = MAIL_MAILBOX_ARGUMENTS.flatMap(key => {
+      const value = args[key];
+      return typeof value === 'string' && value !== '' && !isInboxName(value) ? [{ key, value }] : [];
+    });
+    if (named.length === 0) {
+      return { args };
+    }
+    const listed = await this.#inner.callTool({
+      name: MAIL_MAILBOX_LIST_TOOL_NAME,
+      arguments: { [MAIL_ACCOUNT_ARGUMENT]: args[MAIL_ACCOUNT_ARGUMENT] },
+    });
+    const mailboxes =
+      isCallToolResponseResult(listed) && listed.result.isError !== true ? mailboxesOfResult(listed.result) : [];
+    if (mailboxes.length === 0) {
+      return { args };
+    }
+    const resolved = { ...args };
+    for (const { key, value } of named) {
+      const name = resolveMailboxName({ requested: value, mailboxes });
+      if (name === undefined) {
+        return { refused: unknownMailboxText({ requested: value, mailboxes }) };
+      }
+      resolved[key] = name;
+    }
+    return { args: resolved };
   }
 
   async #readAccounts(fresh: boolean): Promise<readonly string[] | undefined> {

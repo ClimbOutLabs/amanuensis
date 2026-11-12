@@ -34,6 +34,14 @@ const TOOL_WORDS: ReadonlyMap<string, ToolWords> = new Map([
     'gmail_draft',
   ]),
   ...words({ doing: 'Sending an email', done: 'Sent an email', thing: 'An email' }, ['send_draft', 'gmail_send']),
+  ...words(
+    {
+      doing: 'Checking your Google connection',
+      done: 'Checked your Google connection',
+      thing: 'Your Google connection',
+    },
+    ['google_setup_status', 'google_setup_read'],
+  ),
   ...words({ doing: 'Checking your calendar', done: 'Read your calendar', thing: 'Your calendar' }, [
     'list_events',
     'get_event',
@@ -44,6 +52,28 @@ const TOOL_WORDS: ReadonlyMap<string, ToolWords> = new Map([
     'update_event',
     'calendar_write',
   ]),
+  ...words(
+    { doing: 'Checking your Google Drive files', done: 'Read your Google Drive files', thing: 'Your Drive files' },
+    ['list_files', 'read_drive_file', 'google_drive_read'],
+  ),
+  ...words(
+    {
+      doing: 'Changing your Google Drive files',
+      done: 'Changed your Google Drive files',
+      thing: 'A Google Drive change',
+    },
+    ['create_doc', 'append_rows', 'google_drive_write'],
+  ),
+  ...words({ doing: 'Searching your notes', done: 'Searched your notes', thing: 'A notes search' }, [
+    'search_notes',
+    'notes_read',
+  ]),
+  ...words({ doing: 'Reading a note', done: 'Read note', thing: 'A note' }, ['read_note']),
+  ...words({ doing: 'Adding to your notes inbox', done: 'Added to your notes inbox', thing: 'A notes inbox entry' }, [
+    'append_to_inbox',
+    'notes_write',
+  ]),
+  ...words({ doing: 'Making a note', done: 'Made a note', thing: 'A new note' }, ['create_note']),
   ...words({ doing: 'Searching the web', done: 'Searched the web', thing: 'A web search' }, [
     'tavily_search',
     'web_search',
@@ -79,12 +109,26 @@ const TOOL_WORDS: ReadonlyMap<string, ToolWords> = new Map([
   ]),
   ...words({ doing: 'Making a space', done: 'Changed a space', thing: 'A new space' }, ['create_space']),
   ...words({ doing: 'Updating the space', done: 'Changed a space', thing: 'A space change' }, [
-    'update_space',
+    'edit_space',
     'replace_text',
     'revert_space',
     'space_write',
   ]),
+  ...words({ doing: 'Moving a space to a folder', done: 'Moved a space to a folder', thing: 'A space move' }, [
+    'move_space',
+  ]),
   ...words({ doing: 'Setting a reminder', done: 'Set a reminder', thing: 'A reminder' }, ['set_reminder']),
+  ...words({ doing: 'Sending you a notice', done: 'Sent you a notice', thing: 'A notice for you' }, [
+    'delivery.created',
+  ]),
+  ...words(
+    {
+      doing: 'Sending a notice to your device',
+      done: 'Sent a notice to your device',
+      thing: 'A notice to your device',
+    },
+    ['delivery.web_push'],
+  ),
   ...words({ doing: 'Checking your reminders', done: 'Checked your reminders', thing: 'Your reminders' }, [
     'list_reminders',
   ]),
@@ -93,9 +137,11 @@ const TOOL_WORDS: ReadonlyMap<string, ToolWords> = new Map([
     'list_schedules',
     'schedule_read',
   ]),
-  ...words({ doing: 'Changing a schedule', done: 'Changed a schedule', thing: 'A schedule change' }, [
-    'create_schedule',
+  ...words({ doing: 'Creating a schedule', done: 'Created a schedule', thing: 'A new schedule' }, ['create_schedule']),
+  ...words({ doing: 'Deleting a schedule', done: 'Deleted a schedule', thing: 'A schedule to delete' }, [
     'delete_schedule',
+  ]),
+  ...words({ doing: 'Changing a schedule', done: 'Changed a schedule', thing: 'A schedule change' }, [
     'pause_schedule',
     'resume_schedule',
     'schedule_write',

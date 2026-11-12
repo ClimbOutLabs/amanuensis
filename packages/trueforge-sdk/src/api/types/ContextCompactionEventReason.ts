@@ -2,12 +2,13 @@
 
 /** Why no summary was applied. missing_block, missing_section, duplicate_section, self_referential, over_length: the summary was invalid. summarizer_failed: the summarization call failed. request_too_large: the summarization request could not fit the model context. */
 export const ContextCompactionEventReason = {
-        MissingBlock: "missing_block",
-        MissingSection: "missing_section",
-        DuplicateSection: "duplicate_section",
-        SelfReferential: "self_referential",
-        OverLength: "over_length",
-        SummarizerFailed: "summarizer_failed",
-        RequestTooLarge: "request_too_large"
-    } as const;
-export type ContextCompactionEventReason = typeof ContextCompactionEventReason[keyof typeof ContextCompactionEventReason];
+    MissingBlock: "missing_block",
+    MissingSection: "missing_section",
+    DuplicateSection: "duplicate_section",
+    SelfReferential: "self_referential",
+    OverLength: "over_length",
+    SummarizerFailed: "summarizer_failed",
+    RequestTooLarge: "request_too_large",
+} as const;
+export type ContextCompactionEventReason =
+    (typeof ContextCompactionEventReason)[keyof typeof ContextCompactionEventReason];

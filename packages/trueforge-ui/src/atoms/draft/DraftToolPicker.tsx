@@ -266,7 +266,7 @@ function SearchField({
 
 function SectionHeading({ label, count }: { label: string; count: number }) {
   return (
-    <div className="text-text-secondary px-3 pt-2 pb-1 text-[0.75rem] font-normal">
+    <div className="text-text-secondary px-3 pt-2 pb-1 text-xs font-normal">
       {label} ({count})
     </div>
   );
@@ -400,7 +400,7 @@ export function DraftToolPicker({
   };
 
   const sandboxDescription = !sandboxAvailable
-    ? SANDBOX_UNAVAILABLE_REASON
+    ? (capabilities?.sandbox.reason ?? SANDBOX_UNAVAILABLE_REASON)
     : selectedSkills.length > 0
       ? `${SANDBOX_DESCRIPTION} Turning this off clears attached skills.`
       : SANDBOX_DESCRIPTION;

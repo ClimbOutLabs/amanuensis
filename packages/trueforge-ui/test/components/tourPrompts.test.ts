@@ -1,4 +1,4 @@
-import { MORNING_BRIEF_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
+import { MORNING_BRIEF_CARD_PROMPT } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 import { HELP_AREA_IDS } from '@truefoundry/trueforge-core/schemas/personalizationHelpAreas';
 import { describe, expect, it } from 'vitest';
 
@@ -11,8 +11,9 @@ import {
   HOME_TOPIC_IDS,
   HOME_TOPICS,
   homeCardsFor,
+  homeSlotsFor,
   isHomeTopicId,
-  SHARED_RULES,
+  RUN_BRIEF_CARD,
   visibleTourCards,
   type TourCapabilities,
   type TourCard,
@@ -144,17 +145,15 @@ describe('homeCardsFor', () => {
 });
 
 describe('card text', () => {
-  it('puts the shared rules under every card prompt after a blank line', () => {
+  it('puts only the card prompt in the composer, with nothing added under it', () => {
     for (const card of everyCard) {
-      if (card.sharedRules === false) continue;
-      expect(composerTextFor(card)).toBe(`${card.prompt}\n\n${SHARED_RULES}`);
+      expect(composerTextFor(card)).toBe(card.prompt);
     }
   });
 
-  it('fills only the morning brief prompt for the brief card, with no rules', () => {
-    expect(CARDS.brief.prompt).toBe(MORNING_BRIEF_PROMPT);
-    expect(composerTextFor(CARDS.brief)).toBe(MORNING_BRIEF_PROMPT);
-    expect(everyCard.filter(card => card.sharedRules === false)).toEqual([CARDS.brief]);
+  it('fills the morning brief card prompt for the brief card', () => {
+    expect(CARDS.brief.prompt).toBe(MORNING_BRIEF_CARD_PROMPT);
+    expect(composerTextFor(CARDS.brief)).toBe(MORNING_BRIEF_CARD_PROMPT);
   });
 
   it('writes every card in plain words, names the assistant only through its display name, and uses no dashes', () => {
@@ -198,6 +197,111 @@ describe('card text', () => {
   });
 });
 
+describe('the rewritten cards', () => {
+  it('carries none of the shared rules lines that were taken out, on any card', () => {
+    const removed = [
+      'Plain words and short replies',
+      'Ask one thing at a time when you need answers',
+      'If you have to assume something, say what it is in one line',
+      'Never send, save, book, cancel, or change anything without asking me first',
+      'ask with the exact thing you are about to do',
+    ];
+    for (const card of everyCard) {
+      for (const line of removed) expect(composerTextFor(card), card.title).not.toContain(line);
+    }
+  });
+
+  it('carries no act-first or latest-message-wins line on any card', () => {
+    for (const card of everyCard) {
+      expect(card.prompt, card.title).not.toContain('do that first');
+      expect(card.prompt, card.title).not.toContain('latest message wins');
+    }
+  });
+
+  it('states the ask first on every card, asks once, and uses no dashes, so the model acts instead of asking what to do', () => {
+    // The brief card opens with the line the brief schedule is recognised by, so it is checked on its own.
+    const cards = everyCard.filter(card => card !== CARDS.brief);
+    for (const card of cards) {
+      expect(card.prompt, card.title).toMatch(/^I /);
+      expect(card.prompt, card.title).not.toContain(' - ');
+      expect(card.prompt, card.title).not.toContain('\u2014');
+      if (/\bask me\b/i.test(card.prompt)) expect(card.prompt, card.title).toContain('one short message');
+      expect(card.prompt, card.title).not.toMatch(/one (thing|field|line|word) at a time|line by line|in one line/i);
+    }
+    expect(CARDS.brief.prompt).toBe(MORNING_BRIEF_CARD_PROMPT);
+    expect(CARDS.say_no.prompt).toMatch(/^I need to say no to something\. In one short message, ask me/);
+    for (const card of [CARDS.say_no, CARDS.ask_for, CARDS.thanks]) {
+      expect(card.prompt, card.title).toContain('Show me the draft and wait for my OK');
+    }
+    expect(CARDS.follow_up.prompt).toContain('Wait for my OK before sending');
+  });
+
+  it('waits for my OK on every card whose prompt sends, saves, sets or books', () => {
+    for (const card of everyCard) {
+      if (/\b(save|saving|saved|send|sending|sent|book|booking|set it|set them|set that)\b/i.test(card.prompt)) {
+        expect(card.prompt, card.title).toMatch(/\bask|after I say yes|wait(ing)? for my OK|asking me/i);
+      }
+    }
+  });
+
+  it('asks before saving the dinner plan', () => {
+    expect(CARDS.dinner.prompt).toContain('Offer to save the plan where I can tick it off');
+    expect(CARDS.dinner.prompt).toContain('only after I say yes');
+  });
+
+  it('asks who is eating and about allergies on the dinner card, when that is not known', () => {
+    expect(CARDS.dinner.prompt).toContain('who is eating');
+    expect(CARDS.dinner.prompt).toContain('unless you already know');
+    expect(CARDS.dinner.prompt).toContain("an allergy or a food they won't eat");
+  });
+
+  it('starts the dinner card with the plan, not a round of questions', () => {
+    expect(CARDS.dinner.prompt).toMatch(/^I want this week's dinners planned, with one shopping list grouped by aisle/);
+    expect(CARDS.dinner.prompt).not.toContain('Ask me how many people are eating');
+  });
+
+  it('asks only for what the trip checklist needs', () => {
+    expect(CARDS.trip.prompt).toContain('ask me where I am going and when');
+    expect(CARDS.trip.prompt).not.toContain('sort out the week before');
+  });
+
+  it('fits the trip checklist to the time left', () => {
+    expect(CARDS.trip.prompt).toContain('what to book, what to sort out before I go, and what to pack');
+    expect(CARDS.trip.prompt).toContain('in the right order for the time I have left');
+  });
+
+  it('does not presume my answers on the trip card or defend against them', () => {
+    expect(CARDS.trip.prompt).not.toContain('short or joking');
+    expect(CARDS.trip.prompt).not.toContain('Never ask the same thing twice');
+  });
+
+  it('makes the start card one small first step, with no check-back script', () => {
+    expect(CARDS.start.prompt).toContain('one small first step I could do in about ten minutes');
+    expect(CARDS.start.prompt).toContain('make the step smaller without making a fuss');
+    expect(CARDS.start.prompt).not.toContain('check back in 30 minutes');
+    expect(CARDS.start.prompt).not.toContain('two lines');
+    expect(CARDS.start.prompt).not.toContain('two minutes');
+  });
+
+  it('lets the talk card listen, with advice only when it is asked for', () => {
+    expect(CARDS.talk.prompt).toContain("If I want advice, I'll ask for it");
+    expect(CARDS.talk.prompt).not.toContain('Do not give advice unless I ask for it');
+    expect(CARDS.talk.prompt).not.toContain('two or three lines');
+  });
+
+  it('keeps the company card quiet without sealing it shut', () => {
+    expect(CARDS.company.prompt).toContain('stay quiet unless I speak to you');
+    expect(CARDS.company.prompt).not.toContain('nothing else');
+    expect(CARDS.company.prompt).not.toContain('Never add tips or encouragement');
+  });
+
+  it('lays the decide options side by side without scripting the ending', () => {
+    expect(CARDS.decide.prompt).toContain('lay the options out side by side');
+    expect(CARDS.decide.prompt).not.toContain('three questions at most');
+    expect(CARDS.decide.prompt).not.toContain('Then stop');
+  });
+});
+
 describe('help areas', () => {
   it('map to the pills in one table, one entry for each saved help area', () => {
     expect(HELP_AREA_TOPIC).toEqual({
@@ -209,5 +313,50 @@ describe('help areas', () => {
     });
     expect(Object.keys(HELP_AREA_TOPIC).sort()).toEqual([...HELP_AREA_IDS].sort());
     for (const topic of Object.values(HELP_AREA_TOPIC)) expect(isHomeTopicId(topic)).toBe(true);
+  });
+});
+
+describe('homeSlotsFor', () => {
+  const titles = (slots: ReturnType<typeof homeSlotsFor>) => slots.map(slot => slot.card.title);
+
+  it('puts the run my daily brief card just after the morning brief card, at the same count', () => {
+    const slots = homeSlotsFor({ topic: null, capabilities: connected, briefRun: true });
+
+    expect(slots).toHaveLength(HOME_CARD_COUNT);
+    expect(titles(slots).slice(0, 2)).toEqual([CARDS.brief.title, RUN_BRIEF_CARD.title]);
+    expect(slots[1]?.kind).toBe('run_brief');
+  });
+
+  it('puts the run card first when the morning brief card is hidden', () => {
+    const slots = homeSlotsFor({ topic: null, capabilities: none, briefRun: true });
+
+    expect(slots[0]?.kind).toBe('run_brief');
+    expect(slots).toHaveLength(HOME_CARD_COUNT);
+  });
+
+  it('leaves the run card out without a brief schedule, and under other pills', () => {
+    expect(
+      homeSlotsFor({ topic: null, capabilities: connected, briefRun: false }).map(slot => slot.kind),
+    ).not.toContain('run_brief');
+    expect(titles(homeSlotsFor({ topic: 'money', capabilities: connected, briefRun: true }))).toEqual(
+      titlesOf(homeCardsFor({ topic: 'money', capabilities: connected })),
+    );
+  });
+
+  it("puts the run card first under I'm behind, at the same count", () => {
+    const slots = homeSlotsFor({ topic: 'behind', capabilities: connected, briefRun: true });
+
+    expect(slots[0]?.kind).toBe('run_brief');
+    expect(slots).toHaveLength(HOME_CARD_COUNT);
+    expect(titles(slots).slice(1)).toEqual(
+      titlesOf(homeCardsFor({ topic: 'behind', capabilities: connected })).slice(0, HOME_CARD_COUNT - 1),
+    );
+  });
+
+  it('describes the run card in plain words, with no assistant name and no dashes', () => {
+    const detail = RUN_BRIEF_CARD.detail('Juniper');
+    expect(RUN_BRIEF_CARD.title).toBe('Run my daily brief');
+    expect(detail).toBe('Runs your scheduled brief now');
+    for (const text of [detail, RUN_BRIEF_CARD.title]) expect(text).not.toMatch(/\b(Aman|Mannie)\b|\u2014/);
   });
 });

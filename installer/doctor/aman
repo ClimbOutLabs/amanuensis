@@ -8,6 +8,7 @@
 #   aman doctor sandbox [--fix [--yes]] [--instance NAME] [--disk-gb N] [--no-hard-disk-limit]
 #   aman doctor docker|disk|backup|checkout|tls [--fix [--yes]]
 #   aman backup [NAME]
+#   aman restore [NAME] [TIME | --latest]
 #   aman upgrade [--check] [--force]
 #   aman import FILE [--instance NAME] [--display-name NAME] [--dry-run]
 #   aman migrate --from-compose FOLDER [--user ID]
@@ -87,6 +88,7 @@ Usage: aman doctor [--json] [--verbose] [--only ID] [--instance NAME] [--deep] [
        aman doctor sandbox [--fix [--yes]] [--instance NAME] [--disk-gb N] [--no-hard-disk-limit]
        aman doctor docker|disk|backup|checkout|tls [--fix [--yes]]
        aman backup [NAME]
+       aman restore [NAME] [TIME | --latest]
        aman upgrade [--check] [--force]
        aman password [--instance NAME] [--password-stdin]
          sets a new owner password; run it on the computer where Aman is installed
@@ -455,7 +457,7 @@ check_images() {
       "Run install.sh again from the folder Aman was installed from."
     return
   fi
-  for key in app_image dex_image stt_image; do
+  for key in app_image dex_image stt_image tts_image calendar_image browser_image browser_gateway_image mail_email_image; do
     ref=$(json_value "$release" "$key")
     [ -n "$ref" ] || continue
     checked=$((checked + 1))
@@ -797,7 +799,7 @@ check_instance_config() {
   dir="${AMAN_HOME}/instances/${name}"
   if [ ! -f "${dir}/.env" ]; then
     record "$name" config fail "The instance settings file is missing." \
-      "Restore this instance from a backup in ${AMAN_HOME}/backups."
+      "Put it back from a backup with: aman restore ${name}"
     return
   fi
   # dex.env holds the login password hash; both files hold secrets.
@@ -1602,14 +1604,17 @@ doctor_repair() { # kind
   exit "$failed"
 }
 
-# The Aman images this computer no longer needs: every aman-app and aman-stt image that is not the recorded release and
-# that no container uses.
+# The Aman images this computer no longer needs: every image the installer builds here that is not the recorded release
+# and that no container uses.
 unused_aman_images() {
-  local release="${AMAN_HOME}/release/release.json" keep image used
-  keep=" $(json_value "$release" app_image) $(json_value "$release" stt_image) "
+  local release="${AMAN_HOME}/release/release.json" keep image used key
+  keep=" "
+  for key in app_image stt_image tts_image calendar_image browser_image browser_gateway_image; do
+    keep="$keep$(json_value "$release" "$key") "
+  done
   used=" $(docker ps -a --format '{{.Image}}' 2>/dev/null | tr '\n' ' ') "
   while IFS= read -r image; do
-    case "$image" in aman-app:* | aman-stt:*) ;; *) continue ;; esac
+    case "$image" in aman-app:* | aman-stt:* | aman-tts:* | aman-calendar-caldav:* | aman-browser:* | aman-browser-gateway:*) ;; *) continue ;; esac
     case "$keep$used" in *" $image "*) continue ;; esac
     printf '%s\n' "$image"
   done < <(docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null)
@@ -1695,7 +1700,7 @@ doctor_machine_repair() { # kind
   exit 0
 }
 
-# aman backup [NAME], aman upgrade [...] and aman migrate [...]: the installer the sandbox tools were set up from, run for the person.
+# aman backup [NAME], aman restore [...], aman upgrade [...] and aman migrate [...]: the installer the sandbox tools were set up from, run for the person.
 run_installer() { # command args...
   local installer failure
   if ! installer=$(checkout_installer); then
@@ -1874,7 +1879,7 @@ esac
 
 case "${1:-}" in
   doctor) shift ;;
-  backup | upgrade | migrate) run_installer "$@" ;;
+  backup | restore | upgrade | migrate) run_installer "$@" ;;
   import)
     shift
     run_import "$@"

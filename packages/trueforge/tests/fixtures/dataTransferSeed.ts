@@ -19,10 +19,12 @@ import {
 
 import type { ISessionStore } from '@truefoundry/trueforge-core/agent-session';
 import type { IAgentStore } from '../../src/db/agentStore';
+import type { IDeliveryStore } from '../../src/db/deliveryStore';
 import type { IGlobalSettingsStore } from '../../src/db/globalSettingsStore';
 import type { IMcpServerStore } from '../../src/db/mcpServerStore';
 import type { IPersonaStore } from '../../src/db/personaStore';
 import type { IPersonalizationStore } from '../../src/db/personalizationStore';
+import type { IReachSettingsStore } from '../../src/db/reachSettingsStore';
 import type { IScheduleStore } from '../../src/db/scheduleStore';
 import type { ISentinelAuditStore } from '../../src/db/sentinelAuditStore';
 import type { ISentinelSettingsStore } from '../../src/db/sentinelSettingsStore';
@@ -33,6 +35,7 @@ import { personaKnowledgeLocation } from '../../src/personaKnowledge/knowledgePa
 import { openPersonaKnowledgeRepository } from '../../src/personaKnowledge/sqliteKnowledgeRepository';
 import { EMBEDDING_DIMENSIONS } from '../../src/runtime/memory/embeddingModel';
 import { McpServerManifestSchema } from '../../src/schemas/mcpServer';
+import { defaultReachSettings } from '../../src/schemas/reach';
 import { ScheduleManifestSchema } from '../../src/schemas/schedule';
 
 export const SEED_IDS = {
@@ -43,6 +46,7 @@ export const SEED_IDS = {
   personaResearcher: 'persona-researcher',
   personaChef: 'persona-chef',
   space: 'space-1',
+  spaceFolder: 'space-folder-1',
   scheduleDaily: 'schedule-1',
   scheduleWeekly: 'schedule-2',
   agentName: 'reporter',
@@ -159,6 +163,8 @@ export interface DataTransferSeedStores<TTransaction> {
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
   sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
   auditStore: ISentinelAuditStore;
+  deliveryStore: IDeliveryStore;
+  reachSettingsStore: IReachSettingsStore;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   mcpServerStore: IMcpServerStore<TTransaction>;
 }
@@ -260,6 +266,8 @@ export async function seedRichInstance<TTransaction>(input: SeedRichInstanceInpu
     metadata: {},
     external_id: null,
     source: null,
+    is_incognito: false,
+    private_expires_at: null,
   });
   await stores.sessionStore.setSessionFolder({
     tenant_id: tenantId,
@@ -391,6 +399,8 @@ export async function seedRichInstance<TTransaction>(input: SeedRichInstanceInpu
     metadata: {},
     external_id: null,
     source: { type: 'schedule', id: SEED_IDS.scheduleDaily, run_id: 'run-1' },
+    is_incognito: false,
+    private_expires_at: null,
   });
   await stores.sessionStore.createTurn(
     makeCreateTurnInput({
@@ -426,6 +436,8 @@ export async function seedRichInstance<TTransaction>(input: SeedRichInstanceInpu
     metadata: {},
     external_id: null,
     source: null,
+    is_incognito: false,
+    private_expires_at: null,
   });
   await stores.sessionStore.createTurn(
     makeCreateTurnInput({
@@ -494,6 +506,25 @@ export async function seedRichInstance<TTransaction>(input: SeedRichInstanceInpu
     });
   }
   await stores.auditStore.importRecords({ tenant_id: tenantId, created_by: userId, records: SEED_AUDIT });
+  await stores.deliveryStore.create({
+    tenant_id: tenantId,
+    created_by: userId,
+    kind: 'reminder',
+    level: 'nudge',
+    text: 'Call the dentist',
+    reason: 'You asked to be reminded on Monday.',
+    link: null,
+  });
+  await stores.reachSettingsStore.put({
+    tenant_id: tenantId,
+    created_by: userId,
+    settings: {
+      ...defaultReachSettings('Europe/Paris'),
+      channels: { texts: false, calls: true },
+      call_kinds: ['travel'],
+      max_nudges_per_day: 3,
+    },
+  });
 
   const knowledgeDbPath = personaKnowledgeLocation({
     knowledgeDir: input.knowledgeDir,
@@ -576,6 +607,18 @@ export async function seedRichInstance<TTransaction>(input: SeedRichInstanceInpu
     expected_revision: 1,
     expected_aggregate_revision: aggregateAfterCreate.revision,
   });
+  await stores.spaceStore.createSpaceFolder({
+    tenant_id: tenantId,
+    created_by: userId,
+    id: SEED_IDS.spaceFolder,
+    name: 'Moving',
+  });
+  await stores.spaceStore.setSpaceFolder({
+    tenant_id: tenantId,
+    created_by: userId,
+    space_id: SEED_IDS.space,
+    folder_id: SEED_IDS.spaceFolder,
+  });
 
   await stores.mcpServerStore.createServer({
     tenant_id: tenantId,
@@ -625,6 +668,8 @@ export async function seedRichInstance<TTransaction>(input: SeedRichInstanceInpu
     search_without_asking: true,
     maps_without_asking: true,
     sandbox_without_asking: true,
+    chat_search_enabled: undefined,
+    package_downloads_without_project_allowed: true,
   });
 
   const baseVault = join(input.memoryDir, tenantId);

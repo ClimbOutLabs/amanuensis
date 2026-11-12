@@ -35,7 +35,8 @@ export class UsagePeriodError extends Error {
 
 /** One usage event as the summary needs it: the chat it belongs to, the model, the tokens and the priced cost. */
 export interface UsageEntry {
-  session_id: string;
+  /** Null when the chat is never named: it was deleted, or it is private. */
+  session_id: string | null;
   title: string | null;
   model_id: string;
   display_name: string;
@@ -187,8 +188,8 @@ function roundUsd(value: number): number {
   return Math.round(value * 1_000_000) / 1_000_000;
 }
 
-function groupBy<K>(entries: UsageEntry[], key: (entry: UsageEntry) => K): Map<K, UsageEntry[]> {
-  const groups = new Map<K, UsageEntry[]>();
+function groupBy<K, E extends UsageEntry>(entries: E[], key: (entry: E) => K): Map<K, E[]> {
+  const groups = new Map<K, E[]>();
   for (const entry of entries) {
     const k = key(entry);
     groups.set(k, [...(groups.get(k) ?? []), entry]);
@@ -206,7 +207,7 @@ function tallyOf(entries: UsageEntry[]): Tally {
 
 /**
  * Adds a person's usage entries for a period into the totals, the split by model and by day, the
- * most expensive chats, and what is left under the daily cap.
+ * most expensive chats (never a deleted or private one), and what is left under the daily cap.
  */
 export function summarizeUsage({
   entries,
@@ -235,7 +236,7 @@ export function summarizeUsage({
   ]
     .map(([date, group]) => ({ date, ...tallyOf(group).row() }))
     .sort((a, b) => a.date.localeCompare(b.date));
-  const topChats = [...groupBy(entries, entry => entry.session_id).values()]
+  const topChats = [...groupBy(namedChatEntries(entries), entry => entry.session_id).values()]
     .map(group => ({
       title: group[0]?.title ?? UNTITLED_CHAT_LABEL,
       ...tallyOf(group).row(),
@@ -257,6 +258,10 @@ export function summarizeUsage({
             scope: 'instance',
           },
   };
+}
+
+function namedChatEntries(entries: UsageEntry[]): (UsageEntry & { session_id: string })[] {
+  return entries.flatMap(entry => (entry.session_id === null ? [] : [{ ...entry, session_id: entry.session_id }]));
 }
 
 function localDate({ instant, timeZone }: { instant: string; timeZone: string }): string {

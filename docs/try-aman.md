@@ -2,64 +2,25 @@
 
 Aman is a private assistant that runs on your own computer. Your chats, files and memory stay on your machine. What leaves it is what you send to the AI model you choose, and the words of any web search, which go to the Parallel search service.
 
-Setting it up takes about 45 minutes. Most of that is waiting while things download and build; you answer five questions at the start and type your password once near the end.
+Setting it up takes about 45 minutes. Most of that is waiting while things download and build; you answer a few questions and choose a password at the start. Then it runs on its own.
 
 ## What you need
 
-- A computer with at least 16 GB of memory and 30 GB of free disk space. It stays on while you use Aman.
+- A computer with 16 GB of memory (8 GB is the bare minimum, and the first install is slow there) and free disk space: about 20 GB on a Mac, about 45 GB on Linux. It stays on while you use Aman.
 - **Mac:** [Docker Desktop](https://www.docker.com/products/docker-desktop/). After installing it, open Docker Desktop, go to Settings, Resources, and set Memory to 8 GB or more. Then click Apply.
-- **Windows:** Windows 11 (or Windows 10 with the latest updates). You will install Ubuntu inside Windows (called WSL) and Docker Desktop; the steps are below.
+- **Windows:** this page is not for you. Follow the [Windows guide](install-windows.md) instead: one download, Aman Setup, does the install. Once you have signed in, come back to [Step 4](#step-4-add-your-ai-model).
 - **Linux (Ubuntu or Debian):** nothing extra. The installer offers to install Docker for you. Your user must be allowed to use `sudo`.
-- A GitHub account that has been given access to the Aman code (ask the person who sent you this).
-- An API key for an AI model (OpenAI, Anthropic or Google Gemini). You create it on that company's website; it is pasted into Aman after the install. This is the only part that costs money, and it is billed by that company, not by Aman.
+- An API key for an AI model (Together AI, OpenAI, Anthropic or Google Gemini). You create it on that company's website; it is pasted into Aman after the install. This is the only part that costs money, and it is billed by that company, not by Aman.
 
-## Step 1: get the code
+## Steps 1 and 2: install Aman
 
-Open a terminal.
+Follow the guide for your computer. Each one installs the latest release and ends with Aman running:
 
-- Mac: open the **Terminal** app (press Command+Space and type "Terminal").
-- Windows: first install Ubuntu. Open **PowerShell as administrator** and run `wsl --install`, then restart the computer and open the **Ubuntu** app once so it asks you for a username and password. Then install Docker Desktop, open it, go to Settings, Resources, WSL integration, and turn on the switch for Ubuntu. From now on, do everything in the **Ubuntu** app, never in PowerShell.
-- Linux: open your terminal.
+- [Install on a Mac](install-mac.md)
+- [Install on Linux](install-linux.md)
+- [Install on Windows](install-windows.md)
 
-Then run these three lines, one at a time. Replace `vX.Y.Z` with the version the person who sent you this told you to use.
-
-```
-git clone https://github.com/ClimbOutLabs/amanuensis
-cd amanuensis
-git checkout vX.Y.Z
-```
-
-The first line asks you to sign in to GitHub. Your GitHub password does not work there; use a "personal access token" instead (on GitHub: your profile picture, Settings, Developer settings, Personal access tokens, Generate new token; give it access to the Aman repository with "Contents: read"). Paste the token where it asks for a password.
-
-On a Mac, the first `git` command may show a window offering to install "command line developer tools". Click Install and wait, then run the line again.
-
-On Windows, keep the code inside Ubuntu (just run the lines as they are; do not go to a folder like `/mnt/c`).
-
-## Step 2: run the installer
-
-```
-./installer/install.sh
-```
-
-It first checks your computer, then asks:
-
-1. **Name for this instance [main]:** press Enter to name it main, or type another name, such as `work`.
-2. **Your email, used to sign in**: type your email in lowercase. This is only your sign-in name; nothing is sent to it.
-3. **What should Aman call you?**: type your name, or press Enter to use the part of your email before the @.
-4. **Back up automatically every day? [Y/n]**: press Enter.
-5. It shows the plan: what it will download and build. **Go ahead? [Y/n]**: press Enter.
-6. **Password**: choose a password of at least 8 characters with a number and a symbol, such as @ or #, and type it twice. Nothing shows while you type. Remember it; you need it to sign in.
-
-Then it works on its own for 20 to 40 minutes. You see one line per step with a spinner and the time it has taken. "Building the Aman app (this might take a while)" is the longest step; 15 minutes is normal.
-
-On **Linux** it asks two more questions near the end. Type `y` for both, then your computer password when it asks:
-
-- **Set up the sandbox now? [y/N]**: type `y`. (This gives Aman a safe place to run code. If you press Enter here, the install stops; just run the installer again and type `y`.)
-- **Make Docker start with this computer? [y/N]**: type `y`.
-
-When it is done, it prints a box that starts with **Ready. Instance main is running.** and lists the addresses to open. Below that: "Open a new terminal window to use the aman command."
-
-If it stops with a red line instead, read the **Next:** line under it. It names the one thing to fix or the one command to run. Then run `./installer/install.sh` again; it continues where it stopped.
+Then come back here.
 
 ## Step 3: open Aman and sign in
 
@@ -69,17 +30,19 @@ On the computer you installed it on, open a browser and go to:
 http://localhost:8791
 ```
 
-Click **Let's Get Started**, then enter the email and the password you chose. You land in Settings, Models.
+Click **Sign in**, then enter the email and the password you chose.
 
-**From your phone or another computer in your home:** the install printed a line like "Trust this computer on each device: http://…/trust". Open that address on the phone (or scan the square code that was printed). The page explains, for iPhone, Android, Mac and Windows, how to make that device trust your computer. You do this once per device. After that, open the https address from the "Open" list (the one that starts with `https://` and ends in `:8443`). An iPhone says the profile is "Not Signed"; that is expected for a profile you made yourself.
+**On a Mac,** Aman opens on that Mac only. Phones and other computers cannot reach it.
+
+**On Linux, from your phone or another computer in your home:** the install printed a line that starts "Instead, open this page once on that device and follow its steps", with an address that ends in `/trust`. Open that address on the phone (or scan the square code that was printed). The page explains, for iPhone, Android, Mac and Windows, how to make that device trust your computer. You do this once per device. After that, open the https address from the "Open" list (the one that starts with `https://` and ends in `:8443`). An iPhone says the profile is "Not Signed"; that is expected for a profile you made yourself.
 
 ## Step 4: add your AI model
 
-Aman does not come with a model. In **Settings, Models**, find the company you have a key for (OpenAI, Anthropic, Google Gemini), click **Configure**, paste the key, and save. Its models now appear in the model picker at the bottom of the chat screen.
+Aman does not come with a model. In **Settings, Models**, find the company you have a key for (Together AI, OpenAI, Anthropic, Google Gemini), click **Configure**, paste the key, and click **Create**. Its models now appear in the model picker at the bottom of the chat screen.
 
 ## Step 5: first things to try
 
-Click **New Chat**, pick a model in the picker, and try:
+Click **New chat**, pick a model in the picker, and try:
 
 - **A chat.** "Help me plan a week of dinners for two people, one vegetarian."
 - **Running code.** "Write a small Python program that prints the first 20 prime numbers, run it, and show me the output." Aman runs it in a sealed-off area on your computer; it cannot reach the internet or your files.
@@ -90,13 +53,13 @@ Aman keeps running in the background, also after you restart the computer (Docke
 
 ## If something goes wrong
 
-Open a new terminal window and run:
+On Windows, run **Check Aman** from the Start menu. On a Mac or Linux, open a new terminal window and run:
 
 ```
 aman doctor
 ```
 
-It checks everything and prints one **Next:** line per problem, with the command that fixes it. If that does not help, copy the whole output of `aman doctor` and send it to the person who gave you this guide, together with the log file named in the red line, if there was one. The output contains no passwords or chats.
+It checks everything and prints one **Next:** line per problem, with the command that fixes it. If that does not help, follow the **Still stuck** steps in [Troubleshooting](troubleshooting.md).
 
 A few common ones:
 
@@ -108,36 +71,50 @@ A few common ones:
 
 ## Updating
 
-When a new version comes out, run (replace the version):
+On Windows, run **Update Aman** from the Start menu. On a Mac or Linux, run these lines in the folder you installed from. They find the newest release, get its code, and update Aman to it:
 
 ```
-cd amanuensis
+cd ~/amanuensis
+VERSION=$(curl -fsSL -o /dev/null -w '%{url_effective}' https://github.com/ClimbOutLabs/amanuensis/releases/latest)
+VERSION=${VERSION##*/}
 git fetch --tags
-git checkout vX.Y.Z
+git checkout "$VERSION"
 aman upgrade
 ```
+
+Here the folder is `~/amanuensis`; use your own folder. If the `git checkout` line fails, there is no newer release, and nothing was changed.
 
 It backs up your data first, builds the new version (about 15 minutes), and switches over. If anything fails, it puts the old version back on its own.
 
 ## Removing Aman
 
-To remove everything, including your chats and memory:
+On Windows, choose **Remove Aman** in the Start menu; the [Windows guide](install-windows.md#removing-aman) walks through its two questions. On a Mac or Linux, to remove everything, including your chats and memory:
 
 ```
-cd amanuensis
+cd ~/amanuensis
 ./installer/install.sh instance remove main --purge-data
 ```
 
-It asks you to type `main` to confirm. Then, to free the disk space Aman's downloads used:
+It asks you to type `main` to confirm. Your backups stay in `~/.amanuensis/backups`; delete that folder too if you do not want them. You can also uninstall Docker Desktop (Mac, Windows) if you do not use it for anything else.
+
+## Go back to an earlier backup
+
+If chats or settings were lost or changed by mistake, run:
 
 ```
-docker image prune -a
+aman restore
 ```
 
-Your backups stay in `~/.amanuensis/backups`; delete that folder too if you do not want them. You can also uninstall Docker Desktop (Mac, Windows) if you do not use it for anything else.
+It shows your backups, newest first, and asks:
+
+```
+Restore which backup (number):
+```
+
+Type a number. It tells you what will be replaced and asks you to type `yes`. The password goes back to the one you had when the backup was made. Before it changes anything it saves a copy of what you have now and shows you where that copy is. If something goes wrong it puts everything back and says so. To use the newest backup without the list, run `aman restore --latest`.
 
 ## Good to know
 
 - Nothing is sent anywhere except to the model company you chose, and to Parallel (the search service Aman uses by default) when Aman searches the web. Parallel sees the search words and your internet address. To stop it, remove the `parallel-web` connector in Settings, or turn on Offline mode.
 - Backups are made every night at 03:30 into `~/.amanuensis/backups` on your computer, keeping the last 7.
-- Each person gets a new instance.
+- Each person gets their own Aman, called an instance. See [Adding people](install.mdx#adding-people).

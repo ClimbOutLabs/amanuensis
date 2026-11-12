@@ -1,19 +1,212 @@
+import { homedir, hostname, networkInterfaces } from 'node:os';
+import { basename } from 'node:path';
+
 import { runCli } from './cli.ts';
+import { resolvePendingSwap } from './commands/upgrade.ts';
+import { installerConfig } from './config.ts';
 import { hostForPlatform } from './host/hostFor.ts';
+import { systemWindowsJobs, windowsPaths } from './host/windowsJobs.ts';
+import { createLineInput, type LineInput } from './lineInput.ts';
+import { PRESS_ENTER_TO_CLOSE_LINE, UNEXPECTED_FAILURE, problemText } from './messages.ts';
+import { isSetupProgramName } from './release/assetNames.ts';
+import { fetchBytesFromNetwork } from './release/download.ts';
 import { SystemProcessRunner } from './runner/processRunner.ts';
+import { storeForHost } from './state/storeFor.ts';
+import { shouldHoldWindow } from './windowHold.ts';
 
 // The one entry point the single executable is built from.
-runCli(process.argv.slice(2), {
-  host: hostForPlatform(process.platform),
-  runner: new SystemProcessRunner(),
+const host = hostForPlatform(process.platform);
+const runner = new SystemProcessRunner();
+const config = installerConfig({ env: process.env, homeDir: homedir() });
+
+// The folder the adopt step put the installed program in, from the one
+// place that names the Windows folders. Only a Windows computer has
+// one; everywhere else the upgrade refuses before it would be used.
+const programsDir = host.kind === 'windows' ? windowsPaths(config.localAppDataDir).programsDir : null;
+
+// A piped input is read by one reader for the whole run, so answers
+// piped in together each reach their own question. A terminal gets a
+// reader per question, so nothing reads keys between questions (the
+// secret question reads them itself).
+let pipedLines: LineInput | null = null;
+
+async function readAnswer(question: string): Promise<string | null> {
+  process.stdout.write(question);
+  if (!process.stdin.isTTY) {
+    pipedLines ??= createLineInput(process.stdin);
+    return pipedLines.next();
+  }
+  const lines = createLineInput(process.stdin);
+  try {
+    return await lines.next();
+  } finally {
+    lines.close();
+  }
+}
+
+// The upgrade's one question, asked on the terminal. Anything but an
+// explicit yes is a no, and a closed terminal is a no.
+async function askConfirm(question: string): Promise<boolean> {
+  const answer = await readAnswer(`${question} Type yes to go ahead: `);
+  return answer !== null && /^y(es)?$/i.test(answer.trim());
+}
+
+// The install command's questions, asked on the terminal. A closed
+// terminal is no answer.
+async function askLine(question: string): Promise<string | null> {
+  return (await readAnswer(`${question} `))?.trim() ?? null;
+}
+
+// The install command's secret questions: what is typed is not shown.
+// On a real terminal the input is read a key at a time with echo off;
+// anywhere else a plain line is read. Both paths follow the one rule
+// for secrets, applied here and nowhere else: a secret is taken
+// exactly as typed, never trimmed, because a password can begin or
+// end with a space. (The visible questions above do trim; the install
+// command trims the pasted key itself, at its question, where a paste
+// can carry stray spaces with it.)
+async function askSecretLine(question: string): Promise<string | null> {
+  const input = process.stdin;
+  if (!input.isTTY) {
+    return readAnswer(`${question} `);
+  }
+  process.stdout.write(`${question} `);
+  return new Promise<string | null>(resolve => {
+    // One entry per character typed, so a backspace takes back
+    // exactly one character, never half of one. The bytes are decoded
+    // as a stream, so a letter whose bytes arrive in two chunks is
+    // still the one letter, not two broken halves.
+    const decoder = new TextDecoder();
+    const chars: string[] = [];
+    const wasRaw = input.isRaw;
+    const cleanup = (): void => {
+      input.off('data', onData);
+      input.off('end', onEnd);
+      input.setRawMode(wasRaw);
+      input.pause();
+    };
+    const onEnd = (): void => {
+      cleanup();
+      resolve(null);
+    };
+    const onData = (chunk: Buffer): void => {
+      for (const ch of decoder.decode(chunk, { stream: true })) {
+        if (ch === '\r' || ch === '\n') {
+          cleanup();
+          process.stdout.write('\n');
+          resolve(chars.join(''));
+          return;
+        }
+        if (ch === '\u0003' || ch === '\u0004') {
+          cleanup();
+          process.stdout.write('\n');
+          resolve(null);
+          return;
+        }
+        if (ch === '\u007f' || ch === '\b') {
+          chars.pop();
+        } else if (ch >= ' ') {
+          chars.push(ch);
+        }
+      }
+    };
+    input.setRawMode(true);
+    input.resume();
+    input.on('data', onData);
+    input.on('end', onEnd);
+  });
+}
+
+// This same program is also built as Aman-Setup.exe (the setup build
+// names its output, not its code). Run with no command under that
+// name, it does what the computer in front of it needs: the first
+// install where Aman is not installed, the adopt step on a starter
+// PC, and the upgrade on an installed one. The setup command in the
+// command list decides which, from what is on the computer.
+function invokedAsSetup(): boolean {
+  for (const path of [process.argv[1] ?? '', process.execPath]) {
+    if (isSetupProgramName(basename(path))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+let args = process.argv.slice(2);
+if (args.length === 0 && invokedAsSetup()) {
+  args = ['setup'];
+}
+if (programsDir !== null) {
+  resolvePendingSwap(programsDir);
+}
+const windowsJobs = systemWindowsJobs({
+  runner,
+  localAppDataDir: config.localAppDataDir,
+  selfExePath: process.execPath,
+  selfPid: process.pid,
+});
+
+// Waits for Enter when the window would otherwise close unread.
+async function holdWindowIfNeeded(exitCode: number): Promise<void> {
+  const hold = await shouldHoldWindow({
+    hostKind: host.kind,
+    interactive: process.stdin.isTTY,
+    command: args[0],
+    exitCode,
+    parentPid: process.ppid,
+    jobs: windowsJobs,
+  });
+  if (hold) {
+    await askLine(PRESS_ENTER_TO_CLOSE_LINE);
+  }
+}
+
+void runCli(args, {
+  host,
+  runner,
+  store: storeForHost({ host, runner, stateHome: config.stateHome }),
+  windowsJobs,
+  probeHealth: async (url: string) => {
+    try {
+      const response = await fetch(url);
+      return response.status === 200;
+    } catch {
+      return false;
+    }
+  },
+  sleep: (ms: number) =>
+    new Promise<void>(resolve => {
+      setTimeout(resolve, ms);
+    }),
   print: (line: string) => {
     console.log(line);
   },
-}).then(
-  exitCode => {
+  now: () => Math.floor(Date.now() / 1000),
+  homeDir: config.homeDir,
+  stateHome: host.kind === 'windows' ? null : config.stateHome,
+  osReleasePath: config.osReleasePath,
+  dockerConfigDir: config.dockerConfigDir,
+  appService: config.appService,
+  confirm: askConfirm,
+  fetchBytes: fetchBytesFromNetwork,
+  programsDir,
+  arch: process.arch,
+  interfaces: networkInterfaces(),
+  hostName: hostname(),
+  ask: askLine,
+  askSecret: askSecretLine,
+})
+  .then(
+    exitCode => exitCode,
+    () => {
+      // A failure no command planned for still owes the person one
+      // plain problem and a next step, never a silent exit.
+      console.log(problemText(UNEXPECTED_FAILURE));
+      return 1;
+    },
+  )
+  .then(async exitCode => {
     process.exitCode = exitCode;
-  },
-  () => {
-    process.exitCode = 1;
-  },
-);
+    await holdWindowIfNeeded(exitCode).catch(() => undefined);
+    pipedLines?.close();
+  });

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 
 import { connectorOffKey } from '@truefoundry/trueforge-core/core/connectors/chatConnectorChoice';
 import { useOptionalWorkOnRepoPanel, useWorkOnRepoAvailable } from '../../containers/workOnRepoPanel.js';
+import { useComposerInputActions } from '../../hooks/useComposerInputActions.js';
 import { Icon } from '../../icons/Icon.js';
 import { useChatConnectorChoice } from '../../server/ChatConnectorChoiceContext.js';
 import { useServerCapabilities } from '../../server/ServerContext.js';
@@ -298,10 +299,11 @@ export function DraftCompositeSelector({ disabled, isRunning, onAttach }: DraftC
       )}
     </>
   );
+  const inputActions = useComposerInputActions(onAttach);
   const workOnRepoPanel = useOptionalWorkOnRepoPanel();
   const workOnRepoAvailable = useWorkOnRepoAvailable();
   const menuActions: DraftComposerAction[] = [
-    ...(onAttach === undefined ? [] : [{ id: 'attach', label: 'Attach files', icon: 'paperclip', onSelect: onAttach }]),
+    ...inputActions,
     ...(hasValidModel ? [{ id: 'add-ons', label: 'Add-ons', icon: 'wrench', onSelect: () => openPicker() }] : []),
     ...(workOnRepoPanel != null && workOnRepoAvailable
       ? [

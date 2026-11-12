@@ -46,6 +46,11 @@ export type AmanRuntimeRailProps = {
   /** @deprecated Wrap the rail and chat shell in `PersonalizationProvider` instead. */
   personalizationApi?: PersonalizationApi;
   /**
+   * The open chat is private. The rail then says nothing about what the assistant is doing in it;
+   * a connection problem still shows, since it says what to do next.
+   */
+  privateChat?: boolean;
+  /**
    * Ids of the approvals waiting on the person in this chat. Any id puts the panda in its waiting
    * state, and puts a live Waiting for you line above the history in the Activity row.
    */
@@ -55,6 +60,12 @@ export type AmanRuntimeRailProps = {
    * It is the body of the Activity row.
    */
   auditFeed?: ReactNode;
+  /**
+   * The host's way to open Settings at the Audit section. The rail renders outside the shell
+   * tree, so it cannot open Settings itself: the Audits link shows only when the host hands
+   * this over, and clicking it calls it.
+   */
+  onOpenAudits?: () => void;
 };
 
 /** Same `aui-` prefixed style as the left rail's `aui-history-collapsed` preference. */
@@ -165,7 +176,9 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
   personaName,
   status: statusOverride,
   pendingApprovalIds = [],
+  privateChat = false,
   auditFeed,
+  onOpenAudits,
 }) => {
   const profile = useOptionalPersonalization()?.profile;
   const assistantName = assistantDisplayName(profile?.assistant_name);
@@ -178,7 +191,7 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
   const connectivity = useRuntimeConnectivity({ enabled: selfProbed });
   const status = statusOverride ?? connectivity.status;
   const waitingOnPerson = pendingApprovalIds.length > 0;
-  const statusLine = statusLineLabel({ status, activity, waitingOnPerson });
+  const statusLine = privateChat && status === 'ready' ? null : statusLineLabel({ status, activity, waitingOnPerson });
   // Folded, the poster's tooltip is all that is left, so it still says a reply is running.
   const compactLabel = statusLine ?? WORKING_ON_IT_LABEL;
   const tone = statusToneOf({ status, activity, waitingOnPerson });
@@ -319,6 +332,15 @@ const RuntimeRailContent: FC<RuntimeRailContentProps> = ({
               </p>
             )}
             {auditFeed ?? <p className="aman-runtime-rail__row-text">Nothing has happened in this chat yet.</p>}
+            {onOpenAudits !== undefined && (
+              <button
+                type="button"
+                className="justify-self-start text-left text-xs text-text-secondary hover:underline underline-offset-1 mt-2"
+                onClick={onOpenAudits}
+              >
+                Audits
+              </button>
+            )}
           </FoldedRow>
 
           <FoldedRow section="rules" title="Rules">

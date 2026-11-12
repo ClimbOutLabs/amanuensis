@@ -28,9 +28,18 @@ export interface MemoryClient {
     queryTimestamp: string;
     entityTokens: number;
     timeoutMs: number;
+    /** The chat being answered: notes retained from it are never returned (its history is already in the conversation). */
+    currentSessionId?: string | undefined;
   }): Promise<RecallOutcome>;
 
   retain(params: { items: RetainItem[]; operationId: string; timeoutMs: number }): Promise<RetainOutcome>;
+
+  /**
+   * Removes every memory stored under one document id. A document that does not exist is a success.
+   * `context` is the line the document was retained with, so a store that kept copies before document
+   * ids existed can remove those too.
+   */
+  deleteDocument(params: { documentId: string; context?: string; timeoutMs: number }): Promise<RetainOutcome>;
 
   getOperation(id: string, timeoutMs: number): Promise<GetOperationOutcome>;
 
@@ -57,6 +66,15 @@ export interface MemoryClient {
   listEntries(params: { namespace: string; timeoutMs: number }): Promise<ListMemoryVaultEntriesOutcome>;
 
   /**
+   * Memory vault: the live entries in the newest `maxDailyFiles` daily files of the vault this client's
+   * `retain` writes into. Absent on a backend without a cheap listing.
+   */
+  listRecentWrittenEntries?(params: {
+    maxDailyFiles: number;
+    timeoutMs: number;
+  }): Promise<ListMemoryVaultEntriesOutcome>;
+
+  /**
    * Memory vault: replace one entry's text. The store stays append-only: the old
    * entry is kept and a supersede marker records the new text. Unknown or deleted
    * ids fail with code `not_found`.
@@ -77,6 +95,13 @@ export interface MemoryClient {
    * summarization itself. Never throws.
    */
   noteSummaryOutcome?(params: SummaryOutcomeNote): Promise<void>;
+
+  /**
+   * Optional: record a retain operation that stored nothing on purpose (a turn with no durable
+   * facts) as completed, so a later sweep does not treat it as vanished and rebuild it from the
+   * chat. Only the markdown client implements it. Never throws.
+   */
+  completeOperation?(operationId: string): Promise<void>;
 }
 
 /** One turn-summary attempt's outcome, noted on the client that owns the turn's vault. */
@@ -96,6 +121,8 @@ export interface MemoryVaultEntry {
   timestamp: string;
   /** Owning persona for `persona:<name>` vaults, else null. */
   persona: string | null;
+  /** The internal id the entry was filed under, when it has one. Not part of `text` and never shown to people. */
+  context?: string;
 }
 
 export type MemoryVaultFailureCode = 'request_failed' | 'not_found' | 'timeout';

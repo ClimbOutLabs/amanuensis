@@ -2,7 +2,7 @@
 
 /** Whether a new event is added or an existing one changed. */
 export const Tier3CalendarEventAction = {
-        Create: "create",
-        Change: "change"
-    } as const;
-export type Tier3CalendarEventAction = typeof Tier3CalendarEventAction[keyof typeof Tier3CalendarEventAction];
+    Create: "create",
+    Change: "change",
+} as const;
+export type Tier3CalendarEventAction = (typeof Tier3CalendarEventAction)[keyof typeof Tier3CalendarEventAction];

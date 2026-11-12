@@ -6,7 +6,11 @@ import { PRESETS } from '@truefoundry/trueforge-ui';
 import { chromium, type Browser } from 'playwright-core';
 import { createServer, defaultClientConditions } from 'vite';
 
+import { DEV_OPTIMIZE_DEPS } from '../src/devPrebundle.ts';
+import { featureShotPath, saveFailureShots } from './support/featureShots.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
+import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
+import { privateViteCache } from './support/viteCache.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
 
@@ -15,8 +19,11 @@ test(
   { timeout: 180_000 },
   async () => {
     const frontendRoot = fileURLToPath(new URL('../', import.meta.url));
+    const viteCache = privateViteCache('dock-edge');
     const server = await createServer({
+      cacheDir: viteCache.cacheDir,
       configFile: false,
+      optimizeDeps: DEV_OPTIMIZE_DEPS,
       root: frontendRoot,
       logLevel: 'silent',
       // The dock pulls in core modules the published ui dist leaves external, so resolve them from source like the app does.
@@ -41,10 +48,13 @@ test(
           const label = `${preset}/${mode}`;
           await page.goto(
             `http://127.0.0.1:${address.port}/tests/fixtures/dock-edge.fixture.html?preset=${preset}&mode=${mode}`,
-            { waitUntil: 'domcontentloaded', timeout: RENDER_TIMEOUT_MS },
+            { waitUntil: 'domcontentloaded', timeout: FIRST_LOAD_TIMEOUT_MS },
           );
           const panel = page.locator('[data-aui-compact-layout]');
           await panel.waitFor({ state: 'visible', timeout: RENDER_TIMEOUT_MS });
+          await page.screenshot({
+            path: await featureShotPath({ surface: 'screen:chat-layout', step: `side-panel-edge-${preset}-${mode}` }),
+          });
 
           const edge = await panel.evaluate(element => {
             const style = getComputedStyle(element);
@@ -74,9 +84,13 @@ test(
           }
         }
       }
+    } catch (error) {
+      await saveFailureShots({ browser, surface: 'screen:chat-layout' });
+      throw error;
     } finally {
       await browser?.close();
       await server.close();
+      viteCache.remove();
     }
   },
 );

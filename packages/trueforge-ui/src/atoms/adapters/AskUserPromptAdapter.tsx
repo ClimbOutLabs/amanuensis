@@ -78,7 +78,7 @@ export function AskUserPrompt({
             </div>
             <div className="flex items-center gap-2 rounded-b-lg border border-t-0 border-border px-4 py-3">
               <Icon name="circle-check" size="0.875em" className="shrink-0 text-primary-button-bg" />
-              <span className="font-sans text-[0.8125rem] font-medium text-text-primary">
+              <span className="font-sans text-sm font-medium text-text-primary">
                 {q.isCustom ? `Other: ${q.answer}` : q.answer}
               </span>
             </div>
@@ -132,9 +132,9 @@ export function AskUserPrompt({
       placeholder={hasOptions ? 'Other' : 'Type your answer'}
       aria-label={hasOptions ? 'Other (custom answer)' : 'Your answer'}
       className={cn(
-        'field-sizing-content min-h-6 max-h-[3lh] w-full resize-none overflow-y-auto rounded px-2 py-0.5 text-[0.8125rem] leading-snug text-text-primary',
+        'field-sizing-content min-h-6 max-h-[3lh] w-full resize-none overflow-y-auto rounded px-2 py-0.5 text-sm leading-snug text-text-primary',
         framed ? 'border border-input-border bg-primary-bg' : 'border border-transparent bg-transparent',
-        'placeholder:text-[0.8125rem] focus:outline-none focus:ring-1 focus:ring-focus-ring',
+        'placeholder:text-[length:var(--text-sm)] focus:outline-none focus:ring-1 focus:ring-focus-ring',
       )}
     />
   );
@@ -195,7 +195,7 @@ export function AskUserPrompt({
       <div className="flex flex-col gap-4 rounded-b-lg border border-t-0 border-border px-4 py-3">
         <div className="flex flex-col gap-3">
           {isMultiQuestion && (
-            <div className="font-sans text-[0.9375rem] font-semibold leading-snug text-text-primary">
+            <div className="font-sans text-base font-semibold leading-snug text-text-primary">
               {currentQuestion.question || 'What would you like to do?'}
             </div>
           )}
@@ -220,7 +220,7 @@ export function AskUserPrompt({
                   />
                   <span
                     className={cn(
-                      'min-w-0 font-sans text-[0.8125rem] leading-snug text-text-primary',
+                      'min-w-0 font-sans text-sm leading-snug text-text-primary',
                       isSelected ? 'font-semibold' : 'font-medium',
                     )}
                   >

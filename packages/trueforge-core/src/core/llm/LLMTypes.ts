@@ -92,6 +92,33 @@ export const MapsHostsSchema = z
   })
   .describe('Configured maps upstream URLs for the approval card destination.');
 
+export const DocumentScopeSchema = z
+  .object({
+    staged_uploads_dir: z
+      .string()
+      .nullable()
+      .describe('Directory the sandbox stages uploaded files in, or null when it is not known.'),
+    workspace_cwd: z.string().nullable().describe('Bound project folder for this chat, or null when none is bound.'),
+    path_resolution: z
+      .enum(['host', 'remote'])
+      .nullable()
+      .describe("How this call's file paths are read: on the server's filesystem, or inside a remote sandbox."),
+  })
+  .describe('Host-derived folders the document reader may read without asking. Never model-authored.');
+
+export const BrowserClickReviewSchema = z
+  .object({
+    site: z.string().describe('Host of the page the click would happen on.'),
+    accessible_name: z.string().describe("The clicked element's accessible name, read from the live page."),
+    is_form_submit: z
+      .boolean()
+      .describe('True when the element submits a form: type=submit, or a plain button inside a form.'),
+    form_values: z
+      .record(z.string(), z.string())
+      .describe("Named field values on the clicked element's form, sensitive ones already masked."),
+  })
+  .describe('Host-read context for a browser click, used to classify it and to build its approval card.');
+
 export const InternalToolCallInfoSchema = z.object({
   type: z.enum(['truefoundry-system', 'mcp']).describe('Whether the tool is a system tool or MCP tool.'),
   mcp_server_id: z.string().describe('Internal MCP server id (empty for system tools).'),
@@ -117,12 +144,19 @@ export const InternalToolCallInfoSchema = z.object({
     .describe(
       'How the Sentinel reads this call\'s file paths: the sandbox provider says "remote" when the sandbox filesystem is not the server\'s. Never model-authored.',
     ),
+  workspace_cwd: z
+    .string()
+    .nullable()
+    .optional()
+    .describe(
+      'Workspace the classifier judged this call against, recorded by the tool that classified it so pre-dispatch verification re-checks containment against the same root. Never model-authored.',
+    ),
   is_client_side: z.boolean().optional().describe('Whether the client must supply the tool result.'),
   // Runtime + wire: deviation from origin/main OpenAPI (which omitted this field) is accepted.
   is_thread_creation: z.boolean().optional().describe('Whether this tool call creates a subagent thread.'),
   pre_dispatch_failure: z
     .object({
-      kind: z.enum(['policy_blocked', 'pre_dispatch_failed']),
+      kind: z.enum(['policy_blocked', 'pre_dispatch_failed', 'connector_unreachable']),
       message: z.string(),
       owner_message: z
         .string()
@@ -151,6 +185,12 @@ export const InternalToolCallInfoSchema = z.object({
   ),
   maps_hosts: MapsHostsSchema.optional().describe(
     'Host-derived configured maps upstream hosts for the approval card destination. Never model-authored or client supplied.',
+  ),
+  document_scope: DocumentScopeSchema.optional().describe(
+    'Host-derived folders the document reader may read without asking. Never model-authored or client supplied.',
+  ),
+  browser_click: BrowserClickReviewSchema.optional().describe(
+    'Host-read context for a browser_click call, read from the live page before the click. Never model-authored.',
   ),
   // Sentinel host-only classification. Populated by the classifier in
   // ToolSet/Sandbox; always present on classified calls, never wire-visible.
@@ -183,6 +223,12 @@ export const InternalToolCallInfoSchema = z.object({
     .describe(
       'Connector host a standing grant for this call binds to, set on a grant-eligible ask. Never model-authored.',
     ),
+  grant_tool_name: z
+    .string()
+    .optional()
+    .describe(
+      'Scope key a standing grant for this call is recorded under, when it covers more than the one tool. Never model-authored.',
+    ),
   audit_description: z
     .string()
     .optional()
@@ -202,6 +248,12 @@ export const InternalToolCallInfoSchema = z.object({
     .optional()
     .describe(
       'Set when the call reads a sensitive path or passes a path-like argument, which is never eligible for a standing grant. Never model-authored.',
+    ),
+  mail_send: z
+    .literal(true)
+    .optional()
+    .describe(
+      "Set when the call is a send through the host's own Email sidecar, so approving it checks the Email list. Never model-authored.",
     ),
   approval_binding: TrackedExecutionBindingSchema.nullable()
     .optional()
@@ -342,6 +394,8 @@ export type ThinkingBlock = z.infer<typeof ThinkingBlockSchema>;
 export type RedactedThinkingBlock = z.infer<typeof RedactedThinkingBlockSchema>;
 export type ToolEffectHints = z.infer<typeof ToolEffectHintsSchema>;
 export type MapsHosts = z.infer<typeof MapsHostsSchema>;
+export type DocumentScope = z.infer<typeof DocumentScopeSchema>;
+export type BrowserClickReview = z.infer<typeof BrowserClickReviewSchema>;
 export type InternalToolCallInfo = z.infer<typeof InternalToolCallInfoSchema>;
 export type RegisteredCommandExecution = z.infer<typeof RegisteredCommandExecutionSchema>;
 export type TrueFoundrySystemToolInfo = z.infer<typeof TrueFoundrySystemToolInfoSchema>;
@@ -416,6 +470,19 @@ export interface RawAssistantMessageWithUsage {
   repetition_stopped?: true;
   /** Which guard cut the answer short and on which channel, present when repetition_stopped is set. */
   repetition_stop?: RepetitionStop;
+  /**
+   * Ids of tool calls the stream stopped early because their arguments ran past the host's
+   * per-call size limit. Their arguments are partial and must never run: the reply guard
+   * refuses them with a plain message that tells the model to send the content in smaller
+   * parts. Absent when no call was cut.
+   */
+  size_cut_tool_calls?: string[];
+  /**
+   * Set when the stream stopped reading because the reply started more tool calls than the
+   * stream reads. The calls it holds are the ones before the cut; the reply guard stops the
+   * turn rather than running part of the reply. Absent when the whole reply was read.
+   */
+  tool_call_count_cut?: true;
 }
 
 export const UNKNOWN_TOOL_NAME = 'unknown';

@@ -28,11 +28,20 @@ import type { CancellationReason, TerminalTurnState } from '../schemas/turn';
 
 /**
  * Caller-supplied fields for creating a session; the store owns timestamps and tip state.
- * `agent` is a discriminated reference | inline binding.
+ * `agent` is a discriminated reference | inline binding. A private chat (`is_incognito`) carries
+ * its first deletion time; any other chat carries null.
  */
 export type CreateSessionInput<TSessionCustom extends object = Record<string, never>> = Pick<
   SessionRecord<TSessionCustom>,
-  'tenant_id' | 'session_id' | 'agent' | 'created_by_subject' | 'external_id' | 'metadata' | 'source'
+  | 'tenant_id'
+  | 'session_id'
+  | 'agent'
+  | 'created_by_subject'
+  | 'external_id'
+  | 'metadata'
+  | 'source'
+  | 'is_incognito'
+  | 'private_expires_at'
 > & {
   custom: TSessionCustom | null;
 };
@@ -80,6 +89,24 @@ export interface GetSessionByExternalIdInput {
 }
 
 export interface DeleteSessionInput {
+  tenant_id: string;
+  session_id: string;
+}
+
+export interface SetPrivateExpiryInput {
+  tenant_id: string;
+  session_id: string;
+  private_expires_at: Date;
+}
+
+export interface ListExpiredPrivateSessionsInput {
+  /** Private chats whose deletion time is at or before this instant are returned. */
+  now: Date;
+  limit: number;
+}
+
+/** A private chat past its deletion time, named across tenants for the sweep that deletes it. */
+export interface ExpiredPrivateSession {
   tenant_id: string;
   session_id: string;
 }
@@ -212,6 +239,8 @@ export interface ListSessionsInput {
    * Requires `source_type`.
    */
   source_id: string | undefined;
+  /** When false, private chats (`is_incognito`) are left out. */
+  include_private: boolean;
 }
 
 /** Turn row fields without assembled snapshot (create input / listTurns). */
@@ -445,6 +474,68 @@ export interface ListSessionEventsInput {
   after_event_id: string | undefined;
 }
 
+/** One searchable piece of a finished turn: words the person typed, or the assistant's final reply. */
+export interface ChatSearchDocument {
+  /** Stable within the turn; the caller keys it to the message it came from, so a re-index replaces it. */
+  message_id: string;
+  role: 'user' | 'assistant';
+  text: string;
+  /** When the message was written: the turn's start for the person's words, its end for the reply. */
+  created_at: Date;
+}
+
+export interface IndexChatMessagesInput {
+  tenant_id: string;
+  session_id: string;
+  turn_id: string;
+  /** The persona the turn ran under, or `null` for the main assistant. Search scopes by it. */
+  persona_id: string | null;
+  /** The turn's complete document set; the rows stored for the turn are replaced by it. */
+  documents: readonly ChatSearchDocument[];
+}
+
+/**
+ * Whose persona chats a search may return. Messages written with no persona always count.
+ * 'only' limits persona messages to the listed ids, for an assistant reading another persona's
+ * chats; 'all' returns every persona's, for the person searching their own chat list.
+ */
+export type ChatSearchPersonaScope = { kind: 'all' } | { kind: 'only'; persona_ids: readonly string[] };
+
+export interface SearchChatHistoryInput {
+  tenant_id: string;
+  /** Free text; a chat matches when one of its indexed messages holds every query word (see chatSearchText). */
+  query: string;
+  /** Only chats this subject created are searched. */
+  created_by_subject_id: string;
+  /** Which personas' messages may be returned. */
+  personas: ChatSearchPersonaScope;
+  /** The chat the search runs from; never among the hits. `null` excludes nothing. */
+  exclude_session_id: string | null;
+  /** Inclusive lower bound on the matched message's time; `null` is unbounded. */
+  from: Date | null;
+  /** Exclusive upper bound on the matched message's time; `null` is unbounded. */
+  to: Date | null;
+  /** Most hits to return; at most one hit per chat. */
+  limit: number;
+}
+
+export interface ClearChatSearchIndexInput {
+  tenant_id: string;
+  /** Every indexed message of the chats this subject created is removed. */
+  created_by_subject_id: string;
+}
+
+export interface ChatSearchHit {
+  session_id: string;
+  title: string | null;
+  /** When the chat was created. */
+  created_at: Date;
+  /** Excerpt of the chat's best-matching message, at most 300 characters. */
+  snippet: string;
+  /** When the matched message was written. */
+  matched_at: Date;
+}
+
 /**
  * Session/turn persistence contract. Pure durability: no streaming, SSE, or
  * subscription members. Callers authorize the parent session before using
@@ -462,6 +553,9 @@ export interface ISessionStore<
    * `session_id` is globally unique across tenants.
    * Persists caller-supplied `created_by_subject` (immutable after create).
    * Sets `last_activity_timestamp_ms` (= now) on create.
+   * `is_incognito` is fixed here for the session's life. A private chat must carry a
+   * `private_expires_at` and any other chat must carry null, or the create rejects with
+   * `SessionStoreInvariantError` and writes nothing.
    */
   createSession(input: CreateSessionInput<TSessionCustom>): Promise<void>;
 
@@ -478,6 +572,38 @@ export interface ISessionStore<
 
   /** Permanently removes a session and all related data; missing sessions are a no-op. */
   deleteSession(input: DeleteSessionInput): Promise<void>;
+
+  /**
+   * Moves a private chat's deletion time. A chat that is not private rejects with
+   * `SessionStoreInvariantError`; a missing one with `SessionNotFoundError`. Not session activity:
+   * `updated_at` and `last_activity_timestamp_ms` are left alone.
+   */
+  setPrivateExpiry(input: SetPrivateExpiryInput): Promise<void>;
+
+  /**
+   * Private chats in every tenant whose deletion time is at or before `now`, soonest first,
+   * at most `limit`. Read path: nothing is changed.
+   */
+  listExpiredPrivateSessions(input: ListExpiredPrivateSessionsInput): Promise<ExpiredPrivateSession[]>;
+
+  /**
+   * Replaces one turn's rows in the past-chat search index with `documents`. The index is
+   * derived data: it is never exported, and after an import it is rebuilt by indexing the
+   * restored turns again. Indexing a session that does not exist is a no-op, so a chat
+   * deleted while its turn was finishing leaves nothing behind.
+   */
+  indexChatMessages(input: IndexChatMessagesInput): Promise<void>;
+
+  /**
+   * Word search over the indexed messages of the chats `created_by_subject_id` created in the
+   * tenant, limited to the personas `personas` allows. At most one hit per chat, its newest
+   * matching message; chats with the newest match come first, ties by session id. `from` / `to`
+   * bound the matched message's time. A query with no searchable words matches nothing.
+   */
+  searchChatHistory(input: SearchChatHistoryInput): Promise<ChatSearchHit[]>;
+
+  /** Removes every indexed message of the chats the subject created in the tenant. */
+  clearChatSearchIndex(input: ClearChatSearchIndexInput): Promise<void>;
 
   /** Lists active grants for the owner-scoped session and its current repository binding, including between turns. */
   listImplementationPlanGrants(input: ListImplementationPlanGrantsInput): Promise<ImplementationPlanGrant[]>;
@@ -571,7 +697,8 @@ export interface ISessionStore<
    * `agent_id` filters ref-bound sessions. `created_by_or_agent_ids` matches
    * rows created by its subject OR bound to one of its agent ids; optional
    * `source_type` / `source_id` filter by JSON `source` (expression-indexed,
-   * no scalar columns). Does **not** bump `last_activity_timestamp_ms` (read path).
+   * no scalar columns). Private chats are returned only with `include_private`.
+   * Does **not** bump `last_activity_timestamp_ms` (read path).
    */
   listSessions(
     input: ListSessionsInput,

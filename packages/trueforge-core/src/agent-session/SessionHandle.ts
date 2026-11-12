@@ -1,6 +1,7 @@
 /**
  * Bound session handle: starts turns via {@link SessionHandle.createTurn}.
  */
+import type { Logger } from 'winston';
 import { stripLegacyHostContextMessages } from '../core/capabilities/builtins/RepositoryBindingContext';
 import type { ActionRequiredEvent, ApprovalDecision, UserToolApprovalMessage } from '../core/events/schema';
 import { newEventId } from '../core/events/schema';
@@ -20,6 +21,7 @@ import {
   createSentinelHostContext,
   DEFAULT_PINNED_PATH,
   defaultSentinelServices,
+  forIncognitoChat,
   forUnattendedRun,
   withoutRelaxations,
   type SentinelHostContext,
@@ -426,6 +428,8 @@ export class SessionHandle<
      * A follow-up turn in the same chat asks as usual, but never gets the owner's relaxations.
      */
     unattended?: boolean | undefined;
+    /** Built-in tool names this turn does not offer. */
+    withheld_tools?: readonly string[] | undefined;
     /** End the turn after its tool step without calling the model. */
     stop_after_tool_response?: boolean | undefined;
   }): Promise<TurnHandle<TTurnCustom>> {
@@ -440,12 +444,14 @@ export class SessionHandle<
     const custom = typeof input.custom === 'function' ? input.custom(previous?.custom ?? undefined) : input.custom;
     // A scheduled chat never gets the owner's relaxations, even on turns they type: its context still
     // holds what the run read. Only holding what would ask stays with the unattended turn itself.
+    // An incognito chat makes nothing that outlives it, on every turn and whoever is watching.
+    const sessionServices = this.session.is_incognito ? forIncognitoChat(this.sentinelServices) : this.sentinelServices;
     const sentinelServices =
       input.unattended === true
-        ? forUnattendedRun(this.sentinelServices)
+        ? forUnattendedRun(sessionServices)
         : this.session.source?.type === 'schedule'
-          ? withoutRelaxations(this.sentinelServices)
-          : this.sentinelServices;
+          ? withoutRelaxations(sessionServices)
+          : sessionServices;
 
     // Dispose-on-early-failure: any resource acquired below (sandbox handle,
     // MCP connections) is owned by createTurn() until the TurnHandle is returned; from then
@@ -502,6 +508,9 @@ export class SessionHandle<
         session_id: this.session.session_id,
       };
       const turnId = input.turn_id;
+      // One logger for the whole turn, stamped with the session and turn ids, so every line the
+      // turn's threads and orchestrator write can be found in the app log by either id.
+      const turnLogger = input.resolver.logger.child({ sessionId: this.session.session_id, turnId });
       const planGrantTurnOwner = { ...planGrantOwner, turn_id: turnId };
       let turnCommitted = false;
       const chatApprovalGrants = new Set(
@@ -554,6 +563,7 @@ export class SessionHandle<
       const agentThreads = this.buildThreads({
         previous,
         resolver: input.resolver,
+        logger: turnLogger,
         spec,
         sandbox,
         tracing,
@@ -564,10 +574,12 @@ export class SessionHandle<
         turnToolCallLedger,
         sentinelServices,
         stopAfterToolResponse: input.stop_after_tool_response === true,
+        withheldTools: input.withheld_tools,
       });
 
       const createDynamicSubAgentThread = this.makeCreateDynamicSubAgentThread({
         resolver: input.resolver,
+        logger: turnLogger,
         previous,
         spec,
         sandbox,
@@ -575,13 +587,14 @@ export class SessionHandle<
         chatApprovalGrants,
         loadImplementationPlanGrants,
         sentinelServices,
+        withheldTools: input.withheld_tools,
       });
 
       const orchestrator = new AgentThreadOrchestrator({
         agentThreads,
         createDynamicSubAgentThread,
         tracing,
-        logger: input.resolver.logger,
+        logger: turnLogger,
       });
 
       // SEND BEFORE COMMIT — validate + append; throw ⇒ nothing persisted.
@@ -1026,6 +1039,7 @@ export class SessionHandle<
   private buildThreads(input: {
     previous: TurnRecord<TTurnCustom> | undefined;
     resolver: ITurnResourceResolver<TTurnCustom>;
+    logger: Logger;
     spec: AgentSpec;
     sandbox: Sandbox | undefined;
     tracing: AgentTracing;
@@ -1036,6 +1050,7 @@ export class SessionHandle<
     turnToolCallLedger: TurnToolCallLedger;
     sentinelServices: SentinelServices;
     stopAfterToolResponse: boolean;
+    withheldTools: readonly string[] | undefined;
   }): Map<string, AgentThread> {
     const snapshots = input.previous?.snapshot.threads;
     const map = new Map<string, AgentThread>();
@@ -1050,6 +1065,7 @@ export class SessionHandle<
           threadId,
           previousThreadSnapshot: snapshots?.[threadId],
           resolver: input.resolver,
+          logger: input.logger,
           spec: input.spec,
           sandbox: input.sandbox,
           tracing: input.tracing,
@@ -1060,6 +1076,7 @@ export class SessionHandle<
           turnToolCallLedger: input.turnToolCallLedger,
           sentinelServices: input.sentinelServices,
           stopAfterToolResponse: input.stopAfterToolResponse,
+          withheldTools: input.withheldTools,
         }),
       );
     }
@@ -1070,6 +1087,7 @@ export class SessionHandle<
     threadId: string;
     previousThreadSnapshot?: AgentThreadSnapshot | undefined;
     resolver: ITurnResourceResolver<TTurnCustom>;
+    logger: Logger;
     spec: AgentSpec;
     sandbox: Sandbox | undefined;
     tracing: AgentTracing;
@@ -1080,6 +1098,7 @@ export class SessionHandle<
     turnToolCallLedger: TurnToolCallLedger;
     sentinelServices: SentinelServices;
     stopAfterToolResponse: boolean;
+    withheldTools: readonly string[] | undefined;
   }): AgentThread {
     const { definition, extraCapabilities, compactionModel } = input.resolvedDefinition;
     const isChild = Boolean(input.previousThreadSnapshot?.parent);
@@ -1092,10 +1111,11 @@ export class SessionHandle<
       sandbox,
       sandboxAvailable: Boolean(sandbox),
       tracing: input.tracing,
-      logger: input.resolver.logger,
+      logger: input.logger,
       compactionContext: input.resolver.compactionContext,
       compactionThresholdTokensDefault: input.resolver.compactionThresholdTokensDefault,
       boundRepository: input.resolver.boundRepository,
+      withheldTools: input.withheldTools,
       extraCapabilities,
     });
     return new AgentThread({
@@ -1121,20 +1141,23 @@ export class SessionHandle<
       loadImplementationPlanGrants: input.loadImplementationPlanGrants,
       isRequestContinuation: input.isRequestContinuation,
       tracing: input.tracing,
-      logger: input.resolver.logger,
+      logger: input.logger,
       toolDispatchMaxConcurrency: input.resolver.toolDispatchMaxConcurrency,
       toolCallTimeoutMs: input.resolver.toolCallTimeoutMs,
       runCodeToolCallTimeoutMs: input.resolver.runCodeToolCallTimeoutMs,
       modelFirstResponseTimeoutMs: input.resolver.modelFirstResponseTimeoutMs,
       modelIdleTimeoutMs: input.resolver.modelIdleTimeoutMs,
+      modelToolCallIdleTimeoutMs: input.resolver.modelToolCallIdleTimeoutMs,
       toolCallPolicy: input.resolver.toolCallPolicy,
       stopAfterToolResponse: input.stopAfterToolResponse,
+      withheldTools: input.withheldTools,
       sentinel: this.createSentinelContext(input.sentinelServices, input.resolver.webSearchTurn),
     });
   }
 
   private makeCreateDynamicSubAgentThread(input: {
     resolver: ITurnResourceResolver<TTurnCustom>;
+    logger: Logger;
     previous: TurnRecord<TTurnCustom> | undefined;
     spec: AgentSpec;
     sandbox: Sandbox | undefined;
@@ -1142,6 +1165,7 @@ export class SessionHandle<
     chatApprovalGrants: Set<string>;
     loadImplementationPlanGrants: () => Promise<ReadonlySet<string>>;
     sentinelServices: SentinelServices;
+    withheldTools: readonly string[] | undefined;
   }): CreateDynamicSubAgentThread {
     return async params => {
       throwIfSignalAborted(params.signal);
@@ -1198,7 +1222,7 @@ export class SessionHandle<
         sandbox,
         sandboxAvailable: Boolean(sandbox),
         tracing: input.tracing,
-        logger: input.resolver.logger,
+        logger: input.logger,
         compactionContext: input.resolver.compactionContext,
         compactionThresholdTokensDefault: input.resolver.compactionThresholdTokensDefault,
         boundRepository: input.resolver.boundRepository,
@@ -1215,17 +1239,19 @@ export class SessionHandle<
         capabilities,
         toolCallMemo: undefined,
         turnToolCallLedger: params.turnToolCallLedger,
+        withheldTools: input.withheldTools,
         taskState: undefined,
         chatApprovalGrants: input.chatApprovalGrants,
         loadImplementationPlanGrants: input.loadImplementationPlanGrants,
         isRequestContinuation: false,
         tracing: input.tracing,
-        logger: input.resolver.logger,
+        logger: input.logger,
         toolDispatchMaxConcurrency: input.resolver.toolDispatchMaxConcurrency,
         toolCallTimeoutMs: input.resolver.toolCallTimeoutMs,
         runCodeToolCallTimeoutMs: input.resolver.runCodeToolCallTimeoutMs,
         modelFirstResponseTimeoutMs: input.resolver.modelFirstResponseTimeoutMs,
         modelIdleTimeoutMs: input.resolver.modelIdleTimeoutMs,
+        modelToolCallIdleTimeoutMs: input.resolver.modelToolCallIdleTimeoutMs,
         toolCallPolicy: input.resolver.toolCallPolicy,
         sentinel: this.createSentinelContext(input.sentinelServices, input.resolver.webSearchTurn),
       });

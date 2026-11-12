@@ -535,6 +535,8 @@ interface ConnectorFamily {
    * message to a person, so it also has to be shown in full and carry no hidden characters.
    */
   sends?: 'message' | 'content';
+  /** The call only stages a message as a draft: nothing is delivered, so its card carries no send warning. */
+  stages_message?: boolean;
   /** The card has to name a recipient. */
   needs_recipient?: boolean;
   /** Replaces the recipient when only some addresses in the params receive anything, such as a filter's sender match. */
@@ -642,6 +644,7 @@ const CONNECTOR_FAMILIES: ConnectorFamily[] = [
   {
     match: words => hasPhrase(words, 'create_draft', 'draft_email', 'update_draft', 'gmail_draft', 'save_draft'),
     sends: 'message',
+    stages_message: true,
     describe: ({ where, fields }) => `Save a message draft${toRecipient(fields)}${where}?`,
   },
   {
@@ -705,6 +708,8 @@ export interface ExtractionResult {
   connector_what: string | null;
   /** The call sends data out (a send family, an external service, or a named recipient); it is never trusted by a hint or grant. */
   sends: boolean;
+  /** The call only saves a draft of a message: nothing is sent, so its card carries no send warning. */
+  staged_draft: boolean;
   /** Why a send cannot be shown to the user in full, or null. Such a send is refused, never carded. */
   incomplete_send: IncompleteSend | null;
 }
@@ -862,7 +867,10 @@ interface IncompleteSend {
   owner_message: string;
 }
 
-const REFUSALS: Record<HiddenSend | 'hidden_characters' | 'long_key' | 'too_long' | 'no_recipient', IncompleteSend> = {
+const REFUSALS: Record<
+  HiddenSend | 'hidden_characters' | 'long_key' | 'too_long' | 'no_recipient' | 'draft_no_recipient',
+  IncompleteSend
+> = {
   reply_all: {
     model_message:
       'Replying to everyone fills in the recipients after approval, so it cannot be shown. Reply on the same message with every person who should get it named in `to`.',
@@ -895,6 +903,11 @@ const REFUSALS: Record<HiddenSend | 'hidden_characters' | 'long_key' | 'too_long
   no_recipient: {
     model_message: 'This does not name who receives it. Name each recipient in `to` and try again.',
     owner_message: 'Nothing was sent: it did not say who gets it. The assistant needs to name each person.',
+  },
+  draft_no_recipient: {
+    model_message:
+      'This draft names no recipient, and a draft must say who it is for. Put the address in `recipients`, or ask the person who the draft should go to.',
+    owner_message: 'Nothing was saved: the draft did not say who it is for. The assistant needs to name the recipient.',
   },
 };
 
@@ -944,6 +957,8 @@ function incompleteSend(input: {
   truncated: boolean;
   needs_recipient: boolean;
   needs_to: boolean;
+  /** The host Email connector's own draft: it must name a recipient even though a draft sends nothing. */
+  draft_needs_recipient: boolean;
   params: Record<string, unknown>;
   fields: ExtractedCardFields;
 }): IncompleteSend | null {
@@ -972,6 +987,9 @@ function incompleteSend(input: {
   ) {
     return REFUSALS.no_recipient;
   }
+  if (input.draft_needs_recipient && input.fields.recipient === null) {
+    return REFUSALS.draft_no_recipient;
+  }
   return null;
 }
 
@@ -990,6 +1008,11 @@ export function extractCardFields(input: {
   server_name?: string | undefined;
   /** The tool is declared read-only and closed-world: a recipient or draft argument alone does not make it a send. */
   read_only_closed_world?: boolean | undefined;
+  /**
+   * The classifier judged this the host Email connector's own save_draft, from the first-party mark the
+   * extractor cannot see: its draft must name a recipient, unlike a draft-shaped call anywhere else.
+   */
+  host_mail_draft?: boolean | undefined;
 }): ExtractionResult {
   const entry = EXTRACTOR_REGISTRY.find(e => e.match(input.tool_name));
   const externalService =
@@ -1004,6 +1027,7 @@ export function extractCardFields(input: {
       connector_read: false,
       connector_what: null,
       sends: externalService,
+      staged_draft: false,
       incomplete_send: incompleteSend({
         hidden: null,
         sends: externalService,
@@ -1013,6 +1037,7 @@ export function extractCardFields(input: {
         truncated: false,
         needs_recipient: false,
         needs_to: false,
+        draft_needs_recipient: false,
         params: input.canonical_params,
         fields: base,
       }),
@@ -1059,6 +1084,7 @@ export function extractCardFields(input: {
     external_service: externalService,
     connector_read: connectorRead,
     sends,
+    staged_draft: family?.stages_message === true,
     incomplete_send: incompleteSend({
       hidden,
       sends,
@@ -1068,6 +1094,7 @@ export function extractCardFields(input: {
       truncated: outbound.truncated,
       needs_recipient: family?.needs_recipient === true,
       needs_to: isMailReply({ words: `${words}${nameWords(input.server_name ?? '')}`, params: input.canonical_params }),
+      draft_needs_recipient: input.host_mail_draft === true && family?.stages_message === true,
       params: input.canonical_params,
       fields,
     }),

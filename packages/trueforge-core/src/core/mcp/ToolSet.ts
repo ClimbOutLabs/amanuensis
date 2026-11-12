@@ -24,7 +24,7 @@ import { isMapsToolName } from '../permissions/mapsToolNames';
 import { appendOutboundTrace, collectOutboundStrings } from '../permissions/outboundGuard';
 import {
   isSearchAskReason,
-  isSilentSearchReason,
+  countsAsSilentLookup,
   resultTexts,
   runOneAtATime,
   type SearchProviderGrant,
@@ -131,7 +131,9 @@ export function stampSentinelDecision(input: {
   | 'audit_description'
   | 'effect'
   | 'grant_host'
+  | 'grant_tool_name'
   | 'secret_path_read'
+  | 'mail_send'
 > {
   const decision = input.decision;
   return {
@@ -145,7 +147,9 @@ export function stampSentinelDecision(input: {
     // A connector read is inspection per call: its arguments decide it, not the tool's annotations.
     ...(decision.inspection ? { effect: 'inspect' as const } : {}),
     ...(decision.grant_host === null ? {} : { grant_host: decision.grant_host }),
+    ...(decision.grant_tool_name === null ? {} : { grant_tool_name: decision.grant_tool_name }),
     ...(decision.secret_path_read ? { secret_path_read: true as const } : {}),
+    ...(decision.mail_send ? { mail_send: true as const } : {}),
     ...(decision.silent_search_query === null ? {} : { silent_search_query: decision.silent_search_query }),
     ...(decision.audit_description === null ? {} : { audit_description: decision.audit_description }),
     is_approval_required:
@@ -177,12 +181,16 @@ function autoDenyMessage(decision: TierDecision): string {
       return `Auto-denied: ${decision.reason_detail ?? 'the send cannot be shown in full.'}`;
     case 'unattended_run':
       return `Auto-denied: ${decision.reason_detail ?? 'a scheduled run cannot do this'}`;
+    case 'incognito_chat':
+      return `Not done: ${decision.reason_detail ?? 'an incognito chat cannot make or change anything lasting.'}`;
     case 'outbound_guard':
       return `Auto-denied: ${decision.reason_detail ?? 'the outbound guard held this call back'} Continue without it.`;
     case 'lookup_limit':
       return `Not run: ${decision.reason_detail ?? 'this reply already looked up a lot.'} Answer from what you already found.`;
     case 'steered_by_content':
       return `Skipped: ${decision.reason_detail ?? 'something read, not the person, asked for it.'} Continue without it.`;
+    case 'home_assistant_refused':
+      return `Not run: ${decision.reason_detail ?? 'Aman does not control locks, alarms or garage doors.'} Continue without it.`;
     case 'private_detail':
       return `Skipped: ${decision.reason_detail ?? 'it would have shared something private.'} Continue without it.`;
     default:
@@ -503,7 +511,7 @@ export class ToolSet implements IToolSet {
     if (
       decision === undefined &&
       classification !== undefined &&
-      isSilentSearchReason(classification.reason) &&
+      countsAsSilentLookup({ tool_name: params.name, reason: classification.reason }) &&
       this.sentinel !== undefined
     ) {
       // Classified as silent a moment ago inside this one-at-a-time step, so the count is current.
@@ -654,6 +662,7 @@ export class ToolSet implements IToolSet {
       sentinel,
       repository_id: null,
       workspace_cwd: sentinel.workspace_cwd,
+      path_resolution: info.path_resolution,
       action: {
         tool_name: params.name,
         canonical_params: isRecord(params.arguments) ? params.arguments : {},
@@ -672,6 +681,7 @@ export class ToolSet implements IToolSet {
           open_world_hint: info.open_world_hint,
         },
         maps_hosts: info.maps_hosts,
+        document_scope: info.document_scope,
       },
     });
     const stamp = stampSentinelDecision({ decision });
@@ -686,7 +696,7 @@ export class ToolSet implements IToolSet {
           stamp.is_approval_required === true ||
           (decision.auto_deny === null &&
             this.policy.requiresApproval(params.name, tool?.annotations, {
-              waiveUnclassified: isHostVouchedDecision(decision),
+              waiveWriteAndUnclassifiedForHostVouchedRead: isHostVouchedDecision(decision),
             })),
       },
       classification: decision,

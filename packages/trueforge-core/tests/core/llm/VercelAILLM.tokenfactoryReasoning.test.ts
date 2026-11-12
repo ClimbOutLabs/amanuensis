@@ -9,6 +9,19 @@ import type { LLMCreateParams } from '../../../src/core/llm/ILLM';
 import { ModelOutputRepetitionError, VercelAILLM } from '../../../src/core/llm/VercelAILLM';
 import { makeSilentLogger } from '../harnessMocks';
 
+// Model HTTP rides the configured outbound fetch in production (util/outboundFetch);
+// in these suites it delegates to the global fetch the tests stub.
+jest.mock('../../../src/core/util/outboundFetch', () => {
+  const actual = jest.requireActual<typeof import('../../../src/core/util/outboundFetch')>(
+    '../../../src/core/util/outboundFetch',
+  );
+  return {
+    ...actual,
+    modelOutboundFetch: (input: string | URL | Request, init?: RequestInit): Promise<Response> =>
+      globalThis.fetch(input, init),
+  };
+});
+
 const RAW_MARKERS = ['<tool_call', '</tool_call', '<think', '</think', '<tool_calls', '</invoke', '<invoke'];
 
 function sseBodyFor(pieces: string[]): string {
@@ -210,7 +223,7 @@ describe('Token Factory repetition stops', () => {
     expect(result.repetition_stop).toEqual({ guard: 'answer_units', channel: 'answer' });
     const content = typeof result.output.content === 'string' ? result.output.content : '';
     expect(content).toContain('Stopped: the reply was repeating itself.');
-    expect(content.match(/dentist appointment is booked/g)).toHaveLength(2);
+    expect(content.match(/dentist appointment is booked/g)).toHaveLength(1);
   });
 
   it('stops reasoning that goes in circles and names the guard and channel on the error', async () => {
@@ -239,7 +252,7 @@ describe('Token Factory repetition stops', () => {
 
   it('lets a long reply with real tool calls and some repeated sentences finish whole', async () => {
     const opening =
-      'Your dentist visit is on Monday at half past two. The office is on the second floor of the clinic building on Pine Street.';
+      'Your dentist visit is on Monday at half past two. The office is upstairs in the clinic on Pine Street.';
     mockFrames([
       sseFrame({ role: 'assistant' }, null),
       sseFrame({ content: `${opening} ${opening}` }, null),

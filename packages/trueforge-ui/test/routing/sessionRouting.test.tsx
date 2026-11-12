@@ -6,8 +6,8 @@ import {
   type ThreadMessageLike,
 } from '@assistant-ui/react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { useState, type ReactNode } from 'react';
-import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom';
+import { useEffect, useState, type ReactNode } from 'react';
+import { BrowserRouter, MemoryRouter, useLocation, useNavigate } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 
 import { CompactLayoutProvider } from '@/atoms/lib/CompactLayoutContext.js';
@@ -16,7 +16,7 @@ import { ThreadListContainer } from '@/containers/ThreadListContainer.js';
 import { resolveRoutesConfig } from '@/routing/paths.js';
 import { RemoteIdRouteBridge } from '@/routing/RemoteIdRouteBridge.js';
 import { ShellRouteSync } from '@/routing/ShellRouteSync.js';
-import { ShellModeProvider } from '@/server/ShellModeContext.js';
+import { ShellModeProvider, useShellMode } from '@/server/ShellModeContext.js';
 import { SlotsProvider } from '@/theme/SlotsProvider.js';
 
 const routes = resolveRoutesConfig();
@@ -30,6 +30,18 @@ function CaptureLocation() {
   pathname = location.pathname;
   search = location.search;
   hash = location.hash;
+  return null;
+}
+
+let shellOpens: string[] = [];
+
+/** Records each session the shell asks the chat runtime to open. */
+function CaptureShellOpens() {
+  const shell = useShellMode();
+  const { pendingSessionId, pendingSessionEpoch } = shell;
+  useEffect(() => {
+    if (pendingSessionId != null) shellOpens.push(pendingSessionId);
+  }, [pendingSessionId, pendingSessionEpoch]);
   return null;
 }
 
@@ -74,6 +86,7 @@ function Harness({
     <SlotsProvider overrides={{ ThreadListRow: ThreadListRowOverride }}>
       <ShellModeProvider agentConfig={{ mode: 'AgentLibraryWithComposer' }}>
         <ShellRouteSync routes={routes} activeRemoteId={activeRemoteId} initialSettingsOpen={false} />
+        <CaptureShellOpens />
         <RuntimeHarness
           threadList={{
             threadId,
@@ -219,5 +232,53 @@ describe('selecting a session updates the URL', () => {
     });
     expect(search).toBe('?tenant=acme');
     expect(hash).toBe('#top');
+  });
+  // In a busy browser, Back can land before React renders the shell's own push. The router then
+  // commits the popped entry, which equals the one it last rendered, so only the pop shows the move.
+  it('opens the chat Back lands on even when Back beats the shell navigation it undoes', async () => {
+    window.history.replaceState(null, '', '/');
+    shellOpens = [];
+    render(
+      <BrowserRouter>
+        <CaptureLocation />
+        <Harness
+          threads={[
+            { status: 'regular', id: 'thread-draft', title: 'New Chat' },
+            { status: 'regular', id: 'thread-1', remoteId: 'session-1', title: 'First' },
+            { status: 'regular', id: 'thread-2', remoteId: 'session-2', title: 'Second' },
+          ]}
+        />
+      </BrowserRouter>,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'First' }));
+    });
+    await waitFor(() => {
+      expect(pathname).toBe('/sessions/session-1');
+    });
+    const firstEntry: unknown = window.history.state;
+
+    // The person presses Back the moment the shell pushes the second chat, before React renders it.
+    const pushState = window.history.pushState.bind(window.history);
+    const spy = vi.spyOn(window.history, 'pushState').mockImplementation((state, unused, url) => {
+      pushState(state, unused, url);
+      if (String(url).endsWith('/sessions/session-2')) {
+        window.history.replaceState(firstEntry, '', '/sessions/session-1');
+        window.dispatchEvent(new PopStateEvent('popstate', { state: firstEntry }));
+      }
+    });
+    try {
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Second' }));
+      });
+    } finally {
+      spy.mockRestore();
+    }
+
+    await waitFor(() => {
+      expect(shellOpens.at(-1)).toBe('session-1');
+    });
+    expect(pathname).toBe('/sessions/session-1');
   });
 });

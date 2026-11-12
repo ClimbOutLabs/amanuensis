@@ -18,7 +18,10 @@ export const searchResponse = {
   query: 'English speaking doctor Lisbon',
   follow_up_questions: null,
   answer: null,
-  images: [],
+  images: [
+    { url: 'https://cdn.clinics.example/harbour-front.jpg', description: 'The clinic entrance' },
+    'https://cdn.clinics.example/garden-sign.jpg',
+  ],
   results: [
     {
       url: HARBOUR_URL,

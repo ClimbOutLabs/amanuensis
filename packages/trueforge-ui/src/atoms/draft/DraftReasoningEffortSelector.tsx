@@ -76,7 +76,7 @@ export function useReasoningEffortChoices(): ReasoningEffortChoices | null {
 export function DraftReasoningEffortOptions({ choices }: { choices: ReasoningEffortChoices }) {
   return (
     <div role="listbox" aria-label="Reasoning effort" className="border-border border-t p-1">
-      <p className="text-text-secondary px-2 py-1.5 text-[0.75rem]">Reasoning effort</p>
+      <p className="text-text-secondary px-2 py-1.5 text-xs">Reasoning effort</p>
       {choices.efforts.map(effort => {
         const active = effort === choices.resolved;
         return (
@@ -86,7 +86,7 @@ export function DraftReasoningEffortOptions({ choices }: { choices: ReasoningEff
             role="option"
             aria-selected={active}
             className={cn(
-              'flex w-full items-center rounded-md px-2 py-1.5 text-left text-[0.8125rem]',
+              'flex w-full items-center rounded-md px-2 py-1.5 text-left text-sm',
               active ? 'bg-dropdown-selected-item-bg text-dropdown-selected-item-text' : 'hover:bg-ghost-button-hover',
             )}
             onClick={() => choices.choose(effort)}

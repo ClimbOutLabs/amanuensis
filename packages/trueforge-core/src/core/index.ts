@@ -33,7 +33,12 @@ export type {
 export { AgentThreadOrchestrator } from './runtime/AgentThreadOrchestrator';
 export { stageAttachment } from './runtime/attachmentStaging';
 export type { StagedAttachment } from './runtime/attachmentStaging';
-export { isHostWrappedText, isUntrustedDocumentText } from './runtime/contextUtils';
+export {
+  hostPictureMessage,
+  isHostWrappedText,
+  isUntrustedDocumentText,
+  personMessageIndex,
+} from './runtime/contextUtils';
 export type { CreateDynamicSubAgentThread } from './runtime/CreateDynamicSubAgentThread';
 export { measurePromptRequest } from './runtime/promptReport';
 export type { PromptReport, PromptReportInput, PromptReportRow } from './runtime/promptReport';
@@ -58,10 +63,10 @@ export type {
 export type { StructuredDocumentReport } from '../documents/documentRenderer';
 export type { NetWorthObservationInput, NetWorthReport } from '../documents/netWorthReport';
 export { DEFAULT_OCR_LANGUAGES, requiredOcrLanguages } from '../documents/ocrLanguages';
-export { EXTRACT_DOCUMENT_TEXT_TOOL_NAME } from '../documents/toolContract';
+export { DOCUMENTS_SERVER_ID, EXTRACT_DOCUMENT_TEXT_TOOL_NAME } from '../documents/toolContract';
 export {
   CREATE_DOCUMENT_REPORT_TOOL_NAME,
-  DOCUMENTS_SERVER_ID,
+  DOCUMENT_REPORT_TOOL_NAMES,
   SUMMARIZE_NET_WORTH_TOOL_NAME,
   documentCapability,
 } from './capabilities/builtins/DocumentTools';
@@ -73,6 +78,7 @@ export type {
   AgentThreadExecutionContext,
   PostToolCallAgentContextProcessor,
   PreLLMEphemeralAgentContextProcessor,
+  PreLLMEphemeralCall,
   PreSendContextProcessor,
 } from './capabilities/AgentContextProcessor';
 export type { ToolResponseProcessor, ToolResponseProcessorResult } from './capabilities/ToolResponseProcessor';
@@ -105,11 +111,7 @@ export {
   largeToolResponse,
 } from './capabilities/builtins/LargeToolResponse';
 export { openUI } from './capabilities/builtins/OpenUI';
-export {
-  REPLACE_TASK_CHECKLIST_TOOL_NAME,
-  TASK_CHECKLIST_SERVER_ID,
-  taskChecklist,
-} from './capabilities/builtins/TaskChecklist';
+export { TASK_CHECKLIST_SERVER_ID, taskChecklist } from './capabilities/builtins/TaskChecklist';
 export type { TaskChecklistAccess } from './capabilities/builtins/TaskChecklist';
 export { TOKEN_BUDGET_SAFETY_MARGIN } from './capabilities/builtins/tokenBudgetConstants';
 export { toolOutputScreen } from './capabilities/builtins/ToolOutputScreen';
@@ -164,6 +166,7 @@ export type {
 } from './mcp/implementationPlanGrant';
 export { RemoteMCP } from './mcp/RemoteMCP';
 export type { RemoteMcpHeaders, ResolveHeadersResult } from './mcp/RemoteMCP';
+export { DEFAULT_MAX_MCP_RESPONSE_BYTES } from './mcp/remoteMcpClient';
 export type { RemoteMcpConnection, RemoteMcpTransportType } from './mcp/remoteMcpClient';
 export type { ToolSelectorConfig } from './mcp/ToolSelectorPolicy';
 export {
@@ -195,6 +198,7 @@ export type { ResponseFormat } from './llm/responseFormat';
 export { streamDeadlineDetailsOf } from './llm/streamDeadline';
 export type { StreamDeadlineDetails } from './llm/streamDeadline';
 export {
+  ModelOutputRepetitionError,
   SUPPORTED_REASONING_EFFORTS,
   TOKEN_FACTORY_DEFAULT_BASE_URL,
   VERCEL_AI_PROVIDER_NAMES,
@@ -257,7 +261,12 @@ export type { AgentThreadSendBatch, ContextMessage } from './runtime/AgentThread
 export { isInternalSystemMessage } from './runtime/contextUtils';
 export { AgentThreadMetricsSchema } from './runtime/metrics';
 export type { AgentThreadMetrics } from './runtime/metrics';
-export { TaskFindingSchema, TaskPhaseSchema, TaskStateSchema } from './runtime/taskState';
+export {
+  REPLACE_TASK_CHECKLIST_TOOL_NAME,
+  TaskFindingSchema,
+  TaskPhaseSchema,
+  TaskStateSchema,
+} from './runtime/taskState';
 export type { TaskFinding, TaskPhase, TaskState, TaskStateSnapshot } from './runtime/taskState';
 
 // Tracing
@@ -274,12 +283,24 @@ export {
   ImplementationPlanAdmissionBlockedError,
   McpConnectionError,
   McpDcrConfigurationError,
+  McpRedirectRefusedError,
   StructuredEditPreconditionBlockedError,
   ToolPolicyBlockedError,
   ToolPreDispatchError,
 } from './errors';
 export { REDIS_KEY_NAMESPACE, redisKey } from './redisKeys';
 export { describeUnknownError, extractErrorLogFields } from './util/errorLogFields';
+export {
+  DEFAULT_MCP_HTTP_BODY_TIMEOUT_MS,
+  DEFAULT_MCP_HTTP_CONNECT_TIMEOUT_MS,
+  DEFAULT_MCP_HTTP_MAX_RETRIES,
+  DEFAULT_MODEL_HTTP_BODY_TIMEOUT_MS,
+  DEFAULT_MODEL_HTTP_CONNECT_TIMEOUT_MS,
+  DEFAULT_MODEL_HTTP_HEADERS_TIMEOUT_MS,
+  DEFAULT_MODEL_HTTP_MAX_RETRIES,
+  MCP_HTTP_HEADERS_TIMEOUT_MARGIN_MS,
+  configureOutboundFetches,
+} from './util/outboundFetch';
 export { PromiseTimeoutError, withTimeout } from './util/promiseUtils';
 export { isRedirectStatus, redirectTargetOrigin } from './util/redirects';
 
@@ -326,6 +347,7 @@ export { GIT_NETWORK_ENV_NAMES, pickGitNetworkEnv } from './sandbox/hostAuthenti
 export {
   PACKAGE_GIT_DEPENDENCY_MESSAGE,
   commandDownloadsPackages,
+  commandInstallsPackages,
   findCommandLineGitDependency,
   findGitDependency,
 } from './sandbox/packageMirrors';
@@ -365,6 +387,7 @@ export {
   SKILL_DOWNLOAD_TIMEOUT_SECONDS,
   Sandbox,
   buildWriteAndRunScriptCommand,
+  forgetShownSkillNotices,
 } from './sandbox/Sandbox';
 export type {
   BoundRepository,
@@ -400,11 +423,14 @@ export {
   DEFAULT_SESSION_DISK_MB,
   SLOT_MIRROR_GUEST_PORT,
   SLOT_MIRROR_SOCKET_NAME,
+  SLOT_SKILL_NETWORK_GUEST_PORT,
+  SLOT_SKILL_NETWORK_SOCKET_NAME,
   slotMirrorSocketPathsIn,
+  slotSkillNetworkSocketPathsIn,
   slotSocketPathsIn,
 } from './sandbox/slots/slotContract';
 export { SLOT_FIX_COMMAND, SLOT_NOT_READY_MESSAGE, SlotDriver } from './sandbox/slots/SlotDriver';
-export { SlotSandboxProvider } from './sandbox/slots/SlotSandboxProvider';
+export { SlotFullStateLog, SlotSandboxProvider } from './sandbox/slots/SlotSandboxProvider';
 export { extractStructuredEditPaths, repositoryRootsMatch } from './sandbox/structuredEditPaths';
 export type { StructuredEditPathRequest, StructuredEditPathResolution } from './sandbox/structuredEditPaths';
 
@@ -425,6 +451,12 @@ export type { HostToolCallPolicy, HostToolCallPolicyBlock, HostToolCallPolicyCal
 
 // Sentinel: three-tier permission system for tool execution
 export {
+  callResultSource,
+  callReturnsOutsideContent,
+  contextHasOutsideToolResult,
+} from './capabilities/builtins/ChatProvenance';
+export type { ToolResultSource } from './capabilities/builtins/ChatProvenance';
+export {
   InMemoryApprovalTokenStore,
   hasApprovalScope,
   hashApprovalTokenId,
@@ -442,13 +474,36 @@ export type {
 export { recordClassificationAudit, recordHeldActionAudit } from './permissions/audit';
 export type { AuditLogWriter, AuditOutcome, AuditRecordInput } from './permissions/audit';
 export {
+  BROWSER_CANCEL_QUALIFIERS,
+  BROWSER_COMMIT_WORDS,
+  classifyBrowserClickKind,
+  matchesCommitWord,
+} from './permissions/browserTier';
+export {
+  BROWSER_BACK_TOOL_NAME,
+  BROWSER_CLICK_TOOL_NAME,
+  BROWSER_COMMIT_REASON,
+  BROWSER_EXPLORE_REASON,
+  BROWSER_OPEN_TOOL_NAME,
+  BROWSER_PREPARE_REASON,
+  BROWSER_READ_TOOL_NAME,
+  BROWSER_SCREENSHOT_TOOL_NAME,
+  BROWSER_SCROLL_TOOL_NAME,
+  BROWSER_SELECT_TOOL_NAME,
+  BROWSER_SERVER_ID,
+  BROWSER_TOOL_NAMES,
+  BROWSER_TYPE_TOOL_NAME,
+  isBrowserToolName,
+} from './permissions/browserToolNames';
+export type { BrowserToolName } from './permissions/browserToolNames';
+export {
   canonicalShellForm,
   classifyHostToolCall,
   classifyTier,
   mapsDestinationHosts,
   shellBindingFromForm,
 } from './permissions/classifier';
-export type { ClassifyContext, ReminderLine, SentinelAction } from './permissions/classifier';
+export type { ClassifyContext, ReminderLine, ScheduleStatusReview, SentinelAction } from './permissions/classifier';
 export {
   DEFAULT_PINNED_PATH,
   classifyContextFor,
@@ -481,7 +536,15 @@ export {
 } from './permissions/mapsToolNames';
 export { checkOutboundStrings, collectOutboundStrings } from './permissions/outboundGuard';
 export type { OutboundGuardRule, OutboundGuardVerdict } from './permissions/outboundGuard';
-export { isTrustedLink, recordPageImageUrls, recordPersonText } from './permissions/provenance';
+export {
+  isTrustedLink,
+  isTrustedPicture,
+  recordPageImageUrls,
+  recordPersonText,
+  recordUntrustedText,
+  searchResultUrls,
+} from './permissions/provenance';
+export type { ChatProvenance, ReadSource, SearchResultUrls } from './permissions/provenance';
 export {
   AUTO_DENY_REASONS,
   TIER2_ACTION_KINDS,
@@ -504,7 +567,12 @@ export type {
   TrackedExecutionBinding,
 } from './permissions/tier';
 export type { ToolGrantIdentity, ToolGrantKey, ToolGrantStore } from './permissions/toolGrants';
-export { SILENT_SEARCH_LIMIT, createWebSearchTurnState, pageImageUrls } from './permissions/webSearch';
+export {
+  PAGE_PICTURES_LABEL,
+  SILENT_SEARCH_LIMIT,
+  createWebSearchTurnState,
+  pageImageUrls,
+} from './permissions/webSearch';
 export type { SearchProviderGrant, WebSearchTurnState } from './permissions/webSearch';
 export {
   FETCHED_PAGE_TEXT_MAX_CHARS,

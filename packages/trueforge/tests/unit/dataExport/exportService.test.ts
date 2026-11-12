@@ -8,7 +8,9 @@ import { z } from 'zod';
 import { makeCreateTurnInput, makeModelMessageEvent } from '../../../../trueforge-core/tests/agent-session/testHelpers';
 
 import { runDataExport, type DataExportDeps, type MemoryExportSource } from '../../../src/dataExport/exportService';
+import { DeliveryStore } from '../../../src/db/deliveryStore';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
+import { ReachSettingsStore } from '../../../src/db/reachSettingsStore';
 import { SentinelAuditStore } from '../../../src/db/sentinelAuditStore';
 import type { SessionCustom, TurnCustom } from '../../../src/db/sessionCustom';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
@@ -63,6 +65,8 @@ async function makeDeps(
     globalSettingsStore: new SqliteGlobalSettingsStore(db),
     sentinelSettingsStore: new SqliteSentinelSettingsStore(db),
     auditStore: new SentinelAuditStore(db),
+    deliveryStore: new DeliveryStore(db),
+    reachSettingsStore: new ReachSettingsStore(db),
     turnArtifactStore: new SqliteTurnArtifactStore(db),
     mcpServerStore: new SqliteMcpServerStore(db),
     listAgents: () => Promise.resolve([]),
@@ -127,6 +131,46 @@ async function createPersona(deps: DataExportDeps<never>, input: { id: string; n
   });
 }
 
+describe('runDataExport space folders', () => {
+  it('writes each space folder placement from the same read as the folder list', async () => {
+    const { deps, close } = await makeDeps({ kind: 'markdown', markdownDir: join(tmpdir(), 'unused-memory') });
+    try {
+      const owner = { tenant_id: TENANT_ID, created_by: 'alice' };
+      await deps.spaceStore.createSpaceFolder({ ...owner, id: 'folder-1', name: 'Homes' });
+      const read = deps.spaceStore;
+      const refuseSeparateReads = (): never => {
+        throw new Error('Folders and placements must come from one snapshot.');
+      };
+      const spaceStore: DataExportDeps<never>['spaceStore'] = {
+        getAggregate: input => read.getAggregate(input),
+        listSpaces: input => read.listSpaces(input),
+        listSpacesWithAggregate: input => read.listSpacesWithAggregate(input),
+        getSpace: input => read.getSpace(input),
+        getSpaceRevision: input => read.getSpaceRevision(input),
+        createSpace: input => read.createSpace(input),
+        updateSpace: input => read.updateSpace(input),
+        revertSpace: input => read.revertSpace(input),
+        deleteSpace: input => read.deleteSpace(input),
+        createSpaceFolder: input => read.createSpaceFolder(input),
+        updateSpaceFolder: input => read.updateSpaceFolder(input),
+        deleteSpaceFolder: input => read.deleteSpaceFolder(input),
+        setSpaceFolder: input => read.setSpaceFolder(input),
+        listSpaceFolders: refuseSeparateReads,
+        listSpaceFolderAssignments: refuseSeparateReads,
+        readSpaceFolderSnapshot: input => read.readSpaceFolderSnapshot(input),
+      };
+      const sink = new CollectingWritable();
+      await runDataExport({ ...deps, spaceStore }, exportRequest(), sink);
+      const entries = readZipEntries(sink.buffer());
+
+      const folders: unknown = JSON.parse(zipEntryText(entries, 'space_folders.json'));
+      expect(folders).toEqual([expect.objectContaining({ folder_id: 'folder-1', name: 'Homes' })]);
+    } finally {
+      await close();
+    }
+  });
+});
+
 describe('runDataExport memory backends', () => {
   it('renders a client (hindsight) backend into Markdown files in the vault layout', async () => {
     const { client } = listing({
@@ -154,6 +198,21 @@ describe('runDataExport memory backends', () => {
         status: 'included',
         vaults: 2,
       });
+    } finally {
+      await close();
+    }
+  });
+
+  it('writes a retained entry with its internal id back as the closing line', async () => {
+    const { client } = listing({
+      '': [{ ...vaultEntry('Lives in Lisbon with a cat.', '2026-10-02T10:00:00.000Z'), context: 'maya:identity' }],
+    });
+    const { deps, close } = await makeDeps({ kind: 'client', backend: 'hindsight', client });
+    try {
+      const sink = new CollectingWritable();
+      await runDataExport(deps, exportRequest(), sink);
+      const shared = zipEntryText(readZipEntries(sink.buffer()), `memory/${TENANT_ID}/memory/2026-10-16.md`);
+      expect(shared).toBe('## 2026-10-02T10:00:00.000Z\n\nLives in Lisbon with a cat.\n\n> maya:identity\n');
     } finally {
       await close();
     }
@@ -310,6 +369,8 @@ describe('runDataExport on a large instance', () => {
         metadata: {},
         external_id: null,
         source: null,
+        is_incognito: false,
+        private_expires_at: null,
       });
       await sessionStore.createTurn(
         makeCreateTurnInput({

@@ -1,4 +1,4 @@
-import { htmlImageLinks, MAX_HTML_CHARS } from '../../../../src/core/email/gmail/htmlText';
+import { htmlImageLinks, htmlImages, MAX_HTML_CHARS } from '../../../../src/core/email/gmail/htmlText';
 
 describe('htmlImageLinks', () => {
   it('lists web image links once each, in order, decoding entities', () => {
@@ -51,6 +51,16 @@ describe('htmlImageLinks', () => {
     ]);
   });
 
+  it('reads a src whose quotes are escaped, as HTML carried inside a JSON string is', () => {
+    const html = JSON.stringify(
+      '<img src="https://example.com/a.png" alt="A"><img src=\'https://example.com/b.png\'><img src="broken>',
+    );
+    expect(htmlImageLinks({ source: html, max: 20 })).toEqual([
+      'https://example.com/a.png',
+      'https://example.com/b.png',
+    ]);
+  });
+
   it('stops at the cap', () => {
     const html = Array.from({ length: 30 }, (_, i) => `<img src="https://example.com/${String(i)}.png">`).join('');
     expect(htmlImageLinks({ source: html, max: 20 })).toHaveLength(20);
@@ -63,5 +73,16 @@ describe('htmlImageLinks', () => {
     expect(Date.now() - started).toBeLessThan(2000);
     const late = `${' '.repeat(MAX_HTML_CHARS)}<img src="https://example.com/late.png">`;
     expect(htmlImageLinks({ source: late, max: 20 })).toEqual([]);
+  });
+});
+
+describe('htmlImages', () => {
+  it("keeps each image's alt text, decoded, and none when the tag has no alt", () => {
+    const html = `<img src="https://example.com/a.png" alt="Tom &amp; Jerry"><img alt='' src="https://example.com/b.png"><img src="https://example.com/c.png" data-alt="no">`;
+    expect(htmlImages({ source: html, max: 20 })).toEqual([
+      { url: 'https://example.com/a.png', alt: 'Tom & Jerry' },
+      { url: 'https://example.com/b.png', alt: undefined },
+      { url: 'https://example.com/c.png', alt: undefined },
+    ]);
   });
 });

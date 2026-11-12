@@ -2,8 +2,8 @@
 
 /** Whether the bytes were kept, and why not when they were not. */
 export const TurnArtifactStatus = {
-        Stored: "stored",
-        SkippedSize: "skipped_size",
-        SkippedMissing: "skipped_missing"
-    } as const;
-export type TurnArtifactStatus = typeof TurnArtifactStatus[keyof typeof TurnArtifactStatus];
+    Stored: "stored",
+    SkippedSize: "skipped_size",
+    SkippedMissing: "skipped_missing",
+} as const;
+export type TurnArtifactStatus = (typeof TurnArtifactStatus)[keyof typeof TurnArtifactStatus];

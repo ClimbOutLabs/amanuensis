@@ -41,9 +41,21 @@ if (process.platform === 'darwin') {
 const postjectPackagePath = requireHere.resolve('postject/package.json');
 const postjectPackage = requireHere('postject/package.json');
 const postjectBin = typeof postjectPackage.bin === 'string' ? postjectPackage.bin : postjectPackage.bin.postject;
+// On macOS, Node reads the blob from the NODE_SEA Mach-O segment, so postject must put it
+// there; its default segment leaves the fuse flipped with no blob Node can find, and the
+// executable crashes at startup (https://nodejs.org/api/single-executable-applications.html).
+const machoArgs = process.platform === 'darwin' ? ['--macho-segment-name', 'NODE_SEA'] : [];
 execFileSync(
   process.execPath,
-  [join(dirname(postjectPackagePath), postjectBin), exePath, 'NODE_SEA_BLOB', blobPath, '--sentinel-fuse', SEA_FUSE],
+  [
+    join(dirname(postjectPackagePath), postjectBin),
+    exePath,
+    'NODE_SEA_BLOB',
+    blobPath,
+    '--sentinel-fuse',
+    SEA_FUSE,
+    ...machoArgs,
+  ],
   { stdio: 'inherit' },
 );
 

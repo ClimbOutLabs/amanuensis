@@ -5,11 +5,11 @@ import { StaleTaskChecklistError } from '../../../agent-session/store/SessionSto
 import { type CallToolResponse, toolResultResponse } from '../../mcp/IMCPServer';
 import { defineTool, LocalToolMCP, type ToolDefinition } from '../../mcp/LocalToolMCP';
 import { internalSystemTag } from '../../runtime/contextUtils';
+import { REPLACE_TASK_CHECKLIST_TOOL_NAME } from '../../runtime/taskState';
 import type { AgentTracing } from '../../tracing/AgentTracing';
 import type { AgentCapability } from '../AgentCapability';
 
 export const TASK_CHECKLIST_SERVER_ID = 'task-checklist';
-export const REPLACE_TASK_CHECKLIST_TOOL_NAME = 'replace_task_checklist';
 export const TASK_CHECKLIST_CONTEXT_PREFIX = 'Durable task checklist (host-owned; ordered items only):';
 
 export interface TaskChecklistAccess {

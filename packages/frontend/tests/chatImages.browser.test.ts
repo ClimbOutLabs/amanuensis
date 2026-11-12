@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -9,7 +8,11 @@ import { crc32, deflateSync } from 'node:zlib';
 import { chromium, type Browser, type Page } from 'playwright-core';
 import { createServer, defaultClientConditions, type Plugin } from 'vite';
 
+import { DEV_OPTIMIZE_DEPS } from '../src/devPrebundle.ts';
+import { featureShotPath, saveFailureShots } from './support/featureShots.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
+import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
+import { privateViteCache } from './support/viteCache.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
 const CSP_META = /<meta\s+http-equiv="Content-Security-Policy"\s+content="([^"]*)"/i;
@@ -110,23 +113,17 @@ test('chat images: no remote image request ever leaves the page', { timeout: 180
   assert.equal(fixtureCsp, indexCsp, 'the fixture must run under the app shell image policy');
   assert.doesNotMatch(indexCsp, /img-src[^;]*(https?:|\*)/, 'img-src must not allow any remote host');
 
-  // Its own dependency cache: a shared one lets a parallel browser test re-optimize and reload this page.
-  const cacheDir = mkdtempSync(join(tmpdir(), 'chat-images-vite-'));
+  const viteCache = privateViteCache('chat-images');
   const server = await createServer({
     configFile: false,
+    optimizeDeps: DEV_OPTIMIZE_DEPS,
     root: frontendRoot,
-    cacheDir,
+    cacheDir: viteCache.cacheDir,
     logLevel: 'silent',
     server: { host: '127.0.0.1', port: 0 },
     // Same resolution as the app: workspace packages load from source, one React instance.
     resolve: {
       conditions: ['trueforge-dev', ...defaultClientConditions],
-      alias: [
-        {
-          find: /^truefoundry-gateway-sdk(\/.*)?$/,
-          replacement: fileURLToPath(new URL('../src/gatewaySdkStub.ts', import.meta.url)),
-        },
-      ],
       dedupe: ['react', 'react-dom', '@assistant-ui/core', '@assistant-ui/store', '@assistant-ui/react'],
     },
     plugins: [chatImageRoute(gradientPng())],
@@ -144,7 +141,6 @@ test('chat images: no remote image request ever leaves the page', { timeout: 180
       headless: true,
     });
 
-    const screenshotDir = process.env['CHAT_IMAGES_SCREENSHOT_DIR'];
     for (const viewport of [
       { name: 'desktop', width: 1280, height: 900, isMobile: false },
       { name: 'phone', width: 390, height: 844, isMobile: true },
@@ -176,7 +172,7 @@ test('chat images: no remote image request ever leaves the page', { timeout: 180
 
       await page.goto(`${origin}/tests/fixtures/chat-images.fixture.html`, {
         waitUntil: 'domcontentloaded',
-        timeout: RENDER_TIMEOUT_MS,
+        timeout: FIRST_LOAD_TIMEOUT_MS,
       });
 
       // Only the sandbox chart shows before anyone asks; every web picture waits behind a line.
@@ -194,10 +190,10 @@ test('chat images: no remote image request ever leaves the page', { timeout: 180
         (await page.evaluate(() => document.documentElement.scrollWidth)) <= viewport.width,
         `${viewport.name}: chat images overflow horizontally`,
       );
-      if (screenshotDir !== undefined) {
-        mkdirSync(screenshotDir, { recursive: true });
-        await page.screenshot({ path: join(screenshotDir, `chat-images-${viewport.name}.png`), fullPage: true });
-      }
+      await page.screenshot({
+        path: await featureShotPath({ surface: 'screen:chat-images', step: `${viewport.name}-hidden` }),
+        fullPage: true,
+      });
 
       // Showing the reply pictures loads the harbor photo; the broken copy leaves nothing behind.
       await showEach(page, 'Show image');
@@ -234,12 +230,10 @@ test('chat images: no remote image request ever leaves the page', { timeout: 180
         // 10rem at the default 16px root, with a little room for borders.
         assert.ok(width >= 150 && width <= 170, `${viewport.name}: thumbnail is ${String(width)}px wide`);
       }
-      if (screenshotDir !== undefined) {
-        await page.screenshot({
-          path: join(screenshotDir, `chat-images-${viewport.name}-approved.png`),
-          fullPage: true,
-        });
-      }
+      await page.screenshot({
+        path: await featureShotPath({ surface: 'screen:chat-images', step: `${viewport.name}-shown` }),
+        fullPage: true,
+      });
 
       const sources = await page.evaluate(() => [...document.querySelectorAll('img')].map(img => img.src));
       for (const src of sources) {
@@ -249,9 +243,12 @@ test('chat images: no remote image request ever leaves the page', { timeout: 180
       assert.deepEqual(cspViolations, [], `${viewport.name}: the page tried to break the image policy`);
       await context.close();
     }
+  } catch (error) {
+    await saveFailureShots({ browser, surface: 'screen:chat-images' });
+    throw error;
   } finally {
     await browser?.close();
     await server.close();
-    rmSync(cacheDir, { recursive: true, force: true });
+    viteCache.remove();
   }
 });

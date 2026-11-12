@@ -21,14 +21,17 @@ import {
 } from '../hooks/useComposerBusyState.js';
 import { createStreamDropChannel, ForegroundEventSync } from '../hooks/useForegroundEventSync.js';
 import { ActiveSessionPermissionsProvider } from '../hooks/useResourcePermissions.js';
+import type { HarnessListSessionsParams } from '../plugins/trueforge-agent-server-adapter/chatServer.js';
 import {
   isPendingApprovalsError,
   publishBlockedSend,
 } from '../plugins/trueforge-agent-server-adapter/sessionResync.js';
+import { readPrivateChatState, withOpenPrivateChatOnly } from '../server/privateChatStore.js';
 import type { AgentUIServer } from '../server/types.js';
 import { isNetworkFailureError, LiveConnectionLostError, ReplyStoppedByRestartError } from '../utils/liveConnection.js';
 import { isStaleApprovalError, publishStaleApproval } from '../utils/staleApproval.js';
 import { turnRefusalCode } from '../utils/turnRefusal.js';
+import { disarmSpokenReply } from '../utils/voiceTurn.js';
 import { PendingApprovalsReporter } from './PendingApprovalsReporter.js';
 import { ToasterProvider, useToaster } from './ToasterContainer.js';
 
@@ -85,10 +88,15 @@ function runtimeServer({
     listTurns: request => readOrConnectionLost(() => server.listTurns(request)),
     listEvents: request => readOrConnectionLost(() => server.listEvents(request)),
     async listSessions(request) {
-      const result = await server.listSessions(request);
+      // Private chats are listed only while one is open in this tab, and only that one.
+      const listed: HarnessListSessionsParams = {
+        ...request,
+        ...(readPrivateChatState().openSessionId === undefined ? {} : { includePrivate: true }),
+      };
+      const result = await server.listSessions(listed);
       return {
         ...result,
-        data: result.data.filter(session => !sessionIsCreateAgent(session)),
+        data: withOpenPrivateChatOnly(result.data.filter(session => !sessionIsCreateAgent(session))),
       };
     },
   };
@@ -177,6 +185,8 @@ function ChatRuntimeScope({
       // ease back. Fires whether the host or the toaster renders the error itself.
       activitySink?.reportError();
       notifyComposerBusyFailure(getActiveComposerSendId(composerBusyScope), composerBusyScope);
+      // A failed send never gets its reply, so its voice arm must not wait for the next one.
+      disarmSpokenReply();
       if (isPendingApprovalsError(error)) {
         // The send was rejected because the session tip still holds pending
         // tool approvals. Surface the escape hatch immediately (the banner

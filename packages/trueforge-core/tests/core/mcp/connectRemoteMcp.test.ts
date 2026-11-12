@@ -1,9 +1,13 @@
 import { McpConnectionError } from '../../../src/core/errors';
-import { connectRemoteMcp, isSessionExpiredError } from '../../../src/core/mcp/remoteMcpClient';
+import { connectRemoteMcp, isSessionExpiredError, transportFailureDetail } from '../../../src/core/mcp/remoteMcpClient';
 
 // Records every transport type client.connect() was attempted with, in order.
 const mockConnectAttempts: string[] = [];
+const mockConnectSignals: Array<AbortSignal | undefined> = [];
 const mockRequestTimeouts: number[] = [];
+let mockCloseCalls = 0;
+// When set, connect hangs until the AbortSignal passed to it is aborted.
+let hangUntilAbort = false;
 // Per-test hook: throw to fail a given transport, return to succeed.
 let mockConnectImpl: (type: string) => void = () => {
   /* no-op */
@@ -18,13 +22,28 @@ jest.mock('@modelcontextprotocol/sdk/client/index.js', () => ({
   Client: class {
     onclose?: () => void;
     onerror?: (e: Error) => void;
-    connect(transport: MockTransport): Promise<void> {
+    connect(transport: MockTransport, options?: { signal?: AbortSignal }): Promise<void> {
       const type = transport.__type;
       mockConnectAttempts.push(type);
+      mockConnectSignals.push(options?.signal);
       mockConnectImpl(type);
+      const signal = options?.signal;
+      if (hangUntilAbort && signal) {
+        return new Promise((_, reject) => {
+          const onAbort = (): void => {
+            reject(signal.reason instanceof Error ? signal.reason : new Error('aborted'));
+          };
+          if (signal.aborted) {
+            onAbort();
+            return;
+          }
+          signal.addEventListener('abort', onAbort, { once: true });
+        });
+      }
       return Promise.resolve();
     }
     close(): Promise<void> {
+      mockCloseCalls += 1;
       return Promise.resolve();
     }
     request(_req: unknown, _schema: unknown, options?: { timeout?: number }): Promise<{ tools: [] }> {
@@ -69,7 +88,10 @@ const baseParams = () => ({
 describe('connectRemoteMcp transport selection', () => {
   beforeEach(() => {
     mockConnectAttempts.length = 0;
+    mockConnectSignals.length = 0;
     mockRequestTimeouts.length = 0;
+    mockCloseCalls = 0;
+    hangUntilAbort = false;
     mockConnectImpl = () => {
       /* no-op */
     };
@@ -219,4 +241,79 @@ describe('connectRemoteMcp transport selection', () => {
     expect(isSessionExpiredError(new Error('HTTP 401 Unauthorized'))).toBe(false);
     expect(isSessionExpiredError(new Error('HTTP 500 Internal Server Error'))).toBe(false);
   });
+
+  it('aborts a hung connect when connectTimeoutMs elapses without aborting the caller signal', async () => {
+    hangUntilAbort = true;
+    const caller = new AbortController();
+
+    await expect(
+      connectRemoteMcp({ ...baseParams(), signal: caller.signal, connectTimeoutMs: 20 }),
+    ).rejects.toMatchObject({ constructor: McpConnectionError });
+
+    expect(mockConnectAttempts.length).toBeGreaterThan(0);
+    expect(mockConnectSignals.every(signal => signal?.aborted === true)).toBe(true);
+    expect(caller.signal.aborted).toBe(false);
+    expect(mockCloseCalls).toBe(mockConnectAttempts.length);
+  });
+
+  it('does not abort the connect signal after a successful handshake', async () => {
+    await connectRemoteMcp({ ...baseParams(), knownTransportType: 'sse', connectTimeoutMs: 20 });
+    await new Promise(resolve => setTimeout(resolve, 40));
+    expect(mockConnectSignals).toHaveLength(1);
+    expect(mockConnectSignals[0]?.aborted).toBe(false);
+  });
 });
+
+describe('connectRemoteMcp when every transport fails', () => {
+  beforeEach(() => {
+    mockConnectAttempts.length = 0;
+  });
+
+  it('keeps a refused connection as the typed cause, so a caller can tell the server is unreachable', async () => {
+    mockConnectImpl = () => {
+      throw Object.assign(new Error('connect ECONNREFUSED 192.0.2.1:9557'), { code: 'ECONNREFUSED' });
+    };
+
+    const failure: unknown = await connectRemoteMcp(baseParams()).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(McpConnectionError);
+    expect(transportFailureDetail(failure)).toBeDefined();
+  });
+
+  it('does not read an answer from a server that is up as unreachable', async () => {
+    mockConnectImpl = () => {
+      throw new Error('Streamable HTTP error: Error POSTing to endpoint (HTTP 500)');
+    };
+
+    const failure: unknown = await connectRemoteMcp(baseParams()).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(McpConnectionError);
+    expect(transportFailureDetail(failure)).toBeUndefined();
+  });
+
+  it.each(['ECONNREFUSED', 'ENOTFOUND', 'EHOSTUNREACH', 'UND_ERR_CONNECT_TIMEOUT'])(
+    'stops after one transport when the host cannot be reached (%s)',
+    async code => {
+      mockConnectImpl = () => {
+        throw new TypeError('fetch failed', { cause: Object.assign(new Error(`connect ${code}`), { code }) });
+      };
+
+      const failure: unknown = await connectRemoteMcp(baseParams()).catch((error: unknown) => error);
+
+      expect(mockConnectAttempts).toEqual(['streamable-http']);
+      expect(failure).toBeInstanceOf(McpConnectionError);
+      expect(failure instanceof Error ? failure.message : '').toContain('tried streamable-http)');
+    },
+  );
+
+  it('still tries the other transport when the host answered', async () => {
+    mockConnectImpl = () => {
+      throw new Error('Streamable HTTP error: Error POSTing to endpoint (HTTP 405)');
+    };
+
+    await connectRemoteMcp(baseParams()).catch(() => undefined);
+
+    expect(mockConnectAttempts).toEqual(['streamable-http', 'sse']);
+  });
+});
+

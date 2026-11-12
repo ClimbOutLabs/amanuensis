@@ -104,6 +104,31 @@ export async function recordStandingTrustRun(input: {
 }
 
 /**
+ * One row for a space change a scheduled run saved. Nobody watches such a run, so this row is where the
+ * owner later sees what the run did to their spaces.
+ */
+export async function recordUnattendedSpaceChange(input: {
+  services: SentinelServices;
+  identity: Pick<SentinelCallIdentity, 'tenant_id' | 'created_by' | 'conversation_id'>;
+  info: Pick<InternalToolCallInfo, 'original_tool_name' | 'audit_description'>;
+}): Promise<void> {
+  const writer = input.services.audit;
+  if (writer === null) {
+    return;
+  }
+  await writer.record({
+    tenant_id: input.identity.tenant_id,
+    created_by: input.identity.created_by,
+    conversation_id: input.identity.conversation_id,
+    tier: 1,
+    tool_name: input.info.original_tool_name,
+    description: input.info.audit_description ?? input.info.original_tool_name,
+    outcome: 'logged',
+    auto_deny_reason: null,
+  });
+}
+
+/**
  * Audit row text for a call that asked. Any search provider call, or a card shaped like a held
  * search, is described without its query, including calls stored before audit_description existed.
  */
@@ -160,7 +185,7 @@ export async function recordHeldActionAudit(input: {
   services: SentinelServices;
   identity: Pick<SentinelCallIdentity, 'tenant_id' | 'created_by' | 'conversation_id'>;
   info: InternalToolCallInfo;
-  outcome: Extract<AuditOutcome, 'logged' | 'approved' | 'denied'>;
+  outcome: Extract<AuditOutcome, 'logged' | 'approved' | 'denied' | 'auto_denied'>;
   /** What happened, in plain words, written before the action's own description. */
   note: string;
 }): Promise<void> {

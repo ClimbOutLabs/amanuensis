@@ -1,0 +1,5 @@
+# Direct runtime dependencies. requirements.txt is the generated, hash-locked closure.
+fastapi==0.141.1
+numpy==2.5.3
+onnxruntime==1.31.0
+uvicorn==0.54.0

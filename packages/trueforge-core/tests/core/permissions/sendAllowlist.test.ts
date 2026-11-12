@@ -155,4 +155,101 @@ describe("demo instance and Aman's own Gmail send", () => {
     const decision = await classifyTier(hostGmailSend(DRAFT), ctx([]));
     expect(decision).toMatchObject({ auto_deny: 'outbound_guard' });
   });
+
+  it("still saves one of Aman's own Gmail drafts to anyone, since a draft never leaves the account", async () => {
+    const decision = await classifyTier({ ...hostGmailSend(DRAFT), tool_name: 'draft_email' }, ctx(['a@demo.example']));
+    expect(decision).toMatchObject({ tier: 3, auto_deny: null, reason: 'gmail_draft' });
+  });
+});
+
+describe("demo instance and the host Email connector's drafts", () => {
+  const LISTED = 'dana@example.com';
+  const STRANGER = 'stranger@example.com';
+
+  /** A demo context whose Email list (the addresses the owner has mailed) holds only the listed address. */
+  function demoCtx(): ClassifyContext {
+    const base = ctx(['a@demo.example']);
+    return {
+      ...base,
+      services: { ...base.services, mail_listed_addresses: () => Promise.resolve([LISTED]) },
+    };
+  }
+
+  /** A call on the host's own Email sidecar, carrying the first-party mark only the host's connector gets. */
+  function hostMailCall(tool_name: string, params: Record<string, unknown>): SentinelAction {
+    return {
+      tool_name,
+      canonical_params: params,
+      tool_type: 'mcp',
+      mcp_server_name: 'Email',
+      mcp_server_host: 'mail-email',
+      mcp_hints: { read_only_hint: false, destructive_hint: false, open_world_hint: true },
+      mcp_first_party: true,
+    };
+  }
+
+  it('lets a draft to a listed address through to its ordinary card, with no demo refusal', async () => {
+    const decision = await classifyTier(
+      hostMailCall('save_draft', { recipients: [LISTED], subject: 'Lease', body: 'Hi' }),
+      demoCtx(),
+    );
+    expect(decision).toMatchObject({ tier: 3, auto_deny: null, reason: 'connector_send' });
+    expect(decision.card?.plain_what).toContain('Save a message draft');
+  });
+
+  it('raises the new-recipient card for a draft to a new address instead of the demo refusal', async () => {
+    const decision = await classifyTier(
+      hostMailCall('save_draft', { recipients: [STRANGER], subject: 'Lease', body: 'Hi' }),
+      demoCtx(),
+    );
+    expect(decision).toMatchObject({ tier: 3, auto_deny: null, reason: 'mail_new_recipient' });
+    expect(decision.card?.mail_new_recipients).toEqual([STRANGER]);
+    expect(decision.card?.mail_draft).toBe(true);
+    expect(decision.mail_send).toBe(false);
+  });
+
+  it('refuses a draft naming no one with the plain draft wording, not the demo refusal', async () => {
+    const decision = await classifyTier(hostMailCall('save_draft', { subject: 'Lease', body: 'Hi' }), demoCtx());
+    expect(decision.card).toBeNull();
+    expect(decision.auto_deny).toBe('incomplete_send_card');
+    expect(decision.reason_detail).toContain('a draft must say who it is for');
+  });
+
+  it.each(['send_email', 'forward_email'])('still refuses %s through the host connector', async tool_name => {
+    const decision = await classifyTier(
+      hostMailCall(tool_name, { recipients: [LISTED], subject: 'Lease', body: 'Hi' }),
+      demoCtx(),
+    );
+    expect(decision).toMatchObject({ auto_deny: 'outbound_guard', card: null, reason_detail: DEMO_CONNECTOR_REFUSAL });
+  });
+
+  it("still refuses a send named like Gmail's draft send on the host connector", async () => {
+    const decision = await classifyTier(
+      hostMailCall('send_draft', { recipients: [LISTED], subject: 'Lease', body: 'Hi' }),
+      demoCtx(),
+    );
+    expect(decision).toMatchObject({ auto_deny: 'outbound_guard', card: null, reason_detail: DEMO_CONNECTOR_REFUSAL });
+  });
+
+  it('still refuses a draft save from a connector that only shares the Email name', async () => {
+    const lookalike: SentinelAction = {
+      ...hostMailCall('save_draft', { recipients: [LISTED], subject: 'Lease', body: 'Hi' }),
+      mcp_first_party: false,
+    };
+    const decision = await classifyTier(lookalike, demoCtx());
+    expect(decision).toMatchObject({ auto_deny: 'outbound_guard', card: null, reason_detail: DEMO_CONNECTOR_REFUSAL });
+  });
+
+  it('is unchanged outside demo mode', async () => {
+    const base = demoCtx();
+    const outsideDemo: ClassifyContext = {
+      ...base,
+      services: { ...base.services, demoSendAllowlist: null },
+    };
+    const decision = await classifyTier(
+      hostMailCall('save_draft', { recipients: [LISTED], subject: 'Lease', body: 'Hi' }),
+      outsideDemo,
+    );
+    expect(decision).toMatchObject({ tier: 3, auto_deny: null, reason: 'connector_send' });
+  });
 });

@@ -38,7 +38,7 @@ dcm() {
   D compose --project-name aman-machine --project-directory "$MACHINE_DIR" -f "$MACHINE_DIR/compose.yaml" --env-file "$MACHINE_DIR/.env" "$@"
 }
 
-stt_threads() {
+voice_threads() {
   local n
   n=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
   case "$n" in '' | *[![:digit:]]*) n=4 ;; esac
@@ -47,24 +47,27 @@ stt_threads() {
   printf '%s' "$n"
 }
 
-machine_render() {
+# The voice service runs only when a release recorded its image; a release from before it has none.
+machine_render() { # stt image, tts image (may be empty)
+  local tts_on=0
+  if [ -n "${2:-}" ]; then tts_on=1; fi
   ensure_private_dir "$MACHINE_DIR"
-  render_template "$TEMPLATES_DIR/machine/compose.yaml.tpl" "STT_IMAGE=$1" | write_if_changed "$MACHINE_DIR/compose.yaml" 644 || true
+  render_template "$TEMPLATES_DIR/machine/compose.yaml.tpl" "STT_IMAGE=$1" "IF_TTS=$tts_on" "TTS_IMAGE=${2:-}" | write_if_changed "$MACHINE_DIR/compose.yaml" 644 || true
   if [ ! -f "$MACHINE_DIR/.env" ]; then
-    render_template "$TEMPLATES_DIR/machine/env.tpl" "STT_THREADS=$(stt_threads)" | write_if_changed "$MACHINE_DIR/.env" 600 || true
+    render_template "$TEMPLATES_DIR/machine/env.tpl" "VOICE_THREADS=$(voice_threads)" | write_if_changed "$MACHINE_DIR/.env" 600 || true
   fi
 }
 
-# up -d is a no-op when nothing changed. The speech model loads in the background, so this does not wait on it.
-machine_up() {
+# up -d is a no-op when nothing changed. The speech models load in the background, so this does not wait on them.
+machine_up() { # stt image, tts image (may be empty)
   local name rc=0
-  machine_render "$1"
-  step_begin start-machine "Starting the speech-to-text service"
+  machine_render "$1" "${2:-}"
+  step_begin start-machine "Starting the speech services"
   dcm up -d --remove-orphans >"$STEP_LOG" 2>&1 || rc=$?
   if [ "$rc" != 0 ]; then
-    step_fail "The speech-to-text service could not start" "Fix what the log says, then run install.sh again."
+    step_fail "The speech services could not start" "Fix what the log says, then run install.sh again."
   fi
-  step_ok "The speech-to-text service is running"
+  step_ok "The speech services are running"
   # A recreated speech container loses the extra networks it was connected to, so reconnect them all.
   for name in $(reg_names); do
     if D network inspect "$(stt_network "$name")" >/dev/null 2>&1; then
@@ -73,33 +76,47 @@ machine_up() {
   done
 }
 
-# Each instance has its own internal network with only its speech relay on it besides the speech service. The shared
-# service is connected to every one of those networks, so no instance has a route to another, and the service has no
+# Each instance has its own internal network with only its speech relay on it besides the shared speech services. Each
+# service is connected to every one of those networks, so no instance has a route to another, and the services have no
 # route into any instance except that relay.
 stt_network() { printf 'aman_%s_speech' "$1"; }
 
+# The shared speech services the machine project runs: speech-to-text always, the voice when its image was recorded.
+speech_engines() {
+  printf '%s\n' aman-stt
+  if grep -q 'container_name: aman-tts' "$MACHINE_DIR/compose.yaml" 2>/dev/null; then printf '%s\n' aman-tts; fi
+}
+
 stt_attach() {
-  local net out
+  local engine rc=0
+  for engine in $(speech_engines); do
+    engine_attach "$1" "$engine" || rc=1
+  done
+  return "$rc"
+}
+
+engine_attach() { # instance, container
+  local net out alias=$2-engine
   net=$(stt_network "$1")
-  if out=$(D network connect --alias aman-stt-engine "$net" aman-stt 2>&1); then
+  if out=$(D network connect --alias "$alias" "$net" "$2" 2>&1); then
     return 0
   fi
   case "$out" in
     *"already exists"*)
       # Joined before, perhaps without the name the relay dials; then join again with it.
-      if stt_has_alias "$net"; then return 0; fi
-      D network disconnect -f "$net" aman-stt >/dev/null 2>&1 || true
-      if out=$(D network connect --alias aman-stt-engine "$net" aman-stt 2>&1); then return 0; fi
+      if engine_has_alias "$net" "$2"; then return 0; fi
+      D network disconnect -f "$net" "$2" >/dev/null 2>&1 || true
+      if out=$(D network connect --alias "$alias" "$net" "$2" 2>&1); then return 0; fi
       ;;
   esac
-  warn "The speech-to-text service could not be connected to instance $1: $out"
+  warn "The speech service $2 could not be connected to instance $1: $out"
   return 1
 }
 
-stt_has_alias() { # network
+engine_has_alias() { # network, container
   local alias
-  for alias in $(D inspect --format "{{with index .NetworkSettings.Networks \"$1\"}}{{join .Aliases \" \"}}{{end}}" aman-stt 2>/dev/null); do
-    if [ "$alias" = aman-stt-engine ]; then return 0; fi
+  for alias in $(D inspect --format "{{with index .NetworkSettings.Networks \"$1\"}}{{join .Aliases \" \"}}{{end}}" "$2" 2>/dev/null); do
+    if [ "$alias" = "$2-engine" ]; then return 0; fi
   done
   return 1
 }
@@ -110,6 +127,7 @@ stt_old_network() { printf 'aman_%s_stt' "$1"; }
 
 stt_detach() {
   D network disconnect -f "$(stt_network "$1")" aman-stt >/dev/null 2>&1 || true
+  D network disconnect -f "$(stt_network "$1")" aman-tts >/dev/null 2>&1 || true
   D network disconnect -f "$(stt_old_network "$1")" aman-stt >/dev/null 2>&1 || true
   stt_forget_old_network "$1"
 }
@@ -134,9 +152,11 @@ machine_running() {
 
 # Rewrites compose.yaml and dex.yaml from the registry (the owner) and the given images. Both hold no secrets.
 instance_render() {
-  local name=$1 app_image=$2 dex_image=$3 dir login_bind=0.0.0.0 app_port login_port public_url login_url email client_id sandbox_on edge_on login_host origins redirects app_ports tls_on=0 tls_port address
+  local name=$1 app_image=$2 dex_image=$3 dir login_bind=0.0.0.0 app_port login_port public_url login_url email client_id sandbox_on edge_on login_host origins redirects app_ports tls_on=0 tls_host=0 tls_volume=0 tls_port address
   dir=$(instance_dir "$name")
+  instance_tailscale_https_move "$name" "$app_image"
   owner_name_backfill "$name"
+  web_push_backfill "$name" "$app_image"
   app_port=$(reg_get "$name" app_port)
   login_port=$(reg_get "$name" login_port)
   public_url=$(reg_get "$name" public_url)
@@ -176,7 +196,17 @@ instance_render() {
   fi
   # The calendar connector is part of the compose file only once its image is known.
   local calendar_on=0
-  [ -n "${REL_CALENDAR_TAG:-}" ] && calendar_on=1
+  if [ -n "${REL_CALENDAR_TAG:-}" ]; then
+    calendar_on=1
+    env_secret_backfill "$name" CALENDAR_ACCOUNT_SECRET
+  fi
+  # Aman's browser is on in every instance once its images are known. Its seccomp profile is copied beside the compose
+  # file, because the compose file reads it from this folder.
+  local browser_on=0
+  if [ -n "${REL_BROWSER_TAG:-}" ] && [ -n "${REL_BROWSER_GATEWAY_TAG:-}" ]; then
+    browser_on=1
+    env_secret_backfill "$name" BROWSER_SECRET
+  fi
   # The email connector is part of the compose file only once its image is known. Its wrapper script is copied beside the
   # compose file, because the compose file mounts it from this folder.
   local email_on=0
@@ -189,11 +219,21 @@ instance_render() {
     # No account file is written here: the account lives in the connector's volume, and the
     # installer writes it through the connector's account agent (see email_agent_write).
   fi
+  if [ "$browser_on" = 1 ]; then
+    write_if_changed "$dir/browser-seccomp.json" 644 <"$REPO_ROOT/ops/browser-sidecar/seccomp_profile.json" || true
+  fi
+  # The https folders are mounted from the home folder itself, except when the home is the state volume
+  # (Windows): then the compose file mounts them from inside the volume, because a host folder the
+  # daemon could read does not exist there.
+  if [ "$tls_on" = 1 ]; then
+    if tls_home_in_volume; then tls_volume=1; else tls_host=1; fi
+  fi
   render_template "$TEMPLATES_DIR/instance/compose.yaml.tpl" \
-    "NAME=$name" "IF_CALENDAR=$calendar_on" "CALENDAR_IMAGE=${REL_CALENDAR_TAG:-}" "IF_EMAIL=$email_on" "MAIL_EMAIL_IMAGE=${REL_MAIL_EMAIL_IMAGE:-}" "STT_NETWORK=$(stt_network "$name")" "APP_IMAGE=$app_image" "DEX_IMAGE=$dex_image" "APP_PORT=$app_port" "IF_SANDBOX=$sandbox_on" \
+    "NAME=$name" "IF_CALENDAR=$calendar_on" "CALENDAR_IMAGE=${REL_CALENDAR_TAG:-}" "IF_EMAIL=$email_on" "MAIL_EMAIL_IMAGE=${REL_MAIL_EMAIL_IMAGE:-}" \
+    "IF_BROWSER=$browser_on" "BROWSER_IMAGE=${REL_BROWSER_TAG:-}" "BROWSER_GATEWAY_IMAGE=${REL_BROWSER_GATEWAY_TAG:-}" "STT_NETWORK=$(stt_network "$name")" "APP_IMAGE=$app_image" "DEX_IMAGE=$dex_image" "APP_PORT=$app_port" "IF_SANDBOX=$sandbox_on" \
     "IF_EDGE=$edge_on" "LOGIN_HOST=$login_host" \
     "LOGIN_PORT=$login_port" "DEX_TELEMETRY_PORT=$DEX_TELEMETRY_PORT" "APP_PORTS=$app_ports" \
-    "IF_TLS=$tls_on" "CADDY_IMAGE=$(tls_image)" "TLS_USER=$(id -u):$(id -g)" "TLS_LEAF_DIR=$(tls_leaf_dir "$name")" \
+    "IF_TLS=$tls_on" "IF_TLS_HOST=$tls_host" "IF_TLS_VOLUME=$tls_volume" "CADDY_IMAGE=$(tls_image)" "TLS_USER=$(id -u):$(id -g)" "TLS_LEAF_DIR=$(tls_leaf_dir "$name")" \
     "TLS_TRUST_DIR=$(tls_trust_dir "$name")" "TLS_HTTP_IN=$TLS_HTTP_IN" | write_if_changed "$dir/compose.yaml" 644 || true
   if [ "$tls_on" = 1 ]; then tls_prepare "$name" "$app_image"; fi
   if [ "$edge_on" = 1 ]; then edge_render "$name"; fi
@@ -228,6 +268,75 @@ owner_name_backfill() { # name
   fi
 }
 
+# A secret the app shares with one of its connectors (CALENDAR_ACCOUNT_SECRET, BROWSER_SECRET), so only the app can
+# use that connector. It is made once, in the settings file, and a usable value (32 or more characters) is never
+# changed. Compose reads the last line for a key, so that line is the one that counts: a short or second line is
+# dropped, the managed part keeps the value, and a file without the managed part (an older or hand-made one) gets it
+# as its last line. A missing file gets nothing: the instance has no settings to run from, and the instance commands
+# say so.
+env_secret_backfill() { # name key
+  local env key=$2 value
+  env="$(instance_dir "$1")/.env"
+  [ -f "$env" ] || return 0
+  value=$(sed -n "s/^$key=//p" "$env" | tail -n 1)
+  if [ "${#value}" -lt 32 ]; then
+    value=$(sed -n "s/^$key=\(.\{32,\}\)\$/\1/p" "$env" | tail -n 1)
+    [ -n "$value" ] || value=$(rand_hex 32)
+  fi
+  if grep -q '^# >>> managed by the installer' "$env"; then
+    env_managed_set "$env" "$key" "$value"
+    env_drop_outside_block "$env" "$key"
+    return 0
+  fi
+  {
+    grep -v "^$key=" "$env" || true
+    printf '%s=%s\n' "$key" "$value"
+  } | write_if_changed "$env" 600 || true
+}
+
+# Makes one push key pair with the app image's Node.js, so the computer needs no key tools of its own. Prints the
+# public key, a space, then the private key, and fails, printing nothing, on any other output.
+push_keypair() { # app_image
+  local out
+  out=$(D run --rm --network none --user "$(id -u):$(id -g)" -v "$INSTALLER_DIR/lib/push-keys.mjs:/push-keys.mjs:ro" \
+    --entrypoint node "$1" /push-keys.mjs 2>/dev/null) || return 1
+  matches_whole "$out" '^[A-Za-z0-9_-]{87} [A-Za-z0-9_-]{43}$' || return 1
+  printf '%s\n' "$out"
+}
+
+# The key pair the app signs push notices with, so a closed page still hears about a due reminder. They are
+# made once, in the settings file, and an existing pair is never changed. An older instance gets them on its next
+# refresh or upgrade. A file without the installer's managed part gets the lines at its end. A missing file gets nothing.
+# When no key can be made, push stays off and the rest works as before.
+web_push_backfill() { # name app_image
+  local env keys public private
+  env="$(instance_dir "$1")/.env"
+  [ -f "$env" ] || return 0
+  if ! grep -q '^WEB_PUSH_PUBLIC_KEY=..*' "$env" || ! grep -q '^WEB_PUSH_PRIVATE_KEY=..*' "$env"; then
+    keys=$(push_keypair "$2") || {
+      warn "Push notices could not be set up this time. Run the installer again to try once more."
+      return 0
+    }
+    public=${keys% *}
+    private=${keys#* }
+    web_push_env_set "$env" WEB_PUSH_PUBLIC_KEY "$public"
+    web_push_env_set "$env" WEB_PUSH_PRIVATE_KEY "$private"
+  fi
+}
+
+# Sets one line in the settings file: in the managed part when it has one, at the end when it does not.
+web_push_env_set() { # env key value
+  local env=$1 key=$2 value=$3
+  if grep -q '^# >>> managed by the installer' "$env"; then
+    env_managed_set "$env" "$key" "$value"
+    return 0
+  fi
+  {
+    grep -v "^$key=" "$env" || true
+    printf '%s=%s\n' "$key" "$value"
+  } | write_if_changed "$env" 600 || true
+}
+
 # running, partial or stopped, from the containers Compose labelled for the project.
 instance_state() {
   local count
@@ -243,9 +352,19 @@ instance_state() {
 }
 
 instance_up() {
-  local name=$1 rc=0 recreate=()
+  local name=$1 rc=0 recreate=() clash
   if [ "${2:-}" = recreate ]; then recreate=(--force-recreate); fi
   step_begin "start-$name" "Starting instance $name and waiting until it answers"
+  # Tailscale would take the port the moment the instance stops, so a start that would stop it is not begun.
+  clash=$(instance_tailscale_clash "$name")
+  if [ -n "$clash" ]; then
+    if [ "$clash" = "$(reg_get "$name" app_port)" ]; then
+      UI_FD=2 ui_step_end fail "Instance $name was not started. Tailscale serve on this computer is set up for port $clash, which the instance uses." "Turn that entry off, for example with: sudo tailscale serve --https=$clash off. Then run install.sh again."
+    else
+      UI_FD=2 ui_step_end fail "Instance $name was not started. Tailscale serve on this computer is set up for its https port $clash." "Run: install.sh instance refresh $name. It moves https to a free port."
+    fi
+    return 1
+  fi
   # A whole-project start removes the containers of services the compose file no longer lists (--remove-orphans),
   # so a service dropped from the file, like the https front end when an instance closes back to this computer,
   # does not linger as an orphan. Every whole-project start follows this rule.
@@ -258,6 +377,7 @@ instance_up() {
     stt_attach "$name" || true
   fi
   stt_forget_old_network "$name"
+  sandbox_retired_volumes_remove "$name"
   # From now on the instance may hold data worth backing up; an instance that never got here holds none.
   if reg_exists "$name"; then reg_set "$name" healthy 1; fi
   step_ok "Instance $name is running and answering"
@@ -453,17 +573,17 @@ instance_collect_addresses() {
 }
 
 # --tls caddy serves the two public origins on 443 under DNS names Let's Encrypt can issue for. --tls local (the
-# default on a network) serves https with a certificate from this computer's own authority; --tls off keeps plain http.
+# default on a network) serves https with a certificate from this computer's own authority.
 instance_collect_tls() {
   case "$I_TLS" in
     '') return 0 ;;
-    local | off)
+    local)
       [ -z "$I_PUBLIC_URL" ] || usage_die "--tls $I_TLS is for an instance opened on your network. With --public-url, use --tls caddy."
       [ "$OPT_LOCAL_ONLY" != 1 ] || usage_die "--local-only keeps Aman on this computer, where plain http is fine, so --tls does not apply."
       return 0
       ;;
     caddy) ;;
-    *) usage_die "--tls takes local, off or caddy" ;;
+    *) usage_die "--tls takes local or caddy" ;;
   esac
   [ -n "$I_PUBLIC_URL" ] || usage_die "--tls caddy needs --public-url and --login-url (the two https addresses Caddy will serve)"
   [ -z "$OPT_PUBLIC_IP" ] || valid_ipv4 "$OPT_PUBLIC_IP" || usage_die "--public-ip must be an IPv4 address"
@@ -541,13 +661,56 @@ instance_address_change() { # name; prints open, close, refresh or nothing
     if [ -n "$(reg_get "$name" origins)" ]; then printf 'close'; fi
   elif [ -n "$(reg_get "$name" origins)" ] && [ "$(tls_target "$name")" != "$(reg_get "$name" tls)" ]; then
     printf 'refresh'
+  elif [ -n "$(reg_get "$name" origins)" ] && tls_port_taken_by_tailscale "$name"; then
+    printf 'refresh'
   fi
+}
+
+# Moves the https port the installer picked off a port Tailscale serve was set up for since, so the compose file drawn
+# next never publishes it. Every start from a freshly drawn compose file goes through here.
+instance_tailscale_https_move() { # name app_image
+  [ -n "$(reg_get "$1" origins)" ] && tls_port_taken_by_tailscale "$1" || return 0
+  instance_apply_addresses "$1" refresh "$2"
+}
+
+# The first port of an instance that Tailscale serve is set up for, or nothing.
+instance_tailscale_clash() { # name
+  local port
+  [ -n "$(reg_get "$1" origins)" ] || return 0
+  for port in $(reg_get "$1" app_port) $(reg_get "$1" tls_port); do
+    if tailscale_serves_port "$port"; then
+      printf '%s' "$port"
+      return 0
+    fi
+  done
+}
+
+# True when the https port the installer picked for an instance is one Tailscale serve was set up for since.
+tls_port_taken_by_tailscale() { # name
+  local port
+  port=$(reg_get "$1" tls_port)
+  [ -n "$port" ] && tailscale_serves_port "$port"
+}
+
+# An instance opened on the network publishes its app port on this computer's Tailscale address too. When Tailscale
+# serve is set up for that port, Tailscale takes it while the instance restarts, so this stops before anything is
+# stopped. The app port is the one devices open, so it is never moved by itself.
+instance_tailscale_port_check() { # name
+  local name=$1 port
+  [ -n "$(reg_get "$name" origins)" ] || return 0
+  port=$(reg_get "$name" app_port)
+  [ -n "$port" ] && tailscale_serves_port "$port" || return 0
+  die "Tailscale serve on this computer is set up for port $port, which instance $name uses, so Tailscale would take the port while the instance restarts. Nothing was stopped. Turn that entry off, for example with: sudo tailscale serve --https=$port off (tailscale serve status lists the entries). Then run this again."
 }
 
 # Writes the list of addresses of an instance into its record and its settings: read again from this computer, plus
 # the names given with --address (kept from the first install unless new ones are given). Renders and restarts nothing.
-instance_apply_addresses() { # name open|close|refresh
-  local name=$1 mode=$2 origins='' extras env tls='' tls_port='' app_port
+# Moving an instance to https is the exception to writing first: the front end and the certificate are made before the
+# record says https, with the new addresses already in the record so the certificate carries them. If making them
+# fails, the record is put back as it was and the run stops, so the instance keeps serving plain http and the next
+# plain run tries the move again.
+instance_apply_addresses() { # name open|close|refresh app_image
+  local name=$1 mode=$2 app_image=$3 origins='' extras env tls='' tls_port='' app_port old_tls_port='' old_origins='' had_origins=0 fingerprint_before='' moved_from=
   env="$(instance_dir "$name")/.env"
   app_port=$(reg_get "$name" app_port)
   extras=${OPT_ADDRESSES:-$(reg_get "$name" extra_hosts)}
@@ -557,14 +720,48 @@ instance_apply_addresses() { # name open|close|refresh
     origins=$(network_origin_list "$app_port" '' $extras)
     if [ "$tls" = local ] && origins_reach_the_network "$origins"; then
       tls_port=$(reg_get "$name" tls_port)
+      moved_from=
+      # The https port was picked by the installer, so one that Tailscale serve was set up for since is picked again
+      # before anything restarts; Tailscale answers on that port at this computer's Tailscale address in any case.
+      if [ -n "$tls_port" ] && tailscale_serves_port "$tls_port"; then
+        moved_from=$tls_port
+        tls_port=
+      fi
       if [ -z "$tls_port" ]; then
         tls_port=$(pick_port 8443 "$(reg_all app_port) $(reg_all login_port) $(reg_all tls_port)") || die "No free port was found on this computer for https near 8443."
+      fi
+      if [ -n "$moved_from" ]; then
+        say "Tailscale serve on this computer is set up for port $moved_from, so instance $name now opens over https on port $tls_port. On each device, open it with the new port."
       fi
       # shellcheck disable=SC2086
       origins=$(network_origin_list "$app_port" "$tls_port" $extras)
     fi
   else
     extras=
+  fi
+  if [ "$tls" = local ] && [ -n "$tls_port" ] && ! tls_active "$name"; then
+    old_tls_port=$(reg_get "$name" tls_port)
+    old_origins=$(reg_get "$name" origins)
+    # An instance from before the address list has no origins line at all; putting the record back must not
+    # invent one, or the next run would no longer see the instance as one to open on the network.
+    if grep -q '^origins=' "$(reg_file "$name")"; then had_origins=1; fi
+    fingerprint_before=$(tls_fingerprint)
+    reg_set "$name" tls_port "$tls_port"
+    reg_set "$name" origins "$origins"
+    # The certificate is made in a subshell so its failure stops only this step: the record is put back and the
+    # run stops with the one thing to do next, instead of leaving the record claiming https.
+    if ! ( tls_prepare "$name" "$app_image" ); then
+      reg_set "$name" tls_port "$old_tls_port"
+      if [ "$had_origins" = 1 ]; then
+        reg_set "$name" origins "$old_origins"
+      else
+        reg_unset "$name" origins
+      fi
+      die "Instance $name could not be moved to https, so it stays on plain http for now. Run the installer again to finish the move."
+    fi
+    # A new authority is made again only when there was one before and its fingerprint changed; the first
+    # authority is not "made again".
+    if [ -n "$fingerprint_before" ] && [ "$(tls_fingerprint)" != "$fingerprint_before" ]; then TLS_AUTHORITY_REPLACED=1; fi
   fi
   reg_set "$name" tls "$tls"
   reg_set "$name" tls_port "$tls_port"
@@ -703,8 +900,10 @@ print_instance_summary() {
   elif [ -n "$origins" ]; then
     if tls_active "$name"; then
       print_trust_lines "$name"
-    else
-      ui_line "Sign-in on your home network is not encrypted. Use the Tailscale address to keep it private."
+    elif origins_reach_the_network "$origins"; then
+      # The warning is only for sign-in that crosses the network: an instance that only ever answers on this
+      # computer keeps sign-in on this computer, so there is nothing to warn about.
+      ui_line "Sign-in on your home network is not encrypted. Run the installer again to move this instance to https."
     fi
     if [ -n "$bookmark" ]; then ui_line "Bookmark $bookmark: it keeps working when this computer's address changes."; fi
   elif ! is_loopback_origin "$url"; then
@@ -778,7 +977,10 @@ load_installed_release() {
   release_load "$RELEASE_DIR/release.json" || die "The record of the installed version cannot be read. Run install.sh again."
   REL_APP_TAG=$CUR_APP_TAG
   REL_STT_TAG=$CUR_STT_TAG
+  REL_TTS_TAG=$CUR_TTS_TAG
   REL_CALENDAR_TAG=$CUR_CALENDAR_TAG
+  REL_BROWSER_TAG=$CUR_BROWSER_TAG
+  REL_BROWSER_GATEWAY_TAG=$CUR_BROWSER_GATEWAY_TAG
   REL_DEX_IMAGE=$CUR_DEX_IMAGE
   REL_MAIL_EMAIL_IMAGE=$CUR_MAIL_EMAIL_IMAGE
   docker_image_exists "$REL_APP_TAG" || die "Part of Aman ($REL_APP_TAG) is missing. Run install.sh to build it again."
@@ -795,19 +997,31 @@ gateway_flag() { # origins public_url
   if [ -z "$1" ] && ! is_loopback_origin "$2"; then printf 1; else printf 0; fi
 }
 
-# Puts back the settings an instance's .env lost, from its record and the template that wrote it. A setting that is
-# still there is never changed, so existing secrets stay; a lost secret gets a new value that the app and the sign-in
-# service both read from this file. The Token Factory key cannot be made again and is skipped.
-instance_env_repair() {
-  local name=$1 env network_on=0 tf_on=0 tf_cap_on=0 demo_on=0 line key value tf_cap fresh=0 restored=0
-  env="$(instance_dir "$name")/.env"
-  # The name is recorded first, so a lost OWNER_NAME is put back with it rather than empty.
-  owner_name_backfill "$name"
+# The settings the template gives an instance from its record: its addresses, its sign-in client and owner, and new
+# secrets. Prints them; writes nothing.
+instance_env_from_record() { # name
+  local name=$1 network_on=0 tf_on=0 tf_cap_on=0 demo_on=0 tf_cap
   if [ -n "$(reg_get "$name" origins)" ]; then network_on=1; fi
   tf_cap=$(reg_get "$name" tf_cap)
   if [ -n "$tf_cap" ]; then tf_cap_on=1; fi
   if [ "$(reg_get "$name" demo)" = 1 ]; then demo_on=1; fi
   if [ "$(reg_get "$name" token_factory)" = 1 ]; then tf_on=1; fi
+  render_template "$TEMPLATES_DIR/instance/env.tpl" \
+    "PUBLIC_URL=$(reg_get "$name" public_url)" "IF_NETWORK=$network_on" "ORIGINS=$(reg_get "$name" origins)" \
+    "COOKIE_SUFFIX=$(reg_get "$name" cookie_suffix)" "ISSUER=$(reg_get "$name" login_url)/dex" "CLIENT_ID=$(reg_get "$name" client_id)" \
+    "IF_GATEWAY=$(gateway_flag "$(reg_get "$name" origins)" "$(reg_get "$name" public_url)")" "LOGIN_PORT=$(reg_get "$name" login_port)" \
+    "CLIENT_SECRET=$(rand_hex 32)" "OWNER_EMAIL=$(reg_get "$name" owner_email)" "OWNER_NAME=$(reg_get "$name" owner_name)" "API_KEY=$(rand_hex 32)" \
+    "IF_TOKEN_FACTORY=$tf_on" "TF_KEY=unused" "TF_MODEL=$(reg_get "$name" tf_model)" "IF_TF_CAP=$tf_cap_on" "TF_CAP=$tf_cap" "IF_DEMO=$demo_on"
+}
+
+# Puts back the settings an instance's .env lost, from its record and the template that wrote it. A setting that is
+# still there is never changed, so existing secrets stay; a lost secret gets a new value that the app and the sign-in
+# service both read from this file. The Token Factory key cannot be made again and is skipped.
+instance_env_repair() {
+  local name=$1 env line key value fresh=0 restored=0
+  env="$(instance_dir "$name")/.env"
+  # The name is recorded first, so a lost OWNER_NAME is put back with it rather than empty.
+  owner_name_backfill "$name"
   if [ ! -f "$env" ]; then fresh=1; fi
   while IFS= read -r line; do
     case "$line" in '' | '#'*) continue ;; esac
@@ -823,12 +1037,7 @@ instance_env_repair() {
       env_managed_set "$env" "$key" "$value"
       restored=$((restored + 1))
     fi
-  done < <(render_template "$TEMPLATES_DIR/instance/env.tpl" \
-    "PUBLIC_URL=$(reg_get "$name" public_url)" "IF_NETWORK=$network_on" "ORIGINS=$(reg_get "$name" origins)" \
-    "COOKIE_SUFFIX=$(reg_get "$name" cookie_suffix)" "ISSUER=$(reg_get "$name" login_url)/dex" "CLIENT_ID=$(reg_get "$name" client_id)" \
-    "IF_GATEWAY=$(gateway_flag "$(reg_get "$name" origins)" "$(reg_get "$name" public_url)")" "LOGIN_PORT=$(reg_get "$name" login_port)" \
-    "CLIENT_SECRET=$(rand_hex 32)" "OWNER_EMAIL=$(reg_get "$name" owner_email)" "OWNER_NAME=$(reg_get "$name" owner_name)" "API_KEY=$(rand_hex 32)" \
-    "IF_TOKEN_FACTORY=$tf_on" "TF_KEY=unused" "TF_MODEL=$(reg_get "$name" tf_model)" "IF_TF_CAP=$tf_cap_on" "TF_CAP=$tf_cap" "IF_DEMO=$demo_on")
+  done < <(instance_env_from_record "$name")
   if [ "$restored" -gt 0 ]; then ui_ok "Put back $restored lost settings of instance $name"; fi
 }
 
@@ -944,11 +1153,12 @@ cmd_instance_refresh() {
   lock_acquire
   load_installed_release
   warn_if_installed_older
+  instance_tailscale_port_check "$name"
   change=$(instance_address_change "$name")
   if [ -n "$change" ]; then
-    instance_apply_addresses "$name" "$change"
+    instance_apply_addresses "$name" "$change" "$REL_APP_TAG"
   elif [ -n "$(reg_get "$name" origins)" ]; then
-    instance_apply_addresses "$name" refresh
+    instance_apply_addresses "$name" refresh "$REL_APP_TAG"
   fi
   instance_env_repair "$name"
   instance_enforce_single_owner "$name" || true
@@ -1013,7 +1223,7 @@ cmd_instance_add() {
     return 0
   fi
   [ -n "$AMAN_PASSWORD" ] || ask_password AMAN_PASSWORD
-  machine_running || machine_up "$REL_STT_TAG"
+  machine_running || machine_up "$REL_STT_TAG" "$REL_TTS_TAG"
   instance_create
   AMAN_PASSWORD=
   edge_ensure "$I_NAME"
@@ -1259,7 +1469,16 @@ cmd_instance_remove() {
   fi
   [ -n "$(reg_names)" ] || last_one=1
   if [ "${OPT_PURGE:-0}" != 1 ]; then
-    say "Removed instance $name. Its data is kept (aman_${name}_data and aman_${name}_dex)."
+    volumes=$(instance_volumes "$name" | tr '\n' ' ')
+    volumes=${volumes% }
+    if [ -n "$volumes" ]; then
+      say "Removed instance $name. Its data is kept: $volumes."
+    else
+      say "Removed instance $name."
+    fi
+    case " $volumes " in
+      *" aman_${name}_browser_profiles "*) say "That includes the sites Aman's browser is signed in to." ;;
+    esac
     if [ "$last_one" = 1 ]; then
       say "The shared speech-to-text service and its downloaded model are kept too."
     fi

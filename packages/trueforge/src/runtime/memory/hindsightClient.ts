@@ -16,6 +16,7 @@ import configuration from '../../config';
 import type { MemoryProviderFailureCode } from '../../schemas/memoryProvider';
 import { stripAssistantAbilityNotes } from './assistantAbilityNotes';
 import { readBodyWithinCap } from './boundedBodyReader';
+import { isFromSession } from './markdownMemoryFiles';
 import type {
   DeleteMemoryVaultEntryOutcome,
   ListMemoryVaultEntriesOutcome,
@@ -33,7 +34,6 @@ const REFUSE_REDIRECT: NonNullable<RequestInit['redirect']> = 'manual';
 export interface RecallItem {
   id: string;
   text: string;
-  type: string;
   entities?: string[];
   occurred_start?: string;
   occurred_end?: string;
@@ -109,7 +109,6 @@ function sanitizeRecallItem(value: unknown): RecallItem | null {
   const sanitized: RecallItem = {
     id: typeof item['id'] === 'string' ? item['id'] : '',
     text: item['text'],
-    type: typeof item['type'] === 'string' ? item['type'] : 'unknown',
   };
   const occurredStart = sanitizeOptionalString(item['occurred_start']);
   if (occurredStart !== undefined) {
@@ -383,6 +382,7 @@ function sleep(ms: number): Promise<void> {
  */
 interface RequestTimeout {
   signal: AbortSignal;
+  /** The caller's own timeout, which a timeout failure names even when a retry ran on what was left of it. */
   timeoutMs: number;
 }
 
@@ -431,6 +431,7 @@ export class HindsightClient implements MemoryClient {
     queryTimestamp: string;
     entityTokens: number;
     timeoutMs: number;
+    currentSessionId?: string | undefined;
   }): Promise<RecallOutcome> {
     const sent = await this.sendWithOverloadRetry({
       path: '/memories/recall',
@@ -461,7 +462,9 @@ export class HindsightClient implements MemoryClient {
         results?: unknown;
         entities?: Record<string, unknown>;
       };
-      const results = sanitizeRecallItems(parsed.results);
+      const results = sanitizeRecallItems(parsed.results).filter(
+        item => !isFromSession({ metadata: item.metadata, sessionId: params.currentSessionId }),
+      );
       const entities: EntitySummary[] = [];
       if (parsed.entities && typeof parsed.entities === 'object') {
         for (const [name, value] of Object.entries(parsed.entities)) {
@@ -513,6 +516,27 @@ export class HindsightClient implements MemoryClient {
     }
     if (!sent.response.ok) {
       const failure = await this.httpFailure({ sent, operation: 'retain' });
+      return { ok: false, reason: failure.reason };
+    }
+    return { ok: true };
+  }
+
+  async deleteDocument(params: { documentId: string; context?: string; timeoutMs: number }): Promise<RetainOutcome> {
+    // Hindsight keys documents by id alone; the context is for stores that kept copies before ids existed.
+    const sent = await this.send({
+      path: `/documents/${encodeURIComponent(params.documentId)}`,
+      method: 'DELETE',
+      timeoutMs: params.timeoutMs,
+    });
+    if (!sent.ok) {
+      return { ok: false, reason: sent.reason };
+    }
+    // 404 means the document is already gone, which is what the caller wanted; the reason lets it log that.
+    if (sent.response.status === 404) {
+      return { ok: true, reason: 'document not found' };
+    }
+    if (!sent.response.ok) {
+      const failure = await this.httpFailure({ sent, operation: 'delete document' });
       return { ok: false, reason: failure.reason };
     }
     return { ok: true };
@@ -572,7 +596,7 @@ export class HindsightClient implements MemoryClient {
     if (remainingMs <= 0) {
       return fromConfig;
     }
-    const legacy = await this.getProfileLegacy(remainingMs);
+    const legacy = await this.getProfileLegacy({ timeoutMs: remainingMs, callerTimeoutMs: timeoutMs });
     if (legacy.ok) {
       return legacy;
     }
@@ -610,8 +634,8 @@ export class HindsightClient implements MemoryClient {
   }
 
   /** Legacy `/profile` endpoint for pre-0.10.0 servers (retired upstream in 0.10.0). */
-  private async getProfileLegacy(timeoutMs: number): Promise<GetProfileOutcome> {
-    const sent = await this.send({ path: '/profile', method: 'GET', timeoutMs });
+  private async getProfileLegacy(input: { timeoutMs: number; callerTimeoutMs: number }): Promise<GetProfileOutcome> {
+    const sent = await this.send({ path: '/profile', method: 'GET', ...input });
     if (!sent.ok) {
       return sent;
     }
@@ -743,12 +767,14 @@ export class HindsightClient implements MemoryClient {
    */
   private async send(input: {
     path: string;
-    method: 'GET' | 'POST';
+    method: 'GET' | 'POST' | 'DELETE';
     timeoutMs: number;
+    /** Set when `timeoutMs` is only what is left of a longer budget, so a timeout names the budget the caller gave. */
+    callerTimeoutMs?: number;
     body?: unknown;
   }): Promise<SentRequest | MemoryFailure> {
     const timeoutSignal = AbortSignal.timeout(input.timeoutMs);
-    const timeout: RequestTimeout = { signal: timeoutSignal, timeoutMs: input.timeoutMs };
+    const timeout: RequestTimeout = { signal: timeoutSignal, timeoutMs: input.callerTimeoutMs ?? input.timeoutMs };
     try {
       const resolved = await Promise.race([resolveHeadersSafely(this.headers), rejectOnAbort(timeoutSignal)]);
       if (!resolved.ok) {
@@ -767,7 +793,7 @@ export class HindsightClient implements MemoryClient {
       return { ok: true, response, timeout };
     } catch (error) {
       if (isTimeoutError(error)) {
-        return timeoutFailure(input.timeoutMs);
+        return timeoutFailure(timeout.timeoutMs);
       }
       return {
         ok: false,
@@ -781,8 +807,8 @@ export class HindsightClient implements MemoryClient {
    * `send` plus bounded 503/Retry-After retries for the read-only lanes (recall, reflect).
    * The refusal body is drained on each attempt so the socket can be reused, and every attempt
    * and wait shares the caller's timeout through a deadline: an overloaded provider cannot hold
-   * a turn open past `timeoutMs`, and an exhausted budget reports the provider's own refusal
-   * rather than a synthetic timeout.
+   * a turn open past `timeoutMs`, a wait that would reach the deadline is skipped, and an
+   * exhausted budget reports the provider's own refusal rather than a synthetic timeout.
    */
   private async sendWithOverloadRetry(input: {
     path: string;
@@ -802,6 +828,7 @@ export class HindsightClient implements MemoryClient {
         path: input.path,
         method: input.method,
         timeoutMs: remainingMs,
+        callerTimeoutMs: input.timeoutMs,
         body: input.body,
       });
       if (!sent.ok || sent.response.status !== 503) {
@@ -812,11 +839,12 @@ export class HindsightClient implements MemoryClient {
         break;
       }
       const waitMs = parseRetryAfterMs(sent.response.headers.get('retry-after')) ?? DEFAULT_OVERLOAD_RETRY_WAIT_MS;
-      const budgetMs = deadline - Date.now();
-      if (budgetMs <= 0) {
+      // A retry the provider asks us to delay past the deadline could never run, so report the
+      // refusal now instead of holding the turn until the budget runs out.
+      if (waitMs >= deadline - Date.now()) {
         break;
       }
-      await sleep(Math.min(waitMs, budgetMs));
+      await sleep(waitMs);
     }
     return lastRefusal ?? timeoutFailure(input.timeoutMs);
   }

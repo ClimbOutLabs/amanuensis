@@ -83,8 +83,8 @@ password_problem() {
 
 # The answers given on stdin, one line each, in this fixed order: sign-in password (--password-stdin), Token Factory key
 # (--token-factory-key-stdin), calendar app password (--calendar-password-stdin), email app password
-# (--email-password-stdin). A line is there only when its option is given. main reads every line here, once, before any
-# question, so an answer can never be taken for another one. A dry run reads none of them.
+# (--email-password-stdin), Tavily key (--tavily-key-stdin). A line is there only when its option is given. main reads
+# every line here, once, before any question, so an answer can never be taken for another one. A dry run reads none of them.
 STDIN_SIGNIN_PASSWORD=
 STDIN_CAL_PASSWORD=
 STDIN_EMAIL_PASSWORD=
@@ -100,6 +100,11 @@ stdin_answers_read() {
   fi
   if [ "$OPT_CAL_PASSWORD_STDIN" = 1 ]; then IFS= read -r STDIN_CAL_PASSWORD || true; fi
   if [ "$OPT_EMAIL_PASSWORD_STDIN" = 1 ]; then IFS= read -r STDIN_EMAIL_PASSWORD || true; fi
+  if [ "$OPT_TAVILY_KEY_STDIN" = 1 ]; then
+    line=
+    IFS= read -r line || true
+    tavily_key_take "$line"
+  fi
 }
 
 # Reads a password twice without echo into the variable named by $1. The value stays in shell
@@ -227,25 +232,115 @@ ensure_private_dir() {
   chmod 700 "$1"
 }
 
-# A mkdir lock is atomic everywhere; a dead holder's lock is taken over.
-lock_acquire() {
-  local lock="$STATE_DIR/lock" pid
-  ensure_private_dir "$STATE_DIR"
-  if ! mkdir "$lock" 2>/dev/null; then
-    pid=$(cat "$lock/pid" 2>/dev/null || true)
-    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-      die "Another install is running right now (process $pid). Wait for it to finish, then run this again."
-    fi
-    rm -rf "$lock"
-    mkdir "$lock" || die "Could not mark this run as active at $lock. If no other install is running, remove that folder and try again."
-  fi
-  printf '%s\n' "$$" >"$lock/pid"
-  LOCK_HELD=1
+# The run lock, as installer/STATE.md ("The lock") writes it down. state/lock is a folder made with mkdir,
+# which is atomic everywhere. The holder refreshes state/lock/beat every LOCK_BEAT_SECONDS for as long as it
+# runs, so a long image build never looks stopped; a lock whose beat is older than LOCK_DEAD_SECONDS belongs to a
+# holder that stopped without cleaning up. The pid file is for people: when the home is a Docker volume the holder
+# ran in its own container, so its pid means nothing to the next run. The TypeScript installer and the volume
+# script follow the same contract, so keep the three in step.
+LOCK_BEAT_SECONDS=15
+LOCK_DEAD_SECONDS=120
+
+# Seconds since the time written in file $1, or nothing when there is no readable time.
+lock_age_of() {
+  local when
+  when=$(cat "$1" 2>/dev/null || true)
+  case $when in '' | *[!0-9]*) return 1 ;; esac
+  printf '%s\n' $(($(date +%s) - when))
 }
 
+# Whether the folder $1 shows a sign of life in its file $2 within the dead limit. A folder with no time yet
+# belongs to a run between mkdir and its first write, so it is given a moment.
+lock_is_live() {
+  local tries=0 age
+  [ -d "$1" ] || return 1
+  while [ "$tries" -lt 3 ]; do
+    if age=$(lock_age_of "$1/$2"); then
+      [ "$age" -lt "$LOCK_DEAD_SECONDS" ]
+      return
+    fi
+    tries=$((tries + 1))
+    sleep 1
+  done
+  return 1
+}
+
+lock_write_beat() {
+  date +%s >"$1/beat.$$" && mv -f "$1/beat.$$" "$1/beat"
+}
+
+# A takeover goes through a second folder, state/takeover, made with mkdir like the lock: only the run holding it
+# may move a lock folder aside, so two runs that both find a dead lock cannot both move it. Under it the run
+# judges the lock again, reads its owner, moves the folder aside with one rename, and checks that what it moved
+# still has that owner and a stopped beat; if not, it is a live lock another run made a moment ago, and it goes
+# back. A guard left by a crashed run is judged by its own timestamp. After writing its owner the run reads it
+# back, and waits a second once in case the folder is being put back.
+lock_take_over() {
+  local lock=$1 guard="$STATE_DIR/takeover" aside="$STATE_DIR/lock.stale-$LOCK_TOKEN" old_owner age
+  lock_is_live "$lock" beat && lock_busy
+  if ! mkdir "$guard" 2>/dev/null; then
+    lock_is_live "$guard" since && lock_busy
+    mv "$guard" "$STATE_DIR/takeover.stale-$LOCK_TOKEN" 2>/dev/null || lock_busy
+    mkdir "$guard" 2>/dev/null || lock_busy
+    rm -rf "$STATE_DIR/takeover.stale-$LOCK_TOKEN"
+  fi
+  date +%s >"$guard/since"
+  if lock_is_live "$lock" beat; then rm -rf "$guard"; lock_busy; fi
+  old_owner=$(cat "$lock/owner" 2>/dev/null || true)
+  if [ -d "$lock" ]; then
+    if ! mv "$lock" "$aside" 2>/dev/null; then rm -rf "$guard"; lock_busy; fi
+    age=$(lock_age_of "$aside/beat" || true)
+    if [ "$(cat "$aside/owner" 2>/dev/null || true)" != "$old_owner" ] || { [ -n "$age" ] && [ "$age" -lt "$LOCK_DEAD_SECONDS" ]; }; then
+      if [ ! -e "$lock" ]; then mv "$aside" "$lock" 2>/dev/null || true; fi
+      rm -rf "$guard"
+      lock_busy
+    fi
+    rm -rf "$aside"
+  fi
+  if ! mkdir "$lock" 2>/dev/null; then rm -rf "$guard"; lock_busy; fi
+  rm -rf "$guard"
+}
+
+lock_acquire() {
+  local lock="$STATE_DIR/lock"
+  ensure_private_dir "$STATE_DIR"
+  LOCK_TOKEN="$$-$(date +%s)"
+  if ! mkdir "$lock" 2>/dev/null; then lock_take_over "$lock"; fi
+  printf '%s\n' "$LOCK_TOKEN" >"$lock/owner"
+  lock_write_beat "$lock"
+  printf '%s\n' "$$" >"$lock/pid"
+  if [ "$(cat "$lock/owner" 2>/dev/null || true)" != "$LOCK_TOKEN" ]; then
+    sleep 1
+    [ "$(cat "$lock/owner" 2>/dev/null || true)" = "$LOCK_TOKEN" ] || lock_busy
+  fi
+  LOCK_HELD=1
+  lock_beat_start "$lock"
+}
+
+lock_busy() {
+  die "Another install is running right now. Wait for it to finish, or wait $((LOCK_DEAD_SECONDS / 60)) minutes if you stopped an install a moment ago, then run this again."
+}
+
+# The beat stops with the holder, and never touches a lock another run took over.
+lock_beat_start() {
+  local lock=$1 holder=$$ token=$LOCK_TOKEN
+  (
+    while sleep "$LOCK_BEAT_SECONDS"; do
+      kill -0 "$holder" 2>/dev/null || exit 0
+      [ "$(cat "$lock/owner" 2>/dev/null)" = "$token" ] || exit 0
+      lock_write_beat "$lock"
+    done
+  ) </dev/null >/dev/null 2>&1 &
+  LOCK_BEAT_PID=$!
+}
+
+# Only the run that still owns the lock removes it.
 lock_release() {
   if [ "${LOCK_HELD:-0}" = 1 ]; then
-    rm -rf "$STATE_DIR/lock"
+    if [ -n "${LOCK_BEAT_PID:-}" ]; then kill "$LOCK_BEAT_PID" 2>/dev/null || true; fi
+    if [ "$(cat "$STATE_DIR/lock/owner" 2>/dev/null)" = "$LOCK_TOKEN" ]; then
+      rm -rf "$STATE_DIR/lock"
+    fi
     LOCK_HELD=0
   fi
 }

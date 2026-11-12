@@ -1,10 +1,10 @@
 ---
 title: 'Google'
 sidebarTitle: 'Google'
-description: 'Connect your own Google account so Aman can read your email and calendar and, with your approval, send email and add events.'
+description: 'Connect your own Google account so Aman can read your email and calendar, work with the Drive files it created or you opened with it and, with your approval, send email, add events and create Docs.'
 ---
 
-Aman can read and search your Gmail, read events on your Google Calendar, and, if you allow it, save drafts, send email and add events to your calendar. Reading is quiet. Every draft, every send and every new or changed event asks you first, and the approval card shows exactly what will be sent or saved.
+Aman can read and search your Gmail, read events on your Google Calendar, and, if you allow it, save drafts, send email and add events to your calendar. It can also work with your Google Drive files: the ones it created, or ones you opened with it. Reading is quiet. Every draft, every send, every new or changed event, every new Doc and every set of rows added to a Sheet asks you first, and the approval card shows exactly what will be sent or saved.
 
 You connect your own Google account through a Google Cloud project that you create yourself. Aman does not use a shared project, so no verification or security review by Google is needed for your own use. The setup takes about ten minutes, once.
 
@@ -34,13 +34,25 @@ A new Google project starts in Testing. You can choose either:
 
 ## Attachments
 
-Ask Aman to open a PDF or image attached to an email and it reads the file in the sandbox, including scanned pages. This needs the sandbox to be on; without it, Aman tells you attachments cannot be opened. Text from an attachment is treated as untrusted, like the email itself.
+Ask Aman to open an attachment and it reads the file in the sandbox: PDFs (including scanned pages), images, Word (`.docx`, `.doc`), Excel (`.xlsx`, `.xls`), CSV, PowerPoint (`.pptx`), OpenDocument (`.odt`, `.ods`, `.odp`), RTF, HTML, forwarded emails saved as `.eml` or `.msg` (with the text of their own attachments), calendar invites and text files. See [Document attachments](/sandbox#document-attachments) for how each is read. This needs the sandbox to be on; without it, Aman tells you attachments cannot be opened. Text from an attachment is treated as untrusted, like the email itself.
 
 ## Calendar
 
 Calendar is separate from mail and is off until you connect it. Once it is on, ask Aman things like "Any birthdays coming up?" or "What is on my calendar Thursday?". Aman can list events in a date range, search them by words, and open one event to see its guests, place, description and how it repeats. Reading never changes anything, and Aman never replies to an invite.
 
-To connect Calendar, finish the mail setup first, then:
+### Connect Google Calendar with an app password
+
+This is the simpler way to connect Google Calendar only. It does not connect Gmail.
+
+1. Turn on 2-Step Verification for your Google account, if it is not on yet. Google only offers app passwords after that.
+2. Open myaccount.google.com/apppasswords, type a name such as Aman, and select Create.
+3. Copy the 16-letter password Google shows. Google shows it only once.
+4. Open Settings, then Connectors, then Calendar, and select Connect.
+5. Pick Google, type your Gmail address (for example, yourusername@gmail.com), leave the login name empty, paste the app password, and select Connect.
+
+Aman fills in the calendar address from your email address: `https://calendar.google.com/calendar/dav/yourusername%40gmail.com/`. Aman reads only your own calendar. Calendars other people share with you, and holiday calendars, are left out on purpose, because other people can write into them. If a Google Workspace admin has turned app passwords off for your account, use the Google panel instead.
+
+To connect Calendar through the Google panel, finish the mail setup first, then:
 
 1. In the Calendar section of the Google panel, open the Calendar API link and click Enable. Without this, Aman says the Google Calendar API isn't turned on.
 2. Select Connect Calendar and leave the calendar box ticked on Google's screen. Aman reuses the client you already saved, so there is nothing to retype.
@@ -72,13 +84,26 @@ A scheduled run, such as a morning brief, never adds or changes an event by itse
 
 Every event you approve is recorded in the permissions log. When Aman then goes on to save it, the log also says whether Google saved it, or why it was not saved. A change refused before that point, such as one whose details changed after you approved it, shows only your approval. That record is kept on your Aman server even if you delete the chat. An approval that runs out before it is used never saves anything.
 
+## Drive
+
+Drive is separate from mail and calendar and is off until you connect it. Google only ever shows Aman the files Aman created itself, or files you opened with Aman. Everything else in your Drive is not listed and cannot be read. Aman can list and search those files, read a Google Doc, read the rows of a Google Sheet, create a new Doc, and add rows to a Sheet. It cannot delete a file, and it cannot change who a file is shared with.
+
+To connect Drive, finish the mail setup first, then:
+
+1. In the Drive section of the Google panel, open the Drive API, Docs API and Sheets API links and click Enable on each page. Reading a Doc uses the Docs API, and reading a Sheet or adding rows to one uses the Sheets API, so all three are needed. Without them, Aman says the API isn't turned on and points back to these links.
+2. Select Connect Google Drive and leave the Drive box ticked on Google's screen. Aman reuses the client you already saved, so there is nothing to retype.
+
+Creating a Doc and adding rows to a Sheet ask you first. The approval card shows the whole text of the Doc, or every row that will be added, so you can check it before anything is saved. A scheduled run, such as a morning brief, never creates a Doc or adds rows by itself.
+
+Text inside a Doc or a Sheet can be written by anyone the file is shared with, so it is treated as untrusted, like an email. Text inside a file cannot change what Aman does or skip an approval.
+
 ## Reconnect
 
-If Google no longer accepts the saved sign-in, the panel says Reconnect needed, and mail and calendar are paused. Everything else in Aman keeps working. Select Reconnect and sign in again. Aman reuses the client you already saved, so there is nothing to retype.
+If Google no longer accepts the saved sign-in, the panel says Reconnect needed, and mail, calendar and Drive files are paused. Everything else in Aman keeps working. Select Reconnect and sign in again. Aman reuses the client you already saved, so there is nothing to retype.
 
 ## Disconnect
 
-Select Disconnect, then confirm. This turns off both mail and calendar. Aman asks Google to revoke its access and deletes the saved sign-in. If Google doesn't confirm, Aman still removes the connection and tells you; you can also remove access in your Google account settings. Emails already sent stay in Gmail.
+Select Disconnect, then confirm. This turns off mail, calendar and Drive. Aman asks Google to revoke its access and deletes the saved sign-in. If Google doesn't confirm, Aman still removes the connection and tells you; you can also remove access in your Google account settings. Emails already sent stay in Gmail.
 
 ## Demo instances
 
@@ -101,8 +126,8 @@ If the Google project is in Testing mode, Google signs the account out every 7 d
 
 - Email content is treated as untrusted. Text inside a message cannot change what Aman does or skip an approval.
 - A reply stays in its conversation. Aman reads the thread from Gmail itself, and the approval card says which thread it is for ("Reply in the thread", with the original subject and sender). A reply whose thread links do not match that thread is refused. If a send is refused, nothing is sent, and any new or changed draft asks for a new approval.
-- Scheduled runs can read your email and calendar but never draft or send email. A scheduled run that wants to add an event asks you on the Needs your OK list instead.
+- Scheduled runs can read your email, calendar and Drive files but never draft or send email, and never create a Doc or add rows to a Sheet. A scheduled run that wants to add an event asks you on the Needs your OK list instead.
 - After Aman reads your email, calendar, a document or an attachment in a conversation, a web search or map in that conversation runs without asking only if it doesn't copy anything from what it read: a sender's name, an email address, a phone number, a long number, or a run of five or more words. Line breaks and extra spaces don't hide a copy. Aman also checks what a command printed after such a read. The check does not catch a reworded copy. If it cannot check a result in full, it asks you first. In a scheduled run it skips that lookup and tells you.
-- Offline mode turns Gmail and Calendar off, because they need the network.
+- Offline mode turns Gmail, Calendar and Drive off, because they need the network.
 - Your client secret and sign-in are stored on your Aman server, in its data folder. They are not encrypted there, so keep that folder private.
 - Aman connects one Google account per person.

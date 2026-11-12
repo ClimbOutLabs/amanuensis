@@ -77,6 +77,61 @@ describe('extractCitationMarkers', () => {
   });
 });
 
+describe('JSON-shaped citation markers', () => {
+  it('extracts a JSON marker with id 0 as numeric source 0', () => {
+    const source = 'Nemotron says【{"id":0,"cursor":0,"loc":0}】here.';
+    const markers = extractCitationMarkers(source);
+    expect(markers).toHaveLength(1);
+    expect(markers[0]).toMatchObject({
+      sourceId: 0,
+      descriptor: '',
+      text: '【{"id":0,"cursor":0,"loc":0}】',
+      start: 13,
+    });
+    expect(source.substring(markers[0]?.start ?? 0, markers[0]?.end ?? 0)).toBe('【{"id":0,"cursor":0,"loc":0}】');
+  });
+
+  it('maps a JSON marker id to the same index as the dagger shape', () => {
+    const json = extractCitationMarkers('a【{"id":2}】');
+    const dagger = extractCitationMarkers('a【2†excerpts】');
+    expect(json[0]?.sourceId).toBe(2);
+    expect(json[0]?.sourceId).toBe(dagger[0]?.sourceId);
+  });
+
+  it('ignores extra keys and whitespace in the JSON body', () => {
+    const markers = extractCitationMarkers('x【{ "cursor": 5, "id": 2, "loc": 1, "extra": "y" }】');
+    expect(markers).toHaveLength(1);
+    expect(markers[0]?.sourceId).toBe(2);
+  });
+
+  it('leaves malformed or non-numeric JSON bodies as text, like other non-markers', () => {
+    expect(extractCitationMarkers('bad【{"id":0,】')).toHaveLength(0);
+    expect(extractCitationMarkers('bad【{"id":"7"}】')).toHaveLength(0);
+    expect(extractCitationMarkers('bad【{"cursor":0}】')).toHaveLength(0);
+    expect(extractCitationMarkers('bad【{"id":1.5}】')).toHaveLength(0);
+    expect(extractCitationMarkers('bad【[1]】')).toHaveLength(0);
+  });
+
+  it('skips JSON markers inside code spans', () => {
+    const markers = extractCitationMarkers('text `【{"id":1}】` more【{"id":2}】');
+    expect(markers).toHaveLength(1);
+    expect(markers[0]?.sourceId).toBe(2);
+  });
+
+  it('renders a resolved JSON marker as the numbered chip and removes an unresolved one', () => {
+    const sources: CitationSource[] = [{ id: 2, title: 'Doc', url: 'https://example.com/doc' }];
+    const [resolved] = extractCitationMarkers('a【{"id":2}】');
+    const [unresolved] = extractCitationMarkers('a【{"id":0,"cursor":0,"loc":0}】');
+    expect(resolved).toBeDefined();
+    expect(unresolved).toBeDefined();
+    if (!resolved || !unresolved) return;
+    expect(renderCitationReplacement(resolved, resolveCitationSource(resolved, sources))).toBe(
+      '[【2】](https://example.com/doc "Doc")',
+    );
+    expect(renderCitationReplacement(unresolved, resolveCitationSource(unresolved, sources))).toBe('');
+  });
+});
+
 describe('resolveCitationSource', () => {
   it('resolves a marker from an array of sources', () => {
     const sources: CitationSource[] = [

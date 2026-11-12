@@ -19,7 +19,6 @@ import { changeRequestReason, changeRequestText } from '@truefoundry/trueforge-c
 import { isMapsToolName } from '@truefoundry/trueforge-core/core/permissions/mapsToolNames';
 import { isSearchHoldCardText } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { CREATE_PERSONA_TOOL_NAME } from '@truefoundry/trueforge-core/core/personas/toolContract';
-import { SET_REMINDER_TOOL_NAME } from '@truefoundry/trueforge-core/core/schedules/toolContract';
 import { useCallback, useEffect, useState } from 'react';
 
 import { useIsMobile } from '../atoms/lib/useIsMobile.js';
@@ -30,8 +29,6 @@ import { RefusedPlaceList } from '../components/RefusedPlaceList.js';
 import { useActiveSessionCanManage } from '../hooks/useResourcePermissions.js';
 import { useHighlightedCard } from '../hooks/useRewardLedger.js';
 import { useWaitingToolCallIds } from '../hooks/useWaitingToolCallIds.js';
-import { ReminderNotificationPrompt } from '../reminders/ReminderNotificationPrompt.js';
-import { useOptionalReminders } from '../reminders/RemindersContext.js';
 import { ALWAYS_ALLOW_TOOL_OPTION_ID, offersChangeIt, SAVE_DRAFT_OPTION_ID } from '../sentinel/approvalChoices.js';
 import { EmailApprovalCard } from '../sentinel/EmailApprovalCard.js';
 import { PermissionApprovalCard } from '../sentinel/PermissionApprovalCard.js';
@@ -61,6 +58,7 @@ import {
   parseMcpToolArgs,
   parseSandboxArgs,
   parseSandboxResult,
+  parseSpaceWriteTooLongNote,
   parseToolOutputScreen,
   resolveSubAgentMeta,
   SANDBOX_TOOL_NAMES,
@@ -289,6 +287,7 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
         onApprove={() => onSelectOption(allowOnceId)}
         onApproveForChat={allowChatId === undefined ? undefined : () => onSelectOption(allowChatId)}
         onApproveAlways={approvalInfo.alwaysAllowOffered === true ? respondAlwaysAllow : undefined}
+        alwaysAllowCovers={approvalInfo.alwaysAllowCovers}
         onDeny={onDeny}
         onChangeRequest={onChangeRequest}
         onApproveAll={approveAll}
@@ -428,15 +427,15 @@ function RequestResponseSlots({
   response: { data: string; isJson: boolean };
 }) {
   return {
+    // The Request pane resizes like the Response pane. At a fixed height it cut a long request off
+    // with no sign the rest existed; resizable shows it from the start, and the full text stays
+    // reachable by dragging the pane taller, scrolling, or expanding it.
     requestSlot: request.value ? (
-      <ToolCallContentBlockContainer
-        title="Request"
-        content={request.value}
-        isJson={request.isJson}
-        maxHeight="10.5rem"
-      />
+      <ToolCallContentBlockContainer title="Request" content={request.value} isJson={request.isJson} resizable />
     ) : response.data ? (
-      <ToolCallContentBlockContainer title="Request" content="{}" isJson maxHeight="10.5rem" />
+      // No request is on record for this call. Say so plainly rather than showing an empty object
+      // the call may never have carried.
+      <ToolCallContentBlockContainer title="Request" content="No request was recorded for this step." isJson={false} />
     ) : undefined,
     responseSlot: response.data ? (
       <ToolCallContentBlockContainer title="Response" content={response.data} isJson={response.isJson} resizable />
@@ -482,13 +481,6 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
   useEffect(() => {
     if (personaAdded) void reloadPersonas?.();
   }, [personaAdded, reloadPersonas]);
-  // A reminder set in this chat: look for the Reminders chat now, and offer browser notices once.
-  const reminders = useOptionalReminders();
-  const reminderSet = part.toolName === SET_REMINDER_TOOL_NAME && part.status?.type === 'complete';
-  const reminderSetNotice = reminders?.reminderSet;
-  useEffect(() => {
-    if (reminderSet) reminderSetNotice?.();
-  }, [reminderSet, reminderSetNotice]);
   const isRequiresAction = part.status?.type === 'requires-action';
   const stateApproval = useAuiState(s => (s.part.type === 'tool-call' ? s.part.approval : undefined));
   const approval = stateApproval ?? part.approval;
@@ -540,18 +532,27 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
   const disposition = toolCallDisposition(part);
   const outputScreen = parseToolOutputScreen(part.result);
   const outputWasWithheld = outputScreen?.action === 'withheld';
+  // A space write refused for its size is a normal step in building the space in parts, so
+  // its step shows a plain note in a neutral tone instead of the failure line. The refusal
+  // text itself stays in the result, for the model and for the step's details.
+  const tooLongNote = outputWasWithheld ? undefined : parseSpaceWriteTooLongNote(part.result);
   const status = outputWasWithheld
     ? outputScreen.tone
-    : disposition === undefined
-      ? toStatus(part.status?.type)
-      : disposition.tone;
-  const failureReason = outputWasWithheld ? undefined : getToolFailureReason(part.result, disposition);
+    : tooLongNote !== undefined
+      ? 'muted'
+      : disposition === undefined
+        ? toStatus(part.status?.type)
+        : disposition.tone;
+  const failureReason =
+    outputWasWithheld || tooLongNote !== undefined ? undefined : getToolFailureReason(part.result, disposition);
   const notDoneReason = outputWasWithheld ? undefined : toolCallNotDoneReason(part);
   const outcomeText = outputWasWithheld
     ? outputScreen.label
-    : notDoneReason !== undefined
-      ? notDoneText({ toolName: typeof part.toolName === 'string' ? part.toolName : '', reason: notDoneReason })
-      : buildOutcomeText(disposition, failureReason);
+    : tooLongNote !== undefined
+      ? tooLongNote
+      : notDoneReason !== undefined
+        ? notDoneText({ toolName: typeof part.toolName === 'string' ? part.toolName : '', reason: notDoneReason })
+        : buildOutcomeText(disposition, failureReason);
   const onToggle = () => setExpanded(prev => !prev);
   const expandSubAgent = useCallback(() => setExpanded(true), []);
   useRegisterApprovalExpand(isSubAgent ? part.toolCallId : '', expandSubAgent);
@@ -738,11 +739,5 @@ function ToolCallPart(part: ToolCallMessagePartProps) {
       approvalId={showApproval ? approval?.id : undefined}
     />
   );
-  if (!reminderSet) return card;
-  return (
-    <>
-      {card}
-      <ReminderNotificationPrompt />
-    </>
-  );
+  return card;
 }

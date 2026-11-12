@@ -3,6 +3,7 @@ export const TOOL_BUNDLE_NAMES = [
   'google',
   'web',
   'maps',
+  'browser',
   'sandbox',
   'spaces',
   'documents',
@@ -32,6 +33,10 @@ const TOOL_BUNDLES: Record<ToolBundleName, ToolBundleSpec> = {
   maps: {
     summary: 'places, routes and maps',
     aliases: ['map', 'places', 'route', 'directions'],
+  },
+  browser: {
+    summary: "Aman's own web browser: reading pages, finding things on sites",
+    aliases: ['web_browser', 'chrome'],
   },
   sandbox: {
     summary: 'the sandbox workspace, repository work, file uploads',

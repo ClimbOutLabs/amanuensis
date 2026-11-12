@@ -2,7 +2,8 @@
 
 /** Which backend runs code: docker, or the isolated sandbox slots. */
 export const GetRunCodeStatusResponseDataBackend = {
-        Docker: "docker",
-        Slots: "slots"
-    } as const;
-export type GetRunCodeStatusResponseDataBackend = typeof GetRunCodeStatusResponseDataBackend[keyof typeof GetRunCodeStatusResponseDataBackend];
+    Docker: "docker",
+    Slots: "slots",
+} as const;
+export type GetRunCodeStatusResponseDataBackend =
+    (typeof GetRunCodeStatusResponseDataBackend)[keyof typeof GetRunCodeStatusResponseDataBackend];

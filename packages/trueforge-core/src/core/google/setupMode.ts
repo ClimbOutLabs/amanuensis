@@ -2,8 +2,11 @@
  * How Google sends the user back to Aman, which decides what kind of client the user creates. Google only
  * accepts a public https address (or a loopback address, for a Desktop app) as the place to return to, and
  * the default install is reached by any LAN, Tailscale or host name, so three modes exist:
- *  - web: this install has a public https address and the browser is on it. The user makes a Web client with
- *    that exact callback; a browser anywhere else would arrive at that address without its session.
+ *  - web: the browser is on a public https address for this install: the configured public address, or one of
+ *    the addresses the installer recorded for the instance (its Tailscale name is one: it is a real domain
+ *    name, and Google accepts https return addresses on real domain names). The user makes a Web client with
+ *    that exact callback; a browser anywhere else would arrive at that address without its session. Only this
+ *    return trip reads the recorded addresses; the public address keeps its meaning everywhere else.
  *  - loopback: the browser is on this machine. A Desktop client returns straight to this server.
  *  - paste: the browser is elsewhere. A Desktop client returns to an address that cannot load, and the user
  *    pastes that address back so the code and state can be read from it.
@@ -28,9 +31,6 @@ export const GoogleSetupInfoSchema = z.object({
   redirect_uri: z.string().describe('The exact redirect URI to register (Web client) or that the consent returns to.'),
 });
 export type GoogleSetupInfo = z.infer<typeof GoogleSetupInfoSchema>;
-
-/** Names Google treats as private even though they look public: a Tailscale name is only reachable on its tailnet. */
-const PRIVATE_DOMAINS = ['ts.net'];
 
 const PRIVATE_NAME_SUFFIXES = [
   'local',
@@ -63,9 +63,6 @@ export function publicHttpsBase(baseUrl: string): string | null {
   } catch {
     return null;
   }
-  if (PRIVATE_DOMAINS.some(domain => url.hostname === domain || url.hostname.endsWith(`.${domain}`))) {
-    return null;
-  }
   const labels = url.hostname.split('.');
   const suffix = labels[labels.length - 1] ?? '';
   const isPublicName =
@@ -88,11 +85,21 @@ export function resolveGoogleSetup(input: {
   public_base_url: string;
   request_url: string;
   callback_path: string;
+  /**
+   * The addresses the installer recorded for this instance, when the host has them. A browser on one that is
+   * a public https address gets the web return on that address, even when the configured public address is
+   * the loopback default. The session guard is unchanged: the return address is only used for the exact
+   * origin the browser arrived on.
+   */
+  recorded_origins?: readonly string[] | undefined;
 }): GoogleSetupInfo {
-  const publicBase = publicHttpsBase(input.public_base_url);
   const request = new URL(input.request_url);
-  if (publicBase !== null && new URL(publicBase).origin === request.origin) {
-    return { mode: 'web', client_type: 'web', redirect_uri: `${publicBase}${input.callback_path}` };
+  const candidates = [input.public_base_url, ...(input.recorded_origins ?? [])];
+  for (const candidate of candidates) {
+    const base = publicHttpsBase(candidate);
+    if (base !== null && new URL(base).origin === request.origin) {
+      return { mode: 'web', client_type: 'web', redirect_uri: `${base}${input.callback_path}` };
+    }
   }
   if (isLoopbackHostname(request.hostname)) {
     return { mode: 'loopback', client_type: 'desktop', redirect_uri: `${request.origin}${input.callback_path}` };

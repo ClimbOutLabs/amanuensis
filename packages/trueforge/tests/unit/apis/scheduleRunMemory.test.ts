@@ -40,6 +40,7 @@ import { MarkdownMemoryClient } from '../../../src/runtime/memory/markdownMemory
 import { resolveTurnSummarizeContext } from '../../../src/runtime/memorySummarizeSettings';
 import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import { ScheduleManifestSchema } from '../../../src/schemas/schedule';
+import { deliveryDeps } from '../../fixtures/deliveryDeps';
 import { discardedModelUsage } from '../../fixtures/discardedModelUsage';
 import { FakeTurnArtifactStore } from '../../fixtures/fakeTurnArtifactStore';
 import { uncappedTokenFactoryBudget } from '../../fixtures/uncappedTokenFactoryBudget';
@@ -138,9 +139,12 @@ describe('scheduled run memory wiring', () => {
     app.route(
       '/',
       createSchedulesRouter({
+        chatDeletionStore: { listDeletedChatModelUsage: () => Promise.resolve([]) },
         mcpCatalog: McpCatalog.loadShipped(),
         scheduleStore,
         briefItemStore: new BriefItemCompletionStore(db),
+        deliveryService: deliveryDeps(db).deliveryService,
+        reminderReach: deliveryDeps(db).reminderReach,
         sessions: new Sessions<SessionCustom, TurnCustom>({ sessionStore }),
         agentStore,
         personaStore: {
@@ -194,7 +198,7 @@ describe('scheduled run memory wiring', () => {
     const retained = await memoryClient.retain({
       items: [
         {
-          content: 'Turn summary: the scheduled report run finished.',
+          content: 'The scheduled report run finished.',
           timestamp: '2026-10-20T13:00:00.000Z',
           document_id: 'schedule-run-1',
         },
@@ -208,7 +212,7 @@ describe('scheduled run memory wiring', () => {
     const shared = await reader.listEntries({ namespace: '', timeoutMs: 5_000 });
     expect(shared.ok).toBe(true);
     if (shared.ok) {
-      expect(shared.entries.some(entry => entry.text.includes('Turn summary:'))).toBe(true);
+      expect(shared.entries.some(entry => entry.text.includes('scheduled'))).toBe(true);
     }
   });
 
@@ -223,7 +227,7 @@ describe('scheduled run memory wiring', () => {
     const retained = await memoryClient.retain({
       items: [
         {
-          content: 'Turn summary: Zara’s scheduled archive check finished.',
+          content: 'Zara’s scheduled archive check finished.',
           timestamp: '2026-10-20T13:00:00.000Z',
           document_id: 'schedule-run-2',
         },
@@ -237,7 +241,7 @@ describe('scheduled run memory wiring', () => {
     const zara = await reader.listEntries({ namespace: 'persona:Zara', timeoutMs: 5_000 });
     expect(zara.ok).toBe(true);
     if (zara.ok) {
-      expect(zara.entries.some(entry => entry.text.includes('Turn summary:'))).toBe(true);
+      expect(zara.entries.some(entry => entry.text.includes('scheduled'))).toBe(true);
     }
     const shared = await reader.listEntries({ namespace: '', timeoutMs: 5_000 });
     expect(shared.ok).toBe(true);
@@ -262,7 +266,6 @@ describe('scheduled run memory wiring', () => {
         type: 'inline',
         spec: AgentSpecSchema.parse({ model: { name: 'test-provider/test-model' } }),
       } as const,
-      helperFqn: undefined,
     };
 
     // The state a scheduled run was in before the wiring: no client, no context, the

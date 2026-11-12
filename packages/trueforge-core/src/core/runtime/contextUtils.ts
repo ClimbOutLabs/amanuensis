@@ -1,5 +1,7 @@
 import dedent from 'dedent';
 import { createHash } from 'node:crypto';
+import type { ChatCompletionMessageParam } from 'openai/resources/chat';
+import { MAIL_DRAFT_TOOL_NAME } from '../email/mailConnector/toolContract';
 import type { ApprovalDecision } from '../events/schema';
 import {
   EventType,
@@ -85,7 +87,7 @@ Show a picture in a reply only when the person asked for one or the picture is t
  * per-tool special case.
  */
 export const NO_TASK_NO_TOOLS_PROMPT = dedent`
-When the user's message names no concrete task, such as a greeting, an announcement of intent ("ready to...", "let's..."), or small talk, reply in text and ask what they want done. Do not call any tool, open or use a sandbox, or guess which tool they might mean.
+When the user's message names no concrete task, such as a greeting, an announcement of intent ("ready to...", "let's..."), or small talk, reply in text and ask what they want done. In that case, do not call any tool, open or use a sandbox, or guess which tool they might mean. The one exception: if the message answers a question you just asked, take the answer and continue the task, using tools as the task needs.
 `;
 
 /**
@@ -107,14 +109,28 @@ Speak to the user in plain words. Never name tools, sandboxes, shells, networks,
 `;
 
 /**
- * Email is connected only through the Settings form, so the app password never passes through a
- * chat. Without this, a model asked to "set up email with this password" will try to use the
+ * Email and Calendar are connected only through the Settings form, so the app password never passes
+ * through a chat. Without this, a model asked to "set up email with this password" will try to use the
  * password somewhere, or repeat it back. The fix is a plain instruction to point at Settings and
  * never touch the password, not a per-tool special case.
  */
-export const EMAIL_PASSWORD_PROMPT = dedent`
-Email is connected only in Settings, under Connectors, Email, with an app password you never see. Never ask for a password in chat. If someone pastes a password or asks you to connect email with it, do not use it, save it, or pass it to a tool; tell them to enter it in Settings, Connectors, Email instead.
+function connectorPasswordPrompt({ connector, owner }: { connector: string; owner: string }): string {
+  return dedent`
+${connector} is connected only in Settings, under Connectors, ${connector}, with an app password you never see. Never ask for a password in chat. If someone pastes a password or asks you to connect ${owner} with it, do not use it, save it, or pass it to a tool; tell them to enter it in Settings, Connectors, ${connector} instead.
 `;
+}
+
+export const EMAIL_PASSWORD_PROMPT = connectorPasswordPrompt({ connector: 'Email', owner: 'email' });
+
+/**
+ * A demo instance refuses to send from the Email account but lets a draft be saved. The model is told so, or it answers "send it"
+ * with a pointer to Settings and prints a draft instead of saving one.
+ */
+export const DEMO_EMAIL_PROMPT = dedent`
+On this demo, the Email account cannot send. When the person asks you to send or draft a message from it, save it as a draft with ${MAIL_DRAFT_TOOL_NAME}; that asks the person first. Use the address they gave, and fill in names you know instead of placeholders.
+`;
+
+export const CALENDAR_PASSWORD_PROMPT = connectorPasswordPrompt({ connector: 'Calendar', owner: 'their calendar' });
 
 /**
  * Host-owned source contract; it guides evidence gathering without routing requests. The shell is named as a
@@ -420,6 +436,54 @@ export function hasSentHostNoteThisTurn(
   return false;
 }
 
+/** Opens the host's note on a picture the host itself attached, such as a browser screenshot. */
+const HOST_PICTURE_NOTE_START = `${SYSTEM_TAG_START}[host-picture] `;
+
+/**
+ * A picture the host shows the model, with the host's note on it: a user-role message the person
+ * did not write, so it never takes the place of the person's message.
+ */
+export function hostPictureMessage(input: { note: string; imageUrl: string }): ChatCompletionMessageParam {
+  return {
+    role: 'user',
+    content: [
+      { type: 'text', text: internalSystemTag(`[host-picture] ${input.note}`) },
+      { type: 'image_url', image_url: { url: input.imageUrl } },
+    ],
+  };
+}
+
+function isHostWrittenUserContent(content: ChatCompletionMessageParam['content']): boolean {
+  if (typeof content === 'string') {
+    return isHostWrappedText(content);
+  }
+  if (!Array.isArray(content) || content.length === 0) {
+    return false;
+  }
+  // A picture the host attached comes with its note first. A person's own picture never does: an
+  // upload is announced by other host text, so a message of the person's keeps counting as theirs.
+  const [first, ...rest] = content;
+  if (first?.type === 'text' && first.text.startsWith(HOST_PICTURE_NOTE_START)) {
+    return rest.every(part => part.type === 'image_url' || (part.type === 'text' && isHostWrappedText(part.text)));
+  }
+  return content.every(part => part.type === 'text' && isHostWrappedText(part.text));
+}
+
+/**
+ * Index of the latest user message the person wrote, or -1 when there is none. Skips user-role
+ * messages the host wrote: internal notes such as the empty-answer nudge, and extracted file text,
+ * which follows the person's message. The one owner of "where is the person's message".
+ */
+export function personMessageIndex(messages: readonly ChatCompletionMessageParam[]): number {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message?.role === 'user' && !isHostWrittenUserContent(message.content)) {
+      return i;
+    }
+  }
+  return -1;
+}
+
 export function internalSystemMessage(m: string): LLMUserMessage {
   return { role: 'user' as const, content: internalSystemTag(m) };
 }
@@ -545,6 +609,28 @@ export function withHostUniqueToolCallIds<T extends { id: string }>(input: {
   });
 }
 
+/**
+ * Carries a set of provider tool call ids across withHostUniqueToolCallIds. The remap returns
+ * the calls in order, so a fact recorded against the provider ids (for example, which calls
+ * the stream stopped early for size) is rebuilt against the ids the calls carry now. Without
+ * this, a remapped call's recorded fact is silently lost: the set still names an id no call
+ * in the reply has.
+ */
+export function remapToolCallIdSet<T extends { id: string }>(input: {
+  before: readonly T[];
+  after: readonly T[];
+  ids: ReadonlySet<string>;
+}): Set<string> {
+  const remapped = new Set<string>();
+  input.before.forEach((call, index) => {
+    const replacement = input.after[index];
+    if (replacement !== undefined && input.ids.has(call.id)) {
+      remapped.add(replacement.id);
+    }
+  });
+  return remapped;
+}
+
 /** Every call an unattended run held for the owner, in the order it was made. A repeat in one batch is not one. */
 export function findHeldToolCalls(context: readonly ContextMessage[]): InternalEnrichedToolCall[] {
   const held: InternalEnrichedToolCall[] = [];
@@ -575,6 +661,14 @@ export function makeUnknownToolInfo(toolName: string): InternalToolCallInfo {
     is_approval_required: false,
     is_client_side: false,
   };
+}
+
+/**
+ * What a reply removes when a call is declined or unavailable. A deferred call names its inner
+ * server and tool, so one down server never removes the same tool name on a healthy one.
+ */
+export function removedToolKey(info: InternalToolCallInfo): string {
+  return info.is_deferred === true ? `${info.mcp_server_name}/${info.original_tool_name}` : info.original_tool_name;
 }
 
 export function toToolCallInfo(toolInfo: InternalToolCallInfo): ToolInfo {

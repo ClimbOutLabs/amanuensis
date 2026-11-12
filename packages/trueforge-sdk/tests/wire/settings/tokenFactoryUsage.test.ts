@@ -5,77 +5,95 @@ import { TrueForge } from "../../../src/Client";
 import { mockServerPool } from "../../mock-server/MockServerPool";
 
 describe("TokenFactoryUsageClient", () => {
-    
     test("get (1)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { "data" : { "cap_tokens" : 1 , "cost_usd" : 1.1 , "models" : [ { "calls" : 1 , "cost_usd" : null , "display_name" : "display_name" , "input_tokens" : 1 , "model_id" : "model_id" , "output_tokens" : 1 } ] , "remaining_tokens" : 1 , "usage_date" : "usage_date" , "used_tokens" : 1 } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = {
+            data: {
+                cap_tokens: 1,
+                cost_usd: 1.1,
+                models: [
+                    {
+                        calls: 1,
+                        cost_usd: null,
+                        display_name: "display_name",
+                        input_tokens: 1,
+                        model_id: "model_id",
+                        output_tokens: 1,
+                    },
+                ],
+                remaining_tokens: 1,
+                usage_date: "usage_date",
+                used_tokens: 1,
+            },
+        };
+
         server
             .mockEndpoint()
-            .get("/api/v1/settings/token-factory-usage").respondWith()
-            .statusCode(200).jsonBody(rawResponseBody)
-                .build();
+            .get("/api/v1/settings/token-factory-usage")
+            .respondWith()
+            .statusCode(200)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-                        
-                                const response = await client.settings.tokenFactoryUsage.get();
-                                expect(response).toEqual({
-    data: {
-        capTokens: 1,
-        costUsd: 1.1,
-        models: [{
-                calls: 1,
-                costUsd: null,
-                displayName: "display_name",
-                inputTokens: 1,
-                modelId: "model_id",
-                outputTokens: 1
-            }],
-        remainingTokens: 1,
-        usageDate: "usage_date",
-        usedTokens: 1
-    }
-});
-                              
-                    
+        const response = await client.settings.tokenFactoryUsage.get();
+        expect(response).toEqual({
+            data: {
+                capTokens: 1,
+                costUsd: 1.1,
+                models: [
+                    {
+                        calls: 1,
+                        costUsd: null,
+                        displayName: "display_name",
+                        inputTokens: 1,
+                        modelId: "model_id",
+                        outputTokens: 1,
+                    },
+                ],
+                remainingTokens: 1,
+                usageDate: "usage_date",
+                usedTokens: 1,
+            },
+        });
     });
-          
+
     test("get (2)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .get("/api/v1/settings/token-factory-usage").respondWith()
-            .statusCode(401).jsonBody(rawResponseBody)
-                .build();
+            .get("/api/v1/settings/token-factory-usage")
+            .respondWith()
+            .statusCode(401)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.settings.tokenFactoryUsage.get()
-            }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
+        await expect(async () => {
+            return await client.settings.tokenFactoryUsage.get();
+        }).rejects.toThrow(TrueForgeTypes.UnauthorizedError);
     });
-          
+
     test("get (3)", async () => {
         const server = mockServerPool.createServer();
-        const client = new TrueForge({ "maxRetries" : 0 , "token" : "test" , "baseUrl" : server.baseUrl });
-        
-        const rawResponseBody = { "error" : { "message" : "message" } };
-        
+        const client = new TrueForge({ maxRetries: 0, token: "test", baseUrl: server.baseUrl });
+
+        const rawResponseBody = { error: { message: "message" } };
+
         server
             .mockEndpoint()
-            .get("/api/v1/settings/token-factory-usage").respondWith()
-            .statusCode(403).jsonBody(rawResponseBody)
-                .build();
+            .get("/api/v1/settings/token-factory-usage")
+            .respondWith()
+            .statusCode(403)
+            .jsonBody(rawResponseBody)
+            .build();
 
-        
-            await expect(async () => {
-                return await client.settings.tokenFactoryUsage.get()
-            }).rejects.toThrow(TrueForgeTypes.ForbiddenError);
+        await expect(async () => {
+            return await client.settings.tokenFactoryUsage.get();
+        }).rejects.toThrow(TrueForgeTypes.ForbiddenError);
     });
-          
 });

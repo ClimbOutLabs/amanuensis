@@ -5,7 +5,11 @@ import { fileURLToPath } from 'node:url';
 import { chromium, type Browser } from 'playwright-core';
 import { createServer, defaultClientConditions } from 'vite';
 
+import { DEV_OPTIMIZE_DEPS } from '../src/devPrebundle.ts';
+import { featureShotPath, saveFailureShots } from './support/featureShots.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
+import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
+import { privateViteCache } from './support/viteCache.ts';
 
 const RENDER_TIMEOUT_MS = 45_000;
 
@@ -30,8 +34,11 @@ test(
     timeout: 180_000,
   },
   async () => {
+    const viteCache = privateViteCache('runtime-rail');
     const server = await createServer({
+      cacheDir: viteCache.cacheDir,
       configFile: false,
+      optimizeDeps: DEV_OPTIMIZE_DEPS,
       root: fileURLToPath(new URL('../', import.meta.url)),
       logLevel: 'silent',
       resolve: { conditions: ['trueforge-dev', ...defaultClientConditions] },
@@ -47,13 +54,16 @@ test(
         const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
         await page.goto(`http://127.0.0.1:${address.port}/tests/fixtures/runtime-rail.fixture.html?theme=${theme}`, {
           waitUntil: 'domcontentloaded',
-          timeout: RENDER_TIMEOUT_MS,
+          timeout: FIRST_LOAD_TIMEOUT_MS,
         });
         const panel = page.getByRole('complementary', { name: 'Amanuensis runtime status' });
         await panel.waitFor({ timeout: RENDER_TIMEOUT_MS });
         // Open every fold so all of the panel's text is rendered.
         for (const summary of await panel.locator('summary').all()) await summary.click();
         await panel.getByText('Sent an email').waitFor({ timeout: RENDER_TIMEOUT_MS });
+        await page.screenshot({
+          path: await featureShotPath({ surface: 'screen:chat-layout', step: `status-panel-${theme}` }),
+        });
         await page.waitForFunction(() => {
           const img = document.querySelector<HTMLImageElement>('.aman-runtime-rail__picture');
           return img?.complete === true && img.naturalWidth > 0;
@@ -151,9 +161,13 @@ test(
         await page.getByRole('button', { name: 'Show panel' }).click();
         await page.close();
       }
+    } catch (error) {
+      await saveFailureShots({ browser, surface: 'screen:chat-layout' });
+      throw error;
     } finally {
       await browser?.close();
       await server.close();
+      viteCache.remove();
     }
   },
 );

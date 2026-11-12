@@ -40,6 +40,69 @@ describe('AskUserPrompt', () => {
     expect(screen.getAllByText('Answered')).toHaveLength(2);
   });
 
+  it('sizes an answered question on the type scale, not a one-off literal', () => {
+    const onSubmit = vi.fn();
+    const { unmount } = render(
+      <AskUserPrompt
+        questions={[]}
+        answeredQuestions={[{ ...firstQuestion, answer: 'Immediately', isCustom: false }]}
+        onSubmit={onSubmit}
+        dataTestPrefix="ask"
+      />,
+    );
+    const answer = screen.getByText('Immediately', { selector: 'span' });
+    expect(answer).toHaveClass('text-sm');
+    expect(answer.className).not.toMatch(/text-\[0\.8125rem\]/);
+    unmount();
+  });
+
+  it('sizes a current question option on the type scale, not a one-off literal', () => {
+    const onSubmit = vi.fn();
+    render(
+      <AskUserPrompt
+        questions={[firstQuestion]}
+        currentQuestion={firstQuestion}
+        currentAnswer={{ radioValue: '', custom: '' }}
+        onSubmit={onSubmit}
+      />,
+    );
+    const option = screen.getByText('Immediately');
+    expect(option).toHaveClass('text-sm');
+    expect(option.className).not.toMatch(/text-\[0\.8125rem\]/);
+  });
+
+  it('sizes the custom-answer field and its placeholder on the --text-sm scale step', () => {
+    render(
+      <AskUserPrompt
+        questions={[firstQuestion]}
+        currentQuestion={firstQuestion}
+        currentAnswer={{ radioValue: '', custom: '' }}
+        onSubmit={() => {}}
+      />,
+    );
+
+    const customAnswer = screen.getByRole('textbox', { name: 'Other (custom answer)' });
+    expect(customAnswer).toHaveClass('text-sm');
+    expect(customAnswer.className).not.toMatch(/text-\[0\.8125rem\]/);
+    expect(customAnswer.className).toContain('placeholder:text-[length:var(--text-sm)]');
+  });
+
+  it('sizes the multi-question headline on the --text-base scale step, not a one-off literal', () => {
+    render(
+      <AskUserPrompt
+        questions={[firstQuestion, secondQuestion]}
+        currentQuestion={secondQuestion}
+        currentQuestionIndex={1}
+        currentAnswer={{ radioValue: '', custom: '' }}
+        onSubmit={() => {}}
+      />,
+    );
+
+    const headline = screen.getByText('Which region?', { selector: 'div' });
+    expect(headline).toHaveClass('text-base');
+    expect(headline.className).not.toMatch(/text-\[0\.9375rem\]/);
+  });
+
   it('reports option and custom-answer edits and submits an enabled single question', () => {
     const onCurrentAnswerChange = vi.fn();
     const onSubmit = vi.fn();

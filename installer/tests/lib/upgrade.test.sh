@@ -6,6 +6,28 @@ set -euo pipefail
 
 app_tag() { sed -n 's/.*"app_image": "\([^"]*\)".*/\1/p' "$1"; }
 compose_image() { sed -n 's/^[[:space:]]*image:[[:space:]]*//p' "$AMAN_HOME/instances/$1/compose.yaml" | head -n 1; }
+env_value() { sed -n "s/^$2=//p" "$AMAN_HOME/instances/$1/.env" | head -n 1; }
+reg_value() { sed -n "s/^$2=//p" "$AMAN_HOME/state/instances/$1.conf" | head -n 1; }
+compose() { cat "$AMAN_HOME/instances/main/compose.yaml"; }
+
+# This computer has a home network address and a name on it, so an instance can open on the network.
+lan() {
+  fixture_network 192.168.1.20
+  fixture_hostname host
+}
+
+HTTPS_ORIGINS="http://127.0.0.1:8791,http://localhost:8791,https://192.168.1.20:8443,https://host:8443,https://host.local:8443"
+PLAIN_ORIGINS="http://127.0.0.1:8791,http://localhost:8791,http://192.168.1.20:8791,http://host:8791,http://host.local:8791"
+
+# The record and the settings of the installed instance rewritten the way an install from before
+# https left them: opened on the network, with plain http everywhere and no https port.
+record_plain_http() {
+  sed -i 's/^tls=.*/tls=off/' "$AMAN_HOME/state/instances/main.conf"
+  sed -i 's/^tls_port=.*/tls_port=/' "$AMAN_HOME/state/instances/main.conf"
+  sed -i "s|^origins=.*|origins=$PLAIN_ORIGINS|" "$AMAN_HOME/state/instances/main.conf"
+  sed -i "s|^ALLOWED_ORIGINS=.*|ALLOWED_ORIGINS=$PLAIN_ORIGINS|" "$AMAN_HOME/instances/main/.env"
+  sed -i "/192.168.1.20:8443:8443/d" "$AMAN_HOME/instances/main/compose.yaml"
+}
 
 test_noop_when_current() {
   t_begin "upgrade with nothing new says so and rebuilds nothing"
@@ -17,6 +39,84 @@ test_noop_when_current() {
   assert_rc 0
   assert_contains "$OUT" "Already up to date"
   assert_eq "$(log_count "docker build")" "$builds"
+  sandbox_drop
+}
+
+test_upgrade_check_names_the_move_to_https_and_changes_nothing() {
+  t_begin "upgrade --check names the move to https an older plain http instance needs, and changes nothing"
+  sandbox_new
+  lan
+  install_machine
+  record_plain_http
+  run_install upgrade --check
+  assert_rc 0
+  assert_flat_contains "$OUT" "Instance main would move to https"
+  assert_eq "$(reg_value main tls)" off "the check leaves the record on plain http"
+  assert_eq "$(env_value main ALLOWED_ORIGINS)" "$PLAIN_ORIGINS" "and the settings keep the plain addresses"
+  sandbox_drop
+}
+
+test_upgrade_moves_a_plain_http_instance_to_https() {
+  t_begin "an upgrade with nothing new to install still moves an older plain http instance to https"
+  sandbox_new
+  lan
+  install_machine
+  record_plain_http
+  local secret
+  secret=$(env_value main OIDC_CLIENT_SECRET)
+  : >"$STUB_LOG"
+  run_install upgrade
+  assert_rc 0
+  assert_flat_contains "$OUT" "Moving instance main to https"
+  assert_eq "$(reg_value main tls)" local
+  assert_eq "$(reg_value main tls_port)" 8443
+  assert_eq "$(env_value main ALLOWED_ORIGINS)" "$HTTPS_ORIGINS"
+  assert_contains "$(compose)" "- '192.168.1.20:8443:8443'" "the moved instance is served over https"
+  assert_eq "$(env_value main OIDC_CLIENT_SECRET)" "$secret" "secrets stay as they were"
+  assert_log_has "--force-recreate"
+  run_install upgrade
+  assert_rc 0
+  assert_contains "$OUT" "Already up to date"
+  assert_eq "$(reg_value main tls)" local "https is kept"
+  sandbox_drop
+}
+
+test_a_full_upgrade_moves_a_plain_http_instance_to_https() {
+  t_begin "an upgrade to a new version moves an older plain http instance to https on the way"
+  sandbox_new
+  lan
+  install_machine
+  record_plain_http
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_eq "$(reg_value main tls)" local
+  assert_eq "$(reg_value main tls_port)" 8443
+  assert_eq "$(env_value main ALLOWED_ORIGINS)" "$HTTPS_ORIGINS"
+  assert_contains "$(compose)" "- '192.168.1.20:8443:8443'" "the moved instance is served over https"
+  sandbox_drop
+}
+
+test_upgrade_building_missing_parts_moves_a_plain_http_instance_to_https() {
+  t_begin "an upgrade that builds missing parts also moves an older plain http instance to https"
+  sandbox_new
+  lan
+  install_machine
+  record_plain_http
+  # One part of the installed version is missing, so the upgrade builds it again instead of
+  # finding everything in place.
+  grep -v -Fx "$(app_tag "$AMAN_HOME/release/release.json")" "$STUB_STATE/images" >"$STUB_STATE/images.new"
+  mv "$STUB_STATE/images.new" "$STUB_STATE/images"
+  : >"$STUB_LOG"
+  run_install upgrade
+  assert_rc 0
+  assert_flat_contains "$OUT" "Building the missing parts again"
+  assert_flat_contains "$OUT" "Moving instance main to https"
+  assert_eq "$(reg_value main tls)" local
+  assert_eq "$(reg_value main tls_port)" 8443
+  assert_eq "$(env_value main ALLOWED_ORIGINS)" "$HTTPS_ORIGINS"
+  assert_contains "$(compose)" "- '192.168.1.20:8443:8443'" "the moved instance is served over https"
+  assert_log_has "--force-recreate"
   sandbox_drop
 }
 
@@ -88,6 +188,155 @@ test_upgrade_without_an_old_email_account_file_stays_quiet() {
   run_install upgrade
   assert_rc 0
   assert_not_contains "$OUT" "Email was set up the old way"
+  sandbox_drop
+}
+
+test_upgrade_notes_an_old_calendar_account_file() {
+  t_begin "upgrade says how to reconnect the calendar when the old account file is there, once"
+  sandbox_new
+  install_machine
+  printf '%s\n' 'CALDAV_URL=https://caldav.example.invalid/dav/' 'CALDAV_USERNAME=owner@example.invalid' \
+    >"$AMAN_HOME/instances/main/.env.calendar"
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_contains "$OUT" "Calendar was set up the old way. Connect it again in Settings, then Connectors, then Calendar."
+  assert_not_contains "$OUT" "Email was set up the old way"
+  assert_file "$AMAN_HOME/instances/main/.env.calendar"
+  run_install upgrade
+  assert_rc 0
+  assert_contains "$OUT" "Already up to date"
+  assert_contains "$OUT" "Calendar was set up the old way. Connect it again in Settings, then Connectors, then Calendar."
+  sandbox_drop
+}
+
+test_upgrade_moves_a_complete_old_calendar_account() {
+  t_begin "upgrade moves a complete old calendar account into the connector, deletes the old file and stays quiet after"
+  sandbox_new
+  install_machine
+  local dir=$AMAN_HOME/instances/main
+  printf '%s\n' 'CALDAV_URL=https://caldav.example.invalid/dav/' 'CALDAV_USERNAME=owner@example.invalid' \
+    'CALDAV_PASSWORD=old-sentinel-91c2' 'CALDAV_USER_EMAIL=owner@example.invalid' >"$dir/.env.calendar"
+  printf 'CALENDAR_CONNECTOR_URL=http://calendar-caldav:9558/mcp\n' >>"$dir/.env"
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_not_contains "$OUT" "Calendar was set up the old way"
+  assert_no_path "$dir/.env.calendar"
+  assert_eq "$(grep -c '^CALENDAR_CONNECTOR_URL=' "$dir/.env" || true)" 0 "the old connector line is gone"
+  assert_contains "$(cat "$STUB_STATE/calendar-account-aman-main")" "CALDAV_PASSWORD=old-sentinel-91c2"
+  assert_not_contains "$OUT$ERR" "old-sentinel-91c2"
+  run_install upgrade
+  assert_rc 0
+  assert_not_contains "$OUT" "Calendar was set up the old way"
+  sandbox_drop
+}
+
+test_upgrade_keeps_a_calendar_account_connected_again() {
+  t_begin "upgrade never replaces an account connected again in Settings with the old file; it only deletes the old file"
+  sandbox_new
+  install_machine
+  local dir=$AMAN_HOME/instances/main
+  printf '%s\n' 'CALDAV_URL=https://new.example.invalid/dav/' 'CALDAV_USERNAME=new@example.invalid' \
+    'CALDAV_PASSWORD=new-sentinel' 'CALDAV_USER_EMAIL=new@example.invalid' >"$STUB_STATE/calendar-account-aman-main"
+  printf '%s\n' 'CALDAV_URL=https://caldav.example.invalid/dav/' 'CALDAV_USERNAME=owner@example.invalid' \
+    'CALDAV_PASSWORD=old-sentinel' 'CALDAV_USER_EMAIL=owner@example.invalid' >"$dir/.env.calendar"
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_no_path "$dir/.env.calendar"
+  assert_contains "$(cat "$STUB_STATE/calendar-account-aman-main")" "CALDAV_PASSWORD=new-sentinel"
+  assert_not_contains "$(cat "$STUB_STATE/calendar-account-aman-main")" "old-sentinel"
+  assert_not_contains "$OUT" "Calendar was set up the old way"
+  sandbox_drop
+}
+
+test_upgrade_keeps_the_old_calendar_file_when_the_check_says_nothing() {
+  t_begin "upgrade keeps the old calendar file, and says so, when the connector's check printed nothing"
+  sandbox_new
+  install_machine
+  local dir=$AMAN_HOME/instances/main
+  printf '%s\n' 'CALDAV_URL=https://new.example.invalid/dav/' 'CALDAV_USERNAME=new@example.invalid' \
+    'CALDAV_PASSWORD=new-sentinel' 'CALDAV_USER_EMAIL=new@example.invalid' >"$STUB_STATE/calendar-account-aman-main"
+  printf '%s\n' 'CALDAV_URL=https://caldav.example.invalid/dav/' 'CALDAV_USERNAME=owner@example.invalid' \
+    'CALDAV_PASSWORD=old-sentinel' 'CALDAV_USER_EMAIL=owner@example.invalid' >"$dir/.env.calendar"
+  repo_commit_change "app change"
+  STUB_CALENDAR_CHECK=silent run_install upgrade
+  assert_rc 0
+  assert_file "$dir/.env.calendar"
+  assert_contains "$OUT" "Calendar was set up the old way. Connect it again in Settings, then Connectors, then Calendar."
+  assert_contains "$(cat "$STUB_STATE/calendar-account-aman-main")" "CALDAV_PASSWORD=new-sentinel"
+  sandbox_drop
+}
+
+test_upgrade_without_an_old_calendar_account_file_stays_quiet() {
+  t_begin "upgrade without the old calendar file says nothing about reconnecting the calendar"
+  sandbox_new
+  install_machine
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_not_contains "$OUT" "Calendar was set up the old way"
+  sandbox_drop
+}
+
+test_upgrade_starts_the_calendar_connector_without_a_profile() {
+  t_begin "after an upgrade the instance's compose file starts the calendar connector with the instance"
+  sandbox_new
+  install_machine
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_not_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "profiles: ['calendar']"
+  assert_contains "$(cat "$AMAN_HOME/instances/main/compose.yaml")" "calendar-account:/account"
+  sandbox_drop
+}
+
+test_upgrade_turns_the_browser_on_for_an_install_from_before_it() {
+  t_begin "upgrading an install from before the browser builds it, makes its secret and starts it with the instance"
+  sandbox_new
+  install_machine
+  local release=$AMAN_HOME/release/release.json env=$AMAN_HOME/instances/main/.env compose=$AMAN_HOME/instances/main/compose.yaml
+  # The install as an older installer left it: no browser in the record, the settings or the compose file.
+  grep -v '"browser_image"\|"browser_gateway_image"' "$release" >"$release.new" && mv "$release.new" "$release"
+  grep -v '^BROWSER_SECRET=' "$env" >"$env.new" && mv "$env.new" "$env"
+  chmod 600 "$release" "$env"
+  sed -i '/BROWSER\|browser/d' "$compose"
+  run_install upgrade --check
+  assert_rc 0
+  assert_contains "$OUT" "browser (new) -> aman-browser:"
+  run_install upgrade
+  assert_rc 0
+  assert_contains "$(cat "$release")" '"browser_image": "aman-browser:'
+  assert_eq "$(sed -n 's/^BROWSER_SECRET=//p' "$env" | wc -c | tr -d ' ')" 65 "64 characters and a newline"
+  assert_mode "$env" 600
+  assert_contains "$(cat "$compose")" "BROWSER_ENABLED: 'true'"
+  assert_contains "$(cat "$compose")" "image: aman-browser-gateway:"
+  assert_log_has "docker build -t aman-browser:"
+  run_install upgrade
+  assert_rc 0
+  assert_contains "$OUT" "Already up to date"
+  sandbox_drop
+}
+
+test_a_failed_upgrade_from_before_the_browser_puts_back_a_version_without_it() {
+  t_begin "a failed upgrade of an install from before the browser puts back that version, with no browser in it"
+  sandbox_new
+  install_machine
+  local release=$AMAN_HOME/release/release.json compose=$AMAN_HOME/instances/main/compose.yaml old
+  grep -v '"browser_image"\|"browser_gateway_image"' "$release" >"$release.new" && mv "$release.new" "$release"
+  chmod 600 "$release"
+  sed -i '/BROWSER\|browser/d' "$compose"
+  old=$(app_tag "$release")
+  repo_commit_change "bad app change with the browser"
+  STUB_UP_FAIL_UNLESS_TAG=$old
+  run_install upgrade
+  assert_rc 1
+  assert_contains "$OUT" "The previous version is back"
+  assert_not_contains "$(cat "$release")" "browser_image" "the record put back has no browser"
+  assert_eq "$(compose_image main)" "$old" "the instance runs the previous app"
+  assert_not_contains "$(cat "$compose")" "aman-browser" "the compose file put back starts no browser"
+  assert_not_contains "$(cat "$compose")" "BROWSER_" "and does not turn it on in the app"
   sandbox_drop
 }
 
@@ -337,7 +586,7 @@ test_a_record_from_before_the_flag_counts_as_having_data() {
 repo_remote_add() {
   local remote=${1:-origin} branch
   branch=$(git -C "$REPO" branch --show-current)
-  git init -q --bare "$SB/origin.git"
+  git -c init.defaultBranch=main init -q --bare "$SB/origin.git"
   git -C "$REPO" remote add "$remote" "$SB/origin.git"
   git -C "$REPO" push -q "$remote" "HEAD:refs/heads/$branch"
   git -C "$REPO" fetch -q "$remote" "+refs/heads/$branch:refs/remotes/$remote/$branch"
@@ -360,7 +609,7 @@ repo_remote_advance() {
 # not on it, and the checkout tracks nothing.
 repo_remote_without_own_branch() {
   local remote=${1:-origin}
-  git init -q --bare "$SB/origin.git"
+  git -c init.defaultBranch=main init -q --bare "$SB/origin.git"
   git -C "$REPO" remote add "$remote" "$SB/origin.git"
   git -C "$REPO" push -q "$remote" "HEAD:refs/heads/other-branch"
 }
@@ -628,7 +877,31 @@ test_upgrade_warns_that_the_branch_is_not_on_origin_when_it_is_missing_there() {
   sandbox_drop
 }
 
+test_upgrade_from_a_release_without_the_voice_adds_it() {
+  t_begin "upgrading an install from before the voice builds it, starts it and joins it to each instance"
+  sandbox_new
+  install_machine
+  local release=$AMAN_HOME/release/release.json
+  grep -v '"tts_image"' "$release" >"$release.new"
+  mv "$release.new" "$release"
+  : >"$SB_STATE/network_aliases"
+  run_install upgrade --check
+  assert_rc 0
+  assert_contains "$OUT" "voice   (not installed) -> aman-tts:"
+  run_install upgrade
+  assert_rc 0
+  assert_contains "$(cat "$release")" '"tts_image": "aman-tts:'
+  assert_contains "$(cat "$AMAN_HOME/machine/compose.yaml")" "container_name: aman-tts"
+  assert_contains "$(cat "$SB_STATE/network_aliases")" "aman_main_speech aman-tts aman-tts-engine"
+  sandbox_drop
+}
+
+
 test_noop_when_current
+test_upgrade_check_names_the_move_to_https_and_changes_nothing
+test_upgrade_moves_a_plain_http_instance_to_https
+test_a_full_upgrade_moves_a_plain_http_instance_to_https
+test_upgrade_building_missing_parts_moves_a_plain_http_instance_to_https
 test_upgrade_reports_a_newer_version_when_the_checkout_is_behind_origin
 test_upgrade_stays_up_to_date_when_the_checkout_matches_origin
 test_upgrade_uses_the_checkout_when_it_is_ahead_of_origin
@@ -651,11 +924,20 @@ test_check_reports_without_changing
 test_successful_upgrade_backs_up_first
 test_upgrade_notes_an_old_email_account_file
 test_upgrade_without_an_old_email_account_file_stays_quiet
+test_upgrade_notes_an_old_calendar_account_file
+test_upgrade_moves_a_complete_old_calendar_account
+test_upgrade_keeps_a_calendar_account_connected_again
+test_upgrade_keeps_the_old_calendar_file_when_the_check_says_nothing
+test_upgrade_without_an_old_calendar_account_file_stays_quiet
+test_upgrade_starts_the_calendar_connector_without_a_profile
+test_upgrade_turns_the_browser_on_for_an_install_from_before_it
+test_a_failed_upgrade_from_before_the_browser_puts_back_a_version_without_it
 test_failed_upgrade_restores_database_and_images
 test_restore_goes_only_into_the_right_volume
 test_restore_does_not_wait_for_a_migration_marker
 test_failed_build_changes_nothing
 test_doctor_failure_blocks_unless_forced
+test_upgrade_from_a_release_without_the_voice_adds_it
 test_gate_passes_when_the_doctor_reports_only_warnings
 test_gate_blocks_when_the_doctor_cannot_be_checked
 tests_finish

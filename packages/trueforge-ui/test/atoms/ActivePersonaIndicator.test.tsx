@@ -119,6 +119,19 @@ describe('ActivePersonaIndicator', () => {
     expect(menu).toHaveTextContent('haiku');
   });
 
+  it('sizes the trigger and the menu heading on the type scale, not a one-off literal', async () => {
+    renderIndicator({ getSessionPersona: async () => ZARA });
+
+    const trigger = await screen.findByTitle('Choose a persona');
+    expect(trigger).toHaveClass('text-sm');
+    expect(trigger.className).not.toMatch(/text-\[0\.8125rem\]/);
+
+    fireEvent.click(trigger);
+    const heading = screen.getByText('Who answers this chat');
+    expect(heading).toHaveClass('text-xs');
+    expect(heading.className).not.toMatch(/text-\[0\.75rem\]/);
+  });
+
   it("shows the assistant's own display name while the chat is on the default assistant", async () => {
     renderIndicator({ getSessionPersona: async () => null });
 

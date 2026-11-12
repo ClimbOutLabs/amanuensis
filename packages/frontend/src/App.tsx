@@ -5,9 +5,11 @@ import {
   BugReportProvider,
   ComposerDraftScopeProvider,
   DEFAULT_AGENT_SPEC_SKILLS,
+  DeliveriesProvider,
   getErrorMessage,
   HelpProvider,
   ImplementationPlanGrantProvider,
+  LocalAccountProvider,
   MemoryRecallProvider,
   ModelUsageProvider,
   PersonalizationProvider,
@@ -16,8 +18,10 @@ import {
   RunCodeStatusProvider,
   SentinelApiProvider,
   SentinelAuditFeed,
+  SpokenReplyProvider,
   ThemeProvider,
   TrueForgeUI,
+  useIsPrivateChat,
   useTheme,
   VoiceInputProvider,
   type AgentConfig,
@@ -26,6 +30,7 @@ import {
   type CurrentUser,
   type FirstRunGuideState,
   type RoutesConfig,
+  type SettingsOpenRequest,
   type SlotOverrides,
   type ThemeConfig,
   type TrueForgeServerConfig,
@@ -43,13 +48,17 @@ import { AuthErrorScreen } from './AuthErrorScreen';
 import { createAuthAwareFetch } from './authFetch';
 import { probeSession, type SessionState } from './authSession';
 import { parseAuthErrorReason, shouldShowAuthErrorScreen, stripAuthErrorSearch } from './authStatusSearch';
+import { BrowserLivePage } from './BrowserLivePage';
+import { isBrowserLivePath } from './browserLivePath';
 import { createBugReportApi } from './bugReportApi';
 import { createChatFolderStore } from './chatFolderStore';
+import { createDeliveriesApi } from './deliveriesApi';
 import { createFirstRunGuideApi } from './firstRunGuideApi';
 import { GetStartedScreen } from './GetStartedScreen';
 import { createHelpApi } from './helpApi';
 import { createImplementationPlanGrantApi } from './implementationPlanGrantApi';
-import { LogoutButton } from './LogoutButton';
+import { createLocalAccountApi } from './localAccountApi';
+import { LogoutButton, SignOutConfirmProvider } from './LogoutButton';
 import { createMemoryRecallApi } from './memoryRecallApi';
 import { createModelUsageApi } from './modelUsageApi';
 import { createPersonaApi } from './personaApi';
@@ -60,7 +69,7 @@ import { createRunCodeStatusApi } from './runCodeStatusApi';
 import { createSentinelApi, readAllSessionEvents } from './sentinelApi';
 import { isSetupComplete, mergeSetupRead, SETUP_REFRESH_MS, type SetupSnapshot } from './setupStatus';
 import { createSpaceStore } from './spaceStore';
-import { createVoiceInputApi } from './voiceInputApi';
+import { createServerVoiceApi, createVoiceInputApi } from './voiceInputApi';
 
 /** Shared cookie/OIDC fetch for boot helpers and `<TrueForgeUI server />`. */
 const authAwareFetch = createAuthAwareFetch();
@@ -96,17 +105,10 @@ const AMAN_AVATAR_MOTION_SOURCES: AmanAvatarMotionSources = {
 const AMAN_PANDA_SRC = apiPath('/aman-avatar.png');
 
 const AMAN_THEME: ThemeConfig = {
-  webFonts: false,
   brand: {
     mode: 'icon-title',
     name: 'Amanuensis',
   },
-};
-
-/** Host look: the kit's warm paper and gold. No host colour overrides. */
-const appTheme: ThemeConfig = {
-  // The shell CSP keeps stylesheets and fonts on the app origin.
-  webFonts: false,
 };
 
 function Loader() {
@@ -148,19 +150,23 @@ type BootState =
 const AmanChatSurface = memo(function AmanChatSurface({
   defaultAgentSpec,
   openSettings,
+  settingsOpenRequest,
   displayName,
   overrides,
   onAgentActivity,
   onActiveSessionChange,
   onPendingApprovalsChange,
+  onSettingsChromeEnabledChange,
 }: {
   defaultAgentSpec: HarnessAgentSpec;
   openSettings: boolean;
+  settingsOpenRequest: SettingsOpenRequest | undefined;
   displayName: string;
   overrides: SlotOverrides;
   onAgentActivity: (activity: AmanAvatarActivity) => void;
   onActiveSessionChange: (sessionId: string | undefined) => void;
   onPendingApprovalsChange: (approvalIds: readonly string[]) => void;
+  onSettingsChromeEnabledChange: (enabled: boolean) => void;
 }) {
   const agentConfig = useMemo(
     (): AgentConfig => ({ mode: 'AgentLibraryWithComposer', defaultAgentSpec }),
@@ -179,10 +185,12 @@ const AmanChatSurface = memo(function AmanChatSurface({
         {...(ROUTES ? { routes: ROUTES } : {})}
         agentConfig={agentConfig}
         initialSettingsOpen={openSettings}
+        {...(settingsOpenRequest ? { settingsOpenRequest } : {})}
         currentUser={currentUser}
         onAgentActivity={onAgentActivity}
         onActiveSessionChange={onActiveSessionChange}
         onPendingApprovalsChange={onPendingApprovalsChange}
+        onSettingsChromeEnabledChange={onSettingsChromeEnabledChange}
         overrides={overrides}
         className="app-assistant"
       />
@@ -221,16 +229,30 @@ function AmanShell({
   const [activeSessionId, setActiveSessionId] = useState<string | undefined>(undefined);
   // Approvals waiting in the active chat, for the rail's waiting status and panda.
   const [pendingApprovalIds, setPendingApprovalIds] = useState<readonly string[]>([]);
+  // Settings requests from outside the chat tree (the rail's Audits link). Each ask raises
+  // the nonce, so asking again after Settings was closed asks again.
+  const [settingsOpenRequest, setSettingsOpenRequest] = useState<SettingsOpenRequest | undefined>(undefined);
+  const openAudits = () => {
+    setSettingsOpenRequest(previous => ({ section: 'audit', nonce: (previous?.nonce ?? 0) + 1 }));
+  };
+  // Whether Settings chrome exists, reported by the shell that owns the gate. The rail is
+  // handed its Audits link only while this holds, so the link can never outlive the
+  // Settings it opens. It starts shown, like the Settings button itself, which also
+  // shows until capabilities say otherwise.
+  const [settingsChromeEnabled, setSettingsChromeEnabled] = useState(true);
+  const activeChatIsPrivate = useIsPrivateChat(activeSessionId);
   return (
     <div className="aman-shell">
       <AmanChatSurface
         defaultAgentSpec={defaultAgentSpec}
         openSettings={openSettings}
+        settingsOpenRequest={settingsOpenRequest}
         displayName={displayName}
         overrides={overrides}
         onAgentActivity={setAvatarActivity}
         onActiveSessionChange={setActiveSessionId}
         onPendingApprovalsChange={setPendingApprovalIds}
+        onSettingsChromeEnabledChange={setSettingsChromeEnabled}
       />
       <AmanRuntimeRail
         modelName={modelName}
@@ -240,7 +262,9 @@ function AmanShell({
         version={version}
         buildRef={buildRef}
         pendingApprovalIds={pendingApprovalIds}
+        privateChat={activeChatIsPrivate}
         auditFeed={activeSessionId === undefined ? undefined : <SentinelAuditFeed sessionId={activeSessionId} />}
+        {...(settingsChromeEnabled ? { onOpenAudits: openAudits } : {})}
       />
     </div>
   );
@@ -433,7 +457,9 @@ export function App() {
     [guideDismissedLocally, boot],
   );
   const personalizationApi = useMemo(() => createPersonalizationApi(authAwareFetch), []);
+  const localAccountApi = useMemo(() => createLocalAccountApi(authAwareFetch), []);
   const personaApi = useMemo(() => createPersonaApi(authAwareFetch), []);
+  const deliveriesApi = useMemo(() => createDeliveriesApi(authAwareFetch), []);
   const helpApi = useMemo(
     () => createHelpApi({ fetcher: authAwareFetch, listPersonas: () => personaApi.listPersonas() }),
     [personaApi],
@@ -443,6 +469,7 @@ export function App() {
   const bugReportApi = useMemo(() => createBugReportApi(authAwareFetch), []);
   const runCodeStatusApi = useMemo(() => createRunCodeStatusApi(authAwareFetch), []);
   const voiceInputApi = useMemo(() => createVoiceInputApi(authAwareFetch), []);
+  const serverVoiceApi = useMemo(() => createServerVoiceApi(authAwareFetch), []);
   const memoryRecallApi = useMemo(() => createMemoryRecallApi(bootClient), []);
   const modelUsageApi = useMemo(() => createModelUsageApi(bootClient), []);
   // Raw persisted session events for Sentinel's durable read (approval cards and Tier 2
@@ -464,7 +491,7 @@ export function App() {
   const authErrorReason = shouldShowAuthErrorScreen({ authError, session });
   if (authErrorReason != null) {
     return (
-      <ThemeProvider theme={appTheme}>
+      <ThemeProvider>
         <AuthErrorScreen reason={authErrorReason} />
       </ThemeProvider>
     );
@@ -472,7 +499,7 @@ export function App() {
 
   if (session.status === 'checking') {
     return (
-      <ThemeProvider theme={appTheme}>
+      <ThemeProvider>
         <Loader />
       </ThemeProvider>
     );
@@ -480,15 +507,25 @@ export function App() {
 
   if (session.status === 'unauthenticated') {
     return (
-      <ThemeProvider theme={appTheme}>
+      <ThemeProvider>
         <GetStartedScreen />
+      </ThemeProvider>
+    );
+  }
+
+  // The live browser view is a bare page of its own: it needs the session, but none of the app boot.
+  // It is answered here, before the app's router, which would send an address it does not know home.
+  if (isBrowserLivePath(window.location.pathname)) {
+    return (
+      <ThemeProvider>
+        <BrowserLivePage />
       </ThemeProvider>
     );
   }
 
   if (boot.status === 'error') {
     return (
-      <ThemeProvider theme={appTheme}>
+      <ThemeProvider>
         <div className="boot-screen" data-error="true">
           Failed to load application configuration: {boot.message}
         </div>
@@ -498,7 +535,7 @@ export function App() {
 
   if (boot.status === 'loading') {
     return (
-      <ThemeProvider theme={appTheme}>
+      <ThemeProvider>
         <Loader />
       </ThemeProvider>
     );
@@ -508,48 +545,56 @@ export function App() {
     <div className="app-root">
       <ThemeProvider theme={AMAN_THEME}>
         <SentinelApiProvider api={sentinelApi}>
-          <PersonalizationProvider api={personalizationApi}>
-            <ImplementationPlanGrantProvider api={implementationPlanGrantApi}>
-              <RepositoryWorkProvider api={repositoryWorkApi}>
-                <BugReportProvider api={bugReportApi}>
-                  <VoiceInputProvider api={voiceInputApi}>
-                    <RunCodeStatusProvider api={runCodeStatusApi}>
-                      <MemoryRecallProvider api={memoryRecallApi}>
-                        <ModelUsageProvider api={modelUsageApi}>
-                          <PersonaProvider api={personaApi}>
-                            <HelpProvider api={helpApi}>
-                              <AmanSetupProvider
-                                value={{
-                                  modelName: setup?.modelName ?? (boot.defaultAgentSpec.model.name || null),
-                                  hasChatted: setup === null ? boot.hasChatted : setup.hasChatted,
-                                  firstRunGuide,
-                                  settingsHref: '/settings',
-                                }}
-                              >
-                                <ComposerDraftScopeProvider scope={draftScope}>
-                                  <AmanShell
-                                    defaultAgentSpec={boot.defaultAgentSpec}
-                                    openSettings={boot.openSettings}
-                                    displayName={session.displayName}
-                                    overrides={overrides}
-                                    modelName={
-                                      setup?.modelName ?? (boot.defaultAgentSpec.model.name || 'Choose a model')
-                                    }
-                                    version={boot.build?.version}
-                                    buildRef={boot.build?.ref}
-                                  />
-                                </ComposerDraftScopeProvider>
-                              </AmanSetupProvider>
-                            </HelpProvider>
-                          </PersonaProvider>
-                        </ModelUsageProvider>
-                      </MemoryRecallProvider>
-                    </RunCodeStatusProvider>
-                  </VoiceInputProvider>
-                </BugReportProvider>
-              </RepositoryWorkProvider>
-            </ImplementationPlanGrantProvider>
-          </PersonalizationProvider>
+          <DeliveriesProvider api={deliveriesApi}>
+            <LocalAccountProvider api={localAccountApi}>
+              <PersonalizationProvider api={personalizationApi}>
+                <ImplementationPlanGrantProvider api={implementationPlanGrantApi}>
+                  <RepositoryWorkProvider api={repositoryWorkApi}>
+                    <BugReportProvider api={bugReportApi}>
+                      <VoiceInputProvider api={voiceInputApi}>
+                        <SpokenReplyProvider serverVoice={serverVoiceApi}>
+                          <RunCodeStatusProvider api={runCodeStatusApi}>
+                            <MemoryRecallProvider api={memoryRecallApi}>
+                              <ModelUsageProvider api={modelUsageApi}>
+                                <PersonaProvider api={personaApi}>
+                                  <HelpProvider api={helpApi}>
+                                    <AmanSetupProvider
+                                      value={{
+                                        modelName: setup?.modelName ?? (boot.defaultAgentSpec.model.name || null),
+                                        hasChatted: setup === null ? boot.hasChatted : setup.hasChatted,
+                                        firstRunGuide,
+                                        settingsHref: '/settings',
+                                      }}
+                                    >
+                                      <ComposerDraftScopeProvider scope={draftScope}>
+                                        <SignOutConfirmProvider>
+                                          <AmanShell
+                                            defaultAgentSpec={boot.defaultAgentSpec}
+                                            openSettings={boot.openSettings}
+                                            displayName={session.displayName}
+                                            overrides={overrides}
+                                            modelName={
+                                              setup?.modelName ?? (boot.defaultAgentSpec.model.name || 'Choose a model')
+                                            }
+                                            version={boot.build?.version}
+                                            buildRef={boot.build?.ref}
+                                          />
+                                        </SignOutConfirmProvider>
+                                      </ComposerDraftScopeProvider>
+                                    </AmanSetupProvider>
+                                  </HelpProvider>
+                                </PersonaProvider>
+                              </ModelUsageProvider>
+                            </MemoryRecallProvider>
+                          </RunCodeStatusProvider>
+                        </SpokenReplyProvider>
+                      </VoiceInputProvider>
+                    </BugReportProvider>
+                  </RepositoryWorkProvider>
+                </ImplementationPlanGrantProvider>
+              </PersonalizationProvider>
+            </LocalAccountProvider>
+          </DeliveriesProvider>
         </SentinelApiProvider>
       </ThemeProvider>
     </div>

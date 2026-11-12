@@ -15,6 +15,7 @@
   "scripts": {
     "build": "node scripts/build-exe.mjs",
     "lint": "eslint src",
+    "release": "node src/release/tool.ts",
     "test": "node --test \"tests/**/*.test.ts\"",
     "typecheck": "tsc --noEmit"
   },

@@ -16,9 +16,9 @@ The app runs in two modes: **standalone** — one process on your own machine, S
 | Node.js | 22.14 or newer | [nodejs.org](https://nodejs.org/en/download) or `brew install node` |
 | pnpm | 11.16.0 through [Corepack](https://pnpm.io/installation#using-corepack) | `corepack enable` (Corepack ships with Node.js; the exact pnpm version is pinned in `package.json`) |
 | Git | any recent version | [git-scm.com/downloads](https://git-scm.com/downloads) |
-| A Bash-compatible shell | — | macOS/Linux: built in. Windows: [WSL](https://learn.microsoft.com/windows/wsl/install) (recommended) or Git Bash, which ships with [Git for Windows](https://git-scm.com/downloads/win) |
+| A Bash-compatible shell | — | macOS/Linux: built in. Windows: [WSL2](https://learn.microsoft.com/windows/wsl/install) |
 
-On Windows, run every command below from a WSL or Git Bash shell, not PowerShell or cmd — the setup scripts use POSIX-style environment variable assignments that neither of those understand.
+This page is for developers. To install Aman on Windows for everyday use, follow the [Windows guide](install-windows.md) instead. On Windows, run every command below inside WSL2. Native Windows (PowerShell, cmd or Git Bash) is not supported: the setup scripts use POSIX-style environment variable assignments that those shells do not understand.
 
 ## Install and run
 
@@ -37,11 +37,12 @@ Login is mandatory in standalone mode, and the server refuses to start without i
 pnpm standalone:dev
 ```
 
+No Docker? Set `TRUEFORGE_AUTH_MODE=local` in `packages/trueforge/.env` instead and skip `pnpm dev:login`. Aman then keeps one sign-in itself, an email and a password it stores as a scrambled hash, and the first page you open asks you to create it. That is the sign-in the `npx amanuensis` install uses; see [Setup Login](/authentication/overview).
+
 The install takes a few minutes the first time. When it finishes, open [http://localhost:3000](http://localhost:3000) and sign in — that is the app.
 
 <Note>
-  `pnpm standalone:dev` starts the API server without the file watcher: on some Windows machines the watcher
-  (`tsx watch`) stalls before the server ever starts, leaving the UI unable to reach the API. The UI itself still
+  `pnpm standalone:dev` starts the API server without the file watcher. The UI itself still
   hot-reloads; restart the command to pick up server-side changes. Contributors who want backend hot reload can run
   the package-level watch scripts instead (`pnpm --filter @truefoundry/trueforge dev`).
 </Note>
@@ -144,8 +145,11 @@ None of these are required to chat with a model. Each is one sentence plus where
     ```bash
     git clone https://github.com/ClimbOutLabs/amanuensis && cd amanuensis
     cp packages/trueforge/.env.example packages/trueforge/.env
+    export CALENDAR_ACCOUNT_SECRET=$(openssl rand -hex 32)
     docker compose up --build
     ```
+
+    The `export` line makes a random secret that the app and the calendar container share, so only the app can use the calendar container's account port. Compose stops with a message if it is missing. Set it again in each new terminal, and run `docker compose down` and `up` with the same value; `pnpm smoke` makes one for you.
 
     The first build takes a few minutes (it compiles the app from source). `docker compose up` stays in the foreground
     and streams every container's log; the stack is ready when the `server` line `Agent server listening on http://0.0.0.0:8790`
@@ -197,13 +201,18 @@ None of these are required to chat with a model. Each is one sentence plus where
        ```
 
     4. Open [http://localhost:8791](http://localhost:8791) and click **Let's Get Started**. The browser lands on
-       `https://localhost:5556/dex`, whose certificate the stack minted for itself on first start, so it warns once:
-       choose **Advanced**, then proceed to localhost. Sign in with the email and password you chose. You land in the
-       app as that user, with **Settings** available.
+       the sign-in page at `http://localhost:5556/dex`. Sign in with the email and password you chose. You land in
+       the app as that user, with **Settings** available.
 
-    The certificate and its key live in the `dex-tls` Docker volume; `docker compose down -v` removes them and the
-    next start mints new ones. The account itself is only the `.env` lines, so changing the password means
-    generating a new hash and restarting the `dex` service.
+    The sign-in page answers on this computer only, like the app, so there is no certificate and no browser warning.
+    If your browser ever warns about the sign-in page, stop and check the address: do not click past the warning.
+    The account itself is only the `.env` lines, so changing the password means generating a new hash and restarting
+    the `dex` service.
+
+    Turned on login here before the sign-in page moved to plain http? Your `.env` still names its old https address,
+    so sign-in stops working after you pull. In `packages/trueforge/.env`, change `OIDC_ISSUER_URL` to
+    `http://localhost:5556/dex`, delete the `NODE_EXTRA_CA_CERTS` line, then run
+    `docker compose --profile login up --build -d` again.
 
     **Ollama from Compose.** The app runs inside a container here, so `localhost` means the container itself. Point the custom provider at `http://host.docker.internal:11434/v1` instead of `http://localhost:11434/v1`. Docker Desktop provides that mapping automatically; plain Docker Engine needs the `extra_hosts` entry this repo's `docker-compose.yml` already ships. Ollama itself listens on `127.0.0.1` only by default — open it to the Docker network with `OLLAMA_HOST=0.0.0.0:11434` (systemd override on Linux/WSL, or the desktop app's Settings on macOS/Windows) and restart it.
 
@@ -233,12 +242,11 @@ None of these are required to chat with a model. Each is one sentence plus where
     ```
 
     ```bash
-    helm install trueforge oci://tfy.jfrog.io/tfy-helm/trueforge \
-      --version <x.y.z> \
+    helm install trueforge ./charts/trueforge \
       --values values.yaml
     ```
 
-    Find the version you want to install in the [published Helm charts](https://tfy.jfrog.io/ui/packages/oci:%2F%2Ftrueforge).
+    Run it from a clone of this repository; the chart lives in `charts/trueforge`.
     See the [chart README](https://github.com/ClimbOutLabs/amanuensis/blob/main/charts/trueforge/README.md#api-key) for full `apiKey` details.
 
     To expose TrueForge through an Istio gateway, save this `VirtualService` in
@@ -267,8 +275,7 @@ None of these are required to chat with a model. Each is one sentence plus where
     Then install (or upgrade) with the values file that includes both `apiKey` and `extraObjects`:
 
     ```bash
-    helm upgrade --install trueforge oci://tfy.jfrog.io/tfy-helm/trueforge \
-      --version <x.y.z> \
+    helm upgrade --install trueforge ./charts/trueforge \
       --values values.yaml
     ```
 

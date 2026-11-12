@@ -253,6 +253,8 @@ export type {
   ImplementationPlanGrant,
   ImplementationPlanGrantApi,
 } from './components/ImplementationPlanGrantContext.js';
+export { LocalAccountProvider, useOptionalLocalAccount } from './components/LocalAccountContext.js';
+export type { LocalAccountApi } from './components/LocalAccountContext.js';
 export { MemoryRecallProvider, useOptionalMemoryRecall } from './components/MemoryRecallContext.js';
 export type { MemoryRecallApi, MemoryTurnContext } from './components/MemoryRecallContext.js';
 export { ModelUsageProvider, useOptionalModelUsage } from './components/ModelUsageContext.js';
@@ -295,9 +297,15 @@ export type {
 } from './components/RepositoryWorkContext.js';
 export { RunCodeStatusProvider, useOptionalRunCodeStatus } from './components/RunCodeStatusContext.js';
 export type { RunCodeStatus, RunCodeStatusApi } from './components/RunCodeStatusContext.js';
+export { SpokenReplyProvider, useSpokenReply } from './components/SpokenReplyContext.js';
 export type { TourCapabilities } from './components/tourPrompts.js';
 export { VoiceInputProvider, useOptionalVoiceInput } from './components/VoiceInputContext.js';
-export type { VoiceAvailability, VoiceInputApi, VoiceTranscription } from './components/VoiceInputContext.js';
+export type {
+  VoiceAvailability,
+  VoiceConnection,
+  VoiceInputApi,
+  VoiceTranscription,
+} from './components/VoiceInputContext.js';
 export { AgentStepsContainer } from './containers/AgentStepsContainer.js';
 export type { AgentStepsContainerProps } from './containers/AgentStepsContainer.js';
 export { ApprovalNavContainer } from './containers/ApprovalNavContainer.js';
@@ -353,11 +361,15 @@ export { ThreadWorkOnRepoControls, WorkOnRepoControls } from './containers/WorkO
 export type { WorkOnRepoControlsProps } from './containers/WorkOnRepoControls.js';
 export { HELP_BUTTON_LABEL, IRIS_HELP_CHOICES } from './help/helpModel.js';
 export type {
+  HelpConnectorState,
+  HelpGoogleLoginState,
   HelpHealthCheck,
   HelpHealthItem,
   HelpHealthStatus,
   HelpHostReport,
   HelpHostReportState,
+  HelpSetupStep,
+  HelpState,
 } from './help/helpModel.js';
 export { HelpProvider, useOptionalHelp } from './help/HelpProvider.js';
 export type { HelpApi, HelpPhase, HelpSession } from './help/HelpProvider.js';
@@ -430,6 +442,14 @@ export {
   shouldDownscaleImage,
   withImageDownscaling,
 } from './server/imageAttachmentAdapter.js';
+export { useIsPrivateChat } from './server/privateChatStore.js';
+export { ServerVoiceRefusal } from './utils/spokenReplyPlayer.js';
+export type {
+  ServerVoiceApi,
+  ServerVoiceRefusalReason,
+  SpokenReplyPlayer,
+  SpokenReplyVoice,
+} from './utils/spokenReplyPlayer.js';
 
 // Curated chrome hooks (same instance as the SDK runtime). Deep primitives: install @assistant-ui/react.
 export { useAui, useAuiState } from './assistant-ui.js';
@@ -465,6 +485,7 @@ export type {
 export { AgentDetailsToggleButton } from './atoms/AgentDetailsToggleButton.js';
 export { ClearChatButton } from './atoms/ClearChatButton.js';
 export { railMenuRowClassName } from './atoms/lib/buttonClasses.js';
+export { menuTriggerFor } from './atoms/lib/menuTriggerFor.js';
 export {
   IS_CREATE_AGENT_METADATA_KEY,
   isCreateAgentMetadataValue,
@@ -511,7 +532,12 @@ export {
   useOptionalShellMode,
   useShellMode,
 } from './server/ShellModeContext.js';
-export type { AgentConfig, SelectLibraryAgentRequest, ShellMode } from './server/ShellModeContext.js';
+export type {
+  AgentConfig,
+  SelectLibraryAgentRequest,
+  SettingsOpenRequest,
+  ShellMode,
+} from './server/ShellModeContext.js';
 export type {
   AgentBuilderCapabilitiesResponse,
   AgentBuilderServer,
@@ -725,5 +751,19 @@ export { SessionsBrowserButton } from './atoms/SessionsBrowserButton.js';
 export type { SessionsBrowserButtonProps } from './atoms/SessionsBrowserButton.js';
 export { SpacesButton } from './atoms/SpacesButton.js';
 export type { SpacesButtonProps } from './atoms/SpacesButton.js';
+export { DeliveriesProvider, useOptionalDeliveries } from './deliveries/DeliveriesContext.js';
+export { NOTICING_KINDS } from './deliveries/types.js';
+export type {
+  DeliveriesApi,
+  DeliveryItem,
+  DeliveryLink,
+  DeliveryPage,
+  NoticingKind,
+  PushDevice,
+  ReachApi,
+  ReachSender,
+  ReachSettings,
+  ReachView,
+} from './deliveries/types.js';
 export { SpaceProvider, useOptionalSpaces } from './server/SpaceContext.js';
-export type { Space, SpaceFormat, SpaceStatus, SpaceStore } from './server/SpaceContext.js';
+export type { Space, SpaceFolder, SpaceFormat, SpaceStatus, SpaceStore } from './server/SpaceContext.js';

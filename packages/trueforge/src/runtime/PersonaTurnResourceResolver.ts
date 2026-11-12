@@ -5,7 +5,9 @@ import type { PersonaKnowledgeHit } from '../personaKnowledge/knowledgeRetrieval
 import type { PersonalizationProfile } from '../personalization/profile';
 import { isAmanGuidePersona } from '../personas/amanGuide/identity';
 import type { PersonaContext } from '../personas/persona';
+import { buildGuideSearchToolSet, type GuideSearchTurnContext } from './guideSearch';
 import { PersonalizationTurnResourceResolver } from './PersonalizationTurnResourceResolver';
+import { guardSwitchClaim, PersonaSwitchLog, switchTextForContext } from './personaSwitchClaim';
 
 /** Root-only capability: the persona is who is answering the user, not who runs a sub-agent. */
 function personaContextCapability(context: PersonaContext): AgentCapability {
@@ -109,19 +111,22 @@ export class PersonaTurnResourceResolver extends PersonalizationTurnResourceReso
   readonly #persona: PersonaContext | undefined;
   readonly #personaKnowledgeBlock: string | undefined;
   /**
-   * Host post-pass: enforces knowledge attribution on the root thread's
-   * final assistant message. Present only when the turn injected passages;
-   * the harness applies it once, before the terminal state is persisted.
+   * Host post-pass on the root thread's final assistant message: enforces knowledge
+   * attribution when the turn injected passages, and replaces a claimed persona switch
+   * no tool made. The harness applies it once, before the terminal state is persisted.
    */
-  readonly finalizeAssistantOutput: ((output: ModelMessageEvent) => ModelMessageEvent | undefined) | undefined;
+  readonly finalizeAssistantOutput: (output: ModelMessageEvent) => ModelMessageEvent | undefined;
+  /** Set by the persona tools when a switch really ran, so a reply cannot claim one that did not. */
+  readonly switches = new PersonaSwitchLog();
   /**
    * Host marker strip for the durable thread context: persona turns never
    * persist live citation markers, so a stale marker in history cannot
    * false-attribute a passage in a later turn. Set for every persona turn —
    * it is a no-op when the answer carries no markers.
    */
-  readonly sanitizeAssistantTextForContext: ((text: string) => string) | undefined;
+  readonly sanitizeAssistantTextForContext: (text: string) => string;
   readonly #switchNotice: PersonaSwitchNotice | undefined;
+  readonly #guideSearch: GuideSearchTurnContext | undefined;
 
   constructor(
     deps: ConstructorParameters<typeof PersonalizationTurnResourceResolver>[0],
@@ -130,6 +135,7 @@ export class PersonaTurnResourceResolver extends PersonalizationTurnResourceReso
     personaKnowledgeBlock?: string,
     personaKnowledgeHits?: readonly PersonaKnowledgeHit[],
     switchNotice?: PersonaSwitchNotice,
+    guideSearch?: GuideSearchTurnContext,
   ) {
     // The configured persona owns assistant identity and voice while active, so
     // the deployment personalization is projected without its identity fields
@@ -140,15 +146,17 @@ export class PersonaTurnResourceResolver extends PersonalizationTurnResourceReso
     super(deps, profile, { speaker: persona === undefined ? 'default_assistant' : 'persona' });
     this.#persona = persona;
     this.#personaKnowledgeBlock = personaKnowledgeBlock;
-    this.sanitizeAssistantTextForContext = stripCitationMarkers;
-    this.finalizeAssistantOutput =
-      personaKnowledgeHits === undefined || personaKnowledgeHits.length === 0
-        ? undefined
-        : output => {
-            const repaired = repairAssistantMessageContent(output.content, personaKnowledgeHits);
-            return repaired === output.content ? undefined : { ...output, content: repaired };
-          };
+    this.sanitizeAssistantTextForContext = text =>
+      switchTextForContext({ text: stripCitationMarkers(text), log: this.switches });
+    const hits = personaKnowledgeHits ?? [];
+    this.finalizeAssistantOutput = output => {
+      const repaired = repairAssistantMessageContent(output.content, hits);
+      const base = repaired === output.content ? output : { ...output, content: repaired };
+      const guarded = guardSwitchClaim({ output: base, log: this.switches });
+      return guarded ?? (base === output ? undefined : base);
+    };
     this.#switchNotice = switchNotice;
+    this.#guideSearch = guideSearch;
   }
 
   override async resolveAgentDefinition(
@@ -177,6 +185,25 @@ export class PersonaTurnResourceResolver extends PersonalizationTurnResourceReso
     const personaModel = await this.deps.llm(persona.model_name, 'chat');
     const knowledgeCapability =
       this.#personaKnowledgeBlock === undefined ? [] : [personaKnowledgeCapability(this.#personaKnowledgeBlock)];
+    const isGuide = isAmanGuidePersona({ id: persona.persona_id, created_by: input.created_by });
+    // The guide's one live tool, and only when this turn may have it: Tavily is the
+    // configured provider and offline mode is off. The builder returns undefined in
+    // every other case, and the guide then answers from its built-in help alone.
+    const guideSearchToolSet =
+      isGuide && this.#guideSearch !== undefined
+        ? await buildGuideSearchToolSet({
+            context: this.#guideSearch,
+            tenantId: input.tenant_id,
+            createdBy: input.created_by,
+            sessionId: input.session_id,
+            connectionFor: async serverName => {
+              const connection = await this.deps.mcp(serverName);
+              return { url: connection.url, headers: connection.headers, search_provider: connection.search_provider };
+            },
+            sentinelServices: input.sentinel_services,
+            logger: this.deps.logger,
+          })
+        : undefined;
 
     return {
       ...resolved,
@@ -191,7 +218,9 @@ export class PersonaTurnResourceResolver extends PersonalizationTurnResourceReso
         // The pre-flight guard sizes the persona's output against this window, so it must be the persona's own.
         modelProperties: personaModel.modelProperties,
         // Iris only explains Aman from what she knows: she is never given a tool that sends, writes or schedules.
-        readOnly: isAmanGuidePersona({ id: persona.persona_id, created_by: input.created_by }),
+        // Her one exception is the read-only search over Aman's public sources, set just above when this turn may have it.
+        readOnly: isGuide,
+        ...(guideSearchToolSet === undefined ? {} : { guideSearchToolSet }),
       },
       compactionModel: await this.#pinCompactionAwayFromPersona(input.spec, resolved),
       extraCapabilities: [

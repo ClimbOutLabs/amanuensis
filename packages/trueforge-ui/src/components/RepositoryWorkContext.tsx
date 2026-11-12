@@ -7,6 +7,8 @@ export type RepositorySummary = {
   clone_url: string;
   default_branch: string | null;
   revision: number;
+  /** While on, the sandbox may download this repo's packages through the download-only mirrors. */
+  package_downloads_allowed: boolean;
 };
 
 /** One repo from the person's GitHub account, offered in the picker. */
@@ -61,6 +63,10 @@ export type RepositoryWorkApi = {
   }) => Promise<StartRepositoryWorkResult>;
   getSessionRepository: (sessionId: string) => Promise<SessionRepositoryBinding>;
   getRepository: (repositoryId: string) => Promise<RepositorySummary>;
+  /** Every repository the person has registered, for the Settings download list. */
+  listRepositories: () => Promise<RepositorySummary[]>;
+  /** Allows or stops package downloads for one repository; stopping ends its live mirror grants at once. */
+  setRepositoryPackageDownloads: (input: { repositoryId: string; allowed: boolean }) => Promise<RepositorySummary>;
   listCommandProposals: (repositoryId: string) => Promise<RepositoryCommandProposal[]>;
   confirmCommandProposal: (input: {
     repositoryId: string;

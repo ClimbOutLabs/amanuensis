@@ -1,8 +1,13 @@
 /** The API: resource routers, the OpenAPI document and Swagger UI, all under /api/v1. */
-import { swaggerUI } from '@hono/swagger-ui';
 import { OpenAPIHono, z } from '@hono/zod-openapi';
 import type { ISessionStore, Sessions, TurnStreamingEvent } from '@truefoundry/trueforge-core/agent-session';
-import { extractErrorLogFields, type SentinelServices } from '@truefoundry/trueforge-core/core';
+import {
+  existingSandboxIdForProvider,
+  extractErrorLogFields,
+  rawSandboxId,
+  repositoryRootsMatch,
+  type SentinelServices,
+} from '@truefoundry/trueforge-core/core';
 import type { RequestReplyRouter } from '@truefoundry/trueforge-core/request-reply';
 import type { Context, ErrorHandler, MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
@@ -14,14 +19,18 @@ import { createAgentsRouter } from './apis/agents';
 import { createAuditLogRouter } from './apis/auditLog';
 import { createAuthRouter } from './apis/auth';
 import { createBriefItemsRouter } from './apis/briefItems';
+import { createBrowserLiveRouter } from './apis/browserLive';
 import { createBugReportRouter } from './apis/bugReport';
 import { createAppBugReportRouter } from './apis/bugReportApp';
+import { CALENDAR_SETTINGS_BASE_PATH, createCalendarAccountRouter } from './apis/calendarAccount';
 import { createCapabilitiesRouter } from './apis/capabilities';
 import { createCatalogRouter } from './apis/catalog';
 import { createChatImagesRouter } from './apis/chatImages';
 import { createChatPicturesRouter } from './apis/chatPictures';
+import { createChatSearchRouter } from './apis/chatSearch';
 import { createDataExportRouter } from './apis/dataExport';
 import { createDataImportRouter } from './apis/dataImport';
+import { createDeliveriesRouter, createPushRouter } from './apis/deliveries';
 import { createEmailAccountRouter, EMAIL_SETTINGS_BASE_PATH } from './apis/emailAccount';
 import { createGoogleRouter } from './apis/google';
 import { createHelpRouter } from './apis/help';
@@ -30,18 +39,23 @@ import { createMcpOAuthRouter } from './apis/mcpOAuth';
 import { createMcpServersRouter } from './apis/mcpServers';
 import { createMemoryVaultRouter } from './apis/memoryVault';
 import { createModelsRouter } from './apis/models';
+import { createNotesFolderRouter, NOTES_FOLDER_SETTINGS_BASE_PATH } from './apis/notesFolder';
+import { createNoticingRouter } from './apis/noticing';
 import { createPermissionsRouter } from './apis/permissions';
 import { createPersonaKnowledgeRouter } from './apis/personaKnowledge';
 import { createPersonalizationRouter } from './apis/personalization';
 import { createPersonasRouter, createSessionPersonasRouter } from './apis/personas';
+import { createChatPrivacyRouter, createPrivateChatSweepRouter } from './apis/privateChats';
+import { createReachRouter } from './apis/reach';
 import { createRepositoriesRouter, createSessionRepositoryRouter } from './apis/repositories';
 import { createScheduleExecutionRouter, createSchedulesRouter } from './apis/schedules';
 import { createSentinelSettingsRouter } from './apis/sentinelSettings';
 import { createSessionFolderAssignmentsRouter, createSessionFoldersRouter } from './apis/sessionFolders';
 import { createInternalMetricsRouter } from './apis/sessionMetrics';
-import { createInternalSessionsRouter, createSessionsRouter } from './apis/sessions';
+import { createInternalSessionsRouter, createSessionsRouter, sandboxIdOfLastTurn } from './apis/sessions';
 import { createSettingsRouter } from './apis/settings';
 import { createAvailableSkillsRouter, type ResolveSkillStore } from './apis/skills';
+import { createSpaceFolderAssignmentsRouter, createSpaceFoldersRouter } from './apis/spaceFolders';
 import { createSpacePicturesRouter } from './apis/spacePictures';
 import { createSpacesRouter } from './apis/spaces';
 import { createTurnsRouter } from './apis/turns';
@@ -57,6 +71,7 @@ import {
   createAuthMiddleware,
   createUiSessionAuthMiddleware,
   truefoundryAdminMiddleware,
+  tryAuthenticate,
 } from './auth/middleware';
 import type { OidcDiscoveryHandle } from './auth/oidc';
 import { createRequestGuardMiddleware } from './auth/requestGuard';
@@ -74,14 +89,20 @@ import configuration, {
 } from './config';
 import type { AgentRecord, IAgentStore } from './db/agentStore';
 import type { IBriefItemCompletionStore } from './db/briefItemCompletionStore';
+import type { IChatDeletionStore } from './db/chatDeletionStore';
 import type { ICompletedTurnEventStore } from './db/completedTurnEvents';
+import type { IDeliveryStore } from './db/deliveryStore';
 import type { IGlobalSettingsStore } from './db/globalSettingsStore';
 import type { IGoogleConnectionStore } from './db/googleConnectionStore';
+import type { ILocalUserStore } from './db/localUserStore';
 import type { IMcpServerWithAuthStore } from './db/mcpServerStore';
 import type { IMcpToolGrantStore } from './db/mcpToolGrantStore';
 import type { IModelProviderStore } from './db/modelProviderStore';
+import type { INoticingStore } from './db/noticingStore';
 import type { IPersonalizationStore } from './db/personalizationStore';
 import type { IPersonaStore } from './db/personaStore';
+import type { IPushSubscriptionStore } from './db/pushSubscriptionStore';
+import type { IReachSettingsStore } from './db/reachSettingsStore';
 import type { IRepositoryStore } from './db/repositoryStore';
 import type { ISandboxProviderStore } from './db/sandboxProviderStore';
 import type { IScheduleStore } from './db/scheduleStore';
@@ -94,6 +115,7 @@ import type { ISpaceStore } from './db/spaceStore';
 import type { WithTransaction } from './db/transaction';
 import type { ITurnArtifactStore } from './db/turnArtifactStore';
 import type { SchedulerProbe } from './help/healthCheck';
+import { mountApiDocs } from './http/apiDocs';
 import { mountCatalogLogos } from './http/catalogLogos';
 import { createClientCertificateMiddleware } from './http/tls';
 import type { IOAuthTokenStore } from './mcp/auth/types';
@@ -106,13 +128,19 @@ import { OPENAPI_DOCUMENT_TAGS } from './routes/openapiTags';
 import type { ActiveTurnRegistry } from './runtime/activeTurns';
 import type { ChatImageService } from './runtime/chatImages/chatImageService';
 import { createChatPictureService } from './runtime/chatPictures/chatPictureService';
+import type { ChatSearchIndexer } from './runtime/chatSearchIndexing';
 import { resolveDefaultChatModel } from './runtime/defaultChatModel';
+import type { DeliveryService } from './runtime/delivery/deliveryService';
 import type { EventSubscriptionRegistry } from './runtime/event-subscription';
+import { createVaultClient } from './runtime/memory/vaultClient';
+import type { NoticingService } from './runtime/noticing/noticingService';
+import type { ReminderReach } from './runtime/noticing/reminderReach';
 import { resolveSandboxProvider } from './runtime/sessionResources';
 import { createSpacePictureService } from './runtime/spacePictures/spacePictureService';
 import { TokenFactoryDailyCapError, type TokenFactoryBudget } from './runtime/tokenFactoryBudget';
 import { envManagedModelProviderNames } from './runtime/tokenFactoryProvider';
 import type { TurnDrainRegistry } from './runtime/turnDrains';
+import type { ReachAvailability } from './schemas/reach';
 import { InvalidCronError } from './schemas/schedule';
 import { TENANT_ID } from './tenancy';
 import { zodErrorResponse, zodValidationHook } from './zodErrorResponse';
@@ -287,8 +315,26 @@ export interface ServerDeps<TTransaction> {
   sessionMetricsStore: ISessionMetricsStore;
   sentinelAuditStore: ISentinelAuditStore;
   sentinelSettingsStore: ISentinelSettingsStore<TTransaction>;
+  /** Keeps the past-chat search index for people who turned the search on. */
+  chatSearchIndexer: ChatSearchIndexer;
   briefItemStore: IBriefItemCompletionStore;
+  deliveryStore: IDeliveryStore;
+  pushSubscriptionStore: IPushSubscriptionStore;
+  /** The one door into the feed; due reminders go through it. */
+  deliveryService: DeliveryService;
+  reachSettingsStore: IReachSettingsStore;
+  noticingStore: Pick<INoticingStore, 'getCheckpoint'>;
+  /** Runs the watcher passes the controller asks for. */
+  noticingService: NoticingService;
+  /** Settles how loud a due reminder is. */
+  reminderReach: ReminderReach;
+  /** Which phone channels this server can use. Texts and calls are set up by later parts. */
+  reachChannels: () => ReachAvailability;
+  /** The public key a browser needs to turn push on; undefined while push is off. */
+  webPushPublicKey: string | undefined;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
+  /** Deletes a chat and everything it owns in one go; keeps its token counts. */
+  chatDeletionStore: IChatDeletionStore;
   /** Not tenant-scoped: the persisted live tool-output screen override is global. */
   globalSettingsStore: IGlobalSettingsStore<TTransaction>;
   /** Whether the in-process schedule loop is running; the help check reads it. */
@@ -312,12 +358,87 @@ export interface ServerDeps<TTransaction> {
   logger: Logger;
   /** Background OIDC discovery; undefined when browser login is disabled. */
   oidcDiscovery: OidcDiscoveryHandle | undefined;
+  /** The local user store, present only in local sign-in mode. */
+  localUserStore: ILocalUserStore | undefined;
   /** Startup-selected authenticator; middleware is built from this once per app. */
   authenticator: Authenticator;
   /** Startup-selected agent authorization policy. */
   authorizer: Authorizer;
   /** Exact secret values this server holds; Sentinel's outbound guard and the data export both read them. */
   outboundSecrets: SentinelServices['outboundSecrets'];
+}
+
+/**
+ * Whether the sandbox the chat last used already holds a real checkout at the
+ * workspace path. Git must name the path as the checkout root and HEAD must
+ * resolve to a commit, so an empty folder, a repo with no commits yet, and the
+ * leftover of an interrupted clone do not count. The recorded sandbox id goes
+ * through the same provider gate turn admit uses, and any failure to tell
+ * counts as no checkout, so start work refuses plainly instead of failing.
+ */
+export async function resolveCheckoutExistsInSessionSandbox(input: {
+  deps: {
+    sessionStore: Pick<ISessionStore<SessionCustom, TurnCustom>, 'getSession' | 'getTurn'>;
+    logger: Logger;
+    sandboxProviderResolver: typeof resolveSandboxProvider | undefined;
+    resolveSandboxProviderStore: (c: Context) => ISandboxProviderStore;
+  };
+  c: Context;
+  session_id: string;
+  workspace_cwd: string;
+}): Promise<boolean> {
+  const { deps, c, session_id, workspace_cwd } = input;
+  try {
+    const session = await deps.sessionStore.getSession({ tenant_id: TENANT_ID, session_id });
+    if (session === undefined) {
+      return false;
+    }
+    const recordedSandboxId = await sandboxIdOfLastTurn({
+      deps: { sessionStore: deps.sessionStore, logger: deps.logger },
+      record: session,
+    });
+    if (recordedSandboxId === undefined) {
+      return false;
+    }
+    const resolver = deps.sandboxProviderResolver ?? resolveSandboxProvider;
+    const provider = await resolver({
+      tenant_id: TENANT_ID,
+      store: deps.resolveSandboxProviderStore(c),
+      logger: deps.logger,
+      sessionId: session_id,
+    });
+    if (provider === undefined) {
+      return false;
+    }
+    const sandboxId = existingSandboxIdForProvider({
+      existingSandboxId: recordedSandboxId,
+      currentProviderType: provider.type,
+    });
+    if (sandboxId === undefined) {
+      return false;
+    }
+    const root = await provider.exec({
+      sandboxId: rawSandboxId(sandboxId),
+      command: 'git rev-parse --show-toplevel',
+      cwd: workspace_cwd,
+    });
+    if (
+      !root.success ||
+      root.response.exitCode !== 0 ||
+      !repositoryRootsMatch({ expected: workspace_cwd, actual: root.response.result.trim() })
+    ) {
+      return false;
+    }
+    const head = await provider.exec({
+      sandboxId: rawSandboxId(sandboxId),
+      command: 'git rev-parse HEAD',
+      cwd: workspace_cwd,
+    });
+    return head.success && head.response.exitCode === 0 && head.response.result.trim().length > 0;
+  } catch (error) {
+    deps.logger.warn('Could not check for a checkout before starting work', extractErrorLogFields(error));
+    return false;
+  }
 }
 
 export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
@@ -400,6 +521,8 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     mcpCatalog: deps.mcpCatalog,
     scheduleStore: deps.scheduleStore,
     briefItemStore: deps.briefItemStore,
+    deliveryService: deps.deliveryService,
+    reminderReach: deps.reminderReach,
     sessions: deps.sessions,
     agentStore: deps.agentStore,
     personaStore: deps.personaStore,
@@ -414,6 +537,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     resolveSkillStore: deps.resolveSkillStore,
     tokenStore: deps.tokenStore,
     repositoryStore: deps.repositoryStore,
+    sentinelSettingsStore: deps.sentinelSettingsStore,
     sessionStore: deps.sessionStore,
     spaceStore: deps.spaceStore,
     googleConnectionStore: deps.googleConnectionStore,
@@ -421,6 +545,9 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     sandboxProviderResolver: deps.sandboxProviderResolver,
     globalSettingsStore: deps.globalSettingsStore,
     tokenFactoryBudget: deps.tokenFactoryBudget,
+    chatDeletionStore: deps.chatDeletionStore,
+    chatSearchIndexer: deps.chatSearchIndexer,
+    audit: deps.sentinelAuditStore,
   };
 
   if (configuration.ACCESS_LOGS) {
@@ -497,6 +624,14 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       oidcDiscovery: deps.oidcDiscovery,
       logger: deps.logger,
       authMiddleware,
+      ...(deps.localUserStore === undefined
+        ? {}
+        : {
+            localSignIn: {
+              localUserStore: deps.localUserStore,
+              globalSettingsStore: deps.globalSettingsStore,
+            },
+          }),
     }),
   );
   app.route(
@@ -524,6 +659,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         tokenStore: deps.tokenStore,
         globalSettingsStore: deps.globalSettingsStore,
         googleConnectionStore: deps.googleConnectionStore,
+        personalizationStore: deps.personalizationStore,
         hostReportPath: configuration.HOST_REPORT_PATH,
         schedulerStatus: deps.schedulerStatus,
         logger: deps.logger,
@@ -564,6 +700,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       tokenStore: deps.tokenStore,
       mcpServerStore: deps.resolveMcpServerStore(),
       logger: deps.logger,
+      resolveSession: c => tryAuthenticate({ authenticator: deps.authenticator, context: c }),
     }),
   );
   app.route(
@@ -600,6 +737,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         resolveMcpServerStore: deps.resolveMcpServerStore,
         resolveSkillStore: deps.resolveSkillStore,
         resolveSandboxProviderStore: deps.resolveSandboxProviderStore,
+        mcpCatalog: deps.mcpCatalog,
         withTransaction: deps.withTransaction,
         resolveRequestContext,
         authorizer: deps.authorizer,
@@ -610,6 +748,25 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
   app.route(
     '/api/internal/schedules',
     withAuth(createScheduleExecutionRouter(scheduleTurnDeps), scheduleExecutionAuthMiddleware),
+  );
+  app.route(
+    '/api/internal/noticing',
+    withAuth(createNoticingRouter({ noticing: deps.noticingService }), scheduleExecutionAuthMiddleware),
+  );
+  app.route(
+    '/api/internal/private-chats',
+    withAuth(
+      createPrivateChatSweepRouter({
+        sessions: deps.sessions,
+        sessionStore: deps.sessionStore,
+        chatDeletionStore: deps.chatDeletionStore,
+        activeTurns: deps.activeTurns,
+        turnDrains: deps.turnDrains,
+        redis: deps.redis,
+        logger: deps.logger,
+      }),
+      scheduleExecutionAuthMiddleware,
+    ),
   );
   app.route(
     '/api/v1/schedules',
@@ -646,6 +803,8 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         globalSettingsStore: deps.globalSettingsStore,
         sentinelSettingsStore: deps.sentinelSettingsStore,
         sentinelAuditStore: deps.sentinelAuditStore,
+        deliveryStore: deps.deliveryStore,
+        reachSettingsStore: deps.reachSettingsStore,
         turnArtifactStore: deps.turnArtifactStore,
         tokenStore: deps.tokenStore,
         resolveMcpServerStore: deps.resolveMcpServerStore,
@@ -669,7 +828,10 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       scheduleStore: deps.scheduleStore,
       globalSettingsStore: deps.globalSettingsStore,
       sentinelAuditStore: deps.sentinelAuditStore,
+      deliveryStore: deps.deliveryStore,
+      reachSettingsStore: deps.reachSettingsStore,
       turnArtifactStore: deps.turnArtifactStore,
+      chatSearchIndexer: deps.chatSearchIndexer,
       tokenStore: deps.tokenStore,
       resolveMcpServerStore: deps.resolveMcpServerStore,
       resolveAgentStore: deps.resolveAgentStore,
@@ -715,6 +877,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     withAuth(
       createInternalSessionsRouter({
         sessions: deps.sessions,
+        mcpCatalog: deps.mcpCatalog,
         resolveModelProviderStore: deps.resolveModelProviderStore,
         resolveMcpServerStore: deps.resolveMcpServerStore,
         resolveSkillStore: deps.resolveSkillStore,
@@ -772,6 +935,42 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     ),
   );
   app.route(
+    '/api/v1/user/deliveries',
+    withAuth(createDeliveriesRouter({ deliveryStore: deps.deliveryStore, resolveRequestContext }), authMiddleware),
+  );
+  app.route(
+    '/api/v1/user/reach',
+    withAuth(
+      createReachRouter({
+        reachStore: deps.reachSettingsStore,
+        noticingStore: deps.noticingStore,
+        deliveryService: deps.deliveryService,
+        channels: deps.reachChannels,
+        memories: async ({ tenant_id }) => {
+          const outcome = await createVaultClient({ logger: deps.logger, tenantId: tenant_id })?.listEntries({
+            namespace: '',
+            timeoutMs: 10_000,
+          });
+          return outcome?.ok === true ? outcome.entries.map(entry => entry.text) : [];
+        },
+        resolveRequestContext,
+        logger: deps.logger,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
+    '/api/v1/user/push',
+    withAuth(
+      createPushRouter({
+        pushSubscriptionStore: deps.pushSubscriptionStore,
+        publicKey: deps.webPushPublicKey,
+        resolveRequestContext,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
     '/api/v1/user/brief-items',
     withAuth(
       createBriefItemsRouter({
@@ -784,10 +983,23 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     ),
   );
   app.route(
+    '/api/v1/user/chat-search',
+    withAuth(
+      createChatSearchRouter({
+        sessionStore: deps.sessionStore,
+        sentinelSettingsStore: deps.sentinelSettingsStore,
+        resolveRequestContext,
+        logger: deps.logger,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
     '/api/v1/user/settings/sentinel',
     withAuth(
       createSentinelSettingsRouter({
         sentinelSettingsStore: deps.sentinelSettingsStore,
+        chatSearchIndexer: deps.chatSearchIndexer,
         resolveRequestContext,
       }),
       authMiddleware,
@@ -808,17 +1020,49 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       createUiSessionAuthMiddleware(deps.authenticator),
     ),
   );
-  // Browser session only, like Google's: the email account is the instance owner's, and its app
-  // password passes through the save call to the sidecar only.
+  // Browser session only and admin only: the Email and Calendar accounts belong to the whole instance, so a
+  // member of a shared server must not read or change them. Their app passwords pass through the save call
+  // to the sidecars only.
   app.route(
     EMAIL_SETTINGS_BASE_PATH,
     withAuth(
-      createEmailAccountRouter({
-        fetchImpl: undefined,
-        resolveRequestContext,
-        logger: deps.logger,
-        mcpServerStore: deps.resolveMcpServerStore(),
-      }),
+      withAdminAuth(
+        createEmailAccountRouter({
+          fetchImpl: undefined,
+          logger: deps.logger,
+          mcpServerStore: deps.resolveMcpServerStore(),
+        }),
+        adminAuthMiddleware,
+      ),
+      createUiSessionAuthMiddleware(deps.authenticator),
+    ),
+  );
+  app.route(
+    CALENDAR_SETTINGS_BASE_PATH,
+    withAuth(
+      withAdminAuth(
+        createCalendarAccountRouter({
+          fetchImpl: undefined,
+          logger: deps.logger,
+          mcpServerStore: deps.resolveMcpServerStore(),
+        }),
+        adminAuthMiddleware,
+      ),
+      createUiSessionAuthMiddleware(deps.authenticator),
+    ),
+  );
+  // Same guard as the accounts: the notes folder belongs to the whole instance. It holds no
+  // secret; the path and the inbox file name are all that is saved.
+  app.route(
+    NOTES_FOLDER_SETTINGS_BASE_PATH,
+    withAuth(
+      withAdminAuth(
+        createNotesFolderRouter({
+          logger: deps.logger,
+          settingsStore: deps.globalSettingsStore,
+        }),
+        adminAuthMiddleware,
+      ),
       createUiSessionAuthMiddleware(deps.authenticator),
     ),
   );
@@ -842,6 +1086,18 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
       createChatImagesRouter({
         sessions: deps.sessions,
         chatImages: deps.chatImages,
+        resolveRequestContext,
+        logger: deps.logger,
+      }),
+      createUiSessionAuthMiddleware(deps.authenticator),
+    ),
+  );
+  // Live view of Aman's browser, browser session only: the signed-in person watches and drives the
+  // tabs of their own browser profile, and no agent or API token can see or steer it for them.
+  app.route(
+    '/api/browser/live',
+    withAuth(
+      createBrowserLiveRouter({
         resolveRequestContext,
         logger: deps.logger,
       }),
@@ -918,6 +1174,26 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     ),
   );
   app.route(
+    '/api/v1/spaces',
+    withAuth(
+      createSpaceFolderAssignmentsRouter({
+        spaceStore: deps.spaceStore,
+        resolveRequestContext,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
+    '/api/v1/space-folders',
+    withAuth(
+      createSpaceFoldersRouter({
+        spaceStore: deps.spaceStore,
+        resolveRequestContext,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
     '/api/v1/repositories',
     withAuth(
       createRepositoriesRouter({
@@ -942,9 +1218,12 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     withAuth(
       createSessionsRouter({
         sessions: deps.sessions,
+        mcpCatalog: deps.mcpCatalog,
         sessionStore: deps.sessionStore,
+        chatDeletionStore: deps.chatDeletionStore,
         sentinelAuditStore: deps.sentinelAuditStore,
         activeTurns: deps.activeTurns,
+        turnDrains: deps.turnDrains,
         resolveModelProviderStore: deps.resolveModelProviderStore,
         resolveMcpServerStore: deps.resolveMcpServerStore,
         resolveSkillStore: deps.resolveSkillStore,
@@ -992,6 +1271,8 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     withAuth(
       createVoiceRouter({
         logger: deps.logger,
+        resolveRequestContext,
+        app,
       }),
       authMiddleware,
     ),
@@ -1020,6 +1301,19 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
   app.route(
     '/api/v1/sessions',
     withAuth(
+      createChatPrivacyRouter({
+        sessionStore: deps.sessionStore,
+        personaStore: deps.personaStore,
+        resolveAgentStore: deps.resolveAgentStore,
+        resolveModelProviderStore: deps.resolveModelProviderStore,
+        resolveRequestContext,
+      }),
+      authMiddleware,
+    ),
+  );
+  app.route(
+    '/api/v1/sessions',
+    withAuth(
       createSessionRepositoryRouter({
         repositoryStore: deps.repositoryStore,
         sessionStore: deps.sessionStore,
@@ -1036,6 +1330,18 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
           });
           return provider?.getWorkspaceDir();
         },
+        resolveCheckoutExists: ({ c, session_id, workspace_cwd }) =>
+          resolveCheckoutExistsInSessionSandbox({
+            deps: {
+              sessionStore: deps.sessionStore,
+              logger: deps.logger,
+              sandboxProviderResolver: deps.sandboxProviderResolver,
+              resolveSandboxProviderStore: deps.resolveSandboxProviderStore,
+            },
+            c,
+            session_id,
+            workspace_cwd,
+          }),
       }),
       authMiddleware,
     ),
@@ -1061,7 +1367,10 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
         repositoryStore: deps.repositoryStore,
         turnArtifactStore: deps.turnArtifactStore,
         globalSettingsStore: deps.globalSettingsStore,
+        sentinelSettingsStore: deps.sentinelSettingsStore,
+        chatSearchIndexer: deps.chatSearchIndexer,
         tokenFactoryBudget: deps.tokenFactoryBudget,
+        chatDeletionStore: deps.chatDeletionStore,
         eventSubscriptions: deps.eventSubscriptions,
         resolveSandboxProviderStore: deps.resolveSandboxProviderStore,
         sandboxProviderResolver: deps.sandboxProviderResolver,
@@ -1079,8 +1388,8 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
   const uiBasePath = getPublicUiBasePath();
   const openApiSpecPath = `${uiBasePath}api/v1/openapi.json`;
   const openApiServerUrl = uiBasePath === '/' ? undefined : uiBasePath.replace(/\/$/, '');
-  app.get('/api/v1/docs', swaggerUI({ url: openApiSpecPath }));
-  app.get('/api/v1/openapi.json', c =>
+  mountApiDocs(app, { uiBasePath, openApiSpecPath, authMiddleware });
+  app.get('/api/v1/openapi.json', authMiddleware, c =>
     c.json(
       buildOpenApiDocument(app, {
         authEnabled,

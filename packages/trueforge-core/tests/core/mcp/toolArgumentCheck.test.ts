@@ -245,6 +245,127 @@ describe('checkToolArguments', () => {
   });
 });
 
+/** The shape of an edit call to a page the person keeps: a list whose entries are either of two kinds. */
+const EDIT_PAGE_SCHEMA = toParameterSchema({
+  type: 'object',
+  properties: {
+    page_name: { type: 'string' },
+    edits: {
+      type: 'array',
+      items: {
+        anyOf: [
+          {
+            type: 'object',
+            properties: {
+              type: { type: 'string', const: 'search' },
+              search: { type: 'string', minLength: 1 },
+              replace: { type: 'string' },
+            },
+            required: ['type', 'search', 'replace'],
+            additionalProperties: false,
+          },
+          {
+            type: 'object',
+            properties: {
+              type: { type: 'string', const: 'block' },
+              anchor: { type: 'string' },
+              new_content: { type: 'string' },
+            },
+            required: ['type', 'anchor', 'new_content'],
+            additionalProperties: false,
+          },
+        ],
+      },
+    },
+  },
+  required: ['page_name', 'edits'],
+});
+
+describe('a value that fits none of several object shapes', () => {
+  function problemFor(edit: unknown) {
+    const outcome = checkToolArguments({
+      schema: EDIT_PAGE_SCHEMA,
+      args: { page_name: 'Harbour Market Plan', edits: [edit] },
+      readOnly: false,
+    });
+    return outcome.problems;
+  }
+
+  it('names the fields each option needs, using the real field names', () => {
+    const [problem] = problemFor({ find: 'Tomatoes', with: 'Basil' });
+    expect(problem?.path).toBe('edits[0]');
+    expect(problem?.expected).toBe(
+      'either an object with type set to "search", search (text) and replace (text), ' +
+        'or an object with type set to "block", anchor (text) and new_content (text)',
+    );
+  });
+
+  it('never says the same thing twice in one message', () => {
+    const message = toolArgumentProblemMessage({
+      toolName: 'edit_page',
+      problems: problemFor('Tomatoes become Basil'),
+    });
+    expect(message).toContain('edits[0] must be either an object with type set to "search"');
+    expect(message).not.toContain('named fields');
+    const options = message.split(/\bor an object\b/);
+    expect(options).toHaveLength(2);
+    expect(options[0]).not.toEqual(options[1]);
+  });
+
+  it('holds a value that names its own option to that option, and points at the missing field', () => {
+    expect(problemFor({ type: 'search', search: 'Tomatoes' })).toEqual([
+      { path: 'edits[0].replace', expected: 'text (this one is required)', example: undefined, optional: false },
+    ]);
+  });
+
+  it('still accepts a well-formed entry of either kind', () => {
+    expect(problemFor({ type: 'search', search: 'Tomatoes', replace: 'Basil' })).toEqual([]);
+    expect(problemFor({ type: 'block', anchor: 'intro', new_content: 'Hello' })).toEqual([]);
+  });
+
+  it('reads any union alike, naming a plain option as plainly as an object one', () => {
+    const schema = toParameterSchema({
+      type: 'object',
+      properties: {
+        when: {
+          anyOf: [
+            { type: 'string' },
+            { type: 'object', properties: { from: { type: 'string' }, to: { type: 'string' } }, required: ['from'] },
+          ],
+        },
+      },
+    });
+    const outcome = checkToolArguments({ schema, args: { when: 42 }, readOnly: false });
+    expect(outcome.problems).toEqual([
+      {
+        path: 'when',
+        expected: 'either text, or an object with from (text), and optionally to',
+        example: undefined,
+        optional: true,
+      },
+    ]);
+  });
+
+  it('collapses options that read the same into one phrase', () => {
+    const schema = toParameterSchema({
+      type: 'object',
+      properties: { limit: { anyOf: [{ type: 'string' }, { type: 'string', minLength: 2 }] } },
+    });
+    const outcome = checkToolArguments({ schema, args: { limit: 3 }, readOnly: false });
+    expect(outcome.problems[0]?.expected).toBe('text');
+  });
+
+  it('lists at most a few optional fields, then says there are more', () => {
+    const fields = Object.fromEntries(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'].map(name => [name, { type: 'string' }]));
+    const schema = toParameterSchema({
+      type: 'object',
+      properties: { box: { type: 'object', properties: fields } },
+    });
+    const outcome = checkToolArguments({ schema, args: { box: 'x' }, readOnly: false });
+    expect(outcome.problems[0]?.expected).toBe('an object with the optional fields a, b, c, d, e, f and more');
+  });
+});
+
 describe('dropUnnamedArguments', () => {
   const named = { type: 'object', properties: { query: { type: 'string' } } };
 

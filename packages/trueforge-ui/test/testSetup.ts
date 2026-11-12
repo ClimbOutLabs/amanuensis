@@ -41,11 +41,31 @@ vi.mock('react-syntax-highlighter/dist/esm/styles/prism', () => ({
 vi.mock('@openuidev/react-lang', () => ({
   Renderer: ({ response, isStreaming }: { response?: string | null; isStreaming?: boolean }) =>
     createElement('div', { 'data-testid': 'aui-openui-renderer', 'data-streaming': String(!!isStreaming) }, response),
+  // Shape-true stand-ins for the library factory and hooks the gated fence library
+  // uses, so suites that render a fence under this stub keep working.
+  createLibrary: (input: { root?: string; componentGroups?: unknown; components: Array<{ name: string }> }) => ({
+    root: input.root,
+    componentGroups: input.componentGroups,
+    components: Object.fromEntries(input.components.map(component => [component.name, component])),
+  }),
+  useStateField: (name: string, value?: unknown) => ({ name, value, isReactive: false, setValue: () => {} }),
+  useTriggerAction: () => () => {},
 }));
 
 vi.mock('@openuidev/react-ui', () => ({
   ThemeProvider: ({ children }: { children?: ReactNode }) => children,
-  openuiLibrary: {},
+  Callout: () => null,
+  Steps: ({ children }: { children?: ReactNode }) => children,
+  StepsItem: () => null,
+  openuiLibrary: {
+    root: 'Stack',
+    componentGroups: [],
+    components: Object.fromEntries(
+      ['Stack', 'Image', 'ImageBlock', 'ImageGallery', 'MarkDownRenderer', 'TextContent', 'Callout', 'Steps'].map(
+        name => [name, { name, props: {}, description: '', component: () => null }],
+      ),
+    ),
+  },
 }));
 
 // jsdom does not implement ResizeObserver; assistant-ui's viewport/scroll
@@ -73,6 +93,20 @@ if (typeof Blob !== 'undefined' && typeof Blob.prototype.arrayBuffer !== 'functi
       reader.onload = () => resolve(reader.result as ArrayBuffer);
       reader.onerror = () => reject(reader.error);
       reader.readAsArrayBuffer(this);
+    });
+  };
+}
+
+// jsdom's Blob does not implement text() either. Since Node 24, undici's Response#blob() builds
+// its result with the global Blob, which the jsdom environment replaces, so every fetched blob
+// in a test is a jsdom Blob. Browsers implement text() (UTF-8 decode), so fill it the same way.
+if (typeof Blob !== 'undefined' && typeof Blob.prototype.text !== 'function') {
+  Blob.prototype.text = function text(this: Blob): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(this, 'utf-8');
     });
   };
 }

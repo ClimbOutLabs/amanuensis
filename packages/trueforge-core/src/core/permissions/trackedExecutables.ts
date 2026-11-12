@@ -166,12 +166,36 @@ export function canonicalWriteTarget(input: {
   if (input.resolution === 'remote') {
     return lexicalPath(input);
   }
+  const absolute = path.isAbsolute(input.p) ? input.p : path.resolve(input.cwd, input.p);
+  // Folders that do not exist yet are created by the write, so the target resolves through its
+  // nearest existing ancestor. A missing folder cannot be a link, so appending the missing names
+  // lexically cannot hide where the write lands.
+  const missing: string[] = [path.basename(absolute)];
+  let ancestor = path.dirname(absolute);
+  for (;;) {
+    try {
+      return path.join(realpathSync(ancestor), ...missing);
+    } catch (error) {
+      const parent = path.dirname(ancestor);
+      if (!isMissingPathError(error) || parent === ancestor || isLinkPath(ancestor)) {
+        return null;
+      }
+      missing.unshift(path.basename(ancestor));
+      ancestor = parent;
+    }
+  }
+}
+
+function isMissingPathError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT';
+}
+
+/** True when the path itself is a symlink (dangling or not); such a folder is never treated as missing. */
+function isLinkPath(p: string): boolean {
   try {
-    const absolute = path.isAbsolute(input.p) ? input.p : path.resolve(input.cwd, input.p);
-    const parent = path.dirname(absolute);
-    return path.join(realpathSync(parent), path.basename(absolute));
+    return lstatSync(p).isSymbolicLink();
   } catch {
-    return null;
+    return false;
   }
 }
 
@@ -385,6 +409,41 @@ export function isInsideWorkspace(input: {
     return false;
   }
   return identity === root || identity.startsWith(`${root}${path.sep}`);
+}
+
+/**
+ * True when a path lies under a directory, comparing whole path components. A relative directory
+ * matches the same relative form (a provider whose staged paths are cwd-relative), with the
+ * candidate's dot segments collapsed first; an absolute
+ * directory is compared against the path's canonical identity when it has one, and against its
+ * normalized text when it does not, so a path in a remote sandbox still matches.
+ */
+export function isPathUnderDir(input: {
+  p: string;
+  dir: string;
+  cwd: string;
+  resolution?: PathResolution | undefined;
+}): boolean {
+  const dir = input.dir.replace(/\\/g, '/').replace(/\/+$/g, '');
+  const p = input.p.replace(/\\/g, '/');
+  if (dir === '') {
+    return false;
+  }
+  if (!path.posix.isAbsolute(dir)) {
+    // Collapse dot segments before the prefix match: uploads/../outside.pdf starts with the
+    // directory's name as raw text but resolves outside it, so it must not count as staged.
+    const collapsed = path.posix.normalize(p);
+    return collapsed === dir || collapsed.startsWith(`${dir}/`);
+  }
+  const identity =
+    canonicalFileIdentity({ p: input.p, cwd: input.cwd, resolution: input.resolution }) ??
+    (path.posix.isAbsolute(p) ? lexicalPath({ p, cwd: '/' }) : null);
+  const root =
+    canonicalFileIdentity({ p: dir, cwd: '/', resolution: input.resolution }) ?? lexicalPath({ p: dir, cwd: '/' });
+  if (identity === null || root === null) {
+    return false;
+  }
+  return isUnderRoot({ identity: identity.replace(/\\/g, '/'), root: root.replace(/\\/g, '/'), separator: '/' });
 }
 
 const INTERPRETERS = new Set([

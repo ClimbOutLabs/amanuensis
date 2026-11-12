@@ -6,6 +6,19 @@ import { InternalEventType } from '../../../src/core/runtime/AgentThread.types';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { makeMockIMCPServer, makeSilentLogger } from '../harnessMocks';
 
+// Model HTTP rides the configured outbound fetch in production (util/outboundFetch);
+// in these suites it delegates to the global fetch the tests stub.
+jest.mock('../../../src/core/util/outboundFetch', () => {
+  const actual = jest.requireActual<typeof import('../../../src/core/util/outboundFetch')>(
+    '../../../src/core/util/outboundFetch',
+  );
+  return {
+    ...actual,
+    modelOutboundFetch: (input: string | URL | Request, init?: RequestInit): Promise<Response> =>
+      globalThis.fetch(input, init),
+  };
+});
+
 interface Frame {
   atMs: number;
   delta: Record<string, unknown>;
@@ -79,6 +92,8 @@ function modelClient(signal: AbortSignal) {
     signal,
     logger: makeSilentLogger(),
     streamTimeout: { firstChunkMs: 100, chunkMs: 50 },
+    // The partial call is open, so its allowance is the one the empty heartbeats must not extend.
+    toolCallChunkMs: 50,
     providerConfig: {
       provider: { type: 'custom' as const, name: 'synthetic' },
       model: { id: 'synthetic-model', name: 'synthetic-model' },

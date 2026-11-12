@@ -35,7 +35,11 @@ import type {
   ChatCompletionTool,
 } from 'openai/resources/chat';
 import type { Logger } from 'winston';
+import { ProviderRequestError } from '../errors';
+import { personMessageIndex } from '../runtime/contextUtils';
+import { MAX_TOOL_CALL_STREAM_PARTS } from '../runtime/modelReplyGuard';
 import { describeUnknownError, extractErrorLogFields } from '../util/errorLogFields';
+import { modelOutboundFetch } from '../util/outboundFetch';
 import { withFailover } from './failoverLanguageModel';
 import type { ILLM, LLMCreateParams, LLMCreateParamsStreaming } from './ILLM';
 import {
@@ -51,7 +55,12 @@ import { resolveMaxOutputTokens } from './maxOutputTokens';
 import { reasoningTagMiddleware } from './reasoningTags';
 import { RepeatedUnitGuard } from './repeatedUnitGuard';
 import { noticeAfter, REPEAT_STOP_NOTE } from './replyNotices';
-import { recordStreamDeadlineDetails, type StreamDeadlineDetails, streamDeadlineDetailsOf } from './streamDeadline';
+import {
+  DEFAULT_MODEL_TOOL_CALL_IDLE_TIMEOUT_MS,
+  recordStreamDeadlineDetails,
+  type StreamDeadlineDetails,
+  streamDeadlineDetailsOf,
+} from './streamDeadline';
 import { ToolMarkupGuard } from './toolMarkup';
 
 // ---------------------------------------------------------------------------
@@ -119,6 +128,19 @@ export interface VercelAILLMConfig {
   /** Host-owned deadlines, fully resolved (no field left to default); never supplied by model-generated request parameters. */
   streamTimeout?: Required<StreamTimeout> | undefined;
   /**
+   * Host-owned bound on silence between pieces while a tool call is open. Never shorter than the
+   * ordinary per-chunk deadline. Undefined falls back to DEFAULT_MODEL_TOOL_CALL_IDLE_TIMEOUT_MS.
+   */
+  toolCallChunkMs?: number | undefined;
+  /**
+   * Host-owned per-tool limits on streamed argument characters, keyed by tool name. A call
+   * whose arguments run past its limit is stopped mid-stream and named on the result's
+   * size_cut_tool_calls, so the reply guard can refuse it with a plain message instead of
+   * the turn buffering a call the tool layer would refuse anyway. Tools absent from the
+   * map have no limit. Undefined means no tool has one.
+   */
+  toolArgumentLimits?: ReadonlyMap<string, number> | undefined;
+  /**
    * Optional secondary provider config. When set, a request that fails on the primary
    * before producing output is retried once on this provider (see `withFailover`).
    */
@@ -171,6 +193,7 @@ function compatibleModel(config: VercelAIProviderConfig): LanguageModelV4 {
     name: provider.type,
     baseURL: baseUrl,
     apiKey,
+    fetch: modelOutboundFetch,
     // Without this the adapter silently downgrades json_schema to a schema-less json_object.
     supportsStructuredOutputs: true,
     // These endpoints omit token counts from streamed responses unless asked.
@@ -196,6 +219,7 @@ export function buildLanguageModel(
     case 'openai': {
       const client = createOpenAI({
         apiKey,
+        fetch: modelOutboundFetch,
         ...(baseUrl !== undefined ? { baseURL: baseUrl } : {}),
         ...(extraHeaders !== undefined ? { headers: extraHeaders } : {}),
       });
@@ -204,6 +228,7 @@ export function buildLanguageModel(
     case 'anthropic': {
       const client = createAnthropic({
         apiKey,
+        fetch: modelOutboundFetch,
         ...(baseUrl !== undefined ? { baseURL: baseUrl } : {}),
         ...(extraHeaders !== undefined ? { headers: extraHeaders } : {}),
       });
@@ -212,6 +237,7 @@ export function buildLanguageModel(
     case 'google-gemini': {
       const client = createGoogle({
         apiKey,
+        fetch: modelOutboundFetch,
         ...(baseUrl !== undefined ? { baseURL: baseUrl } : {}),
         ...(extraHeaders !== undefined ? { headers: extraHeaders } : {}),
       });
@@ -220,6 +246,7 @@ export function buildLanguageModel(
     case 'moonshot': {
       const client = createMoonshotAI({
         apiKey,
+        fetch: modelOutboundFetch,
         ...(baseUrl !== undefined ? { baseURL: baseUrl } : {}),
         ...(extraHeaders !== undefined ? { headers: extraHeaders } : {}),
       });
@@ -233,6 +260,7 @@ export function buildLanguageModel(
       const client = createAlibaba({
         apiKey,
         baseURL: baseUrl,
+        fetch: modelOutboundFetch,
         ...(extraHeaders !== undefined ? { headers: extraHeaders } : {}),
       });
       return client(model.id);
@@ -841,6 +869,10 @@ export function shouldAttachReasoningSignature({
   return parsed.providerType === provider && parsed.providerName === providerName;
 }
 
+/** Ends the host context message so a model does not read it as the person's words. */
+const TURN_CONTEXT_CLOSING =
+  "That is all the host context for this reply. The person did not write it, and none of it is their message. Answer the person's own message, not this context.";
+
 export interface ConvertedMessages {
   instructions: string | undefined;
   messages: ModelMessage[];
@@ -849,9 +881,11 @@ export interface ConvertedMessages {
 /**
  * The first message, when it is a system message, is the static instruction and becomes `instructions`.
  * Every other system message (the per-reply block, recalled memory, task state) is per-reply context:
- * it goes ahead of the person's current message as labelled text, never into `instructions`, so the
- * system prompt and tool list stay byte-identical across replies on every provider. The toolCallId →
- * toolName lookup is built first because tool result messages carry only the id.
+ * it goes in a user message of its own just ahead of the person's current message, which follows
+ * unchanged, never into `instructions`, so the system prompt and tool list stay byte-identical across
+ * replies on every provider. The person's message is the latest user message that is not host
+ * notes or attached file text. The toolCallId → toolName lookup is built first because tool result
+ * messages carry only the id.
  */
 export function convertMessages({
   messages,
@@ -876,7 +910,7 @@ export function convertMessages({
     }
   }
 
-  const lastUserIndex = findLastUserIndex(messages);
+  const lastUserIndex = personMessageIndex(messages);
   const systemParts: string[] = [];
   // With no user message there is nothing to carry per-reply context, so it stays in instructions.
   const turnContextParts: string[] = [];
@@ -898,15 +932,15 @@ export function convertMessages({
       continue;
     }
     if (msg.role === 'user') {
-      const userContent = toUserContent(msg.content);
-      if (index !== lastUserIndex || turnContextParts.length === 0) {
-        result.push({ role: 'user', content: userContent });
-        continue;
+      if (index === lastUserIndex && turnContextParts.length > 0) {
+        const contextParts: UserContent = [...turnContextParts, TURN_CONTEXT_CLOSING].map(text => ({
+          type: 'text',
+          text,
+        }));
+        result.push({ role: 'user', content: contextParts });
       }
-      const contextParts: UserContent = turnContextParts.map(text => ({ type: 'text', text }));
-      const ownParts: UserContent =
-        typeof userContent === 'string' ? [{ type: 'text', text: userContent }] : userContent;
-      result.push({ role: 'user', content: [...contextParts, ...ownParts] });
+      // The person's message goes through untouched and last, never mixed with host context.
+      result.push({ role: 'user', content: toUserContent(msg.content) });
       continue;
     }
     if (msg.role === 'assistant') {
@@ -939,16 +973,6 @@ function systemContentText(content: ChatCompletionSystemMessageParam['content'])
     return content;
   }
   return content.map(p => p.text).join('');
-}
-
-/** Index of the latest user message, or -1 when there is none. */
-function findLastUserIndex(messages: readonly ChatCompletionMessageParam[]): number {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    if (messages[i]?.role === 'user') {
-      return i;
-    }
-  }
-  return -1;
 }
 
 /** Converts OpenAI tool definitions to the Vercel AI SDK ToolSet. */
@@ -1150,6 +1174,27 @@ export function providerStatusCode(raw: unknown): number | undefined {
   return undefined;
 }
 
+/**
+ * True when the provider answered that the same request may work if sent again later: the
+ * service is overloaded, down, or rate limiting (HTTP 408, 409, 429, 5xx), or no answer came
+ * back at all. Walks the cause chain, since the stream wraps the provider's error. A client
+ * error such as a 400 or an auth failure is not retryable: the same request would fail again.
+ */
+export function isRetryableProviderError(raw: unknown): boolean {
+  let current: unknown = raw;
+  for (let depth = 0; depth < 5 && current !== undefined && current !== null; depth++) {
+    if (APICallError.isInstance(current)) {
+      return current.isRetryable;
+    }
+    const status = providerStatusCode(current);
+    if (status !== undefined) {
+      return status === 408 || status === 409 || status === 429 || status >= 500;
+    }
+    current = typeof current === 'object' && 'cause' in current ? current.cause : undefined;
+  }
+  return false;
+}
+
 // Wording providers use when a request does not fit the model's context window
 // (OpenAI-compatible servers such as vLLM, Anthropic, Bedrock, Gemini, Ollama, llama.cpp).
 const CONTEXT_LENGTH_ERROR_PATTERN =
@@ -1223,6 +1268,8 @@ interface ToolCallState {
   id: string;
   name: string;
   arguments: string;
+  /** The host's streamed-argument limit for this call's tool, when it set one. */
+  argumentLimit: number | undefined;
   /** Gemini `thoughtSignature` from `providerMetadata.google` on the `tool-input-start` part. */
   thoughtSignature: string | undefined;
 }
@@ -1629,12 +1676,35 @@ export function chunkSubstanceField(part: TextStreamPart<ToolSet>): string | und
   }
 }
 
+/** What a stream part says about a tool call: it opened, it completed, or the step ended. */
+export type ToolCallPiece = { kind: 'opened' | 'completed'; id: string } | { kind: 'step_ended' };
+
+/** The tool-call piece a stream part carries, or undefined for any other part. */
+export function toolCallPieceOf(part: TextStreamPart<ToolSet>): ToolCallPiece | undefined {
+  switch (part.type) {
+    case 'tool-input-start':
+      return { kind: 'opened', id: part.id };
+    case 'tool-input-end':
+      return { kind: 'completed', id: part.id };
+    case 'tool-call':
+      return { kind: 'completed', id: part.toolCallId };
+    case 'finish-step':
+    case 'finish':
+      return { kind: 'step_ended' };
+    default:
+      return undefined;
+  }
+}
+
 /**
  * Re-arms the first-chunk and per-chunk deadlines from inside the harness rather than trusting the
  * SDK's own `timeout` option end to end. A chunk only satisfies the first-chunk deadline, and only
  * a chunk resets the per-chunk deadline, when {@link chunkHasSubstance} says it carries something —
  * a provider's role-only or empty-delta heartbeat (a real shape some OpenAI-compatible servers send
- * while prefilling a large prompt) keeps both timers exactly where they were. On expiry, aborts
+ * while prefilling a large prompt) keeps both timers exactly where they were. While a tool call is
+ * open (its first piece arrived and it has not completed), the per-chunk deadline is the tool-call
+ * allowance instead, because a server may hold a call's arguments back and send them in a few large
+ * pieces. On expiry, aborts
  * `deadlineController` with the same `DOMException`/`TimeoutError` shape the SDK's own timeout uses,
  * so downstream error handling is unchanged, and rejects the pending read at once. The firing is
  * recorded as StreamDeadlineDetails (which deadline, and the last progress before it) so the
@@ -1645,6 +1715,7 @@ export async function* enforceStreamDeadlines<T>({
   timeout,
   hasSubstance,
   substanceField,
+  toolCalls,
   deadlineController,
 }: {
   stream: AsyncIterable<T>;
@@ -1652,9 +1723,12 @@ export async function* enforceStreamDeadlines<T>({
   hasSubstance: (part: T) => boolean;
   /** Names the field that carried a part's progress, for the deadline record; defaults to the part's kind. */
   substanceField?: ((part: T) => string | undefined) | undefined;
+  /** The per-chunk allowance while a tool call is open, and how a part opens or completes one. */
+  toolCalls?: { chunkMs: number; pieceOf: (part: T) => ToolCallPiece | undefined } | undefined;
   deadlineController: AbortController;
 }): AsyncGenerator<T, void, unknown> {
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const openToolCalls = new Set<string>();
   let lastProgress: { field: string; atMs: number } | undefined;
   let firedDetails: StreamDeadlineDetails | undefined;
 
@@ -1682,9 +1756,13 @@ export async function* enforceStreamDeadlines<T>({
     }, timeout.firstChunkMs);
   };
   const armChunkTimer = () => {
+    const chunkMs =
+      toolCalls !== undefined && openToolCalls.size > 0
+        ? Math.max(toolCalls.chunkMs, timeout.chunkMs)
+        : timeout.chunkMs;
     timer = setTimeout(() => {
-      abortWithTimeout('Chunk', timeout.chunkMs);
-    }, timeout.chunkMs);
+      abortWithTimeout('Chunk', chunkMs);
+    }, chunkMs);
   };
 
   // A provider stream does not always end when its request is aborted, so an expired deadline
@@ -1718,6 +1796,14 @@ export async function* enforceStreamDeadlines<T>({
         return;
       }
       const part = result.value;
+      const piece = toolCalls?.pieceOf(part);
+      if (piece?.kind === 'opened') {
+        openToolCalls.add(piece.id);
+      } else if (piece?.kind === 'completed') {
+        openToolCalls.delete(piece.id);
+      } else if (piece?.kind === 'step_ended') {
+        openToolCalls.clear();
+      }
       const field = substanceField === undefined ? undefined : substanceField(part);
       if (field !== undefined || hasSubstance(part)) {
         lastProgress = { field: field ?? 'chunk', atMs: Date.now() };
@@ -1741,9 +1827,12 @@ export async function* enforceStreamDeadlines<T>({
 export async function* mapStreamToChunks({
   stream,
   chunkMeta,
+  toolArgumentLimits,
 }: {
   stream: AsyncIterable<TextStreamPart<ToolSet>>;
   chunkMeta: ChunkMeta;
+  /** Host-owned per-tool limits on streamed argument characters; absent means no tool has one. */
+  toolArgumentLimits?: ReadonlyMap<string, number> | undefined;
 }): AsyncGenerator<ExtendedChatCompletionChunk, RawAssistantMessageWithUsage, unknown> {
   const makeBase = (): Omit<ExtendedChatCompletionChunk, 'choices' | 'usage'> => ({
     id: chunkMeta.id,
@@ -1762,6 +1851,11 @@ export async function* mapStreamToChunks({
   const answerUnits = new RepeatedUnitGuard();
   const reasoningRepetition = new StreamingRepetitionGuard();
   let repetitionStopped = false;
+  // Calls stopped mid-stream for running past their tool's argument size limit. Their partial
+  // arguments stay in the reply; the caller refuses them instead of running them.
+  const sizeCutToolCalls: string[] = [];
+  // Set when the reply started more calls than the stream reads; reading stops there.
+  let toolCallCountCut = false;
   const accumulatedThinking: ThinkingBlock[] = [];
   const thinkingByReasoningItem = new Map<string, ThinkingBlock>();
   let currentThinkingBlock: ThinkingBlock | null = null;
@@ -1875,6 +1969,14 @@ export async function* mapStreamToChunks({
       }
 
       case 'tool-input-start': {
+        if (nextToolIndex >= MAX_TOOL_CALL_STREAM_PARTS) {
+          // Past what any one reply may legitimately hold: stop reading here rather than
+          // buffering a flood the reply guard would refuse anyway, or waiting on a model that
+          // keeps writing calls until the turn's time limit. The reply is marked cut so the
+          // turn stops.
+          toolCallCountCut = true;
+          break streamLoop;
+        }
         const idx = nextToolIndex++;
         // A tool call is real output progress: the reasoning guard must not
         // mistake a turn that keeps acting for a stuck reasoning loop.
@@ -1890,6 +1992,7 @@ export async function* mapStreamToChunks({
           id: part.id,
           name: part.toolName,
           arguments: '',
+          argumentLimit: toolArgumentLimits?.get(part.toolName),
           thoughtSignature,
         });
         yield {
@@ -1942,6 +2045,15 @@ export async function* mapStreamToChunks({
             },
           ],
         };
+        if (state.argumentLimit !== undefined && state.arguments.length > state.argumentLimit) {
+          // The call ran past its size limit: stop reading the stream here rather than
+          // buffering a call the tool layer would refuse anyway, or waiting on a server
+          // that may never finish it. The partial call stays in the reply and is named
+          // on the result, so the reply guard refuses it with a plain message and the
+          // model can send the content in smaller parts in the same turn.
+          sizeCutToolCalls.push(state.id);
+          break streamLoop;
+        }
         break;
       }
 
@@ -1977,8 +2089,9 @@ export async function* mapStreamToChunks({
         // mid-response HarmonyError takes) is the stream itself breaking, so it is a
         // ModelStreamFault. A provider answer saying the request is over the context window is
         // the one definite answer a shorter history can fix, so it is a ModelStreamFault too.
-        if (providerStatusCode(raw) != null && !isContextLengthError(raw)) {
-          throw new Error(message, { cause });
+        const statusCode = providerStatusCode(raw);
+        if (statusCode != null && !isContextLengthError(raw)) {
+          throw new ProviderRequestError(message, { statusCode, cause });
         }
         throw new ModelStreamFault(message, { cause });
       }
@@ -2132,6 +2245,8 @@ export async function* mapStreamToChunks({
     ...(repetitionStopped
       ? { repetition_stopped: true, repetition_stop: { guard: 'answer_units', channel: 'answer' } }
       : {}),
+    ...(sizeCutToolCalls.length > 0 ? { size_cut_tool_calls: sizeCutToolCalls } : {}),
+    ...(toolCallCountCut ? { tool_call_count_cut: true } : {}),
   };
 }
 
@@ -2154,9 +2269,14 @@ export class VercelAILLM implements ILLM {
     // chunks hold an unfinished proposal open indefinitely. The SDK counts
     // nonempty text, reasoning and tool-input chunks as progress.
     this.streamTimeout = { ...(config.streamTimeout ?? { firstChunkMs: 300_000, chunkMs: 60_000 }) };
-    for (const value of Object.values(this.streamTimeout)) {
+    for (const value of [...Object.values(this.streamTimeout), config.toolCallChunkMs ?? this.streamTimeout.chunkMs]) {
       if (!Number.isSafeInteger(value) || value <= 0 || value > 2_147_483_647) {
         throw new Error('Model stream deadlines must be integer milliseconds between 1 and 2147483647');
+      }
+    }
+    for (const value of config.toolArgumentLimits?.values() ?? []) {
+      if (!Number.isSafeInteger(value) || value <= 0) {
+        throw new Error('Tool argument limits must be positive integer character counts');
       }
     }
   }
@@ -2297,11 +2417,19 @@ export class VercelAILLM implements ILLM {
       timeout: this.streamTimeout,
       hasSubstance: chunkHasSubstance,
       substanceField: chunkSubstanceField,
+      toolCalls: {
+        chunkMs: this.config.toolCallChunkMs ?? DEFAULT_MODEL_TOOL_CALL_IDLE_TIMEOUT_MS,
+        pieceOf: toolCallPieceOf,
+      },
       deadlineController,
     });
 
     try {
-      const result = yield* mapStreamToChunks({ stream: deadlineGuardedStream, chunkMeta });
+      const result = yield* mapStreamToChunks({
+        stream: deadlineGuardedStream,
+        chunkMeta,
+        toolArgumentLimits: this.config.toolArgumentLimits,
+      });
       result.output.source = `${provider.type}/${provider.name}/${model.name}`;
       return result;
     } catch (error) {

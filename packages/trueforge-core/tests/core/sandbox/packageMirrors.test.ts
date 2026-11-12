@@ -1,9 +1,11 @@
 import {
   PACKAGE_GIT_DEPENDENCY_MESSAGE,
   commandDownloadsPackages,
+  commandInstallsPackages,
   findCommandLineGitDependency,
   findGitDependency,
   packageDownloadCardWhat,
+  packageDownloadCardWhatWithoutProject,
   splitShellCommands,
 } from '../../../src/core/sandbox/packageMirrors';
 
@@ -28,7 +30,10 @@ describe('commandDownloadsPackages', () => {
   it.each([
     'pip install requests',
     'pip3 install -r requirements.txt',
+    'pip download requests',
+    'pip3 download -r requirements.txt',
     'python3 -m pip install flask',
+    'python3 -m pip download flask',
     'cd app && npm ci',
     'npm install',
     'npm i lodash',
@@ -37,6 +42,7 @@ describe('commandDownloadsPackages', () => {
     'cargo build --release',
     'cargo test',
     'cargo fetch',
+    'cargo install ripgrep',
     'go mod download',
     'go build ./...',
     'go test ./...',
@@ -44,6 +50,34 @@ describe('commandDownloadsPackages', () => {
     'poetry install',
     'FOO=bar pip install requests',
     'sudo npm install -g typescript',
+    'pip3.12 install requests',
+    'python3.11 -m pip install flask',
+    'python -m pip3 install flask',
+    '(cd app && npm install)',
+    'echo $(pip install x)',
+    'echo `pip install x`',
+    'bash -c "pip install requests"',
+    "sh -lc 'npm ci'",
+    'eval "pip install requests"',
+    'pipx install black',
+    'pdm install',
+    'pipenv install',
+    'uvx ruff',
+    'npx create-react-app demo',
+    'yarn',
+    'bun add zod',
+    'cat requirements.txt | xargs -n 1 pip install',
+    'timeout 300 npm ci',
+    'sudo -u builder env FOO=1 pip install requests',
+    'nice -n 10 cargo build',
+    'if true; then pip install x; fi',
+    'p=pip; $p install requests',
+    "alias pi='pip install'; pi requests",
+    'make install',
+    'make -j4 deps',
+    'npm run setup',
+    'yarn bootstrap',
+    "python3 -c \"import subprocess; subprocess.run(['pip', 'install', 'x'])\"",
   ])('recognises %s as a download command', command => {
     expect(commandDownloadsPackages(command)).toBe(true);
   });
@@ -60,8 +94,28 @@ describe('commandDownloadsPackages', () => {
     'python3 train.py',
     'echo pip install requests',
     'grep -r "npm install" .',
+    'make test',
+    'npm run lint',
+    'bash -c "ls -la"',
+    'print("run pip install x first")',
   ])('does not treat %s as a download command', command => {
     expect(commandDownloadsPackages(command)).toBe(false);
+  });
+});
+
+describe('commandDownloadsPackages on Python code', () => {
+  it.each([
+    'import subprocess\nsubprocess.run(["pip", "install", "requests"])',
+    'import subprocess, sys\nsubprocess.check_call([sys.executable, "-m", "pip", "install", "requests"])',
+    'import os\nos.system("npm install left-pad")',
+    "import subprocess\nsubprocess.Popen('pip install requests', shell=True)",
+    'import pip\npip.main(["install", "requests"])',
+  ])('recognises a script that runs an install: %s', code => {
+    expect(commandDownloadsPackages(code)).toBe(true);
+  });
+
+  it('does not treat a script that runs something else as a download', () => {
+    expect(commandDownloadsPackages('import subprocess\nsubprocess.run(["ls", "-la"])')).toBe(false);
   });
 });
 
@@ -314,6 +368,65 @@ describe('PACKAGE_GIT_DEPENDENCY_MESSAGE', () => {
   });
 });
 
+describe('commandInstallsPackages', () => {
+  it.each([
+    'pip install requests',
+    'pip download requests',
+    'python3 -m pip install flask',
+    'npm ci',
+    'npm install',
+    'pnpm add vitest',
+    'yarn',
+    'yarn install',
+    'cargo add serde',
+    'cargo install ripgrep',
+    'cargo fetch',
+    'go get example.com/mod',
+    'go mod download',
+    'uv pip install httpx',
+    'uv sync',
+    'uv tool install ruff',
+    'pipx install black',
+    'poetry install',
+    'bash -c "pip install requests"',
+    "python3 -c \"import subprocess; subprocess.run(['pip', 'install', 'x'])\"",
+  ])('treats %s as an explicit install', command => {
+    expect(commandInstallsPackages(command)).toBe(true);
+  });
+
+  it.each([
+    'npx tsc',
+    'npx prettier --write .',
+    'npm run prepare',
+    'uv run pytest',
+    'make init',
+    'make install',
+    'cargo build',
+    'cargo test',
+    'go build ./...',
+    'go test ./...',
+    'uvx ruff',
+    'pipx run black',
+    'npm run setup',
+    'ls -la',
+  ])('does not treat %s as an explicit install, though it may still fetch', command => {
+    expect(commandInstallsPackages(command)).toBe(false);
+  });
+
+  it('still recognises the might-fetch commands as downloads for the wider checks', () => {
+    for (const command of [
+      'npx tsc',
+      'npm run prepare',
+      'uv run pytest',
+      'make init',
+      'cargo build',
+      'go test ./...',
+    ]) {
+      expect(commandDownloadsPackages(command)).toBe(true);
+    }
+  });
+});
+
 describe('packageDownloadCardWhat', () => {
   it('names only the sites the command actually uses', () => {
     expect(packageDownloadCardWhat('pip install requests')).toBe(
@@ -322,10 +435,19 @@ describe('packageDownloadCardWhat', () => {
     expect(packageDownloadCardWhat('npm ci')).toBe(
       "Aman wants to download this project's packages from the public package sites (npm).",
     );
-    expect(packageDownloadCardWhat('go build ./...')).toBe(
+    expect(packageDownloadCardWhat('go get example.com/mod')).toBe(
       "Aman wants to download this project's packages from the public package sites (the Go package site).",
     );
-    expect(packageDownloadCardWhat('cargo build')).toBe(
+    expect(packageDownloadCardWhat('cargo install ripgrep')).toBe(
+      "Aman wants to download this project's packages from the public package sites (crates.io).",
+    );
+  });
+
+  it('names the sites for the plain download commands too', () => {
+    expect(packageDownloadCardWhat('pip download requests')).toBe(
+      "Aman wants to download this project's packages from the public package sites (PyPI).",
+    );
+    expect(packageDownloadCardWhat('cargo install ripgrep')).toBe(
       "Aman wants to download this project's packages from the public package sites (crates.io).",
     );
   });
@@ -333,6 +455,20 @@ describe('packageDownloadCardWhat', () => {
   it('lists each site once, in the order the command uses them', () => {
     expect(packageDownloadCardWhat('pip install requests && npm ci && pip install flask')).toBe(
       "Aman wants to download this project's packages from the public package sites (PyPI, npm).",
+    );
+  });
+
+  it('is undefined for a command that only might fetch, so it gets no download card', () => {
+    expect(packageDownloadCardWhat('cargo build')).toBeUndefined();
+    expect(packageDownloadCardWhat('go build ./...')).toBeUndefined();
+    expect(packageDownloadCardWhat('make install')).toBeUndefined();
+    expect(packageDownloadCardWhat('npx tsc')).toBeUndefined();
+    expect(packageDownloadCardWhat('uv run pytest')).toBeUndefined();
+  });
+
+  it('says the allowance for chats without a project also covers scheduled runs', () => {
+    expect(packageDownloadCardWhatWithoutProject('pip install requests')).toBe(
+      'Aman wants to download packages from the public package sites (PyPI) in your chats that are not working on a project. This also covers your scheduled runs.',
     );
   });
 

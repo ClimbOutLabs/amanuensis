@@ -2,6 +2,7 @@
 
 import { WelcomeScreen, type WelcomeScreenProps } from '../atoms/WelcomeScreen.js';
 import { useOptionalCurrentUser } from '../contexts/CurrentUserContext.js';
+import { useConnectedAccounts } from '../hooks/useConnectedAccounts.js';
 import { useGrantedGoogleFeatures } from '../hooks/useGrantedGoogleFeatures.js';
 import { useFillPrompt, useSendPrompt } from '../hooks/useSendPrompt.js';
 import { useServerCapabilities } from '../server/ServerContext.js';
@@ -11,18 +12,20 @@ import { AmanTour } from './AmanTour.js';
 import { EMPTY_PERSONALIZATION_PROFILE, useOptionalPersonalization } from './PersonalizationContext.js';
 import { personDisplayName } from './personDisplayName.js';
 import type { TourCapabilities } from './tourPrompts.js';
+import { useDailyBriefRun } from './useDailyBriefRun.js';
 
 /**
  * What this instance can do, read from data the shell already has: the sandbox from server
- * capabilities and the Google grants from the catalog. Unknown reads to "no", so a pill only
+ * capabilities, and the Google grants and connected email and calendar accounts from the catalog. Unknown reads to "no", so a pill only
  * offers a prompt once the instance has confirmed the capability.
  */
 function useTourCapabilities(): TourCapabilities {
   const granted = useGrantedGoogleFeatures();
+  const accounts = useConnectedAccounts();
   const capabilities = useServerCapabilities();
   return {
-    email: granted?.includes('gmail_read') === true,
-    calendar: granted?.includes('calendar_read') === true,
+    email: granted?.includes('gmail_read') === true || accounts.email,
+    calendar: granted?.includes('calendar_read') === true || accounts.calendar,
     sandbox: capabilities?.sandbox.enabled === true,
     // Maps ships built in with public upstreams and has no off switch, so it is on wherever the
     // home runs. It stays a capability so that a future off switch hides its prompts without a change here.
@@ -37,6 +40,7 @@ function AmanHome() {
   const capabilities = useTourCapabilities();
   const fillPrompt = useFillPrompt();
   const sendPrompt = useSendPrompt();
+  const runBrief = useDailyBriefRun();
   const currentUser = useOptionalCurrentUser();
   const profile = personalization?.profile ?? EMPTY_PERSONALIZATION_PROFILE;
   const personName = personDisplayName({
@@ -56,6 +60,7 @@ function AmanHome() {
       onSend={sendPrompt}
       onFill={fillPrompt}
       canSend={setup === null || setup.modelName !== null}
+      {...(runBrief === undefined ? {} : { onRunBrief: runBrief.run, briefStarting: runBrief.starting })}
     />
   );
 }

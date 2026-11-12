@@ -2,7 +2,8 @@
 
 /** normal: the full configured recall budget applied. post_compaction: a host-written compaction summary was seen recently, so the token budget was halved and entity summaries were skipped for this turn. */
 export const MemoryRecallStatsBudgetReason = {
-        Normal: "normal",
-        PostCompaction: "post_compaction"
-    } as const;
-export type MemoryRecallStatsBudgetReason = typeof MemoryRecallStatsBudgetReason[keyof typeof MemoryRecallStatsBudgetReason];
+    Normal: "normal",
+    PostCompaction: "post_compaction",
+} as const;
+export type MemoryRecallStatsBudgetReason =
+    (typeof MemoryRecallStatsBudgetReason)[keyof typeof MemoryRecallStatsBudgetReason];

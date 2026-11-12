@@ -23,7 +23,9 @@ import type { PersonaContext } from '../personas/persona';
 import type { InternalSourceState } from './internalSourceGuard';
 import { hindsightMemoryCapability, type MemoryConfig } from './memory/memoryCapability';
 import type { MemoryClient } from './memory/memoryClient';
+import type { SummarizeTurnContext } from './memory/memoryRetain';
 import { PersonaTurnResourceResolver, type PersonaSwitchNotice } from './PersonaTurnResourceResolver';
+import { isStaleSearchProviderMount } from './sessionResources';
 import { toolOutputScreenCapability, type ToolOutputScreenConfig } from './toolOutputScreen';
 
 export type { ToolOutputScreenConfig } from './toolOutputScreen';
@@ -35,20 +37,27 @@ export interface MemoryTurnContext {
   config: MemoryConfig;
   sessionId: string;
   previousTurnId: string | null;
-  sessionTitle: string | undefined;
   /** MCP server name of the provider, so its mount can be narrowed to reads. Undefined with no provider. */
   providerServerName: string | undefined;
   /** Name of the connector designated as the web search provider, looked up per turn. Undefined when none is designated. */
   searchProviderServerName?: (() => Promise<string | undefined>) | undefined;
+  /** Names of the catalog presets offered as a web search provider. Absent: no remembered mount is dropped as stale. */
+  searchProviderPresetNames?: (() => readonly string[]) | undefined;
   /** Off keys (see connectorOffKey) of the connectors the person turned off for this chat. Absent: nothing is off. */
   turnedOffConnectorKeys?: readonly string[] | undefined;
   /** When false, memory recall is off for this turn: the user disabled it for the session, or the turn runs unattended. */
   recallEnabled?: boolean | undefined;
+  /** Present when summaries are on for this turn, so a vanished earlier turn is never rebuilt as a raw exchange. */
+  summarize: SummarizeTurnContext | undefined;
+  /** The person's IANA time zone from the request; a recalled memory's day is shown in it. */
+  clientTimezone?: string | undefined;
   /**
    * Per-turn internal-source state. Recall records what it injected here so
    * the turn's tool policy can block web_search as a substitute for recall.
    */
   internalSourceState?: InternalSourceState | undefined;
+  /** True in a private chat: memory is read as usual and nothing from the chat is saved. */
+  keepsNothing: boolean;
 }
 
 /** Root-only: sub-agent threads get no memory capability (same gating as personalization/persona). */
@@ -69,10 +78,12 @@ function memoryCapabilitiesForTurn(input: {
       logger: input.logger,
       sessionId: memory.sessionId,
       previousTurnId: memory.previousTurnId,
-      sessionTitle: memory.sessionTitle,
       recallEnabled: memory.recallEnabled,
+      keepsFullExchange: memory.summarize === undefined,
+      timeZone: memory.clientTimezone,
       internalSourceState: memory.internalSourceState,
       webSearch: input.webSearch,
+      keepsNothing: memory.keepsNothing,
     }),
   ];
 }
@@ -105,9 +116,18 @@ function withMemoryProviderNarrowedToReads(spec: AgentSpec, providerServerName: 
   };
 }
 
-/** The Email connector's attachments go into the sandbox on every thread that mounts the connector. */
-function mailAttachmentCapabilities(spec: AgentSpec): AgentCapability[] {
-  if (!spec.mcp_servers?.some(entry => entry.name === MAIL_CONNECTOR_NAME)) {
+/**
+ * The Email connector's attachments go into the sandbox on every thread that mounts the host's own Email
+ * connector. A connector that only carries the name is not it, so its results are never placed in the sandbox.
+ */
+function mailAttachmentCapabilities({
+  spec,
+  hostOwnsMail,
+}: {
+  spec: AgentSpec;
+  hostOwnsMail: boolean;
+}): AgentCapability[] {
+  if (!hostOwnsMail || !spec.mcp_servers?.some(entry => entry.name === MAIL_CONNECTOR_NAME)) {
     return [];
   }
   return [{ toolResponseProcessors: [new MailAttachmentProcessor()] }];
@@ -121,6 +141,44 @@ function withConnectorAttached(spec: AgentSpec, serverName: string): AgentSpec {
   }
   const [attached] = AgentSpecSchema.shape.mcp_servers.unwrap().parse([{ name: serverName }]);
   return attached === undefined ? spec : { ...spec, mcp_servers: [...servers, attached] };
+}
+
+/**
+ * The spec with remembered mounts of a deleted search provider removed. A chat's remembered
+ * spec can still name a connector the person deleted after moving the search provider role to
+ * another one; resolving that name would fail the whole turn, and the designated provider is
+ * attached anyway. Only preset names that are not set up and do not hold the role are dropped,
+ * one log line each; anything else is left for the ordinary unknown-server error. A set-up list
+ * that could not be read proves nothing is missing, so nothing is dropped then.
+ */
+function withoutStaleSearchProviderMounts(input: {
+  spec: AgentSpec;
+  searchProviderPresetNames: readonly string[];
+  configuredNames: readonly string[] | undefined;
+  designatedName: string | undefined;
+  logger: PersonaTurnResourceResolver['logger'];
+}): AgentSpec {
+  const servers = input.spec.mcp_servers;
+  if (servers === undefined || input.configuredNames === undefined) {
+    return input.spec;
+  }
+  const configured = new Set(input.configuredNames);
+  const kept = servers.filter(entry => {
+    const stale =
+      !configured.has(entry.name) &&
+      isStaleSearchProviderMount({
+        name: entry.name,
+        searchProviderPresetNames: input.searchProviderPresetNames,
+        designatedName: input.designatedName,
+      });
+    if (stale) {
+      input.logger.warn(
+        `Dropped a stale search provider mount "${entry.name}" from the turn spec: that connector is not configured and is not the designated search provider.`,
+      );
+    }
+    return !stale;
+  });
+  return kept.length === servers.length ? input.spec : { ...input.spec, mcp_servers: kept };
 }
 
 /** Adds host-enforced long-term memory (recall + retain) to the root thread of one turn. */
@@ -138,9 +196,28 @@ export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
     personaKnowledgeHits?: readonly PersonaKnowledgeHit[],
     switchNotice?: PersonaSwitchNotice,
   ) {
-    super(deps, profile, persona, personaKnowledgeBlock, personaKnowledgeHits, switchNotice);
+    super(deps, profile, persona, personaKnowledgeBlock, personaKnowledgeHits, switchNotice, {
+      // A chat that turned the search provider off keeps it off for the guide too:
+      // the lookup the guide's tool is built from answers as if nothing were designated.
+      searchProviderServerName:
+        memory.searchProviderServerName === undefined
+          ? undefined
+          : async () => {
+              const designated = await memory.searchProviderServerName?.();
+              if (designated === undefined) {
+                return undefined;
+              }
+              const turnedOff = new Set(memory.turnedOffConnectorKeys ?? []);
+              return turnedOff.has(connectorOffKey(designated)) ? undefined : designated;
+            },
+    });
     this.#memory = memory;
     this.#toolOutputScreen = toolOutputScreen;
+  }
+
+  /** True in an incognito chat: nothing from it may outlive it. */
+  protected get keepsNothing(): boolean {
+    return this.#memory.keepsNothing;
   }
 
   /**
@@ -176,21 +253,33 @@ export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
       designatedSearchProvider !== undefined && turnedOff.has(connectorOffKey(designatedSearchProvider))
         ? undefined
         : designatedSearchProvider;
-    const defaultedSpec = isSubAgent ? input.spec : await this.#withDefaultSourcesAttached(input.spec, turnedOff);
+    // The list holds Email and Calendar only when they are the host's own, so it also decides what is trusted by name.
+    const setUpConnectorNames = await this.setUpConnectorNames;
+    const baseSpec = isSubAgent
+      ? input.spec
+      : withoutStaleSearchProviderMounts({
+          spec: input.spec,
+          searchProviderPresetNames: this.#memory.searchProviderPresetNames?.() ?? [],
+          configuredNames: setUpConnectorNames,
+          designatedName: designatedSearchProvider,
+          logger: this.logger,
+        });
+    const defaultedSpec = isSubAgent ? baseSpec : await this.#withDefaultSourcesAttached(baseSpec, turnedOff);
     const narrowedSpec =
       providerServerName === undefined || isSubAgent
         ? defaultedSpec
         : withMemoryProviderNarrowedToReads(defaultedSpec, providerServerName);
-    // The Email connector is offered only its eight tools on every thread, sub-agents included.
-    const mailNarrowedSpec = narrowConnectorTools(narrowedSpec, {
-      server_name: MAIL_CONNECTOR_NAME,
-      tools: MAIL_CONNECTOR_TOOL_NAMES,
-    });
-    // The Calendar connector is offered only its eight tools on every thread, sub-agents included.
-    const calendarNarrowedSpec = narrowConnectorTools(mailNarrowedSpec, {
-      server_name: CALDAV_SERVER_NAME,
-      tools: CALDAV_TOOL_NAMES,
-    });
+    // Narrowing only takes tools away, so it also applies while the set-up list cannot be read.
+    const narrowsHostConnector = (name: string): boolean =>
+      setUpConnectorNames === undefined || setUpConnectorNames.includes(name);
+    // The host's Email connector is offered only its eight tools on every thread, sub-agents included.
+    const mailNarrowedSpec = narrowsHostConnector(MAIL_CONNECTOR_NAME)
+      ? narrowConnectorTools(narrowedSpec, { server_name: MAIL_CONNECTOR_NAME, tools: MAIL_CONNECTOR_TOOL_NAMES })
+      : narrowedSpec;
+    // The host's Calendar connector is offered only its eight tools on every thread, sub-agents included.
+    const calendarNarrowedSpec = narrowsHostConnector(CALDAV_SERVER_NAME)
+      ? narrowConnectorTools(mailNarrowedSpec, { server_name: CALDAV_SERVER_NAME, tools: CALDAV_TOOL_NAMES })
+      : mailNarrowedSpec;
     const effectiveSpec =
       searchProviderServerName === undefined
         ? calendarNarrowedSpec
@@ -209,7 +298,10 @@ export class MemoryTurnResourceResolver extends PersonaTurnResourceResolver {
     const extraCapabilities = [
       ...memoryCapabilities,
       ...(outputScreen === undefined ? [] : [outputScreen]),
-      ...mailAttachmentCapabilities(effectiveSpec),
+      ...mailAttachmentCapabilities({
+        spec: effectiveSpec,
+        hostOwnsMail: setUpConnectorNames?.includes(MAIL_CONNECTOR_NAME) === true,
+      }),
     ];
     if (extraCapabilities.length === 0) {
       return resolved;

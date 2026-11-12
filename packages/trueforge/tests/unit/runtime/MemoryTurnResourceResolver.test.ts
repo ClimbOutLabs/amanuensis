@@ -12,8 +12,10 @@ import type { ILLM, IToolSet } from '@truefoundry/trueforge-core/core';
 import { isAuthRequired } from '@truefoundry/trueforge-core/core';
 import { CALDAV_SERVER_NAME } from '@truefoundry/trueforge-core/core/calendar/caldav/toolContract';
 import { connectorOffKey } from '@truefoundry/trueforge-core/core/connectors/chatConnectorChoice';
+import { MailAttachmentProcessor } from '@truefoundry/trueforge-core/core/email/mailConnector/MailAttachmentProcessor';
 import { MAIL_CONNECTOR_NAME } from '@truefoundry/trueforge-core/core/email/mailConnector/toolContract';
-import { createLogger } from 'winston';
+import { Writable } from 'node:stream';
+import { createLogger, format, transports, type Logger } from 'winston';
 import { PERSONA_CONTEXT_VERSION, type PersonaContext } from '../../../src/personas/persona';
 import type { MemoryConfig } from '../../../src/runtime/memory/memoryCapability';
 import {
@@ -92,16 +94,19 @@ function memoryContext(
   providerServerName: string | undefined,
   searchProviderServerName?: () => Promise<string | undefined>,
   chat: Pick<MemoryTurnContext, 'turnedOffConnectorKeys' | 'recallEnabled'> = {},
+  searchProviderPresetNames?: () => readonly string[],
 ): MemoryTurnContext {
   return {
+    keepsNothing: false,
     // No client: these scenarios are about tool exposure, not about recall or retain.
     client: undefined,
     config: MEMORY_CONFIG,
     sessionId: 'session-1',
     previousTurnId: null,
-    sessionTitle: undefined,
+    summarize: undefined,
     providerServerName,
     searchProviderServerName,
+    searchProviderPresetNames,
     ...chat,
   };
 }
@@ -110,10 +115,12 @@ function makeResolver(input: {
   url: string;
   providerServerName: string | undefined;
   searchProviderServerName?: () => Promise<string | undefined>;
+  searchProviderPresetNames?: () => readonly string[];
   toolOutputScreen?: ToolOutputScreenConfig;
   setUpConnectorNames?: () => Promise<readonly string[]>;
   chat?: Pick<MemoryTurnContext, 'turnedOffConnectorKeys' | 'recallEnabled'>;
   persona?: PersonaContext;
+  logger?: Logger;
 }) {
   return new MemoryTurnResourceResolver(
     {
@@ -128,11 +135,16 @@ function makeResolver(input: {
       ...(input.setUpConnectorNames === undefined ? {} : { setUpConnectorNames: input.setUpConnectorNames }),
       mcpRequestTimeoutMs: 10_000,
       mcpConnectTimeoutMs: 10_000,
-      logger: createLogger({ silent: true }),
+      logger: input.logger ?? createLogger({ silent: true }),
     },
     undefined,
     input.persona,
-    memoryContext(input.providerServerName, input.searchProviderServerName, input.chat),
+    memoryContext(
+      input.providerServerName,
+      input.searchProviderServerName,
+      input.chat,
+      input.searchProviderPresetNames,
+    ),
     input.toolOutputScreen ?? TOOL_OUTPUT_SCREEN_CONFIG,
   );
 }
@@ -428,8 +440,134 @@ describe('web search, email and calendar on by default in every chat', () => {
     expect(byChoice.definition.toolSets).toHaveLength(byList.definition.toolSets?.length ?? -1);
   });
 
+  describe('a mount that carries the name Email', () => {
+    const listedEmail = () =>
+      AgentSpecSchema.parse({
+        model: { name: CHAT_MODEL },
+        instructions: 'Answer the user.',
+        mcp_servers: [{ name: EMAIL }],
+      });
+
+    function takesAttachments(resolved: Awaited<ReturnType<typeof resolve>>): boolean {
+      return (resolved.extraCapabilities ?? []).some(capability =>
+        (capability.toolResponseProcessors ?? []).some(processor => processor instanceof MailAttachmentProcessor),
+      );
+    }
+
+    it("is narrowed to the mail tools and has its attachments placed only when it is the host's own", async () => {
+      const resolved = await resolve(chatResolver({ setUp: [EMAIL] }), listedEmail());
+      expect(mountFor(resolved, EMAIL)?.preload).toBe(true);
+      expect(takesAttachments(resolved)).toBe(true);
+    });
+
+    it('is left as listed, with no attachments placed, when the host has no Email of its own set up', async () => {
+      const resolved = await resolve(chatResolver({ setUp: [SEARCH_SERVER] }), listedEmail());
+      expect(mountFor(resolved, EMAIL)?.preload).toBe(false);
+      expect(takesAttachments(resolved)).toBe(false);
+    });
+
+    it('is still narrowed, but places no attachments, when the set-up list cannot be read', async () => {
+      const resolved = await resolve(chatResolver({ setUp: undefined }), listedEmail());
+      expect(mountFor(resolved, EMAIL)?.preload).toBe(true);
+      expect(takesAttachments(resolved)).toBe(false);
+    });
+  });
+
   it('adds nothing to a sub-agent', async () => {
     const resolved = await resolve(chatResolver({ setUp: [SEARCH_SERVER, EMAIL, CALENDAR] }), bareSpec(), true);
     expect(resolved.definition.toolSets ?? []).toHaveLength(0);
+  });
+});
+
+describe('a remembered mount of a search provider that was deleted', () => {
+  const STALE = 'parallel-web';
+  const DESIGNATED = 'tavily';
+  const PRESETS = ['parallel-web', 'tavily'];
+  let inert: InertMcpServer;
+
+  beforeAll(async () => {
+    inert = await startInertMcpServer();
+  });
+
+  afterAll(async () => {
+    await inert.close();
+  });
+
+  function capturingLogger(lines: string[]): Logger {
+    const stream = new Writable({
+      write(chunk: Buffer, _encoding: string, callback: () => void) {
+        lines.push(chunk.toString());
+        callback();
+      },
+    });
+    return createLogger({ level: 'warn', format: format.simple(), transports: [new transports.Stream({ stream })] });
+  }
+
+  function staleResolver(input: { setUp: readonly string[] | undefined; logger?: Logger }) {
+    const setUp = input.setUp;
+    return makeResolver({
+      url: inert.url,
+      providerServerName: undefined,
+      searchProviderServerName: () => Promise.resolve(DESIGNATED),
+      searchProviderPresetNames: () => PRESETS,
+      // An unreadable set-up list is the dep being absent: the resolver reads it as unknown.
+      ...(setUp === undefined ? {} : { setUpConnectorNames: () => Promise.resolve(setUp) }),
+      ...(input.logger === undefined ? {} : { logger: input.logger }),
+    });
+  }
+
+  async function mountedNames(resolver: MemoryTurnResourceResolver, spec: AgentSpec, subAgent = false) {
+    const resolved = await resolve(resolver, spec, subAgent);
+    return (resolved.definition.toolSets ?? []).map(toolSet => toolSet.name).sort();
+  }
+
+  const staleSpec = () =>
+    AgentSpecSchema.parse({
+      model: { name: CHAT_MODEL },
+      instructions: 'Answer the user.',
+      mcp_servers: [{ name: STALE }, { name: OTHER_SERVER }],
+    });
+
+  it('drops the stale mount, still attaches the designated provider, and logs the drop', async () => {
+    const lines: string[] = [];
+    const resolver = staleResolver({ setUp: [DESIGNATED, OTHER_SERVER], logger: capturingLogger(lines) });
+
+    expect(await mountedNames(resolver, staleSpec())).toEqual([DESIGNATED, OTHER_SERVER].sort());
+    expect(lines.join('')).toContain(STALE);
+  });
+
+  it('keeps the designated provider mount even when the set-up list does not name it', async () => {
+    const spec = AgentSpecSchema.parse({
+      model: { name: CHAT_MODEL },
+      mcp_servers: [{ name: DESIGNATED }],
+    });
+
+    expect(await mountedNames(staleResolver({ setUp: [] }), spec)).toEqual([DESIGNATED]);
+  });
+
+  it('does not drop an unknown mount that is not a search provider preset', async () => {
+    const spec = AgentSpecSchema.parse({
+      model: { name: CHAT_MODEL },
+      mcp_servers: [{ name: 'missing-mcp' }],
+    });
+
+    expect(await mountedNames(staleResolver({ setUp: [DESIGNATED] }), spec)).toEqual(
+      [DESIGNATED, 'missing-mcp'].sort(),
+    );
+  });
+
+  it('drops nothing when the set-up list cannot be read', async () => {
+    const spec = AgentSpecSchema.parse({
+      model: { name: CHAT_MODEL },
+      mcp_servers: [{ name: STALE }],
+    });
+
+    expect(await mountedNames(staleResolver({ setUp: undefined }), spec)).toEqual([DESIGNATED, STALE].sort());
+  });
+
+  it('leaves a sub-agent spec exactly as stated', async () => {
+    expect(await mountedNames(staleResolver({ setUp: [DESIGNATED, OTHER_SERVER] }), staleSpec(), true)).toEqual(
+      [OTHER_SERVER, STALE].sort(),
+    );
   });
 });

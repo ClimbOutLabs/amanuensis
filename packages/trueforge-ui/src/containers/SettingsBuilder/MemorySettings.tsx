@@ -1,6 +1,6 @@
 'use client';
 
-import { useTrueFoundryAgentSpec, useTrueFoundryUpdateAgentSpec } from '@truefoundry/assistant-ui-runtime';
+import { useTrueFoundryAgentSpec } from '@truefoundry/assistant-ui-runtime';
 import type { TrueForgeApi } from '@truefoundry/trueforge-sdk';
 import { useEffect, useState, type ReactNode } from 'react';
 
@@ -14,7 +14,9 @@ import {
 } from '@/server/ServerContext.js';
 import { useAssistantDisplayName } from '../../components/PersonalizationContext.js';
 import { useToasterOptional } from '../ToasterContainer.js';
+import { useChatSearchSetting } from './chatSearchSetting.js';
 import { readMemoryEmbeddingsStatus, type MemoryEmbeddingsStatus } from './memoryEmbeddingsCapability.js';
+import { useMemoryRecallSetting } from './memoryRecallSetting.js';
 import { readMemoryScreenStatus, readToolOutputScreenStatus } from './memoryScreenCapability.js';
 import { useMemoryScreenSetting } from './memoryScreenSetting.js';
 import { readMemoryStorageDir } from './memoryStorageCapability.js';
@@ -359,10 +361,10 @@ function MemorySummarizeCard() {
         Turn summaries
       </h4>
       <p className="mt-1 text-sm text-text-secondary">
-        When this is on, {assistant} condenses each finished chat into a short summary before saving it to the memory
-        log, instead of keeping the full word-for-word transcript. Summaries keep the important details and skip the
-        small talk, so the log stays compact and quick to search. If a summary can&rsquo;t be made for a turn,{' '}
-        {assistant} keeps the full transcript &mdash; a memory is never lost.
+        When this is on, {assistant} saves only the lasting facts from each finished chat, such as who people are,
+        plans, preferences, and anything you ask it to remember. It does not save the chat itself or small talk. If a
+        turn has no lasting facts, or a summary can&rsquo;t be made, nothing is saved for that turn. When this is off,{' '}
+        {assistant} saves each turn word for word.
       </p>
       <div className="mt-4 border-t border-border pt-4">
         <MemorySummarizeToggle setting={setting} />
@@ -423,22 +425,10 @@ function StatusPill({ tone, text }: { tone: 'on' | 'neutral'; text: string }) {
 function MemoryRecallToggle() {
   const assistant = useAssistantDisplayName();
   const { agentSpec } = useTrueFoundryAgentSpec();
-  const updateAgentSpec = useTrueFoundryUpdateAgentSpec();
+  const setting = useMemoryRecallSetting();
 
-  const recallEnabled = agentSpec?.config?.memory?.recallEnabled ?? true;
-
-  const setRecallEnabled = (next: boolean) => {
-    if (!updateAgentSpec) return;
-    updateAgentSpec({
-      config: {
-        ...(agentSpec?.config ?? {}),
-        memory: {
-          ...(agentSpec?.config?.memory ?? {}),
-          recallEnabled: next,
-        },
-      },
-    });
-  };
+  // The server's person-level switch owns the choice; the agent's own value only shows until it is set.
+  const recallEnabled = setting.enabled ?? agentSpec?.config?.memory?.recallEnabled ?? true;
 
   return (
     <div className="flex items-start justify-between gap-4">
@@ -449,13 +439,69 @@ function MemoryRecallToggle() {
         <p className="mt-0.5 text-xs text-text-secondary">
           When this is off, {assistant} does not bring saved memories into its replies. Saved memories are kept.
         </p>
+        {setting.enabled === null ? null : (
+          <button
+            type="button"
+            className="mt-1 text-xs text-text-secondary underline"
+            disabled={setting.saving}
+            onClick={() => {
+              void setting.clear().catch(() => undefined);
+            }}
+          >
+            Follow each agent&apos;s own setting
+          </button>
+        )}
+        {setting.error === null ? null : (
+          <p role="alert" className="mt-1 text-xs text-text-secondary">
+            {setting.error}
+          </p>
+        )}
       </div>
       <Switch
         id="memory-recall-toggle"
         checked={recallEnabled}
-        disabled={!updateAgentSpec}
-        onCheckedChange={setRecallEnabled}
+        disabled={!setting.supported || setting.saving}
+        onCheckedChange={next => {
+          // The failure message is shown below; the rejection carries nothing more to handle.
+          void setting.setEnabled(next).catch(() => undefined);
+        }}
         aria-label="Use memories in replies"
+      />
+    </div>
+  );
+}
+
+/** The past-chat search switch: off, the search tool is not offered at all; on, earlier chats can be searched when asked. */
+function ChatSearchToggle() {
+  const assistant = useAssistantDisplayName();
+  const setting = useChatSearchSetting();
+  const label = `Let ${assistant} search your past chats when you ask`;
+
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <div className="min-w-0">
+        <label htmlFor="chat-search-toggle" className="text-sm font-medium text-text-primary">
+          {label}
+        </label>
+        <p className="mt-0.5 text-xs text-text-secondary">
+          When this is on, {assistant} can look through your own earlier chats when you ask about something you
+          discussed before. When it is off, the search is not offered at all.
+        </p>
+        {setting.error === null ? null : (
+          <p role="alert" className="mt-1 text-xs text-text-secondary">
+            {setting.error}
+          </p>
+        )}
+      </div>
+      <Switch
+        id="chat-search-toggle"
+        checked={setting.enabled ?? false}
+        disabled={!setting.supported || setting.saving}
+        onCheckedChange={next => {
+          // The failure message is shown below; the rejection carries nothing more to handle.
+          void setting.setEnabled(next).catch(() => undefined);
+        }}
+        aria-label={label}
       />
     </div>
   );
@@ -508,6 +554,10 @@ function MemoryStatusCard() {
           <MemoryRecallToggle />
         </div>
       ) : null}
+
+      <div className="mt-4 border-t border-border pt-4">
+        <ChatSearchToggle />
+      </div>
     </section>
   );
 }

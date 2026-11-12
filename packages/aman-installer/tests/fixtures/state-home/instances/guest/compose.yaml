@@ -1,0 +1,4 @@
+name: aman-guest
+services:
+  app:
+    image: aman-app:abc123def456

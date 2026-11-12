@@ -50,6 +50,8 @@ export async function openImportDataSession(): Promise<ImportDataSession> {
     { runDataImport },
     { getSharedEmbeddingModel, isEmbeddingModelCached },
     { SentinelAuditStore },
+    { DeliveryStore },
+    { ReachSettingsStore },
     { McpCatalog },
   ] = await Promise.all([
     import('../../config'),
@@ -60,6 +62,8 @@ export async function openImportDataSession(): Promise<ImportDataSession> {
     import('../../dataImport/importService'),
     import('../../runtime/memory/embeddingModel'),
     import('../../db/sentinelAuditStore'),
+    import('../../db/deliveryStore'),
+    import('../../db/reachSettingsStore'),
     import('../../catalog/McpCatalog'),
   ]);
   if (!configuration.STANDALONE) {
@@ -132,6 +136,8 @@ export async function openImportDataSession(): Promise<ImportDataSession> {
           scheduleStore: new SqliteScheduleStore(db),
           globalSettingsStore: new SqliteGlobalSettingsStore(db),
           auditStore: audit,
+          deliveryStore: new DeliveryStore(db),
+          reachSettingsStore: new ReachSettingsStore(db),
           turnArtifactStore: new SqliteTurnArtifactStore(db),
           mcpServerStore: new SqliteMcpServerStore(db),
           agentStore: new SqliteAgentStore(db),

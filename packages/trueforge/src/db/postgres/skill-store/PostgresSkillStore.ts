@@ -9,6 +9,7 @@ import {
   type GetSkillInput,
   type ISkillStore,
   type ListSkillsInput,
+  type SetSkillNetworkApprovalInput,
   type SkillRecord,
   type UpsertSkillInput,
 } from '../../skillStore';
@@ -21,6 +22,7 @@ function toRecord(row: Selectable<SkillTable>): SkillRecord {
     tenant_id: row.tenant_id,
     name: row.name,
     manifest: row.manifest,
+    network_approval: row.network_approval,
     created_at: row.created_at.toISOString(),
     updated_at: row.updated_at.toISOString(),
   };
@@ -55,6 +57,7 @@ export class PostgresSkillStore implements ISkillStore<Transaction<Database>> {
           tenant_id: input.tenant_id,
           name: input.name,
           manifest: json(input.manifest),
+          network_approval: null,
           created_at: now(),
           updated_at: now(),
         })
@@ -77,6 +80,7 @@ export class PostgresSkillStore implements ISkillStore<Transaction<Database>> {
         tenant_id: input.tenant_id,
         name: input.name,
         manifest: json(input.manifest),
+        network_approval: null,
         created_at: now(),
         updated_at: now(),
       })
@@ -89,6 +93,24 @@ export class PostgresSkillStore implements ISkillStore<Transaction<Database>> {
       .returningAll()
       .executeTakeFirstOrThrow();
     return toRecord(row);
+  }
+
+  async setSkillNetworkApproval(
+    input: SetSkillNetworkApprovalInput,
+    transaction?: Transaction<Database>,
+  ): Promise<SkillRecord | undefined> {
+    const db = transaction ?? this.#db;
+    const row = await db
+      .updateTable('skill')
+      .set({
+        network_approval: input.hosts === null ? null : json([...input.hosts]),
+        updated_at: now(),
+      })
+      .where('tenant_id', '=', input.tenant_id)
+      .where('name', '=', input.name)
+      .returningAll()
+      .executeTakeFirst();
+    return row === undefined ? undefined : toRecord(row);
   }
 
   async deleteSkill(input: GetSkillInput, transaction?: Transaction<Database>): Promise<boolean> {

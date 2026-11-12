@@ -93,6 +93,10 @@ const SECRET_VALUE_PATTERNS: readonly RegExp[] = [
   /-----BEGIN ([A-Z0-9 ]*)PRIVATE KEY-----[\s\S]*?(?:-----END \1PRIVATE KEY-----|$)/g,
   // Password inside a URL (`postgres://user:password@host`); the user and host stay.
   /(?<=\/\/[^\s:@/]+:)[^\s@/]+(?=@)/g,
+  // A card number written in groups of four; plain digit runs stay, since ids and timestamps look alike.
+  /\b\d{4}(?:[ -]\d{4}){2}[ -]\d{4}(?:[ -]\d{1,3})?\b/g,
+  // A password, passcode or PIN stated in prose; the word stays, the value goes.
+  /\b(?<=(?:password|passcode|pin)(?: is|:|=)\s*)\S+/gi,
 ];
 
 /** Credential-shaped substrings replaced in free text, without counting them. */

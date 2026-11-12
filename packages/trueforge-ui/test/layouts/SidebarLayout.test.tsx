@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { BugReportDialog } from '@/atoms/BugReportButton.js';
 import { AgentConfigInstructionsProvider } from '@/atoms/draft/AgentConfigInstructionsContext.js';
 import { BugReportProvider, type BugReportApi } from '@/components/BugReportContext.js';
 import { SidebarLayout } from '@/layouts/SidebarLayout.js';
@@ -8,6 +9,7 @@ import { SpaceProvider, type SpaceStore } from '@/server/SpaceContext.js';
 import { SlotsProvider } from '@/theme/SlotsProvider.js';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { noSpaceFolders } from '../server/noSpaceFolders.js';
 
 import { RuntimeHarness } from '../containers/RuntimeHarness.js';
 import { createMockAgentUIServer, createMockCatalog, createMockScheduleServer } from '../server/mockServer.js';
@@ -225,17 +227,19 @@ function mockSpaceStore(): SpaceStore {
       throw new Error('not found');
     }),
     delete: vi.fn(async () => {}),
+    ...noSpaceFolders,
   };
 }
 
-/** Same as `renderSidebarLayout`, plus a `SpaceProvider` so the Spaces nav button renders
- *  (it renders nothing without one — see `SpacesButton`). */
 const bugReportApi: BugReportApi = {
   generateBugReport: () => Promise.reject(new Error('not used')),
   generateAppBugReport: () => Promise.reject(new Error('not used')),
   getBugReportHandoff: () => Promise.reject(new Error('not used')),
 };
 
+/** Same as `renderSidebarLayout`, plus a `SpaceProvider` so the Spaces nav button renders
+ *  (it renders nothing without one — see `SpacesButton`). With `withBugReport` it also mounts the
+ *  bug report dialog, as the app shell does. */
 function renderSidebarLayoutWithSpaces({
   withBugReport = false,
   withLibrary = false,
@@ -250,6 +254,7 @@ function renderSidebarLayoutWithSpaces({
                 <div className="h-96">
                   <SidebarLayout />
                 </div>
+                {withBugReport ? <BugReportDialog /> : null}
               </RuntimeHarness>
             </AgentConfigInstructionsProvider>
           </SpaceProvider>
@@ -387,5 +392,29 @@ describe('SidebarLayout More menu', () => {
     expect(within(screen.getByRole('menu')).getByRole('button', { name: 'Report a bug' })).toHaveTextContent(
       'Report a bug',
     );
+  });
+
+  it('opens the bug report dialog from the More menu row and keeps it open after the menu closes', async () => {
+    renderSidebarLayoutWithSpaces({ withBugReport: true });
+
+    fireEvent.click(screen.getByRole('button', { name: 'More' }));
+    fireEvent.click(within(screen.getByRole('menu')).getByRole('button', { name: 'Report a bug' }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'Report a bug' });
+    expect(dialog).toHaveAttribute('open');
+    await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument());
+    expect(screen.getByRole('dialog', { name: 'Report a bug' })).toHaveAttribute('open');
+  });
+
+  it('returns focus to the More button when the dialog closes', async () => {
+    renderSidebarLayoutWithSpaces({ withBugReport: true });
+    const more = screen.getByRole('button', { name: 'More' });
+
+    fireEvent.click(more);
+    fireEvent.click(within(screen.getByRole('menu')).getByRole('button', { name: 'Report a bug' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Report a bug' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+
+    await waitFor(() => expect(more).toHaveFocus());
   });
 });

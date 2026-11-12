@@ -2,7 +2,8 @@
 
 /** Set when a scheduled run could not save this action for the owner, and why. It will not run. */
 export const ApprovalToolCallRefNotSaved = {
-        TooMany: "too_many",
-        HelperAgent: "helper_agent"
-    } as const;
-export type ApprovalToolCallRefNotSaved = typeof ApprovalToolCallRefNotSaved[keyof typeof ApprovalToolCallRefNotSaved];
+    TooMany: "too_many",
+    HelperAgent: "helper_agent",
+} as const;
+export type ApprovalToolCallRefNotSaved =
+    (typeof ApprovalToolCallRefNotSaved)[keyof typeof ApprovalToolCallRefNotSaved];

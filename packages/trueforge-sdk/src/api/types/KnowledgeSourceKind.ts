@@ -2,8 +2,8 @@
 
 /** How the document entered the library: file upload, saved link, or pasted text. */
 export const KnowledgeSourceKind = {
-        Upload: "upload",
-        Url: "url",
-        Text: "text"
-    } as const;
-export type KnowledgeSourceKind = typeof KnowledgeSourceKind[keyof typeof KnowledgeSourceKind];
+    Upload: "upload",
+    Url: "url",
+    Text: "text",
+} as const;
+export type KnowledgeSourceKind = (typeof KnowledgeSourceKind)[keyof typeof KnowledgeSourceKind];

@@ -234,7 +234,7 @@ export function createWorld({ instances = ['main'] } = {}) {
       for (const name of wired) {
         writeFileSync(
           path.join(world.instanceDir(name), 'compose.yaml'),
-          "services:\n  app:\n    environment:\n      SANDBOX_BACKEND: slots\n      SANDBOX_SLOTS: '4'\n      SANDBOX_SLOTS_DIR: /run/aman-slots\n",
+          "services:\n  app:\n    environment:\n      SANDBOX_BACKEND: slots\n      SANDBOX_SLOTS: '2'\n      SANDBOX_SLOTS_DIR: /run/aman-slots\n",
         );
       }
       return repo;
@@ -407,12 +407,28 @@ export function createWorld({ instances = ['main'] } = {}) {
   writeFileSync(
     world.release,
     JSON.stringify(
-      { app_image: 'aman-app:local', dex_image: 'dexidp/dex@sha256:abc', stt_image: 'aman-stt:local' },
+      {
+        app_image: 'aman-app:local',
+        stt_image: 'aman-stt:local',
+        calendar_image: 'aman-calendar-caldav:local',
+        browser_image: 'aman-browser:local',
+        browser_gateway_image: 'aman-browser-gateway:local',
+        dex_image: 'dexidp/dex@sha256:abc',
+        mail_email_image: 'example/mail@sha256:def',
+      },
       null,
       2,
     ),
   );
-  for (const ref of ['aman-app:local', 'dexidp/dex@sha256:abc', 'aman-stt:local']) {
+  for (const ref of [
+    'aman-app:local',
+    'dexidp/dex@sha256:abc',
+    'aman-stt:local',
+    'aman-calendar-caldav:local',
+    'aman-browser:local',
+    'aman-browser-gateway:local',
+    'example/mail@sha256:def',
+  ]) {
     world.set(`image_${sanitize(ref)}`, { out: 'amd64\n', rc: 0 });
   }
 

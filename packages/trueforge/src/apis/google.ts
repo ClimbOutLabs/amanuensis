@@ -15,7 +15,7 @@ import { parsePastedAddress, resolveGoogleSetup } from '@truefoundry/trueforge-c
 import type { MiddlewareHandler } from 'hono';
 import type { Logger } from 'winston';
 import type { ResolveRequestContext } from '../auth/identity';
-import configuration from '../config';
+import configuration, { getAllowedOrigins } from '../config';
 import type { IGoogleConnectionStore } from '../db/googleConnectionStore';
 import {
   beginGoogleConsentRoute,
@@ -119,11 +119,14 @@ export function createGoogleRouter(deps: GoogleRouterDeps) {
     const requestContext = deps.resolveRequestContext(c);
     return { tenant_id: requestContext.tenant_id, created_by: requestContext.subject.id };
   };
+  // Only this return trip reads the instance's recorded addresses, so a browser on the Tailscale address
+  // gets the web return there; the public address keeps its meaning for every other caller.
   const setupFor = (c: Parameters<ResolveRequestContext>[0]) =>
     resolveGoogleSetup({
       public_base_url: configuration.PUBLIC_BASE_URL,
       request_url: browserUrlOf(c),
       callback_path: GOOGLE_CALLBACK_PATH,
+      recorded_origins: getAllowedOrigins(),
     });
 
   const statusHandler: RouteHandler<typeof getGoogleConnectionStatusRoute> = async c => {

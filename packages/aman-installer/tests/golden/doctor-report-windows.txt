@@ -1,0 +1,14 @@
+
+Checking this computer
+Docker is installed, but it is not running.
+Next: Open Docker Desktop and wait until it says it is running, then run aman doctor.
+Skipped: Docker is not reachable. (runtime)
+Skipped: Docker is not reachable. (images, disk, docker_memory, clock)
+Daily backups are on; the last one is 1 day old.
+
+Checking instance main
+Docker is not reachable, so this instance cannot be checked.
+Next: Fix the Docker problem reported under the machine checks first.
+
+2 problems.
+Run the Next command for each, then run aman doctor again.

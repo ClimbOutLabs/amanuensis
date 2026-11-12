@@ -1,5 +1,3 @@
-
-
 import { fromJson } from "../json.js";
 import { RUNTIME } from "../runtime/index.js";
 
@@ -8,9 +6,9 @@ export declare namespace Stream {
         /**
          * The HTTP response stream to read from.
          */
-        
+
         stream: ReadableStream;
-        
+
         /**
          * The event shape to use for parsing the stream data.
          */
@@ -35,9 +33,8 @@ export declare namespace Stream {
          * A function that re-issues the HTTP request with the Last-Event-ID header
          * and returns the new response body stream. Required for reconnection to work.
          */
-        
+
         reconnect?: (lastEventId: string) => Promise<ReadableStream>;
-        
     }
 
     interface JsonEvent {
@@ -70,9 +67,8 @@ const DEFAULT_RECONNECT_DELAY_MS = 1_000;
 const MAX_RECONNECT_DELAY_MS = 30_000;
 
 export class Stream<T> implements AsyncIterable<T> {
-    
     private stream: ReadableStream;
-    
+
     private parse: (val: unknown) => Promise<T>;
     /**
      * The prefix to use for each message. For example,
@@ -85,15 +81,23 @@ export class Stream<T> implements AsyncIterable<T> {
     private resumable: boolean;
     private reconnectionEnabled: boolean;
     private maxReconnectionAttempts: number;
-    
+
     private reconnect: ((lastEventId: string) => Promise<ReadableStream>) | undefined;
-    
+
     private controller: AbortController = new AbortController();
     private decoder: TextDecoder | undefined;
     private externalSignal: AbortSignal | undefined;
     private onExternalAbort: (() => void) | undefined;
 
-    constructor({ stream, parse, eventShape, signal, reconnectionEnabled, maxReconnectionAttempts, reconnect }: Stream.Args & { parse: (val: unknown) => Promise<T> }) {
+    constructor({
+        stream,
+        parse,
+        eventShape,
+        signal,
+        reconnectionEnabled,
+        maxReconnectionAttempts,
+        reconnect,
+    }: Stream.Args & { parse: (val: unknown) => Promise<T> }) {
         this.stream = stream;
         this.parse = parse;
         if (eventShape.type === "sse") {
@@ -239,7 +243,6 @@ export class Stream<T> implements AsyncIterable<T> {
                 // Failed reconnect (e.g. HTTP error); assign an empty stream
                 // so the next iteration is a safe no-op before shouldReconnect.
                 currentStream = this.createEmptyStream();
-                continue;
             }
         }
     }
@@ -337,7 +340,6 @@ export class Stream<T> implements AsyncIterable<T> {
                 // Failed reconnect (e.g. HTTP error); assign an empty stream
                 // so the next iteration is a safe no-op before shouldReconnect.
                 currentStream = this.createEmptyStream();
-                continue;
             }
         }
     }
@@ -414,11 +416,13 @@ export class Stream<T> implements AsyncIterable<T> {
         });
     }
 
-
     private createEmptyStream(): ReadableStream {
-        return new ReadableStream({ start(controller) { controller.close(); } });
+        return new ReadableStream({
+            start(controller) {
+                controller.close();
+            },
+        });
     }
-
 
     private removeAbortListener(): void {
         if (this.externalSignal != null && this.onExternalAbort != null) {
@@ -436,7 +440,7 @@ export class Stream<T> implements AsyncIterable<T> {
                 } finally {
                     self.removeAbortListener();
                 }
-            }
+            },
         };
     }
 
@@ -509,6 +513,6 @@ export function readableStreamAsyncIterable<T>(stream: any): AsyncIterableIterat
         },
         [Symbol.asyncIterator]() {
             return this;
-        }
+        },
     };
 }

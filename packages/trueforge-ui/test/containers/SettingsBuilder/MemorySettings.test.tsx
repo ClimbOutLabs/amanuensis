@@ -8,16 +8,14 @@ import { ServerProvider, useOptionalRefreshServerCapabilities } from '@/server/S
 import type { AgentBuilderCapabilitiesResponse, AgentUIServer } from '@/server/types.js';
 import { createMockAgentUIServer, createMockCatalog } from '../../server/mockServer.js';
 
-/** The agent spec the recall switch reads and writes; the runtime hooks are stubbed around it. */
+/** The agent's own memory setting, shown only until the person-level switch is set; the runtime hook is stubbed. */
 const recallState = vi.hoisted(() => ({ enabled: true }));
-const updateAgentSpec = vi.hoisted(() => vi.fn());
 
 vi.mock('@truefoundry/assistant-ui-runtime', async importOriginal => ({
   ...(await importOriginal<typeof import('@truefoundry/assistant-ui-runtime')>()),
   useTrueFoundryAgentSpec: () => ({
     agentSpec: { config: { memory: { recallEnabled: recallState.enabled } } },
   }),
-  useTrueFoundryUpdateAgentSpec: () => updateAgentSpec,
 }));
 
 /** Memory-defaults fixture per the generated SDK type. The page only reads `backend` and
@@ -348,8 +346,7 @@ describe('MemorySettings (backend honesty)', () => {
       renderSummarizeSwitch({ enabled: true, overridden: true, defaultEnabled: false, effectiveEnabled: true });
 
       expect(await screen.findByText('Turn summaries')).toBeInTheDocument();
-      expect(screen.getByText(/important details/)).toBeInTheDocument();
-      expect(screen.getByText(/full transcript/)).toBeInTheDocument();
+      expect(screen.getByText(/saves only the lasting facts/)).toBeInTheDocument();
       const toggle = screen.getByRole('switch', { name: SWITCH_NAME });
       expect(toggle).toBeChecked();
     });
@@ -605,36 +602,90 @@ describe('MemorySettings (backend honesty)', () => {
 });
 
 describe('MemorySettings (use memories in replies)', () => {
-  it('turns recall off and back on from the Settings > Memory switch', async () => {
-    recallState.enabled = true;
-    updateAgentSpec.mockClear();
-    const server = createMockAgentUIServer({
-      catalog: createMockCatalog(),
-      ...capabilitiesWith({ memoryDefaults: MARKDOWN_DEFAULTS }),
+  /** A memory-recall port backed by one stored value, as the server keeps it. */
+  function recallPort(initial: boolean | null) {
+    const state = { enabled: initial };
+    const setMemoryRecallEnabled = vi.fn(async (next: boolean | null) => {
+      state.enabled = next;
+      return { enabled: state.enabled };
     });
-    const page = () => (
-      <ServerProvider server={server}>
-        <MemorySettings />
-      </ServerProvider>
-    );
-    const { rerender } = render(page());
+    return {
+      setMemoryRecallEnabled,
+      server: {
+        ...capabilitiesWith({ memoryDefaults: MARKDOWN_DEFAULTS }),
+        memoryRecall: { getMemoryRecall: async () => ({ enabled: state.enabled }), setMemoryRecallEnabled },
+      },
+    };
+  }
+
+  it('saves the switch to the server setting, not to the agent', async () => {
+    recallState.enabled = true;
+    const { server, setMemoryRecallEnabled } = recallPort(null);
+    renderMemory(server);
 
     const recall = await screen.findByRole('switch', { name: 'Use memories in replies' });
+    // Nothing is stored yet, so the agent's own value (on) shows.
     expect(recall).toBeChecked();
 
     fireEvent.click(recall);
-    expect(updateAgentSpec).toHaveBeenLastCalledWith({
-      config: { memory: { recallEnabled: false } },
+    await waitFor(() => {
+      expect(setMemoryRecallEnabled).toHaveBeenLastCalledWith(false);
     });
-
-    recallState.enabled = false;
-    rerender(page());
-    expect(screen.getByRole('switch', { name: 'Use memories in replies' })).not.toBeChecked();
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Use memories in replies' })).not.toBeChecked();
+    });
 
     fireEvent.click(screen.getByRole('switch', { name: 'Use memories in replies' }));
-    expect(updateAgentSpec).toHaveBeenLastCalledWith({
-      config: { memory: { recallEnabled: true } },
+    await waitFor(() => {
+      expect(setMemoryRecallEnabled).toHaveBeenLastCalledWith(true);
     });
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Use memories in replies' })).toBeChecked();
+    });
+  });
+
+  it('reflects the stored setting over the agent value', async () => {
+    recallState.enabled = true;
+    renderMemory(recallPort(false).server);
+
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Use memories in replies' })).not.toBeChecked();
+    });
+  });
+
+  it('clears the switch back to the agent setting', async () => {
+    recallState.enabled = true;
+    const { server, setMemoryRecallEnabled } = recallPort(false);
+    renderMemory(server);
+
+    fireEvent.click(await screen.findByRole('button', { name: "Follow each agent's own setting" }));
+    await waitFor(() => {
+      expect(setMemoryRecallEnabled).toHaveBeenLastCalledWith(null);
+    });
+    // Nothing is stored now, so the agent's own value (on) shows and the link is gone.
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Use memories in replies' })).toBeChecked();
+    });
+    expect(screen.queryByRole('button', { name: "Follow each agent's own setting" })).not.toBeInTheDocument();
+  });
+
+  it('shows a plain message and keeps the old value when the save fails', async () => {
+    recallState.enabled = true;
+    const { server } = recallPort(true);
+    const failingServer = {
+      ...server,
+      memoryRecall: {
+        ...server.memoryRecall,
+        setMemoryRecallEnabled: async () => {
+          throw new Error('The memory switch failed with HTTP 500. Try again in a moment.');
+        },
+      },
+    };
+    renderMemory(failingServer);
+
+    fireEvent.click(await screen.findByRole('switch', { name: 'Use memories in replies' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Try again in a moment');
+    expect(screen.getByRole('switch', { name: 'Use memories in replies' })).toBeChecked();
   });
 
   it('hides the recall switch while the memory backend is not confirmed', async () => {
@@ -642,5 +693,77 @@ describe('MemorySettings (use memories in replies)', () => {
 
     expect(await screen.findByText('Memory status unavailable')).toBeInTheDocument();
     expect(screen.queryByRole('switch', { name: 'Use memories in replies' })).not.toBeInTheDocument();
+  });
+});
+
+describe('MemorySettings (past-chat search)', () => {
+  /** A chat-search port backed by one stored value, as the server keeps it. */
+  function chatSearchPort(initial: boolean) {
+    const state = { enabled: initial };
+    const setChatSearchEnabled = vi.fn(async (next: boolean) => {
+      state.enabled = next;
+      return { enabled: state.enabled };
+    });
+    return {
+      setChatSearchEnabled,
+      server: {
+        ...capabilitiesWith({ memoryDefaults: MARKDOWN_DEFAULTS }),
+        chatSearch: {
+          getChatSearch: async () => ({ enabled: state.enabled }),
+          setChatSearchEnabled,
+          searchOwnChats: async () => ({ searchEnabled: state.enabled, hits: [] }),
+        },
+      },
+    };
+  }
+
+  it('is off until the person turns it on, and saves each flip', async () => {
+    const { server, setChatSearchEnabled } = chatSearchPort(false);
+    renderMemory(server);
+
+    const toggle = await screen.findByRole('switch', { name: 'Let Aman search your past chats when you ask' });
+    expect(toggle).not.toBeChecked();
+
+    fireEvent.click(toggle);
+    await waitFor(() => {
+      expect(setChatSearchEnabled).toHaveBeenLastCalledWith(true);
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Let Aman search your past chats when you ask' })).toBeChecked();
+    });
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Let Aman search your past chats when you ask' }));
+    await waitFor(() => {
+      expect(setChatSearchEnabled).toHaveBeenLastCalledWith(false);
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Let Aman search your past chats when you ask' })).not.toBeChecked();
+    });
+  });
+
+  it('shows the stored on value', async () => {
+    renderMemory(chatSearchPort(true).server);
+
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'Let Aman search your past chats when you ask' })).toBeChecked();
+    });
+  });
+
+  it('shows a plain message and keeps the old value when the save fails', async () => {
+    const { server } = chatSearchPort(false);
+    const failingServer = {
+      ...server,
+      chatSearch: {
+        ...server.chatSearch,
+        setChatSearchEnabled: async () => {
+          throw new Error('The past-chat search switch failed with HTTP 500. Try again in a moment.');
+        },
+      },
+    };
+    renderMemory(failingServer);
+
+    fireEvent.click(await screen.findByRole('switch', { name: 'Let Aman search your past chats when you ask' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Try again in a moment');
+    expect(screen.getByRole('switch', { name: 'Let Aman search your past chats when you ask' })).not.toBeChecked();
   });
 });

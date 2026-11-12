@@ -1,5 +1,12 @@
 /** A reply is stopped before a sentence that has already come this many times. */
 const STOP_AT_COPY = 3;
+/** A reply is stopped before a long sentence that has already come this many times. */
+const STOP_AT_LONG_COPY = 2;
+/**
+ * A sentence with at least this many words counts as long. Two full copies of a long sentence are
+ * never a real answer, so long sentences get less tolerance than short ones.
+ */
+const LONG_SENTENCE_WORDS = 12;
 /** Shorter sentences ("Done.", "Yes.") repeat in ordinary answers, so they are never counted. */
 const MIN_SENTENCE_WORDS = 6;
 /** A unit with no sentence end is released once it reaches this length, so text never waits long. */
@@ -40,11 +47,17 @@ function isSentence(key: string): boolean {
   return key.split(' ').length >= MIN_SENTENCE_WORDS && /[\p{L}\p{N}]/u.test(key);
 }
 
+/** How many copies of this sentence may be shown before the reply stops. */
+function stopAtCopy(key: string): number {
+  return key.split(' ').length >= LONG_SENTENCE_WORDS ? STOP_AT_LONG_COPY : STOP_AT_COPY;
+}
+
 /**
- * Stops streamed answer text once one whole prose sentence has come STOP_AT_COPY times. Text in code
- * fences, inline code, list items, headings, tables and short sentences is never counted. Each unit is
- * shown as it completes, and a copy that would be the last one is not shown: the reply ends before it.
- * Text that starts like a sentence already seen twice is held until it is clear it is not that sentence.
+ * Stops streamed answer text once one whole prose sentence has come STOP_AT_COPY times, or
+ * STOP_AT_LONG_COPY times for a long sentence. Text in code fences, inline code, list items,
+ * headings, tables and short sentences is never counted. Each unit is shown as it completes, and a
+ * copy that would be the last one is not shown: the reply ends before it. Text that starts like a
+ * sentence whose next copy would stop the reply is held until it is clear it is not that sentence.
  */
 export class RepeatedUnitGuard {
   /** The unit still arriving: the text from the last unit break on. */
@@ -112,7 +125,7 @@ export class RepeatedUnitGuard {
       return { text: shown, stopped: false };
     }
     const copies = this.#copies.get(key) ?? 0;
-    if (copies + 1 >= STOP_AT_COPY) {
+    if (copies + 1 >= stopAtCopy(key)) {
       return { text: '', stopped: true };
     }
     this.#copies.set(key, copies + 1);
@@ -141,8 +154,8 @@ export class RepeatedUnitGuard {
   }
 
   /**
-   * Decides the text still arriving. It streams as it comes unless it starts like a sentence already
-   * seen twice, since that copy may be the one the reply must stop before.
+   * Decides the text still arriving. It streams as it comes unless it starts like a sentence whose
+   * next copy would stop the reply, since that copy may be the one the reply must stop before.
    */
   #settlePartial(): string {
     const unshown = this.#partial.slice(this.#partialShown);
@@ -158,7 +171,7 @@ export class RepeatedUnitGuard {
       return false;
     }
     for (const [key, copies] of this.#copies) {
-      if (copies + 1 >= STOP_AT_COPY && key.startsWith(prefix)) {
+      if (copies + 1 >= stopAtCopy(key) && key.startsWith(prefix)) {
         return true;
       }
     }

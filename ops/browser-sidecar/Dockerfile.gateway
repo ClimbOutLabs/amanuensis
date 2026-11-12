@@ -1,0 +1,11 @@
+# The browser gateway: the egress proxy the browser must use, and the relay from the app server to the
+# sidecar's API (see src/egressProxy.mjs). Node built-ins only, so nothing is installed.
+FROM node:24-bookworm-slim@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c
+
+WORKDIR /app
+COPY src/urlSafety.mjs src/egressProxy.mjs src/gatewayEntrypoint.mjs ./src/
+USER node
+
+EXPOSE 3128 8792
+
+CMD ["node", "/app/src/gatewayEntrypoint.mjs"]

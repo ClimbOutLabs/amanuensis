@@ -14,6 +14,8 @@ export interface DemoNote {
 export interface DemoKnowledgeDocument {
   title: string;
   text: string;
+  /** Printed next to the title in the reply's "Sources:" footer, so it is a plain name, never an id. */
+  sourceLabel: string;
 }
 
 export interface DemoPersona {

@@ -2,11 +2,12 @@
 
 /** Server-classified effect of this tool call. */
 export const TrueFoundrySystemToolInfoEffect = {
-        Inspect: "inspect",
-        Edit: "edit",
-        Verify: "verify",
-        Commit: "commit",
-        Push: "push",
-        Execute: "execute"
-    } as const;
-export type TrueFoundrySystemToolInfoEffect = typeof TrueFoundrySystemToolInfoEffect[keyof typeof TrueFoundrySystemToolInfoEffect];
+    Inspect: "inspect",
+    Edit: "edit",
+    Verify: "verify",
+    Commit: "commit",
+    Push: "push",
+    Execute: "execute",
+} as const;
+export type TrueFoundrySystemToolInfoEffect =
+    (typeof TrueFoundrySystemToolInfoEffect)[keyof typeof TrueFoundrySystemToolInfoEffect];

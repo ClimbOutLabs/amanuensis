@@ -3,6 +3,9 @@ import {
   GET_CURRENT_DATETIME_TOOL_NAME,
 } from '../../../src/core/capabilities/builtins/CurrentDateTime';
 import { EventType } from '../../../src/core/events/schema';
+import type { IToolSet } from '../../../src/core/mcp/IMCPServer';
+import { ToolSet } from '../../../src/core/mcp/ToolSet';
+import { SANDBOX_FILE_WRITE_TOOLS } from '../../../src/core/permissions/dispatch';
 import { AgentThread } from '../../../src/core/runtime/AgentThread';
 import { AgentThreadOrchestrator } from '../../../src/core/runtime/AgentThreadOrchestrator';
 import {
@@ -12,6 +15,12 @@ import {
   SANDBOX_RUN_CODE_TOOL_NAME,
   type Sandbox,
 } from '../../../src/core/sandbox/Sandbox';
+import {
+  AMAN_SOURCES_TOOL_NAME,
+  amanSourcePrefixes,
+  AmanSourcesSource,
+} from '../../../src/core/search/AmanSourcesSource';
+import { TavilyClient } from '../../../src/core/search/TavilyClient';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 import { llmCreateInputs, runTurn, textReplyStream } from '../../orchestration/helpers/helpers';
 import { makeSilentLogger, makeStubPublicSandbox } from '../harnessMocks';
@@ -23,7 +32,36 @@ const SANDBOX_TOOL_NAMES = [
   SANDBOX_REPLACE_TEXT_TOOL_NAME,
 ];
 
-function threadFor({ readOnly, sandbox }: { readOnly: boolean; sandbox?: Sandbox | undefined }) {
+function guideSearchToolSet(): IToolSet {
+  const client = new TavilyClient({
+    auth: { kind: 'keyless' },
+    fetchImpl: () => Promise.resolve(new Response(JSON.stringify({ results: [], images: [] }))),
+  });
+  const source = new AmanSourcesSource({
+    id: 'aman-sources',
+    name: 'Aman sources',
+    client,
+    prefixes: amanSourcePrefixes({}),
+  });
+  return new ToolSet({
+    source,
+    selectors: { enableTools: ['@all'], disableTools: [], preloadTools: [], requireApprovalForTools: [] },
+    preload: true,
+    searchProvider: { tools: [AMAN_SOURCES_TOOL_NAME], plumbing_fields: [] },
+  });
+}
+
+function threadFor({
+  readOnly,
+  sandbox,
+  withheldTools,
+  guideSearchToolSet,
+}: {
+  readOnly: boolean;
+  sandbox?: Sandbox | undefined;
+  withheldTools?: readonly string[] | undefined;
+  guideSearchToolSet?: IToolSet | undefined;
+}) {
   const modelClient = {
     create: jest.fn().mockImplementation(() => textReplyStream('ok')),
     createNonStream: jest.fn(),
@@ -40,6 +78,7 @@ function threadFor({ readOnly, sandbox }: { readOnly: boolean; sandbox?: Sandbox
       modelId: undefined,
       configuredModels: undefined,
       readOnly,
+      guideSearchToolSet,
     },
     threadId: 'thread_read_only',
     title: 'read-only',
@@ -55,6 +94,7 @@ function threadFor({ readOnly, sandbox }: { readOnly: boolean; sandbox?: Sandbox
     turnToolCallLedger: undefined,
     taskState: undefined,
     isRequestContinuation: undefined,
+    withheldTools,
     tracing: NOOP_AGENT_TRACING,
     logger: makeSilentLogger(),
   });
@@ -99,5 +139,34 @@ describe('AgentThread read-only definitions', () => {
     await runTurn({ orchestrator, sendBatch: [{ type: EventType.USER_MESSAGE, content: 'Run a quick script.' }] });
     const requests = JSON.stringify(llmCreateInputs(modelClient));
     expect(requests).toContain(`"name":"${SANDBOX_RUN_CODE_TOOL_NAME}"`);
+  });
+
+  it('offers a read-only definition its one guide search tool, and no other tool', async () => {
+    const { modelClient, orchestrator } = threadFor({ readOnly: true, guideSearchToolSet: guideSearchToolSet() });
+    await runTurn({ orchestrator, sendBatch: [{ type: EventType.USER_MESSAGE, content: 'hello' }] });
+    const requests = llmCreateInputs(modelClient);
+    expect(requests.length).toBeGreaterThan(0);
+    const joined = JSON.stringify(requests);
+    expect(joined).toContain(`"name":"${AMAN_SOURCES_TOOL_NAME}"`);
+    expect(joined).not.toContain(GET_CURRENT_DATETIME_TOOL_NAME);
+    for (const name of SANDBOX_TOOL_NAMES) {
+      expect(joined).not.toContain(`"name":"${name}"`);
+    }
+  });
+
+  it('leaves out the sandbox tools a run withholds and keeps the read and other tools', async () => {
+    const { modelClient, orchestrator } = threadFor({
+      readOnly: false,
+      sandbox: makeStubPublicSandbox(),
+      withheldTools: [...SANDBOX_FILE_WRITE_TOOLS],
+    });
+    await runTurn({ orchestrator, sendBatch: [{ type: EventType.USER_MESSAGE, content: 'hello' }] });
+    const requests = JSON.stringify(llmCreateInputs(modelClient));
+    for (const name of SANDBOX_FILE_WRITE_TOOLS) {
+      expect(requests).not.toContain(`"name":"${name}"`);
+    }
+    expect(requests).toContain(`"name":"${SANDBOX_EXEC_TOOL_NAME}"`);
+    expect(requests).toContain(`"name":"${SANDBOX_RUN_CODE_TOOL_NAME}"`);
+    expect(requests).toContain(GET_CURRENT_DATETIME_TOOL_NAME);
   });
 });
