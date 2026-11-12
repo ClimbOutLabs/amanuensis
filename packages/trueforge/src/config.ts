@@ -1163,6 +1163,20 @@ function parseAuthCookieSuffix(raw: string | undefined): string {
   return value;
 }
 
+/** Only `local` can be named; every other mode is derived from the rest of the configuration. */
+function parseTrueForgeAuthMode(raw: string | undefined): 'local' | undefined {
+  const value = raw?.trim().toLowerCase() ?? '';
+  if (value === '') {
+    return undefined;
+  }
+  if (value === 'local') {
+    return 'local';
+  }
+  throw new Error(
+    'TRUEFORGE_AUTH_MODE can only be set to "local". Remove it to sign in with the sign-in service instead.',
+  );
+}
+
 function resolveOIDCConfig({ standalone }: { standalone: boolean }): OIDCConfig | undefined {
   const issuerUrl = getEnv('OIDC_ISSUER_URL');
   const clientId = getEnv('OIDC_CLIENT_ID');
@@ -1289,6 +1303,17 @@ export interface SharedServerConfiguration {
    * is disabled, which standalone refuses at startup.
    */
   OIDC: OIDCConfig | undefined;
+  /**
+   * Sign-in mode chosen by name. Env: `TRUEFORGE_AUTH_MODE`. Only `local` can be named: Aman then
+   * signs its one owner in itself, with an email and password it stores, and the OIDC settings are
+   * ignored. Unset derives the mode from the rest of the configuration.
+   */
+  TRUEFORGE_AUTH_MODE: 'local' | undefined;
+  /**
+   * True when OIDC settings were provided while `TRUEFORGE_AUTH_MODE=local`: they are ignored
+   * (OIDC resolves as unset) and startup says so in one line.
+   */
+  OIDC_SET_BUT_IGNORED: boolean;
   /**
    * Suffix appended to every auth cookie name so instances sharing a hostname (cookies ignore
    * ports) do not read each other's sessions. Env: `AUTH_COOKIE_SUFFIX`. Default empty.
@@ -2397,6 +2422,12 @@ if (browserEnabled && (browserUrl === undefined || browserSecret === undefined))
   throw new Error('BROWSER_ENABLED is true, so BROWSER_URL and BROWSER_SECRET must both be set.');
 }
 
+const requestedAuthMode = parseTrueForgeAuthMode(getEnv('TRUEFORGE_AUTH_MODE'));
+/** In local mode the OIDC settings are ignored whole, even a partial set; startup names that once. */
+const oidcSetButIgnored =
+  requestedAuthMode === 'local' &&
+  ['OIDC_ISSUER_URL', 'OIDC_CLIENT_ID', 'OIDC_CLIENT_SECRET'].some(key => (getEnv(key) ?? '') !== '');
+
 const shared: SharedServerConfiguration = {
   LOG_LEVEL: getEnv('LOG_LEVEL', { defaultValue: 'info' }) ?? 'info',
   ACCESS_LOGS: parseBoolean({ envKey: 'ACCESS_LOGS', raw: getEnv('ACCESS_LOGS'), defaultValue: true }),
@@ -2408,7 +2439,9 @@ const shared: SharedServerConfiguration = {
   PORT: port,
   HOST: host,
   REQUIRE_AUTH: parseBoolean({ envKey: 'REQUIRE_AUTH', raw: getEnv('REQUIRE_AUTH'), defaultValue: true }),
-  OIDC: resolveOIDCConfig({ standalone }),
+  OIDC: requestedAuthMode === 'local' ? undefined : resolveOIDCConfig({ standalone }),
+  TRUEFORGE_AUTH_MODE: requestedAuthMode,
+  OIDC_SET_BUT_IGNORED: oidcSetButIgnored,
   AUTH_COOKIE_SUFFIX: parseAuthCookieSuffix(getEnv('AUTH_COOKIE_SUFFIX')),
   EXECUTOR_ID: standalone ? LOCAL_EXECUTOR_ID : randomAlphanumeric(6),
   MODEL_CATALOG_PATH: resolveOptionalPathEnv('MODEL_CATALOG_PATH'),
@@ -3103,6 +3136,36 @@ export function isOidcConfigured(value: ServerConfiguration): value is ServerCon
   return value.OIDC !== undefined;
 }
 
+/** The refusal shown when local sign-in would be offered over a plain-http address beyond this computer. */
+export const LOCAL_SIGN_IN_ORIGIN_REFUSAL =
+  'Local sign-in works on this computer or behind https. Set PUBLIC_BASE_URL to an https address, or use the Docker install.';
+
+/**
+ * Local sign-in is allowed only when every address the app is opened at is on this computer, or the
+ * person has set an https public address. A plain-http address beyond this computer refuses to start:
+ * the password would travel unprotected. Runs at load, before the server starts.
+ */
+export function assertLocalSignInOrigins(
+  config: Pick<
+    ServerConfiguration,
+    'TRUEFORGE_AUTH_MODE' | 'PUBLIC_BASE_URL' | 'ALLOWED_ORIGINS' | 'PORT' | 'STANDALONE'
+  >,
+): void {
+  if (config.TRUEFORGE_AUTH_MODE !== 'local') {
+    return;
+  }
+  if (config.PUBLIC_BASE_URL.startsWith('https://')) {
+    return;
+  }
+  const origins = [effectivePublicBaseUrl(config), ...config.ALLOWED_ORIGINS].filter(origin => origin !== '');
+  for (const origin of origins) {
+    const url = new URL(origin);
+    if (url.protocol === 'http:' && !isLoopbackHost(url.hostname)) {
+      throw new Error(LOCAL_SIGN_IN_ORIGIN_REFUSAL);
+    }
+  }
+}
+
 /**
  * TrueFoundry mode: ServiceFoundry-backed models/MCP/agents. Only available on
  * distributed config when `TRUEFOUNDRY_SERVICEFOUNDRY_SERVER_URL` is set.
@@ -3118,13 +3181,18 @@ export enum TrueForgeAuthMode {
   Standalone = 'standalone',
   Oidc = 'oidc',
   TrueFoundry = 'truefoundry',
+  Local = 'local',
 }
 
 /**
  * Resolve the active {@link TrueForgeAuthMode} from configuration.
+ * A mode named with `TRUEFORGE_AUTH_MODE` wins over the derived ones; otherwise
  * TrueFoundry wins over OIDC when both would otherwise be set (startup already rejects that combo).
  */
 export function getTrueForgeAuthMode(config: ServerConfiguration = configuration): TrueForgeAuthMode {
+  if (config.TRUEFORGE_AUTH_MODE === 'local') {
+    return TrueForgeAuthMode.Local;
+  }
   if (isTrueFoundryModeEnabled(config)) {
     return TrueForgeAuthMode.TrueFoundry;
   }
@@ -3327,6 +3395,7 @@ export function assertNetworkAuthRequirement(requirement: NetworkAuthRequirement
     throw new Error(
       'Refusing to start without login: standalone mode requires OIDC. ' +
         'Set OIDC_ISSUER_URL, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET and OIDC_ALLOWED_EMAILS (REQUIRE_AUTH=false no longer opts out). ' +
+        'To sign in with a password Aman keeps itself, set TRUEFORGE_AUTH_MODE=local instead. ' +
         'For local development run `pnpm dev:login` and add the lines it prints to packages/trueforge/.env; ' +
         'see docs/authentication/overview.mdx.',
     );
@@ -3377,6 +3446,8 @@ export function assertSingleOwnerSignIn({ standalone, oidc }: SingleOwnerSignIn)
 }
 
 assertSingleOwnerSignIn({ standalone: configuration.STANDALONE, oidc: configuration.OIDC });
+
+assertLocalSignInOrigins(configuration);
 
 if (isTrueFoundryModeEnabled(configuration)) {
   // TrueFoundry authenticates each caller with their own gateway token, so browser SSO must be off.

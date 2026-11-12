@@ -23,8 +23,8 @@ If Aman cannot say what an action does, it shows no card. It refuses, says why, 
 On a card where the action cannot be undone, or where it reaches other people, the safe choice comes first and is the main button. On a delete it says **Keep it**. On a mail send it says **Don't send**. The button that does the thing comes after it.
 
 - **Allow** lets this one thing happen.
-- **Always allow this here** stops the questions for this kind of action in this chat. Only some cards show it.
-- **Always allow this tool** lets Aman use one tool of a connector without asking, in every chat. Only some cards show it. You confirm once.
+- **Always allow this here** stops the questions for this kind of action to the same place in this chat. Only a card that names who or where the action goes shows it. On a mail draft or a change to your own calendar, it covers every later one in this chat. Creating a schedule or a persona asks every time.
+- **Always allow this tool** lets Aman use one tool of a connector without asking, in every chat. Only some cards show it. You confirm once. Aman still asks when a call would send something that looks like a password, a key or a card number, or a lot of text.
 - **Change it** asks Aman to change the request first. Nothing runs now.
 - **Not now** does not run it.
 
@@ -38,7 +38,7 @@ If the mail goes to an address that is not on your Email list, the safe choice s
 
 1. Click **More** in the left bar, click **Settings**, then click **Permissions**.
 2. Under **Always allow**, turn on **Write files** if you want Aman to write files without asking.
-3. Turn on **Web searches**, the maps switch or the **Sandbox** switch to stop those questions. Each one has its own switch.
+3. Turn on **Web searches**, the maps switch or the **Sandbox** switch to stop those questions. Each one has its own switch. The **Sandbox** switch covers new files and scripts Aman wrote in the same chat, and only where the sandbox has no network. Where you allowed package downloads, or a skill may reach its own sites, they still ask. Installing a package still asks.
 4. Sending email is not on this page. It always asks.
 
 To take back an always allowed tool, click **More**, then **Settings**, then **Connectors**. Open the connector and stop allowing the tool.

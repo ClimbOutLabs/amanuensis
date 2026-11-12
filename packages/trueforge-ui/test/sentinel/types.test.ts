@@ -248,6 +248,7 @@ describe('extractSentinelFromEvent', () => {
             tier: 3,
             tier3_card: {
               plain_what: 'Run code in the sandbox',
+              copy: { headline: 'Run code in the sandbox', consequence: 'Runs once.', reason: null },
               plain_why: null,
               cannot_be_undone: 'Runs once.',
               destination: null,
@@ -289,6 +290,7 @@ describe('extractSentinelFromEvent', () => {
             tier: 3,
             tier3_card: {
               plain_what: 'Change a saved draft in your Gmail.',
+              copy: { headline: 'Change this draft?', consequence: null, reason: null },
               plain_why: null,
               cannot_be_undone: null,
               destination: null,
@@ -386,6 +388,7 @@ describe('extractSentinelFromEvent', () => {
             tier: 3,
             tier3_card: {
               plain_what: 'Change "Team sync" in your Google Calendar.',
+              copy: { headline: 'Change "Team sync" in your Google Calendar?', consequence: null, reason: null },
               plain_why: null,
               cannot_be_undone: null,
               destination: null,
@@ -581,6 +584,7 @@ describe('held actions', () => {
             ...heldRef,
             tier3_card: {
               plain_what: 'Send a note to Ana.',
+              copy: { headline: 'Send a note to Ana.', consequence: null, reason: null },
               plain_why: null,
               cannot_be_undone: null,
               why_asked_again: null,

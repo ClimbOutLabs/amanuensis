@@ -216,7 +216,7 @@ sandbox_docker_share_gb() {
 # for every disk it creates (setup-disks.sh checks the same). Disks that already exist are not counted again.
 sandbox_disks_need_gb() {
   local name slot need=0
-  for name in $(printf '%s\n' $(reg_names) "$(sandbox_first_instance)" | sort -u); do
+  for name in $({ reg_names; sandbox_first_instance; echo; } | grep . | sort -u); do
     if reg_exists "$name"; then
       instance_sandbox_wanted "$name" || continue
     elif [ "$OPT_NO_SANDBOX" = 1 ]; then

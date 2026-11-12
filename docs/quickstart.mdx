@@ -18,7 +18,7 @@ The app runs in two modes: **standalone** — one process on your own machine, S
 | Git | any recent version | [git-scm.com/downloads](https://git-scm.com/downloads) |
 | A Bash-compatible shell | — | macOS/Linux: built in. Windows: [WSL2](https://learn.microsoft.com/windows/wsl/install) |
 
-On Windows, run every command below inside WSL2. Native Windows (PowerShell, cmd or Git Bash) is not supported: the setup scripts use POSIX-style environment variable assignments that those shells do not understand.
+This page is for developers. To install Aman on Windows for everyday use, follow the [Windows guide](install-windows.md) instead. On Windows, run every command below inside WSL2. Native Windows (PowerShell, cmd or Git Bash) is not supported: the setup scripts use POSIX-style environment variable assignments that those shells do not understand.
 
 ## Install and run
 
@@ -36,6 +36,8 @@ Login is mandatory in standalone mode, and the server refuses to start without i
 ```bash
 pnpm standalone:dev
 ```
+
+No Docker? Set `TRUEFORGE_AUTH_MODE=local` in `packages/trueforge/.env` instead and skip `pnpm dev:login`. Aman then keeps one sign-in itself, an email and a password it stores as a scrambled hash, and the first page you open asks you to create it. That is the sign-in the `npx amanuensis` install uses; see [Setup Login](/authentication/overview).
 
 The install takes a few minutes the first time. When it finishes, open [http://localhost:3000](http://localhost:3000) and sign in — that is the app.
 

@@ -25,6 +25,7 @@ import {
   CREATE_SCHEDULE_TOOL_NAME,
   DELETE_SCHEDULE_TOOL_NAME,
   isReminderToolName,
+  isScheduleStatusToolName,
   isScheduleWriteToolName,
   LIST_REMINDERS_TOOL_NAME,
   LIST_SCHEDULES_TOOL_NAME,
@@ -411,6 +412,7 @@ export class ScheduleToolSet extends LocalToolMCP {
       return { ...info, pre_dispatch_failure: { kind: 'pre_dispatch_failed', message: prepared.message } };
     }
     const reminder = isReminderToolName(call.name) ? await this.#reminderLine(call) : undefined;
+    const scheduleStatus = isScheduleStatusToolName(call.name) ? await this.#statusTarget(call) : undefined;
     const decision = await classifyHostToolCall({
       sentinel: this.#options.sentinel,
       repository_id: null,
@@ -427,6 +429,7 @@ export class ScheduleToolSet extends LocalToolMCP {
         },
         ...(prepared === undefined ? {} : { schedule_write: prepared.value.review }),
         ...(reminder === undefined ? {} : { reminder }),
+        ...(scheduleStatus === undefined ? {} : { schedule_status: scheduleStatus }),
       },
     });
     return {
@@ -831,6 +834,13 @@ export class ScheduleToolSet extends LocalToolMCP {
       description: `Cancelled a reminder: ${reminder.manifest.task}`,
     });
     return jsonResult({ cancelled: { id: reminder.id, what: reminder.manifest.task } });
+  }
+
+  /** The schedule a pause or resume call names, read from the store so a card can say which one it is. */
+  async #statusTarget(params: CallToolRequest['params']): Promise<{ name: string } | undefined> {
+    const parsed = ScheduleRefToolSchema.safeParse(params.arguments ?? {});
+    const found = parsed.success ? await this.#find(parsed.data) : undefined;
+    return found?.ok === true ? { name: plainScheduleName(found.value.name) } : undefined;
   }
 
   async #setStatus(input: { input: ScheduleRefToolInput; status: ScheduleStatus }) {
