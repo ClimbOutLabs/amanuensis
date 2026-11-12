@@ -12,9 +12,19 @@ import {
   type SentinelServices,
 } from '../../../src/core/permissions/context';
 import { verifyPreDispatch } from '../../../src/core/permissions/dispatch';
-import { isMapsToolName, MAPS_SILENT_REASON } from '../../../src/core/permissions/mapsToolNames';
+import {
+  isMapsToolName,
+  MAPS_ASK_REASON,
+  MAPS_HOLD_REASON,
+  MAPS_SILENT_REASON,
+} from '../../../src/core/permissions/mapsToolNames';
 import { recordPersonText, recordUntrustedText } from '../../../src/core/permissions/provenance';
-import { createWebSearchTurnState, recordToolResultProvenance } from '../../../src/core/permissions/webSearch';
+import {
+  createWebSearchTurnState,
+  hostToolStamp,
+  NO_HOST_STAMP,
+  recordToolResultProvenance,
+} from '../../../src/core/permissions/webSearch';
 
 function makeCtx(services?: SentinelServices): ClassifyContext {
   return {
@@ -349,6 +359,30 @@ describe('maps without asking', () => {
     }
   });
 
+  it('says why a map asked when the setting is off and the place is one the chat only read', async () => {
+    const ctx = makeCtx(maps_off);
+    recordPersonText({ provenance: ctx.web_search.provenance, text: 'Where is that clinic?' });
+    recordUntrustedText({
+      provenance: ctx.web_search.provenance,
+      text: 'Harbour Family Clinic, 12 Example Street, Lisbon 1100-000',
+      source: 'page',
+    });
+    const decision = await classifyTier(mapsAction('render_map', { place_name: '12 Example Street, Lisbon' }), ctx);
+    expect(decision).toMatchObject({
+      tier: 3,
+      reason: MAPS_HOLD_REASON,
+      reason_detail: 'This place is not from your own words or your calendar, so Aman is checking with you first.',
+    });
+  });
+
+  it("asks with the plain maps reason for the person's own place when the setting is off", async () => {
+    const ctx = makeCtx(maps_off);
+    recordPersonText({ provenance: ctx.web_search.provenance, text: 'Show me 12 Example Street in Lisbon.' });
+    recordUntrustedText({ provenance: ctx.web_search.provenance, text: 'Harbour Family Clinic', source: 'page' });
+    const decision = await classifyTier(mapsAction('render_map', { place_name: '12 Example Street, Lisbon' }), ctx);
+    expect(decision).toMatchObject({ tier: 3, reason: MAPS_ASK_REASON });
+  });
+
   it('gives the always-Tier-3 detail when the setting is off', async () => {
     const decision = await classifyTier(mapsAction('render_map', { place_name: 'Paris' }), makeCtx(maps_off));
     expect(decision.reason_detail).toBe('Maps are set to ask, so Aman is checking with you first.');
@@ -390,7 +424,7 @@ describe('maps without asking', () => {
     expect(first.tier).toBe(1);
     const second = await classifyTier(mapsAction('render_map', { place_name: HELD_VALUE.slice(10) }), ctx);
     expect(second.tier).toBe(3);
-    expect(second.reason).toBe('maps_tool');
+    expect(second.reason).toBe(MAPS_HOLD_REASON);
   });
 
   it("runs a map of the person's own city from their profile", async () => {
@@ -412,7 +446,7 @@ describe('maps without asking', () => {
       makeCtx(services),
     );
     expect(decision.tier).toBe(3);
-    expect(decision.reason).toBe('maps_tool');
+    expect(decision.reason).toBe(MAPS_HOLD_REASON);
     expect(decision.card).not.toBeNull();
   });
 
@@ -473,13 +507,21 @@ describe("with maps set to run without asking, only the person's own places run 
     recordToolResultProvenance({
       state: ctx.web_search,
       tool_name: 'read_email',
+      stamp: NO_HOST_STAMP,
       argument_values: ['m1'],
       texts: [text],
     });
   }
 
+  /** Events as the assistant's own Calendar tool returns them. */
   function readCalendar(ctx: ClassifyContext, text: string): void {
-    recordToolResultProvenance({ state: ctx.web_search, tool_name: 'list_events', argument_values: [], texts: [text] });
+    recordToolResultProvenance({
+      state: ctx.web_search,
+      tool_name: 'list_events',
+      stamp: hostToolStamp({ type: 'truefoundry-system' }),
+      argument_values: [],
+      texts: [text],
+    });
   }
 
   it.each([
@@ -494,7 +536,7 @@ describe("with maps set to run without asking, only the person's own places run 
     recordPersonText({ provenance: ctx.web_search.provenance, text: 'Show me a map of Paris and where lunch is.' });
     readMail(ctx, STRANGER_MAIL);
     const decision = await classifyTier(action, ctx);
-    expect(decision).toMatchObject({ tier: 3, reason: 'maps_tool', reason_detail: READ_PLACE_SAY });
+    expect(decision).toMatchObject({ tier: 3, reason: MAPS_HOLD_REASON, reason_detail: READ_PLACE_SAY });
     expect(decision.card).not.toBeNull();
   });
 
@@ -507,7 +549,7 @@ describe("with maps set to run without asking, only the person's own places run 
       source: 'page',
     });
     const decision = await classifyTier(mapsAction('render_map', { place_name: '12 Example Street, Lisbon' }), ctx);
-    expect(decision).toMatchObject({ tier: 3, reason: 'maps_tool', reason_detail: READ_PLACE_SAY });
+    expect(decision).toMatchObject({ tier: 3, reason: MAPS_HOLD_REASON, reason_detail: READ_PLACE_SAY });
   });
 
   it('asks for an address only a search result named', async () => {
@@ -516,6 +558,7 @@ describe("with maps set to run without asking, only the person's own places run 
     recordToolResultProvenance({
       state: ctx.web_search,
       tool_name: 'web_search',
+      stamp: hostToolStamp({ type: 'mcp', search_provider_call: true }),
       argument_values: ['clinic open today'],
       texts: [
         JSON.stringify({
@@ -530,7 +573,7 @@ describe("with maps set to run without asking, only the person's own places run 
       ],
     });
     const decision = await classifyTier(mapsAction('render_map', { place_name: '12 Example Street, Lisbon' }), ctx);
-    expect(decision).toMatchObject({ tier: 3, reason: 'maps_tool', reason_detail: READ_PLACE_SAY });
+    expect(decision).toMatchObject({ tier: 3, reason: MAPS_HOLD_REASON, reason_detail: READ_PLACE_SAY });
   });
 
   it('runs a place the person named themselves, also after the chat read mail', async () => {
@@ -548,6 +591,20 @@ describe("with maps set to run without asking, only the person's own places run 
     readMail(ctx, STRANGER_MAIL);
     const decision = await classifyTier(mapsAction('render_map', { place_name: '40 Rua Augusta, Lisbon' }), ctx);
     expect(decision).toMatchObject({ tier: 1, reason: MAPS_SILENT_REASON, card: null });
+  });
+
+  it("asks for a place only a connector's tool named, though the tool is called like the Calendar tool", async () => {
+    const ctx = mapsOnCtx();
+    recordPersonText({ provenance: ctx.web_search.provenance, text: 'How do I get to my next appointment?' });
+    recordToolResultProvenance({
+      state: ctx.web_search,
+      tool_name: 'list_events',
+      stamp: hostToolStamp({ type: 'mcp' }),
+      argument_values: [],
+      texts: [JSON.stringify({ events: [{ title: 'Dentist', location: '40 Rua Augusta, Lisbon' }] })],
+    });
+    const decision = await classifyTier(mapsAction('render_map', { place_name: '40 Rua Augusta, Lisbon' }), ctx);
+    expect(decision).toMatchObject({ tier: 3, reason: MAPS_HOLD_REASON, reason_detail: READ_PLACE_SAY });
   });
 
   it('runs a place nobody named in a chat that has read only the calendar', async () => {
@@ -584,7 +641,7 @@ describe("with maps set to run without asking, only the person's own places run 
       mapsAction('render_route', { from_place: '7 Calm Lane, Lisbon', to_place: '12 Harbour Street, Lisbon' }),
       ctx,
     );
-    expect(read).toMatchObject({ tier: 3, reason: 'maps_tool', reason_detail: READ_PLACE_SAY, auto_deny: null });
+    expect(read).toMatchObject({ tier: 3, reason: MAPS_HOLD_REASON, reason_detail: READ_PLACE_SAY, auto_deny: null });
     expect(read.card).not.toBeNull();
   });
 });

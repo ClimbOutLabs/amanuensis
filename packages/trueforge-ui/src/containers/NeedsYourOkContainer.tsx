@@ -109,6 +109,7 @@ export function NeedsYourOkContainer({ parts }: { parts: readonly PartState[] })
           card={info.card}
           status={statusOf(info)}
           alwaysAllowOffered={info.alwaysAllowOffered === true}
+          alwaysAllowCovers={info.alwaysAllowCovers}
           disabled={!canManage || server == null || !hasSessionResync(server)}
           onApprove={() => void answer(info, 'approve')}
           onAlwaysAllow={() => void answer(info, 'always_allow')}

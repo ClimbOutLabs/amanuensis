@@ -135,6 +135,14 @@ describe('browser capability', () => {
     expect(textOf(result)).toContain('private network');
   });
 
+  it('says to ask for the address without the sign-in part when the address carries one', async () => {
+    const { call } = mount(() => ({ json: { status: 'refused', reason: 'sign_in_in_address' } }));
+    const result = await call('browser_open', { url: 'https://sam@hulu.com/account' });
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toContain('sign-in name or password');
+    expect(textOf(result)).toContain('Ask for the address without that part');
+  });
+
   it('reports a page that moved to another site without any of its text', async () => {
     const { call } = mount(() => ({ json: { status: 'moved', url: 'https://mail.example/inbox' } }));
     const result = await call('browser_back');

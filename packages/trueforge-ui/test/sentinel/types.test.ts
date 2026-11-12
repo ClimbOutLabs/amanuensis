@@ -314,6 +314,49 @@ describe('extractSentinelFromEvent', () => {
     });
   });
 
+  it('keeps the name a mail is sent as and its name-left-off note, and leaves them off an older card', () => {
+    const card = (extra: Record<string, unknown>) =>
+      extractSentinelFromEvent({
+        type: 'tool.approval_required',
+        tool_calls: [
+          {
+            id: 'call-14',
+            tier: 3,
+            tier3_card: {
+              plain_what: 'Do it',
+              email: { action: 'send', to: [], cc: [], bcc: [], subject: 's', body: 'b', ...extra },
+            },
+          },
+        ],
+      })[0]?.card.email;
+    expect(card({ from_name: 'PayPal Security', name_left_off: true })).toMatchObject({
+      from_name: 'PayPal Security',
+      name_left_off: true,
+    });
+    expect(card({ from_name: null })).toMatchObject({ from_name: null });
+    expect(card({})).not.toHaveProperty('from_name');
+    expect(card({})).not.toHaveProperty('name_left_off');
+  });
+
+  it('keeps the duplicate and multi-day warnings of an event', () => {
+    const event = (extra: Record<string, unknown>) =>
+      extractSentinelFromEvent({
+        type: 'tool.approval_required',
+        tool_calls: [
+          {
+            id: 'call-15',
+            tier: 3,
+            tier3_card: { plain_what: 'Do it', calendar_event: { ...CALENDAR_EVENT, ...extra } },
+          },
+        ],
+      })[0]?.card.calendar_event;
+    expect(event({ already_created: true, span_days: 3 })).toMatchObject({ already_created: true, span_days: 3 });
+    expect(event({})).not.toHaveProperty('span_days');
+    for (const span_days of [0, -2, 1.5, '3']) {
+      expect(event({ span_days })).toBeNull();
+    }
+  });
+
   const CALENDAR_EVENT = {
     action: 'change',
     calendar: 'ada@example.com',
@@ -519,6 +562,13 @@ describe('held actions', () => {
     expect(info?.alwaysAllowOffered).toBe(true);
   });
 
+  it('reads that the every-chat answer on a maps card covers maps, and leaves it unset on any other card', () => {
+    const maps = { ...heldRef, id: 'call-map', always_allow_covers: 'maps' };
+    const other = { ...heldRef, id: 'call-other', always_allow_covers: 'everything' };
+    const parsed = extractSentinelFromEvent({ type: 'tool.approval_required', tool_calls: [maps, heldRef, other] });
+    expect(parsed.map(info => info.alwaysAllowCovers)).toEqual(['maps', undefined, undefined]);
+  });
+
   it('offers always allow for a held mail read the owner may grant, and never for a held send', () => {
     const mailRead = {
       ...heldRef,
@@ -541,6 +591,7 @@ describe('held actions', () => {
         tool_calls: [
           {
             ...heldRef,
+            always_allow_covers: 'maps',
             tier3_card: {
               plain_what: 'Send a note to Ana.',
               plain_why: null,
@@ -562,6 +613,7 @@ describe('held actions', () => {
     const [info] = extractSentinelFromEvent(parsed);
     expect(info?.held).toEqual({ expiresAt: '2026-10-17T07:00:00.000Z' });
     expect(info?.alwaysAllowOffered).toBe(true);
+    expect(info?.alwaysAllowCovers).toBe('maps');
   });
 
   it('leaves an ordinary approval without a held marker, and never offers always-allow it did not get', () => {

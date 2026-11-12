@@ -45,6 +45,7 @@ describe("ServerClient", () => {
                     stdout_stderr_cap_kb: 1,
                 },
                 settings: { enabled: true },
+                sign_in: { mode: "local" },
                 skill: { enabled: true, reason: "reason" },
                 tool_output_screen: {
                     configured: true,
@@ -119,6 +120,9 @@ describe("ServerClient", () => {
                 },
                 settings: {
                     enabled: true,
+                },
+                signIn: {
+                    mode: "local",
                 },
                 skill: {
                     enabled: true,

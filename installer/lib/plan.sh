@@ -344,7 +344,7 @@ plan_build() {
     fi
   fi
 
-  plan_image "$REL_APP_TAG" "The Aman app is built" "Build the Aman app" app-base app-deps dockerfile-frontend
+  plan_image "$REL_APP_TAG" "The Aman app is built" "Build the Aman app" app-base app-deps vad-model dockerfile-frontend
   plan_image "$REL_STT_TAG" "The speech-to-text service is built" "Build the speech-to-text service" stt-base stt-deps
   plan_image "$REL_TTS_TAG" "The voice that reads replies aloud is built" "Build the voice that reads replies aloud" tts-deps tts-voice
   plan_image "$REL_CALENDAR_TAG" "The calendar connector is built" "Build the calendar connector"
@@ -599,6 +599,8 @@ install_execute() {
   ensure_private_dir "$MACHINE_DIR"
   ensure_private_dir "$INSTANCES_DIR"
   install_doctor_shim
+  # Before the build and the backup, so a port Tailscale would take stops the run with nothing changed.
+  for name in $(reg_names); do instance_tailscale_port_check "$name"; done
   if need_new_instance && [ -z "$AMAN_PASSWORD" ]; then
     ui_hint "Asked now so the rest of the setup runs on its own."
     ask_password AMAN_PASSWORD

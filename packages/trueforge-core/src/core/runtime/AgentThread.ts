@@ -97,6 +97,7 @@ import {
   awaitsApproval,
   effectiveApprovalDecisions,
   effectiveToolAdmissions,
+  mapsCardTakesLastingAnswer,
 } from '../mcp/approvalGrant';
 import { convertMCPServersToTools, type ConvertToolsResult, type MappedMCPTool } from '../mcp/convertMCPServers';
 import {
@@ -1186,6 +1187,16 @@ function getPendingApprovalToolCalls(input: {
  * one that Sentinel did not card (a call a selector gates though it let it through) is described
  * from its own arguments, and shows as a review card because it asks all the same.
  */
+/** Whether the card offers the every-chat answer, and what that answer covers when it is not one tool. */
+function alwaysAllowFields(
+  info: InternalToolCallInfo,
+): Pick<ToolApprovalRequiredEvent['tool_calls'][number], 'can_always_allow' | 'always_allow_covers'> {
+  const offered = allowsToolGrant(info);
+  return offered && mapsCardTakesLastingAnswer(info)
+    ? { can_always_allow: true, always_allow_covers: 'maps' }
+    : { can_always_allow: offered };
+}
+
 function approvalCardFields(toolCall: InternalEnrichedToolCall): { tier?: Tier; tier3_card: Tier3Card } {
   const { tool_info } = toolCall;
   if (tool_info.tier3_card !== undefined && tool_info.tier3_card !== null) {
@@ -2333,13 +2344,20 @@ export class AgentThread {
             this.sentinel !== undefined &&
             allowsToolGrant(pending.tool_info)
           ) {
-            await this.sentinel.services.tool_grants.recordToolGrant({
-              tenant_id: this.sentinel.tenant_id,
-              created_by: this.sentinel.created_by,
-              mcp_server_name: pending.tool_info.mcp_server_name,
-              tool_name: pending.tool_info.original_tool_name,
-              mcp_server_host: pending.tool_info.grant_host ?? null,
-            });
+            if (mapsCardTakesLastingAnswer(pending.tool_info)) {
+              await this.sentinel.services.allowMapsWithoutAsking({
+                tenant_id: this.sentinel.tenant_id,
+                created_by: this.sentinel.created_by,
+              });
+            } else {
+              await this.sentinel.services.tool_grants.recordToolGrant({
+                tenant_id: this.sentinel.tenant_id,
+                created_by: this.sentinel.created_by,
+                mcp_server_name: pending.tool_info.mcp_server_name,
+                tool_name: pending.tool_info.grant_tool_name ?? pending.tool_info.original_tool_name,
+                mcp_server_host: pending.tool_info.grant_host ?? null,
+              });
+            }
           }
         }
         const pendingClientCalls = new Map(getPendingClientSideToolCalls(this.context).map(call => [call.id, call]));
@@ -5624,7 +5642,7 @@ export class AgentThread {
               source_event_id: modelMessageEventId,
               ...approvalCardFields(call),
               held: true as const,
-              can_always_allow: allowsToolGrant(call.tool_info),
+              ...alwaysAllowFields(call.tool_info),
               expires_at: held.expires_at,
             },
           ]
@@ -5855,7 +5873,7 @@ export class AgentThread {
           // Tier and card ride on the approval event because the wire tool_info omits them.
           ...approvalCardFields(toolCall),
           can_chat_allow: allowsChatApproval(toolCall.tool_info),
-          can_always_allow: allowsToolGrant(toolCall.tool_info),
+          ...alwaysAllowFields(toolCall.tool_info),
         })),
       };
       yield event;

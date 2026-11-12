@@ -36,7 +36,7 @@ test_a_default_install_is_served_over_https() {
   assert_not_contains "$file" "'0.0.0.0:"
   assert_contains "$file" "image: caddy:2.11.6-alpine@sha256:d44355d3c2149dc580ce2cac735955d1c08d3d00882c30489c241aa51a5c10d9"
   assert_contains "$file" "network_mode: 'service:loopback'"
-  assert_contains "$file" "user: '1000:1000'" "the front end runs as the person who installed, so the folders it reads stay theirs"
+  assert_contains "$file" "user: '$STUB_UID:$STUB_GID'" "the front end runs as the person who installed, so the folders it reads stay theirs"
   local dex origin
   dex=$(cat "$AMAN_HOME/instances/main/dex.yaml")
   for origin in ${HTTPS_ORIGINS//,/ }; do
@@ -246,6 +246,124 @@ sys.exit(0 if s.connect_ex(("127.0.0.1",8443))==0 else 1)' 2>/dev/null && [ "$wa
   assert_rc 0
   assert_eq "$(reg_value main tls_port)" 8444
   assert_contains "$(env_value main ALLOWED_ORIGINS)" "https://192.168.1.20:8444"
+  sandbox_drop
+}
+
+tailnet() {
+  fixture_network 192.168.1.20 tailscale0:100.101.102.103
+  fixture_hostname host
+  fixture_tailscale 100.101.102.103 host.example.ts.net
+}
+
+test_a_port_tailscale_serves_is_not_picked() {
+  t_begin "an install skips the https port Tailscale serve is set up for"
+  sandbox_new
+  tailnet
+  STUB_TS_SERVE_PORTS="443 8443"
+  install_machine
+  assert_rc 0
+  assert_eq "$(reg_value main tls_port)" 8444
+  assert_contains "$(compose)" "- '100.101.102.103:8444:8443'"
+  assert_not_contains "$(compose)" ":8443:8443'"
+  sandbox_drop
+}
+
+test_an_upgrade_moves_https_off_a_port_tailscale_took() {
+  t_begin "an upgrade moves the https port before restarting when Tailscale serve was set up for it since, so the new version and the rollback both start"
+  sandbox_new
+  tailnet
+  install_machine
+  assert_eq "$(reg_value main tls_port)" 8443
+  # Set up after the install, while the instance held the port: Tailscale takes it the moment the instance stops.
+  STUB_TS_SERVE_PORTS="443 8443"
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_eq "$(reg_value main tls_port)" 8444
+  assert_contains "$(env_value main ALLOWED_ORIGINS)" "https://100.101.102.103:8444"
+  assert_not_contains "$(env_value main ALLOWED_ORIGINS)" ":8443"
+  assert_contains "$(compose)" "- '100.101.102.103:8444:8443'"
+  assert_not_contains "$(compose)" ":8443:8443'"
+  assert_flat_contains "$OUT" "Tailscale serve on this computer is set up for port 8443, so instance main now opens over https on port 8444"
+  sandbox_drop
+}
+
+test_a_failed_backup_leaves_the_https_port_as_it_was() {
+  t_begin "when the backup before an upgrade fails, the https port and the addresses stay as they were"
+  sandbox_new
+  tailnet
+  install_machine
+  local origins
+  origins=$(env_value main ALLOWED_ORIGINS)
+  STUB_TS_SERVE_PORTS="8443"
+  STUB_BACKUP_FAIL=1
+  repo_commit_change "app change"
+  run_install upgrade
+  if [ "$RC" != 0 ]; then t_pass; else t_fail "the upgrade went ahead without a backup"; fi
+  assert_eq "$(reg_value main tls_port)" 8443
+  assert_eq "$(env_value main ALLOWED_ORIGINS)" "$origins"
+  assert_not_contains "$OUT$ERR" "now opens over https on port"
+  sandbox_drop
+}
+
+test_rebuilding_missing_parts_moves_https_off_a_port_tailscale_took() {
+  t_begin "an upgrade that only builds missing parts again also moves https off a port Tailscale serve took, before restarting"
+  sandbox_new
+  tailnet
+  install_machine
+  local app
+  app=$(sed -n 's/.*"app_image": "\([^"]*\)".*/\1/p' "$AMAN_HOME/release/release.json")
+  grep -Fxv "$app" "$SB_STATE/images" >"$SB_STATE/images.new" || true
+  mv "$SB_STATE/images.new" "$SB_STATE/images"
+  STUB_TS_SERVE_PORTS="8443"
+  run_install upgrade
+  assert_rc 0
+  assert_flat_contains "$OUT" "Building the missing parts again"
+  assert_eq "$(reg_value main tls_port)" 8444
+  assert_contains "$(compose)" "- '100.101.102.103:8444:8443'"
+  assert_not_contains "$(compose)" ":8443:8443'"
+  sandbox_drop
+}
+
+test_an_upgrade_move_to_https_skips_a_port_tailscale_serves() {
+  t_begin "an upgrade that moves a plain http instance to https picks a port Tailscale serve does not use"
+  sandbox_new
+  tailnet
+  install_machine
+  local conf="$AMAN_HOME/state/instances/main.conf" plain
+  plain=$(reg_value main origins | sed 's|https://\([^,]*\):8443|http://\1:8791|g')
+  sed -i 's/^tls=.*/tls=off/; s/^tls_port=.*/tls_port=/' "$conf"
+  sed -i "s|^origins=.*|origins=$plain|" "$conf"
+  sed -i "s|^ALLOWED_ORIGINS=.*|ALLOWED_ORIGINS=$plain|" "$AMAN_HOME/instances/main/.env"
+  STUB_TS_SERVE_PORTS="443 8443"
+  repo_commit_change "app change"
+  run_install upgrade
+  assert_rc 0
+  assert_eq "$(reg_value main tls)" local
+  assert_eq "$(reg_value main tls_port)" 8444
+  assert_contains "$(compose)" "- '100.101.102.103:8444:8443'"
+  assert_not_contains "$(compose)" ":8443:8443'"
+  sandbox_drop
+}
+
+test_an_app_port_tailscale_serves_stops_before_anything_changes() {
+  t_begin "an upgrade stops before the backup and the build when Tailscale serve is set up for the app port, which is never moved by itself"
+  sandbox_new
+  tailnet
+  install_machine
+  local builds
+  builds=$(log_count "docker build")
+  STUB_TS_SERVE_PORTS="8791"
+  repo_commit_change "app change"
+  : >"$STUB_LOG"
+  run_install upgrade
+  if [ "$RC" != 0 ]; then t_pass; else t_fail "the upgrade went ahead"; fi
+  assert_flat_contains "$OUT$ERR" "Tailscale serve on this computer is set up for port 8791"
+  assert_flat_contains "$OUT$ERR" "Nothing was stopped."
+  assert_log_lacks "docker build"
+  assert_log_lacks " down"
+  assert_no_path "$AMAN_HOME/backups"
+  assert_eq "$(reg_value main app_port)" 8791
   sandbox_drop
 }
 
@@ -605,6 +723,12 @@ test_tls_off_is_refused
 test_the_flag_is_checked
 test_a_computer_with_no_network_has_nothing_to_serve
 test_a_busy_https_port_moves_the_instance
+test_a_port_tailscale_serves_is_not_picked
+test_an_upgrade_moves_https_off_a_port_tailscale_took
+test_a_failed_backup_leaves_the_https_port_as_it_was
+test_rebuilding_missing_parts_moves_https_off_a_port_tailscale_took
+test_an_upgrade_move_to_https_skips_a_port_tailscale_serves
+test_an_app_port_tailscale_serves_stops_before_anything_changes
 test_an_existing_instance_moves_to_https
 test_a_failed_move_to_https_keeps_plain_http_and_is_tried_again
 test_a_plain_http_instance_is_told_to_run_the_installer_again
