@@ -13,7 +13,7 @@ A notes folder works on the npx install and on an install built from the source.
 
 !!! note "Not in Docker"
 
-    The Docker install can't use a notes folder. There, Aman runs in a container, and no folder on your computer is passed through to it, so a folder path can't be found. The installer on a Mac or Linux and Aman Setup on Windows both use Docker. On those installs, connect Obsidian through its Local REST API plugin instead. The steps are in [On a Docker install: connect Obsidian instead](../../packages/trueforge/guide/topics/notes-folder.md#on-a-docker-install-connect-obsidian-instead). Obsidian is then an ordinary connector: each tool asks first, and Obsidian must be open.
+    The Docker install can't use a notes folder. There, Aman runs in a container, and no folder on your computer is passed through to it, so a folder path can't be found. The installer on a Mac or Linux and Aman Setup on Windows both use Docker. On those installs, connect Obsidian through its Local REST API plugin instead. The steps are in [Obsidian](obsidian.md). Obsidian is then an ordinary connector: each tool asks first, and Obsidian must be open.
 
 ## What Aman reads
 

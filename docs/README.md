@@ -68,6 +68,7 @@ These are the same pages Aman's **Help, I'm stuck** answers from.
 - [Connect email and calendar](../packages/trueforge/guide/topics/connect-mail-calendar.md): Pick the right card and connect your accounts.
 - [Connect Google](google.mdx): Gmail, Google Calendar and Google Drive, step by step.
 - [Your notes folder](../packages/trueforge/guide/topics/notes-folder.md): Let Aman search and add to your notes.
+- [Obsidian](connectors/obsidian.md): Use your Obsidian vault on a Docker install.
 - [Home Assistant](connectors/home-assistant.md): Control the devices in your home.
 - [Other connectors](mcp-servers.mdx): Add Notion, GitHub and other apps.
 

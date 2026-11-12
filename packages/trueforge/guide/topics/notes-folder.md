@@ -61,34 +61,13 @@ Removing the folder changes nothing inside it. Aman forgets the path and stops l
 
 ## On a Docker install: connect Obsidian instead
 
-On the installer and on Aman Setup, Aman can't see a folder on your computer, but it can reach Obsidian. Obsidian's Local REST API plugin lets Aman search, read and write your vault while Obsidian is open.
+On the installer and on Aman Setup, Aman can't see a folder on your computer, but it can reach Obsidian. Obsidian's Local REST API plugin lets Aman search, read and write your vault while Obsidian is open. You add it as a connector, by its address.
 
-!!! note "Before you start"
+[Obsidian](../../../../docs/connectors/obsidian.md) has the steps, in Obsidian and in Aman. Before you choose this way, know how it differs from a notes folder:
 
-    You need Obsidian on the same computer as Aman, and about five minutes. Obsidian must be open whenever you want Aman to use your notes. When it's closed, Aman can't reach them.
-
-### Step 1: Turn on the plugin in Obsidian
-
-1. In Obsidian, open **Settings**, then **Community plugins**, and turn community plugins on.
-2. Click **Browse**, find **Local REST API**, then click **Install** and **Enable**.
-3. Open the plugin's settings. Turn on **Enable HTTP server**. Aman can't check the plugin's own https certificate, so it uses the plain address on this computer.
-4. On Linux only, set **Binding host** to `172.17.0.1`. That's Docker's own address on this computer, so Aman can reach the plugin and other devices can't.
-5. Copy the **API key**.
-
-### Step 2: Add Obsidian in Aman
-
-1. In Aman, click **More** in the left bar, then **Settings**, then **Connectors**.
-2. Click **Add MCP Server**.
-3. Type `obsidian` as the **Name**, and "My notes in Obsidian" as the **Description**.
-4. In **URL**, type `http://host.docker.internal:27123/mcp/`. That's how Aman, inside its container, reaches this computer.
-5. Under **Auth type**, choose **API key**, and paste the key. Leave **Header name** empty.
-6. Click **Add**, then **Test connection**. Aman lists the tools Obsidian offers.
-
-### How it differs from a notes folder
-
-- **Each step asks first.** Every Obsidian tool asks for your OK on a card, because Aman doesn't know what a connector you add will do. Click **Always allow everywhere** on the reads you're happy with, such as search and read.
-- **Obsidian can change notes.** The plugin's tools can edit and delete notes. Allow those only one at a time.
-- **Obsidian must be open.** A notes folder needs only the files. Obsidian's plugin needs the app running.
+- Obsidian must be open whenever you want Aman to use your notes. A notes folder needs only the files.
+- Every Obsidian tool asks for your OK on a card, like any connector you add. You can stop the asking for the reads you're happy with.
+- The plugin's tools can change and delete notes. A notes folder never changes a note you wrote.
 
 ## Good to know
 
