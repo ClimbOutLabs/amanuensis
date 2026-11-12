@@ -18,6 +18,7 @@ const ORIGINS = [
   'http://100.101.102.103:8791',
   'http://host.example.local:8791',
   'http://host.example.ts.net:8791',
+  'https://192.168.1.20:8443',
   'https://aman.example.com',
 ];
 
@@ -261,5 +262,16 @@ describe('signing in to an instance opened on several addresses', () => {
     const tls = await signInAt('https://aman.example.com');
     expect(cookieHeader(tls.login, STATE_COOKIE)).toMatch(/;\s*Secure/i);
     expect(cookieHeader(tls.callback, ID_TOKEN_COOKIE)).toMatch(/;\s*Secure/i);
+    const tlsLan = await signInAt('https://192.168.1.20:8443');
+    expect(cookieHeader(tlsLan.callback, ID_TOKEN_COOKIE)).toMatch(/;\s*Secure/i);
+  });
+
+  it('keeps the sign-in cookie for a day over https and for half a day over plain http', async () => {
+    const plain = await signInAt('http://192.168.1.20:8791');
+    expect(cookieHeader(plain.callback, ID_TOKEN_COOKIE)).toMatch(/Max-Age=43200/i);
+    const loopback = await signInAt('http://127.0.0.1:8791');
+    expect(cookieHeader(loopback.callback, ID_TOKEN_COOKIE)).toMatch(/Max-Age=43200/i);
+    const tlsLan = await signInAt('https://192.168.1.20:8443');
+    expect(cookieHeader(tlsLan.callback, ID_TOKEN_COOKIE)).toMatch(/Max-Age=86400/i);
   });
 });

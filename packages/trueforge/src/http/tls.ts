@@ -4,7 +4,6 @@
  *
  * Cert triple under the configured dir: `tls.crt` / `tls.key` / `ca.crt`.
  */
-import type { HttpBindings } from '@hono/node-server';
 import type { MiddlewareHandler } from 'hono';
 import { readFileSync } from 'node:fs';
 import { createServer as createHttpsServer, type ServerOptions as HttpsServerOptions } from 'node:https';
@@ -123,14 +122,32 @@ export function serverTlsServeOptions(
   };
 }
 
-/** Rejects certless requests except `/healthz`. Mount only when mTLS is enabled. */
+/** Marks a request the server sends to its own routes; it never crossed the network, so it has no certificate. */
+const IN_PROCESS_ENV = Object.freeze({});
+
+/** Sends a request to the server's own routes in process, which the client-certificate check lets through. */
+export function inProcessFetch(app: {
+  fetch: (request: Request, env: object) => Response | Promise<Response>;
+}): (request: Request) => Response | Promise<Response> {
+  return request => app.fetch(request, IN_PROCESS_ENV);
+}
+
+function incomingSocket(env: unknown): unknown {
+  if (typeof env !== 'object' || env === null || !('incoming' in env)) {
+    return undefined;
+  }
+  const incoming = env.incoming;
+  return typeof incoming === 'object' && incoming !== null && 'socket' in incoming ? incoming.socket : undefined;
+}
+
+/** Rejects certless requests except `/healthz` and the server's own in-process requests. Mount only when mTLS is enabled. */
 export function createClientCertificateMiddleware(logger: Logger): MiddlewareHandler {
   return async (c, next) => {
-    if (c.req.path === '/healthz') {
+    if (c.req.path === '/healthz' || c.env === IN_PROCESS_ENV) {
       await next();
       return;
     }
-    if (hasAuthorizedClientCertificate((c.env as HttpBindings).incoming.socket)) {
+    if (hasAuthorizedClientCertificate(incomingSocket(c.env))) {
       await next();
       return;
     }

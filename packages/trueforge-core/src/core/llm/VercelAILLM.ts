@@ -35,9 +35,11 @@ import type {
   ChatCompletionTool,
 } from 'openai/resources/chat';
 import type { Logger } from 'winston';
+import { ProviderRequestError } from '../errors';
 import { personMessageIndex } from '../runtime/contextUtils';
 import { MAX_TOOL_CALL_STREAM_PARTS } from '../runtime/modelReplyGuard';
 import { describeUnknownError, extractErrorLogFields } from '../util/errorLogFields';
+import { modelOutboundFetch } from '../util/outboundFetch';
 import { withFailover } from './failoverLanguageModel';
 import type { ILLM, LLMCreateParams, LLMCreateParamsStreaming } from './ILLM';
 import {
@@ -191,6 +193,7 @@ function compatibleModel(config: VercelAIProviderConfig): LanguageModelV4 {
     name: provider.type,
     baseURL: baseUrl,
     apiKey,
+    fetch: modelOutboundFetch,
     // Without this the adapter silently downgrades json_schema to a schema-less json_object.
     supportsStructuredOutputs: true,
     // These endpoints omit token counts from streamed responses unless asked.
@@ -216,6 +219,7 @@ export function buildLanguageModel(
     case 'openai': {
       const client = createOpenAI({
         apiKey,
+        fetch: modelOutboundFetch,
         ...(baseUrl !== undefined ? { baseURL: baseUrl } : {}),
         ...(extraHeaders !== undefined ? { headers: extraHeaders } : {}),
       });
@@ -224,6 +228,7 @@ export function buildLanguageModel(
     case 'anthropic': {
       const client = createAnthropic({
         apiKey,
+        fetch: modelOutboundFetch,
         ...(baseUrl !== undefined ? { baseURL: baseUrl } : {}),
         ...(extraHeaders !== undefined ? { headers: extraHeaders } : {}),
       });
@@ -232,6 +237,7 @@ export function buildLanguageModel(
     case 'google-gemini': {
       const client = createGoogle({
         apiKey,
+        fetch: modelOutboundFetch,
         ...(baseUrl !== undefined ? { baseURL: baseUrl } : {}),
         ...(extraHeaders !== undefined ? { headers: extraHeaders } : {}),
       });
@@ -240,6 +246,7 @@ export function buildLanguageModel(
     case 'moonshot': {
       const client = createMoonshotAI({
         apiKey,
+        fetch: modelOutboundFetch,
         ...(baseUrl !== undefined ? { baseURL: baseUrl } : {}),
         ...(extraHeaders !== undefined ? { headers: extraHeaders } : {}),
       });
@@ -253,6 +260,7 @@ export function buildLanguageModel(
       const client = createAlibaba({
         apiKey,
         baseURL: baseUrl,
+        fetch: modelOutboundFetch,
         ...(extraHeaders !== undefined ? { headers: extraHeaders } : {}),
       });
       return client(model.id);
@@ -2081,8 +2089,9 @@ export async function* mapStreamToChunks({
         // mid-response HarmonyError takes) is the stream itself breaking, so it is a
         // ModelStreamFault. A provider answer saying the request is over the context window is
         // the one definite answer a shorter history can fix, so it is a ModelStreamFault too.
-        if (providerStatusCode(raw) != null && !isContextLengthError(raw)) {
-          throw new Error(message, { cause });
+        const statusCode = providerStatusCode(raw);
+        if (statusCode != null && !isContextLengthError(raw)) {
+          throw new ProviderRequestError(message, { statusCode, cause });
         }
         throw new ModelStreamFault(message, { cause });
       }

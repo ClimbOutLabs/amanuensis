@@ -20,6 +20,8 @@ A task scheduler with per-task notification controls. Task types: one-shot remin
 
 **Per-task notification controls.** Each task has its own channel (in-app, push, silent log) and quiet hours are global. A task can be paused, edited, or deleted at any time.
 
+**A reminder lands where it was set.** When a reminder is set in a chat, that chat is recorded on the reminder. When the reminder fires, the bell item comes first, then its line appears at the end of that same chat, and the bell item opens that chat. The chat is recorded by the server when the reminder is set; the schedules API does not accept it, and an edit keeps it. The line is written only into a chat the reminder's owner started. If a reply is running in that chat, the line waits for it to end. There is no shared Reminders chat. A reminder set outside a chat, a reminder saved before this was recorded, and a reminder whose chat has been deleted still fire on time: the bell item carries them, with no chat line and no link, and no chat is made. Chats named Reminders that already exist in a person's data are left as they are.
+
 ## Scope
 
 - Create/edit/delete scheduled tasks from chat ("remind me in 2 hours", "brief me every morning at 7")
