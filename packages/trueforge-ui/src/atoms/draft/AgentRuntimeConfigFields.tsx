@@ -91,7 +91,7 @@ function applyBudgetedTools(value: TrueForgeAgentRuntimeConfig, budgetedTools: s
   };
 }
 
-/** A set size starts where Automatic would summarize, in whole thousands, so switching does not shrink it. */
+/** A set size starts at 80% of the model's limit, in whole thousands. Automatic can go lower when the agent caps its reply length. */
 function startingCompactionSize(modelContextLength: number | null | undefined): number {
   if (modelContextLength === null || modelContextLength === undefined) {
     return DEFAULT_CONTEXT_COMPACTION_THRESHOLD_TOKENS;
