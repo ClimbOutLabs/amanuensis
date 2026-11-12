@@ -148,6 +148,7 @@ async function setup({
     store: deliveryStore,
     senders: [
       {
+        channel: 'web_push',
         send: ({ delivery }) => {
           if (delivery.level !== 'note') {
             pushed.push(delivery);

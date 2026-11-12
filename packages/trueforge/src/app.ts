@@ -594,6 +594,7 @@ export function createServerApp<TTransaction>(deps: ServerDeps<TTransaction>) {
     tokenFactoryBudget: deps.tokenFactoryBudget,
     chatSearchIndexer: deps.chatSearchIndexer,
     audit: deps.sentinelAuditStore,
+    reminderReach: deps.reminderReach,
     telegramStore: deps.telegramStore,
     telegramService: deps.telegramService,
     telegramQueue: deps.telegramQueue,

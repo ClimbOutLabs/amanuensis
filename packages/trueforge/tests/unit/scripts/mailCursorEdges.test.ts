@@ -81,7 +81,7 @@ async function scenario(harness: MailAgentHarness, { delay_ms = 0 }: { delay_ms?
   const deliveryStore = new DeliveryStore(db);
   const deliveries = createDeliveryService({
     store: deliveryStore,
-    senders: [{ send: () => Promise.resolve([]) }],
+    senders: [{ channel: 'web_push', send: () => Promise.resolve([]) }],
     audit: { record: () => Promise.resolve() },
     logger: winston.createLogger({ silent: true }),
   });

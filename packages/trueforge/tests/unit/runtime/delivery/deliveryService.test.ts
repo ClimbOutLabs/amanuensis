@@ -25,6 +25,7 @@ async function setup() {
   const store = new DeliveryStore(db);
   const sent: string[] = [];
   const sender: DeliveryChannelSender = {
+    channel: 'web_push',
     send: ({ delivery }) => {
       sent.push(delivery.text);
       return Promise.resolve([
