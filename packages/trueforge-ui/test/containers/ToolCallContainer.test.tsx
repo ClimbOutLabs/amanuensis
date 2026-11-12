@@ -765,7 +765,7 @@ describe('ToolCallContainer', () => {
     );
 
     expectNewCardOnly();
-    expect(screen.getByRole('button', { name: 'Always allow this here' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Always allow in this chat' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Allow' })).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
     expect(respondToToolApproval).toHaveBeenCalledWith(
@@ -840,7 +840,7 @@ describe('ToolCallContainer', () => {
     );
   });
 
-  it('preserves the chat scope option when Always allow this here is clicked', () => {
+  it('preserves the chat scope option when Always allow in this chat is clicked', () => {
     respondToToolApproval.mockClear();
     const onRespondToToolApproval = vi.fn();
     renderPendingApprovalMessage(
@@ -865,7 +865,7 @@ describe('ToolCallContainer', () => {
       { onRespondToToolApproval },
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Always allow this here' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Always allow in this chat' }));
     expect(respondToToolApproval).toHaveBeenCalledWith(
       expect.objectContaining({ approvalId: 'approval-1', approved: true, optionId: 'allow-chat' }),
     );
@@ -898,7 +898,7 @@ describe('ToolCallContainer', () => {
     expect(screen.queryByText('Execution details')).not.toBeInTheDocument();
     expectNewCardOnly();
     expect(screen.getByRole('button', { name: 'Allow' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Always allow this here' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Always allow in this chat' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Not now' })).toBeInTheDocument();
   });
 
@@ -1157,8 +1157,11 @@ describe('ToolCallContainer: held search request', () => {
 
   function renderHeldSearch(call: Record<string, unknown>, status?: ThreadMessageLike['status']) {
     const card: SentinelApprovalInfo['card'] = {
-      plain_what: searchHoldCardText({ summary: 'how do I rotate ws••••••3x safely', page: false }),
-      plain_reason: 'This sends something that looks like a password or key.',
+      plain_what: searchHoldCardText({
+        summary: 'how do I rotate ws••••••3x safely',
+        say: 'This sends something that looks like a password or key.',
+        page: false,
+      }),
       plain_why: null,
       cannot_be_undone: null,
       why_asked_again: null,

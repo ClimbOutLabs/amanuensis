@@ -66,6 +66,15 @@ describe('the persona approval card', () => {
     );
   });
 
+  it('shows only the persona Details, and no card-level Details that would open empty', () => {
+    renderCard(TRAVEL_PLANNER_CARD);
+    // The fixture carries no outbound request, no search service fields, and no Always allow handler,
+    // so the one Details on the card is the persona's own, holding its instructions.
+    const disclosures = document.querySelectorAll('details');
+    expect(disclosures).toHaveLength(1);
+    expect(disclosures[0]).toContainElement(screen.getByRole('region', { name: 'Persona instructions' }));
+  });
+
   it('reads the persona from the server event, and drops one with a missing field', () => {
     const event = (persona: Record<string, unknown>) => ({
       type: 'tool.approval_required',

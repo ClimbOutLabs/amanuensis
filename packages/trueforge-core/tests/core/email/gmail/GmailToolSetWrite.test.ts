@@ -10,6 +10,7 @@ import { classifyUnstampedToolCall } from '../../../../src/core/runtime/AgentThr
 import { message, plainDraft } from './fixtures';
 import {
   approvalProblem,
+  APPROVED,
   approvedContext,
   build,
   json,
@@ -81,10 +82,13 @@ describe('draft_email', () => {
             : undefined,
       ],
     });
-    const response = await tools.callTool({
-      name: 'draft_email',
-      arguments: { to: ['grace@example.com'], subject: 'Lease', body: 'Thursday works.' },
-    });
+    const response = await tools.callTool(
+      {
+        name: 'draft_email',
+        arguments: { to: ['grace@example.com'], subject: 'Lease', body: 'Thursday works.' },
+      },
+      APPROVED,
+    );
     expect(JSON.parse(text(response))).toMatchObject({
       draft_id: 'd7',
       message_id: 'm7',
@@ -115,10 +119,18 @@ describe('draft_email', () => {
         features: [...COMPOSE],
         routes: [route('/messages/orig', original), created],
       });
-      await tools.callTool({
-        name: 'draft_email',
-        arguments: { to: ['grace@example.com'], subject: 'anything the model chose', body: 'ok', in_reply_to: 'orig' },
-      });
+      await tools.callTool(
+        {
+          name: 'draft_email',
+          arguments: {
+            to: ['grace@example.com'],
+            subject: 'anything the model chose',
+            body: 'ok',
+            in_reply_to: 'orig',
+          },
+        },
+        APPROVED,
+      );
       const { mime, threadId } = sentDraft(google.bodies[0]);
       expect(threadId).toBe('t5');
       expect(mime).toContain('Subject: Re: Lease renewal');
@@ -137,10 +149,13 @@ describe('draft_email', () => {
         features: [...COMPOSE],
         routes: [route('/messages/orig', answering), created],
       });
-      await tools.callTool({
-        name: 'draft_email',
-        arguments: { to: ['grace@example.com'], subject: 'x', body: 'ok', in_reply_to: 'orig' },
-      });
+      await tools.callTool(
+        {
+          name: 'draft_email',
+          arguments: { to: ['grace@example.com'], subject: 'x', body: 'ok', in_reply_to: 'orig' },
+        },
+        APPROVED,
+      );
       expect(sentDraft(google.bodies[0]).mime).toContain('Subject: Re: Lease renewal\r\n');
     });
 
@@ -156,10 +171,13 @@ describe('draft_email', () => {
 
   it('refuses a subject with a line break instead of sending a header the model smuggled in', async () => {
     const { tools, google } = await build({ features: [...COMPOSE], routes: [] });
-    const response = await tools.callTool({
-      name: 'draft_email',
-      arguments: { to: ['grace@example.com'], subject: 'Hi\r\nBcc: mallory@example.com', body: 'x' },
-    });
+    const response = await tools.callTool(
+      {
+        name: 'draft_email',
+        arguments: { to: ['grace@example.com'], subject: 'Hi\r\nBcc: mallory@example.com', body: 'x' },
+      },
+      APPROVED,
+    );
     expect(text(response)).toContain('line breaks');
     expect(google.urls).toHaveLength(0);
   });
@@ -244,10 +262,13 @@ describe('update_draft', () => {
             : undefined,
       ],
     });
-    await tools.callTool({
-      name: 'update_draft',
-      arguments: { draft_id: 'd1', to: ['grace@example.com'], subject: 'Re: Lease renewal', body: 'Friday instead.' },
-    });
+    await tools.callTool(
+      {
+        name: 'update_draft',
+        arguments: { draft_id: 'd1', to: ['grace@example.com'], subject: 'Re: Lease renewal', body: 'Friday instead.' },
+      },
+      APPROVED,
+    );
     const put = sentDraft(google.bodies.at(-1));
     expect(put.threadId).toBe('t9');
     expect(put.mime).toContain('In-Reply-To: <orig@mail.example.com>');
@@ -266,7 +287,7 @@ describe('update_draft', () => {
       const args = { draft_id: 'd1', to: ['grace@example.com'], subject: 'Lease', body: 'new' };
       const info = await tools.toolCallInfo({ name: 'update_draft', arguments: args });
       expect(info.pre_dispatch_failure?.message).toContain('cannot be changed here');
-      const response = await tools.callTool({ name: 'update_draft', arguments: args });
+      const response = await tools.callTool({ name: 'update_draft', arguments: args }, APPROVED);
       expect(text(response)).toContain('cannot be changed here');
       expect(google.urls.some(entry => entry.startsWith('PUT'))).toBe(false);
     }
@@ -761,7 +782,7 @@ describe('send_draft', () => {
     expect(sleeps.length).toBeGreaterThan(0);
   });
 
-  it('is never covered by a standing "Always allow" or by "Always allow this here"', async () => {
+  it('is never covered by a standing "Always allow" or by "Always allow in this chat"', async () => {
     const { tools } = await build({ features: [...COMPOSE], routes: [draftRoute()] });
     const info = await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
     expect(info.tier).toBe(3);
@@ -769,7 +790,7 @@ describe('send_draft', () => {
     expect(allowsChatApproval(info)).toBe(false);
   });
 
-  it('lets a draft, which sends nothing, be answered once for this chat but never by a standing grant', async () => {
+  it('asks before every draft, with no answer for the whole chat and no standing grant', async () => {
     const { tools } = await build({ features: [...COMPOSE], routes: [draftRoute()] });
     for (const [name, args] of [
       ['update_draft', { draft_id: 'd1', to: ['grace@example.com'], subject: 'Lease', body: 'x' }],
@@ -778,7 +799,7 @@ describe('send_draft', () => {
       const info = await tools.toolCallInfo({ name, arguments: args });
       expect(info.tier).toBe(3);
       expect(allowsToolGrant(info)).toBe(false);
-      expect(allowsChatApproval(info)).toBe(true);
+      expect(allowsChatApproval(info)).toBe(false);
     }
   });
 

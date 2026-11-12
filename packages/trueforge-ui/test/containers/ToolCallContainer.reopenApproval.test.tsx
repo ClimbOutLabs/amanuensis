@@ -66,8 +66,7 @@ function approvalEvent(search: HeldSearch): Record<string, unknown> {
         source_event_id: 'evt-model',
         tier: 3,
         tier3_card: {
-          plain_what: searchHoldCardText({ summary: 'oslo weather', page: false }),
-          plain_reason: search.say,
+          plain_what: searchHoldCardText({ summary: 'oslo weather', say: search.say, page: false }),
           destination: 'search',
           outbound_text: 'query: "oslo weather"',
         },
@@ -197,8 +196,8 @@ describe('a reopened chat with one held search', () => {
 
       it('offers a chat-wide choice only when the server allows one, and never an always choice', async () => {
         const live = await liveChoices(search);
-        expect(live.includes('Always allow this here')).toBe(search.can_chat_allow);
-        expect(live).not.toContain('Always allow this tool');
+        expect(live.includes('Always allow in this chat')).toBe(search.can_chat_allow);
+        expect(live).not.toContain('Always allow everywhere');
         expect(live.slice(0, 3)).toEqual(['Allow', 'Change it', 'Not now']);
       });
     });

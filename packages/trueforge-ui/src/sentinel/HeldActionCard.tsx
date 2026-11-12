@@ -2,18 +2,27 @@
 
 import { useRef, useState, type FC, type ReactNode } from 'react';
 
+import { cn } from '../atoms/lib/cn.js';
 import { useAssistantDisplayName } from '../components/PersonalizationContext.js';
 import { Icon } from '../icons/Icon.js';
 import { AlwaysAllowToolControl } from './AlwaysAllowToolControl.js';
 import { ApprovalActions, ApprovalButton, ApprovalCardShell, ApprovalFacts } from './ApprovalCardParts.js';
 import {
+  alwaysAllowConfirm,
   APPROVAL_CHOICES,
   isNewRecipientCard,
   isNewRecipientDraftCard,
   NEW_RECIPIENT_CHOICES,
   NEW_RECIPIENT_DRAFT_CHOICES,
 } from './approvalChoices.js';
-import { approvalFacts, approvalQuestion, outboundRepeatsFacts } from './approvalCopy.js';
+import {
+  approvalFacts,
+  cardConsequence,
+  cardHeadline,
+  cardReason,
+  outboundRepeatsFacts,
+  safeVerb,
+} from './approvalCopy.js';
 import { CalendarEventDetails } from './CalendarEventDetails.js';
 import { ChangeRequestBox } from './ChangeRequestBox.js';
 import { APPROVED_OUTCOME_TEXT, HELD_EXPIRED_TEXT, type HeldActionOutcome } from './heldActionErrors.js';
@@ -37,7 +46,7 @@ export type HeldActionStatus =
 export type HeldActionCardProps = {
   card: SentinelApprovalCard;
   status: HeldActionStatus;
-  /** Show "Always allow this tool": the server only accepts it for some tools. */
+  /** Show "Always allow everywhere": the server only accepts it for some tools. */
   alwaysAllowOffered: boolean;
   /** Lets a person who cannot manage this chat read the card without answering it. */
   disabled?: boolean;
@@ -117,12 +126,17 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
     : newRecipients
       ? NEW_RECIPIENT_CHOICES.cancel
       : APPROVAL_CHOICES.deny;
+  // The server marks a card safe-first when the action is irreversible or reaches other people:
+  // the safe choice is then the primary button and the action follows it.
+  const safeFirst = card.safe_choice === true;
+  const safeLabel = newRecipients || newRecipientDraft ? denyChoice.label : safeVerb(card);
+  const consequence = cardConsequence(card);
 
   return (
     <li className="list-none" data-role="held-action">
       <ApprovalCardShell
-        question={approvalQuestion(card)}
-        reason={card.plain_reason}
+        question={cardHeadline(card)}
+        reason={cardReason(card)}
         status={canAnswer ? { kind: 'waiting' } : { kind: 'answered', ...answeredStatus(status) }}
       >
         {card.why_asked_again !== null && (
@@ -151,10 +165,10 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
           </div>
         )}
 
-        {card.cannot_be_undone !== null && (
+        {consequence !== null && (
           <p className="flex items-start gap-2 text-sm text-text-secondary">
             <Icon name="info" className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-            <span>{card.cannot_be_undone}</span>
+            <span>{consequence}</span>
           </p>
         )}
 
@@ -171,14 +185,28 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
         )}
 
         <ApprovalActions>
-          <ApprovalButton main title={approveChoice.hint} onClick={onApprove} disabled={disabled}>
+          {safeFirst && (
+            <ApprovalButton main title={denyChoice.hint} onClick={onDeny} disabled={disabled}>
+              {safeLabel}
+            </ApprovalButton>
+          )}
+          <ApprovalButton
+            main={!safeFirst}
+            title={approveChoice.hint}
+            onClick={onApprove}
+            disabled={disabled}
+            className={cn(safeFirst && card.destructive === true && 'text-failure-bg')}
+          >
             {approveChoice.label}
           </ApprovalButton>
           {alwaysAllowOffered && !newRecipients && (
             <AlwaysAllowToolControl
               size="large"
               disabled={disabled}
-              description={`${assistant} will run this tool on this connector without asking, in every chat.`}
+              confirm={alwaysAllowConfirm({
+                covers: undefined,
+                toolSay: `${assistant} will run this tool on this connector without asking, in every chat.`,
+              })}
               onConfirm={onAlwaysAllow}
               className="aui-approval-card__choice"
             />
@@ -196,9 +224,11 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
               {APPROVAL_CHOICES.changeIt.label}
             </ApprovalButton>
           )}
-          <ApprovalButton title={denyChoice.hint} onClick={onDeny} disabled={disabled}>
-            {denyChoice.label}
-          </ApprovalButton>
+          {!safeFirst && (
+            <ApprovalButton title={denyChoice.hint} onClick={onDeny} disabled={disabled}>
+              {denyChoice.label}
+            </ApprovalButton>
+          )}
         </ApprovalActions>
         {changing && onChangeRequest !== undefined && (
           <ChangeRequestBox

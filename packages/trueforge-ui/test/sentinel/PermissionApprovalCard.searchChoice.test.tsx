@@ -7,8 +7,11 @@ import { PermissionApprovalCard } from '@/sentinel/PermissionApprovalCard.js';
 import type { SentinelApprovalCard } from '@/sentinel/types.js';
 
 const SEARCH_CARD: SentinelApprovalCard = {
-  plain_what: searchHoldCardText({ summary: 'Find quiet coffee shops in San Francisco', page: false }),
-  plain_reason: holdSay('Aman').search_setting,
+  plain_what: searchHoldCardText({
+    summary: 'Find quiet coffee shops in San Francisco',
+    say: holdSay('Aman').search_setting,
+    page: false,
+  }),
   plain_why: null,
   cannot_be_undone: null,
   why_asked_again: null,
@@ -42,9 +45,9 @@ function renderSearch(onApproveForChat = vi.fn()) {
 }
 
 describe('PermissionApprovalCard for a held search', () => {
-  it('offers the one chat-wide choice, "Always allow this here", when the server allows it', () => {
+  it('offers the one chat-wide choice, "Always allow in this chat", when the server allows it', () => {
     const { onApproveForChat } = renderSearch();
-    fireEvent.click(screen.getByRole('button', { name: 'Always allow this here' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Always allow in this chat' }));
     expect(onApproveForChat).toHaveBeenCalledTimes(1);
   });
 

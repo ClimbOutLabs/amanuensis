@@ -2,21 +2,25 @@
 
 import { useRef, useState, type FC } from 'react';
 
+import { cn } from '../atoms/lib/cn.js';
 import { GoldTick } from '../atoms/Reward.js';
 import { useAssistantDisplayName } from '../components/PersonalizationContext.js';
 import { useRewardLedger } from '../hooks/useRewardLedger.js';
 import { Icon } from '../icons/Icon.js';
 import { AlwaysAllowToolControl } from './AlwaysAllowToolControl.js';
 import { ApprovalActions, ApprovalButton, ApprovalCardShell, ApprovalFacts, FoldedText } from './ApprovalCardParts.js';
-import { APPROVAL_CHOICES, isNewRecipientCard } from './approvalChoices.js';
+import { alwaysAllowConfirm, APPROVAL_CHOICES, isNewRecipientCard } from './approvalChoices.js';
 import {
   approvalFacts,
-  approvalQuestion,
   approvalSentLine,
   approvalTime,
   approveVerb,
+  cardConsequence,
+  cardHeadline,
+  cardReason,
   declineVerb,
   outboundRepeatsFacts,
+  safeVerb,
 } from './approvalCopy.js';
 import { CalendarEventDetails } from './CalendarEventDetails.js';
 import { ChangeRequestBox } from './ChangeRequestBox.js';
@@ -36,10 +40,12 @@ export type PermissionApprovalCardProps = {
   /** Only passed when the server declared a chat-scoped allow for this call. */
   onApproveForChat?: (() => void) | undefined;
   /**
-   * Records a standing "Always allow this tool" grant and approves this call. Only passed when the
+   * Records a standing "Always allow everywhere" grant and approves this call. Only passed when the
    * server says the owner may always allow this tool; the card asks for confirmation first.
    */
   onApproveAlways?: (() => void) | undefined;
+  /** Set when that answer lets maps run without asking, instead of allowing one tool. */
+  alwaysAllowCovers?: 'maps' | undefined;
   onDeny: () => void;
   /** Only passed for a card with editable content. Gets the text the person typed. */
   onChangeRequest?: ((text: string) => void) | undefined;
@@ -114,6 +120,7 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
   onApprove,
   onApproveForChat,
   onApproveAlways,
+  alwaysAllowCovers,
   onDeny,
   onChangeRequest,
   onApproveAll,
@@ -141,6 +148,10 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
       : visibleOutbound;
   const alwaysOffered = onApproveAlways !== undefined && !newRecipients;
   const hasDetails = (!outboundOpen && outboundShown !== null) || plumbingText !== null || alwaysOffered;
+  const consequence = cardConsequence(card);
+  // The server marks a card safe-first when the action is irreversible or reaches other people: the safe
+  // choice then leads the row as the main button, and Allow follows it.
+  const safeFirst = card.safe_choice === true;
 
   // The tick plays only for an approval the ledger allows; otherwise the card simply says it is done.
   const markSent = (send: () => void) => () => {
@@ -163,8 +174,8 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
     <ApprovalCardShell
       data-role="approval-ticket"
       data-approval-id={approvalId}
-      question={approvalQuestion(card)}
-      reason={card.plain_reason}
+      question={cardHeadline(card)}
+      reason={cardReason(card)}
       highlighted={highlighted}
       status={
         answered
@@ -176,10 +187,10 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
           : { kind: 'waiting' }
       }
     >
-      {card.cannot_be_undone !== null && (
+      {consequence !== null && (
         <p className="flex items-start gap-2 text-text-secondary">
           <Icon name="info" className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-          <span>{card.cannot_be_undone}</span>
+          <span>{consequence}</span>
         </p>
       )}
 
@@ -206,12 +217,24 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
       )}
 
       <ApprovalActions>
+        {safeFirst && (
+          <ApprovalButton
+            main
+            data-approval-primary
+            title={APPROVAL_CHOICES.deny.hint}
+            onClick={onDeny}
+            disabled={busy}
+          >
+            {safeVerb(card)}
+          </ApprovalButton>
+        )}
         <ApprovalButton
-          main
-          data-approval-primary
+          main={!safeFirst}
+          {...(safeFirst ? {} : { 'data-approval-primary': true })}
           title={APPROVAL_CHOICES.approve.hint}
           onClick={markSent(onApprove)}
           disabled={busy}
+          className={cn(safeFirst && card.destructive === true && 'text-failure-bg')}
         >
           {approveVerb(card)}
         </ApprovalButton>
@@ -243,9 +266,11 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
             {APPROVAL_CHOICES.changeIt.label}
           </ApprovalButton>
         )}
-        <ApprovalButton title={APPROVAL_CHOICES.deny.hint} onClick={onDeny} disabled={busy}>
-          {declineVerb(card)}
-        </ApprovalButton>
+        {!safeFirst && (
+          <ApprovalButton title={APPROVAL_CHOICES.deny.hint} onClick={onDeny} disabled={busy}>
+            {declineVerb(card)}
+          </ApprovalButton>
+        )}
       </ApprovalActions>
 
       {changing && onChangeRequest !== undefined && (
@@ -274,7 +299,10 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
               <AlwaysAllowToolControl
                 size="small"
                 disabled={busy}
-                description={`${assistant} will run this kind of action on this connector without asking, in every chat.`}
+                confirm={alwaysAllowConfirm({
+                  covers: alwaysAllowCovers,
+                  toolSay: `${assistant} will run this kind of action on this connector without asking, in every chat.`,
+                })}
                 onConfirm={markSent(onApproveAlways)}
               />
             )}

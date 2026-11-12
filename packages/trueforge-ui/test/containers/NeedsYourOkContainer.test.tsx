@@ -40,6 +40,7 @@ vi.mock('@/server/ServerContext.js', async importOriginal => {
 function card(overrides: Partial<SentinelApprovalCard> = {}): SentinelApprovalCard {
   return {
     plain_what: 'Send a note to Ana.',
+    copy: { headline: 'Send a note to Ana.', consequence: null, reason: null },
     plain_why: 'It was on the Monday list.',
     cannot_be_undone: null,
     why_asked_again: null,
@@ -192,7 +193,7 @@ describe('NeedsYourOkContainer', () => {
   it('sends Always allow only where the server offered it', async () => {
     answerHeldAction.mockResolvedValue(undefined);
     renderBrief({ alwaysAllowOffered: true });
-    fireEvent.click(screen.getByRole('button', { name: 'Always allow this tool' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Always allow everywhere' }));
     fireEvent.click(screen.getByTestId('always-allow-confirm'));
     await waitFor(() => {
       expect(answerHeldAction).toHaveBeenCalledWith(expect.objectContaining({ answer: 'always_allow' }));

@@ -9,14 +9,18 @@ const noop = () => {};
 
 // A held search with every choice a ticket card can show, the chat-wide one included.
 createRoot(rootElement).render(
-  <SlotsProvider theme={{ webFonts: false }}>
+  <SlotsProvider>
     <main style={{ maxWidth: '48rem', margin: '0 auto', padding: '1rem', display: 'grid', gap: '1rem' }}>
       <section data-testid="ticket-card">
         <PermissionApprovalCard
           approvalId="approval-phone"
           card={{
             plain_what: 'Search the web for Find quiet coffee shops near the Ferry Building in San Francisco?',
-            plain_reason: 'Searches are set to ask, so Aman is checking with you first.',
+            copy: {
+              headline: 'Search the web for Find quiet coffee shops near the Ferry Building in San Francisco?',
+              consequence: null,
+              reason: 'Searches are set to ask, so Aman is checking with you first.',
+            },
             plain_why: null,
             cannot_be_undone: null,
             why_asked_again: null,

@@ -19,7 +19,11 @@ import { actionIdFor } from '../../../src/core/permissions/approvalTokens';
 import type { AuditRecordInput } from '../../../src/core/permissions/audit';
 import { forUnattendedRun, type SentinelServices } from '../../../src/core/permissions/context';
 import { recordPersonText, recordUntrustedText } from '../../../src/core/permissions/provenance';
-import { recordToolResultProvenance, SILENT_SEARCH_LIMIT } from '../../../src/core/permissions/webSearch';
+import {
+  hostToolStamp,
+  recordToolResultProvenance,
+  SILENT_SEARCH_LIMIT,
+} from '../../../src/core/permissions/webSearch';
 import { toToolCallInfo } from '../../../src/core/runtime/contextUtils';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 
@@ -250,8 +254,9 @@ describe('the outbound guard on the designated provider', () => {
     const h = harness({ searchProvider: true, secrets: [secret] });
     const info = await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: `debug ${secret} now` } });
     const card = info.tier3_card;
-    expect(card?.plain_what).toBe('Search the web for debug sy••••••11 now?');
-    expect(card?.plain_reason).toBe('This sends something that looks like a password or key.');
+    expect(card?.plain_what).toBe(
+      'Search the web for debug sy••••••11 now? This sends something that looks like a password or key.',
+    );
     expect(card?.outbound_text).toBe('query: debug sy••••••11 now');
     expect(card?.why_asked_again).toBeNull();
     expect(JSON.stringify(info)).not.toContain(secret);
@@ -271,7 +276,7 @@ describe('the outbound guard on the designated provider', () => {
     const info = await h.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: secret.slice(14) } });
     expect(info.tier3_card?.plain_what).not.toContain(secret.slice(14));
     expect(info.tier3_card?.outbound_text).not.toContain(secret.slice(14));
-    expect(info.tier3_card?.plain_reason).toContain('looks like a password or key');
+    expect(info.tier3_card?.plain_what).toContain('looks like a password or key');
   });
 
   it('masks the key on the card when searches are set to ask', async () => {
@@ -374,7 +379,7 @@ describe('provider plumbing fields on the designated provider', () => {
     const result = await info(h, { objective, search_queries: [tooLong], session_id: uuid });
     expect(result.tier).toBe(3);
     expect(result.tier3_card?.outbound_text).toContain(tooLong.trim());
-    expect(result.tier3_card?.plain_reason).toBe('This is a long search, so Aman is checking with you first.');
+    expect(result.tier3_card?.plain_what).toContain('This is a long search, so Aman is checking with you first.');
     expect(result.tier3_card?.why_asked_again).toBeNull();
   });
 
@@ -382,7 +387,7 @@ describe('provider plumbing fields on the designated provider', () => {
     const h = harness({ searchProvider: true, plumbingFields });
     const result = await info(h, { objective: 'loom', session_id: 'x'.repeat(60) });
     expect(result.tier).toBe(3);
-    expect(result.tier3_card?.plain_reason).toBe('This is a long search, so Aman is checking with you first.');
+    expect(result.tier3_card?.plain_what).toContain('This is a long search, so Aman is checking with you first.');
   });
 
   it('names a held search in one plain line: its objective, with the ids, model and provider left out', async () => {
@@ -394,8 +399,14 @@ describe('provider plumbing fields on the designated provider', () => {
       model_name: 'invented-model-7',
     });
     expect(result.tier).toBe(3);
-    expect(result.tier3_card?.plain_what).toBe(`Search the web for ${objective}?`);
-    expect(result.tier3_card?.plain_reason).toBe(`Searches are set to ask, so Aman is checking with you first.`);
+    expect(result.tier3_card?.plain_what).toBe(
+      `Search the web for ${objective}? Searches are set to ask, so Aman is checking with you first.`,
+    );
+    expect(result.tier3_card?.copy).toEqual({
+      headline: `Search the web for ${objective}?`,
+      consequence: null,
+      reason: 'Searches are set to ask, so Aman is checking with you first.',
+    });
     expect(result.tier3_card?.outbound_text).toContain(uuid);
     expect(result.tier3_card?.outbound_text).toContain('invented-model-7');
   });
@@ -454,8 +465,9 @@ describe('provider plumbing fields on the designated provider', () => {
     const h = harness({ searchProvider: true, plumbingFields, secrets: [key] });
     const result = await info(h, { objective: 'loom', session_id: key, model_name: 424242 });
     expect(result.tier).toBe(3);
-    expect(result.tier3_card?.plain_what).toBe('Search the web for loom?');
-    expect(result.tier3_card?.plain_reason).toBe('This sends something that looks like a password or key.');
+    expect(result.tier3_card?.plain_what).toBe(
+      'Search the web for loom? This sends something that looks like a password or key.',
+    );
     expect(result.tier3_card?.outbound_text).toContain('session_id: in••••••2c');
     expect(result.tier3_card?.outbound_text).toContain('model_name (number): 424242');
     expect(result.audit_description).toBe(
@@ -470,7 +482,7 @@ describe('provider plumbing fields on the designated provider', () => {
     const h = harness({ searchProvider: true, plumbingFields, secrets: [key] });
     const result = await info(h, { objective: 'loom', session_id: tail, search_queries: [head] });
     expect(result.tier).toBe(3);
-    expect(result.tier3_card?.plain_reason).toContain('looks like a password or key');
+    expect(result.tier3_card?.plain_what).toContain('looks like a password or key');
     expect(result.tier3_card?.plain_what).not.toContain(tail);
     expect(result.tier3_card?.outbound_text).not.toContain(tail);
     expect(result.audit_description).not.toContain(tail);
@@ -583,6 +595,7 @@ describe('links and where they came from', () => {
     recordToolResultProvenance({
       state: h.host.web_search,
       tool_name: input.tool_name,
+      stamp: hostToolStamp({ type: 'mcp', search_provider_call: true }),
       argument_values: input.args,
       texts: [input.text],
     });
@@ -616,9 +629,8 @@ describe('links and where they came from', () => {
     readResult(h, { tool_name: 'read_email', args: ['m1'], text: mail });
     const info = await fetchInfo(h, `${mailLink}sam.rivers@example.com`);
     expect(info.tier).toBe(3);
-    expect(info.tier3_card?.plain_what).toBe(`Open ${mailLink}sam.rivers@example.com?`);
-    expect(info.tier3_card?.plain_reason).toBe(
-      `Aman found this link in something it read, and opening it would send more than the link said.`,
+    expect(info.tier3_card?.plain_what).toBe(
+      `Open ${mailLink}sam.rivers@example.com? Aman found this link in something it read, and opening it would send more than the link said.`,
     );
     expect(info.audit_description).toBe(
       'Open a web page through the search provider. Aman found this link in something it read, and opening it would send more than the link said.',
@@ -682,8 +694,14 @@ describe('links and where they came from', () => {
       searchWithoutAsking: false,
     });
     const info = await fetchInfo(h, page);
-    expect(info.tier3_card?.plain_what).toBe(`Open ${page}?`);
-    expect(info.tier3_card?.plain_reason).toBe(`Searches are set to ask, so Aman is checking with you first.`);
+    expect(info.tier3_card?.plain_what).toBe(
+      `Open ${page}? Searches are set to ask, so Aman is checking with you first.`,
+    );
+    expect(info.tier3_card?.copy).toEqual({
+      headline: `Open ${page}?`,
+      consequence: null,
+      reason: 'Searches are set to ask, so Aman is checking with you first.',
+    });
   });
 });
 
@@ -888,7 +906,7 @@ describe('a secret sent in pieces over several searches', () => {
     await runSearch(chat, secret.slice(0, 14));
     const info = await chat.toolSet.toolCallInfo({ name: 'lookup', arguments: { query: secret.slice(14) } });
     expect(info.tier).toBe(3);
-    expect(info.tier3_card?.plain_reason).toContain('looks like a password or key');
+    expect(info.tier3_card?.plain_what).toContain('looks like a password or key');
 
     const scheduled = harness({ searchProvider: true, secrets: [secret], unattended: true });
     await runSearch(scheduled, secret.slice(0, 14));

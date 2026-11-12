@@ -43,7 +43,7 @@ function renderCard(overrides: Partial<SentinelApprovalCard> = {}, props: Partia
 }
 
 describe('PermissionApprovalCard', () => {
-  it('renders the server-supplied what, why, and details', () => {
+  it('renders the why and details of a card saved before copy existed, under the generic headline', () => {
     renderCard({
       destination: 'acme-corp',
       recipient: 'Acme Corp',
@@ -51,7 +51,7 @@ describe('PermissionApprovalCard', () => {
       cannot_be_undone: "Once this is sent, it can't be unsent.",
       why_asked_again: 'the earlier approval expired',
     });
-    expect(screen.getByText('Send $250 to Acme Corp')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Needs your OK' })).toBeInTheDocument();
     expect(screen.getByText(/says: You asked the assistant to pay the invoice\.$/)).toBeInTheDocument();
     expect(screen.getByText('Where')).toBeInTheDocument();
     expect(screen.getAllByText('acme-corp')[0]).toBeInTheDocument();
@@ -89,6 +89,15 @@ describe('PermissionApprovalCard', () => {
     expect(screen.getByText('query: sensitive internal project name')).toBeInTheDocument();
   });
 
+  it('keeps the outbound request inside the card-level Details', () => {
+    renderCard({ outbound_text: 'query: sensitive internal project name' });
+    const summary = screen.getByText('Details', { selector: 'summary' });
+    const details = summary.closest('details');
+    if (details === null) throw new Error('the card-level Details disclosure is missing');
+    expect(details).toContainElement(screen.getByText('Full request'));
+    expect(details).toContainElement(screen.getByText('query: sensitive internal project name'));
+  });
+
   it('renders outbound text in a monospace block', () => {
     renderCard({ outbound_text: 'url: https://example.com/fetch?x=1' });
     const block = screen.getByText('url: https://example.com/fetch?x=1');
@@ -115,7 +124,7 @@ describe('PermissionApprovalCard', () => {
   it('shows no reason line when the server sent none', () => {
     renderCard({ plain_why: null });
     expect(screen.queryByText(/did not state a reason/i)).not.toBeInTheDocument();
-    expect(screen.getByText('Send $250 to Acme Corp')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Needs your OK' })).toBeInTheDocument();
   });
 
   it('shows the cannot-be-undone note as a calm line with no warning box or prefix', () => {
@@ -128,10 +137,78 @@ describe('PermissionApprovalCard', () => {
 
   it('renders a card with a null cannot-be-undone note without an empty row or the word null', () => {
     renderCard({ cannot_be_undone: null });
-    expect(screen.getByText('Send $250 to Acme Corp')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Needs your OK' })).toBeInTheDocument();
     expect(screen.queryByText(/null/i)).not.toBeInTheDocument();
     expect(document.querySelector('p:empty')).toBeNull();
     expect(document.querySelectorAll('p > svg')).toHaveLength(0);
+  });
+
+  it('puts the safe choice first as the primary button on a destructive card, with the reason under the question', () => {
+    const { onApprove, onDeny } = renderCard({
+      copy: {
+        headline: 'Delete "Dentist", Fri 7 Nov, 3:00 PM?',
+        consequence: "This removes the event from the calendar. It can't be restored from here.",
+        reason: 'Aman always asks before deleting an event in this calendar.',
+      },
+      safe_choice: true,
+      destructive: true,
+    });
+    expect(screen.getByRole('heading', { name: 'Delete "Dentist", Fri 7 Nov, 3:00 PM?' })).toBeInTheDocument();
+    expect(
+      screen.getByText("This removes the event from the calendar. It can't be restored from here."),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Aman always asks before deleting an event in this calendar.')).toBeInTheDocument();
+
+    const buttons = screen
+      .getAllByRole('button')
+      .filter(button => ['Keep it', 'Allow'].includes(button.textContent ?? ''));
+    expect(buttons.map(button => button.textContent)).toEqual(['Keep it', 'Allow']);
+    expect(buttons[0]?.hasAttribute('data-approval-primary')).toBe(true);
+    expect(buttons[1]?.hasAttribute('data-approval-primary')).toBe(false);
+    expect(buttons[1]?.className).toMatch(/text-failure-bg/);
+    expect(screen.queryByRole('button', { name: 'Not now' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Keep it' }));
+    expect(onDeny).toHaveBeenCalledTimes(1);
+    expect(onApprove).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
+    expect(onApprove).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the new-recipient line from the copy on a send to someone new', () => {
+    renderCard({
+      plain_what: 'Send an email to stranger@example.com?',
+      recipient: 'stranger@example.com',
+      cannot_be_undone: "Once this is sent, it can't be unsent.",
+      copy: {
+        headline: 'Send an email to stranger@example.com?',
+        consequence:
+          "New recipient. You have never emailed stranger@example.com. Approving adds them to your send list and sends. Once this is sent, it can't be unsent.",
+        reason: null,
+      },
+      safe_choice: true,
+      destructive: true,
+    });
+    expect(screen.getByRole('heading', { name: 'Send an email to stranger@example.com?' })).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "New recipient. You have never emailed stranger@example.com. Approving adds them to your send list and sends. Once this is sent, it can't be unsent.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('keeps the action primary and the safe choice quiet on a reversible card', () => {
+    renderCard({
+      copy: {
+        headline: 'Write the summary into notes.md?',
+        consequence: null,
+        reason: 'This kind of write always asks.',
+      },
+    });
+    const allow = screen.getByRole('button', { name: 'Allow' });
+    expect(allow.hasAttribute('data-approval-primary')).toBe(true);
+    expect(screen.getByRole('button', { name: 'Not now' })).toBeInTheDocument();
+    expect(screen.getByText('This kind of write always asks.')).toBeInTheDocument();
   });
 
   it("labels the reason as the agent's own words", () => {
@@ -173,12 +250,22 @@ describe('PermissionApprovalCard', () => {
     expect(folded.textContent).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
   });
 
-  it('asks its question as the heading, with no approval label, lock or tier word', () => {
+  it('shows the generic headline as the heading on a card with no copy and no fields, with no approval label, lock or tier word', () => {
     renderCard();
-    expect(screen.getByRole('heading', { name: 'Send $250 to Acme Corp' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Needs your OK' })).toBeInTheDocument();
     expect(screen.getAllByText('Waiting for you')).toHaveLength(1);
     expect(screen.queryByText('Approval needed')).not.toBeInTheDocument();
-    expect(screen.queryByText(/Needs your OK|Review carefully|Tier \d/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Review carefully|Tier \d/)).not.toBeInTheDocument();
+  });
+
+  it('never shows an id saved in an old card anywhere on the card', () => {
+    // A card saved by the old calendar path: its stored sentence names the event by its id.
+    const idToken = ['ev1', 'L2NhbGVu', 'ZGFyL2Rh', 'dGlvbi05', 'ZjhlN2Q2', 'YzViNGE'].join('.');
+    renderCard({
+      plain_what: `Delete the event with id ${idToken}? Its title could not be read.`,
+    });
+    expect(screen.getByRole('heading', { name: 'Needs your OK' })).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain(idToken);
   });
 
   it('calls the safe verb', () => {
@@ -262,11 +349,15 @@ describe('PermissionApprovalCard for a calendar event', () => {
 });
 
 describe('PermissionApprovalCard always allow this tool', () => {
-  const ALWAYS_ALLOW_TOOL = 'Always allow this tool';
+  const ALWAYS_ALLOW_TOOL = 'Always allow everywhere';
 
   it('offers the option only when an always-allow handler is passed', () => {
     renderCard({}, { onApproveAlways: vi.fn() });
-    expect(screen.getByRole('button', { name: ALWAYS_ALLOW_TOOL })).toBeInTheDocument();
+    const control = screen.getByRole('button', { name: ALWAYS_ALLOW_TOOL });
+    expect(control).toBeInTheDocument();
+    const details = control.closest('details');
+    if (details === null) throw new Error('the always-allow control is not inside the card-level Details');
+    expect(details.querySelector('summary')).toHaveTextContent('Details');
   });
 
   it('does not offer the option without a handler', () => {
@@ -279,7 +370,7 @@ describe('PermissionApprovalCard always allow this tool', () => {
     renderCard({}, { onApproveAlways });
     fireEvent.click(screen.getByRole('button', { name: ALWAYS_ALLOW_TOOL }));
 
-    expect(screen.getByRole('heading', { name: 'Always allow this tool?' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Always allow everywhere?' })).toBeInTheDocument();
     expect(screen.getByText(/You can remove this later in connector settings/)).toBeInTheDocument();
     expect(onApproveAlways).not.toHaveBeenCalled();
   });
@@ -292,6 +383,24 @@ describe('PermissionApprovalCard always allow this tool', () => {
       screen.getByText('Aman will run this kind of action on this connector without asking, in every chat.'),
     ).toBeInTheDocument();
     expect(screen.queryByText(/The agent will run/)).not.toBeInTheDocument();
+  });
+
+  it('says on a maps card that the answer turns maps on everywhere, and names the Maps switch', () => {
+    renderCard({}, { onApproveAlways: vi.fn(), alwaysAllowCovers: 'maps' });
+    const button = screen.getByRole('button', { name: ALWAYS_ALLOW_TOOL });
+    expect(button).toHaveAttribute(
+      'title',
+      'Show maps without asking, in every chat, until you turn it off in Settings.',
+    );
+    fireEvent.click(button);
+
+    expect(
+      screen.getByText(
+        'Maps will show without asking, in every chat and in scheduled runs. A map still asks if it would send something that looks like a password or key.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText('You can turn this off later with the Maps switch in Settings.')).toBeInTheDocument();
+    expect(screen.queryByText(/connector/)).not.toBeInTheDocument();
   });
 
   it('calls nothing when the owner cancels the confirm step', () => {

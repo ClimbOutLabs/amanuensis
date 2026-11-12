@@ -145,12 +145,20 @@ describe('the approval card', () => {
       attendees: ['lin@example.com', 'sam@example.com'],
       guests_emailed: true,
       one_of_repeating: false,
+      already_created: false,
+      span_days: 1,
       before: null,
     });
     expect(info.tier3_card?.plain_what).toBe(
       'Add "Dentist" to your Google Calendar on Mon Oct 19, 9:00 to 10:00 am (America/New_York)? Google emails lin@example.com and sam@example.com about it.',
     );
-    expect(info.tier3_card?.plain_reason).toBe('This change sends an invitation to other people, so Aman always asks.');
+    expect(info.tier3_card?.copy).toEqual({
+      headline: 'Add "Dentist" to your Google Calendar on Mon Oct 19, 9:00 to 10:00 am (America/New_York)?',
+      consequence:
+        "Google emails lin@example.com and sam@example.com about it. Google emails the guests right away. That email can't be unsent.",
+      reason: 'This change sends an invitation to other people, so Aman always asks.',
+    });
+    expect(info.tier3_card?.safe_choice).toBe(true);
     expect(info.tier3_card?.cannot_be_undone).toContain("can't be unsent");
   });
 
@@ -489,12 +497,12 @@ describe('durable approvals', () => {
     expect(allowsToolGrant(info)).toBe(false);
   });
 
-  it('offers approve-for-this-chat and always-allow for a new event with no guests', async () => {
+  it('offers the answer for this chat, and not the one for every chat, for a new event with no guests', async () => {
     const built = await build({ routes: [], features: [...WRITE], timeZone: 'America/New_York' });
     const info = await built.tools.toolCallInfo({ name: 'create_event', arguments: { ...DENTIST } });
     expect(info).toMatchObject({ tier: 3, tier_reason: 'calendar_write', is_approval_required: true });
     expect(allowsChatApproval(info)).toBe(true);
-    expect(allowsToolGrant(info)).toBe(true);
+    expect(allowsToolGrant(info)).toBe(false);
   });
 });
 
@@ -718,7 +726,7 @@ describe('card date wording and duplicate creates', () => {
       arguments: { title: 'Retreat', start: '2026-10-27T14:30', end: '2026-10-28T15:00' },
     });
     expect(info.tier3_card?.calendar_event?.when).toBe('Tue Oct 27, 2:30 pm to Wed Oct 28, 3:00 pm');
-    expect(info.tier3_card?.plain_reason).toBe('This event runs over 2 days. Is that right?');
+    expect(info.tier3_card?.plain_what).toContain('This event runs over 2 days. Is that right?');
   });
 
   it('shows a same-day event in the short form, with no warning', async () => {
@@ -735,7 +743,7 @@ describe('card date wording and duplicate creates', () => {
     expect(outcome.disposition).toBe('executed_ok');
 
     const again = await cardFor(built, { name: 'create_event', arguments: CHECKUP });
-    expect(again.tier3_card?.plain_what).toContain('You already have this event. Add another?');
+    expect(again.tier3_card?.copy?.consequence).toContain('You already have this event.');
     // It still asks as a normal card: approving it is the owner's choice, not a refusal.
     expect(again.tier).toBe(3);
     expect(again.is_approval_required).toBe(true);
@@ -764,7 +772,7 @@ describe('card date wording and duplicate creates', () => {
 });
 
 describe('the write tool under a standing grant', () => {
-  it('writes an event with no guests under an Always grant, with no answer to that call', async () => {
+  it('asks for an event with no guests under an Always grant, and writes nothing with no answer to that call', async () => {
     const services = defaultSentinelServices({ pinned_path: '/usr/bin:/bin' });
     const built = await build({ routes: [insertRoute], features: [...WRITE], timeZone: 'America/New_York', services });
     await services.tool_grants.recordToolGrant({
@@ -775,11 +783,27 @@ describe('the write tool under a standing grant', () => {
       mcp_server_host: null,
     });
     const info = await built.tools.toolCallInfo({ name: 'create_event', arguments: DENTIST });
-    expect(info).toMatchObject({ tier: 1, tier_reason: 'mcp_tool_grant' });
+    expect(info).toMatchObject({ tier: 3, tier_reason: 'calendar_write', is_approval_required: true });
     const response = await built.tools.callTool({ name: 'create_event', arguments: DENTIST }, undefined, {
       admission_provenance: { source: 'automatic' },
       approved_params: info.mint_canonical_params,
     });
+    expect(text(response)).toContain('not approved');
+    expect(writes(built.google.urls)).toEqual([]);
+  });
+
+  it('writes an event with no guests on an answer given for the whole chat', async () => {
+    const built = await build({ routes: [insertRoute], features: [...WRITE], timeZone: 'America/New_York' });
+    const info = await built.tools.toolCallInfo({ name: 'create_event', arguments: DENTIST });
+    expect(info).toMatchObject({ tier: 3, tier_reason: 'calendar_write' });
+    const response = await built.tools.callTool(
+      { name: 'create_event', arguments: DENTIST },
+      { status: 'allow', scope: 'chat' },
+      {
+        admission_provenance: { source: 'chat_grant', decision: 'allow', scope: 'chat' },
+        approved_params: info.mint_canonical_params,
+      },
+    );
     expect(text(response)).not.toContain('not approved');
     expect(writes(built.google.urls)).toHaveLength(1);
   });

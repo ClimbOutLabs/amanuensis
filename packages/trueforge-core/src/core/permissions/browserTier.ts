@@ -23,22 +23,28 @@ import {
   BROWSER_TYPE_TOOL_NAME,
   isBrowserToolName,
 } from './browserToolNames';
+import { browserCardCopy } from './cardCopy';
 import type { SentinelAction } from './classifier';
 import { escapeDisplayText } from './displayText';
 import { renderOutboundArguments } from './extractorRegistry';
+import { withHoldSay } from './searchHoldText';
 import { tier1Decision, tier3Decision, type Tier3Card, type TierDecision } from './tier';
 
-/** The card for an open that asks: the exact address, which is everything the open sends, and the site it goes to. */
+/**
+ * The card for an open that asks: the exact address, which is everything the open sends, and the site
+ * it goes to. The question and the sentence that says why this open asks arrive apart, so the copy
+ * owner can lead with the question and carry the sentence as the reason; plain_what joins them.
+ */
 export function browserOpenCard(input: {
   url: string;
   host: string | null;
-  plain_what: string;
-  plain_reason: string;
+  headline: string;
+  say: string;
   plain_why: string | null;
 }): Tier3Card {
   return {
-    plain_what: input.plain_what,
-    plain_reason: input.plain_reason,
+    plain_what: withHoldSay(input.headline, input.say),
+    copy: browserCardCopy({ headline: input.headline, reason: input.say }),
     plain_why: input.plain_why,
     cannot_be_undone: null,
     why_asked_again: null,
@@ -132,8 +138,10 @@ function shown(text: string): string {
 function commitClickCard(review: BrowserClickReview): Tier3Card {
   const label = review.accessible_name.trim() === '' ? '(no label)' : shown(review.accessible_name);
   const outbound = renderOutboundArguments(review.form_values);
+  const plain_what = `Click "${label}" on ${shown(review.site)}?`;
   return {
-    plain_what: `Click "${label}" on ${shown(review.site)}?`,
+    plain_what,
+    copy: browserCardCopy({ headline: plain_what, reason: null }),
     plain_why: null,
     cannot_be_undone: null,
     why_asked_again: null,

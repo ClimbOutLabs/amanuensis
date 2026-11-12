@@ -1552,6 +1552,15 @@
   font-weight: 600;
   line-height: 1.35;
   letter-spacing: normal;
+  overflow-wrap: anywhere;
+}
+
+/* Every text block on a card wraps anywhere, so no word or string can push the card sideways. */
+.aui-approval-card p,
+.aui-approval-card dt,
+.aui-approval-card dd,
+.aui-approval-card li {
+  overflow-wrap: anywhere;
 }
 
 .aui-approval-card--answered .aui-approval-card__title {
@@ -1810,6 +1819,16 @@
     min-height: 2.75rem;
     height: auto;
     white-space: normal;
+  }
+
+  /* On a phone the choices stack full width in a column, in the order the card puts them. */
+  .aui-approval-card__choices {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .aui-approval-card__choices > * {
+    width: 100%;
   }
 }
 

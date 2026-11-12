@@ -14,7 +14,7 @@
  * server sent an explicit `tier`.
  */
 import { changeRequestText } from '@truefoundry/trueforge-core/core/permissions/changeRequest';
-import { savedSearchHold } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
+import { savedSearchHold, withHoldSay } from '@truefoundry/trueforge-core/core/permissions/searchHoldText';
 import { readStoredMailbox, type Tier3Mailbox } from '@truefoundry/trueforge-core/core/permissions/tierMailbox';
 import type { BriefSection } from '@truefoundry/trueforge-core/core/schedules/morningBrief';
 
@@ -65,6 +65,10 @@ export type SentinelApprovalEmail = {
   reply_in_thread: { subject: string; from: string } | null;
   /** The address replies go to when it is not the sender, or null when replies go to the sender. */
   reply_to: string | null;
+  /** The display name the message is sent as, null when none is set; absent on a card from before it was carried. */
+  from_name?: string | null;
+  /** True when a name was left off an address because it looked like an address; absent on an older card. */
+  name_left_off?: boolean;
 };
 
 const APPROVAL_CALENDAR_ACTIONS = ['create', 'change'] as const;
@@ -90,6 +94,10 @@ export type SentinelApprovalCalendarEvent = {
   guests_emailed: boolean;
   /** True when a change touches one date of a repeating event. */
   one_of_repeating: boolean;
+  /** True when the same event was created in this chat a few minutes ago; absent on an older card. */
+  already_created?: boolean;
+  /** How many days the event runs over; absent on an older card. */
+  span_days?: number;
   /** The event as it is now, for a change; null for a new event. */
   before: { title: string; when: string; duration: string; location: string } | null;
 };
@@ -115,6 +123,21 @@ export type SentinelApprovalSchedule = {
 };
 
 /**
+ * The words an approval card is made of, produced by the server by one owner per action kind.
+ * The UI renders the three parts and never builds sentences of its own. Absent on cards saved
+ * before copy existed; those build their headline from their own fields, or show the generic
+ * headline when they have none, never their stored plain_what.
+ */
+export type SentinelApprovalCopy = {
+  /** What will happen, in one sentence, in words the person recognises. */
+  headline: string;
+  /** What follows from approving, in one line, or null when nothing needs saying. */
+  consequence: string | null;
+  /** Why the tier asks, in plain words, shown on its own line under the question, or null. */
+  reason: string | null;
+};
+
+/**
  * Server-rendered approval card for Tier 2 and Tier 3 actions. Mirrors the backend `Tier3Card` schema:
  * destination/recipient/amount come from the server-side extractor registry over
  * canonical params, never agent text. Shell cards carry the server-parsed command.
@@ -123,8 +146,12 @@ export type SentinelApprovalSchedule = {
 export type SentinelApprovalCard = {
   /** One plain-language sentence describing what will happen. No jargon. Always present. */
   plain_what: string;
-  /** One plain sentence on why the assistant is checking first, shown under the question; null or absent when none. */
-  plain_reason?: string | null | undefined;
+  /** The headline, consequence and reason the card renders, or null on cards saved before copy existed. */
+  copy?: SentinelApprovalCopy | null | undefined;
+  /** True when the safe choice is the primary button: the action is irreversible or reaches other people. */
+  safe_choice?: boolean | undefined;
+  /** True when the action destroys or sends something for good, so its button wears the destructive ink. */
+  destructive?: boolean | undefined;
   /** One sentence on why the agent wants this, from agent intent when available. */
   plain_why: string | null;
   /** What cannot be undone, or null when fully reversible. */
@@ -192,6 +219,8 @@ export type SentinelApprovalInfo = {
   chatAllowOffered?: boolean | undefined;
   /** True when the server lets the owner always allow this tool; the server refuses it for other tools. */
   alwaysAllowOffered?: boolean | undefined;
+  /** Set when the every-chat answer on this card lets maps run without asking, instead of allowing one tool. */
+  alwaysAllowCovers?: 'maps' | undefined;
   /** Present only for an action a scheduled run held; such a card never pauses the chat. */
   held?: HeldActionInfo | undefined;
   /** Present only for an action a scheduled run could not save for the owner, and why. */
@@ -298,7 +327,7 @@ export type SentinelUserSettings = {
  * server's HTTP API plus the SDK client; trueforge-ui only declares the contract.
  *
  * - `GET /api/v1/sessions/{sessionId}/audit-log?limit=N` -> `{ entries: [...] }`
- * - `GET /api/v1/user/audit-log?limit=N&page_token=T&outcome=O` -> `{ data: [...], pagination }`
+ * - `GET /api/v1/user/audit-log?limit=N&page_token=T&outcome=O&from=ISO&to=ISO` -> `{ data: [...], pagination }`
  * - `GET /api/v1/user/settings/sentinel` -> `{ data: settings }`
  * - `PATCH /api/v1/user/settings/sentinel` with a settings patch -> `{ data: settings }`
  * - `GET /api/v1/user/brief-items/completions` -> `{ data: [{ item_key, ... }] }`
@@ -311,6 +340,10 @@ export type SentinelApi = {
     limit?: number;
     pageToken?: string | undefined;
     outcome?: SentinelAuditOutcome | undefined;
+    /** Start of the shown days, as an ISO instant; no start bound when undefined. */
+    from?: string | undefined;
+    /** End of the shown days, as an ISO instant; entries before it show. No end bound when undefined. */
+    to?: string | undefined;
   }) => Promise<SentinelUserAuditPage>;
   getUserSettings: () => Promise<SentinelUserSettings>;
   updateUserSettings: (patch: Partial<SentinelUserSettings>) => Promise<SentinelUserSettings>;
@@ -385,7 +418,7 @@ function cardFlag(record: Record<string, unknown>, { snake, camel }: { snake: st
 
 const SEARCH_QUERY_MARKER = ' for: ';
 
-// Search cards saved before the hold reason had its own line: the reason was filed as
+// Search cards saved before the hold reason moved into plain_what: the reason was filed as
 // "seen before", and a held key was written out in full. The key is not recoverable here, so the
 // whole query is dropped for that case.
 function readSavedHoldReason(card: SentinelApprovalCard): SentinelApprovalCard {
@@ -396,13 +429,12 @@ function readSavedHoldReason(card: SentinelApprovalCard): SentinelApprovalCard {
     const heading = marker === -1 ? card.plain_what : card.plain_what.slice(0, marker);
     return {
       ...card,
-      plain_what: heading,
-      plain_reason: saved.say,
+      plain_what: withHoldSay(heading, saved.say),
       why_asked_again: null,
       outbound_text: null,
     };
   }
-  return { ...card, plain_reason: saved.say, why_asked_again: null };
+  return { ...card, plain_what: withHoldSay(card.plain_what, saved.say), why_asked_again: null };
 }
 
 function stringList(value: unknown): string[] | undefined {
@@ -445,6 +477,11 @@ function parseEmail(value: unknown): SentinelApprovalEmail | null {
   const threadFrom = isRecord(thread) ? optionalString(thread, 'from') : undefined;
   // A card from before this field existed has no reply address, so it replies to the sender as it did then.
   const replyTo = optionalString(value, 'reply_to') ?? optionalString(value, 'replyTo') ?? null;
+  const fromName =
+    value.from_name === null || value.fromName === null
+      ? null
+      : (optionalString(value, 'from_name') ?? optionalString(value, 'fromName'));
+  const nameLeftOff = optionalBoolean(value, 'name_left_off') ?? optionalBoolean(value, 'nameLeftOff');
   return {
     action,
     to,
@@ -457,6 +494,8 @@ function parseEmail(value: unknown): SentinelApprovalEmail | null {
     reply_in_thread:
       threadSubject === undefined || threadFrom === undefined ? null : { subject: threadSubject, from: threadFrom },
     reply_to: replyTo,
+    ...(fromName === undefined ? {} : { from_name: fromName }),
+    ...(nameLeftOff === undefined ? {} : { name_left_off: nameLeftOff }),
   };
 }
 
@@ -488,6 +527,14 @@ function parseCalendarEvent(value: unknown): SentinelApprovalCalendarEvent | nul
   const attendees = stringList(value.attendees);
   const guests_emailed = optionalBoolean(value, 'guests_emailed') ?? optionalBoolean(value, 'guestsEmailed');
   const one_of_repeating = optionalBoolean(value, 'one_of_repeating') ?? optionalBoolean(value, 'oneOfRepeating');
+  const alreadyCreated = optionalBoolean(value, 'already_created') ?? optionalBoolean(value, 'alreadyCreated');
+  const rawSpanDays = value.span_days ?? value.spanDays;
+  // The server only sends whole days of at least one; anything else is not a card this reader can trust.
+  const spanDays =
+    typeof rawSpanDays === 'number' && Number.isInteger(rawSpanDays) && rawSpanDays >= 1 ? rawSpanDays : undefined;
+  if (rawSpanDays !== undefined && spanDays === undefined) {
+    return null;
+  }
   if (
     action === undefined ||
     calendar === undefined ||
@@ -515,6 +562,8 @@ function parseCalendarEvent(value: unknown): SentinelApprovalCalendarEvent | nul
     attendees,
     guests_emailed,
     one_of_repeating,
+    ...(alreadyCreated === undefined ? {} : { already_created: alreadyCreated }),
+    ...(spanDays === undefined ? {} : { span_days: spanDays }),
     before: parseCalendarBefore(value.before),
   };
 }
@@ -556,13 +605,27 @@ function parseSchedule(value: unknown): SentinelApprovalSchedule | null {
   return { action, name, when, time_zone, task, runs_as, next_runs };
 }
 
+/** The card's copy, read from the wire shape or its camel twin; undefined when the card predates copy. */
+function parseApprovalCopy(value: unknown): SentinelApprovalCopy | undefined {
+  if (!isRecord(value)) return undefined;
+  const headline = optionalString(value, 'headline');
+  if (headline === undefined) return undefined;
+  return {
+    headline,
+    consequence: cardString(value, { snake: 'consequence', camel: 'consequence' }),
+    reason: cardString(value, { snake: 'reason', camel: 'reason' }),
+  };
+}
+
 function parseApprovalCard(value: unknown): SentinelApprovalCard | undefined {
   if (!isRecord(value)) return undefined;
   const plain_what = optionalString(value, 'plain_what') ?? optionalString(value, 'plainWhat');
   if (plain_what === undefined) return undefined;
   return readSavedHoldReason({
     plain_what,
-    plain_reason: cardString(value, { snake: 'plain_reason', camel: 'plainReason' }),
+    copy: parseApprovalCopy(value.copy),
+    safe_choice: cardFlag(value, { snake: 'safe_choice', camel: 'safeChoice' }),
+    destructive: cardFlag(value, { snake: 'destructive', camel: 'destructive' }),
     plain_why: cardString(value, { snake: 'plain_why', camel: 'plainWhy' }),
     cannot_be_undone: cardString(value, { snake: 'cannot_be_undone', camel: 'cannotBeUndone' }),
     why_asked_again: cardString(value, { snake: 'why_asked_again', camel: 'whyAskedAgain' }),
@@ -620,6 +683,7 @@ function parseApprovalInfo(
   const notSaved = parseNotSaved(ref);
   const chatAllowOffered = ref.can_chat_allow ?? ref.canChatAllow;
   const alwaysAllowOffered = ref.can_always_allow ?? ref.canAlwaysAllow;
+  const alwaysAllowCovers = ref.always_allow_covers ?? ref.alwaysAllowCovers;
   return {
     toolCallId,
     tier,
@@ -627,6 +691,7 @@ function parseApprovalInfo(
     ...origin,
     ...(typeof chatAllowOffered === 'boolean' ? { chatAllowOffered } : {}),
     ...(typeof alwaysAllowOffered === 'boolean' ? { alwaysAllowOffered } : {}),
+    ...(alwaysAllowCovers === 'maps' ? { alwaysAllowCovers } : {}),
     ...(held === undefined ? {} : { held }),
     ...(notSaved === undefined ? {} : { notSaved }),
   };

@@ -8,10 +8,13 @@ export interface Tier3Card {
     calendarEvent?: TrueForge.Tier3CalendarEvent | null;
     /** A short note on what can't be reversed, or null. */
     cannotBeUndone: string | null;
+    copy: TrueForge.ApprovalCardCopy | null;
     /** Verifiable destination (URL, service name), or null. */
     destination: string | null;
     /** Host of the connector server that receives the call, or null when it is not a remote server. */
     destinationHost: string | null;
+    /** True when the action destroys or sends something for good, so its button wears the destructive ink. */
+    destructive?: boolean;
     email?: TrueForge.Tier3Email | null;
     /** True when a card carrying mail_new_recipients approves saving a draft rather than sending. */
     mailDraft?: boolean;
@@ -26,14 +29,14 @@ export interface Tier3Card {
     /** Server-parsed command structure for shell actions, or null. */
     parsedCommand: string | null;
     persona?: TrueForge.Tier3Persona | null;
-    /** One plain sentence on why the assistant is checking first, shown under the question, or null. */
-    plainReason?: string | null;
     /** One plain-language sentence describing what will happen. No jargon. */
     plainWhat: string;
     /** One sentence on why the agent wants this, from agent intent when available. */
     plainWhy: string | null;
     /** Verifiable recipient (address, handle), or null. */
     recipient: string | null;
+    /** True when the safe choice is the primary button: the action is irreversible or reaches other people. */
+    safeChoice?: boolean;
     schedule?: TrueForge.Tier3Schedule | null;
     /** Actual cause of re-escalation, or null on first ask. */
     whyAskedAgain: string | null;

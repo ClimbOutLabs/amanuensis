@@ -13,7 +13,15 @@ import {
   type ApprovalFact,
 } from './ApprovalCardParts.js';
 import { APPROVAL_CHOICES, EMAIL_CHOICES, isNewRecipientCard } from './approvalChoices.js';
-import { approvalTime, approveVerb, declineVerb, emailQuestion } from './approvalCopy.js';
+import {
+  approvalTime,
+  approveVerb,
+  cardConsequence,
+  cardHeadline,
+  cardReason,
+  declineVerb,
+  safeVerb,
+} from './approvalCopy.js';
 import { ChangeRequestBox } from './ChangeRequestBox.js';
 import { countEmailWords, isLongEmailBody, splitEmailBody } from './emailBody.js';
 import type { SentinelApprovalCard, SentinelApprovalEmail, SentinelApprovalMailbox } from './types.js';
@@ -139,9 +147,16 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
     { label: 'To', value: mailboxListText(email.to) },
     ...(email.cc.length > 0 ? [{ label: 'Copy', value: mailboxListText(email.cc) }] : []),
     ...(email.bcc.length > 0 ? [{ label: 'Hidden copy', value: mailboxListText(email.bcc) }] : []),
+    ...(email.from_name === null || email.from_name === undefined
+      ? []
+      : [{ label: 'Sent as', value: email.from_name }]),
     ...(email.reply_to === null ? [] : [{ label: 'Replies go to', value: email.reply_to }]),
     { label: 'Subject', value: email.subject === '' ? 'No subject' : email.subject },
   ];
+  // A send reaches other people and cannot be unsent, so the server marks its card safe-first:
+  // the safe choice is the main button and the send follows it in the destructive ink.
+  const safeFirst = card.safe_choice === true;
+  const consequence = cardConsequence(card);
 
   return (
     <ApprovalCardShell
@@ -149,20 +164,23 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
       data-approval-id={approvalId}
       data-kind="email"
       className="my-2"
-      question={emailQuestion(email)}
-      reason={card.plain_reason}
+      question={cardHeadline(card)}
+      reason={cardReason(card)}
       status={
         sentAt === null ? { kind: 'waiting' } : { kind: 'answered', text: `${sending ? 'Sent' : 'Saved'} · ${sentAt}` }
       }
     >
       {/* For a new address the server's sentence says that approving adds it; the fields do not. */}
       {isNewRecipientCard(card) && <p className="text-text-primary">{card.plain_what}</p>}
-      {card.cannot_be_undone !== null && <p className="text-text-secondary">{card.cannot_be_undone}</p>}
+      {consequence !== null && <p className="text-text-secondary">{consequence}</p>}
       {card.why_asked_again !== null && (
         <p className="text-text-secondary">You have seen this before: {card.why_asked_again}</p>
       )}
 
       <ApprovalFacts facts={facts} />
+      {email.name_left_off === true && (
+        <p className="text-text-primary">The name was left off an address because it looked like an address.</p>
+      )}
       {email.replaces !== null && (
         <p className="text-text-secondary">
           Replaces the saved draft “{email.replaces.subject}” to {mailboxListText(email.replaces.to)}
@@ -194,12 +212,24 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
 
       <div className="sticky bottom-0 -mx-[1.125rem] -mb-4 rounded-b-[0.625rem] bg-card-bg px-[1.125rem] pb-4 pt-1">
         <ApprovalActions>
+          {safeFirst && (
+            <ApprovalButton
+              main
+              data-approval-primary
+              title={APPROVAL_CHOICES.deny.hint}
+              onClick={onDeny}
+              disabled={disabled}
+            >
+              {safeVerb(card)}
+            </ApprovalButton>
+          )}
           <ApprovalButton
-            main
-            data-approval-primary
+            main={!safeFirst}
+            {...(safeFirst ? {} : { 'data-approval-primary': true })}
             title={APPROVAL_CHOICES.approve.hint}
             onClick={sendNow}
             disabled={disabled}
+            className={cn(safeFirst && card.destructive === true && 'text-failure-bg')}
           >
             {approveVerb(card)}
           </ApprovalButton>
@@ -220,9 +250,11 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
               {EMAIL_CHOICES.saveDraft.label}
             </ApprovalButton>
           )}
-          <ApprovalButton title={APPROVAL_CHOICES.deny.hint} onClick={onDeny} disabled={disabled}>
-            {declineVerb(card)}
-          </ApprovalButton>
+          {!safeFirst && (
+            <ApprovalButton title={APPROVAL_CHOICES.deny.hint} onClick={onDeny} disabled={disabled}>
+              {declineVerb(card)}
+            </ApprovalButton>
+          )}
         </ApprovalActions>
       </div>
     </ApprovalCardShell>

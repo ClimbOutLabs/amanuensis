@@ -4,6 +4,7 @@ import { useThreadIsRunning } from '@assistant-ui/core/react';
 import { useAuiState } from '@assistant-ui/react';
 import { createContext, useCallback, useContext, useEffect, useRef, type ReactNode } from 'react';
 
+import { useVoiceMode } from '../utils/voiceMode.js';
 import { useOptionalComposerBusyState } from './useComposerBusyState.js';
 
 /** What the assistant is doing right now, as read by the avatar. Connectivity stays out:
@@ -218,11 +219,16 @@ export function AvatarActivityBridge() {
   // A turn parked on a tool approval / ask-user / MCP auth still counts as busy: the agent
   // is waiting on the user, not done. The avatar shows that as its own waiting state.
   const turnBlockedOnUser = useAuiState(selectTurnBlockedOnUser);
-  const isBusy = isRunning || (busy?.isBusy ?? false) || turnBlockedOnUser;
+  // Voice mode runs its turns on the server, so the avatar follows what the voice line reports:
+  // listening is calm (idle), thinking and speaking read like thinking and writing.
+  const voiceMode = useVoiceMode();
+  const voiceThinking = voiceMode === 'thinking' || voiceMode === 'speaking';
+  const isBusy = isRunning || (busy?.isBusy ?? false) || turnBlockedOnUser || voiceThinking;
+  const isStreaming = isTextStreaming || voiceMode === 'speaking';
 
   useEffect(() => {
-    sink?.reportDerived({ isBusy, isTextStreaming, isWaiting: turnBlockedOnUser });
-  }, [sink, isBusy, isTextStreaming, turnBlockedOnUser]);
+    sink?.reportDerived({ isBusy, isTextStreaming: isStreaming, isWaiting: turnBlockedOnUser });
+  }, [sink, isBusy, isStreaming, turnBlockedOnUser]);
 
   return null;
 }

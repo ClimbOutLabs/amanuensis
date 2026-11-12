@@ -76,6 +76,44 @@ describe('extractSentinelFromEvent', () => {
     expect(other?.card.mail_new_recipients).toBeNull();
   });
 
+  it('reads the card copy and the safe choice marks, and drops a copy missing its headline', () => {
+    const [withCopy, badCopy, plain] = extractSentinelFromEvent({
+      type: 'tool.approval_required',
+      tool_calls: [
+        {
+          tool_call_id: 'call-copy',
+          tier: 3,
+          tier3_card: {
+            plain_what: 'Delete something.',
+            copy: {
+              headline: 'Delete "Dentist", Fri 7 Nov, 3:00 PM?',
+              consequence: "This removes the event from the calendar. It can't be restored from here.",
+              reason: null,
+            },
+            safe_choice: true,
+            destructive: true,
+          },
+        },
+        {
+          tool_call_id: 'call-bad-copy',
+          tier: 3,
+          tier3_card: { plain_what: 'Delete something else.', copy: { consequence: 'No headline here.' } },
+        },
+        { tool_call_id: 'call-plain', tier: 3, tier3_card: { plain_what: 'Read.' } },
+      ],
+    });
+    expect(withCopy?.card.copy).toEqual({
+      headline: 'Delete "Dentist", Fri 7 Nov, 3:00 PM?',
+      consequence: "This removes the event from the calendar. It can't be restored from here.",
+      reason: null,
+    });
+    expect(withCopy?.card.safe_choice).toBe(true);
+    expect(withCopy?.card.destructive).toBe(true);
+    expect(badCopy?.card.copy).toBeUndefined();
+    expect(plain?.card.safe_choice).toBe(false);
+    expect(plain?.card.destructive).toBe(false);
+  });
+
   it('reads the draft mark on a new-recipient card, and no mark on a send card', () => {
     const [draft, send] = extractSentinelFromEvent({
       type: 'tool.approval_required',
@@ -127,8 +165,9 @@ describe('extractSentinelFromEvent', () => {
         outbound_text: 'query: debug synthetic-key-000111',
         why_asked_again: 'Held for approval: it contains a secret this server holds.',
       });
-      expect(card?.plain_what).toBe('Search the web through finder');
-      expect(card?.plain_reason).toBe('This sends something that looks like a password or key.');
+      expect(card?.plain_what).toBe(
+        'Search the web through finder. This sends something that looks like a password or key.',
+      );
       expect(card?.outbound_text).toBeNull();
       expect(card?.why_asked_again).toBeNull();
     });
@@ -139,9 +178,8 @@ describe('extractSentinelFromEvent', () => {
         outbound_text: 'query: oslo weather',
         why_asked_again: 'Held for approval: this turn already ran 8 searches without asking.',
       });
-      // A card saved before the wording changed gets the plain reason on its own line.
-      expect(card?.plain_what).toBe('Search the web through finder for: oslo weather');
-      expect(card?.plain_reason).toBe('It checked with you first.');
+      // A card saved before the wording changed gets the plain reason after its sentence.
+      expect(card?.plain_what).toBe('Search the web through finder for: oslo weather. It checked with you first.');
       expect(card?.outbound_text).toBe('query: oslo weather');
       expect(card?.why_asked_again).toBeNull();
     });
@@ -151,19 +189,6 @@ describe('extractSentinelFromEvent', () => {
         'the earlier approval expired',
       );
     });
-  });
-
-  it('reads the reason line from the card, raw or camel-cased', () => {
-    const reasonOf = (card: Record<string, unknown>) =>
-      extractSentinelFromEvent({
-        type: 'tool.approval_required',
-        tool_calls: [
-          { tool_call_id: 'call-9', tier: 3, tier3_card: { plain_what: 'Open a page on example.org?', ...card } },
-        ],
-      })[0]?.card.plain_reason;
-    expect(reasonOf({ plain_reason: 'Searches are set to ask.' })).toBe('Searches are set to ask.');
-    expect(reasonOf({ plainReason: 'Searches are set to ask.' })).toBe('Searches are set to ask.');
-    expect(reasonOf({})).toBeNull();
   });
 
   it('parses outbound_text and destination_host from the card', () => {
@@ -223,6 +248,7 @@ describe('extractSentinelFromEvent', () => {
             tier: 3,
             tier3_card: {
               plain_what: 'Run code in the sandbox',
+              copy: { headline: 'Run code in the sandbox', consequence: 'Runs once.', reason: null },
               plain_why: null,
               cannot_be_undone: 'Runs once.',
               destination: null,
@@ -264,6 +290,7 @@ describe('extractSentinelFromEvent', () => {
             tier: 3,
             tier3_card: {
               plain_what: 'Change a saved draft in your Gmail.',
+              copy: { headline: 'Change this draft?', consequence: null, reason: null },
               plain_why: null,
               cannot_be_undone: null,
               destination: null,
@@ -327,6 +354,49 @@ describe('extractSentinelFromEvent', () => {
     });
   });
 
+  it('keeps the name a mail is sent as and its name-left-off note, and leaves them off an older card', () => {
+    const card = (extra: Record<string, unknown>) =>
+      extractSentinelFromEvent({
+        type: 'tool.approval_required',
+        tool_calls: [
+          {
+            id: 'call-14',
+            tier: 3,
+            tier3_card: {
+              plain_what: 'Do it',
+              email: { action: 'send', to: [], cc: [], bcc: [], subject: 's', body: 'b', ...extra },
+            },
+          },
+        ],
+      })[0]?.card.email;
+    expect(card({ from_name: 'PayPal Security', name_left_off: true })).toMatchObject({
+      from_name: 'PayPal Security',
+      name_left_off: true,
+    });
+    expect(card({ from_name: null })).toMatchObject({ from_name: null });
+    expect(card({})).not.toHaveProperty('from_name');
+    expect(card({})).not.toHaveProperty('name_left_off');
+  });
+
+  it('keeps the duplicate and multi-day warnings of an event', () => {
+    const event = (extra: Record<string, unknown>) =>
+      extractSentinelFromEvent({
+        type: 'tool.approval_required',
+        tool_calls: [
+          {
+            id: 'call-15',
+            tier: 3,
+            tier3_card: { plain_what: 'Do it', calendar_event: { ...CALENDAR_EVENT, ...extra } },
+          },
+        ],
+      })[0]?.card.calendar_event;
+    expect(event({ already_created: true, span_days: 3 })).toMatchObject({ already_created: true, span_days: 3 });
+    expect(event({})).not.toHaveProperty('span_days');
+    for (const span_days of [0, -2, 1.5, '3']) {
+      expect(event({ span_days })).toBeNull();
+    }
+  });
+
   const CALENDAR_EVENT = {
     action: 'change',
     calendar: 'ada@example.com',
@@ -361,6 +431,7 @@ describe('extractSentinelFromEvent', () => {
             tier: 3,
             tier3_card: {
               plain_what: 'Change "Team sync" in your Google Calendar.',
+              copy: { headline: 'Change "Team sync" in your Google Calendar?', consequence: null, reason: null },
               plain_why: null,
               cannot_be_undone: null,
               destination: null,
@@ -556,6 +627,7 @@ describe('held actions', () => {
             ...heldRef,
             tier3_card: {
               plain_what: 'Send a note to Ana.',
+              copy: { headline: 'Send a note to Ana.', consequence: null, reason: null },
               plain_why: null,
               cannot_be_undone: null,
               why_asked_again: null,
@@ -575,6 +647,20 @@ describe('held actions', () => {
     const [info] = extractSentinelFromEvent(parsed);
     expect(info?.held).toEqual({ expiresAt: '2026-10-17T07:00:00.000Z' });
     expect(info?.alwaysAllowOffered).toBe(true);
+  });
+
+  it('reads that the every-chat answer on a maps card turns maps on, and leaves it unset on any other card', () => {
+    const card = { tier: 3, can_always_allow: true, tier3_card: { plain_what: 'Show a map of Lisbon?' } };
+    const parsed = extractSentinelFromEvent({
+      type: 'tool.approval_required',
+      tool_calls: [
+        { ...card, id: 'call-map', always_allow_covers: 'maps' },
+        { ...card, id: 'call-sdk', alwaysAllowCovers: 'maps' },
+        { ...card, id: 'call-plain' },
+        { ...card, id: 'call-other', always_allow_covers: 'everything' },
+      ],
+    });
+    expect(parsed.map(info => info.alwaysAllowCovers)).toEqual(['maps', 'maps', undefined, undefined]);
   });
 
   it('leaves an ordinary approval without a held marker, and never offers always-allow it did not get', () => {

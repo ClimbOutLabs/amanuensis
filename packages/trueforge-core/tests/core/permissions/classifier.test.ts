@@ -386,7 +386,7 @@ describe('classifyTier exec reaching the internet', () => {
     };
     const decision = await classifyTier(flagged, makeCtx());
     expect(decision.tier).toBe(3);
-    expect(decision.card?.plain_reason).toBe(internetNote);
+    expect(decision.card?.plain_what).toContain(internetNote);
   });
 
   test('an unflagged command keeps its card wording', async () => {

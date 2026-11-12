@@ -55,6 +55,7 @@ import {
   classifyContextFor,
   classifyHostToolCall,
   isNewWriteTarget,
+  sandboxCardCopy,
   type SentinelHostContext,
 } from '../permissions';
 import { toJsonSafeParams } from '../permissions/approvalTokens';
@@ -2526,6 +2527,7 @@ export class Sandbox extends LocalToolMCP {
         // cannot follow its symlinks; the slot agent's O_NOFOLLOW walk and the guest's own view contain those.
         path_resolution: this.provider.filesystem,
         ...(this.provider.filesystem === 'remote' ? { file_digest: (path: string) => this.fileDigest(path) } : {}),
+        sandbox_network: await this.networkForUnaskedWork(),
         action: {
           tool_name: params.name,
           canonical_params: effectiveArguments ?? {},
@@ -3224,7 +3226,7 @@ export class Sandbox extends LocalToolMCP {
   }
 
   configureCodeMode(servers: readonly IToolSet[]): void {
-    if (!servers.length || this.provider.supportsCodeMode === false) {
+    if (!servers.length || this.provider.supportsCodeMode !== true) {
       return;
     }
     if (this.codeModeDispatcher !== undefined || this.codeModeTransport !== undefined) {
@@ -4143,6 +4145,20 @@ export class Sandbox extends LocalToolMCP {
    */
   private packageDownloadsPossible(): boolean {
     return this.packageGatewayAvailable() && this.packageDownloadsAllowedForChat;
+  }
+
+  /**
+   * `none` only when nothing the agent runs in this chat can reach outside the sandbox: the provider
+   * has no network, and a run would carry neither a package download token nor a skill's site token.
+   * Read fresh for each call, since an approval earlier in the same step can turn downloads on.
+   */
+  private async networkForUnaskedWork(): Promise<'none' | undefined> {
+    if (this.provider.network !== 'none') {
+      return undefined;
+    }
+    await this.refreshPackageDownloadsAllowed();
+    await this.refreshSkillNetworkHosts();
+    return this.packageDownloadsPossible() || this.skillNetworkHostsForChat.length > 0 ? undefined : 'none';
   }
 
   /** Reads the download setting into the cache. A failed read keeps downloads off, never on. */
@@ -6801,7 +6817,7 @@ export class Sandbox extends LocalToolMCP {
         status: persisted ? 'active' : 'submission_approved_once',
         message: persisted
           ? 'The implementation plan grant is active for this chat until revoked or repository state drifts.'
-          : 'The plan submission was approved for this call only, so no reusable plan grant was created. Choose Always allow this here to create one.',
+          : 'The plan submission was approved for this call only, so no reusable plan grant was created. Choose Always allow in this chat to create one.',
       }),
     });
   }
@@ -7535,6 +7551,12 @@ function withHostGitCard(input: {
   return {
     ...input.card,
     plain_what: input.hostGitCard.plain_what,
+    // The card renders its copy, so the push wording goes through the sandbox copy owner as well.
+    copy: sandboxCardCopy({
+      headline: input.hostGitCard.plain_what,
+      undo: input.hostGitCard.cannot_be_undone,
+      reason: input.card.copy?.reason ?? null,
+    }),
     cannot_be_undone: input.hostGitCard.cannot_be_undone,
     destination: input.hostGitCard.destination,
     parsed_command: input.hostGitCard.parsed_command,
@@ -7557,6 +7579,7 @@ function withPackageDownloadCard(input: {
   if (input.card === null || input.card === undefined) {
     return {
       plain_what: input.packageCard.plain_what,
+      copy: sandboxCardCopy({ headline: input.packageCard.plain_what, undo: null, reason: null }),
       plain_why: null,
       cannot_be_undone: null,
       why_asked_again: null,
@@ -7569,5 +7592,14 @@ function withPackageDownloadCard(input: {
       outbound_truncated: false,
     };
   }
-  return { ...input.card, plain_what: input.packageCard.plain_what };
+  return {
+    ...input.card,
+    plain_what: input.packageCard.plain_what,
+    // The card renders its copy, so the download wording goes through the sandbox copy owner as well.
+    copy: sandboxCardCopy({
+      headline: input.packageCard.plain_what,
+      undo: input.card.cannot_be_undone,
+      reason: input.card.copy?.reason ?? null,
+    }),
+  };
 }

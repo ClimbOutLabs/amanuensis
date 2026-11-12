@@ -18,6 +18,7 @@ import { STANDALONE_REQUEST_CONTEXT } from '../../../src/auth/identity';
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { SentinelAuditStore } from '../../../src/db/sentinelAuditStore';
 import { SqliteAgentStore } from '../../../src/db/sqlite/agent-store/SqliteAgentStore';
+import { SqliteChatDeletionStore } from '../../../src/db/sqlite/chat-deletion-store/SqliteChatDeletionStore';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../../../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
 import { SqliteMcpServerStore } from '../../../src/db/sqlite/mcp-server-store/SqliteMcpServerStore';
@@ -25,7 +26,10 @@ import { SqliteModelProviderStore } from '../../../src/db/sqlite/model-provider-
 import { SqliteSandboxProviderStore } from '../../../src/db/sqlite/sandbox-provider-store/SqliteSandboxProviderStore';
 import { SqliteSessionStore } from '../../../src/db/sqlite/session-store/SqliteSessionStore';
 import { SqliteSkillStore } from '../../../src/db/sqlite/skill-store/SqliteSkillStore';
+import { SqliteTurnArtifactStore } from '../../../src/db/sqlite/turn-artifact-store/SqliteTurnArtifactStore';
 import { ActiveTurnRegistry } from '../../../src/runtime/activeTurns';
+import { PRIVATE_CHAT_BUG_REPORT_MESSAGE } from '../../../src/runtime/privateChat';
+import { TurnDrainRegistry } from '../../../src/runtime/turnDrains';
 import { setCachedLocalSandboxSupport } from '../../../src/sandbox/localRuntime';
 import { checkSnapshotStatus, readPersistedSnapshotStatus } from '../../../src/sandbox/providerUtils';
 
@@ -84,6 +88,8 @@ describe('bug-report HTTP endpoint', () => {
     app.route(
       '/',
       createSessionsRouter({
+        chatDeletionStore: new SqliteChatDeletionStore({ db, turnArtifactStore: new SqliteTurnArtifactStore(db) }),
+        turnDrains: new TurnDrainRegistry(),
         sessions,
         sessionStore,
         sentinelAuditStore: new SentinelAuditStore(db),
@@ -133,10 +139,22 @@ describe('bug-report HTTP endpoint', () => {
       metadata: {},
       agent: { type: 'inline', spec: inlineSpec },
       custom: null,
+      is_incognito: false,
+      private_expires_at: null,
     });
 
     const res = await app.request('/other-user-session/bug-report', jsonInit('POST', {}));
     expect(res.status).toBe(403);
+  });
+
+  it('refuses a bug report for a private chat, so none of it leaves', async () => {
+    const created = await app.request('/', jsonInit('POST', { agent: { spec: inlineSpec }, is_incognito: true }));
+    const { data: session } = (await created.json()) as { data: { id: string } };
+
+    const res = await app.request(`/${session.id}/bug-report`, jsonInit('POST', { include_chat: true }));
+
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({ error: { message: PRIVATE_CHAT_BUG_REPORT_MESSAGE } });
   });
 
   it('carries the chat only when the request opts in', async () => {
