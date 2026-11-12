@@ -106,6 +106,9 @@ by the Images workflow (see `RELEASING.md`). When an entry's source id
 equals the checkout's, the installer pulls that exact digest and tags it
 with the local name instead of building. Otherwise, with
 `--build-from-source`, or when the download fails, it builds as before.
+The app is also built when `Dockerfile.dev` has a step the id cannot
+follow: a JSON-form, continued or heredoc `COPY`, an `ADD` of a local file,
+or a mount of the checkout.
 The sandbox slot image is always built on the computer.
 
 ## Backups

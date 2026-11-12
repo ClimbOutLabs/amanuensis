@@ -129,6 +129,30 @@ test_the_app_id_follows_its_build_inputs_only() {
   sandbox_drop
 }
 
+test_an_app_build_step_the_id_cannot_follow_builds_the_app() {
+  local step
+  local -a steps=(
+    'COPY ["package.json", "./"]'
+    $'COPY package.json \\\n  ./'
+    $'COPY <<EOT /notes.txt\nnotes\nEOT'
+    'copy package.json ./'
+    'ADD package.json ./'
+    'RUN --mount=type=bind,source=.,target=/src true'
+    'RUN --mount=target=/src true'
+  )
+  for step in "${steps[@]}"; do
+    t_begin "a published app image is not used when Dockerfile.dev has: ${step%%$'\n'*}"
+    sandbox_new
+    printf '%s\n' "$step" >>"$REPO/Dockerfile.dev"
+    (cd "$REPO" && git add -A && git -c user.name=t -c user.email=t@example.invalid commit -q -m step)
+    pin_published "${ALL_PUBLISHED[@]}"
+    run_install --dry-run --yes
+    assert_flat_contains "$OUT" "Build the Aman app"
+    assert_flat_contains "$OUT" "Download the speech-to-text service"
+    sandbox_drop
+  done
+}
+
 test_nothing_published_builds_everything
 test_a_published_image_for_this_source_is_downloaded_by_digest
 test_a_published_image_for_other_source_is_not_used
@@ -136,4 +160,5 @@ test_build_from_source_ignores_published_images
 test_a_failed_download_is_built_instead
 test_a_malformed_pin_stops_the_installer
 test_the_app_id_follows_its_build_inputs_only
+test_an_app_build_step_the_id_cannot_follow_builds_the_app
 tests_finish

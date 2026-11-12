@@ -51,6 +51,7 @@ published_pins_validate() {
 published_image_for() {
   local ref
   [ "${OPT_BUILD_FROM_SOURCE:-0}" != 1 ] || return 0
+  [ "$1" != published_app_image ] || app_build_inputs_followable || return 0
   ref=$(json_get "$PINS_FILE" "$1")
   [ -n "$ref" ] || return 0
   case "$ref" in
@@ -112,6 +113,27 @@ app_build_inputs() {
       for (i = 1; i < n; i++) print words[i]
     }' "$REPO_ROOT/Dockerfile.dev"
   } | LC_ALL=C sort -u
+}
+
+# True when app_build_inputs can see every file Dockerfile.dev takes from the checkout. A step it cannot read (a
+# JSON-form or continued COPY/ADD, a heredoc, a local ADD, a bind mount of the checkout) could change the image without
+# changing its id, so a published app image is not used then.
+app_build_inputs_followable() {
+  awk '
+    { op = toupper($1) }
+    (op == "COPY" || op == "ADD") && $0 !~ /--from=/ {
+      if ($0 ~ /\\[[:space:]]*$/ || $0 ~ /<</) bad = 1
+      for (i = 2; i <= NF; i++) if ($i !~ /^--/) break
+      if (i <= NF && $i ~ /^\[/) bad = 1
+      if (op == "ADD") for (; i < NF; i++) if ($i !~ /^https?:\/\//) bad = 1
+    }
+    op == "COPY" && $0 !~ /--from=/ && $1 != "COPY" { bad = 1 }
+    {
+      for (i = 1; i <= NF; i++)
+        if ($i ~ /^--mount=/ && $i !~ /from=/ && $i !~ /type=(cache|secret|ssh|tmpfs)/) bad = 1
+    }
+    END { exit bad }
+  ' "$REPO_ROOT/Dockerfile.dev"
 }
 
 checkout_app_tag() {
