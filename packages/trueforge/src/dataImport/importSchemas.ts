@@ -43,6 +43,7 @@ import { CurrentContextUsageSchema } from '@truefoundry/trueforge-core/core/runt
 import { z } from 'zod';
 
 import { parseTurnCustom } from '../db/sessionCustom';
+import { customWordProblem } from '../runtime/texts/knownWords';
 import { NameSchema } from '../schemas/common';
 import { DeliverySchema } from '../schemas/deliveries';
 import { SessionEventWithPassthroughSchema } from '../schemas/events';
@@ -93,6 +94,7 @@ export const LEFT_OUT = {
   checklistDetail: 'checklist detail',
   permissionSetting: 'permission setting',
   deliveryAttempt: 'delivery attempt',
+  textWord: 'text word',
 } as const;
 
 export const LEFT_OUT_PLURALS: Readonly<Record<string, string>> = {
@@ -105,6 +107,7 @@ export const LEFT_OUT_PLURALS: Readonly<Record<string, string>> = {
   [LEFT_OUT.checklistDetail]: 'checklist details',
   [LEFT_OUT.permissionSetting]: 'permission settings',
   [LEFT_OUT.deliveryAttempt]: 'delivery attempts',
+  [LEFT_OUT.textWord]: 'text words',
 };
 
 /** Host-owned turn data; one this version does not store is left out. */
@@ -603,4 +606,16 @@ export type ImportDelivery = z.infer<typeof DeliverySchema>;
 /** The person's Reach me settings, as a list of none or one. The text and call switches are always off on import. */
 export const ImportReachFileSchema = z.array(ReachSettingsSchema);
 /** The person's number for texts and their choice of words, as a list of none or one. It always comes in unconfirmed. */
-export const ImportTextsFileSchema = z.array(TextContactExportSchema);
+export const ImportTextsFileSchema = z.array(
+  TextContactExportSchema.transform(contact => ({
+    ...contact,
+    // A word the person could not add by hand is left out, and the import report says how many.
+    words: contact.words.filter(word => {
+      if (customWordProblem(word) === undefined) {
+        return true;
+      }
+      noteLeftOut({ label: LEFT_OUT.textWord });
+      return false;
+    }),
+  })),
+);

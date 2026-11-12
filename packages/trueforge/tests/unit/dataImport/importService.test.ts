@@ -3090,6 +3090,23 @@ describe('runDataImport keeps permission history and persona choices', () => {
       });
       await runDataImport(importDeps(older), importRequest(before));
       await expect(older.stores.textContactStore.listWords(owner)).resolves.toEqual([]);
+      // A word the person could not add by hand is left out, so the list never shows a word that does nothing.
+      const rules = await repack(archive, entries => {
+        entries.set(
+          'texts.json',
+          Buffer.from(
+            JSON.stringify([{ phone: '+15550111', mode: 'full', words: ['patel', 'com', 'five', 'dot', 'dad'] }]),
+          ),
+        );
+      });
+      const strict = await makeInstance('target-text-words-rules');
+      try {
+        const result = await runDataImport(importDeps(strict), importRequest(rules));
+        await expect(strict.stores.textContactStore.listWords(owner)).resolves.toEqual(['dad', 'patel']);
+        expect(JSON.stringify(result)).toMatch(/3 text words/);
+      } finally {
+        await strict.close();
+      }
     } finally {
       await source.close();
       await target.close();

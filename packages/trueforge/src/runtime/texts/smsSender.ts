@@ -5,7 +5,6 @@ import type { DeliveryAttempt } from '../../schemas/deliveries';
 import type { TextMode } from '../../schemas/textMessages';
 import { TEST_WORDS, type DeliveryChannelSender } from '../delivery/deliveryChannel';
 import { textAssistantName } from './assistantName';
-import { customWordProblem } from './knownWords';
 import { smsFailureWords, type SmsProvider } from './smsProvider';
 import {
   claimTextLimits,
@@ -16,7 +15,7 @@ import {
   type DeliveryLimitSettings,
 } from './textLimits';
 import { canText, type TextNumberService } from './textNumber';
-import { textBody, TEXTS_NOT_SET_UP, type FullWithheld } from './textWords';
+import { allowedExtraWords, textBody, TEXTS_NOT_SET_UP, type FullWithheld } from './textWords';
 
 /** How a number is named in Activity: by its last four digits only. */
 export function maskedTarget(phone: string): string {
@@ -133,14 +132,14 @@ export function createSmsSender({
         return [attempt({ outcome: 'skipped', detail, target, at })];
       }
       const name = await textAssistantName({ personalization, owner });
+      const extra = await allowedExtraWords({ contacts, owner, name });
       // Only the fixed test words are let through in Full, whatever kind a test delivery has.
-      const allowed = new Set((await contacts.listWords(owner)).filter(word => customWordProblem(word) === undefined));
       const { body, withheld, held } = textBody({
         name,
         delivery,
         mode: contact.mode,
         test: test && delivery.text === TEST_WORDS,
-        allowed,
+        extra,
       });
       const result = await provider.send({ to: contact.phone, body });
       if (result.outcome === 'sent') {
