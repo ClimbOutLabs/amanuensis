@@ -189,6 +189,19 @@ async function listSpaces(server: ApprovalTestServer) {
   return ListSpacesSchema.parse(await (await server.request('/api/v1/spaces')).json()).data;
 }
 
+const ActivityLogSchema = z.object({
+  data: z.array(z.object({ tool_name: z.string(), description: z.string(), outcome: z.string() }).loose()),
+});
+
+/** What the activity log in Settings says about one space, oldest line first. */
+async function spaceActivity({ server, name }: { server: ApprovalTestServer; name: string }): Promise<string[]> {
+  const log = ActivityLogSchema.parse(await (await server.request('/api/v1/user/audit-log')).json());
+  return log.data
+    .filter(row => row.description.includes(`the space ${name}.`))
+    .map(row => row.description)
+    .reverse();
+}
+
 describe('scheduled runs', () => {
   let server: ApprovalTestServer;
   let agent: { id: string; name: string };
@@ -307,7 +320,7 @@ describe('scheduled runs', () => {
   );
 
   it(
-    'makes and changes a space without asking, and keeps the earlier version so it can be brought back',
+    'makes and changes a space without asking, shows one line per change in the activity log, and keeps the earlier version so it can be brought back',
     async () => {
       const NAME = 'Apartment listings';
       const FIRST = '- Flat on Quay Street, two rooms';
@@ -330,6 +343,7 @@ describe('scheduled runs', () => {
       expect(await heldCards({ server, chatId: made.chatId })).toEqual([]);
       const created = (await listSpaces(server)).spaces.find(space => space.name === NAME);
       expect(created).toMatchObject({ revision: 1, body: FIRST });
+      expect(await spaceActivity({ server, name: NAME })).toEqual([`Created the space ${NAME}.`]);
       if (created === undefined) {
         throw new Error('the scheduled run saved no space');
       }
@@ -353,6 +367,10 @@ describe('scheduled runs', () => {
       expect(current?.revision).toBe(2);
       expect(current?.body).toContain(FIRST);
       expect(current?.body).toContain(SECOND);
+      expect(await spaceActivity({ server, name: NAME })).toEqual([
+        `Created the space ${NAME}.`,
+        `Updated the space ${NAME}.`,
+      ]);
 
       const earlier = await server.request(`/api/v1/spaces/${created.id}?revision=1`);
       expect(SpaceResponseSchema.parse(await earlier.json()).data.body).toBe(FIRST);
@@ -366,6 +384,24 @@ describe('scheduled runs', () => {
         revision: 3,
         body: FIRST,
       });
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'a space made in a chat the person is in leaves no line in the activity log',
+    async () => {
+      const NAME = 'Packing list';
+      const chat = await server.request('/api/v1/sessions', jsonInit({ agent: { spec: AGENT_SPEC } }));
+      expect(chat.status).toBe(201);
+      const chatId = z.object({ data: z.object({ id: z.string() }) }).parse(await chat.json()).data.id;
+
+      server.model.next({
+        toolArguments: { name: NAME, purpose: 'What to bring on the trip.', status: 'active', body: '- Tent' },
+      });
+      expect(await typeInChat({ server, chatId, text: `${RUN_DIRECTIVE_PREFIX}create_space please` })).toEqual([]);
+      expect((await listSpaces(server)).spaces.map(space => space.name)).toContain(NAME);
+      expect(await spaceActivity({ server, name: NAME })).toEqual([]);
     },
     TURN_TIMEOUT_MS,
   );
