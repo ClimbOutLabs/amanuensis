@@ -634,6 +634,9 @@ export function createPhoneCallService(deps: PhoneCallDeps): PhoneCallService {
           return chat;
         },
         hangUp,
+        failed: error => {
+          logger.warn('A phone call turn failed', { call_id: call.id, error: errorName(error) });
+        },
         // Said in the voice's own reading, like every reply after it: a reminder is written for the screen, and a
         // check that it reads word for word would refuse many of them while protecting nothing on an answered call.
         sayMessage: line => {

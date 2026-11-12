@@ -238,15 +238,18 @@ describe('a turn that cannot be run', () => {
   const never = new AbortController().signal;
 
   it('ends as a failed turn when the chat cannot be opened, and when the chat’s own turn throws', async () => {
+    const failures: unknown[] = [];
     const opening = new CallTurns({
       message: MESSAGE,
       openChat: () => Promise.reject(new Error('database went away')),
       hangUp: () => undefined,
       sayMessage: () => undefined,
+      failed: error => failures.push(error),
     });
     await expect(opening.sendMessage({ text: 'yes', signal: never, onText: () => undefined })).resolves.toEqual({
       kind: 'failed',
     });
+    expect(failures).toHaveLength(1);
     const open = new CallTurns({
       message: MESSAGE,
       openChat: () =>

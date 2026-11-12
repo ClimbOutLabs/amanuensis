@@ -86,6 +86,7 @@ export class CallTurns implements VoiceTurnRunner {
   readonly #hangUp: () => void;
   readonly #askedAgain: () => void;
   readonly #sayMessage: (line: string) => void;
+  readonly #failed: (error: unknown) => void;
   #phase: 'asking' | 'open' | 'closing' = 'asking';
   #unclear = 0;
   #replies = 0;
@@ -98,6 +99,7 @@ export class CallTurns implements VoiceTurnRunner {
     hangUp,
     askedAgain = () => undefined,
     sayMessage,
+    failed = () => undefined,
   }: {
     /** The line that says what the call is about, said only after a yes. */
     message: string;
@@ -108,12 +110,15 @@ export class CallTurns implements VoiceTurnRunner {
     askedAgain?: () => void;
     /** Says what the call is about. */
     sayMessage: (line: string) => void;
+    /** A turn ended as failed; told why so it can be logged without anything that was said. */
+    failed?: (error: unknown) => void;
   }) {
     this.#message = message;
     this.#openChat = openChat;
     this.#hangUp = hangUp;
     this.#askedAgain = askedAgain;
     this.#sayMessage = sayMessage;
+    this.#failed = failed;
   }
 
   /** Whether the person said it was a good time. */
@@ -161,7 +166,8 @@ export class CallTurns implements VoiceTurnRunner {
   }): Promise<TurnOutcome> {
     try {
       return await this.#answer(input);
-    } catch {
+    } catch (error) {
+      this.#failed(error);
       return { kind: 'failed' };
     }
   }
