@@ -27,7 +27,7 @@ The first time you turn it on, Aman starts from that moment, so old mail does no
 
 ## How loudly
 
-Everything shows under the bell, with the reason you got it.
+Everything shows under the bell, with the reason you got it. The bell is at the top of the left panel. On a phone, tap the menu button to see it; that button shows how many items you have not seen.
 An item that came from a chat shows **Open**, which takes you to that chat. If you deleted the chat, the item stays under the bell without **Open**.
 
 - A note is quiet. Most things are notes.

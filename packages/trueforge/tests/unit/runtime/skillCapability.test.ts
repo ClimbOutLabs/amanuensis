@@ -10,10 +10,13 @@ import { allowsChatApproval } from '@truefoundry/trueforge-core/core/mcp/approva
 import { createToolCallMemoState, executeToolCalls } from '@truefoundry/trueforge-core/core/mcp/executeToolCalls';
 import { isCallToolResponseResult } from '@truefoundry/trueforge-core/core/mcp/IMCPServer';
 import { NOOP_AGENT_TRACING } from '@truefoundry/trueforge-core/core/tracing/NoopAgentTracing';
+import { Response as UndiciResponse } from 'undici';
+
 import { migrateSqliteToLatest } from '../../../src/db/migrateSqlite';
 import { createSqliteDb } from '../../../src/db/sqlite/client';
 import { SqliteSkillStore } from '../../../src/db/sqlite/skill-store/SqliteSkillStore';
 import { skillCapability, SkillToolSet, storedSkillName } from '../../../src/runtime/skillCapability';
+import type { SkillLookupDeps } from '../../../src/runtime/skillSource';
 import { parseGitSkill } from '../../../src/schemas/skill';
 import type { CatalogSkill } from '../../../src/schemas/skillCatalog';
 
@@ -39,20 +42,22 @@ const STARTER: CatalogSkill = {
 /** A GitHub stand-in whose main branch can move and whose file can change with it. */
 function github() {
   const state = { head: COMMIT, files: new Map([[COMMIT, SKILL_FILE]]), asked: 0 };
-  const fetchImpl: typeof fetch = input => {
-    state.asked += 1;
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-    const path = url.replace('https://api.github.com', '');
-    if (path === '/repos/acme/skills/commits/main') {
-      return Promise.resolve(new Response(JSON.stringify({ sha: state.head }), { status: 200 }));
-    }
-    const [file, ref] = path.split('?ref=');
-    const body = file === SKILL_PATH && ref !== undefined ? state.files.get(ref) : undefined;
-    return Promise.resolve(
-      body === undefined ? new Response('{}', { status: 404 }) : new Response(body, { status: 200 }),
-    );
+  const lookup: SkillLookupDeps = {
+    fetchImpl: url => {
+      state.asked += 1;
+      const path = String(url).replace('https://api.github.com', '');
+      if (path === '/repos/acme/skills/commits/main') {
+        return Promise.resolve(new UndiciResponse(JSON.stringify({ sha: state.head }), { status: 200 }));
+      }
+      const [file, ref] = path.split('?ref=');
+      const body = file === SKILL_PATH && ref !== undefined ? state.files.get(ref) : undefined;
+      return Promise.resolve(
+        body === undefined ? new UndiciResponse('{}', { status: 404 }) : new UndiciResponse(body, { status: 200 }),
+      );
+    },
+    resolveAddresses: () => Promise.resolve(['140.82.112.6']),
   };
-  return { state, fetchImpl };
+  return { state, lookup };
 }
 
 async function setup() {
@@ -73,7 +78,7 @@ async function setup() {
     tenant_id: TENANT,
     catalog: [STARTER],
     sandboxReady: true,
-    fetchImpl: hub.fetchImpl,
+    lookup: hub.lookup,
     sentinel,
   };
   const tools = new SkillToolSet(options);
@@ -344,7 +349,7 @@ describe('in an incognito chat', () => {
       tenant_id: TENANT,
       catalog: [],
       sandboxReady: true,
-      fetchImpl: () => Promise.reject(new Error('unused')),
+      lookup: { fetchImpl: () => Promise.reject(new Error('unused')), resolveAddresses: undefined },
       sentinel,
       keepsNothing: true,
     });

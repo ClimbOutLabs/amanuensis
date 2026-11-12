@@ -44,7 +44,7 @@ One server-side feed of things Aman wants a person to see, called deliveries. Ea
 - Routes under `/api/v1/user/deliveries`: list (newest first, paged), unread count, mark seen, get one
 - Reminders create a delivery, then write their line into the chat the reminder was set in, and the delivery links to that chat; a reply running in that chat holds the line, never the delivery; the old browser polling and per-browser storage are removed
 - A reminder set outside a chat, one saved before the origin chat was recorded, and one whose origin chat has been deleted create a delivery with no link and no chat line; no chat is made for them, and there is no shared Reminders chat anymore
-- A bell with the unread count in the main headers and a panel that lists deliveries; opening an item marks it seen
+- A bell with the unread count in the left panel and a panel that lists deliveries; opening an item marks it seen
 - Web Push with a service worker, per-device opt-in in Settings, and plain words for iPhone (Home Screen needed), unsupported and blocked browsers, and for each kind of failure while turning notices on or off
 - Every delivery and every channel attempt is written to the Activity log in plain words
 - Deliveries are included in data export and import, with an upgrade step and an older-shape fixture; push subscriptions are not exported
