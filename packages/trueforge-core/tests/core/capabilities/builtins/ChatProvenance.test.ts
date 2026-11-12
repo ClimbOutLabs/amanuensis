@@ -4,12 +4,19 @@ import {
   contextHasOutsideToolResult,
 } from '../../../../src/core/capabilities/builtins/ChatProvenance';
 import type { InternalToolCallInfo } from '../../../../src/core/llm/LLMTypes';
-import { isTrustedLink, isTrustedPicture, type ChatProvenance } from '../../../../src/core/permissions/provenance';
+import {
+  hasReadContent,
+  isTrustedLink,
+  isTrustedPicture,
+  steeredDestinations,
+  type ChatProvenance,
+} from '../../../../src/core/permissions/provenance';
 import { createWebSearchTurnState } from '../../../../src/core/permissions/webSearch';
 import type { ContextMessage } from '../../../../src/core/runtime/AgentThread.types';
 import { getEmptyCurrentContextUsage } from '../../../../src/core/runtime/contextUsage';
 
-// Invented hosts and names only.
+// Invented people, hosts and names only.
+const ADDRESS = 'bookings@harbour-prints.example';
 const RESULT_LINK = 'https://news.example.org/2024/06/oslo-weather';
 const RESULT_PICTURE = 'https://cdn.news.example.org/oslo/harbour.jpg';
 const PAGE = 'https://guide.example.net/oslo';
@@ -152,5 +159,55 @@ describe('only the assistant own task tools keep a turn free of outside content'
         function: { name: 'record_finding', arguments: '{}' },
       }),
     ).toBe(true);
+  });
+});
+
+const steered = (provenance: ChatProvenance): string[] =>
+  steeredDestinations({ provenance, addresses: [ADDRESS], values: [], reply_sender: null }).map(
+    found => `${found.value} from ${found.origin.source}`,
+  );
+
+describe('an address in an earlier reply of the assistant', () => {
+  it('counts as something the assistant read on the next turn, when the person never gave it', async () => {
+    const provenance = await provenanceOf([
+      { role: 'user', content: 'who takes print orders' },
+      { role: 'assistant', content: `Orders go to ${ADDRESS}.` },
+      { role: 'user', content: 'ok, write to them' },
+    ]);
+    expect(steered(provenance)).toEqual([`${ADDRESS} from reply`]);
+  });
+
+  it('is read from a reply written in parts too', async () => {
+    const provenance = await provenanceOf([
+      { role: 'user', content: 'who takes print orders' },
+      { role: 'assistant', content: [{ type: 'text', text: `Orders go to ${ADDRESS}.` }] },
+      { role: 'user', content: 'ok, write to them' },
+    ]);
+    expect(steered(provenance)).toEqual([`${ADDRESS} from reply`]);
+  });
+
+  it("stays the person's when they gave it, before or after the reply", async () => {
+    const before = await provenanceOf([
+      { role: 'user', content: `write to ${ADDRESS} about the posters` },
+      { role: 'assistant', content: `Here is a draft for ${ADDRESS}.` },
+      { role: 'user', content: 'send it' },
+    ]);
+    expect(steered(before)).toEqual([]);
+    const after = await provenanceOf([
+      { role: 'user', content: 'who takes print orders' },
+      { role: 'assistant', content: `Orders go to ${ADDRESS}.` },
+      { role: 'user', content: `yes, ${ADDRESS} is right, write to them` },
+    ]);
+    expect(steered(after)).toEqual([]);
+  });
+
+  it("does not make a chat of the person's words and replies one that has read other people's content", async () => {
+    const provenance = await provenanceOf([
+      { role: 'user', content: 'who takes print orders' },
+      { role: 'assistant', content: `Orders go to ${ADDRESS}. See https://harbour-prints.example/orders too.` },
+      { role: 'assistant', content: null },
+      { role: 'user', content: 'thanks' },
+    ]);
+    expect(hasReadContent(provenance)).toBe(false);
   });
 });

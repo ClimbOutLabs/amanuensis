@@ -116,6 +116,9 @@ export const LiveFrameReplySchema = z.discriminatedUnion('status', [
     jpeg_base64: z.string().min(1),
     width: z.number().optional(),
     height: z.number().optional(),
+    // Whether the person has taken the tab over, and whether the page is asking for a human check.
+    takeover: z.boolean().optional(),
+    challenge: z.boolean().optional(),
   }),
   ClosedReplySchema,
 ]);
@@ -124,10 +127,16 @@ export const LiveInputReplySchema = z.discriminatedUnion('status', [
   z.object({ status: z.literal('bad_input') }),
   ClosedReplySchema,
 ]);
+export const LiveTakeoverReplySchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('ok'), takeover: z.boolean() }),
+  z.object({ status: z.literal('bad_input') }),
+  ClosedReplySchema,
+]);
 
 export type LiveTabsReply = z.infer<typeof LiveTabsReplySchema>;
 export type LiveFrameReply = z.infer<typeof LiveFrameReplySchema>;
 export type LiveInputReply = z.infer<typeof LiveInputReplySchema>;
+export type LiveTakeoverReply = z.infer<typeof LiveTakeoverReplySchema>;
 
 /** What the sidecar answered to a request, or why there is no usable answer. */
 export type SidecarResult<T> = { ok: true; body: T } | { ok: false; message: string };
@@ -153,11 +162,15 @@ const REFUSAL_MESSAGES: Record<string, string> = {
   private_network: "That address is on this computer or a private network, so Aman's browser will not open it.",
   unresolved: "That address could not be found, so Aman's browser will not open it. Check the address and try again.",
   not_a_url: 'That is not a web address Aman can open. Check the address and try again.',
+  sign_in_in_address:
+    "That address has a sign-in name or password in front of the site, so Aman's browser will not open it. Ask for the address without that part.",
   sensitive_field:
     'This field is for a password, a payment detail or a one-time code. Ask the person to type it themselves.',
   unknown_ref: 'That part of the page is gone. Read the page again to get a fresh ref, then try again.',
   stale_ref: 'That part of the page is gone. Read the page again to get a fresh ref, then try again.',
   no_such_option: 'That option is not on the list. Read the page again to see the choices, then try again.',
+  takeover:
+    'The person has taken over this page in the live browser and is driving it themselves. Tell the person to press Hand back in the live view. Once they have, read the page again.',
 };
 
 function refusalMessage(reason: string): string {

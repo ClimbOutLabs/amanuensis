@@ -72,7 +72,37 @@ time.sleep(30)' >"$SB/listener.out" &
   sandbox_drop
 }
 
+test_tailscale_serve_ports_are_never_picked() {
+  t_begin "a port Tailscale serve is set up for is never picked, and an explicit one is refused with the reason"
+  sandbox_new
+  rm -f "$SB_BIN/python3"
+  cp "$TESTS_DIR/stubs/tailscale" "$SB_BIN/tailscale"
+  BUSY=
+  assert_eq "$(PATH=$SB_BIN STUB_TS_SERVE_PORTS="443 9001 9002" "$SB_BIN/bash" -c ". '$INSTALLER_DIR/lib/common.sh'; . '$INSTALLER_DIR/lib/ports.sh'; tailscale_serve_ports | tr '\n' ' '")" "443 9001 9002 "
+  assert_eq "$(PATH=$SB_BIN STUB_TS_SERVE_PORTS="9001 9002" "$SB_BIN/bash" -c ". '$INSTALLER_DIR/lib/common.sh'; . '$INSTALLER_DIR/lib/ports.sh'; pick_port 9001 ''")" 9003
+  local out rc=0
+  out=$(PATH=$SB_BIN STUB_TS_SERVE_PORTS="9100" "$SB_BIN/bash" -c ". '$INSTALLER_DIR/lib/common.sh'; . '$INSTALLER_DIR/lib/ui.sh'; . '$INSTALLER_DIR/lib/ports.sh'; check_port_usable 9100 '' --port" 2>&1) || rc=$?
+  if [ "$rc" != 0 ]; then t_pass; else t_fail "a port Tailscale serve uses was accepted"; fi
+  assert_contains "$out" "Tailscale serve"
+  rm -f "$SB_BIN/tailscale"
+  assert_eq "$(in_lib 'tailscale_serve_ports')" "" "no Tailscale, no ports"
+  sandbox_drop
+}
+
+test_a_port_clash_names_the_port() {
+  t_begin "when Docker cannot take a port, the sentence names the port and how to see what holds it"
+  local cause
+  cause=$(printf '%s\n' 'Error response from daemon: driver failed programming external connectivity on endpoint x (1): failed to bind host port 100.101.102.103:8444/tcp: address already in use' |
+    bash -c ". '$INSTALLER_DIR/lib/diagnose.sh'; container_failure_cause_stdin")
+  assert_contains "$cause" "Port 8444 on 100.101.102.103"
+  assert_contains "$cause" "sudo ss -ltnp 'sport = :8444'"
+  cause=$(printf 'Bind for 0.0.0.0:80 failed: port is already allocated\n' | bash -c ". '$INSTALLER_DIR/lib/diagnose.sh'; container_failure_cause_stdin")
+  assert_eq "$cause" "A port the app needs is already in use on this computer."
+}
+
 test_picks_first_free_port_with_listener_table
+test_tailscale_serve_ports_are_never_picked
+test_a_port_clash_names_the_port
 test_container_side_ports_are_never_picked
 test_explicit_port_checks
 test_real_bind_detects_listener
