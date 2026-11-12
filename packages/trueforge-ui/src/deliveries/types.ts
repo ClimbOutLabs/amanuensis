@@ -23,7 +23,69 @@ export type DeliveryPage = { items: DeliveryItem[]; nextPageToken: string | unde
 /** What a browser hands over when it turns notices on. */
 export type PushDevice = { endpoint: string; p256dh: string; auth: string; label: string };
 
-/** The feed and the push devices, served by the host. */
+/** The kinds of event the assistant watches for, in the order Reach me lists them. */
+export const NOTICING_KINDS = ['mail_always', 'calendar_clash', 'travel', 'bill_due', 'approval_waiting'] as const;
+
+export type NoticingKind = (typeof NOTICING_KINDS)[number];
+
+export type ReachSender = {
+  address: string;
+  name: string | null;
+  /** Whether the person typed this sender or accepted it from a memory suggestion. */
+  source: 'settings' | 'memory';
+  /** Kept as the server wrote it, so saving the list does not change when a sender was added. */
+  addedAt: string;
+};
+
+export type ReachSettings = {
+  /** Whether the assistant checks mail, the calendar and waiting approvals in the background. */
+  noticingOn: boolean;
+  textsOn: boolean;
+  callsOn: boolean;
+  alwaysImportant: ReachSender[];
+  dismissedSuggestions: string[];
+  callKinds: NoticingKind[];
+  callForUrgentReminders: boolean;
+  quietHours: { enabled: boolean; start: string; end: string };
+  timezone: string;
+  maxNudgesPerDay: number;
+  minHoursBetweenCalls: number;
+  travelLeadMinutes: number;
+  approvalWaitMinutes: number;
+};
+
+export type ReachChannelState = { available: boolean; note: string };
+
+export type ReachView = {
+  settings: ReachSettings;
+  /** False until the person saves once. While false, the settings are the quiet defaults. */
+  saved: boolean;
+  availability: { texts: ReachChannelState; calls: ReachChannelState };
+  /** The highest level each kind of event can ever reach, so only kinds that can call offer the tick. */
+  maxLevels: Partial<Record<NoticingKind, 'note' | 'nudge' | 'call'>>;
+  /** Set once mail has gone unchecked for about an hour: since when, and what to do about it. */
+  mailProblem: { since: string; kind: 'too_slow' | 'google_sign_in' | 'email_password' | 'other' } | null;
+  /** Set once the calendar has gone unchecked for about an hour. */
+  calendarProblem: { since: string; kind: 'google_sign_in' | 'other' } | null;
+  /** Where mail is read from, or null until it has been checked once. */
+  mailSource: 'google' | 'email_connector' | null;
+};
+
+export type ReachSuggestion = { address: string; memory: string };
+
+export type ReachTestChannel = 'in_app' | 'push' | 'text' | 'call';
+
+/** The person's Reach me settings, served by the host. Each call rejects with a message fit to show. */
+export type ReachApi = {
+  get(): Promise<ReachView>;
+  /** Saves and resolves to what the server now holds. */
+  save(settings: ReachSettings): Promise<ReachView>;
+  suggestions(): Promise<ReachSuggestion[]>;
+  /** Sends a test through one channel. Resolves to how many devices a push notice reached. */
+  test(channel: ReachTestChannel): Promise<{ devicesReached: number }>;
+};
+
+/** The feed, the push devices and Reach me settings, served by the host. */
 export type DeliveriesApi = {
   /** Where the service worker lives under the app's public path, and the part of the app it covers. */
   pushWorker: { url: string; scope: string };
@@ -40,4 +102,7 @@ export type DeliveriesApi = {
   /** Resolves to `taken` when this address already gets another account's notices; a fresh subscription is needed. */
   savePushDevice(device: PushDevice): Promise<'saved' | 'taken'>;
   removePushDevice(endpoint: string): Promise<void>;
+  /** Whether the server still sends notices to this address. A device drops off when newer ones replace it or it goes away. */
+  pushDeviceSaved(endpoint: string): Promise<boolean>;
+  reach: ReachApi;
 };

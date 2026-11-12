@@ -38,6 +38,22 @@ describe('voice turn tracking', () => {
     expect(takeSpokenReply('user-1')).toBe(false);
   });
 
+  it('keeps the reply due when the chat renames the voice message once the server accepts it', () => {
+    armSpokenReply({ fromVoice: true, text: 'What is on my calendar?' });
+    noteUserMessage({ id: 'temporary-1', text: 'What is on my calendar?' });
+    noteUserMessage({ id: 'turn-1-user', text: 'What is on my calendar?' });
+
+    expect(takeSpokenReply('turn-1-user')).toBe(true);
+  });
+
+  it('drops the reply due when a different message follows the voice message', () => {
+    armSpokenReply({ fromVoice: true, text: 'What is on my calendar?' });
+    noteUserMessage({ id: 'temporary-1', text: 'What is on my calendar?' });
+    noteUserMessage({ id: 'user-2', text: 'Something typed' });
+
+    expect(takeSpokenReply('user-2')).toBe(false);
+  });
+
   it('does not read a reply to a typed message', () => {
     armSpokenReply({ fromVoice: false, text: 'typed words' });
     noteUserMessage({ id: 'user-1', text: 'typed words' });

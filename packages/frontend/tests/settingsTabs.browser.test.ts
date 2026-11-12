@@ -6,6 +6,7 @@ import { chromium, type Browser, type Page } from 'playwright-core';
 import { createServer, defaultClientConditions } from 'vite';
 
 import { DEV_OPTIMIZE_DEPS } from '../src/devPrebundle.ts';
+import { featureShotPath, saveFailureShots } from './support/featureShots.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.js';
 import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
 import { privateViteCache } from './support/viteCache.ts';
@@ -55,9 +56,18 @@ test('settings tabs highlight the section shown and stay reachable', { timeout: 
           timeout: FIRST_LOAD_TIMEOUT_MS,
         });
         await checkSettingsPage(page, `${viewport.width}px ${theme}`);
+        await page.screenshot({
+          path: await featureShotPath({
+            surface: 'screen:settings-tabs',
+            step: `${String(viewport.width)}px-${theme}`,
+          }),
+        });
         await context.close();
       }
     }
+  } catch (error) {
+    await saveFailureShots({ browser, surface: 'screen:settings-tabs' });
+    throw error;
   } finally {
     await browser?.close();
     await server.close();

@@ -23,7 +23,7 @@ export class AuditLogClient {
     }
 
     /**
-     * Lists the authenticated user’s Sentinel audit entries from every chat, newest first, including chats that were deleted. Read-only and paged.
+     * Lists the authenticated user’s Sentinel audit entries from every chat, newest first, including chats that were deleted. Can be narrowed by outcome and by a from and to time. Read-only and paged.
      *
      * @param {TrueForge.personalization.ListAuditLogRequest} request
      * @param {AuditLogClient.RequestOptions} requestOptions - Request-specific configuration.
@@ -44,7 +44,7 @@ export class AuditLogClient {
             async (
                 request: TrueForge.personalization.ListAuditLogRequest,
             ): Promise<core.WithRawResponse<TrueForge.ListUserAuditLogResponse>> => {
-                const { limit = 50, pageToken, outcome } = request;
+                const { limit = 50, pageToken, outcome, from: from_, to } = request;
                 const _queryParams: Record<string, unknown> = {
                     limit,
                     page_token: pageToken,
@@ -57,6 +57,8 @@ export class AuditLogClient {
                                   omitUndefined: true,
                               })
                             : undefined,
+                    from: from_ != null ? from_?.toISOString() : undefined,
+                    to: to != null ? to?.toISOString() : undefined,
                 };
                 const _authRequest: core.AuthRequest = await this._options.authProvider.getAuthRequest();
                 const _headers: core.Fetcher.Args["headers"] = mergeHeaders(

@@ -1,6 +1,6 @@
 /**
  * Sandbox commands in a "Work on a repo" chat, through the tool route a chat classifies them on: reads in the workspace
- * never ask, and "Always allow this here" on a command covers that exact command only.
+ * never ask, and "Always allow in this chat" on a command covers that exact command only.
  */
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -79,7 +79,7 @@ function call(id: string, info: InternalToolCallInfo): InternalEnrichedToolCall 
   return { id, type: 'function', function: { name: SANDBOX_EXEC_TOOL_NAME, arguments: '{}' }, tool_info: info };
 }
 
-/** Whether a call shows a card once the chat holds these "Always allow this here" answers. */
+/** Whether a call shows a card once the chat holds these "Always allow in this chat" answers. */
 function showsCard(info: InternalToolCallInfo, grants: ReadonlySet<string>): boolean {
   const admitted = effectiveToolAdmissions({
     calls: [call('c', info)],
@@ -128,7 +128,7 @@ describe('reads in the workspace never ask', () => {
   });
 });
 
-describe('"Always allow this here" on a sandbox command', () => {
+describe('"Always allow in this chat" on a sandbox command', () => {
   async function grantedOnTests(sandbox: Sandbox): Promise<ReadonlySet<string>> {
     const granted = await exec(sandbox, { purpose: 'verify', command: 'pnpm test' });
     expect(granted.is_approval_required).toBe(true);

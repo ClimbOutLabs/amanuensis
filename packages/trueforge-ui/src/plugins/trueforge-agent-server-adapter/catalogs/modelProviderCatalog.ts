@@ -14,7 +14,7 @@ import type {
   ModelProviderCatalogEntry,
   UpdateModelProviderRequest,
 } from '../../../server/types.js';
-import { toSameOriginCatalogLogoUrl } from '../../../utils/catalogLogo.js';
+import { catalogLogoSrc, withLogo } from '../../../utils/catalogLogo.js';
 import type { CreateTrueForgeClientOptions } from '../client.js';
 
 /** Custom-form rows omit properties; catalog rows round-trip them. */
@@ -94,9 +94,9 @@ export function toUiCatalogModelProviderEntry(
   return {
     type: provider.type,
     name: provider.type,
-    ...(provider.logo === undefined
-      ? {}
-      : { logo: toSameOriginCatalogLogoUrl({ logo: provider.logo, baseUrl: options.baseUrl ?? '/' }) }),
+    ...withLogo(
+      catalogLogoSrc({ logo: provider.logo, kind: 'model', name: provider.type, baseUrl: options.baseUrl ?? '/' }),
+    ),
     ...(provider.baseUrl === undefined ? {} : { baseUrl: provider.baseUrl }),
     models: provider.models.map(toUiModelEntry),
   };

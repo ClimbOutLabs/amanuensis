@@ -11,6 +11,7 @@ export const UpdateSessionRequest: core.serialization.Schema<
     TrueForge.UpdateSessionRequest
 > = core.serialization.object({
     agent: SessionAgentSpecBody.optional(),
+    isIncognito: core.serialization.property("is_incognito", core.serialization.boolean().optional()),
     metadata: SessionMetadata.optional(),
     title: core.serialization.string().optional(),
 });
@@ -18,6 +19,7 @@ export const UpdateSessionRequest: core.serialization.Schema<
 export declare namespace UpdateSessionRequest {
     export interface Raw {
         agent?: SessionAgentSpecBody.Raw | null;
+        is_incognito?: boolean | null;
         metadata?: SessionMetadata.Raw | null;
         title?: string | null;
     }

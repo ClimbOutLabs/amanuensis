@@ -10,6 +10,7 @@ import { MemoryScreenCapability } from "./MemoryScreenCapability.js";
 import { SandboxCapability } from "./SandboxCapability.js";
 import { SandboxIsolationCapability } from "./SandboxIsolationCapability.js";
 import { SettingsCapability } from "./SettingsCapability.js";
+import { SignInCapability } from "./SignInCapability.js";
 import { SkillCapability } from "./SkillCapability.js";
 import { ToolOutputScreenCapability } from "./ToolOutputScreenCapability.js";
 import { VoiceCapability } from "./VoiceCapability.js";
@@ -25,6 +26,7 @@ export const CapabilitiesData: core.serialization.ObjectSchema<
     sandbox: SandboxCapability,
     sandboxIsolation: core.serialization.property("sandbox_isolation", SandboxIsolationCapability),
     settings: SettingsCapability,
+    signIn: core.serialization.property("sign_in", SignInCapability),
     skill: SkillCapability,
     toolOutputScreen: core.serialization.property("tool_output_screen", ToolOutputScreenCapability.optional()),
     voice: VoiceCapability,
@@ -39,6 +41,7 @@ export declare namespace CapabilitiesData {
         sandbox: SandboxCapability.Raw;
         sandbox_isolation: SandboxIsolationCapability.Raw;
         settings: SettingsCapability.Raw;
+        sign_in: SignInCapability.Raw;
         skill: SkillCapability.Raw;
         tool_output_screen?: ToolOutputScreenCapability.Raw | null;
         voice: VoiceCapability.Raw;

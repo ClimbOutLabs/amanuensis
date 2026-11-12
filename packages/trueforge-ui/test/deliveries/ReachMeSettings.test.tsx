@@ -2,84 +2,21 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { EMPTY_PERSONALIZATION_PROFILE, PersonalizationProvider } from '@/components/PersonalizationContext.js';
 import { DeliveriesProvider } from '@/deliveries/DeliveriesContext.js';
 import { ReachMeSettings } from '@/deliveries/ReachMeSettings.js';
 
 import { fakeServer, SERVER_KEY } from './fakeDeliveriesApi.js';
+import { removePushBrowser, stubPushBrowser } from './fakePushBrowser.js';
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  Reflect.deleteProperty(navigator, 'serviceWorker');
-  Reflect.deleteProperty(window, 'PushManager');
+  removePushBrowser();
 });
 
-function keyBuffer(base64url: string): ArrayBuffer {
-  const raw = window.atob(base64url.replace(/-/g, '+').replace(/_/g, '/'));
-  const bytes = new Uint8Array(raw.length);
-  for (let i = 0; i < raw.length; i += 1) bytes[i] = raw.charCodeAt(i);
-  return bytes.buffer;
-}
-
-type StubSubscription = {
-  endpoint: string;
-  options: { applicationServerKey: ArrayBuffer | null };
-  getKey: (name: string) => ArrayBuffer;
-  unsubscribe: () => Promise<boolean>;
-};
-
-/** A browser that can take push. `existingKey` makes it start with a subscription made with that key. */
-function stubPushBrowser({ existingKey }: { existingKey?: string } = {}) {
-  let made = 0;
-  const unsubscribed: string[] = [];
-  const makeSubscription = (key: ArrayBuffer | null): StubSubscription => {
-    made += 1;
-    const endpoint = `https://push.example.test/device-${String(made)}`;
-    return {
-      endpoint,
-      options: { applicationServerKey: key },
-      getKey: (name: string) => new TextEncoder().encode(name).buffer,
-      unsubscribe: () => {
-        unsubscribed.push(endpoint);
-        current = null;
-        return Promise.resolve(true);
-      },
-    };
-  };
-  let current: StubSubscription | null = existingKey === undefined ? null : makeSubscription(keyBuffer(existingKey));
-  const registration = {
-    pushManager: {
-      getSubscription: vi.fn(() => Promise.resolve(current)),
-      subscribe: vi.fn((options: { applicationServerKey: Uint8Array<ArrayBuffer> }) => {
-        current = makeSubscription(options.applicationServerKey.buffer);
-        return Promise.resolve(current);
-      }),
-    },
-  };
-  Object.defineProperty(navigator, 'serviceWorker', {
-    configurable: true,
-    value: {
-      register: vi.fn(() => Promise.resolve(registration)),
-      ready: Promise.resolve(registration),
-      getRegistration: vi.fn(() => Promise.resolve(current === null ? undefined : registration)),
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-    },
-  });
-  Object.defineProperty(window, 'PushManager', { configurable: true, value: class {} });
-  const requestPermission = vi.fn(() => {
-    stub.permission = 'granted';
-    return Promise.resolve<NotificationPermission>('granted');
-  });
-  const stub = class {
-    static permission: NotificationPermission = 'default';
-    static requestPermission = requestPermission;
-  };
-  vi.stubGlobal('Notification', stub);
-  return { registration, requestPermission, unsubscribed };
-}
-
-function renderSettings() {
+function renderSettings({ savedEndpoints = [] }: { savedEndpoints?: string[] } = {}) {
   const server = fakeServer([]);
+  for (const endpoint of savedEndpoints) server.state.pushEndpoints.add(endpoint);
   render(
     <DeliveriesProvider api={server.api}>
       <ReachMeSettings />
@@ -138,9 +75,39 @@ describe('Settings, Reach me', () => {
     expect(await screen.findByText('On for this device.')).toBeTruthy();
   });
 
-  it('shows on for a subscription made with the current key', async () => {
+  it('shows on for a subscription made with the current key that the server still has', async () => {
     stubPushBrowser({ existingKey: SERVER_KEY });
-    renderSettings();
+    renderSettings({ savedEndpoints: ['https://push.example.test/device-1'] });
+    expect(await screen.findByText('On for this device.')).toBeTruthy();
+  });
+
+  it('keeps showing on when the server cannot be asked about this device', async () => {
+    stubPushBrowser({ existingKey: SERVER_KEY });
+    const server = fakeServer([]);
+    vi.mocked(server.api.pushDeviceSaved).mockRejectedValueOnce(new Error('offline'));
+    render(
+      <DeliveriesProvider api={server.api}>
+        <ReachMeSettings />
+      </DeliveriesProvider>,
+    );
+    expect(await screen.findByText('On for this device.')).toBeTruthy();
+  });
+
+  it('reads as off once the server dropped this device, and turning on saves it again', async () => {
+    stubPushBrowser({ existingKey: SERVER_KEY });
+    const { api } = renderSettings();
+    const on = await screen.findByRole('button', { name: 'Turn on for this device' });
+    await waitFor(() => expect(on).toHaveProperty('disabled', false));
+    expect(screen.getByText('Off for this device.')).toBeTruthy();
+    expect(api.pushDeviceSaved).toHaveBeenCalledWith('https://push.example.test/device-1');
+
+    fireEvent.click(on);
+
+    await waitFor(() =>
+      expect(api.savePushDevice).toHaveBeenCalledWith(
+        expect.objectContaining({ endpoint: 'https://push.example.test/device-1' }),
+      ),
+    );
     expect(await screen.findByText('On for this device.')).toBeTruthy();
   });
 
@@ -206,6 +173,132 @@ describe('Settings, Reach me', () => {
   it('never names the assistant in its own words, and keeps texts and calls off', () => {
     stubPushBrowser();
     renderSettings();
-    expect(screen.getByText(/Texts and phone calls are off\./)).toBeTruthy();
+    expect(screen.getByText(/Texts and phone calls stay off until they are set up\./)).toBeTruthy();
+  });
+
+  it('names the assistant the person chose in the notice words, not the product', async () => {
+    stubPushBrowser();
+    const server = fakeServer([]);
+    const personalizationApi = {
+      getProfile: async () => ({ ...EMPTY_PERSONALIZATION_PROFILE, assistant_name: 'Testname' }),
+      updateProfile: async () => ({ ...EMPTY_PERSONALIZATION_PROFILE }),
+      deleteProfile: async () => {},
+    };
+    render(
+      <PersonalizationProvider api={personalizationApi}>
+        <DeliveriesProvider api={server.api}>
+          <ReachMeSettings />
+        </DeliveriesProvider>
+      </PersonalizationProvider>,
+    );
+    expect(await screen.findByText(/A notice shows even when Testname is closed/)).toBeTruthy();
+    expect(screen.getByText(/The details open in Testname\./)).toBeTruthy();
+    expect(screen.queryByText(/even when Aman is closed/)).toBeNull();
+  });
+
+  it('explains a certificate failure as a trust problem, in readable styling, and keeps the raw error off the page', async () => {
+    stubPushBrowser({
+      registerError: new Error(
+        "Failed to register a ServiceWorker for scope ('https://box.example.ts.net:8444/') with script ('https://box.example.ts.net:8444/sw.js'): An SSL certificate error occurred when fetching the script.",
+      ),
+    });
+    const { api } = renderSettings();
+    const on = await screen.findByRole('button', { name: 'Turn on for this device' });
+    await waitFor(() => expect(on).toHaveProperty('disabled', false));
+
+    fireEvent.click(on);
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('This device does not trust the computer that runs');
+    expect(alert.textContent).toContain('open the "Trust this computer" link the installer printed');
+    expect(alert.textContent).not.toContain('aman doctor network');
+    expect(alert.textContent).not.toContain('Failed to register a ServiceWorker');
+    expect(alert.textContent).not.toContain('SSL');
+    expect(alert.className).toContain('text-failure-bg');
+    expect(alert.className).not.toContain('text-failure-text');
+    expect(api.savePushDevice).not.toHaveBeenCalled();
+  });
+
+  it('says to reload when the notice program fails to load for another reason', async () => {
+    stubPushBrowser({
+      registerError: new Error(
+        "Failed to register a ServiceWorker for scope ('https://box.example.test/') with script ('https://box.example.test/sw.js'): A bad HTTP response code (404) was received when fetching the script.",
+      ),
+    });
+    renderSettings();
+    const on = await screen.findByRole('button', { name: 'Turn on for this device' });
+    await waitFor(() => expect(on).toHaveProperty('disabled', false));
+
+    fireEvent.click(on);
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('could not load the small program notices need');
+    expect(alert.textContent).not.toContain('does not trust the computer');
+  });
+
+  it('treats a SecurityError while subscribing as a trust failure with the same next step', async () => {
+    stubPushBrowser({ subscribeError: new DOMException('The operation is not supported.', 'SecurityError') });
+    const { api } = renderSettings();
+    const on = await screen.findByRole('button', { name: 'Turn on for this device' });
+    await waitFor(() => expect(on).toHaveProperty('disabled', false));
+
+    fireEvent.click(on);
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('This device does not trust the computer that runs');
+    expect(alert.textContent).toContain('open the "Trust this computer" link the installer printed');
+    expect(alert.textContent).not.toContain('could not load the small program');
+    expect(api.savePushDevice).not.toHaveBeenCalled();
+  });
+
+  it('says what to do when subscribing is refused', async () => {
+    stubPushBrowser({ subscribeError: new DOMException('Permission denied.', 'NotAllowedError') });
+    renderSettings();
+    const on = await screen.findByRole('button', { name: 'Turn on for this device' });
+    await waitFor(() => expect(on).toHaveProperty('disabled', false));
+
+    fireEvent.click(on);
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('This browser did not allow notices');
+    expect(alert.textContent).toContain('Allow them for this site in the browser settings, then try again.');
+  });
+
+  it('says what to do when the notice service cannot be reached while subscribing', async () => {
+    stubPushBrowser({ subscribeError: new DOMException('The push service is unavailable.', 'AbortError') });
+    renderSettings();
+    const on = await screen.findByRole('button', { name: 'Turn on for this device' });
+    await waitFor(() => expect(on).toHaveProperty('disabled', false));
+
+    fireEvent.click(on);
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('The notice service could not be reached');
+    expect(alert.textContent).toContain("Check this device's connection, then try again.");
+  });
+
+  it('says to reload when turning on fails in a way it does not recognise', async () => {
+    stubPushBrowser({ registerError: new Error('Something unexpected happened.') });
+    renderSettings();
+    const on = await screen.findByRole('button', { name: 'Turn on for this device' });
+    await waitFor(() => expect(on).toHaveProperty('disabled', false));
+
+    fireEvent.click(on);
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('Notices could not be turned on. Reload the page, then try again.');
+  });
+
+  it('says to reload when turning off fails in a way it does not recognise', async () => {
+    stubPushBrowser({ unsubscribeError: new Error('Something unexpected happened.') });
+    const { api } = renderSettings();
+    const on = await screen.findByRole('button', { name: 'Turn on for this device' });
+    await waitFor(() => expect(on).toHaveProperty('disabled', false));
+    fireEvent.click(on);
+    fireEvent.click(await screen.findByRole('button', { name: 'Turn off on this device' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('Notices could not be turned off. Reload the page, then try again.');
+    expect(api.removePushDevice).toHaveBeenCalledWith('https://push.example.test/device-1');
   });
 });

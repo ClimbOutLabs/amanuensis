@@ -9,9 +9,7 @@ import {
   armSpokenReply,
   clearDraftFromVoice,
   disarmSpokenReply,
-  getHandsFree,
   markDraftFromVoice,
-  setHandsFree,
   takeDraftFromVoice,
 } from '@/utils/voiceTurn.js';
 import {
@@ -130,7 +128,6 @@ describe('SpokenReplyContainer', () => {
     stopSpokenReply();
     removeSpeechSynthesis();
     clearDraftFromVoice();
-    setHandsFree('off');
     window.localStorage.clear();
     threadRunning.value = false;
   });
@@ -144,6 +141,23 @@ describe('SpokenReplyContainer', () => {
         { type: 'text', text: 'You have **two** meetings [today](https://example.com).' },
       ],
     });
+
+    expect(spokenTexts(synthesis)).toEqual(['You have two meetings today.']);
+  });
+
+  // The chat shows a sent message under a temporary id, then renames it to the server's turn id.
+  it('reads the answer when the voice message is renamed while its turn runs', async () => {
+    markDraftFromVoice();
+    const reply = [{ type: 'text' as const, text: 'You have two meetings today.' }];
+    const { rerender } = render(thread({ messages: [], running: false }));
+    armSpokenReply({ fromVoice: takeDraftFromVoice(), text: PROMPT });
+    rerender(thread({ messages: [userMessage(PROMPT)], running: true }));
+    await settle();
+    const renamed: ThreadMessageLike = { ...userMessage(PROMPT), id: 'turn-1-user' };
+    rerender(thread({ messages: [renamed, streamingMessage(reply)], running: true }));
+    await settle();
+    rerender(thread({ messages: [renamed, assistantMessage(reply)], running: false }));
+    await settle();
 
     expect(spokenTexts(synthesis)).toEqual(['You have two meetings today.']);
   });
@@ -280,47 +294,4 @@ describe('SpokenReplyContainer', () => {
     ).resolves.toBeDefined();
     expect(synthesis.speak).not.toHaveBeenCalled();
   });
-
-  it('a hands-free conversation listens again only once the reply has been read aloud', async () => {
-    await sendAndFinishHandsFree();
-    expect(getHandsFree()).toBe('answering');
-
-    await act(async () => {
-      for (const call of synthesis.speak.mock.calls) call[0].finish();
-    });
-    await settle();
-    expect(getHandsFree()).toBe('listen-due');
-  });
-
-  it('a hands-free conversation listens again at once when there is nothing to read', async () => {
-    window.localStorage.setItem(SPEAK_VOICE_REPLIES_STORAGE_KEY, 'false');
-
-    await sendAndFinishHandsFree();
-
-    expect(getHandsFree()).toBe('listen-due');
-  });
-
-  it('switching chats ends a hands-free conversation', async () => {
-    const { rerender } = render(thread({ messages: [], running: false, threadId: 'chat-a' }));
-    await settle();
-    setHandsFree('answering');
-
-    rerender(thread({ messages: [], running: false, threadId: 'chat-b' }));
-    await settle();
-
-    expect(getHandsFree()).toBe('off');
-  });
-
-  async function sendAndFinishHandsFree() {
-    const { rerender } = render(thread({ messages: [], running: false }));
-    setHandsFree('answering');
-    markDraftFromVoice();
-    armSpokenReply({ fromVoice: takeDraftFromVoice(), text: PROMPT });
-    const prompt = [userMessage(PROMPT)];
-    const reply = [{ type: 'text' as const, text: 'Hello there.' }];
-    rerender(thread({ messages: prompt, running: true }));
-    await settle();
-    rerender(thread({ messages: [...prompt, assistantMessage(reply)], running: false }));
-    await settle();
-  }
 });

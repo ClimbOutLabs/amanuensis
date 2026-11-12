@@ -11,6 +11,7 @@
 #        install.sh instance password [<name>]
 #        install.sh backup [<name>]
 #        install.sh backups daily|off
+#        install.sh restore [<name>] [<time> | --latest]
 #        install.sh upgrade [--check] [--force]
 #        install.sh docker
 #        install.sh command
@@ -73,6 +74,8 @@ DOWNLOADS_FILE=$INSTALLER_DIR/downloads.txt
 . "$INSTALLER_DIR/lib/migrate.sh"
 # shellcheck source=lib/backup.sh
 . "$INSTALLER_DIR/lib/backup.sh"
+# shellcheck source=lib/restore.sh
+. "$INSTALLER_DIR/lib/restore.sh"
 # shellcheck source=lib/upgrade.sh
 . "$INSTALLER_DIR/lib/upgrade.sh"
 # shellcheck source=lib/plan.sh
@@ -169,6 +172,8 @@ Amanuensis installer
                                   set a new owner password and sign everyone out
   install.sh backup [<name>]      make a backup now
   install.sh backups daily|off    turn the daily backup on or off
+  install.sh restore [<name>] [<time> | --latest]
+                                  put an instance back from a backup; with no time it lists them and asks which
   install.sh upgrade [--check] [--force]
                                   update Aman to this copy of its code; --check only shows what would change
   install.sh docker               install or start Docker, or update it, asking before anything that needs admin rights
@@ -211,7 +216,7 @@ Options
   --home-network        on a cloud server, still open Aman at its private addresses (other customers share them, so the default there is this computer only)
   --port N              the port for the app on this computer
   --login-port N        the port for the sign-in service on this computer
-  --tls local|off|caddy  https on your network with a certificate made on this computer (default), plain http, or
+  --tls local|caddy     https on your network with a certificate made on this computer (default), or
                         https at --public-url and --login-url with Caddy on this computer (the system's Caddy package, Let's Encrypt)
   --public-ip ADDRESS   this computer's public address, for the --tls caddy check (default: ask a lookup service)
   --confirm-name NAME   with --purge-data, the instance name typed in advance
@@ -223,7 +228,7 @@ Options
   --email-password-stdin  read the email app password from the input (see the line order above)
   --email-imap-host HOST, --email-imap-port N, --email-smtp-host HOST, --email-smtp-port N
                         the incoming and outgoing servers, for --email-provider other only
-  --calendar-provider NAME  the calendar provider: fastmail, yahoo, gmx, webde or other (with --yes: required)
+  --calendar-provider NAME  the calendar provider: google, fastmail, yahoo, gmx, webde or other (with --yes: required)
   --calendar-email ADDRESS  the email address of the calendar account (with --yes: required)
   --calendar-url URL    the https address of the calendar, for the other provider (with --yes: required for other)
   --calendar-user NAME  the calendar login name (default: the email address)
@@ -281,6 +286,7 @@ parse_args() {
       --check) OPT_CHECK=1 ;;
       --force) OPT_FORCE=1 ;;
       --purge-data) OPT_PURGE=1 ;;
+      --latest) OPT_LATEST=1 ;;
       --demo) OPT_DEMO=1 ;;
       --reset) OPT_RESET=1 ;;
       --fresh) OPT_FRESH=1 ;;
@@ -301,7 +307,7 @@ parse_args() {
         case "$positional:$COMMAND" in
           1:install)
             case "$arg" in
-              instance | backup | backups | upgrade | docker | command | tls | migrate) COMMAND=$arg ;;
+              instance | backup | backups | upgrade | docker | command | tls | migrate | restore) COMMAND=$arg ;;
               *) usage_die "unknown command $arg" ;;
             esac
             ;;
@@ -309,6 +315,7 @@ parse_args() {
           3:instance | 2:backup) OPT_NAME=$arg ;;
           4:instance) OPT_IMPORT_FILE=$arg ;;
           2:backups) OPT_BACKUPS_ARG=$arg ;;
+          2:restore | 3:restore) restore_take_arg "$arg" ;;
           *) usage_die "unexpected argument $arg" ;;
         esac
         ;;
@@ -370,6 +377,14 @@ print_signout_note() {
 }
 
 # --demo belongs to install and instance add; --reset and --fresh only to instance demo-seed.
+# An instance opened on the network is always served over https, so sign-in is never sent unprotected: --tls off is not
+# a choice anymore. An instance from before this change that still says plain http moves to https on the next run.
+check_tls_options() {
+  if [ "$(lowercase "$OPT_TLS")" = off ]; then
+    usage_die "--tls off is not a choice anymore: an instance opened on your network is served over https with a certificate Aman makes on this computer, so sign-in stays protected. Run again without --tls off."
+  fi
+}
+
 check_demo_options() {
   local seeding=0
   if [ "$COMMAND:$SUBCOMMAND" = instance:demo-seed ]; then seeding=1; fi
@@ -393,6 +408,9 @@ check_demo_options() {
   fi
   if [ "$OPT_LOCAL_ONLY" = 1 ] && [ -n "$OPT_PUBLIC_URL" ]; then
     usage_die "--local-only and --public-url are opposites; pick one."
+  fi
+  if [ "$OPT_LATEST" = 1 ] && [ "$COMMAND" != restore ]; then
+    usage_die "--latest applies to restore"
   fi
   if [ "$OPT_LOCAL_ONLY" = 1 ] && [ "$OPT_HOME_NETWORK" = 1 ]; then
     usage_die "--local-only and --home-network are opposites; pick one."
@@ -430,6 +448,7 @@ on_exit() {
   upgrade_on_exit
   import_on_exit
   migrate_on_exit
+  restore_on_exit
   if [ "$rc" != 0 ]; then instance_pending_notice; fi
   lock_release
   exit "$rc"
@@ -441,6 +460,7 @@ main() {
   parse_args "$@"
   set_paths
   trap on_exit EXIT
+  check_tls_options
   check_demo_options
   check_import_options
   check_migrate_options
@@ -477,6 +497,7 @@ main() {
     install) cmd_install ;;
     backup) cmd_backup ;;
     backups) cmd_backups ;;
+    restore) cmd_restore ;;
     docker) docker_fix ;;
     command) cmd_command ;;
     tls) cmd_tls ;;

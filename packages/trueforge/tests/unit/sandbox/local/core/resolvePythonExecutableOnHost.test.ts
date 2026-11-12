@@ -41,6 +41,11 @@ describe('sandbox PATH vs allowRead', () => {
     expect(platformAllowRead('linux')).not.toContain('/tmp');
   });
 
+  it("lets linux read the pip that Ubuntu's Python puts into a new environment, and no more of /usr/share", () => {
+    expect(platformAllowRead('linux')).toContain('/usr/share/python-wheels');
+    expect(platformAllowRead('linux')).not.toContain('/usr/share');
+  });
+
   it('grants /etc and /private/etc on darwin (symlink + resolved spelling)', () => {
     expect(platformAllowRead('linux')).toContain('/etc');
     expect(platformAllowRead('linux')).not.toContain('/private/etc');
