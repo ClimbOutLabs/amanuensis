@@ -58,6 +58,7 @@ export async function exportInstanceArchive<TTransaction>({
     reachSettingsStore: stores.reachSettingsStore,
     turnArtifactStore: stores.turnArtifactStore,
     mcpServerStore: stores.mcpServerStore,
+    modelProviderStore: stores.modelProviderStore,
     listAgents: async () =>
       (
         await stores.agentStore.listAgents({
