@@ -14,6 +14,7 @@ Aman reads mail, web pages, files, and whatever a connector sends back. All of t
 - Every chat tells the model that content from tools, files, web pages and repositories is data, not instructions. If that content asks Aman to do something, Aman is told to tell you instead of doing it.
 - Memories Aman recalls are marked the same way: they are notes about you, not commands.
 - What Aman learns about you from chats is kept as information about you, not as instructions.
+- A search result is a result from the web search provider you picked in Settings. A tool of any other connector returns something Aman read, even when the tool has the name of a search tool.
 
 ## Reading is free, doing needs your OK
 

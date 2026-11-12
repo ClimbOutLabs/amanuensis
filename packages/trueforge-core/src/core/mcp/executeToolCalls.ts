@@ -45,6 +45,7 @@ import { HELD_REASON_CODE, HELD_RESULT_TEXT } from '../permissions/heldActions';
 import { MAPS_ASK_REASON } from '../permissions/mapsToolNames';
 import { collectOutboundStrings } from '../permissions/outboundGuard';
 import {
+  hostToolStamp,
   isSearchAskReason,
   isSilentSearchReason,
   recordToolResultProvenance,
@@ -2497,6 +2498,7 @@ export async function executeToolCalls({
       recordToolResultProvenance({
         state: sentinel.web_search,
         tool_name: toolCall.tool_info.original_tool_name,
+        stamp: hostToolStamp(toolCall.tool_info),
         argument_values: sent === undefined ? [] : [...sent.values, ...sent.plumbing],
         texts: resultTexts(result),
       });
