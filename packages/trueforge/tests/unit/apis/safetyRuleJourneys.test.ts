@@ -459,6 +459,34 @@ describe('a page Aman opens in its browser', () => {
       },
       TURN_TIMEOUT_MS,
     );
+
+    it(
+      'is a plain reply note when an earlier turn of the chat ran a web search, though the turn of the reply read nothing',
+      async () => {
+        const searching = await startApprovalTestServer({ inertWebSearch: true });
+        try {
+          const chatId = await createChat(searching);
+          searching.model.next({ toolArguments: { query: 'boat hire' } });
+          const searched = await runTurn({ server: searching, chatId, input: ask('web_search') });
+          const ran = await runTurn({
+            server: searching,
+            chatId,
+            input: answer({ card: onlyCard(searched), scope: 'once' }),
+          });
+          expect(cards(ran)).toEqual([]);
+          searching.model.next({ reply: 'The boat hire desk is beside the slipway.' });
+          await runTurn({
+            server: searching,
+            chatId,
+            input: [{ type: 'user.message', content: 'Where is the boat hire desk?' }],
+          });
+          expect(await closingLineOfNoteWith('slipway')).toBe('> External source: assistant reply');
+        } finally {
+          await searching.close();
+        }
+      },
+      TURN_TIMEOUT_MS,
+    );
   });
 
   it(

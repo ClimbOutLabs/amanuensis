@@ -91,6 +91,8 @@ export interface WebSearchTurnState {
   sentText: string;
   /** Where the links and addresses this chat has seen came from. */
   provenance: ChatProvenance;
+  /** Whether a tool that can return text from outside the chat has answered in this chat, a plain search included. */
+  outsideToolResult: boolean;
   /** The name the person calls the assistant, for the sentences on its cards. */
   assistantName: string;
   /** Tail of the one-at-a-time chain that classifies and counts the turn's search calls. */
@@ -102,6 +104,7 @@ export function createWebSearchTurnState(): WebSearchTurnState {
     silentSearches: 0,
     sentText: '',
     provenance: emptyChatProvenance(),
+    outsideToolResult: false,
     assistantName: DEFAULT_ASSISTANT_NAME,
     admission: Promise.resolve(),
   };

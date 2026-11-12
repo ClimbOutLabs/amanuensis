@@ -1991,7 +1991,8 @@ async function beginAcceptedTurnExecution(
               session: session.record,
               userText: extractUserMessageText(input ?? []),
               attachedFiles: inputAttachesFiles(input ?? []),
-              chatHasReadContent: () => hasReadContent(resolver.webSearchTurn.provenance),
+              chatHasReadContent: () =>
+                hasReadContent(resolver.webSearchTurn.provenance) || resolver.webSearchTurn.outsideToolResult,
               timeZone: deps.clientTimezone,
               summarize: memorySummarize,
             },
@@ -3169,7 +3170,8 @@ export function createTurnsRouter(deps: TurnsRouterDeps) {
                   session: session.record,
                   userText: extractUserMessageText(body.input),
                   attachedFiles: inputAttachesFiles(body.input ?? []),
-                  chatHasReadContent: () => hasReadContent(resolver.webSearchTurn.provenance),
+                  chatHasReadContent: () =>
+                    hasReadContent(resolver.webSearchTurn.provenance) || resolver.webSearchTurn.outsideToolResult,
                   timeZone: body.client_timezone,
                   // Resolved once on the create-turn path above; absent means verbatim.
                   summarize: memorySummarize,

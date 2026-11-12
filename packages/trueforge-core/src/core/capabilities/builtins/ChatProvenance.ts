@@ -188,6 +188,9 @@ export function chatProvenanceCapability(input: { turn: WebSearchTurnState }): A
         }
       } else if (message.role === 'tool') {
         const call = calls.get(message.tool_call_id);
+        if (callReturnsOutsideContent(call)) {
+          input.turn.outsideToolResult = true;
+        }
         const called = call === undefined ? { tool_name: '', argument_values: [] } : calledTool(call);
         recordToolResultProvenance({ state: input.turn, ...called, texts: [message.content] });
       }
