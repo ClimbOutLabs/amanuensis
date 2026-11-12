@@ -345,6 +345,9 @@ async function withWorld(run) {
       <button id="swap" onpointerdown="document.getElementById('trap').hidden = false">Swap on press</button>
       <div id="trap" hidden style="position: fixed; inset: 0; background: red"
         onclick="fetch('/stray', { method: 'POST' })"></div>`),
+    // A page with another site's widget in a frame at its top corner, as a human check sits on a page.
+    '/widget-frame': html(`<iframe src="http://site-b.test/widget"
+      style="position: fixed; left: 0; top: 0; width: 12rem; height: 8rem; border: 0"></iframe>`),
     // A page that moves another site's frame under the pointer, or the focus into it.
     '/frames': html(`<h1>Frames</h1>
       <div style="position: relative; width: 12rem; height: 2.5rem">
@@ -1454,6 +1457,36 @@ test(
 );
 
 test(
+  "the person's own click in the live view reaches another site's frame, and Aman's press there is still stopped",
+  { skip: !browsersAvailable },
+  async () => {
+    await withWorld(async ({ sidecar, siteB }) => {
+      const where = { owner: 'owner-1', tab: 'chat-1' };
+      await sidecar.open({ ...where, url: 'http://site-a.test/widget-frame' });
+      await settle();
+      // The widget's button fills the frame's top 2.5rem, at the page's top left.
+      assert.deepEqual(await sidecar.liveInput({ ...where, input: { kind: 'click', x: 96, y: 16 } }), {
+        status: 'ok',
+      });
+      await settle();
+      assert.ok(
+        siteB.hits.some(hit => hit.method === 'POST' && hit.url === '/allowed'),
+        "the person's click reached the frame",
+      );
+      const before = posts(siteB.hits).length;
+      const opened = await sidecar.open({ ...where, url: 'http://site-a.test/frames' });
+      const ref = refFor(opened.text, 'Show details');
+      assert.deepEqual(await sidecar.click({ ...where, ref, expect: await checked(sidecar, ref) }), {
+        status: 'refused',
+        reason: 'changed',
+      });
+      await settle();
+      assert.equal(posts(siteB.hits).length, before, "Aman's press never reached the frame");
+    });
+  },
+);
+
+test(
   "typing that the page moves into another site's frame is stopped there and refused",
   { skip: !browsersAvailable },
   async () => {
@@ -1542,6 +1575,9 @@ async function withFakeSidecar(run) {
   const evaluate = expression => {
     if (expression.includes('amanGuard = guard')) {
       return undefined;
+    }
+    if (expression.includes('return viewPosition()')) {
+      return { top: 0, bottom: 800, height: 800 };
     }
     if (expression.includes('return extractSnapshotNodes()')) {
       return [{ id: 'HTML:0/INPUT:0', role: 'textbox', name: 'Name', value: '', field_kind: null, actionable: true }];
@@ -1652,9 +1688,10 @@ async function fakeSidecar() {
     mainFrame: () => mainFrame,
     url: () => 'https://site-a.test/account',
     title: async () => pageTitle,
-    frames: () => frameUrls.map(url => ({ url: () => url })),
+    frames: () => frameUrls.map(url => ({ url: () => url, evaluate: async () => undefined })),
     goto: async () => undefined,
-    evaluate: async () => [],
+    exposeBinding: async () => undefined,
+    addInitScript: async () => undefined,
     screenshot: async options => {
       if (shotsToFail > 0) {
         shotsToFail -= 1;
@@ -1711,8 +1748,20 @@ async function fakeSidecar() {
     },
     close: async () => undefined,
   };
+  // Reads run in the sidecar's own world in the page; this page has nothing on it to read.
   const cdp = {
-    send: async method => (method === 'Page.getFrameTree' ? { frameTree: { frame: { id: 'main' } } } : {}),
+    send: async (method, params) => {
+      if (method === 'Page.getFrameTree') {
+        return { frameTree: { frame: { id: 'main' } } };
+      }
+      if (method === 'Page.createIsolatedWorld') {
+        return { executionContextId: 7 };
+      }
+      if (method === 'Runtime.evaluate') {
+        return { result: { value: params.expression.includes('return extractSnapshotNodes()') ? [] : undefined } };
+      }
+      return {};
+    },
     on: () => undefined,
   };
   const context = {
@@ -1899,17 +1948,18 @@ test('takeover streams the pointer in steps, holds the model out, and hands the 
 });
 
 test('under takeover the model cannot click, type or select, and can again after handback', async () => {
-  await withFakeSidecar(async ({ sidecar }) => {
+  await withFakeSidecar(async ({ sidecar, state }) => {
     await sidecar.liveTakeover({ owner: 'owner-1', tab: 'chat-1', on: true });
     for (const step of [
-      () => sidecar.click({ owner: 'owner-1', tab: 'chat-1', ref: 'e1' }),
-      () => sidecar.type({ owner: 'owner-1', tab: 'chat-1', ref: 'e1', text: 'hello' }),
-      () => sidecar.select({ owner: 'owner-1', tab: 'chat-1', ref: 'e1', option: 'x' }),
+      () => sidecar.click({ owner: 'owner-1', tab: 'chat-1', ref: 'e1', expect: FAKE_FIELD }),
+      () => sidecar.type({ owner: 'owner-1', tab: 'chat-1', ref: 'e1', expect: FAKE_FIELD, text: 'hello' }),
+      () => sidecar.select({ owner: 'owner-1', tab: 'chat-1', ref: 'e1', expect: FAKE_FIELD, option: 'x' }),
     ]) {
       assert.deepEqual(await step(), { status: 'refused', reason: 'takeover' });
     }
+    assert.equal(state.actions, 0, 'nothing reached the page');
     await sidecar.liveTakeover({ owner: 'owner-1', tab: 'chat-1', on: false });
-    const typed = await sidecar.type({ owner: 'owner-1', tab: 'chat-1', ref: 'e1', text: 'hello' });
+    const typed = await sidecar.type({ owner: 'owner-1', tab: 'chat-1', ref: 'e1', expect: FAKE_FIELD, text: 'hello' });
     assert.equal(typed.status, 'ok');
   });
 });

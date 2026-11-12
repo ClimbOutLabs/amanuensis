@@ -2,7 +2,7 @@
 // chat, reached only through the browser gateway, which checks the app server's shared secret before
 // it relays a call. Nothing here is published to the host or to any other service.
 import { Buffer } from 'node:buffer';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -333,9 +333,19 @@ async function realInput({ tab, result, text }) {
 const FRAME_INPUT_BINDING = 'amanFrameInput';
 
 /**
+ * The name of each frame guard's switch, and the key it answers to. The key is made fresh for each run
+ * of the sidecar and lives only inside the guard, so a page's scripts can call the switch but never
+ * turn the guard off.
+ */
+const FRAME_GUARD_SWITCH = 'amanFrameGuard';
+const FRAME_GUARD_KEY = randomBytes(32).toString('hex');
+
+/**
  * Runs before any script in every frame but the top one. Aman only ever acts on the top page, so any
  * real input that reaches a frame inside it (a frame the page slid under the pointer, or moved the
- * focus into) is stopped and cancelled before that frame's own code sees it, and reported.
+ * focus into) is stopped and cancelled before that frame's own code sees it, and reported. The guard
+ * starts on; the sidecar switches it off only while the person's own live-view act runs, so they can
+ * use a frame (a human check, a card form) by hand.
  */
 const FRAME_GUARD_SCRIPT = `(() => {
   if (window === window.top) {
@@ -345,8 +355,19 @@ const FRAME_GUARD_SCRIPT = `(() => {
   const stop = Event.prototype.stopImmediatePropagation;
   const cancel = Event.prototype.preventDefault;
   const report = window.${FRAME_INPUT_BINDING};
+  let on = true;
+  Object.defineProperty(window, ${JSON.stringify(FRAME_GUARD_SWITCH)}, {
+    value: (key, wanted) => {
+      if (key === ${JSON.stringify(FRAME_GUARD_KEY)}) {
+        on = wanted === true;
+      }
+    },
+    writable: false,
+    enumerable: false,
+    configurable: false,
+  });
   const block = event => {
-    if (!event.isTrusted) {
+    if (!on || !event.isTrusted) {
       return;
     }
     apply(stop, event, []);
@@ -482,7 +503,47 @@ async function capturePage(page, options) {
   }
 }
 
-/** Runs one live-view act after every act sent before it has finished, whether or not that one worked. */
+/**
+ * Turns the guard in every frame of the tab on or off. A frame that goes away meanwhile is skipped:
+ * whatever loads in its place starts with its guard on.
+ */
+async function setFrameGuards(tab, on) {
+  await Promise.all(
+    tab.page
+      .frames()
+      .filter(frame => frame !== tab.page.mainFrame())
+      .map(frame =>
+        frame
+          .evaluate(([name, key, wanted]) => window[name]?.(key, wanted), [FRAME_GUARD_SWITCH, FRAME_GUARD_KEY, on])
+          .catch(() => undefined),
+      ),
+  );
+}
+
+/** Live-view acts that press or type; a move or a wheel turn is not input the frame guards stop. */
+const GUARDED_LIVE_KINDS = new Set(['click', 'down', 'up', 'type', 'key']);
+
+/**
+ * Runs the person's own live-view act with the frame guards off, so it reaches a frame they point at,
+ * and turns them back on before anything else runs on the tab.
+ */
+async function livePersonAct(tab, input) {
+  if (!GUARDED_LIVE_KINDS.has(input.kind)) {
+    return liveAct(tab, input);
+  }
+  await setFrameGuards(tab, false);
+  try {
+    return await liveAct(tab, input);
+  } finally {
+    await setFrameGuards(tab, true);
+  }
+}
+
+/**
+ * Runs one act on the tab's real mouse or keyboard after every act sent before it has finished,
+ * whether or not that one worked. The person's live-view acts and Aman's own checked input share
+ * this one line, so the frame guards are never off while Aman's input runs.
+ */
 function inLiveOrder(tab, act) {
   const run = tab.liveActs.then(act);
   tab.liveActs = run.then(
@@ -876,7 +937,7 @@ export class BrowserSidecar {
       try {
         const nodes = await inReadWorld({ tab, expression: EXTRACT_SCRIPT });
         const refs = tab.refs.refsFor(nodes);
-        const view = await tab.page.evaluate(VIEW_SCRIPT);
+        const view = await inReadWorld({ tab, expression: VIEW_SCRIPT });
         const text = renderSnapshot({ title: await tab.page.title(), url: tab.page.url(), nodes, refs, view });
         return { status: 'ok', text };
       } catch (error) {
@@ -947,7 +1008,7 @@ export class BrowserSidecar {
    * The layout is read in an isolated world, and nothing on the page is changed.
    */
   async #pictureLayout(tab) {
-    const nodes = await tab.page.evaluate(EXTRACT_SCRIPT);
+    const nodes = await inReadWorld({ tab, expression: EXTRACT_SCRIPT });
     const refs = tab.refs.refsFor(nodes);
     const cdp = await tab.page.context().newCDPSession(tab.page);
     try {
@@ -1069,8 +1130,12 @@ export class BrowserSidecar {
     if (result.status === 'press' || result.status === 'keys') {
       // Real input, so the page's controls react as they do to a person. The guards stop any of it
       // that lands outside the checked element, in this page or a frame inside it, before the page sees it.
-      tab.frameInput = false;
-      const sent = await realInput({ tab, result, text: rest.text }).then(
+      const sent = await inLiveOrder(tab, async () => {
+        // Every live act turns the guards back on; this covers a frame that missed that call.
+        await setFrameGuards(tab, true);
+        tab.frameInput = false;
+        return realInput({ tab, result, text: rest.text });
+      }).then(
         done => ({ done }),
         error => ({ error }),
       );
@@ -1181,7 +1246,7 @@ export class BrowserSidecar {
     if (tab === undefined) {
       return NO_TAB;
     }
-    return inLiveOrder(tab, () => liveAct(tab, input));
+    return inLiveOrder(tab, () => livePersonAct(tab, input));
   }
 
   /**

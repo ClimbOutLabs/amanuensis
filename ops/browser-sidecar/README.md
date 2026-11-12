@@ -114,7 +114,10 @@ set up at the start of every document, before any of the page's scripts. It stop
 lands outside the checked element, and it notices when a press never reached the element or typing
 ended with the focus somewhere else. The other runs first in every frame inside the page, including
 frames from other sites. Aman never acts inside a frame, so it stops all real input that reaches one.
-Either way the action is refused as `changed`. A guard that could only be set up after the page's
+Either way the action is refused as `changed`. The frame guard is switched off only while one of the
+person's own live-view clicks or keys runs, so they can use a human check or a card form inside a frame
+by hand. A page's scripts cannot switch it off. The person's acts and Aman's own input take turns on a
+tab, so the frame guard is always on while Aman's input runs. A guard that could only be set up after the page's
 scripts ran is not trusted, so the action is refused as `unchecked`.
 
 The fields an action checks are the ones that decide what it does: a click checks them all,
