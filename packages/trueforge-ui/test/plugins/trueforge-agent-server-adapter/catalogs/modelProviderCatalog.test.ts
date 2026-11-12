@@ -101,10 +101,15 @@ describe('modelProviderCatalog mappers', () => {
 
   it('serves provider logos from the app, never from the outside host', () => {
     const entry = toUiCatalogModelProviderEntry(
-      { type: 'anthropic', logo: 'https://assets.production.truefoundry.com/anthropic.svg', models: [] },
+      { type: 'anthropic', logo: 'https://assets.example/anthropic.svg', models: [] },
       { baseUrl: '/' },
     );
-    assert.equal(entry.logo, '/catalog-logos/https/assets.production.truefoundry.com/anthropic.svg');
+    assert.equal(entry.logo, '/catalog-logos/https/assets.example/anthropic.svg');
+  });
+
+  it('uses the bundled provider logo when the shipped catalog names none', () => {
+    const entry = toUiCatalogModelProviderEntry({ type: 'openai', models: [] }, { baseUrl: '/' });
+    assert.equal(entry.logo, 'catalog-logo:model/openai');
   });
 
   it('maps catalog presets and names them after their type', () => {
@@ -122,6 +127,7 @@ describe('modelProviderCatalog mappers', () => {
       {
         type: 'anthropic',
         name: 'anthropic',
+        logo: 'catalog-logo:model/anthropic',
         models: [
           {
             id: 'claude-sonnet-4-6',

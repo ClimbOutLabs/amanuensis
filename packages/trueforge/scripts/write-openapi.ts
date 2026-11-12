@@ -26,9 +26,12 @@ import configuration from '../src/config';
 import { McpServerWithAuthStore } from '../src/db/McpServerWithAuthStore';
 import { BriefItemCompletionStore } from '../src/db/briefItemCompletionStore';
 import { DeliveryStore } from '../src/db/deliveryStore';
+import { NoticingStore } from '../src/db/noticingStore';
 import { PushSubscriptionStore } from '../src/db/pushSubscriptionStore';
+import { ReachSettingsStore } from '../src/db/reachSettingsStore';
 import { SentinelAuditStore, type SentinelAuditDatabase } from '../src/db/sentinelAuditStore';
 import { SqliteAgentStore } from '../src/db/sqlite/agent-store/SqliteAgentStore';
+import { SqliteChatDeletionStore } from '../src/db/sqlite/chat-deletion-store/SqliteChatDeletionStore';
 import { SqliteChatImageStore } from '../src/db/sqlite/chat-image-store/SqliteChatImageStore';
 import { createSqliteDb } from '../src/db/sqlite/client';
 import { SqliteGlobalSettingsStore } from '../src/db/sqlite/global-settings-store/SqliteGlobalSettingsStore';
@@ -55,6 +58,8 @@ import { createImageReencoder } from '../src/runtime/chatImages/reencodeInSandbo
 import { ChatSearchIndexer } from '../src/runtime/chatSearchIndexing';
 import { createDeliveryService } from '../src/runtime/delivery/deliveryService';
 import { EventSubscriptionRegistry } from '../src/runtime/event-subscription';
+import { NO_PHONE_CHANNELS } from '../src/runtime/noticing/reachChannels';
+import { createReminderReach } from '../src/runtime/noticing/reminderReach';
 import { createTokenFactoryBudget } from '../src/runtime/tokenFactoryBudget';
 import { TurnDrainRegistry } from '../src/runtime/turnDrains';
 
@@ -90,6 +95,7 @@ const skillStore = new SqliteSkillStore(db);
 const sandboxProviderStore = new SqliteSandboxProviderStore(db);
 const modelProviderStore = new SqliteModelProviderStore(db);
 const turnArtifactStore = new SqliteTurnArtifactStore(db);
+const chatDeletionStore = new SqliteChatDeletionStore({ db, turnArtifactStore });
 const deliveryStore = new DeliveryStore(db);
 const personaStore = new SqlitePersonaStore(db);
 const globalSettingsStore = new SqliteGlobalSettingsStore(db);
@@ -131,6 +137,7 @@ const app = createServerApp({
   withTransaction: callback => db.transaction().execute(callback),
   scheduleStore: new SqliteScheduleStore(db),
   turnArtifactStore,
+  chatDeletionStore,
   globalSettingsStore,
   tokenFactoryBudget: createTokenFactoryBudget({ store: new SqliteTokenFactoryUsageStore(db), cap: undefined }),
   tokenStore,
@@ -147,6 +154,17 @@ const app = createServerApp({
     audit: { record: () => Promise.resolve() },
     logger,
   }),
+  reachSettingsStore: new ReachSettingsStore(db),
+  noticingStore: new NoticingStore(db),
+  noticingService: { run: () => Promise.resolve({ owners: 0, raised: 0 }) },
+  reminderReach: createReminderReach({
+    reachSettings: new ReachSettingsStore(db),
+    store: new NoticingStore(db),
+    history: deliveryStore,
+    channels: () => NO_PHONE_CHANNELS,
+    logger,
+  }),
+  reachChannels: () => NO_PHONE_CHANNELS,
   webPushPublicKey: undefined,
   sessions: new Sessions({ sessionStore }),
   chatImages: createChatImageService({
@@ -163,6 +181,7 @@ const app = createServerApp({
   eventSubscriptions: new EventSubscriptionRegistry<TurnStreamingEvent>(undefined),
   logger,
   oidcDiscovery: undefined,
+  localUserStore: undefined,
   authenticator: new StandaloneAuthenticator(),
   authorizer: new TrueForgeAuthorizer(),
   outboundSecrets: () => Promise.resolve([]),
