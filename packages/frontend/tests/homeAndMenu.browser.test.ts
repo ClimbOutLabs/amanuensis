@@ -164,7 +164,7 @@ test(
               };
               probe.remove();
               const style = getComputedStyle(el);
-              const rows = Array.from(el.querySelectorAll('button, [role="group"] > p')).map(row => {
+              const rows = Array.from(el.querySelectorAll('button')).map(row => {
                 const rowStyle = getComputedStyle(row);
                 const icon = row.querySelector('svg');
                 return {
