@@ -4,7 +4,7 @@ import {
   type ReminderLine,
   type SentinelAction,
 } from '../../../src/core/permissions/classifier';
-import { defaultSentinelServices } from '../../../src/core/permissions/context';
+import { defaultSentinelServices, forUnattendedRun } from '../../../src/core/permissions/context';
 import type { Tier3Schedule } from '../../../src/core/permissions/tier';
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 
@@ -146,5 +146,104 @@ describe('Reminder tool classification', () => {
       makeCtx(),
     );
     expect((decision.reason_detail ?? '').length).toBeLessThan(140);
+  });
+});
+
+/** The same chat context while a schedule runs it with nobody watching. */
+function scheduledRunCtx(): ClassifyContext {
+  const ctx = makeCtx();
+  return { ...ctx, services: forUnattendedRun(ctx.services) };
+}
+
+function statusAction(tool_name: string, name?: string): SentinelAction {
+  return { ...scheduleAction(tool_name), ...(name === undefined ? {} : { schedule_status: { name } }) };
+}
+
+describe('A scheduled run asks before it changes a schedule or a reminder', () => {
+  it.each([
+    ['pause_schedule', 'Pause the schedule "Morning brief"?'],
+    ['resume_schedule', 'Resume the schedule "Morning brief"?'],
+  ])('%s asks and names the schedule', async (tool_name, plain_what) => {
+    const decision = await classifyTier(statusAction(tool_name, 'Morning brief'), scheduledRunCtx());
+    expect(decision).toMatchObject({ tier: 3, auto_deny: null, card: { plain_what } });
+    expect(decision.approval_token_id).not.toBeNull();
+  });
+
+  it('asks before a pause even when the host could not name the schedule', async () => {
+    const decision = await classifyTier(statusAction('pause_schedule'), scheduledRunCtx());
+    expect(decision).toMatchObject({ tier: 3, auto_deny: null, card: { plain_what: 'Pause a schedule?' } });
+  });
+
+  it('asks before it sets a reminder, with the time and the words', async () => {
+    const decision = await classifyTier(
+      reminderAction('set_reminder', { when: 'Monday, October 26 at 6:00 PM', what: 'Take the medicine' }),
+      scheduledRunCtx(),
+    );
+    expect(decision).toMatchObject({
+      tier: 3,
+      auto_deny: null,
+      card: { plain_what: 'Set a reminder for Monday, October 26 at 6:00 PM: Take the medicine?' },
+    });
+    expect(decision.approval_token_id).not.toBeNull();
+  });
+
+  it('asks before it cancels a reminder, with the words of the reminder', async () => {
+    const decision = await classifyTier(
+      reminderAction('cancel_reminder', { when: null, what: 'Take the medicine' }),
+      scheduledRunCtx(),
+    );
+    expect(decision).toMatchObject({
+      tier: 3,
+      auto_deny: null,
+      card: { plain_what: 'Cancel the reminder: Take the medicine?' },
+    });
+  });
+
+  it('asks before a reminder change even when the host gave no details', async () => {
+    const set = await classifyTier(reminderAction('set_reminder'), scheduledRunCtx());
+    const cancel = await classifyTier(reminderAction('cancel_reminder'), scheduledRunCtx());
+    expect(set).toMatchObject({ tier: 3, card: { plain_what: 'Set a reminder?' } });
+    expect(cancel).toMatchObject({ tier: 3, card: { plain_what: 'Cancel a reminder?' } });
+  });
+
+  it.each(['list_schedules', 'list_reminders'])('%s still runs without a card', async tool_name => {
+    const decision = await classifyTier(scheduleAction(tool_name), scheduledRunCtx());
+    expect(decision).toMatchObject({ tier: 1, card: null, auto_deny: null });
+  });
+});
+
+function readAction(input: { server: string; tool_name: string; params?: Record<string, unknown> }): SentinelAction {
+  return {
+    tool_name: input.tool_name,
+    canonical_params: input.params ?? {},
+    tool_type: 'truefoundry-system',
+    mcp_server_name: input.server,
+    mcp_hints: { read_only_hint: true, open_world_hint: true },
+  };
+}
+
+describe('A scheduled run still does its ordinary work without a card', () => {
+  it.each([
+    ['gmail', 'list_inbox_threads'],
+    ['gmail', 'read_email'],
+    ['google_calendar', 'list_events'],
+    ['space', 'list_spaces'],
+    ['space', 'get_space'],
+    ['schedules', 'list_reminders'],
+  ])('a morning brief reads with %s %s', async (server, tool_name) => {
+    const decision = await classifyTier(readAction({ server, tool_name }), scheduledRunCtx());
+    expect(decision).toMatchObject({ tier: 1, card: null, auto_deny: null });
+  });
+
+  it('a schedule that keeps a space up to date edits it', async () => {
+    const decision = await classifyTier(
+      readAction({
+        server: 'space',
+        tool_name: 'edit_space',
+        params: { space_name: 'Groceries', edits: [{ type: 'search', search: 'milk', replace: 'oat milk' }] },
+      }),
+      scheduledRunCtx(),
+    );
+    expect(decision).toMatchObject({ tier: 1, reason: 'space_write', card: null, auto_deny: null });
   });
 });
