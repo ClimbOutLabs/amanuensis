@@ -45,10 +45,10 @@ export const BROWSER_OPEN_PRIVATE_DETAIL_REASON = 'browser_open_private_detail';
 /** Reason code for an open that asks because the outbound guard or the person's search setting holds it. */
 export const BROWSER_OPEN_GUARD_REASON = 'browser_open_guard';
 
-/** Reason code for typing into a field or picking an option: nothing has left the computer yet (tier 1). */
+/** Reason code for typing into a field or picking an option: the page's own script may send it at once (tier 3). */
 export const BROWSER_PREPARE_REASON = 'browser_prepare';
 
-/** Reason code for a click the classifier ranks as a commit: a submit, or a commit word (tier 3). */
+/** Reason code for a click that asks first: anything but a plain link with an ordinary label (tier 3). */
 export const BROWSER_COMMIT_REASON = 'browser_commit';
 
 export function isBrowserToolName(tool_name: string): tool_name is BrowserToolName {

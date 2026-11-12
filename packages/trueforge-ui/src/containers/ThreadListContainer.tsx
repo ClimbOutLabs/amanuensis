@@ -68,7 +68,11 @@ function ThreadListItemRow({
   const custom = useAuiState(s => s.threadListItem.custom);
   const mainThreadId = useAuiState(s => s.threads.mainThreadId);
   const agentName = readThreadAgentName(custom);
-  const sidebarNavOpen = shell?.libraryOpen === true || shell?.sessionsOpen === true || shell?.schedulesOpen === true;
+  const sidebarNavOpen =
+    shell?.libraryOpen === true ||
+    shell?.sessionsOpen === true ||
+    shell?.schedulesOpen === true ||
+    shell?.remindersOpen === true;
   const deliveries = useOptionalDeliveries();
   const answerMarks = useOptionalChatAnswerMarks();
   // A chat with an unread item in the feed (a reminder, say) is marked until it is opened.
@@ -357,7 +361,11 @@ function useRenderChatEntry({
   const server = useOptionalServer();
   const shell = useOptionalShellMode();
   const activeRemoteId = useAuiState(s => s.threadListItem.remoteId);
-  const sidebarNavOpen = shell?.libraryOpen === true || shell?.sessionsOpen === true || shell?.schedulesOpen === true;
+  const sidebarNavOpen =
+    shell?.libraryOpen === true ||
+    shell?.sessionsOpen === true ||
+    shell?.schedulesOpen === true ||
+    shell?.remindersOpen === true;
 
   // Failures reach the delete dialog, which says so and keeps the chat.
   const deleteFolderSession = async (sessionId: string) => {
@@ -564,6 +572,7 @@ export function ThreadListContainer({ onThreadOpen, variant = 'default' }: Threa
   const AgentsLibraryButton = useSlot('AgentsLibraryButton');
   const SessionsBrowserButton = useSlot('SessionsBrowserButton');
   const SchedulesButton = useSlot('SchedulesButton');
+  const RemindersButton = useSlot('RemindersButton');
   const SpacesButton = useSlot('SpacesButton');
   const ThreadListRowSkeleton = useSlot('ThreadListRowSkeleton');
   const ThreadListEmptyState = useSlot('ThreadListEmptyState');
@@ -750,6 +759,7 @@ export function ThreadListContainer({ onThreadOpen, variant = 'default' }: Threa
             <AgentsLibraryButton />
             <SessionsBrowserButton />
             <SchedulesButton />
+            <RemindersButton />
             <SpacesButton />
           </div>
         )
