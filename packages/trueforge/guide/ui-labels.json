@@ -179,7 +179,6 @@
   "What's for dinner this week?": "packages/trueforge-ui/src/components/tourPrompts.ts",
   "Memory": "packages/trueforge-ui/src/containers/SettingsBuilder/index.tsx",
   "Skills": "packages/trueforge-ui/src/containers/SettingsBuilder/index.tsx",
-  "Open chat": "packages/trueforge-ui/src/layouts/WidgetLayout.tsx",
   "Load more": "packages/trueforge-ui/src/sentinel/AuditLogSettings.tsx",
   "Approved": "packages/trueforge-ui/src/sentinel/types.ts",
   "Denied": "packages/trueforge-ui/src/sentinel/types.ts",
