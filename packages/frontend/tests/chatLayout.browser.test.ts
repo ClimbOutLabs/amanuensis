@@ -8,6 +8,7 @@ import { createServer } from 'vite';
 import { startApprovalTestServer } from '../../trueforge/tests/fixtures/approvalTestServer.ts';
 import { FINAL_TEXT } from '../../trueforge/tests/fixtures/scriptedModelServer.ts';
 import { inProcessApi } from './support/approvalChat.ts';
+import { featureShotPath, saveFailureShots } from './support/featureShots.ts';
 import { findChromiumExecutable } from './support/findChromiumExecutable.ts';
 import { FIRST_LOAD_TIMEOUT_MS } from './support/firstLoad.ts';
 import { privateViteCache } from './support/viteCache.ts';
@@ -77,6 +78,8 @@ test(
       await page.locator('main').getByText(FINAL_TEXT).first().waitFor({ timeout: RENDER_TIMEOUT_MS });
       await page.locator('.aui-thread-composer').waitFor({ timeout: RENDER_TIMEOUT_MS });
 
+      await page.screenshot({ path: await featureShotPath({ surface: 'route:session', step: 'new-chat-opened' }) });
+      await page.screenshot({ path: await featureShotPath({ surface: 'route:turn', step: 'reply-shown' }) });
       const bothOpen = await composerBox(page);
       assertCentred(bothOpen, 'both sides open');
       assert.equal(bothOpen.transition, '0.3s', 'the width change is smooth when motion is allowed');
@@ -89,6 +92,9 @@ test(
 
       await page.getByRole('button', { name: 'Hide panel' }).click();
       const bothFolded = await composerBox(page);
+      await page.screenshot({
+        path: await featureShotPath({ surface: 'screen:chat-layout', step: 'both-sides-folded' }),
+      });
       assert.ok(
         bothFolded.width > listFolded.width + 64,
         `folding the right panel widens it more (${bothFolded.width})`,
@@ -108,29 +114,37 @@ test(
       assert.equal((await composerBox(still)).transition, '0s', 'with reduced motion the width changes at once');
       await reduced.close();
 
-      // On a phone the chat header keeps the menu button, the title and every action on one line.
-      const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
-      const small = await phone.newPage();
-      await small.goto(chatUrl, { waitUntil: 'domcontentloaded', timeout: RENDER_TIMEOUT_MS });
-      await small.getByRole('switch', { name: 'Agent details' }).waitFor({ timeout: RENDER_TIMEOUT_MS });
-      const header = await small.evaluate(() => {
-        const bar = document.querySelector('header');
-        if (bar == null) throw new Error('no header');
-        const box = bar.getBoundingClientRect();
-        const controls = Array.from(bar.querySelectorAll('button')).map(button => button.getBoundingClientRect());
-        return {
-          height: box.height,
-          overflows: bar.scrollWidth > bar.clientWidth + 1,
-          tops: controls.map(rect => Math.round(rect.top + rect.height / 2)),
-          rightmost: Math.max(...controls.map(rect => rect.right)),
-          width: window.innerWidth,
-        };
-      });
-      assert.ok(!header.overflows, 'the phone header does not overflow');
-      assert.ok(header.height <= 57, `the phone header is one line tall (${header.height})`);
-      assert.ok(header.rightmost <= header.width, 'every header action is on screen');
-      assert.equal(new Set(header.tops).size, 1, `every header control sits on one row (${header.tops.join(', ')})`);
-      await phone.close();
+      // On a phone, down to the narrowest still in use, the chat header keeps the menu button and every action on one line.
+      for (const width of [390, 320]) {
+        const phone = await browser.newContext({ viewport: { width, height: 844 }, isMobile: true, hasTouch: true });
+        const small = await phone.newPage();
+        await small.goto(chatUrl, { waitUntil: 'domcontentloaded', timeout: RENDER_TIMEOUT_MS });
+        await small.getByRole('switch', { name: 'Agent details' }).waitFor({ timeout: RENDER_TIMEOUT_MS });
+        const header = await small.evaluate(() => {
+          const bar = document.querySelector('header');
+          if (bar == null) throw new Error('no header');
+          const box = bar.getBoundingClientRect();
+          const controls = Array.from(bar.querySelectorAll('button')).map(button => button.getBoundingClientRect());
+          return {
+            height: box.height,
+            overflows: bar.scrollWidth > bar.clientWidth + 1,
+            tops: controls.map(rect => Math.round(rect.top + rect.height / 2)),
+            rightmost: Math.max(...controls.map(rect => rect.right)),
+            width: window.innerWidth,
+          };
+        });
+        await small.screenshot({
+          path: await featureShotPath({ surface: 'screen:chat-layout', step: `phone-header-${String(width)}` }),
+        });
+        assert.ok(!header.overflows, `the ${String(width)}px phone header does not overflow`);
+        assert.ok(header.height <= 57, `the phone header is one line tall (${header.height})`);
+        assert.ok(header.rightmost <= header.width, `every header action is on screen at ${String(width)}px`);
+        assert.equal(new Set(header.tops).size, 1, `every header control sits on one row (${header.tops.join(', ')})`);
+        await phone.close();
+      }
+    } catch (error) {
+      await saveFailureShots({ browser, surface: 'screen:chat-layout' });
+      throw error;
     } finally {
       await browser?.close();
       await vite.close();
