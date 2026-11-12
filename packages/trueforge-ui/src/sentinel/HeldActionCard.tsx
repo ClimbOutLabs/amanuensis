@@ -7,6 +7,7 @@ import { useAssistantDisplayName } from '../components/PersonalizationContext.js
 import { Icon } from '../icons/Icon.js';
 import { AlwaysAllowToolControl } from './AlwaysAllowToolControl.js';
 import {
+  alwaysAllowConfirm,
   APPROVAL_CHOICES,
   isNewRecipientCard,
   isNewRecipientDraftCard,
@@ -223,7 +224,10 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
               <AlwaysAllowToolControl
                 size="large"
                 disabled={disabled}
-                description={`${assistant} will run this tool on this connector without asking, in every chat.`}
+                confirm={alwaysAllowConfirm({
+                  covers: undefined,
+                  toolSay: `${assistant} will run this tool on this connector without asking, in every chat.`,
+                })}
                 onConfirm={onAlwaysAllow}
               />
             )}

@@ -9,7 +9,7 @@ import { useAssistantDisplayName } from '../components/PersonalizationContext.js
 import { useRewardLedger } from '../hooks/useRewardLedger.js';
 import { Icon } from '../icons/Icon.js';
 import { AlwaysAllowToolControl } from './AlwaysAllowToolControl.js';
-import { APPROVAL_CHOICES, isNewRecipientCard } from './approvalChoices.js';
+import { alwaysAllowConfirm, APPROVAL_CHOICES, isNewRecipientCard } from './approvalChoices.js';
 import {
   approvalSentLine,
   approvalStub,
@@ -47,6 +47,8 @@ export type PermissionApprovalCardProps = {
    * server says the owner may always allow this tool; the card asks for confirmation first.
    */
   onApproveAlways?: (() => void) | undefined;
+  /** Set when that answer lets maps run without asking, instead of allowing one tool. */
+  alwaysAllowCovers?: 'maps' | undefined;
   onDeny: () => void;
   /** Only passed for a card with editable content. Gets the text the person typed. */
   onChangeRequest?: ((text: string) => void) | undefined;
@@ -161,6 +163,7 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
   onApprove,
   onApproveForChat,
   onApproveAlways,
+  alwaysAllowCovers,
   onDeny,
   onChangeRequest,
   onApproveAll,
@@ -391,7 +394,10 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
                 <AlwaysAllowToolControl
                   size="small"
                   disabled={disabled || sentAt !== null}
-                  description={`${assistant} will run this kind of action on this connector without asking, in every chat.`}
+                  confirm={alwaysAllowConfirm({
+                    covers: alwaysAllowCovers,
+                    toolSay: `${assistant} will run this kind of action on this connector without asking, in every chat.`,
+                  })}
                   onConfirm={markSent(onApproveAlways)}
                 />
               )}

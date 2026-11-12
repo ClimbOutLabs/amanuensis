@@ -418,6 +418,13 @@
       },
       "ApprovalToolCallRef": {
         "properties": {
+          "always_allow_covers": {
+            "description": "Set when the lasting answer lets maps run without asking, instead of allowing one tool.",
+            "enum": [
+              "maps"
+            ],
+            "type": "string"
+          },
           "can_always_allow": {
             "description": "Whether the owner may allow this tool for good.",
             "type": "boolean"
