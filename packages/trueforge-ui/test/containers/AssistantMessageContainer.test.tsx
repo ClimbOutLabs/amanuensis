@@ -991,7 +991,7 @@ describe('AssistantMessageContainer memory recall visibility', () => {
     await renderWithStoredPreference({ agentDetails: 'expanded' });
     const internals = getAgentInternals();
     expect(within(internals).queryByText(/recalled/)).not.toBeInTheDocument();
-    expect(within(internals).getAllByText('3 items, 1 entity')).toHaveLength(1);
+    expect(within(internals).getAllByText('3 memories')).toHaveLength(1);
   });
 
   it('hides the recall counts when agent details are collapsed', async () => {
@@ -1528,7 +1528,7 @@ describe('AssistantMessageContainer model and cost line', () => {
     expect(secondUsage).toBeVisible();
   });
 
-  it('folds helper calls into the total and names the model they ran on', async () => {
+  it('folds helper calls into the total without naming them on the line', async () => {
     await renderWithUsage({
       usage: [{ turnId: 'trn_1', events: [SUPER_EVENT, NANO_SUMMARY_EVENT, NANO_COMPACTION_EVENT] }],
       agentDetails: 'expanded',
@@ -1536,6 +1536,7 @@ describe('AssistantMessageContainer model and cost line', () => {
 
     expect(screen.getByTestId('model-usage-tokens')).toHaveTextContent('Tokens: 6,990 (6,300 in, 690 out)');
     expect(screen.getByTestId('model-usage-helpers')).toHaveTextContent('Helper calls: 2, on Nemotron 3 Nano');
+    expect(screen.getByTestId('assistant-message-agent-internals-toggle')).not.toHaveTextContent('helper');
   });
 
   it('lists the helper calls with their model, tokens and cost in the agent details when they are on', async () => {
@@ -1545,7 +1546,7 @@ describe('AssistantMessageContainer model and cost line', () => {
     });
 
     const internals = getAgentInternals();
-    expect(screen.getByTestId('assistant-message-agent-internals-toggle')).toHaveTextContent('2 helper calls');
+    expect(screen.getByTestId('assistant-message-agent-internals-toggle')).not.toHaveTextContent('helper calls');
     const rows = within(internals).getAllByTestId('model-usage-row');
     expect(rows.map(row => row.textContent)).toEqual([
       expect.stringContaining('Answer·Nemotron 3 Super'),

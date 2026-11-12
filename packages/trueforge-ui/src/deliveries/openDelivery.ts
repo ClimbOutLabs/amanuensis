@@ -40,6 +40,7 @@ export async function openDeliveryLink({
     shell.setLibraryOpen(false);
     shell.setSessionsOpen(false);
     shell.setSchedulesOpen(false);
+    shell.setRemindersOpen(false);
     shell.openSpaces(link.spaceId);
     return { opened: true };
   }
@@ -50,6 +51,7 @@ export async function openDeliveryLink({
     shell.setLibraryOpen(false);
     shell.setSessionsOpen(false);
     shell.setSchedulesOpen(false);
+    shell.setRemindersOpen(false);
     shell.closeSpaces();
     shell.openHistorySession({
       sessionId: link.sessionId,

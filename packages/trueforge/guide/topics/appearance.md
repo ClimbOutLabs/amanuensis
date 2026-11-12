@@ -16,3 +16,11 @@ Click **More** at the bottom of the left bar. Under **Appearance**, click **Ligh
 4. Under Theme, click **Paper**, **Forest**, **Midnight** or **High contrast**.
 
 **High contrast** gives the clearest text. Your choice stays until you change it.
+
+## Make the words in your chats bigger or smaller
+
+1. Click **More** in the left bar, then click **Settings**.
+2. Click **Themes**.
+3. Under **Chat text size**, click **Smaller**, **Default**, **Larger** or **Largest**.
+
+Only your chats change size, and the box where you write. The rest of the app stays the size it was. Your choice stays until you change it.
