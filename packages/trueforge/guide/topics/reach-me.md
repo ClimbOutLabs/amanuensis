@@ -28,6 +28,7 @@ The first time you turn it on, Aman starts from that moment, so old mail does no
 ## How loudly
 
 Everything shows under the bell, with the reason you got it.
+An item that came from a chat shows **Open**, which takes you to that chat. If you deleted the chat, the item stays under the bell without **Open**.
 
 - A note is quiet. Most things are notes.
 - A nudge is a notice on the devices where you turned notices on.
