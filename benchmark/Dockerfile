@@ -5,7 +5,7 @@ FROM python:3.11-slim
 
 WORKDIR /bench
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --require-hashes -r requirements.txt
 COPY . .
 
 # Full pipeline: set up agents, run the matrix, grade, aggregate.
