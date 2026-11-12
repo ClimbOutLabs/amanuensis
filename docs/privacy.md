@@ -34,7 +34,9 @@ While an incognito chat is open:
 
 - Aman can still read what it already knows, such as your memories and its persona's notes.
 - Aman saves nothing from it. It writes no memories and no daily notes, learns nothing about you from it, and adds nothing to past-chat search, the brief or Home.
-- Aman cannot make or change anything that would outlive the chat: no spaces, no reminders, no schedules and no new personas. It can still read your spaces, schedules and reminders, and switch to a persona you already have. Ask in a normal chat for anything you want kept.
+- Aman cannot make or change anything of its own that would outlive the chat: no spaces, no reminders, no schedules, no new personas and no notes in your notes folder. It can still read them, and switch to a persona you already have. Ask in a normal chat for anything you want kept.
+- Through a connector you added, Aman can only look things up. It refuses anything else it would do through one, and tells you to ask in a normal chat. It also refuses a lookup it does not know by name, because a connector's own word that a tool only reads is not enough here.
+- Your own email and calendar work as in any chat. Sending a message, saving a draft and adding an event each ask you first.
 - The web browser is off, because it keeps its history and sign-ins between chats.
 - Text you type but do not send is not saved in the browser tab.
 - It shows in the Chats list with an **Incognito** label, only in the browser tab that started it. It never shows in search, and it cannot be put in a folder.

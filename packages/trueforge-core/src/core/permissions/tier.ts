@@ -100,6 +100,7 @@ export type Tier2ActionKind = (typeof TIER2_ACTION_KINDS)[number];
 export const AUTO_DENY_REASONS = [
   APPROVAL_EXPIRED_REASON_CODE,
   'destination_unverifiable',
+  'incognito_chat',
   'incomplete_send_card',
   'lookup_limit',
   'offline_mode',

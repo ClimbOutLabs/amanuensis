@@ -23,7 +23,7 @@ An incognito chat is a chat Aman forgets. To start one, open a new chat and pres
 
 Aman can still read what it already knows. It writes nothing new to memory, your persona notes or the daily brief. The chat is left out of your chat list search and of past chat search.
 
-Aman cannot make anything that would outlive the chat. It cannot make or change spaces, reminders, schedules or personas there, and the web browser is off. It can still read your spaces and reminders, and switch to a persona you already have. For anything you want kept, ask in a normal chat.
+Aman cannot make anything of its own that would outlive the chat. It cannot make or change spaces, reminders, schedules, personas or notes there, and the web browser is off. It can still read your spaces, reminders and notes, and switch to a persona you already have. Through a connector you added, Aman can only look things up there. Your own email and calendar still ask first, as in any chat. For anything you want kept, ask in a normal chat.
 
 The line above the message box says where your words go. With a hosted model, they still go to that model's company. With a local model, they never leave your computer. The line is checked again after each reply and when you switch persona.
 
