@@ -31,7 +31,7 @@ How to get there: Click **More** in the left bar, then **Settings**, then **Skil
 2. Click **Add-ons**, then the **Skills** tab.
 3. Select the skill.
 
-When a skill is on for a chat, Aman reads its instructions when the job comes up.
+When a skill is on for a chat, Aman reads its instructions when the job comes up. Reading them doesn't ask you. Running a command the skill tells it to run follows the usual rules, so a command that downloads or changes something still shows a card.
 
 ## Add your own skill from GitHub
 
