@@ -200,7 +200,7 @@ export const SentinelSettings: FC = () => {
           <p className="text-sm font-medium text-text-primary">Sandbox</p>
           <p className="mt-1 text-sm text-text-secondary">
             {sandboxWithoutAsking
-              ? `${assistant} can make new files and run the scripts it wrote in this chat without asking. Changing a file that already exists, running scripts from your repository, and running tests still ask. Anything that leaves the sandbox still asks.`
+              ? `${assistant} can make new files and run the scripts it wrote in this chat without asking. This only applies where the sandbox has no network, which is the sandbox the installer sets up. Where you allowed package downloads, or a skill may reach its own sites, running code and making a file still ask. Installing a package still asks. Changing a file that already exists, running scripts from your repository, and running tests still ask. Anything that leaves the sandbox still asks. A scheduled run always asks, and so does its chat when you type there.`
               : 'Work inside the sandbox asks before it runs.'}
           </p>
           {sandboxError !== null && (
@@ -219,7 +219,7 @@ export const SentinelSettings: FC = () => {
       </div>
 
       <div className="rounded-lg border border-border p-4">
-        <p className="text-sm font-medium text-text-primary">Always allow</p>
+        <p className="text-sm font-medium text-text-primary">Always allow everywhere</p>
         <p className="mt-1 text-sm text-text-secondary">
           Off means the assistant asks before each of these. On means it runs them without asking.
         </p>

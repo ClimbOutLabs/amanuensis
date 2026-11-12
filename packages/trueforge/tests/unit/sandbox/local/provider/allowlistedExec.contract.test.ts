@@ -290,7 +290,7 @@ describe('allowlisted commands run the program that was classified (real LocalSa
     expect(await readFile(marker, 'utf8')).toBe('');
   });
 
-  test('sandbox setup with code mode never runs a planted program', async () => {
+  test('sandbox setup with connector tools never runs a planted program', async () => {
     const marker = join(sandboxId, 'planted-ran');
     await writeFile(join(sandboxId, 'hello.txt'), 'hello\n');
     await plantPassThrough(marker);

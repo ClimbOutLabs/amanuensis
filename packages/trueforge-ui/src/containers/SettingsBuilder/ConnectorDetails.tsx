@@ -1,5 +1,9 @@
 'use client';
 
+import {
+  HOME_ASSISTANT_SERVER_NAME,
+  homeAssistantGrantLabel,
+} from '@truefoundry/trueforge-core/core/homeassistant/toolContract';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import { cn } from '../../atoms/lib/cn.js';
@@ -315,25 +319,32 @@ const ConnectorDetails = ({
               These tools run without asking. Risky calls can still ask first.
             </p>
             <ul className="overflow-hidden rounded-xl border border-border bg-card-bg">
-              {grantedTools.map(toolName => (
-                <li
-                  key={toolName}
-                  className="flex min-h-12 items-center gap-3 border-b border-border px-3 py-2 last:border-b-0"
-                >
-                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-text-primary">{toolName}</span>
-                  <Button.Secondary
-                    size="small"
-                    type="button"
-                    disabled={busy || revokingTool !== null}
-                    aria-label={`Stop always allowing ${toolName}`}
-                    onClick={() => {
-                      void revokeToolGrant(toolName);
-                    }}
+              {grantedTools.map(toolName => {
+                // A Home Assistant grant is stored under its scope key; show what it covers.
+                const label =
+                  connector.name === HOME_ASSISTANT_SERVER_NAME
+                    ? (homeAssistantGrantLabel(toolName) ?? toolName)
+                    : toolName;
+                return (
+                  <li
+                    key={toolName}
+                    className="flex min-h-12 items-center gap-3 border-b border-border px-3 py-2 last:border-b-0"
                   >
-                    {revokingTool === toolName ? 'Revoking…' : 'Revoke'}
-                  </Button.Secondary>
-                </li>
-              ))}
+                    <span className="min-w-0 flex-1 truncate text-sm font-medium text-text-primary">{label}</span>
+                    <Button.Secondary
+                      size="small"
+                      type="button"
+                      disabled={busy || revokingTool !== null}
+                      aria-label={`Stop always allowing ${label}`}
+                      onClick={() => {
+                        void revokeToolGrant(toolName);
+                      }}
+                    >
+                      {revokingTool === toolName ? 'Revoking…' : 'Revoke'}
+                    </Button.Secondary>
+                  </li>
+                );
+              })}
             </ul>
           </section>
         ) : null}

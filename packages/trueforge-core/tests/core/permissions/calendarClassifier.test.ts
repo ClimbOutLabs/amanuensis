@@ -117,6 +117,21 @@ describe('Calendar write classification', () => {
     expect(decision.approval_token_id).not.toBeNull();
   });
 
+  it('puts no warning in the card sentence that the event shape does not carry', async () => {
+    for (const changes of [{}, { already_created: true }, { span_days: 3 }, { already_created: true, span_days: 2 }]) {
+      const decision = await classifyTier(writeAction({ ...REVIEW, ...changes }), makeCtx());
+      const what = decision.card?.plain_what ?? '';
+      const event = decision.card?.calendar_event;
+      expect(what.includes('You already have this event')).toBe(event?.already_created === true);
+      expect(what.includes('runs over')).toBe((event?.span_days ?? 1) > 1);
+    }
+  });
+
+  it('carries a duplicate and a multi-day warning in the event itself, so they can be read back', async () => {
+    const decision = await classifyTier(writeAction({ ...REVIEW, already_created: true, span_days: 3 }), makeCtx());
+    expect(decision.card?.calendar_event).toMatchObject({ already_created: true, span_days: 3 });
+  });
+
   it('asks in a scheduled run too, so the run holds it for the owner instead of dropping it', async () => {
     const decision = await classifyTier(
       writeAction(REVIEW),

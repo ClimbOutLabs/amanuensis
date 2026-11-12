@@ -1,5 +1,5 @@
 /**
- * The caller's "Always allow this tool" grants, which the Harness adds on top of the runtime's
+ * The caller's "Always allow everywhere" grants, which the Harness adds on top of the runtime's
  * connector port so Settings can show and revoke them.
  *
  * The server owns the wire shape (`ListMcpToolGrantsResponseSchema` in the Harness's
