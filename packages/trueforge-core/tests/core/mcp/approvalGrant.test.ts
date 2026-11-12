@@ -236,6 +236,7 @@ describe('chat grant key', () => {
     const base = { ...toolInfo('notes', 'lookup_note'), effect: 'inspect' as const };
     const card = ({ destination, recipient }: { destination: string | null; recipient: string | null }) => ({
       plain_what: 'x',
+      copy: null,
       plain_why: null,
       cannot_be_undone: null,
       why_asked_again: null,
@@ -266,6 +267,7 @@ describe('chat grant key', () => {
     const base = { ...toolInfo('notes', 'lookup_note'), effect: 'inspect' as const };
     const card = (overrides: Partial<NonNullable<InternalToolCallInfo['tier3_card']>>) => ({
       plain_what: 'x',
+      copy: null,
       plain_why: null,
       cannot_be_undone: null,
       why_asked_again: null,
@@ -311,6 +313,7 @@ describe('chat grant key', () => {
 describe('a chat grant is tied to the target the card names', () => {
   const card = (target: { destination?: string; recipient?: string; destination_host?: string }) => ({
     plain_what: 'x',
+    copy: null,
     plain_why: null,
     cannot_be_undone: null,
     why_asked_again: null,

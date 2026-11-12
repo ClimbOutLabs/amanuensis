@@ -14,6 +14,7 @@ import {
   NEW_RECIPIENT_CHOICES,
   NEW_RECIPIENT_DRAFT_CHOICES,
 } from './approvalChoices.js';
+import { cardConsequence, cardHeadline, safeVerb } from './approvalCopy.js';
 import { CalendarEventDetails } from './CalendarEventDetails.js';
 import { ChangeRequestBox } from './ChangeRequestBox.js';
 import { APPROVED_OUTCOME_TEXT, HELD_EXPIRED_TEXT, type HeldActionOutcome } from './heldActionErrors.js';
@@ -136,11 +137,16 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
     : newRecipients
       ? NEW_RECIPIENT_CHOICES.cancel
       : APPROVAL_CHOICES.deny;
+  // The server marks a card safe-first when the action is irreversible or reaches other people:
+  // the safe choice is then the primary button and the action follows it.
+  const safeFirst = card.safe_choice === true;
+  const safeLabel = newRecipients || newRecipientDraft ? denyChoice.label : safeVerb(card);
+  const consequence = cardConsequence(card);
 
   return (
     <li className="list-none rounded-lg border border-border bg-primary-bg" data-role="held-action">
       <div className="space-y-3 px-4 py-3">
-        <p className="text-sm font-medium text-text-primary">{card.plain_what}</p>
+        <p className="text-sm font-medium text-text-primary">{cardHeadline(card)}</p>
         {card.why_asked_again !== null && (
           <p className="text-sm text-text-secondary" data-role="held-action-why-held">
             {card.why_asked_again}
@@ -175,10 +181,10 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
           </div>
         )}
 
-        {card.cannot_be_undone !== null && (
+        {consequence !== null && (
           <p className="flex items-start gap-2 text-sm text-text-secondary">
             <Icon name="info" className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-            <span>{card.cannot_be_undone}</span>
+            <span>{consequence}</span>
           </p>
         )}
 
@@ -192,13 +198,25 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
 
         {canAnswer && (
           <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+            {safeFirst && (
+              <Button
+                variant="primary"
+                size="large"
+                title={denyChoice.hint}
+                onClick={onDeny}
+                disabled={disabled}
+                className="sm:min-w-24"
+              >
+                {safeLabel}
+              </Button>
+            )}
             <Button
-              variant="primary"
+              variant={safeFirst ? 'secondary' : 'primary'}
               size="large"
               title={approveChoice.hint}
               onClick={onApprove}
               disabled={disabled}
-              className="sm:min-w-24"
+              className={safeFirst && card.destructive === true ? 'text-failure-bg sm:min-w-24' : 'sm:min-w-24'}
             >
               {approveChoice.label}
             </Button>
@@ -228,16 +246,18 @@ export const HeldActionCard: FC<HeldActionCardProps> = ({
                 {APPROVAL_CHOICES.changeIt.label}
               </Button>
             )}
-            <Button
-              variant="secondary"
-              size="large"
-              title={denyChoice.hint}
-              onClick={onDeny}
-              disabled={disabled}
-              className="sm:min-w-24"
-            >
-              {denyChoice.label}
-            </Button>
+            {!safeFirst && (
+              <Button
+                variant="secondary"
+                size="large"
+                title={denyChoice.hint}
+                onClick={onDeny}
+                disabled={disabled}
+                className="sm:min-w-24"
+              >
+                {denyChoice.label}
+              </Button>
+            )}
           </div>
         )}
         {canAnswer && changing && onChangeRequest !== undefined && (

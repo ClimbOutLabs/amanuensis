@@ -7,6 +7,7 @@ function haChangeDecision(grant_tool_name: string | null): TierDecision {
   return tier3Decision({
     card: {
       plain_what: 'Turn off Living room lamp',
+      copy: null,
       plain_why: null,
       cannot_be_undone: null,
       why_asked_again: null,

@@ -13,6 +13,7 @@ export * from "./AnthropicModelProvider.js";
 export * from "./AppBugReportBundle.js";
 export * from "./ApprovalAllow.js";
 export * from "./ApprovalAllowScope.js";
+export * from "./ApprovalCardCopy.js";
 export * from "./ApprovalDecision.js";
 export * from "./ApprovalDeny.js";
 export * from "./ApprovalToolCallRef.js";
