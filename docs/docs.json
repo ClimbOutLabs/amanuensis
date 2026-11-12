@@ -44,7 +44,11 @@
           },
           {
             "group": "Your Data and Safety",
-            "pages": ["safety", "privacy", "schedules", "backup"]
+            "pages": ["safety", "privacy", "browser", "schedules", "reach-me", "backup"]
+          },
+          {
+            "group": "Connectors",
+            "pages": ["connectors/notes-folder"]
           },
           {
             "group": "TrueForge Harness",
@@ -56,6 +60,7 @@
                   "models",
                   "model-roles",
                   "mcp-servers",
+                  "connectors/home-assistant",
                   "google",
                   "skills",
                   "sandbox",

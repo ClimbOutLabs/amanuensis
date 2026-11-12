@@ -11,12 +11,14 @@ export const CreateSessionRequest: core.serialization.Schema<
     TrueForge.CreateSessionRequest
 > = core.serialization.object({
     agent: CreateSessionAgent,
+    isIncognito: core.serialization.property("is_incognito", core.serialization.boolean().optional()),
     metadata: SessionMetadata.optional(),
 });
 
 export declare namespace CreateSessionRequest {
     export interface Raw {
         agent: CreateSessionAgent.Raw;
+        is_incognito?: boolean | null;
         metadata?: SessionMetadata.Raw | null;
     }
 }

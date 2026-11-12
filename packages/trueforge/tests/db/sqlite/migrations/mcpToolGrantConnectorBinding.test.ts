@@ -1,5 +1,5 @@
 /**
- * `20261105_000001_mcp_tool_grant_connector_binding` binds each standing grant to its connector's setup instead
+ * `20261112_000001_mcp_tool_grant_connector_binding` binds each standing grant to its connector's setup instead
  * of its host. A grant recorded for a host can never match a setup, so it is removed and the next call asks again.
  */
 import { promises as fs } from 'node:fs';
@@ -13,8 +13,8 @@ import { createSqliteDb } from '../../../../src/db/sqlite/client';
 import { SqliteMcpToolGrantStore } from '../../../../src/db/sqlite/mcp-tool-grant-store/SqliteMcpToolGrantStore';
 import type { Database } from '../../../../src/db/sqlite/types';
 
-const PREVIOUS_MIGRATION = '20261102_000004_delivery';
-const THIS_MIGRATION = '20261105_000001_mcp_tool_grant_connector_binding';
+const PREVIOUS_MIGRATION = '20261111_000001_noticing';
+const THIS_MIGRATION = '20261112_000001_mcp_tool_grant_connector_binding';
 
 async function createMigrator(db: Kysely<Database>): Promise<Migrator> {
   return new Migrator({
@@ -28,7 +28,7 @@ async function createMigrator(db: Kysely<Database>): Promise<Migrator> {
   });
 }
 
-describe('20261105_000001_mcp_tool_grant_connector_binding migration', () => {
+describe('20261112_000001_mcp_tool_grant_connector_binding migration', () => {
   let tempDir: string;
   let db: Kysely<Database>;
 

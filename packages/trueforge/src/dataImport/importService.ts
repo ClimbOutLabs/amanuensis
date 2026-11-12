@@ -38,6 +38,7 @@ import { sessionPartIndex, sessionPartName } from '../dataExport/sessionRecords'
 import { ZIP_MAX_ENTRIES } from '../dataExport/zipStreamWriter';
 import type { IDeliveryStore } from '../db/deliveryStore';
 import type { IGlobalSettingsStore } from '../db/globalSettingsStore';
+import type { IReachSettingsStore } from '../db/reachSettingsStore';
 import type { ISentinelAuditStore } from '../db/sentinelAuditStore';
 import type { SessionCustom, TurnCustom } from '../db/sessionCustom';
 import type { WithTransaction } from '../db/transaction';
@@ -79,6 +80,7 @@ import { MEMORY_SUMMARIZE_SETTING_KEY } from '../runtime/memorySummarizeSettings
 import { DEFAULT_CHAT_MODEL_SETTING_KEY } from '../runtime/tokenFactoryProvider';
 import { TOOL_OUTPUT_SCREEN_ENABLED_SETTING_KEY } from '../runtime/toolOutputScreenSettings';
 import type { ImportDataResult } from '../schemas/dataImport';
+import type { ReachSettings } from '../schemas/reach';
 import { newId } from '../utils/id';
 import { detachConnectors, normalizeImportedConnectors, withoutKeptConnector } from './connectorImport';
 import { upgradeArchivedDeliveries } from './deliveryUpgrade';
@@ -112,6 +114,7 @@ import {
   ImportManifestSchema,
   ImportPersonalizationFileSchema,
   ImportPersonasFileSchema,
+  ImportReachFileSchema,
   ImportSchedulesFileSchema,
   ImportSessionEntrySchema,
   ImportSessionPartRecordSchema,
@@ -140,6 +143,7 @@ import {
 import { writePersonaKnowledge, type KnowledgeEmbedder } from './knowledgeImport';
 import { countingLeftOut, isRecord, type LeftOutCounts } from './lenient';
 import { repairPersonaNames } from './personaNames';
+import { startReachSwitchesAsNew } from './reachUpgrade';
 import { assembleSessionParts } from './sessionParts';
 import { replaySessions, restoreSessions, type SessionRestoreContext } from './sessionRestore';
 import { readZipArchive, ZipArchiveError, type ZipArchiveEntry } from './zipArchiveReader';
@@ -151,6 +155,8 @@ export interface DataImportDeps<TTransaction> extends PreflightDeps<TTransaction
   auditStore: Pick<ISentinelAuditStore, 'importRecords'>;
   /** The feed comes along with the same commit. Push devices never do. */
   deliveryStore: Pick<IDeliveryStore, 'importDeliveries'>;
+  /** Reach me settings come along with the same commit, with texts and calls switched off. */
+  reachSettingsStore: Pick<IReachSettingsStore, 'importSettings'>;
   turnArtifactStore: ITurnArtifactStore<TTransaction>;
   withTransaction: WithTransaction<TTransaction>;
   personaKnowledgeDir: string;
@@ -499,6 +505,7 @@ interface ArchiveContents {
   settings: ImportSettingsFile;
   audit: ImportAuditRecord[];
   deliveries: ImportDelivery[];
+  reach: ReachSettings[];
   files: ReadonlyMap<string, Buffer>;
   sourceTenantId: string;
   /** Internal details from an older version that were repaired or left out, filled in as sections are read. */
@@ -609,7 +616,7 @@ function readSessionEntries(input: {
       logger,
       leftOut,
     });
-    return () => entries;
+    return () => withoutPrivateChats({ entries, logger });
   }
   if (partNames.length === 0) {
     throw new DataImportError(
@@ -641,7 +648,26 @@ function readSessionEntries(input: {
       yield* last.records;
     }
   }
-  return () => assembleSessionParts(records());
+  return () => withoutPrivateChats({ entries: assembleSessionParts(records()), logger });
+}
+
+/**
+ * Exports never hold a private chat, since nothing of one is kept. An archive that claims one
+ * anyway does not bring it back: restoring it would keep the chat its owner meant to forget.
+ */
+function* withoutPrivateChats(input: {
+  entries: Iterable<ImportSessionEntry>;
+  logger: DataImportDeps<never>['logger'];
+}): Generator<ImportSessionEntry> {
+  for (const entry of input.entries) {
+    if (entry.session.is_incognito) {
+      input.logger.warn('Data import skipped a private chat found in the archive', {
+        sessionId: entry.session.session_id,
+      });
+      continue;
+    }
+    yield entry;
+  }
 }
 
 function loadArchive(input: {
@@ -734,6 +760,8 @@ function loadArchive(input: {
     deliveries: files.has('deliveries.json')
       ? section('deliveries.json', ImportDeliveriesFileSchema, upgradeArchivedDeliveries)
       : [],
+    // Absent from exports made before Reach me settings existed.
+    reach: files.has('reach.json') ? section('reach.json', ImportReachFileSchema, startReachSwitchesAsNew) : [],
     files,
     sourceTenantId: manifest.tenant_id,
     leftOutReport: leftOut,
@@ -1414,6 +1442,7 @@ async function importArchive<TTransaction>(
     settings,
     audit,
     deliveries,
+    reach,
   } = contents;
   // Each person's guide is installed from the bundled pack, so the archived copy is never written again.
   // Its memory still maps to the person's own guide, and the summary still counts it.
@@ -1716,6 +1745,9 @@ async function importArchive<TTransaction>(
       }
       await deps.auditStore.importRecords({ tenant_id: tenantId, created_by: subjectId, records: audit }, tx);
       await deps.deliveryStore.importDeliveries({ tenant_id: tenantId, created_by: subjectId, deliveries }, tx);
+      for (const settings of reach) {
+        await deps.reachSettingsStore.importSettings({ tenant_id: tenantId, created_by: subjectId, settings }, tx);
+      }
 
       if (personalization !== null) {
         // Replaces the empty profile the app creates on first sign-in; the emptiness check ruled out a filled one.

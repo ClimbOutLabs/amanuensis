@@ -1186,7 +1186,7 @@ describe('audit rows for a web search held before its audit text was stored', ()
     expect(h.audit.at(-1)?.description).not.toContain('Held');
   });
 
-  it.each(cases)('answered %s after a scheduled run held it (saved reason %s)', async (status, why) => {
+  async function heldByScheduledRun(why: (typeof savedReasons)[number]) {
     const h = makeHarness(
       [() => toolCallsStream([{ id: 'call-search', name: 'web_search', args: JSON.stringify({ query }) }])],
       {
@@ -1200,13 +1200,33 @@ describe('audit rows for a web search held before its audit text was stored', ()
       context: savedByEarlierRelease(heldContext(thread), why),
       stopAfterToolResponse: true,
     });
-    await runTurn({ orchestrator: replay.orchestrator, sendBatch: [answer(status)] });
+    return { h, replay };
+  }
+
+  it.each(savedReasons)('answered deny after a scheduled run held it (saved reason %s)', async why => {
+    const { h, replay } = await heldByScheduledRun(why);
+    await runTurn({ orchestrator: replay.orchestrator, sendBatch: [answer('deny')] });
 
     expect(h.audit.length).toBeGreaterThanOrEqual(2);
     expectNoCaughtText(h);
     expect(h.audit.at(-1)?.description).toContain('Search the web through the search provider. ');
     expect(h.audit.at(-1)?.description).not.toContain('Held');
   });
+
+  // The card reads differently in this release, so the owner is asked to ask again instead of approving words they did not read.
+  it.each(savedReasons)(
+    'answered allow after a scheduled run held it is not run, and says to ask again (saved reason %s)',
+    async why => {
+      const { h, replay } = await heldByScheduledRun(why);
+      await expect(runTurn({ orchestrator: replay.orchestrator, sendBatch: [answer('allow')] })).rejects.toThrow(
+        'This no longer matches what was held, so nothing was done. Ask again in chat.',
+      );
+
+      expect(h.audit.length).toBeGreaterThanOrEqual(2);
+      expectNoCaughtText(h);
+      expect(h.audit.at(-1)).toMatchObject({ outcome: 'denied' });
+    },
+  );
 });
 
 describe('the per-reply call cap in an unattended run (owner ruling, 2026-10-19)', () => {
