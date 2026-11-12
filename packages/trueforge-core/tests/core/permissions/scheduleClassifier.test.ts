@@ -2,10 +2,11 @@ import {
   classifyTier,
   type ClassifyContext,
   type ReminderLine,
+  type ScheduleStatusReview,
   type SentinelAction,
 } from '../../../src/core/permissions/classifier';
-import { defaultSentinelServices } from '../../../src/core/permissions/context';
-import type { Tier3Schedule } from '../../../src/core/permissions/tier';
+import { defaultSentinelServices, forUnattendedRun } from '../../../src/core/permissions/context';
+import { GRANT_BARRED_TIER_REASONS, type Tier3Schedule } from '../../../src/core/permissions/tier';
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 
 function makeCtx(): ClassifyContext {
@@ -42,6 +43,17 @@ function scheduleAction(tool_name: string, schedule_write?: Tier3Schedule): Sent
   };
 }
 
+const MORNING_BRIEF_STATUS: ScheduleStatusReview = {
+  action: 'resume',
+  name: 'Morning brief',
+  when: 'Every weekday at 8:00 AM',
+  time_zone: 'America/New_York',
+};
+
+function statusAction(tool_name: string, schedule_status: ScheduleStatusReview): SentinelAction {
+  return { ...scheduleAction(tool_name), schedule_status };
+}
+
 describe('Schedule tool classification', () => {
   it('asks before creating, with the schedule in plain words', async () => {
     const decision = await classifyTier(scheduleAction('create_schedule', MORNING_BRIEF), makeCtx());
@@ -70,9 +82,40 @@ describe('Schedule tool classification', () => {
     expect(decision).toMatchObject({ tier: 3, auto_deny: 'destination_unverifiable', card: null });
   });
 
-  it.each(['list_schedules', 'pause_schedule', 'resume_schedule'])('runs %s without asking', async name => {
-    const decision = await classifyTier(scheduleAction(name), makeCtx());
+  it('lists schedules without asking', async () => {
+    const decision = await classifyTier(scheduleAction('list_schedules'), makeCtx());
     expect(decision).toMatchObject({ tier: 1, card: null, auto_deny: null, sensitive_read: false });
+  });
+
+  it('asks before pausing, with the schedule and when it runs', async () => {
+    const decision = await classifyTier(
+      statusAction('pause_schedule', { ...MORNING_BRIEF_STATUS, action: 'pause' }),
+      makeCtx(),
+    );
+    expect(decision).toMatchObject({ tier: 3, reason: 'schedule_status', auto_deny: null });
+    expect(decision.approval_token_id).not.toBeNull();
+    expect(decision.card?.plain_what).toBe(
+      'Pause the schedule "Morning brief"? It runs every weekday at 8:00 AM (America/New_York) and will not run again until it is resumed.',
+    );
+  });
+
+  it('asks before resuming, with the schedule and when it runs', async () => {
+    const decision = await classifyTier(statusAction('resume_schedule', MORNING_BRIEF_STATUS), makeCtx());
+    expect(decision).toMatchObject({ tier: 3, reason: 'schedule_status', auto_deny: null });
+    expect(decision.approval_token_id).not.toBeNull();
+    expect(decision.card?.plain_what).toBe(
+      'Resume the schedule "Morning brief"? It runs every weekday at 8:00 AM (America/New_York) and starts again as soon as you approve.',
+    );
+  });
+
+  it.each(['pause_schedule', 'resume_schedule'])('refuses %s when the host could not show the schedule', async name => {
+    const decision = await classifyTier(scheduleAction(name), makeCtx());
+    expect(decision).toMatchObject({ tier: 3, auto_deny: 'destination_unverifiable', card: null });
+  });
+
+  it('never offers "Always allow" for a pause, a resume or a cancelled reminder', () => {
+    expect(GRANT_BARRED_TIER_REASONS.has('schedule_status')).toBe(true);
+    expect(GRANT_BARRED_TIER_REASONS.has('reminder_cancel')).toBe(true);
   });
 
   it('fails closed on an unknown schedule tool', async () => {
@@ -110,18 +153,28 @@ describe('Reminder tool classification', () => {
     });
   });
 
-  it('cancels a reminder without a card', async () => {
+  it('asks before cancelling a reminder, with its words and when it is due', async () => {
     const decision = await classifyTier(
-      reminderAction('cancel_reminder', { when: null, what: 'Take the medicine' }),
+      reminderAction('cancel_reminder', { when: 'Monday, October 26 at 6:00 PM', what: 'Take the medicine' }),
       makeCtx(),
     );
-    expect(decision).toMatchObject({
-      tier: 1,
-      reason: 'reminder_write',
-      reason_detail: 'Cancelled a reminder: Take the medicine',
-      card: null,
-      auto_deny: null,
-    });
+    expect(decision).toMatchObject({ tier: 3, reason: 'reminder_cancel', auto_deny: null });
+    expect(decision.approval_token_id).not.toBeNull();
+    expect(decision.card?.plain_what).toBe(
+      'Cancel the reminder "Take the medicine", set for Monday, October 26 at 6:00 PM?',
+    );
+    expect(decision.card?.cannot_be_undone).toBe('Once cancelled, the reminder is gone for good.');
+  });
+
+  it('shows the whole of a long reminder on the cancel card', async () => {
+    const what = `Call the clinic about ${'the results '.repeat(20)}before noon`;
+    const decision = await classifyTier(reminderAction('cancel_reminder', { when: null, what }), makeCtx());
+    expect(decision.card?.plain_what).toBe(`Cancel the reminder "${what}"?`);
+  });
+
+  it('refuses to cancel a reminder the host could not show', async () => {
+    const decision = await classifyTier(reminderAction('cancel_reminder'), makeCtx());
+    expect(decision).toMatchObject({ tier: 3, auto_deny: 'destination_unverifiable', card: null });
   });
 
   it('lists reminders without a card', async () => {
@@ -146,5 +199,112 @@ describe('Reminder tool classification', () => {
       makeCtx(),
     );
     expect((decision.reason_detail ?? '').length).toBeLessThan(140);
+  });
+});
+
+/** The same chat context while a schedule runs it with nobody watching. */
+function scheduledRunCtx(): ClassifyContext {
+  const ctx = makeCtx();
+  return { ...ctx, services: forUnattendedRun(ctx.services) };
+}
+
+describe('A scheduled run asks before it changes a schedule or a reminder', () => {
+  it.each([
+    [
+      'pause_schedule',
+      'pause',
+      'Pause the schedule "Morning brief"? It runs every weekday at 8:00 AM (America/New_York) and will not run again until it is resumed.',
+    ],
+    [
+      'resume_schedule',
+      'resume',
+      'Resume the schedule "Morning brief"? It runs every weekday at 8:00 AM (America/New_York) and starts again as soon as you approve.',
+    ],
+  ] as const)('%s asks and shows the schedule', async (tool_name, action, plain_what) => {
+    const decision = await classifyTier(
+      statusAction(tool_name, { ...MORNING_BRIEF_STATUS, action }),
+      scheduledRunCtx(),
+    );
+    expect(decision).toMatchObject({ tier: 3, auto_deny: null, card: { plain_what } });
+    expect(decision.approval_token_id).not.toBeNull();
+  });
+
+  it('refuses a pause when the host could not show the schedule', async () => {
+    const decision = await classifyTier(scheduleAction('pause_schedule'), scheduledRunCtx());
+    expect(decision).toMatchObject({ tier: 3, auto_deny: 'destination_unverifiable', card: null });
+  });
+
+  it('asks before it sets a reminder, with the time and the words', async () => {
+    const decision = await classifyTier(
+      reminderAction('set_reminder', { when: 'Monday, October 26 at 6:00 PM', what: 'Take the medicine' }),
+      scheduledRunCtx(),
+    );
+    expect(decision).toMatchObject({
+      tier: 3,
+      auto_deny: null,
+      card: { plain_what: 'Set a reminder for Monday, October 26 at 6:00 PM: Take the medicine?' },
+    });
+    expect(decision.approval_token_id).not.toBeNull();
+  });
+
+  it('asks before it cancels a reminder, with the words of the reminder', async () => {
+    const decision = await classifyTier(
+      reminderAction('cancel_reminder', { when: null, what: 'Take the medicine' }),
+      scheduledRunCtx(),
+    );
+    expect(decision).toMatchObject({
+      tier: 3,
+      auto_deny: null,
+      card: { plain_what: 'Cancel the reminder "Take the medicine"?' },
+    });
+    expect(decision.approval_token_id).not.toBeNull();
+  });
+
+  it('asks before it sets a reminder even when the host gave no details, and refuses a cancel it cannot show', async () => {
+    const set = await classifyTier(reminderAction('set_reminder'), scheduledRunCtx());
+    const cancel = await classifyTier(reminderAction('cancel_reminder'), scheduledRunCtx());
+    expect(set).toMatchObject({ tier: 3, card: { plain_what: 'Set a reminder?' } });
+    expect(cancel).toMatchObject({ tier: 3, auto_deny: 'destination_unverifiable', card: null });
+  });
+
+  it.each(['list_schedules', 'list_reminders'])('%s still runs without a card', async tool_name => {
+    const decision = await classifyTier(scheduleAction(tool_name), scheduledRunCtx());
+    expect(decision).toMatchObject({ tier: 1, card: null, auto_deny: null });
+  });
+});
+
+function readAction(input: { server: string; tool_name: string; params?: Record<string, unknown> }): SentinelAction {
+  return {
+    tool_name: input.tool_name,
+    canonical_params: input.params ?? {},
+    tool_type: 'truefoundry-system',
+    mcp_server_name: input.server,
+    mcp_hints: { read_only_hint: true, open_world_hint: true },
+  };
+}
+
+describe('A scheduled run still does its ordinary work without a card', () => {
+  it.each([
+    ['gmail', 'list_inbox_threads'],
+    ['gmail', 'read_email'],
+    ['google_calendar', 'list_events'],
+    ['space', 'list_spaces'],
+    ['space', 'get_space'],
+    ['schedules', 'list_reminders'],
+  ])('a morning brief reads with %s %s', async (server, tool_name) => {
+    const decision = await classifyTier(readAction({ server, tool_name }), scheduledRunCtx());
+    expect(decision).toMatchObject({ tier: 1, card: null, auto_deny: null });
+  });
+
+  it('a schedule that keeps a space up to date edits it', async () => {
+    const decision = await classifyTier(
+      readAction({
+        server: 'space',
+        tool_name: 'edit_space',
+        params: { space_name: 'Groceries', edits: [{ type: 'search', search: 'milk', replace: 'oat milk' }] },
+      }),
+      scheduledRunCtx(),
+    );
+    expect(decision).toMatchObject({ tier: 1, reason: 'space_write', card: null, auto_deny: null });
   });
 });

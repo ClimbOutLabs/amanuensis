@@ -89,6 +89,15 @@ describe('PermissionApprovalCard', () => {
     expect(screen.getByText('query: sensitive internal project name')).toBeInTheDocument();
   });
 
+  it('keeps the outbound request inside the card-level Details', () => {
+    renderCard({ outbound_text: 'query: sensitive internal project name' });
+    const summary = screen.getByText('Details', { selector: 'summary' });
+    const details = summary.closest('details');
+    if (details === null) throw new Error('the card-level Details disclosure is missing');
+    expect(details).toContainElement(screen.getByText('Full request'));
+    expect(details).toContainElement(screen.getByText('query: sensitive internal project name'));
+  });
+
   it('renders outbound text in a monospace block', () => {
     renderCard({ outbound_text: 'url: https://example.com/fetch?x=1' });
     const block = screen.getByText('url: https://example.com/fetch?x=1');
@@ -262,11 +271,15 @@ describe('PermissionApprovalCard for a calendar event', () => {
 });
 
 describe('PermissionApprovalCard always allow this tool', () => {
-  const ALWAYS_ALLOW_TOOL = 'Always allow this tool';
+  const ALWAYS_ALLOW_TOOL = 'Always allow everywhere';
 
   it('offers the option only when an always-allow handler is passed', () => {
     renderCard({}, { onApproveAlways: vi.fn() });
-    expect(screen.getByRole('button', { name: ALWAYS_ALLOW_TOOL })).toBeInTheDocument();
+    const control = screen.getByRole('button', { name: ALWAYS_ALLOW_TOOL });
+    expect(control).toBeInTheDocument();
+    const details = control.closest('details');
+    if (details === null) throw new Error('the always-allow control is not inside the card-level Details');
+    expect(details.querySelector('summary')).toHaveTextContent('Details');
   });
 
   it('does not offer the option without a handler', () => {
@@ -279,7 +292,7 @@ describe('PermissionApprovalCard always allow this tool', () => {
     renderCard({}, { onApproveAlways });
     fireEvent.click(screen.getByRole('button', { name: ALWAYS_ALLOW_TOOL }));
 
-    expect(screen.getByRole('heading', { name: 'Always allow this tool?' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Always allow everywhere?' })).toBeInTheDocument();
     expect(screen.getByText(/You can remove this later in connector settings/)).toBeInTheDocument();
     expect(onApproveAlways).not.toHaveBeenCalled();
   });

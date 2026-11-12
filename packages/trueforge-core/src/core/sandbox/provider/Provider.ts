@@ -527,8 +527,9 @@ export interface SandboxProvider {
   /** Stable provider kind used in fancy sandbox ids and carry-forward (plain string). */
   readonly type: string;
   /**
-   * False when the provider offers no Code Mode bridge: the agent then keeps its connector tools as
-   * ordinary tools and `createCodeModeTransport` is never called. Absent means supported.
+   * True only when the provider offers a Code Mode bridge. Absent or false, the agent keeps its connector
+   * tools as ordinary tools and `createCodeModeTransport` is never called, so a provider that says nothing
+   * gets no bridge.
    */
   readonly supportsCodeMode?: boolean | undefined;
   /**

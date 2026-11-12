@@ -4,10 +4,10 @@ import type { SentinelApprovalCard } from './types.js';
 /** The approval choices, in the order every approval surface shows them. */
 export const APPROVAL_CHOICES = {
   approve: { label: 'Approve', hint: 'Allow this one call only.' },
-  approveForChat: { label: 'Always allow this here', hint: "Don't ask again for this kind of action in this chat." },
-  alwaysAllow: { label: 'Always allow', hint: 'Remember this for every chat.' },
+  approveForChat: { label: 'Always allow in this chat', hint: "Don't ask again for this kind of action in this chat." },
+  alwaysAllow: { label: 'Always allow everywhere', hint: 'Remember this for every chat.' },
   alwaysAllowTool: {
-    label: 'Always allow this tool',
+    label: 'Always allow everywhere',
     hint: 'Run this tool on this connector without asking, in every chat, until you remove it in settings.',
   },
   changeIt: { label: 'Change it', hint: 'Ask the persona to change this first. Nothing runs now.' },

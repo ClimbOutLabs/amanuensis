@@ -4,4 +4,7 @@
  * @example
  *     {}
  */
-export type CancelSessionRequest = {};
+export interface CancelSessionRequest {
+    /** Cancel only this turn, and nothing else running in the session. Omit to cancel the last turn. */
+    turnId?: string;
+}
