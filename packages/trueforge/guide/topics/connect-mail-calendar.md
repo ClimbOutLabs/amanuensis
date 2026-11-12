@@ -100,7 +100,7 @@ The app signs in to your calendar once before it saves anything. If the sign-in 
 
 You can connect more than one calendar account. To add another, click **Manage**, click the button that starts with "Add another", and fill in the form again. The Calendar card in Settings lists every connected account. One account is the default. To make a different account the default, click **Make default** next to it. Reads span every account, and answers say which account each calendar and event belongs to. A new event lands on the account of the calendar you pick for it, and the approval card names that calendar and its account before you approve. Nothing about an event changes after you approve it.
 
-To change one account, click **Manage**, then click **Change** next to it. To remove one account, click **Remove** next to it. This deletes that account's saved app password for good. If an account says the sign-in stopped working, or that the calendar is not working right now, click **Change** next to it and type the details again.
+To change one account, click **Manage**, then click **Change** next to it. To remove one account, click **Remove** next to it. This deletes that account's saved app password for good. If an account says the sign-in stopped working, or that the calendar is not working right now, click **Change** next to it and type the details again. To close the form without saving, click **Cancel**.
 
 The app stores the app passwords only on your computer, in the calendar connector. Your assistant never sees them. Never paste a password into a chat. A chat cannot connect a calendar. Use Settings.
 
