@@ -208,7 +208,7 @@ const PersonaSettings = () => {
   };
 
   return (
-    <section aria-labelledby="personas-heading" className="mt-6">
+    <section aria-labelledby="personas-heading">
       <div className="mb-2 flex items-center justify-between gap-2">
         <div id="personas-heading" className="text-[0.8125rem] font-semibold uppercase text-text-secondary">
           Personas

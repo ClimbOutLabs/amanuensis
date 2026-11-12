@@ -535,6 +535,7 @@ export * from "./Tier3Mailbox.js";
 export * from "./Tier3Persona.js";
 export * from "./Tier3Schedule.js";
 export * from "./Tier3ScheduleAction.js";
+export * from "./Tier3Skill.js";
 export * from "./Timezone.js";
 export * from "./TogetherAiModelProvider.js";
 export * from "./TokenFactoryModelProvider.js";

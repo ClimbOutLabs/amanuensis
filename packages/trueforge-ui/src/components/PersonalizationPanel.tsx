@@ -90,12 +90,26 @@ const PersonalizationPanelContent: FC<Pick<PersonalizationPanelProps, 'onProfile
     }
   };
 
+  // Clear all empties what this page shows. The learned profile and its switch live on
+  // Settings > Memory > Learned profile, and the help areas come from the Tour; none of them is
+  // visible here, so clearing this page keeps them. Only when nothing would be left is the whole
+  // profile deleted (the host refuses an empty PUT; DELETE is how a profile goes away).
   const clear = async () => {
     setSaving(true);
     setFeedback(null);
     try {
-      await deleteProfile();
-      setDraft(EMPTY_PERSONALIZATION_PROFILE);
+      const kept: PersonalizationProfile = {
+        ...EMPTY_PERSONALIZATION_PROFILE,
+        help_areas: profile?.help_areas ?? [],
+        learned_profile: profile?.learned_profile ?? null,
+        ...(profile?.learning_enabled === undefined ? {} : { learning_enabled: profile.learning_enabled }),
+      };
+      if (kept.help_areas.length > 0 || kept.learned_profile !== null || kept.learning_enabled === true) {
+        setDraft(await updateProfile(kept));
+      } else {
+        await deleteProfile();
+        setDraft(EMPTY_PERSONALIZATION_PROFILE);
+      }
       setFeedback({ tone: 'success', message: 'Personalization cleared.' });
     } catch (error) {
       setFeedback({

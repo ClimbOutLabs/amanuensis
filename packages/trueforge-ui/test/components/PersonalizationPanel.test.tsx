@@ -207,6 +207,45 @@ describe('PersonalizationPanel', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Personalization cleared.');
   });
 
+  it('clears only this page and keeps the learned profile, its switch and the help areas', async () => {
+    // The learned profile lives on Settings > Memory now, out of sight from this page, so
+    // Clear all here must not delete it or turn learning off.
+    const learned: PersonalizationProfile = {
+      ...initialProfile,
+      user_name: 'Sam Rivera',
+      help_areas: ['family'],
+      learned_profile: '# Learned\n\n- Enjoys woodworking.',
+      learning_enabled: true,
+    };
+    const deleteProfile = vi.fn(async () => {});
+    const updateProfile = vi.fn(async (profile: PersonalizationProfile) => profile);
+    render(
+      <PersonalizationProvider api={{ getProfile: async () => learned, updateProfile, deleteProfile }}>
+        <PersonalizationPanel />
+      </PersonalizationProvider>,
+    );
+
+    expect(await screen.findByDisplayValue('Sam Rivera')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear all' }));
+
+    await waitFor(() => expect(updateProfile).toHaveBeenCalledOnce());
+    expect(deleteProfile).not.toHaveBeenCalled();
+    expect(updateProfile.mock.calls[0]?.[0]).toEqual({
+      assistant_name: null,
+      assistant_identity: null,
+      voice_guidance: null,
+      user_name: null,
+      address_as: null,
+      user_profile: null,
+      pinned_preferences: [],
+      help_areas: ['family'],
+      learned_profile: '# Learned\n\n- Enjoys woodworking.',
+      learning_enabled: true,
+    });
+    expect(await screen.findByRole('status')).toHaveTextContent('Personalization cleared.');
+    expect(screen.getByLabelText('Your name')).toHaveValue('');
+  });
+
   it('carries the learned profile fields through a save without inventing a learning switch', async () => {
     // The Learned profile block lives under Settings > Memory now; this panel no longer shows
     // it. The fields are still on the profile the panel saves, so they ride through a save
