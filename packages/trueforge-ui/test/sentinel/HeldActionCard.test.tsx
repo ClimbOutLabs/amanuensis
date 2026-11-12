@@ -101,26 +101,26 @@ describe('HeldActionCard', () => {
     expect(onDeny).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole('button', { name: /this chat/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Always deny/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Always allow this tool' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Always allow everywhere' })).not.toBeInTheDocument();
   });
 
-  it('offers Always allow this tool only when the server said it may', () => {
+  it('offers Always allow everywhere only when the server said it may', () => {
     renderCard({ alwaysAllowOffered: false });
-    expect(screen.queryByRole('button', { name: 'Always allow this tool' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Always allow everywhere' })).not.toBeInTheDocument();
   });
 
-  it('asks the owner to confirm Always allow this tool before it records anything', () => {
+  it('asks the owner to confirm Always allow everywhere before it records anything', () => {
     const { onAlwaysAllow } = renderCard({ alwaysAllowOffered: true });
-    fireEvent.click(screen.getByRole('button', { name: 'Always allow this tool' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Always allow everywhere' }));
 
-    expect(screen.getByRole('heading', { name: 'Always allow this tool?' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Always allow everywhere?' })).toBeInTheDocument();
     expect(screen.getByText(/You can remove this later in connector settings/)).toBeInTheDocument();
     expect(onAlwaysAllow).not.toHaveBeenCalled();
   });
 
   it('says who will run the tool in the confirm step, in the assistant name and never as an agent', () => {
     renderCard({ alwaysAllowOffered: true });
-    fireEvent.click(screen.getByRole('button', { name: 'Always allow this tool' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Always allow everywhere' }));
 
     expect(
       screen.getByText('Aman will run this tool on this connector without asking, in every chat.'),
@@ -130,7 +130,7 @@ describe('HeldActionCard', () => {
 
   it('calls nothing when the owner cancels the Always allow confirm step', () => {
     const { onAlwaysAllow, onApprove } = renderCard({ alwaysAllowOffered: true });
-    fireEvent.click(screen.getByRole('button', { name: 'Always allow this tool' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Always allow everywhere' }));
     fireEvent.click(screen.getByTestId('always-allow-cancel'));
 
     expect(onAlwaysAllow).not.toHaveBeenCalled();
@@ -139,7 +139,7 @@ describe('HeldActionCard', () => {
 
   it('calls the Always allow handler once when the owner confirms', () => {
     const { onAlwaysAllow } = renderCard({ alwaysAllowOffered: true });
-    fireEvent.click(screen.getByRole('button', { name: 'Always allow this tool' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Always allow everywhere' }));
     fireEvent.click(screen.getByTestId('always-allow-confirm'));
 
     expect(onAlwaysAllow).toHaveBeenCalledTimes(1);

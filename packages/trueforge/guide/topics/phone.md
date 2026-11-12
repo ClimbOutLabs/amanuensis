@@ -10,4 +10,6 @@ The first time, open the "Trust this computer" link that the installer printed, 
 
 If the page says the connection is not private, the phone does not trust your computer yet. Do the trust steps again on the phone.
 
+Notices on the phone need the same trust step. If "Turn on for this device" in Settings, Reach me says the device does not trust the computer, do the trust steps on that device, then press it again.
+
 On a small phone the buttons at the top of a chat use shorter names so they all fit. "Agent details" shows as "Details", and "Help, I'm stuck" shows as "Help". The three dots at the end open the rest, such as "Clear chat".

@@ -16,7 +16,7 @@ export type Tier2RelaxationToggleProps = {
 };
 
 /**
- * "Always allow" switch for one Tier 2 action kind. Off by default, so Tier 2
+ * "Always allow everywhere" switch for one Tier 2 action kind. Off by default, so Tier 2
  * asks; the checked state always reflects the server settings, and flipping it writes
  * through the user settings API. Lives in Settings > Permissions next to the kind it controls.
  */

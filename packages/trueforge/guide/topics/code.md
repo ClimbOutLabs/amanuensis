@@ -40,3 +40,5 @@ Publishing or uploading a package is never possible this way, only downloading.
 Allowing downloads does not install anything by itself. Each time Aman wants to install a package, it shows a card first.
 
 Where downloads are allowed, Aman also asks before it runs code or makes a file, even with the **Sandbox** switch on. Code there can reach the package sites, so you see it first.
+
+A scheduled run asks before it runs code or makes a file too. So does its chat when you open it and type there.

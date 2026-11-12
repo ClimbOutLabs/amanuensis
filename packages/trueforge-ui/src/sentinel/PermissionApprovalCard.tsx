@@ -39,7 +39,7 @@ export type PermissionApprovalCardProps = {
   /** Only passed when the server declared a chat-scoped allow for this call. */
   onApproveForChat?: (() => void) | undefined;
   /**
-   * Records a standing "Always allow this tool" grant and approves this call. Only passed when the
+   * Records a standing "Always allow everywhere" grant and approves this call. Only passed when the
    * server says the owner may always allow this tool; the card asks for confirmation first.
    */
   onApproveAlways?: (() => void) | undefined;

@@ -5,7 +5,6 @@ import { allowsChatApproval, allowsToolGrant } from '../../../src/core/mcp/appro
 import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
 import { defaultSentinelServices } from '../../../src/core/permissions/context';
 import { isCalendarChangeToolName } from '../../../src/core/permissions/extractorRegistry';
-import { TOOL_GRANT_REASON } from '../../../src/core/permissions/toolGrants';
 import { createWebSearchTurnState } from '../../../src/core/permissions/webSearch';
 
 const GOOGLE = 'google_calendar';
@@ -94,7 +93,7 @@ const CREATE_ARGS = { calendar_id: 'primary', summary: 'Dentist', start: '2026-1
 const UPDATE_ARGS = { id: 'ev1', summary: 'Dentist moved' };
 
 describe('Google Calendar changes and standing grants', () => {
-  it('asks by default for a new event with no guests, and lets an Always grant admit it without a card', async () => {
+  it('asks for a new event with no guests, also when an Always grant is stored for the tool', async () => {
     const asks = await classifyTier(googleAction('create_event', review({})), await ctxWithGrants([]));
     expect(asks).toMatchObject({ tier: 3, reason: 'calendar_write' });
 
@@ -102,10 +101,11 @@ describe('Google Calendar changes and standing grants', () => {
       googleAction('create_event', review({})),
       await ctxWithGrants([[GOOGLE, 'create_event']]),
     );
-    expect(granted).toMatchObject({ tier: 1, reason: TOOL_GRANT_REASON, card: null });
+    expect(granted).toMatchObject({ tier: 3, reason: 'calendar_write' });
+    expect(granted.card).not.toBeNull();
   });
 
-  it('asks by default for a change to an event with no guests, and admits it under an Always grant', async () => {
+  it('asks for a change to an event with no guests, also when an Always grant is stored for the tool', async () => {
     const change = review({
       action: 'change',
       before: { title: 'Dentist', when: 'x', short_when: 'x', duration: '1 hour', location: '' },
@@ -116,7 +116,7 @@ describe('Google Calendar changes and standing grants', () => {
     });
     expect(
       await classifyTier(googleAction('update_event', change), await ctxWithGrants([[GOOGLE, 'update_event']])),
-    ).toMatchObject({ tier: 1, reason: TOOL_GRANT_REASON });
+    ).toMatchObject({ tier: 3, reason: 'calendar_write' });
   });
 
   it('shows a card for a new event with guests even with an Always grant, and says why in plain words', async () => {
@@ -148,14 +148,14 @@ describe('Google Calendar changes and standing grants', () => {
 });
 
 describe('CalDAV changes and standing grants', () => {
-  it('asks by default for a new event with no guests, and admits it under an Always grant', async () => {
+  it('asks for a new event with no guests, also when an Always grant is stored for the tool', async () => {
     expect(await classifyTier(caldavAction('create_event', CREATE_ARGS), await ctxWithGrants([]))).toMatchObject({
       tier: 3,
       reason: 'caldav_calendar_change',
     });
     expect(
       await classifyTier(caldavAction('create_event', CREATE_ARGS), await ctxWithGrants([[CALDAV, 'create_event']])),
-    ).toMatchObject({ tier: 1, reason: TOOL_GRANT_REASON });
+    ).toMatchObject({ tier: 3, reason: 'caldav_calendar_change' });
   });
 
   it('shows a card for an update to an existing event with no guests, even with an Always grant', async () => {
@@ -321,13 +321,13 @@ describe('which calendar changes a grant may cover', () => {
     };
   }
 
-  it.each([
-    ['calendar_write', true],
-    ['caldav_calendar_change', true],
-  ])('lets %s be covered by a chat or Always grant', (tier_reason, covered) => {
-    expect(allowsChatApproval(info(tier_reason))).toBe(covered);
-    expect(allowsToolGrant(info(tier_reason))).toBe(covered);
-  });
+  it.each(['calendar_write', 'caldav_calendar_change'])(
+    'lets %s be covered by a chat grant, and never by an Always grant',
+    tier_reason => {
+      expect(allowsChatApproval(info(tier_reason))).toBe(true);
+      expect(allowsToolGrant(info(tier_reason))).toBe(false);
+    },
+  );
 
   it.each(['calendar_write_guests', 'caldav_calendar_guests', 'caldav_invitation_reply', 'connector_calendar_write'])(
     'never lets %s be covered by a grant',

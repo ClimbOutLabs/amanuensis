@@ -782,7 +782,7 @@ describe('send_draft', () => {
     expect(sleeps.length).toBeGreaterThan(0);
   });
 
-  it('is never covered by a standing "Always allow" or by "Always allow this here"', async () => {
+  it('is never covered by a standing "Always allow" or by "Always allow in this chat"', async () => {
     const { tools } = await build({ features: [...COMPOSE], routes: [draftRoute()] });
     const info = await tools.toolCallInfo({ name: 'send_draft', arguments: { draft_id: 'd1' } });
     expect(info.tier).toBe(3);
@@ -790,7 +790,7 @@ describe('send_draft', () => {
     expect(allowsChatApproval(info)).toBe(false);
   });
 
-  it('lets a draft, which sends nothing, be answered once for this chat but never by a standing grant', async () => {
+  it('asks before every draft, with no answer for the whole chat and no standing grant', async () => {
     const { tools } = await build({ features: [...COMPOSE], routes: [draftRoute()] });
     for (const [name, args] of [
       ['update_draft', { draft_id: 'd1', to: ['grace@example.com'], subject: 'Lease', body: 'x' }],
@@ -799,7 +799,7 @@ describe('send_draft', () => {
       const info = await tools.toolCallInfo({ name, arguments: args });
       expect(info.tier).toBe(3);
       expect(allowsToolGrant(info)).toBe(false);
-      expect(allowsChatApproval(info)).toBe(true);
+      expect(allowsChatApproval(info)).toBe(false);
     }
   });
 
