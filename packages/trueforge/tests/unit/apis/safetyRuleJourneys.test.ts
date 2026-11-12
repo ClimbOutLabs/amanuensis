@@ -21,6 +21,7 @@ import {
   INERT_GET_PAGE_TOOL,
   INERT_SEARCH_MESSAGES_TOOL,
   INERT_SERVER_NAME,
+  INERT_WEB_SEARCH_TOOL,
   INERT_WRITE_TOOL,
 } from '../../fixtures/inertMcpServer';
 import {
@@ -1005,6 +1006,62 @@ describe('an Incognito chat', () => {
         reminderSaved: true,
         spaceSaved: true,
       });
+    },
+    TURN_TIMEOUT_MS,
+  );
+});
+
+describe('a connector tool named like a search tool', () => {
+  let server: ApprovalTestServer;
+  const ADDRESS = 'noor.haddad@orchard.example';
+  const DRAFT = { to: [ADDRESS], subject: 'Apple order', body: 'Hi Noor, could I order a crate for Saturday?' };
+
+  beforeAll(async () => {
+    server = await startApprovalTestServer({ inertWebSearch: true });
+  });
+
+  afterAll(async () => {
+    await server.close();
+  });
+
+  /** A new chat where the connector's `web_search` was asked about the orchard and answered with the address. */
+  async function chatThatSearchedTheConnector(): Promise<string> {
+    // The invented inbox only stands in once the connector has answered: with it on, an added connector is not run.
+    server.setEvalMode(false);
+    const searchesBefore = server.mcp.webSearchInvocations();
+    const chatId = await createChat(server);
+    server.model.next({ toolArguments: { query: `the orchard, run by ${ADDRESS}` } });
+    const search = onlyCard(await runTurn({ server, chatId, input: ask(INERT_WEB_SEARCH_TOOL) }));
+    await runTurn({ server, chatId, input: answer({ card: search, scope: 'once' }) });
+    expect(server.mcp.webSearchInvocations()).toBe(searchesBefore + 1);
+    server.setEvalMode(true);
+    return chatId;
+  }
+
+  it(
+    'what it returns counts as something Aman read, so a draft to an address only it named says so',
+    async () => {
+      const chatId = await chatThatSearchedTheConnector();
+      server.model.next({ toolArguments: DRAFT });
+      const card = onlyCard(await runTurn({ server, chatId, input: ask('draft_email') }));
+      expect(card.tier3_card?.plain_what).toContain(`This goes to ${ADDRESS}, whose address was in a page Aman read.`);
+    },
+    TURN_TIMEOUT_MS,
+  );
+
+  it(
+    'a draft to an address the person wrote themselves shows the plain card',
+    async () => {
+      const chatId = await chatThatSearchedTheConnector();
+      server.model.next({ toolArguments: DRAFT });
+      const card = onlyCard(
+        await runTurn({
+          server,
+          chatId,
+          input: [{ type: 'user.message', content: `${RUN_DIRECTIVE_PREFIX}draft_email to ${ADDRESS} please` }],
+        }),
+      );
+      expect(card.tier3_card?.plain_what).not.toContain('Aman read');
     },
     TURN_TIMEOUT_MS,
   );
