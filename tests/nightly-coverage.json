@@ -352,6 +352,10 @@
       "set": "reach",
       "tests": []
     },
+    "route:reminder": {
+      "set": "reminders",
+      "tests": []
+    },
     "route:repository": {
       "set": "code",
       "tests": []
@@ -796,6 +800,7 @@
     "route:personalization",
     "route:privateChat",
     "route:reach",
+    "route:reminder",
     "route:repository",
     "route:runCode",
     "route:sandboxProvider",

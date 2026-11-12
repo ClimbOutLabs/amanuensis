@@ -26,6 +26,13 @@ import {
   type RemoteMcpTransportType,
 } from './remoteMcpClient';
 
+/**
+ * How long to wait before the one retry of a connect that failed at the transport: long enough
+ * for a server that is mid-restart (the mail sidecar right after a send-list change) to start
+ * answering, short enough that a person is not left waiting on a server that is simply down.
+ */
+const CONNECT_TRANSPORT_RETRY_WAIT_MS = 1500;
+
 /** Redacted url for trace spans: scheme + host + path only, so userinfo/query secrets never leak. */
 function redactUrlForTrace(url: string): string {
   try {
@@ -216,7 +223,7 @@ export class RemoteMCP implements ToolSource {
   ): Promise<ExecuteResult<T>> {
     let used: RemoteMcpConnection | undefined;
     try {
-      const initInfo = await this.connectIfNeeded(headers);
+      const initInfo = await this.connectWithOneTransportRetry(headers);
       const connection = this._connection;
       if (!connection) {
         throw new Error(`Remote MCP '${this.name}' not connected - connectIfNeeded() must run first`);
@@ -331,6 +338,32 @@ export class RemoteMCP implements ToolSource {
       mcp_server_name: this.name,
       is_approval_required: false,
     });
+  }
+
+  /**
+   * The connect step of a run, with one retry for a transport failure. A server can be
+   * mid-restart when a call is due (the mail sidecar restarts to load a changed send list):
+   * the connect is refused even though the server answers a moment later. The retry covers
+   * only the connect itself, which runs before the operation, so the operation can never run
+   * twice because of it; a failure the operation throws is never retried here. A
+   * session-expired connect keeps its existing path: it is rethrown untouched, so the
+   * session-expired retry in connectAndRun handles it exactly as before.
+   */
+  private async connectWithOneTransportRetry(
+    headers: Record<string, string>,
+  ): Promise<MCPServerInitInfo | undefined> {
+    try {
+      return await this.connectIfNeeded(headers);
+    } catch (error) {
+      if (isSessionExpiredError(error) || transportFailureDetail(error) === undefined) {
+        throw error;
+      }
+      this.logger.info(
+        `Connect to remote MCP ${this.name} hit a transport failure before any call ran; waiting briefly and trying once more...`,
+      );
+      await new Promise(resolve => setTimeout(resolve, CONNECT_TRANSPORT_RETRY_WAIT_MS));
+      return this.connectIfNeeded(headers);
+    }
   }
 
   private async connectIfNeeded(headers: Record<string, string>): Promise<MCPServerInitInfo | undefined> {

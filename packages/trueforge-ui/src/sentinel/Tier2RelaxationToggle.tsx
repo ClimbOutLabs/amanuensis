@@ -4,7 +4,7 @@ import { useState, type FC } from 'react';
 
 import { Switch } from '../atoms/primitives/Switch.js';
 import { APPROVAL_CHOICES } from './approvalChoices.js';
-import type { Tier2ActionKind } from './types.js';
+import { TIER2_ACTION_LABELS, type Tier2ActionKind } from './types.js';
 
 export type Tier2RelaxationToggleProps = {
   /** Exact Tier 2 action kind this toggle controls. */
@@ -49,7 +49,7 @@ export const Tier2RelaxationToggle: FC<Tier2RelaxationToggleProps> = ({
           checked={relaxed}
           disabled={disabled || busy}
           onCheckedChange={handleChange}
-          aria-label={`${APPROVAL_CHOICES.alwaysAllow.label}: ${actionType}`}
+          aria-label={`${APPROVAL_CHOICES.alwaysAllow.label}: ${TIER2_ACTION_LABELS[actionType]}`}
         />
         <span className="text-[0.6875rem] text-text-secondary">{APPROVAL_CHOICES.alwaysAllow.label}</span>
       </span>

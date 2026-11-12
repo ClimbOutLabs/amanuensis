@@ -14,6 +14,7 @@ import { ModelsClient } from "./api/resources/models/client/Client.js";
 import { PersonalizationClient } from "./api/resources/personalization/client/Client.js";
 import { PersonasClient } from "./api/resources/personas/client/Client.js";
 import { ReachClient } from "./api/resources/reach/client/Client.js";
+import { RemindersClient } from "./api/resources/reminders/client/Client.js";
 import { RepositoriesClient } from "./api/resources/repositories/client/Client.js";
 import { RepositoryCommandProposalsClient } from "./api/resources/repositoryCommandProposals/client/Client.js";
 import { RepositoryCommandsClient } from "./api/resources/repositoryCommands/client/Client.js";
@@ -66,6 +67,7 @@ export class TrueForge {
     protected _spaces: SpacesClient | undefined;
     protected _deliveries: DeliveriesClient | undefined;
     protected _reach: ReachClient | undefined;
+    protected _reminders: RemindersClient | undefined;
     protected _voice: VoiceClient | undefined;
     protected _catalogs: CatalogsClient | undefined;
     protected _memory: MemoryClient | undefined;
@@ -173,6 +175,10 @@ export class TrueForge {
 
     public get reach(): ReachClient {
         return (this._reach ??= new ReachClient(this._options));
+    }
+
+    public get reminders(): RemindersClient {
+        return (this._reminders ??= new RemindersClient(this._options));
     }
 
     public get voice(): VoiceClient {
