@@ -8,8 +8,6 @@ import {
   NUMBER_WORDS,
   SPOKEN_DOT,
 } from '../../../../src/runtime/texts/knownWords';
-import webEndings from '../../../../src/runtime/texts/webEndings.json';
-import wordList from '../../../../src/runtime/texts/wordList.json';
 
 describe('the words a Full text may carry', () => {
   it('holds about 45,000 common English words, each of plain lower-case letters', () => {
@@ -64,13 +62,30 @@ describe('the words a Full text may carry', () => {
     }
   });
 
-  it('holds no word of the less common sizes that is also a web ending', () => {
-    const endings = new Set<string>(webEndings);
+  it('keeps everyday words that are also web endings but are not on the named list', () => {
     const words = knownWords();
-    for (const word of wordList.more) {
-      if (endings.has(word)) {
-        expect([word, words.has(word)]).toEqual([word, false]);
-      }
+    for (const word of [
+      'dad',
+      'email',
+      'ms',
+      'soccer',
+      'grocery',
+      'dental',
+      'flights',
+      'hotels',
+      'yoga',
+      'visa',
+      'spa',
+      'salon',
+      'ski',
+      'bike',
+      'coupon',
+      'rentals',
+      'shop',
+      'help',
+      'today',
+    ]) {
+      expect([word, words.has(word)]).toEqual([word, true]);
     }
   });
 
@@ -101,8 +116,27 @@ describe('a word the person adds to the words Aman may text', () => {
     }
   });
 
-  it('refuses every web ending and every number word', () => {
-    for (const word of ['com', 'COM', 'io', 'ly', 'dev', 'xyz', 'juniper', 'five', 'Twenty', 'hundred', 'dot']) {
+  it('takes an everyday word that is also a web ending, such as dad or yoga', () => {
+    for (const word of ['dad', 'Email', 'yoga', 'visa', 'juniper', 'ms']) {
+      expect([word, customWordProblem(word)]).toEqual([word, undefined]);
+    }
+  });
+
+  it('refuses the named web endings, the spoken dots and every number word', () => {
+    for (const word of [
+      'com',
+      'COM',
+      'io',
+      'ly',
+      'dev',
+      'xyz',
+      'five',
+      'Twenty',
+      'hundred',
+      'dot',
+      'point',
+      'period',
+    ]) {
       expect([word, customWordProblem(word)]).toEqual([word, expect.any(String)]);
       expect(isEndingOrNumber(word)).toBe(true);
     }

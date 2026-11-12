@@ -1,6 +1,8 @@
+import type { PersonOwner } from '../../db/personOwner';
+import type { ITextContactStore } from '../../db/textContactStore';
 import type { Delivery, DeliveryKind } from '../../schemas/deliveries';
 import type { TextMode } from '../../schemas/textMessages';
-import { isAllowedWord, isEndingOrNumber } from './knownWords';
+import { customWordProblem, isAllowedWord, isEndingOrNumber } from './knownWords';
 
 /** Said wherever texts are asked for on a server that has no Twilio details. */
 export const TEXTS_NOT_SET_UP =
@@ -98,8 +100,8 @@ const RANGE = new RegExp(`(?<![\\d:./-])(${TIME_PART})\\s?-\\s?(?=${TIME_PART}(?
 const SPACED_AM_PM = /(\d)\s([ap]\.?m\.?)(?![a-z])/g;
 /** The signs a sentence may end a word with: a comma, a full stop, a question mark or an exclamation mark. */
 const ENDING_SIGNS = /[.,?!]{1,3}$/;
-/** A word of letters, with a dash or an apostrophe only inside it. */
-const WORD = /^[a-z]+(?:['-][a-z]+)*$/;
+/** A word of letters, with a dash or an apostrophe only inside it, or an apostrophe after a final s, as in Smiths'. */
+const WORD = /^[a-z]+(?:['-][a-z]+)*(?:(?<=s)')?$/;
 /** What may follow an apostrophe: the rest of a contraction or a possessive, such as 's, 'll or n't. */
 const APOSTROPHE_ENDS = new Set(['s', 'd', 'll', 're', 've', 'm', 't']);
 /** The stems before n't that are not words on their own, such as ca in can't. */
@@ -181,7 +183,11 @@ function wordAllowed({ word, extra }: { word: string; extra: ReadonlySet<string>
       return false;
     }
     if (end === undefined) {
-      return stem.length === 1 || isAllowedWord({ word: stem, extra });
+      return isAllowedWord({ word: stem, extra });
+    }
+    // A plural possessive, such as the Smiths', is the plural with an apostrophe after its s.
+    if (end === '') {
+      return stem.endsWith('s') && isAllowedWord({ word: stem, extra });
     }
     if (stem === 'o' && end === 'clock') {
       return true;
@@ -190,7 +196,7 @@ function wordAllowed({ word, extra }: { word: string; extra: ReadonlySet<string>
       const base = stem.slice(0, -1);
       return NT_STEMS.has(base) || isAllowedWord({ word: base, extra });
     }
-    return APOSTROPHE_ENDS.has(end) && end !== 't' && (stem.length === 1 || isAllowedWord({ word: stem, extra }));
+    return APOSTROPHE_ENDS.has(end) && end !== 't' && isAllowedWord({ word: stem, extra });
   });
 }
 
@@ -223,7 +229,6 @@ export function heldBackWord({
   const words = tokens.map(token => token.replace(ENDING_SIGNS, ''));
   let digits = 0;
   let numberRun = 0;
-  let letterRun = 0;
   for (const [index, word] of words.entries()) {
     const token = tokens[index] ?? word;
     if (!WORD.test(word)) {
@@ -243,7 +248,6 @@ export function heldBackWord({
         return token;
       }
       digits += counted.digits;
-      letterRun = 0;
       numberRun = counted.bare ? numberRun + 1 : 0;
       if (numberRun >= 3 || digits > MAX_DIGITS) {
         return token;
@@ -253,13 +257,6 @@ export function heldBackWord({
     numberRun = 0;
     if (!wordAllowed({ word, extra })) {
       return token;
-    }
-    // Single letters in a row spell a site or a number letter by letter.
-    for (const part of word.split('-')) {
-      letterRun = part.split("'")[0]?.length === 1 ? letterRun + 1 : 0;
-      if (letterRun >= 3) {
-        return token;
-      }
     }
   }
   return undefined;
@@ -316,7 +313,25 @@ export function nameWords(name: string): Set<string> {
     .toLowerCase()
     .split(/[^a-z']+/)
     .flatMap(word => [word.replace(/^'+|'+$/g, ''), ...word.split("'")]);
-  return new Set(words.filter(word => word !== ''));
+  // A single letter is no word, in a name as anywhere else, so a name cannot spell a link letter by letter.
+  return new Set(words.filter(word => word.length > 1));
+}
+
+/**
+ * The words a text or a call may carry besides the list: the words the person added, each checked again against the
+ * rules for an added word, and the words of the assistant's name. The one owner of this set, for texts and calls alike.
+ */
+export async function allowedExtraWords({
+  contacts,
+  owner,
+  name,
+}: {
+  contacts: Pick<ITextContactStore, 'listWords'>;
+  owner: PersonOwner;
+  name: string;
+}): Promise<ReadonlySet<string>> {
+  const added = (await contacts.listWords(owner)).filter(word => customWordProblem(word) === undefined);
+  return new Set([...added, ...nameWords(name)]);
 }
 
 /** Why a Full text went out in Private words instead, or null when it carried the item's own words. */
@@ -335,14 +350,14 @@ export function textBody({
   delivery,
   mode,
   test,
-  allowed,
+  extra,
 }: {
   name: string;
   delivery: Delivery;
   mode: TextMode;
   test: boolean;
-  /** The words the person added, which a text may carry besides the list and the assistant's name. */
-  allowed?: ReadonlySet<string>;
+  /** The words a text may carry besides the list, from `allowedExtraWords`. */
+  extra?: ReadonlySet<string> | undefined;
 }): {
   body: string;
   withheld: FullWithheld;
@@ -357,7 +372,6 @@ export function textBody({
     return { body: privateBody, withheld: 'noticed', held: null };
   }
   const prefix = `${name}: `;
-  const extra = new Set([...(allowed ?? NO_WORDS), ...nameWords(name)]);
   const { words, held } = checkWords({ text: delivery.text, room: TEXT_MAX - prefix.length, extra });
   if (words === undefined) {
     return { body: privateBody, withheld: 'not_plain_words', held: held ?? null };

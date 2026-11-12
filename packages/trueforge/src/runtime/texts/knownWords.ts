@@ -44,7 +44,7 @@ const CALENDAR_WORDS = [
   'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday', 'mon', 'tue', 'tues', 'wed', 'thu',
   'thur', 'thurs', 'fri', 'sat', 'sun', 'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august',
   'september', 'october', 'november', 'december', 'jan', 'feb', 'mar', 'apr', 'jun', 'jul', 'aug', 'sep', 'sept',
-  'oct', 'nov', 'dec', 'dr', 'mr', 'mrs', 'jr', 'sr', 'eur', 'gbp', 'jpy',
+  'oct', 'nov', 'dec', 'dr', 'mr', 'mrs', 'ms', 'jr', 'sr', 'eur', 'gbp', 'jpy',
 ] as const;
 
 /** The only words of one letter. */
@@ -61,7 +61,7 @@ export function isRemovedWord(word: string): boolean {
   return REMOVED.has(foldWord(word));
 }
 
-/** Whether a word is any web ending, a spoken dot or a number word, which no word the person adds can be. */
+/** Whether a word is any web ending, a spoken dot or a number word. */
 export function isEndingOrNumber(word: string): boolean {
   const folded = foldWord(word);
   return WEB_ENDINGS.has(folded) || REMOVED.has(folded);
@@ -73,10 +73,7 @@ function buildKnown(): ReadonlySet<string> {
     known.add(word);
   }
   for (const word of WORD_LIST.more) {
-    // A less common word that is also a web ending, such as academy or zip, cannot be told from a site's end.
-    if (!WEB_ENDINGS.has(word)) {
-      known.add(word);
-    }
+    known.add(word);
   }
   for (const word of CALENDAR_WORDS) {
     known.add(word);
@@ -111,8 +108,8 @@ export function foldWord(word: string): string {
 }
 
 /**
- * Why a word cannot be added to the words Aman may text, or undefined when it can. The same rules apply to a name:
- * letters only, not a web ending or a number word, and not longer than a name should be.
+ * Why a word cannot be added to the words Aman may text, or undefined when it can: letters only, not one of the web
+ * endings, spoken dots or number words kept off the list, and not longer than a name should be.
  */
 export function customWordProblem(word: string): string | undefined {
   const folded = foldWord(word);
@@ -122,8 +119,8 @@ export function customWordProblem(word: string): string | undefined {
   if (folded.length < 2 || folded.length > CUSTOM_WORD_MAX) {
     return `Use 2 to ${String(CUSTOM_WORD_MAX)} letters.`;
   }
-  if (isEndingOrNumber(folded)) {
-    return 'A web ending or a number cannot be added. A text could use it to spell a link or a phone number.';
+  if (REMOVED.has(folded)) {
+    return 'A web ending such as com or io, a spoken dot or a number word cannot be added. A text could use it to spell a link or a phone number.';
   }
   return undefined;
 }

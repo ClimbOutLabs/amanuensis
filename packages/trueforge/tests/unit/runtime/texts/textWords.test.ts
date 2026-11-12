@@ -1,4 +1,5 @@
 import {
+  allowedExtraWords,
   checkedWords,
   heldBackWord,
   isPlainWords,
@@ -267,6 +268,13 @@ describe('the words of a text', () => {
       'Call 1800 flowers',
       'Call 1-800 flowers',
       'Visit evil 1com',
+      // A single letter is a word only as a or i, so a link cannot be spelled out one letter at a time.
+      'Plan B is on for Saturday',
+      'Take vitamin D with lunch',
+      'Visit e v i l',
+      'Visit w w w',
+      'Visit e-v-i-l',
+      "Visit evil'",
       // Number words, which could be read out as a phone number.
       'Call five five five',
       'Call two',
@@ -293,7 +301,6 @@ describe('the words of a text', () => {
       'Dentist at 2:30 p.m.',
       'Bins go out on 11/06',
       'Send the card before Nov 6, 2026',
-      'Plan A or plan B',
       'CALL THE BANK BACK',
       'Doctor follow-up at 3pm',
       "It's a big day",
@@ -336,8 +343,9 @@ describe('the words of a text', () => {
       "Don't forget the keys, we'll leave at 8",
       // Ordinary words with a dash or an apostrophe inside, and single letters.
       'Book a check-in with the well-known doctor',
-      'Plan B is on for Saturday',
-      'Take vitamin D with lunch',
+      'Call Dad about the visa',
+      'Email Ms. Lee, soccer is at 5pm',
+      "The parents' evening is on Tuesday",
       "It's the o'clock chime",
     ]) {
       expect([text, textBody({ test: false, name: 'Mannie', delivery: delivery(text), mode: 'full' })]).toEqual([
@@ -433,6 +441,50 @@ const SITE_PARTS = [
   'point',
   'period',
 ];
+
+describe('the words allowed besides the list', () => {
+  const owner = { tenant_id: 't1', created_by: 'alice' };
+
+  it("holds the person's added words and the words of the assistant's name, for texts and calls alike", async () => {
+    const contacts = { listWords: () => Promise.resolve(['patel', 'lopez']) };
+    const extra = await allowedExtraWords({ contacts, owner, name: "Mannie O'Neil-Smith" });
+    expect([...extra].sort()).toEqual(['lopez', 'mannie', 'neil', "o'neil", 'patel', 'smith']);
+    expect(await allowedExtraWords({ contacts: { listWords: () => Promise.resolve([]) }, owner, name: 'J' })).toEqual(
+      new Set(),
+    );
+    expect(isPlainWords('Ask Mannie to call Patel', extra)).toBe(true);
+    expect(checkedWords({ text: 'Ask Mannie to call Patel', room: 300, extra })).toBe('Ask Mannie to call Patel');
+    expect(checkedWords({ text: 'Ask Mannie to call Patel', room: 300 })).toBeUndefined();
+  });
+
+  it('leaves out a stored word that breaks the rules for an added word, so none can let a web ending through', async () => {
+    const contacts = { listWords: () => Promise.resolve(['patel', 'com', 'five', 'dot']) };
+    const extra = await allowedExtraWords({ contacts, owner, name: 'Mannie' });
+    expect([...extra].sort()).toEqual(['mannie', 'patel']);
+    expect(isPlainWords('Visit evil. com', extra)).toBe(false);
+  });
+
+  it('takes the words of the owner it is asked about, and no other', async () => {
+    const asked: unknown[] = [];
+    const contacts = {
+      listWords: (who: unknown) => {
+        asked.push(who);
+        return Promise.resolve([]);
+      },
+    };
+    await allowedExtraWords({ contacts, owner, name: 'Mannie' });
+    expect(asked).toEqual([owner]);
+  });
+});
+
+describe('a plural possessive', () => {
+  it("passes when the word before the apostrophe is allowed: the Patels' house", () => {
+    expect(heldBackWord({ text: "Dinner at the Patels' house" })).toBe("patels'");
+    expect(heldBackWord({ text: "Dinner at the Patels' house", extra: new Set(['patels']) })).toBeUndefined();
+    expect(heldBackWord({ text: "The parents' evening and the doctors' office" })).toBeUndefined();
+    expect(heldBackWord({ text: "The zxqvjs' house" })).toBe("zxqvjs'");
+  });
+});
 
 describe('everyday reminders', () => {
   // The 11 two-sentence reminders from the tenth review, and 19 more of the same style.
