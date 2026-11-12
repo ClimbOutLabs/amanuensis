@@ -33,6 +33,8 @@ export const CalendarEventSchema = z.object({
   organizer: z
     .object({ email: z.string().optional(), displayName: z.string().optional(), self: z.boolean().optional() })
     .optional(),
+  /** Who made the event. Unlike the organizer, an invite from someone else cannot name the person here. */
+  creator: z.object({ email: z.string().optional(), self: z.boolean().optional() }).optional(),
   attendees: z.array(AttendeeSchema).optional(),
   attendeesOmitted: z.boolean().optional(),
   /** Read only to tell whether a change emailed to guests would carry a call link or files the card cannot show. */

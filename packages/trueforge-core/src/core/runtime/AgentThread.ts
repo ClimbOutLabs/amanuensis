@@ -75,6 +75,7 @@ import {
 } from '../llm/LLMTypes';
 import { resolveMaxOutputTokens } from '../llm/maxOutputTokens';
 import { buildModelWaitingEvent } from '../llm/modelWaitingEvent';
+import { describeTurnFailure } from '../llm/plainFailureMessages';
 import { noticeAfter, REPEAT_STOP_NOTE, TOOL_MARKUP_NOTICE, UNBACKED_CLAIM_NOTES } from '../llm/replyNotices';
 import { toOpenAIResponseFormat } from '../llm/responseFormat';
 import {
@@ -6332,7 +6333,9 @@ export class AgentThread {
       // Providers / transports often reject with plain objects; instanceof Error would
       // otherwise collapse those into an opaque "Unknown error occurred" in Agent Steps.
       this.logger.error('Agent thread execution failed', extractErrorLogFields(error));
-      yield this.generateErrorEvent(describeUnknownError(error), undefined, 'fatal_error');
+      // The chat gets plain words; the details above stay in the log.
+      const message = error instanceof RequestOverLimitError ? CHAT_TOO_LONG_MESSAGE : describeTurnFailure(error);
+      yield this.generateErrorEvent(message, undefined, 'fatal_error');
     } finally {
       this.contextBusy = false;
     }
