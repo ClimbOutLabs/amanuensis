@@ -11,6 +11,10 @@ export async function up(db: Kysely<unknown>): Promise<void> {
 }
 
 export async function down(db: Kysely<unknown>): Promise<void> {
-  void db;
-  return Promise.reject(new Error('20261107_000001_session_approval_refusals is not reversible'));
+  await db.transaction().execute(async trx => {
+    await sql`
+      ALTER TABLE session
+        DROP COLUMN approval_refusals
+    `.execute(trx);
+  });
 }
