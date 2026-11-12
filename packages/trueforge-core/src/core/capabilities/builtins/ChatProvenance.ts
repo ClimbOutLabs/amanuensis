@@ -147,7 +147,12 @@ export function chatProvenanceCapability(input: { turn: WebSearchTurnState }): A
       if (message.role === 'user') {
         for (const text of userTexts(message.content)) {
           if (isHostWrappedText(text)) {
-            recordUntrustedText({ provenance, text, source: isUntrustedDocumentText(text) ? 'file' : 'other' });
+            recordUntrustedText({
+              provenance,
+              text,
+              source: isUntrustedDocumentText(text) ? 'file' : 'other',
+              page_site: null,
+            });
           } else {
             recordPersonText({ provenance, text });
           }

@@ -435,6 +435,17 @@
             "description": "Whether the user may approve this tool for the rest of the chat.",
             "type": "boolean"
           },
+          "chat_grant_scope": {
+            "description": "What a chat approval on this call covers when it reaches past the one call: the whole site, for a browser open the user vouched for. Null when a chat approval binds the call itself.",
+            "enum": [
+              "site",
+              null
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "expires_at": {
             "description": "ISO 8601 time after which a held action can no longer be approved.",
             "type": "string"
@@ -10849,6 +10860,13 @@
             },
             "type": "array"
           },
+          "approval_refusals": {
+            "description": "Server-derived refusals from a \"no\" to a browser open or click, kept for the rest of this chat.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "created_at": {
             "description": "ISO 8601 creation timestamp.",
             "type": "string"
@@ -10908,6 +10926,7 @@
           "created_at",
           "updated_at",
           "approval_grants",
+          "approval_refusals",
           "metrics",
           "metadata",
           "source",

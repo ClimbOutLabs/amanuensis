@@ -287,6 +287,8 @@ export interface CreateTurnInput<TTurnCustom extends object = Record<string, nev
   sandbox_info: SandboxInfo | null;
   /** Complete session-scoped approval grant set after applying this turn's decisions. */
   approval_grants: string[];
+  /** Complete session-scoped browser refusal set after applying this turn's decisions. */
+  approval_refusals: string[];
   /** Approval continuations must consume the current session tip exactly once. */
   require_previous_turn_is_tip: boolean;
   /**

@@ -329,6 +329,7 @@ export class PostgresSessionStore implements ISessionStore<SessionCustom, TurnCu
     await createTurnQuery(this.db, {
       session_id: input.turn.session_id,
       approval_grants: input.approval_grants,
+      approval_refusals: input.approval_refusals,
       require_previous_turn_is_tip: input.require_previous_turn_is_tip,
       retained_previous_thread_ids: input.retained_previous_thread_ids,
       turn: {
@@ -550,6 +551,7 @@ export class PostgresSessionStore implements ISessionStore<SessionCustom, TurnCu
           // Bind via json(): a bare [] is encoded by node-pg as the Postgres array
           // literal '{}', which then casts to jsonb as an empty OBJECT, not [].
           approval_grants: json([]),
+          approval_refusals: json([]),
           task_checklist: json(emptyTaskChecklist()),
           custom: session.custom !== null ? json(session.custom) : null,
           metadata: json(metadata),

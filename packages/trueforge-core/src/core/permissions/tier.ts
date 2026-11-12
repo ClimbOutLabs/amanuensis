@@ -83,6 +83,17 @@ export const CHAT_GRANTABLE_CONSEQUENCE_REASONS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Browser open reasons whose chat grant covers the whole site, not the one address. Only the unvouched open
+ * qualifies: it asks because the person never gave the address once the chat had read other people's content,
+ * so the person is the one vouching, the card names the site, and a later open on that site still has to pass
+ * the outbound guard, the private-detail check and the steering check on its own, each under a reason no
+ * grant covers. Every other open reason stays out: a steered open always asks, an address carrying a private
+ * detail asks for what is inside that one address, and an open the guard or the person's search setting held
+ * is never covered by a grant.
+ */
+export const BROWSER_OPEN_SITE_GRANT_REASONS: ReadonlySet<string> = new Set(['browser_open_unvouched']);
+
+/**
  * Calendar changes that touch only the person's own calendar: no guest is invited, reached or cancelled.
  * Only these may get a chat grant, and none gets a grant for every chat. Anything that cannot be shown guest-free
  * is a guest change.

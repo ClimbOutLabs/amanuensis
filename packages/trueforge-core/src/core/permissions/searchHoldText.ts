@@ -1,7 +1,8 @@
 /** Wording of held web search, page and map cards and their audit rows. Browser-safe: the UI reads it too. */
 import { TAVILY_API_HOST, TAVILY_CONNECTOR_HOST } from '../search/TavilyClient.js';
+import { escapeDisplayText } from './displayText.js';
 import type { OutboundGuardRule } from './outboundGuard.js';
-import type { ReadSource } from './provenance.js';
+import type { ReadOrigin, ReadSource } from './provenance.js';
 
 /** Clause for a held key in other tools' outbound reasons; search cards use SECRET_SAY instead. */
 export const SERVER_SECRET_REASON = "it contains one of this computer's keys";
@@ -103,6 +104,31 @@ export function steeredDestinationSay(input: {
       : `This goes to ${who}, whose address was in ${READ_PLACE[source]} ${assistant} read.`;
   });
   return [...new Set(sentences)].join(' ');
+}
+
+/**
+ * The body of a card for an open whose address read content chose: whose idea it was not, and where the
+ * assistant read the link, in one plain line. The page is named by its host when the read named it, since
+ * no title for it is kept. `origin.site` is the host of the page the link was read on, taken from that
+ * page's own address when the read named it, and it is escaped for display like the destination host is.
+ */
+export function steeredOpenSay(input: { assistant: string; origin: ReadOrigin }): string {
+  const { assistant, origin } = input;
+  const read =
+    origin.source === 'page' || origin.source === 'browser_page'
+      ? origin.site === null
+        ? `A page ${assistant} read`
+        : `A page on ${escapeDisplayText(origin.site)} that ${assistant} read`
+      : origin.source === 'email' || origin.source === 'email_sender'
+        ? `An email ${assistant} read`
+        : origin.source === 'event'
+          ? `A calendar event ${assistant} read`
+          : origin.source === 'file'
+            ? `A file ${assistant} read`
+            : origin.source === 'tool_result'
+              ? `A tool result ${assistant} read`
+              : `Something ${assistant} read`;
+  return `You did not ask for this. ${read} linked to this address.`;
 }
 
 /** Which sentence each rule the outbound secret guard can trip on says. */

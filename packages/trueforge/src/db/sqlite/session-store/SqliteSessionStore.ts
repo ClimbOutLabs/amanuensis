@@ -305,6 +305,7 @@ export class SqliteSessionStore implements ISessionStore<SessionCustom, TurnCust
     await createTurnQuery(this.db, {
       session_id: input.turn.session_id,
       approval_grants: input.approval_grants,
+      approval_refusals: input.approval_refusals,
       require_previous_turn_is_tip: input.require_previous_turn_is_tip,
       retained_previous_thread_ids: input.retained_previous_thread_ids,
       turn: {

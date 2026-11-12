@@ -16,6 +16,7 @@ import {
   approvalStub,
   approvalTime,
   approveVerb,
+  chatGrantLabel,
   declineVerb,
 } from './approvalCopy.js';
 import { CalendarEventDetails } from './CalendarEventDetails.js';
@@ -39,6 +40,8 @@ export type PermissionApprovalCardProps = {
   onApprove: () => void;
   /** Only passed when the server declared a chat-scoped allow for this call. */
   onApproveForChat?: (() => void) | undefined;
+  /** Only passed when the server says that chat-scoped allow covers the whole site, so the button can name it. */
+  chatGrantScope?: 'site' | undefined;
   /**
    * Records a standing "Always allow everywhere" grant and approves this call. Only passed when the
    * server says the owner may always allow this tool; the card asks for confirmation first.
@@ -159,6 +162,7 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
   othersWaiting,
   onApprove,
   onApproveForChat,
+  chatGrantScope,
   onApproveAlways,
   alwaysAllowCovers,
   onDeny,
@@ -328,7 +332,7 @@ export const PermissionApprovalCard: FC<PermissionApprovalCardProps> = ({
             disabled={disabled || sentAt !== null}
             className={cn('w-full', sentAt !== null && 'pointer-events-none opacity-0')}
           >
-            {APPROVAL_CHOICES.approveForChat.label}
+            {chatGrantLabel(chatGrantScope)}
           </Button>
         )}
         {changing && onChangeRequest !== undefined && (

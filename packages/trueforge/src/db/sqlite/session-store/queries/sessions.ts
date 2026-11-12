@@ -81,6 +81,7 @@ function mapRowToSessionRecord(row: {
   workspace_cwd: string | null;
   last_turn_id: string | null;
   approval_grants: string[];
+  approval_refusals: string[];
   task_checklist: TaskChecklist | null;
   external_id: string | null;
   is_incognito: number;
@@ -109,6 +110,7 @@ function mapRowToSessionRecord(row: {
     workspace_cwd: row.workspace_cwd,
     last_turn_id: row.last_turn_id,
     approval_grants: row.approval_grants,
+    approval_refusals: row.approval_refusals,
     task_checklist: parseStoredTaskChecklist(row.task_checklist),
     external_id: row.external_id,
     is_incognito: row.is_incognito === 1,
@@ -137,6 +139,7 @@ function sessionSelectColumns() {
     'workspace_cwd' as const,
     'last_turn_id' as const,
     jsonText<string[]>(sql.ref('approval_grants')).as('approval_grants'),
+    jsonText<string[]>(sql.ref('approval_refusals')).as('approval_refusals'),
     jsonText<TaskChecklist | null>(sql.ref('task_checklist')).as('task_checklist'),
     'external_id' as const,
     'is_incognito' as const,
@@ -169,6 +172,7 @@ export async function createSession(db: Kysely<Database>, input: CreateSessionIn
         title: null,
         folder_id: null,
         approval_grants: jsonbBind([]),
+        approval_refusals: jsonbBind([]),
         task_checklist: jsonbBind(emptyTaskChecklist()),
         custom: input.custom !== null ? jsonbBind(input.custom) : null,
         metadata: jsonbBind(input.metadata),

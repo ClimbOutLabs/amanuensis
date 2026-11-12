@@ -26,6 +26,8 @@ export interface ReadOrigin {
   source: ReadSource;
   /** The display name an email's sender gave, or null. */
   name: string | null;
+  /** The host of the page the value was read on, when the caller named that page's address; null otherwise. */
+  site: string | null;
 }
 
 export interface ChatProvenance {
@@ -112,6 +114,19 @@ function urlsOf(value: string): string[] {
 /** Whether any outbound value is, or contains, a URL: a call that opens a page rather than searches. */
 export function namesUrl(values: readonly string[]): boolean {
   return values.some(value => urlsOf(value).length > 0);
+}
+
+/** The host of the first address among values, or null: the page a page read was of, when the call named it. */
+export function firstUrlHost(values: readonly string[]): string | null {
+  for (const value of values) {
+    for (const url of urlsOf(value)) {
+      const host = parsedUrl(url)?.hostname;
+      if (host !== undefined && host !== '') {
+        return host;
+      }
+    }
+  }
+  return null;
 }
 
 function parsedUrl(value: string): URL | undefined {
@@ -465,8 +480,17 @@ export function recordPersonText(input: { provenance: ChatProvenance; text: stri
   recordDetails(input.provenance, input.text);
 }
 
-/** Text the assistant read: a page, a mail, a file, a tool's output. It is data, never the person's say. */
-export function recordUntrustedText(input: { provenance: ChatProvenance; text: string; source: ReadSource }): void {
+/**
+ * Text the assistant read: a page, a mail, a file, a tool's output. It is data, never the person's say.
+ * `page_site` is the host of the page the text came from, when the caller named that page's address, so a
+ * card can say which page named a link; null when the read was not of a page or its address is unknown.
+ */
+export function recordUntrustedText(input: {
+  provenance: ChatProvenance;
+  text: string;
+  source: ReadSource;
+  page_site: string | null;
+}): void {
   if (input.text.trim() !== '') {
     input.provenance.read_content = true;
   }
@@ -481,7 +505,11 @@ export function recordUntrustedText(input: { provenance: ChatProvenance; text: s
     recordDetails(input.provenance, input.text);
   }
   for (const key of recordText(input.provenance.untrusted, input.text)) {
-    noteOrigin({ provenance: input.provenance, key, origin: { source: input.source, name: null } });
+    noteOrigin({
+      provenance: input.provenance,
+      key,
+      origin: { source: input.source, name: null, site: input.page_site },
+    });
   }
 }
 
@@ -494,7 +522,7 @@ export function recordReplyText(input: { provenance: ChatProvenance; text: strin
   for (const key of recordText(input.provenance.reply, input.text)) {
     if (key.startsWith('address:')) {
       add({ side: input.provenance.untrusted, kind: 'addresses', value: key.slice('address:'.length) });
-      noteOrigin({ provenance: input.provenance, key, origin: { source: 'reply', name: null } });
+      noteOrigin({ provenance: input.provenance, key, origin: { source: 'reply', name: null, site: null } });
     }
   }
 }
@@ -542,7 +570,7 @@ function senderOf(value: string): { address: string; name: string | null } | und
  * a card can say "who sent the email" rather than only that an email named them.
  */
 export function recordEmailText(input: { provenance: ChatProvenance; text: string }): void {
-  recordUntrustedText({ provenance: input.provenance, text: input.text, source: 'email' });
+  recordUntrustedText({ provenance: input.provenance, text: input.text, source: 'email', page_site: null });
   recordDetails(input.provenance, input.text);
   const senders = [...input.text.matchAll(FROM_LINE)].map(match => match[1] ?? '');
   try {
@@ -556,7 +584,7 @@ export function recordEmailText(input: { provenance: ChatProvenance; text: strin
       noteOrigin({
         provenance: input.provenance,
         key: `address:${sender.address}`,
-        origin: { source: 'email_sender', name: sender.name },
+        origin: { source: 'email_sender', name: sender.name, site: null },
       });
     }
   }
@@ -757,7 +785,7 @@ export interface SteeredDestination {
 
 /** Where a steered value was read; a value past the cap was never noted, so it reads as "something". */
 function originOf(input: { provenance: ChatProvenance; key: string }): ReadOrigin {
-  return input.provenance.read_from.get(input.key) ?? { source: 'other', name: null };
+  return input.provenance.read_from.get(input.key) ?? { source: 'other', name: null, site: null };
 }
 
 /**

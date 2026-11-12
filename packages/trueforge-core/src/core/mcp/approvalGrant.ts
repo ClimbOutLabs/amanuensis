@@ -1,7 +1,9 @@
 import type { ApprovalDecision } from '../events/schema';
 import type { InternalEnrichedToolCall, InternalToolCallInfo } from '../llm/LLMTypes';
+import { BROWSER_CLICK_TOOL_NAME, BROWSER_OPEN_TOOL_NAME, isAmanBrowserCall } from '../permissions/browserToolNames';
 import { MAPS_ASK_REASON } from '../permissions/mapsToolNames';
 import {
+  BROWSER_OPEN_SITE_GRANT_REASONS,
   CHAT_GRANTABLE_CONSEQUENCE_REASONS,
   GRANT_BARRED_TIER_REASONS,
   OWN_CALENDAR_CHANGE_REASONS,
@@ -78,12 +80,41 @@ export function effectiveToolAdmissions(input: {
 }
 
 /**
+ * What a chat-scoped approval on this call covers beyond the call itself, or null when it binds the call.
+ * The one wider scope is a browser open the person vouched for by site: the server sets it, the card names
+ * it, and the grant key binds it, so the three can never drift apart.
+ */
+export function chatGrantScope(info: InternalToolCallInfo): 'site' | null {
+  return siteGrantableOpen(info) ? 'site' : null;
+}
+
+/**
+ * A browser open whose chat grant may cover its site: one of Aman's own browser opens, under a reason the
+ * site-grant set names, with a site on its card to bind to. A barred reason never qualifies, whatever the
+ * set says, and neither does a private read.
+ */
+function siteGrantableOpen(info: InternalToolCallInfo): boolean {
+  if (secretPathReadBarsDurableGrant(info) || tierBarsDurableGrant(info)) {
+    return false;
+  }
+  if (!isAmanBrowserCall(info) || info.original_tool_name !== BROWSER_OPEN_TOOL_NAME) {
+    return false;
+  }
+  if (info.tier_reason === undefined || !BROWSER_OPEN_SITE_GRANT_REASONS.has(info.tier_reason)) {
+    return false;
+  }
+  const host = info.tier3_card?.destination_host ?? null;
+  return host !== null && host !== '';
+}
+
+/**
  * Server-owned eligibility for "Always allow in this chat", the one chat-scoped grant. This only gates which calls may
  * *receive* chat scope; the scope's binding lives in the grant key: the tool and its destination, and for sandbox
  * exec an invocation digest over (purpose, command, cwd, env), so approving one command in a chat never authorizes a
  * different one or reaches another chat. A consequential action qualifies only when its card names a target for
  * the grant to be tied to; a send, a mail draft and a steered call never do. A map qualifies, unless it would
- * send something that looks like a secret.
+ * send something that looks like a secret. A browser open qualifies only by site, under the reasons
+ * `chatGrantScope` names.
  */
 export function allowsChatApproval(info: InternalToolCallInfo): boolean {
   if (secretPathReadBarsDurableGrant(info)) {
@@ -100,6 +131,9 @@ export function allowsChatApproval(info: InternalToolCallInfo): boolean {
   }
   if (info.tier_reason !== undefined && CHAT_GRANTABLE_CONSEQUENCE_REASONS.has(info.tier_reason)) {
     return cardNamesTarget(info);
+  }
+  if (chatGrantScope(info) === 'site') {
+    return true;
   }
   return !tierBarsDurableGrant(info) && (info.effect === 'inspect' || info.effect === 'verify');
 }
@@ -169,6 +203,23 @@ export function allowsToolGrant(info: InternalToolCallInfo): boolean {
 }
 
 /**
+ * The chat-scoped refusal key for a call, or null when a "no" to it lasts only the turn. Only a
+ * browser open or click records one: the person turned down a page, or a click on one, and the
+ * refusal is kept on the session so the rest of the chat refuses the same identity with no new
+ * card. The key is the approval grant key, so an open under the site scope is refused for the
+ * whole site, exactly as a grant on it would have covered the site.
+ */
+export function chatRefusalKey(info: InternalToolCallInfo): string | null {
+  if (!isAmanBrowserCall(info)) {
+    return null;
+  }
+  if (info.original_tool_name !== BROWSER_OPEN_TOOL_NAME && info.original_tool_name !== BROWSER_CLICK_TOOL_NAME) {
+    return null;
+  }
+  return approvalGrantKey(info);
+}
+
+/**
  * Whether this is the card of the assistant's own maps tool that a lasting answer may cover. "Always allow in
  * this chat" stops the question for the chat, and "Always allow everywhere" lets maps run without asking from
  * then on. A map that asks because it would send something that looks like a secret offers neither.
@@ -197,9 +248,23 @@ export function awaitsApproval(input: {
  * Durable identity for a chat-scoped approval. The identity is derived by the
  * server from the enriched tool call, never accepted from the browser. The card's
  * destination and recipient are part of it so a grant never follows a call to a different target.
+ * A site-scoped open is the one exception: its identity is the tool, the reason it was given on and
+ * the site, never the one address, so the grant covers the site the person approved and nothing else.
  */
 export function approvalGrantKey(info: InternalToolCallInfo): string {
   const card = info.tier3_card ?? null;
+  if (chatGrantScope(info) === 'site') {
+    return JSON.stringify([
+      APPROVAL_GRANT_VERSION,
+      info.type,
+      info.mcp_server_id,
+      info.original_tool_name,
+      null,
+      null,
+      card?.destination_host ?? null,
+      info.tier_reason ?? null,
+    ]);
+  }
   return JSON.stringify([
     APPROVAL_GRANT_VERSION,
     info.type,

@@ -248,4 +248,17 @@ describe('classifyTier: browser_click', () => {
     const decision = await classifyTier(browserAction(BROWSER_CLICK_TOOL_NAME), makeCtx());
     expect(decision.tier).toBe(3);
   });
+
+  it('names the click and carries no send warning when the host could not read the click context', async () => {
+    const decision = await classifyTier(
+      browserAction(BROWSER_CLICK_TOOL_NAME, {
+        mcp_hints: { read_only_hint: false, open_world_hint: true },
+      }),
+      makeCtx(),
+    );
+    expect(decision.tier).toBe(3);
+    expect(decision.reason).toBe('mcp_open_world_hint');
+    expect(decision.card?.plain_what).toBe('Click on the open page?');
+    expect(decision.card?.cannot_be_undone).toBeNull();
+  });
 });

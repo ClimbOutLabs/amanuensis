@@ -90,6 +90,7 @@ async function setup(channels: ReachAvailability = NO_PHONE_CHANNELS) {
       },
       sandbox_info: null,
       approval_grants: [],
+      approval_refusals: [],
       require_previous_turn_is_tip: false,
       retained_previous_thread_ids: [],
       new_threads: [
@@ -246,6 +247,7 @@ async function setup(channels: ReachAvailability = NO_PHONE_CHANNELS) {
       },
       sandbox_info: null,
       approval_grants: [],
+      approval_refusals: [],
       require_previous_turn_is_tip: false,
       retained_previous_thread_ids: [MAIN_THREAD_ID],
       new_threads: [],

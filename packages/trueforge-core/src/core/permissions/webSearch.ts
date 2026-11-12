@@ -12,6 +12,7 @@ import { isPageReaderTool, isSearchResultTool } from '../search/fetchedPages';
 import { BROWSER_OPEN_SILENT_REASON, BROWSER_OPEN_TOOL_NAME, isBrowserToolName } from './browserToolNames';
 import {
   emptyChatProvenance,
+  firstUrlHost,
   namesUrl,
   recordEmailText,
   recordPageImageUrls,
@@ -298,11 +299,13 @@ export function recordToolResultProvenance(input: {
   }
   const source = readSourceOf(baseName);
   const pageReader = input.stamp.search_provider && isPageReaderTool(baseName);
+  // A page read names the page it read in its own arguments, so where its links were read is known by host.
+  const page_site = source === 'page' || source === 'browser_page' ? firstUrlHost(input.argument_values) : null;
   for (const text of input.texts) {
     if (source === 'email') {
       recordEmailText({ provenance, text });
     } else {
-      recordUntrustedText({ provenance, text, source });
+      recordUntrustedText({ provenance, text, source, page_site });
     }
     if (pageReader) {
       // A page the chat opened is the exception to that rule for its pictures: opening the page

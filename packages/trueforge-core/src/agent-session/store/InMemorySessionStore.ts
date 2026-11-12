@@ -318,6 +318,7 @@ export class InMemorySessionStore<
       updated_at: now,
       last_activity_timestamp_ms: Date.now(),
       approval_grants: [],
+      approval_refusals: [],
       task_checklist: emptyTaskChecklist(),
       metrics: {
         total_duration_ms: 0,
@@ -1010,6 +1011,9 @@ export class InMemorySessionStore<
           value => !isSerializedImplementationPlanGrant(value),
         ),
       ),
+    ].sort();
+    stored.record.approval_refusals = [
+      ...new Set([...stored.record.approval_refusals, ...input.approval_refusals]),
     ].sort();
     stored.record.metrics.total_turns += 1;
     stored.record.last_activity_timestamp_ms = Date.now();

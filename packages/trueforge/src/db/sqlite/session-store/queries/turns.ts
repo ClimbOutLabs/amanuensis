@@ -138,6 +138,7 @@ export interface CreateTurnInput {
   session_id: string;
   turn: CreateTurnTurnFields;
   approval_grants: string[];
+  approval_refusals: string[];
   require_previous_turn_is_tip: boolean;
   retained_previous_thread_ids: string[];
   new_threads: NewThreadRegistration[];
@@ -416,7 +417,11 @@ export async function createTurn(db: Kysely<Database>, input: CreateTurnInput): 
       // Step 1: read session tip; no FOR UPDATE (BEGIN IMMEDIATE is the lock).
       const locked = await trx
         .selectFrom('session')
-        .select(['last_turn_id', jsonText<string[]>(sql.ref('approval_grants')).as('approval_grants')])
+        .select([
+          'last_turn_id',
+          jsonText<string[]>(sql.ref('approval_grants')).as('approval_grants'),
+          jsonText<string[]>(sql.ref('approval_refusals')).as('approval_refusals'),
+        ])
         .where('session_id', '=', input.session_id)
         .executeTakeFirst();
 
@@ -449,12 +454,15 @@ export async function createTurn(db: Kysely<Database>, input: CreateTurnInput): 
         ),
       ].sort();
 
+      const approvalRefusals = [...new Set([...locked.approval_refusals, ...input.approval_refusals])].sort();
+
       // Step 2: bump session tip + optional title coalesce.
       let sessionUpdate = trx
         .updateTable('session')
         .set({
           last_turn_id: input.turn.turn_id,
           approval_grants: jsonbBind(approvalGrants),
+          approval_refusals: jsonbBind(approvalRefusals),
           updated_at: nowIso(),
           last_activity_timestamp_ms: input.last_activity_timestamp_ms,
           // total_turns rides the same tip UPDATE so a later failure in this tx rolls it back.

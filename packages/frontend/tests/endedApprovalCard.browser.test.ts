@@ -40,6 +40,7 @@ async function endRequest(api: ApprovalTestServer, ids: { sessionId: string; pau
       custom: null,
     },
     approval_grants: [],
+    approval_refusals: [],
     require_previous_turn_is_tip: false,
     retained_previous_thread_ids: ['main'],
     new_threads: [],

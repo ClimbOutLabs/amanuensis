@@ -516,6 +516,7 @@ export class SessionHandle<
       const chatApprovalGrants = new Set(
         this.session.approval_grants.filter(value => !isSerializedImplementationPlanGrant(value)),
       );
+      const chatApprovalRefusals = new Set(this.session.approval_refusals);
       const loadImplementationPlanGrants = async (): Promise<ReadonlySet<string>> => {
         // send() validates and snapshots before createTurn commits. There is no
         // executable tool batch at that point, and the durable lifecycle must not
@@ -569,6 +570,7 @@ export class SessionHandle<
         tracing,
         definitionsByThreadId,
         chatApprovalGrants,
+        chatApprovalRefusals,
         loadImplementationPlanGrants,
         isRequestContinuation,
         turnToolCallLedger,
@@ -585,6 +587,7 @@ export class SessionHandle<
         sandbox,
         tracing,
         chatApprovalGrants,
+        chatApprovalRefusals,
         loadImplementationPlanGrants,
         sentinelServices,
         withheldTools: input.withheld_tools,
@@ -601,6 +604,7 @@ export class SessionHandle<
       const new_context_appends = await collectContextAppends(orchestrator.send(sendBatch, input.signal), input.signal);
 
       const approvalGrants = [...chatApprovalGrants];
+      const approvalRefusals = [...chatApprovalRefusals];
 
       const now = new Date();
 
@@ -646,6 +650,7 @@ export class SessionHandle<
         turn: turnInit,
         sandbox_info: sandbox?.getCurrentSandboxInfo() ?? previous?.snapshot.sandbox_info ?? null,
         approval_grants: approvalGrants.sort(),
+        approval_refusals: approvalRefusals.sort(),
         require_previous_turn_is_tip: (input.input ?? []).some(isApprovalDecisionMessage),
         retained_previous_thread_ids: previous ? threadIdsForCurrentTurn(previous) : [],
         new_threads,
@@ -1045,6 +1050,7 @@ export class SessionHandle<
     tracing: AgentTracing;
     definitionsByThreadId: ReadonlyMap<string, ResolvedAgentDefinition>;
     chatApprovalGrants: Set<string>;
+    chatApprovalRefusals: Set<string>;
     loadImplementationPlanGrants: () => Promise<ReadonlySet<string>>;
     isRequestContinuation: boolean;
     turnToolCallLedger: TurnToolCallLedger;
@@ -1071,6 +1077,7 @@ export class SessionHandle<
           tracing: input.tracing,
           resolvedDefinition,
           chatApprovalGrants: input.chatApprovalGrants,
+          chatApprovalRefusals: input.chatApprovalRefusals,
           loadImplementationPlanGrants: input.loadImplementationPlanGrants,
           isRequestContinuation: input.isRequestContinuation,
           turnToolCallLedger: input.turnToolCallLedger,
@@ -1093,6 +1100,7 @@ export class SessionHandle<
     tracing: AgentTracing;
     resolvedDefinition: ResolvedAgentDefinition;
     chatApprovalGrants: Set<string>;
+    chatApprovalRefusals: Set<string>;
     loadImplementationPlanGrants: () => Promise<ReadonlySet<string>>;
     isRequestContinuation: boolean;
     turnToolCallLedger: TurnToolCallLedger;
@@ -1138,6 +1146,7 @@ export class SessionHandle<
       turnToolCallLedger: input.turnToolCallLedger,
       taskState: input.previousThreadSnapshot?.task_state,
       chatApprovalGrants: input.chatApprovalGrants,
+      chatApprovalRefusals: input.chatApprovalRefusals,
       loadImplementationPlanGrants: input.loadImplementationPlanGrants,
       isRequestContinuation: input.isRequestContinuation,
       tracing: input.tracing,
@@ -1163,6 +1172,7 @@ export class SessionHandle<
     sandbox: Sandbox | undefined;
     tracing: AgentTracing;
     chatApprovalGrants: Set<string>;
+    chatApprovalRefusals: Set<string>;
     loadImplementationPlanGrants: () => Promise<ReadonlySet<string>>;
     sentinelServices: SentinelServices;
     withheldTools: readonly string[] | undefined;
@@ -1242,6 +1252,7 @@ export class SessionHandle<
         withheldTools: input.withheldTools,
         taskState: undefined,
         chatApprovalGrants: input.chatApprovalGrants,
+        chatApprovalRefusals: input.chatApprovalRefusals,
         loadImplementationPlanGrants: input.loadImplementationPlanGrants,
         isRequestContinuation: false,
         tracing: input.tracing,

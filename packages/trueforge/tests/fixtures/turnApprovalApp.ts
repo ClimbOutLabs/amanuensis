@@ -148,6 +148,7 @@ export function turnInput({
       custom: null,
     },
     approval_grants: [],
+    approval_refusals: [],
     require_previous_turn_is_tip: false,
     retained_previous_thread_ids: previousTurnId === null ? [] : [MAIN_THREAD_ID],
     new_threads:

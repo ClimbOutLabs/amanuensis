@@ -922,6 +922,15 @@ describe('chat scope offer', () => {
     expect(read({ canChatAllow: true })?.chatAllowOffered).toBe(true);
     expect(read({})).not.toHaveProperty('chatAllowOffered');
   });
+
+  it('reads the server grant scope in either spelling and leaves it absent when not sent', () => {
+    const read = (extra: Record<string, unknown>) =>
+      extractSentinelFromEvent({ type: 'tool.approval_required', tool_calls: [{ ...ref, ...extra }] })[0];
+    expect(read({ chat_grant_scope: 'site' })?.chatGrantScope).toBe('site');
+    expect(read({ chatGrantScope: 'site' })?.chatGrantScope).toBe('site');
+    expect(read({ chat_grant_scope: null })).not.toHaveProperty('chatGrantScope');
+    expect(read({})).not.toHaveProperty('chatGrantScope');
+  });
 });
 
 describe('entryForPart', () => {

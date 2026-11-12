@@ -118,6 +118,8 @@ export interface SessionTable {
   last_turn_id: string | null;
   /** Exact-tool approvals scoped to this session. */
   approval_grants: JSONColumnType<string[], string[], string[]>;
+  /** Browser refusals scoped to this session: a "no" kept for the rest of the chat. */
+  approval_refusals: JSONColumnType<string[], string[], string[]>;
   /** Host-owned durable ordered task state. */
   task_checklist: JSONColumnType<TaskChecklist, TaskChecklist, TaskChecklist>;
   /**

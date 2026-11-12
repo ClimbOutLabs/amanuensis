@@ -1,4 +1,5 @@
 import {
+  APPROVAL_CHOICES,
   isNewRecipientCard,
   isNewRecipientDraftCard,
   NEW_RECIPIENT_CHOICES,
@@ -51,6 +52,15 @@ export function approveVerb(card: SentinelApprovalCard): string {
   if (isNewRecipientDraftCard(card)) return NEW_RECIPIENT_DRAFT_CHOICES.approve.label;
   if (isNewRecipientCard(card)) return NEW_RECIPIENT_CHOICES.approve.label;
   return 'Allow';
+}
+
+/**
+ * The words on the standing-grant button. The server marks a card whose chat grant covers the whole
+ * site, and only that card names the site, so the words always match what the grant really covers.
+ * Every other card keeps the shared words.
+ */
+export function chatGrantLabel(grantScope: 'site' | undefined): string {
+  return grantScope === 'site' ? 'Always allow this site' : APPROVAL_CHOICES.approveForChat.label;
 }
 
 /** The verb on the quiet button that says no: Not now, except a new-recipient card, which says what will not happen. */

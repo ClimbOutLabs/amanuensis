@@ -40,6 +40,7 @@ describe('SqliteRepositoryStore', () => {
           folder_id: null,
           last_turn_id: null,
           approval_grants: jsonbBind([]),
+          approval_refusals: jsonbBind([]),
           custom: null,
           metadata: jsonbBind({}),
           external_id: null,

@@ -5,6 +5,7 @@ import {
   approvalSentLine,
   approvalStub,
   approveVerb,
+  chatGrantLabel,
   declineVerb,
 } from '../../src/sentinel/approvalCopy.js';
 import type { SentinelApprovalCard } from '../../src/sentinel/types.js';
@@ -51,6 +52,14 @@ describe('approval copy', () => {
     expect(approvalQuestion(card)).toBe('Send this reply to Rui?');
     expect(approveVerb(card)).toBe('Allow');
     expect(declineVerb(card)).toBe('Not now');
+  });
+
+  it('names the site on the standing grant when the server marked the grant as covering it', () => {
+    expect(chatGrantLabel('site')).toBe('Always allow this site');
+  });
+
+  it('keeps the shared grant words when the server set no wider scope', () => {
+    expect(chatGrantLabel(undefined)).toBe('Always allow in this chat');
   });
 
   it('never shows a search connector id on a held search stub', () => {

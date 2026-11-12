@@ -104,6 +104,7 @@ export interface SessionTable {
   folder_id: string | null;
   last_turn_id: string | null;
   approval_grants: JsonbColumn<string[]>;
+  approval_refusals: JsonbColumn<string[]>;
   /** Host-owned durable ordered task state. Null only for rows created before T3. */
   task_checklist: JsonbColumn<TaskChecklist> | null;
   /** Optional unique key within `tenant_id` when set. */

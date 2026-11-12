@@ -9,6 +9,8 @@ export interface ApprovalToolCallRef {
     canAlwaysAllow?: boolean;
     /** Whether the user may approve this tool for the rest of the chat. */
     canChatAllow?: boolean;
+    /** What a chat approval on this call covers when it reaches past the one call: the whole site, for a browser open the user vouched for. Null when a chat approval binds the call itself. */
+    chatGrantScope?: "site" | null;
     /** ISO 8601 time after which a held action can no longer be approved. */
     expiresAt?: string;
     /** Set when a scheduled run held this action for the owner. The run did not wait for an answer. */
