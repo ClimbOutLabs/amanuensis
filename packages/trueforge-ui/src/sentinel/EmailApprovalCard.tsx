@@ -165,9 +165,18 @@ export const EmailApprovalCard: FC<EmailApprovalCardProps> = ({
               <dd className="break-words text-text-primary">{mailboxListText(email.bcc)}</dd>
             </>
           )}
+          {email.from_name !== null && email.from_name !== undefined && (
+            <>
+              <dt className="text-text-secondary">Sent as</dt>
+              <dd className="break-words text-text-primary">{email.from_name}</dd>
+            </>
+          )}
           <dt className="text-text-secondary">Subject</dt>
           <dd className="break-words text-text-primary">{email.subject === '' ? 'No subject' : email.subject}</dd>
         </dl>
+        {email.name_left_off === true && (
+          <p className="mt-2 text-text-primary">The name was left off an address because it looked like an address.</p>
+        )}
         {email.reply_in_thread !== null && <p className="mt-2 text-text-secondary">Reply in existing thread</p>}
         {email.reply_to !== null && <p className="mt-2 text-text-primary">Replies go to: {email.reply_to}</p>}
         {email.replaces !== null && (

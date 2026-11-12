@@ -107,12 +107,12 @@ function siteGrantableOpen(info: InternalToolCallInfo): boolean {
 }
 
 /**
- * Server-owned eligibility for "Always allow this here", the one chat-scoped grant. This only gates which calls may
+ * Server-owned eligibility for "Always allow in this chat", the one chat-scoped grant. This only gates which calls may
  * *receive* chat scope; the scope's binding lives in the grant key: the tool and its destination, and for sandbox
  * exec an invocation digest over (purpose, command, cwd, env), so approving one command in a chat never authorizes a
  * different one or reaches another chat. A consequential action qualifies only when its card names a target for
- * the grant to be tied to; a send and a steered call never do. A browser open qualifies only by site, under the
- * reasons `chatGrantScope` names.
+ * the grant to be tied to; a send, a mail draft and a steered call never do. A browser open qualifies only by
+ * site, under the reasons `chatGrantScope` names.
  */
 export function allowsChatApproval(info: InternalToolCallInfo): boolean {
   if (secretPathReadBarsDurableGrant(info)) {
@@ -137,19 +137,14 @@ export function allowsChatApproval(info: InternalToolCallInfo): boolean {
 }
 
 /**
- * Whether the card names who or where the action goes: a destination, a recipient, or the people a mail draft
- * is addressed to. An action whose card names none has nothing for a chat grant to be tied to: the grant would
- * cover any later call of the tool, whatever it carries. The connector's own address does not count: it is the
- * same on every call to that connector, so it tells one action from another no better than the tool name.
+ * Whether the card names who or where the action goes: a destination or a recipient. An action whose card names
+ * none has nothing for a chat grant to be tied to: the grant would cover any later call of the tool, whatever it
+ * carries. The connector's own address does not count: it is the same on every call to that connector, so it
+ * tells one action from another no better than the tool name.
  */
 function cardNamesTarget(info: InternalToolCallInfo): boolean {
   const card = info.tier3_card ?? null;
-  const mail = card?.email ?? null;
-  const mailRecipients = mail === null ? 0 : mail.to.length + mail.cc.length + mail.bcc.length;
-  return (
-    mailRecipients > 0 ||
-    [card?.destination, card?.recipient].some(target => typeof target === 'string' && target.trim() !== '')
-  );
+  return [card?.destination, card?.recipient].some(target => typeof target === 'string' && target.trim() !== '');
 }
 
 /** A change to the person's own calendar with no guests; a guest change never qualifies, whatever its effect. */
@@ -180,10 +175,11 @@ function secretPathReadBarsDurableGrant(info: InternalToolCallInfo): boolean {
 }
 
 /**
- * Server-owned eligibility for a standing "Always allow this tool" grant: only a connector tool
+ * Server-owned eligibility for a standing "Always allow everywhere" grant: only a connector tool
  * that is read-only inspection, for the same argument-blindness reason as a chat grant. A call the
  * classifier stamped with a grant scope key is the one exception: the key itself is the scope
  * (a Home Assistant domain or the one entity), so the grant is never wider than the key says.
+ * A change to the person's own calendar is answered per chat, so it never gets one.
  */
 export function allowsToolGrant(info: InternalToolCallInfo): boolean {
   // A grant has no effect on the designated search provider, which has its own guarded path.
@@ -196,7 +192,6 @@ export function allowsToolGrant(info: InternalToolCallInfo): boolean {
     return false;
   }
   return (
-    isOwnCalendarChange(info) ||
     isOwnDriveWrite(info) ||
     (info.type === 'mcp' && info.effect === 'inspect') ||
     (info.type === 'mcp' && info.grant_tool_name !== undefined)

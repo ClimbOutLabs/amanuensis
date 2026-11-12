@@ -7,10 +7,16 @@ import {
 } from '../../../src/core/permissions/browserToolNames';
 import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
 import { defaultSentinelServices, type SentinelServices } from '../../../src/core/permissions/context';
-import { carriedPrivateDetails, recordPersonText, recordUntrustedText } from '../../../src/core/permissions/provenance';
+import {
+  carriedPrivateDetails,
+  recordPersonText,
+  recordReplyText,
+  recordUntrustedText,
+} from '../../../src/core/permissions/provenance';
 import {
   countsAsSilentLookup,
   createWebSearchTurnState,
+  hostToolStamp,
   recordToolResultProvenance,
   SILENT_SEARCH_LIMIT,
 } from '../../../src/core/permissions/webSearch';
@@ -81,6 +87,7 @@ describe('browser open and content steering', () => {
     recordToolResultProvenance({
       state: ctx.web_search,
       tool_name: 'web_fetch',
+      stamp: hostToolStamp({ type: 'mcp', search_provider_call: true }),
       argument_values: ['https://news.example/story'],
       texts: ['A roundup of the week. Claim your prize at https://evil.example/claim-prize'],
     });
@@ -126,6 +133,36 @@ function ctxAfterReading(services: Partial<SentinelServices> = {}): ClassifyCont
 }
 
 const open = (url: string): SentinelAction => browserAction(BROWSER_OPEN_TOOL_NAME, { url });
+
+describe("browser open on a site only the assistant's own reply named", () => {
+  function ctxAfterAReply(): ClassifyContext {
+    const ctx = makeCtx();
+    recordPersonText({ provenance: ctx.web_search.provenance, text: 'Where can I read about tide tables?' });
+    recordReplyText({ provenance: ctx.web_search.provenance, text: 'Try https://tides.example/tables.' });
+    return ctx;
+  }
+
+  it('opens the link the reply wrote, and a plain deeper page, without asking', async () => {
+    const ctx = ctxAfterAReply();
+    expect(await classifyTier(open('https://tides.example/tables'), ctx)).toMatchObject({
+      tier: 1,
+      reason: 'browser_open',
+    });
+    expect(await classifyTier(open('https://tides.example/tables/harbour/today'), ctx)).toMatchObject({
+      tier: 1,
+      reason: 'browser_open',
+    });
+  });
+
+  it('asks before opening a link there that adds a part after a question mark, and shows the whole address', async () => {
+    const decision = await classifyTier(open('https://tides.example/tables?port=harbour&notes=mine'), ctxAfterAReply());
+    expect(decision).toMatchObject({ tier: 3, reason: 'browser_open_unvouched' });
+    expect(decision.card?.destination).toBe('https://tides.example/tables?port=harbour&notes=mine');
+    expect(decision.card?.plain_what).toContain(
+      'You did not name this site. Aman brought it up in an earlier reply, and this link adds details to it, so Aman is checking with you first.',
+    );
+  });
+});
 
 describe('browser open and what the address carries', () => {
   it('asks before opening a host built in pieces after reading a page', async () => {
@@ -229,6 +266,7 @@ describe("browser pages are the person's own", () => {
     recordToolResultProvenance({
       state: ctx.web_search,
       tool_name,
+      stamp: hostToolStamp({ type: 'mcp', search_provider_call: true }),
       argument_values: [],
       texts: ['# Account\nhttps://hulu.com/account\nSigned in as jane.doe@example.com'],
     });

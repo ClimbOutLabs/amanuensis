@@ -682,7 +682,7 @@ describe("the operator's own Calendar sidecar, under a standing grant the person
     return services;
   }
 
-  it('runs a granted calendar write with no card under the default gate', async () => {
+  it('asks for a calendar write under the default gate, also when it was granted for every chat', async () => {
     const calendar = makeToolSet({
       tools: [createEvent],
       services: calendarServices(['create_event']),
@@ -693,7 +693,7 @@ describe("the operator's own Calendar sidecar, under a standing grant the person
       name: 'create_event',
       arguments: { summary: 'Lunch', start: '2026-10-22T12:00', end: '2026-10-22T13:00' },
     });
-    expect(info).toMatchObject({ tier: 1, tier_reason: 'mcp_tool_grant', is_approval_required: false });
+    expect(info).toMatchObject({ tier: 3, tier_reason: 'caldav_calendar_change', is_approval_required: true });
   });
 
   it('still asks for a destructive calendar call, granted or not', async () => {

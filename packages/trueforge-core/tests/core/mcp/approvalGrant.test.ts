@@ -29,7 +29,11 @@ import { classifyTier, type ClassifyContext, type SentinelAction } from '../../.
 import type { SentinelServices } from '../../../src/core/permissions/context';
 import { recordUntrustedText } from '../../../src/core/permissions/provenance';
 import { tier1Decision, type TierDecision } from '../../../src/core/permissions/tier';
-import { createWebSearchTurnState, recordToolResultProvenance } from '../../../src/core/permissions/webSearch';
+import {
+  createWebSearchTurnState,
+  hostToolStamp,
+  recordToolResultProvenance,
+} from '../../../src/core/permissions/webSearch';
 import { sandboxCommandApprovalIdentity } from '../../../src/core/sandbox/Sandbox';
 import { NOOP_AGENT_TRACING } from '../../../src/core/tracing/NoopAgentTracing';
 
@@ -1025,6 +1029,7 @@ describe('browser open site grants', () => {
     recordToolResultProvenance({
       state: ctx.web_search,
       tool_name: BROWSER_READ_TOOL_NAME,
+      stamp: hostToolStamp({ type: 'truefoundry-system' }),
       argument_values: [],
       texts: ['# Account\nSigned in as jane.doe@example.com'],
     });
@@ -1049,6 +1054,7 @@ describe('browser open site grants', () => {
     recordToolResultProvenance({
       state: ctx.web_search,
       tool_name: BROWSER_READ_TOOL_NAME,
+      stamp: hostToolStamp({ type: 'truefoundry-system' }),
       argument_values: [],
       texts: ['# Account\nSigned in as jane.doe@example.com'],
     });

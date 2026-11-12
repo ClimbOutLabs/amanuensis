@@ -24,6 +24,10 @@ export const SANDBOX_SILENT_REASONS: ReadonlySet<string> = new Set([
   SANDBOX_RUN_CODE_REASON,
 ]);
 
+/** Tier 3 reason codes for cancelling a reminder and for pausing or resuming a schedule. Each asks every time. */
+export const REMINDER_CANCEL_REASON = 'reminder_cancel';
+export const SCHEDULE_STATUS_REASON = 'schedule_status';
+
 /** Reason code for a consequential action whose recipient or site only content the assistant read named. */
 export const CONTENT_STEERED_REASON = 'content_steered';
 
@@ -34,13 +38,15 @@ export const CONTENT_STEERED_REASON = 'content_steered';
 export const CONNECTOR_READ_GUARD_REASON = 'connector_read_guard';
 
 /**
- * Tier 3 reason codes for calls the classifier ranks as a send, destructive, install or hint-escalated
- * action. A standing approval is argument-blind, so these never get "Always allow" across chats, whatever the
- * hosting server declares about the tool. Only the chat grant below may cover some of them, inside one chat.
+ * Tier 3 reason codes for calls the classifier ranks as a send, a mail draft, destructive, install or
+ * hint-escalated action. A standing approval is argument-blind, so these never get "Always allow" across chats,
+ * whatever the hosting server declares about the tool. Only the chat grant below may cover some of them, inside
+ * one chat.
  */
 export const GRANT_BARRED_TIER_REASONS: ReadonlySet<string> = new Set([
   'external_service',
   'gmail_send',
+  'gmail_draft',
   'mail_new_recipient',
   'mail_send',
   'destructive_action',
@@ -54,18 +60,19 @@ export const GRANT_BARRED_TIER_REASONS: ReadonlySet<string> = new Set([
   'connector_calendar_write',
   'schedule_write',
   'persona_write',
+  REMINDER_CANCEL_REASON,
+  SCHEDULE_STATUS_REASON,
   CONTENT_STEERED_REASON,
   CONNECTOR_READ_GUARD_REASON,
 ]);
 
 /**
- * Consequential actions a person may answer once for the whole chat with "Always allow this here". The chat grant
+ * Consequential actions a person may answer once for the whole chat with "Always allow in this chat". The chat grant
  * binds the tool and its destination, never a standing grant across chats, so it is offered only when the card
- * names one. A send, a guest change, a steered call, and creating a schedule or a persona are never among them:
- * each of those asks every time.
+ * names one. A send, a mail draft, a guest change, a steered call, and creating a schedule or a persona are never
+ * among them: each of those asks every time.
  */
 export const CHAT_GRANTABLE_CONSEQUENCE_REASONS: ReadonlySet<string> = new Set([
-  'gmail_draft',
   'connector_outbound',
   'destructive_action',
   'mcp_destructive_hint',
@@ -85,14 +92,14 @@ export const BROWSER_OPEN_SITE_GRANT_REASONS: ReadonlySet<string> = new Set(['br
 
 /**
  * Calendar changes that touch only the person's own calendar: no guest is invited, reached or cancelled.
- * Only these may get an "Always allow" or chat grant. Anything that cannot be shown guest-free is a guest change.
+ * Only these may get a chat grant, and none gets a grant for every chat. Anything that cannot be shown guest-free
+ * is a guest change.
  */
 export const OWN_CALENDAR_CHANGE_REASONS: ReadonlySet<string> = new Set(['calendar_write', 'caldav_calendar_change']);
 
 /**
  * Drive writes touch only the person's own files: a new Doc, or rows added to their own Sheet. Nothing is
- * sent to anyone and nothing is shared, so only these may get an "Always allow" or chat grant, as an
- * own-calendar change may.
+ * sent to anyone and nothing is shared, so only these may get an "Always allow" or chat grant.
  */
 export const OWN_DRIVE_WRITE_REASONS: ReadonlySet<string> = new Set(['google_drive_write']);
 
@@ -104,6 +111,7 @@ export type Tier2ActionKind = (typeof TIER2_ACTION_KINDS)[number];
 export const AUTO_DENY_REASONS = [
   APPROVAL_EXPIRED_REASON_CODE,
   'destination_unverifiable',
+  'incognito_chat',
   'incomplete_send_card',
   'lookup_limit',
   'offline_mode',
@@ -146,6 +154,16 @@ export const Tier3EmailSchema = z
       .nullable()
       .default(null)
       .describe('The address replies go to when it is not the sender, or null when replies go to the sender.'),
+    // Absent on cards stored before these fields existed: a reader must treat absent as not known.
+    from_name: z
+      .string()
+      .nullable()
+      .optional()
+      .describe('The display name the message is sent as, or null when none is set.'),
+    name_left_off: z
+      .boolean()
+      .optional()
+      .describe('True when a name was left off an address because it looked like an address.'),
   })
   .describe('The message an email action sends or saves, shown in full.')
   .openapi('Tier3Email');
@@ -174,6 +192,17 @@ export const Tier3CalendarEventSchema = z
     guests_emailed: z.boolean().describe('True when Google emails the guests about this.'),
     one_of_repeating: z.boolean().describe('True when this changes one date of a repeating event.'),
     before: Tier3CalendarEventBeforeSchema.nullable(),
+    // Absent on cards stored before these fields existed: a reader must treat absent as not known.
+    already_created: z
+      .boolean()
+      .optional()
+      .describe('True when the same event was already created in this chat a few minutes ago.'),
+    span_days: z
+      .number()
+      .int()
+      .min(1)
+      .optional()
+      .describe('How many days the event runs over; 1 for an ordinary event.'),
   })
   .describe('The calendar event a write adds or changes, shown in full.')
   .openapi('Tier3CalendarEvent');
