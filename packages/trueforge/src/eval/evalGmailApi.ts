@@ -103,6 +103,20 @@ export class EvalGmailApi implements GmailApiPort {
     return input.format === 'metadata' ? this.#metadataThread(input.threadId) : this.#fullThread(input.threadId);
   }
 
+  listMessages(input: { query: string; maxResults: number; pageToken: string | undefined }) {
+    return this.listThreads(input).then(({ threadIds }) => ({
+      messageIds: this.#threads
+        .filter(thread => threadIds.includes(thread.id))
+        .flatMap(thread => (thread.messages ?? []).map(message => message.id))
+        .reverse(),
+      nextPageToken: undefined,
+    }));
+  }
+
+  getMessageHeaders(messageId: string): Promise<GmailMessage> {
+    return this.getMessage(messageId);
+  }
+
   getMessage(messageId: string): Promise<GmailMessage> {
     for (const thread of this.#threads) {
       const message = thread.messages?.find(item => item.id === messageId);

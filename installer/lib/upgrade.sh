@@ -4,6 +4,8 @@
 
 UPGRADE_STAGE=idle
 UPGRADE_BACKUP=
+# The instances this upgrade moved to https, so the restart that follows recreates them.
+UPGRADE_MOVED=
 # What upgrade_checkout_behind adds to the pull command it advises when the checkout's branch
 # does not track its source, so the command names the source and branch a plain pull would need.
 UPGRADE_PULL_ARGS=
@@ -97,6 +99,15 @@ upgrade_health_gate() {
   done
 }
 
+# Tailscale serve keeps trying for each port it is set up for, so it takes a port of an instance the moment the upgrade
+# stops the instance, and the new version and the rollback would both fail to start. The app port is never moved by
+# itself, so one Tailscale wants stops the upgrade before anything changes. An https port is moved when the instance is
+# drawn again, after the backup and the build.
+upgrade_ports_ready() {
+  local name
+  for name in $(reg_names); do instance_tailscale_port_check "$name"; done
+}
+
 # Backs up every instance that has data, then builds what is missing. Touches nothing that is running, so a failed
 # build needs no rollback.
 upgrade_prepare() {
@@ -117,7 +128,7 @@ upgrade_switch() {
   for name in $(reg_names); do
     if instance_sandbox_wanted "$name"; then sandbox_ensure "$name" refresh; fi
     rc=
-    if instance_enforce_single_owner "$name"; then rc=recreate; fi
+    if instance_enforce_single_owner "$name" || upgrade_moved "$name"; then rc=recreate; fi
     instance_render "$name" "$REL_APP_TAG" "$REL_DEX_IMAGE"
     instance_up "$name" ${rc:+"$rc"} || exit 1
   done
@@ -217,8 +228,34 @@ upgrade_checkout_behind() {
   [ -n "$(git -C "$REPO_ROOT" rev-list "HEAD..refs/remotes/$remote/$source_ref" 2>/dev/null)" ]
 }
 
-cmd_upgrade() {
+# The instances an upgrade should move to https: ones an older installer opened on the network over
+# plain http. Their recorded addresses say the move is owed, and no other part of an upgrade looks
+# at the addresses, so without this an instance keeps sending its password over plain http.
+upgrade_http_instances() {
   local name
+  for name in $(reg_names); do
+    if [ "$(instance_address_change "$name")" = refresh ]; then printf '%s\n' "$name"; fi
+  done
+}
+
+# Moves one instance to https. The addresses are settled first, which makes the certificate before
+# the record says https and puts the record back if the certificate cannot be made. The instance is
+# drawn again so it is served the new way; the caller restarts it.
+upgrade_move_to_https() { # name
+  say "Moving instance $1 to https, so sign-in on your network is encrypted."
+  instance_apply_addresses "$1" refresh "$REL_APP_TAG"
+  instance_render "$1" "$REL_APP_TAG" "$REL_DEX_IMAGE"
+  UPGRADE_MOVED="$UPGRADE_MOVED $1"
+}
+
+# Whether this upgrade moved the instance to https.
+upgrade_moved() { # name
+  case " $UPGRADE_MOVED " in *" $1 "*) return 0 ;; esac
+  return 1
+}
+
+cmd_upgrade() {
+  local name rc movers
   require_installed
   release_load "$RELEASE_DIR/release.json" || die "The record of the installed version cannot be read. Run install.sh again."
   docker_attach
@@ -233,7 +270,26 @@ cmd_upgrade() {
   if [ "$OPT_CHECK" != 1 ] && [ "$DRY_RUN" != 1 ]; then install_doctor_shim; fi
   if [ "$CUR_APP_TAG" = "$REL_APP_TAG" ] && [ "$CUR_STT_TAG" = "$REL_STT_TAG" ] && [ "$CUR_TTS_TAG" = "$REL_TTS_TAG" ] && [ "$CUR_CALENDAR_TAG" = "$REL_CALENDAR_TAG" ] && [ "$CUR_BROWSER_TAG" = "$REL_BROWSER_TAG" ] && [ "$CUR_BROWSER_GATEWAY_TAG" = "$REL_BROWSER_GATEWAY_TAG" ] && [ "$CUR_DEX_IMAGE" = "$REL_DEX_IMAGE" ]; then
     if docker_image_exists "$REL_APP_TAG" && docker_image_exists "$REL_STT_TAG" && docker_image_exists "$REL_TTS_TAG" && docker_image_exists "$REL_CALENDAR_TAG" && docker_image_exists "$REL_BROWSER_TAG" && docker_image_exists "$REL_BROWSER_GATEWAY_TAG" && docker_image_exists "$REL_DEX_IMAGE"; then
-      say "Already up to date ($REL_APP_TAG). Nothing to do."
+      movers=$(upgrade_http_instances)
+      if [ -z "$movers" ]; then
+        say "Already up to date ($REL_APP_TAG). Nothing to do."
+        upgrade_old_account_notices
+        upgrade_report
+        return 0
+      fi
+      if [ "$OPT_CHECK" = 1 ] || [ "$DRY_RUN" = 1 ]; then
+        say "Aman is up to date ($REL_APP_TAG)."
+        for name in $movers; do
+          say "  Instance $name would move to https (it is open on your network over plain http)."
+        done
+        return 0
+      fi
+      lock_acquire
+      say "Aman is up to date ($REL_APP_TAG). One change is still needed:"
+      for name in $movers; do
+        upgrade_move_to_https "$name"
+        instance_up "$name" recreate || exit 1
+      done
       upgrade_old_account_notices
       upgrade_report
       return 0
@@ -243,11 +299,19 @@ cmd_upgrade() {
       return 0
     fi
     lock_acquire
+    upgrade_ports_ready
     say "Building the missing parts again"
     images_ensure
     machine_up "$REL_STT_TAG" "$REL_TTS_TAG"
+    for name in $(upgrade_http_instances); do
+      upgrade_move_to_https "$name"
+    done
     for name in $(reg_names); do
-      instance_up "$name" || exit 1
+      rc=
+      if upgrade_moved "$name"; then rc=recreate; fi
+      # Containers rebuilt here restart, so an https port Tailscale serve took is moved first.
+      if tls_port_taken_by_tailscale "$name"; then instance_render "$name" "$REL_APP_TAG" "$REL_DEX_IMAGE"; fi
+      instance_up "$name" ${rc:+"$rc"} || exit 1
     done
     upgrade_old_account_notices
     upgrade_report
@@ -265,6 +329,9 @@ cmd_upgrade() {
   [ "$CUR_BROWSER_TAG" = "$REL_BROWSER_TAG" ] || say "  browser ${CUR_BROWSER_TAG:-(new)} -> $REL_BROWSER_TAG"
   [ "$CUR_DEX_IMAGE" = "$REL_DEX_IMAGE" ] || say "  login   $CUR_DEX_IMAGE -> $REL_DEX_IMAGE"
   if upgrade_any_sandbox; then say "  sandbox PDF and image reading (builds the sandbox again)"; fi
+  for name in $(upgrade_http_instances); do
+    say "  Instance $name moves to https (it is open on your network over plain http)."
+  done
   if [ "$OPT_CHECK" = 1 ]; then
     return 0
   fi
@@ -276,7 +343,11 @@ cmd_upgrade() {
   say "Steps: check each instance, back up every instance, build the new version, restart the instances, check again."
   say "If anything fails, the old version and the backup are put back."
   upgrade_health_gate
+  upgrade_ports_ready
   upgrade_prepare
+  for name in $(upgrade_http_instances); do
+    upgrade_move_to_https "$name"
+  done
   upgrade_switch
   if [ -n "$UPGRADE_BACKUP" ]; then
     say "Upgraded to $REL_APP_TAG. The backup from before the upgrade is at $UPGRADE_BACKUP."

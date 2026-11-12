@@ -5,8 +5,8 @@ import * as core from "../../core/index.js";
 import type * as serializers from "../index.js";
 
 export const MeSessionType: core.serialization.Schema<serializers.MeSessionType.Raw, TrueForge.MeSessionType> =
-    core.serialization.enum_(["default", "oidc-connected"]);
+    core.serialization.enum_(["default", "oidc-connected", "local-connected"]);
 
 export declare namespace MeSessionType {
-    export type Raw = "default" | "oidc-connected";
+    export type Raw = "default" | "oidc-connected" | "local-connected";
 }

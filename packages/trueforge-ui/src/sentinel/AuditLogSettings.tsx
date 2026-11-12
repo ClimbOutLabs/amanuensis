@@ -35,6 +35,28 @@ function parseOutcomeFilter(value: string): SentinelAuditOutcome | undefined {
   return SENTINEL_AUDIT_OUTCOMES.find(outcome => outcome === value);
 }
 
+/** A date input value (yyyy-mm-dd) as the local start of that day; undefined when the value is not a date. */
+function parseLocalDay(value: string): Date | undefined {
+  const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (parts === null) return undefined;
+  const [, year, month, day] = parts;
+  if (year === undefined || month === undefined || day === undefined) return undefined;
+  const date = new Date(Number(year), Number(month) - 1, Number(day));
+  return Number.isNaN(date.getTime()) ? undefined : date;
+}
+
+function localDayStartIso(value: string): string | undefined {
+  return parseLocalDay(value)?.toISOString();
+}
+
+/** The local start of the day after a date input value, so the picked day itself is fully included. */
+function localDayAfterStartIso(value: string): string | undefined {
+  const date = parseLocalDay(value);
+  if (date === undefined) return undefined;
+  date.setDate(date.getDate() + 1);
+  return date.toISOString();
+}
+
 const AuditRow: FC<{ entry: SentinelUserAuditEntry; chatHref: string | null }> = ({ entry, chatHref }) => (
   <li className="flex flex-col gap-1 border-b border-border/60 px-4 py-3 last:border-b-0">
     <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
@@ -65,6 +87,9 @@ export const AuditLogSettings: FC = () => {
   const api = useOptionalSentinelApi();
   const routes = useOptionalResolvedRoutes();
   const [outcome, setOutcome] = useState<SentinelAuditOutcome | undefined>(undefined);
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
+  const datesPicked = fromDate !== '' || toDate !== '';
   const [entries, setEntries] = useState<SentinelUserAuditEntry[]>([]);
   const [nextPageToken, setNextPageToken] = useState<string | undefined>(undefined);
   const [loading, setLoading] = useState(false);
@@ -79,7 +104,13 @@ export const AuditLogSettings: FC = () => {
       setLoading(true);
       setError(null);
       try {
-        const page = await api.listUserAuditEntries({ limit: PAGE_SIZE, pageToken, outcome });
+        const page = await api.listUserAuditEntries({
+          limit: PAGE_SIZE,
+          pageToken,
+          outcome,
+          from: localDayStartIso(fromDate),
+          to: localDayAfterStartIso(toDate),
+        });
         if (request !== requestRef.current) return;
         setEntries(current => (append ? [...current, ...page.entries] : page.entries));
         setNextPageToken(page.nextPageToken);
@@ -90,8 +121,13 @@ export const AuditLogSettings: FC = () => {
         if (request === requestRef.current) setLoading(false);
       }
     },
-    [api, outcome],
+    [api, outcome, fromDate, toDate],
   );
+
+  const clearDates = useCallback(() => {
+    setFromDate('');
+    setToDate('');
+  }, []);
 
   useEffect(() => {
     setEntries([]);
@@ -113,21 +149,52 @@ export const AuditLogSettings: FC = () => {
         </p>
       </div>
 
-      <label className="flex items-center gap-2 text-sm text-text-secondary">
-        Show
-        <select
-          className="rounded-md border border-border bg-primary-bg px-2 py-1 text-sm text-text-primary"
-          value={outcome ?? ''}
-          onChange={event => setOutcome(parseOutcomeFilter(event.target.value))}
-        >
-          <option value="">Everything</option>
-          {SENTINEL_AUDIT_OUTCOMES.map(value => (
-            <option key={value} value={value}>
-              {SENTINEL_AUDIT_OUTCOME_LABELS[value]}
-            </option>
-          ))}
-        </select>
-      </label>
+      <div className="flex flex-wrap items-end gap-3">
+        <label className="flex items-center gap-2 text-sm text-text-secondary">
+          Show
+          <select
+            className="rounded-md border border-border bg-primary-bg px-2 py-1 text-sm text-text-primary"
+            value={outcome ?? ''}
+            onChange={event => setOutcome(parseOutcomeFilter(event.target.value))}
+          >
+            <option value="">Everything</option>
+            {SENTINEL_AUDIT_OUTCOMES.map(value => (
+              <option key={value} value={value}>
+                {SENTINEL_AUDIT_OUTCOME_LABELS[value]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-sm text-text-secondary">
+          From
+          <input
+            type="date"
+            className="rounded-md border border-border bg-primary-bg px-2 py-1 text-sm text-text-primary"
+            value={fromDate}
+            max={toDate === '' ? undefined : toDate}
+            onChange={event => setFromDate(event.target.value)}
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-sm text-text-secondary">
+          To
+          <input
+            type="date"
+            className="rounded-md border border-border bg-primary-bg px-2 py-1 text-sm text-text-primary"
+            value={toDate}
+            min={fromDate === '' ? undefined : fromDate}
+            onChange={event => setToDate(event.target.value)}
+          />
+        </label>
+        {datesPicked ? (
+          <button
+            type="button"
+            className={auiButtonClass({ variant: 'secondary', size: 'small' })}
+            onClick={clearDates}
+          >
+            Clear dates
+          </button>
+        ) : null}
+      </div>
 
       {error !== null && (
         <p className="flex items-center gap-1.5 text-sm text-failure-bg" role="alert">
@@ -144,7 +211,16 @@ export const AuditLogSettings: FC = () => {
       )}
 
       {entries.length === 0 && !loading && error === null ? (
-        <p className="py-6 text-center text-sm text-text-secondary">Nothing recorded yet.</p>
+        datesPicked ? (
+          <p className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 py-6 text-center text-sm text-text-secondary">
+            Nothing in the audit log for those dates.
+            <button type="button" className="underline hover:text-text-primary" onClick={clearDates}>
+              Clear dates
+            </button>
+          </p>
+        ) : (
+          <p className="py-6 text-center text-sm text-text-secondary">Nothing recorded yet.</p>
+        )
       ) : (
         <ul className="min-h-0 overflow-y-auto rounded-md border border-border">
           {entries.map(entry => (
