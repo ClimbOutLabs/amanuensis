@@ -50,7 +50,19 @@ describe('splitSourceLine', () => {
 });
 
 describe('MemoryVaultEntryRow', () => {
-  it('shows where the memory came from as a small label beside the time, and keeps it in the text being edited', () => {
+  it("says where an outside memory came from, and whose it is when it is not the person's own", () => {
+    renderRow({
+      entry: {
+        ...ENTRY,
+        text: 'Gate code is on the fridge.\n\n> External source: email',
+        owner: 'persona',
+        persona: 'Ada',
+      },
+    });
+    expect(screen.getByText(/^External source: email · Ada · /)).toBeInTheDocument();
+  });
+
+  it("shows only the time for a memory of the person's own, and keeps its source line in the text being edited", () => {
     const text = 'Sister Lexie is allergic to shellfish.\n\n> From you';
     const { container } = render(
       <MemoryVaultEntryRow
@@ -63,7 +75,8 @@ describe('MemoryVaultEntryRow', () => {
       />,
     );
     expect(container.querySelector('blockquote')).toBeNull();
-    expect(screen.getByText(/^From you · You · /)).toBeInTheDocument();
+    expect(screen.queryByText(/From you/)).toBeNull();
+    expect(screen.queryByText(/You ·/)).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
     expect(screen.getByRole('textbox', { name: 'Edit memory' })).toHaveValue(text);
   });

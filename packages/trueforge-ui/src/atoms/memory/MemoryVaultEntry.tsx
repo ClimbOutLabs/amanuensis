@@ -10,10 +10,14 @@ import type { ExplorerMemory } from './memoryExplorer.js';
 
 const COPIED_NOTE_MS = 2000;
 
-function ownerLabel(memory: ExplorerMemory): string {
+/** Whose memory it is, said only when it is not the person's own: a persona's name or a shared topic. */
+function ownerLabel(memory: ExplorerMemory): string | null {
   if (memory.owner === 'persona') return memory.persona ?? 'Persona';
-  return memory.owner === 'you' ? 'You' : 'Shared topic';
+  return memory.owner === 'you' ? null : 'Shared topic';
 }
+
+/** The person's own words need no label; anything else says where it came from. */
+const OWN_SOURCE = 'From you';
 
 /** The time of day a memory was saved; its day is the heading it sits under. */
 function savedLabel(timestamp: string): string {
@@ -87,7 +91,7 @@ export function MemoryVaultEntryRow(props: {
   }
 
   return (
-    <li className="flex gap-3 px-4 py-3">
+    <li className="flex gap-3 p-3">
       <input
         type="checkbox"
         checked={props.selected}
@@ -137,11 +141,12 @@ export function MemoryVaultEntryRow(props: {
           </div>
         ) : (
           <>
-            <Markdown content={shown.body} highlight={props.highlight} readOnly className="text-sm" />
+            <Markdown content={shown.body} highlight={props.highlight} readOnly className="text-sm!" />
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-xs text-text-secondary">
-                {shown.source === null ? '' : `${shown.source} · `}
-                {ownerLabel(entry)} · {savedLabel(entry.timestamp)}
+                {[shown.source === OWN_SOURCE ? null : shown.source, ownerLabel(entry), savedLabel(entry.timestamp)]
+                  .filter(part => part !== null)
+                  .join(' · ')}
               </span>
               <div className="flex flex-wrap items-center gap-1">
                 {copied ? (
