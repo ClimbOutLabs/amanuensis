@@ -84,8 +84,8 @@ describe('chatFontSizePreference', () => {
     });
   });
 
-  it('leaves a text size that is not a plain rem value to the theme', () => {
-    expect(chatFontSizeStyle('larger', { textBase: '16px' })).toEqual({});
+  it('scales a text size that is not a plain rem value with calc(), and skips sizes the theme does not set', () => {
+    expect(chatFontSizeStyle('larger', { textBase: '16px' })).toEqual({ '--text-base': 'calc(16px * 1.1333)' });
     expect(chatFontSizeStyle('larger', {})).toEqual({});
   });
 });

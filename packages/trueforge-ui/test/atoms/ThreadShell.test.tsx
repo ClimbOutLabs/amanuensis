@@ -71,6 +71,19 @@ describe('ThreadRootShell chat text size', () => {
     expect(root.style.getPropertyValue('--text-base')).toBe('1.4167rem');
   });
 
+  it('scales a host text size given in another unit with calc()', () => {
+    window.localStorage.setItem(CHAT_FONT_SIZE_STORAGE_KEY, 'largest');
+    render(
+      <ThemeProvider theme={{ tokens: { textBase: '16px' } }}>
+        <ThreadRootShell data-testid="thread-root" />
+      </ThemeProvider>,
+    );
+
+    const root = screen.getByTestId('thread-root');
+    expect(root.style.getPropertyValue('--text-base')).toBe('calc(16px * 1.2667)');
+    expect(root.style.getPropertyValue('--text-sm')).toBe('1.0292rem');
+  });
+
   it('puts a smaller scale on the thread root when a smaller size is picked', () => {
     window.localStorage.setItem(CHAT_FONT_SIZE_STORAGE_KEY, 'smaller');
     render(<ThreadRootShell data-testid="thread-root" />);

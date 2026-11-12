@@ -97,6 +97,16 @@ describe('ThemeSettings chat text size', () => {
     expect(screen.getByText(/The rest of the app keeps its size/)).toBeInTheDocument();
   });
 
+  it('shows a preview line at the picked size', () => {
+    renderSettings();
+    const preview = screen.getByText('This is how chat messages will look.');
+    expect(preview.style.getPropertyValue('--text-base')).toBe('');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Larger' }));
+
+    expect(preview.style.getPropertyValue('--text-base')).toBe('1.0625rem');
+  });
+
   it('labels the size buttons as one group', () => {
     renderSettings();
 

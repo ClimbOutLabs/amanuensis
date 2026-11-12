@@ -50,14 +50,17 @@ export function useChatFontSize(): { size: ChatFontSize; setSize: (size: ChatFon
 const REM_AMOUNT = /^(\d+(?:\.\d+)?)rem$/;
 
 /**
- * One theme text size scaled by a chat size factor. A size that is not a plain rem value
- * is left alone, so the theme's own value stands.
+ * One theme text size scaled by a chat size factor. A plain rem value is worked out to a
+ * rem value; any other size a host theme sets (px, em, a clamp()) is scaled with calc(),
+ * so every theme's text follows the choice.
  */
-function scaleRemValue(value: string | undefined, factor: number): string | undefined {
+function scaleTextValue(value: string | undefined, factor: number): string | undefined {
   if (value === undefined) return undefined;
-  const match = REM_AMOUNT.exec(value.trim());
-  const amountText = match?.[1];
-  if (amountText === undefined) return undefined;
+  const trimmed = value.trim();
+  if (trimmed === '') return undefined;
+  const factorText = String(Number(factor.toFixed(4)));
+  const amountText = REM_AMOUNT.exec(trimmed)?.[1];
+  if (amountText === undefined) return `calc(${trimmed} * ${factorText})`;
   return `${Number((Number(amountText) * factor).toFixed(4))}rem`;
 }
 
@@ -73,7 +76,7 @@ export function chatFontSizeStyle(size: ChatFontSize, tokens: Partial<SemanticTo
   if (option === undefined || option.factor === null) return {};
   const scale: Partial<ChatTextScale> = {};
   for (const key of TEXT_SCALE_KEYS) {
-    const scaled = scaleRemValue(tokens[key], option.factor);
+    const scaled = scaleTextValue(tokens[key], option.factor);
     if (scaled !== undefined) scale[key] = scaled;
   }
   return tokensToStyle(scale);
