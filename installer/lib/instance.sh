@@ -1089,8 +1089,8 @@ instance_enforce_single_owner() { # name
     {
       while IFS= read -r line || [ -n "$line" ]; do
         case "$line" in
-          'DEX_USER_PASSWORD_HASH_'* | '# >>> sign-in users added with'* | '# <<< end of user hashes'*) ;;
-          *) printf '%s\n' "$line" ;;
+          '# >>> sign-in users added with'* | '# <<< end of user hashes'*) ;;
+          *) [ -n "$(env_user_hash_name "$line")" ] || printf '%s\n' "$line" ;;
         esac
       done <"$dir/dex.env"
     } | write_if_changed "$dir/dex.env" 600 || true
