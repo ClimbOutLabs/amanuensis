@@ -46,6 +46,9 @@ const TruefoundrySettingsBuilder = lazy(() => import('../containers/SettingsBuil
 const SchedulesPage = lazy(() =>
   import('../atoms/schedules/SchedulesPage.js').then(m => ({ default: m.SchedulesPage })),
 );
+const RemindersPage = lazy(() =>
+  import('../atoms/reminders/RemindersPage.js').then(m => ({ default: m.RemindersPage })),
+);
 const SpacesView = lazy(() => import('../containers/SpacesView.js'));
 
 const brandLogoClassName = 'h-5 w-5 max-w-40 shrink-0 object-contain';
@@ -62,7 +65,7 @@ function isRecentHistoryVisible({ overlayOpen, mode }: { overlayOpen: boolean; m
 const CHAT_LIST_INSIDE_SELECTOR = '[data-chat-list-trigger], [role="menu"], [role="dialog"], [role="alertdialog"]';
 
 /**
- * Nav buttons only (Chats, Spaces and Schedules). Returned as plain siblings, not wrapped in their own
+ * Nav buttons only (Chats, Spaces, Schedules and Reminders). Returned as plain siblings, not wrapped in their own
  * `<nav>`, so the caller lays them out in one scrolling flex column with the footer actions.
  * New chat lives at the top of the chat list; Build agent, Agents, Sessions and Settings live under More.
  */
@@ -76,6 +79,7 @@ function SidebarNavItems({
   onChats: () => void;
 }): ReactNode {
   const SchedulesButton = useSlot('SchedulesButton');
+  const RemindersButton = useSlot('RemindersButton');
   const SpacesButton = useSlot('SpacesButton');
   const chatsSelected = selected === 'chats';
 
@@ -103,6 +107,7 @@ function SidebarNavItems({
       </button>
       <SpacesButton compact selected={selected === 'spaces'} />
       <SchedulesButton compact selected={selected === 'schedules'} />
+      <RemindersButton compact selected={selected === 'reminders'} />
     </>
   );
 }
@@ -240,8 +245,9 @@ export function SidebarLayout({ className }: { className?: string }) {
   const libraryOpen = shell?.libraryOpen === true;
   const sessionsOpen = shell?.sessionsOpen === true;
   const schedulesOpen = shell?.schedulesOpen === true;
+  const remindersOpen = shell?.remindersOpen === true;
   const spacesOpen = shell?.spacesOpen === true;
-  const overlayOpen = settingsOpen || libraryOpen || sessionsOpen || schedulesOpen || spacesOpen;
+  const overlayOpen = settingsOpen || libraryOpen || sessionsOpen || schedulesOpen || remindersOpen || spacesOpen;
   const showAgentConfig =
     shell != null && shellIsCreateAgent(shell.mode) && !overlayOpen && (!isMobile || shell.agentConfigOpen);
   const recentHistoryAvailable = isRecentHistoryVisible({ overlayOpen, mode: shell?.mode });
@@ -275,6 +281,7 @@ export function SidebarLayout({ className }: { className?: string }) {
     shell.setLibraryOpen(false);
     shell.setSessionsOpen(false);
     shell.setSchedulesOpen(false);
+    shell.setRemindersOpen(false);
     shell.closeSpaces();
     shell.setHistoryCollapsed(false);
     setChatListFromRail(true);
@@ -449,6 +456,22 @@ export function SidebarLayout({ className }: { className?: string }) {
                 }
               >
                 <SchedulesPage />
+              </Suspense>
+            ) : remindersOpen ? (
+              <Suspense
+                fallback={
+                  <div
+                    className="flex h-full items-center justify-center"
+                    role="status"
+                    aria-live="polite"
+                    aria-busy="true"
+                  >
+                    <Spinner size={28} className="text-text-primary" />
+                    <span className="sr-only">Loading</span>
+                  </div>
+                }
+              >
+                <RemindersPage />
               </Suspense>
             ) : spacesOpen ? (
               <Suspense
