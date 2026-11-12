@@ -140,6 +140,8 @@ export function runSentinelAuditStoreContractSuite(getEnv: () => SentinelAuditSt
       metadata: {},
       agent: { type: 'inline', spec: makeAgentSpec() },
       custom: null,
+      is_incognito: false,
+      private_expires_at: null,
     });
     await env.sessions.updateSession({
       tenant_id: 't1',
