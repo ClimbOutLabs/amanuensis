@@ -35,6 +35,7 @@ import type {
   ChatCompletionTool,
 } from 'openai/resources/chat';
 import type { Logger } from 'winston';
+import { ProviderRequestError } from '../errors';
 import { personMessageIndex } from '../runtime/contextUtils';
 import { MAX_TOOL_CALL_STREAM_PARTS } from '../runtime/modelReplyGuard';
 import { describeUnknownError, extractErrorLogFields } from '../util/errorLogFields';
@@ -2088,8 +2089,9 @@ export async function* mapStreamToChunks({
         // mid-response HarmonyError takes) is the stream itself breaking, so it is a
         // ModelStreamFault. A provider answer saying the request is over the context window is
         // the one definite answer a shorter history can fix, so it is a ModelStreamFault too.
-        if (providerStatusCode(raw) != null && !isContextLengthError(raw)) {
-          throw new Error(message, { cause });
+        const statusCode = providerStatusCode(raw);
+        if (statusCode != null && !isContextLengthError(raw)) {
+          throw new ProviderRequestError(message, { statusCode, cause });
         }
         throw new ModelStreamFault(message, { cause });
       }

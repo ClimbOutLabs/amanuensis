@@ -63,6 +63,10 @@
       "set": "approvals",
       "tests": ["packages/frontend/tests/approvalKinds.browser.test.ts"]
     },
+    "approval:skill": {
+      "set": "approvals",
+      "tests": ["packages/frontend/tests/approvalKinds.browser.test.ts"]
+    },
     "calendar-preset:fastmail": {
       "set": "calendar",
       "tests": []
@@ -341,6 +345,10 @@
     },
     "route:privateChat": {
       "set": "chat",
+      "tests": []
+    },
+    "route:reach": {
+      "set": "reach",
       "tests": []
     },
     "route:repository": {
@@ -778,6 +786,7 @@
     "route:personaKnowledge",
     "route:personalization",
     "route:privateChat",
+    "route:reach",
     "route:repository",
     "route:runCode",
     "route:sandboxProvider",

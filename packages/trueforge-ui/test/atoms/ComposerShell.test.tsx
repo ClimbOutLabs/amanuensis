@@ -72,6 +72,21 @@ describe('ComposerShell', () => {
     expect(onCancel).toHaveBeenCalledOnce();
   });
 
+  it('marks the model label so narrow screens can give it a line of its own', () => {
+    const { container } = render(
+      <ComposerShell
+        input={<textarea aria-label="Message" />}
+        disabled={false}
+        canSubmit={false}
+        modelLabel="GPT 5"
+        onSubmit={() => {}}
+      />,
+    );
+
+    const label = container.querySelector('.aui-composer-model-label');
+    expect(label).toHaveTextContent('GPT 5');
+  });
+
   it('omits optional composer chrome when labels and attachment handling are absent', () => {
     render(
       <ComposerShell input={<input aria-label="Message" />} disabled={false} canSubmit={false} onSubmit={() => {}} />,
