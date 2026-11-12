@@ -63,6 +63,12 @@ export class ModelProviderNameConflictError extends Error {
 }
 
 export interface IModelProviderStore<TTransaction = never> {
+  /**
+   * True when the providers live somewhere else (TrueFoundry) and every write
+   * here is refused. Callers that would write, such as an import, check this
+   * instead of finding out from a thrown error.
+   */
+  readonly managedElsewhere: boolean;
   listProviders(input: ListModelProvidersInput, transaction?: TTransaction): Promise<ModelProviderRecord[]>;
   getProvider(input: GetModelProviderInput, transaction?: TTransaction): Promise<ModelProviderRecord | undefined>;
   /**

@@ -28,6 +28,8 @@ function toRecord(row: Selectable<ModelProviderTable>): ModelProviderRecord {
 }
 
 export class PostgresModelProviderStore implements IModelProviderStore<Transaction<Database>> {
+  readonly managedElsewhere = false;
+
   readonly #db: Kysely<Database>;
 
   constructor(db: Kysely<Database>) {

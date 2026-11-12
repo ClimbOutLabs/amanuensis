@@ -29,6 +29,8 @@ function recordColumns(eb: ExpressionBuilder<Database, 'model_provider'>) {
 }
 
 export class SqliteModelProviderStore implements IModelProviderStore<Transaction<Database>> {
+  readonly managedElsewhere = false;
+
   readonly #db: Kysely<Database>;
 
   constructor(db: Kysely<Database>) {
