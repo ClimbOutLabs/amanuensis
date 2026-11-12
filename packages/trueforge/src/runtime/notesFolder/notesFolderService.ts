@@ -211,7 +211,10 @@ export class NotesFolderService {
     }
     const notes = await scanNotesFolder(folder);
     const chunks = notes.flatMap(note => chunkNote(note));
-    const store = (this.store ??= await EmbeddingStore.load({ namespaceDir: this.deps.indexDir, fileName: LOG_VECTORS_FILE }));
+    const store = (this.store ??= await EmbeddingStore.load({
+      namespaceDir: this.deps.indexDir,
+      fileName: LOG_VECTORS_FILE,
+    }));
     await this.embedChanged({ store, chunks });
     store.reconcile(new Set(chunks.map(chunk => chunk.id)));
     await store.save();

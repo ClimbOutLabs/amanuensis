@@ -83,8 +83,6 @@ const ReviewResultSchema = z.object({
   }),
 });
 
-const ErrorSchema = z.object({ error: z.object({ message: z.string() }) });
-
 function parseEntry(body: unknown): MemoryVaultEntry {
   const parsed = z.object({ data: MemoryVaultEntrySchema }).safeParse(body);
   if (!parsed.success) {

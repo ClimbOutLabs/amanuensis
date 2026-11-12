@@ -77,9 +77,6 @@ import {
   NOTE_SOURCE_METADATA_KEY,
   noteRetainContent,
 } from '../runtime/memory/memoryNotes';
-import { isInPageFolder, pageFolder, parsePageFilePath } from '../runtime/memory/memoryPages';
-import { MEMORY_NIGHTLY_SETTING_KEY } from '../runtime/memoryNightlySettings';
-import { MEMORY_PAGE_SORTING_SETTING_KEY } from '../runtime/memoryPageSortingSettings';
 import {
   isPersonOrigin,
   MEMORY_ORIGIN_METADATA_KEY,
@@ -87,7 +84,10 @@ import {
   USER_STATED_ORIGIN,
   type AmanMemoryOrigin,
 } from '../runtime/memory/memoryOrigin';
+import { isInPageFolder, pageFolder, parsePageFilePath } from '../runtime/memory/memoryPages';
 import { ensureMemorySourceLines } from '../runtime/memory/memorySourceLines';
+import { MEMORY_NIGHTLY_SETTING_KEY } from '../runtime/memoryNightlySettings';
+import { MEMORY_PAGE_SORTING_SETTING_KEY } from '../runtime/memoryPageSortingSettings';
 import { MEMORY_RECALL_ENABLED_SETTING_KEY } from '../runtime/memoryRecallSettings';
 import { MEMORY_SCREEN_ENABLED_SETTING_KEY } from '../runtime/memoryScreenSettings';
 import { MEMORY_SUMMARIZE_SETTING_KEY } from '../runtime/memorySummarizeSettings';
