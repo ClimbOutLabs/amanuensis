@@ -1,0 +1,66 @@
+# Settings for the docs website on GitHub Pages. The pages come from docs/ and the in-app help
+# topics; `pnpm docs:site:build` lays them out and adds the menu from docs/README.md.
+site_name: Amanuensis documentation
+site_description: Aman, a private assistant that runs on your own computer.
+site_url: https://climboutlabs.github.io/amanuensis/
+repo_url: https://github.com/ClimbOutLabs/amanuensis
+repo_name: ClimbOutLabs/amanuensis
+edit_uri: ''
+site_dir: site
+
+theme:
+  name: material
+  # Use the system fonts, so the site loads nothing from Google.
+  font: false
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - search.highlight
+    - content.code.copy
+    - content.tabs.link
+  logo: assets/aman/logo.svg
+  favicon: assets/aman/logo.svg
+  palette:
+    - media: '(prefers-color-scheme: light)'
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: '(prefers-color-scheme: dark)'
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+# Aman's colours, font and menu style. The build copies these in from the app (see scripts/build-docs-site.mjs).
+extra_css:
+  - assets/aman/fonts.css
+  - assets/aman/aman.css
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+
+plugins:
+  - search
+
+validation:
+  links:
+    not_found: warn
+    anchors: warn
+    unrecognized_links: info

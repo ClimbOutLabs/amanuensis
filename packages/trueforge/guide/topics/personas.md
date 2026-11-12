@@ -1,7 +1,7 @@
 ---
 id: personas
 title: Personas, agents, and choosing who answers
-covers:
+covers: settings:model-roles, route:persona, route:personaKnowledge, route:agent, route:agentImport
 ---
 
 A persona is a helper that answers in your chats. It has its own name, its own instructions, and its own model. For example, a travel persona can plan a trip for you.

@@ -75,6 +75,7 @@ nested:
   "source_ref": "<the checkout commit the images were built from>",
   "app_image": "aman-app:<source id>",
   "stt_image": "aman-stt:<source id>",
+  "tts_image": "aman-tts:<source id>",
   "calendar_image": "aman-calendar-caldav:<source id>",
   "browser_image": "aman-browser:<source id>",
   "browser_gateway_image": "aman-browser-gateway:<source id>",
@@ -85,7 +86,8 @@ nested:
 
 On upgrade the old record is copied to `release/previous.release.json`
 before the new one is written. Readers treat the record as readable only
-when at least the app, speech and sign-in images are named.
+when at least the app, speech-to-text and sign-in images are named. A record
+from before the read-aloud voice has no `tts_image`; the next upgrade adds it.
 
 ## Backups
 
@@ -95,7 +97,28 @@ added when it carries a label, and `-1`, `-2` and so on when the name is
 already taken. Inside: one folder per instance that was backed up, a copy of
 `release/release.json`, a copy of the authority's `root.crt` under `tls/`
 (never its key), and `SHA256SUMS` with the hash of every file. Unlabelled
-backups are pruned to the newest seven.
+backups are pruned to the newest seven. The database copy in each backup
+holds no incognito chats: `aman backup` deletes them from its copy before the
+copy is checked, so an incognito chat open at backup time is not kept.
+`install.sh restore` reads these folders: it accepts a backup only when every
+part its instance needs is there, `SHA256SUMS` matches, neither
+`release.json`'s `schema` nor the instance's `manifest.json` version is newer
+than this installer's, and `aman backup-check` in the installed app image finds
+no database migration that image does not ship. The copy it saves first carries
+the label `before-restore`. After writing the backup's `.env` it sets the keys
+the registry owns again from the registry (`PUBLIC_BASE_URL`,
+`ALLOWED_ORIGINS`, `AUTH_COOKIE_SUFFIX`, `OIDC_ISSUER_URL`,
+`LOGIN_UPSTREAM_URL`, `OIDC_CLIENT_ID`) and drops `TRUSTED_PROXY_ADDRESSES`,
+so `.env` and `dex.yaml` always name the same client. The owner goes the
+other way: the registry's `owner_email` and `owner_name` are taken from the
+backup, and `OIDC_ADMIN_ROLE_VALUE`, `OIDC_ALLOWED_EMAILS` and `OWNER_NAME`
+are written from them. A restore with no answer on its input exits 1.
+On Windows the backups are kept on the PC itself, in
+`%LOCALAPPDATA%\Amanuensis\backups`, not in the `aman_home` volume. The
+TypeScript installer's `aman backup` and `aman restore` run the shell's
+`backup` and `restore` in the setup container with that folder mounted at
+`/root/.amanuensis/backups`, so the shell reads and writes it as its own
+`backups/`.
 
 ## The lock
 

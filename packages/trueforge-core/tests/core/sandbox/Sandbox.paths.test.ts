@@ -4110,6 +4110,7 @@ describe('Sandbox provider-owned paths', () => {
           return readyExec();
         },
         uploadFile,
+        supportsCodeMode: true,
         createCodeModeTransport: () => transport,
       }),
     );
@@ -4638,7 +4639,7 @@ describe('Sandbox host bookkeeping', () => {
       stop: () => Promise.resolve(),
     };
     const provider: SandboxProvider = {
-      ...makeProvider({ createCodeModeTransport: () => transport }),
+      ...makeProvider({ supportsCodeMode: true, createCodeModeTransport: () => transport }),
       exec: (params): Promise<ExecResult> => {
         commands.push(params.command);
         return readyExec();

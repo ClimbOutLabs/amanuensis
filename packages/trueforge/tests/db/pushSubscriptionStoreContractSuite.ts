@@ -55,6 +55,18 @@ export function runPushSubscriptionStoreContractSuite(getStore: () => IPushSubsc
     expect(kept).toContain(ids[MAX_PUSH_DEVICES]);
   });
 
+  it('finds a device only for its owner, and not once a newer one dropped it', async () => {
+    const store = getStore();
+    await store.save(device(ALICE, 'https://push.example.test/first'));
+    await expect(store.hasEndpoint({ ...ALICE, endpoint: 'https://push.example.test/first' })).resolves.toBe(true);
+    await expect(store.hasEndpoint({ ...BOB, endpoint: 'https://push.example.test/first' })).resolves.toBe(false);
+    for (let index = 0; index < MAX_PUSH_DEVICES; index += 1) {
+      await new Promise(resolve => setTimeout(resolve, 2));
+      await store.save(device(ALICE, `https://push.example.test/newer-${String(index)}`));
+    }
+    await expect(store.hasEndpoint({ ...ALICE, endpoint: 'https://push.example.test/first' })).resolves.toBe(false);
+  });
+
   it('removes only the owner’s device', async () => {
     const store = getStore();
     const saved = savedId(await store.save(device(ALICE)));
