@@ -815,6 +815,22 @@ export const INSTALL_DOWNLOAD_FAILED: Problem = {
   fix: 'Check your internet connection, then open Aman Setup again.',
 };
 
+// The free space check before anything is downloaded: the drive Docker
+// Desktop keeps its data on is named the way File Explorer names it.
+export function installLowDiskProblem(options: { drive: string; freeText: string }): Problem {
+  return {
+    happened: `Aman needs about 20 GB of free space on drive ${printable(options.drive)}, and it has only ${printable(options.freeText)} free.`,
+    fix: `Free up space on drive ${printable(options.drive)}, then open Aman Setup again.`,
+  };
+}
+
+// The same check when the free space could not be read: the setup
+// carries on, and the person is told what to make sure of.
+export function installDiskUnreadLine(drive: string): string {
+  const where = drive === '' ? 'the drive Docker Desktop keeps its data on' : `drive ${printable(drive)}`;
+  return `The free space on ${where} could not be read. Make sure it has about 20 GB free, or the setup may stop part way.`;
+}
+
 export const INSTALL_DOCKER_UNTRUSTED: Problem = {
   happened: 'The Docker Desktop download did not come from Docker Inc, so it was not run.',
   fix: 'Download Docker Desktop from desktop.docker.com yourself, then open Aman Setup again.',
@@ -984,6 +1000,7 @@ export const INSTALL_DONE_LINE = 'Aman is installed, and the getting started pag
 // order. It asks nothing, downloads nothing and changes nothing.
 export const INSTALL_DRY_RUN_LINES: readonly string[] = [
   'This shows what aman install would do. Nothing is changed and nothing is asked.',
+  'It checks that there is about 20 GB of free space for Aman, and stops if there is not.',
   'It checks that Docker Desktop is installed and running, and installs it first if it is missing.',
   'It asks four questions: your email, a password, your model key, and whether to open Aman to your phone.',
   'It downloads the newest Aman and sets it up with daily backups and an https address on this computer.',
@@ -1230,6 +1247,9 @@ export function allMessageLines(): string[] {
   lines.push(problemText(INSTALL_NOT_WINDOWS));
   lines.push(problemText(INSTALL_REMOVAL_NOTE_STUCK));
   lines.push(problemText(INSTALL_IMAGE_UNAVAILABLE));
+  lines.push(problemText(installLowDiskProblem({ drive: 'C:', freeText: '12.3 GB' })));
+  lines.push(installDiskUnreadLine('C:'));
+  lines.push(installDiskUnreadLine(''));
   lines.push(problemText(INSTALL_DOWNLOAD_FAILED));
   lines.push(problemText(INSTALL_DOCKER_UNTRUSTED));
   lines.push(problemText(INSTALL_DOCKER_FAILED));

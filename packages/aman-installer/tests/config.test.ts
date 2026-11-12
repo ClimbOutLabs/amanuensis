@@ -51,3 +51,12 @@ test('the windows folder root follows LOCALAPPDATA when Windows names it', () =>
   });
   assert.equal(config.localAppDataDir, 'C:\\Users\\Friend\\AppData\\Local');
 });
+
+test('the roaming folder Docker Desktop keeps its settings in follows APPDATA when Windows names it', () => {
+  assert.equal(installerConfig({ env: {}, homeDir: '/home/person' }).appDataDir, '/home/person/AppData/Roaming');
+  const config = installerConfig({
+    env: { APPDATA: 'C:\\Users\\Friend\\AppData\\Roaming' },
+    homeDir: 'C:\\Users\\Friend',
+  });
+  assert.equal(config.appDataDir, 'C:\\Users\\Friend\\AppData\\Roaming');
+});

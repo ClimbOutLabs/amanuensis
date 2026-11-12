@@ -170,6 +170,9 @@ On your phone, open http://192.168.1.20:8791.
 The Aman Setup download sets Aman up on a Windows computer, and this is not one. Use the installer for this computer to set Aman up.
 A note left by an earlier removal of Aman could not be deleted, so the install did not start. Delete the file docker-removed in the folder %LOCALAPPDATA%\Programs\Amanuensis, then open Aman Setup again.
 Docker could not download the small helper it needs to read the record of what is installed. Check your internet connection, then open Aman Setup again.
+Aman needs about 20 GB of free space on drive C:, and it has only 12.3 GB free. Free up space on drive C:, then open Aman Setup again.
+The free space on drive C: could not be read. Make sure it has about 20 GB free, or the setup may stop part way.
+The free space on the drive Docker Desktop keeps its data on could not be read. Make sure it has about 20 GB free, or the setup may stop part way.
 Docker Desktop could not be downloaded. Check your internet connection, then open Aman Setup again.
 The Docker Desktop download did not come from Docker Inc, so it was not run. Download Docker Desktop from desktop.docker.com yourself, then open Aman Setup again.
 Docker Desktop could not be installed. Install Docker Desktop from its website, then open Aman Setup again.
@@ -202,6 +205,7 @@ Also use Aman from your phone and other devices on your home Wi-Fi? (yes or no):
 Please answer yes or no.
 Aman is installed, and the getting started page is open in your browser.
 This shows what aman install would do. Nothing is changed and nothing is asked.
+It checks that there is about 20 GB of free space for Aman, and stops if there is not.
 It checks that Docker Desktop is installed and running, and installs it first if it is missing.
 It asks four questions: your email, a password, your model key, and whether to open Aman to your phone.
 It downloads the newest Aman and sets it up with daily backups and an https address on this computer.

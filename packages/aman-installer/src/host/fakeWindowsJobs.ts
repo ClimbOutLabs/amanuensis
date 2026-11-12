@@ -13,6 +13,7 @@ import {
   userPathHasFolder,
   windowsPaths,
   type AclRead,
+  type DriveSpace,
   type ShortcutFacts,
   type WindowsJobs,
 } from './windowsJobs.ts';
@@ -90,6 +91,9 @@ export class FakeWindowsJobs implements WindowsJobs {
   caCertContents: string | null = null;
   browserUrls: string[] = [];
   dockerDesktopStarts = 0;
+  // The free space on the drive Docker Desktop keeps its data on, as a
+  // test scripts it; plenty on C: unless a test says otherwise.
+  driveSpace: DriveSpace;
   backupTask: boolean;
   backupNames: string[];
   readonly backupHolds: Map<string, readonly string[]>;
@@ -138,6 +142,7 @@ export class FakeWindowsJobs implements WindowsJobs {
     startedFromExplorer?: boolean;
     // Whether an earlier removal left its note that Docker is cleared.
     dockerRemovedMark?: boolean;
+    driveSpace?: DriveSpace;
   }) {
     const paths = windowsPaths(options.localAppDataDir);
     this.programsExePath = paths.programsExePath;
@@ -166,6 +171,7 @@ export class FakeWindowsJobs implements WindowsJobs {
     this.backupHolds = new Map(options.backupHolds ?? []);
     this.fromExplorer = options.startedFromExplorer ?? false;
     this.dockerRemovedMark = options.dockerRemovedMark ?? false;
+    this.driveSpace = options.driveSpace ?? { status: 'read', drive: 'C:', freeBytes: 100 * 1024 * 1024 * 1024 };
   }
 
   private step(name: FakeWindowsJobStep): void {
@@ -411,6 +417,10 @@ export class FakeWindowsJobs implements WindowsJobs {
       entries: [{ principal: this.aclOwner, canRead: true }],
     });
     return Promise.resolve();
+  }
+
+  dockerDataDriveSpace(): Promise<DriveSpace> {
+    return Promise.resolve(this.driveSpace);
   }
 
   readFolderAcl(path: string): Promise<AclRead> {

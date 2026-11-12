@@ -142,6 +142,7 @@ if (programsDir !== null) {
 const windowsJobs = systemWindowsJobs({
   runner,
   localAppDataDir: config.localAppDataDir,
+  appDataDir: config.appDataDir,
   selfExePath: process.execPath,
   selfPid: process.pid,
 });

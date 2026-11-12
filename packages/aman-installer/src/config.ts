@@ -20,6 +20,10 @@ export interface InstallerConfig {
   // reads it, for the folders the aman command and its shortcuts live
   // in. Elsewhere it is the folder Windows would name, unused.
   localAppDataDir: string;
+  // The per-user roaming folder (APPDATA): only Windows reads it, for
+  // Docker Desktop's settings file. Elsewhere it is the folder Windows
+  // would name, unused.
+  appDataDir: string;
 }
 
 // The one place the installer's environment settings are read. AMANUENSIS_HOME
@@ -35,6 +39,7 @@ export function installerConfig(options: {
   const osRelease = options.env['AMAN_OS_RELEASE'];
   const appService = options.env['AMAN_DOCTOR_APP_SERVICE'];
   const localAppData = options.env['LOCALAPPDATA'];
+  const appData = options.env['APPDATA'];
   return {
     stateHome: fromEnv !== undefined && fromEnv !== '' ? fromEnv : join(options.homeDir, '.amanuensis'),
     homeDir: options.homeDir,
@@ -44,5 +49,6 @@ export function installerConfig(options: {
     appService: appService !== undefined && appService !== '' ? appService : 'app',
     localAppDataDir:
       localAppData !== undefined && localAppData !== '' ? localAppData : join(options.homeDir, 'AppData', 'Local'),
+    appDataDir: appData !== undefined && appData !== '' ? appData : join(options.homeDir, 'AppData', 'Roaming'),
   };
 }

@@ -13,7 +13,10 @@ What it can do today:
   slots, the folder Aman was installed from, and https) and then each
   instance, by running the instance's own doctor inside its app container.
   On Windows it also checks that the folders Aman keeps on the PC itself
-  can be read by the person's own account only. `aman doctor --json`
+  can be read by the person's own account only, and its disk check reads
+  the free space on the drive Docker Desktop keeps its data on (usually
+  C:), read from Windows itself rather than through Docker, warning under
+  about 20 GB and failing under 2 GB. `aman doctor --json`
   prints the same checks as data. With `aman doctor --local` the
   instances' own checks skip the ones that reach the network, as the
   health gate before an upgrade needs. `aman doctor --fix` makes the
@@ -28,7 +31,10 @@ What it can do today:
 - `aman status` says what is installed and whether each instance is
   running.
 - `aman install`, on Windows, is the first install, what Aman-Setup.exe
-  does on a computer with no Aman yet: it installs Docker Desktop first
+  does on a computer with no Aman yet: it stops when the drive Docker
+  Desktop keeps its data on (usually C:, or the folder Docker Desktop's
+  settings moved it to) has less than about 20 GB free, before anything
+  is downloaded, and it installs Docker Desktop first
   when it is missing (the download is checked against Docker Inc's
   signature before it runs, and a resume entry is set so an install a
   restart stops is carried on from), checks Docker's memory before
