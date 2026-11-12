@@ -200,6 +200,8 @@ export type SentinelApprovalInfo = {
   chatGrantScope?: 'site' | undefined;
   /** True when the server lets the owner always allow this tool; the server refuses it for other tools. */
   alwaysAllowOffered?: boolean | undefined;
+  /** Set when the every-chat answer on this card lets maps run without asking, instead of allowing one tool. */
+  alwaysAllowCovers?: 'maps' | undefined;
   /** Present only for an action a scheduled run held; such a card never pauses the chat. */
   held?: HeldActionInfo | undefined;
   /** Present only for an action a scheduled run could not save for the owner, and why. */
@@ -648,6 +650,7 @@ function parseApprovalInfo(
   const chatAllowOffered = ref.can_chat_allow ?? ref.canChatAllow;
   const chatGrantScope = ref.chat_grant_scope ?? ref.chatGrantScope;
   const alwaysAllowOffered = ref.can_always_allow ?? ref.canAlwaysAllow;
+  const alwaysAllowCovers = ref.always_allow_covers ?? ref.alwaysAllowCovers;
   return {
     toolCallId,
     tier,
@@ -656,6 +659,7 @@ function parseApprovalInfo(
     ...(typeof chatAllowOffered === 'boolean' ? { chatAllowOffered } : {}),
     ...(chatGrantScope === 'site' ? { chatGrantScope: 'site' as const } : {}),
     ...(typeof alwaysAllowOffered === 'boolean' ? { alwaysAllowOffered } : {}),
+    ...(alwaysAllowCovers === 'maps' ? { alwaysAllowCovers } : {}),
     ...(held === undefined ? {} : { held }),
     ...(notSaved === undefined ? {} : { notSaved }),
   };

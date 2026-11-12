@@ -10,6 +10,10 @@ export const ApprovalToolCallRef: core.serialization.ObjectSchema<
     serializers.ApprovalToolCallRef.Raw,
     TrueForge.ApprovalToolCallRef
 > = core.serialization.object({
+    alwaysAllowCovers: core.serialization.property(
+        "always_allow_covers",
+        core.serialization.stringLiteral("maps").optional(),
+    ),
     canAlwaysAllow: core.serialization.property("can_always_allow", core.serialization.boolean().optional()),
     canChatAllow: core.serialization.property("can_chat_allow", core.serialization.boolean().optional()),
     chatGrantScope: core.serialization.property(
@@ -27,6 +31,7 @@ export const ApprovalToolCallRef: core.serialization.ObjectSchema<
 
 export declare namespace ApprovalToolCallRef {
     export interface Raw {
+        always_allow_covers?: "maps" | null;
         can_always_allow?: boolean | null;
         can_chat_allow?: boolean | null;
         chat_grant_scope?: ("site" | null | undefined) | null;

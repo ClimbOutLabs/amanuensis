@@ -112,6 +112,7 @@ import { DEFAULT_MAPS_TRAVEL_MODE, MapsTravelModeSchema } from './mapsRouteSchem
 import {
   isMapsToolName,
   MAPS_ASK_REASON,
+  MAPS_HOLD_REASON,
   MAPS_SILENT_REASON,
   RENDER_PLACES_TOOL_NAME,
   RENDER_ROUTE_TOOL_NAME,
@@ -2243,31 +2244,45 @@ function steeringChecked(input: {
 }
 
 /**
- * An embedded maps call that runs without asking, once the person has let maps run without asking. The outbound
- * secret guard still reads its places. Returns the guard's rule when the call should show its card instead.
+ * A map that would ask, left out of a scheduled run: nobody is there to answer, and a map never leaves a card
+ * waiting for the owner. `guard` is the outbound guard's verdict on what the map would send.
  */
-async function classifyMapsSilently(input: {
-  action: SentinelAction;
-  ctx: ClassifyContext;
-}): Promise<{ decision: TierDecision } | { held: OutboundGuardVerdict }> {
-  const { action, ctx } = input;
-  const strings = collectOutboundStrings(action.canonical_params);
-  const { verdict } = await outboundGuard({ ctx, strings });
-  if (!verdict.ok) {
-    return { held: verdict };
+function mapsSkipped(guard: OutboundGuardVerdict): TierDecision {
+  if (!guard.ok) {
+    return autoDenyDecision({
+      reason: 'outbound_guard',
+      reason_detail:
+        'The map would have sent text that looks like a password, a key, a card number or a long block of text.',
+      owner_message:
+        'One map was skipped, because its place text looked like a password, a key, a card number or a long block of text. Ask for the map in a chat to see what it would send.',
+      sensitive_read: false,
+    });
   }
+  return autoDenyDecision({
+    reason: 'unattended_run',
+    reason_detail: 'Maps are set to ask, and nobody is here to answer in a scheduled run. Continue without the map.',
+    owner_message:
+      'One map was skipped, because maps are set to ask. To get maps in scheduled runs, turn on Maps in Settings, under Permissions.',
+    sensitive_read: false,
+  });
+}
+
+/** An embedded maps call that runs without a card, once the person has let maps run without asking. */
+function mapsSilentDecision(input: {
+  ctx: ClassifyContext;
+  strings: ReturnType<typeof collectOutboundStrings>;
+}): TierDecision {
+  const { ctx, strings } = input;
   // The text leaves with this call, so a later silent search or map sees a secret split across the two.
   if (strings !== undefined) {
     ctx.web_search.sentText = appendOutboundTrace({ earlier: ctx.web_search.sentText, strings });
   }
   const values = strings?.values.map(value => value.trim()).filter(value => value !== '') ?? [];
-  return {
-    decision: tier1Decision({
-      reason: MAPS_SILENT_REASON,
-      reason_detail: `Maps ran without asking: ${values.join(', ')}`,
-      sensitive_read: false,
-    }),
-  };
+  return tier1Decision({
+    reason: MAPS_SILENT_REASON,
+    reason_detail: `Maps ran without asking: ${values.join(', ')}`,
+    sensitive_read: false,
+  });
 }
 
 /** Said on a card when a recipient's name was left off because it looked like an address. */
@@ -4039,13 +4054,17 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
           sensitive_read: false,
         });
       }
-      const runsWithoutAsking = await ctx.services.mapsWithoutAsking({
-        tenant_id: ctx.tenant_id,
-        created_by: ctx.created_by,
-      });
-      const silent = runsWithoutAsking ? await classifyMapsSilently({ action, ctx }) : undefined;
-      if (silent !== undefined && 'decision' in silent) {
-        return silent.decision;
+      const strings = collectOutboundStrings(action.canonical_params);
+      // Judged whatever the setting says, so an answer given for the chat never covers a map that trips the guard.
+      const { verdict } = await outboundGuard({ ctx, strings });
+      if (
+        verdict.ok &&
+        (await ctx.services.mapsWithoutAsking({ tenant_id: ctx.tenant_id, created_by: ctx.created_by }))
+      ) {
+        return mapsSilentDecision({ ctx, strings });
+      }
+      if (ctx.services.unattended) {
+        return mapsSkipped(verdict);
       }
       const outbound = renderOutboundArguments(
         action.tool_name === RENDER_PLACES_TOOL_NAME
@@ -4066,13 +4085,10 @@ export async function classifyTier(action: SentinelAction, ctx: ClassifyContext)
           destination_host: action.maps_hosts === undefined ? null : mapsDestinationHosts(action.maps_hosts),
           outbound_truncated: outbound.truncated,
         },
-        reason: MAPS_ASK_REASON,
-        reason_detail:
-          silent === undefined
-            ? holdSay(ctx.web_search.assistantName).maps_always
-            : silent.held.ok
-              ? null
-              : guardRuleSay({ rule: silent.held.rule, assistant: ctx.web_search.assistantName }),
+        reason: verdict.ok ? MAPS_ASK_REASON : MAPS_HOLD_REASON,
+        reason_detail: verdict.ok
+          ? holdSay(ctx.web_search.assistantName).maps_always
+          : guardRuleSay({ rule: verdict.rule, assistant: ctx.web_search.assistantName }),
         sensitive_read: false,
         approval_token_id: await mintPlainToken({
           ctx,

@@ -1,6 +1,7 @@
 import type { ApprovalDecision } from '../events/schema';
 import type { InternalEnrichedToolCall, InternalToolCallInfo } from '../llm/LLMTypes';
 import { BROWSER_CLICK_TOOL_NAME, BROWSER_OPEN_TOOL_NAME, isAmanBrowserCall } from '../permissions/browserToolNames';
+import { MAPS_ASK_REASON } from '../permissions/mapsToolNames';
 import {
   BROWSER_OPEN_SITE_GRANT_REASONS,
   CHAT_GRANTABLE_CONSEQUENCE_REASONS,
@@ -111,8 +112,9 @@ function siteGrantableOpen(info: InternalToolCallInfo): boolean {
  * *receive* chat scope; the scope's binding lives in the grant key: the tool and its destination, and for sandbox
  * exec an invocation digest over (purpose, command, cwd, env), so approving one command in a chat never authorizes a
  * different one or reaches another chat. A consequential action qualifies only when its card names a target for
- * the grant to be tied to; a send, a mail draft and a steered call never do. A browser open qualifies only by
- * site, under the reasons `chatGrantScope` names.
+ * the grant to be tied to; a send, a mail draft and a steered call never do. A map qualifies, unless it would
+ * send something that looks like a secret. A browser open qualifies only by site, under the reasons
+ * `chatGrantScope` names.
  */
 export function allowsChatApproval(info: InternalToolCallInfo): boolean {
   if (secretPathReadBarsDurableGrant(info)) {
@@ -121,7 +123,7 @@ export function allowsChatApproval(info: InternalToolCallInfo): boolean {
   if (info.implementation_plan_grant !== undefined) {
     return true;
   }
-  if (isOwnCalendarChange(info)) {
+  if (isOwnCalendarChange(info) || mapsCardTakesLastingAnswer(info)) {
     return true;
   }
   if (isOwnDriveWrite(info)) {
@@ -179,7 +181,8 @@ function secretPathReadBarsDurableGrant(info: InternalToolCallInfo): boolean {
  * that is read-only inspection, for the same argument-blindness reason as a chat grant. A call the
  * classifier stamped with a grant scope key is the one exception: the key itself is the scope
  * (a Home Assistant domain or the one entity), so the grant is never wider than the key says.
- * A change to the person's own calendar is answered per chat, so it never gets one.
+ * A change to the person's own calendar is answered per chat, so it never gets one. A map gets one, which lets
+ * maps run without asking.
  */
 export function allowsToolGrant(info: InternalToolCallInfo): boolean {
   // A grant has no effect on the designated search provider, which has its own guarded path.
@@ -192,6 +195,7 @@ export function allowsToolGrant(info: InternalToolCallInfo): boolean {
     return false;
   }
   return (
+    mapsCardTakesLastingAnswer(info) ||
     isOwnDriveWrite(info) ||
     (info.type === 'mcp' && info.effect === 'inspect') ||
     (info.type === 'mcp' && info.grant_tool_name !== undefined)
@@ -213,6 +217,15 @@ export function chatRefusalKey(info: InternalToolCallInfo): string | null {
     return null;
   }
   return approvalGrantKey(info);
+}
+
+/**
+ * Whether this is the card of the assistant's own maps tool that a lasting answer may cover. "Always allow in
+ * this chat" stops the question for the chat, and "Always allow everywhere" lets maps run without asking from
+ * then on. A map that asks because it would send something that looks like a secret offers neither.
+ */
+export function mapsCardTakesLastingAnswer(info: InternalToolCallInfo): boolean {
+  return info.type === 'truefoundry-system' && info.tier_reason === MAPS_ASK_REASON;
 }
 
 /**

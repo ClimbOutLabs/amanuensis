@@ -288,6 +288,7 @@ function ToolApprovalSlot({ part }: { part: ToolCallMessagePartProps }) {
         onApproveForChat={allowChatId === undefined ? undefined : () => onSelectOption(allowChatId)}
         chatGrantScope={approvalInfo.chatGrantScope}
         onApproveAlways={approvalInfo.alwaysAllowOffered === true ? respondAlwaysAllow : undefined}
+        alwaysAllowCovers={approvalInfo.alwaysAllowCovers}
         onDeny={onDeny}
         onChangeRequest={onChangeRequest}
         onApproveAll={approveAll}

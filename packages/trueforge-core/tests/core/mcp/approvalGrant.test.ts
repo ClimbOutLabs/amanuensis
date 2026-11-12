@@ -9,6 +9,7 @@ import {
   chatGrantScope,
   effectiveApprovalDecisions,
   effectiveToolAdmissions,
+  mapsCardTakesLastingAnswer,
 } from '../../../src/core/mcp/approvalGrant';
 import type { ToolSchema } from '../../../src/core/mcp/IMCPServer';
 import {
@@ -27,6 +28,7 @@ import {
 } from '../../../src/core/permissions/browserToolNames';
 import { classifyTier, type ClassifyContext, type SentinelAction } from '../../../src/core/permissions/classifier';
 import type { SentinelServices } from '../../../src/core/permissions/context';
+import { MAPS_ASK_REASON, MAPS_HOLD_REASON } from '../../../src/core/permissions/mapsToolNames';
 import { recordUntrustedText } from '../../../src/core/permissions/provenance';
 import { tier1Decision, type TierDecision } from '../../../src/core/permissions/tier';
 import {
@@ -1094,5 +1096,59 @@ describe('browser open site grants', () => {
     };
     expect(approvalGrantKey(clickInfo)).not.toBe(approvalGrantKey(first.info));
     expect(admission(clickInfo, grants)?.decision).toBeUndefined();
+  });
+});
+
+describe('lasting answers on a maps card', () => {
+  function mapsInfo(overrides: Partial<InternalToolCallInfo>): InternalToolCallInfo {
+    return {
+      type: 'truefoundry-system',
+      mcp_server_id: 'maps',
+      mcp_server_name: 'maps',
+      original_tool_name: 'render_map',
+      is_approval_required: true,
+      tier: 3,
+      tier_reason: MAPS_ASK_REASON,
+      ...overrides,
+    };
+  }
+
+  it('offers both for a map that asks only because maps are set to ask', () => {
+    const info = mapsInfo({});
+    expect(mapsCardTakesLastingAnswer(info)).toBe(true);
+    expect(allowsChatApproval(info)).toBe(true);
+    expect(allowsToolGrant(info)).toBe(true);
+  });
+
+  it('offers neither for a map that would send something that looks like a secret', () => {
+    const info = mapsInfo({ tier_reason: MAPS_HOLD_REASON });
+    expect(mapsCardTakesLastingAnswer(info)).toBe(false);
+    expect(allowsChatApproval(info)).toBe(false);
+    expect(allowsToolGrant(info)).toBe(false);
+  });
+
+  it('does not let an answer given for the chat cover a later map that would send a secret', () => {
+    const plain = mapsInfo({});
+    const secret = mapsInfo({ tier_reason: MAPS_HOLD_REASON });
+    const admissions = effectiveToolAdmissions({
+      calls: [toolCall('plain-again', plain), toolCall('secret', secret)],
+      decisions: new Map(),
+      chatApprovalGrants: new Set([approvalGrantKey(plain), approvalGrantKey(secret)]),
+      implementationPlanGrants: new Set(),
+    });
+    expect(admissions.get('plain-again')?.decision).toEqual({ status: 'allow', scope: 'chat' });
+    expect(admissions.get('secret')).toEqual({ decision: undefined, admission_provenance: { source: 'automatic' } });
+  });
+
+  it('offers neither for such a map even if the maps tool were marked as only reading', () => {
+    const info = mapsInfo({ tier_reason: MAPS_HOLD_REASON, effect: 'inspect' });
+    expect(allowsChatApproval(info)).toBe(false);
+    expect(allowsToolGrant(info)).toBe(false);
+  });
+
+  it("offers neither for a connector's tool that only carries the maps reason", () => {
+    const info = mapsInfo({ type: 'mcp' });
+    expect(mapsCardTakesLastingAnswer(info)).toBe(false);
+    expect(allowsToolGrant(info)).toBe(false);
   });
 });
