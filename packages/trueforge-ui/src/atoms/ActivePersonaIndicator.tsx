@@ -2,6 +2,7 @@
 
 import { useThreadIsRunning } from '@assistant-ui/core/react';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import { useAuiState } from '../assistant-ui.js';
 import {
@@ -19,6 +20,7 @@ import {
   registerPersonaMutation,
 } from '../personaMutationGate.js';
 import { displayModelLabel } from './draft/DraftModelCatalogPanel.js';
+import { themePortalRoot } from './draft/DraftModelMenuPortal.js';
 import { auiButtonClass } from './lib/buttonClasses.js';
 import { cn } from './lib/cn.js';
 import { useFitOnScreen } from './lib/useFitOnScreen.js';
@@ -88,6 +90,7 @@ function ActivePersonaChip({
   const mutationGenerationRef = useRef(0);
   const menuContainerRef = useRef<HTMLSpanElement | null>(null);
   const menuTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
   const menuStyle = useFitOnScreen({
     open: menuOpen,
     anchorRef: menuTriggerRef,
@@ -149,7 +152,12 @@ function ActivePersonaChip({
     }
     const onPointerDown = (event: MouseEvent | TouchEvent) => {
       const target = event.target;
-      if (menuContainerRef.current != null && target instanceof Node && !menuContainerRef.current.contains(target)) {
+      if (
+        target instanceof Node &&
+        menuContainerRef.current != null &&
+        !menuContainerRef.current.contains(target) &&
+        menuRef.current?.contains(target) !== true
+      ) {
         setMenuOpen(false);
       }
     };
@@ -277,48 +285,53 @@ function ActivePersonaChip({
         </span>
         <Icon name="chevron-down" className="size-3.5 shrink-0" />
       </button>
-      {menuOpen && menuStyle !== null ? (
-        <div
-          id={menuId}
-          role="menu"
-          aria-label={MENU_HEADING}
-          style={menuStyle}
-          className="z-50 rounded-md border border-border bg-card-bg py-1 shadow-lg"
-        >
-          <p className="m-0 px-3 pt-1 pb-1.5 text-xs text-text-secondary">{MENU_HEADING}</p>
-          <button
-            type="button"
-            role="menuitem"
-            disabled={triggerDisabled}
-            className={itemClass}
-            onClick={() => applyPersona(null)}
-          >
-            <span className="min-w-0 flex-1 truncate">{assistant}</span>
-            {chosenId === null ? <Icon name="check" className="size-3.5 shrink-0" /> : null}
-          </button>
-          {personas.map(persona => (
-            <button
-              key={persona.id}
-              type="button"
-              role="menuitem"
-              aria-label={persona.display_name}
-              disabled={triggerDisabled}
-              className={itemClass}
-              onClick={() => applyPersona(persona.id)}
+      {menuOpen && menuStyle !== null
+        ? // Portaled for the same reason as the add-ons picker: the chat area would trap a fixed menu.
+          createPortal(
+            <div
+              ref={menuRef}
+              id={menuId}
+              role="menu"
+              aria-label={MENU_HEADING}
+              style={menuStyle}
+              className="z-50 rounded-md border border-border bg-card-bg py-1 shadow-lg"
             >
-              <span className="min-w-0 flex-1">
-                <span className="block truncate font-medium">{persona.display_name}</span>
-                {persona.model_name ? (
-                  <span className="block truncate text-xs text-text-secondary">
-                    {displayModelLabel(persona.model_name)}
+              <p className="m-0 px-3 pt-1 pb-1.5 text-xs text-text-secondary">{MENU_HEADING}</p>
+              <button
+                type="button"
+                role="menuitem"
+                disabled={triggerDisabled}
+                className={itemClass}
+                onClick={() => applyPersona(null)}
+              >
+                <span className="min-w-0 flex-1 truncate">{assistant}</span>
+                {chosenId === null ? <Icon name="check" className="size-3.5 shrink-0" /> : null}
+              </button>
+              {personas.map(persona => (
+                <button
+                  key={persona.id}
+                  type="button"
+                  role="menuitem"
+                  aria-label={persona.display_name}
+                  disabled={triggerDisabled}
+                  className={itemClass}
+                  onClick={() => applyPersona(persona.id)}
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-medium">{persona.display_name}</span>
+                    {persona.model_name ? (
+                      <span className="block truncate text-xs text-text-secondary">
+                        {displayModelLabel(persona.model_name)}
+                      </span>
+                    ) : null}
                   </span>
-                ) : null}
-              </span>
-              {chosenId === persona.id ? <Icon name="check" className="size-3.5 shrink-0" /> : null}
-            </button>
-          ))}
-        </div>
-      ) : null}
+                  {chosenId === persona.id ? <Icon name="check" className="size-3.5 shrink-0" /> : null}
+                </button>
+              ))}
+            </div>,
+            themePortalRoot(menuContainerRef.current),
+          )
+        : null}
     </span>
   );
 }
