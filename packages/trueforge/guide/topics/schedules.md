@@ -41,4 +41,4 @@ Reminders do not show on the Schedules page.
 - Click **Run now** on a row to run it at once.
 - Click the three dots on a row. Then click **Edit**, **Pause**, **Resume** or **Delete**.
 
-A scheduled run cannot skip your approval. If a run wants to send or change something, it holds that action. When the run finishes, its chat ends with a **Needs your OK** list. Nothing has been done until you approve an item. A scheduled run can read your email, but it never saves a draft or sends mail.
+A scheduled run cannot skip your approval. If a run wants to send or change something, it holds that action. When the run finishes, its chat ends with a **Needs your OK** list. Nothing has been done until you approve an item. When you approve one, Aman checks it again. If anything on the card has changed since, nothing is done and Aman says to ask again in chat. A scheduled run can read your email, but it never saves a draft or sends mail.

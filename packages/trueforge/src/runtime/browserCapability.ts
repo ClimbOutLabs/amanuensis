@@ -162,6 +162,8 @@ const REFUSAL_MESSAGES: Record<string, string> = {
   private_network: "That address is on this computer or a private network, so Aman's browser will not open it.",
   unresolved: "That address could not be found, so Aman's browser will not open it. Check the address and try again.",
   not_a_url: 'That is not a web address Aman can open. Check the address and try again.',
+  sign_in_in_address:
+    "That address has a sign-in name or password in front of the site, so Aman's browser will not open it. Ask for the address without that part.",
   sensitive_field:
     'This field is for a password, a payment detail or a one-time code. Ask the person to type it themselves.',
   unknown_ref: 'That part of the page is gone. Read the page again to get a fresh ref, then try again.',
