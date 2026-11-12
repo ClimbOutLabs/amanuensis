@@ -661,10 +661,23 @@ describe('Parallel preset tools', () => {
     );
     const card = cardOf(decision);
     expect(decision.reason).toBe('connector_outbound');
-    expect(card.plain_what).toBe('Fetch a web page from www.usps.com?');
+    expect(card.plain_what).toBe('Fetch pages from www.usps.com and 1 other site?');
     expect(card.destination_host).toBe('search.parallel.ai');
     expect(card.outbound_text).toContain('urls (array): ["https://www.usps.com/manage/forward.htm"');
     expect(card.outbound_text).toContain('objective: How to change an address');
+  });
+
+  test.each([
+    [['https://www.usps.com/a'], 'Fetch a web page from www.usps.com?'],
+    [['https://www.usps.com/a', 'https://www.usps.com/b'], 'Fetch pages from www.usps.com?'],
+    [
+      ['https://www.usps.com/a', 'https://example.com/b', 'https://evil.example/c'],
+      'Fetch pages from www.usps.com and 2 other sites?',
+    ],
+    [['not a web address', 'also not one'], 'Fetch web pages?'],
+  ])('web_fetch with urls %j names every site it reaches, not only the first', async (urls, what) => {
+    const decision = await classifyTier(parallel('web_fetch', { urls, objective: 'o' }), makeCtx());
+    expect(cardOf(decision).plain_what).toBe(what);
   });
 
   test('web_search gets plain search wording', async () => {

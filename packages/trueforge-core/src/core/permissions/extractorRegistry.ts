@@ -683,9 +683,22 @@ const CONNECTOR_FAMILIES: ConnectorFamily[] = [
       ),
     describe: ({ fields, params }) => {
       // The site, never the tool or the connector; the full address stays on the card's destination row.
-      // Some fetch tools carry the page in a `urls` list instead of a destination key.
-      const site = webSiteName(fields.destination ?? firstOrNull(stringValues(params, ['urls'])));
-      return site !== null ? `Fetch a web page from ${escapeDisplayText(site)}?` : 'Fetch a web page?';
+      // Some fetch tools carry the pages in a `urls` list; the headline counts every site in it, not just the first.
+      const addresses = [
+        ...new Set([...(fields.destination === null ? [] : [fields.destination]), ...stringValues(params, ['urls'])]),
+      ];
+      const sites = [...new Set(addresses.map(webSiteName).filter(site => site !== null))];
+      const [first] = sites;
+      if (first === undefined) {
+        return addresses.length > 1 ? 'Fetch web pages?' : 'Fetch a web page?';
+      }
+      const others = sites.length - 1;
+      if (others > 0) {
+        return `Fetch pages from ${escapeDisplayText(first)} and ${String(others)} other ${others === 1 ? 'site' : 'sites'}?`;
+      }
+      return addresses.length > 1
+        ? `Fetch pages from ${escapeDisplayText(first)}?`
+        : `Fetch a web page from ${escapeDisplayText(first)}?`;
     },
   },
   {
